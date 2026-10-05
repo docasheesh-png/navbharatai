@@ -713,8 +713,8 @@ export function BillingPanel(props: BillingPanelProps) {
                               <span className="font-mono text-[11px] font-bold text-ink break-all select-all">{g.code}</span>
                               <span className="shrink-0 text-right">
                                 <span className="block text-[11px] font-black text-ink font-mono">₹{g.faceInr.toLocaleString('en-IN')}</span>
-                                <span className={`block text-[9px] font-black uppercase tracking-widest ${g.status === 'redeemed' ? 'text-muted' : 'text-success'}`}>
-                                  {g.status === 'redeemed' ? 'Used' : 'Unused'}
+                                <span className={`block text-[9px] font-black uppercase tracking-widest ${g.status === 'unused' ? 'text-success' : 'text-muted'}`}>
+                                  {g.status === 'redeemed' ? 'Used' : g.status === 'voided' ? 'Refunded' : 'Unused'}
                                 </span>
                               </span>
                             </div>

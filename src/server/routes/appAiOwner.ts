@@ -11,7 +11,6 @@
 // from the published app's ₹20, so testing can never eat the budget the live app's visitors need.
 
 import type { Express, Request, Response } from 'express';
-import express from 'express';
 import { verifyFirebaseToken, rateLimiter } from '../lib/authMiddleware';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 import { appAiGatewayEnabled, readGatewayRequest, ownerFacingMessage } from '../lib/appAiGateway';
@@ -68,7 +67,7 @@ async function ownerOf(req: Request, workspaceId: unknown): Promise<string | nul
 export function registerAppAiOwnerRoutes(app: Express): void {
   const limiter = rateLimiter({ name: 'app-ai-owner', authed: 120, anon: 0, noun: 'questions', durable: false });
 
-  app.post('/api/app-ai/preview-ask', express.json({ limit: '16kb' }), limiter, async (req: Request, res: Response) => {
+  app.post('/api/app-ai/preview-ask', limiter, async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const ownerId = await ownerOf(req, workspaceId);
     if (!ownerId) { res.status(403).json({ ok: false, message: 'Sign in as this app’s owner to use its assistant in the preview.' }); return; }
@@ -95,7 +94,7 @@ export function registerAppAiOwnerRoutes(app: Express): void {
    * is made, and where to paste it, because the owner is exactly the person who can act on it.
    */
   const imageLimiter = rateLimiter({ name: 'app-ai-owner-image', authed: 60, anon: 0, noun: 'pictures', durable: false });
-  app.post(PREVIEW_IMAGE_PATH, express.json({ limit: '16kb' }), imageLimiter, async (req: Request, res: Response) => {
+  app.post(PREVIEW_IMAGE_PATH, imageLimiter, async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const ownerId = await ownerOf(req, workspaceId);
     if (!ownerId) { res.status(403).json({ ok: false, message: 'Sign in as this app’s owner to make pictures in the preview.' }); return; }
@@ -133,7 +132,7 @@ export function registerAppAiOwnerRoutes(app: Express): void {
     });
   });
 
-  app.post('/api/app-ai/settings', express.json({ limit: '4kb' }), limiter, async (req: Request, res: Response) => {
+  app.post('/api/app-ai/settings', limiter, async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const ownerId = await ownerOf(req, workspaceId);
     if (!ownerId) { res.status(403).json({ error: 'Forbidden' }); return; }

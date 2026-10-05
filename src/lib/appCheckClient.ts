@@ -14,7 +14,9 @@
 //
 // Everything is dependency-injected so the rules are testable without a browser or a device.
 
+import { Capacitor } from '@capacitor/core';
 import { isAppCheckProtected } from './appCheckRoutes';
+import { app } from './firebase';
 import { recordNonFatal } from './observability';
 
 export const APP_CHECK_HEADER = 'X-Firebase-AppCheck';
@@ -129,10 +131,8 @@ export interface NativeAppCheck {
  * ever resolves to the proxy itself.
  */
 async function loadNativeAppCheck(): Promise<NativeAppCheck | null> {
-  const [{ Capacitor }, { FirebaseAppCheck }] = await Promise.all([
-    import('@capacitor/core'),
-    import('@capacitor-firebase/app-check'),
-  ]);
+  // `@capacitor/core` is a static import (Q-625: it is in the startup chunk); the plugin stays lazy.
+  const { FirebaseAppCheck } = await import('@capacitor-firebase/app-check');
   // A phone app built before the plugin shipped has no native half. Asking it would throw
   // "not implemented"; asking first keeps that an ordinary "missing".
   if (!Capacitor.isPluginAvailable('FirebaseAppCheck')) return null;
@@ -170,10 +170,9 @@ export async function installAppCheck(
     }
     const key = await fetchAppCheckSiteKey(w.fetch.bind(w));
     if (!key) return 'no-key';
-    const [{ initializeAppCheck, ReCaptchaEnterpriseProvider, getToken }, { app }] = await Promise.all([
-      import('firebase/app-check'),
-      import('./firebase'),
-    ]);
+    // `app` comes from the static `./firebase` import (Q-625: that module is in the startup chunk, so
+    // an `import()` of it split nothing). The App Check SDK itself stays lazy.
+    const { initializeAppCheck, ReCaptchaEnterpriseProvider, getToken } = await import('firebase/app-check');
     const appCheck = initializeAppCheck(app, {
       provider: new ReCaptchaEnterpriseProvider(key),
       isTokenAutoRefreshEnabled: true,

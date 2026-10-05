@@ -11,6 +11,7 @@
 // try/caught — a measurement SDK must never be able to break the app or a privacy control.
 
 import { consentAllowsAnalytics } from './consent';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 
 /** What the native plugin reports back. `sdk-absent` is the normal answer on a build with no Meta credentials. */
 export type NativeConsentOutcome = 'enabled' | 'disabled' | 'sdk-absent' | 'failed' | 'not-native' | 'unavailable';
@@ -34,7 +35,6 @@ export function nativeMetaConsentGranted(rawConsent: string | null | undefined):
  */
 export async function syncNativeMetaConsent(granted: boolean): Promise<NativeConsentOutcome> {
   try {
-    const { Capacitor, registerPlugin } = await import('@capacitor/core');
     if (Capacitor.isNativePlatform() !== true) return 'not-native';
     const plugin = registerPlugin<{
       setConsent(options: { granted: boolean }): Promise<{ granted: boolean; outcome: NativeConsentOutcome }>;

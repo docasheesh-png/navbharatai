@@ -21,11 +21,13 @@
 
 import type { Request } from 'express';
 import { verifyFirebaseIdentity } from './authMiddleware';
+import { identityGrantEmail, type GrantEmail } from '../AgentV3/featureFlag';
 
 export interface CostlyAiIdentity {
   ok: true;
   uid: string;
-  email: string | null;
+  /** Provider-verified only (Q-624) — every reader matches it against a free or admin list. */
+  email: GrantEmail | null;
 }
 
 export interface CostlyAiRefusal {
@@ -35,7 +37,8 @@ export interface CostlyAiRefusal {
 }
 
 /**
- * PURE: the refusal an anonymous caller receives. Kept separate from the lookup so the wording is
+ * PURE: the refusal an anonymous caller receives. Every gate's sign-in answer goes through this — the
+ * per-surface nouns live in `anonymousCapabilities.ts` (Q-622). Kept separate from the lookup so the wording is
  * unit-testable and identical on every route.
  *
  * It names what the visitor gets by signing in rather than what they are being denied — the credit is
@@ -63,5 +66,5 @@ export async function requireAccountForCostlyAi(
 ): Promise<CostlyAiIdentity | CostlyAiRefusal> {
   const identity = await verifyFirebaseIdentity(req);
   if (!identity?.uid) return anonymousAiRefusal(noun);
-  return { ok: true, uid: identity.uid, email: identity.email ?? null };
+  return { ok: true, uid: identity.uid, email: identityGrantEmail(identity) };
 }

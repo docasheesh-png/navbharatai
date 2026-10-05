@@ -4,6 +4,7 @@ import { setUserContext, clearUserContext, setCrashKey, setFeatureContext, featu
 import React, { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
 import { tokenFromDeepLink, ticketFromDeepLink, redeemGithubTicket, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
+import { takeGithubReturnFragment, consumeGithubNonce, browserStorage, GITHUB_WEB_NONCE_KEY } from './lib/githubOauthNonce';
 // Native Supabase-connect return — the SAME deep-link shape, its own path (2026-09-14 fix).
 import { nonceFromSupabaseDeepLink, errorFromSupabaseDeepLink, SUPABASE_NATIVE_RETURN_EVENT } from './lib/supabaseOauthReturn';
 import { restartScreenEnter, shouldAnimateViewChange } from './lib/screenTransition';
@@ -17,6 +18,8 @@ import { computeTabClose } from './lib/tabClose';
 import { parentForOpen } from './lib/tabParenting';
 import { historySurfaceFor, historyFilterFor } from './lib/historySurface';
 import { HistoryPopup } from './components/history/HistoryPopup';
+import { HistoryView } from './components/HistoryView';
+import { ProfessionalHistoryView } from './components/professionals/ProfessionalHistoryView';
 // AgentV3Panel is rendered via ProV3Surface (the gated v5.0 surface), not directly here.
 // FilesPanel → moved to ViewPanels.tsx
 import { v3MobileFooterActive, type V3FooterApi } from './components/agentv3/v3FooterApi';
@@ -79,6 +82,7 @@ import { onAuthStateChanged, getRedirectResult, GithubAuthProvider, User as Fire
 import { socialRedirectFailureMessage, authErrorDetail } from './components/socialSignInPolicy';
 import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 
 // Firebase init now lives in ONE place — src/lib/firebase.ts (root-cause fix 2026-07-11: a second
 // initializeApp there with a stale JSON config either crashed with app/duplicate-app or, load-order
@@ -134,8 +138,10 @@ const RepoAnalystTool = _lz(() => import('./components/repoAnalyst/RepoAnalystTo
 const AboutPanel = _lz(() => import('./components/panels/AboutPanel'), 'AboutPanel');
 const DeploySuccessPanel = _lz(() => import('./components/panels/DeploySuccessPanel'), 'DeploySuccessPanel');
 
-const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
-const ProfessionalHistoryView = _lz(() => import('./components/professionals/ProfessionalHistoryView'), 'ProfessionalHistoryView');
+// HistoryView and ProfessionalHistoryView are STATIC on purpose (Q-625): HistoryPopup above already
+// imports HistoryView statically, and HistoryView imports ProfessionalHistoryView, so both are in the
+// startup chunk whatever this file does. A `lazy()` here split nothing and only added a Suspense hop.
+// To make them lazy, make EVERY importer lazy — tests/aDynamicImportMustSplitSomething.test.ts checks it.
 
 import { useBuild } from './components/ide/BuildContext';
 import { useDevLogs } from './hooks/useDevLogs';
@@ -174,7 +180,7 @@ import {
 import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
 import { aboutContent, type AboutContent, type AboutOverrides } from './content/about';
 import { decideBackAction, HARDWARE_BACK_EVENT } from './lib/androidBack';
-import { loadNativeShellContext, exitNativeApp } from './lib/nativeShell';
+import { loadNativeShellContext, exitNativeApp, syncStatusBarToTheme } from './lib/nativeShell';
 import { ExitConfirmDialog } from './components/ExitConfirmDialog';
 // AgentMode → re-exported from ./types
 
@@ -310,8 +316,6 @@ export default function App() {
     loadingWallet, setLoadingWallet,
     monthlyAiCost, setMonthlyAiCost,
     isRecharging, setIsRecharging,
-    paymentSession, setPaymentSession,
-    showCheckoutModal, setShowCheckoutModal,
     rechargeStatus, setRechargeStatus,
     activeBillingDetailTab, setActiveBillingDetailTab,
     customPurchaseCredits, setCustomPurchaseCredits,
@@ -324,7 +328,6 @@ export default function App() {
     fetchWallet,
     createBillingOrder,
     storeRail, storeConfig, platformFeePct, buyStorePack, buyingProductId, storePurchaseNotice,
-    verifyBillingPayment,
     redeemPromoCoupon,
     giftFaceInput, setGiftFaceInput,
     isBuyingGift, giftError,
@@ -358,7 +361,6 @@ export default function App() {
     // dark app — a mismatch no real app has. No-op on web; best-effort, never blocks the theme switch.
     void (async () => {
       try {
-        const { loadNativeShellContext, syncStatusBarToTheme } = await import('./lib/nativeShell');
         await syncStatusBarToTheme(await loadNativeShellContext(), theme);
       } catch { /* polish only */ }
     })();
@@ -923,15 +925,14 @@ export default function App() {
   const [userE2bKey, setUserE2bKey] = useState<string>(() => {
     try { return localStorage.getItem('engineer_e2b_key') || ''; } catch { return ''; }
   });
-  const [firebaseToken, setFirebaseToken] = useState<string | null>(() => localStorage.getItem('fb_token'));
-  const [firebaseUser, setFirebaseUser] = useState<any>(() => {
-    try {
-      const saved = localStorage.getItem('fb_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
+  // Q-671: a stored Firebase "DevOps link" token is never trusted. The only flow that ever issued one was a
+  // mock with fabricated credentials (routes/firebaseAuth.ts now answers "not yet available"), and every
+  // other way in was a planting hole — so whatever is stored is fake or hostile, and it is dropped.
+  const [firebaseToken, setFirebaseToken] = useState<string | null>(() => {
+    try { localStorage.removeItem('fb_token'); localStorage.removeItem('fb_user'); } catch { /* storage blocked */ }
+    return null;
   });
+  const [firebaseUser, setFirebaseUser] = useState<any>(null);
   const [githubUser, setGithubUser] = useState<any>(null);
   const [repositories, setRepositories] = useState<any[]>([]);
   const [isGHSyncing, setIsGHSyncing] = useState(false);
@@ -1205,7 +1206,6 @@ export default function App() {
       // L7: Escape — close any open modal overlay
       if (e.key === 'Escape') {
         if (showAuth) { setShowAuth(false); return; }
-        if (showCheckoutModal) { setShowCheckoutModal(false); return; }
         if (showPurchaseFormPanel) { setShowPurchaseFormPanel(false); return; }
         if (showDeployPanel) { setShowDeployPanel(false); return; }
         // No modal was open — if Focus Mode is on, Esc brings the header back (always works, even
@@ -1223,7 +1223,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, focusMode]);
+  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showPurchaseFormPanel, showDeployPanel, focusMode]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const defaults = { gemini: '', groq: '', deepseek: '', openai: '', openrouter: '', claude: '' };
@@ -3009,6 +3009,8 @@ export default function App() {
         // served same-origin). A cross-origin sender here means a hostile page trying to inject
         // its own GitHub token into this session — reject it.
         if (e.origin !== window.location.origin) return;
+        // Q-623: and only for a sign-in THIS tab started — the popup echoes the tab's one-time nonce.
+        if (!consumeGithubNonce(browserStorage('session'), GITHUB_WEB_NONCE_KEY, e.data.nonce, Date.now())) return;
         const token = e.data.token;
         setGithubToken(token);
         localStorage.setItem('gh_token', token);
@@ -3017,18 +3019,9 @@ export default function App() {
         fetchGitHubUser(token);
       } else if (e.data.type === 'GITHUB_AUTH_ERROR') {
         addLog(`GitHub connection failed: ${e.data.error}`, 'error');
-      } else if (e.data.type === 'FIREBASE_AUTH_SUCCESS') {
-        // Same-origin guard: reject a cross-origin page injecting a forged Firebase token.
-        if (e.origin !== window.location.origin) return;
-        const token = e.data.token;
-        const userObj = e.data.user;
-        setFirebaseToken(token);
-        setFirebaseUser(userObj);
-        localStorage.setItem('fb_token', token);
-        localStorage.setItem('fb_user', JSON.stringify(userObj));
-        // Keep the active deployment platform synced
-        localStorage.setItem('v_deploy_platform', 'firebase');
-        addLog(`GCP/Firebase connected successfully to project: ${userObj.projectId || 'navbharat-sandbox-7729'}.`, 'success');
+      // Q-671: there is no FIREBASE_AUTH_SUCCESS handler. No server sends one (the Firebase connect route
+      // answers CANCELLED only), so a message carrying a Firebase token could only come from a page
+      // trying to plant one — the same hole Q-623 closed for GitHub.
       } else if (e.data.type === 'FIREBASE_AUTH_ERROR') {
         addLog(`Firebase connection failed: ${e.data.error}`, 'error');
         setFirebaseOauthError({
@@ -3049,18 +3042,8 @@ export default function App() {
         addLog('GitHub connected successfully via cross-tab channel.', 'success');
         fetchGitHubUser(token);
         localStorage.removeItem('gh_token_signal');
-      } else if (e.key === 'firebase_token_signal' && e.newValue) {
-        const token = e.newValue;
-        setFirebaseToken(token);
-        localStorage.setItem('fb_token', token);
-        try {
-          const userObj = JSON.parse(localStorage.getItem('fb_user') || '{}');
-          setFirebaseUser(userObj);
-        } catch {}
-        localStorage.setItem('v_deploy_platform', 'firebase');
-        addLog('Firebase pipeline updated successfully via cross-tab channel.', 'success');
-        localStorage.removeItem('firebase_token_signal');
       }
+      // Q-671: no `firebase_token_signal` listener — nothing in this app writes it any more.
     };
     window.addEventListener('storage', handleStorageChange);
 
@@ -3108,7 +3091,7 @@ export default function App() {
       toggleTab('settings');
       setSettingsScreen('database');
       window.dispatchEvent(new CustomEvent(SUPABASE_NATIVE_RETURN_EVENT));
-      void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
+      void Promise.resolve().then(() => Browser.close()).catch(() => {});
       return true;
     };
 
@@ -3119,35 +3102,29 @@ export default function App() {
     let removeGithubUrlOpen: (() => void) | undefined;
     void (async () => {
       try {
-        const { Capacitor } = await import('@capacitor/core');
         if (Capacitor.isNativePlatform?.() !== true) return;
         const { App: CapApp } = await import('@capacitor/app');
         const handle = await CapApp.addListener('appUrlOpen', (data: { url?: string }) => {
           if (handleSupabaseUrlOpen(data?.url)) return; // see handleSupabaseUrlOpen above
           if (handleAppLinkOpen(data?.url)) return; // an https navbharatai.com link — see above
-          // A TICKET, when the server had a verified identity to bind one to; the raw token otherwise.
-          // Both are handled because the server chooses, not the client — see githubOauthReturn.ts.
-          // The ticket path exists because a custom URI scheme is claimable by any installed app, and
-          // this token carries `repo workflow` on all of the user's private repositories.
+          // ONLY A TICKET is accepted, redeemed with this app's one-time device nonce (Q-629). A raw
+          // `gh_token` link is recognised and REFUSED: this build never asks for one, and a token in a
+          // custom-scheme link is what any installed app or web page can forge.
           const ticket = ticketFromDeepLink(data?.url);
           const directToken = tokenFromDeepLink(data?.url);
           if (!ticket && !directToken) return; // not our GitHub deep link — ignore
 
           void (async () => {
-            let token = directToken;
-            if (ticket) {
-              token = await redeemGithubTicket(ticket);
-              if (!token) {
-                // The ticket is single-purpose and short-lived; a failure here is a dead end, not
-                // something to retry silently. Say so and clear the overlay rather than spinning.
-                addLog('GitHub sign-in could not be completed. Please try connecting again.', 'error');
-                recordNonFatal('GitHub sign-in ticket could not be redeemed', 'github');
-                setGithubRedirectingMessage(null);
-                void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
-                return;
-              }
+            const token = ticket ? await redeemGithubTicket(ticket) : null;
+            if (!token) {
+              // The ticket is single-purpose and short-lived; a failure here is a dead end, not
+              // something to retry silently. Say so and clear the overlay rather than spinning.
+              addLog('GitHub sign-in could not be completed. Please try connecting again.', 'error');
+              recordNonFatal(ticket ? 'GitHub sign-in ticket could not be redeemed' : 'GitHub deep link with a raw token refused', 'github');
+              setGithubRedirectingMessage(null);
+              void Promise.resolve().then(() => Browser.close()).catch(() => {});
+              return;
             }
-            if (!token) return;
           setGithubToken(token);
           localStorage.setItem('gh_token', token);
           rememberGithubOwner(auth.currentUser?.uid);
@@ -3159,7 +3136,7 @@ export default function App() {
           // that state, so it never showed; on native the app never navigates, so it sat there forever
           // over a login that had already finished. The success path now has something to say.
           setGithubRedirectingMessage(null);
-          void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
+          void Promise.resolve().then(() => Browser.close()).catch(() => {});
           })();
         });
         removeGithubUrlOpen = () => { try { handle.remove(); } catch { /* already removed */ } };
@@ -3189,33 +3166,23 @@ export default function App() {
       } catch { /* not native / plugin absent — the web flows above handle the token */ }
     })();
 
-    // Check for fragment token (supporting full redirect flow)
+    // Fragment token from the full-redirect flow — stored ONLY for a sign-in this tab started (Q-623).
     const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const fragmentToken = hashParams.get('gh_token');
-    if (fragmentToken) {
-      setGithubToken(fragmentToken);
-      localStorage.setItem('gh_token', fragmentToken);
+    const ghReturn = takeGithubReturnFragment(window.location.hash, browserStorage('session'), Date.now());
+    if (ghReturn.kind === 'accepted') {
+      setGithubToken(ghReturn.token);
+      localStorage.setItem('gh_token', ghReturn.token);
       rememberGithubOwner(auth.currentUser?.uid);
       addLog('GitHub connected (via redirect).', 'success');
-      fetchGitHubUser(fragmentToken);
-      // Clean URL
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      fetchGitHubUser(ghReturn.token);
+    } else if (ghReturn.kind === 'rejected') {
+      addLog('A GitHub sign-in link was ignored because it was not started from this tab. Connect GitHub again if you meant to.', 'warn');
     }
+    // Clean URL — accepted or not, the token never stays in the address bar or history.
+    if (ghReturn.kind !== 'absent') window.history.replaceState(null, '', window.location.pathname + window.location.search);
 
-    const fbFragmentToken = hashParams.get('fb_token');
-    if (fbFragmentToken) {
-      setFirebaseToken(fbFragmentToken);
-      localStorage.setItem('fb_token', fbFragmentToken);
-      try {
-        const userStr = hashParams.get('fb_user');
-        if (userStr) {
-          const decodedUser = JSON.parse(decodeURIComponent(userStr));
-          setFirebaseUser(decodedUser);
-          localStorage.setItem('fb_user', JSON.stringify(decodedUser));
-        }
-      } catch {}
-      localStorage.setItem('v_deploy_platform', 'firebase');
-      addLog('Firebase connected (via redirect).', 'success');
+    // Q-671: a `#fb_token=` fragment is never stored — no server issues one, so only a crafted link could.
+    if (hashParams.get('fb_token')) {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
 
@@ -4532,11 +4499,6 @@ export default function App() {
         pendingKey={pendingKey}
         setPendingKey={setPendingKey}
         handleKeySave={handleKeySave}
-        showCheckoutModal={showCheckoutModal}
-        setShowCheckoutModal={setShowCheckoutModal}
-        paymentSession={paymentSession}
-        user={user}
-        verifyBillingPayment={verifyBillingPayment}
         isWorkspacePreparing={isWorkspacePreparing}
         workspacePrepError={workspacePrepError}
         setWorkspacePrepError={setWorkspacePrepError}

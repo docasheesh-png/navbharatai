@@ -6,8 +6,7 @@
  * verdict names a main region that is still LITERALLY empty in a browser capture that saw the app paint.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync, readFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { existsSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import http from 'http';
 import type { AddressInfo } from 'net';
@@ -15,6 +14,7 @@ import { analyzePreviewHtml, emptyMainRegion, splitPaintMarker, BROWSE_MAIN_GRAC
 import { browsePageScript } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
 import { classifyPage, pageCheckScript, parsePageCheck } from '../src/server/AgentV3/PageRouteCheck';
 import { playwrightImport } from '../src/server/AgentV3/sandboxBrowserScript';
+import { makeTempDir } from './helpers/tempDir';
 
 const page = (main: string) => `<html><body><div id="root"><nav><a href="/">Home</a><a href="/orders">Orders</a></nav>${main}</div></body></html>`;
 const BROWSER = { source: 'browser', painted: true } as const;
@@ -98,7 +98,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   afterAll(async () => { for (const s of servers) await new Promise<void>((res) => s.close(() => res())); });
 
   const browse = async (url: string) => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-frame-'));
+    const dir = makeTempDir('nbai-frame-');
     const file = join(dir, 'browse.js');
     writeFileSync(file, browsePageScript(url, { recordConsole: false }));
     const { execFile } = await import('node:child_process');
@@ -121,7 +121,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
       return body.replace(playwrightImport('/home/user/.e-tools'), `import playwright from '${PW_DIR}/playwright/index.js';\nconst { chromium } = playwright;`);
     };
     const run = async (url: string) => {
-      const dir = mkdtempSync(join(tmpdir(), 'nbai-routes-'));
+      const dir = makeTempDir('nbai-routes-');
       const file = join(dir, 'check.mjs');
       const src = module(url);
       expect(src).toContain(`${PW_DIR}/playwright/index.js`);

@@ -47,7 +47,7 @@ afterEach(() => { process.env = { ...savedEnv }; });
 describe('the flag off is a perfect no-op', () => {
   it('allows everything and meters nothing', async () => {
     delete process.env.PROFESSIONAL_PAID_ENABLED;
-    const r = await gateToolAction(UID, EMAIL, 'ai_tool');
+    const r = await gateToolAction(UID, EMAIL, 'ai_tool', 'debug');
     expect(r.allow).toBe(true);
     if (r.allow) {
       expect(r.countsAgainstFree).toBe(false);
@@ -55,17 +55,30 @@ describe('the flag off is a perfect no-op', () => {
     }
   });
 
-  it('allows an anonymous caller too, exactly like today', async () => {
+  it('allows an anonymous caller on a GUEST tool surface — on the free tier, never paid (Q-622)', async () => {
     process.env.PROFESSIONAL_PAID_ENABLED = 'false';
-    const r = await gateToolAction(null, null, 'image');
+    const r = await gateToolAction(null, null, 'ai_tool', 'debug');
     expect(r.allow).toBe(true);
+    if (r.allow) expect(r.tier).toBe('free');
+  });
+
+  it('asks an anonymous caller to sign in on a sign-in surface, even with the flag off (Q-622)', async () => {
+    // Before 2026-10-05 this returned allow + tier 'paid' for a caller with no account. No route reached
+    // it anonymously (each image route asks for an account first), so it was a latent hole — closed here.
+    process.env.PROFESSIONAL_PAID_ENABLED = 'false';
+    const r = await gateToolAction(null, null, 'image', 'image-generation');
+    expect(r.allow).toBe(false);
+    if (!r.allow) {
+      expect(r.status).toBe(401);
+      expect(r.body.code).toBe('login_required');
+    }
   });
 });
 
 describe('free users get a daily allowance', () => {
   it('allows an action inside the allowance, on the free chain, and marks it to be burned', async () => {
     state.usedToday = 2;
-    const r = await gateToolAction(UID, EMAIL, 'ai_tool');
+    const r = await gateToolAction(UID, EMAIL, 'ai_tool', 'debug');
     expect(r.allow).toBe(true);
     if (r.allow) {
       expect(r.countsAgainstFree).toBe(true);
@@ -83,7 +96,7 @@ describe('free users get a daily allowance', () => {
    */
   it('blocks with 402 once the allowance is used, and sells nothing', async () => {
     state.usedToday = aiToolFreeDailyLimit();
-    const r = await gateToolAction(UID, EMAIL, 'ai_tool');
+    const r = await gateToolAction(UID, EMAIL, 'ai_tool', 'debug');
     expect(r.allow).toBe(false);
     if (!r.allow) {
       expect(r.status).toBe(402);
@@ -100,14 +113,14 @@ describe('free users get a daily allowance', () => {
 
   it('a blocked action never counts against the allowance', async () => {
     state.usedToday = 99;
-    const r = await gateToolAction(UID, EMAIL, 'ai_tool');
+    const r = await gateToolAction(UID, EMAIL, 'ai_tool', 'debug');
     expect(r.allow).toBe(false);
     // countsAgainstFree only exists on an allow; nothing may be burned from a block.
     expect(state.incremented).toHaveLength(0);
   });
 
   it('asks an anonymous caller to sign in rather than silently metering them', async () => {
-    const r = await gateToolAction(null, null, 'ai_tool');
+    const r = await gateToolAction(null, null, 'ai_tool', 'debug');
     expect(r.allow).toBe(false);
     if (!r.allow) {
       expect(r.status).toBe(401);
@@ -120,7 +133,7 @@ describe('the Professional Pass unlocks the tools', () => {
   it('a pass holder is unlimited on the AI tools, however much they have used', async () => {
     state.passActive = true;
     state.usedToday = 10_000;
-    const r = await gateToolAction(UID, EMAIL, 'ai_tool');
+    const r = await gateToolAction(UID, EMAIL, 'ai_tool', 'debug');
     expect(r.allow).toBe(true);
     if (r.allow) {
       expect(r.countsAgainstFree).toBe(false);
@@ -131,7 +144,7 @@ describe('the Professional Pass unlocks the tools', () => {
   it('but images stay capped WITH a pass — ₹99 cannot carry unlimited image generation', async () => {
     state.passActive = true;
     state.usedToday = imagePassDailyLimit();
-    const r = await gateToolAction(UID, EMAIL, 'image');
+    const r = await gateToolAction(UID, EMAIL, 'image', 'image-generation');
     expect(r.allow).toBe(false);
     if (!r.allow) {
       expect(r.status).toBe(402);
@@ -146,7 +159,7 @@ describe('the Professional Pass unlocks the tools', () => {
   it('a pass holder still gets their higher image allowance', async () => {
     state.passActive = true;
     state.usedToday = imageFreeDailyLimit(); // past the FREE cap, inside the pass cap
-    const r = await gateToolAction(UID, EMAIL, 'image');
+    const r = await gateToolAction(UID, EMAIL, 'image', 'image-generation');
     expect(r.allow).toBe(true);
   });
 });
@@ -158,9 +171,9 @@ describe('images are capped tighter than everything else', () => {
 
   it('blocks a free user at the image cap while AI tools are still available', async () => {
     state.usedToday = imageFreeDailyLimit();
-    expect((await gateToolAction(UID, EMAIL, 'image')).allow).toBe(false);
+    expect((await gateToolAction(UID, EMAIL, 'image', 'image-generation')).allow).toBe(false);
     // Separate counters: the same count has not exhausted the ai_tool bucket.
-    expect((await gateToolAction(UID, EMAIL, 'ai_tool')).allow).toBe(true);
+    expect((await gateToolAction(UID, EMAIL, 'ai_tool', 'debug')).allow).toBe(true);
   });
 });
 
@@ -173,13 +186,13 @@ describe('the admin can retune every limit from Cloud Run without a deploy', () 
     expect(imageFreeDailyLimit()).toBe(1);
     expect(imagePassDailyLimit()).toBe(50);
     state.usedToday = 2;
-    expect((await gateToolAction(UID, EMAIL, 'ai_tool')).allow).toBe(false);
+    expect((await gateToolAction(UID, EMAIL, 'ai_tool', 'debug')).allow).toBe(false);
   });
 
   it('a limit of 0 turns the free allowance off entirely', async () => {
     process.env.AI_IMAGE_FREE_DAILY_LIMIT = '0';
     state.usedToday = 0;
-    const r = await gateToolAction(UID, EMAIL, 'image');
+    const r = await gateToolAction(UID, EMAIL, 'image', 'image-generation');
     expect(r.allow).toBe(false);
   });
 

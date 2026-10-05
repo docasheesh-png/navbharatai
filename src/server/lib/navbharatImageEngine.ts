@@ -7,9 +7,11 @@
 // behind it. This module is that picture: our engines, our accounts, and the user's ONE wallet.
 //
 // 🔒 ONE PRICE FOR EVERY DOOR. The charge is exactly the Image Generator's (imageAllowance.ts): five free
-// pictures a day per ACCOUNT (India's day), then the admin's fixed price each. A picture is counted and
-// charged only AFTER it was delivered, from the count after it, so two at once cannot both be the free
-// fifth. A picture that failed costs nothing.
+// pictures a day per ACCOUNT (India's day), then the admin's fixed price each. Since Q-616 (2026-10-05)
+// the slot and the price are TAKEN before any engine runs and given back if no picture comes out — the
+// shared `reserveImage` (imageHold.ts), which the caller (`apiKeyImage.ts`) wraps around `drawWithNavBharat`.
+// The old read-before / charge-after pair that lived here (`imageStartFor` + `chargeDeliveredImage`) is
+// gone: concurrent requests each passed its read, and the extra pictures went uncharged or into overdraft.
 //
 // 🔒 AN IMAGE MODEL DRAWS, IT DOES NOT REFUSE. Every prompt passes the platform's word ban
 // (scanPollinationsPrompt) before any engine is called, the same as the Image Generator's paid ladder.
@@ -23,12 +25,6 @@
 import { cloudflareImageConfig, cloudflareServesSize, fetchCloudflareImage } from './cloudflareImage';
 import { fetchPollinationsImage, pollinationsApiKey, grokImageKey, grokImageModel, parseGrokImageResponse, type GeneratedImage } from './imageGen';
 import { scanPollinationsPrompt } from './pollinationsGuard';
-import { imagePricingEnabled, imageFreePerDay, imagePriceInr, decideImageStart, needsBalance, imageFeeForCount, freeImagesLeft } from './imageAllowance';
-import { toolUsageStore } from '../tools/ToolUsageStore';
-import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
-import { debitWalletRolledUp } from './walletDebit';
-import { featureLabel, featureRollupRef } from './walletFeature';
-import { getServerDb } from './serverDb';
 
 export interface ImagePixels { w: number; h: number }
 
@@ -57,7 +53,7 @@ export function imageShapeOf(px: ImagePixels): 'square' | 'wide' | 'portrait' {
   return 'square';
 }
 
-/** Make one picture on NavBharatAI's own engines. No charge here — see `chargeDeliveredImage`. */
+/** Make one picture on NavBharatAI's own engines. No charge here — the caller holds it (`reserveImage`). */
 export async function drawWithNavBharat(
   prompt: string,
   px: ImagePixels,
@@ -110,48 +106,4 @@ export async function drawWithNavBharat(
   }
 
   return { ok: false, reason: 'failed', detail: tried.join(' | ') || 'no image engine is configured' };
-}
-
-/** Can this account start one more picture? Read BEFORE any engine is called. Never throws. */
-export async function imageStartFor(uid: string, freeListed: boolean): Promise<{ allow: true } | { allow: false; message: string }> {
-  if (!imagePricingEnabled() || freeListed) return { allow: true };
-  try {
-    const freePerDay = imageFreePerDay();
-    const priceInr = imagePriceInr();
-    const usedToday = await toolUsageStore.getTodayCount(uid, 'image');
-    const facts = { freeListed, usedToday, freePerDay, priceInr };
-    const balanceInr = needsBalance(facts)
-      ? await readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), uid).catch(() => null)
-      : null;
-    const start = decideImageStart({ ...facts, balanceInr });
-    if (start.allow) return { allow: true };
-    return { allow: false, message: `Today's ${freePerDay} free pictures are used, and the NavBharatAI wallet needs at least ₹${priceInr} for the next one. Add balance in the NavBharatAI app.` };
-  } catch {
-    // An unreadable count or balance is let through, like every wallet gate on the platform.
-    return { allow: true };
-  }
-}
-
-/**
- * Count and charge one DELIVERED picture to `uid`. Returns the rupees charged (0 for a free one).
- * Fire-and-forget safe: a money-path failure is logged, never thrown, so it cannot cost the caller the
- * picture they already have.
- */
-export async function chargeDeliveredImage(uid: string, freeListed: boolean): Promise<{ chargedInr: number; freeLeftToday: number | null }> {
-  if (!imagePricingEnabled() || freeListed || !uid) return { chargedInr: 0, freeLeftToday: null };
-  const freePerDay = imageFreePerDay();
-  const countAfter = await toolUsageStore.increment(uid, 'image').catch(() => 0);
-  const fee = imageFeeForCount(countAfter, freePerDay, imagePriceInr());
-  if (fee > 0) {
-    const now = Date.now();
-    await debitWalletRolledUp(getServerDb() as any, uid, {
-      billedInr: fee,
-      rollupRef: featureRollupRef('image', now),
-      description: featureLabel('image'),
-      feature: 'image',
-    }).then((r) => {
-      if (!r.ok) console.error(`[IMAGE_ENGINE] ₹${fee} image charge FAILED for ${uid}: ${r.error} — the picture was served but not charged.`);
-    }).catch(() => undefined);
-  }
-  return { chargedInr: fee, freeLeftToday: countAfter > 0 ? freeImagesLeft(countAfter, freePerDay) : null };
 }

@@ -5,8 +5,9 @@
 // and refuses anything that isn't a public, internet-routable HTTP(S) target. The IP math is pure and
 // unit-tested; `assertPublicHttpUrl` adds the async DNS resolution around it.
 
-import { promises as dns } from 'node:dns';
+import dnsCallback, { promises as dns } from 'node:dns';
 import net from 'node:net';
+import { Agent, buildConnector } from 'undici';
 
 /** Parse a dotted-quad IPv4 into its four octets, or null if not a valid IPv4 literal. Pure. */
 function parseIpv4(ip: string): [number, number, number, number] | null {
@@ -125,6 +126,63 @@ export async function guardedPublicFetch(
 ): Promise<{ ok: boolean; status: number; text: () => Promise<string> }> {
   const check = await assertPublicHttpUrl(url);
   if (!check.ok) return { ok: false, status: 403, text: async () => check.reason ?? 'blocked' };
-  const r = await fetch(url, { ...init, redirect: 'error' });
+  const r = await fetch(url, publicOnlyInit({ ...init, redirect: 'error' }));
   return { ok: r.ok, status: r.status, text: () => r.text() };
+}
+
+/** The error a refused connection carries, so a caller can tell "blocked" from "unreachable". */
+export const SSRF_BLOCKED_CODE = 'ESSRFBLOCKED';
+
+function blocked(host: string): Error {
+  return Object.assign(new Error(`${host} resolves to a private/reserved address`), { code: SSRF_BLOCKED_CODE });
+}
+
+type LookupCallback = (err: NodeJS.ErrnoException | null, address?: string | Array<{ address: string; family: number }>, family?: number) => void;
+type LookupFn = (hostname: string, options: Record<string, unknown>, callback: LookupCallback) => void;
+
+/**
+ * A DNS lookup for the CONNECTION itself that refuses a private, loopback, link-local or metadata
+ * address. PURE over the injected resolver (tests rebind a name between two lookups).
+ *
+ * 🔴 WHY THE CHECK HAS TO LIVE HERE (forensic audit 2026-10-04, Q-617). `assertPublicHttpUrl` resolves a
+ * name and vets the answer — and then `fetch` resolves the name AGAIN to connect. A DNS server that
+ * answers "public" the first time and "169.254.169.254" the second (DNS rebinding, a 0-second TTL) walks
+ * straight past the check. Vetting the address the socket is about to use closes that window: there is
+ * no second answer, because this IS the answer the connection uses.
+ */
+export function publicOnlyLookup(resolve: LookupFn = dnsCallback.lookup as unknown as LookupFn): LookupFn {
+  return (hostname, options, callback) => {
+    resolve(hostname, { ...options, all: true }, (err, addresses) => {
+      if (err) return callback(err);
+      const list = Array.isArray(addresses) ? addresses : [];
+      if (list.length === 0) return callback(Object.assign(new Error(`could not resolve ${hostname}`), { code: 'ENOTFOUND' }));
+      if (list.some((a) => isBlockedIp(a.address))) return callback(blocked(hostname));
+      if (options && (options as { all?: boolean }).all) return callback(null, list);
+      return callback(null, list[0].address, list[0].family);
+    });
+  };
+}
+
+/**
+ * The dispatcher every fetch of a USER-SUPPLIED address goes through. Each connection — the first hop
+ * and every redirect hop — is vetted at connect time: a name through `publicOnlyLookup`, an IP literal
+ * (which Node connects to without any lookup) directly.
+ */
+function publicOnlyConnector() {
+  const connect = buildConnector({ lookup: publicOnlyLookup() } as Parameters<typeof buildConnector>[0]);
+  return (opts: Parameters<typeof connect>[0], callback: Parameters<typeof connect>[1]) => {
+    const host = String(opts.hostname || '').replace(/^\[|\]$/g, '');
+    if (net.isIP(host) && isBlockedIp(host)) return callback(blocked(host), null);
+    return connect(opts, callback);
+  };
+}
+
+export const publicOnlyDispatcher = new Agent({ connect: publicOnlyConnector() });
+
+/**
+ * `init` for a fetch of a user-supplied address: the same options, sent through `publicOnlyDispatcher`.
+ * The one place that knows the global fetch accepts a `dispatcher` its DOM types do not declare.
+ */
+export function publicOnlyInit(init: RequestInit): RequestInit {
+  return { ...init, dispatcher: publicOnlyDispatcher } as RequestInit;
 }

@@ -20,8 +20,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   resolveAppDisplayName,
@@ -33,6 +32,7 @@ import { planAppDefaults } from '../src/server/AgentV3/appDefaults';
 import { analyzeRequest } from '../src/server/AgentV3/RequestAnalyser';
 import { namesBusinessDomain, namesPersonalTool } from '../src/server/lib/appComplexitySignals';
 import { deriveJourneys, journeyScript, valueForInput } from '../src/server/AgentV3/journeyDerivation';
+import { makeTempDir } from './helpers/tempDir';
 
 const THE_PROMPT =
   'Build a water drinking reminder app which reminds me to drink water in regular duration according the weight and height ratio. Take input of height weight and age and suggest necessary amount of water needed';
@@ -207,7 +207,7 @@ describe('3 · the journey chooses from a dropdown and gives a time a time', () 
     const end = script.indexOf('\nNBAI_EOF', start);
     expect(start).toBeGreaterThan(0);
     expect(end).toBeGreaterThan(start);
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-journey-'));
+    const dir = makeTempDir('nbai-journey-');
     const file = join(dir, 'journey.mjs');
     writeFileSync(file, script.slice(start, end));
     expect(() => execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' })).not.toThrow();

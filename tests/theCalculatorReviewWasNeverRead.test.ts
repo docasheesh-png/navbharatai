@@ -26,11 +26,11 @@ import {
   clickExplorerModule, parseExploreOutput, EXPLORE_RESULT_MARKER, MAX_SECOND_LEVEL_CLICKS, MAX_SECOND_LEVEL_PER_PARENT,
   MAX_PRIMED_RETRIES, NEVER_PRESS, WRITE_VERBS, CONSOLE_NOISE, THEME_CONTROL, MAX_THEME_PRESSES,
 } from '../src/server/AgentV3/clickExplorer';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { makeTempDir } from './helpers/tempDir';
 
 const read = (p: string) => readFileSync(p, 'utf8');
 
@@ -278,7 +278,7 @@ function seven() { d.textContent = d.textContent === '0' ? '7' : d.textContent +
   afterAll(() => new Promise<void>((res) => server.close(() => res())));
 
   it('AC and +/− are proven to respond after "7"; the dead % is named, not failed', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-primed-'));
+    const dir = makeTempDir('nbai-primed-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, clickExplorerModule({
       base, marker: EXPLORE_RESULT_MARKER, maxClicks: 12, maxSecond: MAX_SECOND_LEVEL_CLICKS, perParent: MAX_SECOND_LEVEL_PER_PARENT,

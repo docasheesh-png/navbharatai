@@ -4,13 +4,13 @@
 // a form every user reaches in one tap. The release gate then held the build YELLOW for a journey
 // "that could not be reached".
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import http from 'http';
 import type { AddressInfo } from 'net';
 import { journeyScript, parseJourneyResults, JOURNEY_OPENER, TOOLS_DIR, type Journey } from '../src/server/AgentV3/journeyDerivation';
 import { NEVER_PRESS } from '../src/server/AgentV3/clickExplorer';
+import { makeTempDir } from './helpers/tempDir';
 
 describe('what counts as an opener', () => {
   it.each(['+ New Habit', 'Add task', 'New', 'Create note', '＋ Add'])('%s', (l) => {
@@ -69,7 +69,7 @@ draw();
     const full = journeyScript(base, [j], 'NBAI-MARK-7');
     const body = full.slice(full.indexOf('\n') + 1, full.lastIndexOf('NBAI_EOF'))
       .replace(`import playwright from '${TOOLS_DIR}/node_modules/playwright/index.js';`, `import playwright from '${PW}';`);
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-journey-real-'));
+    const dir = makeTempDir('nbai-journey-real-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, body);
     const { execFile } = await import('node:child_process');

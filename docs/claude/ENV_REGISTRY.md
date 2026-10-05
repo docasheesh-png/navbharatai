@@ -46,6 +46,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   not "it is set in Cloud Run".)
 - **GitHub storage:** `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
   `GITHUB_ORG`, `GITHUB_STORAGE_ENABLED`, `GITHUB_PR_MODE`
+- **GitHub native sign-in, legacy switch (Q-629, added 2026-10-05):** `GITHUB_NATIVE_LEGACY_TOKEN_RETURN`
+  — NOT set; **unset means ON**. While on, an app build from before 2026-08-28 (#2706), which sends the bare
+  `nbai-native` state, still gets the GitHub token in the `com.navbharat.ai://github-callback#gh_token=…`
+  deep link — the only thing that build can read. Set it to `off` to retire that path once enough users
+  run a bundle with the device-nonce flow; old installs then see "Please update the NavBharatAI app to
+  connect GitHub." ⚠️ While on, a crafted authorize link with `state=nbai-native` still makes the server
+  put a token in a deep link any installed app can claim — the switch, not the app, is the exposure.
+  Read by `legacyTokenReturnEnabled()` in `src/server/lib/githubNativeHandoff.ts`; nothing else reads it.
 - **Payments:** `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY` (code also accepts the `CASHFREE_CLIENT_ID` /
   `CASHFREE_CLIENT_SECRET` pair — use ONE pair, not both), `CASHFREE_WEBHOOK_SECRET`
   (✅ **SET in Cloud Run by the admin 2026-08-10** — the third delivery path for a payment is now live;
@@ -290,6 +298,15 @@ the code (it is actually read somewhere) on 2026-07-11.
   as the vaccine repair budget noted in that flag's own entry.
   **What to watch:** `FUZZ_ROBUSTNESS` findings in the admin build report. A build that suddenly takes
   ~90s longer at the very end is this pass; unset the key to revert instantly.
+- **Scheduled work without an awake server — Cloud Scheduler tick (built 2026-10-05, Q-159, NOT live until set):**
+  `SCHEDULER_TICK_SECRET` (16+ random characters). Cloud Scheduler calls `POST https://navbharatai.com/api/internal/scheduler-tick`
+  with header `x-scheduler-secret: <the same value>` every 5 minutes; the tick runs every exclusive job (plan sweep and
+  renewal reminders, hosting daily bill, image cleanup, outbound rescan, site uptime, retention purge when enabled) that
+  is due by the durable `job_runs` record. Unset ⇒ the route answers 503, so a half-done setup shows red in the Cloud
+  Scheduler console. The admin's choice over `--min-instances 1` (2026-10-05): it costs nothing while idle.
+- **New domain gets the published app by itself (built 2026-10-05, Q-163):** `DOMAIN_AUTOPUBLISH` — kill switch,
+  **default ON**; `off` stops the uptime sweep putting the already-published app (from `PUBLISHED_APPS_BUCKET`'s copy)
+  on a connected domain whose site is still empty. Once per domain + app, owner's active app only.
 - **Payment recovery (shipped 2026-08-04):** `PAYMENT_RECONCILE_MIN_AGE_MINUTES` (2),
   `PAYMENT_RECONCILE_MAX_AGE_DAYS` (7), `PAYMENT_RECONCILE_MAX_ORDERS` (5). On sign-in the server settles
   the user's own unfinished orders against Cashfree. ⚠️ CORRECTION 2026-08-10: this entry used to say
@@ -3987,3 +4004,8 @@ the flag entries above promise.
   - optional `IMAGE_PROVIDER`;
   - optional `<PROVIDER>_IMAGE_MODEL`.
 - **Admin action:** after the PR merges, run the manual `e2b-template` workflow. The warm primer in `infra/e2b/e2b.Dockerfile` now carries `@types/react` and `@types/react-dom` (Q-574), and it reaches live sandboxes only after that rebuild.
+
+### 2026-10-05 — WhatsApp bot signatures and the bot ledger (Q-612)
+
+- **`WHATSAPP_SIGNATURE_REQUIRED_AFTER`** (NOT set; default `2026-11-05T00:00:00Z` in `src/server/bots/whatsappSignature.ts`) — an ISO date or date-time. Until then, a hosted WhatsApp bot connected WITHOUT a Meta App Secret (every bot connected before 2026-10-05) is still served, and its owner sees a notice in the Bot Builder naming this date. After it, such a bot's deliveries are refused (403) until the owner adds the App Secret. Bots connected from 2026-10-05 must give the App Secret at connect, and their deliveries are checked against `X-Hub-Signature-256` at once — this date does not affect them. An unreadable value is ignored (logged once per read) and the default applies. Set it only to give owners more time; moving it earlier cuts off legacy bots sooner.
+- **No new secret in Cloud Run.** Each bot's App Secret is the USER's own (their Meta app), stored encrypted in the `bots` collection with the existing `SECRET_ENCRYPTION_KEY` / `SECRET_KEY_V<N>` (`lib/secrets.ts`).

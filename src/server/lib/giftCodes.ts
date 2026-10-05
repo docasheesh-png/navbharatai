@@ -158,17 +158,25 @@ export interface GiftCodeRecord {
   paidInr: number;
   feeInr: number;
   orderId: string;
-  status: 'unused' | 'redeemed';
+  /**
+   * `voided` (Q-614): the payment that bought the code was refunded or charged back in full before
+   * anyone redeemed it, so it carries no value. A PARTIAL reversal leaves it `unused` with a smaller
+   * `faceInr` (the original stays in `faceBeforeRefundInr`). See `paymentReversalStore.ts`.
+   */
+  status: 'unused' | 'redeemed' | 'voided';
   createdAt: string;
   redeemedBy?: string;
   redeemedAt?: string;
+  voidedAt?: string;
+  voidReason?: string;
+  faceBeforeRefundInr?: number;
   note?: string;
 }
 
 /** What the redeemer's request is allowed to do to a record. Pure, so the route cannot improvise. */
 export type GiftRedeemOutcome =
   | { ok: true; faceInr: number }
-  | { ok: false; reason: 'not-found' | 'already-redeemed' | 'own-code'; message: string };
+  | { ok: false; reason: 'not-found' | 'already-redeemed' | 'own-code' | 'voided'; message: string };
 
 /**
  * Decide a redemption from the stored record.
@@ -184,6 +192,11 @@ export function decideGiftRedemption(
 ): GiftRedeemOutcome {
   if (!record) {
     return { ok: false, reason: 'not-found', message: 'That code is not valid. Please check it and try again.' };
+  }
+  // A refunded code is not a USED one — telling the redeemer "already used" would be a false sentence
+  // about somebody else's money (Q-614).
+  if (record.status === 'voided') {
+    return { ok: false, reason: 'voided', message: 'This gift code is no longer valid because its purchase was refunded.' };
   }
   if (record.status !== 'unused') {
     return { ok: false, reason: 'already-redeemed', message: 'This gift code has already been used.' };

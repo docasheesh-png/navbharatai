@@ -122,14 +122,16 @@ describe('🔒 the wiring — a reader nothing calls is not a fix', () => {
   const route = code('../src/server/routes/agentv3.ts');
 
   it('the gate assembly asks the timeline, beside the command log', () => {
-    expect(route).toContain('provenFromTimeline(buildDiag.report().issues)');
-    expect(route).toContain("if (gateEvidence.pages === 'not-run' && seen.pages)");
+    // Since Q-101: one ledger read, which composes this timeline reader and the command log.
+    expect(route).toContain('fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger())');
+    expect(code('../src/server/AgentV3/evidenceLedger.ts')).toContain('provenFromTimeline(issues)');
   });
 
   it('🔒 it FILLS a gap and never overwrites real evidence — the same discipline as the command log', () => {
     // A check the build genuinely ran and recorded as `failed` must survive this pass untouched.
-    expect(route).toContain("gateEvidence.pages === 'not-run'");
-    expect(route).toContain('gateEvidence.previewUrlPublished === undefined');
+    const ledger = code('../src/server/AgentV3/evidenceLedger.ts');
+    expect(ledger).toContain("gate[name] === 'not-run'");
+    expect(ledger).toContain('gate.previewUrlPublished === undefined');
   });
 
   it('⚠️ it is a SIBLING of agentRunEvidence, not a branch inside it — two sources, two names', () => {

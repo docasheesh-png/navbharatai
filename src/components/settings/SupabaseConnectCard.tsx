@@ -19,6 +19,8 @@ import { Database, Check, Loader2, ExternalLink, AlertTriangle, ArrowLeft } from
 import { authedFetch } from '../../lib/authedFetch';
 import { V3_TAB_FLAG, V3_VIEW } from '../agentv3/v3TabPersistence';
 import { SUPABASE_NATIVE_RETURN_EVENT } from '../../lib/supabaseOauthReturn';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import { readAnswer, isRecord } from '../../lib/serverAnswer';
 
 /**
@@ -34,7 +36,6 @@ import { readAnswer, isRecord } from '../../lib/serverAnswer';
  */
 async function isNativePlatform(): Promise<boolean> {
   try {
-    const { Capacitor } = await import('@capacitor/core');
     return Capacitor.isNativePlatform?.() === true;
   } catch {
     return false;
@@ -163,7 +164,6 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
         // appUrlOpen listener catches (it stashes the nonce/error and fires SUPABASE_NATIVE_RETURN_EVENT
         // above). No page navigation, so the native app is never replaced by the website.
         try {
-          const { Browser } = await import('@capacitor/browser');
           await Browser.open({ url: data.url, presentationStyle: 'popover' });
         } catch {
           setError('Could not open the in-app browser. Please try again.');

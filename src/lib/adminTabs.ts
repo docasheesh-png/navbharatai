@@ -30,7 +30,7 @@ export type AdminTabId =
 export type AdminPageId =
   | 'monitor'
   | 'users' | 'userreports' | 'ratings'
-  | 'apps' | 'publishing' | 'review'
+  | 'apps' | 'publishing' | 'review' | 'bots'
   | 'reports' | 'apkreports' | 'health'
   | 'engines'
   | 'revenue'
@@ -55,6 +55,9 @@ export const ADMIN_TABS: readonly AdminTabDef[] = [
     { id: 'apps', label: 'All apps' },
     { id: 'publishing', label: 'Publishing' },
     { id: 'review', label: 'Review' },
+    // Who built which hosted chat bot (admin 2026-10-05): "kis kis user ne bot banaye hai, uska bhi hisab
+    // admin panel me rakho". Under Apps because a bot is a thing a user built and NavBharatAI hosts.
+    { id: 'bots', label: 'Bots' },
   ] },
   // Build reports and phone builds stay separate pages too (admin 2026-09-14): one is the in-house
   // engine's report, the other the store-build pipeline on the user's own GitHub. Same tab, never

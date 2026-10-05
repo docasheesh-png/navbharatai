@@ -20,6 +20,9 @@ import { normalizeFeePct } from '../../lib/platformFee';
 import { grievanceOfficerFrom, type GrievanceOfficer } from '../../content/legal/grievance';
 import { grievanceOfficer } from '../lib/grievanceOfficer';
 import { appCheckSiteKey, appCheckStats } from '../lib/appCheck';
+import { scheduler } from '../lib/ScheduledJobs';
+import { tickAuth, firestoreRunLog, SCHEDULER_TICK_HEADER, type RunLogStore } from '../lib/schedulerTick';
+import { getServerDb } from '../lib/serverDb';
 
 // Set true once the server has finished initialization (wired from server.ts).
 let serverReady = false;
@@ -148,6 +151,21 @@ function collectHealthChecks(): HealthCheck[] {
 }
 
 export function registerHealthRoutes(app: Express): void {
+  // Q-159 — every instance records each exclusive job's run durably, so the external tick below knows what ran
+  // while it slept. Wired here because every instance registers these routes at boot.
+  try { scheduler.setRunLog(firestoreRunLog(getServerDb() as unknown as RunLogStore)); } catch { /* no database: the tick reports "unknown" */ }
+
+  // Q-159 — Cloud Scheduler's call (see schedulerTick.ts). Wakes an instance and runs what is due by the record.
+  app.post('/api/internal/scheduler-tick', async (req: Request, res: Response) => {
+    const auth = tickAuth(process.env.SCHEDULER_TICK_SECRET, req.headers[SCHEDULER_TICK_HEADER]);
+    if (auth === 'not-configured') { res.status(503).json({ error: 'SCHEDULER_TICK_SECRET is not set (16+ characters).' }); return; }
+    if (auth === 'denied') { audit('SCHEDULER_TICK_DENIED', { ip: req.ip }); res.status(401).json({ error: 'Wrong scheduler secret.' }); return; }
+    // A cold instance registers its jobs during boot; wait for that (bounded) rather than report "nothing due".
+    const ready = await Promise.race([scheduler.started.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 20_000))]);
+    if (!ready) { res.status(503).json({ error: 'The scheduler has not started on this instance yet.' }); return; }
+    res.json(await scheduler.catchUp());
+  });
+
   app.get('/api/live', (_req: Request, res: Response) => {
     res.json({ status: 'live', uptime: process.uptime() });
   });

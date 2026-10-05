@@ -11,6 +11,7 @@
 // this never fakes a successful registration.
 
 import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import { registerDeviceToken, unregisterDeviceToken } from './pushApi';
 import { PLAY_STORE_URL } from './appUpdate';
 import { pushTapAction } from './appMartTarget';
@@ -163,8 +164,8 @@ export async function initPushNotifications(userId: string): Promise<void> {
             return;
           }
           const url = action.url;
-          void import('@capacitor/browser')
-            .then(({ Browser }) => Browser.open({ url }))
+          void Promise.resolve()
+            .then(() => Browser.open({ url }))
             .catch(() => { window.open(url, '_blank', 'noopener'); });
         } catch { /* a tap handler must never crash the app */ }
       });

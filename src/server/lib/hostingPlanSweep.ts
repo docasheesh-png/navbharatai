@@ -36,6 +36,7 @@
  */
 
 import { doc, runTransaction, getServerDb } from './serverDb';
+import { scheduler } from './ScheduledJobs';
 import {
   decidePlanSweepStep, hostingPlansEnabled, planPriceInr, planDays,
   invalidatePlanCache, type PlanSweepAction, type HostingPlanRecord,
@@ -347,13 +348,29 @@ export async function reattachSuspendedDomains(userId: string): Promise<number> 
   }
 }
 
-let _sweepTimer: ReturnType<typeof setInterval> | null = null;
+/** The sweep's id in the shared scheduler — the external tick (Q-159) reaches it by this. */
+export const HOSTING_PLAN_SWEEP_JOB = 'hosting-plan-sweep';
+let _registered = false;
 
-/** Register the periodic sweep at boot (idempotent; no-op under VITEST). */
+/**
+ * Register the periodic sweep at boot (idempotent; no-op under VITEST).
+ *
+ * 🔴 IN THE SHARED SCHEDULER, NOT A PRIVATE `setInterval` (queue Q-159, 2026-10-05). The private timer ran only
+ * while an instance was awake — with `--min-instances 0` a renewal reminder could be hours late — and it ran on
+ * EVERY instance. As an `exclusive` scheduler job one instance runs it, its runs are recorded durably, and Cloud
+ * Scheduler's tick runs it on time even when no instance was up. Cadence never affects CORRECTNESS: decisions are
+ * pure over absolute time and the sweep dedupes its own reminders.
+ */
 export function registerHostingPlanSweep(): void {
-  if (process.env.VITEST || _sweepTimer) return;
-  // First pass shortly after boot (instances recycle on every deploy — don't wait 6h to remind),
-  // then every 6 hours. Cadence never affects CORRECTNESS: decisions are pure over absolute time.
-  setTimeout(() => { void sweepHostingPlans(); }, 2 * 60 * 1000);
-  _sweepTimer = setInterval(() => { void sweepHostingPlans(); }, 6 * 60 * 60 * 1000);
+  if (process.env.VITEST || _registered) return;
+  _registered = true;
+  scheduler.register({
+    id: HOSTING_PLAN_SWEEP_JOB,
+    exclusive: true,
+    schedule: { kind: 'everyMs', ms: 6 * 60 * 60 * 1000 },
+    handler: async () => { await sweepHostingPlans(); },
+  });
+  // First pass shortly after boot (instances recycle on every deploy — don't wait 6h to remind), through the
+  // scheduler so the claim decides which instance runs it.
+  setTimeout(() => { void scheduler.runNow(HOSTING_PLAN_SWEEP_JOB); }, 2 * 60 * 1000).unref?.();
 }

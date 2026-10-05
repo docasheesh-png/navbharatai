@@ -11,8 +11,7 @@
 // 3. The live timer said "this app is bigger than expected" at minute 4 of a build the user had been
 //    told would take ~5–7 min, and which finished at 6.8 min — inside that band.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import http from 'http';
 import type { AddressInfo } from 'net';
@@ -26,6 +25,7 @@ import { openTagsAt } from '../src/server/AgentV3/jsxTags';
 import {
   deriveJourneys, journeyScript, parseJourneyResults, screenReachedByControl, TOOLS_DIR, type Journey,
 } from '../src/server/AgentV3/journeyDerivation';
+import { makeTempDir } from './helpers/tempDir';
 
 const MIN = 60_000;
 
@@ -311,7 +311,7 @@ document.getElementById('meds').onclick = showMeds;
     const full = journeyScript(base, [j], 'NBAI-MARK-9');
     const body = full.slice(full.indexOf('\n') + 1, full.lastIndexOf('NBAI_EOF'))
       .replace(`import playwright from '${TOOLS_DIR}/node_modules/playwright/index.js';`, `import playwright from '${PW}';`);
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-journey-e49-'));
+    const dir = makeTempDir('nbai-journey-e49-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, body);
     const { execFile } = await import('node:child_process');

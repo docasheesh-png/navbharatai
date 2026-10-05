@@ -89844,6 +89844,100 @@ Q-104, Q-116, Q-135, Q-139, Q-146, Q-147, Q-150, Q-152, Q-153, Q-156, Q-164 (Q-1
 open from that work, each 🟡 with what it needs in `BUILD_REPORT_QUEUE.md`: Q-154 (admin confirms `hops: 1` at
 `/api/admin/proxy-hops`), Q-162 (45 undecided routes), Q-160, Q-136 (#3533), Q-101, Q-159, Q-141, Q-163.
 
+### 2026-10-05 — Forensic audit follow-up (PR #3551): Q-613, Q-617, Q-619, Q-621 + the admin's decisions
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-613 paid order claimed but never credited | the PENDING→SUCCESS claim and the wallet credit were two transactions; reconcile re-drives only PENDING | money moved in two steps with no recovery between them | wallet top-ups claim + credit in ONE transaction; a claimed gift order with no code is resumed (idempotent mint) | `aPaidOrderIsNeverLeftUncredited` (crash injected; old code → 2 fail) |
+| Q-617 DNS rebinding past the SSRF check | the address was vetted, then `fetch` resolved the name again; `domainServingCheck` followed unvetted redirect hops | check-then-use on a name | `publicOnlyDispatcher`: the connection's own lookup refuses private addresses, the connector refuses private IP literals; six sites; census | `aNameThatRebindsIsRefusedAtConnect` |
+| Q-619 new advisories passed the audit gate | allowlist matched package names | a triage reason written for one advisory covering every later one | entries accept only listed GHSA ids; brace-expansion / node-forge / braces re-triaged per id; axios 1.20.0 + undici 7.30.0 (HIGH 7 → 5) | `auditGate.test.ts` Q-619 block |
+| Q-621 a disconnect was never noticed (listener half) | `req` 'close' has already fired once `express.json()` read a POST body | a listener on the wrong object | `clientDisconnect.ts` on `res`; five sites; census | `aClientThatLeavesIsNoticed` (real socket) |
+
+**Admin decisions recorded 2026-10-05** (rows in the queue): Q-615 — no test/sandbox/simulator purchase may credit a
+real wallet, fake payment paths removed; Q-614 (a) refunds debit the tokens bought, never below zero; Q-616 (b) hold ₹1
+before an image, settle or release (after #3547); Q-612 (a) app secret at connect + admin ledger of users' bots;
+Q-629 (a) device-bound GitHub hand-off; Q-624 (a) email grants need `email_verified`; Q-140 (a) preview on its own
+origin (domain from the admin).
+
+**Session incident, recorded honestly:** a `/tmp` cleanup (the suite had leaked ~24 GB of temp dirs) also deleted the
+environment's commit-signing helper `/tmp/code-sign`; commits were blocked until the session restarted. The temp-dir
+leak itself is a test-hygiene defect worth its own row.
+
+### 2026-10-05 — Q-624: an email grants nothing until the provider verified it (PR #3551)
+
+- **Class:** a list that matches an email (free list, cost-routing canary, sign-in exemption, store admins,
+  report admins, the professional and tool gates) trusted any address on a verified TOKEN, verified or not.
+  Email/password sign-up sends no verification, so a listed address nobody had registered yet could be claimed.
+- **Fix at the type:** `GrantEmail` (featureFlag.ts) is produced only by `grantEmail(email, emailVerified)`;
+  every grant takes it, so the compiler refuses a plain string at every present and future call site.
+  `verifyFirebaseIdentity`, the money gate, `resolveGrantEmail` and `emailForUid` carry the provider's flag.
+  The access allowlist stays an availability gate (empty in production); admin lists show a stored-email
+  label through `freeListLabelForStoredEmail` (one reader, held by a census).
+- **Siblings found while fixing:** `isReportAdmin`/`isAdminEmail` (raw provider names, admin hosting), the
+  costly-AI account (images, screenshot-to-prompt), `gateToolAction`, `gateProfessionalTurn/Exam`, and the
+  deploy-providers price label (read a claimed query email; now the verified identity).
+- **Lock:** `tests/aGrantNeedsAVerifiedEmail.test.ts` (5 fail when the check is removed).
+- **Watch:** a listed person signing in with an unverified email/password account loses the grant — list
+  their uid too, or have them verify the address.
+- Also: `tests/fixtures/sheetContractBaseline.json` AppModals 6 → 5 (Q-615 removed the simulated checkout).
+### 2026-10-05 — Q-612: WhatsApp bots answer only Meta; the admin's bot ledger (PR #3551)
+
+Admin decision 2026-10-05, option (a), plus: *"kis kis user ne bot banaye hai, uska bhi hisab admin panel me rakho!"*
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-612 unsigned WhatsApp webhook | `POST /api/bots/whatsapp/webhook/:botId` ran the flow and sent replies with the owner's token before authenticating anything; Meta's signature needs the per-bot App Secret, which was never collected | a hosted-bot webhook that runs a flow before authenticating the sender | App Secret required at connect (encrypted with `lib/secrets`), `X-Hub-Signature-256` verified over `req.rawBody` in constant time before the flow; legacy bots served until `WHATSAPP_SIGNATURE_REQUIRED_AFTER` (default 2026-11-05), then refused; siblings: Telegram secret header and Meta verify token now constant-time | `tests/theWhatsAppBotOnlyAnswersMeta.test.ts` — behaviour + a census of every `/api/bots/*/webhook/` route (gate disabled → 8 fail; pre-fix route file → 17 fail) |
+
+Also built: the owner's notice strip in the Bot Builder (what the App Secret is, where Meta shows it, the cut-over date, an
+in-place "Save App Secret" that keeps the webhook URL), a signed bot's last refused delivery shown to its owner, and
+**Admin → Apps → Bots** (`GET /api/admin/bots`, `requireAdmin`): owner, platform, bot, connected date, signed status, last
+message (tracked from today, throttled), unsigned traffic and bad-signature stamps, totals. AppKnowledgeBase updated
+(`bot_builder`, new `admin-bot-ledger`, the admin tab list). **What existing bot owners must do:** add their App Secret
+from the Bot Builder notice before 2026-11-05, or their WhatsApp bot stops replying.
+### 2026-10-05 — Q-614: a refund or chargeback takes back the tokens that payment bought (PR #3551)
+
+Admin decision (a), 2026-10-05. Before this, every signed Cashfree webhook went to `verifyPaymentInternal`
+("fulfil this order") and nothing anywhere took tokens back after a refund or a lost chargeback.
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-614 a refunded / charged-back payment kept its tokens | the webhook had one branch (fulfil); no writer ever handled a reversal; the store rails check refund state only at first verify | a money event classified by "it is signed" rather than by what it is | webhook branches on `type` (`classifyCashfreeWebhook`); amounts re-read from Cashfree's refunds/disputes API (`paymentReversalStore.ts`); one pure clawback (`paymentReversal.ts`) shared by every rail, idempotent on the order's `clawbackTargetTokens`, debiting through `walletMirror` down to zero and never below, with a Refund/Chargeback ledger line; a refund recorded before the credit is applied in the credit's own transaction; gift codes reduced/voided (unused) or clawed from the buyer (redeemed); `orderCredit.ts` is now the ONE credited-tokens formula for credit and clawback | `tests/aRefundTakesBackWhatItBought.test.ts` — 7 reversions, each fails |
+
+**Open (needs the admin):** subscribe the Cashfree webhook to REFUND and DISPUTE events; Play RTDN (Pub/Sub +
+authenticated push) or a Voided Purchases pull, and App Store Server Notifications v2 (with JWS chain
+verification) — neither exists, so store refunds are still not taken back (both would call `applyOrderReversal`).
+
+**Discovered while building it (needs its own queue row):** `mirroredCreditPatch` (walletMirror.ts) floors the
+token view at zero with `max(0, held + delta)`, so on a wallet already in OVERDRAFT a credit lifts it past the
+delta (a 100-token gift to a −50,000 wallet lands at 0, forgiving the debt and over-counting `total_balance`),
+and an admin DEDUCTION on such a wallet raises it to 0. The refund path avoids it (it never calls the patch for
+a wallet at or below zero); the coupon / referral / admin-adjustment writers do not.
+### 2026-10-05 — Q-623 + Q-629: a GitHub token is accepted only for a sign-in this client started (PR #3551, branch `agent/github-handoff`)
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-623 a `#gh_token=` link planted an attacker's token | the client stored any fragment token; the OAuth `state` was only a return URL, with no per-attempt value | a credential trusted for WHERE it arrived, not because this client asked for it | one-time nonce: client (sessionStorage, `X-NBAI-GitHub-Nonce` header) → signed web state (`githubWebState.ts`, same `hmac`/key as native) → echoed beside the token → stored only on match, then deleted (`githubOauthNonce.ts`). Unsigned state refused before the code exchange. Siblings: postMessage intake, the popup page writing `gh_token`/`gh_token_signal` directly, AgentV3Panel's starter | `tests/aGithubTokenNeedsTheNonceThisTabSaved.test.ts`, `tests/aGithubHandoffIsBoundToTheDeviceNonce.test.ts` — 10 reversions, each failed |
+| Q-629 legacy native hand-off put the token in a claimable deep link, and v2 fell back to it | the uid ticket needs a signed-in user; when identity failed the server silently issued the legacy state | a request for the safe flow quietly given the unsafe one | admin option (a): device nonce — state carries only its SHA-256, deep link carries an encrypted ticket, redeemed once with the nonce (works signed-out). `handoff=ticket` without identity → 401. The app refuses a raw-token deep link. Legacy return behind `GITHUB_NATIVE_LEGACY_TOKEN_RETURN` (default ON for pre-2026-08-28 installs) | same two files + updated `githubNativeHandoff.test.ts` |
+
+**Open, honestly:** (1) the legacy token-in-URL return is still served while `GITHUB_NATIVE_LEGACY_TOKEN_RETURN` is on — the
+admin turns it `off` once enough phones carry the new bundle; (2) single use of a device ticket is per Cloud Run
+instance (a cross-instance replay still needs the nonce, which never leaves the app except in the redeem body);
+(3) sibling found, not fixed here: App.tsx still accepts `#fb_token=` fragments / `FIREBASE_AUTH_SUCCESS` messages that
+no server sends any more. **Phones:** a frontend change reaches phone users only via a fresh `.aab`/`.ipa`
+(`docs/claude/RELEASE.md`) — none built here; app builds 2026-08-28…2026-10-05 lose signed-OUT GitHub connect until updated.
+
+### 2026-10-05 — Q-670 overdraft forgiveness, Q-671 planted Firebase token (PR #3551)
+
+- **Q-670** (found by the Q-614 refund work): `mirroredCreditPatch` floored every result at zero, so any
+  credit to a wallet in overdraft wiped the whole debt and booked it as lifetime credit, and an admin
+  deduction on such a wallet raised it to zero. Now a credit moves by exactly its amount and a deduction
+  floors at `min(held, 0)`. Lock: Q-670 block in `tests/walletMirror.test.ts` (3 fail when reverted).
+- **Q-671** (found by the Q-623 work): the Firebase sibling of the GitHub planting hole — three ingestion
+  paths with no legitimate sender. Removed, and a stored token is dropped on load (the only issuer ever was
+  a mock with fabricated credentials). Lock: `tests/aFirebaseTokenIsNeverPlanted.test.ts`.
+- Two Q-615 leftovers fixed: the platform-credentials census accepts `cashfreePaymentsAvailability`, and
+  the walletMirror simulator guard now asserts there is no simulator at all.
+- **Q-672** recorded OPEN: the suite leaks temp directories (24 GB seen).
 ---
 
 ## 2026-10-05 — Q-574 ✅: the E2B builder template was rebuilt with the new warm primer
@@ -90079,6 +90173,249 @@ PR 3 covers four server capabilities that existed with no screen, plus the two s
 Q-660, Q-661, Q-662 and Q-663 move to ✅. Their ledger is the "Free mode removed" entry above.
 
 **Watch:** a picture should arrive on the first press on the live site.
+---
+
+## 2026-10-05 — Q-616: an image is paid for BEFORE it is drawn (hold → settle → release)
+
+**Report:** forensic audit 2026-10-04 (#3538). `/api/image/generate` only READ today's count and the wallet
+balance before an engine ran; the count moved and the ₹1 was debited after delivery, fire-and-forget (failure
+only logged), clamped at the overdraft floor. Concurrent requests each passed the read, so extra pictures went
+uncharged or pushed the wallet into overdraft.
+
+**Root cause (class):** a fixed price enforced as a READ before the work and a WRITE after it. Every concurrent
+request fits between the two moments.
+
+**Decision (admin, 2026-10-05):** option (b): hold ₹1 before the provider is called, settle on delivery, release on failure.
+
+**What changed:**
+
+- `src/server/lib/imageHold.ts` (new): `reserveImage` is the one implementation for every door that sells a picture.
+  - It takes today's slot first (`ToolUsageStore.increment`, atomic) and decides the fee from the count that call returned.
+  - A priced slot holds the ₹ in ONE wallet transaction before any engine runs.
+  - Delivery calls `settle()`: nothing more is charged, and feature-spend telemetry is recorded then.
+  - Every other exit calls `release()` from a `finally` keyed on a `delivered` flag.
+- `walletDebit.ts`:
+  - `computeRolledUpDebit` gains `allOrNothing` (refuse rather than clamp) and `holdId` (stamped on the bucket row's `openHolds`).
+  - New: `holdWalletRolledUp` (`floorInr: 0`, never overdraws), `computeRolledUpRelease` / `releaseWalletHold` (the exact inverse in the same rollup bucket: tokens, ₹, gift and carry; idempotent by hold id), `computeRolledUpSettle` / `settleWalletHold`.
+  - Owner resolution is now one helper, `walletOwnerId`, shared by every debit, hold and release.
+- `ToolUsageStore.decrement`: transactional, floored at 0, same IST day only.
+- `routes/imageGen.ts` uses the hold.
+- Sibling door `apiKeyImage.ts` (Developer API and app pictures) uses the same hold. Its old `imageStartFor` + `chargeDeliveredImage` pair is removed from `navbharatImageEngine.ts`.
+- `decideImageStart` / `needsBalance` are removed, so a read-then-charge gate cannot be re-wired.
+
+**Behaviour:** unchanged for free-listed users and with `AI_IMAGE_PRICING=off`.
+
+- A counter that cannot be written still fails open, as before.
+- A wallet that cannot be written now fails CLOSED, with an honest 503: "could not take the payment … nothing was charged".
+
+**Lock:** `tests/anImageIsPaidBeforeItIsDrawn.test.ts` (17 tests). It runs the real route and the real
+transactions against a serialised in-memory store, and is proven by 8 reversions:
+- the old route and door;
+- clamp instead of refuse;
+- no release;
+- refund never written;
+- slot never returned;
+- release leaves the hold open;
+- fee from a pre-read count;
+- a second charge on delivery.
+
+**Siblings NOT the same class (reported):**
+- `chat.ts` attachment edits count against the image bucket but never charge (a consent/pricing decision).
+- The metered tools and assistants are billed after the call by design (cost unknown up front), bounded by the overdraft floor.
+- The API key's own daily ₹ cap is still read-then-record. The money is held now, so this only lets the key's self-set cap overshoot by the in-flight requests.
+
+**Watch after deploy:** for a paid picture, the wallet image row should show one ₹1 per delivered picture, and no `openHolds` should be left behind. Any `[IMAGE_HOLD] … could NOT be given back` log line is a refund that needs a look.
+### 2026-10-05 — Q-622: an anonymous caller is never on the paid tier — one capability table (PR #3551, branch `agent/q622-anon`)
+
+**Problem → root cause → class.** With `PROFESSIONAL_FREE_QUOTA=off`, `gateProfessionalTurn` returned `tier: 'paid'`
+for a caller with no account (Professionals, Doctor AI, and Exam mode through it): the full chain, Claude included,
+uncharged because there is no wallet. Sibling: `gateToolAction` returned `'paid'` for an anonymous caller while
+`PROFESSIONAL_PAID_ENABLED` was off (latent: no route read that tier yet). Class: "what does a caller without an
+account get?" was answered separately inside each gate, and the answers drifted.
+
+**Fix.** `src/server/lib/anonymousCapabilities.ts` — one table per AI surface: `guest` (the free universe, bounded by
+`guestDailyQuota`), `owner-billed` (the published-app assistant, paid by the app's owner inside their caps), or
+`sign-in` (the shared `anonymousAiRefusal`). Unknown surface ⇒ sign-in. `CallerTier` ties a tier to the identity, so
+`{ uid: null, tier: 'paid' }` fails the server typecheck. `passGate` (turn + exam) and `toolGate` ask the table first,
+before any env flag; every gate call names its surface; `guestDailyQuota` takes only guest surfaces and re-checks the
+table at run time; `answerForApp` takes its tier from it. Signed-in callers: unchanged in every mode.
+
+**Route map (anonymous caller, before → after).** Professionals / Exam / Doctor AI: default sign-in → sign-in; env-off
+paid chain uncharged → sign-in. Free chat, Repo Analyst, App Review, Security Scan, AI Debugger, App Scan, design:
+free universe under the guest allowance → unchanged. AI tool gate on those: allow + `'paid'` (unread) → allow +
+`'free'`. Image generation / download / prompt improvement, picture editing, Screenshot → Code, Website → App, Pro
+builds: sign-in → sign-in (now also declared in the table, and the tool gate refuses them anonymously too). App
+assistant: owner-billed free chain → unchanged, tier from the table.
+
+**Lock.** `tests/anAnonymousCallerNeverRunsOnPaidRungs.test.ts` (22). Reverted and watched fail: old `passGate.ts` → 5;
+only the new anonymous block removed → 4 + server tsc errors; old `toolGate.ts` → 4; a guest route without
+`guestDailyQuota` → 2; a `paid` table entry → 3 + tsc error; an undeclared model-calling route file → 1. Updated:
+`professionalsRoute.test.ts` (the env-off anonymous case now asserts 401 and no engine call), `toolGate.test.ts`, two
+source pins for the new `gateToolAction` argument. AppKnowledgeBase guest entry names every sign-in surface.
+
+**🟡 Open, for the admin (not changed here).** A guest's free universe is not all ₹0: past the zero-cost leader it
+falls back to cheap metered rungs under the free-chat price ceiling. That is the 2026-09-27 ten-free-messages decision,
+bounded per device and per address by `guestDailyQuota`. Removing the metered rungs for guests would leave those ten
+messages on one zero-cost rung. Recommendation: keep.
+### 2026-10-05 — Q-627 request-body limits + Q-628 MCP credentials encrypted at rest (PR #3551, branch `agent/q627-q628`)
+
+**Q-627 — problem:** one global `express.json({ limit: '30mb' })` in `server.ts`, and its `verify` hook kept every
+body a second time as `req.rawBody`. Any caller could post 30 MB to any route (OTP, profile, payment) and the
+server held it twice before the route ran.
+**Root cause / class:** one parser sized for the largest caller (chat attachments) applied to every route; raw bytes
+captured for the three readers that need them and paid for by all ~300.
+**Fix:** `src/server/lib/requestBodyLimits.ts` — the one parser. 1 MB default; 30 MB only on `LARGE_BODY_ROUTES`
+(61 paths found by evidence: client call sites that post base64/dataUrl/files/attachments/screenshots/history/
+package-lock, plus "doubt" entries kept large on purpose); `rawBody` only on `RAW_BODY_ROUTES` — the Cashfree
+webhook and the WhatsApp webhook (HMAC over the raw bytes) and the `/preview-app` reverse proxy (verbatim forward).
+The `/api/v1/...` prefix is resolved before matching (the parser runs before the version rewrite). An over-limit
+body is now an honest 413 `BODY_TOO_LARGE` with a sentence, logged as `[BODY_TOO_LARGE]` and sent to the admin
+Errors view — previously the global error handler turned every 413 into a generic 500.
+**Lock:** `tests/aRequestBodyIsOnlyAsLargeAsItsRouteNeeds.test.ts` — a census of every route registration (a route
+reading a payload-shaped field or passing its body to a helper must be on the large list or on the test's
+reviewed-small list with its evidence), a coverage check that no route module escapes the scan, a stale-entry
+check, a rawBody-reader census (route and file level), a server.ts guard, and a live Express check (3 MB reaches
+the build chat, 413 on an ordinary route, raw bytes only on the webhooks). Reverted-and-failed: removing
+`/api/chat/navbharat`, `/api/workspace/explain`, `/api/sync/:userId` from the list and the WhatsApp webhook from
+the raw list failed 5 tests; restoring the old `server.ts` failed 3.
+**Watch after deploy:** any `[BODY_TOO_LARGE]` log line names a route that needs adding to the list.
+**Observation (not changed):** `useChatEngine.ts` posts to `/api/chat` for non-NavBharatAI agents; the server has
+no such route (404 before and after this change).
+
+**Q-628 — problem:** MCP service headers (the user's bearer token) stored in plaintext in `agentv3_mcp_servers` and
+`agentv3_mcp_library`.
+**Fix:** `src/server/AgentV3/mcpCredentials.ts` seals headers into `headersEnc` with `lib/secrets.ts`
+(AES-256-GCM, same key as the vault and bot tokens); a stored record never carries `headers`. Both shapes read:
+legacy plaintext rows work unchanged and are re-sealed on the next write, or by a transactional migration a read
+starts. An undecryptable or tampered key fails CLOSED: `listFull`/`get` leave it out, `unreadableIds` names it,
+the check route reports "reconnect" without probing, attach answers 409, the build narrates it, and the Connected
+Services screen shows "saved key unreadable — disconnect and connect it again". A failed read no longer lets
+`add`/`remove` overwrite the list with a shorter one.
+**Sibling hunt:** every Firestore-writing server module was scanned for credential-shaped fields. Already
+encrypted: `user_secrets`, `bots` (token, app secret), `supabase_connections`; hashed: API keys, NavStore app
+passwords, vault PIN. GitHub, Hostinger and deploy tokens are per-request, never stored. Left as is (not
+third-party credentials): FCM device tokens (push addresses used as doc ids), share/team invite tokens (our own
+capability links).
+**Lock:** `tests/anMcpCredentialIsNeverStoredInTheClear.test.ts` (in-memory store: no plaintext written, round
+trip, legacy row reads and is sealed, tampered ciphertext fails closed, unreadable entry kept byte for byte, read
+failure never overwrites; census: no `headers` handling in the stores, every `servers` write sealed, no other
+writer of the two collections, route fail-closed order). Reverted-and-failed: plaintext seal + fail-open → 8
+failures; the original stores → 13 failures.
+## 2026-10-05 — Q-625: a dynamic import must split something
+
+**Problem (forensic audit 2026-10-04):** the build printed five `INEFFECTIVE_DYNAMIC_IMPORT` warnings — modules
+loaded with `import()` while something in the startup graph already imported them statically, so the `import()`
+moved nothing and only added an `await`.
+
+**Root cause / class:** an `import()` of a module that is already in the startup chunk. The build only warns about
+some of them; a census of the real client graph (entry → static imports = the eager set) found **36 call sites**:
+- local: `nativeShell` (App.tsx), `mobileNative` (nativeShell), `firebase` (appCheckClient), `authedFetch` (APKBuilder),
+  `HistoryView` and `ProfessionalHistoryView` (App.tsx `lazy()`, while `HistoryPopup` imports them statically);
+- packages: `@capacitor/core` (13 files), `firebase/auth` (10 sites), `@capacitor/browser` (6), `firebase/app` (1).
+
+**Fix:** each one is a static import now. Behaviour is unchanged (the modules were already loaded), except that a
+few handlers no longer yield before their work — the Apple sign-in handler now awaits nothing before it builds
+the provider, the stronger form of the 2026-08-09 desktop-popup fix. The four firebase/auth exports the v12
+types do not surface (`OAuthProvider`, `PhoneAuthProvider`, `signInWithCustomToken`, `linkWithPhoneNumber`)
+are read once in `src/lib/firebaseAuthRuntime.ts` instead of five `as any` dynamic imports in two components.
+
+**Not changed, on purpose:** `PreviewSurface`, `FilesPanel`, `TerminalPanel` and `content/legal/grievance`
+are `import()`ed by one screen and statically imported by another LAZY chunk. That is a working shared split
+(the build does not warn); making the builder's own imports lazy would only add a loading state inside it.
+`buildService` and `agentV3StreamError` were `import('x').Type` type positions, which emit no code.
+
+**Evidence:** build warnings 5 → 0. Bundle (gz): first paint 503.2 → 493.0 KB, total JS 1526.1 → 1515.0 KB.
+
+**Lock:** `tests/aDynamicImportMustSplitSomething.test.ts` (fixtures for the analyzer + the real graph from
+`index.html`'s entry). Reversion-proven: putting back the App.tsx `import('./lib/nativeShell')` and a
+`referralClaim.ts` `import('@capacitor/core')` each failed it with the module named.
+
+**Also found and fixed:** `tests/pluginProxyIsNeverResolved.test.ts`'s scanner matched `{ A } = await import(…)`
+from the enclosing block's `{` when the destructure was the block's first statement, so it never saw the plugin
+name. `[^}]` → `[^{}]`, with a fixture test (reversion-proven).
+
+## 2026-10-05 — Q-620: the DAST job does what its comment says
+
+**Problem (forensic audit 2026-10-04):** `dast.yml` said "HIGH fails, MED warns", but passed `fail_action: true`
+without `-I`, and `security/zap-baseline.conf` had no FAIL rule.
+
+**Evidence (real runs, not theory):** all 40 nightly runs checked (2026-08-27 → 2026-10-04) are red. The two
+read in full (2026-09-30, 2026-10-04) end `FAIL-NEW: 0 … WARN-NEW: 11 … PASS: 59` and
+`The process '/usr/bin/docker' failed with exit code 2`. zap-baseline exits 2 on WARN-only and the action turns
+exit 1 and exit 2 into a failure when `fail_action` is true. So the job was red over informational findings every
+night, and had no rule that could mark a real one.
+
+**Root cause / class:** a gate whose stated policy is not derived from its flags — the comment was the only
+place the policy existed, and nothing compared it with what runs.
+
+**Fix:**
+- `cmd_options: '-a -I'`: a FAIL rule fails the job, a WARN (or unlisted) rule is reported and does not.
+- `zap-baseline.conf` classifies all 70 rules this ZAP version runs (the ids printed by the real nightly
+  log): 13 FAIL (vulnerable JS library, anti-clickjacking, directory browsing, Heartbleed, CSP missing,
+  X-ChromeLogger-Data, PII, hash disclosure, CORS misconfiguration, source code disclosure, weak auth method,
+  malicious script domain, session id in URL) — every one PASSED on the real runs, so red now means a regression;
+  55 WARN with reasons; 2 IGNORE with reasons (10112, an informational auth marker; 90005, which inspects the
+  requests ZAP's own spider sends).
+- Two parser facts found in the action's source and written into the file: the action passes the rules file to
+  ZAP (`-c`) only when it has at least one IGNORE row, and its reader stops at a blank line.
+- DAST stays nightly + manual, not per PR: building, booting and pulling the ZAP image costs minutes per PR for a
+  scan of deployed headers.
+
+**Lock:** `tests/dastConfigSaysWhatItDoes.test.ts` derives the behaviour from the flags and compares it with the
+promise comment, parses the conf the way both parsers do (3 TAB fields, no blank line, an IGNORE row present,
+every IGNORE with a reason), checks all 70 real rule ids are classified and that none of the 11 that fire today is
+FAIL. Reversion-proven: removing `-I`, and removing the IGNORE rows, each fail it.
+
+**Watch after merge:** the next nightly DAST run should be green. Separately, the 2026-10-05 run never started
+("recent account payments have failed or your spending limit needs to be increased") — GitHub billing on the
+admin's account, outside this fix.
+
+## 2026-10-05 — Q-672: no test leaves a temp directory behind
+
+**Problem:** the suite filled a session's disk mid-gate (about 24 GB in 6,688 directories under `/tmp`).
+
+**Measured (private TMPDIR, so nothing in the shared `/tmp` was touched):**
+- 37 test files called `mkdtempSync(join(tmpdir(), 'nbai-…-'))` and nothing removed the directory. Running them
+  left **84 directories per run** (~2 MB). After the fix the same run (plus the census) leaves **0**.
+- `scripts/serverDepsGate.mjs` (a CI step) left a ~13 MB directory per run: `process.exit()` inside its `try`
+  ends the process before the `finally` that removes it. Three such directories were in `/tmp` today. Now
+  `process.exitCode` + return; a run with a private TMPDIR leaves nothing.
+
+**Root cause / class:** removal was a separate step each test had to remember. `tests/helpers/tempDir.ts` makes
+it part of creation: `makeTempDir(prefix)` registers the file's `afterAll` itself (and one process-wide exit
+backstop). All 37 files use it.
+
+**Lock:** `tests/noTestLeavesATempDirBehind.test.ts` — an AST census over every `*.test.ts(x)`: a `mkdtemp`
+whose path mentions `tmpdir()` must come with the helper, or with a removal (or a local wrapper around one) in
+an after-hook or a `finally`. Reversion-proven: restoring `theBadgeCanBeClosed.test.ts` to its old form fails it.
+Its first run caught its own false positive (`securityEvaluator.test.ts` removes through a local `cleanup()`), so it
+now follows local wrappers, with a fixture for that shape.
+
+**Recorded, not fixed (not our code):**
+- Chromium leaves about 4 `.org.chromium.Chromium.*` directories per run of the real-browser tests (0–256 KB
+  each; 46 were in `/tmp`). Fix path if it matters: pass `TMPDIR` set to the test's own `makeTempDir()` folder to
+  the spawned browser scripts.
+- A vitest run that is KILLED (timeout, cutoff) leaves its own transform cache, `/tmp/<21-char id>/ssr/…`
+  (50–120 MB, ~4,000 files; vitest removes it only on a clean close). This is the likeliest source of most of
+  the 24 GB, but the historical directories had already been deleted, so it cannot be proven from evidence.
+  A sweep is unsafe: concurrent sessions share `/tmp`, and a live run's directory looks the same.
+
+
+### 2026-10-05 — #3551 second half: Q-616, Q-622, Q-627, Q-628, Q-625, Q-620, Q-672 integrated; Q-673, Q-674 found and fixed
+
+- The four agent branches (image hold, anonymous capabilities, body limits + MCP credentials, import /
+  DAST / temp-dir hygiene) were cherry-picked onto #3551 and gated together on the merged state.
+- **Q-673:** the free chat sent non-default agent ids to a route that never existed. Fixed, plus a census that
+  every client `/api/...` path has a server route.
+- **Q-674:** route-level body parsers were dead (the global one runs first), so the public app-AI gateways
+  took the global limit; malformed JSON was a 500. Limits moved into the one parser; malformed is a 400.
+- **Decisions the admin owns (recorded, not changed):**
+  - Q-622: the guest free chat's chain falls back to cheap metered rungs after its ₹0 first rung.
+    Recommended: keep (it serves the admin's 10-free-messages decision of 2026-09-27, bounded by
+    `guestDailyQuota`). Alternative: guests on the ₹0 rung only.
+  - Q-616: picture edits inside the chat count against the image allowance but are never charged ₹ — the
+    chat never shows the price. Recommended: after the 5 free a day, refuse with the existing "open the
+    Image Generator" sentence.
 
 ---
 
@@ -90129,6 +90466,77 @@ after the next store bundle.
 
 **Correction to my own reply the same day:** I told the admin that setting `_RELEASE_GATE_URL` alone would not enforce the
 gate. That was wrong — the step was already in `cloudbuild.yaml`; setting the substitution is the whole remaining action.
+## 2026-10-05 — Game graphics: the 3D layer rendered, eight defects fixed at the root (external plan adapted)
+
+The admin forwarded an external plan ("NAVBHARATAI GAME ENGINE — MAJOR GRAPHICS & REALISM UPGRADE"), marked *"external suggestions (blindly ❌)"*.
+
+**What the plan assumed vs what the repo has.** The plan asked for:
+- an asset manifest, lighting presets, camera rigs and PBR materials;
+- terrain, vegetation, vehicles and characters;
+- quality tiers;
+- a "never hand-model" rule.
+
+Nearly all of it already exists: `Game3DGenerator.ts` (nine lighting moods, camera rigs, PBR surfaces, environment maps, `createCar`, `createTree`, `createRoad`, `createRiver`, `createMountain`, `createAnimal`, `createHumanoid`, and the `real`/`lite` tier) and the builder prompt's realism checklist. Games already skip the fast lane so they get the game tools (`fastLaneSkipsGame`). Rebuilding it as a parallel `game-engine/` tree would have duplicated working code.
+
+**Evidence first.** The layer was rendered in Chromium (SwiftShader), used exactly as the prompt instructs: an Indian village driving scene with `setDetailLevel('real')`, `applyEnvironment` and `surfaceMaterial`. That was its BEST case. It still had these defects:
+
+| # | Defect seen | Root cause | Fix |
+|---|---|---|---|
+| 1 | Road flickered into black zebra stripes | asphalt at y = 0, the ground's own plane | `ROAD_SURFACE_Y` = 0.03 plus `polygonOffset` on the markings |
+| 2 | One kerb and one edge line, the kerb inside the road | `break` after the first side; `(side*W)/2 + 0.15` | both sides; `side * (W/2 + 0.15)` |
+| 3 | Wheel arches floated beside the car and spun | arch inside the wheel group; x-offset applied twice | arch on the body at the wheel centre |
+| 4 | Brick/plaster houses were one flat colour | `mergeGeometries` dropped UVs | UVs carried through the merge |
+| 5 | Ground stayed flat colour in `real` | the tier lived in `objects.ts`, which `world.ts` never imported | the tier moved to `surfaces.ts` (re-exported); real ground textured; soft patches in both tiers |
+| 6 | A grid of tile seams over grass and walls | value-noise lattice did not wrap | wrapping lattice |
+| 7 | A texture's repeat changed when another material of the same kind was made | `repeat` set on the SHARED cached texture | per-repeat clones sharing one image |
+| 8 | Rivers broke into blue scraps; a dog the size of a horse; a purple cow | waves swung through y = 0 (the road's class again); one 1.4 m default for all kinds; hide tinted through the blue-grey fabric texture | `RIVER_SURFACE_Y` = 0.14; `ANIMAL_HEIGHT` per kind; hide uses plaster grain |
+
+**New object:** `createHouse` — an Indian house with:
+- a door with a frame and a step;
+- windows with a chhajja (sun-shade);
+- a plinth and washed walls;
+- a flat RCC roof with a parapet and water tank, or a clay-tile roof.
+
+The builder prompt now names it ("never a box with a cone on top").
+
+**Proof:** `tests/the3DLayerDrawsWhatItPromises.test.ts`, 15 cases, EXECUTES the generated modules with real three.js (`three@0.180.0`, added as an exact devDependency for exactly this). It checks positions, parents, UVs, materials and texture tiling. All of its original 12 cases fail against `main`'s generator. Before/after renders of an identical scene were shared with the admin.
+
+**Rejected from the plan, with reasons:**
+- **Clay, AiGameKit and AssetForge** need GPUs or Blender; NavBharatAI builds on CPU-only sandboxes. Their code is MIT, but the model weights carry their own terms. They are architectural reference only; nothing was copied. See `docs/game-engine/open-source-license-audit.md`.
+- **A parallel `game-engine/` module tree** — the layer exists.
+- **An "auto-repair until a visual score is reached" loop** — another self-heal loop is the opposite of first-pass-correct. The library is now verified by tests instead.
+
+**Honest ceiling and open items:**
+- The look is stylised-realistic, built from code: the car is still built from boxes and people are blocky.
+- The distant mountain reads bluish under day fog; that is aerial haze, not a bug.
+- Real GPU-generated assets are a money decision for the admin.
+
+### 2026-10-05 (same PR) — the camera sits BEHIND what the player drives
+
+The admin reported: *"gadi ka front side dikhta hai, jisse button ulte kaam karte hai… game ka backside dikhna chahiye"* ("the car's front is visible, so the buttons work in reverse… the back of the car should be visible").
+
+**Root cause, measured by running the models:** every model faces its local +Z (car headlights at z = +2.16, the bikes' steering heads and the animals' heads are on +Z too). Two things then combined against the player:
+- `CameraRig` places the third-person camera at +Z of its target, which is IN FRONT of the car, and it reads only the target's position, never its heading;
+- the runtime's up key is `axis.y = −1`, so a game that used `axis.y` as throttle drove backwards on W.
+
+Together the car drove at the camera with every control mirrored.
+
+**Fix, at the class:**
+- `MODEL_FORWARD` (+Z) names the one convention.
+- `CameraRig.follow(object, dt)` and a `'chase'` kind put the camera behind the object's real heading every frame and keep the rig's yaw in step.
+- `createVehicleState` and `driveVehicle(vehicle, state, input.axis(), dt)` take the RAW axis and own the signs: W forward, S brake then reverse, A/D turn to the driver's left/right, steering inverts in reverse and fades in with speed. Default start speed is 5 m/s, per the "a vehicle starts moving" rule.
+- The shell has `ctx.follow(vehicle)`.
+- The builder prompt carries a 🚗 rule: never `rig.update(vehicle.position)`, never flip a control or mirror a model.
+
+**Proof:** 7 new executable cases in `tests/the3DLayerDrawsWhatItPromises.test.ts`:
+- at four headings the tail lights are nearer the camera than the headlights;
+- with the raw axis, W moves the car away from the camera, D goes screen-right and A screen-left;
+- an untouched car keeps moving, and S brakes then reverses;
+- the shell follows with the chase rig.
+
+Reversion: placing the camera in front fails 5 of them; flipping the throttle sign fails 2. A real render from the chase rig shows the car's tail lights, and a right turn bends right on screen.
+
+**Open (recorded, not done):** a walking character still starts facing the camera until the first move. Changing the rig's default yaw would flip the world's "ahead" (−Z) for every existing shell game, and the admin's report was about vehicles, so it is left for an explicit decision.
 ### 2026-10-05 — Q-154 ✅ RESOLVED: the live hop count is measured, and it is right
 
 The admin opened **Admin → Safety → Visitor address check** on the live site (#3545 deployed). The card read:
@@ -90138,3 +90546,69 @@ recorded here). So `TRUSTED_PROXY_HOPS = 1` (#3538) is confirmed on the real hos
 The row leaves the open queue. Lock: `tests/aCallerCannotChooseItsOwnAddress.test.ts` (one reader of the address)
 and `tests/theClientIsMeasuredNotGuessed.test.ts` (the measurement and its card). If the hosting path ever
 changes (a CDN or load balancer in front of Cloud Run), the same card will say Mismatch and name the number.
+### 2026-10-05 — Q-136: a state-routed app's tab that opens only the frame is named
+
+The per-route check (Lane B) visits routes; a state-routed app has none, so its screens are reached by the click
+explorer — which judged "blank" by the whole root. A tab that left the main area empty under a painted nav read
+"ok": the Q-147 class (the frame judged as the page) in a third lane. The explorer now asks the shared
+`MAIN_REGION_EMPTY_JS` after each press, with the paint wait's own grace for a screen still fetching. Real-browser
+lock: `tests/aTabThatEmptiesTheMainArea.test.ts`.
+
+### 2026-10-05 — Q-162: the admin's rule for the 45 undecided routes is written down
+
+Admin: *"apki salah ke anusar bana kar sara work complete finish karo"*. The recommendation becomes a CLAUDE.md
+core rule: an uncalled `/api` route is decided (screen / named outside caller / deleted) in the same PR that next
+touches its file, and the baseline shrinks with it — never a mass deletion. The census now maps every undecided
+route to its file, so the list stays actionable.
+
+### 2026-10-05 — Q-159: scheduled work no longer needs a server that happens to be awake
+
+Admin chose Cloud Scheduler. The in-process scheduler kept `nextRun` in memory, so an instance that woke at 04:05
+believed today's 04:00 bill was tomorrow's, and with no instance up at 04:00 nothing ran at all. Now every
+instance records each exclusive job's run in `job_runs/{id}`, and `POST /api/internal/scheduler-tick` (secret
+header) runs whatever is due by THAT record — first sight seeds instead of running, an unreadable record runs
+nothing, the lease still picks one instance. The plan sweep (renewal reminders) left its private `setInterval` for
+the shared scheduler as an exclusive job. 🟡 Live once the admin sets `SCHEDULER_TICK_SECRET` and creates the
+Cloud Scheduler job (steps in the queue row). Lock: `tests/scheduledWorkDoesNotNeedAnAwakeServer.test.ts`.
+
+### 2026-10-05 — Q-160: "Save to folder" — Open Folder can write back, on a press, safely
+
+Admin chose the cautious option. A project opened from a folder now remembers that folder (and each file's
+disk timestamp at read time); the Files panel shows "Save to folder". A press, after a confirmation, writes only
+changed and new files — never a delete, never over a file edited on disk since (named instead), never into a
+folder that held a different project (under half the files shared ⇒ refused), never outside it or into
+node_modules/.git/dist. Lock: `tests/saveToFolderWritesOnlyWhatChanged.test.ts`. Not exercised in a real Chrome
+against a real disk here (no desktop browser with a picker in this container) — the API calls are the
+standard File System Access ones, and the logic is tested against a fake disk.
+
+### 2026-10-05 — Q-163: a domain connected after the last publish gets the published app by itself
+
+Admin chose option (b). The uptime sweep (every 15 minutes, one instance) already probes every connected domain;
+when the site is still EMPTY (the hosting service's two-marker "nothing published" page), `domainAutoPublish.ts`
+reads the app's already-published copy back from the publish bucket and deploys it to the domain's site — no
+rebuild, so no "which build is current" question. Owner's active app only, once per domain + app (transaction
+claim), a 5xx retried once, the owner notified either way, and the same sweep does not call the domain "down".
+Kill switch `DOMAIN_AUTOPUBLISH=off`. Lock: `tests/aNewDomainGetsThePublishedApp.test.ts`.
+
+### 2026-10-05 — Q-101: one read of everything a build already proved
+
+The write half of the ledger already existed — actors record proven facts on the build's timeline, and
+`RENDER_PROVEN_CODES` (2026-09-21) is the one render vocabulary. The gap was the READ: the release gate read the
+command log and the timeline in two separate blocks with two vocabularies, and the render answer read a third
+way. `evidenceLedger.ts` is now the one read — composing `agentRunEvidence` and `provenFromTimeline` unchanged,
+naming every fact once with where it was proven — and `BuildDiagnostics.evidenceLedger()` is its entry point.
+The gate fills from it (fill-only: a recorded failure keeps its failure, so a bill cannot move) and
+`renderProvenNow` reads it. A census fails on any direct read of either source. Not done (honestly): letting
+the agent skip a re-run of a check it already passed — that needs every fact invalidated on the next write,
+and a wrong skip would be a false pass.
+
+⚠️ **Correction to the entry above (same day):** it says the existing 3D tests "only read the source text". That is not fully true. `tests/game3dObjects.test.ts` already RUNS the generated `objects.ts` against a three.js stub (`tests/helpers/threeStub.ts`), for the bikes. It never covered the road, the car's arches, merged UVs, the ground or the textures, which is why those defects survived. The stub now carries the detail tier (`setDetailLevel` / `getDetailLevel`), since that moved into `surfaces.ts`. `tests/aRecipeBringsTheLayersItImports.test.ts` now expects `surfaces.ts` among the files a missing 3D layer brings in, because `world.ts` imports it.
+
+### 2026-10-05 — #3555 merged: Q-101, Q-136, Q-160, Q-162, Q-163 leave the open queue
+
+#3555 merged (staged with #3554 by the merging session). Its resolved rows move to ✅ and leave the open table;
+their ledgers are the five 2026-10-05 entries above. Two watch items carried from those ledgers: Q-160's
+"Save to folder" has not yet been pressed in a real desktop Chrome against a real disk, and Q-163's first real
+domain connected after a publish should show the app within ~15 minutes with one notification. Still open from
+that PR: **Q-159** — 🟡 the code is live; it needs the admin to set `SCHEDULER_TICK_SECRET` and create the Cloud
+Scheduler job (steps in the queue row).

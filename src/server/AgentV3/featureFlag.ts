@@ -6,6 +6,27 @@ import { envFlag, parseEnvFlag } from '../lib/envFlag';
 // under construction. This is the single gate that keeps v5.0 inert in
 // production until it is proven (NAVBHARATAI_PRO_V3_DESIGN.md §6).
 
+/**
+ * AN EMAIL THAT MAY GRANT SOMETHING (Q-624, admin 2026-10-05). The free, canary, sign-in and store-admin
+ * lists match a uid OR an email. An email the provider has NOT verified is only a claim: email/password sign-up sends no
+ * verification here, so anyone could register a listed address nobody had used yet and inherit what the
+ * list grants (free builds, the professionals free list, store-admin rights). This brand is produced ONLY
+ * by `grantEmail`, which returns null for an unverified email, and every list check takes the brand — so
+ * the compiler refuses a plain string at every call site, today's and tomorrow's.
+ */
+export type GrantEmail = string & { readonly __grantEmail: true };
+
+/** The email as a grant input, or null when it is absent or not verified by the provider. */
+export function grantEmail(email: string | null | undefined, emailVerified: boolean | undefined): GrantEmail | null {
+  const e = (email ?? '').trim();
+  return e && emailVerified === true ? (e as GrantEmail) : null;
+}
+
+/** The grant email of a verified identity (or null). */
+export function identityGrantEmail(identity: { email?: string | null; emailVerified?: boolean } | null | undefined): GrantEmail | null {
+  return grantEmail(identity?.email ?? null, identity?.emailVerified);
+}
+
 /** True when v5.0 is globally enabled via AGENTV3_ENABLED=true. */
 export function isAgentV3GloballyEnabled(): boolean {
   return envFlag('AGENTV3_ENABLED');
@@ -26,6 +47,10 @@ export function agentV3Allowlist(): string[] {
  * (case-insensitive) — so an admin can allowlist by the email they know rather
  * than hunting for a uid.
  */
+// The ACCESS list is an availability gate, not a grant: it decides whether the engine is SHOWN, and every
+// build it shows is still billed against the verified identity. So it keeps taking a plain email — many read
+// routes pass the caller's claimed one, and in production the list is empty (open to all). The money and
+// admin grants below take a `GrantEmail`.
 export function isAgentV3Enabled(userId?: string | null, email?: string | null): boolean {
   if (!isAgentV3GloballyEnabled()) return false;
   const allow = agentV3Allowlist();
@@ -60,8 +85,18 @@ export function agentV3FreeList(): string[] {
  * OR email (case-insensitive). MUST be called with the server-VERIFIED identity, never a client-claimed
  * one — a spoofed email could otherwise claim free access. Pure over the env-derived list.
  */
-export function isAgentV3FreeUser(userId?: string | null, email?: string | null): boolean {
+export function isAgentV3FreeUser(userId?: string | null, email?: GrantEmail | null): boolean {
   return matchesIdentityList(agentV3FreeList(), userId, email);
+}
+
+/**
+ * A LABEL, never a grant: does a STORED address (the wallet's `userEmail`, whose verification is unknown)
+ * appear on the free list? Only the admin builds list uses it, to tag a row "free-listed" (Q-624). Nothing
+ * that decides a charge, a limit or a right may call it — `aGrantNeedsAVerifiedEmail.test.ts` holds the
+ * caller list to that one file.
+ */
+export function freeListLabelForStoredEmail(userId?: string | null, storedEmail?: string | null): boolean {
+  return matchesIdentityList(agentV3FreeList(), userId, storedEmail);
 }
 
 /**
@@ -99,7 +134,7 @@ export function isAgentV3CreditGateEnabled(): boolean {
  * any drive-by anonymous caller from running unbounded FREE paid builds on the platform's account,
  * while today (non-empty allowlist) it changes nothing for real users. PURE + unit-tested.
  */
-export function buildRequiresSignIn(verifiedUserId: string | null, email: string | null): boolean {
+export function buildRequiresSignIn(verifiedUserId: string | null, email: GrantEmail | null): boolean {
   if (verifiedUserId) return false;
   return !matchesIdentityList(agentV3Allowlist(), null, email);
 }
@@ -123,7 +158,7 @@ export function costRoutingEnabled(): boolean {
  * bake-off — watch usage-report/telemetry, then clear the list to widen to everyone). Empty/unset =
  * every user once the master is on. Master off = nobody, regardless of the list.
  */
-export function costRoutingActiveFor(userId?: string | null, email?: string | null): boolean {
+export function costRoutingActiveFor(userId?: string | null, email?: GrantEmail | null): boolean {
   if (!costRoutingEnabled()) return false;
   const canary = (process.env.AGENTV3_COST_ROUTING_USERS || '')
     .split(',')

@@ -19,15 +19,19 @@ const read = (rel: string) => readFileSync(join(process.cwd(), rel), 'utf8');
 describe('1. Apple sign-in keeps its user activation (desktop popup fix)', () => {
   const auth = read('src/components/AuthComponent.tsx');
 
-  it('the firebase/auth module promise starts at module load', () => {
-    expect(auth).toContain("const firebaseAuthModuleForApple = import('firebase/auth');");
+  // Since Q-625 the stronger form: OAuthProvider is a STATIC import (firebase/auth is in the startup
+  // chunk anyway), so nothing at all is awaited between the click and the popup.
+  it('OAuthProvider is a static import, read from firebase/auth at module load', () => {
+    expect(auth).toMatch(/^import \{[^}]*\bOAuthProvider\b[^}]*\} from '\.\.\/lib\/firebaseAuthRuntime';$/m);
+    expect(read('src/lib/firebaseAuthRuntime.ts')).toMatch(/^import \* as firebaseAuth from 'firebase\/auth';$/m);
   });
 
-  it('the click handler awaits the PREFETCHED promise — never a fresh import()', () => {
-    expect(auth).toContain('await firebaseAuthModuleForApple');
+  it('the click handler awaits nothing before it builds the provider — never an import()', () => {
     const handlerAt = auth.indexOf('const handleAppleSignIn');
     const handler = auth.slice(handlerAt, handlerAt + 2000);
-    expect(handler).not.toContain("await import('firebase/auth')");
+    const beforeProvider = handler.slice(0, handler.indexOf("new OAuthProvider('apple.com')"));
+    expect(beforeProvider.replace(/\/\/[^\n]*/g, '')).not.toMatch(/\bawait\b|import\(/);
+    expect(handler).not.toContain("import('firebase/auth')");
   });
 });
 

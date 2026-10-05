@@ -27,6 +27,11 @@
  *
  * The document id IS the user, so there is no path that returns someone else's saved service.
  *
+ * 🔒 ENCRYPTED AT REST (Q-628), exactly like `McpServerStore`: headers are written only as `headersEnc`
+ * (mcpCredentials.ts), legacy plaintext rows still read and are re-sealed on the next write or by the
+ * background migration a read starts, and a saved service whose key cannot be decrypted is never handed
+ * out for a call — `get` returns null for it and `getOpened` says why.
+ *
  * ⚠️ ATTACHING COPIES. When a saved service is attached to an app, the config is written into that
  * app's own `McpServerStore` record — the build path is completely unchanged by this file. The honest
  * consequence, which the screen states in words rather than leaving for a user to discover: removing a
@@ -35,8 +40,9 @@
  */
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
-import { toPublic, type McpServerPublic } from './McpServerStore';
+import { openedToPublic, rawEntries, type McpServerPublic } from './McpServerStore';
 import type { McpServerConfig } from './mcpTransport';
+import { openServer, resealStored, sealServer, type OpenedMcpServer, type StoredMcpServer } from './mcpCredentials';
 
 export const MCP_LIBRARY_COLLECTION = 'agentv3_mcp_library';
 
@@ -55,21 +61,27 @@ export const MAX_SAVED_SERVICES = 20;
  * `null` when the list is full AND this is a new name. A replacement is always allowed, because
  * refusing to update a key the user already has saved would be a cap protecting nothing.
  */
-export function upsertSaved(
-  existing: readonly McpServerConfig[],
-  cfg: McpServerConfig,
+export function upsertSaved<T extends { id: string }>(
+  existing: readonly T[],
+  cfg: T,
   max = MAX_SAVED_SERVICES,
-): McpServerConfig[] | null {
+): T[] | null {
   const without = existing.filter((s) => s.id !== cfg.id);
   const isNew = without.length === existing.length;
   if (isNew && existing.length >= max) return null;
   return [...without, cfg];
 }
 
-class McpLibraryStore {
+type RawEntry = { id: string; url: string } & Record<string, unknown>;
+
+export class McpLibraryStore {
   private db: admin.firestore.Firestore | null = null;
 
+  /** `dbOverride` is for tests: a fake Firestore instead of the real one. */
+  constructor(private readonly dbOverride?: () => admin.firestore.Firestore | null) {}
+
   private getDb(): admin.firestore.Firestore | null {
+    if (this.dbOverride) return this.dbOverride();
     if (process.env.VITEST || process.env.NODE_ENV === 'test') return null;
     try {
       if (!this.db) {
@@ -82,38 +94,63 @@ class McpLibraryStore {
     }
   }
 
-  /**
-   * Everything this user has saved, WITH credentials. Server-side only.
-   *
-   * Returns [] when storage is unavailable rather than throwing — an unreadable library must leave the
-   * connect form working exactly as it does today, never break the screen.
-   */
-  async listFull(userId: string): Promise<McpServerConfig[]> {
+  /** THROWS on a read failure, so a write never mistakes "could not read" for "nothing saved". */
+  private async readRaw(db: admin.firestore.Firestore, userId: string): Promise<RawEntry[]> {
+    const snap = await db.collection(MCP_LIBRARY_COLLECTION).doc(userId).get();
+    return snap.exists ? rawEntries(snap.data()) : [];
+  }
+
+  /** Re-seal pre-Q-628 plaintext rows in a transaction. Best-effort; see McpServerStore.migrateLegacy. */
+  private migrateLegacy(db: admin.firestore.Firestore, userId: string): void {
+    const ref = db.collection(MCP_LIBRARY_COLLECTION).doc(userId);
+    void Promise.resolve()
+      .then(() => db.runTransaction(async (t) => {
+        const snap = await t.get(ref);
+        const raw = snap.exists ? rawEntries(snap.data()) : [];
+        if (!raw.some((r) => openServer(r).legacyPlaintext)) return;
+        t.set(ref, { servers: raw.map(resealStored), updatedAt: Date.now() }, { merge: true });
+      }))
+      .catch(() => { /* the plaintext rows still work; the next write seals them */ });
+  }
+
+  /** Everything this user has saved, opened, with whether each key is usable. Server-side only. */
+  async listOpened(userId: string): Promise<OpenedMcpServer[]> {
     const db = this.getDb();
     if (!db || !userId) return [];
     try {
-      const snap = await db.collection(MCP_LIBRARY_COLLECTION).doc(userId).get();
-      const raw = snap.exists ? (snap.data()?.servers as unknown) : null;
-      if (!Array.isArray(raw)) return [];
-      return raw
-        .filter((s): s is McpServerConfig => !!s && typeof s === 'object'
-          && typeof (s as McpServerConfig).id === 'string'
-          && typeof (s as McpServerConfig).url === 'string')
-        .slice(0, MAX_SAVED_SERVICES);
+      const opened = (await this.readRaw(db, userId)).slice(0, MAX_SAVED_SERVICES).map(openServer);
+      if (opened.some((o) => o.legacyPlaintext)) this.migrateLegacy(db, userId);
+      return opened;
     } catch {
       return [];
     }
   }
 
-  /** The same list, safe to send to a browser — credentials removed. */
-  async listForDisplay(userId: string): Promise<McpServerPublic[]> {
-    return (await this.listFull(userId)).map(toPublic);
+  /**
+   * Everything this user has saved that can be USED, WITH credentials. Server-side only.
+   *
+   * Returns [] when storage is unavailable rather than throwing — an unreadable library must leave the
+   * connect form working exactly as it does today, never break the screen.
+   */
+  async listFull(userId: string): Promise<McpServerConfig[]> {
+    return (await this.listOpened(userId)).filter((o) => !o.credentialsUnreadable).map((o) => o.cfg);
   }
 
-  /** One saved service, WITH credentials, or null. Server-side only — this is what attach reads. */
-  async get(userId: string, serviceId: string): Promise<McpServerConfig | null> {
+  /** The same list, safe to send to a browser — credentials removed, unreadable keys flagged. */
+  async listForDisplay(userId: string): Promise<McpServerPublic[]> {
+    return (await this.listOpened(userId)).map(openedToPublic);
+  }
+
+  /** One saved service, opened (so a caller can tell "not saved" from "saved, key unreadable"). */
+  async getOpened(userId: string, serviceId: string): Promise<OpenedMcpServer | null> {
     if (!serviceId) return null;
-    return (await this.listFull(userId)).find((s) => s.id === serviceId) ?? null;
+    return (await this.listOpened(userId)).find((o) => o.cfg.id === serviceId) ?? null;
+  }
+
+  /** One USABLE saved service, WITH credentials, or null. Server-side only. */
+  async get(userId: string, serviceId: string): Promise<McpServerConfig | null> {
+    const o = await this.getOpened(userId, serviceId);
+    return o && !o.credentialsUnreadable ? o.cfg : null;
   }
 
   /**
@@ -127,7 +164,8 @@ class McpLibraryStore {
     const db = this.getDb();
     if (!db || !userId) return false;
     try {
-      const next = upsertSaved(await this.listFull(userId), cfg);
+      const existing: StoredMcpServer[] = (await this.readRaw(db, userId)).slice(0, MAX_SAVED_SERVICES).map(resealStored);
+      const next = upsertSaved(existing, sealServer(cfg));
       if (!next) return false;
       await db.collection(MCP_LIBRARY_COLLECTION).doc(userId).set(
         { userId, servers: next, updatedAt: Date.now() },
@@ -144,7 +182,7 @@ class McpLibraryStore {
     const db = this.getDb();
     if (!db || !userId) return false;
     try {
-      const next = (await this.listFull(userId)).filter((s) => s.id !== serviceId);
+      const next = (await this.readRaw(db, userId)).filter((s) => s.id !== serviceId).map(resealStored);
       await db.collection(MCP_LIBRARY_COLLECTION).doc(userId).set(
         { userId, servers: next, updatedAt: Date.now() },
         { merge: true },

@@ -78,8 +78,10 @@ export const FOLDER_MAX_DIRS = 20_000;
 export async function readFolderInBrowser(
   root: FileSystemDirectoryHandle,
   onProgress?: (p: FolderScanProgress) => void,
-): Promise<BrowserZipResult> {
+): Promise<BrowserZipResult & { stamps: Record<string, number> }> {
   const files: Record<string, string> = {};
+  /** When each kept SOURCE file was last modified on disk — "Save to folder" refuses to overwrite a newer one. */
+  const stamps: Record<string, number> = {};
   const assets: Record<string, string> = {};
   const dropped: DropCounts = {};
   const state = { files: 0, bytes: 0, assets: 0 };
@@ -123,6 +125,7 @@ export async function readFolderInBrowser(
           state.assets += 1;
         } else {
           files[path] = await file.text();
+          stamps[path] = file.lastModified;
           state.files += 1;
           state.bytes += file.size;
         }
@@ -135,7 +138,7 @@ export async function readFolderInBrowser(
 
   await walk(root, '');
   onProgress?.({ seen: totalEntries, kept: state.files + state.assets, where: '' });
-  return { files, assets, dropped, totalEntries, keptBytes };
+  return { files, assets, dropped, totalEntries, keptBytes, stamps };
 }
 
 /** Read a small binary file as a `data:` URI, the same shape the zip path produces for assets. */

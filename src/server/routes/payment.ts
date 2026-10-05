@@ -8,7 +8,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { doc, getDoc, setDoc, updateDoc, runTransaction, collection, query, where, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
 import { mirroredCreditPatch, rupeesToTokens } from '../lib/walletMirror';
 import { ordersToReconcile, reconcileMessage, type PendingOrderRecord } from '../lib/pendingOrders';
-import { platformCashfreeCredentials, platformCashfreeWebhookSecret } from '../lib/cashfreeCredentials';
+import { cashfreePaymentsAvailability, platformCashfreeWebhookSecret } from '../lib/cashfreeCredentials';
 import { sendSafeError } from '../lib/httpError';
 import { verifyPaymentInternal, computeCreditedWallet, TOKENS_PER_RUPEE } from '../lib/payments';
 import { DAY_ONE_STEPS } from '../lib/referralRewards';
@@ -32,6 +32,8 @@ import {
 } from '../lib/giftCodes';
 import { readGiftDaily, giftDay, claimGiftCode } from '../lib/giftCodeStore';
 import { appLockBlocks } from '../lib/appLockEnforce';
+import { classifyCashfreeWebhook, cashfreeWebhookOrderId } from '../lib/paymentReversal';
+import { settleCashfreeReversal } from '../lib/paymentReversalStore';
 
 /**
  * Verify a Cashfree webhook signature. CRITICAL: the HMAC MUST be computed over the EXACT raw bytes
@@ -193,6 +195,13 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       ? { paidInr: orderAmount, feeInr: giftFee, creditInr: 0 }
       : splitPayment(orderAmount);
 
+    // No simulator: without real keys (or with test keys in production) the order is refused honestly,
+    // BEFORE anything is written, and nothing can be "paid" (Q-615, cashfreeCredentials.ts).
+    const availability = cashfreePaymentsAvailability();
+    if (!availability.ok) {
+      console.error(`[CASHFREE] Refusing an order: ${availability.code}`);
+      return res.status(503).json({ error: availability.message, code: availability.code });
+    }
     // Cryptographically-random suffix avoids the collision/predictability of Math.random()*1000.
     const orderId = `ord_nb_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
 
@@ -223,22 +232,9 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
 
       // The merchant credentials are NavBharatAI's own and come only from the server environment —
       // never from the caller's secret vault (cashfreeCredentials.ts, forensic audit 2026-10-04).
-      const { clientId, clientSecret, mode: env, placeholder: isPlaceholder } = platformCashfreeCredentials();
+      const { clientId, clientSecret, mode: env } = availability;
 
-      console.log(`[CASHFREE] Creating order ${orderId} | Env: ${env} | Client: ${clientId?.substring(0, 8)}... | IsPlaceholder: ${isPlaceholder}`);
-
-      if (isPlaceholder) {
-        // Return simulator session if keys are not configured or are placeholder keys, providing seamless dev preview
-        console.log(`[CASHFREE] Missing/placeholder credentials. Returning Sandbox Simulator session for Order: ${orderId}`);
-        return res.json({
-          orderId,
-          paymentSessionId: `sim_session_${orderId}_${amount}`,
-          isSimulator: true,
-          orderAmount,
-          platformFeeInr: feeSplit.feeInr,
-          creditInr: feeSplit.creditInr,
-        });
-      }
+      console.log(`[CASHFREE] Creating order ${orderId} | Env: ${env}`);
 
       // Real Cashfree API order creation
       const cfUrl = env === 'production'
@@ -321,7 +317,6 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         return res.json({
           orderId,
           paymentSessionId: data.payment_session_id,
-          isSimulator: false,
           orderAmount: finalAmount,
           environment: env,
           platformFeeInr: feeSplit.feeInr,
@@ -458,16 +453,18 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
   app.post('/api/payment/webhook', async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      // Verify the HMAC over the EXACT bytes received (captured by the express.json `verify` hook
-      // in server.ts as req.rawBody), NOT a re-serialized JSON.stringify(req.body) — the latter
+      // Verify the HMAC over the EXACT bytes received (kept as req.rawBody for this route only —
+      // RAW_BODY_ROUTES in src/server/lib/requestBodyLimits.ts), NOT a re-serialized JSON.stringify(req.body) — the latter
       // changes the bytes and makes every legitimate webhook fail signature validation. Fall back
       // to re-serialization only if the raw bytes are somehow unavailable (no worse than before).
       const rawBody: string = (req as any).rawBody
         ? (req as any).rawBody.toString('utf8')
         : JSON.stringify(req.body);
 
-      // Cashfree Webhook Data structure
-      const orderId = req.body.data?.order?.order_id;
+      // Cashfree Webhook Data structure. The order id sits in a different place per event family
+      // (payment: data.order, refund: data.refund, dispute: data.order_details) — read once, in
+      // `cashfreeWebhookOrderId`. A refund event used to fail right here with "Order ID missing".
+      const orderId = cashfreeWebhookOrderId(req.body);
       if (!orderId) {
         console.warn('[CASHFREE WEBHOOK] Missing order_id in webhook body:', req.body);
         return res.status(400).json({ error: 'Order ID missing in webhook payload' });
@@ -495,6 +492,30 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         // Never log the expected HMACs — they are secret-derived and would let a reader forge signatures.
         console.error(`[CASHFREE WEBHOOK] Webhook signature mismatch for order ${orderId} — rejecting.`);
         return res.status(401).json({ error: 'Invalid webhook signature' });
+      }
+
+      // 🔴 A REFUND OR A DISPUTE IS NOT A PAYMENT (Q-614, admin 2026-10-05). Every signed event used to
+      // go to `verifyPaymentInternal` — "fulfil this order" — so a refund was handled as if money had
+      // arrived, and the tokens it should have taken back stayed in the wallet. A reversal now takes
+      // its own path: the AMOUNTS are re-read from Cashfree's own API (the body only names the order),
+      // and the wallet gives back what that payment bought, down to zero and never below.
+      const kind = classifyCashfreeWebhook(req.body);
+      if (kind !== 'payment') {
+        const settled = await settleCashfreeReversal(db, orderId, kind);
+        if (!settled.ok) {
+          // Non-2xx so Cashfree delivers it again: acknowledging an event we could not read loses it.
+          console.error(`[CASHFREE WEBHOOK] ${kind} for order ${orderId} not settled: ${settled.error}`);
+          return res.status(502).json({ error: 'Reversal could not be read from the gateway; please retry.' });
+        }
+        const r = settled.result;
+        if (r.status === 'unknown-order') {
+          // Not an order this server created. Acknowledged so it is not re-sent forever; logged loudly.
+          console.error(`[CASHFREE WEBHOOK] ${kind} for unknown order ${orderId} — ignored.`);
+          return res.status(200).json({ status: 'IGNORED' });
+        }
+        console.log(`[CASHFREE WEBHOOK] ${kind} for order ${orderId}: ${r.status}` +
+          (r.appliedTokens !== undefined ? ` (removed ${r.appliedTokens} tokens, shortfall ${r.shortfallTokens ?? 0})` : ''));
+        return res.status(200).json({ status: 'OK', reversal: r.status });
       }
 
       console.log(`[CASHFREE WEBHOOK] Signature verified successfully. Initiating payment fulfillment...`);
@@ -772,7 +793,9 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
           code: String(r.code),
           faceInr: Number(r.faceInr) || 0,
           paidInr: Number(r.paidInr) || 0,
-          status: r.status === 'redeemed' ? 'redeemed' : 'unused',
+          // A refunded code says so — listing it as 'unused' would invite the buyer to share a code
+          // that no longer works (Q-614).
+          status: r.status === 'redeemed' ? 'redeemed' : r.status === 'voided' ? 'voided' : 'unused',
           createdAt: String(r.createdAt || ''),
           redeemedAt: r.redeemedAt ? String(r.redeemedAt) : null,
         }));

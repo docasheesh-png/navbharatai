@@ -941,6 +941,10 @@ break):
   work, add a new dated milestone entry — **never delete or rewrite existing
   entries** (they're the cross-session audit trail). Correct a stale claim by
   adding a new note, not by erasing the old one.
+- **An `/api` route nothing in the app calls is decided when its file is next touched (admin 2026-10-05, Q-162).**
+  `tests/fixtures/uncalledApiRoutesBaseline.json` lists them; 45 are `undecided`. Touching a route file that has
+  one means deciding it in the same PR — give it a screen, name its outside caller (change its reason), or delete
+  it — and shrinking the baseline. Never a mass deletion: an old bundled phone app may still call a route.
 - **Every change goes branch → commit → push → CI green → merge.** Merge
   is what deploys (see Deployment above), so never merge red or unverified.
   **CRITICAL — CI must be green BEFORE merging, no exceptions:**

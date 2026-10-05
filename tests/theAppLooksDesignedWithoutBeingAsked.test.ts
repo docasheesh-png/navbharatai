@@ -13,8 +13,7 @@
 //      the scaffold really ships the kit, and its stylesheet call no longer re-styles kit classes;
 //   4. a one-file app keeps the kit: the platform folds the linked stylesheet into index.html.
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { DESIGN_KIT_CSS } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/designKit';
@@ -27,6 +26,7 @@ import { SINGLE_HTML_FILE_RULE, architectSystemPrompt } from '../src/server/Agen
 import { inlineLinkedStylesheet } from '../src/server/AgentV3/singleFileKit';
 import { parseCssBlocks } from '../src/server/AgentV3/kitRestore';
 import { themeTsx } from '../src/server/AgentV3/goldenScaffolds/base';
+import { makeTempDir } from './helpers/tempDir';
 
 const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
 
@@ -257,7 +257,7 @@ const haveBrowser = existsSync(PW) && existsSync(BROWSERS);
 
 describe.skipIf(!haveBrowser)('in a real browser', () => {
   it('unstyled markup looks designed, and an app\'s own class always wins', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-kit-'));
+    const dir = makeTempDir('nbai-kit-');
     writeFileSync(join(dir, 'page.html'), `<!doctype html><html><head><style>${DESIGN_KIT_CSS}
       .mine { background: rgb(1, 2, 3); color: rgb(250, 250, 250); }
       .their-submit { background: rgb(9, 99, 9); }

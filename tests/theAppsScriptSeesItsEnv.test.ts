@@ -6,10 +6,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, writeFileSync, readFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { withAppEnvFile } from '../src/server/AgentV3/appEnvFileForCommand';
+import { makeTempDir } from './helpers/tempDir';
 
 const ON = {} as NodeJS.ProcessEnv;
 
@@ -48,7 +48,7 @@ describe('which commands get the app\'s .env', () => {
 });
 
 describe('for real, in a shell', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'nbai-envfile-'));
+  const dir = makeTempDir('nbai-envfile-');
   writeFileSync(join(dir, 'seed.js'), 'console.log(JSON.stringify({ db: process.env.DATABASE_URL ?? null, env: process.env.NODE_ENV ?? null, keep: process.env.KEEP ?? null }))');
   const run = (cmd: string, extra: Record<string, string> = {}) => {
     const env = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...extra };

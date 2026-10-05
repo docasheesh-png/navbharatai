@@ -28,6 +28,8 @@ import { verifyFirebaseIdentity } from './authMiddleware';
 export interface VerifiedIdentity {
   uid: string;
   email: string | null;
+  /** The provider verified this email (Q-624). Only a verified email may grant anything — `grantEmail`. */
+  emailVerified?: boolean;
 }
 
 /** A client-supplied session id must be a safe, bounded token — THE single definition (it becomes
@@ -56,7 +58,8 @@ export async function verifiedIdentity(req: Request): Promise<VerifiedIdentity |
     const uid = req.headers['x-test-verified-uid'];
     if (typeof uid === 'string' && uid.length > 0) {
       const email = req.headers['x-test-verified-email'];
-      return { uid, email: typeof email === 'string' && email.length > 0 ? email : null };
+      const verifiedHeader = req.headers['x-test-email-verified'];
+      return { uid, email: typeof email === 'string' && email.length > 0 ? email : null, emailVerified: verifiedHeader !== 'false' };
     }
     return null;
   }
@@ -64,7 +67,7 @@ export async function verifiedIdentity(req: Request): Promise<VerifiedIdentity |
 }
 
 export type MoneyGateResult =
-  | { ok: true; uid: string; email: string | null }
+  | { ok: true; uid: string; email: string | null; emailVerified?: boolean }
   | { ok: false; status: 401; error: string };
 
 /**
@@ -80,7 +83,7 @@ export function moneyGate(verified: VerifiedIdentity | null): MoneyGateResult {
       error: 'Sign in required — this action is billed/quota-tracked and needs a verified account.',
     };
   }
-  return { ok: true, uid: verified.uid, email: verified.email };
+  return { ok: true, uid: verified.uid, email: verified.email, emailVerified: verified.emailVerified };
 }
 
 /** Convenience wrapper for routes: verify the request, then apply the Tier-1 gate. */

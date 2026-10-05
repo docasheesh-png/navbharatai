@@ -44,6 +44,31 @@ export function platformCashfreeCredentials(env: NodeJS.ProcessEnv = process.env
   return { clientId, clientSecret, mode, placeholder };
 }
 
+/**
+ * Can real payments be taken right now? ONE decision for order creation and verification (Q-615, admin
+ * 2026-10-05: "asli kaam karne wala payment rakho, sabhi fake hatao").
+ *
+ * There is no simulator any more. Missing or placeholder keys mean payments are honestly unavailable —
+ * they used to open a "simulated gateway" whose PASS button credited a wallet with no money moved. And a
+ * production server never takes TEST money: sandbox-mode keys there are a misconfiguration, refused rather
+ * than allowed to credit a live wallet from a test payment. Outside production, Cashfree's own sandbox is
+ * a real gateway (real API, test cards) and stays available to developers.
+ */
+export type PaymentsAvailability =
+  | ({ ok: true } & CashfreeCredentials)
+  | { ok: false; code: 'payments_unconfigured' | 'payments_test_mode_in_production'; message: string };
+
+export function cashfreePaymentsAvailability(env: NodeJS.ProcessEnv = process.env): PaymentsAvailability {
+  const creds = platformCashfreeCredentials(env);
+  if (creds.placeholder) {
+    return { ok: false, code: 'payments_unconfigured', message: 'Payments are not available right now. Please try again later.' };
+  }
+  if (creds.mode === 'sandbox' && env.NODE_ENV === 'production') {
+    return { ok: false, code: 'payments_test_mode_in_production', message: 'Payments are not available right now. Please try again later.' };
+  }
+  return { ok: true, ...creds };
+}
+
 /** The webhook signing secret from the server environment, or null when it is not configured. */
 export function platformCashfreeWebhookSecret(env: NodeJS.ProcessEnv = process.env): string | null {
   const s = (env.CASHFREE_WEBHOOK_SECRET || '').trim();

@@ -124,6 +124,7 @@ import { registerKnowledgeDocsRoutes } from './src/server/lib/KnowledgeDocs';
 import { registerApiKeyRoutes } from './src/server/routes/apiKeys';
 import { registerDeveloperApiRoutes } from './src/server/routes/developerApi';
 import { apiVersionMiddleware } from './src/server/routes/apiVersion';
+import { jsonBodyParser } from './src/server/lib/requestBodyLimits';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
 import { registerReleaseNotesRoutes } from './src/server/routes/releaseNotes';
@@ -428,12 +429,15 @@ setInterval(() => {
   // req.protocol / req.hostname still come from that trusted hop. See src/server/lib/clientAddress.ts.
   app.set('trust proxy', TRUSTED_PROXY_HOPS);
 
-    app.use(express.json({
-      limit: '30mb',  // room for vision attachments (images/PDFs as base64)
-      // Stash the raw bytes so the /preview-app reverse proxy can forward POST
-      // bodies verbatim to the previewed dev server (Bug: rawBody was read but
-      // never populated → all proxied POSTs sent an empty body).
-      verify: (req: any, _res, buf) => { req.rawBody = buf; },
+    // JSON bodies: 1 MB everywhere, 30 MB only on the routes that receive attachments, images or whole
+    // projects, and the raw bytes (`req.rawBody`) only where a signature is checked over them or the
+    // preview proxy forwards them verbatim (Q-627). Both lists, and the census that keeps them complete,
+    // live in requestBodyLimits.ts — a new big-body route is added THERE, never by raising this.
+    app.use(jsonBodyParser({
+      onTooLarge: (event, err) => {
+        console.warn(`[BODY_TOO_LARGE] ${event.method} ${event.path} over ${event.limit}${event.length ? ` (${event.length} bytes)` : ''}`);
+        errorTracker.capture(err, { source: 'middleware', httpMethod: event.method, httpUrl: event.path, httpStatus: 413 });
+      },
     }));
 
     // EXPRESS 5 restores nothing that Express 4 gave for free: `req.body` is now left UNDEFINED when

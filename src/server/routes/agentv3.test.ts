@@ -7,7 +7,7 @@ import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, weakFlagshi
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { toPowerLevel } from '../AgentV3/powerLevel';
-import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
+import { isAgentV3FreeUser, buildRequiresSignIn, grantEmail } from '../AgentV3/featureFlag';
 import { userCostStore } from '../lib/UserCostStore';
 
 describe('raceTimeout — bounds request-setup calls that run before the build deadline is armed', () => {
@@ -1589,9 +1589,13 @@ describe('entitlementEmail — T0-9: billing/free-list email must be VERIFIED-on
     else process.env.AGENTV3_FREE_LIST = prevFreeList;
   });
 
-  it('returns the verified token email when the caller is verified', () => {
-    expect(entitlementEmail({ email: 'real@user.com' })).toBe('real@user.com');
-    expect(entitlementEmail({ email: null })).toBeNull(); // verified but no email → still null, never a claim
+  it('returns the token email only when the provider VERIFIED the address (Q-624)', () => {
+    expect(entitlementEmail({ email: 'real@user.com', emailVerified: true })).toBe('real@user.com');
+    expect(entitlementEmail({ email: null, emailVerified: true })).toBeNull(); // verified but no email → still null, never a claim
+    // A verified TOKEN with an unverified ADDRESS (email/password sign-up) grants nothing: anyone can
+    // register an address nobody has used yet.
+    expect(entitlementEmail({ email: 'real@user.com', emailVerified: false })).toBeNull();
+    expect(entitlementEmail({ email: 'real@user.com' })).toBeNull();
   });
   it('returns null for an UNVERIFIED caller — a claimed body email is discarded', () => {
     expect(entitlementEmail(null)).toBeNull();
@@ -1601,7 +1605,7 @@ describe('entitlementEmail — T0-9: billing/free-list email must be VERIFIED-on
     // the handler passed the CLAIMED body email here, so an anon caller claiming the admin's address ran
     // billing-exempt (free Opus). Now the handler passes entitlementEmail(verified=null) === null.
     const claimedAdminEmail = 'aashishcpmt09@gmail.com';
-    expect(isAgentV3FreeUser(null, claimedAdminEmail)).toBe(true);       // the raw function still matches email
+    expect(isAgentV3FreeUser(null, grantEmail(claimedAdminEmail, true))).toBe(true); // a VERIFIED address still matches
     expect(isAgentV3FreeUser(null, entitlementEmail(null))).toBe(false); // but the handler now feeds it null → refused
   });
   it('SECURITY: an unverified free-list-email claim no longer bypasses the sign-in/billing gate', () => {
@@ -1610,7 +1614,7 @@ describe('entitlementEmail — T0-9: billing/free-list email must be VERIFIED-on
     expect(buildRequiresSignIn(null, entitlementEmail(null))).toBe(true);
   });
   it('a genuinely verified free-list admin is unaffected (their real email still grants free-list)', () => {
-    expect(isAgentV3FreeUser('admin-uid', entitlementEmail({ email: 'aashishcpmt09@gmail.com' }))).toBe(true);
+    expect(isAgentV3FreeUser('admin-uid', entitlementEmail({ email: 'aashishcpmt09@gmail.com', emailVerified: true }))).toBe(true);
   });
 });
 
@@ -2127,7 +2131,7 @@ describe('statusEntitlement (T0-9 — /status money facts from the VERIFIED iden
 
   it('a free-list admin/tester (verified) → powerUnlocked=true regardless of wallet, billed=false', () => {
     process.env.AGENTV3_FREE_LIST = 'admin@x.com';
-    const r = statusEntitlement({ uid: 'a', email: 'admin@x.com' }, null);
+    const r = statusEntitlement({ uid: 'a', email: 'admin@x.com', emailVerified: true }, null);
     expect(r.powerUnlocked).toBe(true);
     expect(r.billed).toBe(false);
   });

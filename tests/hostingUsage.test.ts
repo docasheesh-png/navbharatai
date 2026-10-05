@@ -127,7 +127,7 @@ describe('🔒 the route — POST /api/agentv3/host-usage measures BEFORE anythi
     expect(handler).not.toBe('');
     expect(handler).toContain('assertVerifiedWorkspaceOwner(req, workspaceId)'); // verified owner (audit 2026-10-04)
     expect(handler).toContain('await requireVerifiedForMoney(req)');
-    expect(handler).toContain('isReportAdmin(email)');
+    expect(handler).toContain('isReportAdmin(identityGrantEmail(verified))');
   });
 
   it('🔒 it REPORTS what would be billed without charging anyone', () => {

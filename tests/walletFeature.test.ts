@@ -189,7 +189,9 @@ describe('🔒 every path that takes money now names itself', () => {
     // A counter wired call-by-call is one a tenth caller silently never joins — which is how the
     // attribution drifted away in the first place.
     expect(walletDebit).toContain('function recordFeatureSpend');
-    expect(walletDebit.split('recordFeatureSpend(tx, userId)').length - 1).toBe(2);
+    // Three callers, all inside walletDebit.ts: the build debit, the rolled-up debit, and (Q-616) the
+    // settle of a held price — a hold is recorded when its work is delivered, never when it is taken.
+    expect(walletDebit.split('recordFeatureSpend(tx, userId)').length - 1).toBe(3);
   });
 
   it('the admin route stops discarding the ledger it already had', () => {

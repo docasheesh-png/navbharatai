@@ -359,10 +359,14 @@ describe('generateGame3D — the objects a world is made of', () => {
   });
 
   it('every builder honours a REAL / LITE tier set once at start-up', () => {
-    expect(objects).toContain("export function setDetailLevel");
-    expect(objects).toContain("let DEFAULT_DETAIL: Detail = 'lite'");
+    // The ONE setting lives in surfaces.ts (2026-10-05) so the ground reads it too; objects.ts re-exports
+    // it, so `setDetailLevel` from './objects' still works. tests/the3DLayerDrawsWhatItPromises runs it.
+    const surfaces = file('surfaces');
+    expect(surfaces).toContain('export function setDetailLevel');
+    expect(surfaces).toContain("let DEFAULT_DETAIL: Detail = 'lite'");
+    expect(objects).toContain('export { setDetailLevel, getDetailLevel };');
     // Default is LITE on purpose: a plain "3d game" must not be taxed for detail nobody asked for.
-    expect(objects).toMatch(/const tier = \(o\?: BaseOpts\): Detail => o\?\.detail \?\? DEFAULT_DETAIL/);
+    expect(objects).toMatch(/const tier = \(o\?: BaseOpts\): Detail => o\?\.detail \?\? getDetailLevel\(\)/);
   });
 
   it('the CAR is a silhouette, not a box — bonnet, cabin, boot, arches, glass, emitting lights', () => {

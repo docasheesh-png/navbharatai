@@ -130,17 +130,21 @@ describe('the ticket — encrypted, uid-bound, short-lived', () => {
 });
 
 describe('nativeReturnUrl — one function decides the whole return', () => {
-  it('a pre-ticket app gets EXACTLY what it got before', () => {
+  it('a pre-ticket app gets EXACTLY what it got before — while the legacy switch is on', () => {
     // Byte-identical to the old nativeOauthReturn, because those installs run from assets baked into
     // their APK and a server deploy cannot change them.
-    expect(nativeReturnUrl({ kind: 'legacy' }, 'tok123', null))
+    expect(nativeReturnUrl({ kind: 'legacy' }, 'tok123', null, true))
       .toBe('com.navbharat.ai://github-callback#gh_token=tok123');
-    expect(nativeReturnUrl({ kind: 'legacy' }, 'a b&c', null))
+    expect(nativeReturnUrl({ kind: 'legacy' }, 'a b&c', null, true))
       .toBe('com.navbharat.ai://github-callback#gh_token=a%20b%26c');
   });
 
+  it('🔒 Q-629: with the legacy switch off, NO state gets a token in the deep link', () => {
+    expect(nativeReturnUrl({ kind: 'legacy' }, 'tok123', null, false)).toBeNull();
+  });
+
   it('a v2 app gets the ticket and never the token', () => {
-    const url = nativeReturnUrl({ kind: 'v2', uid: 'u' }, 'gho_secret', 'TICKET')!;
+    const url = nativeReturnUrl({ kind: 'v2', uid: 'u' }, 'gho_secret', 'TICKET', true)!;
     expect(url).toBe('com.navbharat.ai://github-callback#gh_ticket=TICKET');
     expect(url).not.toContain('gho_secret');
     expect(url).not.toContain('gh_token');
@@ -149,20 +153,22 @@ describe('nativeReturnUrl — one function decides the whole return', () => {
   it('🔒 NO TICKET means REFUSE, never fall back to the token', () => {
     // A missing ticket means encryption was unavailable. Silently reverting to the insecure path is
     // precisely what this change exists to remove.
-    expect(nativeReturnUrl({ kind: 'v2', uid: 'u' }, 'gho_secret', null)).toBeNull();
+    expect(nativeReturnUrl({ kind: 'v2', uid: 'u' }, 'gho_secret', null, true)).toBeNull();
   });
 
   it('refuses a broken v2 state and the web flow alike', () => {
-    expect(nativeReturnUrl({ kind: 'v2-invalid', reason: 'bad-signature' }, 'tok', 'T')).toBeNull();
-    expect(nativeReturnUrl({ kind: 'none' }, 'tok', 'T')).toBeNull();
+    expect(nativeReturnUrl({ kind: 'v2-invalid', reason: 'bad-signature' }, 'tok', 'T', true)).toBeNull();
+    expect(nativeReturnUrl({ kind: 'device-invalid', reason: 'bad-signature' }, 'tok', 'T', true)).toBeNull();
+    expect(nativeReturnUrl({ kind: 'none' }, 'tok', 'T', true)).toBeNull();
   });
 
   it('🔒 the scheme target is a FIXED constant — a crafted state can never redirect the token', () => {
     // Carried over from the retired nativeOauthReturn test: this invariant is still load-bearing.
     expect(NATIVE_OAUTH_REDIRECT).toBe('com.navbharat.ai://github-callback');
     for (const url of [
-      nativeReturnUrl({ kind: 'legacy' }, 'tok', null),
-      nativeReturnUrl({ kind: 'v2', uid: 'u' }, 'tok', 'T'),
+      nativeReturnUrl({ kind: 'legacy' }, 'tok', null, true),
+      nativeReturnUrl({ kind: 'v2', uid: 'u' }, 'tok', 'T', true),
+      nativeReturnUrl({ kind: 'device', challenge: 'c' }, 'tok', 'T', true),
     ]) {
       expect(url!.startsWith(NATIVE_OAUTH_REDIRECT)).toBe(true);
     }
@@ -184,32 +190,37 @@ describe('both ends are really connected', () => {
     expect(route).not.toMatch(/readTicket\([^)]*req\.body\??\.\s*uid/);
   });
 
-  it('the callback refuses a broken v2 state instead of downgrading', () => {
-    expect(route).toContain("if (nativeState.kind === 'v2-invalid')");
+  it('the callback refuses a broken v2 OR device state instead of downgrading', () => {
+    expect(route).toContain('if (isRefusedNativeState(nativeState))');
   });
 
-  it('the state is only upgraded for an app that ASKED and is AUTHENTICATED', () => {
-    expect(route).toContain("String(req.query.handoff || '') === 'ticket'");
+  it('the uid state is only issued for an app that ASKED and is AUTHENTICATED — and never falls back', () => {
+    expect(route).toContain("} else if (handoff === 'ticket') {");
     expect(route).toContain('const identity = await verifyFirebaseIdentity(req);');
+    // Q-629: the old "using the legacy state" fallback is gone; an unverified request is refused.
+    expect(route).not.toContain('using the legacy state');
   });
 
   it('the dead helper is gone, not left looking like the live path', () => {
     expect(route).not.toContain('export function nativeOauthReturn');
   });
 
-  it('the client handles BOTH a ticket and a legacy token', () => {
-    // The SERVER chooses which to send, so the client cannot assume. Dropping the token branch would
-    // break sign-in exactly when authentication was unavailable.
+  it('Q-629: the client accepts ONLY a ticket — a raw-token deep link is recognised and refused', () => {
+    // Until 2026-10-05 the client stored a raw `gh_token` deep link because the server might choose to
+    // send one. The current app always asks for the device flow, and the server never answers that with
+    // a raw token — so a raw token in a custom-scheme link can only be forged, and is refused.
     expect(ret).toContain('export function ticketFromDeepLink');
     expect(ret).toContain('export function tokenFromDeepLink');
     expect(app).toContain('const ticket = ticketFromDeepLink(data?.url);');
     expect(app).toContain('const directToken = tokenFromDeepLink(data?.url);');
-    expect(app).toContain('await redeemGithubTicket(ticket)');
+    expect(app).toContain('const token = ticket ? await redeemGithubTicket(ticket) : null;');
+    expect(app).not.toContain('let token = directToken');
   });
 
-  it('the app asks for a ticket, with its identity attached', () => {
-    expect(hook).toContain("reqUrl.searchParams.set('handoff', 'ticket')");
-    expect(hook).toContain('authJsonHeaders');
-    expect(hook).toContain('const response = await fetch(reqUrl.toString(), { headers: authHeader });');
+  it('Q-629: the app asks for the DEVICE flow, with its one-time nonce in a header', () => {
+    expect(hook).toContain("reqUrl.searchParams.set('handoff', 'device')");
+    expect(hook).toContain('beginGithubOauthAttempt(browserStorage(\'local\'), GITHUB_DEVICE_NONCE_KEY');
+    expect(hook).toContain('const response = await fetch(reqUrl.toString(), { headers: nonceHeader });');
+    expect(hook).not.toContain("searchParams.set('handoff', 'ticket')");
   });
 });

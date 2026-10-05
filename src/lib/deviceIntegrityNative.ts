@@ -16,6 +16,8 @@
 // `unavailable`, which the caller reads as "this device cannot claim the bonus yet" and shows an
 // honest "update the app" line — never a crash, and never a silent pass.
 
+import { Capacitor, registerPlugin } from '@capacitor/core';
+
 /** What the native side reported. Only `ok` carries usable evidence. */
 export interface NativeDeviceCheck {
   outcome: 'ok' | 'not-configured' | 'failed' | 'unavailable';
@@ -45,7 +47,6 @@ export function isDeviceCheckPlatform(platform: string | null | undefined): bool
 async function plugin(): Promise<{ api: DeviceIntegrityPlugin } | null> {
   if (cached) return { api: cached };
   try {
-    const { Capacitor, registerPlugin } = await import('@capacitor/core');
     if (!isDeviceCheckPlatform(Capacitor.getPlatform())) return null;
     cached = registerPlugin<DeviceIntegrityPlugin>('DeviceIntegrity');
     return { api: cached };

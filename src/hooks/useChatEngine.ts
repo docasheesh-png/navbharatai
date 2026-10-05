@@ -453,10 +453,12 @@ export function useChatEngine(deps: ChatEngineDeps) {
           headers['x-user-name'] = user.displayName || 'NavBharat Client';
         }
 
-        // One chat endpoint. The three Vishwakarma/VIP endpoints were deleted with Vishwakarma on
-        // 2026-09-12, and a LEGACY session whose stored agent id is still `vishwakarma_*` now falls
-        // through to the general chat rather than posting to a route that would 404.
-        const endpoint = currentAgent === 'navbharatai' ? '/api/chat/navbharat' : '/api/chat';
+        // ONE chat endpoint, and it is this one. The comment that used to sit here promised a fall-through
+        // to "the general chat" for any other agent id, but the code sent those to `/api/chat`, a route
+        // the server has never had — so a Pro session's agent id (`navbharatai-pro`) or a legacy
+        // `vishwakarma_*` id got a 404 on send (Q-673). `tests/everyApiPathTheClientCallsExists.test.ts`
+        // keeps a client path from pointing at a route that does not exist.
+        const endpoint = '/api/chat/navbharat';
 
         // TELLING IT A VIAL is stored HERE, on the device, before the message goes anywhere — the vial
         // is a fact about this cot side and belongs on this phone, not on a server. The server sends

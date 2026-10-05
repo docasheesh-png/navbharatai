@@ -20,33 +20,10 @@
       "advisories": []
     },
     {
-      "package": "axios",
-      "severity": "high",
-      "reason": "pre-existing transitive; upgrade evaluated separately (used server-side; needs regression check before bumping).",
-      "advisories": [
-        "GHSA-3pq3-5fj3-cg6v",
-        "GHSA-542g-h47m-68v8",
-        "GHSA-c29m-xwm3-cm6r",
-        "GHSA-m8m8-qj5v-23w3",
-        "GHSA-mghh-pgcx-3jjj",
-        "GHSA-r4gj-5m52-g5wh",
-        "GHSA-x97p-jq2g-jp4f"
-      ]
-    },
-    {
       "package": "cashfree-pg",
       "severity": "high",
       "reason": "payments SDK; vendor-pinned — upgrade requires payment-flow re-verification, tracked separately.",
       "advisories": []
-    },
-    {
-      "package": "undici",
-      "severity": "high",
-      "reason": "transitive (fetch/runtime); pre-existing, upgrade tracked separately.",
-      "advisories": [
-        "GHSA-rfgv-xxqx-mfg5",
-        "GHSA-w293-vg96-wgc3"
-      ]
     },
     {
       "package": "xlsx",

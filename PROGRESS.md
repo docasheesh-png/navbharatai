@@ -89843,3 +89843,22 @@ whoever merges second should expect a conflict in exactly that region and keep b
 Q-104, Q-116, Q-135, Q-139, Q-146, Q-147, Q-150, Q-152, Q-153, Q-156, Q-164 (Q-152 was already-fixed, evidence in its ledger entry). Their ledgers are above in this file. Still
 open from that work, each 🟡 with what it needs in `BUILD_REPORT_QUEUE.md`: Q-154 (admin confirms `hops: 1` at
 `/api/admin/proxy-hops`), Q-162 (45 undecided routes), Q-160, Q-136 (#3533), Q-101, Q-159, Q-141, Q-163.
+
+### 2026-10-05 — Forensic audit follow-up (PR #NEXT): Q-613, Q-617, Q-619, Q-621 + the admin's decisions
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-613 paid order claimed but never credited | the PENDING→SUCCESS claim and the wallet credit were two transactions; reconcile re-drives only PENDING | money moved in two steps with no recovery between them | wallet top-ups claim + credit in ONE transaction; a claimed gift order with no code is resumed (idempotent mint) | `aPaidOrderIsNeverLeftUncredited` (crash injected; old code → 2 fail) |
+| Q-617 DNS rebinding past the SSRF check | the address was vetted, then `fetch` resolved the name again; `domainServingCheck` followed unvetted redirect hops | check-then-use on a name | `publicOnlyDispatcher`: the connection's own lookup refuses private addresses, the connector refuses private IP literals; six sites; census | `aNameThatRebindsIsRefusedAtConnect` |
+| Q-619 new advisories passed the audit gate | allowlist matched package names | a triage reason written for one advisory covering every later one | entries accept only listed GHSA ids; brace-expansion / node-forge / braces re-triaged per id; axios 1.20.0 + undici 7.30.0 (HIGH 7 → 5) | `auditGate.test.ts` Q-619 block |
+| Q-621 a disconnect was never noticed (listener half) | `req` 'close' has already fired once `express.json()` read a POST body | a listener on the wrong object | `clientDisconnect.ts` on `res`; five sites; census | `aClientThatLeavesIsNoticed` (real socket) |
+
+**Admin decisions recorded 2026-10-05** (rows in the queue): Q-615 — no test/sandbox/simulator purchase may credit a
+real wallet, fake payment paths removed; Q-614 (a) refunds debit the tokens bought, never below zero; Q-616 (b) hold ₹1
+before an image, settle or release (after #3547); Q-612 (a) app secret at connect + admin ledger of users' bots;
+Q-629 (a) device-bound GitHub hand-off; Q-624 (a) email grants need `email_verified`; Q-140 (a) preview on its own
+origin (domain from the admin).
+
+**Session incident, recorded honestly:** a `/tmp` cleanup (the suite had leaked ~24 GB of temp dirs) also deleted the
+environment's commit-signing helper `/tmp/code-sign`; commits were blocked until the session restarted. The temp-dir
+leak itself is a test-hygiene defect worth its own row.

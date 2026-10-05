@@ -89843,3 +89843,75 @@ whoever merges second should expect a conflict in exactly that region and keep b
 Q-104, Q-116, Q-135, Q-139, Q-146, Q-147, Q-150, Q-152, Q-153, Q-156, Q-164 (Q-152 was already-fixed, evidence in its ledger entry). Their ledgers are above in this file. Still
 open from that work, each 🟡 with what it needs in `BUILD_REPORT_QUEUE.md`: Q-154 (admin confirms `hops: 1` at
 `/api/admin/proxy-hops`), Q-162 (45 undecided routes), Q-160, Q-136 (#3533), Q-101, Q-159, Q-141, Q-163.
+
+## 2026-10-05 — Q-650: Q-146's fix was a heal; the two layers in front of it. And the process finding that matters more.
+
+### 🔑 THE PROCESS FINDING FIRST, because it is the fourth duplication in one day and I caused this one
+
+I picked Q-146 off `BUILD_REPORT_QUEUE.md` as an unclaimed row, did the whole safeguard-#6 search —
+`find . -iname "*browserOnly*" -o -iname "*nodeSafe*" -o -iname "*commandGuard*"`, three vocabularies, the
+whole repo — and found nothing. **#3534 had already built it, as `browserCodeInNode.ts`, and merged while I
+worked.**
+
+Two separate failures, and only one is the familiar one:
+
+1. **The vocabulary miss.** I guessed `browserOnly`; they wrote `browserCode`. That is safeguard #6's own
+   lesson, except it could not have saved me here: at the moment I searched, the file was in an unmerged
+   PR and in no tree I could grep.
+2. 🔴 **The real one: I read the open PRs' TITLES and BODIES, which is exactly what the concurrency rule
+   says to do, and it was not enough.** #3534's title named Q-104, Q-147, Q-150 and Q-155. It never
+   mentioned Q-146. **Its claim on Q-146 existed only in its diff of `BUILD_REPORT_QUEUE.md`** — where, by
+   the sixth rule's own design, claims live. A title is a summary; the queue diff is the claim.
+
+**So the check that actually works is one call per open PR:** read its diff of `BUILD_REPORT_QUEUE.md` and
+take the `+| Q-NNN` lines. That is where ownership is recorded, it cannot be summarised away, and it is
+cheap. Done for this change: one open PR (#3544), touching no queue rows. ⚠️ Recorded here rather than
+added to `CLAUDE.md` unilaterally — it amends a rule the admin wrote, and that is theirs to decide.
+
+### What the work itself turned out to be
+
+Reading #3534's module changed the task rather than ending it. `browserCodeInNodeHint` fires on
+`ReferenceError: X is not defined` **in the command's output** — so it is a HEAL: the failed `npx tsx`, its
+turn and its seconds are already spent when it speaks. The fifth rule's step 5 asks the harder question —
+*"why did a heal need to run at all?"* — and here the answer is knowable before the shell: the file is in
+the workspace, and node's missing globals are a fixed, measurable fact.
+
+**Two layers in front of it, both in the shape of the five guards already in the `bash` case**
+(`ScaffoldGuard`, `gitCloneGuard`, `PreviewGuard`, `fixNodeModulesTypo`, the empty-command refusal):
+
+1. **At the write** — a script-named file (`seed`, `migrate`, `backfill`, anything under `scripts/`)
+   written with browser globals is told so while the file is open, so the run is never attempted.
+   Mechanical, because a prose rule in a 90 KB prompt loses to the habit.
+2. **Before the shell** — a `node`/`tsx`/`ts-node` command pointed at a project file that needs a browser
+   is refused unrun, naming the path that works and saying **explicitly not to mock the browser**, which
+   is the improvisation that turned one failure into four in the original report.
+
+**Merged into `browserCodeInNode.ts` rather than shipped beside it.** Two modules for one class is how
+`safeRelPath` grew four drifted copies. One measured list of globals now serves all three layers — which
+also killed a dead alternative: **`navigator` was in the hint's regex, and node 22 DEFINES it**, so
+`ReferenceError: navigator is not defined` could never have been thrown from that runtime.
+
+🔒 The list is measured against `node:22-bookworm` (what all three E2B Dockerfiles pin) and **re-measured
+in the running node by the test**, so a future runtime that defines one of these fails CI instead of
+leaving the guard quietly refusing commands that would have worked.
+
+### Three of my own precision holes, each found by this module's own test
+
+Recorded because each would have been a WRONG REFUSAL, which is a worse defect than the failure the guard
+prevents — and because all three are the same mistake in different clothes: judging a NAME instead of a
+binding.
+
+- **An imported binding of the same name.** `import { location } from './router'` was read as the browser
+  global. A router's own export would have had its command refused.
+- **A polyfill made invisible by my own stripper.** `global['document'] = {}` is a deliberate shim and must
+  stand the guard down — but `withoutCommentsAndStrings` blanks string *contents*, so it became
+  `global['']`. The polyfill check is now asked of the RAW source; the use check stays on the stripped copy.
+- **`topLevel` was false for the report's own seed.** Its browser calls sit inside `seedProducts()`; what
+  sits at module scope is the CALL. So "is the global at depth 0?" answered false for the very file this
+  was written for, and the message would have said the weaker of two true sentences. A module-scope call to
+  a function declared in the file now counts as reached-on-load.
+
+⚠️ **And a reversion probe disproved one of my own claims.** I wrote that `npm run seed` is excluded *by the
+runner list*, then put `npm` into that list and **no test failed** — the file pattern rejects `run` anyway,
+so the exclusion is over-determined. What the list really protects is the FINDING: removing `tsx` from it
+fails 3 tests, and that is what the test now asserts. A proof that does not bite is not a proof.

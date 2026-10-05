@@ -41,6 +41,7 @@ import { ConsentBanner } from './components/ConsentBanner';
 import { InviteAcceptGate } from './components/InviteAcceptGate';
 import { SharePortal } from './components/SharePortal';
 import { MobileEngagementGate } from './components/MobileEngagementGate';
+import { PlatformRatingHost } from './components/PlatformRatingHost';
 import { hasAnalyticsConsent, getConsent, CONSENT_EVENT } from './lib/consent';
 import { isChunkLoadError, shouldReloadForStaleChunk } from './lib/chunkReload';
 import { installNativeApiRewrite } from './lib/apiBase';
@@ -339,6 +340,7 @@ createRoot(document.getElementById('root')!).render(
         <InviteAcceptGate />
         <SharePortal />
         <MobileEngagementGate />
+        <PlatformRatingHost />
       </BuildProvider>
     </ErrorBoundary>
   </StrictMode>,

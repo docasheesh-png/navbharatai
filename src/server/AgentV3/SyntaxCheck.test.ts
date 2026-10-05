@@ -103,7 +103,8 @@ describe('findSyntaxErrors (deterministic parse gate — deep-test App #6)', () 
       'src/App.tsx': 'import React from "react";\nexport default function App(){ return <div className="app">hi</div>; }',
       'src/util.ts': 'export const add = (a: number, b: number): number => a + b;\nexport type P = { x: number };',
       'src/Widget.jsx': 'export function Widget(){ return <span>ok</span>; }',
-      'src/data.json': '{ not: valid json but not checked }', // non-JS/TS → skipped
+      // Was `{ not: valid json }` "→ skipped" until Q-139: an invalid JSON file is now reported (tests/aCutOffStylesheetIsBroken).
+      'src/data.json': '{ "valid": "json" }',
       'README.md': 'not code',
     };
     expect(await findSyntaxErrors(files)).toEqual([]);

@@ -63,7 +63,7 @@ const DURABLE_RESTORE_WRITE_MS = 4 * 60_000;
 const DURABLE_RESTORE_ASSET_MS = 90_000;
 
 import {
-  BROWSE_PAINT_DEADLINE_MS, BROWSE_PAINT_POLL_MS, splitPaintMarker,
+  BROWSE_PAINT_DEADLINE_MS, BROWSE_PAINT_POLL_MS, BROWSE_MAIN_GRACE_MS, MAIN_REGION_EMPTY_JS, splitPaintMarker,
 } from '../../../PreviewVerify';
 import { STYLE_EVIDENCE_JS, STYLE_MARKER, splitStyleMarker, type RenderStyleEvidence } from '../../../renderStyle';
 import { assertWriteAllowed, runInPass } from '../../../greenFreeze';
@@ -264,6 +264,13 @@ const CONSOLE_LOG = `${TOOLS_DIR}/console.log`;
  *
  * `networkidle` is not an option and never was: a Vite/CRA dev server's HMR socket never goes idle.
  */
+//
+// 🆕 THE FRAME IS NOT THE PAGE (queue Q-147). A nav bar paints first; a page that returns `null` while its
+// data loads leaves `<main>` empty for a moment. Stopping at the first content photographed that moment,
+// and a check that reads an empty main as "only the frame rendered" would then accuse a working app. So
+// after the first paint, an EMPTY main region gets up to BROWSE_MAIN_GRACE_MS more to fill — inside the
+// SAME paint deadline (`i+g`), so no capture can take longer than it already could and every script's
+// timeout still holds. A page whose main is already filled pays nothing.
 const paintWaitJs = (page: string): string => `
   var painted=0;
   for(var i=0;i<${Math.ceil(BROWSE_PAINT_DEADLINE_MS / BROWSE_PAINT_POLL_MS)};i++){
@@ -275,7 +282,14 @@ const paintWaitJs = (page: string): string => `
     if(n>0){painted=1;break;}
     await ${page}.waitForTimeout(${BROWSE_PAINT_POLL_MS});
   }
-  if(painted){await ${page}.waitForTimeout(250);}
+  if(painted){
+    for(var g=0;g<${Math.ceil(BROWSE_MAIN_GRACE_MS / BROWSE_PAINT_POLL_MS)}&&i+g<${Math.ceil(BROWSE_PAINT_DEADLINE_MS / BROWSE_PAINT_POLL_MS)};g++){
+      var frameOnly=await ${page}.evaluate(${MAIN_REGION_EMPTY_JS}).catch(function(){return false;});
+      if(!frameOnly) break;
+      await ${page}.waitForTimeout(${BROWSE_PAINT_POLL_MS});
+    }
+    await ${page}.waitForTimeout(250);
+  }
 `;
 
 const SCREENSHOT_SCRIPT = `

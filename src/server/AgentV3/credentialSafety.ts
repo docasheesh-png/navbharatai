@@ -38,7 +38,9 @@ export type CredentialWarningKind =
   /** A sandbox credential: correct for building, takes no real money. */
   | 'test-key'
   /** A server-only secret saved under a name the bundler publishes to every visitor. */
-  | 'exposed-secret';
+  | 'exposed-secret'
+  /** A value that is not this provider's key at all — it carries none of the shapes the provider issues (Q-156). */
+  | 'wrong-shape';
 
 export interface CredentialWarning {
   kind: CredentialWarningKind;
@@ -121,6 +123,22 @@ export function inspectCredential(name: string, value: string): CredentialWarnin
     }
   }
 
+  // 🔴 NOT THIS PROVIDER'S KEY AT ALL (queue Q-156). A real vault held `VITE_RAZORPAY_KEY_ID=doc.asheesh`
+  // and the build injected it silently, then said "🔐 Loaded your saved keys". A provider that issues keys
+  // in a fixed shape cannot have issued one outside it, so this is a positive identification, not a guess:
+  // only catalogue variables with `valuePrefixes` are judged. The value is still given to the app — it is
+  // the user's, and dropping it silently would be its own lie — but the user is told, with where to look.
+  const shapes = findRecipeVar(varName)?.valuePrefixes;
+  if (shapes && shapes.length > 0 && !shapes.some((p) => v.startsWith(p))) {
+    out.push({
+      kind: 'wrong-shape',
+      name: varName,
+      message: `⚠️ ${varName} does not look like the key it should be — a real one begins with ${shapes.join(' or ')}. `
+        + 'It was given to your app exactly as you saved it, so whatever uses it will fail until it is right. '
+        + 'Copy it again from the provider and paste it in Settings → App Settings → Secrets & API Keys.',
+    });
+  }
+
   const prefix = testKeyPrefix(varName, v);
   if (prefix) {
     out.push({
@@ -157,8 +175,10 @@ export function credentialWarningSummary(warnings: CredentialWarning[]): string 
   if (!Array.isArray(warnings) || warnings.length === 0) return '';
   const exposed = warnings.filter((w) => w.kind === 'exposed-secret').map((w) => w.name);
   const test = warnings.filter((w) => w.kind === 'test-key').map((w) => w.name);
+  const wrong = warnings.filter((w) => w.kind === 'wrong-shape').map((w) => w.name);
   const parts: string[] = [];
   if (exposed.length) parts.push(`${exposed.length} server secret(s) saved under a browser-published name: ${exposed.join(', ')}`);
+  if (wrong.length) parts.push(`${wrong.length} saved value(s) that are not the provider's key shape: ${wrong.join(', ')}`);
   if (test.length) parts.push(`${test.length} sandbox key(s) that cannot take real money: ${test.join(', ')}`);
   return parts.join(' · ');
 }

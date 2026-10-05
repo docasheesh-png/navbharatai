@@ -26,6 +26,7 @@
 import { isCheapFlashRung, withoutCheapFlashLead, type LadderRung } from './tierLadder';
 import { signalsCouldNotRead, signalsMatchedNothing } from './RequestAnalyser';
 import { BIG_SOFTWARE_NOUN, countEnumeratedFeatures } from './enumeratedFeatures';
+import { withEnglishReading } from '../lib/devanagariTechTerms';
 
 /**
  * 🔒 ONE IMPLEMENTATION, OWNED BY THE MODULE THE FACT IS ABOUT (2026-09-17, later the same day).
@@ -153,12 +154,14 @@ export const MIN_STATED_FEATURES = 2;
  * big software by name (`BIG_SOFTWARE_NOUN`). Without either, the request is an admitted unknown, and
  * this module's own rule for an unknown applies: open on the cheap rung, and let the ladder climb.
  *
- * ⚠️ Only for a request the scorer READ. One in a script it cannot read still buys the call, because
- * neither the feature count nor the noun list can see a Devanagari "management system".
+ * ⚠️ Only for a request the scorer READ. One in a script it cannot read still buys the call. (Since
+ * Q-104 the noun list does read a Devanagari "मैनेजमेंट सिस्टम" through `devanagariTechTerms.ts`, but
+ * the unread-script path is decided before this question is asked, and is left as it was.)
  */
 export function statesAScope(prompt: string): boolean {
   const text = String(prompt ?? '');
-  return BIG_SOFTWARE_NOUN.test(text) || countEnumeratedFeatures(text) >= MIN_STATED_FEATURES;
+  // The noun is read in English too (Q-104); the count reads the request itself, never the doubled form.
+  return BIG_SOFTWARE_NOUN.test(withEnglishReading(text)) || countEnumeratedFeatures(text) >= MIN_STATED_FEATURES;
 }
 
 /**

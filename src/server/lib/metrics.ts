@@ -64,7 +64,8 @@ export interface MetricsSnapshot {
  * Adding a second, parallel recording call at each call site is exactly the drift this avoids.
  */
 export interface MetricsSink {
-  onModelCall?(provider: string, inputTokens: number, outputTokens: number, costUsd: number): void;
+  /** `calls` — how many model calls these totals cover (Q-164); absent ⇒ one. */
+  onModelCall?(provider: string, inputTokens: number, outputTokens: number, costUsd: number, calls?: number): void;
   onBuild?(o: { ok: boolean; previewAllowed: boolean; isEdit?: boolean; ms: number; repairAttempts?: number; sandboxSeconds?: number }): void;
 }
 
@@ -91,9 +92,12 @@ export class MetricsRegistry {
    * of this file — which is fine for a usage trend, but is why any surface built on it must say
    * "estimated" rather than presenting it as measured money.
    */
-  recordModelCall(provider: string, inputTokens: number, outputTokens: number, knownCostUsd?: number): void {
+  recordModelCall(provider: string, inputTokens: number, outputTokens: number, knownCostUsd?: number, calls = 1): void {
     const u = this.tokens[provider] || (this.tokens[provider] = { requests: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 });
-    u.requests += 1;
+    // A build reports its totals ONCE per provider with how many calls they cover (Q-164) — counting that
+    // report as one request is what made the Monitor show 1 for a 40-call build.
+    const n = Number.isFinite(calls) && calls >= 1 ? Math.floor(calls) : 1;
+    u.requests += n;
     u.inputTokens += Math.max(0, inputTokens);
     u.outputTokens += Math.max(0, outputTokens);
     const cost = typeof knownCostUsd === 'number' && Number.isFinite(knownCostUsd) && knownCostUsd >= 0
@@ -101,7 +105,7 @@ export class MetricsRegistry {
       : costUsd(provider, Math.max(0, inputTokens), Math.max(0, outputTokens));
     u.costUsd += cost;
     // Never let a sink failure lose the metric that was just recorded here.
-    try { _sink?.onModelCall?.(provider, Math.max(0, inputTokens), Math.max(0, outputTokens), cost); } catch { /* telemetry never throws */ }
+    try { _sink?.onModelCall?.(provider, Math.max(0, inputTokens), Math.max(0, outputTokens), cost, n); } catch { /* telemetry never throws */ }
   }
 
   /** Record the outcome of one build/edit run. */

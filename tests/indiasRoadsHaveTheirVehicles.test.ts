@@ -11,7 +11,7 @@
 // antlers (Phase 2). A tiger with antlers. They have their own kinds now. And `house` named no builder
 // although createHouse has existed since Phase 1.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import * as THREE from 'three';
 import { generateGame3D } from '../src/server/lib/Game3DGenerator';
@@ -134,7 +134,9 @@ describe('the catalogue points at every builder that exists, and never at the wr
 
   it('CENSUS: every export of objects.ts that builds a catalogue object is named by that object', () => {
     // A builder nobody names is a builder the model never uses — the house sat unused this way since Phase 1.
-    const src = readFileSync(join(__dirname, '../src/server/lib/Game3DGenerator.ts'), 'utf8');
+    // objects.ts ITSELF — scanning the whole generator file also caught other modules' builders
+    // (createAtmosphere in atmosphere.ts, 2026-10-05), which are world systems, not catalogue objects.
+    const src = generateGame3D().files['src/game/three/objects.ts'];
     const builders = [...src.matchAll(/export function (create[A-Z]\w+)\(/g)].map((m) => m[1]);
     const named = new Set(OBJECT_CATALOG.map((e) => (e.builder ?? '').replace(/\(.*$/s, '').trim()).filter(Boolean));
     // Builders that are not catalogue objects on their own (world-building pieces, the renderer).

@@ -9,7 +9,7 @@ import { retrieveClinicalKnowledge, formatKnowledgeForPrompt } from '../lib/clin
 import { detectRedFlagsAcross } from '../lib/clinical/redFlags';
 import { isAuditReplyClean } from '../lib/clinical/auditGate';
 import { AIRouterManager } from '../AI/AIRouterManager';
-import { verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { verifyFirebaseIdentity, rateLimiter } from '../lib/authMiddleware';
 import { gateProfessionalTurn, burnFreeMessage, type ProfessionalTier } from '../professionals/passGate';
 import { chargeForAiTurn } from '../lib/aiTurnCharge';
 import type { ChatTurnUsage } from '../lib/chatSpend';
@@ -105,7 +105,10 @@ export function registerSdaRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/sda-chat', async (req: any, res: any) => {
+  // An hourly per-account bound (forensic audit 2026-10-04): the route had none, and a turn the wallet did
+  // not see (see the racers below) had no other limit. Sized far above a clinician's real use.
+  const sdaLimiter = rateLimiter({ name: 'sda-chat', authed: 240, anon: 20, noun: 'messages' });
+  app.post('/api/sda-chat', sdaLimiter, async (req: any, res: any) => {
     try {
       let { message, history = [], teachingMode = false, userId, sessionId, fileData, fileType, fileName } = req.body;
       if (!message && !fileData) return res.status(400).json({ error: 'Message required' });
@@ -482,7 +485,10 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       const sdaGrokKey   = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
       const sdaGeminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
 
-      type SdaRacerFn = (signal: AbortSignal) => Promise<string>;
+      // Each racer returns what it answered AND what it cost (forensic audit 2026-10-04, P1): a paid turn
+      // answered by the race used to leave `sdaSpend` null, so it was 'unmeasured' and charged ₹0 — every
+      // paid Doctor AI turn after the free ones was free. The provider's own usage is the bill; never invented.
+      type SdaRacerFn = (signal: AbortSignal) => Promise<{ text: string; spend: ChatTurnUsage }>;
       const sdaRacers: SdaRacerFn[] = [];
 
       // Grok supports images via vision models but NOT PDFs — skip Grok for PDF files.
@@ -507,7 +513,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           try {
             const r = await c.chat.completions.create({ model: m, messages: buildOpenAIMsgs(userContent), max_tokens: 2000 }, { signal });
             const t = r.choices[0]?.message?.content || '';
-            if (t.trim()) return t;
+            if (t.trim()) return { text: t, spend: { provider: 'GROK', model: m, inputTokens: r.usage?.prompt_tokens, outputTokens: r.usage?.completion_tokens } };
           } catch (e: any) { if (signal.aborted) throw e; console.warn(`[SDA] Grok ${m}: ${e.message}`); }
         }
         throw new Error('Grok SDA: empty');
@@ -523,7 +529,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           try {
             const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM_FINAL, contents, config: { thinkingConfig: { thinkingBudget: 0 } } } as any);
             const t = r.text || '';
-            if (t.trim()) return t;
+            if (t.trim()) return { text: t, spend: { provider: 'GEMINI', model: m, inputTokens: r.usageMetadata?.promptTokenCount, outputTokens: r.usageMetadata?.candidatesTokenCount } };
           } catch (e: any) { if (signal.aborted) throw e; console.warn(`[SDA] Gemini ${m}: ${e.message}`); }
         }
         throw new Error('Gemini SDA: empty');
@@ -533,13 +539,13 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         const sdaAcs = sdaRacers.map(() => new AbortController());
         try {
           const sdaWinner = await Promise.any(
-            sdaRacers.map((fn, i) => fn(sdaAcs[i].signal).then(text => {
+            sdaRacers.map((fn, i) => fn(sdaAcs[i].signal).then(won => {
               sdaAcs.forEach((ac, j) => { if (j !== i && !ac.signal.aborted) ac.abort(); });
               console.log(`[SDA] Race won by ${i === 0 ? 'Grok' : 'Gemini'}`);
-              return text;
+              return won;
             }))
           );
-          if (sdaWinner?.trim()) reply = sdaWinner;
+          if (sdaWinner?.text?.trim()) { reply = sdaWinner.text; sdaSpend = sdaWinner.spend; }
         } catch { console.warn('[SDA] Race (Grok+Gemini) both failed → Vertex/Claude'); }
       }
 
@@ -590,7 +596,11 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
               const model = vertexAI.getGenerativeModel({ model: modelName, systemInstruction: { role: 'system', parts: [{ text: SDA_SYSTEM_FINAL }] } });
               const result = await model.generateContent({ contents });
               reply = result.response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-              if (reply) { console.log(`[SDA] Vertex ${modelName} succeeded`); break; }
+              if (reply) {
+                const um = result.response?.usageMetadata;
+                sdaSpend = { provider: 'VERTEX', model: modelName, inputTokens: um?.promptTokenCount, outputTokens: um?.candidatesTokenCount };
+                console.log(`[SDA] Vertex ${modelName} succeeded`); break;
+              }
             } catch (ve: any) { console.warn(`[SDA] Vertex ${modelName}:`, ve.message); }
           }
         } catch (e: any) { console.warn('[SDA] Vertex err:', e.message); }
@@ -610,7 +620,11 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
             try {
               const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM_FINAL, contents, config: { thinkingConfig: { thinkingBudget: 0 } } } as any);
               const t = r.text || '';
-              if (t.trim()) { reply = t; console.log(`[SDA] Free-tier Gemini fallback ${m} succeeded`); break; }
+              if (t.trim()) {
+                reply = t;
+                sdaSpend = { provider: 'GEMINI', model: m, inputTokens: r.usageMetadata?.promptTokenCount, outputTokens: r.usageMetadata?.candidatesTokenCount };
+                console.log(`[SDA] Free-tier Gemini fallback ${m} succeeded`); break;
+              }
             } catch (e: any) { console.warn(`[SDA] free Gemini ${m}:`, e.message); }
           }
         } catch (e: any) { console.warn('[SDA] free Gemini fallback err:', e.message); }
@@ -637,7 +651,10 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
               messages: [...historyForAI, { role: 'user', content: userContent }],
             });
             reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
-            if (reply) console.log('[SDA] Claude direct succeeded');
+            if (reply) {
+              sdaSpend = { provider: 'CLAUDE', model: claudeVisionAnswerModel(), inputTokens: r.usage?.input_tokens, outputTokens: r.usage?.output_tokens };
+              console.log('[SDA] Claude direct succeeded');
+            }
           } catch (e: any) { console.warn('[SDA] Claude err:', e.message); }
         }
       }

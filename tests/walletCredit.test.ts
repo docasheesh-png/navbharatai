@@ -8,7 +8,7 @@ const EMPTY = { tokenBalance: 0, totalTokensPurchased: 0, totalMoneySpent: 0, re
 describe('computeCreditedWallet — credit math', () => {
   it('standard order credits balanceAdded (₹) and balanceAdded×100 tokens onto the current wallet', () => {
     const tx: WalletCreditTx = { userId: 'u1', amountPaid: 100, balanceAdded: 100 };
-    const { wallet } = computeCreditedWallet(EMPTY, tx, null, T);
+    const { wallet } = computeCreditedWallet(EMPTY, tx, T);
     expect(wallet.tokenBalance).toBe(10000);
     expect(wallet.remaining_balance).toBe(100);
     expect(wallet.total_balance).toBe(100);
@@ -21,7 +21,7 @@ describe('computeCreditedWallet — credit math', () => {
     // ever differed by that pass, so for every other order they were already arithmetically identical
     // — and this asserts the collapse did not change a single figure for a real purchase.
     const tx: WalletCreditTx = { userId: 'u1', amountPaid: 150, balanceAdded: 150 };
-    const { wallet } = computeCreditedWallet(EMPTY, tx, null, T);
+    const { wallet } = computeCreditedWallet(EMPTY, tx, T);
     expect(wallet.tokenBalance).toBe(150 * 100);
     expect(wallet.remaining_balance).toBe(150);
     expect(wallet.total_balance).toBe(150);
@@ -30,21 +30,20 @@ describe('computeCreditedWallet — credit math', () => {
   });
 
   it('🔒 no credit grants a pass or unlocks a mode — those entitlements are gone', () => {
-    const { wallet } = computeCreditedWallet(EMPTY, { userId: 'u1', amountPaid: 150, balanceAdded: 150 }, null, T);
+    const { wallet } = computeCreditedWallet(EMPTY, { userId: 'u1', amountPaid: 150, balanceAdded: 150 }, T);
     expect(wallet.hasVishwakarmaPass).toBeUndefined();
     expect(wallet.vishwakarmaPassActivatedAt).toBeUndefined();
   });
 
-  it('a pending promo credits its tokens and reports promoApplied — without granting a pass', () => {
-    // The promo branch kept its tokens and lost its Vishwakarma reward. It also had a real bug: it
-    // credited 1,000 while recording 10,000 in totalTokensPurchased and in the user's own ledger line.
-    // One number now drives all three, which is what the last two assertions pin.
+  // The pending-promo branch was REMOVED in the forensic audit of 2026-10-04 (P0): the Firestore rules let any
+  // client plant `promo_pending_<uid>`, and the branch then credited 1,000 tokens instead of the paid amount.
+  // A credit is the verified paid amount, always — this pins that it cannot be redirected any more.
+  it('a credit takes no promo input and always credits the paid amount (promo branch removed)', () => {
     const tx: WalletCreditTx = { userId: 'u1', amountPaid: 100, balanceAdded: 100 };
-    const { wallet, promoApplied } = computeCreditedWallet(EMPTY, tx, { mode: 'engineer' }, T);
-    expect(promoApplied).toBe(true);
-    expect(wallet.tokenBalance).toBe(1000);
-    expect(wallet.totalTokensPurchased).toBe(1000);
-    expect(wallet.walletLedger[0].amountCoinsOrTokens).toBe(1000);
+    expect(computeCreditedWallet.length).toBe(3);
+    const { wallet } = computeCreditedWallet(EMPTY, tx, T);
+    expect(wallet.tokenBalance).toBe(wallet.totalTokensPurchased);
+    expect(wallet.walletLedger[0].amountCoinsOrTokens).toBe(wallet.tokenBalance);
     expect(wallet.hasVishwakarmaPass).toBeUndefined();
   });
 
@@ -52,8 +51,8 @@ describe('computeCreditedWallet — credit math', () => {
     // This is exactly what the transaction does when it retries after a concurrent commit: it re-reads
     // the already-credited wallet and applies the next delta on top. Balances must add up, not clobber.
     const tx: WalletCreditTx = { userId: 'u1', amountPaid: 100, balanceAdded: 100 };
-    const first = computeCreditedWallet(EMPTY, tx, null, T).wallet;
-    const second = computeCreditedWallet(first, tx, null, T).wallet;
+    const first = computeCreditedWallet(EMPTY, tx, T).wallet;
+    const second = computeCreditedWallet(first, tx, T).wallet;
     expect(second.tokenBalance).toBe(20000);     // 10000 + 10000, not 10000
     expect(second.remaining_balance).toBe(200);  // 100 + 100
     expect(second.totalMoneySpent).toBe(200);
@@ -63,7 +62,7 @@ describe('computeCreditedWallet — credit math', () => {
   it('preserves unrelated existing wallet fields (full merge, not a reset)', () => {
     const existing = { ...EMPTY, tokenBalance: 500, totalTokensUsed: 42, someOtherField: 'keep-me' };
     const tx: WalletCreditTx = { userId: 'u1', amountPaid: 10, balanceAdded: 10 };
-    const { wallet } = computeCreditedWallet(existing, tx, null, T);
+    const { wallet } = computeCreditedWallet(existing, tx, T);
     expect(wallet.tokenBalance).toBe(1500);      // 500 + 1000
     expect(wallet.totalTokensUsed).toBe(42);     // untouched
     expect(wallet.someOtherField).toBe('keep-me'); // untouched
@@ -71,7 +70,7 @@ describe('computeCreditedWallet — credit math', () => {
 
   it('treats missing/NaN numeric fields as 0 (never produces NaN in a balance)', () => {
     const tx: WalletCreditTx = { userId: 'u1', amountPaid: 50, balanceAdded: 50 };
-    const { wallet } = computeCreditedWallet({}, tx, null, T);
+    const { wallet } = computeCreditedWallet({}, tx, T);
     expect(Number.isFinite(wallet.tokenBalance)).toBe(true);
     expect(wallet.remaining_balance).toBe(50);
   });
@@ -97,7 +96,7 @@ describe('inrToWalletTokens — the ONE ₹→token conversion every surface sha
 
   it('matches the credit path: ₹X purchase mints exactly inrToWalletTokens(X) tokens', () => {
     const tx: WalletCreditTx = { userId: 'u1', amountPaid: 77, balanceAdded: 77 };
-    const { wallet } = computeCreditedWallet(EMPTY, tx, null, T);
+    const { wallet } = computeCreditedWallet(EMPTY, tx, T);
     expect(wallet.tokenBalance).toBe(inrToWalletTokens(77));
   });
 });

@@ -10,6 +10,7 @@
  * orchestration is unit-testable without actually spawning npm.
  */
 import { spawn } from 'child_process';
+import { assertHostExecAllowed, hostChildEnv } from '../lib/actuatorGuard';
 import type { PreviewRuntime, RuntimeTarget } from './RuntimeRouter';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { materializeWorkspace, cleanupWorkspace } from './WorkspaceMaterializer';
@@ -29,9 +30,14 @@ interface ServerSession {
 /** Install dependencies, resolving when the install process exits 0 (rejects otherwise). */
 export type Installer = (dir: string, cmd: string, args: string[]) => Promise<void>;
 
+const INSTALL_TIMEOUT_MS = 5 * 60_000;
+
 const defaultInstaller: Installer = (dir, cmd, args) =>
   new Promise<void>((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd: dir, env: process.env });
+    // 🔒 Host exec is refused outside development, the child never sees the server's secrets, and a
+    // hung install is killed — see actuatorGuard.ts (forensic audit 2026-10-04).
+    assertHostExecAllowed('The server-container preview installer');
+    const child = spawn(cmd, args, { cwd: dir, env: hostChildEnv(), timeout: INSTALL_TIMEOUT_MS, killSignal: 'SIGKILL' });
     child.on('error', reject);
     child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} ${args.join(' ')} exited ${code}`))));
   });
@@ -71,6 +77,8 @@ export class ServerContainerRuntime implements PreviewRuntime {
   }
 
   async start(projectId: string, vfs: VirtualFileSystem): Promise<{ url: string; sessionId: string }> {
+    // Refuse BEFORE a single file of the caller's is written to this machine's disk.
+    assertHostExecAllowed('The server-container preview');
     // BUG F1 FIX: Add random suffix to prevent collision on rapid rebuilds
     const sessionId = `${projectId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const { dir } = this.materialize(vfs);

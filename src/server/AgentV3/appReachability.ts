@@ -238,6 +238,36 @@ export function splitByReachability<T extends { file?: string | null }>(
   return { loaded, unloaded };
 }
 
+/**
+ * 🔴 THE FILTER WAS A HABIT AT EACH CALL SITE, AND THE ONE THAT DECIDED THE OUTCOME FORGOT IT
+ * (Q-105's unhunted sibling, 2026-10-04).
+ *
+ * `splitByReachability` closed autopsy e706e068 for the readiness gate, and the build route then grew
+ * four more call sites that each chained their own `.filter((x) => !isUnreachable(…))` onto a scan.
+ * Four remembered. The FIFTH — the incomplete-code heal's RE-JUDGE — did not:
+ *
+ *     const stubs = highSeverityAuthenticityIssues(written).filter(…not unreachable…);  // input: filtered
+ *     const healed = await completeRunner.run(authenticityRepairInstruction(stubs));
+ *     const after  = highSeverityAuthenticityIssues(written);                           // verdict: NOT filtered
+ *     if (after.length === 0) { … INCOMPLETE_CODE_HEALED … readiness recovery … }
+ *
+ * So one stub in a stray file nothing imports made `after.length > 0` for ever: the heal completed every
+ * stub the app actually HAS, and the build was still recorded as unhealed and left NOT-ready — the exact
+ * e706e068 harm, surviving in the half the original fix never touched. One fact, two readers, one of
+ * them told: the headline class of this repo.
+ *
+ * 🔑 THE 50/50 HALF — why it could arise at all: "the findings about files the app loads" had no NAME,
+ * so it was re-spelled at every call site, and a spelling can be forgotten while the unfiltered scan
+ * still answers cheerfully. It has a name now, and `tests/aHealThatFixedEverythingIsToldSo.test.ts`
+ * fails when a new call site asks the other question.
+ */
+export function loadedFindings<T extends { file?: string | null }>(
+  findings: ReadonlyArray<T> | null | undefined,
+  v: ReachabilityVerdict | null | undefined,
+): T[] {
+  return splitByReachability(findings, v).loaded;
+}
+
 /** The wording for a finding about a file the app never loads — mirrors `preExistingCodeObservation`. */
 export function unreachableCodeObservation(label: string): string {
   return `[observation about files the app never loads — nothing imports them from its entry] ${label}`;

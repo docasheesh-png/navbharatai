@@ -592,6 +592,14 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
             {d?.config?.freezeReason ? (
               <p className="text-[12px] text-warn font-bold">{String(d.config.freezeReason)}</p>
             ) : null}
+            {/* Q-141 — "Frozen: YES" in red is a TRUE reading of a control that may be wired to nothing,
+                which is worse than a faked one. The server's own sentence says whether this freeze would
+                actually hold a deploy, measured from whether a pipeline has really asked the gate. */}
+            {d?.enforcement ? (
+              <p className={`text-[12px] ${String(d.enforcement).startsWith('⚠️') ? 'text-danger font-bold' : 'text-muted'}`}>
+                {String(d.enforcement)}
+              </p>
+            ) : null}
           </div>
         )}
       </ReportCard>

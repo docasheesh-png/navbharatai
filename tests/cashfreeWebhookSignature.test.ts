@@ -43,3 +43,18 @@ describe('isValidCashfreeSignature', () => {
     expect(isValidCashfreeSignature({ rawBody: RAW_BODY, timestamp: TS, signature: 'anything', secret: '' })).toBe(false);
   });
 });
+
+// Forensic audit 2026-10-04 — the comparison is constant-time, never `===` on a secret-derived value.
+import { readFileSync as __read } from 'node:fs';
+import { timingSafeStringEqual } from '../src/server/routes/payment';
+describe('signature comparison is constant-time', () => {
+  it('equal and unequal values are told apart without an early-exit comparison', () => {
+    expect(timingSafeStringEqual('abc', 'abc')).toBe(true);
+    expect(timingSafeStringEqual('abc', 'abd')).toBe(false);
+    expect(timingSafeStringEqual('abc', 'abcd')).toBe(false);
+    const src = __read('src/server/routes/payment.ts', 'utf8');
+    const fn = src.slice(src.indexOf('export function isValidCashfreeSignature'), src.indexOf('export function timingSafeStringEqual'));
+    expect(fn).not.toMatch(/signature === /);
+    expect(src).toMatch(/crypto\.timingSafeEqual\(x, y\)/);
+  });
+});

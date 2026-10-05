@@ -77,6 +77,13 @@ export interface RecipeVar {
    * here so the warning can be deterministic rather than guessed.
    */
   testPrefixes?: string[];
+  /**
+   * Every prefix a REAL value of this variable starts with — test and live alike (queue Q-156). Only for
+   * providers that publish a fixed shape; a variable without it is never judged. A value that matches none
+   * of them is not that provider's key at all (`doc.asheesh` saved as a Razorpay key id), which the build
+   * says plainly instead of injecting it silently.
+   */
+  valuePrefixes?: string[];
 }
 
 /** One provider that can satisfy a requirement (a requirement may have several — Maps is Google OR Mapbox). */
@@ -196,7 +203,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         cost: 'Free to create. Razorpay charges about 2% per payment. Live keys need KYC (PAN + bank account).',
         packages: ['razorpay'],
         vars: [
-          { name: 'RAZORPAY_KEY_ID', where: 'Shown on screen as “Key Id” right after you generate the pair', testPrefixes: ['rzp_test_'] },
+          { name: 'RAZORPAY_KEY_ID', where: 'Shown on screen as “Key Id” right after you generate the pair', testPrefixes: ['rzp_test_'], valuePrefixes: ['rzp_test_', 'rzp_live_'] },
           { name: 'RAZORPAY_KEY_SECRET', where: 'Shown ONCE, in the same dialog — copy it before closing, it cannot be viewed again', serverOnly: true },
         ],
       },
@@ -234,9 +241,9 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         cost: 'Free to create. About 3% per payment. Note Stripe cannot take Indian UPI — for Indian customers use UPI or Razorpay alongside it.',
         packages: ['stripe', '@stripe/stripe-js'],
         vars: [
-          { name: 'STRIPE_PUBLISHABLE_KEY', where: 'Developers → API keys → Publishable key (safe to expose)', testPrefixes: ['pk_test_'] },
-          { name: 'STRIPE_SECRET_KEY', where: 'Developers → API keys → Secret key → Reveal', serverOnly: true, testPrefixes: ['sk_test_', 'rk_test_'] },
-          { name: 'STRIPE_WEBHOOK_SECRET', where: 'Developers → Webhooks → your endpoint → Signing secret (only if your app confirms payments by webhook)', serverOnly: true, testPrefixes: ['whsec_test_'] },
+          { name: 'STRIPE_PUBLISHABLE_KEY', where: 'Developers → API keys → Publishable key (safe to expose)', testPrefixes: ['pk_test_'], valuePrefixes: ['pk_test_', 'pk_live_'] },
+          { name: 'STRIPE_SECRET_KEY', where: 'Developers → API keys → Secret key → Reveal', serverOnly: true, testPrefixes: ['sk_test_', 'rk_test_'], valuePrefixes: ['sk_test_', 'sk_live_', 'rk_test_', 'rk_live_'] },
+          { name: 'STRIPE_WEBHOOK_SECRET', where: 'Developers → Webhooks → your endpoint → Signing secret (only if your app confirms payments by webhook)', serverOnly: true, testPrefixes: ['whsec_test_'], valuePrefixes: ['whsec_'] },
         ],
       },
     ],
@@ -273,7 +280,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         path: 'API Keys → Create API Key',
         cost: 'Free tier of about 3,000 mails a month. Sending from your own domain needs a DNS record.',
         packages: ['resend'],
-        vars: [{ name: 'RESEND_API_KEY', where: 'Shown ONCE when you create the key — copy it immediately', serverOnly: true }],
+        vars: [{ name: 'RESEND_API_KEY', where: 'Shown ONCE when you create the key — copy it immediately', serverOnly: true, valuePrefixes: ['re_'] }],
       },
       {
         provider: 'SendGrid',
@@ -282,7 +289,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         path: 'Settings → API Keys → Create API Key → Full Access',
         cost: 'Free tier of about 100 mails a day. Requires sender verification before anything sends.',
         packages: ['@sendgrid/mail'],
-        vars: [{ name: 'SENDGRID_API_KEY', where: 'Shown ONCE when you create the key — copy it immediately', serverOnly: true }],
+        vars: [{ name: 'SENDGRID_API_KEY', where: 'Shown ONCE when you create the key — copy it immediately', serverOnly: true, valuePrefixes: ['SG.'] }],
       },
     ],
   },
@@ -308,7 +315,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         cost: 'Free trial credit, then per SMS. A trial account can only text numbers you have verified.',
         packages: ['twilio'],
         vars: [
-          { name: 'TWILIO_ACCOUNT_SID', where: 'Console home → Account Info → Account SID (starts with AC)' },
+          { name: 'TWILIO_ACCOUNT_SID', where: 'Console home → Account Info → Account SID (starts with AC)', valuePrefixes: ['AC'] },
           { name: 'TWILIO_AUTH_TOKEN', where: 'Console home → Account Info → Auth Token → click to reveal', serverOnly: true },
         ],
       },
@@ -326,7 +333,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         path: 'APIs & Services → Library → enable “Maps JavaScript API” FIRST, then Credentials → Create credentials → API key',
         cost: 'Has a monthly free allowance, but a billing account with a card is required even to start. Restrict the key to your own domain before you ship it.',
         packages: ['@react-google-maps/api', '@googlemaps/js-api-loader'],
-        vars: [{ name: 'VITE_GOOGLE_MAPS_API_KEY', where: 'Credentials → your API key → Copy. A browser key is visible to every visitor, so restrict it by HTTP referrer on the same screen' }],
+        vars: [{ name: 'VITE_GOOGLE_MAPS_API_KEY', where: 'Credentials → your API key → Copy. A browser key is visible to every visitor, so restrict it by HTTP referrer on the same screen', valuePrefixes: ['AIza'] }],
       },
       {
         provider: 'Mapbox',
@@ -335,7 +342,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         path: 'Access Tokens → Default public token (already created for you, at the top of the list)',
         cost: 'Generous free tier and no card needed to start.',
         packages: ['mapbox-gl', 'react-map-gl'],
-        vars: [{ name: 'VITE_MAPBOX_ACCESS_TOKEN', where: 'Access Tokens → Default public token — it starts with pk. A token starting with sk is a SECRET one and must never go in a browser app' }],
+        vars: [{ name: 'VITE_MAPBOX_ACCESS_TOKEN', where: 'Access Tokens → Default public token — it starts with pk. A token starting with sk is a SECRET one and must never go in a browser app', valuePrefixes: ['pk.', 'sk.'] }],
       },
     ],
   },
@@ -351,7 +358,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         path: 'Create API key (let it make a new project for you on the first one)',
         cost: 'Works on the free tier immediately — no card and no billing account needed.',
         packages: ['@google/generative-ai'],
-        vars: [{ name: 'GOOGLE_API_KEY', where: 'Create API key → copy the value shown (it starts with AIza)', serverOnly: true }],
+        vars: [{ name: 'GOOGLE_API_KEY', where: 'Create API key → copy the value shown (it starts with AIza)', serverOnly: true, valuePrefixes: ['AIza'] }],
       },
       {
         provider: 'OpenAI',
@@ -360,7 +367,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         path: 'API keys → Create new secret key',
         cost: 'Pay as you go — you must add credit before any call works.',
         packages: ['openai'],
-        vars: [{ name: 'OPENAI_API_KEY', where: 'Shown ONCE when created — copy it immediately', serverOnly: true }],
+        vars: [{ name: 'OPENAI_API_KEY', where: 'Shown ONCE when created — copy it immediately', serverOnly: true, valuePrefixes: ['sk-'] }],
       },
       {
         // Chosen only when the app's own code reads AI_API_KEY (the builder's AI_IN_APP_RULE): that app
@@ -389,7 +396,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         vars: [
           { name: 'CLOUDINARY_CLOUD_NAME', where: 'Shown on the Console dashboard home, and again under Settings → API Keys' },
           { name: 'CLOUDINARY_API_KEY', where: 'Settings → API Keys → API Key' },
-          { name: 'CLOUDINARY_URL', where: 'Settings → API Keys → the full CLOUDINARY_URL line (it contains the secret). You need the Admin or Master Admin role to see it — a read-only user cannot', serverOnly: true },
+          { name: 'CLOUDINARY_URL', where: 'Settings → API Keys → the full CLOUDINARY_URL line (it contains the secret). You need the Admin or Master Admin role to see it — a read-only user cannot', serverOnly: true, valuePrefixes: ['cloudinary://'] },
         ],
       },
       {
@@ -401,7 +408,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         packages: ['@aws-sdk/client-s3', 'aws-sdk'],
         vars: [
           { name: 'S3_BUCKET', where: 'S3 → the bucket you created → its name' },
-          { name: 'AWS_ACCESS_KEY_ID', where: 'IAM → Security credentials → Access keys → Access key ID' },
+          { name: 'AWS_ACCESS_KEY_ID', where: 'IAM → Security credentials → Access keys → Access key ID', valuePrefixes: ['AKIA', 'ASIA'] },
           { name: 'AWS_SECRET_ACCESS_KEY', where: 'Shown ONCE when the access key is created — download the .csv', serverOnly: true },
         ],
       },
@@ -420,8 +427,8 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         cost: 'Free up to a few thousand monthly users.',
         packages: ['@clerk/clerk-react', '@clerk/nextjs', '@clerk/backend'],
         vars: [
-          { name: 'VITE_CLERK_PUBLISHABLE_KEY', where: 'API Keys → Publishable key (starts with pk_ — safe to expose)', testPrefixes: ['pk_test_'] },
-          { name: 'CLERK_SECRET_KEY', where: 'API Keys → Secret key → reveal (starts with sk_)', serverOnly: true, testPrefixes: ['sk_test_'] },
+          { name: 'VITE_CLERK_PUBLISHABLE_KEY', where: 'API Keys → Publishable key (starts with pk_ — safe to expose)', testPrefixes: ['pk_test_'], valuePrefixes: ['pk_test_', 'pk_live_'] },
+          { name: 'CLERK_SECRET_KEY', where: 'API Keys → Secret key → reveal (starts with sk_)', serverOnly: true, testPrefixes: ['sk_test_'], valuePrefixes: ['sk_test_', 'sk_live_'] },
         ],
       },
       {
@@ -452,8 +459,8 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         cost: 'Free tier with a real Postgres. A free organisation allows 2 projects.',
         packages: ['@supabase/supabase-js'],
         vars: [
-          { name: 'VITE_SUPABASE_URL', where: 'Project Settings → API → Project URL' },
-          { name: 'VITE_SUPABASE_ANON_KEY', where: 'Project Settings → API → Project API keys → anon / public' },
+          { name: 'VITE_SUPABASE_URL', where: 'Project Settings → API → Project URL', valuePrefixes: ['https://', 'http://localhost', 'http://127.0.0.1'] },
+          { name: 'VITE_SUPABASE_ANON_KEY', where: 'Project Settings → API → Project API keys → anon / public', valuePrefixes: ['eyJ', 'sb_publishable_'] },
         ],
       },
       {
@@ -464,7 +471,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         cost: 'Free Spark plan to start.',
         packages: ['firebase', 'firebase-admin'],
         vars: [
-          { name: 'VITE_FIREBASE_API_KEY', where: 'Project Settings → General → Your apps → apiKey' },
+          { name: 'VITE_FIREBASE_API_KEY', where: 'Project Settings → General → Your apps → apiKey', valuePrefixes: ['AIza'] },
           { name: 'VITE_FIREBASE_PROJECT_ID', where: 'Project Settings → General → Project ID' },
         ],
       },
@@ -475,7 +482,7 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         path: 'your cluster → Connect → Drivers → copy the connection string',
         cost: 'Free shared cluster. Remember to allow network access from anywhere, or the app cannot connect.',
         packages: ['mongodb', 'mongoose'],
-        vars: [{ name: 'MONGODB_URI', where: 'Connect → Drivers → the string shown — replace <password> with your database user password', serverOnly: true }],
+        vars: [{ name: 'MONGODB_URI', where: 'Connect → Drivers → the string shown — replace <password> with your database user password', serverOnly: true, valuePrefixes: ['mongodb://', 'mongodb+srv://'] }],
       },
     ],
   },

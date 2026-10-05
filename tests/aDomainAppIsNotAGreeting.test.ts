@@ -204,7 +204,8 @@ describe('the question is actually asked, at both call sites', () => {
   });
 
   it('the ETA/pipeline estimator asks it too', () => {
-    expect(estimator).toContain('namesBusinessDomain(text)');
+    // `readable` since Q-104: the same request, read in English too when it is written in Devanagari.
+    expect(estimator).toContain('namesBusinessDomain(readable)');
   });
 
   it('it delegates to the platform\'s own domain classifier — never a second keyword list', () => {

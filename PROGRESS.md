@@ -89213,7 +89213,376 @@ Siblings hunted: `readAsDataURL` across the whole repo — the only generated-ap
 (the rest is NavBharatAI's own client sending images to APIs, not storing them). The `catch {}` that hid a
 failed save lived only in `proShell.ts`'s `useCollection`.
 
+### 2026-10-04 — Q-104: a Hindi request is sized like its English twin
 
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-104 sizer / ETA / cost estimate blind to Devanagari | every size signal (`RE`, `COMPLEX_APP_SIGNAL`, `BIG_SOFTWARE_NOUN`, `CLEARLY_SMALL`, the ETA's counters) is Latin; the script-neutral floor counts commas only | signals in one script, a request in another | one glossary, `src/server/lib/devanagariTechTerms.ts`, applied at each sizer's entry; predicates read original + an English line, counters read the gloss alone | `tests/aHindiRequestIsSizedLikeItsEnglishTwin.test.ts` — twins identical; a census fails on any new reader that skips the glossary; glossary off → 12 fail, one sibling reverted → census fails |
+
+Measured before: ecommerce with login/payment/cart/admin panel 30 vs 58; real-time chat 15 vs 58; calculator
+`app_unsized` vs `simple_app`. After: all eight twins identical. Siblings found and fixed in the same change:
+ProjectPlan's project gate (`BIG_SOFTWARE_NOUN` — "स्कूल मैनेजमेंट सिस्टम" was not big software),
+`complexityRouting.statesAScope`, `appScopeAnalyzer` (small-app hint and subject). The short-order case
+("एक टूडू ऐप बनाओ") was already rescued in the live route by the platform's `new_build` floor; only its label
+was wrong, now `simple_app`.
+
+### 2026-10-04 — Q-150: a credential label is not a credential value
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-150 error logs flagged as credential leaks | `lineLogsCredential` = console call AND a sensitive word anywhere on the line | a label read as a value | reads values only: a sensitive name in code (`password`, `user.password`, `${apiKey}`), or a string label ending on one (`"password:"`, `` `token=${t}` ``) followed by a non-error value; `PostEditReviewer`'s label-matching "typo" entry replaced by the shared detector | `tests/theLabelIsNotTheValue.test.ts` (old detector → 5 fail; old reviewer → 2 fail incl. the census of console+credential regexes) |
+
+What it cost before: the false finding is the readiness gate's one HARD compliance block, and the deterministic
+heal (`credentialLogRedaction.ts`) "fixed" it by emptying the call — `console.error('Failed to reset password',
+err)` became `console.error()`, deleting a working error log. Recall went up too: `'API key:', key` and
+`` `token=${t}` `` were missed before and are caught now.
+
+### 2026-10-04 — Q-155: the build report names the saved keys an app did not get
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-155 `withheldSecretNames` never shown | written and tested with the scoping change (2026-08-17), never called | an explanation built and never shown | `loadUserVaultScope` (one vault read → injected keys + withheld names); the build records `SECRETS_WITHHELD` with names only and the Settings path | `tests/aWithheldKeyIsNamed.test.ts` — names, no values, list capped; source guards on the one read; census: every `secretScope` export is used by live code |
+
+### 2026-10-04 — Q-147: the app's frame is not its page
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-147 chrome-only render read as rendered | `analyzePreviewHtml` judged visible text, which the nav supplies; sibling `PageRouteCheck.classifyPage` judged body text the same way | the frame judged as the page | grace for an empty main inside the shared paint deadline (no capture is slower than before); a main region still LITERALLY empty in a browser capture that saw paint is named in both checks; one predicate `MAIN_REGION_EMPTY_JS` | `tests/onlyTheFrameRendered.test.ts` — precision (canvas, spinner, image, empty-state never accused; curl / unmarked captures never judged), real browser for both scripts, each half reverted → fails |
+
+The precision trap, measured before shipping: stopping at first paint photographs `<main>` empty while a page
+fetches (`if (!data) return null`), so the verdict alone would have accused working apps. The grace is what
+makes the verdict safe; it is bounded by the existing paint deadline so the 30 s script timeouts still hold.
+
+### 2026-10-04 — Q-156: a saved value that is not the provider's key shape is named
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-156 no format validation for injected secrets | the catalogue knew test prefixes but not what a real value looks like, so nothing could tell `doc.asheesh` from a Razorpay key id | a value the provider could never have issued, passed on as a key | `valuePrefixes` on 19 variables with a provider-fixed shape; `credentialSafety` `wrong-shape` notice (name + expected prefixes, never the value), value still injected as saved; AppKnowledgeBase vault entry updated | `tests/aKeyThatIsNotTheProvidersShape.test.ts` (the report's value; reverted → 2 fail; census that no test prefix falls outside its shapes) |
+
+Not judged on purpose: a provider whose secret has no fixed shape (`RAZORPAY_KEY_SECRET`, `SMTP_PASS`) — the report's
+phone-number-like secret cannot be told from a real one by shape, and guessing would be the precision failure
+`credentialSafety` exists to avoid. The live provider probe (`credentialProbe.ts`) is what answers those.
+
+Q-153 re-checked the same day: its upstream half is already shipped (`envLoading.ts`); the remaining runtime half
+is recorded in the queue with the breakage it must avoid (`NODE_ENV=production` reaching the agent's `npm install`).
+
+### 2026-10-04 — Q-139: a cut-off stylesheet or package.json is a syntax error
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-139 no truncation guard for CSS/JSON writes | `findSyntaxErrors` / `firstSyntaxError` filtered to JS/TS before parsing | a truncation guard blind to every file type but one | JSON via `JSON.parse` (BOM stripped; tsconfig/jsconfig/.vscode/eslintrc/babelrc/prettierrc JSONC skipped); CSS via esbuild's parser, counting only the cut-off warnings; a write-guard hint per file type | `tests/aCutOffStylesheetIsBroken.test.ts` (reverted → 3 fail); `SyntaxCheck.test.ts`'s "invalid JSON is skipped" fixture updated to valid JSON with the reason beside it |
+
+HTML is deliberately not judged — a browser renders a truncated document, and no parser signature tells a cut-off
+page from a valid one, so a rule there would be a guess. Every consumer of the gate now sees JSON/CSS too: the
+write guard, the final readiness count, the heal before/after comparison and the store preflight.
+
+### 2026-10-04 — Q-122 closed: it was already fixed (evidence)
+
+Q-122 ("`UI_WITHOUT_BUILD` false positive when only `App.tsx` was edited") was migrated into the queue on 2026-10-01
+from the 70115adf note, but the fix had already landed: `uiWithoutBuild.ts` rule 0 — "CAN WE EVEN SEE THE WHOLE
+PROJECT?" — returns no verdict when the view holds no `package.json` (a scaffold-less fragment is proof of a
+partial view, never of a missing builder), recorded at "FIXED — `UI_WITHOUT_BUILD` judged a project it could not
+see" above. The exact case is locked by `tests/uiWithoutBuild.test.ts` (`paths: ['src/App.tsx'], packageJsonFiles:
+[]` → not stranded). Row removed; nothing to build.
+
+### 2026-10-04 — Q-129: Stop reaches the Gemini/Vertex runner
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-129 Gemini runner cannot cancel on Stop | `GeminiToolRunner.runTurn` never read `params.signal`; its only bound was the 120 s per-call timeout | a waiting path that does not hear Stop | `throwIfStopped` before the call, `config.abortSignal` to the SDK, `raceStop` on the wait | `tests/stopReachesEveryProvider.test.ts` (a stalled call ends within 2 s of Stop; reverted → 3 fail; census over every `implements TurnRunner`) |
+
+### 2026-10-04 — Q-131 closed: argued not a defect, and its one real gap already fixed (evidence)
+
+Q-131 ("two definitions of 'was the build stopped?'") was migrated on 2026-10-01 from the first note, but the
+correction recorded right after it (search: "CORRECTION FIRST — the premise I recorded above was false") settles
+it: a model's own `stop_build` DOES raise the abort signal through `setStopBuild` → `abortBuild(…, 'user-stop')`,
+so the two readers ask two different questions correctly — "did the run end early at all?" (the abort signal,
+retry and run proof) and "was an engine's capability ever judged?" (the upsell). Unifying them would make one
+wrong. The one real gap — our own interruptions reaching the upsell — is closed by `interruptedBeforeAnyVerdict`
+(`buildAbortCause.ts`, exhaustive over `AbortCause`), wired at both upsell sites and locked by
+`tests/ourOwnInterruptionIsNotAnEngineLimit.test.ts`. Row removed.
+
+### 2026-10-04 — Q-132 closed: re-audited, already fixed, now locked by a census
+
+Q-132 ("passes write the durable store directly, bypassing Green Freeze" — five route sites recorded in 2026-09)
+was re-audited site by site against today's route. The class was closed by later work: `writeUnlessFrozen`
+(SignBridge autopsy, 12 call sites — keeps a fix on any sandbox failure EXCEPT a freeze refusal) and
+`ToolDispatcher.landHealWrite` (the heal sites). Every durable save after the first `latchGreen` follows
+"sandbox write, then record", so a refusal throws before anything is kept; the two pre-latch sites that swallow
+a failure (integrity normalisation, the heal revert) run before the latch exists. What was missing was a lock on
+the CLASS: `tests/aFrozenWriteIsNeverKept.test.ts` now fails when any post-latch site swallows a sandbox write
+and keeps the content (proven by injecting one at the entry-dedupe site → the census names agentv3.ts:25611).
+Row removed.
+
+### 2026-10-04 — Q-130: a free build's unattended chain is counted on every instance
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-130 free-build time cap counted per instance | the chain map lived in one instance's memory (`freeBuildTimeCap.ts` said so itself) | a limit on spend kept where only one instance can see it | `FreeBuildChainStore.ts` (Firestore `free_build_chains`); `noteFreeBuildStartShared` / `decideFreePauseShared` take the larger count, add the window exactly once, write back before the pause is announced; bounded (2.5 s) and fail-open | `tests/aFreeChainIsCountedOnEveryInstance.test.ts` (cross-instance, real-request reset, failing store, hung store); two source guards in `aFreeBuildHoldsTheMachineForLess.test.ts` follow the shared calls |
+
+The fail direction was checked deliberately: a store that cannot be read leaves the memory count (the old
+behaviour), and the window is added once even when the store hangs — an earlier draft with a route-level timeout
+and fallback would have counted it twice and stopped a build early.
+
+### 2026-10-04 — Q-151 closed: the chunked zip upload already survives the load balancer (evidence)
+
+Q-151 ("zip chunk upload assumes every chunk reaches the same Cloud Run instance") was migrated from the 2026-08
+open note, but `src/server/lib/zipUploadStore.ts` fixed it (admin report "161 MB zip upload nahi ho rahi"): the
+upload record lives in Firestore (`zip_uploads`) and every chunk is its own Cloud Storage object
+(`zip-uploads/<id>/<index>.part`, zero-padded so listing order is numeric order), so any instance validates and any
+instance assembles. It is active wherever a bucket is set — `NAV_STORE_BUCKET` (set in Cloud Run per
+`docs/claude/ENV_REGISTRY.md`) or `FIREBASE_STORAGE_BUCKET` — and keeps the single-instance path only where there
+is one instance (local dev, CI). Locked by `src/server/lib/zipUploadStore.test.ts` and
+`src/server/routes/zipUpload.test.ts`. Row removed.
+
+### 2026-10-04 — Queue audit of the rows migrated on 2026-10-01 (evidence for each change)
+
+A read-only audit of 21 migrated rows against today's code. Changes made from it:
+
+- **Q-105 closed (already fixed):** `src/server/AgentV3/appReachability.ts` walks the app from `index.html`;
+  used by the readiness / fake-code scan, the incomplete-code heal and the simulated-data scan; locked by
+  `tests/appReachability.test.ts` and `tests/readinessJudgesOurOwnCode.test.ts` (fix note "The missing subsystem,
+  built", 2026-09-17).
+- **Q-118 split:** the TS-error→missing-package half is done (`tscErrorCause.ts`, `tests/tscErrorCause.test.ts`);
+  the destructive-delete half stays OPEN as recorded.
+- **Q-125 closed as superseded:** its premise was corrected by Q-343 (Claude turns are under-stated, not
+  over-stated), which is BLOCKED on the admin's money decision; one row per fact.
+- **Q-158 closed and now LOCKED:** the only client import of `AppKnowledgeBase` went with Offline AI on 2026-09-14,
+  but nothing stopped a new one. `tests/theKnowledgeBaseStaysOnTheServer.test.ts` fails on any client import
+  (proven by injecting one).
+- **Q-159 → 🟡 BLOCKED** with the four fields: guaranteed scheduled jobs need Cloud Scheduler (console) or
+  `--min-instances 1` (cost) — the admin's choice; recommendation Cloud Scheduler.
+- Still OPEN after the audit, unchanged: Q-111, Q-113, Q-115, Q-116, Q-126, Q-127, Q-133, Q-134, Q-135, Q-136,
+  Q-143, Q-144, Q-146, Q-148, Q-163, Q-164; Q-162 needs a fresh repo-wide count before it can be judged.
+
+### 2026-10-04 — Q-113: the wallet load stops fetching usage logs no screen shows
+
+`usePaymentEngine.fetchWallet` fired four calls in parallel on every wallet load; the usage-logs call filled
+`billingLogs`, which App passed to `BillingPanel`, which destructured it and never read it. Removed end to end
+(fetch, state, prop). Lock: `tests/theWalletLoadFetchesOnlyWhatIsShown.test.ts` — no logs fetch, no `billingLogs`
+anywhere in the client, and every remaining call has a reader. Client typecheck, unused-import scan and the 200
+billing/payment tests green.
+
+### 2026-10-04 — Q-164: the Monitor's request count is the number of real model calls
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-164 `aiRequests` = one per provider per build | `recordPlatformBuild` reports token TOTALS once per provider; `recordModelCall` added 1 per report | a count read from a total that does not carry it | ledger counts calls on `add` (`callsByProvider`); `providerCalls` on `PlatformBuildRecord`; `MetricsRegistry.recordModelCall(…, calls)`, sink and timeline forward it; absent ⇒ 1 | `tests/theMonitorCountsRealCalls.test.ts` (reverted → 2 fail) |
+
+⚠️ For whoever reads the Monitor next: request counts step UP at this deploy — that is the measurement becoming
+true, not a change in traffic. Token and cost totals are unchanged.
+
+### 2026-10-04 — Q-127: a two-part question gets every live answer
+
+`liveDataContext` returned at the first source that answered; since a live answer skips the web search in
+`liveSearchContext`, the second half of "kanpur me barish hogi kya, aur dollar ka rate kitna hai" was dropped.
+Every source now runs side by side (each still checks its own shape first and fetches nothing when it does not
+match) and every non-empty block is joined in a fixed order. Lock: `tests/aTwoPartQuestionGetsBothAnswers.test.ts`
+(both answers; one-part unchanged with only the matching host fetched; one source failing keeps the other).
+Recorded rather than guessed: a live part plus a NON-live part ("mausam aur gold rate") still skips search for
+the second — the queue row keeps that narrower half.
+
+### 2026-10-04 — Q-135: a pipe whose first program never ran is not a success
+
+`pipedGateExitCodeWarning` covered only gate tools (tsc, eslint, test runners, builds). Now, for any other piped
+command that exited 0, `pipedMissingCommandWarning` reads the SHELL's own not-found line and fires only when it
+names the program the pipe started with — so `prisma migrate deploy | tail` with no prisma is reported, while
+`grep -r "command not found" app.log | head` is not. Lock: `tests/aPipeThatNeverRanIsNotASuccess.test.ts`.
+
+### 2026-10-04 — Q-146: browser code run under node is named once
+
+`browserCodeInNodeHint` (pure) is appended to the bash tool's result when a server-side JS run (node, tsx,
+ts-node, bun, deno, `npx tsx`, an `npm run …seed…`) fails with a browser global's ReferenceError. It says the code
+can never run there, that a polyfill would only fake the result (data written to a fake localStorage never
+reaches the app), and that sample data belongs in the app's first load. Guidance only. Lock:
+`tests/browserCodeIsNotRunUnderNode.test.ts` (pure cases + the real dispatcher bash path).
+
+### 2026-10-04 — Q-115: an icon used once and imported nowhere is healed from the package itself
+
+Autopsy 424ecdab ended RED on `<IndianRupee />` and `<Clock />` — lucide-react icons used once and imported
+nowhere. `addMissingProjectImports` could only copy an import the project had already made, by design ("a guess
+that invents an import turns a broken build into one that will not parse"). The missing fact was the package's
+own export list, which the sandbox has: `readPackageExports` asks it with one bounded `node --input-type=module`
+run over the project's dependencies (only when an unbound JSX tag exists), and the JSX pass adds the import only
+for a single owning package. Precision rules: JSX tag names only (lucide exports an `Image` icon; `new Image()`
+must never be bound to it), the project's own module wins, ambiguity ⇒ nothing, inputs validated before the
+shell. Lock: `tests/anIconTheProjectNeverImportedIsHealed.test.ts`.
+
+### 2026-10-04 — Q-141: the knowledge base no longer claims the release gate stops live deploys
+
+The `admin-release-gate` AppKnowledgeBase entry said "the deploy pipeline checks /api/release/gate and refuses to
+deploy when the gate is closed". The live site deploys through Cloud Build, which has no such step; only the
+backup GitHub workflow checks it, and only with `RELEASE_GATE_URL` set (unset today). Every AI in NavBharatAI
+would have told an admin a freeze protects production when it does not. The entry now states exactly where it
+is enforced. The enforcement itself is 🟡 BLOCKED on the admin approving a `cloudbuild.yaml` step (options and
+recommendation in the queue row).
+
+### 2026-10-04 — Q-116: a big project's graph is filled at build start (the cap was the last hollow cause)
+
+The "pre-edit knowledge gate" was recorded when the graph was hollow on every cold resume. That cause was killed
+upstream on 2026-09-18 (`warmIndexFiles` refills stubs) — prevention, which the 50/50 law prefers to a refusal.
+Re-tracing found the one cause left: the build-start call used the default `maxFiles` of 80, so on a bigger app
+every file past the 80th stayed a stub (and the other call site already used 1,500). Now 400 files with an 8 s
+start-new-reads bound (`WARM_INDEX_BUILD_START_MS`), so a big project cannot hold up the start; the instrument
+still names what is left. Lock: `tests/aBigProjectIsNotHollow.test.ts`.
+
+
+### 2026-10-04 — Q-154: the proxy hop count is measured, not guessed
+
+`trust proxy: true` keys anonymous rate limits on the left-most `X-Forwarded-For` entry, which the caller writes.
+The right value is a hop count, and a wrong count would key every anonymous user to one proxy address — so it is
+measured. New admin-only `GET /api/admin/proxy-hops` (`proxyHops.ts`, pure, nothing logged) shows what `req.ip`
+would be under each count for the admin's own request. 🟡 BLOCKED on the admin opening it once on the live site.
+Lock: `tests/theClientIsMeasuredNotGuessed.test.ts` (agrees with Express itself for every count).
+
+### 2026-10-04 — Q-162: every API route has a caller, or a written reason — and two dead features found
+
+Recounted: 526 `/api` routes, 85 with nothing in the app calling them. The class is a server action whose
+client half was never wired, and it hid two real defects: (1) the community gallery's review queue — every
+submission is created `pending` and `POST /api/gallery/admin/:id/review` is the only path to `approved`, but no
+screen called it, so "Send for review" promised a review nobody could perform and the gallery could never list a
+single app. New `GalleryReviewQueue` inside the Gallery screen, shown only when the server says the viewer is a
+reviewer; Approve appears only beside code that was opened. (2) Closing a version preview never called the stop
+route, so the old version kept its port; `stopVersionPreview` now runs on dismiss (best effort). Lock:
+`tests/everyRouteHasACaller.test.ts` + `tests/fixtures/uncalledApiRoutesBaseline.json` (new uncalled route fails CI;
+baseline only shrinks; every entry carries its reason kind). 45 `undecided` routes are 🟡 BLOCKED on the admin's
+yes to deciding each one when its file is next touched.
+
+### 2026-10-04 — Q-153: the app's own script sees the app's `.env` when the agent runs it
+
+`node scripts/seed.js` reading `process.env.DATABASE_URL` without dotenv crashed on `undefined` although `.env`
+held the value; only the dev server loaded `.env`. A blanket load would let `NODE_ENV=production` reach the
+agent's `npm install`, so the fix is narrow: when the whole command is `node|tsx <file>` or `npm run <task>`
+(not build/dev/start/test/lint/install hooks), it runs under Node's `--env-file=.env` — dotenv syntax, and the
+environment always wins. Missing `.env`, or npm not being the plain Node script, falls back to the original
+command. Kill switch `AGENTV3_AGENT_CMD_ENV_FILE=off`. Lock: `tests/theAppsScriptSeesItsEnv.test.ts`.
+
+### 2026-10-04 — the last migrated rows re-checked: Q-152 already fixed; Q-136, Q-160, Q-101 recorded blocked
+
+- **Q-152 ✅ (already fixed):** bulk landing (2026-08-03) turned a large import's landing from one round trip per
+  file into one archive + one extract; the minutes lazy materialization was designed to hide no longer exist.
+- **Q-136 🟡:** the click explorer already reaches a state-routed app's screens; its blank test is root-level,
+  so an empty main area after a tab press passes (the Q-147 class, third lane). Blocked only because
+  `clickExplorer.ts` is in three other sessions' open PRs.
+- **Q-160 🟡:** writing back to a user's own folder is irreversible from our side — options and a recommendation
+  ("Save to folder" on a press, skipping files changed on disk) are in the row.
+- **Q-101 🟡:** the evidence ledger's read half exists; the write half rewires every verdict and is recommended
+  as a three-PR sequence after the engine PRs in flight land.
+
+### 2026-10-04 — Q-113 resolved by #3531 (merged); this branch's identical change folded into it
+
+#3531 merged the same `billingLogs` removal. The merge kept main's `usePaymentEngine.ts` verbatim and removed the
+Q-113 row (resolved on merge). `tests/theWalletLoadFetchesOnlyWhatIsShown.test.ts` stays as a second lock.
+
+## 2026-10-04 — Q-105 was already fixed, and saying so uncovered the defect it was hiding (Q-640)
+
+**Taken because it was the one row on the older queue no live PR had claimed** — and because it read like the
+largest missing subsystem on the list: *"Post-build gates judge files the entry never imports (no reachability).
+Needs a transitive import closure from `index.html`/`main.tsx` for readiness, fake-code scan and feature heal."*
+
+🔴 **The premise was false, and safeguard #6 is why I found that out instead of rebuilding it.** The first search
+I ran was by FILENAME, not by content — `find . -iname "*reach*"` — and it printed
+`src/server/AgentV3/appReachability.ts` immediately. 245 lines, written on 2026-09-17 with autopsy e706e068, with
+`tests/appReachability.test.ts` beside it, and wired into five readers: the readiness gate
+(`ToolDispatcher.evaluate` → `splitByReachability`), the incomplete-code heal's input, the fake-feature scan and
+both simulated-content disclosures. **Had I searched for the row's own vocabulary — "transitive", "import
+closure" — I would have found nothing and built a second copy of a working subsystem.** That is the exact
+sequence that destroyed `fileMentions.ts`, one safeguard later.
+
+🔑 **And the stale row was not harmless — it was camouflage.** A row that says "this does not exist yet" is a
+row nobody re-reads the code for. Fourteen lines below the heal's own correctly-filtered input sat this:
+
+```ts
+const stubs = highSeverityAuthenticityIssues(written).filter(…not unreachable…);  // input:   filtered ✅
+const healed = await completeRunner.run(authenticityRepairInstruction(stubs));
+const after  = highSeverityAuthenticityIssues(written);                           // verdict: NOT filtered ❌
+if (after.length === 0) { … INCOMPLETE_CODE_HEALED … readiness recovery … }
+```
+
+**On autopsy e706e068's own file shape this fails completely.** A batch repair had left `App.tsx` and
+`hooks/useStudents.ts` at the project root, copies nothing imports. The heal completes every stub the app
+actually HAS; the stray's stub keeps `after.length > 0` for ever; so `INCOMPLETE_CODE_HEALED` is never recorded,
+and the readiness recovery — which lives INSIDE that `if` — never runs. The build stays NOT-ready, GreenGuard
+restores it, and the user's build failed over a file the browser never loads. **That is e706e068's own harm,
+surviving in the half its fix never touched.** The instance was fixed; the class was not — the bar the fifth
+rule's 2026-09-13 note forbids by name.
+
+**The class, and the 50/50 half.** One fact, two readers, one of them told — Q-512's class, two days running.
+But the deeper question is why the branch could exist at all, and the answer is that *"the findings about files
+the app loads"* **had no name**. It was re-spelled as a chained `.filter((x) => !isUnreachable(…))` at each of
+four call sites. Four remembered. A spelling can be forgotten; the unfiltered scan answers cheerfully either
+way, and neither `tsc` nor the suite can see a missing filter.
+
+**Fix:** `loadedFindings(findings, verdict)` in `appReachability.ts` — the `loaded` half of the split the
+readiness gate already used, given a name. All five readers now ask it, and **no reader spells the question by
+hand any more** (that absence is itself asserted). The wrong branch is not merely corrected; there is no second
+expression left to forget it in.
+
+**Lock:** `tests/aHealThatFixedEverythingIsToldSo.test.ts`, 10 cases. Seven are the pure behaviour on the real
+School-ERP file set (the stray's finding dropped, every loaded file's kept, a finding naming no file kept, and
+EVERYTHING kept when the verdict is not applicable — never a demotion). Three are a **census that pins the
+reader count at five**, so a sixth reader fails CI rather than quietly asking the other question. Reversion-
+proven three ways: the re-judge unfiltered again → 2 fail; one other reader back to its own filter → 2 fail;
+`loadedFindings` stops filtering → 2 fail.
+
+⚠️ **Honest limit.** The decision this fixes is inline in the build route's handler and cannot be called from a
+test, so what the census locks is the SHAPE of the five call sites, not the handler's behaviour — the same
+precedent `readinessJudgesOurOwnCode.test.ts` set for this file. The pure half proves the question now returns
+the right answer; the census proves both readers ask it. The live effect to watch is
+`INCOMPLETE_CODE_HEALED` appearing on a build that has stray unreachable files — before this, it could not.
+
+**Siblings hunted:** every `const after` / re-detect pair in the build route (`analyzeProjectIntegrity`,
+`lintBuiltApp`, `analyzeDesignCoverage`, `analyzeHooksRules`, `findBootKillingEnvGuards`) and every call of the
+four file-scoped scans. The asymmetry existed in exactly one place, because reachability filtering existed in
+exactly four — and that is now five, named, and counted.
+### 2026-10-04 — Forensic security / reliability audit (PR #NNNN, branch `claude/new-session-gx9294`)
+
+The admin asked for a repo-wide audit, with every finding fixed P0 → P3 and locked by a test proven by
+reversion. Eight domain audits (auth/IDOR, API surface, AI cost, preview isolation, rules, payments, GitHub,
+secrets/supply chain) were run and **every finding was re-verified by hand before it was fixed** — several
+audit claims turned out false and were dropped. Each fix below ships with a test that fails when the bug is
+put back.
+
+| Sev | Problem | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|---|
+| P0 | `/api/preview` let any caller run code on the HOST | `ServerContainerRuntime` / `SandboxManager` spawned user code with `child_process` and the server's env | user code on the platform's machine | `assertHostExecAllowed` refuses outside dev; allowlisted `hostChildEnv`; `npm install --ignore-scripts`; 5-min install kill; route needs a token | `userCodeNeverRunsOnTheHost` (census of every `child_process` importer) |
+| P0 | The preview bundler read any file on the server (`import '/etc/passwd'`, `../../server.ts`, `@/../`) | esbuild resolved paths with no root | a resolver with no boundary | `confineToWorkspace` plugin on the resolved path; `@/` confined; `file:` refused | `previewBundleStaysInsideTheProject` |
+| P0 | `/pwa/:id`, `/preview/:id` served a user's HTML as navbharatai.com | HTML sent with our origin's cookies/storage | untrusted HTML on our origin | `sendUntrustedHtml` — CSP `sandbox` without `allow-same-origin` (opaque origin) | `userHtmlNeverRunsAsNavBharatAI` |
+| P0 | The admin's Built Apps panel rendered a user's app same-origin | `srcDoc` iframe with `allow-same-origin` | same class, admin surface | `UNTRUSTED_PREVIEW_SANDBOX` | `aStrangersCodeNeverRunsInOurOrigin` (census; `PreviewSurface.tsx` = Q-140) |
+| P0 | Cashfree merchant credentials could come from the USER's vault | `getSecretValue(uid, …)` read the caller's secrets | platform credential from user input | `platformCashfreeCredentials(env)` — env only; `getSecretValue` removed | `platformCredentialsNeverComeFromAUser` |
+| P0 | Any signed-in user could plant `promo_pending_<uid>` and be credited 1,000 tokens for any payment | client-writable Firestore doc read on the money path | a client write deciding a credit | promo branch removed from `computeCreditedWallet`; rule `false` | `aClientCannotWriteTheMoneyPath` (+ emulator) |
+| P0 | host-app / host-usage trusted an email in the request body as admin | non-strict owner gate | claimed identity as authority | `requireVerifiedForMoney` + `assertVerifiedWorkspaceOwner` | `aClaimedEmailIsNeverAnAdmin` |
+| P0 | GitHub OAuth `returnUrl` could send the token to `/api/...` or a file path on our origin | path check before decoding, no deny for server paths | open redirect of a credential | `safeReturnUrl` decodes, lowercases, refuses server/file paths, drops fragments | `aGithubTokenOnlyReturnsToOurOwnApp` |
+| P0 | The org git token stayed in the sandbox's `.git/config` | hydrate copied the authenticated remote | a credential left on disk | `credentialFreeRepoUrl`; remote rewritten before copy and after push | `aGitTokenNeverStaysInTheSandbox` |
+| P1 | Every per-IP limit could be bypassed with one header; three limiters never limited | `trust proxy: true` (leftmost XFF) + `ipKeyGenerator(req)` returning the request object | caller-chosen address; wrong argument hidden by `as any` | one hop (`TRUSTED_PROXY_HOPS`, aligned with #3531), `clientAddress`, `addressRateKey` / `identityRateKey`, preview limiter | `aCallerCannotChooseItsOwnAddress` (real Express + limiter) |
+| P1 | `GET /server.cjs.map` served 27 MB of server source | build wrote it into the static root | server artifact in public dir | `denyServerOnlyArtifacts` on the DECODED name, every `.map` | `theServerSourceIsNeverServed` |
+| P1 | GitHub tokens in logs (axios errors) | error objects carry request headers | credential in an error | global axios interceptor redacts (incl. symbol-keyed headers) | `anHttpErrorNeverCarriesACredential` |
+| P1 | Anyone who guessed a shell id controlled that terminal | shells keyed by a short id only | capability without owner check | shells scoped to their workspace; UUID ids | `aTerminalBelongsToItsWorkspace` |
+| P1 | A claimed `userId` read, deployed, restored or pushed someone else's app | 14 source routes used the non-strict owner gate | claimed identity | `assertVerifiedWorkspaceOwner` on all 14 | `aClaimedUidReadsNoOnesSource` |
+| P1 | Free chat / security scan unbounded (size, attachments, history, rate) | no input limits before provider call | unmetered spend | `checkChatInput`; scan limiter + 200k-char cap | `aFreeAiRequestIsBounded` |
+| P1 | Doctor AI paid answers recorded no cost | racers returned text only | unmeasured spend | racers return `{text, spend}` | `everyPaidDoctorAiTurnIsMeasured` |
+| P1 | Professionals ran vision on attachments before the gate | order of checks | spend before allow | gate first | `nothingIsSpentBeforeATurnIsAllowed` |
+| P1 | One malformed request benched a provider for every user | any error set a cooldown | breaker poisoning | only provider-health errors cool a provider | `oneRequestNeverBenchesAProvider` |
+| P1 | The free Repo Analyst fell through to Claude Sonnet | a `callClaude` rung | free surface on a paid rung | rung removed | `aFreeSurfaceNeverRunsSonnet` |
+| P1 | Bot webhooks / MCP fetched user URLs with redirects followed | redirects unvetted | SSRF via redirect | `guardedPublicFetch`, `redirect: 'error'` | `aUserSuppliedUrlIsVettedOnEveryHop` |
+| P2 | Boot printed env values / key prefixes; `/api/agentv3/diag` public | debug logging | secret in logs | presence + length only; diag admin-only | `noEnvValueMaterialInLogsOrFiles` |
+| P2 | Webhook signature compared with `===` | non-constant-time compare | timing oracle | `timingSafeStringEqual` | `cashfreeWebhookSignature` |
+| P2 | `.env` not ignored by git / docker; no Permissions-Policy | missing config | secrets in repo/image | ignore files (identical to #3531); policy header | `localSecretsAndUnusedFeaturesStayOut` |
+| P2 | Production could boot with a test switch on | no config contract | silent security downgrade | `assertProductionConfig` (VITEST fatal; warnings for missing keys) | `productionRefusesASwitchedOffControl` |
+| P2 | Firestore: owner could write any field of `users`; template `posts`/`groups` open; `userId` re-assignable; collab comments rewritable; no Storage rules | permissive template rules | client writes the server never reads safely | rules write only what the app writes; deny-all `storage.rules` | `firestoreRulesAuditHardening` (emulator) |
+| P2 | Q-630: `verify-payment` (no sign-in) returned a fulfilled gift order's CODE to whoever held the order id — which travels in the redirect URL | the route answered with the fulfilment data as-is | a bearer value handed to an unidentified caller | code only to the buyer's verified token; client sends it | `aGiftCodeGoesOnlyToItsBuyer` |
+| P3 | Legacy `/create-order` unauthenticated; `verify-payment` returned balances by order id; Repo Analyst forwarded the session token to GitHub | dead / over-sharing routes | small leaks | 410; balances stripped; GitHub token only | `smallLeaksClosed` |
+
+**Overlap with other sessions (honest record).** #3531 carries the same trust-proxy / `clientAddress` /
+`.gitignore` change; this branch was aligned to its exact text so the second merge has the smallest conflict.
+#3529 adds `isPrivateBuildFile` for the same source-map leak — **its check reads the raw path, and
+`/server.cjs.m%61p` still returns the source through `express.static` (reproduced locally)**. Not edited here
+(another session's in-flight file); reported to the admin. When both land, one of the two middlewares should
+be removed.
+
+**Not fixed in this PR — every item is a row in `BUILD_REPORT_QUEUE.md`:** Q-140 (P0, builder preview
+same-origin, infra-blocked), Q-610 (rules must be deployed by hand to `gen-lang-client-0866594388`), Q-611
+(rotate credentials in git history), Q-612 … Q-629. Q-630 was found by the row verification and fixed here.
 
 ### Q-115: a forgotten package import is restored on the installed package's own word (2026-10-04)
 
@@ -89335,3 +89704,90 @@ sold → 1 fail; dropping the gateway gate → 1 fail.
 list contained no `/inventory/`. It contains *"pharmacy / inventory"* — because a hospital really does need
 pharmacy inventory, which is the whole point of the domain being right. The test names ECOMMERCE's list
 instead. Twice in one change, the lesson is the same: an assertion about a list has to say which list.
+### 2026-10-04 — reconciled with the PRs that merged the same rows (#3532, #3535, #3537)
+
+Four sessions worked the same queue rows at once. On merging main, the MERGED implementation won every
+overlap and this branch's duplicate was removed: Q-115 (#3537's `installedExports`; this branch's
+`readPackageExports` and its test deleted), Q-130 (#3537's `freeChainStore`; `FreeBuildChainStore.ts` and its
+test deleted), Q-155 (#3532's `withheldVaultSecretNames`; `loadUserVaultScope`/`secretsWithheldLine` removed),
+Q-127 and Q-129 (#3535). The ledger entries above for those rows describe code that no longer exists — they are
+kept as the audit trail, corrected here. Kept, because the merged PRs did not reach them: the Q-150 siblings
+(the post-edit reviewer's private pattern; "API key" with a space missing from the word list) and the census
+tests for Q-129 (every TurnRunner hears Stop), Q-127 and Q-132, which pass unchanged against the merged code.
+## 2026-10-04 — Q-141: a freeze that stopped nothing, and the sentence that said it would
+
+**The row, verbatim:** *"Release gate is not enforced on the deploy path that runs (Cloud Build), yet
+AppKnowledgeBase says it is. Either add the gate step (admin) or correct the KB text now."*
+
+🔴 **Verified before touching anything, and it is worse than the row says.** `ReleaseGate.ts` is correct,
+its store is correct, its route is correct. The only CHECK lived in `.github/workflows/deploy.yml`, behind
+`if: steps.guard.outputs.ready == 'true'` — which requires the `GCP_SA_KEY` + `GCP_PROJECT_ID` repo
+secrets, and `CLAUDE.md` records that those are not set, so that whole workflow skips cleanly and deploys
+nothing. `cloudbuild.yaml` is what ships every merge, and it had no gate step at all. **The release gate
+was enforced on exactly zero live paths**, while `AppKnowledgeBase.ts` — what every AI in NavBharatAI
+answers from — said *"the deploy pipeline checks the public GET /api/release/gate?sha=<commit> before
+promoting and refuses to deploy when the gate is closed."*
+
+**So an admin freezing releases during a live incident saw `Frozen: YES` in red on the admin board, and
+the next merge deployed anyway.** That is the second absolute rule broken outright — and it is worse than
+a faked indicator, because the indicator was TRUE. The control it reads was connected to nothing.
+
+🔑 **THE CLASS: a claim about a pipeline, written in prose, in a file the pipeline cannot see.** No
+typecheck, no test and no reviewer could ever have caught the drift, because the sentence in
+`AppKnowledgeBase.ts` and the YAML in `cloudbuild.yaml` had no relationship at all. So the fix is not a
+better sentence — it is the relationship.
+
+### Both halves, and neither alone would have done
+
+**(a) The enforcement.** Step 0 of `cloudbuild.yaml`, in the same cloud-sdk image the deploy step already
+pulls (so nothing new has to be fetchable), running FIRST — during a freeze there is no reason to pay for
+a five-minute Docker build either. **Its only non-zero exit is an explicit `"allowed":false` from our own
+endpoint.** Not configured, unreachable, a timeout, a 500, an empty body and a malformed body all exit 0
+and continue the deploy, because a step that can fail for any other reason is a step that can stop every
+deploy — and no session here can run Cloud Build to prove otherwise. `_RELEASE_GATE_URL` defaults to
+empty, so until the admin sets it on the trigger the step prints one line and stands down.
+
+**(b) The honesty, which deliberately does not rest on a claim.** The gate route now records every time a
+pipeline really asks it, and `freezeEnforcementNote` answers from that MEASUREMENT: with nothing recorded
+it says *"⚠️ A FREEZE DOES NOT STOP A DEPLOY TODAY. No deploy pipeline has ever asked this endpoint"* and
+names the one substitution to set; once a pipeline has asked, the evidence outranks the table. That
+sentence now appears on every admin read of the gate, in the POST answer when a freeze is switched ON, on
+the admin board's Release gate card beside `Frozen: YES`, and in the KB entry.
+
+⚠️ **The evidence lives in its own Firestore document, and that is not tidiness.** `ReleaseGateStore.set`
+writes the config with `merge: false`, so a field kept on the same document would be silently erased the
+next time an admin changed the freeze — and the erased field is the one thing that proves the wiring
+works. Same collection (`platform_config`), so it is already classified.
+
+### Proof
+
+`tests/aFreezeThatStopsNothing.test.ts`, 25 cases.
+
+- It **parses** `cloudbuild.yaml` and `deploy.yml` with `js-yaml` and fails when `DEPLOY_PATHS` disagrees
+  with what they actually contain — the sentence cannot drift from the pipeline again.
+- It sweeps **every** declared substitution for the MUST_MATCH trap this file's own comments record (Cloud
+  Build fails a build on a substitution declared and never used, and equally on one used and never
+  declared) — not only the one added here.
+- It **runs the step** against a real HTTP server for all five outcomes, asserting the exit status.
+- Reversion-proven six ways: the step removed → 8 fail · fail-open turned into fail-closed → 3 fail · the
+  KB's old sentence restored → 1 fail · the table claiming the primary path is live → 5 fail · the route
+  no longer recording the evidence → 1 fail · the admin card dropping the sentence → 1 fail.
+
+⚠️ **A NEAR-MISS WORTH MORE THAN THE FIX, and it is a new entry in this file's collection of them.** The
+first draft ran the step with `execFileSync`. That blocks the test process's own event loop — so the HTTP
+server living in the same process could never accept curl's connection, every case timed out at curl's
+`--max-time 20`, and all five landed in the "the gate did not answer" branch. **Five green-looking cases
+that proved nothing, including the one case that matters: a closed gate read as exit 0.** It was caught
+only because three assertions expected the OTHER outcome. A synchronous child and an in-process server
+cannot both work; `execFile` + `await` is the shape.
+
+🟡 **ONE ADMIN ACTION REMAINS, and it is the only thing between this and a binding freeze:**
+Cloud Build → Triggers → the trigger → Substitution variables → `_RELEASE_GATE_URL` =
+`https://<the live app host>/api/release/gate`. The admin board will then say a pipeline really asked the
+gate, instead of saying a freeze would not hold.
+
+**Siblings hunted:** every surface that mentions the gate — `routes/releaseGate.ts`, `routes/admin.ts`
+(both verbs), `AppKnowledgeBase.ts`, the admin card in `EngineReportsPanel.tsx`, and `APITester.tsx`
+(which only lists the endpoint and claims nothing). ⚠️ `EngineReportsPanel.tsx` is being restructured by
+open PR #3530, which moves this card to a new page; the edit here is two small blocks inside the card, so
+whoever merges second should expect a conflict in exactly that region and keep both changes.

@@ -83,7 +83,7 @@ export function pipedGateExitCodeWarning(
   output: string,
 ): string | null {
   if (exitCode !== 0) return null;              // it already told the truth
-  if (!isPipedGateCommand(command)) return null;
+  if (!isPipedGateCommand(command)) return pipedMissingCommandWarning(command, output);
   const text = (output ?? '').slice(0, 20000);
   if (!text.trim()) return null;
   if (!REAL_ERROR.some((re) => re.test(text))) return null;
@@ -97,3 +97,34 @@ export function pipedGateExitCodeWarning(
     '(redirect to a file and read it if the output is long) — do not rely on the exit code of a piped run.',
   ].join('\n');
 }
+
+/**
+ * 🆕 ANY PIPE, NOT ONLY A GATE TOOL (queue Q-135). `missing-binary | head` exits 0 for every command, and the
+ * gate list above covers only compilers and test runners — so `prisma migrate deploy | tail` on a project
+ * with no prisma installed read as a success. For a non-gate command only the strictest signal counts: the
+ * SHELL's own "not found" line, naming the very program the pipe started with. Output that merely contains
+ * the words (`grep "command not found" app.log | head`) never trips it, because the shell did not write it.
+ * PURE.
+ */
+export function pipedMissingCommandWarning(command: string, output: string): string | null {
+  if (typeof command !== 'string' || !command.replace(/\|\|/g, ' ').includes('|')) return null;
+  const first = (command.replace(/\|\|/g, ' ').split('|')[0] ?? '').trim();
+  // The program the first stage runs: skip `VAR=value` prefixes and `cd x &&` / `sudo` style prefixes.
+  const words = (first.split(/&&|;/).pop() ?? '').trim().split(/\s+/).filter((w) => w && !/^[A-Z_][A-Z0-9_]*=/.test(w));
+  const prog = (words[0] === 'npx' || words[0] === 'sudo' || words[0] === 'exec') ? words[1] : words[0];
+  if (!prog) return null;
+  const name = prog.split('/').pop() ?? prog;
+  const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const shellSaid = new RegExp(
+    `^(?:[\\w./-]*sh|bash|zsh):\\s*(?:(?:line\\s+)?\\d+:\\s*)?(?:\\S*/)?${esc(name)}:\\s*(?:(?:command\\s+)?not found|No such file or directory|Permission denied)`,
+    'mi',
+  );
+  if (!shellSaid.test(String(output ?? '').slice(0, 20000))) return null;
+  return [
+    `⚠️ THIS COMMAND DID NOT RUN. \`${name}\` was not found, and the pipe still exited 0 because its LAST stage`,
+    'succeeded — a pipeline reports the exit status of its last command. Nothing the first stage was meant to do',
+    'happened. Install or fix the program (or use the project\'s own script), and run it WITHOUT a pipe to read its',
+    'real exit status.',
+  ].join('\n');
+}
+

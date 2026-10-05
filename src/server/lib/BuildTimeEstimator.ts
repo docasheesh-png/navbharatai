@@ -9,6 +9,7 @@
 // lower confidence). It never reads the clock — `predictDeadline` takes the start time as input.
 
 import { isComplexAppPrompt, namesBusinessDomain } from './appComplexitySignals';
+import { glossDevanagari, withEnglishReading } from './devanagariTechTerms';
 import { withoutMachineText } from './machineText';
 
 export interface Complexity {
@@ -295,7 +296,11 @@ export function predictDeadline(estimateMs: number, startMs: number): { finishMs
 export function complexityFromPrompt(prompt: string): Complexity {
   // A reference URL's path segments are not modules or features (autopsy 33812996: a Play Store link
   // took the estimate from 2 modules to 6). Read the request with machine text blanked.
-  const text = withoutMachineText(String(prompt || ''), { keepPasted: true });
+  const raw = withoutMachineText(String(prompt || ''), { keepPasted: true });
+  // A Hindi request names its screens and features in Devanagari (Q-104, `devanagariTechTerms.ts`): the
+  // counters read the English gloss ALONE (the two-line form would count every comma twice), the
+  // predicates below read both.
+  const text = glossDevanagari(raw);
   const moduleMatches = text.match(/\b(page|pages|screen|screens|view|views|dashboard|section|sections|tab|tabs|route|routes)\b/gi);
   // Feature signals: list separators + common feature verbs/nouns.
   const featureMatches = text.match(/(?:,|\band\b|\bwith\b|\bplus\b|\n[-*•]|\b(auth|login|signup|search|filter|chart|payment|upload|export|profile|admin|cart|checkout|notification|comment|like|follow)\w*)/gi);
@@ -312,7 +317,8 @@ export function complexityFromPrompt(prompt: string): Complexity {
   // (2026-09-18): "hospital management system" counted 1 module and 1 feature here — magnitude 2, the
   // fast lane, and an ETA sized for a calculator. `namesBusinessDomain` carries the page-scoped and
   // simple-deliverable guards, so "a todo app for my restaurant" is untouched.
-  if (isComplexAppPrompt(text) || namesBusinessDomain(text)) {
+  const readable = withEnglishReading(raw);
+  if (isComplexAppPrompt(readable) || namesBusinessDomain(readable)) {
     moduleCount = clamp(Math.max(moduleCount, 6), 1, 20);
     featureCount = clamp(Math.max(featureCount, 6), 1, 30);
   }

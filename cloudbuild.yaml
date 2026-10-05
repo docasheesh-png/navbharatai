@@ -2,6 +2,59 @@
 # Orchestrated by navBharat AI for enterprise-scale Docker integration.
 
 steps:
+  # Step 0 — THE RELEASE GATE, ON THE PATH THAT ACTUALLY SHIPS (queue row Q-141, 2026-10-04).
+  #
+  # 🔴 WHY THIS HAD TO EXIST. `ReleaseGate.ts` has let an admin freeze releases since P-DEPLOY.5, and
+  # `AppKnowledgeBase.ts` told every AI in NavBharatAI that "the deploy pipeline checks the gate before
+  # promoting and refuses to deploy when the gate is closed." The only check lived in
+  # `.github/workflows/deploy.yml`, behind the GCP_SA_KEY / GCP_PROJECT_ID secrets that are NOT set —
+  # so that workflow deploys nothing and the check never ran. THIS file is what ships every merge, and
+  # it had no gate step at all. An admin freezing during a live incident saw `Frozen: YES` in red and
+  # the next merge deployed anyway.
+  #
+  # FIRST, not just before the deploy: during a freeze there is no reason to pay for a 5-minute Docker
+  # build either.
+  #
+  # ⚠️ INERT UNTIL CONFIGURED, AND THAT IS DELIBERATE. `_RELEASE_GATE_URL` defaults to empty (see
+  # substitutions), so until the admin sets it on the trigger this step prints one line and exits 0.
+  # The ONLY non-zero exit in it is an explicit `"allowed":false` from our own endpoint — an unreachable
+  # gate, a timeout, a 500, an empty body and a malformed body all CONTINUE the deploy. A step that can
+  # fail for any other reason is a step that can stop every deploy, and no session here can run Cloud
+  # Build to prove it would not. The image is the same cloud-sdk one the deploy step below already
+  # ⚠️ Bash variables are written `$$URL` / `$$BODY`: Cloud Build substitutes every `$NAME` in `args` itself and
+  # REJECTS a name that is neither a built-in nor a `_USER` variable — so an un-escaped `$URL` would fail
+  # every build at submit time, before any step ran. `tests/cloudBuildArgsEscapeBashVariables.test.ts`.
+  # pulls, so nothing new has to be fetched for this to work.
+  #
+  # TO TURN IT ON: Cloud Build → Triggers → the trigger → Substitution variables →
+  #   _RELEASE_GATE_URL = https://<the live app host>/api/release/gate
+  # The admin board's Release gate card then reports that a pipeline really asked it.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set +e
+        URL="${_RELEASE_GATE_URL}"
+        if [ -z "$$URL" ]; then
+          echo "Release gate: _RELEASE_GATE_URL is not set on this trigger — no gate check. A freeze will NOT stop this deploy."
+          exit 0
+        fi
+        BODY=$(curl -fsS --max-time 20 "$$URL?sha=$COMMIT_SHA" 2>/dev/null)
+        if [ -z "$$BODY" ]; then
+          echo "Release gate: $$URL did not answer — failing OPEN and continuing the deploy."
+          exit 0
+        fi
+        case "$$BODY" in
+          *'"allowed":false'*|*'"allowed": false'*)
+            echo "RELEASE GATE CLOSED for $COMMIT_SHA — refusing to deploy."
+            echo "$$BODY"
+            exit 1
+            ;;
+        esac
+        echo "Release gate open for $COMMIT_SHA — continuing."
+        exit 0
+
   # P-BRE.5 — Remote build cache. Warm the BuildKit layer cache from the previous `:latest` image in
   # the registry (the registry IS the remote cache — no extra GCS bucket needed). Non-fatal: on the
   # very first build (no `:latest` yet) or a registry hiccup this exits 0 so the deploy never breaks.
@@ -157,6 +210,11 @@ substitutions:
   # EMPTY default = the exact same-origin preview behaviour today (zero change). Override in the Cloud
   # Build trigger (set _VITE_PREVIEW_ORIGIN = https://mitrify.xyz) once the preview subdomain is live.
   _VITE_PREVIEW_ORIGIN: ''
+  # Q-141 — the release gate's URL for Step 0. EMPTY default = no gate check, deploy exactly as today.
+  # ⚠️ It is BOTH declared here and used in Step 0 on purpose: Cloud Build's default MUST_MATCH fails a
+  # build on a substitution that is declared and never used (see the warning below), and equally on one
+  # used and never declared. A test parses this file and asserts both halves.
+  _RELEASE_GATE_URL: ''
   # ⚠️ `_KEEP_IMAGES`, `_PRUNE_MIN_AGE` and `_PRUNE_MAX` were REMOVED with Step 5 (2026-09-18) —
   # nothing reads them any more, and Cloud Build's default `MUST_MATCH` fails a build on a
   # substitution that is declared and never used. If the Cloud Build TRIGGER carries an override for

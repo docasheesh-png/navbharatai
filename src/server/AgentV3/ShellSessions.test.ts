@@ -94,7 +94,7 @@ describe('openShell', () => {
     expect(opened[0].workspaceId).toBe('ws1');
     expect(opened[0].cols).toBe(120);
     expect(opened[0].rows).toBe(40);
-    expect(getShell(r.shell.shellId, 'u1')?.alive).toBe(true);
+    expect(getShell(r.shell.shellId, 'ws1')?.alive).toBe(true);
   });
 
   it('answers no_sandbox — never a fake shell — when the workspace has no PTY host', async () => {
@@ -152,7 +152,7 @@ describe('scrollback and cursors', () => {
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
     opened[0].emit('user@sandbox:/workspace$ ');
-    const read = readShell(r.shell.shellId, 0, 'u1');
+    const read = readShell(r.shell.shellId, 0, 'ws1');
     expect(read?.data).toBe('user@sandbox:/workspace$ ');
     expect(read?.cursor).toBe(25);
   });
@@ -162,10 +162,10 @@ describe('scrollback and cursors', () => {
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
     opened[0].emit('hello ');
-    const first = readShell(r.shell.shellId, 0, 'u1')!;
+    const first = readShell(r.shell.shellId, 0, 'ws1')!;
     expect(first.data).toBe('hello ');
     opened[0].emit('world');
-    const second = readShell(r.shell.shellId, first.cursor, 'u1')!;
+    const second = readShell(r.shell.shellId, first.cursor, 'ws1')!;
     expect(second.data).toBe('world');       // no duplicate of "hello "
     expect(second.truncated).toBe(false);
   });
@@ -177,7 +177,7 @@ describe('scrollback and cursors', () => {
     opened[0].emit('A'.repeat(MAX_SCROLLBACK));
     opened[0].emit('B'.repeat(1000));
 
-    const all = readShell(r.shell.shellId, 0, 'u1')!;
+    const all = readShell(r.shell.shellId, 0, 'ws1')!;
     expect(all.cursor).toBe(MAX_SCROLLBACK + 1000);      // counts everything ever produced
     expect(all.data.length).toBe(MAX_SCROLLBACK);         // holds only the recent tail
     expect(all.data.endsWith('B'.repeat(10))).toBe(true); // the tail is the NEWEST output
@@ -185,7 +185,7 @@ describe('scrollback and cursors', () => {
     // scrollback that silently has a hole in the middle.
     expect(all.truncated).toBe(true);
 
-    const caughtUp = readShell(r.shell.shellId, MAX_SCROLLBACK + 500, 'u1')!;
+    const caughtUp = readShell(r.shell.shellId, MAX_SCROLLBACK + 500, 'ws1')!;
     expect(caughtUp.truncated).toBe(false);
     expect(caughtUp.data).toBe('B'.repeat(500));
   });
@@ -195,7 +195,7 @@ describe('scrollback and cursors', () => {
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
     opened[0].emit('abc');
-    const read = readShell(r.shell.shellId, 999_999, 'u1')!;
+    const read = readShell(r.shell.shellId, 999_999, 'ws1')!;
     expect(read.data).toBe('');
     expect(read.cursor).toBe(3);
   });
@@ -208,8 +208,8 @@ describe('subscribeShell', () => {
     if (!r.ok) throw new Error('open failed');
     const a: string[] = [];
     const b: string[] = [];
-    const offA = subscribeShell(r.shell.shellId, (c) => a.push(c), 'u1')!;
-    subscribeShell(r.shell.shellId, (c) => b.push(c), 'u1');
+    const offA = subscribeShell(r.shell.shellId, (c) => a.push(c), 'ws1')!;
+    subscribeShell(r.shell.shellId, (c) => b.push(c), 'ws1');
 
     opened[0].emit('one');
     offA();
@@ -224,17 +224,17 @@ describe('subscribeShell', () => {
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
     const good: string[] = [];
-    subscribeShell(r.shell.shellId, () => { throw new Error('reader exploded'); }, 'u1');
-    subscribeShell(r.shell.shellId, (c) => good.push(c), 'u1');
+    subscribeShell(r.shell.shellId, () => { throw new Error('reader exploded'); }, 'ws1');
+    subscribeShell(r.shell.shellId, (c) => good.push(c), 'ws1');
 
     expect(() => opened[0].emit('still works')).not.toThrow();
     expect(good).toEqual(['still works']);
     // Output still reached the scrollback, so a reconnecting reader loses nothing.
-    expect(readShell(r.shell.shellId, 0, 'u1')?.data).toBe('still works');
+    expect(readShell(r.shell.shellId, 0, 'ws1')?.data).toBe('still works');
   });
 
   it('refuses to subscribe to an unknown shell', () => {
-    expect(subscribeShell('sh_nope', () => {}, 'u1')).toBeUndefined();
+    expect(subscribeShell('sh_nope', () => {}, 'ws1')).toBeUndefined();
   });
 });
 
@@ -243,7 +243,7 @@ describe('input, resize and interrupt', () => {
     const { host, writes } = fakeHost();
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
-    expect(await writeShell(r.shell.shellId, 'ls -la\r', 'u1')).toBe(true);
+    expect(await writeShell(r.shell.shellId, 'ls -la\r', 'ws1')).toBe(true);
     expect(writes).toEqual([{ pid: r.shell.pid, data: 'ls -la\r' }]);
   });
 
@@ -253,7 +253,7 @@ describe('input, resize and interrupt', () => {
     const { host, writes } = fakeHost();
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
-    await writeShell(r.shell.shellId, '\x03', 'u1');
+    await writeShell(r.shell.shellId, '\x03', 'ws1');
     expect(writes[0].data).toBe('\x03');
   });
 
@@ -261,7 +261,7 @@ describe('input, resize and interrupt', () => {
     const { host, writes } = fakeHost();
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
-    await writeShell(r.shell.shellId, 'x'.repeat(MAX_INPUT_CHARS * 3), 'u1');
+    await writeShell(r.shell.shellId, 'x'.repeat(MAX_INPUT_CHARS * 3), 'ws1');
     expect(writes[0].data.length).toBe(MAX_INPUT_CHARS);
   });
 
@@ -270,14 +270,14 @@ describe('input, resize and interrupt', () => {
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
     vi.spyOn(host, 'writePty').mockRejectedValueOnce(new Error('sandbox gone'));
-    expect(await writeShell(r.shell.shellId, 'ls', 'u1')).toBe(false);
+    expect(await writeShell(r.shell.shellId, 'ls', 'ws1')).toBe(false);
   });
 
   it('forwards a resize so column-drawn output wraps correctly', async () => {
     const { host, resizes } = fakeHost();
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
-    expect(await resizeShell(r.shell.shellId, 200, 50, 'u1')).toBe(true);
+    expect(await resizeShell(r.shell.shellId, 200, 50, 'ws1')).toBe(true);
     expect(resizes).toEqual([{ pid: r.shell.pid, cols: 200, rows: 50 }]);
   });
 
@@ -286,8 +286,8 @@ describe('input, resize and interrupt', () => {
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
     opened[0].exit(0);
-    expect(await writeShell(r.shell.shellId, 'ls', 'u1')).toBe(false);
-    expect(await resizeShell(r.shell.shellId, 100, 30, 'u1')).toBe(false);
+    expect(await writeShell(r.shell.shellId, 'ls', 'ws1')).toBe(false);
+    expect(await resizeShell(r.shell.shellId, 100, 30, 'ws1')).toBe(false);
     expect(writes).toHaveLength(0);
   });
 });
@@ -300,11 +300,11 @@ describe('exit', () => {
     opened[0].emit('bye\r\n');
     opened[0].exit(1);
 
-    const s = getShell(r.shell.shellId, 'u1')!;
+    const s = getShell(r.shell.shellId, 'ws1')!;
     expect(s.alive).toBe(false);
     expect(s.exitCode).toBe(1);
     // The user must SEE that the process ended, not watch a terminal that just stops responding.
-    expect(readShell(r.shell.shellId, 0, 'u1')?.data).toContain('process exited with code 1');
+    expect(readShell(r.shell.shellId, 0, 'ws1')?.data).toContain('process exited with code 1');
   });
 
   it('handles an exit with no code without printing "undefined"', async () => {
@@ -312,7 +312,7 @@ describe('exit', () => {
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
     opened[0].exit(undefined);
-    const out = readShell(r.shell.shellId, 0, 'u1')!.data;
+    const out = readShell(r.shell.shellId, 0, 'ws1')!.data;
     expect(out).toContain('process exited');
     expect(out).not.toContain('undefined');
   });
@@ -325,17 +325,17 @@ describe('ownership', () => {
     if (!r.ok) throw new Error('open failed');
     const id = r.shell.shellId;
 
-    expect(getShell(id, 'intruder')).toBeUndefined();
-    expect(readShell(id, 0, 'intruder')).toBeUndefined();
-    expect(subscribeShell(id, () => {}, 'intruder')).toBeUndefined();
-    expect(await writeShell(id, 'rm -rf /', 'intruder')).toBe(false);
-    expect(await resizeShell(id, 10, 10, 'intruder')).toBe(false);
-    expect(await closeShell(id, 'intruder')).toBe(false);
+    expect(getShell(id, 'ws-intruder')).toBeUndefined();
+    expect(readShell(id, 0, 'ws-intruder')).toBeUndefined();
+    expect(subscribeShell(id, () => {}, 'ws-intruder')).toBeUndefined();
+    expect(await writeShell(id, 'rm -rf /', 'ws-intruder')).toBe(false);
+    expect(await resizeShell(id, 10, 10, 'ws-intruder')).toBe(false);
+    expect(await closeShell(id, 'ws-intruder')).toBe(false);
 
     // Nothing reached the sandbox, and the owner's shell is untouched.
     expect(writes).toHaveLength(0);
     expect(kills).toHaveLength(0);
-    expect(getShell(id, 'owner')?.alive).toBe(true);
+    expect(getShell(id, 'ws1')?.alive).toBe(true);
   });
 });
 
@@ -344,9 +344,9 @@ describe('closeShell', () => {
     const { host, kills } = fakeHost();
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
-    expect(await closeShell(r.shell.shellId, 'u1')).toBe(true);
+    expect(await closeShell(r.shell.shellId, 'ws1')).toBe(true);
     expect(kills).toEqual([r.shell.pid]);
-    expect(getShell(r.shell.shellId, 'u1')).toBeUndefined();
+    expect(getShell(r.shell.shellId, 'ws1')).toBeUndefined();
     expect(shellCount()).toBe(0);
   });
 
@@ -358,7 +358,7 @@ describe('closeShell', () => {
       if (r.ok) ids.push(r.shell.shellId);
     }
     expect((await openShell('ws1', host, { userId: 'u1' })).ok).toBe(false);
-    await closeShell(ids[0], 'u1');
+    await closeShell(ids[0], 'ws1');
     expect((await openShell('ws1', host, { userId: 'u1' })).ok).toBe(true);
   });
 
@@ -367,7 +367,7 @@ describe('closeShell', () => {
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
     vi.spyOn(host, 'killPty').mockRejectedValueOnce(new Error('sandbox already gone'));
-    expect(await closeShell(r.shell.shellId, 'u1')).toBe(true);
+    expect(await closeShell(r.shell.shellId, 'ws1')).toBe(true);
     expect(shellCount()).toBe(0); // "already gone" is still closed — never a stuck ghost session
   });
 });
@@ -397,10 +397,10 @@ describe('sweepShells', () => {
     const { host, kills } = fakeHost();
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) throw new Error('open failed');
-    subscribeShell(r.shell.shellId, () => {}, 'u1');
+    subscribeShell(r.shell.shellId, () => {}, 'ws1');
     expect(await sweepShells(Date.now() + IDLE_TIMEOUT_MS * 10)).toBe(0);
     expect(kills).toHaveLength(0);
-    expect(getShell(r.shell.shellId, 'u1')?.alive).toBe(true);
+    expect(getShell(r.shell.shellId, 'ws1')?.alive).toBe(true);
   });
 
   it('leaves a recently-used shell alone', async () => {
@@ -443,7 +443,7 @@ describe('the sandbox idle clock — a watched terminal must never be paused mid
       const r = await openShell('ws1', host, { userId: 'u1' });
       expect(r.ok).toBe(true);
       if (!r.ok) return;
-      subscribeShell(r.shell.shellId, () => {}, 'u1');
+      subscribeShell(r.shell.shellId, () => {}, 'ws1');
       notes.length = 0; // the subscribe itself notes; this test is about the OUTPUT
 
       // Four minutes of install chatter, past the 5-minute idle limit that used to pause the VM.
@@ -462,7 +462,7 @@ describe('the sandbox idle clock — a watched terminal must never be paused mid
     const { host, notes } = fakeHost();
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) return;
-    subscribeShell(r.shell.shellId, () => {}, 'u1');
+    subscribeShell(r.shell.shellId, () => {}, 'ws1');
     expect(notes).toEqual(['ws1']);
   });
 
@@ -474,7 +474,7 @@ describe('the sandbox idle clock — a watched terminal must never be paused mid
       const { host, opened, notes } = fakeHost();
       const r = await openShell('ws1', host, { userId: 'u1' });
       if (!r.ok) return;
-      subscribeShell(r.shell.shellId, () => {}, 'u1');
+      subscribeShell(r.shell.shellId, () => {}, 'ws1');
       notes.length = 0;
 
       vi.setSystemTime(new Date('2026-08-17T10:01:00Z'));
@@ -499,7 +499,7 @@ describe('the sandbox idle clock — a watched terminal must never be paused mid
     const { host, opened, notes } = fakeHost();
     const r = await openShell('ws1', host, { userId: 'u1' });
     if (!r.ok) return;
-    const off = subscribeShell(r.shell.shellId, () => {}, 'u1');
+    const off = subscribeShell(r.shell.shellId, () => {}, 'ws1');
     off?.();
     notes.length = 0;
     opened[0].emit('output with nobody home\r\n');
@@ -519,9 +519,9 @@ describe('the sandbox idle clock — a watched terminal must never be paused mid
     const r = await openShell('ws1', bare, { userId: 'u1' });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    subscribeShell(r.shell.shellId, () => {}, 'u1');
+    subscribeShell(r.shell.shellId, () => {}, 'ws1');
     expect(() => opened[0].emit('hello\r\n')).not.toThrow();
-    expect(readShell(r.shell.shellId, 0, 'u1')?.data).toBe('hello\r\n');
+    expect(readShell(r.shell.shellId, 0, 'ws1')?.data).toBe('hello\r\n');
   });
 
   it('a throwing noteActivity can never break the output stream', async () => {
@@ -529,9 +529,9 @@ describe('the sandbox idle clock — a watched terminal must never be paused mid
     const hostile: PtyHost = { ...host, noteActivity() { throw new Error('sandbox gone'); } };
     const r = await openShell('ws1', hostile, { userId: 'u1' });
     if (!r.ok) return;
-    subscribeShell(r.shell.shellId, () => {}, 'u1');
+    subscribeShell(r.shell.shellId, () => {}, 'ws1');
     expect(() => opened[0].emit('output survives\r\n')).not.toThrow();
-    expect(readShell(r.shell.shellId, 0, 'u1')?.data).toBe('output survives\r\n');
+    expect(readShell(r.shell.shellId, 0, 'ws1')?.data).toBe('output survives\r\n');
   });
 
   it('the note interval stays comfortably under the tightest idle limit', () => {

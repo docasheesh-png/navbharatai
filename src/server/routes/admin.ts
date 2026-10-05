@@ -100,6 +100,7 @@ import { windowSnapshot, sinceBootScope } from '../lib/windowSnapshot';
 import { assessDeployRisk, analyzeIncident } from '../AppMakerLab/deployment/DeployRiskAdvisor';
 import { releaseGateStore } from '../lib/ReleaseGateStore';
 import { normalizeGateConfig } from '../lib/ReleaseGate';
+import { DEPLOY_PATHS, freezeEnforcementNote, freezeWouldNotHold } from '../lib/releaseGateEnforcement';
 import { aggregateProviderLatency, type SpanLike } from '../lib/Percentiles';
 import { tracer } from '../observability/Tracer';
 import { analyzeSeries, type Point } from '../lib/AnomalyDetector';
@@ -170,6 +171,7 @@ import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
 import { walletPassesPaidFilter } from '../lib/adminUserListQuery';
 import { parsePaidFilter, parseSortDirection, directed } from '../../lib/adminUserSort';
 import { isRevenueRow, purchaseRow, filterPurchases, sortPurchases, summarisePurchases, type PurchaseRowWithUser, type PurchaseStatusFilter, type PurchaseSort } from '../lib/purchaseLedger';
+import { hopReport } from '../lib/proxyHops';
 
 /**
  * Admin dashboard routes extracted from the server.ts monolith (Phase 1).
@@ -609,8 +611,21 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   });
 
   // P-DEPLOY.5 — read/update the release freeze/approval gate (admin-gated).
+  // Q-141 — `Frozen: YES` in red is a TRUE reading of a control that may be connected to nothing, which
+  // is worse than a faked one. Every read carries the honest sentence about whether a freeze would hold,
+  // derived from whether a deploy pipeline has really asked the gate — evidence, not a claim.
   app.get('/api/admin/release-gate', verifyAdminToken, async (_req: Request, res: Response) => {
-    res.json({ config: await releaseGateStore.get(), generatedAt: Date.now() });
+    const [config, lastChecked] = await Promise.all([
+      releaseGateStore.get(),
+      releaseGateStore.lastChecked().catch(() => null),
+    ]);
+    res.json({
+      config,
+      lastChecked,
+      enforcement: freezeEnforcementNote(lastChecked, Date.now()),
+      deployPaths: DEPLOY_PATHS,
+      generatedAt: Date.now(),
+    });
   });
   app.post('/api/admin/release-gate', verifyAdminToken, async (req: Request, res: Response) => {
     const config = normalizeGateConfig({ ...(req.body ?? {}), updatedAtMs: Date.now(), updatedBy: 'admin' });
@@ -622,7 +637,15 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       admin: adminUsername(), before: before ?? 'unknown', after: config, result: ok ? 'ok' : 'not-saved', ip: req.ip,
     });
     if (!ok) return res.status(503).json({ error: 'Could not persist the release gate (storage unavailable).' });
-    res.json({ ok: true, config });
+    // An admin who freezes during an incident must be told, in the same answer, whether the freeze will
+    // actually hold — not discover afterwards that the next merge shipped anyway (Q-141).
+    const lastChecked = await releaseGateStore.lastChecked().catch(() => null);
+    res.json({
+      ok: true,
+      config,
+      enforcement: freezeEnforcementNote(lastChecked, Date.now()),
+      warning: freezeWouldNotHold(config) ? freezeEnforcementNote(lastChecked, Date.now()) : undefined,
+    });
   });
 
   // ── MONITOR (2026-08-23) — the admin home page's single data call. ────────────────────────────
@@ -754,6 +777,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         points: [], summary: null, providers: {},
       },
     });
+  });
+
+  // Q-154 — measure the proxy hop count instead of guessing it (see proxyHops.ts). The ADMIN's own request only.
+  app.get('/api/admin/proxy-hops', verifyAdminToken, (req: Request, res: Response) => {
+    res.json(hopReport(req.headers['x-forwarded-for'], req.socket?.remoteAddress));
   });
 
   // G2 — daily metrics history (last N days of persisted MetricsSnapshots).

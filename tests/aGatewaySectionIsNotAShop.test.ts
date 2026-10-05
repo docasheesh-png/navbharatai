@@ -122,6 +122,22 @@ describe('💳 the mechanism, asked directly', () => {
     }
   });
 
+  it('stands down for a Hindi shop too — and the first draft of that could never have fired', () => {
+    // ⚠️ `\b(?:…|कार्ट|दुकान)\b` makes both Hindi alternatives UNMATCHABLE (`\b` is an ASCII word
+    // boundary), and the repo's own census failed the build on exactly that — the #3509 class. These
+    // two cases are why the runs are bounded by Devanagari lookaround instead.
+    const hindiShop = 'दुकान के लिए ऐप, कार्ट के साथ. Use Stripe Checkout and capture orders on the backend.';
+    const out = stripNonDomainUses(hindiShop);
+    expect(out).toMatch(/checkout/i);
+    expect(out).toMatch(/order/i);
+  });
+
+  it('…without सामान matching inside सामान्य — the Sur Taal bug it would otherwise re-create', () => {
+    // "समर्थित सामान्य Audio Formats" (supported COMMON audio formats) must not read as goods.
+    const player = 'एक म्यूजिक प्लेयर ऐप, समर्थित सामान्य Audio Formats. Use Stripe Checkout, capture orders.';
+    expect(stripNonDomainUses(player)).not.toMatch(/checkout/i);
+  });
+
   it('only ever deletes, so it can never invent a domain', () => {
     const p = 'a clinic app. Use Stripe Checkout and capture orders on the backend.';
     expect(stripNonDomainUses(p).length).toBeLessThanOrEqual(p.length);

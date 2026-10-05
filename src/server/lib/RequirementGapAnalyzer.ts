@@ -643,7 +643,21 @@ const PAYMENT_GATEWAY_CONTEXT = /\b(?:stripe|paypal|razorpay|cashfree|payu|phone
 /** The two words a gateway section contributes that mean "a shop" nowhere else. */
 const GATEWAY_COMMERCE_WORDS = /\b(?:checkouts?|orders?)\b/gi;
 /** Evidence the app really sells goods, which makes those words its own after all. */
-const SELLS_GOODS = /\b(?:carts?|add\s+to\s+cart|product\s+(?:catalog(?:ue)?s?|listings?|pages?|variants?)|products?\b(?!\s+(?:owner|manager|team)\b)|inventor(?:y|ies)|stock\s+levels?|skus?|shipping|delivery\s+address(?:es)?|warehouses?|shops?|stores?|merchandise|dropship\w*|e-?commerce|कार्ट|दुकान)\b/i;
+/**
+ * ⚠️ THE DEVANAGARI RUNS SIT OUTSIDE THE `\b` GROUP, AND THE FIRST DRAFT GOT IT WRONG. Writing
+ * `\b(?:carts?|…|कार्ट|दुकान)\b` makes both Hindi alternatives unmatchable — `\b` is an ASCII word
+ * boundary, so there is no boundary beside a Devanagari letter — and the repo's own census
+ * (`tests/aWordBoundaryCanSeeHindi.test.ts`, the #3509 class) failed the build on it. They are bounded
+ * the way this file bounds every Devanagari signal instead: no Devanagari letter before, and no virama
+ * after, so `सामान` does not match inside `सामान्य` while `दुकानों` still does.
+ */
+const SELLS_GOODS = new RegExp(
+  '\\b(?:carts?|add\\s+to\\s+cart|product\\s+(?:catalog(?:ue)?s?|listings?|pages?|variants?)'
+  + '|products?\\b(?!\\s+(?:owner|manager|team)\\b)|inventor(?:y|ies)|stock\\s+levels?|skus?|shipping'
+  + '|delivery\\s+address(?:es)?|warehouses?|shops?|stores?|merchandise|dropship\\w*|e-?commerce)\\b'
+  + '|(?<![\\u0900-\\u097F])(?:कार्ट|दुकान|सामान|उत्पाद)(?!\\u094D)',
+  'i',
+);
 
 const GENERIC_FEATURES: Array<{ label: string; re: RegExp }> = [
   { label: 'user authentication', re: /auth|login|sign.?in|sign.?up|account|user/i },

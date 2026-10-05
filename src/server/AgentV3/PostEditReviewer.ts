@@ -13,6 +13,8 @@
 // Wired into ToolDispatcher so the model sees the review appended to the
 // tool_result and can immediately apply a fix in the same turn.
 
+import { lineLogsCredential } from './ComplianceAnalysis';
+
 export interface PostEditReview {
   /** Human-readable issues found (each a short one-liner). */
   issues: string[];
@@ -28,7 +30,6 @@ const COMMON_TYPOS: Array<[RegExp, string]> = [
   [/\buseContextt\b/g, 'useContext'],
   [/\buseCallbackk\b/g, 'useCallback'],
   [/\buseMemmmo\b/g, 'useMemo'],
-  [/\bconsole\.log\b[^;]*\bpassword\b/gi, 'password printed to console'],
 ];
 
 // Symbols that suggest a commonly-missing import.
@@ -70,6 +71,12 @@ export function reviewEdit(file: string, content: string): PostEditReview {
     if (re.test(content)) issues.push(`Possible typo: should be "${fix}".`);
     re.lastIndex = 0;
   }
+
+  // A credential's VALUE printed to the console — the shared detector, never the word in a label (Q-150).
+  // This used to be a "typo" entry above matching `console.log … password` across lines, so
+  // `console.log('Failed to reset password', err)` read: Possible typo: should be "password printed to console".
+  const credentialLine = content.split('\n').findIndex((l) => lineLogsCredential(l));
+  if (credentialLine >= 0) issues.push(`Line ${credentialLine + 1} prints a credential's value to the console — remove that log.`);
 
   // 3. Missing imports for frequently-used symbols (JSX files only).
   if (isJsx(file)) {

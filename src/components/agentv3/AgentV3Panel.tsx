@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
+import { stopVersionPreview } from '../../lib/versionPreviewStop';
 import { CONTINUE_INTERRUPTED_BUILD_PROMPT, CONTINUE_PAST_BUDGET_PROMPT, CONTINUE_AND_FIX_BUILD_PROMPT } from '../../lib/continueBuildPrompts';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { publicTierLabel } from '../../lib/engineLabels';
@@ -5855,7 +5856,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               <PreviewSurface
                 versionUrl={versionView?.url}
                 versionSha={versionView?.sha}
-                onExitVersion={() => setVersionView(null)}
+                onExitVersion={() => { void stopVersionPreview({ workspaceId: state.workspaceId, sha: versionView?.sha, userId, email }); setVersionView(null); }}
                 url={state.previewUrl}
                 snapshotUrl={state.snapshotUrl}
                 snapshotIdleNote={state.snapshotNote}

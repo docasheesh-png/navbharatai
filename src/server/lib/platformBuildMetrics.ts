@@ -30,10 +30,9 @@ export interface PlatformBuildRecord {
   /**
    * Per-provider token totals for the whole build, already reconciled against the billing sink.
    *
-   * NOTE ON `requests`: this is a per-build, per-provider AGGREGATE, so it produces one recorded
-   * model-call entry per provider per build — not the true number of individual API calls. Token and
-   * cost totals are exact; a per-call count is not available here and is deliberately not invented.
-   * The real per-call counts live in `/api/admin/llm-latency`, which reads the trace spans.
+   * NOTE ON `requests`: this is a per-build, per-provider AGGREGATE of TOKENS. The Monitor's request count
+   * comes from `providerCalls` below (Q-164) — it used to add exactly ONE per provider per build, so a
+   * build that made 40 calls to one provider showed one request.
    */
   providerUsage: Record<string, { inputTokens: number; outputTokens: number }>;
   /**
@@ -60,6 +59,11 @@ export interface PlatformBuildRecord {
    * Optional: absent ⇒ the old provider-only pricing, byte-identical to before.
    */
   providerEntries?: ReadonlyArray<ProviderModelEntry>;
+  /**
+   * How many model calls each provider answered in this build (`ProviderUsageLedger.callsByProvider`).
+   * Absent, or absent for a provider ⇒ that provider counts as ONE request, exactly as before.
+   */
+  providerCalls?: Record<string, number>;
   /**
    * Real E2B VM seconds this build held — OUR infrastructure cost, not the user's bill. It is measured
    * whether or not sandbox billing is switched on, because NavBharatAI pays for the VM either way and
@@ -161,7 +165,9 @@ export function recordPlatformBuild(rec: PlatformBuildRecord): void {
   try {
     const metrics = getMetrics();
     for (const row of priceProviderUsage(rec.providerUsage, rec.providerEntries)) {
-      metrics.recordModelCall(row.provider, row.inputTokens, row.outputTokens, row.costUsd);
+      const n = rec.providerCalls?.[row.provider];
+      metrics.recordModelCall(row.provider, row.inputTokens, row.outputTokens, row.costUsd,
+        typeof n === 'number' && Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1);
     }
     metrics.recordBuild({
       ok: rec.ok,

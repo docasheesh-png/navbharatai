@@ -34,7 +34,7 @@ const SNIPPET_MAX = 120;
 // Sensitive tokens that must never be logged or stored in plaintext on the client.
 // Deliberately high-precision (no bare "email"/"phone" — too noisy) so a hit is a
 // real data-protection problem, not a guess.
-const SENSITIVE = /\b(password|passwd|aadhaar|aadhar|\bpan\b|cvv|\bssn\b|credit[_-]?card|card[_-]?number|otp|secret|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|private[_-]?key|passport)\b/i;
+const SENSITIVE = /\b(password|passwd|aadhaar|aadhar|\bpan\b|cvv|\bssn\b|credit[_-]?card|card[_-]?number|otp|secret|api[_\s-]?key|apikey|access[_-]?token|refresh[_-]?token|private[_-]?key|passport)\b/i;
 
 // A client-side console.* sink — the sink that must never receive a credential/token.
 export const CONSOLE_CALL = /\bconsole\.(log|info|warn|error|debug)\s*\(/;

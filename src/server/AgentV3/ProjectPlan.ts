@@ -22,6 +22,7 @@ import { isPlatformContinuePrompt } from '../../lib/continueBuildPrompts';
 import type { TodoItem, TodoStatus } from './types';
 import { parseEnvFlag } from '../lib/envFlag';
 import { countEnumeratedFeatures, sectionedSpecSize, BIG_SOFTWARE_NOUN, SPEC_FEATURE_COUNT } from './enumeratedFeatures';
+import { withEnglishReading } from '../lib/devanagariTechTerms';
 import { STARTER_ENTRY_PATHS } from './stillTheStarterApp';
 
 export type ModuleStatus = 'pending' | 'in_progress' | 'done' | 'failed';
@@ -169,7 +170,9 @@ export interface MegaProjectSignals {
  * PURE.
  */
 export function megaProjectSignals(prompt: string): MegaProjectSignals {
-  const text = (prompt || '').toLowerCase();
+  // Predicates read the Hindi request in English too ("स्कूल मैनेजमेंट सिस्टम", "50 पेज" — Q-104,
+  // `devanagariTechTerms.ts`); the feature COUNT below reads the prompt itself, never the doubled form.
+  const text = withEnglishReading(prompt || '').toLowerCase();
   const scaleMatch = text.match(/(\d{2,6})\s*\+?\s*(?:files?|pages?|screens?|modules?)/);
   const scale = scaleMatch ? Number(scaleMatch[1]) : 0;
   // A spec in numbered sections is sized by its sections, not by each section's bullets (autopsy Sur

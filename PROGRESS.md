@@ -90153,3 +90153,30 @@ The builder prompt now names it ("never a box with a cone on top").
 - The look is stylised-realistic, built from code: the car is still built from boxes and people are blocky.
 - The distant mountain reads bluish under day fog; that is aerial haze, not a bug.
 - Real GPU-generated assets are a money decision for the admin.
+
+### 2026-10-05 (same PR) — the camera sits BEHIND what the player drives
+
+The admin reported: *"gadi ka front side dikhta hai, jisse button ulte kaam karte hai… game ka backside dikhna chahiye"* ("the car's front is visible, so the buttons work in reverse… the back of the car should be visible").
+
+**Root cause, measured by running the models:** every model faces its local +Z (car headlights at z = +2.16, the bikes' steering heads and the animals' heads are on +Z too). Two things then combined against the player:
+- `CameraRig` places the third-person camera at +Z of its target, which is IN FRONT of the car, and it reads only the target's position, never its heading;
+- the runtime's up key is `axis.y = −1`, so a game that used `axis.y` as throttle drove backwards on W.
+
+Together the car drove at the camera with every control mirrored.
+
+**Fix, at the class:**
+- `MODEL_FORWARD` (+Z) names the one convention.
+- `CameraRig.follow(object, dt)` and a `'chase'` kind put the camera behind the object's real heading every frame and keep the rig's yaw in step.
+- `createVehicleState` and `driveVehicle(vehicle, state, input.axis(), dt)` take the RAW axis and own the signs: W forward, S brake then reverse, A/D turn to the driver's left/right, steering inverts in reverse and fades in with speed. Default start speed is 5 m/s, per the "a vehicle starts moving" rule.
+- The shell has `ctx.follow(vehicle)`.
+- The builder prompt carries a 🚗 rule: never `rig.update(vehicle.position)`, never flip a control or mirror a model.
+
+**Proof:** 7 new executable cases in `tests/the3DLayerDrawsWhatItPromises.test.ts`:
+- at four headings the tail lights are nearer the camera than the headlights;
+- with the raw axis, W moves the car away from the camera, D goes screen-right and A screen-left;
+- an untouched car keeps moving, and S brakes then reverses;
+- the shell follows with the chase rig.
+
+Reversion: placing the camera in front fails 5 of them; flipping the throttle sign fails 2. A real render from the chase rig shows the car's tail lights, and a right turn bends right on screen.
+
+**Open (recorded, not done):** a walking character still starts facing the camera until the first move. Changing the rig's default yaw would flip the world's "ahead" (−Z) for every existing shell game, and the admin's report was about vehicles, so it is left for an explicit decision.

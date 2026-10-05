@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  appStatusView, canUnpublish, canBan, matchesAppQuery, confirmCopy, type AppRow,
+  appStatusView, canUnpublish, canBan, matchesAppQuery, confirmCopy, isRestorableStatus, MODERATION_ROUTE, type AppRow,
 } from '../src/lib/adminAppModeration';
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
@@ -111,9 +111,12 @@ describe('confirmCopy — the last thing read before a permanent act', () => {
     expect(ban.cta).not.toBe(un.cta);
   });
 
-  it('the ban says it cannot be undone, and points at the reversible option instead', () => {
-    expect(ban.body.toLowerCase()).toContain('cannot be undone');
+  it('the ban says the owner can never publish again, that only an admin can lift it, and points at the reversible option', () => {
+    // ⚠️ CHANGED 2026-10-05 (admin panel audit, PR 3), deliberately: this used to require "cannot be undone".
+    // The restore route always existed — it simply had no button — so that sentence was already untrue for
+    // anyone with a terminal. Now Restore is on the screen, and the copy says what is actually so.
     expect(ban.body.toLowerCase()).toContain('never publish again');
+    expect(ban.body.toLowerCase()).toContain('only an admin can lift');
     expect(ban.body.toLowerCase()).toContain('unpublish');
   });
 
@@ -136,7 +139,7 @@ describe('the wiring — the capability must actually be reachable', () => {
   const panel = read('src/components/admin/BuiltAppsPanel.tsx');
 
   it('the client calls BOTH server routes — the bug was that nothing called either', () => {
-    expect(admin).toContain("action === 'ban' ? 'takedown' : 'unpublish'");
+    expect(admin).toContain('const path = MODERATION_ROUTE[action];');
     expect(admin).toContain('/api/admin/deployments/');
     expect(panel).toContain('/api/admin/apps?');
   });
@@ -172,7 +175,8 @@ describe('the wiring — the capability must actually be reachable', () => {
 
   it('the panel renders the ban in red and asks for a reason before it can run', () => {
     expect(admin).toContain('confirmCopy(moderating.action)');
-    expect(admin).toContain("const reasonMissing = isBan && !moderateReason.trim()");
+    // Every action needs the admin's own reason — the same function the server refuses with.
+    expect(admin).toContain("const reasonMissing = !('reason' in readAdminReason(moderateReason));");
     expect(admin).toContain('disabled={moderateBusy || reasonMissing}');
   });
 
@@ -180,5 +184,53 @@ describe('the wiring — the capability must actually be reachable', () => {
     // On a moderation screen, "no built apps" over a failed read is the worst possible lie.
     expect(panel).toContain('Could not read the built-app list.');
     expect(panel).toContain('if (!opts.append) setRows(null);');
+  });
+});
+
+describe('Restore — a mistaken ban can be undone from the screen (admin panel audit, PR 3)', () => {
+  const admin = read('src/components/AdminDashboard.tsx');
+  const route = read('src/server/routes/admin.ts');
+  const panel = read('src/components/admin/BuiltAppsPanel.tsx');
+  const restoreBlock = route.slice(route.indexOf("'/api/admin/deployments/:workspaceId/restore'"), route.indexOf("'/api/admin/deployments/:workspaceId/restore'") + 1500);
+
+  it('is offered only on a ban or an automatic hold — never on a live, offline or paused app', () => {
+    expect(isRestorableStatus('taken_down')).toBe(true);
+    expect(isRestorableStatus('held')).toBe(true);
+    for (const s of ['active', 'unpublished', 'plan_paused', undefined, null, '']) expect(isRestorableStatus(s as any)).toBe(false);
+  });
+
+  it('each action has its own route, and its own words', () => {
+    expect(MODERATION_ROUTE).toEqual({ unpublish: 'unpublish', ban: 'takedown', restore: 'restore' });
+    const r = confirmCopy('restore');
+    expect(r.title).not.toBe(confirmCopy('ban').title);
+    expect(r.body.toLowerCase()).toContain('owner can publish');
+    expect(r.body.toLowerCase()).toContain('stays offline');
+  });
+
+  it('the panel shows Restore by the same rule the server refuses with', () => {
+    expect(panel).toContain("isRestorableStatus(d.status) && (");
+    expect(panel).toContain("onModerate(d.workspaceId, 'restore')");
+    expect(restoreBlock).toContain('isRestorableStatus(before)');
+    expect(restoreBlock).toContain('409');
+  });
+
+  it('marks the app unpublished, not live — the ban deleted the site, so "active" would be a lie', () => {
+    expect(restoreBlock).toContain("setStatus(workspaceId, 'unpublished')");
+    expect(restoreBlock).not.toContain("setStatus(workspaceId, 'active')");
+  });
+
+  it('ban, unpublish and restore all require the admin\'s own reason on the server, and audit who did it', () => {
+    for (const [path, event] of [['takedown', 'ADMIN_APP_TAKEDOWN'], ['unpublish', 'ADMIN_APP_UNPUBLISH'], ['restore', 'ADMIN_APP_RESTORED']]) {
+      const at = route.indexOf(`'/api/admin/deployments/:workspaceId/${path}'`);
+      const block = route.slice(at, at + 2200);
+      expect(block, path).toContain('readAdminReason((req.body ?? {}).reason)');
+      expect(block, path).toMatch(new RegExp(`audit\\('${event}', \\{ admin: adminUsername\\(\\)`));
+    }
+    expect(admin).toContain('Reason (required)');
+  });
+
+  it('the held line names the one thing that holds an app — the publish-time safety scan', () => {
+    expect(appStatusView('held').meaning.toLowerCase()).toContain('safety scan');
+    expect(appStatusView('held').meaning.toLowerCase()).not.toContain('outside address');
   });
 });

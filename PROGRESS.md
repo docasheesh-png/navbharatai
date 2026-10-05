@@ -90032,6 +90032,46 @@ history links; their unit tests stay.
 **Watch after deploy:** a picture should arrive on the first press. If Paid itself fails, the admin diagnostic now
 names the paid rungs, not the free door.
 
+
+## 2026-10-05 — Admin panel audit, PR 3: restore, gallery review, App Check, audit log (admin: "1 karo")
+
+PR 3 covers four server capabilities that existed with no screen, plus the two server items PR 1/2 recorded for it.
+
+- **Restore a banned or held app.** `POST /api/admin/deployments/:id/restore` existed, but no screen called it, so a mistaken ban could not be undone in the app.
+  - Built apps now show **Restore** on a Banned or Held row. The screen and the server read the same rule (`isRestorableStatus`).
+  - A restore marks the app `unpublished`, never `active`: the ban had deleted the live site, so "active" would be a lie. The owner can then publish again.
+  - Any other status is refused with 409.
+  - The ban copy no longer says "cannot be undone".
+  - The Held line no longer blames "an outside address reported unsafe". The only code that holds an app is the publish-time safety scan, and the line now says that.
+- **Ban, unpublish and restore need the admin's own reason** (`readAdminReason`, server-side), and their audit lines carry the admin's name. Recorded for PR 3 by PR 1.
+- **Gallery review.** `GalleryReviewQueue` (inside the Gallery screen) shipped with #3534. The admin Review page still said "Not available yet"; it now opens that queue.
+- **Every store-admin decision is audited.** Before this, the gallery review, the App Mart APK and web reviews, and an admin removing someone else's comment wrote no audit line.
+  - `tests/everyAdminDecisionIsAudited.test.ts` is a census across every route file: an admin-guarded write with no `audit(` fails CI. Proven by reversion.
+- **App Check card** (`GET /api/admin/app-check` had no screen).
+  - It shows per-website and per-phone counts, plus a one-line verdict on whether enforce would refuse anyone (`appCheckReadiness.ts`).
+  - The counts are labelled per server instance.
+- **Audit log screen.**
+  - Admin actions are copied by `audit()` into `admin_audit_log`, a collection holding nothing else. This makes newest-first paging exact without a composite index; `server_logs` would have returned an unordered 500.
+  - `GET /api/admin/audit-log` and `AdminAuditLogPanel` show who, what, on what, why and the result, 50 at a time, with a filter.
+  - Entries are kept 180 days (`RETENTION_POLICIES`), and the collection is classified.
+  - `isAdminAuditEvent` is the one definition. `ADMIN_ACCESS_DENIED` (fires on every refused token) and `ADMIN_BUILD_REPORT_SAVE_FAILED` are excluded, each with its reason.
+- **Found while building it.** 20 authenticated admin audit lines (the 19 listed below, plus `ADMIN_MFA_VERIFY_FAILED`) recorded no `admin:`, so the new screen would have read "not recorded". They now carry it:
+  - welcome gift, build discount, wallet merge, app preview, channel reclaim, settings, feature flags, key rotation, promo codes, MFA enable/disable, Firestore backup, About page, report reply, user account view, report status.
+  - `REPORT_REPLY` joins the admin events.
+  - A census fails on a new token-guarded `ADMIN_` line without `admin:`. Login events are exempt, because no one is authenticated yet.
+- **Checked in a real browser** (built server, desktop 1366 + phone 390):
+  - The Safety page shows both cards.
+  - App Check reads "no site key → enforcing would refuse every website request".
+  - Locally, with no Firestore, the audit log says "Could not read the audit log (HTTP 500)". It does not show an empty log.
+  - Apps → Review shows "Open gallery review", and the stale text is gone.
+  - No page errors.
+- **Still open (not PR 3's), recorded as Q-681 (🟡 BLOCKED, the admin's choice) and Q-680 (OPEN):**
+  - The store review routes still accept a reject or remove without a note. Requiring one would refuse older bundled App Mart clients; that is a decision for when the next store bundle ships.
+  - `OtpHealthCard` stores a server body without checking `res.ok` (the client-write rule's read-side sibling).
+
+- **Gate on the merged state caught two things, both fixed:**
+  - `aboutUsTellsTheTruth` pinned the exact `requireAdmin` import line. It is widened to allow `adminUsername` beside it; the shared-guard property is unchanged.
+  - `appMartSocial`'s rule is that an email is used only for the admin check. The comment-removal audit now names the admin by uid.
 ### 2026-10-05 — #3547 merged: Q-660 … Q-663 leave the open queue
 
 #3547 was squash-merged at `affa6a28` on the admin's word ("marge karo"), after CI ran green on head `e14b3aab`. Earlier CI runs never started because of the GitHub billing limit; once that was cleared, CI ran and passed.

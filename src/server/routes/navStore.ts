@@ -617,6 +617,7 @@ export function registerNavStoreRoutes(app: Express): void {
         await deleteApk(found.storagePath);
       }
 
+      audit('STORE_APK_REVIEW_DECISION', { reviewer: me?.email || '', id: appId, ownerUid: found.uid, before: found.status, decision: status, note: typeof note === 'string' ? note.slice(0, 500) : '', result: 'ok' });
       res.json({ ok: true, id: appId, status });
       // Congratulate the creator AFTER the response — the same "side effects after the response"
       // discipline web/publish's bake already uses below, so a slow/unconfigured email provider can
@@ -1418,6 +1419,7 @@ export function registerNavStoreRoutes(app: Express): void {
       } else {
         await updateWebApp(id, { status: 'listed', reviewedAt: Date.now(), reviewedBy: me?.email || 'admin' });
       }
+      audit('STORE_WEB_REVIEW_DECISION', { reviewer: me?.email || '', id, ownerUid: found.uid, before: found.status, decision, note: typeof req.body?.note === 'string' ? req.body.note.slice(0, 500) : '', result: 'ok' });
       res.json({ ok: true, id, status: decision });
       // Congratulate the creator AFTER the response — same discipline as web/publish's bake above,
       // so a slow/unconfigured email provider can never hold up the admin's review screen.

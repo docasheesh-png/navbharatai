@@ -202,6 +202,13 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
    */
   { collection: 'agentv3_free_chains', ttlDays: 1, timestampField: 'touchedAt', timestampKind: 'epochMs' },
   /**
+   * The admin audit log (adminAuditLog.ts, admin panel audit PR 3): every admin action, with the admin's
+   * name, reason and the ids it touched. 180 days, the same span as the removal records it sits beside —
+   * long enough to answer "who banned this and why" about anything a user can still raise, and not a
+   * permanent file on the people those ids name. `ts: Date.parse(…)` is a plain number ⇒ `epochMs`.
+   */
+  { collection: 'admin_audit_log', ttlDays: 180, timestampField: 'ts', timestampKind: 'epochMs' },
+  /**
    * Flagged messages — the same 180-day story as the removal records above, and for the same reason:
    * an abuse record must outlive the account (see the exclusion note in USER_SCOPED_COLLECTIONS) and
    * must not become a permanent file. `at: Date.now()` ⇒ `epochMs`.

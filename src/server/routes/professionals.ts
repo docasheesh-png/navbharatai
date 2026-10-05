@@ -114,6 +114,22 @@ export function registerProfessionalsRoutes(app: Express): void {
       return;
     }
 
+    // Persistent memory (e.g. Teacher AI's student profile) is keyed by the VERIFIED
+    // token identity ONLY — the client-claimed body `userId` is never trusted for it
+    // (trusting it would let anyone read another user's remembered facts).
+    const identity = await verifyFirebaseIdentity(req);
+    const verifiedUserId = identity?.uid || null;
+
+    // Professional Pass gate (flag-off = no-op). Blocks anonymous / out-of-free-quota users honestly.
+    // 🔴 BEFORE THE ATTACHMENTS ARE READ (forensic audit 2026-10-04, P1): the paid vision chain (Gemini →
+    // Grok → Claude) used to describe up to four images for a caller this gate then REFUSED — anonymous
+    // callers included — and a free-tier turn could reach Claude. Nothing is spent until the turn is allowed.
+    const gate = await gateProfessionalTurn(verifiedUserId, identity?.email || null);
+    if (!gate.allow) {
+      res.status(gate.status).json(gate.body);
+      return;
+    }
+
     // Turn files into text the (text-only) professional engine can actually read.
     let effectiveMessage = typeof message === 'string' ? message.trim() : '';
     /** What this turn's attachments said — remembered below so a LATER turn can still answer from it. */
@@ -133,6 +149,8 @@ export function registerProfessionalsRoutes(app: Express): void {
           // instruction gets its own; every other professional is unchanged.
           const visionBlock = await describeVisionAttachments(rawAttachments, {
             ...(config.visionInstruction ? { instruction: config.visionInstruction } : {}),
+            // The free tier never runs Claude (ROUTING_AND_BILLING: weak never runs Sonnet/Opus).
+            ...(gate.tier === 'free' ? { noClaude: true } : {}),
           });
           if (visionBlock) parts.push(visionBlock);
         }
@@ -151,11 +169,6 @@ export function registerProfessionalsRoutes(app: Express): void {
           .filter((m: any) => m && typeof m.content === 'string')
           .map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content) }))
       : [];
-    // Persistent memory (e.g. Teacher AI's student profile) is keyed by the VERIFIED
-    // token identity ONLY — the client-claimed body `userId` is never trusted for it
-    // (trusting it would let anyone read another user's remembered facts).
-    const identity = await verifyFirebaseIdentity(req);
-    const verifiedUserId = identity?.uid || null;
 
     // ── ATTACHMENT RECALL ────────────────────────────────────────────────────────────────────────
     // Keyed by the VERIFIED user + this professional + THIS CONVERSATION, so one person's file can never
@@ -171,13 +184,6 @@ export function registerProfessionalsRoutes(app: Express): void {
         const block = buildRecallBlock(professionalRecall.recall(recallKey, Date.now()));
         if (block) effectiveMessage = `${block}\n\n---\n${effectiveMessage}`;
       }
-    }
-
-    // Professional Pass gate (flag-off = no-op). Blocks anonymous / out-of-free-quota users honestly.
-    const gate = await gateProfessionalTurn(verifiedUserId, identity?.email || null);
-    if (!gate.allow) {
-      res.status(gate.status).json(gate.body);
-      return;
     }
 
     // IMAGE-GENERATION INTENT (admin 2026-08-02): a Professional (Teacher, Lawyer, …) does not generate

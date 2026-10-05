@@ -11,7 +11,7 @@ import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { validateSiteConfig, DEFAULT_SITE_CONFIG, MAX_REDIRECTS } from '../AgentV3/siteConfig';
 import { siteConfigStore } from '../AgentV3/siteConfigStore';
-import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
+import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX, requireVerifiedForMoney } from '../lib/identityPolicy';
 import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
 import { recordPlatformBuild } from '../lib/platformBuildMetrics';
 import { isAdminEmail } from '../lib/adminEmails';
@@ -694,7 +694,7 @@ import {
   workspaceIdFor,
   safeWorkspaceUid,
 } from '../lib/workspaceIdentity';
-import { adminRequestOk } from '../lib/adminAuth';
+import { adminRequestOk, requireAdmin } from '../lib/adminAuth';
 import { previewFidelityCaveats, previewFidelityNotice } from '../AgentV3/previewFidelity';
 import { journeyUserSummary } from '../AgentV3/journeyUserSummary';
 import { platformChecksProof, browserAlreadySaid, phoneOutcomeFromCode, type PhoneOutcome } from '../AgentV3/buildProofCard';
@@ -990,6 +990,14 @@ export function verifiedWorkspaceReadOk(verifiedUid: string | null, workspaceId:
   return sharedVerifiedWorkspaceReadOk(verifiedUid, workspaceId); // see lib/workspaceIdentity
 }
 
+/**
+ * ⚠️ NON-STRICT: falls back to the CLAIMED body/query userId when there is no token. Kept ONLY for the
+ * automatic build-loop surfaces (preview error/health reports, the build queue) where a token blip must
+ * not hard-break a running build. Anything that READS a user's source, deploys it, restores it, or
+ * pushes it uses `assertVerifiedWorkspaceOwner` (forensic audit 2026-10-04, P1: a token-less request
+ * naming `agentv3-<victimUid>-<sid>` with `userId: <victimUid>` read the victim's whole source tree and
+ * could deploy it with the victim's own keys). `tests/aClaimedUidReadsNoOnesSource.test.ts` holds the line.
+ */
 async function assertWorkspaceOwner(req: Request, workspaceId: string): Promise<boolean> {
   const verifiedUid = await verifyFirebaseToken(req);
   // Claimed id may come from the JSON body (POST) or the query string (GET).
@@ -4041,9 +4049,6 @@ async function probeFreeProviders(): Promise<Array<{ name: string; ok: boolean; 
   return results;
 }
 
-/** Throttle the public live-probe so it can't be abused for cost (one per 30s). */
-let lastDiagProbeTs = 0;
-
 /**
  * The workspaces that already run a SERVER for this owner, for `serverAppLimit`.
  *
@@ -4500,32 +4505,20 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
-  // Provider diagnosis — confirms whether a real Anthropic key is configured.
-  // Returns no secrets (only the public "sk-ant-" scheme prefix + lengths), so a
-  // wrong/leftover key is visible without exposing it. Optional ?test=1 makes one
-  // tiny real Claude call and reports the exact outcome (success or the precise
-  // error), gated by the admin password so it can't be abused for cost.
-  app.get('/api/agentv3/diag', async (req: Request, res: Response) => {
+  // Provider diagnosis — confirms whether a real Anthropic key is configured, and with ?test=1 makes
+  // one tiny real Claude call and reports the exact outcome.
+  //
+  // 🔒 ADMIN-ONLY (forensic audit 2026-10-04). This route used to answer ANYONE: the provider and model
+  // names (the White-Label Law says a user never sees them), the key's prefix and length, the sandbox
+  // configuration, and — with ?test=1 — a real paid call on NavBharatAI's account once every 30 seconds,
+  // for any caller on the internet, with the provider's raw error text. Nothing in the app calls it; it is
+  // the admin's own tool, so it is gated like every other admin tool (the `x-admin-token` header).
+  app.get('/api/agentv3/diag', requireAdmin, async (req: Request, res: Response) => {
     const diag = { ...agentV3KeyDiag(), sandbox: sandboxDiag() };
-    const wantsTest = req.query.test === '1';
-    // Audit finding #3: this used to compare the admin PASSWORD against `?admin=` in the URL, which
-    // wrote that password into every access log. It now takes the same expiring, constant-time admin
-    // token the panel uses. Losing the query path only costs the admin the THROTTLE bypass — the
-    // diagnosis itself is still served, and a throttled probe returns an honest message.
-    const adminOk = adminRequestOk(req);
-    // The live probe makes ONE tiny real Claude call. Admins can run it anytime;
-    // otherwise it's throttled to one every 30s globally so it can't be abused.
-    const now = Date.now();
-    const throttled = now - lastDiagProbeTs < 30_000;
-    if (!wantsTest) {
+    if (req.query.test !== '1') {
       res.json(diag);
       return;
     }
-    if (!adminOk && throttled) {
-      res.json({ ...diag, live: { ok: false, error: 'Live probe is throttled — try again in ~30s.' } });
-      return;
-    }
-    lastDiagProbeTs = now;
     // Live probe: one minimal, real Claude call to surface the exact error.
     let live: { ok: boolean; model?: string; error?: string; status?: number };
     try {
@@ -4541,9 +4534,9 @@ export function registerAgentV3Routes(app: Express): void {
       const e = err as { status?: number; message?: string };
       live = { ok: false, status: e?.status, error: e?.message ? String(e.message).slice(0, 300) : String(err).slice(0, 300) };
     }
-    // Admin-only: also probe the FREE-router providers (Vertex / Gemini / Grok) with
-    // one tiny real call each, so the admin sees which of them actually WORK on live.
-    const freeProviders = adminOk ? await probeFreeProviders() : undefined;
+    // Also probe the FREE-router providers (Vertex / Gemini / Grok) with one tiny real call each, so
+    // the admin sees which of them actually WORK on live.
+    const freeProviders = await probeFreeProviders();
     res.json({ ...diag, live, freeProviders });
   });
 
@@ -5140,7 +5133,7 @@ async function noteBuildOutcome(
     const githubConnectedHint = req.body?.githubConnected === true;
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // Only Render is a wired backend host today; others still use the config-inject + GitHub-connect path.
     if (platform !== 'render') { res.status(400).json({ error: `Backend one-click deploy isn't wired for "${platform}" yet — push to GitHub and connect it on your host (the config was already added).` }); return; }
     // THE USER'S OWN RENDER KEY, NOT OURS (root-caused 2026-08-07). The gate used to ask only
@@ -5482,11 +5475,19 @@ async function noteBuildOutcome(
   app.post('/api/agentv3/host-app', deployOpsRateLimiter(), async (req: Request, res: Response) => {
     // The VERIFIED identity, never the body's claim — a spoofed email deciding admin access is the
     // exact hole every other gate in this file closes.
-    const { userId, email } = await resolveReadIdentity(req);
+    // 🔴 FORENSIC AUDIT 2026-10-04 (P0): the comment above was true only with a token. This read
+    // `resolveReadIdentity`, which falls back to the BODY's email when no token is sent — so a request
+    // with no Authorization header and `email: <the admin's address>` was the admin to `isReportAdmin`,
+    // skipped the plan and server caps, and deployed a container on NavBharatAI's own cloud bill.
+    // Money and admin decisions take the Tier-1 verified identity (identityPolicy.ts), or refuse.
+    const verified = await requireVerifiedForMoney(req);
+    if (!verified.ok) { res.status(verified.status).json({ error: verified.error }); return; }
+    const userId = verified.uid;
+    const email = verified.email;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
 
     // A server app runs only on a plan — the probe is cached and fails CLOSED (`known: false` ⇒ no
     // plan), so a lookup that could not answer never opens a paid path. See hostApp.hostingAvailability.
@@ -5568,11 +5569,16 @@ async function noteBuildOutcome(
    * something we did not observe.
    */
   app.post('/api/agentv3/host-usage', deployOpsRateLimiter(), async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req);
+    // Admin-only, so the identity is the VERIFIED one — never a body email (forensic audit 2026-10-04;
+    // see host-app above for the claimed-email hole this closes).
+    const verified = await requireVerifiedForMoney(req);
+    if (!verified.ok) { res.status(verified.status).json({ error: verified.error }); return; }
+    const userId = verified.uid;
+    const email = verified.email;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // Cost figures are OUR infrastructure spend, which the white-label law keeps admin-side. A user
     // never sees a provider line item — they see the wallet, once slice 2c debits it.
     if (!isReportAdmin(email)) { res.status(403).json({ error: 'Not available for this account.' }); return; }
@@ -5647,7 +5653,7 @@ async function noteBuildOutcome(
     if (!serviceId) { res.status(400).json({ error: 'serviceId is required.' }); return; }
     // The same ownership check the deploy itself makes — a status is about someone's own service, and
     // reading one with a borrowed workspace id would leak which services exist.
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     const vault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
     const key = resolveRenderKey(vault);
     if (!key) { res.status(503).json({ error: renderRequirement(process.env, vault) }); return; }
@@ -5682,7 +5688,7 @@ async function noteBuildOutcome(
     const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken.trim() : '';
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     if (!githubToken) { res.status(401).json({ error: 'Connect GitHub first — we need your permission to create the repository in your account.' }); return; }
     try {
       const actuator = buildActuator();
@@ -7296,7 +7302,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId and sha are required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -7324,7 +7330,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -7358,7 +7364,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId and sha are required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -7401,7 +7407,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId and a valid sha are required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -7432,7 +7438,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -7488,7 +7494,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -7545,7 +7551,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -8023,7 +8029,7 @@ async function noteBuildOutcome(
       return;
     }
     const from = Number(req.query.cursor);
-    const backlog = readShell(shellId, Number.isFinite(from) ? from : 0, userId ?? undefined);
+    const backlog = readShell(shellId, Number.isFinite(from) ? from : 0, workspaceId);
     if (!backlog) {
       res.status(404).json({ error: 'This terminal is no longer open.' });
       return;
@@ -8047,7 +8053,7 @@ async function noteBuildOutcome(
     const unsubscribe = subscribeShell(
       shellId,
       (chunk, cursor) => send('output', { data: chunk, cursor }),
-      userId ?? undefined,
+      workspaceId,
     );
     if (!unsubscribe) { res.end(); return; }
 
@@ -8068,7 +8074,7 @@ async function noteBuildOutcome(
         const q = await terminalAccessFor(req).catch(() => null);
         if (q && !q.access.allowed) {
           send('quota', { message: q.access.message, code: 'TERMINAL_DAILY_LIMIT' });
-          try { closeShell(shellId, userId ?? undefined); } catch { /* already gone */ }
+          try { closeShell(shellId, workspaceId); } catch { /* already gone */ }
           cleanup();
           res.end();
         } else if (q?.access.warn) {
@@ -8081,7 +8087,7 @@ async function noteBuildOutcome(
     }, 30_000);
     // Poll for exit so the UI can show "[process exited]" instead of a shell that just stops responding.
     const watch = setInterval(() => {
-      const s = getShell(shellId, userId ?? undefined);
+      const s = getShell(shellId, workspaceId);
       if (!s || !s.alive) { send('exit', { exitCode: s?.exitCode ?? null }); cleanup(); res.end(); }
     }, 1000);
 
@@ -8120,7 +8126,7 @@ async function noteBuildOutcome(
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
-    const ok = await writeShell(shellId, data, userId ?? undefined);
+    const ok = await writeShell(shellId, data, workspaceId);
     res.json({ ok });
   });
 
@@ -8142,7 +8148,7 @@ async function noteBuildOutcome(
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
-    const ok = await resizeShell(shellId, Number(req.body?.cols), Number(req.body?.rows), userId ?? undefined);
+    const ok = await resizeShell(shellId, Number(req.body?.cols), Number(req.body?.rows), workspaceId);
     res.json({ ok });
   });
 
@@ -8164,7 +8170,7 @@ async function noteBuildOutcome(
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
-    await closeShell(shellId, userId ?? undefined);
+    await closeShell(shellId, workspaceId);
     res.json({ ok: true });
   });
 
@@ -8183,7 +8189,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -9377,7 +9383,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -9425,7 +9431,7 @@ async function noteBuildOutcome(
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -9502,7 +9508,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -9849,7 +9855,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }

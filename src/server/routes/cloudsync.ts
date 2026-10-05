@@ -35,7 +35,8 @@ export function registerCloudsyncRoutes(app: Express): void {
               files[item.path] = Buffer.from(blobRes.data.content, 'base64').toString('utf-8');
               fetchedCount++;
             } catch (blobErr) {
-              console.warn(`Failed to fetch blob for ${item.path}:`, blobErr);
+              // Status and message only — never the error object (it carries the Authorization header).
+              console.warn(`Failed to fetch blob for ${item.path}: ${(blobErr as any)?.response?.status ?? ''} ${(blobErr as Error)?.message ?? ''}`);
             }
           }
         }

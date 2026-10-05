@@ -12,6 +12,7 @@ import {
   readTicket,
   nativeReturnUrl,
 } from '../lib/githubNativeHandoff';
+import { spaFallbackShouldDefer } from '../lib/spaFallback';
 
 /**
  * Key for signing the OAuth `state`. Reuses the secret the platform already requires rather than adding
@@ -38,11 +39,27 @@ const ALLOWED_RETURN_ORIGINS = new Set<string>([
   ...(process.env.APP_ORIGIN ? [process.env.APP_ORIGIN] : []),
 ]);
 
-/** Returns the URL only if its origin is allow-listed; otherwise null (blocks open-redirect token exfil). */
-function safeReturnUrl(raw: string | null | undefined): string | null {
+/**
+ * Returns the URL only if it is a page of OUR app on an allow-listed origin; otherwise null.
+ *
+ * 🔴 FORENSIC AUDIT 2026-10-04 (P0). This checked the ORIGIN only. The token is appended as
+ * `#gh_token=…`, and whatever page loads at the return URL can read its own fragment — so a return URL
+ * on navbharatai.com that serves somebody ELSE'S code (`/pwa/<id>` — any account's hosted HTML,
+ * `/preview/<id>`, a static file) received a victim's repo-scoped GitHub token from one click on a
+ * crafted authorize link. The page must now be one the SPA itself serves: not a server-owned path
+ * (`spaFallbackShouldDefer`, the one list of those) and not a file. The fragment is rebuilt, never kept.
+ */
+export function safeReturnUrl(raw: string | null | undefined): string | null {
   if (!raw || !raw.startsWith('http')) return null;
   try {
-    return ALLOWED_RETURN_ORIGINS.has(new URL(raw).origin) ? raw : null;
+    const u = new URL(raw);
+    if (!ALLOWED_RETURN_ORIGINS.has(u.origin)) return null;
+    let p = u.pathname;
+    try { p = decodeURIComponent(p); } catch { return null; }
+    p = p.toLowerCase();
+    if (spaFallbackShouldDefer(p) || spaFallbackShouldDefer(`${p}/`)) return null;
+    if (/\.[a-z0-9]+$/.test(p)) return null; // a file, not an app route
+    return `${u.origin}${u.pathname}${u.search}`;
   } catch {
     return null;
   }

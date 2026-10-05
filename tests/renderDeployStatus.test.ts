@@ -172,7 +172,7 @@ describe('🔒 the wiring — a status the user can get, and a client that asks 
 
   it('the endpoint exists and is ownership-checked', () => {
     expect(handler).not.toBe('');
-    expect(handler).toContain('assertWorkspaceOwner(req, workspaceId)');
+    expect(handler).toContain('assertVerifiedWorkspaceOwner(req, workspaceId)'); // verified owner (forensic audit 2026-10-04)
   });
 
   it('🔒 the host\'s own status word never reaches the user — the white-label law', () => {

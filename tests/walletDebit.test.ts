@@ -62,7 +62,7 @@ describe('computeDebitedWallet — debit math (the missing half of the money pat
 
   it('debit is the exact mirror of credit: buy then spend the same ₹ returns to the start', () => {
     const credit: WalletCreditTx = { userId: 'u1', amountPaid: 50, balanceAdded: 50 };
-    const bought = computeCreditedWallet({ tokenBalance: 0, remaining_balance: 0, walletLedger: [] }, credit, null, T).wallet;
+    const bought = computeCreditedWallet({ tokenBalance: 0, remaining_balance: 0, walletLedger: [] }, credit, T).wallet;
     const { wallet } = computeDebitedWallet(bought, tx({ billedInr: 50 }), T);
     expect(wallet.tokenBalance).toBe(0);
     expect(wallet.remaining_balance).toBe(0);

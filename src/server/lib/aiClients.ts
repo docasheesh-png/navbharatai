@@ -47,8 +47,9 @@ export const resolveApiKey = (provider: string, userKey?: string): { key: string
 
   // 1. Check user key if provided and not a placeholder
   if (userKey && !isPlaceholder(userKey, true, provider)) {
-    const masked = userKey.substring(0, 6) + '...' + userKey.substring(userKey.length - 4);
-    console.log(`[AUTH] Using USER ${p} key: ${masked}`);
+    // Never any of the key's characters in a log line — not a prefix, not a suffix (forensic audit
+    // 2026-10-04: ten characters of every key used were written to the Cloud Run log on every call).
+    console.log(`[AUTH] Using USER ${p} key (${userKey.length} chars)`);
     return { key: userKey, source: 'USER' };
   }
 
@@ -68,8 +69,7 @@ export const resolveApiKey = (provider: string, userKey?: string): { key: string
 
   if (envKey && !isPlaceholder(envKey, true, provider)) {
     envKey = envKey.trim();
-    const masked = envKey.substring(0, 6) + '...' + envKey.substring(envKey.length - 4);
-    console.log(`[AUTH] Using SYSTEM ${p} key (Fallback): ${masked}`);
+    console.log(`[AUTH] Using SYSTEM ${p} key (Fallback, ${envKey.length} chars)`);
     return { key: envKey, source: 'SYSTEM' };
   }
 

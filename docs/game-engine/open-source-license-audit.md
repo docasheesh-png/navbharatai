@@ -27,3 +27,13 @@ The safe order is:
 4. the procedural objects remain the fallback, so a failed service never leaves a blank game.
 
 Clay's split between orchestrator and GPU backend is the right shape to copy as a design, not as code.
+
+## Phase 2 (2026-10-05): the redesigned car, human and animals
+
+Nothing external was added in Phase 2. The new car body, human and animals are original code in `src/server/lib/Game3DGenerator.ts`. They are built at runtime from three.js's own geometry classes (`ExtrudeGeometry`, `LatheGeometry`, `SphereGeometry`, `CylinderGeometry`, `RingGeometry`).
+
+- No model files, textures or code were copied from any project.
+- No new dependency was added.
+- No GPL or AGPL component is involved. `three` stays the only runtime dependency (MIT).
+
+`docs/game-engine/asset-inventory.md` records what each object is now and what an L3 (authored or generated mesh) level would need.

@@ -41,7 +41,7 @@ describe('the domain button states its real price', () => {
   it('the price is SERVER-supplied, never hardcoded in the UI', () => {
     // An env price change (HOSTING_PLAN_PRICE_INR) must not need a deploy, and the label must never
     // drift from what the connect route actually charges.
-    expect(route).toContain('customDomainPriceInr: hostingPlansEnabled() && !isAgentV3FreeUser(userId, email)');
+    expect(route).toContain('customDomainPriceInr: hostingPlansEnabled() && !isAgentV3FreeUser(labelIdentity?.uid ?? null, identityGrantEmail(labelIdentity))');
     expect(route).toContain('? hostingPlanPriceInr()');
     expect(chooser).not.toMatch(/₹\s*99/);
   });

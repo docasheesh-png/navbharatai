@@ -79,7 +79,8 @@ export interface MockResponse {
   get(k: string): string | undefined;
   /** The response's own events. Modelled because streaming routes learn that the client left from
    *  `res` 'close' (Q-621, `clientDisconnect.ts`) — a mock without them fails a route that is correct.
-   *  `emit('close')` lets a test play the client leaving. */
+   *  `json`/`send`/`end` emit 'finish' then 'close' like a real response; `destroy()` or `emit('close')`
+   *  plays the client leaving. */
   on(event: string, fn: (...a: any[]) => void): MockResponse;
   once(event: string, fn: (...a: any[]) => void): MockResponse;
   emit(event: string, ...a: any[]): boolean;
@@ -89,6 +90,16 @@ export interface MockResponse {
 /** Create a mock Express Response that records status/body/headers. */
 export function mockRes(): MockResponse {
   const listeners: Record<string, Array<{ fn: (...a: any[]) => void; once: boolean }>> = {};
+  // A real response that ends emits 'finish' then 'close', once — routes release locks and timers on
+  // them (mobileSetup's one-prepare-per-app lock, Q-621's disconnect listeners), so the double must too.
+  let closed = false;
+  const complete = (): void => {
+    if (closed) return;
+    closed = true;
+    res.writableFinished = true;
+    res.emit('finish');
+    res.emit('close');
+  };
   const res: MockResponse = {
     statusCode: 200,
     body: undefined,
@@ -96,11 +107,12 @@ export function mockRes(): MockResponse {
     ended: false,
     sent: undefined,
     status(code: number) { this.statusCode = code; return this; },
-    json(payload: any) { this.body = payload; return this; },
-    send(payload: any) { this.sent = payload; this.body = payload; this.headersSent = true; return this; },
+    json(payload: any) { this.body = payload; complete(); return this; },
+    send(payload: any) { this.sent = payload; this.body = payload; this.headersSent = true; complete(); return this; },
     type(t: string) { this.headers['content-type'] = t.includes('/') ? t : `text/${t}`; return this; },
-    end() { this.ended = true; this.writableFinished = true; return this; },
-    destroy() { this.ended = true; return this; },
+    end() { this.ended = true; complete(); return this; },
+    // An abrupt close: the connection goes away WITHOUT the response finishing ('close' only).
+    destroy() { this.ended = true; if (!closed) { closed = true; res.emit('close'); } return this; },
     headersSent: false,
     writableFinished: false,
     on(event: string, fn: (...a: any[]) => void) { (listeners[event] ??= []).push({ fn, once: false }); return this; },

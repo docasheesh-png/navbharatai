@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Check, ExternalLink } from 'lucide-react';
-import { auth } from '../../lib/firebase';
+import { authJsonHeaders } from '../../lib/authHeaders';
 
 /**
  * THE APP SECRET NOTICE (Q-612, admin decision 2026-10-05).
@@ -47,9 +47,10 @@ function fmtDate(ms: number): string {
   return Number.isFinite(ms) && ms > 0 ? new Date(ms).toLocaleDateString('en-IN', { dateStyle: 'medium' }) : '';
 }
 
-async function authHeaders(): Promise<Record<string, string> | null> {
-  const tok = await auth.currentUser?.getIdToken().catch(() => undefined);
-  return tok ? { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` } : null;
+/** The shared token helper; null when nobody is signed in (this notice is for a signed-in owner only). */
+async function ownerHeaders(): Promise<Record<string, string> | null> {
+  const headers = await authJsonHeaders();
+  return headers.Authorization ? headers : null;
 }
 
 export const WhatsAppAppSecretNotice: React.FC<{ refreshKey?: number }> = ({ refreshKey = 0 }) => {
@@ -62,7 +63,7 @@ export const WhatsAppAppSecretNotice: React.FC<{ refreshKey?: number }> = ({ ref
 
   const load = useCallback(async () => {
     try {
-      const headers = await authHeaders();
+      const headers = await ownerHeaders();
       if (!headers) { setBots([]); return; }
       const res = await fetch('/api/bots', { headers });
       if (!res.ok) return;
@@ -84,7 +85,7 @@ export const WhatsAppAppSecretNotice: React.FC<{ refreshKey?: number }> = ({ ref
     }
     setBusy(botId); setErrors(e => ({ ...e, [botId]: '' }));
     try {
-      const headers = await authHeaders();
+      const headers = await ownerHeaders();
       if (!headers) { setErrors(e => ({ ...e, [botId]: 'Please sign in first.' })); return; }
       const res = await fetch('/api/bots/whatsapp/app-secret', { method: 'POST', headers, body: JSON.stringify({ botId, appSecret: value }) });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -112,7 +113,7 @@ export const WhatsAppAppSecretNotice: React.FC<{ refreshKey?: number }> = ({ ref
   const date = fmtDate(cutoverMs);
 
   return (
-    <div className="flex flex-col gap-3 px-3 py-3 border-b border-line bg-card max-h-[45vh] overflow-y-auto" role="region" aria-label="WhatsApp bots that need attention">
+    <div className="flex flex-col gap-3 px-3 py-3 border-b border-line bg-card max-h-[45vh] supports-[height:100dvh]:max-h-[45dvh] overflow-y-auto" role="region" aria-label="WhatsApp bots that need attention">
       {needy.map(bot => {
         const need = appSecretNeed(bot);
         return (

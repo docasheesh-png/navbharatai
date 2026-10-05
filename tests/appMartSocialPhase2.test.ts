@@ -168,7 +168,7 @@ describe('3 · following', () => {
   it('the follower NUMBER is public; WHO follows is the creator’s alone', () => {
     const list = handler("app.get('/api/app-mart/social/followers'");
     expect(list).toMatch(/if \(!me\?\.uid\) return res\.status\(401\)/);
-    expect(list).toContain('other !== me.uid && !isStoreAdmin(me.email)');
+    expect(list).toContain('other !== me.uid && !isStoreAdmin(identityGrantEmail(me))');
     expect(list).toContain('status(403)');
     const state = handler("app.get('/api/app-mart/social/follow-state'");
     expect(state).not.toContain('followersOf(');

@@ -89956,6 +89956,10 @@ PR 3 covers four server capabilities that existed with no screen, plus the two s
   - Locally, with no Firestore, the audit log says "Could not read the audit log (HTTP 500)". It does not show an empty log.
   - Apps → Review shows "Open gallery review", and the stale text is gone.
   - No page errors.
-- **Still open (not PR 3's):**
+- **Still open (not PR 3's), recorded as Q-681 (🟡 BLOCKED, the admin's choice) and Q-680 (OPEN):**
   - The store review routes still accept a reject or remove without a note. Requiring one would refuse older bundled App Mart clients; that is a decision for when the next store bundle ships.
   - `OtpHealthCard` stores a server body without checking `res.ok` (the client-write rule's read-side sibling).
+
+- **Gate on the merged state caught two things, both fixed:**
+  - `aboutUsTellsTheTruth` pinned the exact `requireAdmin` import line. It is widened to allow `adminUsername` beside it; the shared-guard property is unchanged.
+  - `appMartSocial`'s rule is that an email is used only for the admin check. The comment-removal audit now names the admin by uid.

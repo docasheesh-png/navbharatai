@@ -173,10 +173,11 @@ export function registerAppMartSocialRoutes(app: Express): void {
     if (!canRemoveComment(facts)) return res.status(403).json({ error: 'Only the person who wrote this, the app’s creator or an admin can remove it.' });
     try {
       await removeComment(c, removedBy(facts));
-      // An admin removing SOMEONE ELSE'S words is a moderation decision and is recorded with who made it.
-      // Authors and app creators tidying their own threads are not admin actions, so they are not.
+      // An admin removing SOMEONE ELSE'S words is a moderation decision and is recorded with who made it —
+      // by uid, because this file's rule is that an email is used only to ask whether the caller is an admin.
+      // Authors and app creators tidying their own threads are not admin actions, so they are not recorded.
       if (facts.isAdmin && me.uid !== c.uid && me.uid !== facts.appOwnerUid) {
-        audit('STORE_COMMENT_REMOVED_BY_ADMIN', { reviewer: me.email || '', commentId: c.id, appKey: c.appKey, authorUid: c.uid, result: 'ok' });
+        audit('STORE_COMMENT_REMOVED_BY_ADMIN', { reviewer: me.uid, commentId: c.id, appKey: c.appKey, authorUid: c.uid, result: 'ok' });
       }
       const counts = (await countsFor([c.appKey]))[c.appKey] ?? null;
       res.json({ ok: true, counts });

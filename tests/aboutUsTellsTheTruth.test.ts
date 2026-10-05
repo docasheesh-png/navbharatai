@@ -178,7 +178,9 @@ describe('the edit reaches every user — the half that was broken', () => {
     expect(route).toContain("app.put('/api/admin/site/about', requireAdmin");
     // Never a second hand-rolled check: adminAuth.ts records what happened last time two route files
     // each invented one — one of them compared a password in a query string.
-    expect(route).toContain("import { requireAdmin } from '../lib/adminAuth'");
+    // Widened 2026-10-05 (admin panel audit PR 3): the same import now also brings `adminUsername`, so the
+    // audit line names the admin. What is pinned is unchanged — the guard comes from the shared module.
+    expect(route).toMatch(/import \{ requireAdmin(, [A-Za-z, ]+)? \} from '\.\.\/lib\/adminAuth'/);
   });
 
   it('the route is actually registered — an unregistered route answers nobody', () => {

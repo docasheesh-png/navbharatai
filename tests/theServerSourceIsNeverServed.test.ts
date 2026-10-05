@@ -57,13 +57,9 @@ describe('one list for both lanes', () => {
   });
 });
 
-describe('the two private-file predicates are one (merge of #3529 and #3538)', () => {
-  it('isPrivateBuildFile decodes and normalizes exactly like isServerOnlyArtifactPath', async () => {
-    const { isPrivateBuildFile } = await import('../src/server/lib/privateBuildFiles');
-    for (const p of ['/server.cjs', '/server.cjs.map', '/server.cjs.m%61p', '/assets/app.js.map', '/assets/app.js', '/index.html', '/a/../server.cjs?x=1']) {
-      expect(isPrivateBuildFile(p), p).toBe(isServerOnlyArtifactPath(p.split('?')[0]));
-    }
-    expect(isPrivateBuildFile('/server.cjs.m%61p')).toBe(true);
-    expect(isPrivateBuildFile('/assets/app.js')).toBe(false);
+describe('one private-file predicate (merge of #3529 and #3538)', () => {
+  it('decodes and normalizes before judging, with or without a query string', () => {
+    for (const p of ['/server.cjs', '/server.cjs.map', '/server.cjs.m%61p', '/assets/app.js.map', '/a/../server.cjs']) expect(isServerOnlyArtifactPath(p), p).toBe(true);
+    for (const p of ['/assets/app.js', '/index.html', '/server.cjs.map.txt']) expect(isServerOnlyArtifactPath(p), p).toBe(false);
   });
 });

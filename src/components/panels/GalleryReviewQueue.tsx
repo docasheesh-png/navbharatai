@@ -17,6 +17,8 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { cardClasses } from '../ui/variants';
+import { readAdminReason } from '../../lib/adminActionReason';
+import { REVIEW_REASON_CONTRACT } from '../../lib/storeReviewReason';
 
 export interface PendingGalleryApp {
   id: string;
@@ -68,7 +70,8 @@ export function galleryReviewApi(headers: () => Promise<Record<string, string>>)
       const r = await fetch(`/api/gallery/admin/${encodeURIComponent(id)}/review`, {
         method: 'POST',
         headers: await headers(),
-        body: JSON.stringify({ decision, note }),
+        // `reasonContract`: this client enforces the reason (Q-681), so the server may refuse a removal without one.
+        body: JSON.stringify({ decision, note, reasonContract: REVIEW_REASON_CONTRACT }),
       });
       if (!r.ok) throw new Error(await readError(r, 'Could not save that decision.'));
       const d = await r.json().catch(() => null);
@@ -137,6 +140,9 @@ export const GalleryReviewQueue: React.FC<Props> = ({ api, onDecided }) => {
     } finally { setBusy(false); }
   };
 
+  // Q-681: rejecting or removing deletes the author's code, so it needs the reviewer's own reason.
+  const reasonOk = readAdminReason(note).ok;
+
   // Not a reviewer (or not yet known): this screen does not exist for them.
   if (apps === null) return null;
 
@@ -185,12 +191,13 @@ export const GalleryReviewQueue: React.FC<Props> = ({ api, onDecided }) => {
                   <pre className="max-h-72 overflow-auto bg-card border border-line rounded p-2 text-[10px] text-body whitespace-pre-wrap">
                     {source[file] ?? ''}
                   </pre>
-                  <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="A note for the author (shown to them)" />
+                  <Input value={note} onChange={(e) => setNote(e.target.value)} aria-label="Reason" placeholder="Reason — required to reject or remove, shown to the author" />
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" onClick={() => decide(a.id, 'approved')} disabled={busy}>Approve</Button>
-                    <Button size="sm" variant="secondary" onClick={() => decide(a.id, 'rejected')} disabled={busy}>Reject</Button>
-                    <Button size="sm" variant="danger" onClick={() => decide(a.id, 'removed')} disabled={busy}>Remove</Button>
+                    <Button size="sm" variant="secondary" onClick={() => decide(a.id, 'rejected')} disabled={busy || !reasonOk}>Reject</Button>
+                    <Button size="sm" variant="danger" onClick={() => decide(a.id, 'removed')} disabled={busy || !reasonOk}>Remove</Button>
                   </div>
+                  {!reasonOk && <p className="text-[10px] text-muted">Write a reason to reject or remove — it is shown to the author and kept in the removal record.</p>}
                 </div>
               )}
             </div>

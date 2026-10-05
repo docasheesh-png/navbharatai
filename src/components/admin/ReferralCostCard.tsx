@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { readAnswer, isRecord } from '../../lib/serverAnswer';
 
 /**
  * WHAT REFERRALS COST, AND WHO LOOKS LIKE A FARM.
@@ -75,6 +76,13 @@ interface SetupReport {
   manual: string[];
 }
 
+/** The summary route's answer: `{ ok: true, topReferrers, … }`, or its `{ ok: false, reason }` (Q-680). */
+export function isReferralSummary(b: unknown): b is Summary {
+  if (!isRecord(b)) return false;
+  if (b.ok === false) return typeof b.reason === 'string';
+  return b.ok === true && Array.isArray(b.topReferrers);
+}
+
 const rupees = (tokens: number | undefined): string =>
   `₹${((Number(tokens) || 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
@@ -88,7 +96,8 @@ export function ReferralCostCard({ adminToken }: { adminToken: string }): React.
     setLoading(true);
     try {
       const r = await fetch('/api/admin/referral/summary', { headers: { 'x-admin-token': adminToken } });
-      setData(await r.json());
+      const a = await readAnswer(r, isReferralSummary);
+      setData(a.ok ? a.value : { ok: false, reason: a.sentence });
     } catch (e) {
       // An unreachable panel says so rather than rendering zeros, which would read as "it costs
       // nothing" — the most expensive possible way for this card to be wrong.

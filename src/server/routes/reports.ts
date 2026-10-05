@@ -14,7 +14,7 @@
 
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
-import { requireAdmin } from '../lib/adminAuth';
+import { requireAdmin, adminUsername } from '../lib/adminAuth';
 import { rateLimiter } from '../lib/authMiddleware';
 import {
   validateReport, validateReplyPayload, awaitingAdmin, newShotId, isShotId,
@@ -373,7 +373,7 @@ export function registerReportRoutes(app: Express): void {
       notified = false;
     }
 
-    audit('REPORT_REPLY', { id, notified });
+    audit('REPORT_REPLY', { admin: adminUsername(), id, notified });
     res.json({ ok: true, messages, notified, imageSaved: parsed.screenshot ? !!shotId : undefined });
   });
 
@@ -471,7 +471,7 @@ export function registerReportRoutes(app: Express): void {
     // 🔒 LOGGED, BECAUSE WE PROMISED IT WOULD BE. The Privacy Policy (§8) tells every user that
     // "production access is limited, logged, and need-based". This screen is that access, so opening
     // it writes an audit line with the admin who opened it — the promise made true rather than stated.
-    audit('ADMIN_USER_ACCOUNT_VIEW', { uid, ip: req.ip });
+    audit('ADMIN_USER_ACCOUNT_VIEW', { admin: adminUsername(), uid, ip: req.ip });
 
     const [identityMap, buildRows, deployments, wallet, payments, profile, aiLogs, sessions, authMap, pass] = await Promise.all([
       resolveUserIdentities([uid], identityDb()),
@@ -677,7 +677,7 @@ export function registerReportRoutes(app: Express): void {
       status as 'open' | 'reviewed' | 'actioned' | 'dismissed',
       typeof req.body?.note === 'string' ? req.body.note : undefined,
     );
-    audit('ADMIN_USER_REPORT_STATUS', { id: String(routeParam(req.params.id) || ''), status, result: ok ? 'ok' : 'failed', ip: req.ip });
+    audit('ADMIN_USER_REPORT_STATUS', { admin: adminUsername(), id: String(routeParam(req.params.id) || ''), status, result: ok ? 'ok' : 'failed', ip: req.ip });
     if (!ok) return res.status(502).json({ error: 'Could not update that report.' });
     res.json({ ok: true, status });
   });

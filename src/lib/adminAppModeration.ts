@@ -5,8 +5,9 @@
 // route — the capability existed and was unreachable, which is the same as not existing.
 //
 // 🔴 THE PART THAT MATTERS MOST, AND IT IS NOT THE BUTTONS: the two actions are NOT the same action
-// with different words. `taken_down` is re-checked by the deploy gate, so it is PERMANENT — the owner
-// can never publish that workspace again, and nothing on this screen or any other can undo it.
+// with different words. `taken_down` is re-checked by the deploy gate, so the owner can never publish
+// that workspace again — only an admin's RESTORE lifts it (admin panel audit, PR 3: the route existed
+// with no button, so a mistaken ban could not be undone from the app at all).
 // `unpublished` only takes the live site off the internet; the owner publishes again from their own
 // screen whenever they like. A moderator wants the second one far more often than the first, so the
 // screen has to make the difference impossible to miss rather than merely stating it once.
@@ -42,9 +43,12 @@ export function appStatusView(status?: AppStatus): AppStatusView {
     case 'unpublished':
       return { label: 'Offline', live: false, tone: 'off', meaning: 'Taken off the internet. The owner can publish it again themselves.' };
     case 'taken_down':
-      return { label: 'Banned', live: false, tone: 'banned', meaning: 'Removed permanently. This workspace can never publish again.' };
+      return { label: 'Banned', live: false, tone: 'banned', meaning: 'Removed. The owner can never publish this workspace again unless an admin restores it.' };
     case 'held':
-      return { label: 'Held', live: false, tone: 'warn', meaning: 'Held automatically — an outside address it uses was reported unsafe.' };
+      // The ONE writer of 'held' is the publish-time content scan (DeploymentStore, AGENTV3_PUBLISH_SCAN=block):
+      // the app was stopped BEFORE it went live. This line used to blame "an outside address reported unsafe",
+      // a reason no code path ever records.
+      return { label: 'Held', live: false, tone: 'warn', meaning: 'Held automatically — the safety scan stopped it before it went live.' };
     case 'plan_paused':
       return { label: 'Paused', live: false, tone: 'warn', meaning: 'Paused over the owner’s hosting plan, not over its content.' };
     default:
@@ -73,6 +77,16 @@ export function canUnpublish(status?: AppStatus): boolean {
  */
 export function canBan(status?: AppStatus): boolean {
   return (status || 'active') !== 'taken_down';
+}
+
+/**
+ * Can RESTORE act on this status? Only a ban or an automatic hold — the two states the owner cannot
+ * leave by themselves. The server reads this same function, so the screen can never offer a restore the
+ * route would refuse. A record with no status is treated as live (see `appStatusView`), so it is not
+ * restorable.
+ */
+export function isRestorableStatus(status?: AppStatus | null): boolean {
+  return status === 'taken_down' || status === 'held';
 }
 
 /** A row as this screen needs it — a subset of the server's DeploymentRecord. */
@@ -105,12 +119,28 @@ export function matchesAppQuery(row: AppRow, query: string): boolean {
  * against a permanent mistake is that the admin reads a different sentence for a ban than for an
  * unpublish, and a sentence living in a component is one nothing can test.
  */
-export function confirmCopy(action: 'unpublish' | 'ban'): { title: string; body: string; cta: string } {
+export type ModerationAction = 'unpublish' | 'ban' | 'restore';
+
+/** The server route each action runs — one table, so the screen cannot send a ban to the restore route. */
+export const MODERATION_ROUTE: Record<ModerationAction, 'unpublish' | 'takedown' | 'restore'> = {
+  unpublish: 'unpublish',
+  ban: 'takedown',
+  restore: 'restore',
+};
+
+export function confirmCopy(action: ModerationAction): { title: string; body: string; cta: string } {
+  if (action === 'restore') {
+    return {
+      title: 'Restore this app?',
+      body: 'The block is lifted and the owner can publish this app again from their own screen. Nothing goes live by itself: the app stays offline until the owner publishes it.',
+      cta: 'Restore',
+    };
+  }
   return action === 'ban'
     ? {
-      title: 'Ban this app permanently?',
-      body: 'The live site is removed and this workspace can NEVER publish again. This cannot be undone — not by you, and not by the owner. Use Unpublish instead if you only want it taken off the internet for now.',
-      cta: 'Ban permanently',
+      title: 'Ban this app?',
+      body: 'The live site is removed and the owner can NEVER publish again from this workspace. Only an admin can lift a ban, with Restore. Use Unpublish instead if you only want it taken off the internet for now.',
+      cta: 'Ban',
     }
     : {
       title: 'Take this app offline?',

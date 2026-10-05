@@ -118,6 +118,7 @@ const FEATURE_HOME: Record<string, string | string[]> = {
   'only={ENGINE_REPORTS_ON.publishing}': 'publishing',
   "storeTab: 'review'": 'review',
   '<BotsLedgerPanel': 'bots',
+  "detail: { view: 'gallery' }": 'review', // PR 3: the gallery review queue, opened from Apps → Review
   // Builds
   'onClick={clearAllReports}': 'reports',
   '<FailureCategoryCard': 'reports',
@@ -148,6 +149,8 @@ const FEATURE_HOME: Record<string, string | string[]> = {
   'only={ENGINE_REPORTS_ON.revenue}': 'revenue',
   // Safety
   '>Two-Factor Authentication</h3>': 'security',
+  '<AppCheckCard adminToken': 'security',       // PR 3
+  '<AdminAuditLogPanel adminToken': 'security', // PR 3
   '>Recent Failed Login Attempts</h3>': 'security',
   "statCard('Failed Logins'": 'security',
   'only={ENGINE_REPORTS_ON.security}': 'security',

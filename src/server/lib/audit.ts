@@ -6,6 +6,8 @@
  * so the audit trail survives Cloud Run restarts and is queryable via admin API.
  */
 import { logStore } from './logStore';
+import { appendAdminAudit } from './adminAuditLog';
+import { isAdminAuditEvent } from '../../lib/adminAuditEvents';
 
 /** Map a log level to a Cloud Logging severity (auto-promoted from a structured line). */
 const SEVERITY: Record<string, string> = { info: 'INFO', notice: 'NOTICE', warn: 'WARNING', error: 'ERROR', critical: 'CRITICAL' };
@@ -37,6 +39,9 @@ export function audit(event: string, meta: Record<string, any> = {}, level?: key
   } catch { /* circular/oversized meta — skip the structured mirror, never throw */ }
   // G2: persist alongside stdout (fire-and-forget, never throws)
   logStore.append(persistedAuditEntry(event, meta, level));
+  // An admin action is also kept in the admin audit log, a collection holding nothing else, so the Audit
+  // Log screen can read it newest-first and page through it exactly (adminAuditLog.ts). Never throws.
+  if (isAdminAuditEvent(event)) appendAdminAudit(event, meta, Date.parse(ts));
 }
 
 /** The durable level for a severity string the mirror above would emit. */

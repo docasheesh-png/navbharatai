@@ -90031,3 +90031,11 @@ history links; their unit tests stay.
 
 **Watch after deploy:** a picture should arrive on the first press. If Paid itself fails, the admin diagnostic now
 names the paid rungs, not the free door.
+
+### 2026-10-05 — #3547 merged: Q-660 … Q-663 leave the open queue
+
+#3547 was squash-merged at `affa6a28` on the admin's word ("marge karo"), after CI ran green on head `e14b3aab`. Earlier CI runs never started because of the GitHub billing limit; once that was cleared, CI ran and passed.
+
+Q-660, Q-661, Q-662 and Q-663 move to ✅. Their ledger is the "Free mode removed" entry above.
+
+**Watch:** a picture should arrive on the first press on the live site.

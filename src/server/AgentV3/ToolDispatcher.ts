@@ -191,6 +191,7 @@ import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessRep
 import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
 import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE, entryFirstWriteNote } from './earlyPreview';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
+import { loadedMissingPackageUses, notInstalledBlockerLabel, undeclaredInstalledLabel, type MissingPackageUse } from './missingPackageBlockers';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
 import { filesOutsideTheApp, outsideAppMatcher, outsideTheAppNote } from './outsideTheApp';
@@ -5852,6 +5853,33 @@ export class ToolDispatcher {
           const sample = undefHookRep.undefinedHooks.slice(0, 3).map((h) => `${h.hook}()@${h.file}:${h.line}`).join(', ');
           extra.push({ severity: 'high', label: `${undefHookRep.undefinedHooks.length} hook(s) called but never imported/defined (crash at runtime): ${sample}${undefHookRep.undefinedHooks.length > 3 ? ', …' : ''}` });
         }
+        // Q-143 (admin-approved (b) 2026-10-05): a package a LOADED file imports that is still undeclared
+        // after the allowlist reconciler above, and not in node_modules either, cannot run — so READY would
+        // be untrue. Re-collected here (not `depIssues`, read before the reconciler) so a package the heal
+        // just added never blocks. See missingPackageBlockers.ts.
+        try {
+          const stillMissing = (await this.collectDependencyIssues()).filter((d) => d.kind === 'missing').map((d) => d.package);
+          // Only where an npm install has actually populated node_modules: an import-map / CDN preview, or
+          // a project not installed yet, has no node_modules to ask, and "not found" there proves nothing.
+          let installedTree = false;
+          if (stillMissing.length) {
+            try { installedTree = typeof (await this.actuator.readFile(this.workspaceId, 'node_modules/.package-lock.json')) === 'string'; } catch { installedTree = false; }
+          }
+          if (stillMissing.length && installedTree) {
+            const graph = mem.graph();
+            const skip = await this.platformE2eFiles(graph.files);
+            const uses = loadedMissingPackageUses(graph.imports, stillMissing, reach, skip);
+            const notInstalled: MissingPackageUse[] = [];
+            const installedOnly: MissingPackageUse[] = [];
+            for (const u of uses) {
+              let installed = false;
+              try { installed = typeof (await this.actuator.readFile(this.workspaceId, `node_modules/${u.package}/package.json`)) === 'string'; } catch { installed = false; }
+              (installed ? installedOnly : notInstalled).push(u);
+            }
+            if (notInstalled.length) extra.push({ severity: 'high', label: notInstalledBlockerLabel(notInstalled) });
+            if (installedOnly.length) extra.push({ severity: 'medium', label: undeclaredInstalledLabel(installedOnly) });
+          }
+        } catch { /* best-effort — a failed probe never fabricates a blocker */ }
         // Dependency version conflicts (P-AI.14 ConstraintSolver): a react/react-dom major mismatch crashes
         // React at render (HIGH blocker); duplicate/`@types` drift lowers the score as a warning. Pure, sync.
         // Uses the already-read root package.json (pkgForRun) — package.json is not in snap.sources.

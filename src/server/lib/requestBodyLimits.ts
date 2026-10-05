@@ -127,6 +127,26 @@ export const LARGE_BODY_ROUTES: readonly BodyRoute[] = [
 ];
 
 /**
+ * Routes with a limit SMALLER than the default, each with its own figure (Q-674, found 2026-10-05).
+ *
+ * These routes used to mount their own `express.json({ limit })`. That parser never ran: body-parser skips
+ * a request the global parser has already read, so the public, signed-out app-AI gateways — the ones a
+ * stranger can call from any published app — took bodies up to the global limit instead of the 16 KB their
+ * authors wrote. A route-specific limit therefore lives HERE, in the one parser that actually runs, and
+ * `tests/aRequestBodyIsOnlyAsLargeAsItsRouteNeeds.test.ts` forbids a route-level `express.json`.
+ */
+export interface SmallBodyRoute extends BodyRoute {
+  readonly limit: string;
+}
+export const SMALL_BODY_ROUTES: readonly SmallBodyRoute[] = [
+  { path: '/api/app-ai/ask', limit: '16kb', why: 'public gateway for published apps: one question and a short history (appAi.ts)' },
+  { path: '/api/app-ai/image', limit: '16kb', why: 'public gateway for published apps: one picture prompt (appAi.ts)' },
+  { path: '/api/app-ai/preview-ask', limit: '16kb', why: 'the owner\'s preview of the same gateway (appAiOwner.ts)' },
+  { path: '/api/app-ai/preview-image', limit: '16kb', why: 'the owner\'s preview of the picture gateway (appAiOwner.ts)' },
+  { path: '/api/app-ai/settings', limit: '4kb', why: 'two switches and a cap (appAiOwner.ts)' },
+];
+
+/**
  * Routes that keep the exact request bytes as `req.rawBody`. Nothing else gets them: a second copy of
  * every body was memory spent for three readers.
  */
@@ -156,6 +176,7 @@ export function compileRoutePath(path: string): RegExp {
 
 const LARGE_MATCHERS = LARGE_BODY_ROUTES.map((r) => compileRoutePath(r.path));
 const RAW_MATCHERS = RAW_BODY_ROUTES.map((r) => compileRoutePath(r.path));
+const SMALL_MATCHERS = SMALL_BODY_ROUTES.map((r) => ({ re: compileRoutePath(r.path), limit: r.limit }));
 
 /**
  * The path a route will be matched on. The body parser runs BEFORE apiVersionMiddleware rewrites
@@ -170,6 +191,12 @@ export function routingPath(path: string): string {
 export function isLargeBodyRoute(path: string): boolean {
   const p = routingPath(path);
   return LARGE_MATCHERS.some((re) => re.test(p));
+}
+
+/** The route's own smaller limit, or null when it takes the default (or the large one). */
+export function smallBodyLimit(path: string): string | null {
+  const p = routingPath(path);
+  return SMALL_MATCHERS.find((m) => m.re.test(p))?.limit ?? null;
 }
 
 export function needsRawBody(path: string): boolean {
@@ -206,14 +233,17 @@ export function jsonBodyParser(opts: JsonBodyParserOptions = {}): RequestHandler
     large: express.json({ limit: LARGE_JSON_LIMIT }),
     largeRaw: express.json({ limit: LARGE_JSON_LIMIT, verify: keepRawBytes }),
   };
+  // One parser per smaller limit, built once (none of these routes needs raw bytes).
+  const smaller = new Map(SMALL_BODY_ROUTES.map((r) => [r.limit, express.json({ limit: r.limit })] as const));
   return (req: Request, res: Response, next: NextFunction) => {
     const large = isLargeBodyRoute(req.path);
     const raw = needsRawBody(req.path);
-    const parser = large ? (raw ? parsers.largeRaw : parsers.large) : (raw ? parsers.smallRaw : parsers.small);
+    const tiny = !large && !raw ? smallBodyLimit(req.path) : null;
+    const parser = tiny ? smaller.get(tiny)! : large ? (raw ? parsers.largeRaw : parsers.large) : (raw ? parsers.smallRaw : parsers.small);
     parser(req, res, (err?: unknown) => {
       const e = err as { type?: string; status?: number; length?: number; limit?: number } | undefined;
       if (e && (e.type === 'entity.too.large' || e.status === 413)) {
-        const limit = large ? LARGE_JSON_LIMIT : DEFAULT_JSON_LIMIT;
+        const limit = tiny ?? (large ? LARGE_JSON_LIMIT : DEFAULT_JSON_LIMIT);
         try {
           opts.onTooLarge?.({ method: req.method, path: routingPath(req.path), limit, length: typeof e.length === 'number' ? e.length : undefined }, err);
         } catch { /* reporting must never change the answer */ }
@@ -222,6 +252,14 @@ export function jsonBodyParser(opts: JsonBodyParserOptions = {}): RequestHandler
             error: `This request is too large (the limit here is ${limit.toUpperCase()}). Please send less at once.`,
             code: 'BODY_TOO_LARGE',
           });
+        }
+        return;
+      }
+      // A body that is not JSON is the CALLER's mistake: 400 with a sentence, not the generic 500 the
+      // global error handler would turn it into (Q-674, found with the body limits).
+      if (e && e.type === 'entity.parse.failed') {
+        if (!res.headersSent) {
+          res.status(400).json({ error: 'The request body is not valid JSON.', code: 'BODY_NOT_JSON' });
         }
         return;
       }

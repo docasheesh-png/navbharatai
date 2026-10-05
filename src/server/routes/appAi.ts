@@ -13,7 +13,6 @@
 // cannot, and no model is called until all of them have passed.
 
 import type { Express, Request, Response } from 'express';
-import express from 'express';
 import { rateLimiter } from '../lib/authMiddleware';
 import {
   GATEWAY_PATH, IMAGE_GATEWAY_PATH, appAiGatewayEnabled, gatewaySecret, verifyAppAiToken, nonceAccepted,
@@ -65,7 +64,7 @@ export function registerAppAiRoutes(app: Express): void {
    */
   const limiter = rateLimiter({ name: 'app-ai', authed: 240, anon: 240, noun: 'questions', durable: false, anonGlobalPerHour: 20_000 });
 
-  app.post(GATEWAY_PATH, express.json({ limit: '16kb' }), limiter, async (req: Request, res: Response) => {
+  app.post(GATEWAY_PATH, limiter, async (req: Request, res: Response) => {
     cors(res);
     const refuse = (reason: GatewayRefusal, status = 200) => {
       // 200 with `ok: false`, not an HTTP error: the page's helper reads one shape, and a status code
@@ -132,7 +131,7 @@ export function registerAppAiRoutes(app: Express): void {
    */
   const imageLimiter = rateLimiter({ name: 'app-ai-image', authed: 60, anon: 60, noun: 'pictures', durable: false, anonGlobalPerHour: 5_000 });
 
-  app.post(IMAGE_GATEWAY_PATH, express.json({ limit: '16kb' }), imageLimiter, async (req: Request, res: Response) => {
+  app.post(IMAGE_GATEWAY_PATH, imageLimiter, async (req: Request, res: Response) => {
     cors(res);
     const refuse = (message: string) => { res.status(200).json({ ok: false, message }); };
     if (!appAiGatewayEnabled()) { refuse(VISITOR_IMAGE_UNAVAILABLE); return; }

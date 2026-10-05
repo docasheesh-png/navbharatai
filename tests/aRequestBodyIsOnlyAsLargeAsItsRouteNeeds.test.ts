@@ -15,8 +15,8 @@ import type { Server } from 'http';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import {
-  DEFAULT_JSON_LIMIT, LARGE_BODY_ROUTES, LARGE_JSON_LIMIT, RAW_BODY_ROUTES,
-  compileRoutePath, isLargeBodyRoute, jsonBodyParser, needsRawBody, routingPath,
+  DEFAULT_JSON_LIMIT, LARGE_BODY_ROUTES, LARGE_JSON_LIMIT, RAW_BODY_ROUTES, SMALL_BODY_ROUTES,
+  compileRoutePath, smallBodyLimit, isLargeBodyRoute, jsonBodyParser, needsRawBody, routingPath,
 } from '../src/server/lib/requestBodyLimits';
 
 const ROOT = process.cwd();
@@ -358,6 +358,7 @@ describe('jsonBodyParser on a live Express app', () => {
     app.post('/api/payment/webhook', echo);
     app.post('/api/bots/whatsapp/webhook/:botId', echo);
     app.post('/api/profile/budget', echo);
+    app.post('/api/app-ai/ask', echo);
     await new Promise<void>((resolve) => { server = app.listen(0, '127.0.0.1', () => resolve()); });
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });
@@ -400,6 +401,20 @@ describe('jsonBodyParser on a live Express app', () => {
     expect((await res.json()).raw).toBeNull();
   });
 
+  it('Q-674: the public app-AI gateway refuses more than its own 16 KB, honestly', async () => {
+    const res = await post('/api/app-ai/ask', JSON.stringify({ question: 'x'.repeat(40 * 1024) }));
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toMatch(/16KB/);
+    const ok = await post('/api/app-ai/ask', JSON.stringify({ question: 'What are your opening hours?' }));
+    expect(ok.status).toBe(200);
+  });
+
+  it('Q-674: a body that is not JSON is the caller\'s 400, never a 500', async () => {
+    const res = await post('/api/profile/budget', '{"budgetLimitInr": 5');
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe('BODY_NOT_JSON');
+  });
+
   it('the two signed webhooks get the exact bytes', async () => {
     const raw = '{"data":{"order":{"order_id":"o1"}},  "type":"PAYMENT_SUCCESS_WEBHOOK"}';
     for (const p of ['/api/payment/webhook', '/api/bots/whatsapp/webhook/b1']) {
@@ -407,5 +422,32 @@ describe('jsonBodyParser on a live Express app', () => {
       expect(res.status, p).toBe(200);
       expect((await res.json()).raw, p).toBe(Buffer.byteLength(raw));
     }
+  });
+});
+
+describe('🔒 Q-674: a route-specific limit lives in the one parser that runs', () => {
+  // body-parser skips a request already parsed, so a route's own `express.json({ limit })` behind the global
+  // parser never runs — the app-AI gateways wrote 16 KB and took the global limit for months.
+  const files = (dir: string, out: string[] = []): string[] => {
+    for (const n of readdirSync(join(ROOT, dir))) {
+      const p = join(dir, n);
+      if (statSync(join(ROOT, p)).isDirectory()) files(p, out);
+      else if (/\.ts$/.test(n) && !/\.test\./.test(n)) out.push(p);
+    }
+    return out;
+  };
+  it('no route registers its own JSON or urlencoded parser', () => {
+    const offenders = [...files('src/server/routes'), 'server.ts'].filter((f) =>
+      /app\.(?:get|post|put|patch|delete|all|use)\([^;]*express\.(?:json|urlencoded)\(/.test(read(f)));
+    expect(offenders).toEqual([]);
+  });
+  it('the small-route list resolves, and its routes are neither large nor raw', () => {
+    for (const r of SMALL_BODY_ROUTES) {
+      expect(smallBodyLimit(r.path), r.path).toBe(r.limit);
+      expect(isLargeBodyRoute(r.path), r.path).toBe(false);
+      expect(needsRawBody(r.path), r.path).toBe(false);
+    }
+    expect(smallBodyLimit('/api/v1/app-ai/ask')).toBe('16kb');
+    expect(smallBodyLimit('/api/profile/budget')).toBeNull();
   });
 });

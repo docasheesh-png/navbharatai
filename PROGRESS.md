@@ -90360,3 +90360,19 @@ now follows local wrappers, with a fixture for that shape.
   the 24 GB, but the historical directories had already been deleted, so it cannot be proven from evidence.
   A sweep is unsafe: concurrent sessions share `/tmp`, and a live run's directory looks the same.
 
+
+### 2026-10-05 — #3551 second half: Q-616, Q-622, Q-627, Q-628, Q-625, Q-620, Q-672 integrated; Q-673, Q-674 found and fixed
+
+- The four agent branches (image hold, anonymous capabilities, body limits + MCP credentials, import /
+  DAST / temp-dir hygiene) were cherry-picked onto #3551 and gated together on the merged state.
+- **Q-673:** the free chat sent non-default agent ids to a route that never existed. Fixed, plus a census that
+  every client `/api/...` path has a server route.
+- **Q-674:** route-level body parsers were dead (the global one runs first), so the public app-AI gateways
+  took the global limit; malformed JSON was a 500. Limits moved into the one parser; malformed is a 400.
+- **Decisions the admin owns (recorded, not changed):**
+  - Q-622: the guest free chat's chain falls back to cheap metered rungs after its ₹0 first rung.
+    Recommended: keep (it serves the admin's 10-free-messages decision of 2026-09-27, bounded by
+    `guestDailyQuota`). Alternative: guests on the ₹0 rung only.
+  - Q-616: picture edits inside the chat count against the image allowance but are never charged ₹ — the
+    chat never shows the price. Recommended: after the 5 free a day, refuse with the existing "open the
+    Image Generator" sentence.

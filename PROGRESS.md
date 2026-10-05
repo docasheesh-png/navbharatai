@@ -89843,3 +89843,11 @@ whoever merges second should expect a conflict in exactly that region and keep b
 Q-104, Q-116, Q-135, Q-139, Q-146, Q-147, Q-150, Q-152, Q-153, Q-156, Q-164 (Q-152 was already-fixed, evidence in its ledger entry). Their ledgers are above in this file. Still
 open from that work, each 🟡 with what it needs in `BUILD_REPORT_QUEUE.md`: Q-154 (admin confirms `hops: 1` at
 `/api/admin/proxy-hops`), Q-162 (45 undecided routes), Q-160, Q-136 (#3533), Q-101, Q-159, Q-141, Q-163.
+
+---
+
+## 2026-10-05 — Q-574 ✅: the E2B builder template was rebuilt with the new warm primer
+
+- The admin ran **Build E2B Builder Template** (run #10, branch `main` at 56571ce, template kind `default`) and it finished green. `infra/e2b/build.mjs` waits for `Template.build` and throws if the build fails, so a green job means the `navbharat-builder` template was rebuilt and published. Its warm primer now includes `@types/react` and `@types/react-dom` (the change from #3528).
+- **Watch on the next real build:** the setState / props type-error pair (seen three times, last in cc3ef776) should not come back. If it does, check that Cloud Run `E2B_TEMPLATE_ID` points at `navbharat-builder`.
+- **Incident the same morning:** from about 04:14 UTC, every GitHub Actions job (CI, image scan, DAST and this workflow) was refused with *"recent account payments have failed or your spending limit needs to be increased"*. The last job to run before that was the iOS `.ipa` build at 02:44 UTC. The admin fixed the billing, and run #10 then passed. CI runs that failed in that window are not evidence of anything about the code; they must be re-run before any merge.

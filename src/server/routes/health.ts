@@ -15,7 +15,7 @@ import { noteAppOpen } from '../lib/ownAudience';
 import { doraMetrics } from '../lib/DoraMetrics';
 import { serverStats } from '../lib/serverStats';
 import { buildHealthReport, renderStatusPageHtml, type HealthCheck } from '../lib/HealthReport';
-import { adminRequestOk } from '../lib/adminAuth';
+import { adminRequestOk, adminUsername } from '../lib/adminAuth';
 import { normalizeFeePct } from '../../lib/platformFee';
 import { grievanceOfficerFrom, type GrievanceOfficer } from '../../content/legal/grievance';
 import { grievanceOfficer } from '../lib/grievanceOfficer';
@@ -266,7 +266,7 @@ export function registerHealthRoutes(app: Express): void {
   app.post('/api/admin/backup/firestore', async (req: Request, res: Response) => {
     if (!adminOk(req)) { res.status(403).json({ error: 'admin only' }); return; }
     const result = await firestoreBackup.trigger();
-    audit('ADMIN_FIRESTORE_BACKUP', { result: result.ok ? 'ok' : (result.configured ? 'failed' : 'not-configured'), ip: req.ip });
+    audit('ADMIN_FIRESTORE_BACKUP', { admin: adminUsername(), result: result.ok ? 'ok' : (result.configured ? 'failed' : 'not-configured'), ip: req.ip });
     res.status(result.ok ? 200 : (result.configured ? 502 : 400)).json(result);
   });
 }

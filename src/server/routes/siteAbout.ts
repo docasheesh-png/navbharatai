@@ -14,7 +14,7 @@
  */
 
 import type { Express, Request, Response } from 'express';
-import { requireAdmin } from '../lib/adminAuth';
+import { requireAdmin, adminUsername } from '../lib/adminAuth';
 import { audit } from '../lib/audit';
 import { readAboutOverrides, writeAboutOverrides } from '../lib/siteAbout';
 import { aboutContent } from '../../content/about';
@@ -30,7 +30,7 @@ export function registerSiteAboutRoutes(app: Express): void {
   app.put('/api/admin/site/about', requireAdmin, async (req: Request, res: Response) => {
     const saved = await writeAboutOverrides((req.body as { overrides?: unknown })?.overrides ?? req.body);
     // The public About page is what every visitor reads, so who changed it is traceable (PR 1, 2026-10-04).
-    audit('ADMIN_SITE_ABOUT_CHANGED', { result: saved ? 'ok' : 'not-saved', ip: req.ip });
+    audit('ADMIN_SITE_ABOUT_CHANGED', { admin: adminUsername(), result: saved ? 'ok' : 'not-saved', ip: req.ip });
     if (!saved) {
       // ⚠️ AN HONEST FAILURE, NOT A CHEERFUL 200. The whole point of this change is that an admin edit
       // reaches real users; telling them "saved" when nothing was written would rebuild the exact bug

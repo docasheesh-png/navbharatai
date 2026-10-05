@@ -35,6 +35,8 @@ import {
 } from '../lib/adminWelcomeGift';
 import { audit } from '../lib/audit';
 import { readAdminReason, readTokenDelta, broadcastScopeConfirmed } from '../../lib/adminActionReason';
+import { isRestorableStatus } from '../../lib/adminAppModeration';
+import { readAdminAuditPage } from '../lib/adminAuditLog';
 import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } from '../lib/buildDiscount';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
@@ -387,7 +389,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const pending = data?.encrypted_pending ? decrypt(data.encrypted_pending) : '';
       if (!pending) return res.status(400).json({ error: 'No pending enrolment. Start enrolment first.' });
       if (!verifyTotp(pending, code)) {
-        audit('ADMIN_MFA_VERIFY_FAILED', { ip: req.ip });
+        audit('ADMIN_MFA_VERIFY_FAILED', { admin: adminUsername(), ip: req.ip });
         return res.status(401).json({ error: 'Invalid code. Try again.' });
       }
       await setDoc(doc(db, ADMIN_MFA_DOC, ADMIN_MFA_ID), {
@@ -396,7 +398,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         encrypted_pending: '',
         enrolled_at: new Date().toISOString(),
       }, { merge: true });
-      audit('ADMIN_MFA_ENABLED', { ip: req.ip });
+      audit('ADMIN_MFA_ENABLED', { admin: adminUsername(), ip: req.ip });
       res.json({ ok: true, enabled: true });
     } catch (err) {
       console.error('[ADMIN_MFA] verify failed:', err);
@@ -413,7 +415,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
     if (!mfa.enabled || !mfa.secret) return res.json({ ok: true, enabled: false });
     if (!verifyTotp(mfa.secret, code)) {
-      audit('ADMIN_MFA_DISABLE_FAILED', { ip: req.ip });
+      audit('ADMIN_MFA_DISABLE_FAILED', { admin: adminUsername(), ip: req.ip });
       return res.status(401).json({ error: 'Invalid code — cannot disable MFA.' });
     }
     const db = getDb() as any;
@@ -423,7 +425,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         enabled: false, encrypted_secret: '', encrypted_pending: '',
         disabled_at: new Date().toISOString(),
       }, { merge: true });
-      audit('ADMIN_MFA_DISABLED', { ip: req.ip });
+      audit('ADMIN_MFA_DISABLED', { admin: adminUsername(), ip: req.ip });
       res.json({ ok: true, enabled: false });
     } catch (err) {
       console.error('[ADMIN_MFA] disable failed:', err);
@@ -1588,6 +1590,23 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
+  // THE ADMIN AUDIT LOG (admin panel audit, PR 3) — every admin action, newest first, 50 at a time.
+  // Reading it is itself not audited: it changes nothing, and a line per page view would bury the actions.
+  app.get('/api/admin/audit-log', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const before = req.query.before !== undefined ? Number(req.query.before) : undefined;
+      const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+      const page = await readAdminAuditPage({
+        before: Number.isFinite(before) ? before : undefined,
+        limit: Number.isFinite(limit) ? limit : undefined,
+      });
+      res.json(page);
+    } catch (err: any) {
+      console.error('[ADMIN] audit log read failed:', err?.message);
+      res.status(500).json({ error: 'Could not read the audit log.' });
+    }
+  });
+
   // G2 — structured server log query endpoint.
   app.get('/api/admin/logs', verifyAdminToken, async (req: Request, res: Response) => {
     try {
@@ -2438,7 +2457,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           else skipped++;
         }
       }
-      audit('ADMIN_WELCOME_GIFT_BULK', { days, paid, skipped, failed, tokensEach: ADMIN_WELCOME_GIFT_TOKENS, ip: req.ip });
+      audit('ADMIN_WELCOME_GIFT_BULK', { admin: adminUsername(), days, paid, skipped, failed, tokensEach: ADMIN_WELCOME_GIFT_TOKENS, ip: req.ip });
       res.json({
         ok: true, days, paid, skipped, failed, remaining: eligible - batch.length,
         rupeesEach: ADMIN_WELCOME_GIFT_RUPEES, totalRupees: paid * ADMIN_WELCOME_GIFT_RUPEES,
@@ -2471,7 +2490,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
     try {
       const saved = await buildDiscountStore.write(n, 'admin');
-      audit('ADMIN_BUILD_DISCOUNT_SET', { pct: saved.pct, ip: req.ip });
+      audit('ADMIN_BUILD_DISCOUNT_SET', { admin: adminUsername(), pct: saved.pct, ip: req.ip });
       res.json({ ok: true, ...saved, maxPct: BUILD_DISCOUNT_MAX_PCT, cacheSeconds: BUILD_DISCOUNT_CACHE_MS / 1000 });
     } catch (e: any) {
       console.error('[ADMIN] build-discount write failed:', e?.message);
@@ -2510,7 +2529,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         tx.set(fromRef, { ...fromData, tokenBalance: 0, remaining_balance: 0, total_balance: 0, mergedInto: userId, mergedAt: nowIso, updatedAt: nowIso });
         return { newBalance: merged.tokenBalance, mergeAudit };
       });
-      audit('ADMIN_WALLET_MERGE', { into: userId, from: fromUserId, newBalance: out.newBalance, ...out.mergeAudit, ip: req.ip });
+      audit('ADMIN_WALLET_MERGE', { admin: adminUsername(), into: userId, from: fromUserId, newBalance: out.newBalance, ...out.mergeAudit, ip: req.ip });
       res.json({ ok: true, into: userId, from: fromUserId, newBalance: out.newBalance, audit: out.mergeAudit });
     } catch (e: any) {
       console.error('[ADMIN] wallet merge failed:', e?.message);
@@ -2699,7 +2718,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const vfs = VirtualFileSystem.fromRecord(files);
       const html = renderPreview(vfs, bodyOrigin || hdrOrigin || undefined, workspaceId);
       const kind = isReactProject(vfs) ? 'react' : isVueProject(vfs) ? 'vue' : 'static';
-      audit('ADMIN_APP_PREVIEW', { workspaceId, kind, count, ip: req.ip });
+      audit('ADMIN_APP_PREVIEW', { admin: adminUsername(), workspaceId, kind, count, ip: req.ip });
       res.json({ html, kind, count, empty: false });
     } catch (e: any) {
       console.error('[ADMIN] app preview error:', e?.message);
@@ -2711,14 +2730,18 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // never republish (the deploy choke point re-checks status). Honest — reports the real result.
   app.post('/api/admin/deployments/:workspaceId/takedown', verifyAdminToken, async (req: Request, res: Response) => {
     const { workspaceId } = routeParams(req.params);
-    const { reason } = req.body || {};
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+    // A ban removes somebody's live site and writes the 180-day record FROM this sentence (admin panel
+    // audit, PR 3): it is the admin's own reason or the request is refused — the screen is not the boundary.
+    const reasonRead = readAdminReason((req.body ?? {}).reason);
+    if (!('reason' in reasonRead)) return res.status(400).json({ error: reasonRead.error });
+    const reason = reasonRead.reason;
     try {
       // Delete the live channel FIRST (real unpublish); idempotent (404 = already gone). If it throws
       // (e.g. missing IAM role), surface it honestly and do NOT claim the app was taken down.
       await new FirebaseHostingDeployer().deleteChannel(workspaceId);
       const marked = await deploymentStore.setStatus(workspaceId, 'taken_down');
-      audit('ADMIN_APP_TAKEDOWN', { workspaceId, reason: reason || '', ip: req.ip });
+      audit('ADMIN_APP_TAKEDOWN', { admin: adminUsername(), workspaceId, reason, result: 'ok', ip: req.ip });
       /**
        * The 180-day record (IT Rules, 2021 Rule 3(1)(g)). Written only AFTER the channel is really
        * gone, because this route's whole discipline is that it never claims a takedown it did not
@@ -2732,7 +2755,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         surface: 'navbharat_hosting',
         contentId: workspaceId,
         ownerUid: owner?.userId,
-        reason: typeof reason === 'string' ? reason : '',
+        reason,
         actor: 'admin',
         removedBy: 'admin',
         removedAt: Date.now(),
@@ -2766,20 +2789,23 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
    */
   app.post('/api/admin/deployments/:workspaceId/unpublish', verifyAdminToken, async (req: Request, res: Response) => {
     const { workspaceId } = routeParams(req.params);
-    const { reason } = req.body || {};
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+    // Same rule as the ban: the live site of a real person goes, so the record says why, in the admin's words.
+    const reasonRead = readAdminReason((req.body ?? {}).reason);
+    if (!('reason' in reasonRead)) return res.status(400).json({ error: reasonRead.error });
+    const reason = reasonRead.reason;
     try {
       // The live channel goes FIRST, exactly as the takedown does — the registry must never say a
       // site is offline while it is still serving. A throw here means we do NOT touch the status.
       await new FirebaseHostingDeployer().deleteChannel(workspaceId);
       const marked = await deploymentStore.setStatus(workspaceId, 'unpublished');
-      audit('ADMIN_APP_UNPUBLISH', { workspaceId, reason: reason || '', ip: req.ip });
+      audit('ADMIN_APP_UNPUBLISH', { admin: adminUsername(), workspaceId, reason, result: 'ok', ip: req.ip });
       const owner = await deploymentStore.get(workspaceId).catch(() => null);
       await recordTakedown({
         surface: 'navbharat_hosting',
         contentId: workspaceId,
         ownerUid: owner?.userId,
-        reason: `[unpublished — owner may republish] ${typeof reason === 'string' ? reason : ''}`.trim(),
+        reason: `[unpublished — owner may republish] ${reason}`,
         actor: 'admin',
         removedBy: 'admin',
         removedAt: Date.now(),
@@ -3353,7 +3379,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         });
       }
       await new FirebaseHostingDeployer().deleteChannelById(channelId);
-      audit('ADMIN_CHANNEL_RECLAIMED', { channelId, state: target.state, workspaceId: target.workspaceId || '', ip: req.ip });
+      audit('ADMIN_CHANNEL_RECLAIMED', { admin: adminUsername(), channelId, state: target.state, workspaceId: target.workspaceId || '', ip: req.ip });
       // The channel is gone, so every record still pointing at it points at nothing. Reclaiming a build
       // copy was called "harmless — the next green build writes it again", and the records were never
       // told: an app not rebuilt kept framing "Site Not Found" in its preview. Clear exactly the records
@@ -3373,15 +3399,30 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
-  // Restore a held/taken-down app to active (reverses an over-eager takedown/hold). Does NOT
-  // re-publish — the owner must redeploy; this only clears the registry block.
+  // Restore a held/taken-down app (reverses an over-eager takedown or an automatic hold). It does NOT
+  // re-publish — the site stays offline and the OWNER publishes again; this only lifts the block.
+  //
+  // Admin panel audit, PR 3: this route existed with no button, so a mistaken ban could not be undone
+  // from the app at all. Now that the screen offers it, it carries the same discipline as the ban it
+  // reverses: the admin's own reason, the admin's name and the status it replaced in the audit line, and
+  // it acts only on an app that is actually banned or held — restoring anything else would "succeed"
+  // and change nothing, or worse, mark an unpublished app as live while no site is serving.
   app.post('/api/admin/deployments/:workspaceId/restore', verifyAdminToken, async (req: Request, res: Response) => {
     const { workspaceId } = routeParams(req.params);
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+    const reasonRead = readAdminReason((req.body ?? {}).reason);
+    if (!('reason' in reasonRead)) return res.status(400).json({ error: reasonRead.error });
+    const reason = reasonRead.reason;
     try {
-      const ok = await deploymentStore.setStatus(workspaceId, 'active');
-      audit('ADMIN_APP_RESTORED', { workspaceId, ip: req.ip });
-      res.json({ ok, workspaceId, status: 'active' });
+      const current = await deploymentStore.get(workspaceId);
+      const before = current?.status ?? null;
+      if (!current || !isRestorableStatus(before)) {
+        return res.status(409).json({ error: 'Only a banned or held app can be restored.', status: before });
+      }
+      const ok = await deploymentStore.setStatus(workspaceId, 'unpublished');
+      audit('ADMIN_APP_RESTORED', { admin: adminUsername(), workspaceId, before, after: 'unpublished', reason, result: ok ? 'ok' : 'not-saved', ip: req.ip });
+      if (!ok) return res.status(500).json({ error: 'The restore was not saved.' });
+      res.json({ ok: true, workspaceId, status: 'unpublished' });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 
@@ -3414,7 +3455,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     if (featureFlags) Object.assign(serverStats.featureFlags, featureFlags);
     if (pricingConfig) Object.assign(serverStats.pricingConfig, pricingConfig);
     if (providerEnabled) Object.assign(serverStats.providerEnabled, providerEnabled);
-    audit('ADMIN_SETTINGS_CHANGED', { changes: req.body, ip: req.ip });
+    audit('ADMIN_SETTINGS_CHANGED', { admin: adminUsername(), changes: req.body, ip: req.ip });
     // P-PME.8 — persist feature flags to Firestore so they survive Cloud Run restarts (in-memory
     // serverStats alone reset on every deploy). Best-effort: a persistence failure never fails the toggle.
     if (featureFlags) {
@@ -3443,7 +3484,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     };
     const saved = await saveFlagConfig(config);
     if (config.flags) Object.assign(serverStats.featureFlags, config.flags); // keep in-memory cache in sync
-    audit('ADMIN_FEATURE_FLAGS_CHANGED', { ip: req.ip, persisted: saved });
+    audit('ADMIN_FEATURE_FLAGS_CHANGED', { admin: adminUsername(), ip: req.ip, persisted: saved });
     res.json({ ok: true, persisted: saved, config });
   });
 
@@ -3453,10 +3494,10 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.post('/api/admin/rotate-keys', verifyAdminToken, async (req: Request, res: Response) => {
     try {
       const result = await rotateAllSecrets();
-      audit('ADMIN_KEY_ROTATION', { ...result, ip: req.ip }, 'notice');
+      audit('ADMIN_KEY_ROTATION', { admin: adminUsername(), ...result, ip: req.ip }, 'notice');
       res.json({ ok: true, ...result });
     } catch (err: any) {
-      audit('ADMIN_KEY_ROTATION_FAILED', { error: err?.message, ip: req.ip }, 'error');
+      audit('ADMIN_KEY_ROTATION_FAILED', { admin: adminUsername(), error: err?.message, ip: req.ip }, 'error');
       res.status(500).json({ error: 'Key rotation failed', detail: err?.message });
     }
   });
@@ -3512,7 +3553,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       const r = await createAdminPromo(db, req.body, new Date().toISOString());
       if (!r.ok) return res.status(r.status).json({ error: r.error });
-      audit('ADMIN_PROMO_CREATED', { code: r.code, ip: req.ip });
+      audit('ADMIN_PROMO_CREATED', { admin: adminUsername(), code: r.code, ip: req.ip });
       res.json({ ok: true, code: r.code });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
@@ -3540,7 +3581,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const snap = await getDoc(ref);
       if (!snap.exists()) return res.status(404).json({ error: `${code} does not exist.` });
       await deleteDoc(ref);
-      audit('ADMIN_PROMO_DELETED', { code, ip: req.ip });
+      audit('ADMIN_PROMO_DELETED', { admin: adminUsername(), code, ip: req.ip });
       res.json({ ok: true });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });

@@ -8,7 +8,7 @@ import { stampLabel, dayLabel, signInMethodWords } from '../lib/adminUserDisplay
 import { PublishedAppsCard } from './profile/PublishedAppsCard';
 import { publishedAppRows, liveAppCount } from '../lib/publishedAppsView';
 import { adultOptInSummary } from '../lib/adultContent';
-import { confirmCopy } from '../lib/adminAppModeration';
+import { confirmCopy, MODERATION_ROUTE, type ModerationAction } from '../lib/adminAppModeration';
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
@@ -16,9 +16,9 @@ import {
   ADMIN_TABS, ENGINE_REPORTS_ON, tabOfPage, tabDef, firstPageOf, pageTitle, pageBadge, pageHint,
   tabBarBadges, tabHint, type AdminTabId, type AdminPageId,
 } from '../lib/adminTabs';
-import { banCopy, tokenAdjustCopy, broadcastCopy, readTokenDelta, ALL_USERS_SCOPE } from '../lib/adminActionReason';
+import { banCopy, tokenAdjustCopy, broadcastCopy, readTokenDelta, readAdminReason, ALL_USERS_SCOPE } from '../lib/adminActionReason';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
-import { XSquare as BanIcon } from 'lucide-react';
+import { XSquare as BanIcon, RotateCcw } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
 import { summarizeFailurePatterns, summarizeBuildTimes } from '../lib/buildReportAnalytics';
 import { firstPassHeadline, FIRST_PASS_TARGET, type FirstPassMetaStats } from '../lib/firstPassQuality';
@@ -36,6 +36,8 @@ import { UnusedCardMark } from './admin/UnusedCardMark';
 import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
 import { OtpHealthCard } from './admin/OtpHealthCard';
+import { AppCheckCard } from './admin/AppCheckCard';
+import { AdminAuditLogPanel } from './admin/AdminAuditLogPanel';
 import { ProxyHopsCard } from './admin/ProxyHopsCard';
 import { PushHealthCard } from './admin/PushHealthCard';
 import { BuildDiscountCard } from './admin/BuildDiscountCard';
@@ -865,11 +867,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    *
    * ⚠️ The two actions are deliberately NOT the same button:
    *   • Unpublish — the site goes offline and the OWNER can publish it again. The everyday action.
-   *   • Ban       — the site goes offline and the workspace can NEVER publish again. Permanent, and
-   *                  nothing in this panel or any other can undo it.
+   *   • Ban       — the site goes offline and the owner can NEVER publish again from that workspace.
+   *                  Only an admin's Restore lifts it (admin panel audit, PR 3).
+   *   • Restore   — lifts a ban or an automatic hold; the app stays offline until the OWNER publishes.
+   * All three need the admin's own reason: the server refuses the request without one (readAdminReason).
    */
   /** The app awaiting confirmation, and which of the two actions was asked for. */
-  const [moderating, setModerating] = useState<{ workspaceId: string; action: 'unpublish' | 'ban' } | null>(null);
+  const [moderating, setModerating] = useState<{ workspaceId: string; action: ModerationAction } | null>(null);
   const [moderateReason, setModerateReason] = useState('');
   const [moderateBusy, setModerateBusy] = useState(false);
   /** Told to the panel after an action lands, so it re-reads THAT row in place instead of reloading page one. */
@@ -886,19 +890,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     const { workspaceId, action } = moderating;
     setModerateBusy(true);
     try {
-      const path = action === 'ban' ? 'takedown' : 'unpublish';
+      const path = MODERATION_ROUTE[action];
       const r = await fetch(`/api/admin/deployments/${encodeURIComponent(workspaceId)}/${path}`, {
         method: 'POST', headers, body: JSON.stringify({ reason: moderateReason.trim() }),
       });
       const d = await r.json();
       if (d?.ok) {
-        toast(action === 'ban' ? `Banned — ${workspaceId} can never publish again.` : `Unpublished — the owner can publish again.`);
+        toast(action === 'ban'
+          ? `Banned — ${workspaceId} cannot publish again unless an admin restores it.`
+          : action === 'restore'
+            ? 'Restored — the owner can publish this app again.'
+            : 'Unpublished — the owner can publish again.');
         setModerating(null);
         setModerateReason('');
       } else {
-        toast(d?.error || 'Failed — the live site was NOT confirmed removed.');
+        toast(d?.error || (action === 'restore' ? 'The restore did not go through.' : 'Failed — the live site was NOT confirmed removed.'));
       }
-    } catch (e) { console.error(e); toast('Failed — the live site was NOT confirmed removed.'); }
+    } catch (e) { console.error(e); toast(action === 'restore' ? 'The restore did not go through.' : 'Failed — the live site was NOT confirmed removed.'); }
     finally { setModerateBusy(false); setModerated({ workspaceId, tick: Date.now() }); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken, moderating, moderateReason]);
@@ -1776,7 +1784,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       {moderating && (() => {
         const copy = confirmCopy(moderating.action);
         const isBan = moderating.action === 'ban';
-        const reasonMissing = isBan && !moderateReason.trim();
+        const isRestore = moderating.action === 'restore';
+        // The same rule the server enforces — every one of the three actions carries a reason.
+        const reasonMissing = !('reason' in readAdminReason(moderateReason));
         return (
           <div className="fixed inset-0 z-[9999] flex items-center justify-center p-5 bg-scrim backdrop-blur-sm" role="presentation">
             <div role="alertdialog" aria-modal="true" aria-label={copy.title}
@@ -1784,7 +1794,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               <div className="flex items-center gap-2.5 mb-2">
                 <span className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border ${
                   isBan ? 'bg-red-500/10 border-red-500/20' : 'bg-raised border-line'}`}>
-                  {isBan ? <BanIcon size={16} className="text-danger" /> : <Globe size={16} className="text-body" />}
+                  {isBan ? <BanIcon size={16} className="text-danger" /> : isRestore ? <RotateCcw size={16} className="text-body" /> : <Globe size={16} className="text-body" />}
                 </span>
                 <h2 className="text-base font-bold text-ink">{copy.title}</h2>
               </div>
@@ -1795,16 +1805,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               <p className={`text-sm leading-relaxed mb-4 ${isBan ? 'text-danger' : 'text-muted'}`}>{copy.body}</p>
 
               <label className="block text-[10px] font-black uppercase tracking-wider text-muted mb-1.5">
-                Reason {isBan ? '(required)' : '(optional)'}
+                Reason (required)
               </label>
               <input
                 value={moderateReason}
                 onChange={(e) => setModerateReason(e.target.value)}
-                placeholder={isBan ? 'Why is this app being banned?' : 'Why is it being taken offline?'}
+                placeholder={isBan ? 'Why is this app being banned?' : isRestore ? 'Why is the block being lifted?' : 'Why is it being taken offline?'}
                 className="w-full bg-well border border-line rounded-lg px-3 py-2 text-[12px] text-ink placeholder:text-faint mb-1 focus:outline-none focus:border-sky-500/40"
               />
               <p className="text-[10px] text-faint mb-4 leading-relaxed">
-                Kept for 180 days as the record of this removal. The owner is not shown what you type.
+                {isRestore ? 'Kept in the audit log with your name.' : 'Kept for 180 days as the record of this removal.'} The owner is not shown what you type.
               </p>
 
               <div className="flex gap-2.5">
@@ -1820,7 +1830,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <button
                   onClick={() => void runModeration()}
                   disabled={moderateBusy || reasonMissing}
-                  title={reasonMissing ? 'A ban needs a reason' : undefined}
+                  title={reasonMissing ? 'Write a reason of at least 3 characters' : undefined}
                   className={`flex-1 px-4 py-2.5 rounded-xl text-ink text-sm font-bold disabled:opacity-40 ${
                     isBan ? 'bg-red-600 hover:bg-red-500 text-on-accent' : 'bg-raised hover:bg-raised-hover'}`}
                 >
@@ -4758,12 +4768,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               <EngineReportsPanel adminToken={adminToken} onStatus={toast} only={ENGINE_REPORTS_ON.security} heading="Release and keys" />
 
-              {/* NOT BUILT YET, SAID PLAINLY (admin panel audit PR 2): the audit log screen and the App Check
-                  card are PR 3. The events themselves are already recorded on the server. */}
-              <div className="bg-card border border-dashed border-line rounded-[1.5rem] p-5">
-                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Admin audit log · App Check</h3>
-                <p className="text-[11px] text-muted mt-1">Not available on this screen yet. Admin actions are already recorded with who, what and why; the screen to browse them, and the App Check counters, arrive in the next update.</p>
-              </div>
+              {/* Admin panel audit PR 3: the App Check counters (read before switching to enforce) and the
+                  audit log of every admin action, both of which existed on the server with no screen. */}
+              <AppCheckCard adminToken={adminToken} />
+              <AdminAuditLogPanel adminToken={adminToken} />
             </div>
           )}
 
@@ -4947,9 +4955,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   Open App Mart review
                 </button>
               </div>
-              <div className="bg-card border border-dashed border-line rounded-[1.5rem] p-5">
+              {/* The gallery's review queue lives inside the Gallery screen (GalleryReviewQueue.tsx), the same
+                  way App Mart's lives inside App Mart. This card said "Not available yet" after that queue had
+                  shipped — a screen telling the admin a working feature did not exist (admin panel audit, PR 3). */}
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-3">
                 <h3 className="text-sm font-black text-ink uppercase tracking-tight">Community gallery review</h3>
-                <p className="text-[11px] text-muted mt-1">Not available yet. Apps published to the community gallery wait as pending and stay private; the screen to approve or reject them arrives in the next update.</p>
+                <p className="text-[11px] text-muted">Apps people send to the community gallery wait here as pending and stay private until approved. Read the code, then approve, reject or remove. It opens as the signed-in store admin account, not with this panel's login.</p>
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'gallery' } }))}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-[11px] font-black uppercase tracking-wider text-on-accent"
+                >
+                  Open gallery review
+                </button>
               </div>
             </div>
           )}

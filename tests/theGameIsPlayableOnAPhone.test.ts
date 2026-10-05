@@ -14,8 +14,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import ts from 'typescript';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateGameShell } from '../src/server/lib/GameShellGenerator';
 import { generateGameRuntime } from '../src/server/lib/GameRuntimeGenerator';
@@ -23,6 +22,7 @@ import { isKeyboardOnlyGame, touchPlayableNote } from '../src/server/AgentV3/tou
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
+import { makeTempDir } from './helpers/tempDir';
 
 const shell = generateGameShell().files;
 const TOUCH = shell['src/game/ui/touchControls.ts'];
@@ -237,7 +237,7 @@ describe.skipIf(!haveBrowser)('in a real browser, with real touch events', () =>
   afterAll(() => new Promise<void>((res) => server.close(() => res())));
 
   it('phone: joystick + attack together, released on lift; desktop: no overlay', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-touch-'));
+    const dir = makeTempDir('nbai-touch-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, `import playwright from '${PW}';
 const { chromium } = playwright;

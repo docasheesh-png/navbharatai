@@ -7,14 +7,14 @@
 //   3. a badge written before this change is upgraded in place on the next build, never doubled;
 //   4. the post-build button-presser leaves our badge alone.
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   appSignatureHtml, injectAppSignature, hasAppSignature, hasCurrentAppSignature,
   APP_SIGNATURE_MARKER, APP_SIGNATURE_VERSION, APP_SIGNATURE_CLOSE_LABEL,
 } from '../src/server/AgentV3/appSignature';
+import { makeTempDir } from './helpers/tempDir';
 
 const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
 const DOC = `<!doctype html><html><head><title>App</title></head><body><div id="root"></div></body></html>`;
@@ -93,7 +93,7 @@ const haveBrowser = existsSync(PW) && existsSync(BROWSERS);
 
 describe.skipIf(!haveBrowser)('in a real browser', () => {
   it('pressing × hides the badge, a reload brings it back — even when the page forbids every script', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-badge-'));
+    const dir = makeTempDir('nbai-badge-');
     // The strictest policy an app could set: no script at all. Inline styles stay allowed, as they must
     // for the badge to be drawn in the first place.
     const page = injectAppSignature(`<!doctype html><html><head>

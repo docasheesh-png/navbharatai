@@ -5,11 +5,11 @@
 // straight away — a QR button that fails on its first press. The plugin's README also requires a
 // `<meta-data>` inside `<application>`, which the table had no way to express.
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { NATIVE_CAPABILITIES, nativePermissionMap, nativePermissionScript } from '../src/server/AgentV3/nativeCapabilities';
+import { makeTempDir } from './helpers/tempDir';
 
 const MANIFEST = `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -21,7 +21,7 @@ const MANIFEST = `<?xml version="1.0" encoding="utf-8"?>
 `;
 
 function runScript(deps: Record<string, string>): string {
-  const dir = mkdtempSync(join(tmpdir(), 'nbai-perm-'));
+  const dir = makeTempDir('nbai-perm-');
   mkdirSync(join(dir, 'android/app/src/main'), { recursive: true });
   writeFileSync(join(dir, 'android/app/src/main/AndroidManifest.xml'), MANIFEST);
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: deps }));

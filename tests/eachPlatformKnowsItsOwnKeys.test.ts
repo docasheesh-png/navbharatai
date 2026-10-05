@@ -28,6 +28,7 @@ import {
   missingSigningSecrets, signingVerdict, appleSigningNotReadyMessage, signingNotReadyMessageFor,
   isSigningSecretFailure,
 } from '../src/lib/signingReadiness';
+import { makeTempDir } from './helpers/tempDir';
 
 const root = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -188,11 +189,9 @@ describe('the workflow\'s own explanation no longer says "installing" about a pr
 
   it('a failed pre-flight is reported as preflight, and everything else exactly as before', async () => {
     const { execFileSync } = await import('node:child_process');
-    const { mkdtempSync } = await import('node:fs');
-    const { tmpdir } = await import('node:os');
     const script = diagnostic(kit.files['.github/workflows/ios-ipa.yml']);
     const run = (secrets: string, xcode: string): string => {
-      const dir = mkdtempSync(join(tmpdir(), 'nbai-diag-'));
+      const dir = makeTempDir('nbai-diag-');
       const body = script
         .replace('${{ steps.nbai-preflight-secrets.outcome }}', secrets)
         .replace('${{ steps.nbai-preflight-xcode.outcome }}', xcode);

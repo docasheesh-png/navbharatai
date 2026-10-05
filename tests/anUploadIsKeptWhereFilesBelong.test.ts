@@ -6,8 +6,7 @@
  * time (a once-per-build note carrying the file store), and in the summary (the claim is corrected).
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync, readFileSync, mkdtempSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import http from 'http';
 import type { AddressInfo } from 'net';
@@ -21,6 +20,7 @@ import { proStoreTs, proUiTsx } from '../src/server/AgentV3/goldenScaffolds/proS
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
+import { makeTempDir } from './helpers/tempDir';
 
 /** The report's shape: an upload screen reads files as data URLs, a context saves the list in localStorage. */
 const SCHOOL = {
@@ -202,7 +202,7 @@ try {
   console.log('RESULT ' + JSON.stringify({ ...out, back }));
 } finally { await browser.close(); }
 `;
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-files-real-'));
+    const dir = makeTempDir('nbai-files-real-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, script);
     const { execFile } = await import('node:child_process');

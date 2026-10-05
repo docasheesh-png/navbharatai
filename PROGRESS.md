@@ -90330,3 +90330,33 @@ FAIL. Reversion-proven: removing `-I`, and removing the IGNORE rows, each fail i
 ("recent account payments have failed or your spending limit needs to be increased") — GitHub billing on the
 admin's account, outside this fix.
 
+## 2026-10-05 — Q-672: no test leaves a temp directory behind
+
+**Problem:** the suite filled a session's disk mid-gate (about 24 GB in 6,688 directories under `/tmp`).
+
+**Measured (private TMPDIR, so nothing in the shared `/tmp` was touched):**
+- 37 test files called `mkdtempSync(join(tmpdir(), 'nbai-…-'))` and nothing removed the directory. Running them
+  left **84 directories per run** (~2 MB). After the fix the same run (plus the census) leaves **0**.
+- `scripts/serverDepsGate.mjs` (a CI step) left a ~13 MB directory per run: `process.exit()` inside its `try`
+  ends the process before the `finally` that removes it. Three such directories were in `/tmp` today. Now
+  `process.exitCode` + return; a run with a private TMPDIR leaves nothing.
+
+**Root cause / class:** removal was a separate step each test had to remember. `tests/helpers/tempDir.ts` makes
+it part of creation: `makeTempDir(prefix)` registers the file's `afterAll` itself (and one process-wide exit
+backstop). All 37 files use it.
+
+**Lock:** `tests/noTestLeavesATempDirBehind.test.ts` — an AST census over every `*.test.ts(x)`: a `mkdtemp`
+whose path mentions `tmpdir()` must come with the helper, or with a removal (or a local wrapper around one) in
+an after-hook or a `finally`. Reversion-proven: restoring `theBadgeCanBeClosed.test.ts` to its old form fails it.
+Its first run caught its own false positive (`securityEvaluator.test.ts` removes through a local `cleanup()`), so it
+now follows local wrappers, with a fixture for that shape.
+
+**Recorded, not fixed (not our code):**
+- Chromium leaves about 4 `.org.chromium.Chromium.*` directories per run of the real-browser tests (0–256 KB
+  each; 46 were in `/tmp`). Fix path if it matters: pass `TMPDIR` set to the test's own `makeTempDir()` folder to
+  the spawned browser scripts.
+- A vitest run that is KILLED (timeout, cutoff) leaves its own transform cache, `/tmp/<21-char id>/ssr/…`
+  (50–120 MB, ~4,000 files; vitest removes it only on a clean close). This is the likeliest source of most of
+  the 24 GB, but the historical directories had already been deleted, so it cannot be proven from evidence.
+  A sweep is unsafe: concurrent sessions share `/tmp`, and a live run's directory looks the same.
+

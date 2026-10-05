@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'fs';
+import { readFileSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import { gunzipSync } from 'zlib';
 import { distReaderScript } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
+import { makeTempDir } from './helpers/tempDir';
 
 /**
  * Admin 2026-08-19, fourth failure in one Publish flow:
@@ -95,7 +95,7 @@ describe('the dist reader never goes through a shell', () => {
     // This used to rebuild the script by hand inside the test — a second copy that could drift from
     // the one the actuator ships. The actuator now exports the ONE builder, and this runs it for real
     // in node against a real directory, then decodes exactly what the actuator decodes.
-    const root = mkdtempSync(join(tmpdir(), 'dist-reader-'));
+    const root = makeTempDir('dist-reader-');
     const dist = join(root, 'dist');
     mkdirSync(join(dist, 'assets'), { recursive: true });
     writeFileSync(join(dist, 'index.html'), '<div id="root"></div>');
@@ -116,7 +116,7 @@ describe('the dist reader never goes through a shell', () => {
   });
 
   it('an empty build exits 2 — the code the caller turns into "No build output found"', () => {
-    const root = mkdtempSync(join(tmpdir(), 'dist-reader-empty-'));
+    const root = makeTempDir('dist-reader-empty-');
     const scriptPath = join(root, 'reader.cjs');
     writeFileSync(scriptPath, distReaderScript([join(root, 'dist')], join(root, 'o.gz')));
     let code = 0;

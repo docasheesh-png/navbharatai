@@ -2,14 +2,14 @@
 // "Install button do" — three builds, all stopped by the user. Each item below was a fault of ours.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { contractModule } from '../src/server/AgentV3/SimpleBuilder';
 import { danglingStylesheetImports, withoutStylesheetImports, missingImportedSheetNote } from '../src/server/AgentV3/CssConsistency';
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
 import { freeCancellationMessage } from '../src/server/AgentV3/cancelledBuildBilling';
 import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
+import { makeTempDir } from './helpers/tempDir';
 
 const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
 
@@ -41,7 +41,7 @@ describe('1 · an enum written as data keeps its data', () => {
   });
   const tsc = join(__dirname, '..', 'node_modules', '.bin', 'tsc');
   it.skipIf(!existsSync(tsc))('🔴 and the file it writes really compiles, used the way the app uses it', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-contract-'));
+    const dir = makeTempDir('nbai-contract-');
     writeFileSync(join(dir, 'types.ts'), contractModule(CONTRACT)!.source);
     writeFileSync(join(dir, 'use.ts'), "import { EventStatus, type Event } from './types';\nexport const e: Event = { id: '1', title: 't', startDate: new Date(), status: EventStatus.UPCOMING };\n");
     writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, isolatedModules: true, verbatimModuleSyntax: true, module: 'esnext', moduleResolution: 'bundler', target: 'es2020', types: [], noEmit: true }, files: ['types.ts', 'use.ts'] }));

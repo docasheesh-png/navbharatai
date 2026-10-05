@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -11,6 +10,7 @@ import {
   EXPLORE_RESULT_MARKER, NEVER_PRESS, WRITE_VERBS, CONSOLE_NOISE,
   MAX_SECOND_LEVEL_CLICKS, MAX_SECOND_LEVEL_PER_PARENT,
 } from '../src/server/AgentV3/clickExplorer';
+import { makeTempDir } from './helpers/tempDir';
 
 /**
  * Competitive gap G1 (2026-09-28): every check we ran after a build watched the app PAINT or drove one
@@ -157,7 +157,7 @@ describe('one card, several checks', () => {
 
 describe('the runner itself', () => {
   it('the generated module is valid JavaScript (node --check)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-explore-'));
+    const dir = makeTempDir('nbai-explore-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, clickExplorerModule({ base: 'http://x/', marker: EXPLORE_RESULT_MARKER, maxClicks: 3, maxSecond: 2, perParent: 1, budgetMs: 10_000, loadMs: 1000, blockWrites: false, neverSrc: NEVER_PRESS.source, neverFlags: 'i', writeSrc: WRITE_VERBS.source, writeFlags: 'i', noiseSrc: CONSOLE_NOISE.source, noiseFlags: 'i' }));
     expect(() => execFileSync(process.execPath, ['--check', file])).not.toThrow();
@@ -263,7 +263,7 @@ function openTab() {
   afterAll(() => new Promise<void>((res) => server.close(() => res())));
 
   async function explore(blockWrites: boolean) {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-explore-real-'));
+    const dir = makeTempDir('nbai-explore-real-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, clickExplorerModule({
       base, marker: EXPLORE_RESULT_MARKER, maxClicks: 12, maxSecond: MAX_SECOND_LEVEL_CLICKS, perParent: MAX_SECOND_LEVEL_PER_PARENT, budgetMs: 60_000, loadMs: 10_000, blockWrites,

@@ -4,9 +4,8 @@
  * fake worker failed … pdf.worker.min.mjs", "Failed to load PDF file"). Every lock below uses the report's own
  * text where it exists.
  */
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'fs';
+import { readFileSync, mkdirSync, writeFileSync, utimesSync } from 'fs';
 import { execSync } from 'child_process';
-import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, it, expect } from 'vitest';
 import { classifyIntentWithConfidence } from '../src/server/AgentV3/IntentClassifier';
@@ -20,6 +19,7 @@ import { qualityNote } from '../src/server/AgentV3/writeTimeQualityCheck';
 import { applyEdit } from '../src/server/AgentV3/ToolDispatcher';
 import { cdnPdfWorkerNote, setsCdnPdfWorker } from '../src/server/AgentV3/pdfWorkerSource';
 import { attachedBytesNote, filesWithoutBytes } from '../src/server/AgentV3/attachedFileBytes';
+import { makeTempDir } from './helpers/tempDir';
 
 const read = (p: string) => readFileSync(p, 'utf8');
 
@@ -64,7 +64,7 @@ describe('a running dev server is relaunched when a package changed after it pre
   const at = (file: string, secs: number) => utimesSync(file, secs, secs);
 
   it('the shell check compares the last install with the pre-bundle, as files on disk', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-prebundle-'));
+    const dir = makeTempDir('nbai-prebundle-');
     mkdirSync(join(dir, 'node_modules/.vite/deps'), { recursive: true });
     const meta = join(dir, 'node_modules/.vite/deps/_metadata.json');
     const lock = join(dir, 'node_modules/.package-lock.json');
@@ -81,7 +81,7 @@ describe('a running dev server is relaunched when a package changed after it pre
   });
 
   it('a project with no pre-bundle says nothing', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-prebundle-'));
+    const dir = makeTempDir('nbai-prebundle-');
     writeFileSync(join(dir, 'package.json'), '{}');
     expect(sh(dir)).toBe('');
   });

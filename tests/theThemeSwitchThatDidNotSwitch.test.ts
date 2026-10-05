@@ -1,8 +1,7 @@
 // Autopsy 8257ca59 (2026-10-01): a calculator from our own template, a polish step that replaced the
 // working light/dark switch with one that styled nothing, and the checks around it that could not tell.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { readFileSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -125,7 +124,7 @@ function cycle() { i = (i + 1) % 3; var m = modes[i]; if (m === 'auto') document
   afterAll(() => new Promise<void>((res) => server.close(() => res())));
 
   it('the dead 🌓 is unresponsive; the cycling switch passes on its second press; the lamp is just a button', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-theme-real-'));
+    const dir = makeTempDir('nbai-theme-real-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, clickExplorerModule({
       base, marker: EXPLORE_RESULT_MARKER, maxClicks: 12, maxSecond: MAX_SECOND_LEVEL_CLICKS, perParent: MAX_SECOND_LEVEL_PER_PARENT, budgetMs: 60_000, loadMs: 10_000, blockWrites: false,
@@ -228,6 +227,7 @@ describe('7 · a warm-up that compiled nothing does not claim a warm cache', () 
 });
 
 import { pruneGeneratedListing, isPrunableListing } from '../src/server/AgentV3/generatedListing';
+import { makeTempDir } from './helpers/tempDir';
 
 describe('8 · a shell file listing leaves out node_modules and dist, as glob does', () => {
   const findCmd = "find . -maxdepth 3 -type f \\( -name '*.tsx' -o -name '*.js' \\) | head -100";

@@ -10,9 +10,8 @@
  * never a wrapper around a real control. And the linter flags a clickable div/span with no role.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { writeFileSync, mkdtempSync, existsSync } from 'node:fs';
+import { writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
@@ -21,6 +20,7 @@ import {
   MAX_SECOND_LEVEL_CLICKS, MAX_SECOND_LEVEL_PER_PARENT,
 } from '../src/server/AgentV3/clickExplorer';
 import { lintA11y, clickableNonInteractiveCount } from '../src/server/AppMakerLab/intelligence/A11yLinter';
+import { makeTempDir } from './helpers/tempDir';
 
 describe('the accessibility linter sees a clickable div', () => {
   it('flags a div or span with a click handler and no role, in JSX and in HTML', () => {
@@ -85,7 +85,7 @@ document.getElementById('root').addEventListener('click', function (e) {
   afterAll(() => new Promise<void>((res) => server.close(() => res())));
 
   it('presses the listener div, the onclick span and the React div; never a root, a wrapper or plain text', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-explore-div-'));
+    const dir = makeTempDir('nbai-explore-div-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, clickExplorerModule({
       base, marker: EXPLORE_RESULT_MARKER, maxClicks: 12, maxSecond: MAX_SECOND_LEVEL_CLICKS, perParent: MAX_SECOND_LEVEL_PER_PARENT, budgetMs: 60_000, loadMs: 10_000, blockWrites: false,

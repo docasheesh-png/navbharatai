@@ -30,8 +30,7 @@
 // string is parsed here, deliberately, with the same tool the sandbox will use.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -43,6 +42,7 @@ import {
 import { auditSummaryClaims } from '../src/server/AgentV3/claimAudit';
 import { extractPageRoutes } from '../src/server/AgentV3/PageRouteCheck';
 import { GOLDEN_SCAFFOLDS } from '../src/server/AgentV3/goldenScaffolds/registry';
+import { makeTempDir } from './helpers/tempDir';
 
 const ACTUATOR_SRC = readFileSync(
   fileURLToPath(new URL('../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts', import.meta.url)),
@@ -58,7 +58,7 @@ function codeOnly(source: string): string {
 
 /** Parse a generated script exactly as the sandbox's own `node` will. Throws with node's real error. */
 function assertParses(source: string, name: string): void {
-  const dir = mkdtempSync(join(tmpdir(), 'nbai-script-'));
+  const dir = makeTempDir('nbai-script-');
   const file = join(dir, `${name}.cjs`);
   writeFileSync(file, source);
   execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });

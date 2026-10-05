@@ -9,8 +9,7 @@
 //   4. the user is told the app is on screen (phone) or shown it (desktop) the moment the entry is written;
 //   5. one kill switch turns all of it off.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { readFileSync, writeFileSync, existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -22,6 +21,7 @@ import { VirtualFileSystem } from '../src/server/project/ProjectModel';
 import { isAppEntryPath, offerWatchLive } from '../src/components/agentv3/earlyPreviewCue';
 import { agentV3Reducer } from '../src/components/agentv3/agentV3Reducer';
 import { initialAgentV3State } from '../src/components/agentv3/agentV3Types';
+import { makeTempDir } from './helpers/tempDir';
 
 const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
 const OFF = { AGENTV3_EARLY_PREVIEW: 'off' } as NodeJS.ProcessEnv;
@@ -176,7 +176,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   afterAll(() => new Promise<void>((res) => server.close(() => res())));
 
   async function look(path: string) {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-early-'));
+    const dir = makeTempDir('nbai-early-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, `
 import playwright from '${PW}';

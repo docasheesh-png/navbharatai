@@ -5,8 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import {
   NATIVE_CAPABILITIES, REGISTRY_CAPACITOR_MAJOR, REGISTRY_CAPACITOR_CORE, requestedCapabilities,
@@ -16,6 +15,7 @@ import { buildPackageJson } from '../src/server/lib/mobileProjectAssembler';
 import { generateShipKit } from '../src/server/lib/mobileShipKit';
 import { DEFAULT_CAPACITOR_MAJOR } from '../src/server/lib/capacitorToolchain';
 import { manifestRewrittenBy } from '../src/server/AgentV3/DependencyAutoFix';
+import { makeTempDir } from './helpers/tempDir';
 
 describe('the registry itself', () => {
   it('is verified against the phone build’s OWN default Capacitor major', () => {
@@ -86,7 +86,7 @@ describe('the phone build — every plugin on the app’s Capacitor major', () =
 
 describe('the phone build — permissions, applied on the runner', () => {
   const run = (platform: 'android' | 'ios', deps: Record<string, string>, file: string, content: string): string => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-perms-'));
+    const dir = makeTempDir('nbai-perms-');
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: deps }));
     const target = join(dir, file);
     mkdirSync(join(target, '..'), { recursive: true });

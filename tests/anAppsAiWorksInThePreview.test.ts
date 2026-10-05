@@ -4,21 +4,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, mkdtempSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { readPreviewAiAsk, previewAiShimSource, PREVIEW_AI_ASK } from '../src/lib/previewAiProtocol';
 import { withPreviewAiRelay, previewBridgeSource, PREVIEW_AI_RELAY_MARKER } from '../src/server/AgentV3/previewBridge';
 import { ownKeyFromSecrets, askWithOwnKey } from '../src/server/lib/appAiOwnKey';
 import { previewDailyCapInr, previewRefusalMessage } from '../src/server/routes/appAiOwner';
 import { pendingActions, badgeAt } from '../src/lib/actionNavigator';
 import { setAppAiDisabled, getAppAiSettings, __resetAppAiSettings } from '../src/server/lib/AppAiSettingsStore';
+import { makeTempDir } from './helpers/tempDir';
 
 const read = (p: string) => readFileSync(p, 'utf8');
 
 describe('the in-page relay holds no credential and never overrides a real stamp', () => {
   it('is valid JavaScript (parsed by node itself)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-shim-'));
+    const dir = makeTempDir('nbai-shim-');
     const f = join(dir, 'shim.js');
     writeFileSync(f, previewAiShimSource());
     expect(() => execFileSync(process.execPath, ['--check', f])).not.toThrow();

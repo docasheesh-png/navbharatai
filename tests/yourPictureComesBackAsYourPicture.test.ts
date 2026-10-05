@@ -126,7 +126,7 @@ describe('🙋 an attached picture still means "read this", unless it clearly do
   });
 });
 
-describe('🔒 the free route treats an edit as an edit', () => {
+describe('🔒 the image route treats an edit as an edit', () => {
   const src = read(ROUTE);
   const body = code(src);
 
@@ -148,10 +148,9 @@ describe('🔒 the free route treats an edit as an edit', () => {
     // Pollinations cannot receive a picture that lives only in this request; the xAI endpoint is
     // text-to-image only. Either one answering would return a brand-new picture — a
     // successful-looking response that is exactly the failure being fixed.
-    // Since 2026-09-30 (Free / Paid): Free mode refuses an edit before its free provider, and the
-    // Paid ladder's text-to-image rungs (Cloudflare, the keyed free provider, the old Pro host) sit
-    // inside one `if (!editing)`.
-    expect(body).toContain("if (tier === 'free') {\n        res.status(409).json({ error: editNeedsPaidMessage(userWords)");
+    // Since 2026-10-05 (one generator): the ladder's text-to-image rungs (Cloudflare, the keyed free
+    // provider, the old Pro host) sit inside one `if (!editing)`, and no anonymous free provider exists.
+    expect(body).not.toContain('anonymous: true');
     const guard = body.lastIndexOf('if (!editing) {', body.indexOf('cloudflareServesSize(px)'));
     expect(guard).toBeGreaterThan(0);
     for (const rung of ['fetchCloudflareImage(', 'pollinationsApiKey() !==', 'fetchImageProHostImage(']) {

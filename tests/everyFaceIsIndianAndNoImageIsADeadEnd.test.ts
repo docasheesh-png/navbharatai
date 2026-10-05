@@ -149,24 +149,22 @@ describe('the browser decides when to hand the picture to the server', () => {
     expect(typeof (globalThis as { Image?: unknown }).Image).toBe('undefined');
     await expect(imageLinkLoads('https://image.pollinations.ai/prompt/x')).resolves.toBeNull();
   });
-  it('the generator screen wires it: it probes the link, and re-sends the SAME request with the signed link', () => {
-    const src = read('src/components/ide/AIImageGenerator.tsx');
-    expect(src).toContain('imageLinkLoads(ticket.url)');
-    expect(src).toContain('serverFallbackReason(got, linkLoaded)');
-    expect(src).toMatch(/\.\.\.requestBody,\s*freeFailed:/);
-  });
+  // The screen no longer wires this: since 2026-10-05 the server never hands out a link (Free mode
+  // was removed), so there is no browser fetch to fall back from. The pure helpers above stay locked.
 });
 
-describe('the real route: a verified failure runs the server ladder instead of handing back the same link', () => {
+describe('the real route since 2026-10-05: no link at all — the engine that draws gets the Indian brief', () => {
   const saved = { ...process.env };
   let fetchSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    for (const k of ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GROK_API_KEY', 'XAI_API_KEY', 'IMAGE_GEN_POLLINATIONS', 'IMAGE_GEN_CLIENT_FETCH']) {
+    for (const k of ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GROK_API_KEY', 'XAI_API_KEY', 'IMAGE_GEN_POLLINATIONS', 'IMAGE_GEN_CLIENT_FETCH', 'POLLINATIONS_API_KEY', 'IMAGE_GEN_CLOUDFLARE', 'CLOUDFLARE_AI_TOKEN']) {
       delete process.env[k];
     }
     process.env.SECRET_ENCRYPTION_KEY = 'route-secret';
-    fetchSpy = vi.fn(async () => new Response(new Uint8Array([137, 80, 78, 71]), { status: 200, headers: { 'content-type': 'image/png' } }));
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'acc1';
+    process.env.CLOUDFLARE_API_TOKEN = 'cf-token';
+    fetchSpy = vi.fn(async () => new Response(JSON.stringify({ result: { image: 'iVBORw0KGgoAAAANSUhEUg==' } }), { status: 200, headers: { 'content-type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchSpy);
   });
   afterEach(() => {
@@ -184,43 +182,19 @@ describe('the real route: a verified failure runs the server ladder instead of h
 
   const body = { prompt: 'Photograph — indian face', style: 'photo', size: 'square', type: 'Photograph' };
 
-  it('first answer: a signed link, whose brief carries the Indian default, fetched by nobody yet', async () => {
-    const res = await generate(body);
-    expect(res.body.mode).toBe('client-fetch');
-    expect(decodeURIComponent(new URL(res.body.url).pathname)).toContain(INDIAN_PEOPLE_DIRECTION);
-    expect(fetchSpy).not.toHaveBeenCalled();
+  it('the picture comes back as bytes, and the brief the engine was sent carries the Indian default', async () => {
+    const res = await generate({ ...body, tier: 'paid' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.mode).toBeUndefined();
+    expect(res.body.url).toBeUndefined();
+    expect(String(res.body.image)).toMatch(/^data:image\/png;base64,/);
+    const sent = JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body));
+    expect(sent.prompt).toContain(INDIAN_PEOPLE_DIRECTION);
   });
 
-  it('after the browser reports the link came to nothing, the server fetches it and returns the bytes', async () => {
-    const first = await generate(body);
-    const second = await generate({
-      ...body,
-      freeFailed: { url: first.body.url, ticket: first.body.ticket, exp: first.body.exp, reason: 'HTTP 400' },
-    });
-    expect(second.statusCode).toBe(200);
-    expect(second.body.mode).toBeUndefined();
-    expect(String(second.body.image)).toMatch(/^data:image\/png;base64,/);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it('when the server\'s own try fails too, Free mode says the free servers are busy and points at Paid, never a link again', async () => {
-    fetchSpy.mockImplementation(async () => new Response('no', { status: 500 }));
-    const first = await generate(body);
-    const second = await generate({ ...body, freeFailed: { url: first.body.url, ticket: first.body.ticket, exp: first.body.exp } });
-    // 2026-09-30 (admin: "free server are too busy try on paid service"): Free mode has no paid
-    // engine behind it, so the answer names Paid mode instead of trying one.
-    expect(second.statusCode).toBe(503);
-    expect(second.body.code).toBe('free_busy');
-    expect(second.body.url).toBeUndefined();
-    expect(String(second.body.error)).toMatch(/free image servers are too busy/i);
-  });
-
-  it('refuses a claim for a link it did not sign, or for a different brief', async () => {
-    const first = await generate(body);
-    const forged = await generate({ ...body, freeFailed: { url: first.body.url, ticket: 'f'.repeat(48), exp: first.body.exp } });
-    expect(forged.statusCode).toBe(403);
-    const other = await generate({ ...body, prompt: 'Photograph — a cat', freeFailed: { url: first.body.url, ticket: first.body.ticket, exp: first.body.exp } });
-    expect(other.statusCode).toBe(403);
-    expect(fetchSpy).not.toHaveBeenCalled();
+  it('🔒 an old client\'s "the browser got nothing" claim is not even read: the schema drops it, the ladder runs', async () => {
+    const res = await generate({ ...body, freeFailed: { url: 'https://image.pollinations.ai/prompt/x', ticket: 'f'.repeat(48), exp: Date.now() + 60_000 } });
+    expect(res.statusCode).toBe(200);
+    expect(fetchSpy.mock.calls.map((c) => new URL(String(c[0])).host)).toEqual(['api.cloudflare.com']);
   });
 });

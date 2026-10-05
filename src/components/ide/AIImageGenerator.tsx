@@ -1,11 +1,11 @@
 import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { imageAllowanceLine, imageTierLine, paidCanAnswer, type ImageTier } from '../../lib/imageAllowanceLine';
+import { imageAllowanceLine } from '../../lib/imageAllowanceLine';
 import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { usePagedList } from '../../hooks/usePagedList';
 import { feedFor } from '../../lib/imageFeed';
 import { LoadMore } from '../../components/common/LoadMore';
-import { Send, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Send, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move } from 'lucide-react';
 import { ImageOptionSelect, type ImageOption } from './ImageOptionSelect';
 import { CustomSizeFields } from './CustomSizeFields';
 import { ImageResizeEditor } from './ImageResizeEditor';
@@ -16,10 +16,7 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';
 import { imageHistoryStore, pruneHistory, type ImageHistoryItem } from '../../lib/imageHistoryStore';
 import { auth } from '../../lib/firebase';
-import {
-  fetchImageFromUser, imageLinkLoads, relayImage, serverFallbackReason, type ClientFetchTicket,
-} from '../../lib/clientImageFetch';
-import { IMAGE_SERVER_FALLBACK_NOTE, imageWaitMessage } from '../../lib/imageDelivery';
+import { relayImage } from '../../lib/clientImageFetch';
 import { walletEmptyRefusalMessage } from '../../lib/walletEmptyRefusal';
 import { AddCreditNotice } from '../common/AddCreditNotice';
 import { ReportAiContent } from '../chat/ReportAiContent';
@@ -210,18 +207,15 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   // `feedFor` — their own feed. That last part is what makes the no-logo promise keepable: pressing
   // the old chip changed the mode without regenerating anything, so a watermarked FREE picture sat
   // on screen under a lit PAID chip, which is exactly the screenshot the rule was written from.
-  const [tier, setTier] = useState<ImageTier>('free');
-  // ONE screen, ONE feed (see `imageFeed.ts`). Paging runs on the page's own pictures, so "Load
-  // more" on the paid screen can never reach back into a free picture.
-  const visibleHistory = useMemo(() => feedFor(history, tier), [history, tier]);
+  //
+  // 🔁 2026-10-05: FREE MODE IS GONE (admin, choosing after the free provider's anonymous door started
+  // answering 402 to everyone, the admin chose "remove Free mode"). The screen IS the old Paid page — 5 free pictures a
+  // day, then ₹1 each — and every request says so with `tier: 'paid'`, which is the server's proof
+  // that this screen showed the price (`src/server/lib/imageTier.ts`). The feed rule is unchanged: only
+  // pictures the paid ladder made are shown, so an old watermarked free picture never lands here.
+  // It stays in the device's history; nothing is deleted.
+  const visibleHistory = useMemo(() => feedFor(history, 'paid'), [history]);
   const pagedHistory = usePagedList(visibleHistory);
-  // The server's code for a failure Paid mode can answer (`free_busy`, `needs_paid`), so the error
-  // card can offer the switch. Empty for every other failure.
-  const [errorCode, setErrorCode] = useState('');
-  // The countdown shown while the browser waits out the provider's rate limit. Blank the rest of
-  // the time. A visible wait is the difference between "busy" and "broken" — the blank-screen
-  // failure this repo already root-caused once on the chat path.
-  const [waitNote, setWaitNote] = useState('');
   const [actionNote, setActionNote] = useState(''); // honest fallback message for copy/download
   /**
    * The request currently in flight, shown as the user's own message the instant they press send.
@@ -278,7 +272,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   // limit is counted on what is SENT — the type and tint wrapped around the words included.
   const promptLimit = imagePromptLimit(prompt.trim(), buildEffectivePrompt());
 
-  const handleGenerate = async (tierNow: ImageTier = tier) => {
+  const handleGenerate = async () => {
     const effectivePrompt = buildEffectivePrompt();
     // A picture on its own IS a request ("re-render this"), so words are required only without one.
     if ((!effectivePrompt.trim() && !reference) || isLoading || promptLimit.over) return;
@@ -288,7 +282,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
     setImageError(false);
     setBalanceBlock('');
     setErrorMsg('');
-    setErrorCode('');
     setCraftNotes([]);
     // The user's message lands in the thread BEFORE the request goes out, so the press is visibly
     // answered even while nothing has come back yet.
@@ -322,7 +315,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
         // this into an edit on the server, which skips the art-direction layer and the free
         // provider (neither of which can serve a picture that exists only inside this request).
         ...(reference ? { initImage: reference.dataUrl } : {}),
-        tier: tierNow,
+        // This screen shows the price, and this is how the server knows it may charge (`imageTier.ts`).
+        tier: 'paid',
       };
       const res = await fetch('/api/image/generate', { method: 'POST', headers, body: JSON.stringify(requestBody) });
       const data = await res.json().catch(() => null);
@@ -336,76 +330,17 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
         return;
       }
       if (!res.ok || !data) {
-        setErrorCode(paidCanAnswer(data));
         throw new Error((data && typeof data.error === 'string' && data.error)
           || 'Image generation failed — please try again.');
       }
 
-      // ── THE BROWSER FETCHES IT, FROM THE USER'S OWN CONNECTION ────────────────────────────────
-      // A free picture now comes back as a signed link rather than as bytes (admin 2026-09-21:
-      // "free wale me user ki ip"). The provider's limit is one request every 15 seconds PER
-      // ADDRESS, and our server is one address — so this is the only way a free tier survives real
-      // numbers without a key. Everything before this point is unchanged: the prompt was triaged,
-      // crafted and bounded on our server seconds ago.
-      let imageUrl: string;
-      let ticket: ClientFetchTicket | null = null;
-      if (data.mode === 'client-fetch' && typeof data.url === 'string') {
-        ticket = { url: data.url, ticket: String(data.ticket || ''), exp: Number(data.exp) };
-        const got = await fetchImageFromUser(ticket, {
-          onWait: (msLeft) => setWaitNote(imageWaitMessage(msLeft)),
-        });
-        setWaitNote('');
-        // A browser that may not read the bytes shows the picture from the link — but only once the
-        // link has been SEEN to load. An error from the engine throws exactly like a blocked read,
-        // and was being "shown" as a broken image (admin 2026-09-30: "image bani hi nahi").
-        const linkLoaded = got.needsRelay ? await imageLinkLoads(ticket.url) : null;
-        const fallbackReason = serverFallbackReason(got, linkLoaded);
-        if (fallbackReason) {
-          // 🔑 NO IMAGE IS NOT THE END. The server takes the ladder a free-provider failure has always
-          // had — one try from its side, then the metered paid engines — for the SAME request, and
-          // only on the strength of the link it signed for it.
-          setWaitNote(IMAGE_SERVER_FALLBACK_NOTE);
-          const fbRes = await fetch('/api/image/generate', {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              ...requestBody,
-              freeFailed: { url: ticket.url, ticket: ticket.ticket, exp: ticket.exp, reason: fallbackReason },
-            }),
-          });
-          const fb = await fbRes.json().catch(() => null);
-          setWaitNote('');
-          const fbNoCredit = walletEmptyRefusalMessage(fbRes.status, fb);
-          if (fbNoCredit) {
-            setBalanceBlock(fbNoCredit);
-            setPrompt((cur) => draftAfterFailedSend(cur, typed));
-            return;
-          }
-          if (!fbRes.ok || !fb || typeof fb.image !== 'string') {
-            setErrorCode(paidCanAnswer(fb));
-            throw new Error((fb && typeof fb.error === 'string' && fb.error)
-              || got.error
-              || 'Image generation failed — please try again.');
-          }
-          imageUrl = fb.image;
-          ticket = null; // the server delivered the bytes
-        } else if (got.error) {
-          throw new Error(got.error);
-        } else if (got.dataUrl) {
-          imageUrl = got.dataUrl;
-          ticket = null; // the bytes are here; nothing will ever need the relay for this one
-        } else {
-          // This browser is not allowed to read another site's pixels. The picture still arrives
-          // from the USER's connection — it is simply shown from the link — and the bytes are
-          // fetched through our relay the moment a button actually needs them.
-          imageUrl = ticket.url;
-        }
-      } else if (typeof data.image === 'string') {
-        imageUrl = data.image;
-      } else {
+      // The picture always comes back as bytes. The browser-fetched link of the old Free mode
+      // (`mode: 'client-fetch'`) went with it on 2026-10-05: that door answered 402 to everyone.
+      if (typeof data.image !== 'string') {
         throw new Error((typeof data.error === 'string' && data.error)
           || 'Image generation failed — please try again.');
       }
+      const imageUrl: string = data.image;
       // Honest caveats from the server — a style chip that was overruled, or the warning that image
       // engines cannot spell. Shown, never swallowed: a user who knows their shop name may come out
       // garbled can shorten it, where a silent misspelling just wastes a generation.
@@ -414,15 +349,14 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
       const newItem: GeneratedImage = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         url: imageUrl,
-        ...(ticket ? { ticket: ticket.ticket, exp: ticket.exp } : {}),
         prompt: typed,
         type: imageType,
         style,
         size,
         timestamp: Date.now(),
-        // Which page made it. The paid screen shows only its own pictures, so a free picture's
+        // Which ladder made it. The screen shows only paid-ladder pictures, so an old free picture's
         // provider watermark can never land on the screen that promises none.
-        tier: tierNow,
+        tier: 'paid',
       };
       // Persist to IndexedDB so it survives reloads, then reflect it in the UI (newest-first, bounded).
       setHistory((h) => pruneHistory([newItem, ...h]));
@@ -438,7 +372,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
     } finally {
       setIsLoading(false);
       setPending(null);
-      setWaitNote('');
     }
   };
 
@@ -743,50 +676,20 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
           control on the right LEAVES for the other one. On Paid it is a plain back arrow, which is
           what tells a user they went somewhere rather than flipped a switch. */}
       <div className="flex items-center gap-3 border-b border-line px-6 py-4 bg-card">
-        {tier === 'paid' ? (
-          <button
-            type="button"
-            onClick={() => { setTier('free'); setErrorCode(''); }}
-            aria-label="Back to Free mode"
-            className="w-10 h-10 rounded-xl bg-well border border-line flex items-center justify-center shrink-0 text-muted hover:text-body transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-        ) : (
-          <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center shrink-0">
-            <Wand2 className="w-5 h-5 text-accent-text" />
-          </div>
-        )}
+        <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center shrink-0">
+          <Wand2 className="w-5 h-5 text-accent-text" />
+        </div>
         <div className="min-w-0">
           {/* The NAME stays one literal string, and the page marker is its own element. The 2026-09-30
               rename is pinned by a test that reads this file for `>Image Generator AI<`; folding the
               name into a ternary would have broken that lock for a cosmetic reason. */}
           <h2 className="font-semibold text-ink text-base truncate">
             <span>Image Generator AI</span>
-            {tier === 'paid' ? <span className="text-accent-text"> · Paid</span> : null}
           </h2>
-          <p className="text-xs text-faint truncate">{imageTierLine(tier, freeLeft)}</p>
+          <p className="text-xs text-faint truncate">{imageAllowanceLine(freeLeft)}</p>
         </div>
         <div className="ml-auto flex items-center gap-2 shrink-0">
           <span className="hidden sm:inline text-[10px] bg-violet-500/20 text-accent-text px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>
-          {tier === 'free' ? (
-            <button
-              type="button"
-              onClick={() => { setTier('paid'); setErrorCode(''); }}
-              className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1.5 rounded-full bg-accent text-on-accent hover:opacity-90 transition-opacity"
-            >
-              Paid mode
-              <ArrowRight className="w-3 h-3" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => { setTier('free'); setErrorCode(''); }}
-              className="text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1.5 rounded-full bg-well border border-line text-muted hover:text-body transition-colors"
-            >
-              Free mode
-            </button>
-          )}
         </div>
       </div>
 
@@ -811,36 +714,15 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
                 <p className="text-sm font-semibold text-ink">No images yet</p>
                 <p className="text-xs text-muted mt-1">Your images appear here, newest at the bottom.</p>
               </div>
-              {/* ── WHAT THE FREE TIER IS FOR, said before the first send ────────────────────
-                  Admin, 2026-09-21: *"free image generator me, ek watermark jaise chat box me hi
-                  likh dekha, image only for your app … jisse log real cinematic image na ban pane
-                  se nirash nahi honge"* — and, the same day: *"is line ko, niche nahi. upar likhna
-                  hai. jahan 'no image yet' likh ke ata hai"*. So it lives HERE, in the empty state,
-                  and not under the input on every send.
-
-                  🔑 IT IS EXPECTATION, NOT AN APOLOGY. The free engine is genuinely good at flat,
-                  graphic work — a logo, an icon, a banner, an illustration — and genuinely weaker
-                  at photographic and cinematic scenes. A user who asks it for a film still and is
-                  disappointed was not failed by the picture; they were failed by nobody telling
-                  them which job this tool is for. Saying it once, where they start, turns a bad
-                  result into an informed choice.
-
-                  ⚠️ It never says "you cannot" and it never names a vendor. */}
-              {/* ⚠️ The sentence above is about the FREE engine and is honest only there. The paid
-                  page says what the user is actually buying — a different engine, and a picture with
-                  nothing written on it (admin 2026-10-01: "paid me logo nahi hoga! na navbharatai ka
-                  na kisi aur ka"). Neither line ever names a vendor (White-Label Law). */}
-              {tier === 'paid' ? (
-                <p className="text-[11px] text-faint leading-relaxed max-w-xs flex items-center justify-center gap-1.5 flex-wrap">
-                  <Sparkles className="w-2.5 h-2.5 shrink-0" />
-                  <span>Paid images are made on NavBharatAI’s stronger engines, and they carry no watermark of any kind. {imageAllowanceLine(freeLeft)}.</span>
-                </p>
-              ) : (
-                <p className="text-[11px] text-faint leading-relaxed max-w-xs flex items-center justify-center gap-1.5 flex-wrap">
-                  <Wand2 className="w-2.5 h-2.5 shrink-0" />
-                  <span>Free images are made for your app’s artwork — logos, icons, banners, illustrations.</span>
-                </p>
-              )}
+              {/* What the user is buying, said once before the first send: a stronger engine and a
+                  picture with nothing written on it (admin 2026-10-01: "paid me logo nahi hoga! na
+                  navbharatai ka na kisi aur ka"), and the price. The 2026-09-21 line about what the
+                  FREE engine was good at went with Free mode on 2026-10-05. Never names a vendor
+                  (White-Label Law). */}
+              <p className="text-[11px] text-faint leading-relaxed max-w-xs flex items-center justify-center gap-1.5 flex-wrap">
+                <Sparkles className="w-2.5 h-2.5 shrink-0" />
+                <span>Images are made on NavBharatAI’s stronger engines, and they carry no watermark of any kind. {imageAllowanceLine(freeLeft)}.</span>
+              </p>
               <div className="flex flex-wrap gap-2 justify-center">
                 {EXAMPLES.map((e) => (
                   <button
@@ -973,14 +855,9 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
                 <div className="flex items-center gap-3 rounded-2xl rounded-bl-md border border-line bg-card px-3 py-3 w-fit">
                   <TirangaLoader className="w-5 h-5" />
                   <span className="text-xs text-muted">
-                    {waitNote
-                      // The provider allows one picture every 15 seconds per connection, and on a
-                      // shared mobile network several people can be behind one. Counting down is what
-                      // makes that read as "busy" rather than "broken".
-                      ? waitNote
-                      : reference
-                        ? 'Changing your picture — keeping everything you did not ask to change...'
-                        : `Painting your image at ${describeSize(willMakeAt.w, willMakeAt.h)}...`}
+                    {reference
+                      ? 'Changing your picture — keeping everything you did not ask to change...'
+                      : `Painting your image at ${describeSize(willMakeAt.w, willMakeAt.h)}...`}
                   </span>
                 </div>
               )}
@@ -1000,17 +877,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
                     {errorMsg || 'Image could not be generated. Retry or change the prompt.'}
                   </p>
                   <div className="flex items-center gap-4">
-                    {/* The free engine was too busy, or this needs Paid mode: one press switches and
-                        sends the same request again, so the user never retypes it. */}
-                    {errorCode && tier === 'free' && (
-                      <button
-                        type="button"
-                        onClick={() => { setTier('paid'); void handleGenerate('paid'); }}
-                        className="text-[11px] font-semibold text-accent-text hover:underline"
-                      >
-                        Switch to Paid
-                      </button>
-                    )}
                     <button
                       type="button"
                       onClick={() => void handleGenerate()}
@@ -1204,8 +1070,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
             )}
 
             {/* With a picture attached the words mean something different — say so where they are
-                typed. The "what the free tier is for" line moved UP into the empty state (admin
-                2026-09-21: "upar likhna hai, jahan 'no image yet' likh ke ata hai"). */}
+                typed. */}
             {enhanceUndo !== null && (
               <p className="text-[10px] text-faint text-center leading-relaxed flex items-center justify-center gap-1.5">
                 <Sparkles className="w-2.5 h-2.5 shrink-0" />

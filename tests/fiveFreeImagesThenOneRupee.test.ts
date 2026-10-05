@@ -19,7 +19,7 @@ import {
   cloudflareImageConfig, cloudflareServesSize, mimeFromBase64, fetchCloudflareImage, cloudflareRunUrl,
   CLOUDFLARE_IMAGE_MODEL_DEFAULT,
 } from '../src/server/lib/cloudflareImage';
-import { imageAllowanceLine, imageTierLine } from '../src/lib/imageAllowanceLine';
+import { imageAllowanceLine } from '../src/lib/imageAllowanceLine';
 import { IMAGE_MODE_NAME } from '../src/components/chat/modePicker';
 import { WALLET_EMPTY_CODE } from '../src/server/lib/walletEmptyNotice';
 
@@ -123,8 +123,9 @@ describe('5 free images a day, then ₹1 each', () => {
 
   it('every AI that points at the generator states the same rule', () => {
     // Two modes since 2026-09-30 (later the same day): Free for everyone, and Paid with this allowance.
-    expect(imagePriceSentence({} as NodeJS.ProcessEnv)).toBe('free for everyone in Free mode; Paid mode gives 5 free images a day, then ₹1 each from the wallet');
-    expect(imagePriceSentence({ AI_IMAGE_PRICING: 'off' } as NodeJS.ProcessEnv)).toBe('free in both Free and Paid mode');
+    // One mode since 2026-10-05: the sentence every AI quotes names no Free/Paid mode at all.
+    expect(imagePriceSentence({} as NodeJS.ProcessEnv)).toBe('5 free images a day, then ₹1 each from the wallet');
+    expect(imagePriceSentence({ AI_IMAGE_PRICING: 'off' } as NodeJS.ProcessEnv)).toBe('free');
     expect(read('src/server/lib/freeChatModeGuide.ts')).toMatch(/imagePriceSentence\(\)/);
     expect(read('src/server/lib/imageIntent.ts')).toMatch(/imagePriceSentence\(\)/);
   });
@@ -329,13 +330,14 @@ describe('the name has no FREE, and the screen states the price', () => {
     }
   });
 
-  it('the header line states the mode, the rule, then what is left today', () => {
+  it('the header line states the rule, then what is left today', () => {
     expect(imageAllowanceLine(null)).toBe('5 free images a day, then ₹1 each');
     expect(imageAllowanceLine(3)).toBe('3 free images left today, then ₹1 each');
     expect(imageAllowanceLine(1)).toBe('1 free image left today, then ₹1 each');
     expect(imageAllowanceLine(0)).toBe('Free images used for today · ₹1 per image');
-    expect(imageTierLine('free', 3)).toBe('Free for everyone, no daily limit');
-    expect(imageTierLine('paid', 3)).toBe('Paid · 3 free images left today, then ₹1 each');
-    expect(read('src/components/ide/AIImageGenerator.tsx')).toMatch(/imageTierLine\(tier, freeLeft\)/);
+    // One generator since 2026-10-05: the header IS the price line, and it never claims "no daily limit".
+    const screen = read('src/components/ide/AIImageGenerator.tsx');
+    expect(screen).toMatch(/<p className="text-xs text-faint truncate">\{imageAllowanceLine\(freeLeft\)\}<\/p>/);
+    expect(screen).not.toMatch(/no daily limit/i);
   });
 });

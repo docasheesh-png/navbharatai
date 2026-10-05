@@ -73,12 +73,13 @@ describe('E — the four selectors fold, and a folded row still names every sett
 });
 
 describe('F — "what the free tier is for" is said in the empty state, not under every send', () => {
+  // 🔁 2026-10-05: Free mode removed — the empty state's one line is now what the user is buying.
   it('the line sits with "No images yet", before the examples', () => {
-    const line = freeScreen.indexOf('Free images are made for your app');
+    const line = freeScreen.indexOf('Images are made on NavBharatAI');
     const examples = freeScreen.indexOf('EXAMPLES.map');
     expect(line).toBeGreaterThan(0);
     expect(line).toBeLessThan(examples);
-    expect(FREE.split('Free images are made for your app').length).toBe(2);
+    expect(FREE.split('Images are made on NavBharatAI').length).toBe(2);
   });
 
   it('under the input only the attached-picture hint remains, and only while a picture is attached', () => {

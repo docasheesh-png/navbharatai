@@ -888,6 +888,18 @@ the code (it is actually read somewhere) on 2026-07-11.
   - The screen opens on **Free** every visit and never stores the choice (the 2026-09-22 rule: a
     remembered Paid is a charge the user did not decide on). Test-locked and reversion-proven in
     `tests/imageFreeAndPaid.test.ts` and `tests/theImageGeneratorHasFreeAndPaid.test.ts`.
+- **🔁 FREE MODE REMOVED (2026-10-05, admin's choice "Free mode हटाएँ", after a screenshot of Free mode answering
+  every request "the free image servers are too busy" over `HTTP 402 | anonymous access refused`).** The provider was
+  not busy: its anonymous door asks for payment from everybody, so Free mode could make nothing and told users a false
+  cause. Now ONE screen: 5 free a day, then ₹1 (`imageAllowance.ts`), every rung fetched by this server.
+  - **No env key changed.** `IMAGE_GEN_CLIENT_FETCH` and `IMAGE_GEN_ANON_PROBE` are now **dead** (nothing reads the
+    first for minting, `freeProviderDoor.ts` is deleted); leaving them set is harmless. `IMAGE_GEN_POLLINATIONS=off`
+    still removes the KEYED rung. `POLLINATIONS_API_KEY` is still optional, for that keyed rung only.
+  - 🔒 **Consent to a price:** only a request with `tier: 'paid'` (the current screen, which shows the price) is
+    charged. A request with no tier — every phone app installed before this change — gets the same 5 free a day,
+    then **429 `free_used_update`** ("update the app or open navbharatai.com"), never a charge (`imageTier.ts`).
+  - `imageGenConfigured()` counts the free provider only WITH a key, and the route also counts `IMAGE_PRO_KEY`.
+  - Test-locked in `tests/imageFreeAndPaid.test.ts`. Everything below about Free mode is history.
 - **🔑 `POLLINATIONS_API_KEY` — THE FREE IMAGE PROVIDER CLOSED ITS ANONYMOUS DOOR (2026-09-30, admin:
   *"image banne band ho gaye hai!!"*). ⚠️ NOT set as of this date.** The provider now answers **401**
   to any request without an account key, and everything below (`IMAGE_GEN_CLIENT_FETCH`) was built on

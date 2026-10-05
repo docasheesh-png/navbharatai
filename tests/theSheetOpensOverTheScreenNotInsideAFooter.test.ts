@@ -230,16 +230,18 @@ describe('🔒 the two numbers really reach the server', () => {
   });
 });
 
-describe('🔒 the free tier says what it is FOR, beside the box where it is used', () => {
-  const free = code(read('src/components/ide/AIImageGenerator.tsx'));
+// 🔁 2026-10-05: the free tier is gone (Free mode removed), and its "what it is for" line with it.
+// The screen's one empty-state line now says what the user is buying, and still names no vendor.
+describe('🔒 the empty-state line says what the user is buying, and names no vendor', () => {
+  const screen = code(read('src/components/ide/AIImageGenerator.tsx'));
 
-  it('names the work it is good at', () => {
-    expect(free).toMatch(/logos, icons, banners, illustrations/);
+  it('the free-tier line is gone with the free tier', () => {
+    expect(screen).not.toContain('Free images are made');
   });
 
-  it('names no vendor and quotes no price on the free path', () => {
-    const note = free.slice(free.indexOf('Free images are made'), free.indexOf('Free images are made') + 1200);
-    expect(note).not.toMatch(/₹/);
+  it('names no vendor', () => {
+    const note = screen.slice(screen.indexOf('Images are made on NavBharatAI'), screen.indexOf('Images are made on NavBharatAI') + 600);
+    expect(note.length).toBeGreaterThan(0);
     for (const bad of ['pollinations', 'flux', 'openai', 'dall', 'midjourney', 'stability']) {
       expect(note.toLowerCase()).not.toContain(bad);
     }

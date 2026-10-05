@@ -90935,3 +90935,31 @@ Each tell is checked too:
 
 The remaining cases are the builder census and the tiger and goat anatomy. `aHeroObjectIsNotABox` now covers
 six animal kinds, and `heroObjectSpec` moved auto/tractor/house out of its "no builder" list.
+
+### 2026-10-05 — Game engine G4: live traffic (createTraffic)
+
+A driving or city game's road was empty. `createTraffic({ road, count, kinds, speed, seed })` fills it with the
+new Indian vehicles and the car.
+
+**How the traffic behaves:**
+- Everyone keeps LEFT: a vehicle heading +Z drives in the +X lane, and one heading −Z in the −X lane.
+- Cruising speeds come from `TRAFFIC_CRUISE` (car 13 m/s down to tractor 6 m/s), varied ±12% by a seeded RNG.
+- Each vehicle keeps a gap to the one ahead of `TRAFFIC_GAP` (a 2.5 m standstill margin plus a 1.2 s time
+  headway). It matches the leader's pace and stops at the margin.
+- It stops for anything in `update(dt, avoid)` that is ahead in its lane: the player, or the player's vehicle.
+- Vehicles loop round at the road's end.
+- Wheels roll, and the same seed gives the same traffic.
+- **A hard backstop:** no vehicle ever moves further than the room ahead of it, whatever the frame time.
+
+**Locked by `tests/theRoadHasTraffic.test.ts`** (6 cases):
+- no overlap in a minute of 12-vehicle traffic;
+- keeping left, facing the direction of travel, and staying on the road;
+- a car behind a tractor slows to the tractor's pace;
+- a bus stops behind a player standing in the lane and drives on when the player leaves;
+- flow, rolling wheels and determinism;
+- the backstop. Proven by reversion: without the clamp, a car arriving at 13 m/s with 0.8 m of room on a
+  0.1 s frame enters the tractor ahead.
+
+Rendered on a road with houses and trees after 8 simulated seconds: autos, cars, the bus and a truck in their
+lanes, with no console errors. The prompt now says a driving or city game has traffic. The builder census
+treats `createTraffic` as a system, not a catalogue object.

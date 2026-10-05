@@ -138,7 +138,7 @@ describe('the catalogue points at every builder that exists, and never at the wr
     const builders = [...src.matchAll(/export function (create[A-Z]\w+)\(/g)].map((m) => m[1]);
     const named = new Set(OBJECT_CATALOG.map((e) => (e.builder ?? '').replace(/\(.*$/s, '').trim()).filter(Boolean));
     // Builders that are not catalogue objects on their own (world-building pieces, the renderer).
-    const NOT_OBJECTS = new Set(['createRenderer', 'createTerrain', 'createVehicleState']);
+    const NOT_OBJECTS = new Set(['createRenderer', 'createTerrain', 'createVehicleState', 'createTraffic']);
     for (const b of builders) {
       if (NOT_OBJECTS.has(b)) continue;
       expect(named.has(b), `${b} exists but no catalogue entry names it`).toBe(true);

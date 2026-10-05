@@ -2159,6 +2159,140 @@ export function createTractor(options: TractorOptions = {}): THREE.Group {
   return g;
 }
 
+// ── TRAFFIC ──────────────────────────────────────────────────────────────────────────────────────
+export type TrafficKind = 'car' | 'auto' | 'bus' | 'truck' | 'tractor';
+
+export interface TrafficOptions extends BaseOpts {
+  /** The road it runs on — createRoad's own length and width. Lanes are its two halves. */
+  road?: { length?: number; width?: number };
+  count?: number;
+  kinds?: TrafficKind[];
+  /** Multiplies every vehicle's cruising speed. */
+  speed?: number;
+}
+
+export interface TrafficVehicle {
+  object: THREE.Group;
+  kind: TrafficKind;
+  /** +1 drives toward +Z in the +X lane; −1 drives toward −Z in the −X lane (India keeps LEFT). */
+  dir: 1 | -1;
+  speed: number;
+  cruise: number;
+  length: number;
+}
+
+export interface Traffic {
+  root: THREE.Group;
+  vehicles: TrafficVehicle[];
+  /**
+   * Advance the traffic. \`avoid\` is what it must never drive into — the player, the player's car: a
+   * vehicle with one of them ahead in its lane slows and stops behind it.
+   */
+  update: (dt: number, avoid?: THREE.Object3D[]) => void;
+}
+
+/** City cruising speeds, m/s (a car ≈ 47 km/h, a tractor ≈ 22). */
+export const TRAFFIC_CRUISE: Readonly<Record<TrafficKind, number>> = { car: 13, auto: 9, bus: 10, truck: 9, tractor: 6 };
+/** Gap kept to the vehicle ahead: a standstill margin plus a time headway. */
+export const TRAFFIC_GAP = { standstill: 2.5, headway: 1.2 } as const;
+
+/**
+ * LIVE TRAFFIC on a road — what makes a driving or city game feel inhabited rather than staged. Vehicles
+ * keep LEFT (India), cruise at their own kind's speed, keep a safe time-gap to whatever is ahead in their
+ * lane (so a car behind a tractor slows to the tractor's pace instead of driving through it), stop for
+ * the player, and loop round at the road's end without spawning into one another. Same seed, same traffic.
+ */
+export function createTraffic(options: TrafficOptions = {}): Traffic {
+  const d = tier(options);
+  const L = options.road?.length ?? 300;
+  const W = options.road?.width ?? 8;
+  const count = Math.max(1, Math.round(options.count ?? 8));
+  const kinds = options.kinds && options.kinds.length ? options.kinds : (['car', 'auto', 'bus', 'truck', 'car', 'auto', 'tractor', 'car'] as TrafficKind[]);
+  const pace = options.speed ?? 1;
+  const rand = rng(options.seed ?? 7);
+  const root = new THREE.Group();
+  const paints = [0xb42b2b, 0x1d4ed8, 0xf3f4f6, 0x111827, 0x9ca3af, 0x0f766e];
+  const build = (k: TrafficKind): THREE.Group => {
+    if (k === 'auto') return createAutoRickshaw({ detail: d, livery: rand() < 0.5 ? 'delhi' : 'mumbai' });
+    if (k === 'bus') return createBus({ detail: d });
+    if (k === 'truck') return createTruck({ detail: d });
+    if (k === 'tractor') return createTractor({ detail: d });
+    return createCar({ detail: d, color: paints[Math.floor(rand() * paints.length)] });
+  };
+  const lengthOf = (o: THREE.Object3D) => { o.updateMatrixWorld(true); return new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3()).z; };
+
+  const vehicles: TrafficVehicle[] = [];
+  const perLane: Record<string, number> = { '1': 0, '-1': 0 };
+  for (let i = 0; i < count; i++) {
+    const kind = kinds[i % kinds.length];
+    const dir: 1 | -1 = i % 2 === 0 ? 1 : -1;
+    const object = build(kind);
+    const length = lengthOf(object);
+    const cruise = TRAFFIC_CRUISE[kind] * pace * (0.88 + rand() * 0.24);
+    vehicles.push({ object, kind, dir, speed: cruise, cruise, length });
+    perLane[String(dir)] += 1;
+  }
+  // Spread each lane's vehicles evenly along the road, so the first frame has no pile-up.
+  const placed: Record<string, number> = { '1': 0, '-1': 0 };
+  for (const v of vehicles) {
+    const n = perLane[String(v.dir)];
+    const k = placed[String(v.dir)]++;
+    const along = -L / 2 + ((k + 0.5) / n) * L;
+    v.object.position.set(v.dir * (W / 4), ROAD_SURFACE_Y, along * v.dir);
+    v.object.rotation.y = v.dir === 1 ? 0 : Math.PI;
+    root.add(v.object);
+  }
+
+  /** Distance along v's direction of travel from v's nose to the nearest obstacle's tail in its lane. */
+  const gapAhead = (v: TrafficVehicle, avoid: THREE.Object3D[]): { gap: number; speed: number } => {
+    let best = Infinity, bestSpeed = 0;
+    const s = v.object.position.z * v.dir;
+    for (const o of vehicles) {
+      if (o === v || o.dir !== v.dir) continue;
+      let ahead = o.object.position.z * o.dir - s;
+      if (ahead <= 0) ahead += L;                       // the lane loops: the leader may be round the end
+      const gap = ahead - (v.length + o.length) / 2;
+      if (gap < best) { best = gap; bestSpeed = o.speed; }
+    }
+    for (const a of avoid) {
+      const p = a.position;
+      if (Math.abs(p.x - v.object.position.x) > W / 4 + 0.6) continue;   // not in this lane
+      const ahead = p.z * v.dir - s;
+      if (ahead <= 0 || ahead > 60) continue;
+      const gap = ahead - v.length / 2 - 0.8;
+      if (gap < best) { best = gap; bestSpeed = 0; }
+    }
+    return { gap: best, speed: bestSpeed };
+  };
+
+  const update = (dt: number, avoid: THREE.Object3D[] = []) => {
+    const step = Math.min(0.1, Math.max(0, dt));
+    for (const v of vehicles) {
+      const { gap, speed: leaderSpeed } = gapAhead(v, avoid);
+      const wanted = TRAFFIC_GAP.standstill + v.speed * TRAFFIC_GAP.headway;
+      let target = v.cruise;
+      if (gap < wanted) {
+        // Match the leader's pace, scaled down the tighter the gap gets; stop at the standstill margin.
+        const room = Math.max(0, (gap - TRAFFIC_GAP.standstill) / Math.max(0.1, wanted - TRAFFIC_GAP.standstill));
+        target = Math.min(v.cruise, leaderSpeed + (v.cruise - leaderSpeed) * room * 0.5) * Math.min(1, room + 0.2);
+        if (gap <= TRAFFIC_GAP.standstill * 0.5) target = 0;
+      }
+      const accel = target > v.speed ? 2.5 : 7;          // gentle away, firm braking
+      v.speed += Math.sign(target - v.speed) * Math.min(Math.abs(target - v.speed), accel * step);
+      // Never move further than the room there is: two vehicles can never overlap, whatever the step.
+      const move = Math.min(v.speed * step, Math.max(0, gap - 0.3));
+      if (move < v.speed * step) v.speed = move / Math.max(1e-6, step);
+      v.object.position.z += move * v.dir;
+      // Round the end of the road, back on at the start of its own lane.
+      const along = v.object.position.z * v.dir;
+      if (along > L / 2) v.object.position.z = (along - L) * v.dir;
+      rollWheels(v.object, v.speed, step);
+    }
+  };
+
+  return { root, vehicles, update };
+}
+
 // ── DRIVING ──────────────────────────────────────────────────────────────────────────────────────
 /**
  * THE ONE FORWARD. Every model in this file — car, motorcycle, bicycle, animal, house — faces its local
@@ -3429,7 +3563,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '- 🔴 EVERY OBJECT COMES FROM objects.ts, never hand-modelled: createCar, createMotorcycle,\n' +
       '  createBicycle, createTree, createMountain, createRiver, createDesert, createRoad,\n' +
       '  createAnimal (dog, cow, horse, deer, goat, tiger), createHouse, and India\'s roads —\n' +
-      '  createAutoRickshaw, createBus, createTruck, createTractor. Call setDetailLevel()\n' +
+      '  createAutoRickshaw, createBus, createTruck, createTractor — and createTraffic() to fill a road\n' +
+      '  with them (keeps left, keeps distance, stops for the player). Call setDetailLevel()\n' +
       "  ONCE at start-up — 'real' when the user asked for real/realistic/asli/100%, 'lite' when they\n" +
       '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
       '- 🔴 A BIKE IS createMotorcycle() / createBicycle(), never a capsule over two cylinders. A\n' +

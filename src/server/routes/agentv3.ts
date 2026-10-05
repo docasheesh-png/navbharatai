@@ -554,6 +554,8 @@ import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
+import { frameworkMismatchFromListing, messageNamesAFramework, answersFrameworkQuestion, frameworkQuestionMarker, frameworkQuestionSteer, frameworkAnswerNote } from '../AgentV3/frameworkQuestion';
+import type { FrameworkCoherence } from '../AgentV3/ProjectImport';
 import { attachmentMemoryEnabled, rememberableUid, saveAttachmentMemory, loadAttachmentMemory, deleteAttachmentMemory, shouldRecallAttachment, refersToEarlierAttachment } from '../lib/attachmentMemory';
 import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt, readerlessIntent, describeReaderOutcome, type ReaderOutcome } from '../AgentV3/IntentClassifier';
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
@@ -10812,8 +10814,27 @@ async function noteBuildOutcome(
       readerAnswered = false;
       readerSaysUnclear = false;
     }
+    /**
+     * Q-144: the previous turn asked which framework this project should use (its files and its build setup
+     * disagreed). A reply that answers it resumes the request that was asked about, with the choice attached,
+     * as an edit of this project — never as a chat, and never as a fresh build over their files.
+     */
+    const frameworkAnswered = !offerAccepted
+      && lastRequestTurn !== null
+      && lastRequestTurn.lane === 'framework'
+      && Date.now() - lastRequestTurn.ts <= OFFER_LIFETIME_MS
+      && !importingThisTurn
+      && answersFrameworkQuestion(typedPrompt);
+    if (frameworkAnswered && lastRequestTurn) {
+      console.log('[AGENTV3] the user answered the framework question — resuming the request it was asked about');
+      prompt = `${lastRequestTurn.text}\n\n${frameworkAnswerNote(typedPrompt)}`;
+      intent = 'edit_existing';
+      readerAnswered = false;
+      readerSaysUnclear = false;
+    }
     const buildCheck = buildConfirmationEnabled()
       && !offerAccepted
+      && !frameworkAnswered
       && !importingThisTurn
       && (intent === 'new_build' || (intent === 'edit_existing' && !earlierRequestLeftAnApp))
       ? buildConfirmation(prompt)
@@ -11094,6 +11115,34 @@ async function noteBuildOutcome(
       // genuine edit ("add a logout button", "fix the header") can never be flipped to a rebuild.
       intent = 'new_build';
     }
+    /**
+     * Q-144 (admin-approved (b) 2026-10-05): this project's source files are one framework and its build
+     * setup another (`checkFrameworkCoherence`), and the message does not say which one it wants. Building
+     * now is the 18-minute thrash of autopsy a4be5a05, and repairing it automatically could break a working
+     * app — so the turn asks, before a file is written, once per mismatch (frameworkQuestion.ts). Judged
+     * from the file LIST plus package.json, raced, and fail-open: anything unreadable builds as before.
+     */
+    let askFramework: FrameworkCoherence | null = null;
+    if (intent !== 'chat' && !frameworkAnswered && userAppExists && Array.isArray(projectFilePaths)
+      && process.env.AGENTV3_FRAMEWORK_COHERENCE !== 'off'
+      && zipImports.length === 0 && !(typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '')
+      && !messageNamesAFramework(prompt)) {
+      try {
+        const pkg = await raceTimeout(loadWorkspaceFilesByPath(intentWorkspaceId, ['package.json']), 3_000, 'frameworkQuestionPkg');
+        const coherence = frameworkMismatchFromListing(projectFilePaths, pkg?.['package.json']);
+        if (!coherence.ok) {
+          const mem = getWorkspaceMemory(intentWorkspaceId);
+          const marker = frameworkQuestionMarker(coherence);
+          const askedBefore = mem.snapshot().episodes.some((e) => e.kind === 'note' && e.text === marker);
+          if (!askedBefore) {
+            mem.recordNote(marker);
+            askFramework = coherence;
+            console.log(`[AGENTV3] files are ${coherence.sourceFramework} but package.json is ${coherence.packageFramework} — asking which framework before building`);
+            intent = 'chat';
+          }
+        }
+      } catch { /* fail-open — an unreadable project builds exactly as before */ }
+    }
     // An import turn (zip attachment OR a set GitHub import URL) must NEVER take the cheap chat
     // early-exit — the Landing Pipeline (and the follow-up survey/edit) lives in the build path
     // below. Without this, "is app ko analyze karo" + an import could classify as small-talk and
@@ -11150,7 +11199,7 @@ async function noteBuildOutcome(
         const clarifyWhatToBuild = askWhatToBuild;
         // Q-200: the turn was diverted because a build was not confirmed, and no more specific answer took it.
         // The reply answers, then offers; the turn is remembered as an offer so a "yes" builds this request.
-        const answerThenOffer = offerToBuild && !clarifyWhatToBuild && !askUnrelated && !answerProjectElsewhere
+        const answerThenOffer = offerToBuild && !askFramework && !clarifyWhatToBuild && !askUnrelated && !answerProjectElsewhere
           && !answerPictureRequest && !answerSpreadsheet && !echoesPlatformNotice;
         let chatPrompt = attachmentContext
           ? `${prompt}\n\nThe user attached file(s); here is the extracted content:\n\n${attachmentContext}`
@@ -11266,7 +11315,8 @@ async function noteBuildOutcome(
                 + (askUnrelated ? unrelatedRequestSteer(unrelated?.existingHint ?? '', rawAttachments.length > 0) : '')
                 + (answerPictureRequest ? PICTURE_REQUEST_STEER : '')
                 + (answerThenOffer ? BUILD_OFFER_STEER : '')
-                + (ambiguousBuildAsk && !answerThenOffer && !clarifyWhatToBuild && !answerProjectElsewhere && !askUnrelated && !answerPictureRequest
+                + (askFramework ? frameworkQuestionSteer(askFramework) : '')
+                + (ambiguousBuildAsk && !askFramework && !answerThenOffer && !clarifyWhatToBuild && !answerProjectElsewhere && !askUnrelated && !answerPictureRequest
                   ? "\n\nThis message was ambiguous — it might be a request to build or change something "
                     + "in the user's app, phrased in an unusual way, OR it might just be a genuine "
                     + "question/comment. Answer it naturally, but if it plausibly could mean \"build/fix "
@@ -11305,7 +11355,7 @@ async function noteBuildOutcome(
           const chatWsId = deriveWorkspaceId(userId, req.body?.sessionId);
           const chatMem = getWorkspaceMemory(chatWsId);
           // Our own notice is not one of the user's requests, and must never become "earlier context".
-          if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, answerThenOffer ? 'offer' : 'chat');
+          if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, askFramework ? 'framework' : answerThenOffer ? 'offer' : 'chat');
           // Hydration at intent-time is a 3-second RACE, so it can be marked done while the read never
           // landed — `saveWorkspaceMemoryFor` checks the read itself, not the re-entrancy flag.
           void saveWorkspaceMemoryFor(chatWsId, chatMem).catch(() => {});

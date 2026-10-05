@@ -17,6 +17,7 @@ import { panelWidth, type DeviceMode } from '../../lib/panelWidth';
 // (no server-only deps), and client code already imports such pure server modules elsewhere.
 import { isValidAppId } from '../../server/lib/appId';
 import { normaliseAppId } from '../../server/lib/mobileProjectAssembler';
+import { authHeaders } from '../../lib/authedFetch';
 
 // ─── APK BUILDER — ONE HONEST FLOW (redesigned admin 2026-08-11) ────────────────
 //
@@ -102,7 +103,6 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName, sessionId, gith
     const headers: Record<string, string> = { ...(extra || {}) };
     if (githubToken) headers['x-github-token'] = githubToken;
     try {
-      const { authHeaders } = await import('../../lib/authedFetch');
       Object.assign(headers, await authHeaders());
     } catch { /* signed out — the route answers with an empty list, never another account's apps */ }
     return headers;

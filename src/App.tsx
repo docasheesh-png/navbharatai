@@ -18,6 +18,8 @@ import { computeTabClose } from './lib/tabClose';
 import { parentForOpen } from './lib/tabParenting';
 import { historySurfaceFor, historyFilterFor } from './lib/historySurface';
 import { HistoryPopup } from './components/history/HistoryPopup';
+import { HistoryView } from './components/HistoryView';
+import { ProfessionalHistoryView } from './components/professionals/ProfessionalHistoryView';
 // AgentV3Panel is rendered via ProV3Surface (the gated v5.0 surface), not directly here.
 // FilesPanel → moved to ViewPanels.tsx
 import { v3MobileFooterActive, type V3FooterApi } from './components/agentv3/v3FooterApi';
@@ -80,6 +82,7 @@ import { onAuthStateChanged, getRedirectResult, GithubAuthProvider, User as Fire
 import { socialRedirectFailureMessage, authErrorDetail } from './components/socialSignInPolicy';
 import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 
 // Firebase init now lives in ONE place — src/lib/firebase.ts (root-cause fix 2026-07-11: a second
 // initializeApp there with a stale JSON config either crashed with app/duplicate-app or, load-order
@@ -135,8 +138,10 @@ const RepoAnalystTool = _lz(() => import('./components/repoAnalyst/RepoAnalystTo
 const AboutPanel = _lz(() => import('./components/panels/AboutPanel'), 'AboutPanel');
 const DeploySuccessPanel = _lz(() => import('./components/panels/DeploySuccessPanel'), 'DeploySuccessPanel');
 
-const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
-const ProfessionalHistoryView = _lz(() => import('./components/professionals/ProfessionalHistoryView'), 'ProfessionalHistoryView');
+// HistoryView and ProfessionalHistoryView are STATIC on purpose (Q-625): HistoryPopup above already
+// imports HistoryView statically, and HistoryView imports ProfessionalHistoryView, so both are in the
+// startup chunk whatever this file does. A `lazy()` here split nothing and only added a Suspense hop.
+// To make them lazy, make EVERY importer lazy — tests/aDynamicImportMustSplitSomething.test.ts checks it.
 
 import { useBuild } from './components/ide/BuildContext';
 import { useDevLogs } from './hooks/useDevLogs';
@@ -175,7 +180,7 @@ import {
 import type { ZipSizeModalVariant } from './components/ide/ZipSizeModal';
 import { aboutContent, type AboutContent, type AboutOverrides } from './content/about';
 import { decideBackAction, HARDWARE_BACK_EVENT } from './lib/androidBack';
-import { loadNativeShellContext, exitNativeApp } from './lib/nativeShell';
+import { loadNativeShellContext, exitNativeApp, syncStatusBarToTheme } from './lib/nativeShell';
 import { ExitConfirmDialog } from './components/ExitConfirmDialog';
 // AgentMode → re-exported from ./types
 
@@ -356,7 +361,6 @@ export default function App() {
     // dark app — a mismatch no real app has. No-op on web; best-effort, never blocks the theme switch.
     void (async () => {
       try {
-        const { loadNativeShellContext, syncStatusBarToTheme } = await import('./lib/nativeShell');
         await syncStatusBarToTheme(await loadNativeShellContext(), theme);
       } catch { /* polish only */ }
     })();
@@ -3087,7 +3091,7 @@ export default function App() {
       toggleTab('settings');
       setSettingsScreen('database');
       window.dispatchEvent(new CustomEvent(SUPABASE_NATIVE_RETURN_EVENT));
-      void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
+      void Promise.resolve().then(() => Browser.close()).catch(() => {});
       return true;
     };
 
@@ -3098,7 +3102,6 @@ export default function App() {
     let removeGithubUrlOpen: (() => void) | undefined;
     void (async () => {
       try {
-        const { Capacitor } = await import('@capacitor/core');
         if (Capacitor.isNativePlatform?.() !== true) return;
         const { App: CapApp } = await import('@capacitor/app');
         const handle = await CapApp.addListener('appUrlOpen', (data: { url?: string }) => {
@@ -3119,7 +3122,7 @@ export default function App() {
               addLog('GitHub sign-in could not be completed. Please try connecting again.', 'error');
               recordNonFatal(ticket ? 'GitHub sign-in ticket could not be redeemed' : 'GitHub deep link with a raw token refused', 'github');
               setGithubRedirectingMessage(null);
-              void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
+              void Promise.resolve().then(() => Browser.close()).catch(() => {});
               return;
             }
           setGithubToken(token);
@@ -3133,7 +3136,7 @@ export default function App() {
           // that state, so it never showed; on native the app never navigates, so it sat there forever
           // over a login that had already finished. The success path now has something to say.
           setGithubRedirectingMessage(null);
-          void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
+          void Promise.resolve().then(() => Browser.close()).catch(() => {});
           })();
         });
         removeGithubUrlOpen = () => { try { handle.remove(); } catch { /* already removed */ } };

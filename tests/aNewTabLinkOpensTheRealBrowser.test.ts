@@ -78,7 +78,9 @@ describe('the wiring — proven by reversion', () => {
   it('the native shell installs it on the document, beside the tap feedback', () => {
     const src = readFileSync(join(ROOT, 'src/lib/nativeShell.ts'), 'utf8');
     expect(src).toContain('installExternalLinkHandler(ctx, document);');
-    expect(src).toMatch(/import\('\.\/mobileNative'\)\.then\(\(m\) => m\.openExternalUrl\(href\)\)/);
+    // Static since Q-625: mobileNative is in the startup chunk, so an `import()` of it split nothing.
+    expect(src).toContain("import { openExternalUrl } from './mobileNative';");
+    expect(src).toMatch(/open: \(href: string\) => void = \(href\) => openExternalUrl\(href\)/);
   });
 
   it('🔒 every JSX new-tab link also carries rel (comments ignored)', () => {

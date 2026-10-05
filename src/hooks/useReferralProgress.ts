@@ -33,6 +33,7 @@ import {
 import { heldReferralCode } from '../lib/pendingReferralCode';
 import { heldRedeemInFlight } from './useHeldReferralCode';
 import type { RewardStep } from '../lib/referralStepNames';
+import { Capacitor } from '@capacitor/core';
 
 export interface ReferralProgress {
   enabled: boolean;
@@ -180,7 +181,6 @@ export function useRefreshReferralOnResume(refresh: () => void, enabled: boolean
     let remove: (() => void) | null = null;
     void (async () => {
       try {
-        const { Capacitor } = await import('@capacitor/core');
         if (!Capacitor.isNativePlatform()) return;
         const { App } = await import('@capacitor/app');
         const handle = await App.addListener('appStateChange', ({ isActive }: { isActive: boolean }) => {

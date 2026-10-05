@@ -90261,3 +90261,36 @@ trip, legacy row reads and is sealed, tampered ciphertext fails closed, unreadab
 failure never overwrites; census: no `headers` handling in the stores, every `servers` write sealed, no other
 writer of the two collections, route fail-closed order). Reverted-and-failed: plaintext seal + fail-open → 8
 failures; the original stores → 13 failures.
+## 2026-10-05 — Q-625: a dynamic import must split something
+
+**Problem (forensic audit 2026-10-04):** the build printed five `INEFFECTIVE_DYNAMIC_IMPORT` warnings — modules
+loaded with `import()` while something in the startup graph already imported them statically, so the `import()`
+moved nothing and only added an `await`.
+
+**Root cause / class:** an `import()` of a module that is already in the startup chunk. The build only warns about
+some of them; a census of the real client graph (entry → static imports = the eager set) found **36 call sites**:
+- local: `nativeShell` (App.tsx), `mobileNative` (nativeShell), `firebase` (appCheckClient), `authedFetch` (APKBuilder),
+  `HistoryView` and `ProfessionalHistoryView` (App.tsx `lazy()`, while `HistoryPopup` imports them statically);
+- packages: `@capacitor/core` (13 files), `firebase/auth` (10 sites), `@capacitor/browser` (6), `firebase/app` (1).
+
+**Fix:** each one is a static import now. Behaviour is unchanged (the modules were already loaded), except that a
+few handlers no longer yield before their work — the Apple sign-in handler now awaits nothing before it builds
+the provider, the stronger form of the 2026-08-09 desktop-popup fix. The four firebase/auth exports the v12
+types do not surface (`OAuthProvider`, `PhoneAuthProvider`, `signInWithCustomToken`, `linkWithPhoneNumber`)
+are read once in `src/lib/firebaseAuthRuntime.ts` instead of five `as any` dynamic imports in two components.
+
+**Not changed, on purpose:** `PreviewSurface`, `FilesPanel`, `TerminalPanel` and `content/legal/grievance`
+are `import()`ed by one screen and statically imported by another LAZY chunk. That is a working shared split
+(the build does not warn); making the builder's own imports lazy would only add a loading state inside it.
+`buildService` and `agentV3StreamError` were `import('x').Type` type positions, which emit no code.
+
+**Evidence:** build warnings 5 → 0. Bundle (gz): first paint 503.2 → 493.0 KB, total JS 1526.1 → 1515.0 KB.
+
+**Lock:** `tests/aDynamicImportMustSplitSomething.test.ts` (fixtures for the analyzer + the real graph from
+`index.html`'s entry). Reversion-proven: putting back the App.tsx `import('./lib/nativeShell')` and a
+`referralClaim.ts` `import('@capacitor/core')` each failed it with the module named.
+
+**Also found and fixed:** `tests/pluginProxyIsNeverResolved.test.ts`'s scanner matched `{ A } = await import(…)`
+from the enclosing block's `{` when the destructure was the block's first statement, so it never saw the plugin
+name. `[^}]` → `[^{}]`, with a fixture test (reversion-proven).
+

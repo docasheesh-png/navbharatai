@@ -8,6 +8,8 @@ import { clearGithubConnection } from '../lib/githubTokenStore';
 import {
   beginGithubOauthAttempt, browserStorage, GITHUB_DEVICE_NONCE_KEY, GITHUB_WEB_NONCE_KEY,
 } from '../lib/githubOauthNonce';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 export interface GitHubConnectDeps {
   activeView: any;
   currentSessionId: string;
@@ -43,7 +45,6 @@ export function useGitHubConnect(deps: GitHubConnectDeps) {
     // web everything below is byte-for-byte unchanged.
     let isNative = false;
     try {
-      const { Capacitor } = await import('@capacitor/core');
       isNative = Capacitor.isNativePlatform?.() === true;
     } catch { /* web — not native */ }
 
@@ -114,7 +115,6 @@ export function useGitHubConnect(deps: GitHubConnectDeps) {
         // listener catches (it stores the token and closes this browser). No page navigation, so the app
         // is never replaced by the website.
         try {
-          const { Browser } = await import('@capacitor/browser');
           await Browser.open({ url: finalOAuthUrl, presentationStyle: 'popover' });
         } catch (e: any) {
           addLog(`Could not open the in-app browser: ${e?.message || e}`, 'error');

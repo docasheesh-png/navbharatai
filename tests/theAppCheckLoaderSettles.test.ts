@@ -49,7 +49,9 @@ describe('1 · the App Check loader settles on a phone', () => {
   it('🔴 the report: with a Capacitor-like proxy, installAppCheck resolves and never touches `.then`', async () => {
     const calls: string[] = [];
     vi.resetModules();
-    vi.doMock('@capacitor/core', () => ({ Capacitor: { isPluginAvailable: () => true } }));
+    // `isNativePlatform` too: appCheckClient imports `./firebase` statically since Q-625, and that module
+    // asks it once at load to pick its auth persistence. `w.Capacitor` below still drives the native branch.
+    vi.doMock('@capacitor/core', () => ({ Capacitor: { isPluginAvailable: () => true, isNativePlatform: () => false } }));
     vi.doMock('@capacitor-firebase/app-check', () => ({ FirebaseAppCheck: capacitorLikeProxy('FirebaseAppCheck', calls) }));
     const mod = await import('../src/lib/appCheckClient');
     mod.__resetAppCheckInstall();

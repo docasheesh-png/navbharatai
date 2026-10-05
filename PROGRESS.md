@@ -89214,6 +89214,67 @@ Siblings hunted: `readAsDataURL` across the whole repo — the only generated-ap
 failed save lived only in `proShell.ts`'s `useCollection`.
 
 
+## 2026-10-04 — Q-105 was already fixed, and saying so uncovered the defect it was hiding (Q-640)
+
+**Taken because it was the one row on the older queue no live PR had claimed** — and because it read like the
+largest missing subsystem on the list: *"Post-build gates judge files the entry never imports (no reachability).
+Needs a transitive import closure from `index.html`/`main.tsx` for readiness, fake-code scan and feature heal."*
+
+🔴 **The premise was false, and safeguard #6 is why I found that out instead of rebuilding it.** The first search
+I ran was by FILENAME, not by content — `find . -iname "*reach*"` — and it printed
+`src/server/AgentV3/appReachability.ts` immediately. 245 lines, written on 2026-09-17 with autopsy e706e068, with
+`tests/appReachability.test.ts` beside it, and wired into five readers: the readiness gate
+(`ToolDispatcher.evaluate` → `splitByReachability`), the incomplete-code heal's input, the fake-feature scan and
+both simulated-content disclosures. **Had I searched for the row's own vocabulary — "transitive", "import
+closure" — I would have found nothing and built a second copy of a working subsystem.** That is the exact
+sequence that destroyed `fileMentions.ts`, one safeguard later.
+
+🔑 **And the stale row was not harmless — it was camouflage.** A row that says "this does not exist yet" is a
+row nobody re-reads the code for. Fourteen lines below the heal's own correctly-filtered input sat this:
+
+```ts
+const stubs = highSeverityAuthenticityIssues(written).filter(…not unreachable…);  // input:   filtered ✅
+const healed = await completeRunner.run(authenticityRepairInstruction(stubs));
+const after  = highSeverityAuthenticityIssues(written);                           // verdict: NOT filtered ❌
+if (after.length === 0) { … INCOMPLETE_CODE_HEALED … readiness recovery … }
+```
+
+**On autopsy e706e068's own file shape this fails completely.** A batch repair had left `App.tsx` and
+`hooks/useStudents.ts` at the project root, copies nothing imports. The heal completes every stub the app
+actually HAS; the stray's stub keeps `after.length > 0` for ever; so `INCOMPLETE_CODE_HEALED` is never recorded,
+and the readiness recovery — which lives INSIDE that `if` — never runs. The build stays NOT-ready, GreenGuard
+restores it, and the user's build failed over a file the browser never loads. **That is e706e068's own harm,
+surviving in the half its fix never touched.** The instance was fixed; the class was not — the bar the fifth
+rule's 2026-09-13 note forbids by name.
+
+**The class, and the 50/50 half.** One fact, two readers, one of them told — Q-512's class, two days running.
+But the deeper question is why the branch could exist at all, and the answer is that *"the findings about files
+the app loads"* **had no name**. It was re-spelled as a chained `.filter((x) => !isUnreachable(…))` at each of
+four call sites. Four remembered. A spelling can be forgotten; the unfiltered scan answers cheerfully either
+way, and neither `tsc` nor the suite can see a missing filter.
+
+**Fix:** `loadedFindings(findings, verdict)` in `appReachability.ts` — the `loaded` half of the split the
+readiness gate already used, given a name. All five readers now ask it, and **no reader spells the question by
+hand any more** (that absence is itself asserted). The wrong branch is not merely corrected; there is no second
+expression left to forget it in.
+
+**Lock:** `tests/aHealThatFixedEverythingIsToldSo.test.ts`, 10 cases. Seven are the pure behaviour on the real
+School-ERP file set (the stray's finding dropped, every loaded file's kept, a finding naming no file kept, and
+EVERYTHING kept when the verdict is not applicable — never a demotion). Three are a **census that pins the
+reader count at five**, so a sixth reader fails CI rather than quietly asking the other question. Reversion-
+proven three ways: the re-judge unfiltered again → 2 fail; one other reader back to its own filter → 2 fail;
+`loadedFindings` stops filtering → 2 fail.
+
+⚠️ **Honest limit.** The decision this fixes is inline in the build route's handler and cannot be called from a
+test, so what the census locks is the SHAPE of the five call sites, not the handler's behaviour — the same
+precedent `readinessJudgesOurOwnCode.test.ts` set for this file. The pure half proves the question now returns
+the right answer; the census proves both readers ask it. The live effect to watch is
+`INCOMPLETE_CODE_HEALED` appearing on a build that has stray unreachable files — before this, it could not.
+
+**Siblings hunted:** every `const after` / re-detect pair in the build route (`analyzeProjectIntegrity`,
+`lintBuiltApp`, `analyzeDesignCoverage`, `analyzeHooksRules`, `findBootKillingEnvGuards`) and every call of the
+four file-scoped scans. The asymmetry existed in exactly one place, because reachability filtering existed in
+exactly four — and that is now five, named, and counted.
 ### 2026-10-04 — Forensic security / reliability audit (PR #NNNN, branch `claude/new-session-gx9294`)
 
 The admin asked for a repo-wide audit, with every finding fixed P0 → P3 and locked by a test proven by

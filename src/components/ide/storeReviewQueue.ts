@@ -66,3 +66,39 @@ export function reviewStatusLabel(status: string | undefined): 'Approved' | 'On 
 export function reviewActionsFor(status: string | undefined): 'remove' | 'decide' {
   return isLiveOnStore(status) ? 'remove' : 'decide';
 }
+
+// ── The Review HUB (admin 2026-10-05: "instant app aur apk app, dono aise bahar hi hai … pahle 2 button banao,
+// 'manage app, manage apk' aur uske andar apps dikhe, aise bahar pura page bekar dikh raha hai") ──────────────
+// The Review tab used to stack four lists on one long scroll — reported comments, viewer reports, instant apps
+// and Android apps — so the one an admin came for was somewhere below the others. It now opens on three buttons
+// that say what is inside each, and a button opens ONE list.
+
+/** The three things an admin reviews. */
+export type ReviewSection = 'apps' | 'apks' | 'reports';
+/** Inside a list: the requests still to decide, or the apps already live on App Mart. */
+export type ReviewFilter = 'waiting' | 'live';
+
+export interface ReviewSectionCount { waiting: number; live: number }
+
+/** Waiting vs live for one lane — the numbers its hub button shows. */
+export function reviewSectionCount(list: readonly ReviewQueueApp[] | null | undefined): ReviewSectionCount {
+  let waiting = 0; let live = 0;
+  for (const a of list ?? []) {
+    if (!a) continue;
+    if (isLiveOnStore(a.status)) live++; else waiting++;
+  }
+  return { waiting, live };
+}
+
+/** The apps a filter shows, in the order given. */
+export function filterReviewList<T extends ReviewQueueApp>(list: readonly T[] | null | undefined, filter: ReviewFilter): T[] {
+  return (list ?? []).filter((a) => !!a && (filter === 'live' ? isLiveOnStore(a.status) : !isLiveOnStore(a.status)));
+}
+
+/**
+ * Which list opens first when a section is opened: the requests waiting for a decision when there are any —
+ * that is the work — otherwise the apps on the store, so an empty "Waiting" never hides a full shelf.
+ */
+export function defaultReviewFilter(count: ReviewSectionCount): ReviewFilter {
+  return count.waiting > 0 || count.live === 0 ? 'waiting' : 'live';
+}

@@ -5,7 +5,7 @@ import PullToRefresh from '../PullToRefresh';
 import {
   Store, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
   CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package, Flag,
-  Rocket, ImagePlus, Clipboard, Copy, User,
+  Rocket, ImagePlus, Clipboard, Copy, User, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../lib/authHeaders';
@@ -15,7 +15,10 @@ import { resolveApiHref } from '../../lib/apiBase';
 import { isNativeApp, nativePlatformName } from '../../lib/mobileNative';
 import { androidInstallsHidden, visibleAndroidApps } from '../../lib/appStoreCompliance';
 import { adultBadge } from '../../lib/adultContent';
-import { mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsFor, isLiveOnStore } from './storeReviewQueue';
+import {
+  mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsFor, isLiveOnStore,
+  reviewSectionCount, filterReviewList, defaultReviewFilter, type ReviewSection, type ReviewFilter,
+} from './storeReviewQueue';
 import { publishableApps, publishBlockedReason, type PublishableApp } from './publishablePicker';
 import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
 import { creatorLine } from './storeCreatorLine';
@@ -207,7 +210,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const [mine, setMine] = useState<MineApp[]>([]);
   const pagedMine = usePagedList(mine);
   const [queue, setQueue] = useState<QueueApp[]>([]);
-  const pagedQueue = usePagedList(queue);
+  // THE REVIEW HUB (admin 2026-10-05: "pahle 2 button banao, 'manage app, manage apk' aur uske andar apps
+  // dikhe"). The tab opens on its buttons; one button opens one list, filtered to Waiting or On the store.
+  const [reviewSection, setReviewSection] = useState<ReviewSection | null>(null);
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('waiting');
+  const apkReviewCount = useMemo(() => reviewSectionCount(queue), [queue]);
+  const shownApkQueue = useMemo(() => filterReviewList(queue, reviewFilter), [queue, reviewFilter]);
+  const pagedQueue = usePagedList(shownApkQueue, { resetKey: reviewFilter });
   // The tab badge counts only what still needs a DECISION — approved apps are a record, not work.
   const pendingCount = pendingReviewCount(queue);
   /**
@@ -301,7 +310,15 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const sortedWebQueue = useMemo(() => [...webQueue].sort((x, y) =>
     Number(isLiveOnStore(x.status)) - Number(isLiveOnStore(y.status))
     || (y.safetyFindings?.length ?? 0) - (x.safetyFindings?.length ?? 0)), [webQueue]);
-  const pagedWebQueue = usePagedList(sortedWebQueue);
+  const webReviewCount = useMemo(() => reviewSectionCount(webQueue), [webQueue]);
+  const shownWebQueue = useMemo(() => filterReviewList(sortedWebQueue, reviewFilter), [sortedWebQueue, reviewFilter]);
+  const pagedWebQueue = usePagedList(shownWebQueue, { resetKey: reviewFilter });
+  /** Open one review list, on the filter that has the work in it. */
+  const openReviewSection = (section: ReviewSection) => {
+    setReviewSection(section);
+    if (section === 'apps') setReviewFilter(defaultReviewFilter(webReviewCount));
+    if (section === 'apks') setReviewFilter(defaultReviewFilter(apkReviewCount));
+  };
   /**
    * APPS YOU OWN (admin 2026-08-16: "purchase ho jaye to us par kharidne wale ka naam likh jaye, fir
    * jitni baar chahe code copy kare — par bas wahi ek app").
@@ -620,6 +637,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   // Loaded when the Publish tab is actually opened, not on mount: most people arriving at App Mart
   // want to play an app, and a list nobody asked for is a request nobody needed.
   useEffect(() => { if (tab === 'publish' && myApps === null) void loadMyApps(); }, [tab, myApps, loadMyApps]);
+  // Coming back to Review starts on the hub, never inside a list left open earlier.
+  useEffect(() => { if (tab !== 'review') setReviewSection(null); }, [tab]);
   useEffect(() => {
     if (tab === 'mine') { void loadMine(); void loadWebMine(); void loadOwned(); }
     if (tab === 'review') { void loadQueue(); void loadWebQueue(); void loadReports(); }
@@ -1416,9 +1435,87 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         {tab === 'review' && status?.isAdmin && reviewError && (
           <p role="alert" className="mb-4 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-danger">{reviewError}</p>
         )}
-        {tab === 'review' && status?.isAdmin && <CommentReportsAdmin onOpenProfile={setProfileId} />}
+        {/* ── THE REVIEW HUB (admin 2026-10-05: "instant app aur apk app, dono aise bahar hi hai … pahle 2 button
+            banao, 'manage app, manage apk' aur uske andar apps dikhe"). Three buttons, each saying what is
+            inside it; a button opens ONE list. The counts come from the same lists the sections show. */}
+        {tab === 'review' && status?.isAdmin && reviewSection === null && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+            {([
+              { id: 'apps' as const, icon: <Globe size={22} />, title: 'Manage apps', sub: 'Instant apps that open in the browser', count: webReviewCount },
+              { id: 'apks' as const, icon: <Package size={22} />, title: 'Manage APKs', sub: 'Android apps people install', count: apkReviewCount },
+            ]).map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => openReviewSection(b.id)}
+                className="text-left p-4 rounded-2xl bg-card border border-line hover:bg-raised transition-colors flex flex-col gap-2 min-h-[120px]"
+              >
+                <span className="flex items-center justify-between text-accent-text">{b.icon}<ChevronRight size={18} className="text-faint" /></span>
+                <span className="text-base font-bold text-ink">{b.title}</span>
+                <span className="text-xs text-muted">{b.sub}</span>
+                <span className="flex flex-wrap gap-1.5 mt-auto text-[11px] font-semibold">
+                  <span className={b.count.waiting > 0 ? 'text-warn' : 'text-faint'}>{b.count.waiting} waiting</span>
+                  <span className="text-faint">·</span>
+                  <span className="text-success">{b.count.live} on the store</span>
+                </span>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => openReviewSection('reports')}
+              className="text-left p-4 rounded-2xl bg-card border border-line hover:bg-raised transition-colors flex flex-col gap-2 min-h-[120px]"
+            >
+              <span className="flex items-center justify-between text-danger"><Flag size={22} /><ChevronRight size={18} className="text-faint" /></span>
+              <span className="text-base font-bold text-ink">Reports</span>
+              <span className="text-xs text-muted">What viewers reported, and reported comments</span>
+              <span className={`mt-auto text-[11px] font-semibold ${reports.length > 0 ? 'text-danger' : 'text-faint'}`}>
+                {reports.length} app report{reports.length === 1 ? '' : 's'}
+              </span>
+            </button>
+          </div>
+        )}
 
-        {tab === 'review' && status?.isAdmin && reports.length > 0 && (
+        {/* Inside one list: the way back, its name, and Waiting / On the store. */}
+        {tab === 'review' && status?.isAdmin && reviewSection !== null && (
+          <div className="mb-4">
+            <div className="flex items-center gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => setReviewSection(null)}
+                className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-raised hover:bg-raised-hover text-xs font-semibold text-body"
+              ><ChevronLeft size={14} /> Back</button>
+              <p className="text-base font-bold text-ink">
+                {reviewSection === 'apps' ? 'Manage apps' : reviewSection === 'apks' ? 'Manage APKs' : 'Reports'}
+              </p>
+            </div>
+            {reviewSection !== 'reports' && (
+              <div className="flex gap-2" role="tablist" aria-label="Which apps">
+                {([
+                  ['waiting', `Waiting (${(reviewSection === 'apps' ? webReviewCount : apkReviewCount).waiting})`],
+                  ['live', `On the store (${(reviewSection === 'apps' ? webReviewCount : apkReviewCount).live})`],
+                ] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={reviewFilter === id}
+                    onClick={() => setReviewFilter(id)}
+                    className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                      reviewFilter === id ? 'bg-accent text-on-accent' : 'bg-raised text-muted hover:text-body'
+                    }`}
+                  >{label}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'review' && status?.isAdmin && reviewSection === 'reports' && <CommentReportsAdmin onOpenProfile={setProfileId} />}
+        {tab === 'review' && status?.isAdmin && reviewSection === 'reports' && reports.length === 0 && (
+          <p className="text-center text-sm text-faint py-10">No app reports from viewers.</p>
+        )}
+
+        {tab === 'review' && status?.isAdmin && reviewSection === 'reports' && reports.length > 0 && (
           <div className="mb-5">
             <p className="text-xs font-bold uppercase tracking-wider text-danger mb-2 flex items-center gap-1.5">
               <Flag size={12} /> Reported by viewers ({reports.length})
@@ -1459,11 +1556,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         )}
 
         {/* ── Admin review: instant apps waiting for a STORE LISTING (their links already work) ── */}
-        {tab === 'review' && status?.isAdmin && webQueue.length > 0 && (
+        {tab === 'review' && status?.isAdmin && reviewSection === 'apps' && shownWebQueue.length === 0 && (
+          <p className="text-center text-sm text-faint py-10">
+            {reviewFilter === 'waiting' ? 'No instant apps waiting for a decision.' : 'No instant apps on the store yet.'}
+          </p>
+        )}
+        {tab === 'review' && status?.isAdmin && reviewSection === 'apps' && shownWebQueue.length > 0 && (
           <div className="mb-5">
-            <p className="text-xs font-bold uppercase tracking-wider text-faint mb-2 flex items-center gap-1.5">
-              <Globe size={12} /> Instant apps — listing requests and apps on the store
-            </p>
             <div className="space-y-3">
               {pagedWebQueue.visible.map((a) => (
                 <div key={a.id} className={`p-3 rounded-xl bg-card border ${(a.safetyFindings?.length ?? 0) > 0 ? 'border-amber-500/40' : 'border-line'}`}>
@@ -1519,9 +1618,11 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         )}
 
         {/* ── Admin review ── */}
-        {tab === 'review' && status?.isAdmin && (
-          queue.length === 0 && webQueue.length === 0 ? (
-            <p className="text-center text-sm text-faint py-12">No apps waiting for review.</p>
+        {tab === 'review' && status?.isAdmin && reviewSection === 'apks' && (
+          shownApkQueue.length === 0 ? (
+            <p className="text-center text-sm text-faint py-10">
+              {reviewFilter === 'waiting' ? 'No Android apps waiting for a decision.' : 'No Android apps on the store yet.'}
+            </p>
           ) : (
             <div className="space-y-3">
               {pagedQueue.visible.map((a) => (

@@ -57,6 +57,8 @@ export interface PlatformChecks {
   testSuiteIsOurStarter?: boolean;
   /** The 390×844 touch check. */
   phone?: PhoneOutcome;
+  /** The game playtest (gamePlaytest.ts): played with keys, a drag and a thumb, and scored. */
+  game?: { outcome: PhoneOutcome; score?: number | null };
 }
 
 export interface ProofOpts {
@@ -85,6 +87,11 @@ export function platformChecksProof(checks: PlatformChecks, opts: ProofOpts): Us
 
   if (checks.pages === 'passed') passes.push('Every screen of your app was opened, and each one rendered.');
   else if (checks.pages === 'failed') problems.push('One of your app\'s screens did not render when it was opened.');
+
+  // A game is PLAYED, not only opened — the strongest sentence a game can carry, so it goes near the top.
+  const g = checks.game;
+  if (g && g.outcome === 'passed') passes.push(`NavBharatAI played your game — it answered its controls on a keyboard and a touch screen, and scored ${g.score ?? '—'}/100.`);
+  else if (g && g.outcome === 'failed') problems.push(`NavBharatAI played your game and found something to fix (Game Quality Score ${g.score ?? '—'}/100).`);
 
   if (checks.phone === 'passed') passes.push('Your app was opened on a phone-sized screen — it fits, and its buttons are big enough to tap.');
   else if (checks.phone === 'failed') problems.push('On a phone-sized screen your app does not fit properly yet.');

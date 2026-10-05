@@ -50,6 +50,8 @@ export interface FindingLike {
   autoResolved?: boolean;
   observation?: boolean;
   severity?: string;
+  /** The finding's own sentence. An entry with `withEvidence` hands it to the fix, bounded. */
+  message?: string;
 }
 
 /** How many build-finding suggestions may appear at once — the list has other layers to show. */
@@ -60,7 +62,7 @@ export const MAX_FINDING_SUGGESTIONS = 3;
  *
  * Every string here is user-facing: plain language, no tool names, no provider names, no file paths.
  */
-export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; prompt: string }> = [
+export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; prompt: string; withEvidence?: boolean }> = [
   // ── AN APP THAT NEVER RAN OUTRANKS EVERYTHING (added 2026-10-04's census) ───────────────────────
   // These two were measured, recorded as warnings, shown in the user's build-health card — and had no
   // offer, so the one thing the user most wanted to press was the one thing missing.
@@ -194,6 +196,15 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     title: 'Write the missing styles',
     detail: 'Some screens use style names that nothing defines, so those parts show up unstyled.',
     prompt: 'Some class names used by the screens have no styles defined anywhere, so those parts render unstyled. Add the missing rules to the app\'s own stylesheet so every class a screen uses is really styled, and keep the look consistent with the rest of the app.',
+  },
+  {
+    // The game was PLAYED in a real browser and scored (gamePlaytest.ts, admin 2026-10-05). The measured
+    // scorecard and its weakest dimension travel with the fix, so the repair knows exactly what to change.
+    code: 'GAME_PLAYTEST_ISSUES',
+    title: 'Make the game playable',
+    detail: 'NavBharatAI played your game and found a weak spot — the controls, the phone, an error or the replay.',
+    prompt: 'NavBharatAI played this game in a real browser (arrow keys/WASD, Space, a mouse drag, and a thumb on a phone-sized touch screen) and it is not fully playable yet. Fix the weakest area named below at its root, keep everything that already works, and make sure the player can move and act with the keyboard AND with on-screen touch controls.',
+    withEvidence: true,
   },
   {
     // Measured at phone size (mobileLayoutCheck.ts, admin 2026-09-30: "mobile first"). Most users hold a
@@ -407,12 +418,14 @@ export function buildFindingSuggestions(
   if (list.length === 0) return [];
 
   const open = new Set<string>();
+  const evidence = new Map<string, string>();
   for (const f of list) {
     const code = String(f?.code || '').trim();
     if (!code || NEVER_SUGGEST.has(code)) continue;
     if (f?.autoResolved === true) continue;   // the build already dealt with it
     if (f?.observation === true) continue;    // pre-existing user code, not something our build caused
     open.add(code);
+    if (typeof f?.message === 'string' && f.message.trim() && !evidence.has(code)) evidence.set(code, f.message.trim().slice(0, 600));
   }
   if (open.size === 0) return [];
 
@@ -424,7 +437,7 @@ export function buildFindingSuggestions(
       id: `found-${entry.code.toLowerCase().replace(/_/g, '-')}`,
       title: entry.title,
       detail: entry.detail,
-      prompt: entry.prompt,
+      prompt: entry.withEvidence && evidence.has(entry.code) ? `${entry.prompt}\n\nWhat was measured: ${evidence.get(entry.code)}` : entry.prompt,
       kind: 'domain',   // specific to THIS app's measured state, never universal polish
     });
     if (out.length >= Math.max(1, max)) break;

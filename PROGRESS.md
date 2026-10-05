@@ -90792,3 +90792,85 @@ the check was confirmed to be real by planting an error and watching it fail.
 
 **Ethics, stated in the module and in the prompt.** Engagement comes through mastery and progress. There are
 no loot boxes, no paid randomness, no fake timers and no guilt messages. Many players are children.
+
+### 2026-10-05 — Game engine G2: NavBharatAI PLAYS the game before calling it done, and the first playtest found two shell bugs
+
+The brief's last section, adapted: *Design → Generate → Play → Test → Diagnose → Repair → Evaluate*. Before
+this, every browser check looked at a game the way it looks at a form (did it paint, did a button throw,
+does it fit a phone). None ever PLAYED one, so a canvas that paints a lovely scene and ignores every key
+passed all of them.
+
+**Built: `src/server/AgentV3/gamePlaytest.ts`.** It has the same architecture as `mobileLayoutCheck`: a pure
+script builder, a sandbox runner, a parser, and three outcomes. It runs only for a canvas game
+(`isCanvasGameProject`, reusing `touchPlayableGame.GAME_SIGNAL`, now exported, so there is one definition).
+It runs in one browser with no model call:
+1. It presses a visible Start/Play and taps the game surface.
+2. It measures idle change, frame rate (distinct rAF timestamps) and long frames.
+3. It holds up/W, left/A, right/D and Space, and makes a mouse drag. Each response is compared with idle
+   change, so an always-animated world cannot count as "responding".
+4. It reopens the game at 390×844 with touch, drags a thumb on a joystick (raw CDP touch events) and taps
+   an action button, and counts on-screen controls.
+5. It collects page errors and console errors (filtered by the explorer's own `CONSOLE_NOISE`).
+
+Screenshots are decoded and compared at 48×27 *inside the browser*, so no image library is needed.
+
+**The score.** `scorePlaytest` makes a GAME QUALITY SCORE out of seven measured dimensions:
+- Runs, Responds, Mobile, Stable, Smooth and Alive come from the browser;
+- Replay is read from the code (`startMeta` / a best-score save, and a restart);
+- the weights are Responds 25, Runs 20, Mobile 15, Stable 15, Replay 10, Smooth 10, Alive 5.
+
+The weakest dimension is the one losing the most weighted points, and it is named with a fix.
+
+**What reaches the user and the system:**
+- `GAME_PLAYTEST_ISSUES` is a one-tap "Make the game playable" fix. `buildFindingSuggestions` gained
+  `withEvidence`, so this fix carries the measured scorecard to the repair.
+- OK and NOT_RUN are process-only codes.
+- The build card says "NavBharatAI played your game … scored N/100" (`buildProofCard`, three outcomes).
+- It is wired in `agentv3.ts` after the phone check. It is evidence and never a gate. Kill switch:
+  `AGENTV3_GAME_PLAYTEST=off`.
+- Frame rate is graded gently and the message says where it was measured: the build sandbox's software
+  renderer.
+
+**Locked by `tests/aGameIsPlayedBeforeItIsDone.test.ts`** (14 cases). It runs the REAL module in a REAL
+Chromium against five small games built to be broken, and checks each scorecard:
+- works → OK, 85+;
+- deaf → Controls 0 and named weakest;
+- keyboard-only → Phone 0 and weakest;
+- throws on move → Stable, with the error text;
+- blank → Runs 0;
+- no canvas → NOT_RUN.
+
+**THE FIRST PLAYTEST OF OUR OWN SHELL SCORED 57/100, WITH CONTROLS 0.** It found two real bugs, and both
+are fixed at the root.
+
+**1. The player sank through the floor in every shell game with ground colliders.**
+- *Cause:* the motor's ground snap (`vy = -2` while standing) was applied as movement, and nothing put the
+  feet back on the surface. A standing player sank 3 cm a frame, the ground ray started under the floor
+  after about five frames, and the player fell forever (−46 m after 2 s) with the camera following.
+- *Fixes, which were also hunted as siblings:*
+  - `move()` stops the feet ON the hit point;
+  - the probe now reaches as far as the step's fall (there was a tunnelling class above ~9 m/s);
+  - `setColliders` and the camera rig's `setCollidables` refresh world matrices (raycasts ran before the
+    first render);
+  - a fall-out-of-world recovery puts the player back where it last stood, as the last line of defence,
+    and emits `PLAYER_FELL`.
+- *Locked by `tests/aPlayerStandsOnTheGround.test.ts`* (7 cases): standing for 5 s, a 40 m fall, walking
+  and jumping, a moved never-rendered collider, walking off a ledge, the camera matrices, and the body.
+  Reversion proven: disabling only the floor snap fails 4 of the cases.
+
+**2. The hero was invisible.** `CharacterController.object` is an empty Object3D and nothing gave it a body.
+`Game.ts` now attaches `createHumanoid` by default:
+- it turns smoothly to face its velocity (models face +Z) and animates from real speed and grounded state;
+- first-person gets no body;
+- a game can pass `playerBody` (or `false`) and `playerColor`;
+- the body is hidden while the camera follows a vehicle;
+- it is disposed with the game.
+
+`aRecipeBringsTheLayersItImports` now expects `humanoid.ts` in the closure.
+
+**After the fixes, the same shell scores 92/100:** Runs, Controls, Phone, Stable and Replay are all 100.
+Smooth is 35, because the sandbox renders in software at 5 fps. The hero is visible, walking on the ground.
+
+**Honestly not built yet: automatic repair.** A playtest finding is a one-tap offer, not a background
+re-write. A verified repair loop (repair, re-play, keep only if the score rises) is the next step, and
+`explorerRepair.ts` is the pattern to follow.

@@ -44,6 +44,7 @@ import { applyLighting, followShadow, type LightingPresetName, type AppliedLight
 import { disposeMaterials } from './three/materials';
 import { CameraRig, type CameraKind } from './three/camera';
 import { CharacterController } from './play/character';
+import { createHumanoid, type Humanoid } from './three/humanoid';
 import { ParticleSystem } from './fx/particles';
 import { audio } from './fx/audio';
 import { bindGameFeedback } from './fx/feedback';
@@ -82,6 +83,14 @@ export interface GameOptions {
   gameId?: string;
   /** Rewards unlocked at a level, shown when it is reached: { 3: 'Red car', 5: 'Night track' }. */
   unlocks?: Record<number, string>;
+  /**
+   * The player's BODY. Default: a jointed human (createHumanoid) that faces where it walks and animates
+   * from its real speed. Pass your own Object3D (a character, an animal, a ball), or false for none —
+   * first-person games get none by default, since the camera is inside it.
+   */
+  playerBody?: THREE.Object3D | false;
+  /** Shirt colour of the default body, so the hero stands out from the world. */
+  playerColor?: number;
 }
 
 export interface GameContext {
@@ -118,6 +127,8 @@ export class Game {
   private readonly options: GameOptions;
   private disposed = false;
   private followTarget: THREE.Object3D | null = null;
+  /** The default body (createHumanoid), when the game did not bring its own. */
+  private hero: Humanoid | null = null;
 
   constructor(options: GameOptions) {
     this.options = options;
@@ -135,6 +146,16 @@ export class Game {
     this.lights = applyLighting(this.scene, this.renderer, options.lighting ?? 'day');
     this.player = new CharacterController();
     this.scene.add(this.player.object);
+    // 🔴 THE PLAYER HAS A BODY. The controller is an empty Object3D, and nothing gave it one — so in every
+    // third-person game the hero was invisible unless the model happened to add a mesh, and the player
+    // saw a camera drifting over the ground. (Found by PLAYING the shell: gamePlaytest.ts.)
+    const firstPerson = (options.camera ?? 'third-person') === 'first-person';
+    if (options.playerBody) {
+      this.player.object.add(options.playerBody);
+    } else if (options.playerBody !== false && !firstPerson) {
+      this.hero = createHumanoid({ height: 1.75, shirt: options.playerColor ?? 0x2e5a87 });
+      this.player.object.add(this.hero.root);
+    }
     // BOTH blend layers. Adding one is how half the effects end up invisible.
     this.particles.addTo(this.scene);
 
@@ -241,6 +262,20 @@ export class Game {
         },
         this.rig.yaw,
       );
+      if (this.hero) {
+        // Face where it walks (every model faces +Z), turning smoothly, and walk at its real speed.
+        const v = this.player.velocity;
+        const speed = Math.hypot(v.x, v.z);
+        if (speed > 0.2) {
+          const want = Math.atan2(v.x, v.z);
+          let d = want - this.hero.root.rotation.y;
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          this.hero.root.rotation.y += d * Math.min(1, delta * 12);
+        }
+        this.hero.update(delta, speed, this.player.isGrounded);
+        // In a vehicle the camera follows the vehicle; a body standing at the spawn point would read as a bug.
+        this.hero.root.visible = !this.followTarget;
+      }
       this.options.update?.(this.context, delta);
       this.particles.update(delta);
     }
@@ -286,6 +321,7 @@ export class Game {
     this.input.dispose();
     audio.stopAll();
     this.particles.dispose();
+    this.hero?.dispose();
     this.scene.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (mesh.geometry) mesh.geometry.dispose();

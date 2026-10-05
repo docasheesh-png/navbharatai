@@ -236,6 +236,8 @@ export class CharacterController {
   private readonly down = new THREE.Raycaster();
   private readonly side = new THREE.Raycaster();
   private colliders: THREE.Object3D[] = [];
+  /** Where the feet last stood on real ground — where a fall out of the world puts them back. */
+  private readonly lastSafe = new THREE.Vector3();
 
   constructor(options: CharacterOptions = {}) {
     this.radius = options.radius ?? 0.4;
@@ -244,7 +246,16 @@ export class CharacterController {
     this.config = { ...DEFAULT_MOTOR, ...(options.config || {}) };
   }
 
-  setColliders(list: THREE.Object3D[]): void { this.colliders = list; }
+  /**
+   * 🔴 Raycasts read each collider's WORLD matrix, and three.js only refreshes those when it renders.
+   * setup() builds the world and the first fixed step runs BEFORE the first render — so a collider that
+   * was positioned, rotated or scaled was hit-tested at its un-transformed pose, and the player stood on
+   * (or fell through) ground that was not where it was drawn. Refreshed here, once, for the whole list.
+   */
+  setColliders(list: THREE.Object3D[]): void {
+    this.colliders = list;
+    for (const c of list) c.updateMatrixWorld(true);
+  }
 
   /**
    * Put the character back at a spawn point. Restart MUST clear the motor state, not just the position:
@@ -254,6 +265,7 @@ export class CharacterController {
   reset(x = 0, y = 0, z = 0): void {
     this.state = initialMotorState();
     this.object.position.set(x, y, z);
+    this.lastSafe.set(x, y, z);
   }
 
   get velocity(): { x: number; y: number; z: number } { return { x: this.state.vx, y: this.state.vy, z: this.state.vz }; }
@@ -267,7 +279,7 @@ export class CharacterController {
     cameraYaw = 0,
   ): void {
     const dir = cameraRelative(input.moveX, input.moveZ, cameraYaw);
-    const ground = this.probeGround();
+    const ground = this.probeGround(delta);
 
     const { state, jumped, landed } = stepMotor(
       this.state,
@@ -283,23 +295,40 @@ export class CharacterController {
     if (jumped) events.emit('PLAYER_JUMPED');
     if (landed) events.emit('PLAYER_LANDED', { impact: Math.abs(this.state.vy) });
 
-    this.move(delta);
+    this.move(delta, ground.floorY);
+    if (this.state.grounded) this.lastSafe.copy(this.object.position);
+    // THE LAST LINE OF DEFENCE: a player who still drops out of the world (a gap in the level, a
+    // collider the game forgot) is put back where they last stood — never left falling under the map
+    // with the camera following them into the void.
+    if (this.colliders.length > 0 && this.object.position.y < this.lastSafe.y - 60) {
+      this.object.position.copy(this.lastSafe);
+      this.state = initialMotorState();
+      events.emit('PLAYER_FELL', { at: this.lastSafe.clone() });
+    }
   }
 
-  /** Ground probe with skin width — see the note above on why it starts above the feet. */
-  private probeGround(): { grounded: boolean; normalY: number } {
+  /**
+   * Ground probe with skin width — see the note above on why it starts above the feet.
+   *
+   * 🔴 IT ALSO REACHES AS FAR AS THIS STEP WILL FALL. It used to reach a fixed 0.15 m below the feet:
+   * any fall faster than ~9 m/s crossed the floor between two probes and never landed (tunnelling).
+   * \`floorY\` is the surface the feet would reach this step, so move() can stop them ON it.
+   */
+  private probeGround(delta = 0): { grounded: boolean; normalY: number; floorY: number | null } {
     if (this.colliders.length === 0) {
       // No collision geometry yet: treat y<=0 as the floor so a scene under construction still plays.
-      return { grounded: this.object.position.y <= 0.001, normalY: 1 };
+      return { grounded: this.object.position.y <= 0.001, normalY: 1, floorY: null };
     }
     const skin = 0.1;
+    const snap = 0.15;
+    const fall = Math.max(0, -this.state.vy * delta);
     const origin = this.object.position.clone().add(new THREE.Vector3(0, skin, 0));
     this.down.set(origin, new THREE.Vector3(0, -1, 0));
-    this.down.far = skin * 2 + 0.05;
+    this.down.far = skin + Math.max(snap, fall) + 0.05;
     const hit = this.down.intersectObjects(this.colliders, true)[0];
-    if (!hit) return { grounded: false, normalY: 1 };
+    if (!hit) return { grounded: false, normalY: 1, floorY: null };
     const n = hit.face?.normal ?? new THREE.Vector3(0, 1, 0);
-    return { grounded: true, normalY: Math.abs(n.y) };
+    return { grounded: hit.distance <= skin + snap, normalY: Math.abs(n.y), floorY: hit.point.y };
   }
 
   /**
@@ -308,7 +337,7 @@ export class CharacterController {
    * X and Z are resolved SEPARATELY so that sliding along a wall still works: blocking both because one
    * is obstructed is what makes a character stick to walls at an angle instead of sliding along them.
    */
-  private move(delta: number): void {
+  private move(delta: number, floorY: number | null = null): void {
     const p = this.object.position;
     const tryAxis = (dx: number, dz: number) => {
       if (dx === 0 && dz === 0) return;
@@ -332,7 +361,17 @@ export class CharacterController {
 
     tryAxis(this.state.vx * delta, 0);
     tryAxis(0, this.state.vz * delta);
-    p.y += this.state.vy * delta;
+    // 🔴 THE FEET STOP ON THE GROUND. Standing applies a small downward velocity (the motor's ground
+    // snap, which keeps the character glued to slopes) — and nothing ever put the feet back on the
+    // surface, so a player standing still sank 3 cm a frame, lost the ground ray within five frames and
+    // fell through the world. Every game built on the shell lost its player through the floor.
+    const nextY = p.y + this.state.vy * delta;
+    if (floorY !== null && this.state.vy <= 0 && nextY <= floorY + 0.001) {
+      p.y = floorY;
+      if (this.state.vy < 0) this.state = { ...this.state, vy: 0 };
+    } else {
+      p.y = nextY;
+    }
     if (this.colliders.length === 0 && p.y < 0) { p.y = 0; }
   }
 

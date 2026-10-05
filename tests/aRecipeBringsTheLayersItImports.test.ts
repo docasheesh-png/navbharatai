@@ -26,7 +26,11 @@ describe('a recipe brings the layers it imports', () => {
     const ran = filesOf('generate_game_runtime', 'generate_game_controller', 'generate_game_systems', 'generate_game_vfx', 'generate_melody', 'generate_game_shell');
     const missing = missingLayerFiles(ran, new Set(Object.keys(ran)));
     expect([...missing.keys()].sort()).toEqual([
-      'src/game/three/camera.ts', 'src/game/three/lighting.ts', 'src/game/three/materials.ts',
+      'src/game/three/camera.ts',
+      // Game.ts gives the player a body (createHumanoid) since 2026-10-05 — an empty controller left the
+      // third-person hero invisible — so the closure brings humanoid.ts too.
+      'src/game/three/humanoid.ts',
+      'src/game/three/lighting.ts', 'src/game/three/materials.ts',
       // world.ts imports surfaces.ts since 2026-10-05 (the ground reads the detail tier and is textured
       // in the real tier) — so the closure must bring it too, or the added world.ts would not compile.
       'src/game/three/renderer.ts', 'src/game/three/surfaces.ts', 'src/game/three/world.ts',

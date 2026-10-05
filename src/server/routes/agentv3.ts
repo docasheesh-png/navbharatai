@@ -619,6 +619,7 @@ import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
+import { gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestOutcome, isCanvasGameProject, replayFromCode, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration, userOwnedFiles } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
 import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
@@ -22073,6 +22074,8 @@ async function noteBuildOutcome(
       // The phone-size check's own answer, kept for the user's proof card (buildProofCard.ts). It was
       // recorded and discarded; the card could not read a verdict nothing held.
       let phoneProof: PhoneOutcome = 'not-run';
+      // The game playtest's answer for the same card (gamePlaytest.ts). 'not-run' unless a game was played.
+      let gameProof: { outcome: PhoneOutcome; score?: number | null } = { outcome: 'not-run' };
       if (
         process.env.AGENTV3_JOURNEY_CHECK !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !isImportTurn && !abort.signal.aborted
@@ -22194,6 +22197,30 @@ async function noteBuildOutcome(
         } catch (err) {
           try {
             buildDiag.record({ phase: 'preview', severity: 'info', code: 'MOBILE_LAYOUT_NOT_RUN', autoResolved: true, message: `The phone-size check did not complete: ${String((err as { message?: string })?.message ?? err).slice(0, 160)}.` });
+          } catch { /* best-effort */ }
+        }
+      }
+      // 🎮 A GAME IS PLAYED BEFORE IT IS CALLED DONE (admin 2026-10-05, gamePlaytest.ts). Every check above
+      // looks at a game the way it looks at a form; none ever PLAYED one, so a canvas that paints a lovely
+      // scene and ignores every key passed them all. Only for a canvas game: it starts the game, uses the
+      // keys, a drag and a thumb, measures from pixels whether anything answered, and scores it (the Game
+      // Quality Score). Evidence, never a gate, no model call; a finding is a one-tap fix offer carrying the
+      // measured scorecard. Kill switch AGENTV3_GAME_PLAYTEST=off.
+      const playtestFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
+      if (
+        gamePlaytestEnabled() && result.ok && lastPreviewUrl && actuator.runCommand
+        && !isImportTurn && !abort.signal.aborted && !moduleAwaitsShell
+        && isCanvasGameProject(playtestFiles)
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+      ) {
+        try {
+          const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState() })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
+          const verdict = playtestVerdict(parsePlaytest(out.stdout), replayFromCode(playtestFiles));
+          buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
+          gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
+        } catch (err) {
+          try {
+            buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_PLAYTEST_NOT_RUN', autoResolved: true, message: `The game was not played: ${String((err as { message?: string })?.message ?? err).slice(0, 160)}.` });
           } catch { /* best-effort */ }
         }
       }
@@ -22909,6 +22936,7 @@ async function noteBuildOutcome(
             tests: gateEvidence.tests,
             testSuiteIsOurStarter: gateEvidence.testSuiteIsOurStarter === true,
             phone: phoneProof,
+            game: gameProof,
           }, { browserAlreadySaid: browserAlreadySaid(journeyProof, exploreProof) });
           const card = mergeUserProofs(journeyProof, exploreProof, checksProof);
           if (card.headline) emit({ type: 'verified', ok: card.ok, headline: card.headline, steps: card.steps, ts: Date.now() });

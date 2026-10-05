@@ -370,7 +370,12 @@ export class CameraRig {
    * The world is usually built AFTER the rig exists, so colliders cannot only be a constructor option —
    * otherwise third-person camera collision silently never works and the view clips through walls.
    */
-  setCollidables(list: THREE.Object3D[]): void { this.collidables = list; }
+  setCollidables(list: THREE.Object3D[]): void {
+    this.collidables = list;
+    // Raycasts read WORLD matrices, which three.js refreshes only when it renders — and the world is
+    // built before the first render. Same class as CharacterController.setColliders.
+    for (const c of list) c.updateMatrixWorld(true);
+  }
 
   /** Feed the frame's look delta (Input.lookX/lookY). */
   look(dx: number, dy: number, sensitivity = 0.0025): void {

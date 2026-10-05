@@ -58,6 +58,7 @@ const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' |
   explorer_repair_weak_daily: { kind: 'platform', why: 'one doc per UTC day — the platform-wide count of free-tier explorer repairs attempted; no person in it' },
   fleet_mistakes_v3:   { kind: 'platform', why: 'cross-fleet learning, keyed by the mistake, not a person' },
   agentv3_free_chains: { kind: 'retained', why: "a free build's unattended-time counter per workspace (Q-130); ignored after 6 h, purged after a day" },
+  admin_audit_log:     { kind: 'retained', why: 'every admin action with who, why and the ids touched (admin panel audit PR 3); kept 180 days' },
   /**
    * 🔴 `gift_codes` IS DELIBERATELY NOT USER-SCOPED, for the same shape of reason `takedown_records`
    * is not: the thing it records does not belong solely to the person named in it. A purchased gift

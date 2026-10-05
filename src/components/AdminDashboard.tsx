@@ -35,6 +35,8 @@ import { UnusedCardMark } from './admin/UnusedCardMark';
 import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
 import { OtpHealthCard } from './admin/OtpHealthCard';
+import { AppCheckCard } from './admin/AppCheckCard';
+import { AdminAuditLogPanel } from './admin/AdminAuditLogPanel';
 import { PushHealthCard } from './admin/PushHealthCard';
 import { BuildDiscountCard } from './admin/BuildDiscountCard';
 import { FailureCategoryCard } from './admin/FailureCategoryCard';
@@ -4762,12 +4764,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               <EngineReportsPanel adminToken={adminToken} onStatus={toast} only={ENGINE_REPORTS_ON.security} heading="Release and keys" />
 
-              {/* NOT BUILT YET, SAID PLAINLY (admin panel audit PR 2): the audit log screen and the App Check
-                  card are PR 3. The events themselves are already recorded on the server. */}
-              <div className="bg-card border border-dashed border-line rounded-[1.5rem] p-5">
-                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Admin audit log · App Check</h3>
-                <p className="text-[11px] text-muted mt-1">Not available on this screen yet. Admin actions are already recorded with who, what and why; the screen to browse them, and the App Check counters, arrive in the next update.</p>
-              </div>
+              {/* Admin panel audit PR 3: the App Check counters (read before switching to enforce) and the
+                  audit log of every admin action, both of which existed on the server with no screen. */}
+              <AppCheckCard adminToken={adminToken} />
+              <AdminAuditLogPanel adminToken={adminToken} />
             </div>
           )}
 

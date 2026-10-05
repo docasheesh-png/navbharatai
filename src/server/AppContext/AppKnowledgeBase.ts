@@ -3099,6 +3099,33 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Money") stil
     keywords: ['2fa', 'mfa', 'two-factor', 'totp', 'authenticator', 'google authenticator', 'authy', 'otp', 'admin security', 'second factor', 'do factor', 'suraksha', 'login security'],
   },
   {
+    id: 'admin-audit-log',
+    name: 'Admin audit log — every admin action with who, why and the result (admin only)',
+    path: 'Admin Dashboard → Safety → Audit log (admin only)',
+    description: `A record of every action taken from the admin side, newest first, 50 at a time:
+• Bans, unpublishes and restores of apps; token adjustments; account bans; messages to users; release-gate changes; report deletions; promo codes; key rotation; 2FA changes; admin sign-ins and failed sign-ins
+• Store-admin decisions too: approving or removing an App Mart APK or web app, approving, rejecting or removing a community gallery app, and removing somebody's comment
+• Each row shows when, the action, who did it, what it acted on (app, user or report id), the admin's own reason or review note, and whether it worked
+• Filter the loaded rows by action, admin, id or reason; "Load 50 older" goes further back
+• Kept 180 days. If the database cannot be reached the screen says so instead of showing an empty log`,
+    howToUse: 'Admin login required. Open the Admin Dashboard → Safety → Audit log. Type in the filter box to narrow the loaded rows; press "Load 50 older" for earlier actions.',
+    relatedFeatures: ['admin-built-apps', 'admin-mfa', 'admin-app-check'],
+    keywords: ['audit log', 'admin log', 'admin actions', 'who banned', 'kisne ban kiya', 'admin history', 'action history', 'audit trail', 'moderation log', 'reason', 'admin activity'],
+  },
+  {
+    id: 'admin-app-check',
+    name: 'App Check — would enforcing lock anybody out? (admin only)',
+    path: 'Admin Dashboard → Safety → App Check (admin only)',
+    description: `How many guarded requests (money and sign-in actions) carry a valid App Check token, read before switching App Check to enforce:
+• The current mode (off, monitor or enforce) and whether the website's App Check site key is set
+• Per website and per phone app: requests seen, with a valid token, that enforcing would refuse, and that our own verifier could not check
+• One plain verdict: whether enforcing now would refuse anyone, and how many
+• Counts are for this server instance since it started; another instance keeps its own count`,
+    howToUse: 'Admin login required. Open the Admin Dashboard → Safety → App Check. Press Refresh for the latest counts. Switch APP_CHECK_MODE to enforce only when the verdict says no one would be refused.',
+    relatedFeatures: ['admin-audit-log', 'admin-mfa'],
+    keywords: ['app check', 'appcheck', 'enforce', 'recaptcha', 'token', 'bot protection', 'app check counters', 'safety', 'admin security'],
+  },
+  {
     id: 'admin-built-apps',
     name: 'Built apps — every user\'s app, with a preview, unpublish, ban and restore (admin only)',
     path: 'Admin Dashboard → Apps → All apps (admin only)',

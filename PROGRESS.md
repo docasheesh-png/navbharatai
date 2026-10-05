@@ -91175,3 +91175,34 @@ crushed by wave 4, a good one was bored by wave 2, and nobody ever got a breathe
 
 **Proven by reversion:** removing the rate cap fails the rate case, and removing the mercy step fails the
 mercy case. The generated modules typecheck strictly. The prompt and the KB say when to use it.
+
+### 2026-10-05 — Game engine G9: enemies fight differently, and fairly (systems/ai.ts)
+
+Every generated enemy was a melee chaser. It ran straight at the player, so a shooter's enemies queued to be
+shot and a crowd arrived from one side. Every hit also landed the instant an enemy was in range, so nothing
+could be dodged.
+
+**What changed in the pure `ai.ts` (default behaviour byte-identical; the 54 existing AI tests are green):**
+- **`EnemyConfig.role`**, with three presets:
+  - `'ranged'` (`RANGED_ENEMY`) holds `preferredRange` (10 m): it closes in when far, backs off when rushed,
+    STRAFES inside its band, faces the player while engaged, and wants to shoot from within 13 m with line of
+    sight.
+  - `'flanker'` (`FLANKER_ENEMY`) aims at a point beside the player, swinging in as it closes. A stable
+    per-enemy side means a group splits left and right with no randomness.
+  - The default stays `'melee'`.
+- **`AttackTelegraph(windup, recover)`:** ready → windup (with `progress` 0..1 for a glow or raised arm) →
+  ONE `'strike'` step → recover → ready. The caller re-checks range at the strike, which is the dodge.
+- **`BossPhases(thresholds)`:** the phase only ADVANCES, and `changed` is true once per transition, even if
+  the boss heals.
+
+**Locked by `tests/enemiesFightDifferently.test.ts`** (8 cases):
+- ranged: backs off from 3 m, closes from 18 m, settles in its band and shoots, never enters melee range,
+  strafes (more than 0.3 rad round the player), and holds fire without line of sight;
+- four enemies from one side arrive over a wider arc as flankers than as melee (measured at first coming
+  within 5 m — at the end, separation rings any group), and a flanker still arrives and attacks;
+- the default enemy comes straight in;
+- the telegraph has exactly one strike step, at 0.45 s, with no restart mid wind-up;
+- boss phases advance once and never replay.
+
+**Proven by reversion:** with the flanker's sideways steer at 0, the surround case fails. The prompt, the
+module instructions and the KB say when to use each.

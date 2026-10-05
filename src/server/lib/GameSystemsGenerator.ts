@@ -171,7 +171,16 @@ export interface EnemyConfig {
   separationRadius: number;
   /** Turn rate, radians per second. Instant turning reads as robotic. */
   turnRate: number;
+  /**
+   * How it fights. 'melee' (the default) closes in. 'ranged' holds \`preferredRange\` and strafes, shooting
+   * from there. 'flanker' comes in from the side, so a group SURROUNDS the player instead of queueing.
+   */
+  role?: EnemyRole;
+  /** Ranged only: the distance it fights from. Default 10. */
+  preferredRange?: number;
 }
+
+export type EnemyRole = 'melee' | 'ranged' | 'flanker';
 
 export const DEFAULT_ENEMY: EnemyConfig = {
   speed: 2.2,
@@ -183,6 +192,11 @@ export const DEFAULT_ENEMY: EnemyConfig = {
   separationRadius: 2.4,
   turnRate: 6,
 };
+
+/** A shooter: holds its distance, strafes, and shoots when it can see the player. */
+export const RANGED_ENEMY: EnemyConfig = { ...DEFAULT_ENEMY, role: 'ranged', preferredRange: 10, detectRadius: 20, loseRadius: 28, attackRadius: 13, chaseSpeed: 3.4 };
+/** A flanker: comes in from the side, so three of them surround rather than queue. */
+export const FLANKER_ENEMY: EnemyConfig = { ...DEFAULT_ENEMY, role: 'flanker', chaseSpeed: 4.8 };
 
 export interface EnemyState {
   mode: EnemyMode;
@@ -275,8 +289,28 @@ export function stepEnemyAI(
   let desired: Vec2 = { x: 0, z: 0 };
   let speed = 0;
 
-  if (mode === 'chase') {
-    desired = normalise({ x: perception.player.x - s.position.x, z: perception.player.z - s.position.z });
+  const role = config.role ?? 'melee';
+  const toward = normalise({ x: perception.player.x - s.position.x, z: perception.player.z - s.position.z });
+  // Its own side: a stable per-enemy sign from where it started, so flankers split left and right and a
+  // ranged enemy circles one way — with no randomness, so a replay is identical.
+  const side = (Math.floor(s.home.x * 7.13 + s.home.z * 3.71) & 1) ? 1 : -1;
+  if (role === 'ranged' && (mode === 'chase' || mode === 'attack')) {
+    // Hold the band around preferredRange: close in when far, back off when the player rushes it, and
+    // STRAFE inside the band — a shooter that stands still is a target, one that walks at you is a melee enemy.
+    const range = config.preferredRange ?? 10;
+    const radial = toPlayer > range + 2 ? 1 : toPlayer < range - 3 ? -1 : 0;
+    const strafe = radial === 0 ? 1 : 0.35;
+    desired = normalise({ x: toward.x * radial + -toward.z * side * strafe, z: toward.z * radial + toward.x * side * strafe });
+    speed = radial === 0 ? config.speed : config.chaseSpeed;
+    mode = toPlayer <= config.attackRadius ? 'attack' : 'chase';
+    if (mode !== s.mode) { s.mode = mode; s.timeInMode = 0; }
+  } else if (role === 'flanker' && mode === 'chase' && toPlayer > config.attackRadius + 2.5) {
+    // Aim at a point BESIDE the player, swinging in as it closes — the group arrives from several sides.
+    const lateral = Math.min(1, (toPlayer - config.attackRadius) / 8) * 0.9;
+    desired = normalise({ x: toward.x - toward.z * side * lateral * 1.6, z: toward.z + toward.x * side * lateral * 1.6 });
+    speed = config.chaseSpeed;
+  } else if (mode === 'chase') {
+    desired = toward;
     speed = config.chaseSpeed;
   } else if (mode === 'patrol') {
     // A deterministic loop around home: no Math.random, so a replay is identical.
@@ -297,7 +331,7 @@ export function stepEnemyAI(
   if (mag > cap && mag > 1e-6) { vx = (vx / mag) * cap; vz = (vz / mag) * cap; }
 
   // Face where it is going (or the player while attacking), turning at a finite rate.
-  const faceTarget = mode === 'attack'
+  const faceTarget = mode === 'attack' || (role === 'ranged' && engaged)
     ? Math.atan2(perception.player.x - s.position.x, perception.player.z - s.position.z)
     : (mag > 1e-6 ? Math.atan2(vx, vz) : s.facing);
   const turn = angleDelta(s.facing, faceTarget);
@@ -314,6 +348,54 @@ export function stepEnemyAI(
     wantsAttack: mode === 'attack' && perception.canSeePlayer,
     alerted,
   };
+}
+
+/**
+ * A TELEGRAPHED attack: the enemy winds up where the player can SEE it (raise the arm, flash, crouch),
+ * the blow lands at the end of the wind-up, then it recovers. A hit with no wind-up cannot be dodged and
+ * reads as cheap; this is the half-second that makes combat feel fair and skilful.
+ *
+ * At 'strike' check the range AGAIN: a player who stepped away during the wind-up has dodged it.
+ * PURE: drive it with update(dt) and read the phase.
+ */
+export type TelegraphPhase = 'ready' | 'windup' | 'strike' | 'recover';
+export class AttackTelegraph {
+  phase: TelegraphPhase = 'ready';
+  private t = 0;
+  constructor(public readonly windup = 0.45, public readonly recover = 0.6) {}
+  /** Start a wind-up. False unless ready. */
+  request(): boolean {
+    if (this.phase !== 'ready') return false;
+    this.phase = 'windup'; this.t = 0;
+    return true;
+  }
+  /** 0..1 through the wind-up — scale a glow or a raised arm with it. */
+  get progress(): number { return this.phase === 'windup' ? Math.min(1, this.t / this.windup) : 0; }
+  /** Advance. 'strike' is returned for exactly ONE step: deal the damage then, if still in range. */
+  update(dt: number): TelegraphPhase {
+    this.t += Math.max(0, dt);
+    if (this.phase === 'strike') { this.phase = 'recover'; this.t = 0; }
+    else if (this.phase === 'windup' && this.t >= this.windup - 1e-9) { this.phase = 'strike'; this.t = 0; }
+    else if (this.phase === 'recover' && this.t >= this.recover - 1e-9) { this.phase = 'ready'; this.t = 0; }
+    return this.phase;
+  }
+}
+
+/**
+ * A boss fight in PHASES: below each health threshold the boss changes (faster, a new attack, adds). The
+ * phase only ever ADVANCES — a boss that heals back over a threshold must not replay its transition.
+ * changed is true on the one update a new phase begins: emit BOSS_PHASE_CHANGED then.
+ */
+export class BossPhases {
+  phase = 0;
+  constructor(public readonly thresholds: readonly number[] = [0.66, 0.33]) {}
+  update(healthFraction: number): { phase: number; changed: boolean } {
+    let p = 0;
+    for (const t of this.thresholds) if (healthFraction <= t) p++;
+    const changed = p > this.phase;
+    if (changed) this.phase = p;
+    return { phase: this.phase, changed };
+  }
 }
 
 export function initialEnemyState(x: number, z: number, patrolRadius = 0): EnemyState {
@@ -1072,7 +1154,11 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       '  damage 60 times a second and the player dies in half a second. Lowering the damage is not a fix.\n' +
       '- Projectiles test the SEGMENT they travelled, not their new position. A 40 m/s bullet moves 0.66m\n' +
       '  per frame and would otherwise pass straight through a 0.5m enemy.\n' +
-      '- Enemies need separation, or a group converges to one point and reads as a single enemy.\n' +
+      '- Enemies need separation, or a group converges to one point and reads as a single enemy.\n' +      '- Mix ROLES: DEFAULT_ENEMY closes in, RANGED_ENEMY holds ~10 m and strafes while it shoots,\n' +
+      '  FLANKER_ENEMY comes in from the side so a group surrounds. A shooter of only melee chasers is a queue.\n' +
+      '- TELEGRAPH every heavy hit with AttackTelegraph: a readable wind-up (scale a glow by .progress),\n' +
+      "  the blow on 'strike' ONLY if the player is still in range — that is the dodge. A boss uses BossPhases:\n" +
+      "  emit BOSS_PHASE_CHANGED when update(hp / maxHp).changed, and change its attacks per phase.\n" +
       '- De-aggro radius must be LARGER than the detect radius, or enemies flicker at the boundary.\n' +
       '- The AI only REQUESTS an attack; a Cooldown decides if it happens.\n' +
       '- A wave is cleared when every enemy is dead OR has fallen out of the world — otherwise one enemy\n' +

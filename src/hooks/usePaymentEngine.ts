@@ -87,8 +87,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   const [loadingWallet, setLoadingWallet] = useState(false);
   const [monthlyAiCost, setMonthlyAiCost] = useState<{ totalBuilds: number; totalCostUsd: number; month: string } | null>(null);
   const [isRecharging, setIsRecharging] = useState(false);
-  const [paymentSession, setPaymentSession] = useState<any>(null);
-  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [rechargeStatus, setRechargeStatus] = useState<string | null>(null);
   const [activeBillingDetailTab, setActiveBillingDetailTab] = useState<'purchase' | 'gift' | 'use' | 'remaining' | 'budget'>('remaining');
   const [customPurchaseCredits, setCustomPurchaseCredits] = useState<string>('5000');
@@ -218,14 +216,10 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
         userEmail: user.email || '',
         userName: user.displayName || 'NavBharat Client'
       }, { headers: { ...(await authedHeaders()), ...(await unlockHeaders()) } });
-      setPaymentSession(res.data);
-      if (res.data.isSimulator) {
-        setShowCheckoutModal(true);
-        setRechargeStatus('Secure simulated checkout session active.');
-      } else {
-        setRechargeStatus('Handshaking with Cashfree secure gateway...');
-        triggerCashfreeCheckout(res.data.paymentSessionId, res.data.environment);
-      }
+      // The real gateway only — there is no simulated checkout (Q-615). Without real payment keys the
+      // server refuses the order with an honest 503 and the catch below shows its message.
+      setRechargeStatus('Handshaking with Cashfree secure gateway...');
+      triggerCashfreeCheckout(res.data.paymentSessionId, res.data.environment);
     } catch (err: any) {
       alert(`Checkout session initiation failed: ${err.response?.data?.error || err.message}`);
     } finally {
@@ -237,11 +231,10 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
    * Report a CONFIRMED purchase to analytics (and onward to the Meta advertising pixel) exactly once
    * per order.
    *
-   * WHY ONE FUNCTION FOR BOTH PATHS: a payment can be confirmed through the in-app checkout modal
-   * (verifyBillingPayment) or through the external Cashfree redirect return (verifyOrderAndReport),
-   * and a user can genuinely pass through both for the SAME order. Two separate report sites would
-   * count that sale twice; deduping by orderId here makes the double count structurally impossible
-   * rather than unlikely.
+   * WHY ONE FUNCTION: a payment is confirmed through the Cashfree redirect return
+   * (verifyOrderAndReport), and a user can genuinely return twice for the SAME order. Deduping by
+   * orderId here makes a double count structurally impossible rather than unlikely. (The in-app
+   * simulated checkout that was the second path was removed with every fake payment path — Q-615.)
    *
    * ONLY EVER CALLED WHERE THE SERVER CONFIRMED THE MONEY. A `?payment=success` URL parameter is not
    * proof of anything (see the redirect handler below), so this is never called from one.
@@ -414,44 +407,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     pluginReady: playPluginReady,
   });
 
-  const verifyBillingPayment = async (status: 'SUCCESS' | 'FAILED') => {
-    if (!paymentSession || !user) return;
-    setRechargeStatus('Validating secure transaction hash with backend...');
-    try {
-      const res = await axios.post('/api/payment/verify-payment', {
-        orderId: paymentSession.orderId,
-        isSimulator: paymentSession.isSimulator,
-        transactionStatus: status
-      }, { headers: await authedHeaders() }); // the buyer's token: a gift code is returned only to its buyer (Q-630)
-      if (res.data.success) {
-        addLog(`Payment for ORDER #${paymentSession.orderId} verified successfully! credited ₹${paymentSession.orderAmount}.`, 'success');
-        reportPurchaseOnce(paymentSession.orderId, Number(paymentSession.orderAmount));
-        // A GIFT credits nobody's wallet — the code IS the delivery, so it is shown rather than a
-        // balance. `fetchWallet` still runs below for every other product.
-        if (res.data.giftCode) {
-          setLastGiftCode({
-            code: String(res.data.giftCode),
-            faceInr: Number(res.data.giftFaceInr) || 0,
-            paidInr: Number(res.data.paidInr) || Number(paymentSession.orderAmount) || 0,
-            status: 'unused',
-            createdAt: new Date().toISOString(),
-            redeemedAt: null,
-          });
-          void fetchGiftCodes();
-        }
-        fetchWallet();
-        setShowCheckoutModal(false);
-        setPaymentSession(null);
-      } else {
-        alert('SRE gateway rejected authorization: Status flag FAILED on bank lookup.');
-      }
-    } catch (err: any) {
-      alert(`Payment verification handshake errored: ${err.message}`);
-    } finally {
-      setRechargeStatus(null);
-    }
-  };
-
   /**
    * The codes this user has bought. Called when the Promocode tab opens and after a gift is paid for.
    *
@@ -506,12 +461,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
         userEmail: user.email || '',
         userName: user.displayName || 'NavBharat Client',
       }, { headers: { ...(await authedHeaders()), ...(await unlockHeaders()) } });
-      setPaymentSession(res.data);
-      if (res.data.isSimulator) {
-        setShowCheckoutModal(true);
-      } else {
-        triggerCashfreeCheckout(res.data.paymentSessionId, res.data.environment);
-      }
+      triggerCashfreeCheckout(res.data.paymentSessionId, res.data.environment); // real gateway only (Q-615)
     } catch (err: any) {
       setGiftError(err?.response?.data?.error || 'That gift could not be started. Please try again.');
     } finally {
@@ -676,8 +626,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     loadingWallet, setLoadingWallet,
     monthlyAiCost, setMonthlyAiCost,
     isRecharging, setIsRecharging,
-    paymentSession, setPaymentSession,
-    showCheckoutModal, setShowCheckoutModal,
     rechargeStatus, setRechargeStatus,
     activeBillingDetailTab, setActiveBillingDetailTab,
     customPurchaseCredits, setCustomPurchaseCredits,
@@ -697,7 +645,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     platformFeePct,
     buyStorePack, buyingProductId,
     storePurchaseNotice, setStorePurchaseNotice,
-    verifyBillingPayment,
     redeemPromoCoupon,
     // gift codes
     giftFaceInput, setGiftFaceInput,

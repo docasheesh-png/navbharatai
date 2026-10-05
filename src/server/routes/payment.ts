@@ -8,7 +8,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { doc, getDoc, setDoc, updateDoc, runTransaction, collection, query, where, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
 import { mirroredCreditPatch, rupeesToTokens } from '../lib/walletMirror';
 import { ordersToReconcile, reconcileMessage, type PendingOrderRecord } from '../lib/pendingOrders';
-import { platformCashfreeCredentials, platformCashfreeWebhookSecret } from '../lib/cashfreeCredentials';
+import { cashfreePaymentsAvailability, platformCashfreeWebhookSecret } from '../lib/cashfreeCredentials';
 import { sendSafeError } from '../lib/httpError';
 import { verifyPaymentInternal, computeCreditedWallet, TOKENS_PER_RUPEE } from '../lib/payments';
 import { DAY_ONE_STEPS } from '../lib/referralRewards';
@@ -193,6 +193,13 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       ? { paidInr: orderAmount, feeInr: giftFee, creditInr: 0 }
       : splitPayment(orderAmount);
 
+    // No simulator: without real keys (or with test keys in production) the order is refused honestly,
+    // BEFORE anything is written, and nothing can be "paid" (Q-615, cashfreeCredentials.ts).
+    const availability = cashfreePaymentsAvailability();
+    if (!availability.ok) {
+      console.error(`[CASHFREE] Refusing an order: ${availability.code}`);
+      return res.status(503).json({ error: availability.message, code: availability.code });
+    }
     // Cryptographically-random suffix avoids the collision/predictability of Math.random()*1000.
     const orderId = `ord_nb_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
 
@@ -223,22 +230,9 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
 
       // The merchant credentials are NavBharatAI's own and come only from the server environment —
       // never from the caller's secret vault (cashfreeCredentials.ts, forensic audit 2026-10-04).
-      const { clientId, clientSecret, mode: env, placeholder: isPlaceholder } = platformCashfreeCredentials();
+      const { clientId, clientSecret, mode: env } = availability;
 
-      console.log(`[CASHFREE] Creating order ${orderId} | Env: ${env} | Client: ${clientId?.substring(0, 8)}... | IsPlaceholder: ${isPlaceholder}`);
-
-      if (isPlaceholder) {
-        // Return simulator session if keys are not configured or are placeholder keys, providing seamless dev preview
-        console.log(`[CASHFREE] Missing/placeholder credentials. Returning Sandbox Simulator session for Order: ${orderId}`);
-        return res.json({
-          orderId,
-          paymentSessionId: `sim_session_${orderId}_${amount}`,
-          isSimulator: true,
-          orderAmount,
-          platformFeeInr: feeSplit.feeInr,
-          creditInr: feeSplit.creditInr,
-        });
-      }
+      console.log(`[CASHFREE] Creating order ${orderId} | Env: ${env}`);
 
       // Real Cashfree API order creation
       const cfUrl = env === 'production'
@@ -321,7 +315,6 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         return res.json({
           orderId,
           paymentSessionId: data.payment_session_id,
-          isSimulator: false,
           orderAmount: finalAmount,
           environment: env,
           platformFeeInr: feeSplit.feeInr,

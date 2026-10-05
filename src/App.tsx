@@ -310,8 +310,6 @@ export default function App() {
     loadingWallet, setLoadingWallet,
     monthlyAiCost, setMonthlyAiCost,
     isRecharging, setIsRecharging,
-    paymentSession, setPaymentSession,
-    showCheckoutModal, setShowCheckoutModal,
     rechargeStatus, setRechargeStatus,
     activeBillingDetailTab, setActiveBillingDetailTab,
     customPurchaseCredits, setCustomPurchaseCredits,
@@ -324,7 +322,6 @@ export default function App() {
     fetchWallet,
     createBillingOrder,
     storeRail, storeConfig, platformFeePct, buyStorePack, buyingProductId, storePurchaseNotice,
-    verifyBillingPayment,
     redeemPromoCoupon,
     giftFaceInput, setGiftFaceInput,
     isBuyingGift, giftError,
@@ -1205,7 +1202,6 @@ export default function App() {
       // L7: Escape — close any open modal overlay
       if (e.key === 'Escape') {
         if (showAuth) { setShowAuth(false); return; }
-        if (showCheckoutModal) { setShowCheckoutModal(false); return; }
         if (showPurchaseFormPanel) { setShowPurchaseFormPanel(false); return; }
         if (showDeployPanel) { setShowDeployPanel(false); return; }
         // No modal was open — if Focus Mode is on, Esc brings the header back (always works, even
@@ -1223,7 +1219,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, focusMode]);
+  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showPurchaseFormPanel, showDeployPanel, focusMode]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const defaults = { gemini: '', groq: '', deepseek: '', openai: '', openrouter: '', claude: '' };
@@ -4532,11 +4528,6 @@ export default function App() {
         pendingKey={pendingKey}
         setPendingKey={setPendingKey}
         handleKeySave={handleKeySave}
-        showCheckoutModal={showCheckoutModal}
-        setShowCheckoutModal={setShowCheckoutModal}
-        paymentSession={paymentSession}
-        user={user}
-        verifyBillingPayment={verifyBillingPayment}
         isWorkspacePreparing={isWorkspacePreparing}
         workspacePrepError={workspacePrepError}
         setWorkspacePrepError={setWorkspacePrepError}

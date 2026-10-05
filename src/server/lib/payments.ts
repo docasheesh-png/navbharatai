@@ -4,7 +4,7 @@ import { appendLedgerEntry, LEDGER_OPENING_FIELD, LEDGER_DROPPED_FIELD } from '.
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Credits user_token_wallets /
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
 import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
-import { platformCashfreeCredentials } from './cashfreeCredentials';
+import { cashfreePaymentsAvailability } from './cashfreeCredentials';
 import { mintCodeForOrder } from './giftCodeStore';
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
@@ -215,7 +215,7 @@ export function computeCreditedWallet(
 /**
  * Reusable internal payment verification + wallet-credit service.
  * Extracted from the server.ts monolith (Phase 1) with behavior unchanged.
- * Verifies a Cashfree order (or simulates when keys are placeholder), then
+ * Verifies a Cashfree order with Cashfree itself (there is no simulator — Q-615), then
  * credits the user's wallet/tokens idempotently.
  */
 /** A wallet document for an account that has never had one. */
@@ -297,25 +297,21 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       return { success: true, data: { alreadyProcessed: true, balanceAdded: txData.balanceAdded } };
     }
 
-    const userId = txData.userId;
     // The merchant credentials are NavBharatAI's own and come only from the server environment —
     // never from the order owner's secret vault (cashfreeCredentials.ts, forensic audit 2026-10-04).
-    const { clientId, clientSecret, mode: env, placeholder: isPlaceholder } = platformCashfreeCredentials();
+    // There is NO simulator branch (Q-615): an order is paid only when Cashfree itself says PAID. Without
+    // real keys, or with test keys in production, nothing is verified and nothing is credited.
+    const availability = cashfreePaymentsAvailability();
+    if (!availability.ok) {
+      console.error(`[CASHFREE] Cannot verify order ${orderId}: ${availability.code}`);
+      return { success: false, error: availability.message };
+    }
+    const { clientId, clientSecret, mode: env } = availability;
 
     let isPaid = false;
     let cfOrderIdRef = 'cf_' + orderId;
 
-    const isSimulatorOrder = isPlaceholder || txData.isSimulator || orderId.startsWith('sim_');
-    if (isSimulatorOrder) {
-      // The dev simulator credits a real wallet. That is acceptable ONLY outside production —
-      // in production a missing/placeholder credential must NEVER mint free balance. Fail safe.
-      if (process.env.NODE_ENV === 'production') {
-        console.error(`[CASHFREE] Refusing simulator credit in production for order ${orderId} — real Cashfree credentials are required.`);
-        return { success: false, error: 'Payment provider is not configured. Please contact support.' };
-      }
-      console.log(`[CASHFREE SIMULATION] (non-production) Marking order ${orderId} as paid inside verification simulator.`);
-      isPaid = true;
-    } else {
+    {
       const cfUrl = env === 'production'
         ? `https://api.cashfree.com/pg/orders/${orderId}`
         : `https://sandbox.cashfree.com/pg/orders/${orderId}`;

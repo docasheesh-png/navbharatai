@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { cashfreePaymentsAvailability, platformCashfreeCredentials } from '../lib/cashfreeCredentials';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -1676,18 +1677,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         if (r.measured > 0) providerWise[name] = r.outputTokens;
       }
 
-      const clientIdSample = (process.env.CASHFREE_CLIENT_ID || process.env.CASHFREE_APP_ID)?.trim();
-      const clientSecretSample = (process.env.CASHFREE_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY)?.trim();
-      const isPlaceholderSample = !clientIdSample || !clientSecretSample ||
-        clientIdSample.toLowerCase().includes('placeholder') ||
-        clientSecretSample.toLowerCase().includes('placeholder') ||
-        clientIdSample === '' ||
-        clientSecretSample === '';
-
+      // ONE decision (cashfreeCredentials.ts) — this block used to re-derive "placeholder" and "sandbox" on
+      // its own copy of the rules and said "Simulator active", a simulator that no longer exists (Q-615).
+      const availability = cashfreePaymentsAvailability();
       const cashfreeStatus = {
-        clientId: (clientIdSample && !isPlaceholderSample) ? 'Configured ✅' : 'Missing (Simulator active) 🛠️',
-        // Robust detection: default to production unless the secret explicitly indicates 'test' or 'sandbox'
-        env: process.env.CASHFREE_ENV || (clientSecretSample && (clientSecretSample.toLowerCase().includes('test') || clientSecretSample.toLowerCase().includes('sandbox') || clientSecretSample.toLowerCase().includes('sim_')) ? 'sandbox' : 'production')
+        clientId: availability.ok ? 'Configured ✅' : (availability.code === 'payments_unconfigured' ? 'Missing — payments are OFF ⛔' : 'Test-mode keys in production — payments are OFF ⛔'),
+        env: availability.ok ? availability.mode : platformCashfreeCredentials().mode,
       };
 
       // 🔴 READ THROUGH `walletLifetime.ts` (2026-09-17). This sorted and printed

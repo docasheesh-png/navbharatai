@@ -3959,3 +3959,8 @@ the flag entries above promise.
   - optional `IMAGE_PROVIDER`;
   - optional `<PROVIDER>_IMAGE_MODEL`.
 - **Admin action:** after the PR merges, run the manual `e2b-template` workflow. The warm primer in `infra/e2b/e2b.Dockerfile` now carries `@types/react` and `@types/react-dom` (Q-574), and it reaches live sandboxes only after that rebuild.
+
+### 2026-10-05 — WhatsApp bot signatures and the bot ledger (Q-612)
+
+- **`WHATSAPP_SIGNATURE_REQUIRED_AFTER`** (NOT set; default `2026-11-05T00:00:00Z` in `src/server/bots/whatsappSignature.ts`) — an ISO date or date-time. Until then, a hosted WhatsApp bot connected WITHOUT a Meta App Secret (every bot connected before 2026-10-05) is still served, and its owner sees a notice in the Bot Builder naming this date. After it, such a bot's deliveries are refused (403) until the owner adds the App Secret. Bots connected from 2026-10-05 must give the App Secret at connect, and their deliveries are checked against `X-Hub-Signature-256` at once — this date does not affect them. An unreadable value is ignored (logged once per read) and the default applies. Set it only to give owners more time; moving it earlier cuts off legacy bots sooner.
+- **No new secret in Cloud Run.** Each bot's App Secret is the USER's own (their Meta app), stored encrypted in the `bots` collection with the existing `SECRET_ENCRYPTION_KEY` / `SECRET_KEY_V<N>` (`lib/secrets.ts`).

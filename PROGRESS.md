@@ -89880,3 +89880,17 @@ leak itself is a test-hygiene defect worth its own row.
 - **Watch:** a listed person signing in with an unverified email/password account loses the grant — list
   their uid too, or have them verify the address.
 - Also: `tests/fixtures/sheetContractBaseline.json` AppModals 6 → 5 (Q-615 removed the simulated checkout).
+### 2026-10-05 — Q-612: WhatsApp bots answer only Meta; the admin's bot ledger (PR #NEXT)
+
+Admin decision 2026-10-05, option (a), plus: *"kis kis user ne bot banaye hai, uska bhi hisab admin panel me rakho!"*
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-612 unsigned WhatsApp webhook | `POST /api/bots/whatsapp/webhook/:botId` ran the flow and sent replies with the owner's token before authenticating anything; Meta's signature needs the per-bot App Secret, which was never collected | a hosted-bot webhook that runs a flow before authenticating the sender | App Secret required at connect (encrypted with `lib/secrets`), `X-Hub-Signature-256` verified over `req.rawBody` in constant time before the flow; legacy bots served until `WHATSAPP_SIGNATURE_REQUIRED_AFTER` (default 2026-11-05), then refused; siblings: Telegram secret header and Meta verify token now constant-time | `tests/theWhatsAppBotOnlyAnswersMeta.test.ts` — behaviour + a census of every `/api/bots/*/webhook/` route (gate disabled → 8 fail; pre-fix route file → 17 fail) |
+
+Also built: the owner's notice strip in the Bot Builder (what the App Secret is, where Meta shows it, the cut-over date, an
+in-place "Save App Secret" that keeps the webhook URL), a signed bot's last refused delivery shown to its owner, and
+**Admin → Apps → Bots** (`GET /api/admin/bots`, `requireAdmin`): owner, platform, bot, connected date, signed status, last
+message (tracked from today, throttled), unsigned traffic and bad-signature stamps, totals. AppKnowledgeBase updated
+(`bot_builder`, new `admin-bot-ledger`, the admin tab list). **What existing bot owners must do:** add their App Secret
+from the Bot Builder notice before 2026-11-05, or their WhatsApp bot stops replying.

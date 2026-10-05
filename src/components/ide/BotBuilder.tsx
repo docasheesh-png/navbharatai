@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Play, Download, Trash2, Plus, X, ChevronRight, MessageSquare, GitBranch, Globe, Zap, StopCircle, RotateCcw, Send, Bot, User, Copy, Check, Link2, Pencil, Move, Rocket, ExternalLink, HelpCircle } from 'lucide-react';
 import { auth } from '../../lib/firebase';
 import { BotBuildHelp, type HelpMode } from './BotBuildHelp';
+import { WhatsAppAppSecretNotice, looksLikeAppSecret } from './WhatsAppAppSecretNotice';
 
 type NodeType = 'start' | 'message' | 'menu' | 'condition' | 'api' | 'end';
 
@@ -120,6 +121,11 @@ export const BotBuilder: React.FC = () => {
   const [tgToken, setTgToken] = useState('');
   const [waToken, setWaToken] = useState('');
   const [waPhoneId, setWaPhoneId] = useState('');
+  // The owner's Meta App Secret — Meta signs every delivery with it and the server checks that signature
+  // before the flow runs (Q-612). Sent once at connect, stored encrypted, never shown again.
+  const [waAppSecret, setWaAppSecret] = useState('');
+  // Bumped after a connect so the App Secret notice re-reads the owner's bots.
+  const [botsRefresh, setBotsRefresh] = useState(0);
   const [connBusy, setConnBusy] = useState(false);
   const [connErr, setConnErr] = useState('');
   const [connResult, setConnResult] = useState<{ platform: 'telegram' | 'whatsapp'; link?: string | null; username?: string | null; callbackUrl?: string; verifyToken?: string } | null>(null);
@@ -313,11 +319,14 @@ Content-Type: application/json
         if (!res.ok) { setConnErr(data.error || 'Could not connect the bot.'); setConnBusy(false); return; }
         setConnResult({ platform: 'telegram', link: data.link, username: data.botUsername });
       } else {
-        const res = await fetch('/api/bots/whatsapp/connect', { method: 'POST', headers, body: JSON.stringify({ token: waToken.trim(), phoneNumberId: waPhoneId.trim(), flow }) });
+        if (!looksLikeAppSecret(waAppSecret)) { setConnErr('The App Secret is 32 letters and digits — in Meta: App settings → Basic → App secret → Show.'); setConnBusy(false); return; }
+        const res = await fetch('/api/bots/whatsapp/connect', { method: 'POST', headers, body: JSON.stringify({ token: waToken.trim(), phoneNumberId: waPhoneId.trim(), appSecret: waAppSecret.trim(), flow }) });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) { setConnErr(data.error || 'Could not connect the bot.'); setConnBusy(false); return; }
+        setWaAppSecret('');
         setConnResult({ platform: 'whatsapp', callbackUrl: data.callbackUrl, verifyToken: data.verifyToken });
       }
+      setBotsRefresh(n => n + 1);
     } catch { setConnErr('Network error — please try again.'); }
     setConnBusy(false);
   }
@@ -620,6 +629,9 @@ Content-Type: application/json
         </button>
       </div>
 
+      {/* ——— WhatsApp bots without an App Secret (or failing its check) — the owner's notice, Q-612 ——— */}
+      <WhatsAppAppSecretNotice refreshKey={botsRefresh} />
+
       {/* ——— Canvas + (desktop) properties ——— */}
       <div className="flex flex-1 min-h-0">
         <div
@@ -871,14 +883,16 @@ Content-Type: application/json
               </div>
             ) : (
               <div className="flex flex-col gap-3">
-                <p className="text-xs text-muted">WhatsApp needs a Meta WhatsApp Cloud API app (a verified business number). Get your <span className="text-body">permanent access token</span> and <span className="text-body">Phone Number ID</span> from the Meta dashboard, then paste them here:</p>
+                <p className="text-xs text-muted">WhatsApp needs a Meta WhatsApp Cloud API app (a verified business number). Get your <span className="text-body">permanent access token</span>, <span className="text-body">Phone Number ID</span> and <span className="text-body">App Secret</span> from the Meta dashboard, then paste them here:</p>
                 <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-xs bg-sky-600/90 hover:bg-sky-500 text-on-accent transition-colors">
                   <ExternalLink size={13} /> Open Meta App Dashboard (WhatsApp → API Setup)
                 </a>
                 <input value={waToken} onChange={e => setWaToken(e.target.value)} placeholder="WhatsApp permanent access token" className="w-full rounded-lg p-2.5 text-sm text-body border border-line font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: 'var(--surface-base)' }} />
                 <input value={waPhoneId} onChange={e => setWaPhoneId(e.target.value)} placeholder="Phone Number ID" className="w-full rounded-lg p-2.5 text-sm text-body border border-line font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: 'var(--surface-base)' }} />
+                <input type="password" autoComplete="off" value={waAppSecret} onChange={e => setWaAppSecret(e.target.value)} placeholder="App Secret" aria-label="Meta App Secret" className="w-full rounded-lg p-2.5 text-sm text-body border border-line font-mono focus:outline-none focus:border-emerald-500/50" style={{ background: 'var(--surface-base)' }} />
+                <p className="text-[11px] text-muted">The <span className="text-body">App Secret</span> is in the same Meta app under App settings → Basic → App secret → Show. Meta signs every message with it, so your bot only answers messages that really came from WhatsApp. It is stored encrypted and never shown again.</p>
                 {connErr && <p className="text-xs text-danger">{connErr}</p>}
-                <button onClick={goLive} disabled={connBusy || !waToken.trim() || !waPhoneId.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent transition-colors flex items-center justify-center gap-2">
+                <button onClick={goLive} disabled={connBusy || !waToken.trim() || !waPhoneId.trim() || !waAppSecret.trim()} className="w-full py-2.5 rounded-lg text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent transition-colors flex items-center justify-center gap-2">
                   {connBusy ? 'Connecting…' : <><Rocket size={14} /> Connect</>}
                 </button>
                 <div className="flex items-center justify-between">

@@ -10,6 +10,7 @@ import { publishedAppRows, liveAppCount } from '../lib/publishedAppsView';
 import { adultOptInSummary } from '../lib/adultContent';
 import { confirmCopy } from '../lib/adminAppModeration';
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
+import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
 import {
   ADMIN_TABS, ENGINE_REPORTS_ON, tabOfPage, tabDef, firstPageOf, pageTitle, pageBadge, pageHint,
@@ -4804,6 +4805,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               />
 
               {/* Restoring a removed app is built in PR 3 (the server route exists; this screen does not offer it yet). */}
+            </div>
+          )}
+
+          {/* ── APPS · BOTS (admin 2026-10-05) — who built which hosted chat bot, and whether a WhatsApp bot is signed ── */}
+          {activeTab === 'bots' && (
+            <div className="space-y-6">
+              {/* *"kis kis user ne bot banaye hai, uska bhi hisab admin panel me rakho!"* The list, its paging and
+                  the signed / unsigned column are `admin/BotsLedgerPanel.tsx`; the data is GET /api/admin/bots. */}
+              <BotsLedgerPanel headers={headers} openAccount={(uid) => void openAccount(uid)} />
             </div>
           )}
 

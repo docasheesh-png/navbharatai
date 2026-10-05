@@ -6,9 +6,9 @@
  * short grace the paint wait gives a screen that is still fetching.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync, readFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { existsSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { makeTempDir } from './helpers/tempDir';
 import http from 'http';
 import type { AddressInfo } from 'net';
 import {
@@ -55,7 +55,7 @@ function show(s) {
   afterAll(() => new Promise<void>((res) => server.close(() => res())));
 
   it('a tab that fills late is ok; a tab that leaves only the frame is named', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-explore-main-'));
+    const dir = makeTempDir('nbai-explore-main-'); // removed after this file (Q-672)
     const file = join(dir, 'run.mjs');
     writeFileSync(file, clickExplorerModule({
       base, marker: EXPLORE_RESULT_MARKER, maxClicks: 12, maxSecond: MAX_SECOND_LEVEL_CLICKS, perParent: MAX_SECOND_LEVEL_PER_PARENT, budgetMs: 60_000, loadMs: 10_000, blockWrites: false,

@@ -89844,6 +89844,42 @@ Q-104, Q-116, Q-135, Q-139, Q-146, Q-147, Q-150, Q-152, Q-153, Q-156, Q-164 (Q-1
 open from that work, each 🟡 with what it needs in `BUILD_REPORT_QUEUE.md`: Q-154 (admin confirms `hops: 1` at
 `/api/admin/proxy-hops`), Q-162 (45 undecided routes), Q-160, Q-136 (#3533), Q-101, Q-159, Q-141, Q-163.
 
+### 2026-10-05 — App Mart: the comments sheet flickered for ever ("screen vibrate hoti rehti hai")
+
+Admin: *"navbharatai → app mart → instant play app → comment … click kare to screen vibrate hoti rehti hai, aisa lagta
+kuch load ho raha hai, jabki kuch hai hi nahi loading ke liye! fix karo!!"*
+
+**Root cause (an infinite reload loop, not a slow load).** `CommentsSection` (`appMart/AppMartSocial.tsx`) built
+`load` with `useCallback(…, [appKey, onCounts])` and ran it from `useEffect(…, [load, signedIn])`; `load` calls
+`onCounts(d.counts)`. Both parents (`NavAppStore.tsx` — the instant-play detail and the Android sheet) pass `onCounts`
+as an inline arrow that sets their state, so: load → onCounts → parent re-renders → new onCounts → new load → the
+effect runs again → "loading" → fetch → … — the flicker, plus one request to `/api/nav-store` per turn.
+**Class:** a hook that LOADS while listing a callback PROP it calls in its dependencies — the parent's render
+identity becomes a reload trigger. **Fix:** the callback is read through a ref; the load depends on `appKey` only.
+**Siblings hunted:** every client hook with an `onXxx` dependency (32) was classified; only this one loads on mount
+with an unstable callback. Three remain and are proven safe in the test (a stable setState, a once-per-user guard, a
+message listener). **Lock:** `tests/aParentRenderIsNotAReload.test.ts` — a census over src/components, src/hooks,
+src/lib and App.tsx; reversion-proven (putting the bug back fails both the census and the instance test). Writing it
+also caught a census bug: two components in one file each had a `load`, and a name-keyed map hid the violation — it
+now resolves the nearest preceding callback, with a canary for that case.
+⚠️ Frontend change: the website gets it on deploy; phone users need a fresh `.aab`/`.ipa` (bundled mode).
+
+### 2026-10-05 — App Mart → Review opens on buttons: Manage apps · Manage APKs · Reports
+
+Admin: *"app mart → review (admin) — instant app aur apk app, dono aise bahar hi hai … pahle 2 button banao, 'manage
+app, manage apk' aur uske andar apps dikhe, aise bahar pura page bekar dikh raha hai … apne hisab se isko aur acche se
+banana, mai non technical hu"*.
+
+The Review tab stacked four lists on one scroll (reported comments, viewer reports, instant apps, Android apps). It now
+opens on three buttons — **Manage apps** (instant apps), **Manage APKs** (Android apps), **Reports** (viewer reports +
+reported comments) — each showing "N waiting · N on the store" (or the report count). A button opens ONE list with a
+Back button and a **Waiting / On the store** switch with counts; a list opens on Waiting when anything waits, else on
+On the store, so an empty Waiting never hides a full shelf. Leaving the tab returns to the buttons. The third button
+(Reports) is my addition: those two lists were half of the clutter. Rules are pure in `storeReviewQueue.ts`
+(`reviewSectionCount`, `filterReviewList`, `defaultReviewFilter`); `tests/theReviewTabOpensOnButtons.test.ts` locks
+the helpers and that every review list is gated on its own section (reversion-proven). Theme tokens only. Not
+rendered in a browser from the session (the screen needs an admin sign-in); typecheck + 1,499 App Mart/store/theme
+tests green. ⚠️ Frontend: website on deploy; phone app with a fresh `.aab`/`.ipa`.
 ## 2026-10-05 — Image Generator: Free mode removed (admin screenshot, "Tea shop banner")
 
 **Report:** Free mode answered every request "The free image servers are too busy right now. Please try Paid mode",

@@ -89791,3 +89791,10 @@ gate, instead of saying a freeze would not hold.
 (which only lists the endpoint and claims nothing). ⚠️ `EngineReportsPanel.tsx` is being restructured by
 open PR #3530, which moves this card to a new page; the edit here is two small blocks inside the card, so
 whoever merges second should expect a conflict in exactly that region and keep both changes.
+
+### 2026-10-05 — #3534 merged: its resolved rows leave the open queue
+
+#3534 merged (`main` after 7f95104c). Per the sixth rule, the rows it resolved move to ✅ and leave the open table:
+Q-104, Q-116, Q-135, Q-139, Q-146, Q-147, Q-150, Q-152, Q-153, Q-156, Q-164 (Q-152 was already-fixed, evidence in its ledger entry). Their ledgers are above in this file. Still
+open from that work, each 🟡 with what it needs in `BUILD_REPORT_QUEUE.md`: Q-154 (admin confirms `hops: 1` at
+`/api/admin/proxy-hops`), Q-162 (45 undecided routes), Q-160, Q-136 (#3533), Q-101, Q-159, Q-141, Q-163.

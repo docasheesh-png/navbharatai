@@ -90130,3 +90130,13 @@ Admin: *"apki salah ke anusar bana kar sara work complete finish karo"*. The rec
 core rule: an uncalled `/api` route is decided (screen / named outside caller / deleted) in the same PR that next
 touches its file, and the baseline shrinks with it — never a mass deletion. The census now maps every undecided
 route to its file, so the list stays actionable.
+
+### 2026-10-05 — Q-159: scheduled work no longer needs a server that happens to be awake
+
+Admin chose Cloud Scheduler. The in-process scheduler kept `nextRun` in memory, so an instance that woke at 04:05
+believed today's 04:00 bill was tomorrow's, and with no instance up at 04:00 nothing ran at all. Now every
+instance records each exclusive job's run in `job_runs/{id}`, and `POST /api/internal/scheduler-tick` (secret
+header) runs whatever is due by THAT record — first sight seeds instead of running, an unreadable record runs
+nothing, the lease still picks one instance. The plan sweep (renewal reminders) left its private `setInterval` for
+the shared scheduler as an exclusive job. 🟡 Live once the admin sets `SCHEDULER_TICK_SECRET` and creates the
+Cloud Scheduler job (steps in the queue row). Lock: `tests/scheduledWorkDoesNotNeedAnAwakeServer.test.ts`.

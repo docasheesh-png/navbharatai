@@ -55,6 +55,30 @@ export interface ScheduledJob {
  */
 export type RunClaim = (jobId: string) => Promise<boolean>;
 
+/**
+ * When did ANY instance last run a job? (queue Q-159.) The in-process loop keeps `nextRun` in memory, so an
+ * instance that just woke has no idea a daily job already ran at 04:00 — or that it never did, because no
+ * instance was alive at 04:00. Cloud Run scales to zero, so "the job runs while an instance happens to be up"
+ * was the whole guarantee. The external tick (`catchUp`) decides from THIS record instead. Injected like the
+ * claim, so the scheduler stays free of Firestore.
+ */
+export interface RunLog {
+  lastRun(jobId: string): Promise<number | null>;
+  record(jobId: string, atMs: number): Promise<void>;
+}
+
+/** What one external tick did — returned to the caller so a scheduler console shows real outcomes. */
+export interface CatchUpReport {
+  ran: string[];
+  notDue: string[];
+  /** Another instance held the lease: it is running (or just ran) the job. */
+  heldElsewhere: string[];
+  /** First sight of the job in the durable record: the clock was started, nothing was run. */
+  seeded: string[];
+  /** The record could not be read; the job was left alone rather than guessed at. */
+  unknown: string[];
+}
+
 interface JobState {
   job: ScheduledJob;
   nextRun: number;
@@ -81,6 +105,10 @@ export class Scheduler {
   private jobs = new Map<string, JobState>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private claim: RunClaim | null = null;
+  private runLog: RunLog | null = null;
+  private startedResolve: (() => void) | null = null;
+  /** Resolves once `start()` has been called — the jobs are registered by then. */
+  readonly started: Promise<void> = new Promise<void>((res) => { this.startedResolve = res; });
 
   /**
    * Wire the cross-instance claim. Until this is called nothing changes — every job runs on every
@@ -88,6 +116,44 @@ export class Scheduler {
    */
   setClaim(claim: RunClaim | null): void {
     this.claim = claim;
+  }
+
+  /** Wire the durable run record. Until this is called, `catchUp` reports every job as unknown. */
+  setRunLog(log: RunLog | null): void {
+    this.runLog = log;
+  }
+
+  /**
+   * The EXTERNAL tick (Q-159): run every exclusive job that is due by the DURABLE record, whichever instance
+   * this is and however recently it woke. Per-instance jobs (not `exclusive`) are left to the in-process loop —
+   * they warm THIS process, and a woken instance runs its own at boot.
+   *
+   * 🔒 FIRST SIGHT SEEDS, IT DOES NOT RUN. A job with no record yet (the first tick after this ships) has its
+   * clock started at `nowMs` instead of firing: a daily bill or a purge run at a random hour because a record
+   * did not exist yet is exactly the surprise this must not cause. From then on it is due on its own schedule.
+   *
+   * 🔒 AN UNREADABLE RECORD IS LEFT ALONE. Running on a guess could double a daily bill; skipping one tick
+   * costs one tick — the next call tries again.
+   */
+  async catchUp(nowMs: number = Date.now()): Promise<CatchUpReport> {
+    const report: CatchUpReport = { ran: [], notDue: [], heldElsewhere: [], seeded: [], unknown: [] };
+    for (const st of this.jobs.values()) {
+      if (!(st.job.enabled ?? true) || !st.job.exclusive) continue;
+      const id = st.job.id;
+      if (!this.runLog) { report.unknown.push(id); continue; }
+      let last: number | null;
+      try { last = await this.runLog.lastRun(id); } catch { report.unknown.push(id); continue; }
+      if (last === null) {
+        await this.runLog.record(id, nowMs).catch(() => {});
+        report.seeded.push(id);
+        continue;
+      }
+      if (computeNextRun(st.job.schedule, last) > nowMs) { report.notDue.push(id); continue; }
+      const ran = await this.runOnce(st, nowMs);
+      st.nextRun = computeNextRun(st.job.schedule, nowMs);
+      (ran ? report.ran : report.heldElsewhere).push(id);
+    }
+    return report;
   }
 
   /** Register (or replace) a job. Its first run is scheduled relative to `nowMs`. */
@@ -165,6 +231,8 @@ export class Scheduler {
     }
     st.lastRun = nowMs;
     st.runs++;
+    // Recorded for exclusive jobs only — the ones `catchUp` decides — and never allowed to fail the run.
+    if (st.job.exclusive && this.runLog) await this.runLog.record(st.job.id, nowMs).catch(() => {});
     return true;
   }
 
@@ -173,6 +241,7 @@ export class Scheduler {
     if (this.timer) return;
     this.timer = setInterval(() => { void this.tick(); }, tickMs);
     this.timer.unref?.();
+    this.startedResolve?.();
   }
 
   stop(): void {

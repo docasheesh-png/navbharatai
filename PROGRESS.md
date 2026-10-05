@@ -90106,3 +90106,50 @@ Admin, verbatim: *"rating system banao! jab bhi user ki app badhiya bane, user u
 **Proof:** `tests/rateNavBharatAfterALivePublish.test.ts`, 22 cases: the rules, the shape readers, source guards on every wiring point, and the routes over real HTTP. Reversion-proven: removing the "already rated" check fails it, and announcing on every celebration close fails it.
 
 **Watch for:** the first ratings should appear on Admin → Users → Ratings after users publish. Phone users get the card only with a fresh `.aab`/`.ipa`.
+
+---
+
+## 2026-10-05 — Game graphics: the 3D layer rendered, eight defects fixed at the root (external plan adapted)
+
+The admin forwarded an external plan ("NAVBHARATAI GAME ENGINE — MAJOR GRAPHICS & REALISM UPGRADE"), marked *"external suggestions (blindly ❌)"*.
+
+**What the plan assumed vs what the repo has.** The plan asked for:
+- an asset manifest, lighting presets, camera rigs and PBR materials;
+- terrain, vegetation, vehicles and characters;
+- quality tiers;
+- a "never hand-model" rule.
+
+Nearly all of it already exists: `Game3DGenerator.ts` (nine lighting moods, camera rigs, PBR surfaces, environment maps, `createCar`, `createTree`, `createRoad`, `createRiver`, `createMountain`, `createAnimal`, `createHumanoid`, and the `real`/`lite` tier) and the builder prompt's realism checklist. Games already skip the fast lane so they get the game tools (`fastLaneSkipsGame`). Rebuilding it as a parallel `game-engine/` tree would have duplicated working code.
+
+**Evidence first.** The layer was rendered in Chromium (SwiftShader), used exactly as the prompt instructs: an Indian village driving scene with `setDetailLevel('real')`, `applyEnvironment` and `surfaceMaterial`. That was its BEST case. It still had these defects:
+
+| # | Defect seen | Root cause | Fix |
+|---|---|---|---|
+| 1 | Road flickered into black zebra stripes | asphalt at y = 0, the ground's own plane | `ROAD_SURFACE_Y` = 0.03 plus `polygonOffset` on the markings |
+| 2 | One kerb and one edge line, the kerb inside the road | `break` after the first side; `(side*W)/2 + 0.15` | both sides; `side * (W/2 + 0.15)` |
+| 3 | Wheel arches floated beside the car and spun | arch inside the wheel group; x-offset applied twice | arch on the body at the wheel centre |
+| 4 | Brick/plaster houses were one flat colour | `mergeGeometries` dropped UVs | UVs carried through the merge |
+| 5 | Ground stayed flat colour in `real` | the tier lived in `objects.ts`, which `world.ts` never imported | the tier moved to `surfaces.ts` (re-exported); real ground textured; soft patches in both tiers |
+| 6 | A grid of tile seams over grass and walls | value-noise lattice did not wrap | wrapping lattice |
+| 7 | A texture's repeat changed when another material of the same kind was made | `repeat` set on the SHARED cached texture | per-repeat clones sharing one image |
+| 8 | Rivers broke into blue scraps; a dog the size of a horse; a purple cow | waves swung through y = 0 (the road's class again); one 1.4 m default for all kinds; hide tinted through the blue-grey fabric texture | `RIVER_SURFACE_Y` = 0.14; `ANIMAL_HEIGHT` per kind; hide uses plaster grain |
+
+**New object:** `createHouse` — an Indian house with:
+- a door with a frame and a step;
+- windows with a chhajja (sun-shade);
+- a plinth and washed walls;
+- a flat RCC roof with a parapet and water tank, or a clay-tile roof.
+
+The builder prompt now names it ("never a box with a cone on top").
+
+**Proof:** `tests/the3DLayerDrawsWhatItPromises.test.ts`, 15 cases, EXECUTES the generated modules with real three.js (`three@0.180.0`, added as an exact devDependency for exactly this). It checks positions, parents, UVs, materials and texture tiling. All of its original 12 cases fail against `main`'s generator. Before/after renders of an identical scene were shared with the admin.
+
+**Rejected from the plan, with reasons:**
+- **Clay, AiGameKit and AssetForge** need GPUs or Blender; NavBharatAI builds on CPU-only sandboxes. Their code is MIT, but the model weights carry their own terms. They are architectural reference only; nothing was copied. See `docs/game-engine/open-source-license-audit.md`.
+- **A parallel `game-engine/` module tree** — the layer exists.
+- **An "auto-repair until a visual score is reached" loop** — another self-heal loop is the opposite of first-pass-correct. The library is now verified by tests instead.
+
+**Honest ceiling and open items:**
+- The look is stylised-realistic, built from code: the car is still built from boxes and people are blocky.
+- The distant mountain reads bluish under day fog; that is aerial haze, not a bug.
+- Real GPU-generated assets are a money decision for the admin.

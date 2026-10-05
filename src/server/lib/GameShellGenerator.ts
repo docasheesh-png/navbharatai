@@ -85,6 +85,13 @@ export interface GameContext {
   feel: GameFeel;
   input: Input;
   lights: AppliedLighting;
+  /**
+   * Put the camera BEHIND this object (a car, a bike, a horse) and keep it there through every turn —
+   * CameraRig.follow(). Pass null to go back to following the player. ANY game where the player drives
+   * or rides calls this in setup(): without it the camera sits in FRONT of a +Z-facing vehicle, the
+   * player sees its face, and every control feels reversed.
+   */
+  follow: (object: THREE.Object3D | null) => void;
 }
 
 export class Game {
@@ -102,6 +109,7 @@ export class Game {
   private readonly disposers: Array<() => void> = [];
   private readonly options: GameOptions;
   private disposed = false;
+  private followTarget: THREE.Object3D | null = null;
 
   constructor(options: GameOptions) {
     this.options = options;
@@ -188,6 +196,7 @@ export class Game {
       feel: this.feel,
       input: this.input,
       lights: this.lights,
+      follow: (object) => { this.followTarget = object; },
     };
   }
 
@@ -223,8 +232,10 @@ export class Game {
 
   /** Display rate. Camera and drawing only — never gameplay. */
   private render(_alpha: number, frameDelta: number): void {
-    const p = this.player.object.position;
-    this.rig.update(p, frameDelta);
+    // Driving or riding: the camera sits behind the VEHICLE's own front, whatever its heading.
+    const p = this.followTarget ? this.followTarget.position : this.player.object.position;
+    if (this.followTarget) this.rig.follow(this.followTarget, frameDelta);
+    else this.rig.update(p, frameDelta);
     // Defaults, NOT small 3D-looking numbers: applyShake already scales the offset into world units
     // (×0.02). Passing 0.35 here would produce a 0.007-unit shake — mathematically present, invisible.
     this.rig.applyShake(this.feel.shake());

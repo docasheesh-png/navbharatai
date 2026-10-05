@@ -23,6 +23,9 @@ import { dirname, join } from 'node:path';
 import * as THREE from 'three';
 import { generateGame3D } from '../src/server/lib/Game3DGenerator';
 import { generateGameRuntime } from '../src/server/lib/GameRuntimeGenerator';
+import { generateGameShell } from '../src/server/lib/GameShellGenerator';
+
+const generateGameShellFiles = (): Record<string, string> => generateGameShell().files;
 
 const DIR = join(__dirname, `.tmp-game3d-${process.pid}`);
 
@@ -203,6 +206,64 @@ describe('siblings found by rendering every object (render: scattered blue scrap
     const hide = meshesOf(cow.root)[0].material as THREE.MeshStandardMaterial;
     expect(hide.map!.image).toBe(surfaces.surfaceMaps('plaster').map.image);
     expect(hide.map!.image).not.toBe(surfaces.surfaceMaps('fabric').map.image);
+  });
+});
+
+describe('the camera sits BEHIND what you drive (admin: "gadi ka front side dikhta hai, button ulte kaam karte hai")', () => {
+  let camera: any;
+  beforeAll(async () => {
+    (globalThis as any).window = { innerWidth: 800, innerHeight: 600 };
+    camera = await import(join(DIR, 'src/game/three/camera.ts'));
+  });
+
+  const settle = (rig: any, car: THREE.Object3D) => { for (let i = 0; i < 240; i++) rig.follow(car, 1 / 60); rig.camera.updateMatrixWorld(true); };
+  const tailAndHead = (car: THREE.Object3D) => {
+    car.updateMatrixWorld(true);
+    const pick = (hex: number) => { let p: THREE.Vector3 | null = null; car.traverse((x: any) => { if (x.isMesh && x.material.isMeshBasicMaterial && x.material.color.getHex() === hex) p = new THREE.Vector3().setFromMatrixPosition(x.matrixWorld); }); return p!; };
+    return { head: pick(0xfff3d0), tail: pick(0xd82b1e) };
+  };
+
+  for (const heading of [0, Math.PI / 2, Math.PI, -2.2]) {
+    it(`heading ${heading.toFixed(2)}: the camera sees the car's TAIL lights, not its headlights`, () => {
+      const car: THREE.Group = objects.createCar({ detail: 'real' });
+      car.rotation.y = heading;
+      const rig = new camera.CameraRig({ kind: 'chase' });
+      settle(rig, car);
+      const { head, tail } = tailAndHead(car);
+      const cam = rig.camera.position as THREE.Vector3;
+      expect(cam.distanceTo(tail), 'the camera is in front of the car').toBeLessThan(cam.distanceTo(head));
+    });
+  }
+
+  it('W drives AWAY from the camera, D turns to the RIGHT of the screen, A to the left', () => {
+    for (const [steer, side] of [[1, 1], [-1, -1]] as const) {
+      const car: THREE.Group = objects.createCar({ detail: 'lite' });
+      const rig = new camera.CameraRig({ kind: 'chase' });
+      settle(rig, car);
+      const start = car.position.clone();
+      const camFwd = rig.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+      const camRight = new THREE.Vector3().setFromMatrixColumn(rig.camera.matrixWorld, 0).setY(0).normalize();
+      let st = objects.createVehicleState(car);
+      // The runtime's raw axis: up/W is y = −1, right/D is x = +1. driveVehicle decides the signs.
+      for (let i = 0; i < 90; i++) st = objects.driveVehicle(car, st, { x: steer, y: -1 }, 1 / 60);
+      const moved = car.position.clone().sub(start);
+      expect(moved.dot(camFwd), 'W must move the car away from the camera').toBeGreaterThan(1);
+      expect(Math.sign(moved.dot(camRight)), steer > 0 ? 'D must go screen-right' : 'A must go screen-left').toBe(side);
+    }
+  });
+
+  it('a car that is not touched keeps moving (a driving game never starts stalled), and S brakes then reverses', () => {
+    const car: THREE.Group = objects.createCar({ detail: 'lite' });
+    let st = objects.createVehicleState(car);
+    expect(st.speed).toBeGreaterThan(0);
+    for (let i = 0; i < 300; i++) st = objects.driveVehicle(car, st, { x: 0, y: 1 }, 1 / 60);
+    expect(st.speed).toBeLessThan(0);
+  });
+
+  it('the game shell follows the vehicle with the chase rig, never from the front', () => {
+    const shell = Object.values(generateGameShellFiles()).join('\n');
+    expect(shell).toContain('follow: (object) => { this.followTarget = object; }');
+    expect(shell).toMatch(/if \(this\.followTarget\) this\.rig\.follow\(this\.followTarget, frameDelta\);\s*else this\.rig\.update\(p, frameDelta\);/);
   });
 });
 

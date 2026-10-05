@@ -849,6 +849,16 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     // 🏁 ADMIN 2026-08-25, from a real racing game: "baar baar kehne par gaadi ki speed kyu nahi badhayi
     // ja rahi… speed 0 sirf aur sirf tab ho, jab user bole". A vehicle that will not move is not a
     // difficulty setting — it is an unplayable game, and it is the single easiest way to ship one.
+    // 🚗 ADMIN 2026-10-05: "gadi ka front side dikhta hai, jisse button ulte kaam karte hai… game ka
+    // backside dikhna chahiye". Every model faces +Z; the default rig sat in FRONT of it and games used
+    // the runtime's up axis (−1) as throttle — the car drove at the camera with every control mirrored.
+    '  🚗 THE CAMERA SITS BEHIND WHAT THE PLAYER DRIVES OR RIDES — the player sees its BACK, never its face.',
+    '  Every model faces its local +Z (MODEL_FORWARD). Move a car, bike or ridden animal ONLY with',
+    '  driveVehicle(vehicle, state, input.axis(), dt) (state from createVehicleState) — it owns the signs:',
+    '  up/W goes toward the front, left/A turns left. Keep the camera behind it with ctx.follow(vehicle)',
+    '  in the game shell, or rig.follow(vehicle, dt) — NEVER rig.update(vehicle.position), which looks',
+    '  at the vehicle from the front. To drive into the screen, turn the model (rotation.y = Math.PI);',
+    '  never flip a control or mirror a model to make it "look right".',
     '  🏁 A VEHICLE STARTS MOVING, ALWAYS. In any racing, driving or flying game, the player\'s vehicle',
     '  must have a NON-ZERO starting speed and must be able to accelerate from the very first frame.',
     '  Speed may be zero ONLY if the user explicitly asked for it (a standing start, a countdown, a',

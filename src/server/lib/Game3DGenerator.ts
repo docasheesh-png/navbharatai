@@ -322,7 +322,7 @@ import { damp } from '../core/feel';
  * The third-person rig casts a ray back from the player and pulls in on a hit. Without that, walking
  * against a wall puts the camera inside it and the player sees the inside of the level.
  */
-export type CameraKind = 'third-person' | 'first-person' | 'top-down' | 'side-scroller' | 'orbit' | 'fixed';
+export type CameraKind = 'third-person' | 'first-person' | 'top-down' | 'side-scroller' | 'orbit' | 'fixed' | 'chase';
 
 export interface CameraRigOptions {
   kind?: CameraKind;
@@ -346,6 +346,9 @@ export class CameraRig {
   private yawAngle = 0;
   private pitch = -0.2;
   private readonly desired = new THREE.Vector3();
+  private readonly followPos = new THREE.Vector3();
+  private readonly followQuat = new THREE.Quaternion();
+  private readonly followFwd = new THREE.Vector3();
 
   constructor(options: CameraRigOptions = {}) {
     this.kind = options.kind ?? 'third-person';
@@ -418,6 +421,47 @@ export class CameraRig {
 
     this.dampTo(wanted, delta);
     this.camera.lookAt(focus);
+  }
+
+  /**
+   * CHASE — sit BEHIND a vehicle (or any model), whichever way it is pointing, and look past it.
+   *
+   * 🔴 USE THIS FOR ANYTHING YOU DRIVE OR RIDE, never update(car.position). Every model in objects.ts
+   * faces its local +Z (MODEL_FORWARD). update() places the camera from the rig's own yaw, which starts
+   * at +Z of the target — that is IN FRONT of a +Z-facing car. Games built that way showed the car's FACE,
+   * drove it toward the camera, and every control felt reversed (admin 2026-10-05: "gadi ka front side
+   * dikhta hai, jisse button ulte kaam karte hai… backside dikhna chahiye"). follow() reads the object's
+   * real heading every frame, so the camera stays at its BACK through every turn, and the rig's yaw is
+   * kept in step so camera-relative movement elsewhere still agrees with what is on screen.
+   */
+  follow(object: THREE.Object3D, delta: number, lookAhead = 4): void {
+    object.getWorldPosition(this.followPos);
+    object.getWorldQuaternion(this.followQuat);
+    const fwd = this.followFwd.set(0, 0, 1).applyQuaternion(this.followQuat);
+    fwd.y = 0;
+    if (fwd.lengthSq() < 1e-8) fwd.set(0, 0, 1);
+    fwd.normalize();
+
+    const focus = this.followPos.clone();
+    focus.y += this.height * 0.5;
+    let wanted = this.followPos.clone().addScaledVector(fwd, -this.distance);
+    wanted.y += this.height;
+
+    if (this.collidables.length > 0) {
+      const dir = wanted.clone().sub(focus);
+      const dist = dir.length();
+      this.ray.set(focus, dir.normalize());
+      this.ray.far = dist;
+      const hit = this.ray.intersectObjects(this.collidables, true)[0];
+      if (hit) wanted = focus.clone().add(dir.multiplyScalar(Math.max(0.6, hit.distance - 0.3)));
+    }
+
+    this.dampTo(wanted, delta);
+    const look = this.followPos.clone().addScaledVector(fwd, lookAhead);
+    look.y += this.height * 0.35;
+    this.camera.lookAt(look);
+    // The yaw whose third-person offset (sin yaw, cos yaw) points BEHIND the object: offset = -fwd.
+    this.yawAngle = Math.atan2(-fwd.x, -fwd.z);
   }
 
   private dampTo(wanted: THREE.Vector3, delta: number): void {
@@ -1503,6 +1547,86 @@ export function rollWheels(car: THREE.Group, speed: number, dt: number): void {
   }
 }
 
+// ── DRIVING ──────────────────────────────────────────────────────────────────────────────────────
+/**
+ * THE ONE FORWARD. Every model in this file — car, motorcycle, bicycle, animal, house — faces its local
+ * +Z (headlights, handlebars, head and front door are all on +Z). Drive, aim and place by THIS, and put
+ * the camera behind it with CameraRig.follow(). Want a car to drive "into the screen" (−Z)? Turn it:
+ * car.rotation.y = Math.PI — never mirror a model or flip a control to fake it.
+ */
+export const MODEL_FORWARD = new THREE.Vector3(0, 0, 1);
+
+export interface VehicleTuning {
+  /** Top speed, m/s (≈ 25 = 90 km/h). */
+  maxSpeed?: number;
+  reverseSpeed?: number;
+  /** Acceleration, m/s². */
+  accel?: number;
+  brake?: number;
+  /** Fraction of speed lost per second when coasting. */
+  drag?: number;
+  /** Turn rate at full lock, radians per second. */
+  steerRate?: number;
+  /** Speed at start. NOT zero: a racing/driving game whose car sits still reads as broken. */
+  startSpeed?: number;
+}
+export interface VehicleState { speed: number; heading: number }
+
+/** The vehicle's state, starting from where the model already points (its rotation.y). */
+export function createVehicleState(vehicle: THREE.Object3D, tuning: VehicleTuning = {}): VehicleState {
+  return { speed: tuning.startSpeed ?? 5, heading: vehicle.rotation.y };
+}
+
+/**
+ * Drive a vehicle from the RAW input axis — \`input.axis()\` exactly as the runtime gives it — so the
+ * signs are decided here, once, and cannot be got wrong in a game:
+ *   • up / W (axis.y = −1) → accelerate TOWARD THE FRONT (+Z of the model); down / S brakes, then reverses;
+ *   • left / A (axis.x = −1) → turn to the DRIVER'S left; right / D → the driver's right — which, with
+ *     the camera behind (CameraRig.follow), is also the left and right of the SCREEN.
+ * Steering follows the direction of travel, so reversing steers like a real car, and it fades in with
+ * speed, so a parked car does not spin on the spot. Wheels roll if the model has them (createCar).
+ *
+ * 🔴 WHY THIS EXISTS (admin 2026-10-05, "button ulte kaam karte hai"): the runtime's up key is −1, and a
+ * game that used axis.y as throttle drove BACKWARDS on W; with the camera in front of the car on top of
+ * that, every control felt mirrored. Call this; never hand-write a car's movement.
+ */
+export function driveVehicle(
+  vehicle: THREE.Object3D,
+  state: VehicleState,
+  axis: { x: number; y: number },
+  dt: number,
+  tuning: VehicleTuning = {},
+): VehicleState {
+  const maxSpeed = tuning.maxSpeed ?? 25;
+  const reverseSpeed = tuning.reverseSpeed ?? 6;
+  const accel = tuning.accel ?? 9;
+  const brake = tuning.brake ?? 18;
+  const drag = tuning.drag ?? 0.35;
+  const steerRate = tuning.steerRate ?? 1.6;
+
+  const throttle = -axis.y; // up is −1 in the runtime; here up means "go forward"
+  let speed = state.speed;
+  if (throttle > 0.05) {
+    speed += accel * throttle * dt;
+  } else if (throttle < -0.05) {
+    if (speed > 0.5) speed -= brake * -throttle * dt;            // braking first…
+    else speed -= accel * 0.6 * -throttle * dt;                   // …then reversing
+  } else {
+    speed -= speed * drag * dt;                                   // coasting
+  }
+  speed = Math.max(-reverseSpeed, Math.min(maxSpeed, speed));
+
+  // Positive rotation.y turns +Z toward +X, the DRIVER'S LEFT — so a right turn lowers the heading.
+  const grip = Math.min(1, Math.abs(speed) / 4);
+  const heading = state.heading - axis.x * steerRate * grip * Math.sign(speed) * dt;
+
+  vehicle.rotation.y = heading;
+  vehicle.position.x += Math.sin(heading) * speed * dt;
+  vehicle.position.z += Math.cos(heading) * speed * dt;
+  if (vehicle.children.some((c) => c.name === 'wheel')) rollWheels(vehicle as THREE.Group, speed, dt);
+  return { speed, heading };
+}
+
 // ── TREE ─────────────────────────────────────────────────────────────────────────────────────────
 export interface TreeOptions extends BaseOpts { height?: number; leafColor?: number }
 
@@ -2473,6 +2597,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "scene.add(createMountain({ size: 140, height: 50 }));  scene.add(createRoad({ length: 400 }));\n" +
       "const house = createHouse({ roof: 'flat', storeys: 2 }); house.position.set(16, 0, 0); house.rotation.y = -Math.PI / 2; scene.add(house); // door faces +Z — turn it to the road\n" +
       "car.position.y = ROAD_SURFACE_Y;   // wheels ON the asphalt, which sits 3 cm above the ground\n" +
+      "let drive = createVehicleState(car);                       // every model faces +Z (MODEL_FORWARD)\n" +
+      "// each frame: drive = driveVehicle(car, drive, input.axis(), dt); rig.follow(car, dt);  // camera BEHIND the car\n" +
       "const river = createRiver(); scene.add(river.mesh);   // in the loop: river.update(elapsed)\n" +
       "const deer = createAnimal({ kind: 'deer' }); scene.add(deer.root); // deer.update(dt, speed)\n" +
       "const bike = createMotorcycle({ kind: 'sport', color: 0xc4231f }); scene.add(bike.root);\n" +

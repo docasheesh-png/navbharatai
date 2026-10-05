@@ -77,10 +77,18 @@ export interface MockResponse {
    *  missing a verb the real express has fails a route that is perfectly correct. */
   set(k: string, v: string): MockResponse;
   get(k: string): string | undefined;
+  /** The response's own events. Modelled because streaming routes learn that the client left from
+   *  `res` 'close' (Q-621, `clientDisconnect.ts`) — a mock without them fails a route that is correct.
+   *  `emit('close')` lets a test play the client leaving. */
+  on(event: string, fn: (...a: any[]) => void): MockResponse;
+  once(event: string, fn: (...a: any[]) => void): MockResponse;
+  emit(event: string, ...a: any[]): boolean;
+  writableFinished: boolean;
 }
 
 /** Create a mock Express Response that records status/body/headers. */
 export function mockRes(): MockResponse {
+  const listeners: Record<string, Array<{ fn: (...a: any[]) => void; once: boolean }>> = {};
   const res: MockResponse = {
     statusCode: 200,
     body: undefined,
@@ -91,9 +99,18 @@ export function mockRes(): MockResponse {
     json(payload: any) { this.body = payload; return this; },
     send(payload: any) { this.sent = payload; this.body = payload; this.headersSent = true; return this; },
     type(t: string) { this.headers['content-type'] = t.includes('/') ? t : `text/${t}`; return this; },
-    end() { this.ended = true; return this; },
+    end() { this.ended = true; this.writableFinished = true; return this; },
     destroy() { this.ended = true; return this; },
     headersSent: false,
+    writableFinished: false,
+    on(event: string, fn: (...a: any[]) => void) { (listeners[event] ??= []).push({ fn, once: false }); return this; },
+    once(event: string, fn: (...a: any[]) => void) { (listeners[event] ??= []).push({ fn, once: true }); return this; },
+    emit(event: string, ...a: any[]) {
+      const ls = listeners[event] ?? [];
+      listeners[event] = ls.filter((l) => !l.once);
+      for (const l of ls) l.fn(...a);
+      return ls.length > 0;
+    },
     setHeader(k: string, v: string) { this.headers[k.toLowerCase()] = v; },
     header(k: string, v: string) { this.headers[k.toLowerCase()] = v; return this; },
     set(k: string, v: string) { this.headers[k.toLowerCase()] = v; return this; },

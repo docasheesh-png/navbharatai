@@ -38,6 +38,12 @@ const stripComments = (s: string) =>
 
 const PAYMENT_ROUTE = stripComments(read('src/server/routes/payment.ts'));
 const PAYMENTS_LIB = stripComments(read('src/server/lib/payments.ts'));
+/** The body of `fulfilGiftOrder` — the ONE place a paid gift order is turned into a code (Q-613). */
+const giftFulfilment = () => {
+  const start = PAYMENTS_LIB.indexOf('async function fulfilGiftOrder(');
+  expect(start, 'fulfilGiftOrder must exist').toBeGreaterThan(-1);
+  return PAYMENTS_LIB.slice(start, PAYMENTS_LIB.indexOf('export async function verifyPaymentInternal(', start));
+};
 const GIFT_STORE = stripComments(read('src/server/lib/giftCodeStore.ts'));
 
 /** Deterministic "randomness", so a minted code is a fact rather than a coin flip. */
@@ -235,15 +241,19 @@ describe('🔴 the wiring — the three expensive mistakes, held at the source',
     // Both halves: the order is written with a zero credit, and fulfilment returns before the
     // wallet block. Either one alone would be a single edit away from paying out twice.
     expect(PAYMENT_ROUTE).toContain('{ paidInr: orderAmount, feeInr: giftFee, creditInr: 0 }');
-    const fulfil = PAYMENTS_LIB.slice(PAYMENTS_LIB.indexOf("=== 'gift_code'"));
-    const walletAt = fulfil.indexOf("doc(db, 'user_token_wallets'");
-    const returnAt = fulfil.indexOf('return { success: true, data: { giftCode');
-    expect(returnAt).toBeGreaterThan(-1);
-    expect(returnAt, 'fulfilment must return before the wallet credit').toBeLessThan(walletAt);
+    // Since Q-613 the gift is fulfilled by ONE function (`fulfilGiftOrder`), reached from the paid path and
+    // from the resume of a claimed-but-unminted order. It must never touch a wallet, and the one wallet
+    // credit in the file must exclude gift orders by name.
+    const fulfil = giftFulfilment();
+    expect(fulfil).toContain('return { success: true, data: { giftCode');
+    expect(fulfil, 'gift fulfilment must not touch a wallet').not.toMatch(/user_token_wallets|runTransaction/);
+    expect(PAYMENTS_LIB.match(/doc\(db, 'user_token_wallets'/g) ?? [], 'exactly one wallet credit in payments.ts').toHaveLength(1);
+    const creditGuard = PAYMENTS_LIB.slice(0, PAYMENTS_LIB.indexOf("doc(db, 'user_token_wallets'"));
+    expect(creditGuard.slice(creditGuard.lastIndexOf('if (isPaid'))).toMatch(/\[[^\]]*'gift_code'[^\]]*\]\.includes\(String\(txData\.productType/);
   });
 
   it('🔒 the face value comes from the TX DOC the server wrote, never from the request body', () => {
-    const fulfil = PAYMENTS_LIB.slice(PAYMENTS_LIB.indexOf("=== 'gift_code'"));
+    const fulfil = giftFulfilment();
     expect(fulfil).toContain('txData');
     expect(fulfil).toContain('giftFaceInr');
     // A paid order that somehow carries no face value refunds rather than minting a free code.

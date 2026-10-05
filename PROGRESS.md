@@ -89863,3 +89863,20 @@ src/lib and App.tsx; reversion-proven (putting the bug back fails both the censu
 also caught a census bug: two components in one file each had a `load`, and a name-keyed map hid the violation — it
 now resolves the nearest preceding callback, with a canary for that case.
 ⚠️ Frontend change: the website gets it on deploy; phone users need a fresh `.aab`/`.ipa` (bundled mode).
+
+### 2026-10-05 — App Mart → Review opens on buttons: Manage apps · Manage APKs · Reports
+
+Admin: *"app mart → review (admin) — instant app aur apk app, dono aise bahar hi hai … pahle 2 button banao, 'manage
+app, manage apk' aur uske andar apps dikhe, aise bahar pura page bekar dikh raha hai … apne hisab se isko aur acche se
+banana, mai non technical hu"*.
+
+The Review tab stacked four lists on one scroll (reported comments, viewer reports, instant apps, Android apps). It now
+opens on three buttons — **Manage apps** (instant apps), **Manage APKs** (Android apps), **Reports** (viewer reports +
+reported comments) — each showing "N waiting · N on the store" (or the report count). A button opens ONE list with a
+Back button and a **Waiting / On the store** switch with counts; a list opens on Waiting when anything waits, else on
+On the store, so an empty Waiting never hides a full shelf. Leaving the tab returns to the buttons. The third button
+(Reports) is my addition: those two lists were half of the clutter. Rules are pure in `storeReviewQueue.ts`
+(`reviewSectionCount`, `filterReviewList`, `defaultReviewFilter`); `tests/theReviewTabOpensOnButtons.test.ts` locks
+the helpers and that every review list is gated on its own section (reversion-proven). Theme tokens only. Not
+rendered in a browser from the session (the screen needs an admin sign-in); typecheck + 1,499 App Mart/store/theme
+tests green. ⚠️ Frontend: website on deploy; phone app with a fresh `.aab`/`.ipa`.

@@ -177,6 +177,35 @@ describe('the ground (render: flat green under textured objects)', () => {
   });
 });
 
+describe('siblings found by rendering every object (render: scattered blue scraps, four identical horses)', () => {
+  it('the river\'s waves stay ABOVE the ground plane at every moment — the road\'s z-fighting, in water', () => {
+    const river = objects.createRiver({ detail: 'real', length: 40, width: 5 });
+    for (const t of [0, 0.37, 1.1, 2.9, 7.3]) {
+      river.update(t);
+      const p = river.mesh.geometry.getAttribute('position');
+      let min = Infinity;
+      for (let i = 0; i < p.count; i++) min = Math.min(min, p.getY(i));
+      expect(min, `t=${t}: a trough dips into the ground`).toBeGreaterThan(0.02);
+    }
+  });
+
+  it('a dog is not the size of a horse, and each kind keeps its order', () => {
+    const height = (kind: string) => new THREE.Box3().setFromObject(objects.createAnimal({ kind }).root).getSize(new THREE.Vector3()).y;
+    const [dog, deer, cow, horse] = ['dog', 'deer', 'cow', 'horse'].map(height);
+    expect(dog).toBeLessThan(0.8);
+    expect(dog).toBeLessThan(deer);
+    expect(deer).toBeLessThan(horse);
+    expect(cow).toBeLessThan(horse);
+  });
+
+  it('the hide shows the tint as the animal\'s colour (not multiplied by a blue-grey fabric texture)', () => {
+    const cow = objects.createAnimal({ kind: 'cow', detail: 'real' });
+    const hide = meshesOf(cow.root)[0].material as THREE.MeshStandardMaterial;
+    expect(hide.map!.image).toBe(surfaces.surfaceMaps('plaster').map.image);
+    expect(hide.map!.image).not.toBe(surfaces.surfaceMaps('fabric').map.image);
+  });
+});
+
 describe('a house, not a box (render: every building was a box with a hat)', () => {
   for (const roof of ['flat', 'tiled'] as const) {
     it(`${roof} roof: a door on the front, windows, everything standing on the ground`, () => {

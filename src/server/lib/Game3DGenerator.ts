@@ -1634,6 +1634,9 @@ export interface River { mesh: THREE.Mesh; update: (t: number) => void }
  * A river that MOVES. Still water is the fastest way to make a scene look like a screenshot, so the
  * surface scrolls two normal-ish waves against each other and the material is transmissive.
  */
+/** Mean water level above the ground plane. Waves never dip below ground (amplitude is 0.1 m). */
+export const RIVER_SURFACE_Y = 0.14;
+
 export function createRiver(options: RiverOptions = {}): River {
   const d = tier(options);
   const L = options.length ?? 200;
@@ -1668,7 +1671,10 @@ export function createRiver(options: RiverOptions = {}): River {
     for (let i = 0; i < p.count; i++) {
       const x = base[i * 2], z = base[i * 2 + 1];
       // Two waves at different speeds and angles — one wave reads as a flag, two read as water.
-      p.setY(i, Math.sin(z * 0.35 + t * 1.7) * 0.06 + Math.sin(x * 0.5 - t * 1.1) * 0.04);
+      // 🔴 Around RIVER_SURFACE_Y, never around 0. The waves used to swing ±10 cm through the ground's
+      // own plane, so wherever a trough dipped under y = 0 the grass covered the water and the river
+      // rendered as scattered blue scraps (seen in a real render, 2026-10-05 — the road's bug again).
+      p.setY(i, RIVER_SURFACE_Y + Math.sin(z * 0.35 + t * 1.7) * 0.06 + Math.sin(x * 0.5 - t * 1.1) * 0.04);
     }
     p.needsUpdate = true;
     m.geometry.computeVertexNormals();
@@ -1925,14 +1931,21 @@ export interface Animal { root: THREE.Group; update: (dt: number, speed: number)
  * rear-right). Move all four in phase and it reads as a toy being dragged, which is what most
  * generated animals do.
  */
+/** Height to the top of the head, in metres, by kind. */
+export const ANIMAL_HEIGHT: Readonly<Record<'deer' | 'dog' | 'cow' | 'horse', number>> = { dog: 0.62, deer: 1.25, cow: 1.5, horse: 1.75 };
+
 export function createAnimal(options: AnimalOptions = {}): Animal {
   const d = tier(options);
-  const H = options.height ?? 1.4;
   const kind = options.kind ?? 'deer';
+  // 🔴 SIZE BY KIND. Every kind used to default to 1.4 m, so a dog stood as tall as a horse — the four
+  // animals rendered as one animal four times. Real heights to the top of the head, roughly.
+  const H = options.height ?? ANIMAL_HEIGHT[kind];
   const long = kind === 'dog' ? 1.25 : kind === 'cow' ? 1.45 : 1.35;
   const bodyL = H * long;
   const col = options.color ?? (kind === 'cow' ? 0xd8cfc2 : kind === 'dog' ? 0x9a6b3f : 0x8a5f38);
-  const hide = shared('fabric', d, col, 3);
+  // The hide is the near-white PLASTER grain, so the tint IS the animal's colour. It used to be 'fabric',
+  // whose own texture is blue-grey: multiplied by a tint it turned a white cow purple and browns black.
+  const hide = shared('plaster', d, col, 3);
   const dark = new THREE.MeshStandardMaterial({ color: 0x2a211a, roughness: 0.8, metalness: 0 });
   const root = new THREE.Group();
 

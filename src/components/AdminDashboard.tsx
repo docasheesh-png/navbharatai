@@ -2745,7 +2745,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted">
                   <span>
                     {purchases ? `Showing ${purchases.rows.length === 0 ? 0 : purchases.offset + 1}–${purchases.offset + purchases.rows.length} of ${purchases.total.toLocaleString('en-IN')}` : ''}
-                    {purchases?.overall?.refundTracked === false && <span className="ml-2 text-warn">· Refunds are not recorded by the payment webhook — check the gateway dashboard before treating a paid row as final.</span>}
+                    {purchases?.overall?.refundTracked === 'web-only' && <span className="ml-2 text-warn">· Web payment refunds and chargebacks are recorded (₹{Number(purchases.overall.refundedInr || 0).toLocaleString('en-IN')} so far) and take their tokens back; Google Play and App Store refunds are not recorded yet — check the store consoles before treating a store row as final.</span>}
                   </span>
                   <span className="flex gap-2">
                     <button disabled={!purchases || purchases.offset === 0 || purchasesLoading} onClick={() => setPurchaseQuery((q) => ({ ...q, offset: Math.max(0, q.offset - PURCHASE_PAGE) }))} className="px-2 py-1 rounded-lg bg-raised hover:bg-raised-hover disabled:opacity-40 text-ink">‹ Prev</button>

@@ -32,6 +32,8 @@ import {
 } from '../lib/giftCodes';
 import { readGiftDaily, giftDay, claimGiftCode } from '../lib/giftCodeStore';
 import { appLockBlocks } from '../lib/appLockEnforce';
+import { classifyCashfreeWebhook, cashfreeWebhookOrderId } from '../lib/paymentReversal';
+import { settleCashfreeReversal } from '../lib/paymentReversalStore';
 
 /**
  * Verify a Cashfree webhook signature. CRITICAL: the HMAC MUST be computed over the EXACT raw bytes
@@ -459,8 +461,10 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         ? (req as any).rawBody.toString('utf8')
         : JSON.stringify(req.body);
 
-      // Cashfree Webhook Data structure
-      const orderId = req.body.data?.order?.order_id;
+      // Cashfree Webhook Data structure. The order id sits in a different place per event family
+      // (payment: data.order, refund: data.refund, dispute: data.order_details) — read once, in
+      // `cashfreeWebhookOrderId`. A refund event used to fail right here with "Order ID missing".
+      const orderId = cashfreeWebhookOrderId(req.body);
       if (!orderId) {
         console.warn('[CASHFREE WEBHOOK] Missing order_id in webhook body:', req.body);
         return res.status(400).json({ error: 'Order ID missing in webhook payload' });
@@ -488,6 +492,30 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         // Never log the expected HMACs — they are secret-derived and would let a reader forge signatures.
         console.error(`[CASHFREE WEBHOOK] Webhook signature mismatch for order ${orderId} — rejecting.`);
         return res.status(401).json({ error: 'Invalid webhook signature' });
+      }
+
+      // 🔴 A REFUND OR A DISPUTE IS NOT A PAYMENT (Q-614, admin 2026-10-05). Every signed event used to
+      // go to `verifyPaymentInternal` — "fulfil this order" — so a refund was handled as if money had
+      // arrived, and the tokens it should have taken back stayed in the wallet. A reversal now takes
+      // its own path: the AMOUNTS are re-read from Cashfree's own API (the body only names the order),
+      // and the wallet gives back what that payment bought, down to zero and never below.
+      const kind = classifyCashfreeWebhook(req.body);
+      if (kind !== 'payment') {
+        const settled = await settleCashfreeReversal(db, orderId, kind);
+        if (!settled.ok) {
+          // Non-2xx so Cashfree delivers it again: acknowledging an event we could not read loses it.
+          console.error(`[CASHFREE WEBHOOK] ${kind} for order ${orderId} not settled: ${settled.error}`);
+          return res.status(502).json({ error: 'Reversal could not be read from the gateway; please retry.' });
+        }
+        const r = settled.result;
+        if (r.status === 'unknown-order') {
+          // Not an order this server created. Acknowledged so it is not re-sent forever; logged loudly.
+          console.error(`[CASHFREE WEBHOOK] ${kind} for unknown order ${orderId} — ignored.`);
+          return res.status(200).json({ status: 'IGNORED' });
+        }
+        console.log(`[CASHFREE WEBHOOK] ${kind} for order ${orderId}: ${r.status}` +
+          (r.appliedTokens !== undefined ? ` (removed ${r.appliedTokens} tokens, shortfall ${r.shortfallTokens ?? 0})` : ''));
+        return res.status(200).json({ status: 'OK', reversal: r.status });
       }
 
       console.log(`[CASHFREE WEBHOOK] Signature verified successfully. Initiating payment fulfillment...`);
@@ -765,7 +793,9 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
           code: String(r.code),
           faceInr: Number(r.faceInr) || 0,
           paidInr: Number(r.paidInr) || 0,
-          status: r.status === 'redeemed' ? 'redeemed' : 'unused',
+          // A refunded code says so — listing it as 'unused' would invite the buyer to share a code
+          // that no longer works (Q-614).
+          status: r.status === 'redeemed' ? 'redeemed' : r.status === 'voided' ? 'voided' : 'unused',
           createdAt: String(r.createdAt || ''),
           redeemedAt: r.redeemedAt ? String(r.redeemedAt) : null,
         }));

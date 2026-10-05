@@ -6,7 +6,10 @@ import { appendLedgerEntry, LEDGER_OPENING_FIELD, LEDGER_DROPPED_FIELD } from '.
 import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
 import { cashfreePaymentsAvailability } from './cashfreeCredentials';
 import { mintCodeForOrder } from './giftCodeStore';
+import { recordedReversedInr, settleRecordedReversalAtCredit } from './paymentReversal';
+import { applyOrderReversal } from './paymentReversalStore';
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
+import { orderCreditedTokens, recordedPlatformFee, type WalletCreditTx } from './orderCredit';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import { parseEnvNumber } from './envNumber';
 import {
@@ -72,43 +75,11 @@ export function inrToDebitTokens(inr: number): number {
   return Math.round(inr * TOKENS_PER_RUPEE * 1e6) / 1e6; // exact to a millionth of a token
 }
 
-/** Tokens a purchase credits, derived ONLY from the amount actually paid (net of our fee). Pure. */
-export function creditableTokens(netPaidRupees: unknown): number {
-  const paid = Number(netPaidRupees);
-  if (!Number.isFinite(paid) || paid <= 0) return 0;
-  return Math.round(paid * TOKENS_PER_RUPEE);
-}
-
-export interface WalletCreditTx {
-  userId: string;
-  amountPaid: number;
-  balanceAdded: number;
-  /**
-   * The platform fee this payment carried, in ₹ — written by the route that CREATED the order, from
-   * the rate that was disclosed to the user on that screen. Absent on a transaction created before
-   * the fee existed, and absent on a store purchase (Play/Apple packs are priced with their fee
-   * already inside), and absent means ZERO: those credit in full, exactly as they were sold.
-   */
-  platformFeeInr?: number;
-}
-
-/**
- * The platform fee actually recorded on a transaction.
- *
- * 🔑 READ FROM THE TRANSACTION, NOT RE-COMPUTED FROM THE CURRENT RATE. The user agreed to a split on
- * the screen where they paid; if the admin changes the rate while an order sits pending, re-deriving
- * it here would credit a different amount than the one they were shown. The stored number is written
- * by our own route, never by the client, so reading it is not trusting the caller.
- *
- * Clamped to [0, amountPaid] so no corrupt or hand-edited row can ever produce a negative credit.
- */
-export function recordedPlatformFee(txData: WalletCreditTx): number {
-  const paid = Number(txData.amountPaid);
-  const fee = Number(txData.platformFeeInr);
-  if (!Number.isFinite(paid) || paid <= 0) return 0;
-  if (!Number.isFinite(fee) || fee <= 0) return 0;
-  return Math.min(fee, paid);
-}
+// The order→tokens arithmetic lives in `orderCredit.ts` since Q-614 (2026-10-05): the refund clawback
+// must remove exactly what the credit added, so both read ONE formula. Re-exported so every existing
+// importer of these names from this module is unchanged.
+export { creditableTokens, recordedPlatformFee, orderCreditedTokens, orderNetPaidInr } from './orderCredit';
+export type { WalletCreditTx } from './orderCredit';
 
 /**
  * PURE credit computation: given the CURRENT wallet doc and a verified paid order, return the FULL new wallet doc after crediting. No I/O. The caller runs read→compute→write
@@ -130,7 +101,6 @@ export function computeCreditedWallet(
   // NavBharatAI's revenue and never reaches the balance. `totalMoneySpent` below still records the
   // GROSS — that field answers "how much has this user paid us", which is the full amount.
   const platformFee = recordedPlatformFee(txData);
-  const netPaid = Math.round((amountPaid - platformFee) * 100) / 100;
   // SECURITY C4 stands: the tokens still derive from the VERIFIED paid amount, only now net of our
   // own server-written fee — never from anything the client sent.
   //
@@ -146,7 +116,10 @@ export function computeCreditedWallet(
   // Collapsing them removes the duplicated money arithmetic this file's own header warns about: a
   // money rule with two homes is free to drift between them, which is exactly how the pass price came
   // to read ₹50 on one screen and ₹100 on another.
-  const tokensToCredit = creditableTokens(netPaid);
+  //
+  // 🔒 `orderCreditedTokens` (orderCredit.ts) is the net-paid → tokens formula, and the refund clawback
+  // (paymentReversal.ts) reads the SAME function, so a refund removes exactly what this added (Q-614).
+  const tokensToCredit = orderCreditedTokens(txData);
 
   const update: Record<string, any> = {};
 
@@ -271,8 +244,25 @@ async function fulfilGiftOrder(db: any, txRef: any, orderId: string, txData: any
     randomBytes: (n: number) => new Uint8Array(randomBytes(n)),
   });
   try { await updateDoc(txRef, { giftCode: code, fulfilledAt: new Date().toISOString() }); } catch { /* the code exists; the audit note is best-effort */ }
+  // 🔴 A REFUND THAT ARRIVED BEFORE THE CODE EXISTED (Q-614). The refund webhook found no code to void
+  // and recorded its totals on the order; the code minted just now must not go out at full value. The
+  // order is RE-READ (the `txData` above may predate the refund), and the reduction goes through the same
+  // transaction every reversal uses, keyed on the order's own marker, so it can never apply twice.
+  let faceNow = face;
+  try {
+    const fresh = await getDoc(txRef);
+    if (fresh.exists() && recordedReversedInr(fresh.data()) > 0) {
+      const reversal = await applyOrderReversal(db, { orderId, refundedInr: null, disputeLostInr: null });
+      if (reversal.status === 'gift-code-voided') {
+        return { success: false, error: 'This gift purchase was refunded, so its code is no longer valid.' };
+      }
+      if (reversal.status === 'gift-code-reduced' && typeof reversal.giftFaceInr === 'number') faceNow = reversal.giftFaceInr;
+    }
+  } catch (e: any) {
+    console.error(`[GIFT] Order ${orderId}: could not apply a recorded refund to the new code — ${e?.message}`);
+  }
   // `buyerUid` is for the route's owner check only; `verify-payment` strips it before answering (Q-630).
-  return { success: true, data: { giftCode: code, giftFaceInr: face, paidInr: Number(txData.amountPaid) || 0, buyerUid: txData.userId } };
+  return { success: true, data: { giftCode: code, giftFaceInr: faceNow, paidInr: Number(txData.amountPaid) || 0, buyerUid: txData.userId } };
 }
 
 export async function verifyPaymentInternal(orderId: string): Promise<{ success: boolean; data?: any; error?: string }> {
@@ -355,8 +345,15 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
         if (!snap.exists() || snap.data().paymentStatus === 'SUCCESS') return null; // claimed by a concurrent call
         const walletSnap = await tx.get(walletRef);
         const walletData = walletSnap.exists() ? walletSnap.data() : newWalletFor(txData.userId);
-        const { wallet } = computeCreditedWallet(walletData, snap.data() as WalletCreditTx, new Date().toISOString());
-        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef });
+        const nowIso = new Date().toISOString();
+        const fresh = snap.data() as WalletCreditTx & Record<string, unknown>;
+        const { wallet: creditedWallet } = computeCreditedWallet(walletData, fresh, nowIso);
+        // A refund or chargeback recorded on this order BEFORE it was credited (Q-614) is taken back in
+        // this same transaction — otherwise the credit would add the full amount after the reversal
+        // had already been handled, and nothing would ever take it back.
+        const reversal = settleRecordedReversalAtCredit(creditedWallet, fresh, orderCreditedTokens(fresh), orderId, nowIso);
+        const wallet = reversal ? reversal.wallet : creditedWallet;
+        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef, ...(reversal ? reversal.txPatch : {}) });
         tx.set(walletRef, wallet);
         return wallet;
       });

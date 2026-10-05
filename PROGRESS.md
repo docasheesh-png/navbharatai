@@ -89894,3 +89894,21 @@ in-place "Save App Secret" that keeps the webhook URL), a signed bot's last refu
 message (tracked from today, throttled), unsigned traffic and bad-signature stamps, totals. AppKnowledgeBase updated
 (`bot_builder`, new `admin-bot-ledger`, the admin tab list). **What existing bot owners must do:** add their App Secret
 from the Bot Builder notice before 2026-11-05, or their WhatsApp bot stops replying.
+### 2026-10-05 — Q-614: a refund or chargeback takes back the tokens that payment bought (PR #NEXT)
+
+Admin decision (a), 2026-10-05. Before this, every signed Cashfree webhook went to `verifyPaymentInternal`
+("fulfil this order") and nothing anywhere took tokens back after a refund or a lost chargeback.
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-614 a refunded / charged-back payment kept its tokens | the webhook had one branch (fulfil); no writer ever handled a reversal; the store rails check refund state only at first verify | a money event classified by "it is signed" rather than by what it is | webhook branches on `type` (`classifyCashfreeWebhook`); amounts re-read from Cashfree's refunds/disputes API (`paymentReversalStore.ts`); one pure clawback (`paymentReversal.ts`) shared by every rail, idempotent on the order's `clawbackTargetTokens`, debiting through `walletMirror` down to zero and never below, with a Refund/Chargeback ledger line; a refund recorded before the credit is applied in the credit's own transaction; gift codes reduced/voided (unused) or clawed from the buyer (redeemed); `orderCredit.ts` is now the ONE credited-tokens formula for credit and clawback | `tests/aRefundTakesBackWhatItBought.test.ts` — 7 reversions, each fails |
+
+**Open (needs the admin):** subscribe the Cashfree webhook to REFUND and DISPUTE events; Play RTDN (Pub/Sub +
+authenticated push) or a Voided Purchases pull, and App Store Server Notifications v2 (with JWS chain
+verification) — neither exists, so store refunds are still not taken back (both would call `applyOrderReversal`).
+
+**Discovered while building it (needs its own queue row):** `mirroredCreditPatch` (walletMirror.ts) floors the
+token view at zero with `max(0, held + delta)`, so on a wallet already in OVERDRAFT a credit lifts it past the
+delta (a 100-token gift to a −50,000 wallet lands at 0, forgiving the debt and over-counting `total_balance`),
+and an admin DEDUCTION on such a wallet raises it to 0. The refund path avoids it (it never calls the patch for
+a wallet at or below zero); the coupon / referral / admin-adjustment writers do not.

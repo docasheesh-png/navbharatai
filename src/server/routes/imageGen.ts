@@ -8,12 +8,11 @@ import {
   imageSubjectPrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
   geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
-  pollinationsEnabled, fetchPollinationsImage, pollinationsImageUrl, pollinationsApiKey, MAX_PROMPT_CHARS,
+  pollinationsEnabled, fetchPollinationsImage, pollinationsApiKey,
   imagePixelsFor,
 } from '../lib/imageGen';
-import { checkAnonymousDoor, noteAnonymousResult, anonymousDoorNote } from '../lib/freeProviderDoor';
 import { cloudflareImageConfig, cloudflareServesSize, fetchCloudflareImage } from '../lib/cloudflareImage';
-import { imageTierOf, freeBusyMessage, editNeedsPaidMessage, FREE_BUSY_CODE, NEEDS_PAID_CODE } from '../lib/imageTier';
+import { priceShownTo, freeUsedUpdateMessage, FREE_USED_UPDATE_CODE } from '../lib/imageTier';
 import { imageProConfigured, fetchImageProHostImage } from '../lib/imageProHost';
 import {
   imagePricingEnabled, imageFreePerDay, imagePriceInr, decideImageStart, needsBalance,
@@ -31,8 +30,8 @@ import { triageImageRequest } from '../lib/imageSafety';
 import { imageFreePaidBudget, FREE_PAID_CAP_MESSAGE } from '../lib/imageFreePaidBudget';
 import { enhanceImagePrompt, ENHANCE_MAX_INPUT } from '../lib/imagePromptEnhancer';
 import { aiRouter } from '../lib/aiRouter';
-import { clientImageFetchEnabled, freeFailureVerified, imageTicketSecret, signImageTicket, verifyImageTicket } from '../lib/imageTicket';
-import { IMAGE_TICKET_TTL_MS, isAllowedImageHost } from '../../lib/imageDelivery';
+import { imageTicketSecret, verifyImageTicket } from '../lib/imageTicket';
+import { isAllowedImageHost } from '../../lib/imageDelivery';
 import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { initImageTooLarge, parseDataUrl } from '../lib/imageDataUrl';
@@ -71,15 +70,6 @@ const schema = vobject({
   // (initImageTooLarge) rather than by string length. ⚠️ `vobject` drops a key it does not declare,
   // so leaving this out would make the attach button a no-op with nothing failing.
   initImage: vstring({ optional: true, max: 14_000_000 }),
-  // The browser could not get the free picture from the link we handed it — finish it here. Only a
-  // link WE signed, for THIS prompt, is honoured (`freeFailureVerified`). `reason` is the browser's
-  // own account of what went wrong, logged so the next "no image" is explainable.
-  freeFailed: vobject({
-    url: vstring({ max: 4_000 }),
-    ticket: vstring({ max: 120 }),
-    exp: vnumber({ int: true }),
-    reason: vstring({ optional: true, max: 120 }),
-  }, { optional: true }),
 });
 
 // Image generation is costlier than text — its own tighter bucket, separate from the workspace one.
@@ -125,7 +115,7 @@ export function registerImageGenRoutes(app: Express): void {
         return;
       }
     }
-    if (!imageGenConfigured()) {
+    if (!imageGenConfigured() && !imageProConfigured()) {
       // Honest not-available state (rule 2): the capability needs the image key in the environment.
       res.status(503).json({ error: 'Image generation is not configured on this server yet — please try again later.' });
       return;
@@ -136,9 +126,9 @@ export function registerImageGenRoutes(app: Express): void {
     // the prompt is, and whether the free provider is even a candidate.
     const rawInit = typeof req.body.initImage === 'string' ? req.body.initImage.trim() : '';
     const editing = rawInit.length > 0;
-    // FREE or PAID (admin 2026-09-30, `imageTier.ts`). A request that names no tier is Free, which
-    // is what every installed phone app sends.
-    const tier = imageTierOf(req.body);
+    // ONE generator since 2026-10-05 (`imageTier.ts`). What is left of the old tier is consent: only a
+    // screen that SHOWED the price may be charged. Every installed phone app sends no tier.
+    const priceShown = priceShownTo(req.body);
     const userWords = typeof req.body.prompt === 'string' ? req.body.prompt : '';
     if (editing) {
       const parsed = parseDataUrl(rawInit);
@@ -150,16 +140,8 @@ export function registerImageGenRoutes(app: Express): void {
         res.status(413).json({ error: 'That picture is too large. Please use one under 8 MB.' });
         return;
       }
-      // 🔴 THE FREE PROVIDER CANNOT DO THIS, AND SAYING SO IS THE HONEST STATE. Pollinations takes a
-      // prompt in a URL — it has no way to receive a picture that lives only in this request, and
-      // publishing the user's photo somewhere it could fetch is not something we will do to get a
-      // feature working. So an edit is served by the same multimodal rung the ladder already has,
-      // and it is a PAID rung: metered by `allowPaidRung()` below exactly like every other one.
-      // In Free mode the answer is where to find it, in the user's own language.
-      if (tier === 'free') {
-        res.status(409).json({ error: editNeedsPaidMessage(userWords), code: NEEDS_PAID_CODE });
-        return;
-      }
+      // An edit is served by the multimodal rung (the free provider takes a prompt in a URL and cannot
+      // receive a picture that lives only in this request). It is metered like every other picture.
       if (!geminiImageConfigured()) {
         res.status(503).json({
           error: 'Editing your own picture is not available on this server yet. You can still create a new image from a description.',
@@ -195,14 +177,20 @@ export function registerImageGenRoutes(app: Express): void {
     // ── 5 FREE IMAGES A DAY, THEN ₹1 EACH (admin 2026-09-30, `imageAllowance.ts`) ──────────────
     // Decided BEFORE any engine is called, so a user who cannot pay is refused before anything is
     // spent. The balance is read only once today's free pictures are used up.
-    // Only Paid mode is counted or charged: Free mode is free for everybody, with no daily count.
-    const pricing = tier === 'paid' && imagePricingEnabled();
+    // Every picture is counted against the same 5 a day. Only a screen that showed the price is
+    // charged after them; any other caller is told how to get more instead (`imageTier.ts`).
+    const pricing = imagePricingEnabled();
     const freeListed = isProfessionalFreeUser(account.uid, account.email);
     const freePerDay = imageFreePerDay();
     const priceInr = imagePriceInr();
     if (pricing) {
       const usedToday = freeListed ? 0 : await toolUsageStore.getTodayCount(account.uid, 'image');
       const facts = { freeListed, usedToday, freePerDay, priceInr };
+      // Refused before the balance is even read: this caller is not charged, whatever the wallet holds.
+      if (!priceShown && needsBalance(facts)) {
+        res.status(429).json({ error: freeUsedUpdateMessage(userWords, freePerDay), code: FREE_USED_UPDATE_CODE });
+        return;
+      }
       const balanceInr = needsBalance(facts)
         ? await readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), account.uid).catch(() => null)
         : null;
@@ -234,7 +222,7 @@ export function registerImageGenRoutes(app: Express): void {
         // and nothing bounded the whole platform (PR #3234's open item). Read once per request, before
         // the first paid rung, and never for a free-provider image. Free-listed users (the admin's own
         // test accounts) are not counted against it — they are how the paid rungs get verified at all.
-        // With pricing on, each user's own 5 a day bounds what Paid mode gives away, so the platform cap
+        // With pricing on, each user's own 5 a day bounds what the generator gives away, so the platform cap
         // is the pricing-off rule only.
         if (!freeListed && !pricing) {
           const budget = await imageFreePaidBudget.decide();
@@ -298,7 +286,7 @@ export function registerImageGenRoutes(app: Express): void {
         // paid. It is logged here, for every rung, before anything else can go wrong.
         // 🔒 WHITE-LABEL LAW: the name goes to the server log and, below, to an ADMIN caller only. A
         // user is never told which vendor served them.
-        console.info(`[IMAGE_GEN] served by ${engine} (tier=${tier}${paidRung ? ', paid rung' : ''})`);
+        console.info(`[IMAGE_GEN] served by ${engine} (${priceShown ? 'priced' : 'unpriced'}${paidRung ? ', paid rung' : ''})`);
         // Only a PAID rung spends an allowance. A free Pollinations image never counts against a quota,
         // and a failed rung never spends anything — the burn happens on delivery, not on attempt.
         if (!pricing && paidRung && gate && gate.allow && gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
@@ -309,7 +297,8 @@ export function registerImageGenRoutes(app: Express): void {
         let allowance: { freeLeftToday: number; chargedInr: number } | null = null;
         if (pricing && !freeListed) {
           const countAfter = await toolUsageStore.increment(account.uid, 'image').catch(() => 0);
-          const fee = imageFeeForCount(countAfter, freePerDay, priceInr);
+          // A client that never showed the price is never charged, even in a race past the fifth.
+          const fee = priceShown ? imageFeeForCount(countAfter, freePerDay, priceInr) : 0;
           if (fee > 0) {
             // Fire-and-forget like every other small charge: a money-path failure must never cost the
             // user the picture they have already been given.
@@ -364,86 +353,7 @@ export function registerImageGenRoutes(app: Express): void {
         // rungs: they would return a brand-new picture that has nothing to do with the one attached.
       }
 
-      // ── FREE MODE: the free provider, from the user's own connection, and nothing else ─────────────
-      // (admin 2026-09-30: "free wala sabhi ke liye free, agar pollination se image na bane, to likh kar
-      // aye, free server are too busy try on paid service"). No daily count, no charge, and no paid
-      // engine behind it: when the free provider cannot make the picture, the user is told so in their
-      // own language and pointed at Paid mode. Our account key is never used here — a picture anyone
-      // can ask for without limit must not spend the account's budget.
-      if (tier === 'free') {
-        const busy = (): void => {
-          const isAdminCaller = isAgentV3FreeUser(account.uid, account.email);
-          const msg = freeBusyMessage(userWords);
-          res.status(503).json({
-            error: isAdminCaller && diag.length ? `${msg}\n\n[admin diagnostic] ${diag.join(' | ')}` : msg,
-            code: FREE_BUSY_CODE,
-          });
-        };
-        if (!pollinationsEnabled()) { diag.push('free provider: switched off'); busy(); return; }
-        // 🔒 THE POLLINATIONS WORD SCAN (Play rejection 2026-09-28 — Google's evidence was a nude
-        // "Photograph" from this screen). Run on the FINISHED prompt, the exact text the link would
-        // carry, so a word added by the style/craft layer is scanned too.
-        if (!scanPollinationsPrompt(prompt).ok) {
-          res.status(422).json({ error: POLLINATIONS_BLOCK_MESSAGE, code: 'blocked' });
-          return;
-        }
-        // THE BROWSER ALREADY TRIED AND GOT NOTHING. One try from our side, then the honest answer.
-        // An unverified claim is refused — it is either stale or not ours.
-        const failedFree = (req.body as { freeFailed?: { url: string; ticket: string; exp: number; reason?: string } }).freeFailed;
-        const browserFailed = !!failedFree && freeFailureVerified(
-          failedFree, prompt, MAX_PROMPT_CHARS, imageTicketSecret(), Date.now(), isAllowedImageHost,
-        );
-        if (failedFree && !browserFailed) {
-          res.status(403).json({ error: 'That picture link has expired. Please make the image again.' });
-          return;
-        }
-        if (browserFailed) {
-          const why = typeof failedFree.reason === 'string' ? failedFree.reason.slice(0, 120) : 'unknown';
-          diag.push(`browser fetch: ${why}`);
-          console.warn(`[IMAGE_GEN] the browser could not get the free picture (${why}) — trying once from the server.`);
-          noteAnonymousResult(why);
-        }
-        // The anonymous door is used only while it is open (`freeProviderDoor.ts`): a door that is
-        // refusing everybody gets the honest answer at once instead of a link that cannot load.
-        const anonOpen = await checkAnonymousDoor();
-        // 🔑 THE BROWSER FETCHES IT, NOT US (admin 2026-09-21: "free wale me user ki ip"). The provider
-        // allows one request every 15 seconds PER ADDRESS, and this server is one address.
-        if (anonOpen && clientImageFetchEnabled() && !browserFailed) {
-          const url = pollinationsImageUrl(prompt, req.body.size, process.env, {
-            width: req.body.width,
-            height: req.body.height,
-          });
-          const exp = Date.now() + IMAGE_TICKET_TTL_MS;
-          res.json({
-            mode: 'client-fetch',
-            url,
-            ticket: signImageTicket(url, exp, imageTicketSecret()),
-            exp,
-            ...(crafted.notes.length > 0 ? { notes: crafted.notes } : {}),
-          });
-          return;
-        }
-        if (anonOpen) {
-          const pr = await fetchPollinationsImage(prompt, req.body.size, {
-            timeoutMs: ROUTE_TIMEOUT_MS,
-            custom: { width: req.body.width, height: req.body.height },
-            anonymous: true,
-          });
-          if (pr.image) { await deliver(pr.image, false, 'free-provider (anonymous)'); return; }
-          if (pr.blocked) { res.status(422).json({ error: POLLINATIONS_BLOCK_MESSAGE, code: 'blocked' }); return; }
-          if (pr.error) {
-            noteAnonymousResult(pr.error);
-            diag.push(`pollinations: ${pr.error}`);
-            console.warn(`[IMAGE_GEN] free picture failed: ${pr.error} — told the user to try Paid mode.`);
-          }
-        } else {
-          diag.push(anonymousDoorNote() ?? 'free provider: anonymous access closed');
-        }
-        busy();
-        return;
-      }
-
-      // ── PAID MODE: the Cloudflare rung, then the old Pro tier's two engines, then Gemini and Grok ──
+      // ── THE LADDER: the Cloudflare rung, then the old Pro tier's two engines, then Gemini and Grok ──
       // (admin 2026-09-30: "paid wala system abhi apne jo banaya hai, aur old paid wala mila ke banao").
       // Every rung is fetched HERE, so every client gets bytes back. The same word ban runs first: an
       // image model draws, it does not refuse.

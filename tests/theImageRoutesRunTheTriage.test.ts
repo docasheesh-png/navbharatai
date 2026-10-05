@@ -48,10 +48,10 @@ describe('the decision is the SAME triage, with the SAME refusal', () => {
 });
 
 describe('🔒 SOURCE — both routes call it FIRST', () => {
-  it('the free route triages before the account gate, before the link and before any provider', () => {
+  it('the image route triages before the account gate and before any provider', () => {
     const triage = free.indexOf('await triageImageRequest(');
     expect(triage).toBeGreaterThan(0);
-    for (const later of ['requireAccountForCostlyAi(', 'clientImageFetchEnabled()', 'fetchPollinationsImage(', 'runImageEdit(']) {
+    for (const later of ['requireAccountForCostlyAi(', 'fetchCloudflareImage(', 'fetchPollinationsImage(', 'runImageEdit(']) {
       expect(free.indexOf(later), `${later} runs before the triage`).toBeGreaterThan(triage);
     }
     expect(free).toMatch(/if \(safety\.blocked\) \{\s*res\.status\(422\)\.json\(\{ error: safety\.message, code: 'blocked' \}\);\s*return;/);

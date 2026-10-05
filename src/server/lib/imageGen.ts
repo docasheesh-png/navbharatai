@@ -203,8 +203,8 @@ export function pollinationsImageUrl(
  * A SECRET key (`sk_…`) — the only kind the provider allows off a browser. It is read here and sent
  * from THIS SERVER only, as an Authorization header, never in a URL: a key in a link the browser
  * fetches is a key every user can copy. So with a key the picture is fetched here, never by the
- * browser. Unset ⇒ the anonymous link, exactly as before (and `freeProviderDoor.ts` notices when that
- * door is shut and stops sending traffic to it).
+ * browser. Unset ⇒ the anonymous link — but that door answered 402 to everyone on 2026-10-05, so no
+ * route calls this provider without a key any more (`imageTier.ts`).
  */
 export function pollinationsApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return String(env.POLLINATIONS_API_KEY ?? '').trim();
@@ -406,7 +406,9 @@ export function isValidImageGenRequest(body: unknown): body is ImageGenRequest {
 /** True when ANY image provider is available — the free Pollinations provider (no key), OR a Gemini key,
  *  OR an xAI/Grok key. With Pollinations on (the default), image generation is always configured. */
 export function imageGenConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return pollinationsEnabled(env) || cloudflareImageConfig(env) !== null || Boolean(
+  // The free provider counts only WITH our account key: its anonymous door answers 402 to everyone
+  // (2026-10-05), and the route no longer uses it, so a key-less provider is no engine at all.
+  return (pollinationsEnabled(env) && pollinationsApiKey(env) !== '') || cloudflareImageConfig(env) !== null || Boolean(
     env.GEMINI_API_KEY || env.GOOGLE_API_KEY || env.GOOGLE_GENERATIVE_AI_API_KEY
     || env.GROK_API_KEY || env.XAI_API_KEY,
   );
@@ -439,7 +441,7 @@ export async function fetchPollinationsImage(
   opts: {
     fetchImpl?: typeof fetch; timeoutMs?: number; env?: NodeJS.ProcessEnv; custom?: { width?: unknown; height?: unknown };
     /**
-     * Never use our account key, even when one is set. Free mode passes this: a picture every user can
+     * Never use our account key, even when one is set. The old Free mode passed this (removed 2026-10-05): a picture every user can
      * ask for without limit must not spend the account's budget (admin 2026-09-21, "free wale me user ki
      * ip, paid me hamari").
      */

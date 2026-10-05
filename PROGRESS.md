@@ -89936,3 +89936,55 @@ already**, which is why they are corrected here rather than worked around.
 
 Both relaxations were proven to still bite: removing `shadow` from the sum fails the first, and deleting the
 green-freeze block fails the second.
+### 2026-10-05 — Q-154: the hop check could only be run from a command line; now it is an admin card
+
+Admin: *"navbharatai.com/admin/api/admin/proxy-hops open hi nahi ho raha hai"*. Two causes, the second one mine: the
+path had an extra `/admin/`, and even the right path answers 401 from an address bar, because the route needs the
+`x-admin-token` HEADER that only the admin panel sends. Telling the admin to "open the URL" was asking for
+something they could not do — and then to look up their own IP. Class: a check only a command-line user could run.
+Fix: the report computes its own verdict from the admin's own request (the left-most forwarded entry is theirs —
+nothing is forged in their own browser), and `ProxyHopsCard` on **Admin → Safety** sends the token and says
+Correct / Mismatch (naming the number) / Cannot measure. The route left the uncalled-route baseline (it has a
+caller now). Lock: `tests/theClientIsMeasuredNotGuessed.test.ts`.
+## 2026-10-05 — Image Generator: Free mode removed (admin screenshot, "Tea shop banner")
+
+**Report:** Free mode answered every request "The free image servers are too busy right now. Please try Paid mode",
+with the admin diagnostic `browser fetch: HTTP 402 | free provider: anonymous access refused (HTTP 402)`.
+
+**Root cause:** the free provider's anonymous door now answers 402 (payment required) to everybody, both the
+user's browser and our server. Free mode was built only on that door, so it could make nothing. Its "busy" sentence
+named a cause that was not true, and its "Try again" could only fail again.
+
+**This class came back.** The 2026-09-30 fix (`freeProviderDoor.ts`) taught the server to *notice* the closed door.
+That same evening Free mode was re-split so that a closed door meant "busy, try Paid" for every request. The
+instance was detected; the condition (a mode that has no engine) survived. This fix removes the condition.
+
+**Decision (admin, 2026-10-05):** remove Free mode. The options were offered in the same turn: Cloudflare-backed
+free with a cap, buying a provider key, removing it, or only an honest message.
+
+**What changed:**
+
+- One screen, which is the old Paid page.
+  - The header is the price line.
+  - The toggle, the Free page and "Switch to Paid" are gone.
+  - Every request sends `tier: 'paid'`.
+- Server (`imageTier.ts`, `routes/imageGen.ts`):
+  - Every caller runs the same ladder and counts against the same 5 a day.
+  - Only `tier: 'paid'` is charged. A no-tier caller (an old installed phone app) gets 429 `free_used_update` after its 5, never a charge.
+  - No link is minted, and `freeFailed` is dropped by the schema.
+  - `freeProviderDoor.ts` and its test are deleted.
+- `imageGenConfigured()` counts the free provider only with a key (Q-663).
+- Text and docs updated:
+  - every AI's price sentence (`imagePriceSentence`);
+  - the Pro picture pointer;
+  - AppKnowledgeBase;
+  - the ENV registry.
+- Old free pictures stay in the device history but are not shown, under the 2026-10-01 no-watermark rule. Nothing is deleted.
+
+**Kept on purpose:** `/api/image/relay`, `imageTicket.ts` and `clientImageFetch.ts`. They still verify old
+history links; their unit tests stay.
+
+**Rows:** Q-660 … Q-663 in `BUILD_REPORT_QUEUE.md`.
+
+**Watch after deploy:** a picture should arrive on the first press. If Paid itself fails, the admin diagnostic now
+names the paid rungs, not the free door.

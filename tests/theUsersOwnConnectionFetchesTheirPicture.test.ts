@@ -177,34 +177,19 @@ describe('🔒 the kill switch', () => {
 describe('🔒 what the server does, and what it deliberately still does', () => {
   const route = code(read(ROUTE));
 
-  it('a free generation hands the browser a link instead of fetching it here', () => {
-    expect(route).toContain('clientImageFetchEnabled()');
-    expect(route).toContain("mode: 'client-fetch'");
-    expect(route).toContain('signImageTicket(url, exp, imageTicketSecret())');
+  // 🔁 2026-10-05: FREE MODE REMOVED. The anonymous door this file was built on answered 402 to every
+  // request, so the server no longer mints a link at all. What stays locked below: the relay (old
+  // history items carry links), the ticket and the host allowlist.
+  it('🔒 the server mints no link any more — every picture comes back as bytes', () => {
+    expect(route).not.toContain("mode: 'client-fetch'");
+    expect(route).not.toContain('signImageTicket(');
+    expect(route).not.toContain('pollinationsImageUrl(');
+    expect(route).not.toContain('anonymous: true');
   });
 
-  it('🔴 the safety triage still runs HERE, before a link is ever minted', () => {
-    // The link carries a FINISHED prompt. The pornography ban, the craft layer and the India-map
-    // directive all ran on this server seconds earlier — none of that moved to the client.
-    // ⚠️ The provider's own `safe` parameter is NOT a substitute: its docs say safety is off unless
-    // asked for, and it is documented on their NEW endpoint, not the keyless one this uses.
-    const mint = route.slice(route.indexOf('clientImageFetchEnabled()'));
-    expect(mint).toContain('pollinationsImageUrl(prompt');
-    expect(route.indexOf('triagePrompt') === -1 || route.indexOf('craftImagePrompt') > -1).toBe(true);
+  it('🔴 the safety triage and the craft layer still run on this server', () => {
     expect(route).toContain('craftImagePrompt(');
-  });
-
-  it('🔴 an EDIT of the user’s own photo is never handed to the browser', () => {
-    // An edit carries the user's photograph. It goes to a keyed provider from our server, and its
-    // bytes must not end up in a URL anybody could hold. Since 2026-09-30 (Free / Paid) an edit in
-    // Free mode is refused inside the edit validation, BEFORE the only place a link is minted, and
-    // Paid mode mints no links at all.
-    const refusal = route.indexOf("res.status(409).json({ error: editNeedsPaidMessage(userWords), code: NEEDS_PAID_CODE })");
-    const validation = route.indexOf('    if (editing) {');
-    expect(validation).toBeGreaterThan(0);
-    expect(refusal).toBeGreaterThan(validation);
-    expect(refusal).toBeLessThan(route.indexOf("mode: 'client-fetch'"));
-    expect(route.split("mode: 'client-fetch'").length).toBe(2);
+    expect(route).toContain('await triageImageRequest(');
   });
 
   it('the relay is locked by BOTH the host allowlist and the signature', () => {
@@ -260,9 +245,9 @@ describe('🔒 the four features survive — Add text, Crop, Copy, Download', ()
     expect(fn).toContain('could not be opened for editing');
   });
 
-  it('the wait is visible while the browser retries', () => {
-    expect(client).toContain('setWaitNote(imageWaitMessage(msLeft))');
-    expect(client).toContain('{waitNote');
+  it('no browser-side wait is left to show: the screen never fetches a link itself (2026-10-05)', () => {
+    expect(client).not.toContain('fetchImageFromUser(');
+    expect(client).not.toContain('setWaitNote(');
   });
 });
 

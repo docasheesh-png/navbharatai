@@ -1,115 +1,47 @@
-// FREE AND PAID, ON ONE SCREEN (admin 2026-09-30).
+// ONE IMAGE GENERATOR, ONE PRICE — AND A PRICE IS CHARGED ONLY TO A SCREEN THAT SHOWED IT (admin 2026-10-05).
 //
-// Admin, verbatim: "pahle ek system tha, free + paid (dono the) wahi bana do! free wala sabhi ke liye
-// free, agar pollination se image na bane, to likh kar aye, free server are too busy try on paid
-// service (user ki bhasa me). aur paid wala system abhi apne jo banaya hai, aur old paid wala mila ke
-// banao!!"
+// History, so nobody restores the old shape from an old comment:
+//  - 2026-09-30 the screen had two modes, FREE (the free provider's anonymous door, no count, no charge)
+//    and PAID (5 free pictures a day, then ₹1 each, `imageAllowance.ts`).
+//  - 2026-10-05 the admin sent a screenshot of Free mode answering every request with "the free image
+//    servers are too busy" over an admin diagnostic reading `HTTP 402 | anonymous access refused`. The
+//    provider was not busy: it had started asking for payment from anyone without an account key, from
+//    the user's browser and from our server alike, so Free mode could not make a single picture and told
+//    every user a cause that was not true. Asked to choose, the admin removed Free mode
+//    ("Free mode हटाएँ"). The screen now opens straight on the one generator: 5 free pictures a day,
+//    then ₹1 each.
 //
-// So the image generator has TWO modes again, chosen by a toggle on the screen:
-//  - FREE — for everybody, with no daily count and no charge. It uses only the free provider, fetched
-//    from the user's own connection. When the free provider cannot make the picture, the answer is a
-//    plain sentence in the user's own language pointing at Paid mode — never a quiet switch to a paid
-//    engine, because the user did not choose to spend anything.
-//  - PAID — the ladder of paid engines (the Cloudflare rung, the keyed free provider and the second
-//    paid provider from the old Pro tier, then Gemini and Grok), with 5 free pictures a day and ₹1
-//    each after that (`imageAllowance.ts`). An edit of the user's own picture is here too.
-//
-// 🔒 A request that names no tier is FREE. The phone apps are bundled, so every installed build sends
-// no tier at all; for them the safe reading is the one that can never charge anybody.
+// 🔒 WHAT IS LEFT OF "TIER" IS CONSENT TO A PRICE. Every request runs the same engines and counts against
+// the same 5 a day. Only a request whose screen SHOWED the price (`tier: 'paid'`, which the current
+// screen always sends) may be charged. A request that names no tier comes from a client that never
+// showed a price — every phone app installed before this change, and a browser tab still holding the
+// old page — so it gets the same free pictures and, once those are used, a plain sentence instead of a
+// charge it never agreed to.
 
 import { detectLanguageHint } from '../AgentV3/LanguageDetect';
 
-export type ImageTier = 'free' | 'paid';
+/** The code a client sees when its free pictures are used and it cannot be charged. */
+export const FREE_USED_UPDATE_CODE = 'free_used_update';
 
-export const FREE_BUSY_CODE = 'free_busy';
-export const NEEDS_PAID_CODE = 'needs_paid';
-
-/** Which mode this request is for. Anything but the word "paid" is Free. PURE. */
-export function imageTierOf(body: unknown): ImageTier {
+/** True only when the request's own screen showed the price (`tier: 'paid'`). PURE. */
+export function priceShownTo(body: unknown): boolean {
   const t = (body as { tier?: unknown } | null)?.tier;
-  return typeof t === 'string' && t.trim().toLowerCase() === 'paid' ? 'paid' : 'free';
+  return typeof t === 'string' && t.trim().toLowerCase() === 'paid';
 }
 
-type Sentences = { busy: string; edit: string };
-
-const EN: Sentences = {
-  busy: 'The free image servers are too busy right now. Please try Paid mode: switch the toggle at the top to Paid.',
-  edit: 'Changing your own picture is available in Paid mode. Switch the toggle at the top to Paid.',
-};
-
-const HINGLISH: Sentences = {
-  busy: 'Free image server abhi bahut busy hain. Kripya Paid mode try kijiye: upar toggle ko Paid par kijiye.',
-  edit: 'Apni photo badalna Paid mode me hota hai. Upar toggle ko Paid par kijiye.',
-};
-
-/** The sentence per language. Keyed by the codes `detectLanguageHint` returns. */
-const BY_LANGUAGE: Record<string, Sentences> = {
-  hi: {
-    busy: 'फ़्री इमेज सर्वर अभी बहुत व्यस्त हैं। कृपया Paid मोड आज़माइए: ऊपर का टॉगल Paid पर कीजिए।',
-    edit: 'अपनी फ़ोटो बदलना Paid मोड में होता है। ऊपर का टॉगल Paid पर कीजिए।',
-  },
-  mr: {
-    busy: 'फ्री इमेज सर्व्हर सध्या खूप व्यस्त आहेत. कृपया Paid मोड वापरून पहा: वरचा टॉगल Paid वर करा.',
-    edit: 'स्वतःचा फोटो बदलणे Paid मोडमध्ये होते. वरचा टॉगल Paid वर करा.',
-  },
-  bn: {
-    busy: 'ফ্রি ইমেজ সার্ভার এখন খুব ব্যস্ত। অনুগ্রহ করে Paid মোড ব্যবহার করে দেখুন: উপরের টগলটি Paid-এ দিন।',
-    edit: 'নিজের ছবি বদলানো Paid মোডে হয়। উপরের টগলটি Paid-এ দিন।',
-  },
-  ta: {
-    busy: 'இலவச படச் சேவையகங்கள் இப்போது மிகவும் பிஸியாக உள்ளன. தயவுசெய்து Paid பயன்முறையை முயற்சிக்கவும்: மேலே உள்ள டாகிளை Paid-க்கு மாற்றவும்.',
-    edit: 'உங்கள் சொந்தப் படத்தை மாற்றுவது Paid பயன்முறையில் கிடைக்கும். மேலே உள்ள டாகிளை Paid-க்கு மாற்றவும்.',
-  },
-  te: {
-    busy: 'ఉచిత ఇమేజ్ సర్వర్లు ఇప్పుడు చాలా బిజీగా ఉన్నాయి. దయచేసి Paid మోడ్‌ను ప్రయత్నించండి: పైన ఉన్న టోగుల్‌ను Paidకి మార్చండి.',
-    edit: 'మీ సొంత ఫోటోను మార్చడం Paid మోడ్‌లో ఉంటుంది. పైన ఉన్న టోగుల్‌ను Paidకి మార్చండి.',
-  },
-  kn: {
-    busy: 'ಉಚಿತ ಇಮೇಜ್ ಸರ್ವರ್‌ಗಳು ಈಗ ತುಂಬಾ ಬ್ಯುಸಿಯಾಗಿವೆ. ದಯವಿಟ್ಟು Paid ಮೋಡ್ ಪ್ರಯತ್ನಿಸಿ: ಮೇಲಿನ ಟಾಗಲ್ ಅನ್ನು Paidಗೆ ಬದಲಾಯಿಸಿ.',
-    edit: 'ನಿಮ್ಮ ಸ್ವಂತ ಫೋಟೋ ಬದಲಾಯಿಸುವುದು Paid ಮೋಡ್‌ನಲ್ಲಿ ಇದೆ. ಮೇಲಿನ ಟಾಗಲ್ ಅನ್ನು Paidಗೆ ಬದಲಾಯಿಸಿ.',
-  },
-  ml: {
-    busy: 'സൗജന്യ ഇമേജ് സെർവറുകൾ ഇപ്പോൾ വളരെ തിരക്കിലാണ്. ദയവായി Paid മോഡ് പരീക്ഷിക്കൂ: മുകളിലെ ടോഗിൾ Paid ആക്കൂ.',
-    edit: 'സ്വന്തം ഫോട്ടോ മാറ്റുന്നത് Paid മോഡിലാണ്. മുകളിലെ ടോഗിൾ Paid ആക്കൂ.',
-  },
-  gu: {
-    busy: 'મફત ઇમેજ સર્વર અત્યારે બહુ વ્યસ્ત છે. કૃપા કરીને Paid મોડ અજમાવો: ઉપરનું ટૉગલ Paid પર કરો.',
-    edit: 'પોતાનો ફોટો બદલવો Paid મોડમાં થાય છે. ઉપરનું ટૉગલ Paid પર કરો.',
-  },
-  pa: {
-    busy: 'ਮੁਫ਼ਤ ਇਮੇਜ ਸਰਵਰ ਇਸ ਵੇਲੇ ਬਹੁਤ ਰੁੱਝੇ ਹੋਏ ਹਨ। ਕਿਰਪਾ ਕਰਕੇ Paid ਮੋਡ ਵਰਤ ਕੇ ਦੇਖੋ: ਉੱਪਰ ਵਾਲਾ ਟੌਗਲ Paid \'ਤੇ ਕਰੋ।',
-    edit: 'ਆਪਣੀ ਫੋਟੋ ਬਦਲਣਾ Paid ਮੋਡ ਵਿੱਚ ਹੁੰਦਾ ਹੈ। ਉੱਪਰ ਵਾਲਾ ਟੌਗਲ Paid \'ਤੇ ਕਰੋ।',
-  },
-  or: {
-    busy: 'ମାଗଣା ଇମେଜ୍ ସର୍ଭର ଏବେ ବହୁତ ବ୍ୟସ୍ତ ଅଛି। ଦୟାକରି Paid ମୋଡ୍ ଚେଷ୍ଟା କରନ୍ତୁ: ଉପର ଟଗଲ୍‌କୁ Paid କରନ୍ତୁ।',
-    edit: 'ନିଜ ଫଟୋ ବଦଳାଇବା Paid ମୋଡ୍‌ରେ ହୁଏ। ଉପର ଟଗଲ୍‌କୁ Paid କରନ୍ତୁ।',
-  },
-  ar: {
-    busy: 'مفت امیج سرورز اس وقت بہت مصروف ہیں۔ براہ کرم Paid موڈ آزمائیں: اوپر والا ٹوگل Paid پر کریں۔',
-    edit: 'اپنی تصویر بدلنا Paid موڈ میں ہوتا ہے۔ اوپر والا ٹوگل Paid پر کریں۔',
-  },
-};
+const EN = (n: number): string => `You have used your ${n} free images for today. To make more (₹1 each), update the NavBharatAI app or open navbharatai.com, or come back tomorrow for ${n} more free images.`;
+const HINGLISH = (n: number): string => `Aaj ki ${n} free images ho gayi hain. Aur images (₹1 each) ke liye NavBharatAI app update kijiye ya navbharatai.com kholiye, ya kal ${n} nayi free images ke liye aaiye.`;
+const HINDI = (n: number): string => `आज की ${n} फ़्री इमेज हो गई हैं। और इमेज (₹1 प्रति इमेज) के लिए NavBharatAI ऐप अपडेट कीजिए या navbharatai.com खोलिए, या कल ${n} नई फ़्री इमेज के लिए आइए।`;
 
 // Roman-script Hindi ("ek sher ki photo banao") carries no Devanagari, so the script detector cannot
 // see it. Two of these everyday words is enough to answer in the same Roman Hindi; one is not, because
 // "photo" and "banner" are English too.
 const HINGLISH_WORDS = /\b(banao|bana do|banado|banaiye|chahiye|chaiye|dikhao|wala|wali|wale|mera|meri|mere|hamara|hamari|kar do|karo|kijiye|ki|ka|ke|aur|mein|nahi|hai|hain|ek|jaisa|jaisi)\b/gi;
 
-function sentencesFor(text: string): Sentences {
-  const said = String(text ?? '');
-  const hint = detectLanguageHint(said);
-  if (hint && BY_LANGUAGE[hint.code]) return BY_LANGUAGE[hint.code];
+/** "Today's free images are used — update the app", in Hindi, Roman Hindi or English. PURE. */
+export function freeUsedUpdateMessage(prompt: string, freePerDay: number): string {
+  const said = String(prompt ?? '');
+  if (detectLanguageHint(said)?.code === 'hi') return HINDI(freePerDay);
   const hits = new Set((said.toLowerCase().match(HINGLISH_WORDS) ?? []).map((w) => w.trim()));
-  if (hits.size >= 2) return HINGLISH;
-  return EN;
-}
-
-/** "The free servers are busy — try Paid", in the language the user wrote in. PURE. */
-export function freeBusyMessage(prompt: string): string {
-  return sentencesFor(prompt).busy;
-}
-
-/** "Changing your own picture is in Paid mode", in the language the user wrote in. PURE. */
-export function editNeedsPaidMessage(prompt: string): string {
-  return sentencesFor(prompt).edit;
+  return hits.size >= 2 ? HINGLISH(freePerDay) : EN(freePerDay);
 }

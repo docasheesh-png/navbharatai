@@ -798,7 +798,9 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     // animal, road. agar user bole real/asli/100% (wording par nahi jana, INTENTION samjhna hai) to
     // hu-ba-hu real banao. agar sirf 3d bole to lite se kaam chal jayega."
     '       🔴 NEVER HAND-MODEL AN OBJECT. objects.ts builds them properly: createCar, createTree,',
-    '         createMountain, createRiver, createDesert, createRoad, createAnimal (+ createHumanoid).',
+    '         createMountain, createRiver, createDesert, createRoad, createAnimal, createHouse (+ createHumanoid).',
+    '         A building is createHouse() (door, windows, sun-shades, flat roof + water tank or clay tiles) —',
+    '         never a box with a cone on top. Stand vehicles on the road at y = ROAD_SURFACE_Y.',
     '         A hand-written box-with-wheels beside these reads as a bug, not a style. If an object you',
     '         need is not there, build it from the SAME rules — real proportions and a real silhouette.',
     '       🔴 CALL setDetailLevel() ONCE at start-up, from what the user actually MEANT — not from the',

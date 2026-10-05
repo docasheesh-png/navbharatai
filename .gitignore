@@ -33,3 +33,6 @@ tests/.tmp-*/
 .env
 .env.*
 !.env.example
+
+# Executable 3D-layer tests write the generated modules here and delete them afterwards.
+tests/.tmp-game3d-*/

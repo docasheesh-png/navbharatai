@@ -439,6 +439,7 @@ export class CameraRig {
 
 const WORLD = `import * as THREE from 'three';
 import { sharedMaterial, paletteColor, type PaletteName } from './materials';
+import { surfaceMaterial, enableAO, getDetailLevel, type Detail, type SurfaceKind } from './surfaces';
 
 /**
  * Procedural world building — an environment with no asset library.
@@ -479,6 +480,17 @@ export interface TerrainOptions {
   seed?: number;
   palette?: PaletteName;
   flat?: boolean;
+  /** Override the tier set with setDetailLevel(). */
+  detail?: Detail;
+  /** What the ground is made of in the \`real\` tier. Defaults from the palette (grass, sand, …). */
+  surface?: SurfaceKind;
+}
+
+/** The ground a palette implies: a desert is sand, a village or a forest is grass. */
+function groundSurface(palette: PaletteName): SurfaceKind {
+  if (palette === 'desert') return 'sand';
+  if (palette === 'neon' || palette === 'monochrome') return 'tile';
+  return 'grass';
 }
 
 /** A terrain mesh. flat:true gives a plane — right for a village or a city, where hills fight the buildings. */
@@ -505,7 +517,38 @@ export function createTerrain(options: TerrainOptions = {}): THREE.Mesh {
     geo.computeVertexNormals();
   }
 
-  const mesh = new THREE.Mesh(geo, sharedMaterial('ground', paletteColor(options.palette ?? 'indianVillage', 4)));
+  // PATCHES. A field is never one green: broad, soft light-and-dark patches (two octaves of the same
+  // noise) are what the eye reads as ground rather than a painted board — in BOTH tiers, at no runtime
+  // cost (a vertex colour, multiplied in by the GPU).
+  const palette = options.palette ?? 'indianVillage';
+  const patch = valueNoise2D((options.seed ?? 1) + 101);
+  const posAttr = geo.attributes.position as THREE.BufferAttribute;
+  const colors = new Float32Array(posAttr.count * 3);
+  for (let i = 0; i < posAttr.count; i++) {
+    const x = posAttr.getX(i), z = posAttr.getZ(i);
+    const n = patch(x * 0.035, z * 0.035) * 0.7 + patch(x * 0.12, z * 0.12) * 0.3; // 0..1
+    const k = 0.82 + n * 0.3; // 0.82..1.12 — visible, never blotchy
+    colors[i * 3] = k; colors[i * 3 + 1] = k; colors[i * 3 + 2] = k * 0.97;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+  // 🔴 THE REAL TIER IS TEXTURED. This used to be a flat palette colour in every tier, so after
+  // setDetailLevel('real') the car, the road and the trees were textured and the ground under all of
+  // them — the largest thing on screen — was not. One texel per ~3 m reads as grass, not as a pattern.
+  const detail = options.detail ?? getDetailLevel();
+  let material: THREE.Material;
+  if (detail === 'real') {
+    const m = surfaceMaterial(options.surface ?? groundSurface(palette), { repeat: Math.max(8, Math.round(size / 3)) });
+    m.vertexColors = true;
+    enableAO(geo);
+    material = m;
+  } else {
+    const base = sharedMaterial('ground', paletteColor(palette, 4)) as THREE.MeshStandardMaterial;
+    const m = base.clone(); // its own copy: vertexColors on the SHARED material would tint everything else
+    m.vertexColors = true;
+    material = m;
+  }
+  const mesh = new THREE.Mesh(geo, material);
   mesh.receiveShadow = true;
   return mesh;
 }
@@ -588,15 +631,24 @@ function mergeGeometries(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
   const merged = new THREE.BufferGeometry();
   const positions: number[] = [];
   const normals: number[] = [];
+  // 🔴 UVs TRAVEL WITH THE MESH. This used to copy only positions and normals, so every merged shape —
+  // buildingGeometry() and treeGeometry() — came out with NO uv set. A brick or plaster surfaceMaterial
+  // on a house then had nothing to map its texture with and rendered as one flat colour, and enableAO()
+  // (which copies uv) silently did nothing. A part without uvs gets zeros rather than shifting the rest.
+  const uvs: number[] = [];
   for (const g of list) {
     const nonIndexed = g.index ? g.toNonIndexed() : g;
     const p = nonIndexed.attributes.position.array as ArrayLike<number>;
     const n = nonIndexed.attributes.normal.array as ArrayLike<number>;
+    const uv = nonIndexed.attributes.uv?.array as ArrayLike<number> | undefined;
     for (let i = 0; i < p.length; i++) positions.push(p[i]);
     for (let i = 0; i < n.length; i++) normals.push(n[i]);
+    const vertices = p.length / 3;
+    for (let i = 0; i < vertices * 2; i++) uvs.push(uv ? uv[i] : 0);
   }
   merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   merged.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  merged.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   return merged;
 }
 `;
@@ -621,6 +673,21 @@ function mergeGeometries(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 const SURFACES = `import * as THREE from 'three';
 
+export type Detail = 'real' | 'lite';
+
+/**
+ * The tier every builder uses when not told otherwise. Set ONCE at start-up from what the user asked
+ * for — the game should not be deciding this per object.
+ *
+ * It lives HERE, in the module every textured thing already imports, so the ground (world.ts) and the
+ * objects (objects.ts) read ONE setting. It used to live in objects.ts, which world.ts never imported —
+ * so after setDetailLevel('real') every car, tree and road was textured and the ground under them stayed
+ * a flat colour, the exact "flat colour" the realism checklist forbids.
+ */
+let DEFAULT_DETAIL: Detail = 'lite';
+export function setDetailLevel(detail: Detail): void { DEFAULT_DETAIL = detail; }
+export function getDetailLevel(): Detail { return DEFAULT_DETAIL; }
+
 export type SurfaceKind =
   | 'brick' | 'plaster' | 'wood' | 'bark' | 'stone' | 'asphalt'
   | 'soil' | 'grass' | 'metal' | 'fabric' | 'tile' | 'sand';
@@ -643,8 +710,15 @@ function makeRng(seed: number): () => number {
   };
 }
 
+/**
+ * Value noise that TILES. 🔴 The lattice used to be (cells + 1)² independent values, so the last row and
+ * column were unrelated to the first — every texture built on it had a hard seam at its edge, and since
+ * every surface is drawn REPEATED (grass ×100 across a field, plaster ×2 across a wall), that seam
+ * became a visible grid of squares over the whole scene (seen in a real render, 2026-10-05). The lattice
+ * now wraps (the cell after the last is the first), so the right edge continues into the left exactly.
+ */
 function smoothNoise(size: number, cells: number, rng: () => number): Float32Array {
-  const grid = new Float32Array((cells + 1) * (cells + 1));
+  const grid = new Float32Array(cells * cells);
   for (let i = 0; i < grid.length; i++) grid[i] = rng();
   const out = new Float32Array(size * size);
   const step = size / cells;
@@ -655,10 +729,11 @@ function smoothNoise(size: number, cells: number, rng: () => number): Float32Arr
       const fx = gx - x0, fy = gy - y0;
       // Smoothstep, so cell boundaries do not show as a visible grid.
       const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
-      const a = grid[y0 * (cells + 1) + x0];
-      const b = grid[y0 * (cells + 1) + Math.min(x0 + 1, cells)];
-      const c = grid[Math.min(y0 + 1, cells) * (cells + 1) + x0];
-      const d = grid[Math.min(y0 + 1, cells) * (cells + 1) + Math.min(x0 + 1, cells)];
+      const xa = x0 % cells, xb = (x0 + 1) % cells, ya = y0 % cells, yb = (y0 + 1) % cells;
+      const a = grid[ya * cells + xa];
+      const b = grid[ya * cells + xb];
+      const c = grid[yb * cells + xa];
+      const d = grid[yb * cells + xb];
       out[y * size + x] = (a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sy;
     }
   }
@@ -832,9 +907,8 @@ export function surfaceMaterial(
   kind: SurfaceKind,
   opts: { color?: number; repeat?: number; seed?: number; size?: number } = {},
 ): THREE.MeshStandardMaterial {
-  const maps = surfaceMaps(kind, { seed: opts.seed, size: opts.size });
   const repeat = opts.repeat ?? 4;
-  for (const t of [maps.map, maps.normalMap, maps.roughnessMap, maps.aoMap]) t.repeat.set(repeat, repeat);
+  const maps = repeatedMaps(kind, repeat, opts);
   const look = SURFACE_LOOK[kind] ?? SURFACE_LOOK.stone;
   return new THREE.MeshStandardMaterial({
     map: maps.map,
@@ -846,6 +920,25 @@ export function surfaceMaterial(
     roughness: 1,
     ...(opts.color !== undefined ? { color: opts.color } : {}),
   });
+}
+
+/**
+ * The maps at ONE repeat. 🔴 \`repeat\` used to be set on the CACHED textures themselves, so every
+ * material of a kind shared one repeat — whichever was asked for LAST. A road (asphalt ×40) followed by
+ * anything else asphalt (×4) silently rescaled the road's grain tenfold. A clone shares the image (no
+ * new pixels are generated or uploaded twice) and owns its own repeat.
+ */
+const repeatCache = new Map<string, SurfaceMaps>();
+function repeatedMaps(kind: SurfaceKind, repeat: number, opts: { seed?: number; size?: number }): SurfaceMaps {
+  const key = kind + ':' + (opts.seed ?? '') + ':' + (opts.size ?? '') + ':' + repeat;
+  let maps = repeatCache.get(key);
+  if (!maps) {
+    const base = surfaceMaps(kind, { seed: opts.seed, size: opts.size });
+    const at = (t: THREE.Texture) => { const c = t.clone(); c.repeat.set(repeat, repeat); c.needsUpdate = true; return c; };
+    maps = { map: at(base.map), normalMap: at(base.normalMap), roughnessMap: at(base.roughnessMap), aoMap: at(base.aoMap) };
+    repeatCache.set(key, maps);
+  }
+  return maps;
 }
 
 /** Copy uv → uv2 so aoMap works. three.js reads AO from the second uv set and silently ignores it otherwise. */
@@ -1241,20 +1334,15 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
 // feature this codebase forbids. Say "real-looking", never "photorealistic".
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 const OBJECTS = `import * as THREE from 'three';
-import { surfaceMaterial, enableAO, type SurfaceKind } from './surfaces';
+import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, type SurfaceKind, type Detail } from './surfaces';
 
-export type Detail = 'real' | 'lite';
-
-/**
- * The tier every builder uses when not told otherwise. Set ONCE at start-up from what the user asked
- * for — the game should not be deciding this per object.
- */
-let DEFAULT_DETAIL: Detail = 'lite';
-export function setDetailLevel(detail: Detail): void { DEFAULT_DETAIL = detail; }
-export function getDetailLevel(): Detail { return DEFAULT_DETAIL; }
+// The detail tier lives in surfaces.ts so the ground reads the same setting as the objects; it is
+// re-exported here so \`import { setDetailLevel } from './objects'\` keeps working everywhere.
+export { setDetailLevel, getDetailLevel };
+export type { Detail };
 
 interface BaseOpts { detail?: Detail; seed?: number }
-const tier = (o?: BaseOpts): Detail => o?.detail ?? DEFAULT_DETAIL;
+const tier = (o?: BaseOpts): Detail => o?.detail ?? getDetailLevel();
 
 function rng(seed: number): () => number {
   let t = (seed >>> 0) || 1;
@@ -1390,10 +1478,15 @@ export function createCar(options: CarOptions = {}): THREE.Group {
         const rim = mesh(new THREE.CylinderGeometry(wheelR * 0.6, wheelR * 0.6, W * 0.17, seg), rimMat, d);
         rim.rotation.z = Math.PI / 2;
         wheel.add(rim);
+        // 🔴 THE ARCH BELONGS TO THE BODY, NOT THE WHEEL. It used to be a child of this wheel group at
+        // x = sx * W * 0.5 — ON TOP of the group's own x = sx * W * 0.48 — so it rendered almost a full
+        // car-width outside the body, floating beside the car, and \`rollWheels\` (which spins the wheel
+        // group) spun it too. Fixed to the body at the wheel's own centre, it frames the tyre and stays put.
         const arch = mesh(new THREE.TorusGeometry(wheelR * 1.18, L * 0.012, 6, 14, Math.PI), trimMat, d);
-        arch.position.set(sx * W * 0.5, 0, 0);
+        arch.position.set(sx * W * 0.5, wheelR, (sz * wheelbase) / 2);
         arch.rotation.y = Math.PI / 2;
-        wheel.add(arch);
+        arch.name = 'wheel-arch';
+        group.add(arch);
       }
       wheel.position.set(sx * W * 0.48, wheelR, (sz * wheelbase) / 2);
       wheel.name = 'wheel';
@@ -1620,8 +1713,19 @@ export function createDesert(options: DesertOptions = {}): THREE.Mesh {
 export interface RoadOptions extends BaseOpts { length?: number; width?: number; lanes?: number }
 
 /**
+ * How high the road's surface sits above the ground plane (y = 0). Place a vehicle's wheels on it.
+ *
+ * 🔴 IT USED TO BE 0, and that was the worst-looking bug in the whole layer: the asphalt sat in exactly
+ * the same plane as the ground, so the depth buffer could not decide which was in front and the road
+ * flickered into black zebra stripes over the grass the moment the camera moved (seen in a real render,
+ * 2026-10-05). Three centimetres is invisible to a player and is many depth steps at any distance a game
+ * draws. Markings sit above the asphalt the same way, never in its plane.
+ */
+export const ROAD_SURFACE_Y = 0.03;
+
+/**
  * Asphalt with the markings that make it a road rather than a grey strip: a dashed centre line, solid
- * edge lines and kerbs. \`real\` also adds the darker worn tracks where wheels actually run.
+ * edge lines and kerbs on BOTH sides. \`real\` also adds the darker worn tracks where wheels actually run.
  */
 export function createRoad(options: RoadOptions = {}): THREE.Group {
   const d = tier(options);
@@ -1632,41 +1736,179 @@ export function createRoad(options: RoadOptions = {}): THREE.Group {
 
   const surface = mesh(new THREE.PlaneGeometry(W, L, 1, d === 'real' ? 60 : 1), shared('asphalt', d, 0x3a3c40, d === 'real' ? 40 : 1), d);
   surface.rotation.x = -Math.PI / 2;
+  surface.position.y = ROAD_SURFACE_Y;
   surface.castShadow = false;
   group.add(surface);
 
-  const paint = new THREE.MeshStandardMaterial({ color: 0xe8e4d8, roughness: 0.75, metalness: 0 });
+  // polygonOffset pulls the paint toward the camera in DEPTH as well as lifting it, so a mark never
+  // fights the asphalt under it even at a grazing angle far down the road.
+  const paint = new THREE.MeshStandardMaterial({ color: 0xe8e4d8, roughness: 0.75, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   // Dashed centre line — 3 m mark, 6 m gap is close to the real Indian standard.
   const dashes = Math.floor(L / 9);
   for (let i = 0; i < dashes; i++) {
     const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 3), paint);
     dash.rotation.x = -Math.PI / 2;
-    dash.position.set(0, 0.012, -L / 2 + i * 9 + 4.5);
+    dash.position.set(0, ROAD_SURFACE_Y + 0.008, -L / 2 + i * 9 + 4.5);
     group.add(dash);
   }
+  // BOTH sides. This loop used to end in \`break\` after the first pass, so a road had one edge line and
+  // one kerb — and that kerb, at (side * W) / 2 + 0.15, sat INSIDE the asphalt on the left.
   for (const side of [-1, 1]) {
     const edge = new THREE.Mesh(new THREE.PlaneGeometry(0.12, L), paint);
     edge.rotation.x = -Math.PI / 2;
-    edge.position.set((side * W) / 2 - side * 0.35, 0.012, 0);
+    edge.position.set(side * (W / 2 - 0.35), ROAD_SURFACE_Y + 0.008, 0);
     group.add(edge);
     if (d === 'real') {
       const kerb = mesh(new THREE.BoxGeometry(0.3, 0.16, L), shared('stone', d, 0xb9b3a6, 20), d);
-      kerb.position.set((side * W) / 2 + 0.15, 0.08, 0);
+      kerb.position.set(side * (W / 2 + 0.15), 0.08, 0);
       group.add(kerb);
-      // Worn wheel tracks — two slightly darker, slightly smoother bands per lane.
-      for (let lane = 0; lane < lanes; lane++) {
-        const laneCentre = -W / 2 + (W / lanes) * (lane + 0.5);
-        for (const off of [-0.75, 0.75]) {
-          const wear = new THREE.Mesh(
-            new THREE.PlaneGeometry(0.55, L),
-            new THREE.MeshStandardMaterial({ color: 0x303237, roughness: 0.72, metalness: 0, transparent: true, opacity: 0.55 }),
-          );
-          wear.rotation.x = -Math.PI / 2;
-          wear.position.set(laneCentre + off, 0.008, 0);
-          group.add(wear);
-        }
+    }
+  }
+  if (d === 'real') {
+    // Worn wheel tracks — two slightly darker, slightly smoother bands per lane, built once (not once
+    // per side) and sharing ONE material instead of a new one per band.
+    const wearMat = new THREE.MeshStandardMaterial({ color: 0x303237, roughness: 0.72, metalness: 0, transparent: true, opacity: 0.3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    for (let lane = 0; lane < lanes; lane++) {
+      const laneCentre = -W / 2 + (W / lanes) * (lane + 0.5);
+      for (const off of [-0.75, 0.75]) {
+        const wear = new THREE.Mesh(new THREE.PlaneGeometry(0.55, L), wearMat);
+        wear.rotation.x = -Math.PI / 2;
+        wear.position.set(laneCentre + off, ROAD_SURFACE_Y + 0.004, 0);
+        group.add(wear);
       }
-      break; // kerbs+wear are built for both sides in one pass
+    }
+  }
+  return group;
+}
+
+// ── HOUSE ────────────────────────────────────────────────────────────────────────────────────────
+export interface HouseOptions extends BaseOpts {
+  width?: number;
+  depth?: number;
+  /** 1 or 2. Each storey is 3 m. */
+  storeys?: number;
+  /** Wall colour. Defaults to one of the washes Indian houses are actually painted in. */
+  wallColor?: number;
+  /** 'flat' — RCC roof with a parapet and a water tank (towns, most villages). 'tiled' — sloped clay tiles. */
+  roof?: 'flat' | 'tiled';
+}
+
+/** The colours houses in an Indian village or town are really washed in — not white boxes. */
+export const HOUSE_WASHES: readonly number[] = [0xe9c46a, 0xf4a6a6, 0x9ec9e6, 0xf1e3c8, 0xc7e0b4, 0xe8b07a, 0xd7c3e6];
+
+/**
+ * A HOUSE, not a box with a hat. What makes a building read as a home is the stuff on its face: a door
+ * you could walk through, windows with frames and a sun-shade over them, a darker plinth where the wall
+ * meets the ground, and a roof line — here the flat RCC roof with a parapet and a black water tank that
+ * is on nearly every house in India, or sloped clay tiles. Front face is +Z; place it facing the road.
+ *
+ * Walls are textured plaster in \`real\` (the same plaster everywhere, tinted, so a street of ten houses
+ * builds the texture ONCE). Returns a Group whose origin is the centre of the footprint at ground level.
+ */
+export function createHouse(options: HouseOptions = {}): THREE.Group {
+  const d = tier(options);
+  const r = rng(options.seed ?? 11);
+  const W = options.width ?? 6 + r() * 3;
+  const D = options.depth ?? 5 + r() * 2;
+  const storeys = Math.max(1, Math.min(2, Math.round(options.storeys ?? 1)));
+  const H = storeys * 3;
+  const wash = options.wallColor ?? HOUSE_WASHES[Math.floor(r() * HOUSE_WASHES.length)];
+  const roofKind = options.roof ?? (r() < 0.7 ? 'flat' : 'tiled');
+  const group = new THREE.Group();
+
+  const wall = shared('plaster', d, wash, 2);
+  // Tints are chosen to read right in BOTH tiers: in \`lite\` the tint IS the colour, in \`real\` it is
+  // MULTIPLIED by the texture's own colour — a dark tint on a dark texture goes black (the first render
+  // of this house had a black plinth, black sun-shades and a black door).
+  const plinthMat = shared('stone', d, 0xb8b0a4, 3);
+  const concreteMat = shared('plaster', d, 0xd6d1c7, 2);
+  const woodMat = shared('wood', d, 0xc08a5a, 1);
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0xf2efe8, roughness: 0.6, metalness: 0 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x1d2a33, roughness: 0.15, metalness: 0.2 });
+
+  const body = mesh(new THREE.BoxGeometry(W, H, D), wall, d);
+  body.position.y = H / 2;
+  group.add(body);
+  const plinth = mesh(new THREE.BoxGeometry(W + 0.12, 0.45, D + 0.12), plinthMat, d);
+  plinth.position.y = 0.225;
+  group.add(plinth);
+
+  // Door — centred on the front, 2.1 m, with a frame so it is a door and not a brown rectangle.
+  const doorW = 1.0;
+  const door = mesh(new THREE.BoxGeometry(doorW, 2.1, 0.08), woodMat, d);
+  door.position.set(0, 0.45 + 1.05, D / 2 + 0.03);
+  group.add(door);
+  const doorFrame = mesh(new THREE.BoxGeometry(doorW + 0.2, 2.2, 0.05), frameMat, d);
+  doorFrame.position.set(0, 0.45 + 1.1, D / 2 + 0.01);
+  group.add(doorFrame);
+  const step = mesh(new THREE.BoxGeometry(doorW + 0.6, 0.18, 0.5), plinthMat, d);
+  step.position.set(0, 0.09, D / 2 + 0.3);
+  group.add(step);
+
+  // Windows: front (either side of the door, each storey) and both sides. Frame + glass + chhajja.
+  const addWindow = (x: number, y: number, z: number, rotY: number) => {
+    const win = new THREE.Group();
+    const frame = mesh(new THREE.BoxGeometry(1.1, 1.2, 0.06), frameMat, d);
+    win.add(frame);
+    const glass = mesh(new THREE.BoxGeometry(0.92, 1.02, 0.07), glassMat, d);
+    glass.position.z = 0.01;
+    win.add(glass);
+    const bar = mesh(new THREE.BoxGeometry(0.05, 1.02, 0.08), frameMat, d);
+    bar.position.z = 0.02;
+    win.add(bar);
+    // The chhajja — the concrete sun-shade over every Indian window. It is what throws the shadow line.
+    const shade = mesh(new THREE.BoxGeometry(1.4, 0.07, 0.45), concreteMat, d);
+    shade.position.set(0, 0.72, 0.22);
+    win.add(shade);
+    win.position.set(x, y, z);
+    win.rotation.y = rotY;
+    group.add(win);
+  };
+  for (let s2 = 0; s2 < storeys; s2++) {
+    const y = s2 * 3 + 1.75;
+    const fx = Math.min(W / 2 - 0.9, doorW / 2 + 1.1);
+    for (const side of [-1, 1]) {
+      if (s2 > 0 || W > 4.5) addWindow(side * fx, y, D / 2 + 0.04, 0);
+      addWindow(side * (W / 2 + 0.04), y, 0, side * Math.PI / 2);
+    }
+  }
+
+  if (roofKind === 'flat') {
+    // RCC slab overhang, a parapet you can see over the edge of, and the black Sintex-style tank.
+    const slab = mesh(new THREE.BoxGeometry(W + 0.5, 0.18, D + 0.5), concreteMat, d);
+    slab.position.y = H + 0.09;
+    group.add(slab);
+    const t = 0.15;
+    for (const [w2, d2, x, z] of [[W, t, 0, D / 2 - t / 2], [W, t, 0, -D / 2 + t / 2], [t, D, W / 2 - t / 2, 0], [t, D, -W / 2 + t / 2, 0]] as const) {
+      const parapet = mesh(new THREE.BoxGeometry(w2, 0.9, d2), wall, d);
+      parapet.position.set(x, H + 0.18 + 0.45, z);
+      group.add(parapet);
+    }
+    const tank = mesh(new THREE.CylinderGeometry(0.55, 0.6, 1.1, d === 'real' ? 20 : 10), new THREE.MeshStandardMaterial({ color: 0x1b1c1e, roughness: 0.55, metalness: 0 }), d);
+    tank.position.set(W / 2 - 1.1, H + 0.18 + 0.55, -D / 2 + 1.1);
+    group.add(tank);
+  } else {
+    // Sloped clay tiles: two pitched planes with an overhang, terracotta, ridge along the width.
+    const tileMat = shared('tile', d, 0xb5532f, 3);
+    const pitch = 0.5;
+    const run = D / 2 + 0.5;
+    const len = run / Math.cos(pitch);
+    for (const side of [-1, 1]) {
+      const plane = mesh(new THREE.BoxGeometry(W + 0.8, 0.12, len), tileMat, d);
+      // Centred so the slope crosses the wall line (|z| = D/2) exactly at the wall top and the ridge meets
+      // the gable apex — the overhang then dips below the wall top instead of leaving a gap above it.
+      plane.position.set(0, H + Math.tan(pitch) * (run / 2 - 0.5), side * run / 2);
+      plane.rotation.x = side * pitch;
+      group.add(plane);
+    }
+    // Gable ends so the roof is closed, not two boards balanced on a box.
+    const gableShape = new THREE.Shape();
+    gableShape.moveTo(-D / 2, 0); gableShape.lineTo(D / 2, 0); gableShape.lineTo(0, Math.tan(pitch) * (D / 2)); gableShape.closePath();
+    for (const side of [-1, 1]) {
+      const gable = mesh(new THREE.ShapeGeometry(gableShape), wall, d);
+      gable.position.set(side * (W / 2), H, 0);
+      gable.rotation.y = side * Math.PI / 2;
+      group.add(gable);
     }
   }
   return group;
@@ -2182,7 +2424,11 @@ export function generateGame3D(include?: string[]): Game3DResult {
       const base = (path.split('/').pop() || '').replace(/\.ts$/i, '').toLowerCase();
       if (wanted.has(base)) files[path] = content;
     }
-    if (files['src/game/three/world.ts']) files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
+    if (files['src/game/three/world.ts']) {
+      files['src/game/three/materials.ts'] = FILES['src/game/three/materials.ts'];
+      // The ground is textured in the real tier and reads the detail level, both from surfaces.ts.
+      files['src/game/three/surfaces.ts'] = FILES['src/game/three/surfaces.ts'];
+    }
     // 🔒 SURFACES WITHOUT AN ENVIRONMENT IS A DOWNGRADE, NOT AN UPGRADE. Detailed roughness maps make
     // a material's reflections matter, and with nothing to reflect a glossy surface goes darker and
     // deader than the flat colour it replaced. So asking for one pulls in the other.
@@ -2212,6 +2458,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
       "setDetailLevel('real');   // 'real' when the user asked for real/asli; 'lite' for plain 3D\n" +
       "scene.add(createCar({ color: 0xb42b2b }));  scene.add(createTree({ height: 7 }));\n" +
       "scene.add(createMountain({ size: 140, height: 50 }));  scene.add(createRoad({ length: 400 }));\n" +
+      "const house = createHouse({ roof: 'flat', storeys: 2 }); house.position.set(16, 0, 0); house.rotation.y = -Math.PI / 2; scene.add(house); // door faces +Z — turn it to the road\n" +
+      "car.position.y = ROAD_SURFACE_Y;   // wheels ON the asphalt, which sits 3 cm above the ground\n" +
       "const river = createRiver(); scene.add(river.mesh);   // in the loop: river.update(elapsed)\n" +
       "const deer = createAnimal({ kind: 'deer' }); scene.add(deer.root); // deer.update(dt, speed)\n" +
       "const bike = createMotorcycle({ kind: 'sport', color: 0xc4231f }); scene.add(bike.root);\n" +

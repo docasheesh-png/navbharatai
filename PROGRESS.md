@@ -89843,3 +89843,23 @@ whoever merges second should expect a conflict in exactly that region and keep b
 Q-104, Q-116, Q-135, Q-139, Q-146, Q-147, Q-150, Q-152, Q-153, Q-156, Q-164 (Q-152 was already-fixed, evidence in its ledger entry). Their ledgers are above in this file. Still
 open from that work, each 🟡 with what it needs in `BUILD_REPORT_QUEUE.md`: Q-154 (admin confirms `hops: 1` at
 `/api/admin/proxy-hops`), Q-162 (45 undecided routes), Q-160, Q-136 (#3533), Q-101, Q-159, Q-141, Q-163.
+
+### 2026-10-05 — App Mart: the comments sheet flickered for ever ("screen vibrate hoti rehti hai")
+
+Admin: *"navbharatai → app mart → instant play app → comment … click kare to screen vibrate hoti rehti hai, aisa lagta
+kuch load ho raha hai, jabki kuch hai hi nahi loading ke liye! fix karo!!"*
+
+**Root cause (an infinite reload loop, not a slow load).** `CommentsSection` (`appMart/AppMartSocial.tsx`) built
+`load` with `useCallback(…, [appKey, onCounts])` and ran it from `useEffect(…, [load, signedIn])`; `load` calls
+`onCounts(d.counts)`. Both parents (`NavAppStore.tsx` — the instant-play detail and the Android sheet) pass `onCounts`
+as an inline arrow that sets their state, so: load → onCounts → parent re-renders → new onCounts → new load → the
+effect runs again → "loading" → fetch → … — the flicker, plus one request to `/api/nav-store` per turn.
+**Class:** a hook that LOADS while listing a callback PROP it calls in its dependencies — the parent's render
+identity becomes a reload trigger. **Fix:** the callback is read through a ref; the load depends on `appKey` only.
+**Siblings hunted:** every client hook with an `onXxx` dependency (32) was classified; only this one loads on mount
+with an unstable callback. Three remain and are proven safe in the test (a stable setState, a once-per-user guard, a
+message listener). **Lock:** `tests/aParentRenderIsNotAReload.test.ts` — a census over src/components, src/hooks,
+src/lib and App.tsx; reversion-proven (putting the bug back fails both the census and the instance test). Writing it
+also caught a census bug: two components in one file each had a `load`, and a name-keyed map hid the violation — it
+now resolves the nearest preceding callback, with a canary for that case.
+⚠️ Frontend change: the website gets it on deploy; phone users need a fresh `.aab`/`.ipa` (bundled mode).

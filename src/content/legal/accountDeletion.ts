@@ -68,6 +68,7 @@ When your deletion request is completed, we remove:
   day. (The codes themselves are **not** deleted: once you have given a code to somebody, it is theirs
   to redeem, and a payment record is one of the things we are required to keep — see below.);
 - your **App Mart likes, dislikes and comments** — every 👍 and 👎 you gave, every comment and reply you wrote, your App Mart notifications, the list of people you blocked, the creators you follow and the people who follow you, the profile photo you uploaded, and the link between your public creator code and your account (so your App Mart profile stops opening). Other people's replies to your comments are not theirs to lose, but they can no longer be reached once your comment is gone;
+- your **rating of NavBharatAI** — the stars and the note you gave after one of your apps went live, and any "Not now" pause on that question;
 - your **saved sessions and preferences**;
 - your **connection to GitHub**, if you had connected one. (This removes NavBharatAI's access. It does **not** delete anything in your own GitHub account — that stays yours.)
 

@@ -15,6 +15,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Star, X } from 'lucide-react';
 import { authJsonHeaders } from '../lib/authHeaders';
+import { writeFailure } from '../lib/serverAnswer';
 import { nativePlatformName } from '../lib/mobileNative';
 import {
   RATING_MOMENT_EVENT, RATING_COMMENT_MAX, readRatingStatus, offeredThisSession, markOfferedThisSession,
@@ -38,21 +39,29 @@ export function RateNavBharatCard({ onDone }: { onDone: () => void }): React.Rea
   const [thanked, setThanked] = useState(false);
   const firstStarRef = useRef<HTMLButtonElement>(null);
   const closedRef = useRef(false);
+  // The parent's callback is read through a ref, so a parent re-render can never re-run anything here
+  // (tests/aParentRenderIsNotAReload.test.ts).
+  const onDoneRef = useRef(onDone);
+  useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
 
   useEffect(() => { firstStarRef.current?.focus(); }, []);
 
-  // Closing without rating is a "Not now": the server starts the pause. Best effort — a failed write
-  // only means the next live publish may ask again, never that a rated user is asked.
+  // Closing without rating is a "Not now": the server starts the pause. The answer is read, but the card
+  // closes either way — the person asked to close it. A pause that was not saved only means a LATER
+  // session may ask again after the next live publish (this session never will: offeredThisSession);
+  // it can never make a user who rated be asked, because that is decided from the rating itself.
   const notNow = useCallback(() => {
     if (closedRef.current) return;
     closedRef.current = true;
     void (async () => {
       try {
-        await fetch('/api/platform-rating/dismiss', { method: 'POST', headers: await authJsonHeaders(), body: '{}' });
-      } catch { /* see above */ }
+        const res = await fetch('/api/platform-rating/dismiss', { method: 'POST', headers: await authJsonHeaders(), body: '{}' });
+        const failed = await writeFailure(res, 'pause not saved');
+        if (failed) console.warn('[rating] "Not now" was not saved:', failed);
+      } catch { /* offline: same outcome as an unsaved pause, see above */ }
     })();
-    onDone();
-  }, [onDone]);
+    onDoneRef.current();
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !thanked) notNow(); };
@@ -62,9 +71,9 @@ export function RateNavBharatCard({ onDone }: { onDone: () => void }): React.Rea
 
   useEffect(() => {
     if (!thanked) return;
-    const t = window.setTimeout(() => { closedRef.current = true; onDone(); }, 1600);
+    const t = window.setTimeout(() => { closedRef.current = true; onDoneRef.current(); }, 1600);
     return () => window.clearTimeout(t);
-  }, [thanked, onDone]);
+  }, [thanked]);
 
   const submit = async () => {
     if (!stars || saving) return;
@@ -93,7 +102,7 @@ export function RateNavBharatCard({ onDone }: { onDone: () => void }): React.Rea
 
   return createPortal(
     <div
-      className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 flex items-end justify-center bg-scrim p-4 sm:items-center"
+      className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 flex items-end justify-center bg-scrim sm:items-center sm:p-4"
       style={{ zIndex: RATING_Z }}
       role="dialog"
       aria-modal="true"

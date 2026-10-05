@@ -90736,3 +90736,473 @@ humanoid → surfaces.
 Not re-audited: the motorcycle and bicycle.
 
 This is a server-side change: the generator runs on the server, so every user, on web or phone, gets it for newly built games as soon as it is merged and deployed. No new `.aab` / `.ipa` is needed. Games built earlier keep their old files until they are rebuilt.
+### 2026-10-05 — Game engine G1: the meta layer, so a built game brings the player back
+
+The admin asked: *"navbharatai jab game banaye to user ko navbharatai ki latt lag jaye"*. An audit of the
+game generators found almost nothing that brings a player back. There were no achievements, no XP or levels,
+no combo, no daily reason to return, no near-miss moment and no haptics. Two of the pieces that did exist
+were broken:
+- **The best score never persisted.** `state.highScore` existed, but nothing ever called `save()` or
+  `load()`, so every reload reset "best" to 0.
+- **Resuming from pause looked like a new game.** `setStatus('playing')` from pause emitted `GAME_STARTED`,
+  and `GAME_RESUMED`, which is declared and which the HUD subscribes to, never fired.
+
+**Built: `src/game/core/meta.ts`**, emitted by `generate_game_runtime`, the tool every game calls first.
+- A best score that persists per `gameId`.
+- NEW BEST, plus the near miss: "only N more", shown when a round reaches 80% of the best.
+- A combo multiplier (`combo.hit(points)`, broken when the player takes damage).
+- Scale-free XP. It rewards playing, lasting and improving, never raw score size, so a 10-point game and a
+  10,000-point game level at the same pace.
+- Levels with named unlocks.
+- 11 built-in achievements, plus game-specific ones.
+- A daily streak with a once-a-day bonus.
+- Three daily goals. They are seeded per day and drawn only from what the game has actually shown it does,
+  with targets scaled from the player's own bests.
+- Announcements (`mountMetaToasts`) and `summaryLines()` for any game-over screen.
+
+**Shell wiring.** The 3D shell starts all of this itself:
+- it calls `startMeta`, mounts the toasts, ticks the combo, and breaks it on `PLAYER_DAMAGED`;
+- the HUD shows Best and the combo multiplier;
+- the game-over screen is the round summary, with a "Play again" that is focused on arrival and that
+  Enter, Space or R also trigger.
+
+**Prompt and tool description.** Both now tell every game, 2D games included, to wire it.
+
+**Defects found by the tests and fixed:**
+- A round the player walked away from leaked into the next game: its start time and its combo carried over.
+- A brand-new player got only two daily goals. An always-available "play for N minutes" goal now makes three.
+- Vibrating before the first tap logged a console error. `buzz()` now waits for `navigator.userActivation`.
+
+**Rendered in Chromium** with the real shell. Round 1 showed NEW BEST, a level-up with its unlock, two
+achievements and the next goal. Round 2 showed "So close! Only 26 more to beat your best (200)". There were
+0 console errors. All 29 generated game files typecheck under `--strict` against real React and three types;
+the check was confirmed to be real by planting an error and watching it fail.
+
+**Locked by `tests/aGameBringsThePlayerBack.test.ts`** (19 cases). It covers:
+- persistence across a reload, a per-game save, and broken or old storage;
+- NEW BEST only when the best really falls, the near miss, XP scale-freedom, level unlocks, and achievements
+  that fire once;
+- combo maths;
+- the daily reward and streak across days;
+- goal selection and progress;
+- pause semantics, and the walked-away round;
+- shell wiring;
+- a guard that the module contains no `Math.random`, no purchase or currency words, and no countdown
+  pressure.
+
+**Ethics, stated in the module and in the prompt.** Engagement comes through mastery and progress. There are
+no loot boxes, no paid randomness, no fake timers and no guilt messages. Many players are children.
+
+### 2026-10-05 — Game engine G2: NavBharatAI PLAYS the game before calling it done, and the first playtest found two shell bugs
+
+The brief's last section, adapted: *Design → Generate → Play → Test → Diagnose → Repair → Evaluate*. Before
+this, every browser check looked at a game the way it looks at a form (did it paint, did a button throw,
+does it fit a phone). None ever PLAYED one, so a canvas that paints a lovely scene and ignores every key
+passed all of them.
+
+**Built: `src/server/AgentV3/gamePlaytest.ts`.** It has the same architecture as `mobileLayoutCheck`: a pure
+script builder, a sandbox runner, a parser, and three outcomes. It runs only for a canvas game
+(`isCanvasGameProject`, reusing `touchPlayableGame.GAME_SIGNAL`, now exported, so there is one definition).
+It runs in one browser with no model call:
+1. It presses a visible Start/Play and taps the game surface.
+2. It measures idle change, frame rate (distinct rAF timestamps) and long frames.
+3. It holds up/W, left/A, right/D and Space, and makes a mouse drag. Each response is compared with idle
+   change, so an always-animated world cannot count as "responding".
+4. It reopens the game at 390×844 with touch, drags a thumb on a joystick (raw CDP touch events) and taps
+   an action button, and counts on-screen controls.
+5. It collects page errors and console errors (filtered by the explorer's own `CONSOLE_NOISE`).
+
+Screenshots are decoded and compared at 48×27 *inside the browser*, so no image library is needed.
+
+**The score.** `scorePlaytest` makes a GAME QUALITY SCORE out of seven measured dimensions:
+- Runs, Responds, Mobile, Stable, Smooth and Alive come from the browser;
+- Replay is read from the code (`startMeta` / a best-score save, and a restart);
+- the weights are Responds 25, Runs 20, Mobile 15, Stable 15, Replay 10, Smooth 10, Alive 5.
+
+The weakest dimension is the one losing the most weighted points, and it is named with a fix.
+
+**What reaches the user and the system:**
+- `GAME_PLAYTEST_ISSUES` is a one-tap "Make the game playable" fix. `buildFindingSuggestions` gained
+  `withEvidence`, so this fix carries the measured scorecard to the repair.
+- OK and NOT_RUN are process-only codes.
+- The build card says "NavBharatAI played your game … scored N/100" (`buildProofCard`, three outcomes).
+- It is wired in `agentv3.ts` after the phone check. It is evidence and never a gate. Kill switch:
+  `AGENTV3_GAME_PLAYTEST=off`.
+- Frame rate is graded gently and the message says where it was measured: the build sandbox's software
+  renderer.
+
+**Locked by `tests/aGameIsPlayedBeforeItIsDone.test.ts`** (14 cases). It runs the REAL module in a REAL
+Chromium against five small games built to be broken, and checks each scorecard:
+- works → OK, 85+;
+- deaf → Controls 0 and named weakest;
+- keyboard-only → Phone 0 and weakest;
+- throws on move → Stable, with the error text;
+- blank → Runs 0;
+- no canvas → NOT_RUN.
+
+**THE FIRST PLAYTEST OF OUR OWN SHELL SCORED 57/100, WITH CONTROLS 0.** It found two real bugs, and both
+are fixed at the root.
+
+**1. The player sank through the floor in every shell game with ground colliders.**
+- *Cause:* the motor's ground snap (`vy = -2` while standing) was applied as movement, and nothing put the
+  feet back on the surface. A standing player sank 3 cm a frame, the ground ray started under the floor
+  after about five frames, and the player fell forever (−46 m after 2 s) with the camera following.
+- *Fixes, which were also hunted as siblings:*
+  - `move()` stops the feet ON the hit point;
+  - the probe now reaches as far as the step's fall (there was a tunnelling class above ~9 m/s);
+  - `setColliders` and the camera rig's `setCollidables` refresh world matrices (raycasts ran before the
+    first render);
+  - a fall-out-of-world recovery puts the player back where it last stood, as the last line of defence,
+    and emits `PLAYER_FELL`.
+- *Locked by `tests/aPlayerStandsOnTheGround.test.ts`* (7 cases): standing for 5 s, a 40 m fall, walking
+  and jumping, a moved never-rendered collider, walking off a ledge, the camera matrices, and the body.
+  Reversion proven: disabling only the floor snap fails 4 of the cases.
+
+**2. The hero was invisible.** `CharacterController.object` is an empty Object3D and nothing gave it a body.
+`Game.ts` now attaches `createHumanoid` by default:
+- it turns smoothly to face its velocity (models face +Z) and animates from real speed and grounded state;
+- first-person gets no body;
+- a game can pass `playerBody` (or `false`) and `playerColor`;
+- the body is hidden while the camera follows a vehicle;
+- it is disposed with the game.
+
+`aRecipeBringsTheLayersItImports` now expects `humanoid.ts` in the closure.
+
+**After the fixes, the same shell scores 92/100:** Runs, Controls, Phone, Stable and Replay are all 100.
+Smooth is 35, because the sandbox renders in software at 5 fps. The hero is visible, walking on the ground.
+
+**Honestly not built yet: automatic repair.** A playtest finding is a one-tap offer, not a background
+re-write. A verified repair loop (repair, re-play, keep only if the score rises) is the next step, and
+`explorerRepair.ts` is the pattern to follow.
+
+### 2026-10-05 — Game engine G3: India's roads (auto-rickshaw, bus, truck, tractor), tiger and goat, and the catalogue points at every builder
+
+**The gap.** `objectCatalog.ts` described an auto-rickshaw, a bus, a truck and a tractor in full: dimensions,
+parts, and the one "tell" that makes each read as itself. None of them had a builder, so the model hand-modelled
+each one, which produced the box-with-wheels the Phase 2 brief calls a FAIL.
+
+**Built: `createAutoRickshaw`, `createBus`, `createTruck`, `createTractor`.** Each is built from its own side
+profile at the catalogue's size and faces +Z. Their wheels are `'wheel'` groups, so `rollWheels()` and
+`driveVehicle()` work.
+- **Auto-rickshaw:** three wheels, open sides, a canvas roof on posts, handlebar steering, and a Delhi or
+  Mumbai livery.
+- **Bus:** a window band, a lit destination board, doors on the kerb (+X) side, and dual rear wheels.
+- **Truck:** a cab and load body with a gap between them, Indian truck-art bands and crown, doubled rear
+  wheels, mudflaps and a stack.
+- **Tractor:** a 0.75 m rear and 0.40 m front wheel radius, chevron-lug tread, mudguards, and the stack in
+  front of the driver.
+
+**One implementation, shared.** The car's profile extrude, wheel well and wheel code were lifted into shared
+helpers: `extrudeProfile`, `wellArc`, `roadWheel`, `partBox`, `partRod` and `lamp`. The car now uses them too,
+and the 46 existing car/3D tests stayed green across the refactor. Four private copies is how a fix lands in
+only one of them.
+
+**Defects the tests caught in the new vehicles, fixed before shipping:**
+- the bus mirrors made it 3.5 m wide (now about 0.25 m past the body);
+- the truck crown made it 3.8 m tall (spec 3.4);
+- the tractor's tread lugs sat outside the tyre radius and sank 5.5 cm into the road. The lugs are now the
+  tyre's outer 4.5 cm.
+
+**A sibling my own Phase 2 change created, fixed.** The catalogue built `big-cat` and `goat` as
+`createAnimal({ kind: 'deer' })`. That was harmless while every animal was one box, and wrong the moment
+Phase 2 gave the deer antlers: a tiger with antlers. There are now real `tiger` and `goat` kinds.
+- The tiger follows the catalogue's own tell: shoulders highest, a tail nearly the body's length, a broad head
+  carried low, big paws, and stripes.
+- The goat has swept-back horns, a beard and a flicking tail.
+
+**The catalogue never named `createHouse`** (Phase 1), so houses were still hand-modelled. It now names it.
+
+**A census so this cannot recur.** It fails when any `export function createX` in objects.ts is named by no
+catalogue entry.
+
+**Rendered on a road** with the car and a person for scale: both autos (see-through), the bus, the truck, the
+tractor, the tiger and the goat. There were no console errors.
+
+**Locked by `tests/indiasRoadsHaveTheirVehicles.test.ts`** (11 cases). Each vehicle is checked for:
+- the catalogue's size, ±12%;
+- its wheel count;
+- tyres touching the road;
+- an extruded body;
+- a draw-call budget;
+- wheels that roll.
+
+Each tell is checked too:
+- the auto has one centred front wheel, and a ray across it at head height meets nothing, while the same ray
+  hits a car;
+- the bus window band runs along more than 80% of its length, with its doors on +X;
+- the truck has a cab/cargo gap of at least 0.1 m and four rear wheels;
+- the tractor's rear-to-front wheel ratio is at least 1.7.
+
+The remaining cases are the builder census and the tiger and goat anatomy. `aHeroObjectIsNotABox` now covers
+six animal kinds, and `heroObjectSpec` moved auto/tractor/house out of its "no builder" list.
+
+### 2026-10-05 — Game engine G4: live traffic (createTraffic)
+
+A driving or city game's road was empty. `createTraffic({ road, count, kinds, speed, seed })` fills it with the
+new Indian vehicles and the car.
+
+**How the traffic behaves:**
+- Everyone keeps LEFT: a vehicle heading +Z drives in the +X lane, and one heading −Z in the −X lane.
+- Cruising speeds come from `TRAFFIC_CRUISE` (car 13 m/s down to tractor 6 m/s), varied ±12% by a seeded RNG.
+- Each vehicle keeps a gap to the one ahead of `TRAFFIC_GAP` (a 2.5 m standstill margin plus a 1.2 s time
+  headway). It matches the leader's pace and stops at the margin.
+- It stops for anything in `update(dt, avoid)` that is ahead in its lane: the player, or the player's vehicle.
+- Vehicles loop round at the road's end.
+- Wheels roll, and the same seed gives the same traffic.
+- **A hard backstop:** no vehicle ever moves further than the room ahead of it, whatever the frame time.
+
+**Locked by `tests/theRoadHasTraffic.test.ts`** (6 cases):
+- no overlap in a minute of 12-vehicle traffic;
+- keeping left, facing the direction of travel, and staying on the road;
+- a car behind a tractor slows to the tractor's pace;
+- a bus stops behind a player standing in the lane and drives on when the player leaves;
+- flow, rolling wheels and determinism;
+- the backstop. Proven by reversion: without the clamp, a car arriving at 13 m/s with 0.8 m of room on a
+  0.1 s frame enters the tractor ahead.
+
+Rendered on a road with houses and trees after 8 simulated seconds: autos, cars, the bus and a truck in their
+lanes, with no console errors. The prompt now says a driving or city game has traffic. The builder census
+treats `createTraffic` as a system, not a catalogue object.
+
+### 2026-10-05 — Game engine G5: weapons that feel like weapons
+
+A generated shooter usually spawned one projectile per click and called it a gun, and a sword was a radius
+check that hit sixty times a second. Two halves now come from the library.
+
+**The behaviour — `src/game/systems/weapon.ts` (generate_game_systems, closure weapon → projectile):**
+- `Weapon(kind)` with presets for pistol, rifle, smg, shotgun, sniper and bow: a fire rate, semi/auto, a
+  magazine, and a reload you can be caught in. An empty gun clicks (`WEAPON_EMPTY`) and starts its own reload.
+- Spread blooms while spraying (capped at `MAX_BLOOM`) and settles when you stop. Pellets are uniform over the
+  cone's disc. A shotgun is many pellets and ONE `WEAPON_FIRED` (`FireOptions.silent`). An arrow falls.
+- Recoil comes out as `weapon.kick`, which decays on its own.
+- **The fire rate is exact at 60 fps.** A cooldown that is RESET on each shot rounds every gap up to whole
+  frames, so 13 rounds a second quietly became 12. A shot due mid-step now carries its lateness into the next
+  gap — only while the trigger is held continuously, so no shot after a pause comes early.
+- A cooldown counts as ready under 1 µs: 30 steps of 1/60 leave about 1e-16, which made a twice-a-second
+  sword wait one extra frame.
+- `MeleeWeapon` swings once per cooldown and lands ONCE, at its strike moment, on targets in front
+  (`meleeHits`: within the arc, within reach counting each target's radius, nearest first).
+
+**The models — `createWeapon({ kind })` in objects.ts:**
+- Pistol, rifle, smg, shotgun and sniper (with a scope) are built from side profiles. Sword and axe are there
+  too. The grip is at the origin and the barrel points along +Z, with a `muzzle` to fire from.
+- The sword blade is LOFTED with a diamond section: it thins toward the point AND toward both edges, so it
+  catches the light as a ground bevel. An extrude of one thickness reads as a ruler.
+- The bow really draws: `setDraw(0..1)` bends both limbs back from the grip, pulls the string into a V that
+  meets the limb tips and the nock, and shows an arrow on it.
+- **Found while building it:** the first bow's string sat 8 cm behind its own limb tips, a sign error in the
+  string's position.
+- The humanoid gained `leftHand` / `rightHand` grips, `hold(item)` and `aim(on)`.
+
+The catalogue's sword, gun and bow entries now name `createWeapon`; the builder census demanded it. The prompt
+says a weapon is two things, both from the library.
+
+**Locked by `tests/aGunFeelsLikeAGun.test.ts`** (12 cases):
+- fire rates, held vs pressed, and the dry click plus reload;
+- bloom bounded inside the cone, shotgun pellets with one bang, and the arrow's drop;
+- melee in front, once per swing;
+- the models' sizes, grips and muzzles, and the sword's taper and bevel;
+- the bow's draw, with the string meeting the tips and the nock at every draw;
+- a humanoid holding and aiming.
+
+The generated modules typecheck strictly. They were also rendered in a real browser: a rack of all eight,
+plus a rifleman, a swordsman and an archer at full draw, with no console errors.
+
+### 2026-10-05 — Game engine G6: a game is never silent (fx/synth.ts)
+
+**Found while choosing the next engine item, and it is a root cause, not a feature gap.** The feedback table
+fires a sound by NAME on every hit, jump and pickup (`audio.play('shoot')`). `AudioManager.play` only played a
+buffer LOADED under that name, and a generated game ships no sound files. So every call found nothing and
+returned quietly: **every game NavBharatAI built was silent.**
+
+The earlier answer was a prompt line ("call generate_melody too and a game is never silent"). It only covered
+tunes and chimes, not a gunshot or a thud. The particle column of the table had a test that every preset it
+names exists; the sound column had none. That missing sibling is how a whole column could point at nothing.
+
+**The fix, at the root:**
+- **`src/game/fx/synth.ts`** (new, pure, no DOM) has 30 recipes. Each is a few layers of
+  sine/square/saw/triangle/white/brown noise, with an exponential pitch sweep, a two-pole low-pass sweep, an
+  attack/hold/decay envelope, arpeggio notes, vibrato and tremolo.
+  - Weapons: shoot, shotgun, laser, empty, reload, swing.
+  - Bodies: impact, hit, hurt, die, death, explosion, boss_die.
+  - Movement: jump, land, step.
+  - Rewards: pickup, coin, heal, powerup, combo, newbest, levelup, achievement.
+  - Interface: click, error.
+  - World: thunder, and seamless loops for rain and wind (an equal-power crossfade of the tail into the head).
+  - Every sound is normalised, with 3 ms edges so nothing clicks, capped at 4.5 s, and deterministic.
+- **`AudioManager.play` falls back to the built-in voice.** A file under that name plays first; otherwise the
+  voice is rendered once at the context's own sample rate and cached. A file loaded later still wins.
+  `prewarm()` renders every voice after `unlock()`, one per tick, so the first shot never pays for its own
+  synthesis. `play` now returns a stop function (for loops), and `has(name)` was added.
+- **The feedback table now covers the weapon cycle and the rewards.** WEAPON_EMPTY, WEAPON_RELOADED,
+  MELEE_SWING and MELEE_HIT are heard. COMBO_MILESTONE, NEW_BEST, LEVEL_UP, ACHIEVEMENT_UNLOCKED,
+  GOAL_COMPLETED and DAILY_REWARD play on the `ui` bus (a new `category` field).
+- **Stale text corrected in the same change:**
+  - the prompt's "generate_melody — the SOUND ITSELF… vfx only loads files";
+  - both tool descriptions;
+  - the module instructions;
+  - `aTuneNeedsNoSoundFile`, which pinned the old wording (its intent — no dead end for a silent game — now
+    holds outright).
+
+**Locked by `tests/aGameIsNeverSilent.test.ts`** (11 cases). They run the generated modules with a recording
+Web Audio stand-in:
+- **CENSUS:** every sound the table names has a voice, and so does every `audio.play('…')` literal in the game
+  layers.
+- Every voice is audible, never clips, is finite, and starts and ends at silence.
+- Durations fit their kind.
+- Pitch moves the right way: a jump rises, a death falls, an explosion sits below a shot.
+- The same name always gives the same sound.
+- Loops are exact and seamless, with no near-silent quarter.
+- `play('shoot')` with nothing loaded starts a sound at the context's rate, and an unknown name stays quiet.
+- A loaded file wins, a voice is rendered once, and a loop returns a working stop.
+- Rewards are on the `ui` bus.
+
+**Proven by reversion:** without the fallback, THE BUG case fails. With one recipe deleted, the census fails.
+The generated modules typecheck strictly. A 16-second reel of the voices was rendered to WAV for the admin.
+
+**Found on the way, and fixed in the same change:**
+
+1. **The missing-import healer re-walked every file once per exported name.** `addMissingProjectImports` called
+   `getDescendantsOfKind(Identifier)` inside its per-candidate loop, so its cost was files × exported names ×
+   identifiers. On our own game library (34 files, ~400 names, ~20 000 identifiers) that was 17.6 s, and this
+   healer runs on real builds with a missing import. It surfaced as a timeout in `aRecipeBringsTheLayersItImports`
+   once the CPU was busy.
+   - **The fix:** identifiers are indexed by name in ONE walk per file. Each name sees the same identifiers in
+     the same order, so every verdict is unchanged — all 46 healer tests are green. It now takes 1.7 s.
+   - **Locked by** a structural guard: the per-candidate loop must not walk the AST.
+   - **Siblings checked and judged bounded:**
+     - `readsAsValue` walks once per type-only import in a file (a handful);
+     - the JSX and hook analyses loop over a fixed set of node kinds;
+     - neither multiplies by the project's export count.
+2. **The G5 weapon prompt rule named `generate_game_systems` before the numbered tool list.** That broke the
+   prompt-order test, which reads first mentions. The full G5 gate caught it, and the rule now names the
+   module, `weapon.ts`.
+
+### 2026-10-05 — Game engine G7: a living sky — day-night clock and weather (atmosphere.ts)
+
+Every NavBharatAI 3D game was lit by ONE frozen preset: the same noon or the same sunset for ever, with no
+clouds, rain or night. `createAtmosphere({ scene, renderer, camera, lighting })` (generate_game_3d,
+`src/game/three/atmosphere.ts`) DRIVES the lights `applyLighting` made rather than adding its own, so shadows,
+fog and reflections keep agreeing.
+
+**The clock and the sky:**
+- `dayLength` real seconds per day; 0 stops the clock.
+- The sun rises in the east, is overhead at noon and sets in the west. At night the key light is a dim, blue
+  moon from above — never from below.
+- Ten keyframes, smoothstep-blended: night, dawn, morning, noon, afternoon, sunset, dusk, night.
+- The dome sits on the far plane: a gradient, a sun or moon disc with glow, twinkling stars, and fbm clouds
+  that drift and thicken with the weather.
+- `onPhase` announces dawn, day, dusk and night, once each.
+- `addNightLight(light | emissive mesh)` switches lamps on at dusk and off at dawn — and on a dark storm
+  afternoon too.
+
+**Weather — `setWeather(kind, seconds)`** with clear, cloudy, rain, storm, snow, fog and dust:
+- Every number blends over the given time: cloud, how dark the sky is, light dim, fog distance, greying, tint,
+  rain/snow/dust amount, lightning and wind.
+- `wet(materials)` makes a road darker and glossier in about 20 s of rain, and it dries in about a minute.
+- A storm strikes lightning every few seconds (seeded): a double flash lifts exposure and the lights, then
+  `onLightning(distance, distance / 343)` brings the thunder.
+- Rain is GPU line streaks; snow and dust are GPU points. Each is one buffer and one draw call, follows the
+  camera with no per-frame allocation, and 'lite' draws a third as much.
+- Reflections are re-baked per half-hour and weather slot: cached, bounded at 24, at most once a second.
+- **The fog is always the sky's horizon colour**, the rule that hides where the world ends.
+
+**Three real defects the renders caught (all fixed before this commit; a test locks each):**
+1. **The sky shader wrote linear colour straight to the screen.** A ShaderMaterial gets no tone mapping or
+   sRGB encode unless asked, so every sky came out dark and oversaturated. Fixed by adding three's
+   `tonemapping_fragment` and `colorspace_fragment`.
+2. **Every keyframe colour was linearised TWICE.** `setHex` already converts into the linear working space,
+   and a further `convertSRGBToLinear()` squared each channel: dawn and sunset came out blood-red and night
+   pitch black.
+   - **Siblings:** the dust and snow tints had the same call; nothing else in the generators does.
+   - **Locked by:** the noon horizon uniform must equal the authored colour, and the shader must carry the
+     colour-space chunk.
+3. **A storm sky was as pale as drizzle.** Greying kept the horizon's brightness. Each weather now has a
+   `dark` amount, and a test requires storm < 0.7 × rain < cloudy.
+
+The horizon band also uses an exponential falloff, so a sunset's orange hugs the lowest ~15° instead of
+climbing the whole sky.
+
+**Locked by `tests/theWorldHasADayAndWeather.test.ts`** (16 cases, the generated module with real three.js):
+- the clock's rate, wrap and stop;
+- the sun's east-to-west path, and the moon at night;
+- light levels across the day, warm dawn and orange sunset, and the four phases once each in order;
+- the colour converted once;
+- fog equals horizon at 9 hours × 7 weathers;
+- the rain blend, wetting and drying, and lightning count, distance, thunder delay and determinism;
+- the flash decays within 0.6 s, and storm < rain < cloudy darkness;
+- snow, fog and dust each look like themselves;
+- lamps follow the night;
+- the sky follows the camera, and dispose cleans up;
+- 'lite' draws a third of the rain.
+
+The generated modules typecheck strictly. A village street was rendered in Chromium at dawn, noon, sunset and
+night, and in rain, storm (on the flash), snow, fog, dust and a rainy night: no console errors.
+
+### 2026-10-05 — Game engine G8: a run has rhythm and flow (systems/director.ts)
+
+A generated action game spawned at one rate for ever and ramped on one fixed curve. A new player was
+crushed by wave 4, a good one was bored by wave 2, and nobody ever got a breather.
+`new Director(options)` (generate_game_systems) adds both halves of "just right".
+
+**Rhythm:**
+- `pace` moves build → peak (intensity ≥ 0.8) → relax (after `peakSeconds`, default 14, or once the fight
+  cools) → build (after `relaxSeconds`, default 7).
+- `canSpawn` is false in the breather, and `spawnRate` is 1 / 0.5 / 0.
+- Each change emits `PACE_CHANGED`, a new GameEvent.
+
+**Flow:**
+- `skill` (0..1) falls with damage and deaths and rises with kills and with time survived untouched.
+- `difficulty` moves toward the matching value at most 0.012 a second, between 0.6 and 1.8.
+- A second death within 90 s eases it ×0.85 at once — one step, then the window restarts, so it never
+  spirals to the floor.
+- `gameId` remembers the player's skill on their own device.
+- **Honest:** it changes the challenge, never the score. `adapt: false` keeps every run identical for compared
+  scores, and then saves nothing.
+- `bind()` feeds it from PLAYER_DAMAGED, PLAYER_DIED and ENEMY_DIED, and returns the unbind.
+- It plugs into the spawner as `planWave(wave, director.difficulty)`.
+
+**Locked by `tests/aRunHasRhythmAndFlow.test.ts`** (9 cases, the generated modules):
+- a weak player is eased and a strong one pushed, within bounds;
+- the per-step change stays at most 0.012/s;
+- mercy happens once and does not spiral;
+- `adapt: false` stays at 1;
+- the remembered skill restores, and nothing is saved when not adapting;
+- smaller waves for a weak player, bigger for a strong one;
+- the order is peak → relax → build, with zero spawns in a ≥ 6 s breather;
+- a calm run never peaks;
+- `bind`/unbind works.
+
+**Proven by reversion:** removing the rate cap fails the rate case, and removing the mercy step fails the
+mercy case. The generated modules typecheck strictly. The prompt and the KB say when to use it.
+
+### 2026-10-05 — Game engine G9: enemies fight differently, and fairly (systems/ai.ts)
+
+Every generated enemy was a melee chaser. It ran straight at the player, so a shooter's enemies queued to be
+shot and a crowd arrived from one side. Every hit also landed the instant an enemy was in range, so nothing
+could be dodged.
+
+**What changed in the pure `ai.ts` (default behaviour byte-identical; the 54 existing AI tests are green):**
+- **`EnemyConfig.role`**, with three presets:
+  - `'ranged'` (`RANGED_ENEMY`) holds `preferredRange` (10 m): it closes in when far, backs off when rushed,
+    STRAFES inside its band, faces the player while engaged, and wants to shoot from within 13 m with line of
+    sight.
+  - `'flanker'` (`FLANKER_ENEMY`) aims at a point beside the player, swinging in as it closes. A stable
+    per-enemy side means a group splits left and right with no randomness.
+  - The default stays `'melee'`.
+- **`AttackTelegraph(windup, recover)`:** ready → windup (with `progress` 0..1 for a glow or raised arm) →
+  ONE `'strike'` step → recover → ready. The caller re-checks range at the strike, which is the dodge.
+- **`BossPhases(thresholds)`:** the phase only ADVANCES, and `changed` is true once per transition, even if
+  the boss heals.
+
+**Locked by `tests/enemiesFightDifferently.test.ts`** (8 cases):
+- ranged: backs off from 3 m, closes from 18 m, settles in its band and shoots, never enters melee range,
+  strafes (more than 0.3 rad round the player), and holds fire without line of sight;
+- four enemies from one side arrive over a wider arc as flankers than as melee (measured at first coming
+  within 5 m — at the end, separation rings any group), and a flanker still arrives and attacks;
+- the default enemy comes straight in;
+- the telegraph has exactly one strike step, at 0.45 s, with no restart mid wind-up;
+- boss phases advance once and never replay.
+
+**Proven by reversion:** with the flanker's sideways steer at 0, the surround case fails. The prompt, the
+module instructions and the KB say when to use each.

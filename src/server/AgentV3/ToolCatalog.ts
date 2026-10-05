@@ -2255,7 +2255,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: combat, ai, projectile, spawner. Default = all.',
+            description: 'Optional subset: combat, ai, projectile, spawner, weapon, director. Default = all.',
           },
         },
       },
@@ -2296,8 +2296,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'Call this whenever an app needs a tune, background music, a jingle, a chime, or a success / '
         + 'error / coin / level-up cue, and whenever the user asks for a melody, a dhun, sargam, a '
         + 'raga exercise, a music or riyaaz app, or a metronome-like practice tool. '
-        + 'IT IS ALSO THE ANSWER TO A SILENT GAME: generate_game_vfx can only LOAD a sound file, which '
-        + 'the app does not have, so use this for its music and its cues instead of leaving it quiet. '
+        + 'For a GAME it is the music: generate_game_vfx already synthesises every sound EFFECT (shots, '
+        + 'hits, jumps, explosions, pickups, level-up), so use this for the theme and the tunes. '
         + 'Emits src/audio: a notation reader, a player and a small tune library. '
         + 'READS BOTH NOTATIONS in one line of text — Indian sargam (Sa Re Ga Ma Pa Dha Ni, komal as '
         + '_Re, teevra as Ma#, RELATIVE to the tune\'s tonic so one line transposes to any key) and '
@@ -2333,14 +2333,18 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'trauma + hit-stop, so a hit reads as force instead of a state change. Author reactions in that '
         + 'table and keep gameplay emitting events only — never call particles or audio inline from '
         + 'gameplay code, or the reactions drift and half the game ends up feeling weaker. '
-        + 'Adds no dependency. Sound FILES are the app\'s to supply; a missing one plays silently and warns — so for music and cues call generate_melody, which synthesises them and needs no file.',
+        + 'Adds no dependency and needs NO sound files: every sound the table fires has a voice synthesised '
+        + 'from code (src/game/fx/synth.ts — shoot, shotgun, laser, reload, empty, swing, impact, hit, hurt, '
+        + 'die, death, explosion, boss_die, jump, land, step, pickup, coin, heal, powerup, combo, newbest, '
+        + 'levelup, achievement, click, error, thunder, and the loops rain and wind), so a game is never '
+        + 'silent. A file loaded under the same name replaces a voice. Music is generate_melody.',
       input_schema: {
         type: 'object',
         properties: {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: particles, audio, feedback. Default = all.',
+            description: 'Optional subset: particles, synth, audio, feedback. Default = all.',
           },
         },
       },
@@ -2429,12 +2433,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             items: { type: 'string' },
             description:
               'Optional subset: renderer, lighting, materials, camera, world, environment, surfaces, '
-              + 'humanoid, objects. Default = all; imports are pulled in automatically. '
+              + 'humanoid, objects, atmosphere. Default = all; imports are pulled in automatically. '
+              + 'atmosphere = createAtmosphere(): a running day-night clock (sun, moon, stars, street lamps '
+              + 'on at dusk) and weather (clear, cloudy, rain, storm with lightning, snow, fog, dust); '
               + 'environment = sky + image-based reflections; surfaces = brick/wood/bark/stone/road/soil/'
               + 'grass/metal/cloth/tile/sand with real bump + roughness; humanoid = a correctly '
               + 'proportioned figure with joints; objects = createCar / createMotorcycle / createBicycle '
               + '/ createTree / createMountain / '
-              + 'createRiver / createDesert / createRoad / createAnimal, with setDetailLevel() choosing '
+              + 'createRiver / createDesert / createRoad / createAnimal (dog, cow, horse, deer, goat, tiger) / createHouse '
+              + '/ createAutoRickshaw / createBus / createTruck / createTractor / createTraffic (live traffic that keeps '
+              + 'left and stops for the player), with setDetailLevel() choosing '
               + 'full detail or the lighter phone-friendly build. '
               + '⚠️ NARROWING THIS IS HOW A 3D GAME ENDS UP LOOKING FLAT: without environment every '
               + 'metal renders near-black, and without objects there is nothing to put in the world but '
@@ -2452,7 +2460,10 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'and a cheap phone, and an alt-tab cannot teleport the player), polled Input with keyboard + '
         + 'mouse + touch-joystick + virtual buttons behind ONE action map, an EventBus, an object Pool, '
         + 'game state with save/load, and GameFeel (trauma-squared screen shake, hit-stop, easing, '
-        + 'frame-rate-independent damp). NO dependency is added and nothing here is engine-specific, so it '
+        + 'frame-rate-independent damp), and META — what brings a player back: a best score that survives a '
+        + 'reload, NEW BEST and near-miss ("only 12 more") moments, a combo multiplier, XP + levels with '
+        + 'unlocks, achievements, and a daily streak with three daily goals, with on-screen announcements. '
+        + 'NO dependency is added and nothing here is engine-specific, so it '
         + 'serves a 2D canvas and a 3D scene equally. '
         + 'DO NOT hand-roll a requestAnimationFrame loop, a keydown handler or a bullet array — every one '
         + 'of those has a known failure (frame-rate-dependent physics, lost key presses, GC stutter) that '
@@ -2463,7 +2474,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: loop, input, events, pool, feel, state. Default = all; imports are pulled in automatically.',
+            description: 'Optional subset: loop, input, events, pool, feel, state, meta. Default = all; imports are pulled in automatically.',
           },
         },
       },

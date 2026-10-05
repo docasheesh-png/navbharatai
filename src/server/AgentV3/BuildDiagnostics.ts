@@ -83,6 +83,8 @@ export const PROCESS_ONLY_CODES = new Set([
   // Our template seeding and a user's Stop (autopsy 31254f9a): facts about the ENGINE's run, never the app.
   'GOLDEN_SCAFFOLD_SKIPPED', 'LLM_CALL_STOPPED', 'SIMPLE_BUILD_STOPPED', 'DOMAIN_KNOWLEDGE', 'DURABLE_HOLDS_ONLY_STARTER',
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
+  // The game playtest (gamePlaytest.ts): a pass, or a run that could not look, is never a defect of the app.
+  'GAME_PLAYTEST_NOT_RUN', 'GAME_PLAYTEST_OK',
   // A repair's out-of-scope answer that OUR guard refused to write (autopsy eed79815): engine housekeeping.
   'REPAIR_OUT_OF_SCOPE',
   // A review whose findings OUR parser could not read (autopsy d798ddd3) — our instrument.

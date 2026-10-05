@@ -14,7 +14,8 @@
 // PURE.
 
 const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|html?|vue|svelte)$/i;
-const GAME_SIGNAL = /requestAnimationFrame|getContext\(\s*['"](?:2d|webgl2?)['"]|from\s+['"]three['"]|new\s+THREE\.|\bPhaser\b|<canvas\b/;
+/** Something in this file runs a game: a render loop, a 2D/WebGL context, three.js, Phaser or a canvas. */
+export const GAME_SIGNAL = /requestAnimationFrame|getContext\(\s*['"](?:2d|webgl2?)['"]|from\s+['"]three['"]|new\s+THREE\.|\bPhaser\b|<canvas\b/;
 const KEYBOARD_CONTROL = /['"](?:ArrowUp|ArrowDown|ArrowLeft|ArrowRight|KeyW|KeyA|KeyS|KeyD|Space)['"]|\bkeyCode\s*===?\s*(?:32|37|38|39|40)\b|\.key\s*===?\s*['"](?:w|a|s|d|\s)['"]/;
 const KEY_LISTENER = /keydown|onKeyDown|KeyboardEvent/;
 const TOUCH_SIGNAL = /touchstart|touchmove|ontouchstart|onTouchStart|pointerdown|onPointerDown|pointerType|setVirtualButton|setAnalogueMove|TouchControls|nipplejs/i;

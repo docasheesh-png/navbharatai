@@ -789,6 +789,15 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '    1. generate_game_runtime  — ALWAYS FIRST. Fixed-timestep loop, input (incl. touch), events,',
     '       pooling, save/load, game feel. A hand-written requestAnimationFrame loop makes the game run',
     '       at a different SPEED on every monitor.',
+    // 🔁 ADMIN 2026-10-05: "navbharatai jab game banaye to user ko navbharatai ki latt lag jaye". A game
+    // that forgets everything when it ends is played once — best score, progress and a fast restart are
+    // what bring a player back, and the runtime already ships them (meta.ts).
+    '       🔁 IT ALSO SHIPS meta.ts — WHAT BRINGS THE PLAYER BACK. Every game calls startMeta({ gameId })',
+    '       once (the 3D shell does it for you), scores successful actions with combo.hit(points), and ends',
+    '       a round on a screen showing summaryLines(meta.lastSummary) — NEW BEST, or "only N more to beat',
+    '       your best" — with a big, already-focused "Play again". No best score, no progress, or a slow',
+    '       restart means the game is played once. Reward playing and improving: NEVER loot boxes, paid',
+    '       randomness, fake timers or guilt messages.',
     '    2. generate_game_3d       — only for 3D. Colour management, lighting presets, camera rigs,',
     '       procedural world. Adds `three`.',
     // 🎨 ADMIN 2026-08-26, from a real 3D game: "not so realistic". The audit found the lighting was
@@ -798,7 +807,30 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     // animal, road. agar user bole real/asli/100% (wording par nahi jana, INTENTION samjhna hai) to
     // hu-ba-hu real banao. agar sirf 3d bole to lite se kaam chal jayega."
     '       🔴 NEVER HAND-MODEL AN OBJECT. objects.ts builds them properly: createCar, createTree,',
-    '         createMountain, createRiver, createDesert, createRoad, createAnimal, createHouse (+ createHumanoid).',
+    '         createMountain, createRiver, createDesert, createRoad, createAnimal, createHouse (+ createHumanoid),',
+    '         and INDIA\'S ROADS: createAutoRickshaw (livery delhi|mumbai), createBus, createTruck, createTractor.',
+    '         Animals: createAnimal({ kind }) with dog, cow (Indian, with hump), horse, deer, goat or tiger.',
+    '         🚦 A DRIVING OR CITY GAME HAS TRAFFIC: createTraffic({ road: { length, width } }) fills the road',
+    '         with cars, autos, buses, trucks and tractors that keep LEFT, keep their distance and stop for',
+    '         the player — add traffic.root to the scene and call traffic.update(dt, [playerVehicle]) each step.',
+    '         An empty road reads as a stage set.',
+    '         ⚔️ ENEMIES FIGHT DIFFERENTLY AND FAIRLY: mix RANGED_ENEMY (holds distance, strafes, shoots),',
+    '         FLANKER_ENEMY (surrounds) and DEFAULT_ENEMY; every heavy hit is telegraphed (AttackTelegraph —',
+    '         a visible wind-up the player can dodge); a boss changes per BossPhases. All in the systems ai.ts.',
+    '         🎢 A RUN HAS A RHYTHM: an action game with waves uses the Director from the systems layer',
+    '         (director.ts) — tension builds, peaks, then a breather with no new enemies, and difficulty moves',
+    '         slowly toward what THIS player handles: planWave(wave, director.difficulty), spawn only while',
+    '         director.canSpawn. adapt: false when scores are compared on a leaderboard.',
+    '         🌦️ AN OPEN WORLD HAS A SKY THAT LIVES: createAtmosphere({ scene, renderer, camera, lighting })',
+    '         runs a day-night clock (sun, moon, stars; addNightLight(lamp) turns lamps on at dusk) and',
+    "         weather — setWeather('rain' | 'storm' | 'snow' | 'fog' | 'dust' | 'cloudy' | 'clear').",
+    "         wet([roadMaterial]) makes a road shine in the rain; onLightning plays audio.play('thunder').",
+    '         Use it for any outdoor driving, village, city or adventure game — one frozen noon is a photo.',
+    '         🔫 A WEAPON IS TWO THINGS, BOTH FROM THE LIBRARY: the MODEL createWeapon({ kind }) (pistol, rifle,',
+    '         smg, shotgun, sniper, sword, axe, bow) put in the hand with hero.hold(weapon.root), and the',
+    '         BEHAVIOUR new Weapon(kind) / new MeleeWeapon() from the systems layer, weapon.ts (fire rate, semi/auto,',
+    '         magazine + reload, spread that blooms, recoil, pellets, falling arrows; a swing that lands once,',
+    '         in front). One projectile per click is not a gun; a radius check every frame is not a sword.',
     '         A building is createHouse() (door, windows, sun-shades, flat roof + water tank or clay tiles) —',
     '         never a box with a cone on top. Stand vehicles on the road at y = ROAD_SURFACE_Y.',
     '         A hand-written box-with-wheels beside these reads as a bug, not a style. If an object you',
@@ -826,11 +858,14 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       i-frames and fast-bullet collision, which a fresh implementation reliably gets wrong.',
     '    5. generate_game_vfx      — particles, audio and the ONE table that fires effect + sound +',
     '       shake together, which is what makes a hit feel like force.',
-    // The audio manager it emits can only LOAD a sound file, and the app has none — so every game
-    // shipped silent. A note is a frequency and an envelope; `generate_melody` synthesises both.
-    '    5b. generate_melody       — the SOUND ITSELF. generate_game_vfx only loads sound FILES, which',
-    '       the app does not have, so call this too and a game is never silent: synthesised music and',
-    '       cues (coin, success, level-up) from notes, no file, no dependency, no cost.',
+    // The audio manager used to play only a LOADED file, and a generated app has none — so every game
+    // shipped silent (found again 2026-10-05: the feedback table fired 'shoot'/'hit'/'jump' at nothing).
+    // It now synthesises every effect it names itself (fx/synth.ts); `generate_melody` is the MUSIC.
+    '       Every effect sound the table fires (shoot, hit, jump, explosion, pickup, level-up…) is',
+    '       synthesised from code — no file needed, so the game is never silent. Add a sound by NAME',
+    "       (audio.play('thunder'), audio.play('rain', 'sfx', { loop: true })) — never ship a game mute.",
+    '    5b. generate_melody       — the MUSIC: a theme or a tune from notes (sargam or letters), no file,',
+    '       no dependency, no cost. Effects come from 5; melody is for the song.',
     '    6. generate_game_shell    — LAST, and ONLY for a game drawn in 3D: it renders a three.js scene.',
     '       Composes all of the above into something playable, with HUD,',
     '       on-screen TOUCH CONTROLS (joystick, camera drag, Attack/Jump/Use/Run, Pause — shown only on a',

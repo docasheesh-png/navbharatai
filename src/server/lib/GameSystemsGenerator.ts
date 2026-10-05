@@ -171,7 +171,16 @@ export interface EnemyConfig {
   separationRadius: number;
   /** Turn rate, radians per second. Instant turning reads as robotic. */
   turnRate: number;
+  /**
+   * How it fights. 'melee' (the default) closes in. 'ranged' holds \`preferredRange\` and strafes, shooting
+   * from there. 'flanker' comes in from the side, so a group SURROUNDS the player instead of queueing.
+   */
+  role?: EnemyRole;
+  /** Ranged only: the distance it fights from. Default 10. */
+  preferredRange?: number;
 }
+
+export type EnemyRole = 'melee' | 'ranged' | 'flanker';
 
 export const DEFAULT_ENEMY: EnemyConfig = {
   speed: 2.2,
@@ -183,6 +192,11 @@ export const DEFAULT_ENEMY: EnemyConfig = {
   separationRadius: 2.4,
   turnRate: 6,
 };
+
+/** A shooter: holds its distance, strafes, and shoots when it can see the player. */
+export const RANGED_ENEMY: EnemyConfig = { ...DEFAULT_ENEMY, role: 'ranged', preferredRange: 10, detectRadius: 20, loseRadius: 28, attackRadius: 13, chaseSpeed: 3.4 };
+/** A flanker: comes in from the side, so three of them surround rather than queue. */
+export const FLANKER_ENEMY: EnemyConfig = { ...DEFAULT_ENEMY, role: 'flanker', chaseSpeed: 4.8 };
 
 export interface EnemyState {
   mode: EnemyMode;
@@ -275,8 +289,28 @@ export function stepEnemyAI(
   let desired: Vec2 = { x: 0, z: 0 };
   let speed = 0;
 
-  if (mode === 'chase') {
-    desired = normalise({ x: perception.player.x - s.position.x, z: perception.player.z - s.position.z });
+  const role = config.role ?? 'melee';
+  const toward = normalise({ x: perception.player.x - s.position.x, z: perception.player.z - s.position.z });
+  // Its own side: a stable per-enemy sign from where it started, so flankers split left and right and a
+  // ranged enemy circles one way — with no randomness, so a replay is identical.
+  const side = (Math.floor(s.home.x * 7.13 + s.home.z * 3.71) & 1) ? 1 : -1;
+  if (role === 'ranged' && (mode === 'chase' || mode === 'attack')) {
+    // Hold the band around preferredRange: close in when far, back off when the player rushes it, and
+    // STRAFE inside the band — a shooter that stands still is a target, one that walks at you is a melee enemy.
+    const range = config.preferredRange ?? 10;
+    const radial = toPlayer > range + 2 ? 1 : toPlayer < range - 3 ? -1 : 0;
+    const strafe = radial === 0 ? 1 : 0.35;
+    desired = normalise({ x: toward.x * radial + -toward.z * side * strafe, z: toward.z * radial + toward.x * side * strafe });
+    speed = radial === 0 ? config.speed : config.chaseSpeed;
+    mode = toPlayer <= config.attackRadius ? 'attack' : 'chase';
+    if (mode !== s.mode) { s.mode = mode; s.timeInMode = 0; }
+  } else if (role === 'flanker' && mode === 'chase' && toPlayer > config.attackRadius + 2.5) {
+    // Aim at a point BESIDE the player, swinging in as it closes — the group arrives from several sides.
+    const lateral = Math.min(1, (toPlayer - config.attackRadius) / 8) * 0.9;
+    desired = normalise({ x: toward.x - toward.z * side * lateral * 1.6, z: toward.z + toward.x * side * lateral * 1.6 });
+    speed = config.chaseSpeed;
+  } else if (mode === 'chase') {
+    desired = toward;
     speed = config.chaseSpeed;
   } else if (mode === 'patrol') {
     // A deterministic loop around home: no Math.random, so a replay is identical.
@@ -297,7 +331,7 @@ export function stepEnemyAI(
   if (mag > cap && mag > 1e-6) { vx = (vx / mag) * cap; vz = (vz / mag) * cap; }
 
   // Face where it is going (or the player while attacking), turning at a finite rate.
-  const faceTarget = mode === 'attack'
+  const faceTarget = mode === 'attack' || (role === 'ranged' && engaged)
     ? Math.atan2(perception.player.x - s.position.x, perception.player.z - s.position.z)
     : (mag > 1e-6 ? Math.atan2(vx, vz) : s.facing);
   const turn = angleDelta(s.facing, faceTarget);
@@ -314,6 +348,54 @@ export function stepEnemyAI(
     wantsAttack: mode === 'attack' && perception.canSeePlayer,
     alerted,
   };
+}
+
+/**
+ * A TELEGRAPHED attack: the enemy winds up where the player can SEE it (raise the arm, flash, crouch),
+ * the blow lands at the end of the wind-up, then it recovers. A hit with no wind-up cannot be dodged and
+ * reads as cheap; this is the half-second that makes combat feel fair and skilful.
+ *
+ * At 'strike' check the range AGAIN: a player who stepped away during the wind-up has dodged it.
+ * PURE: drive it with update(dt) and read the phase.
+ */
+export type TelegraphPhase = 'ready' | 'windup' | 'strike' | 'recover';
+export class AttackTelegraph {
+  phase: TelegraphPhase = 'ready';
+  private t = 0;
+  constructor(public readonly windup = 0.45, public readonly recover = 0.6) {}
+  /** Start a wind-up. False unless ready. */
+  request(): boolean {
+    if (this.phase !== 'ready') return false;
+    this.phase = 'windup'; this.t = 0;
+    return true;
+  }
+  /** 0..1 through the wind-up — scale a glow or a raised arm with it. */
+  get progress(): number { return this.phase === 'windup' ? Math.min(1, this.t / this.windup) : 0; }
+  /** Advance. 'strike' is returned for exactly ONE step: deal the damage then, if still in range. */
+  update(dt: number): TelegraphPhase {
+    this.t += Math.max(0, dt);
+    if (this.phase === 'strike') { this.phase = 'recover'; this.t = 0; }
+    else if (this.phase === 'windup' && this.t >= this.windup - 1e-9) { this.phase = 'strike'; this.t = 0; }
+    else if (this.phase === 'recover' && this.t >= this.recover - 1e-9) { this.phase = 'ready'; this.t = 0; }
+    return this.phase;
+  }
+}
+
+/**
+ * A boss fight in PHASES: below each health threshold the boss changes (faster, a new attack, adds). The
+ * phase only ever ADVANCES — a boss that heals back over a threshold must not replay its transition.
+ * changed is true on the one update a new phase begins: emit BOSS_PHASE_CHANGED then.
+ */
+export class BossPhases {
+  phase = 0;
+  constructor(public readonly thresholds: readonly number[] = [0.66, 0.33]) {}
+  update(healthFraction: number): { phase: number; changed: boolean } {
+    let p = 0;
+    for (const t of this.thresholds) if (healthFraction <= t) p++;
+    const changed = p > this.phase;
+    if (changed) this.phase = p;
+    return { phase: this.phase, changed };
+  }
 }
 
 export function initialEnemyState(x: number, z: number, patrolRadius = 0): EnemyState {
@@ -407,6 +489,11 @@ export interface FireOptions {
   radius?: number;
   gravity?: number;
   ownerId?: string;
+  /**
+   * Fire without announcing it. A weapon that sends several projectiles per shot (a shotgun's pellets)
+   * emits ONE WEAPON_FIRED itself; per-projectile events gave one shot eight flashes and eight bangs.
+   */
+  silent?: boolean;
 }
 
 export class ProjectileSystem {
@@ -442,7 +529,7 @@ export class ProjectileSystem {
     slot.radius = options.radius ?? 0.15;
     slot.gravity = options.gravity ?? 0;
     slot.ownerId = options.ownerId;
-    events.emit('WEAPON_FIRED', { position: { ...options.position } });
+    if (!options.silent) events.emit('WEAPON_FIRED', { position: { ...options.position } });
     return true;
   }
 
@@ -620,14 +707,402 @@ export function fallenOutOfWorld<T extends WaveTrackable>(enemies: T[], killFloo
 }
 `;
 
+const WEAPON = `/**
+ * WEAPONS — the part of a shooter that decides whether it feels like one.
+ *
+ * A generated shooter usually spawns one projectile per click and calls it a gun. Every weapon a player
+ * has held behaves in ways that click cannot: a rifle keeps firing while the trigger is held and a
+ * pistol does not; a magazine runs dry and a reload takes time you can be caught in; shots spread wider
+ * the longer you hold the trigger and tighten when you stop; the barrel kicks; a shotgun is eight pellets
+ * with ONE bang; an arrow falls. All of it is here, pure and seeded, firing through ProjectileSystem.
+ *
+ * Melee is the same idea for a blade: a swing hits what is IN FRONT, within reach and inside an arc,
+ * once per swing — never everything around the player, never sixty times a second.
+ */
+import { events } from '../core/events';
+import type { ProjectileSystem, ProjectileTarget, Vec3 } from './projectile';
+
+export type WeaponKind = 'pistol' | 'rifle' | 'smg' | 'shotgun' | 'sniper' | 'bow';
+
+export interface WeaponSpec {
+  /** Shots per second at most. */
+  fireRate: number;
+  /** Fires while the trigger is HELD (rifle, SMG) — or once per press (pistol, shotgun, sniper, bow). */
+  auto: boolean;
+  magazine: number;
+  /** Seconds to reload — you cannot fire during it. */
+  reload: number;
+  damage: number;
+  /** Projectile speed, m/s. */
+  speed: number;
+  /** Half-angle of the shot cone, radians, when fired calmly. */
+  spread: number;
+  /** Projectiles per shot (a shotgun's pellets). */
+  pellets: number;
+  /** Upward kick per shot, radians — apply weapon.kick to the camera pitch. */
+  recoil: number;
+  /** Gravity on the projectile (an arrow drops; a bullet, at game ranges, does not). */
+  gravity: number;
+  /** Seconds a projectile lives — its range. */
+  life: number;
+}
+
+export const WEAPONS: Readonly<Record<WeaponKind, WeaponSpec>> = {
+  pistol:  { fireRate: 4,   auto: false, magazine: 12, reload: 1.2, damage: 20, speed: 70,  spread: 0.012, pellets: 1, recoil: 0.035, gravity: 0,     life: 1.5 },
+  rifle:   { fireRate: 9,   auto: true,  magazine: 30, reload: 2.0, damage: 14, speed: 95,  spread: 0.018, pellets: 1, recoil: 0.02,  gravity: 0,     life: 2 },
+  smg:     { fireRate: 13,  auto: true,  magazine: 32, reload: 1.6, damage: 9,  speed: 75,  spread: 0.04,  pellets: 1, recoil: 0.012, gravity: 0,     life: 1.2 },
+  shotgun: { fireRate: 1.2, auto: false, magazine: 6,  reload: 2.6, damage: 9,  speed: 60,  spread: 0.09,  pellets: 8, recoil: 0.09,  gravity: 0,     life: 0.6 },
+  sniper:  { fireRate: 0.8, auto: false, magazine: 5,  reload: 2.8, damage: 90, speed: 170, spread: 0.002, pellets: 1, recoil: 0.13,  gravity: 0,     life: 2.5 },
+  bow:     { fireRate: 1.1, auto: false, magazine: 1,  reload: 0.55, damage: 35, speed: 42, spread: 0.006, pellets: 1, recoil: 0,     gravity: -9.8,  life: 4 },
+};
+
+/** How far the cone may widen while the trigger is held: this many times the calm spread. */
+export const MAX_BLOOM = 2.5;
+/**
+ * A cooldown counts down in fixed steps of 1/60, which floating point never lands on 0 exactly: 30 steps
+ * of 1/60 leave ~1e-16 behind, and a strict \`> 0\` would make every "twice a second" weapon wait one
+ * extra frame. Anything under a microsecond is ready.
+ */
+const READY = 1e-6;
+
+export class Weapon {
+  readonly spec: WeaponSpec;
+  readonly kind: WeaponKind | 'custom';
+  ammo: number;
+  /** Seconds of reload left; 0 when ready. */
+  reloading = 0;
+  /** The camera kick to add to the view's pitch this frame. Decays on its own. */
+  kick = 0;
+  private cooldown = 0;
+  private bloom = 1;
+  private wasHeld = false;
+  /** The trigger was held and the gun ready last step — a late shot now carries its lateness. */
+  private streak = false;
+  private seed: number;
+
+  constructor(kind: WeaponKind | WeaponSpec = 'pistol', seed = 1) {
+    this.spec = typeof kind === 'string' ? WEAPONS[kind] : kind;
+    this.kind = typeof kind === 'string' ? kind : 'custom';
+    this.ammo = this.spec.magazine;
+    this.seed = (seed >>> 0) || 1;
+  }
+
+  /** The current cone half-angle — wider while firing, back to calm when you stop. */
+  get spread(): number { return this.spec.spread * this.bloom; }
+
+  /** Start a reload. False when already full or already reloading. */
+  reload(): boolean {
+    if (this.reloading > 0 || this.ammo >= this.spec.magazine) return false;
+    this.reloading = this.spec.reload;
+    return true;
+  }
+
+  /**
+   * Advance one FIXED step. Returns how many shots left the barrel. \`muzzle\` is the barrel tip in world
+   * space and \`aim\` the direction the player is aiming (it need not be normalised).
+   */
+  update(dt: number, triggerHeld: boolean, muzzle: Vec3, aim: Vec3, projectiles: ProjectileSystem, ownerId?: string): number {
+    // The time between shots rarely divides into 1/60 s steps (13 rounds a second is 4.6 frames). A
+    // cooldown RESET on each shot rounds every gap up to whole frames and quietly turns 13/s into 12/s, so
+    // a shot that comes due mid-step CARRIES how late it is into the next gap. Only while the trigger is
+    // held continuously: the first shot after a pause, a reload or a fresh press is never early.
+    const owed = this.cooldown - dt;
+    this.cooldown = Math.max(0, owed);
+    this.kick *= Math.exp(-10 * dt);
+    if (!triggerHeld) this.bloom = Math.max(1, this.bloom - dt * 3);
+    const pressed = triggerHeld && !this.wasHeld;
+    this.wasHeld = triggerHeld;
+    const wantsShot = this.spec.auto ? triggerHeld : pressed;
+    const late = this.streak && wantsShot && owed < 0 ? Math.min(dt, -owed) : 0;
+    this.streak = wantsShot && this.reloading === 0;
+
+    if (this.reloading > 0) {
+      this.reloading = Math.max(0, this.reloading - dt);
+      if (this.reloading === 0) {
+        this.ammo = this.spec.magazine;
+        events.emit('WEAPON_RELOADED', { kind: this.kind });
+      }
+      return 0;
+    }
+    if (!wantsShot || this.cooldown > READY) return 0;
+    if (this.ammo <= 0) {
+      // Dry: say so (a click) — tapped or held through the last round alike — and start the reload the
+      // player obviously wants. The reload then blocks this branch, so the click sounds once.
+      events.emit('WEAPON_EMPTY', { kind: this.kind });
+      this.reload();
+      return 0;
+    }
+
+    this.ammo -= 1;
+    this.cooldown = 1 / this.spec.fireRate - late;
+    const len = Math.hypot(aim.x, aim.y, aim.z) || 1;
+    const fx = aim.x / len, fy = aim.y / len, fz = aim.z / len;
+    // Two axes perpendicular to the aim, so the cone is a cone whichever way the player looks.
+    const ux0 = Math.abs(fy) < 0.99 ? 0 : 1, uy0 = Math.abs(fy) < 0.99 ? 1 : 0;   // world up, unless aiming straight up
+    let rx = -fz * uy0, ry = fz * ux0, rz = fx * uy0 - fy * ux0;                   // right = aim × up
+    const rl = Math.hypot(rx, ry, rz) || 1; rx /= rl; ry /= rl; rz /= rl;
+    const vx = ry * fz - rz * fy, vy = rz * fx - rx * fz, vz = rx * fy - ry * fx;
+    for (let i = 0; i < this.spec.pellets; i++) {
+      // Uniform over the cone's disc, not its square — a square pattern reads as a bug.
+      const r = this.spread * Math.sqrt(this.random());
+      const a = this.random() * Math.PI * 2;
+      const ox = Math.cos(a) * r, oy = Math.sin(a) * r;
+      projectiles.fire({
+        position: { ...muzzle },
+        direction: { x: fx + rx * ox + vx * oy, y: fy + ry * ox + vy * oy, z: fz + rz * ox + vz * oy },
+        speed: this.spec.speed, damage: this.spec.damage, life: this.spec.life, gravity: this.spec.gravity,
+        ownerId, silent: true,
+      });
+    }
+    // ONE shot is one bang and one flash, however many pellets it carried.
+    events.emit('WEAPON_FIRED', { position: { ...muzzle }, kind: this.kind });
+    this.kick += this.spec.recoil;
+    this.bloom = Math.min(MAX_BLOOM, this.bloom + 0.35);
+    if (this.ammo === 0 && this.spec.magazine === 1) this.reload();   // a bow nocks the next arrow itself
+    return 1;
+  }
+
+  private random(): number {
+    this.seed ^= this.seed << 13; this.seed ^= this.seed >>> 17; this.seed ^= this.seed << 5;
+    return ((this.seed >>> 0) % 1000000) / 1000000;
+  }
+}
+
+/**
+ * What a melee swing hits: targets IN FRONT of the attacker (within \`arc\` of where it faces, on the
+ * ground plane), within \`range\` of it, counting each target's own radius. Nearest first.
+ * \`facingYaw\` is the attacker's rotation.y — every model in the library faces its local +Z.
+ */
+export function meleeHits(origin: Vec3, facingYaw: number, targets: ProjectileTarget[], range = 1.8, arc = Math.PI * 0.6): ProjectileTarget[] {
+  const fx = Math.sin(facingYaw), fz = Math.cos(facingYaw);
+  const out: Array<{ t: ProjectileTarget; d: number }> = [];
+  for (const t of targets) {
+    const dx = t.position.x - origin.x, dz = t.position.z - origin.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist - t.radius > range) continue;
+    if (dist > 1e-6) {
+      const cos = (dx * fx + dz * fz) / dist;
+      if (cos < Math.cos(arc / 2)) continue;
+    }
+    out.push({ t, d: dist });
+  }
+  return out.sort((a, b) => a.d - b.d).map((o) => o.t);
+}
+
+/**
+ * A blade or a fist: one swing per cooldown, and each swing lands ONCE, at its strike moment — not on
+ * every frame the arc overlaps a target.
+ */
+export class MeleeWeapon {
+  private cooldown = 0;
+  private windup = -1;
+  constructor(public readonly damage = 30, public readonly rate = 1.6, public readonly range = 1.8, public readonly arc = Math.PI * 0.6, public readonly strikeDelay = 0.12) {}
+
+  /** Start a swing; false while the last one is still recovering. */
+  swing(): boolean {
+    if (this.cooldown > READY || this.windup >= 0) return false;
+    this.windup = this.strikeDelay;
+    this.cooldown = 1 / this.rate;
+    events.emit('MELEE_SWING', {});
+    return true;
+  }
+
+  /** Advance; returns the targets hit on THIS step (empty except at the strike moment). */
+  update(dt: number, origin: Vec3, facingYaw: number, targets: ProjectileTarget[]): ProjectileTarget[] {
+    this.cooldown = Math.max(0, this.cooldown - dt);
+    if (this.windup < 0) return [];
+    this.windup -= dt;
+    if (this.windup > 0) return [];
+    this.windup = -1;
+    const hits = meleeHits(origin, facingYaw, targets, this.range, this.arc);
+    if (hits.length) events.emit('MELEE_HIT', { count: hits.length });
+    return hits;
+  }
+}
+`;
+
+const DIRECTOR = `import { events } from '../core/events';
+
+/**
+ * The Director — why a good action game feels "just right" for the whole run.
+ *
+ * Two jobs, the two things that keep a player playing:
+ *
+ *   1. PACING. Tension BUILDS as enemies arrive, PEAKS in a real fight, then the game gives a BREATHER —
+ *      no new enemies for a few seconds — before it builds again. Constant pressure is exhausting and
+ *      constant calm is boring; the rhythm between them is what "one more round" is made of.
+ *
+ *   2. FLOW. It watches how the player is doing — hurt, dying, killing, untouched — and moves difficulty
+ *      SLOWLY toward what that player can handle: a struggling player is eased, a strong one is pushed.
+ *      Slowly (about 1% a second at most), so nobody ever feels the game change under them; and after two
+ *      quick deaths it eases once, at once, because that is the moment a player quits.
+ *
+ * Honest by construction: it changes the CHALLENGE (how many enemies, how tough, how often), never the
+ * score. Where scores are compared between players (a shared leaderboard), pass \`adapt: false\`: every
+ * run then gets the same curve, so a high score means the same thing for everyone.
+ *
+ * Use it with the spawner:  planWave(wave, director.difficulty)  and only spawn while director.canSpawn.
+ */
+export type Pace = 'build' | 'peak' | 'relax';
+
+export interface DirectorOptions {
+  /** Adapt difficulty to the player. false keeps every run identical (for compared scores). Default true. */
+  adapt?: boolean;
+  minDifficulty?: number;
+  maxDifficulty?: number;
+  /** The longest a peak may last before the breather is forced. Default 14 s. */
+  peakSeconds?: number;
+  /** How long the breather lasts. Default 7 s. */
+  relaxSeconds?: number;
+  /** Remember the player's skill between sessions under this id (localStorage). */
+  gameId?: string;
+  /** Where to start when nothing is remembered, 0..1. Default 0.5 (difficulty 1). */
+  startSkill?: number;
+}
+
+const MAX_RATE = 0.012;           // difficulty change per second, at most
+const MERCY_WINDOW = 90;          // two deaths within this many seconds → ease at once
+const MERCY_STEP = 0.85;
+
+export class Director {
+  /** Multiply challenge by this: planWave(i, difficulty), enemy speed, spawn count. 1 is the designed game. */
+  difficulty = 1;
+  /** How intense the last few seconds were, 0..1. */
+  intensity = 0;
+  pace: Pace = 'build';
+  /** The running estimate of this player, 0..1. */
+  skill: number;
+  readonly adapt: boolean;
+  private readonly min: number;
+  private readonly max: number;
+  private readonly peakSeconds: number;
+  private readonly relaxSeconds: number;
+  private readonly key: string | null;
+  private paceTime = 0;
+  private sinceHurt = 0;
+  private clock = 0;
+  private lastDeath = -Infinity;
+  private saveIn = 5;
+
+  constructor(options: DirectorOptions = {}) {
+    this.adapt = options.adapt !== false;
+    this.min = Math.max(0.2, options.minDifficulty ?? 0.6);
+    this.max = Math.max(this.min, options.maxDifficulty ?? 1.8);
+    this.peakSeconds = Math.max(2, options.peakSeconds ?? 14);
+    this.relaxSeconds = Math.max(1, options.relaxSeconds ?? 7);
+    this.key = options.gameId ? 'nb-director-v1:' + options.gameId : null;
+    this.skill = clamp01(options.startSkill ?? 0.5);
+    if (this.key && this.adapt) {
+      try {
+        const saved = Number(globalThis.localStorage?.getItem(this.key));
+        if (Number.isFinite(saved) && saved > 0) this.skill = clamp01(saved);
+      } catch { /* storage blocked: start from the default */ }
+    }
+    if (this.adapt) this.difficulty = this.targetDifficulty();
+  }
+
+  /** May a new enemy appear now? False during the breather. */
+  get canSpawn(): boolean { return this.pace !== 'relax'; }
+
+  /** Spawn-rate multiplier: full while building, eased at the peak (the fight is already on), 0 in a breather. */
+  get spawnRate(): number { return this.pace === 'build' ? 1 : this.pace === 'peak' ? 0.5 : 0; }
+
+  /** The player lost this fraction of their health (0..1). */
+  playerHurt(fraction: number): void {
+    const f = clamp01(fraction);
+    this.intensity = clamp01(this.intensity + f * 1.6);
+    this.skill = clamp01(this.skill - f * 0.2);
+    this.sinceHurt = 0;
+  }
+
+  playerDied(): void {
+    this.intensity = 1;
+    this.skill = clamp01(this.skill - 0.12);
+    // Two deaths close together is the moment a player gives up — ease now, once, not a second later.
+    if (this.adapt && this.clock - this.lastDeath < MERCY_WINDOW) {
+      this.difficulty = Math.max(this.min, this.difficulty * MERCY_STEP);
+      this.lastDeath = -Infinity;
+    } else {
+      this.lastDeath = this.clock;
+    }
+    this.sinceHurt = 0;
+  }
+
+  enemyKilled(): void {
+    this.intensity = clamp01(this.intensity + 0.07);
+    this.skill = clamp01(this.skill + 0.008);
+  }
+
+  /** Advance. Call once per fixed step. */
+  update(dt: number): void {
+    const step = Math.max(0, Math.min(dt, 0.25));
+    this.clock += step;
+    this.paceTime += step;
+    this.sinceHurt += step;
+    this.intensity *= Math.exp(-step / (this.pace === 'relax' ? 2.5 : 6));
+
+    // Surviving untouched is evidence too: skill creeps up while the player is not being hurt.
+    if (this.sinceHurt > 5) this.skill = clamp01(this.skill + step * 0.003);
+
+    const was = this.pace;
+    if (this.pace === 'build' && this.intensity >= 0.8) this.pace = 'peak';
+    else if (this.pace === 'peak' && (this.paceTime >= this.peakSeconds || this.intensity < 0.35)) this.pace = 'relax';
+    else if (this.pace === 'relax' && this.paceTime >= this.relaxSeconds) this.pace = 'build';
+    if (this.pace !== was) {
+      this.paceTime = 0;
+      events.emit('PACE_CHANGED', { pace: this.pace, intensity: this.intensity, difficulty: this.difficulty });
+    }
+
+    if (this.adapt) {
+      const want = this.targetDifficulty();
+      const room = MAX_RATE * step;
+      this.difficulty += Math.max(-room, Math.min(room, want - this.difficulty));
+      this.difficulty = Math.max(this.min, Math.min(this.max, this.difficulty));
+      this.saveIn -= step;
+      if (this.saveIn <= 0) { this.saveIn = 5; this.save(); }
+    }
+  }
+
+  /** Listen to the game's own events. Returns the unsubscribe — call it when the scene ends. */
+  bind(): () => void {
+    const offs = [
+      events.on('PLAYER_DAMAGED', (p: { amount?: number; health?: number; maxHealth?: number }) => {
+        const max = p?.maxHealth ?? 100;
+        this.playerHurt(max > 0 ? (p?.amount ?? 10) / max : 0.1);
+      }),
+      events.on('PLAYER_DIED', () => this.playerDied()),
+      events.on('ENEMY_DIED', () => this.enemyKilled()),
+      events.on('GAME_OVER', () => this.save()),
+    ];
+    return () => { for (const off of offs) off(); this.save(); };
+  }
+
+  /** Remember this player's skill for next time (only with a gameId, only when adapting). */
+  save(): void {
+    if (!this.key || !this.adapt) return;
+    try { globalThis.localStorage?.setItem(this.key, this.skill.toFixed(4)); } catch { /* storage blocked */ }
+  }
+
+  private targetDifficulty(): number {
+    const s = this.skill;
+    return s >= 0.5 ? 1 + (s - 0.5) * 2 * (this.max - 1) : 1 - (0.5 - s) * 2 * (1 - this.min);
+  }
+}
+
+function clamp01(v: number): number { return Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0)); }
+`;
+
 const FILES: Record<string, string> = {
   'src/game/systems/combat.ts': COMBAT,
   'src/game/systems/ai.ts': AI,
   'src/game/systems/projectile.ts': PROJECTILE,
   'src/game/systems/spawner.ts': SPAWNER,
+  // Pacing (build → peak → breather) and slow, bounded difficulty adaptation — 2026-10-05.
+  'src/game/systems/director.ts': DIRECTOR,
+  'src/game/systems/weapon.ts': WEAPON,
 };
 
-export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'ai', 'projectile', 'spawner'];
+export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'ai', 'projectile', 'spawner', 'weapon', 'director'];
 
 /** Generate the gameplay systems. Pure; never throws. */
 export function generateGameSystems(include?: string[]): GameSystemsResult {
@@ -644,6 +1119,8 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       const base = (path.split('/').pop() || '').replace(/\.ts$/i, '').toLowerCase();
       if (wanted.has(base)) files[path] = content;
     }
+    // weapon.ts fires through projectile.ts.
+    if (files['src/game/systems/weapon.ts']) files['src/game/systems/projectile.ts'] = FILES['src/game/systems/projectile.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
 
@@ -662,17 +1139,37 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       'const decision = stepEnemyAI(enemy.state, { player, neighbours, canSeePlayer }, DEFAULT_ENEMY, dt);\n' +
       'if (decision.wantsAttack && swing.tryUse()) hp.damage(10, enemy.state.position);\n' +
       'for (const hit of bullets.update(dt, targets)) (hit.target.ref as Health).damage(hit.damage);\n' +
+      '// A GUN is a Weapon, not one projectile per click (weapon.ts):\n' +
+      "const gun = new Weapon('rifle');   // pistol | rifle | smg | shotgun | sniper | bow\n" +
+      'gun.update(dt, input.isDown("attack"), muzzleWorldPos, aimDir, bullets); // camera.pitch += gun.kick\n' +
+      'const sword = new MeleeWeapon(30); if (input.wasPressed("attack")) sword.swing();\n' +
+      'for (const t of sword.update(dt, player.position, player.rotation.y, targets)) (t.ref as Health).damage(sword.damage);\n' +      '// The RHYTHM and the FLOW (director.ts): build → peak → breather, and difficulty that follows the player.\n' +
+      "const director = new Director({ gameId: 'my-game' });   // adapt: false when scores are compared\n" +
+      'const offDirector = director.bind();                   // listens to PLAYER_DAMAGED / DIED / ENEMY_DIED\n' +
+      'const plan = planWave(wave, director.difficulty);      // and: if (director.canSpawn) spawn…\n' +
+      '// each fixed step: director.update(dt);  on teardown: offDirector();\n' +
       '```\n' +
       'THE RULES THESE ENCODE — do not re-implement them by hand:\n' +
       '- Damage needs BOTH an attack cooldown and i-frames. With neither, an adjacent enemy deals its\n' +
       '  damage 60 times a second and the player dies in half a second. Lowering the damage is not a fix.\n' +
       '- Projectiles test the SEGMENT they travelled, not their new position. A 40 m/s bullet moves 0.66m\n' +
       '  per frame and would otherwise pass straight through a 0.5m enemy.\n' +
-      '- Enemies need separation, or a group converges to one point and reads as a single enemy.\n' +
+      '- Enemies need separation, or a group converges to one point and reads as a single enemy.\n' +      '- Mix ROLES: DEFAULT_ENEMY closes in, RANGED_ENEMY holds ~10 m and strafes while it shoots,\n' +
+      '  FLANKER_ENEMY comes in from the side so a group surrounds. A shooter of only melee chasers is a queue.\n' +
+      '- TELEGRAPH every heavy hit with AttackTelegraph: a readable wind-up (scale a glow by .progress),\n' +
+      "  the blow on 'strike' ONLY if the player is still in range — that is the dodge. A boss uses BossPhases:\n" +
+      "  emit BOSS_PHASE_CHANGED when update(hp / maxHp).changed, and change its attacks per phase.\n" +
       '- De-aggro radius must be LARGER than the detect radius, or enemies flicker at the boundary.\n' +
       '- The AI only REQUESTS an attack; a Cooldown decides if it happens.\n' +
       '- A wave is cleared when every enemy is dead OR has fallen out of the world — otherwise one enemy\n' +
       '  through the floor hangs the level forever.\n' +
+      '- A gun has a fire rate, semi/auto, a magazine, a reload you can be caught in, spread that blooms\n' +
+      '  and recoil — Weapon does all of it. A shotgun is many pellets and ONE bang. An arrow falls.\n' +
+      '- A melee swing hits what is IN FRONT, in reach, once per swing — MeleeWeapon, never a radius check\n' +
+      '  every frame.\n' +
+      '- A run needs RHYTHM: Director gives build → peak → a breather with no new enemies (canSpawn is\n' +
+      '  false), and moves difficulty slowly (≤1.2%/s) toward what THIS player handles, easing at once after\n' +
+      '  two quick deaths. It changes the challenge, never the score; pass adapt: false for a leaderboard.\n' +
       '- Everything is seeded and pure, so a run replays identically and difficulty is tunable.',
   };
 }

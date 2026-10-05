@@ -72,7 +72,7 @@ const foldedLathes = (root: THREE.Object3D): number => meshesOf(root).filter((m)
   return !up && !down;
 }).length;
 
-const KINDS = ['dog', 'cow', 'horse', 'deer'] as const;
+const KINDS = ['dog', 'cow', 'horse', 'deer', 'goat', 'tiger'] as const;
 
 describe('the car is a car, not stacked boxes', () => {
   const bodyOf = (car: THREE.Group): THREE.Mesh => {
@@ -145,8 +145,8 @@ describe('the human is a body, not stacked blocks', () => {
   it('keeps every joint the gameplay code drives, and still walks', () => {
     const h = humanoid.createHumanoid();
     expect(Object.keys(h.joints).sort()).toEqual([
-      'chest', 'head', 'hips', 'leftElbow', 'leftHip', 'leftKnee', 'leftShoulder',
-      'neck', 'rightElbow', 'rightHip', 'rightKnee', 'rightShoulder', 'spine',
+      'chest', 'head', 'hips', 'leftElbow', 'leftHand', 'leftHip', 'leftKnee', 'leftShoulder',
+      'neck', 'rightElbow', 'rightHand', 'rightHip', 'rightKnee', 'rightShoulder', 'spine',
     ]);
     h.update(0.3, 2, true);
     expect(h.joints.leftHip.rotation.x).not.toBeCloseTo(h.joints.rightHip.rotation.x, 3);

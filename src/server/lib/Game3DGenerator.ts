@@ -370,7 +370,12 @@ export class CameraRig {
    * The world is usually built AFTER the rig exists, so colliders cannot only be a constructor option —
    * otherwise third-person camera collision silently never works and the view clips through walls.
    */
-  setCollidables(list: THREE.Object3D[]): void { this.collidables = list; }
+  setCollidables(list: THREE.Object3D[]): void {
+    this.collidables = list;
+    // Raycasts read WORLD matrices, which three.js refreshes only when it renders — and the world is
+    // built before the first render. Same class as CharacterController.setColliders.
+    for (const c of list) c.updateMatrixWorld(true);
+  }
 
   /** Feed the frame's look delta (Input.lookX/lookY). */
   look(dx: number, dy: number, sensitivity = 0.0025): void {
@@ -1191,7 +1196,16 @@ export interface Humanoid {
     rightShoulder: THREE.Group; rightElbow: THREE.Group;
     leftHip: THREE.Group; leftKnee: THREE.Group;
     rightHip: THREE.Group; rightKnee: THREE.Group;
+    /** Where a held object goes — the palm, at the end of each forearm. */
+    leftHand: THREE.Group; rightHand: THREE.Group;
   };
+  /**
+   * Put an object in the right hand: a weapon from createWeapon(), a torch, a phone. Its +Z points where
+   * the arm points (models face +Z). Pass null to empty the hand.
+   */
+  hold: (item: THREE.Object3D | null) => void;
+  /** Raise the arms to aim what the right hand holds, straight ahead, while the legs keep walking. */
+  aim: (on: boolean) => void;
   /** Drive the pose. dt in seconds; speed in world units/second; grounded false while airborne. */
   update: (dt: number, speed: number, grounded?: boolean) => void;
   dispose: () => void;
@@ -1369,7 +1383,10 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
     thumb.position.set(-side * limbT * 0.05, -foreArmH - limbT * 0.2, limbT * 0.32);
     thumb.rotation.x = 0.5;
     elbow.add(baked([segment(limbT * 0.43, limbT * 0.33, foreArmH, skinM), hand, thumb], skinM));
-    return { shoulder, elbow };
+    const grip = new THREE.Group();
+    grip.position.y = -foreArmH - limbT * 0.35;
+    elbow.add(grip);
+    return { shoulder, elbow, grip };
   };
 
   const leg = (side: number) => {
@@ -1404,6 +1421,8 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
   const leftLeg = leg(-1), rightLeg = leg(1);
 
   let phase = 0;
+  let aiming = false;
+  let held: THREE.Object3D | null = null;
   const update = (dt: number, speed: number, grounded = true) => {
     const moving = speed > 0.05;
     // Stride frequency rises with speed but saturates — a sprint is a faster stride, not a blur.
@@ -1437,7 +1456,15 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
 
     // Small counter-rotations: the body twists against the stride and bobs twice per cycle. Tiny
     // numbers, and they are most of the difference between "animated" and "alive".
-    chest.rotation.y = -s * swing * 0.18;
+    if (aiming) {
+      // Gun arm straight out in front, the other hand supporting it; the torso stops twisting.
+      right.shoulder.rotation.x = -Math.PI / 2; right.elbow.rotation.x = 0;
+      left.shoulder.rotation.x = -Math.PI / 2 + 0.15; left.elbow.rotation.x = -0.35;
+      left.shoulder.rotation.z = -0.45;
+    } else {
+      left.shoulder.rotation.z = 0;
+    }
+    chest.rotation.y = aiming ? 0 : -s * swing * 0.18;
     hips.rotation.y = s * swing * 0.1;
     hips.position.y = legH + (moving ? Math.abs(Math.sin(phase * 2)) * 0.02 * (1 + speed * 0.1) : Math.sin(phase) * 0.006);
     spine.rotation.x = moving ? Math.min(0.02 + speed * 0.012, 0.16) : 0.01;
@@ -1453,7 +1480,19 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
       rightShoulder: right.shoulder, rightElbow: right.elbow,
       leftHip: leftLeg.hip, leftKnee: leftLeg.knee,
       rightHip: rightLeg.hip, rightKnee: rightLeg.knee,
+      leftHand: left.grip, rightHand: right.grip,
     },
+    hold: (item: THREE.Object3D | null) => {
+      if (held) right.grip.remove(held);
+      held = item;
+      if (item) {
+        // The hand's −Y runs down the forearm, so an object's +Z must turn onto it.
+        item.rotation.set(Math.PI / 2, 0, 0);
+        item.position.set(0, 0, 0);
+        right.grip.add(item);
+      }
+    },
+    aim: (on: boolean) => { aiming = on; update(0, 0, true); },
     update,
     dispose: () => { for (const d of disposables) d.dispose(); },
   };
@@ -1532,6 +1571,134 @@ function mesh(geo: THREE.BufferGeometry, mat: THREE.Material, detail: Detail): T
   return m;
 }
 
+// ── VEHICLE PARTS — one implementation every vehicle shares ──────────────────────────────────────
+// The car grew these first; the rickshaw, bus, truck and tractor use the SAME ones, so a fix to a wheel
+// or a body is a fix to every vehicle (four private copies is how a bug gets fixed in one of them).
+
+/** A closed outline from (z, y) points. */
+function outlineShape(pts: number[][]): THREE.Shape {
+  const sh = new THREE.Shape();
+  sh.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) sh.lineTo(pts[i][0], pts[i][1]);
+  sh.closePath();
+  return sh;
+}
+
+/**
+ * A side profile drawn in (z = length, y = height), front at +z, extruded across the width with a rounded
+ * bevel. This is how every vehicle body here is made — the outline IS the vehicle, never a box on a box.
+ */
+function extrudeProfile(pts: number[][], width: number, bevel: number, real: boolean): THREE.BufferGeometry {
+  const depth = Math.max(0.01, width - 2 * bevel);
+  const g = new THREE.ExtrudeGeometry(outlineShape(pts), {
+    depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel,
+    bevelSegments: real ? 4 : 1, curveSegments: 1,
+  });
+  g.translate(0, 0, -depth / 2);
+  g.rotateY(-Math.PI / 2);          // profile z → model +Z (the front), extrusion → model X
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * The arch of a wheel well cut into a sill at height \`sill\`, over a wheel of radius \`wheelR\` at z = cz.
+ * Points run rear foot → over the top → front foot, so a profile drawn along its bottom from the back to
+ * the front simply includes them in order.
+ */
+function wellArc(cz: number, wheelR: number, sill: number, wellR: number, real: boolean): number[][] {
+  const a = Math.asin(Math.max(-1, Math.min(1, (wheelR - sill) / wellR)));
+  const out: number[][] = [];
+  const n = real ? 14 : 6;
+  for (let i = 0; i <= n; i++) {
+    const t = Math.PI + a - ((Math.PI + 2 * a) * i) / n;
+    out.push([cz + Math.cos(t) * wellR, wheelR + Math.sin(t) * wellR]);
+  }
+  return out;
+}
+
+interface WheelMaterials { tyre: THREE.Material; rim: THREE.Material; rimInner: THREE.Material }
+
+/**
+ * A road wheel, as a group named 'wheel' — rollWheels() and driveVehicle() spin exactly those. A tyre
+ * lathed from its rounded cross-section, a rim, and at the real tier a spoked face on the OUTER side
+ * (\`side\` = +1 for a wheel on the +X side) so a rolling wheel visibly turns. Never a torus inside it:
+ * that is what the old floating arch was, and the arch test keeps wheel groups free of them.
+ */
+function roadWheel(radius: number, width: number, side: number, d: Detail, mats: WheelMaterials, spokes = 5): THREE.Group {
+  const real = d === 'real';
+  const r = radius, h = width / 2;
+  const k = r / 0.3225;              // the car's wheel is the reference size for the small parts
+  const seg = real ? 28 : 12;
+  const rimR = r * 0.64;
+  const wheel = new THREE.Group();
+  const profile = [[rimR, -h], [r * 0.9, -h], [r * 0.97, -h * 0.86], [r, -h * 0.55], [r, h * 0.55],
+    [r * 0.97, h * 0.86], [r * 0.9, h], [rimR, h], [rimR, -h]].map(([a, b]) => new THREE.Vector2(a, b));
+  const tyre = mesh(new THREE.LatheGeometry(profile, seg), mats.tyre, d);
+  tyre.rotation.z = Math.PI / 2;
+  wheel.add(tyre);
+  const rim = mesh(new THREE.CylinderGeometry(rimR, rimR, width * 0.8, seg), real ? mats.rimInner : mats.rim, d);
+  rim.rotation.z = Math.PI / 2;
+  wheel.add(rim);
+  if (real) {
+    const face = side * width * 0.42;
+    const faceParts: THREE.Mesh[] = [];
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(rimR * 0.28, rimR * 0.28, 0.03 * k, 12));
+    hub.rotation.z = Math.PI / 2;
+    hub.position.x = face;
+    faceParts.push(hub);
+    const lip = new THREE.Mesh(new THREE.RingGeometry(rimR * 0.84, rimR, seg));
+    lip.rotation.y = (side * Math.PI) / 2;
+    lip.position.x = face + side * 0.012 * k;
+    faceParts.push(lip);
+    for (let i = 0; i < spokes; i++) {
+      const a = (i / spokes) * Math.PI * 2;
+      const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.03 * k, rimR * 0.8, 0.045 * k));
+      spoke.position.set(face, Math.cos(a) * rimR * 0.5, Math.sin(a) * rimR * 0.5);
+      spoke.rotation.x = a;
+      faceParts.push(spoke);
+    }
+    wheel.add(mesh(mergeGeometries(faceParts), mats.rim, d));
+  }
+  wheel.name = 'wheel';
+  return wheel;
+}
+
+/** Paint that reads as paint: clearcoat at the real tier, plain at lite. */
+function vehiclePaint(color: number, d: Detail): THREE.Material {
+  return d === 'real'
+    ? new THREE.MeshPhysicalMaterial({ color, roughness: 0.32, metalness: 0.6, clearcoat: 1, clearcoatRoughness: 0.1 })
+    : new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.25 });
+}
+
+function vehicleGlass(d: Detail): THREE.Material {
+  return d === 'real'
+    ? new THREE.MeshPhysicalMaterial({ color: 0x0b0f13, roughness: 0.04, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.02 })
+    : new THREE.MeshStandardMaterial({ color: 0x10151a, roughness: 0.2, metalness: 0.3 });
+}
+
+/** A posed box, for baking small parts into one mesh (one draw call per material). */
+function partBox(w: number, h: number, dd: number, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd));
+  m.position.set(x, y, z);
+  m.rotation.set(rx, ry, rz);
+  return m;
+}
+
+/** A posed cylinder along Y (a post, a stack), for baking. */
+function partRod(r: number, len: number, x: number, y: number, z: number, rx = 0, rz = 0, seg = 8): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, seg));
+  m.position.set(x, y, z);
+  m.rotation.set(rx, 0, rz);
+  return m;
+}
+
+/** A lamp that EMITS. An unlit "light" is a coloured sticker. */
+function lamp(color: number, w: number, h: number, x: number, y: number, z: number): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.03), new THREE.MeshBasicMaterial({ color }));
+  m.position.set(x, y, z);
+  return m;
+}
+
 // ── CAR ──────────────────────────────────────────────────────────────────────────────────────────
 export interface CarOptions extends BaseOpts { color?: number; length?: number }
 
@@ -1574,42 +1741,15 @@ export function createCar(options: CarOptions = {}): THREE.Group {
   // A side profile is the car. It is drawn in (z = length, y = height), front at +z, then extruded
   // across the width with a bevel so every edge is rounded — never a box with a box on top.
   const scaled = (pts: number[][]) => pts.map(([z, y]) => [z * s, y * s]);
-  const wellArc = (cz: number): number[][] => {
-    const a = Math.asin(Math.min(1, (wheelR - sill) / wellR));
-    const out: number[][] = [];
-    const n = real ? 14 : 6;
-    for (let i = 0; i <= n; i++) {
-      const t = Math.PI + a - ((Math.PI + 2 * a) * i) / n; // rear foot → over the top → front foot
-      out.push([cz + Math.cos(t) * wellR, wheelR + Math.sin(t) * wellR]);
-    }
-    return out;
-  };
-  const shapeOf = (pts: number[][]): THREE.Shape => {
-    const sh = new THREE.Shape();
-    sh.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) sh.lineTo(pts[i][0], pts[i][1]);
-    sh.closePath();
-    return sh;
-  };
-  const extrudeAcross = (pts: number[][], width: number, bevel: number): THREE.BufferGeometry => {
-    const depth = Math.max(0.01, width - 2 * bevel);
-    const g = new THREE.ExtrudeGeometry(shapeOf(pts), {
-      depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel,
-      bevelSegments: real ? 4 : 1, curveSegments: 1,
-    });
-    g.translate(0, 0, -depth / 2);
-    g.rotateY(-Math.PI / 2);          // profile z → model +Z (the front), extrusion → model X
-    g.computeVertexNormals();
-    return g;
-  };
+  const extrudeAcross = (pts: number[][], width: number, bevel: number) => extrudeProfile(pts, width, bevel, real);
 
   // Body: nose, bonnet, shoulder line, boot deck, tail — with the two wheel wells cut out of the sill.
   const bodyPts = [
     ...scaled([[2.02, 0.22], [2.12, 0.3], [2.16, 0.42], [2.15, 0.56], [2.1, 0.66], [1.98, 0.74],
       [1.6, 0.8], [1.2, 0.85], [0.92, 0.88], [0, 0.9], [-1, 0.93], [-1.5, 0.95], [-1.85, 0.96],
       [-2.05, 0.93], [-2.13, 0.86], [-2.17, 0.72], [-2.17, 0.5], [-2.12, 0.32], [-2.04, 0.22]]),
-    ...wellArc(-axleZ),
-    ...wellArc(axleZ),
+    ...wellArc(-axleZ, wheelR, sill, wellR, real),
+    ...wellArc(axleZ, wheelR, sill, wellR, real),
   ];
   const bodyBevel = 0.05 * s;
   group.add(mesh(extrudeAcross(bodyPts, W, bodyBevel), bodyMat, d));
@@ -1686,42 +1826,14 @@ export function createCar(options: CarOptions = {}): THREE.Group {
     group.add(tail);
   }
 
-  // Wheels: a rounded tyre (lathed from its cross-section) on a spoked rim, sitting IN the wells.
-  const seg = real ? 28 : 12;
+  // Wheels: a rounded tyre on a spoked rim (roadWheel, shared by every vehicle), sitting IN the wells.
   const tyreW = 0.22 * s;
-  const rimR = wheelR * 0.64;
   const linerMat = new THREE.MeshStandardMaterial({ color: 0x0b0c0e, roughness: 0.95, side: THREE.DoubleSide });
   for (const sx of [-1, 1]) {
     for (const sz of [1, -1]) {
-      const wheel = new THREE.Group();
+      const wheel = roadWheel(wheelR, tyreW, sx, d, { tyre: tyreMat, rim: rimMat, rimInner: trimMat });
       const h = tyreW / 2;
-      const profile = [[rimR, -h], [wheelR * 0.9, -h], [wheelR * 0.97, -h * 0.86], [wheelR, -h * 0.55], [wheelR, h * 0.55],
-        [wheelR * 0.97, h * 0.86], [wheelR * 0.9, h], [rimR, h], [rimR, -h]].map(([r, y]) => new THREE.Vector2(r, y));
-      const tyre = mesh(new THREE.LatheGeometry(profile, seg), tyreMat, d);
-      tyre.rotation.z = Math.PI / 2;
-      wheel.add(tyre);
-      const rim = mesh(new THREE.CylinderGeometry(rimR, rimR, tyreW * 0.8, seg), real ? trimMat : rimMat, d);
-      rim.rotation.z = Math.PI / 2;
-      wheel.add(rim);
       if (real) {
-        // Five spokes, a hub and the rim's bright lip on the OUTER face, baked into one mesh, so a
-        // rolling wheel visibly turns. The lip is a flat ring, not a torus — a torus in a wheel group is
-        // what the old floating arch was, and the arch test keeps wheel groups free of them.
-        const face = sx * tyreW * 0.42;
-        const faceParts: THREE.Mesh[] = [];
-        const hub = new THREE.Mesh(new THREE.CylinderGeometry(rimR * 0.28, rimR * 0.28, 0.03 * s, 12));
-        hub.rotation.z = Math.PI / 2;
-        hub.position.x = face;
-        faceParts.push(hub);
-        const lip = new THREE.Mesh(new THREE.RingGeometry(rimR * 0.84, rimR, seg));
-        lip.rotation.y = (sx * Math.PI) / 2;
-        lip.position.x = face + sx * 0.012 * s;
-        faceParts.push(lip);
-        for (let k = 0; k < 5; k++) {
-          const a = (k / 5) * Math.PI * 2;
-          faceParts.push(box(0.03 * s, rimR * 0.8, 0.045 * s, face, Math.cos(a) * rimR * 0.5, Math.sin(a) * rimR * 0.5, a));
-        }
-        wheel.add(mesh(mergeGeometries(faceParts), rimMat, d));
         // 🔴 THE ARCH BELONGS TO THE BODY, NOT THE WHEEL (a child of the wheel group spun with it and,
         // offset twice, floated a car-width outside the body). It is the dark liner of the wheel well,
         // fixed to the body over the wheel's own centre, so the well reads as a hole, not painted metal.
@@ -1734,7 +1846,6 @@ export function createCar(options: CarOptions = {}): THREE.Group {
         group.add(arch);
       }
       wheel.position.set(sx * (bodySide - h - 0.01 * s), wheelR, sz * axleZ);
-      wheel.name = 'wheel';
       group.add(wheel);
     }
   }
@@ -1746,6 +1857,644 @@ export function rollWheels(car: THREE.Group, speed: number, dt: number): void {
   for (const child of car.children) {
     if (child.name === 'wheel') child.rotation.x += speed * dt * 3.2;
   }
+}
+
+// ── INDIA'S ROADS: AUTO-RICKSHAW, BUS, TRUCK, TRACTOR ────────────────────────────────────────────
+// The object catalogue described all four (objectCatalog.ts: dimensions, parts, the one "tell" that makes
+// each read as itself) but had no builder for any of them, so a game asked for an auto or a bus got
+// whatever the model improvised — the box-with-wheels the admin's Phase 2 brief calls a FAIL. Each is
+// built here from its own side profile at its real size, with the shared wheel and body helpers above,
+// faces +Z like every model, and rolls with rollWheels() / driveVehicle().
+
+export interface AutoRickshawOptions extends BaseOpts {
+  /** Delhi CNG green-and-yellow, or Mumbai black-and-yellow. */
+  livery?: 'delhi' | 'mumbai';
+  color?: number;
+  length?: number;
+}
+
+/**
+ * An auto-rickshaw: 2.6 m long, 1.3 m wide, 1.7 m tall, THREE wheels (one front under the cowl, two at
+ * the back), handlebar steering, a canvas roof on thin posts — and OPEN sides, so you can see straight
+ * through it. That see-through stance is what no car has, and it is the whole silhouette.
+ */
+export function createAutoRickshaw(options: AutoRickshawOptions = {}): THREE.Group {
+  const d = tier(options);
+  const real = d === 'real';
+  const s = (options.length ?? 2.6) / 2.6;
+  const mumbai = options.livery === 'mumbai';
+  const body = vehiclePaint(options.color ?? (mumbai ? 0x1b1b1b : 0x1f8f3c), d);
+  const canopyMat = new THREE.MeshStandardMaterial({ color: mumbai ? 0xf2c230 : 0xf5c518, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+  const seatMat = new THREE.MeshStandardMaterial({ color: 0x23201d, roughness: 0.7, metalness: 0.05 });
+  const trim = new THREE.MeshStandardMaterial({ color: 0x1a1c1f, roughness: 0.5, metalness: 0.6 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xc6ccd4, roughness: 0.25, metalness: 1 });
+  const wm = { tyre: shared('fabric', d, 0x14161a, 2), rim: chrome, rimInner: trim };
+  const g = new THREE.Group();
+  const sc = (pts: number[][]) => pts.map(([z, y]) => [z * s, y * s]);
+  const r = 0.2 * s, sill = 0.28 * s;
+  const frontZ = 0.95 * s, rearZ = -0.75 * s, rearX = 0.55 * s;
+
+  // The driver's cowl — narrow, with the front wheel under it and the dashboard on top.
+  g.add(mesh(extrudeProfile([
+    ...sc([[0.62, 0.3]]), ...wellArc(frontZ, r, sill, 0.26 * s, real),
+    ...sc([[1.3, 0.3], [1.34, 0.56], [1.28, 0.96], [1.1, 1.04], [0.92, 1.0], [0.84, 0.62], [0.66, 0.56]]),
+  ], 0.78 * s, 0.05 * s, real), body, d));
+  // The floor and the passengers' tub, full width, with the rear wheel wells in its sill.
+  g.add(mesh(extrudeProfile([
+    ...sc([[-1.25, 0.28]]), ...wellArc(rearZ, r, sill, 0.27 * s, real),
+    ...sc([[0.75, 0.28], [0.75, 0.42], [-0.4, 0.42], [-0.46, 0.78], [-1.16, 0.82], [-1.27, 1.05], [-1.33, 1.0], [-1.33, 0.36]]),
+  ], 1.3 * s, 0.05 * s, real), body, d));
+  // The canvas roof, curved, dropping down at the back like the real drape.
+  g.add(mesh(extrudeProfile(sc([
+    [1.08, 1.55], [1.0, 1.66], [0.5, 1.72], [-0.5, 1.72], [-1.1, 1.68], [-1.33, 1.5], [-1.36, 1.05],
+    [-1.3, 1.05], [-1.27, 1.48], [-1.06, 1.63], [-0.5, 1.67], [0.5, 1.67], [0.98, 1.61], [1.03, 1.53],
+  ]), 1.36 * s, 0.03 * s, real), canopyMat, d));
+
+  // Posts, handlebar and the seats' frames — baked, one draw call.
+  const metal: THREE.Mesh[] = [
+    partRod(0.018 * s, 0.62 * s, 0.5 * s, 1.3 * s, 1.0 * s), partRod(0.018 * s, 0.62 * s, -0.5 * s, 1.3 * s, 1.0 * s),
+    partRod(0.02 * s, 0.9 * s, 0.63 * s, 1.24 * s, -0.42 * s), partRod(0.02 * s, 0.9 * s, -0.63 * s, 1.24 * s, -0.42 * s),
+    partRod(0.016 * s, 0.62 * s, 0, 1.08 * s, 0.82 * s, 0, Math.PI / 2),           // the handlebar
+    partRod(0.03 * s, 0.32 * s, 0, 0.92 * s, 0.86 * s, -0.5),                       // its column
+  ];
+  g.add(mesh(mergeGeometries(metal), trim, d));
+  g.add(mesh(mergeGeometries([
+    partBox(0.46 * s, 0.12 * s, 0.36 * s, 0, 0.62 * s, 0.32 * s),                  // driver's seat
+    partBox(0.3 * s, 0.18 * s, 0.3 * s, 0, 0.5 * s, 0.32 * s),
+    partBox(1.12 * s, 0.14 * s, 0.46 * s, 0, 0.88 * s, -0.86 * s),                 // passengers' bench
+    partBox(1.12 * s, 0.42 * s, 0.1 * s, 0, 1.12 * s, -1.16 * s, -0.12),
+  ]), seatMat, d));
+  const glass = mesh(new THREE.BoxGeometry(0.86 * s, 0.52 * s, 0.025 * s), vehicleGlass(d), d);
+  glass.position.set(0, 1.27 * s, 1.02 * s);
+  glass.rotation.x = -0.16;
+  g.add(glass);
+  if (real) {
+    // Grips and mirrors: the details you only see up close.
+    g.add(mesh(mergeGeometries([
+      partRod(0.024 * s, 0.1 * s, 0.32 * s, 1.08 * s, 0.82 * s, 0, Math.PI / 2), partRod(0.024 * s, 0.1 * s, -0.32 * s, 1.08 * s, 0.82 * s, 0, Math.PI / 2),
+      partBox(0.12 * s, 0.07 * s, 0.03 * s, 0.46 * s, 1.36 * s, 1.03 * s), partBox(0.12 * s, 0.07 * s, 0.03 * s, -0.46 * s, 1.36 * s, 1.03 * s),
+    ]), seatMat, d));
+  }
+  g.add(lamp(0xfff3d0, 0.16 * s, 0.12 * s, 0, 0.84 * s, 1.36 * s));
+  g.add(lamp(0xd82b1e, 0.14 * s, 0.08 * s, 0.5 * s, 0.62 * s, -1.37 * s));
+  g.add(lamp(0xd82b1e, 0.14 * s, 0.08 * s, -0.5 * s, 0.62 * s, -1.37 * s));
+
+  const front = roadWheel(r, 0.12 * s, 1, d, wm);
+  front.position.set(0, r, frontZ);
+  g.add(front);
+  for (const sx of [-1, 1]) {
+    const w = roadWheel(r, 0.13 * s, sx, d, wm);
+    w.position.set(sx * rearX, r, rearZ);
+    g.add(w);
+  }
+  return g;
+}
+
+export interface BusOptions extends BaseOpts { color?: number; stripe?: number; length?: number }
+
+/**
+ * A bus: 11 m long, 2.5 m wide, 3.2 m tall, 5.6 m wheelbase, 0.5 m wheels (dual at the back). The
+ * window band running the whole length at one height is what makes it a bus rather than a large van; the
+ * lit destination board and the doors on the KERB side (the driver's left, +X — India drives on the left)
+ * make it a working one.
+ */
+export function createBus(options: BusOptions = {}): THREE.Group {
+  const d = tier(options);
+  const real = d === 'real';
+  const s = (options.length ?? 11) / 11;
+  const W = 2.5 * s;
+  const paint = vehiclePaint(options.color ?? 0xc62828, d);
+  const stripeMat = new THREE.MeshStandardMaterial({ color: options.stripe ?? 0xf4efe1, roughness: 0.5 });
+  const glassMat = vehicleGlass(d);
+  const trim = new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.6, metalness: 0.5 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xc6ccd4, roughness: 0.25, metalness: 1 });
+  const wm = { tyre: shared('fabric', d, 0x14161a, 2), rim: chrome, rimInner: trim };
+  const g = new THREE.Group();
+  const sc = (pts: number[][]) => pts.map(([z, y]) => [z * s, y * s]);
+  const r = 0.5 * s, sill = 0.36 * s, wellR = 0.6 * s;
+  const frontAxle = 3.2 * s, rearAxle = -2.4 * s;
+
+  g.add(mesh(extrudeProfile([
+    ...sc([[-5.4, 0.36]]), ...wellArc(rearAxle, r, sill, wellR, real), ...wellArc(frontAxle, r, sill, wellR, real),
+    ...sc([[5.42, 0.36], [5.5, 0.6], [5.52, 1.4], [5.46, 2.95], [5.3, 3.16], [-5.3, 3.16], [-5.46, 3.0], [-5.5, 0.55]]),
+  ], W, 0.08 * s, real), paint, d));
+
+  // The window band down both sides, the pillars that divide it, and a stripe under it.
+  const side = W / 2 + 0.008 * s;
+  const glassParts: THREE.Mesh[] = [];
+  const pillarParts: THREE.Mesh[] = [];
+  const stripeParts: THREE.Mesh[] = [];
+  for (const sx of [-1, 1]) {
+    glassParts.push(partBox(0.02 * s, 1.0 * s, 9.6 * s, sx * side, 2.1 * s, -0.15 * s));
+    stripeParts.push(partBox(0.02 * s, 0.16 * s, 10.7 * s, sx * (side + 0.004 * s), 1.42 * s, 0));
+    for (let z = -4.8; z <= 4.6; z += 1.34) pillarParts.push(partBox(0.03 * s, 1.02 * s, 0.1 * s, sx * (side + 0.008 * s), 2.1 * s, z * s));
+  }
+  // Windscreen and back window.
+  glassParts.push(partBox(W * 0.86, 1.3 * s, 0.03 * s, 0, 2.05 * s, 5.53 * s, -0.04));
+  glassParts.push(partBox(W * 0.8, 0.8 * s, 0.03 * s, 0, 2.3 * s, -5.52 * s));
+  // Doors on the kerb side (+X): dark glass panels, front and middle.
+  for (const z of [4.1, -0.8]) glassParts.push(partBox(0.025 * s, 2.3 * s, 1.0 * s, side + 0.006 * s, 1.55 * s, z * s));
+  g.add(mesh(mergeGeometries(glassParts), glassMat, d));
+  g.add(mesh(mergeGeometries(pillarParts), paint, d));
+  g.add(mesh(mergeGeometries(stripeParts), stripeMat, d));
+  const trimParts = [
+    partBox(W * 1.02, 0.34 * s, 0.12 * s, 0, 0.55 * s, 5.5 * s), partBox(W * 1.02, 0.34 * s, 0.12 * s, 0, 0.55 * s, -5.5 * s),
+    partBox(0.04 * s, 0.14 * s, 9.6 * s, side, 0.42 * s, 0), partBox(0.04 * s, 0.14 * s, 9.6 * s, -side, 0.42 * s, 0),
+  ];
+  if (real) {
+    // Wipers, mirrors on stalks, a roof hatch line.
+    trimParts.push(partBox(0.04 * s, 0.7 * s, 0.03 * s, 0.4 * s, 1.75 * s, 5.56 * s, 0, 0, 0.5), partBox(0.04 * s, 0.7 * s, 0.03 * s, -0.4 * s, 1.75 * s, 5.56 * s, 0, 0, 0.5));
+    for (const sx of [-1, 1]) {
+      // Mirrors reach about a quarter-metre past the body, as on a real bus — not half a metre.
+      trimParts.push(partBox(0.26 * s, 0.05 * s, 0.05 * s, sx * (W / 2 + 0.1 * s), 2.75 * s, 5.35 * s));
+      trimParts.push(partBox(0.06 * s, 0.38 * s, 0.2 * s, sx * (W / 2 + 0.22 * s), 2.5 * s, 5.35 * s));
+    }
+  }
+  g.add(mesh(mergeGeometries(trimParts), trim, d));
+  // The destination board is LIT — it is a screen, not paint.
+  g.add(lamp(0xffb300, W * 0.7, 0.28 * s, 0, 2.86 * s, 5.55 * s));
+  for (const sx of [-1, 1]) {
+    g.add(lamp(0xfff3d0, 0.32 * s, 0.18 * s, sx * W * 0.36, 0.86 * s, 5.55 * s));
+    g.add(lamp(0xd82b1e, 0.22 * s, 0.4 * s, sx * W * 0.4, 1.0 * s, -5.55 * s));
+  }
+
+  const tw = 0.3 * s;
+  for (const sx of [-1, 1]) {
+    const f = roadWheel(r, tw, sx, d, wm, 8);
+    f.position.set(sx * (W / 2 - tw / 2 - 0.03 * s), r, frontAxle);
+    g.add(f);
+    // Dual rear wheels: an outer and an inner tyre on each side, the way every loaded bus runs.
+    const outer = roadWheel(r, tw, sx, d, wm, 8);
+    outer.position.set(sx * (W / 2 - tw / 2 - 0.03 * s), r, rearAxle);
+    const inner = roadWheel(r, tw, sx, d, wm, 8);
+    inner.position.set(sx * (W / 2 - tw * 1.55 - 0.03 * s), r, rearAxle);
+    g.add(outer, inner);
+  }
+  return g;
+}
+
+export interface TruckOptions extends BaseOpts { color?: number; cargoColor?: number; length?: number }
+
+/**
+ * A truck: 8.5 m long, 2.5 m wide, 3.4 m tall, 0.52 m wheels, the rear ones doubled. The GAP between the
+ * cab and the load body is the defining line — one continuous box is a bus. Dressed as India's trucks
+ * are: a high wooden body painted in bands, a decorated crown over the cab, mudflaps and a tall stack.
+ */
+export function createTruck(options: TruckOptions = {}): THREE.Group {
+  const d = tier(options);
+  const real = d === 'real';
+  const s = (options.length ?? 8.5) / 8.5;
+  const W = 2.5 * s;
+  const cab = vehiclePaint(options.color ?? 0xe65100, d);
+  const cargo = new THREE.MeshStandardMaterial({ color: options.cargoColor ?? 0xf9a825, roughness: 0.75 });
+  const bandMats = [0xc62828, 0x1565c0, 0x2e7d32].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7 }));
+  const glassMat = vehicleGlass(d);
+  const trim = new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.6, metalness: 0.5 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xc6ccd4, roughness: 0.25, metalness: 1 });
+  const wm = { tyre: shared('fabric', d, 0x14161a, 2), rim: chrome, rimInner: trim };
+  const g = new THREE.Group();
+  const sc = (pts: number[][]) => pts.map(([z, y]) => [z * s, y * s]);
+  const r = 0.52 * s, sill = 0.6 * s;
+  const frontAxle = 3.3 * s, rearAxle = -2.2 * s;
+
+  // The cab: tall, flat-nosed, the front wheels under it.
+  g.add(mesh(extrudeProfile([
+    ...sc([[2.6, 0.6]]), ...wellArc(frontAxle, r, sill, 0.62 * s, real),
+    ...sc([[4.22, 0.6], [4.3, 1.2], [4.24, 2.75], [4.02, 3.05], [2.68, 3.1], [2.6, 2.9]]),
+  ], W * 0.96, 0.08 * s, real), cab, d));
+  g.add(mesh(mergeGeometries([
+    partBox(W * 0.84, 0.86 * s, 0.03 * s, 0, 2.3 * s, 4.29 * s, -0.08),
+    partBox(0.02 * s, 0.7 * s, 0.9 * s, W * 0.49, 2.35 * s, 3.55 * s), partBox(0.02 * s, 0.7 * s, 0.9 * s, -W * 0.49, 2.35 * s, 3.55 * s),
+  ]), glassMat, d));
+
+  // The load body: floor, sides, front wall and tailgate — a high wooden box, painted in bands — with
+  // a gap behind the cab and a decorated crown arching over it.
+  const top = 3.0 * s, floorY = 1.3 * s, z0 = 2.3 * s, z1 = -4.05 * s, len = z0 - z1, mid = (z0 + z1) / 2;
+  const t = 0.09 * s;
+  g.add(mesh(mergeGeometries([
+    partBox(W, 0.14 * s, len, 0, floorY, mid),
+    partBox(t, top - floorY, len, W / 2 - t / 2, (top + floorY) / 2, mid), partBox(t, top - floorY, len, -W / 2 + t / 2, (top + floorY) / 2, mid),
+    partBox(W, top - floorY + 0.35 * s, t, 0, (top + 0.35 * s + floorY) / 2, z0),
+    partBox(W, top - floorY, t, 0, (top + floorY) / 2, z1),
+  ]), cargo, d));
+  g.add(mesh(extrudeProfile(sc([[2.36, 3.25], [2.36, 3.46], [2.33, 3.56], [2.28, 3.46], [2.28, 3.25]]), W * 0.9, 0.02 * s, real), cargo, d));
+  bandMats.forEach((m, i) => {
+    const y = (1.65 + i * 0.32) * s;
+    g.add(mesh(mergeGeometries([
+      partBox(0.012 * s, 0.14 * s, len, W / 2 + 0.006 * s, y, mid), partBox(0.012 * s, 0.14 * s, len, -W / 2 - 0.006 * s, y, mid),
+      partBox(W, 0.14 * s, 0.012 * s, 0, y, z1 - t / 2 - 0.006 * s),
+    ]), m, d));
+  });
+  // Chassis rails, bumper, mudflaps, the stack beside the cab.
+  const trimParts: THREE.Mesh[] = [
+    partBox(0.18 * s, 0.24 * s, 8.0 * s, 0.45 * s, 0.82 * s, 0.1 * s), partBox(0.18 * s, 0.24 * s, 8.0 * s, -0.45 * s, 0.82 * s, 0.1 * s),
+    partBox(W * 1.02, 0.32 * s, 0.16 * s, 0, 0.62 * s, 4.32 * s),
+    partBox(0.5 * s, 0.6 * s, 0.03 * s, W * 0.33, 0.45 * s, rearAxle - 0.7 * s), partBox(0.5 * s, 0.6 * s, 0.03 * s, -W * 0.33, 0.45 * s, rearAxle - 0.7 * s),
+    partRod(0.07 * s, 2.3 * s, W / 2 - 0.12 * s, 2.25 * s, 2.45 * s),
+  ];
+  if (real) {
+    for (const sx of [-1, 1]) trimParts.push(partBox(0.08 * s, 0.4 * s, 0.22 * s, sx * (W / 2 + 0.2 * s), 2.55 * s, 4.05 * s));
+  }
+  g.add(mesh(mergeGeometries(trimParts), trim, d));
+  for (const sx of [-1, 1]) {
+    g.add(lamp(0xfff3d0, 0.3 * s, 0.2 * s, sx * W * 0.34, 1.05 * s, 4.33 * s));
+    g.add(lamp(0xd82b1e, 0.22 * s, 0.16 * s, sx * W * 0.4, 1.0 * s, z1 - 0.1 * s));
+  }
+
+  const tw = 0.3 * s;
+  for (const sx of [-1, 1]) {
+    const f = roadWheel(r, tw, sx, d, wm, 8);
+    f.position.set(sx * (W / 2 - tw / 2 - 0.04 * s), r, frontAxle);
+    g.add(f);
+    const outer = roadWheel(r, tw, sx, d, wm, 8);
+    outer.position.set(sx * (W / 2 - tw / 2 - 0.04 * s), r, rearAxle);
+    const inner = roadWheel(r, tw, sx, d, wm, 8);
+    inner.position.set(sx * (W / 2 - tw * 1.55 - 0.04 * s), r, rearAxle);
+    g.add(outer, inner);
+  }
+  return g;
+}
+
+export interface TractorOptions extends BaseOpts { color?: number; length?: number }
+
+/**
+ * A tractor: 3.6 m long, 2.0 m wide, 2.6 m tall, REAR wheels of 0.75 m radius and front ones of 0.40 m.
+ * The huge-rear, small-front mismatch IS the tractor — equal wheels make it a truck — with a deep
+ * chevron tread, a narrow bonnet, the exhaust stack in front of the driver and the open seat above the
+ * rear axle.
+ */
+export function createTractor(options: TractorOptions = {}): THREE.Group {
+  const d = tier(options);
+  const real = d === 'real';
+  const s = (options.length ?? 3.6) / 3.6;
+  const paint = vehiclePaint(options.color ?? 0xc62828, d);
+  const dark = new THREE.MeshStandardMaterial({ color: 0x1d1f22, roughness: 0.6, metalness: 0.5 });
+  const seatMat = new THREE.MeshStandardMaterial({ color: 0x2a2420, roughness: 0.8 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xd0d4d8, roughness: 0.3, metalness: 1 });
+  const rimPaint = new THREE.MeshStandardMaterial({ color: 0xe0b100, roughness: 0.5, metalness: 0.3 });
+  const tyreMat = shared('fabric', d, 0x141518, 2);
+  const g = new THREE.Group();
+  const sc = (pts: number[][]) => pts.map(([z, y]) => [z * s, y * s]);
+  const rr = 0.75 * s, fr = 0.4 * s;
+  const rearZ = -0.75 * s, frontZ = 1.25 * s;
+
+  // Bonnet and engine — narrow, rising slightly toward the driver.
+  g.add(mesh(extrudeProfile(sc([[1.8, 0.62], [1.82, 1.36], [1.72, 1.48], [0.1, 1.52], [-0.12, 1.56], [-0.16, 0.62]]), 0.76 * s, 0.05 * s, real), paint, d));
+  // Transmission housing under the seat.
+  g.add(mesh(extrudeProfile(sc([[-0.1, 0.62], [-0.1, 1.05], [-1.05, 1.05], [-1.12, 0.62]]), 0.9 * s, 0.04 * s, real), dark, d));
+  // Mudguards over the big rear wheels: half shells in the body colour, with a flat top to sit a hand on.
+  for (const sx of [-1, 1]) {
+    const guard = mesh(new THREE.CylinderGeometry(rr + 0.08 * s, rr + 0.08 * s, 0.5 * s, real ? 20 : 10, 1, true, -0.25, Math.PI * 0.7), paint, d);
+    guard.rotation.z = Math.PI / 2;
+    guard.position.set(sx * 0.82 * s, rr, rearZ);
+    g.add(guard);
+  }
+  g.add(mesh(mergeGeometries([
+    partBox(0.5 * s, 0.1 * s, 0.45 * s, 0, 1.36 * s, -0.86 * s),                     // the seat
+    partBox(0.5 * s, 0.38 * s, 0.08 * s, 0, 1.58 * s, -1.1 * s, -0.15),
+  ]), seatMat, d));
+  const dash: THREE.Mesh[] = [
+    partRod(0.05 * s, 0.9 * s, 0.22 * s, 1.95 * s, 0.9 * s),                          // the stack, in front of the driver
+    partRod(0.025 * s, 0.5 * s, 0, 1.68 * s, -0.12 * s, -0.6),                        // steering column
+    partBox(0.62 * s, 0.32 * s, 0.05 * s, 0, 1.0 * s, 1.83 * s),                      // grille
+  ];
+  g.add(mesh(mergeGeometries(dash), dark, d));
+  const steer = mesh(new THREE.TorusGeometry(0.18 * s, 0.018 * s, 6, real ? 20 : 10), dark, d);
+  steer.position.set(0, 1.86 * s, -0.27 * s);
+  steer.rotation.x = -Math.PI / 2 + 0.6;
+  g.add(steer);
+  if (real) g.add(mesh(mergeGeometries([partRod(0.06 * s, 0.08 * s, 0.22 * s, 2.42 * s, 0.9 * s)]), chrome, d));
+  for (const sx of [-1, 1]) g.add(lamp(0xfff3d0, 0.14 * s, 0.12 * s, sx * 0.24 * s, 1.0 * s, 1.85 * s));
+
+  for (const sx of [-1, 1]) {
+    // At the real tier the chevron lugs ARE the outer 4.5 cm of the tyre: the carcass is smaller by that
+    // much and the lugs end exactly at the wheel's radius, so the tread meets the road instead of sinking in.
+    const lugDepth = real ? 0.045 * s : 0;
+    const rear = roadWheel(rr - lugDepth, 0.42 * s, sx, d, { tyre: tyreMat, rim: rimPaint, rimInner: rimPaint }, 6);
+    if (real) {
+      // The chevron tread: angled lugs round the tyre, two per step, rolling with the wheel.
+      const lugs: THREE.Mesh[] = [];
+      const n = 22;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        for (const half of [-1, 1]) {
+          const lug = partBox(0.2 * s, lugDepth + 0.02 * s, 0.11 * s, half * 0.1 * s, Math.cos(a) * (rr - (lugDepth + 0.02 * s) / 2), Math.sin(a) * (rr - (lugDepth + 0.02 * s) / 2), a, half * 0.45);
+          lugs.push(lug);
+        }
+      }
+      rear.add(mesh(mergeGeometries(lugs), tyreMat, d));
+    }
+    rear.position.set(sx * 0.82 * s, rr, rearZ);
+    g.add(rear);
+    const front = roadWheel(fr, 0.2 * s, sx, d, { tyre: tyreMat, rim: rimPaint, rimInner: rimPaint }, 5);
+    front.position.set(sx * 0.66 * s, fr, frontZ);
+    g.add(front);
+  }
+  return g;
+}
+
+// ── WEAPONS (models) ─────────────────────────────────────────────────────────────────────────────
+export type WeaponModelKind = 'pistol' | 'rifle' | 'smg' | 'shotgun' | 'sniper' | 'sword' | 'axe' | 'bow';
+export interface WeaponModelOptions extends BaseOpts { kind?: WeaponModelKind }
+export interface WeaponModel {
+  root: THREE.Group;
+  /** The barrel tip (or arrow rest, or blade tip). Read its world position to fire from it. */
+  muzzle: THREE.Object3D;
+  kind: WeaponModelKind;
+  /**
+   * Bow only: draw it, 0 (at rest) to 1 (full draw). The limbs bend back, the string pulls into a V and an
+   * arrow sits on it while it is drawn. Drive it from the trigger: \`model.setDraw?.(held ? 1 : 0)\` — or ease
+   * toward it for a slow, tense draw.
+   */
+  setDraw?: (amount: number) => void;
+}
+
+/**
+ * A hand-held weapon at real size, built from its own side profile like the vehicles — a gun is a stock,
+ * a receiver, a magazine and a grip, not a box with a cylinder on it. The GRIP is at the origin and the
+ * barrel points along +Z, so humanoid.hold(weapon.root) puts it in the hand pointing where the arm points.
+ * Pair it with the Weapon / MeleeWeapon systems (generate_game_systems, weapon.ts) for how it fires.
+ */
+export function createWeapon(options: WeaponModelOptions = {}): WeaponModel {
+  const d = tier(options);
+  const real = d === 'real';
+  const kind = options.kind ?? 'rifle';
+  const root = new THREE.Group();
+  const gunmetal = new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.45, metalness: 0.8 });
+  const polymer = new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.7, metalness: 0.1 });
+  const wood = shared('wood', d, 0x7a4a26, 1);
+  const steel = new THREE.MeshStandardMaterial({ color: 0xd5d9de, roughness: 0.2, metalness: 1 });
+  const muzzle = new THREE.Object3D();
+  muzzle.name = 'muzzle';
+  const barrel = (r: number, z0: number, z1: number, y: number, mat: THREE.Material) => {
+    const b = mesh(new THREE.CylinderGeometry(r, r, z1 - z0, real ? 12 : 6), mat, d);
+    b.rotation.x = Math.PI / 2;
+    b.position.set(0, y, (z0 + z1) / 2);
+    root.add(b);
+  };
+  const body = (pts: number[][], width: number, mat: THREE.Material) => root.add(mesh(extrudeProfile(pts, width, Math.min(0.006, width / 4), real), mat, d));
+
+  if (kind === 'pistol') {
+    body([[-0.05, 0.0], [-0.06, 0.06], [0.15, 0.06], [0.15, 0.01], [0.02, 0.0], [0.0, -0.1], [-0.045, -0.11], [-0.03, 0.0]], 0.03, gunmetal);
+    barrel(0.008, 0.15, 0.165, 0.04, polymer);
+    muzzle.position.set(0, 0.04, 0.165);
+  } else if (kind === 'rifle' || kind === 'smg') {
+    const k = kind === 'smg' ? 0.62 : 1;
+    // Stock, receiver, handguard, the magazine curving forward and the pistol grip — one outline.
+    body([[-0.42 * k, -0.12], [-0.42 * k, 0.03], [-0.15, 0.06], [0.36 * k, 0.06], [0.36 * k, -0.02], [0.1, -0.02],
+      [0.1, -0.2], [0.04, -0.2], [0.03, -0.03], [-0.02, -0.03], [-0.05, -0.12], [-0.1, -0.12], [-0.08, -0.03], [-0.16, -0.03], [-0.3 * k, -0.12]], 0.045, polymer);
+    barrel(0.011, 0.36 * k, 0.58 * k, 0.035, gunmetal);
+    if (real) root.add(mesh(mergeGeometries([partBox(0.02, 0.03, 0.12, 0, 0.08, 0.0), partBox(0.012, 0.035, 0.02, 0, 0.078, 0.33 * k)]), gunmetal, d));
+    muzzle.position.set(0, 0.035, 0.58 * k);
+  } else if (kind === 'shotgun') {
+    body([[-0.45, -0.13], [-0.45, 0.02], [-0.18, 0.05], [0.05, 0.05], [0.05, -0.03], [-0.06, -0.03], [-0.1, -0.12], [-0.15, -0.12], [-0.13, -0.03], [-0.25, -0.05]], 0.045, wood);
+    barrel(0.016, 0.05, 0.62, 0.035, gunmetal);
+    // The pump: a wooden fore-end round the magazine tube.
+    const pump = mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.2, real ? 12 : 6), wood, d);
+    pump.rotation.x = Math.PI / 2;
+    pump.position.set(0, 0.0, 0.32);
+    root.add(pump);
+    muzzle.position.set(0, 0.035, 0.62);
+  } else if (kind === 'sniper') {
+    body([[-0.5, -0.13], [-0.5, 0.03], [-0.2, 0.05], [0.3, 0.05], [0.3, -0.03], [-0.04, -0.03], [-0.08, -0.13], [-0.14, -0.13], [-0.12, -0.03], [-0.3, -0.06]], 0.05, new THREE.MeshStandardMaterial({ color: 0x4b5340, roughness: 0.7 }));
+    barrel(0.012, 0.3, 0.85, 0.035, gunmetal);
+    barrel(0.024, -0.12, 0.16, 0.11, polymer);   // the scope
+    muzzle.position.set(0, 0.035, 0.85);
+  } else if (kind === 'sword') {
+    // A blade that tapers to a point, a crossguard, a wrapped grip and a pommel.
+    // The blade is LOFTED, not extruded: a diamond section at every station, so it thins toward the point
+    // AND toward both edges and its faces catch the light as a ground bevel. An extruded slab of one
+    // thickness reads as a ruler.
+    const stations: number[][] = [];
+    for (let k = 0; k <= 8; k++) { const t = k / 8; stations.push([0.1 + 0.72 * t, 0.024 - 0.006 * t, 0.0045 - 0.0017 * t]); }
+    stations.push([0.92, 0.0004, 0.0004]);
+    const ring = (st: number[]) => [[0, st[1], st[0]], [st[2], 0, st[0]], [0, -st[1], st[0]], [-st[2], 0, st[0]]];
+    const tri: number[] = [];
+    for (let k = 0; k + 1 < stations.length; k++) {
+      const a = ring(stations[k]), c = ring(stations[k + 1]);
+      for (let f = 0; f < 4; f++) {
+        const g = (f + 1) % 4;
+        tri.push(...a[f], ...a[g], ...c[g], ...a[f], ...c[g], ...c[f]);
+      }
+    }
+    const base = ring(stations[0]);
+    tri.push(...base[0], ...base[2], ...base[1], ...base[0], ...base[3], ...base[2]);
+    const blade = new THREE.BufferGeometry();
+    blade.setAttribute('position', new THREE.Float32BufferAttribute(tri, 3));
+    blade.computeVertexNormals();      // non-indexed: every facet keeps its own normal — a crisp bevel
+    const bladeMesh = mesh(blade, steel, d);
+    bladeMesh.name = 'blade';
+    root.add(bladeMesh);
+    root.add(mesh(mergeGeometries([partBox(0.03, 0.2, 0.03, 0, 0, 0.09)]), gunmetal, d));
+    barrel(0.016, -0.1, 0.08, 0, new THREE.MeshStandardMaterial({ color: 0x3b2416, roughness: 0.8 }));
+    const pommel = mesh(new THREE.SphereGeometry(0.025, 10, 8), gunmetal, d);
+    pommel.position.z = -0.11;
+    root.add(pommel);
+    muzzle.position.set(0, 0, 0.92);
+  } else if (kind === 'axe') {
+    barrel(0.018, -0.15, 0.6, 0, wood);
+    // The head: a flared bit on one side, a poll on the other.
+    body([[0.5, 0.0], [0.62, 0.0], [0.66, 0.18], [0.46, 0.2], [0.52, 0.05]], 0.03, steel);
+    muzzle.position.set(0, 0.1, 0.66);   // the leading edge of the bit
+  } else {
+    // Bow, held upright: two limbs sweeping forward from a wrapped grip at the origin, 1.5 m tip to tip,
+    // the string 0.2 m behind the grip at rest (the brace height). Each limb pivots at the grip, so a draw
+    // bends both back; the string is two segments meeting at the nock, and the arrow rides on it.
+    const R = 1.5, half = 0.75, brace = 0.2, DRAW = 0.55, lean = 0.13;
+    const sweep = Math.asin(half / R);
+    const limbs: THREE.Group[] = [];
+    const tips: THREE.Vector3[] = [];
+    for (const side of [1, -1]) {
+      const pts: THREE.Vector3[] = [];
+      for (let i = 0; i <= 8; i++) {
+        const a = 0.04 + ((sweep - 0.04) * i) / 8;
+        pts.push(new THREE.Vector3(0, side * (R * Math.sin(a) - 0.06), -(R - R * Math.cos(a))));
+      }
+      const limb = new THREE.Group();
+      limb.position.y = side * 0.06;
+      limb.add(mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), real ? 24 : 8, 0.014, real ? 8 : 5), wood, d));
+      root.add(limb);
+      limbs.push(limb);
+      tips.push(pts[pts.length - 1].clone());
+    }
+    const grip = mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.14, real ? 10 : 6), new THREE.MeshStandardMaterial({ color: 0x3b2416, roughness: 0.85 }), d);
+    root.add(grip);
+    const cord = new THREE.MeshStandardMaterial({ color: 0xe8e2d0, roughness: 0.6 });
+    const strings = [0, 1].map(() => { const s = mesh(new THREE.CylinderGeometry(0.0025, 0.0025, 1, 4), cord, d); root.add(s); return s; });
+    // The arrow: shaft, head and fletching, its nock end at the group's origin, pointing +Z.
+    const arrow = new THREE.Group();
+    const shaft = mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.72, real ? 6 : 4), wood, d);
+    shaft.rotation.x = Math.PI / 2; shaft.position.z = 0.36;
+    const head = mesh(new THREE.ConeGeometry(0.01, 0.04, real ? 6 : 4), steel, d);
+    head.rotation.x = Math.PI / 2; head.position.z = 0.74;
+    arrow.add(shaft, head);
+    for (let k = 0; k < 3; k++) {
+      const vane = mesh(new THREE.BoxGeometry(0.001, 0.014, 0.08), new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.7 }), d);
+      const a = (k * Math.PI * 2) / 3;
+      vane.position.set(Math.sin(a) * 0.009, Math.cos(a) * 0.009, 0.07);
+      vane.rotation.z = -a;
+      arrow.add(vane);
+    }
+    root.add(arrow);
+    const up = new THREE.Vector3(0, 1, 0), tip = new THREE.Vector3(), nock = new THREE.Vector3(), seg = new THREE.Vector3();
+    const setDraw = (amount: number) => {
+      const t = Math.max(0, Math.min(1, amount));
+      const nockZ = -brace - DRAW * t;
+      nock.set(0, 0, nockZ);
+      limbs.forEach((limb, k) => {
+        const side = k === 0 ? 1 : -1;
+        limb.rotation.x = -side * lean * t;
+        tip.copy(tips[k]).applyEuler(limb.rotation).add(limb.position);
+        seg.subVectors(nock, tip);
+        const s = strings[k];
+        s.position.copy(tip).addScaledVector(seg, 0.5);
+        s.scale.y = seg.length();
+        s.quaternion.setFromUnitVectors(up, seg.normalize());
+      });
+      arrow.visible = t > 0.02;
+      arrow.position.z = nockZ;
+    };
+    setDraw(0);
+    muzzle.position.set(0, 0.02, 0.03);   // the arrow rest, just above the grip
+    root.add(muzzle);
+    return { root, muzzle, kind, setDraw };
+  }
+  root.add(muzzle);
+  return { root, muzzle, kind };
+}
+
+// ── TRAFFIC ──────────────────────────────────────────────────────────────────────────────────────
+export type TrafficKind = 'car' | 'auto' | 'bus' | 'truck' | 'tractor';
+
+export interface TrafficOptions extends BaseOpts {
+  /** The road it runs on — createRoad's own length and width. Lanes are its two halves. */
+  road?: { length?: number; width?: number };
+  count?: number;
+  kinds?: TrafficKind[];
+  /** Multiplies every vehicle's cruising speed. */
+  speed?: number;
+}
+
+export interface TrafficVehicle {
+  object: THREE.Group;
+  kind: TrafficKind;
+  /** +1 drives toward +Z in the +X lane; −1 drives toward −Z in the −X lane (India keeps LEFT). */
+  dir: 1 | -1;
+  speed: number;
+  cruise: number;
+  length: number;
+}
+
+export interface Traffic {
+  root: THREE.Group;
+  vehicles: TrafficVehicle[];
+  /**
+   * Advance the traffic. \`avoid\` is what it must never drive into — the player, the player's car: a
+   * vehicle with one of them ahead in its lane slows and stops behind it.
+   */
+  update: (dt: number, avoid?: THREE.Object3D[]) => void;
+}
+
+/** City cruising speeds, m/s (a car ≈ 47 km/h, a tractor ≈ 22). */
+export const TRAFFIC_CRUISE: Readonly<Record<TrafficKind, number>> = { car: 13, auto: 9, bus: 10, truck: 9, tractor: 6 };
+/** Gap kept to the vehicle ahead: a standstill margin plus a time headway. */
+export const TRAFFIC_GAP = { standstill: 2.5, headway: 1.2 } as const;
+
+/**
+ * LIVE TRAFFIC on a road — what makes a driving or city game feel inhabited rather than staged. Vehicles
+ * keep LEFT (India), cruise at their own kind's speed, keep a safe time-gap to whatever is ahead in their
+ * lane (so a car behind a tractor slows to the tractor's pace instead of driving through it), stop for
+ * the player, and loop round at the road's end without spawning into one another. Same seed, same traffic.
+ */
+export function createTraffic(options: TrafficOptions = {}): Traffic {
+  const d = tier(options);
+  const L = options.road?.length ?? 300;
+  const W = options.road?.width ?? 8;
+  const count = Math.max(1, Math.round(options.count ?? 8));
+  const kinds = options.kinds && options.kinds.length ? options.kinds : (['car', 'auto', 'bus', 'truck', 'car', 'auto', 'tractor', 'car'] as TrafficKind[]);
+  const pace = options.speed ?? 1;
+  const rand = rng(options.seed ?? 7);
+  const root = new THREE.Group();
+  const paints = [0xb42b2b, 0x1d4ed8, 0xf3f4f6, 0x111827, 0x9ca3af, 0x0f766e];
+  const build = (k: TrafficKind): THREE.Group => {
+    if (k === 'auto') return createAutoRickshaw({ detail: d, livery: rand() < 0.5 ? 'delhi' : 'mumbai' });
+    if (k === 'bus') return createBus({ detail: d });
+    if (k === 'truck') return createTruck({ detail: d });
+    if (k === 'tractor') return createTractor({ detail: d });
+    return createCar({ detail: d, color: paints[Math.floor(rand() * paints.length)] });
+  };
+  const lengthOf = (o: THREE.Object3D) => { o.updateMatrixWorld(true); return new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3()).z; };
+
+  const vehicles: TrafficVehicle[] = [];
+  const perLane: Record<string, number> = { '1': 0, '-1': 0 };
+  for (let i = 0; i < count; i++) {
+    const kind = kinds[i % kinds.length];
+    const dir: 1 | -1 = i % 2 === 0 ? 1 : -1;
+    const object = build(kind);
+    const length = lengthOf(object);
+    const cruise = TRAFFIC_CRUISE[kind] * pace * (0.88 + rand() * 0.24);
+    vehicles.push({ object, kind, dir, speed: cruise, cruise, length });
+    perLane[String(dir)] += 1;
+  }
+  // Spread each lane's vehicles evenly along the road, so the first frame has no pile-up.
+  const placed: Record<string, number> = { '1': 0, '-1': 0 };
+  for (const v of vehicles) {
+    const n = perLane[String(v.dir)];
+    const k = placed[String(v.dir)]++;
+    const along = -L / 2 + ((k + 0.5) / n) * L;
+    v.object.position.set(v.dir * (W / 4), ROAD_SURFACE_Y, along * v.dir);
+    v.object.rotation.y = v.dir === 1 ? 0 : Math.PI;
+    root.add(v.object);
+  }
+
+  /** Distance along v's direction of travel from v's nose to the nearest obstacle's tail in its lane. */
+  const gapAhead = (v: TrafficVehicle, avoid: THREE.Object3D[]): { gap: number; speed: number } => {
+    let best = Infinity, bestSpeed = 0;
+    const s = v.object.position.z * v.dir;
+    for (const o of vehicles) {
+      if (o === v || o.dir !== v.dir) continue;
+      let ahead = o.object.position.z * o.dir - s;
+      if (ahead <= 0) ahead += L;                       // the lane loops: the leader may be round the end
+      const gap = ahead - (v.length + o.length) / 2;
+      if (gap < best) { best = gap; bestSpeed = o.speed; }
+    }
+    for (const a of avoid) {
+      const p = a.position;
+      if (Math.abs(p.x - v.object.position.x) > W / 4 + 0.6) continue;   // not in this lane
+      const ahead = p.z * v.dir - s;
+      if (ahead <= 0 || ahead > 60) continue;
+      const gap = ahead - v.length / 2 - 0.8;
+      if (gap < best) { best = gap; bestSpeed = 0; }
+    }
+    return { gap: best, speed: bestSpeed };
+  };
+
+  const update = (dt: number, avoid: THREE.Object3D[] = []) => {
+    const step = Math.min(0.1, Math.max(0, dt));
+    for (const v of vehicles) {
+      const { gap, speed: leaderSpeed } = gapAhead(v, avoid);
+      const wanted = TRAFFIC_GAP.standstill + v.speed * TRAFFIC_GAP.headway;
+      let target = v.cruise;
+      if (gap < wanted) {
+        // Match the leader's pace, scaled down the tighter the gap gets; stop at the standstill margin.
+        const room = Math.max(0, (gap - TRAFFIC_GAP.standstill) / Math.max(0.1, wanted - TRAFFIC_GAP.standstill));
+        target = Math.min(v.cruise, leaderSpeed + (v.cruise - leaderSpeed) * room * 0.5) * Math.min(1, room + 0.2);
+        if (gap <= TRAFFIC_GAP.standstill * 0.5) target = 0;
+      }
+      const accel = target > v.speed ? 2.5 : 7;          // gentle away, firm braking
+      v.speed += Math.sign(target - v.speed) * Math.min(Math.abs(target - v.speed), accel * step);
+      // Never move further than the room there is: two vehicles can never overlap, whatever the step.
+      const move = Math.min(v.speed * step, Math.max(0, gap - 0.3));
+      if (move < v.speed * step) v.speed = move / Math.max(1e-6, step);
+      v.object.position.z += move * v.dir;
+      // Round the end of the road, back on at the start of its own lane.
+      const along = v.object.position.z * v.dir;
+      if (along > L / 2) v.object.position.z = (along - L) * v.dir;
+      rollWheels(v.object, v.speed, step);
+    }
+  };
+
+  return { root, vehicles, update };
 }
 
 // ── DRIVING ──────────────────────────────────────────────────────────────────────────────────────
@@ -2246,11 +2995,12 @@ export function createHouse(options: HouseOptions = {}): THREE.Group {
 }
 
 // ── ANIMAL ───────────────────────────────────────────────────────────────────────────────────────
-export interface AnimalOptions extends BaseOpts { height?: number; color?: number; kind?: 'deer' | 'dog' | 'cow' | 'horse' }
+export type AnimalKind = 'deer' | 'dog' | 'cow' | 'horse' | 'goat' | 'tiger';
+export interface AnimalOptions extends BaseOpts { height?: number; color?: number; kind?: AnimalKind }
 export interface Animal { root: THREE.Group; update: (dt: number, speed: number) => void }
 
 /** Height to the top of the head, in metres, by kind. The built animal is scaled to land exactly on it. */
-export const ANIMAL_HEIGHT: Readonly<Record<'deer' | 'dog' | 'cow' | 'horse', number>> = { dog: 0.62, deer: 1.25, cow: 1.5, horse: 1.75 };
+export const ANIMAL_HEIGHT: Readonly<Record<AnimalKind, number>> = { dog: 0.62, goat: 0.95, tiger: 1.05, deer: 1.25, cow: 1.5, horse: 1.75 };
 
 /**
  * A rounded, tapered piece rising from y = 0 to y = len (r0 at the base, r1 at the tip).
@@ -2286,10 +3036,15 @@ function ellipsoid(rx: number, ry: number, rz: number, d: Detail): THREE.BufferG
  * dog is a short body, a snout and a tail that curls up.
  */
 const ANATOMY = {
-  horse: { bL: 0.9, bR: 0.165, bW: 0.78, bY: 0.6, legR: 0.03, neckL: 0.4, neckTilt: 0.62, neckR: 0.075, headL: 0.3, headR: 0.06, snout: 0.62, droop: 0.78, ear: 'up', tail: 'hair', mane: true, horns: false, antlers: false, hump: false, paw: false },
-  cow:   { bL: 0.95, bR: 0.2, bW: 0.86, bY: 0.62, legR: 0.046, neckL: 0.22, neckTilt: 1.0, neckR: 0.095, headL: 0.27, headR: 0.075, snout: 0.85, droop: 0.75, ear: 'side', tail: 'tuft', mane: false, horns: true, antlers: false, hump: true, paw: false },
-  deer:  { bL: 0.72, bR: 0.12, bW: 0.74, bY: 0.6, legR: 0.022, neckL: 0.34, neckTilt: 0.42, neckR: 0.05, headL: 0.2, headR: 0.05, snout: 0.5, droop: 0.95, ear: 'big', tail: 'short', mane: false, horns: false, antlers: true, hump: false, paw: false },
-  dog:   { bL: 0.92, bR: 0.17, bW: 0.78, bY: 0.55, legR: 0.045, neckL: 0.26, neckTilt: 0.6, neckR: 0.1, headL: 0.36, headR: 0.12, snout: 0.45, droop: 0.6, ear: 'up', tail: 'curl', mane: false, horns: false, antlers: false, hump: false, paw: true },
+  horse: { bL: 0.9, bR: 0.165, bW: 0.78, bY: 0.6, legR: 0.03, neckL: 0.4, neckTilt: 0.62, neckR: 0.075, headL: 0.3, headR: 0.06, snout: 0.62, droop: 0.78, ear: 'up', tail: 'hair', mane: true, horns: 'none', antlers: false, hump: false, paw: false, stripes: false, beard: false },
+  cow:   { bL: 0.95, bR: 0.2, bW: 0.86, bY: 0.62, legR: 0.046, neckL: 0.22, neckTilt: 1.0, neckR: 0.095, headL: 0.27, headR: 0.075, snout: 0.85, droop: 0.75, ear: 'side', tail: 'tuft', mane: false, horns: 'cow', antlers: false, hump: true, paw: false, stripes: false, beard: false },
+  deer:  { bL: 0.72, bR: 0.12, bW: 0.74, bY: 0.6, legR: 0.022, neckL: 0.34, neckTilt: 0.42, neckR: 0.05, headL: 0.2, headR: 0.05, snout: 0.5, droop: 0.95, ear: 'big', tail: 'short', mane: false, horns: 'none', antlers: true, hump: false, paw: false, stripes: false, beard: false },
+  dog:   { bL: 0.92, bR: 0.17, bW: 0.78, bY: 0.55, legR: 0.045, neckL: 0.26, neckTilt: 0.6, neckR: 0.1, headL: 0.36, headR: 0.12, snout: 0.45, droop: 0.6, ear: 'up', tail: 'curl', mane: false, horns: 'none', antlers: false, hump: false, paw: true, stripes: false, beard: false },
+  // Thin legs under a light body, horns swept BACK, a beard and a flicking tail — never a small cow.
+  goat:  { bL: 0.9, bR: 0.15, bW: 0.74, bY: 0.62, legR: 0.03, neckL: 0.28, neckTilt: 0.45, neckR: 0.06, headL: 0.25, headR: 0.068, snout: 0.55, droop: 0.9, ear: 'side', tail: 'flick', mane: false, horns: 'goat', antlers: false, hump: false, paw: false, stripes: false, beard: true },
+  // The catalogue's own tell: the shoulders are the highest point, the tail is nearly the body's length,
+  // the broad head is carried LOW and level, and the paws are large. A deer with stripes is not a tiger.
+  tiger: { bL: 1.3, bR: 0.21, bW: 0.86, bY: 0.6, legR: 0.058, neckL: 0.18, neckTilt: 1.2, neckR: 0.14, headL: 0.3, headR: 0.15, snout: 0.62, droop: 0.25, ear: 'round', tail: 'long', mane: false, horns: 'none', antlers: false, hump: false, paw: true, stripes: true, beard: false },
 } as const;
 
 /**
@@ -2312,7 +3067,7 @@ export function createAnimal(options: AnimalOptions = {}): Animal {
   // animals rendered as one animal four times. Real heights to the top of the head, roughly.
   const H = options.height ?? ANIMAL_HEIGHT[kind];
   const A = ANATOMY[kind] ?? ANATOMY.deer;
-  const col = options.color ?? (kind === 'cow' ? 0xd8cfc2 : kind === 'dog' ? 0x9a6b3f : 0x8a5f38);
+  const col = options.color ?? (kind === 'cow' ? 0xd8cfc2 : kind === 'dog' ? 0x9a6b3f : kind === 'tiger' ? 0xd2782a : kind === 'goat' ? 0x5a463a : 0x8a5f38);
   // The hide is the near-white PLASTER grain, so the tint IS the animal's colour. It used to be 'fabric',
   // whose own texture is blue-grey: multiplied by a tint it turned a white cow purple and browns black.
   const hide = shared('plaster', d, col, 3);
@@ -2338,6 +3093,31 @@ export function createAnimal(options: AnimalOptions = {}): Animal {
     const hump = mesh(ellipsoid(A.bR * 0.42, A.bR * 0.4, A.bR * 0.55, d), hide, d);
     hump.position.set(0, A.bY + A.bR * 0.82, A.bL * 0.3);
     torso.add(hump);
+  }
+
+  if (A.stripes) {
+    // A tiger's stripes: dark bands over the back and flanks, following the barrel's own curve.
+    const rAt = (f: number) => {
+      for (let i = 1; i < prof.length; i++) {
+        const [r1, y1] = prof[i], [r0, y0] = prof[i - 1];
+        if (f <= y1) return (r0 + ((f - y0) / Math.max(1e-6, y1 - y0)) * (r1 - r0)) * A.bR;
+      }
+      return A.bR;
+    };
+    const bands: THREE.Mesh[] = [];
+    for (let i = 0; i < 8; i++) {
+      const f = -0.38 + i * 0.1;
+      const rr = rAt(f) * 1.015;
+      const geo = new THREE.CylinderGeometry(rr, rr, A.bL * 0.035, 14, 1, true, Math.PI / 2 + 0.25, Math.PI - 0.5);
+      geo.rotateX(Math.PI / 2);
+      geo.scale(A.bW, 1, 1);
+      const band = new THREE.Mesh(geo);
+      band.position.set(0, A.bY, f * A.bL);
+      band.rotation.z = (i % 2 ? 1 : -1) * 0.08;
+      bands.push(band);
+    }
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0x1a1410, roughness: 0.9, side: THREE.DoubleSide });
+    torso.add(mesh(mergeGeometries(bands), stripeMat, d));
   }
 
   // Neck: rises from the top of the chest, leaning forward by neckTilt.
@@ -2382,16 +3162,18 @@ export function createAnimal(options: AnimalOptions = {}): Animal {
       darkParts.push(eye);
     }
     // Ears: upright and pointed (horse, dog), big and spread (deer), out to the side (cow).
-    const earLen = A.ear === 'big' ? A.headR * 1.7 : A.ear === 'side' ? A.headR * 1.0 : A.headR * 0.95;
+    const earLen = A.ear === 'big' ? A.headR * 1.7 : A.ear === 'side' ? A.headR * 1.0 : A.ear === 'round' ? A.headR * 0.5 : A.headR * 0.95;
     const ear = part(taperGeo(A.headR * 0.28, A.headR * 0.06, earLen, real ? 8 : 5));
     ear.scale.z = 0.45;
     ear.position.set(side * A.headR * 0.5, A.headR * 0.65, -A.headR * 0.35);
-    ear.rotation.z = -side * (A.ear === 'side' ? 1.35 : A.ear === 'big' ? 0.75 : 0.25);
+    ear.rotation.z = -side * (A.ear === 'side' ? 1.35 : A.ear === 'big' ? 0.75 : A.ear === 'round' ? 0.4 : 0.25);
     hideParts.push(ear);
-    if (A.horns) {
-      const horn = part(taperGeo(A.headR * 0.22, A.headR * 0.05, A.headR * 1.3, real ? 8 : 5));
-      horn.position.set(side * A.headR * 0.45, A.headR * 0.8, -A.headR * 0.45);
-      horn.rotation.set(-0.35, 0, -side * 0.55);
+    if (A.horns !== 'none') {
+      // A cow's horns rise and spread; a goat's sweep straight back over its neck.
+      const goat = A.horns === 'goat';
+      const horn = part(taperGeo(A.headR * (goat ? 0.2 : 0.22), A.headR * 0.05, A.headR * (goat ? 1.6 : 1.3), real ? 8 : 5));
+      horn.position.set(side * A.headR * (goat ? 0.3 : 0.45), A.headR * 0.8, -A.headR * (goat ? 0.3 : 0.45));
+      horn.rotation.set(goat ? -1.15 : -0.35, 0, -side * (goat ? 0.18 : 0.55));
       hornParts.push(horn);
     }
     if (A.antlers) {
@@ -2412,6 +3194,12 @@ export function createAnimal(options: AnimalOptions = {}): Animal {
         hornParts.push(tine);
       }
     }
+  }
+  if (A.beard) {
+    const beard = part(taperGeo(A.headR * 0.22, A.headR * 0.05, A.headR * 0.9, real ? 6 : 4));
+    beard.position.set(0, -A.headR * 0.55, tipZ - A.headR * 0.75);
+    beard.rotation.x = Math.PI - 0.15;
+    darkParts.push(beard);
   }
   head.add(mesh(mergeGeometries(hideParts), hide, d));
   head.add(mesh(mergeGeometries(darkParts), dark, d));
@@ -2470,6 +3258,15 @@ export function createAnimal(options: AnimalOptions = {}): Animal {
     const tuft = mesh(ellipsoid(A.legR * 0.7, A.legR * 2.2, A.legR * 0.7, d), hair, d);
     tuft.position.set(0, -Math.cos(lean) * len, -Math.sin(lean) * len);
     tail.add(tuft);
+  } else if (A.tail === 'long') {
+    // Nearly the body's length, heavy at the root, hanging back and lifting at the tip.
+    const t = mesh(taperGeo(A.legR * 0.75, A.legR * 0.45, A.bL * 0.82, radial), hide, d);
+    t.rotation.x = Math.PI + 1.05;
+    tail.add(t);
+  } else if (A.tail === 'flick') {
+    const t = mesh(taperGeo(A.legR * 0.7, A.legR * 0.3, A.bR * 0.6, real ? 6 : 4), hide, d);
+    t.rotation.x = -0.5;
+    tail.add(t);
   } else if (A.tail === 'short') {
     const t = mesh(ellipsoid(A.bR * 0.25, A.bR * 0.4, A.bR * 0.18, d), new THREE.MeshStandardMaterial({ color: 0xece6da, roughness: 0.9 }), d);
     t.position.z = -A.bR * 0.05;
@@ -2872,6 +3669,529 @@ export function createBicycle(options: BicycleOptions = {}): Motorcycle {
 }
 `;
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// ATMOSPHERE — a clock and the weather (2026-10-05, the game-engine taxonomy: sky, weather, world systems).
+// A fixed preset is a photograph; a running day and changing weather make one level many places.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+const ATMOSPHERE = `import * as THREE from 'three';
+import type { AppliedLighting } from './lighting';
+
+/**
+ * A world that LIVES: the sun crosses the sky, evening turns orange, night falls with stars and the
+ * street lights come on — and the weather changes: clouds roll in, rain falls and the road darkens with
+ * it, a monsoon storm flashes and thunders, snow drifts, fog closes in, a dust storm turns the air brown.
+ *
+ * A fixed lighting preset is a photograph. The same level at four times of day and in four kinds of
+ * weather is sixteen places to play, which is why open-world games keep a clock running.
+ *
+ * It DRIVES the lights applyLighting() made (it does not add its own), so shadows, fog and reflections
+ * all keep agreeing with each other. The fog colour is ALWAYS the sky's horizon colour — the rule that
+ * keeps the world from ending at a visible seam, at every hour and in every weather.
+ *
+ * Rain, snow and dust are computed on the GPU from one buffer each: zero allocation per frame, one draw
+ * call per kind, and they follow the camera so a phone never simulates rain it cannot see.
+ */
+export type WeatherKind = 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog' | 'dust';
+export type DayPhase = 'night' | 'dawn' | 'day' | 'dusk';
+
+export interface AtmosphereOptions {
+  scene: THREE.Scene;
+  renderer: THREE.WebGLRenderer;
+  camera: THREE.Camera;
+  /** What applyLighting() returned — the lights this drives. */
+  lighting: AppliedLighting;
+  /** Hour of the day to start at, 0..24. Default 10. */
+  hour?: number;
+  /** Real seconds for one whole in-game day. 0 stops the clock. Default 600 (ten minutes). */
+  dayLength?: number;
+  weather?: WeatherKind;
+  seed?: number;
+  /** 'lite' draws a third of the rain and snow. Default 'real'. */
+  detail?: 'real' | 'lite';
+  /** Re-bake reflections as the sky changes (needs WebGL). Default true. */
+  reflections?: boolean;
+}
+
+export interface Atmosphere {
+  /** The hour, 0..24. Assign it (or call setHour) to jump the clock. */
+  hour: number;
+  dayLength: number;
+  readonly phase: DayPhase;
+  /** 1 at noon, 0 in the dead of night. */
+  readonly daylight: number;
+  readonly weather: WeatherKind;
+  /** How wet the world is, 0..1 — it rises while it rains and dries after. */
+  readonly wetness: number;
+  /** The lightning flash right now, 0..1. */
+  readonly flash: number;
+  readonly sky: THREE.Mesh;
+  setHour(hour: number): void;
+  /** Change the weather, blending over \`seconds\`. */
+  setWeather(kind: WeatherKind, seconds?: number): void;
+  /** A light or an emissive mesh (a street lamp, a lit window) that comes on at dusk and off at dawn. */
+  addNightLight(object: THREE.Light | THREE.Mesh, strength?: number): void;
+  /** Materials that darken and shine when wet: roads, roofs, the ground. */
+  wet(materials: THREE.Material[]): void;
+  /** Called when the phase changes (dawn, day, dusk, night). */
+  onPhase?: (phase: DayPhase) => void;
+  /** Called at each lightning strike: how far away it was and when its thunder arrives (distance / 343). */
+  onLightning?: (distance: number, thunderDelay: number) => void;
+  /** Called when the weather changes — start or stop a rain/wind loop here. */
+  onWeather?: (kind: WeatherKind) => void;
+  /** Advance by dt seconds. Call once a frame (or fixed step) after the camera has moved. */
+  update(dt: number): void;
+  dispose(): void;
+}
+
+// ── The sky through a day ────────────────────────────────────────────────────────────────────────
+interface SkyKey {
+  hour: number;
+  top: number; horizon: number; ground: number;
+  key: number; keyI: number;
+  hemiSky: number; hemiGround: number; hemiI: number;
+  ambient: number; exposure: number; stars: number;
+}
+const NIGHT: Omit<SkyKey, 'hour'> = { top: 0x0a1430, horizon: 0x22345a, ground: 0x05070d, key: 0xaac4ff, keyI: 0.45, hemiSky: 0x2a3b5c, hemiGround: 0x05070d, hemiI: 0.4, ambient: 0.08, exposure: 1.15, stars: 1 };
+const DAY_KEYS: SkyKey[] = [
+  { hour: 0, ...NIGHT },
+  { hour: 4.6, ...NIGHT },
+  { hour: 6, top: 0x34497a, horizon: 0xf4a582, ground: 0x3a2c22, key: 0xffb380, keyI: 1.0, hemiSky: 0xc9a8b8, hemiGround: 0x3d3328, hemiI: 0.55, ambient: 0.12, exposure: 1.05, stars: 0.15 },
+  { hour: 7.5, top: 0x3a78c8, horizon: 0xcfe2f2, ground: 0x6b5a3e, key: 0xfff0d6, keyI: 1.9, hemiSky: 0xbfe3ff, hemiGround: 0x6b5a3e, hemiI: 0.85, ambient: 0.14, exposure: 1.0, stars: 0 },
+  { hour: 12, top: 0x2f6ecb, horizon: 0xbfd9f2, ground: 0x6b5a3e, key: 0xfff4e0, keyI: 2.3, hemiSky: 0xbfe3ff, hemiGround: 0x6b5a3e, hemiI: 0.9, ambient: 0.15, exposure: 1.0, stars: 0 },
+  { hour: 16.5, top: 0x3570c0, horizon: 0xd6dfe6, ground: 0x6b5a3e, key: 0xffe7c4, keyI: 2.0, hemiSky: 0xc4ddf0, hemiGround: 0x6b5a3e, hemiI: 0.85, ambient: 0.15, exposure: 1.0, stars: 0 },
+  { hour: 18.3, top: 0x2a2b6b, horizon: 0xff9a56, ground: 0x3a2418, key: 0xff7b3d, keyI: 2.2, hemiSky: 0xffb877, hemiGround: 0x4a2c17, hemiI: 0.65, ambient: 0.17, exposure: 1.05, stars: 0 },
+  { hour: 19.3, top: 0x141a40, horizon: 0x7a4a6a, ground: 0x1a1218, key: 0x9a7aa8, keyI: 0.6, hemiSky: 0x4a4a78, hemiGround: 0x120c10, hemiI: 0.45, ambient: 0.1, exposure: 1.1, stars: 0.5 },
+  { hour: 20.5, ...NIGHT },
+  { hour: 24, ...NIGHT },
+];
+
+// ── What each weather does on top of it ─────────────────────────────────────────────────────────
+interface WeatherLook { cloud: number; dark: number; dim: number; fog: number; grey: number; rain: number; snow: number; dust: number; lightning: number; wet: number; wind: number }
+const WEATHER: Record<WeatherKind, WeatherLook> = {
+  clear:  { cloud: 0.12, dark: 0, dim: 1,    fog: 1,    grey: 0,    rain: 0, snow: 0, dust: 0, lightning: 0, wet: 0, wind: 0.2 },
+  cloudy: { cloud: 0.7, dark: 0.15,  dim: 0.65, fog: 0.85, grey: 0.3,  rain: 0, snow: 0, dust: 0, lightning: 0, wet: 0, wind: 0.4 },
+  rain:   { cloud: 0.92, dark: 0.4, dim: 0.35, fog: 0.55, grey: 0.6,  rain: 1, snow: 0, dust: 0, lightning: 0, wet: 1, wind: 0.5 },
+  storm:  { cloud: 1, dark: 0.68,    dim: 0.2,  fog: 0.4,  grey: 0.75, rain: 1, snow: 0, dust: 0, lightning: 1, wet: 1, wind: 1 },
+  snow:   { cloud: 0.85, dark: 0.05, dim: 0.5,  fog: 0.5,  grey: 0.7,  rain: 0, snow: 1, dust: 0, lightning: 0, wet: 0, wind: 0.3 },
+  fog:    { cloud: 0.5, dark: 0,  dim: 0.55, fog: 0.18, grey: 0.5,  rain: 0, snow: 0, dust: 0, lightning: 0, wet: 0.3, wind: 0.05 },
+  dust:   { cloud: 0.3, dark: 0.1,  dim: 0.55, fog: 0.3,  grey: 0.2,  rain: 0, snow: 0, dust: 1, lightning: 0, wet: 0, wind: 1 },
+};
+const DUST_TINT = new THREE.Color(0xc9a36b);
+const SNOW_TINT = new THREE.Color(0xdfe5ec);
+
+const smooth = (t: number) => t * t * (3 - 2 * t);
+const wrapHour = (h: number) => ((h % 24) + 24) % 24;
+
+function phaseOf(hour: number): DayPhase {
+  if (hour >= 5 && hour < 7) return 'dawn';
+  if (hour >= 7 && hour < 17.8) return 'day';
+  if (hour >= 17.8 && hour < 20) return 'dusk';
+  return 'night';
+}
+
+/** The sun's direction at an hour: it rises in the east (+X) at 6, is overhead at 12, sets in the west at 18. */
+export function sunDirection(hour: number, out = new THREE.Vector3()): THREE.Vector3 {
+  const a = ((hour - 6) / 12) * Math.PI;
+  return out.set(Math.cos(a), Math.sin(a), 0.35).normalize();
+}
+
+const SKY_VERTEX = [
+  'varying vec3 vDir;',
+  'void main() {',
+  '  vDir = normalize(position);',
+  '  vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+  '  gl_Position = p.xyww;',                       // on the far plane: never in front of anything
+  '}',
+].join('\\n');
+
+const SKY_FRAGMENT = [
+  'uniform vec3 uTop; uniform vec3 uHorizon; uniform vec3 uGround; uniform vec3 uSun; uniform vec3 uSunDir;',
+  'uniform float uStars; uniform float uCloud; uniform float uTime; uniform float uFlash; uniform vec3 uCloudLit;',
+  'varying vec3 vDir;',
+  'float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
+  'float noise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+  '  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }',
+  'float fbm(vec2 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; } return v; }',
+  'void main() {',
+  '  vec3 d = normalize(vDir);',
+  '  float h = d.y;',
+  // The horizon colour hugs the horizon: in linear light a bright horizon dominates any gentle curve, so a
+  // sunset's orange climbed to the top of the screen. An exponential keeps it to the lowest ~15 degrees.
+  '  vec3 col = h > 0.0 ? mix(uHorizon, uTop, 1.0 - exp(-h * 5.0)) : mix(uHorizon, uGround, pow(clamp(-h, 0.0, 1.0), 0.4));',
+  '  if (h > 0.0) {',
+  // Stars: a sparse hash on the direction, twinkling, only where the sky is dark.
+  '    vec2 sp = floor(d.xz / (d.y + 0.35) * 220.0);',
+  '    float star = step(0.9975, hash(sp)) * (0.6 + 0.4 * sin(uTime * 3.0 + hash(sp + 7.0) * 40.0));',
+  '    col += vec3(star) * uStars * smoothstep(0.02, 0.3, h);',
+  // The sun by day, a pale moon by night — always a disc, plus a glow round it.
+  '    vec3 s = normalize(uSunDir);',
+  '    float up = step(0.0, s.y);',
+  '    vec3 body = mix(-s, s, up);',
+  '    float c = max(dot(d, body), 0.0);',
+  '    col += uSun * (pow(c, 900.0) * mix(1.2, 14.0, up) + pow(c, 12.0) * mix(0.05, 0.35, up)) * (1.0 - uCloud * 0.85);',
+  // Clouds: fbm on the sky plane, drifting with time, thicker as the weather closes in.
+  '    vec2 cp = d.xz / (d.y + 0.15) * 1.6 + vec2(uTime * 0.012, uTime * 0.005);',
+  '    float n = fbm(cp);',
+  '    float cover = smoothstep(1.0 - uCloud * 0.9 - 0.12, 1.0 - uCloud * 0.9 + 0.25, n);',
+  '    vec3 cloud = mix(uCloudLit, uHorizon * 0.8, smoothstep(0.4, 0.8, n));',
+  '    col = mix(col, cloud, cover * smoothstep(0.0, 0.18, h));',
+  '  }',
+  '  col += vec3(0.85, 0.88, 1.0) * uFlash * 0.7;',
+  '  gl_FragColor = vec4(col, 1.0);',
+  // The colours above are LINEAR, like the fog's and the lights'. Every standard material ends with these
+  // two steps; a ShaderMaterial does not unless asked. Without them the sky was written to the screen raw
+  // — darker and oversaturated (a dawn came out solid red) and never matching the fog at the horizon.
+  '  #include <tonemapping_fragment>',
+  '  #include <colorspace_fragment>',
+  '}',
+].join('\\n');
+
+const RAIN_VERTEX = [
+  'uniform vec3 uCam; uniform float uTime; uniform float uAmount; uniform vec2 uWind; uniform float uBox; uniform float uHeight; uniform float uSpeed; uniform float uLen;',
+  'attribute vec4 aSeed; attribute float aEnd;',
+  'varying float vAlpha;',
+  'void main() {',
+  '  vec3 v = vec3(uWind.x, -uSpeed, uWind.y);',
+  '  float y = uHeight * 0.6 - mod(uTime * uSpeed + aSeed.z * uHeight, uHeight);',
+  '  float t = (uHeight * 0.6 - y) / uSpeed;',
+  '  vec3 p = vec3(mod(aSeed.x * uBox + uWind.x * t, uBox) - uBox * 0.5, y, mod(aSeed.y * uBox + uWind.y * t, uBox) - uBox * 0.5);',
+  '  p -= normalize(v) * uLen * aEnd;',
+  '  vAlpha = step(aSeed.w, uAmount) * mix(0.55, 0.05, aEnd);',
+  '  gl_Position = projectionMatrix * viewMatrix * vec4(uCam + p, 1.0);',
+  '}',
+].join('\\n');
+const RAIN_FRAGMENT = ['uniform vec3 uColor; varying float vAlpha;', 'void main() { if (vAlpha <= 0.0) discard; gl_FragColor = vec4(uColor, vAlpha); }'].join('\\n');
+
+const FLAKE_VERTEX = [
+  'uniform vec3 uCam; uniform float uTime; uniform float uAmount; uniform vec2 uWind; uniform float uBox; uniform float uHeight; uniform float uSpeed; uniform float uSize; uniform float uFlutter;',
+  'attribute vec4 aSeed;',
+  'varying float vAlpha;',
+  'void main() {',
+  '  float y = uHeight * 0.6 - mod(uTime * uSpeed + aSeed.z * uHeight, uHeight);',
+  '  float t = uTime + aSeed.z * 50.0;',
+  '  vec3 p = vec3(mod(aSeed.x * uBox + uWind.x * t + sin(t * 1.3 + aSeed.w * 30.0) * uFlutter, uBox) - uBox * 0.5, y,',
+  '                mod(aSeed.y * uBox + uWind.y * t + cos(t * 1.1 + aSeed.w * 20.0) * uFlutter, uBox) - uBox * 0.5);',
+  '  vec4 mv = viewMatrix * vec4(uCam + p, 1.0);',
+  '  vAlpha = step(aSeed.w, uAmount);',
+  '  gl_PointSize = uSize * (0.6 + aSeed.w) * 300.0 / max(1.0, -mv.z);',
+  '  gl_Position = projectionMatrix * mv;',
+  '}',
+].join('\\n');
+const FLAKE_FRAGMENT = [
+  'uniform vec3 uColor; uniform float uOpacity; varying float vAlpha;',
+  'void main() { float r = length(gl_PointCoord - 0.5); if (vAlpha <= 0.0 || r > 0.5) discard; gl_FragColor = vec4(uColor, uOpacity * vAlpha * smoothstep(0.5, 0.15, r)); }',
+].join('\\n');
+
+function seeds(count: number, perDrop: number, rand: () => number): { seed: Float32Array; end: Float32Array } {
+  const seed = new Float32Array(count * perDrop * 4);
+  const end = new Float32Array(count * perDrop);
+  for (let i = 0; i < count; i++) {
+    const s = [rand(), rand(), rand(), rand()];
+    for (let k = 0; k < perDrop; k++) { seed.set(s, (i * perDrop + k) * 4); end[i * perDrop + k] = k; }
+  }
+  return { seed, end };
+}
+
+/**
+ * Give the scene a living sky: a clock, a day-night cycle and weather. See the module comment.
+ *
+ * \`\`\`
+ * const lit = applyLighting(scene, renderer, 'day');
+ * const sky = createAtmosphere({ scene, renderer, camera, lighting: lit, hour: 17, weather: 'clear' });
+ * sky.addNightLight(streetLamp);           // on at dusk, off at dawn
+ * sky.wet([roadMaterial]);                 // darkens and shines in the rain
+ * sky.onLightning = (d, delay) => setTimeout(() => audio.play('thunder'), delay * 1000);
+ * // each frame, after the camera moves:  sky.update(dt);
+ * \`\`\`
+ */
+export function createAtmosphere(options: AtmosphereOptions): Atmosphere {
+  const { scene, renderer, camera, lighting } = options;
+  const real = options.detail !== 'lite';
+  let s = ((options.seed ?? 7) * 2654435761) >>> 0 || 1;
+  const rand = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 0xffffffff; };
+
+  const baseFog = { near: lighting.preset.fog.near, far: lighting.preset.fog.far };
+  const fog = scene.fog instanceof THREE.Fog ? scene.fog : new THREE.Fog(0xffffff, baseFog.near, baseFog.far);
+  scene.fog = fog;
+  const keyOffset = Math.max(60, lighting.key.position.distanceTo(lighting.key.target.position));
+
+  // The dome sits on the far plane (xyww), so its radius only has to be inside the frustum.
+  const far = (camera as THREE.PerspectiveCamera).far ?? 1000;
+  const skyMaterial = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: {
+      uTop: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() }, uGround: { value: new THREE.Color() },
+      uSun: { value: new THREE.Color() }, uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uStars: { value: 0 },
+      uCloud: { value: 0 }, uTime: { value: 0 }, uFlash: { value: 0 }, uCloudLit: { value: new THREE.Color() },
+    },
+    vertexShader: SKY_VERTEX, fragmentShader: SKY_FRAGMENT,
+  });
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(Math.min(far * 0.5, 500), 32, 16), skyMaterial);
+  sky.name = 'atmosphere-sky';
+  sky.frustumCulled = false;
+  sky.renderOrder = -1000;
+  scene.add(sky);
+
+  const box = 36, height = 24;
+  const makeRain = () => {
+    const count = real ? 2400 : 800;
+    const { seed, end } = seeds(count, 2, rand);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 2 * 3), 3));
+    g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 4));
+    g.setAttribute('aEnd', new THREE.BufferAttribute(end, 1));
+    const m = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, fog: false,
+      uniforms: { uCam: { value: new THREE.Vector3() }, uTime: { value: 0 }, uAmount: { value: 0 }, uWind: { value: new THREE.Vector2() }, uBox: { value: box }, uHeight: { value: height }, uSpeed: { value: 14 }, uLen: { value: 0.9 }, uColor: { value: new THREE.Color(0xaebfd0) } },
+      vertexShader: RAIN_VERTEX, fragmentShader: RAIN_FRAGMENT,
+    });
+    const l = new THREE.LineSegments(g, m);
+    l.frustumCulled = false; l.visible = false; l.name = 'atmosphere-rain';
+    return l;
+  };
+  const makeFlakes = (name: string, count: number, color: number, size: number, opacity: number, speed: number, flutter: number) => {
+    const { seed } = seeds(count, 1, rand);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+    g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 4));
+    const m = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, fog: false,
+      uniforms: { uCam: { value: new THREE.Vector3() }, uTime: { value: 0 }, uAmount: { value: 0 }, uWind: { value: new THREE.Vector2() }, uBox: { value: box }, uHeight: { value: height }, uSpeed: { value: speed }, uSize: { value: size }, uFlutter: { value: flutter }, uColor: { value: new THREE.Color(color) }, uOpacity: { value: opacity } },
+      vertexShader: FLAKE_VERTEX, fragmentShader: FLAKE_FRAGMENT,
+    });
+    const p = new THREE.Points(g, m);
+    p.frustumCulled = false; p.visible = false; p.name = name;
+    return p;
+  };
+  const rain = makeRain();
+  const snow = makeFlakes('atmosphere-snow', real ? 1800 : 600, 0xffffff, 0.09, 0.9, 1.2, 0.6);
+  const dust = makeFlakes('atmosphere-dust', real ? 900 : 300, 0xb08850, 0.35, 0.22, 0.6, 1.5);
+  scene.add(rain, snow, dust);
+
+  // Night lights and wet materials.
+  const nightLights: Array<{ o: THREE.Light | THREE.Mesh; strength: number }> = [];
+  const wetMats: Array<{ m: THREE.MeshStandardMaterial; roughness: number; color: THREE.Color }> = [];
+
+  // Reflections: re-baked when the sky has visibly changed, cached, and never more than once a second.
+  const reflections = options.reflections !== false;
+  let pmrem: THREE.PMREMGenerator | null = null;
+  const envCache = new Map<string, THREE.Texture>();
+  let envAge = Infinity;
+  let envKey = '';
+  const bakeEnvironment = (key: string) => {
+    if (!reflections) return;
+    const cached = envCache.get(key);
+    if (cached) { scene.environment = cached; return; }
+    try {
+      pmrem = pmrem ?? new THREE.PMREMGenerator(renderer);
+      const bake = new THREE.Scene();
+      const dome = new THREE.Mesh(sky.geometry, skyMaterial);
+      bake.add(dome);
+      const texture = pmrem.fromScene(bake, 0.04).texture;
+      envCache.set(key, texture);
+      // Bounded: a day cycles through about a dozen looks per weather; the oldest is freed beyond that.
+      if (envCache.size > 24) { const first = envCache.keys().next().value as string; envCache.get(first)?.dispose(); envCache.delete(first); }
+      scene.environment = texture;
+    } catch { /* no WebGL here (a test, a headless check): reflections simply stay as they were */ }
+  };
+
+  // State.
+  let hour = wrapHour(options.hour ?? 10);
+  let dayLength = Math.max(0, options.dayLength ?? 600);
+  let target: WeatherKind = options.weather ?? 'clear';
+  const look: WeatherLook = { ...WEATHER[target] };
+  let from: WeatherLook = { ...look };
+  let blend = 1, blendTime = 0;
+  let wetness = look.wet;
+  let time = 0, flash = 0, flashAge = 10, nextStrike = 4 + rand() * 6;
+  let phase = phaseOf(hour);
+  let daylight = 1;
+
+  const c = { top: new THREE.Color(), horizon: new THREE.Color(), ground: new THREE.Color(), key: new THREE.Color(), hemiSky: new THREE.Color(), hemiGround: new THREE.Color() };
+  const ca = new THREE.Color(), cb = new THREE.Color(), grey = new THREE.Color();
+  const sunDir = new THREE.Vector3();
+  const camPos = new THREE.Vector3();
+  const sample = { keyI: 0, hemiI: 0, ambient: 0, exposure: 1, stars: 0 };
+
+  const sampleDay = (h: number) => {
+    let i = 0;
+    while (i < DAY_KEYS.length - 2 && DAY_KEYS[i + 1].hour <= h) i++;
+    const a = DAY_KEYS[i], b = DAY_KEYS[i + 1];
+    const t = smooth(Math.min(1, Math.max(0, (h - a.hour) / Math.max(1e-6, b.hour - a.hour))));
+    for (const k of ['top', 'horizon', 'ground', 'key', 'hemiSky', 'hemiGround'] as const) {
+      // setHex already takes sRGB into the linear working space (three's colour management). Converting
+      // again squared every channel: a sunset came out blood-red and the night sky pitch black.
+      c[k].copy(ca.setHex(a[k])).lerp(cb.setHex(b[k]), t);
+    }
+    sample.keyI = a.keyI + (b.keyI - a.keyI) * t;
+    sample.hemiI = a.hemiI + (b.hemiI - a.hemiI) * t;
+    sample.ambient = a.ambient + (b.ambient - a.ambient) * t;
+    sample.exposure = a.exposure + (b.exposure - a.exposure) * t;
+    sample.stars = a.stars + (b.stars - a.stars) * t;
+  };
+
+  const weatherColour = (col: THREE.Color, amount: number) => {
+    // Grey it toward its own brightness, darker as the cloud thickens; dust and snow tint it.
+    const l = col.r * 0.2126 + col.g * 0.7152 + col.b * 0.0722;
+    // A storm's cloud deck is slate, not the pale grey of a drizzle: \`dark\` is how much light it swallows.
+    grey.setRGB(l, l, l).multiplyScalar(1 - look.dark);
+    col.lerp(grey, look.grey * amount);
+    if (look.dust > 0) col.lerp(ca.copy(DUST_TINT).multiplyScalar(0.25 + 0.75 * daylight), look.dust * 0.75 * amount);
+    if (look.snow > 0) col.lerp(ca.copy(SNOW_TINT).multiplyScalar(0.15 + 0.85 * daylight), look.snow * 0.35 * amount);
+  };
+
+  const api: Atmosphere = {
+    get hour() { return hour; },
+    set hour(h: number) { hour = wrapHour(h); },
+    get dayLength() { return dayLength; },
+    set dayLength(v: number) { dayLength = Math.max(0, v); },
+    get phase() { return phase; },
+    get daylight() { return daylight; },
+    get weather() { return target; },
+    get wetness() { return wetness; },
+    get flash() { return flash; },
+    sky,
+    setHour(h: number) { hour = wrapHour(h); },
+    setWeather(kind: WeatherKind, seconds = 6) {
+      if (!WEATHER[kind] || kind === target) return;
+      from = { ...look };
+      target = kind;
+      blendTime = Math.max(0, seconds);
+      blend = blendTime === 0 ? 1 : 0;
+      api.onWeather?.(kind);
+    },
+    addNightLight(object, strength) {
+      const base = strength ?? ((object as THREE.Light).isLight ? (object as THREE.Light).intensity : 1.5);
+      nightLights.push({ o: object, strength: base });
+    },
+    wet(materials) {
+      for (const m of materials) {
+        const sm = m as THREE.MeshStandardMaterial;
+        if (!sm || typeof sm.roughness !== 'number' || !sm.color) continue;
+        if (wetMats.some((w) => w.m === sm)) continue;
+        wetMats.push({ m: sm, roughness: sm.roughness, color: sm.color.clone() });
+      }
+    },
+    update(dt: number) {
+      const step = Math.max(0, Math.min(dt, 0.25));
+      time += step;
+      if (dayLength > 0) hour = wrapHour(hour + (step * 24) / dayLength);
+
+      // Weather: blend every number from where it was to where it is going.
+      if (blend < 1) blend = blendTime > 0 ? Math.min(1, blend + step / blendTime) : 1;
+      const to = WEATHER[target];
+      const k = smooth(blend);
+      for (const key of Object.keys(to) as Array<keyof WeatherLook>) look[key] = from[key] + (to[key] - from[key]) * k;
+      // Wet in about 20 s of rain, dry in about a minute after it stops.
+      wetness = look.wet > wetness ? Math.min(look.wet, wetness + step / 20) : Math.max(look.wet, wetness - step / 60);
+
+      // Lightning: a storm strikes every few seconds, a double flash, then thunder after distance / 343.
+      flashAge += step;
+      if (look.lightning > 0.5) {
+        nextStrike -= step;
+        if (nextStrike <= 0) {
+          flashAge = 0;
+          const distance = 300 + rand() * 2700;
+          api.onLightning?.(distance, distance / 343);
+          nextStrike = (3 + rand() * 9) / look.lightning;
+        }
+      }
+      flash = flashAge < 0.6 ? Math.max(0, Math.exp(-flashAge * 9) + 0.6 * Math.exp(-Math.abs(flashAge - 0.22) * 30) - 0.02) : 0;
+      flash = Math.min(1, flash) * Math.min(1, look.lightning * 1.5);
+
+      // The sky at this hour, then the weather over it.
+      sampleDay(hour);
+      sunDirection(hour, sunDir);
+      daylight = Math.max(0, Math.min(1, (sample.keyI - NIGHT.keyI) / (2.3 - NIGHT.keyI)));
+      for (const key of ['top', 'horizon', 'ground', 'hemiSky'] as const) weatherColour(c[key], 1);
+      weatherColour(c.key, 0.6);
+
+      const u = skyMaterial.uniforms;
+      (u.uTop.value as THREE.Color).copy(c.top);
+      (u.uHorizon.value as THREE.Color).copy(c.horizon);
+      (u.uGround.value as THREE.Color).copy(c.ground);
+      (u.uSun.value as THREE.Color).copy(c.key);
+      (u.uSunDir.value as THREE.Vector3).copy(sunDir);
+      u.uStars.value = sample.stars * (1 - look.cloud);
+      u.uCloud.value = look.cloud;
+      u.uTime.value = time;
+      u.uFlash.value = flash;
+      (u.uCloudLit.value as THREE.Color).copy(c.key).multiplyScalar(0.35 + 0.65 * daylight).lerp(c.horizon, 0.45);
+
+      // The fog is the horizon: the one rule that hides where the world ends.
+      fog.color.copy(c.horizon);
+      fog.near = baseFog.near * look.fog;
+      fog.far = Math.max(fog.near + 10, baseFog.far * look.fog);
+      if (!(scene.background instanceof THREE.Texture)) scene.background = fog.color;
+
+      // The lights. By day the key IS the sun; at night it is the moon, opposite and blue.
+      const body = sunDir.y >= 0 ? sunDir : camPos.copy(sunDir).negate();
+      lighting.key.position.copy(lighting.key.target.position).addScaledVector(body, keyOffset);
+      lighting.key.color.copy(c.key);
+      lighting.key.intensity = sample.keyI * look.dim + flash * 3;
+      lighting.hemisphere.color.copy(c.hemiSky);
+      lighting.hemisphere.groundColor.copy(c.hemiGround);
+      lighting.hemisphere.intensity = sample.hemiI * (0.55 + 0.45 * look.dim) + flash * 1.5;
+      lighting.ambient.intensity = sample.ambient;
+      renderer.toneMappingExposure = sample.exposure * (1 + flash * 0.8);
+      scene.environmentIntensity = 0.3 + 0.7 * daylight * (0.5 + 0.5 * look.dim);
+
+      // Street lamps and windows: on as the light goes, off as it comes back.
+      const night = smooth(Math.max(0, Math.min(1, (0.45 - daylight * look.dim) / 0.35)));
+      for (const n of nightLights) {
+        if ((n.o as THREE.Light).isLight) (n.o as THREE.Light).intensity = n.strength * night;
+        else {
+          const m = (n.o as THREE.Mesh).material as THREE.MeshStandardMaterial;
+          if (m && 'emissiveIntensity' in m) m.emissiveIntensity = n.strength * night;
+        }
+      }
+      // Wet: darker and glossier — the look that makes rain read as rain on a road.
+      for (const w of wetMats) {
+        w.m.roughness = w.roughness * (1 - 0.65 * wetness);
+        w.m.color.copy(w.color).multiplyScalar(1 - 0.3 * wetness);
+      }
+
+      // Precipitation follows the camera.
+      camera.getWorldPosition(camPos);
+      sky.position.copy(camPos);
+      const wind = look.wind;
+      const setFall = (o: THREE.Object3D, amount: number, windScale: number) => {
+        const m = (o as THREE.Mesh).material as THREE.ShaderMaterial;
+        o.visible = amount > 0.01;
+        m.uniforms.uAmount.value = amount;
+        m.uniforms.uTime.value = time;
+        (m.uniforms.uCam.value as THREE.Vector3).copy(camPos);
+        (m.uniforms.uWind.value as THREE.Vector2).set(wind * windScale, wind * windScale * 0.35);
+      };
+      setFall(rain, look.rain * (0.7 + 0.3 * look.lightning), 4);   // a storm pours; rain falls
+      (rain.material as THREE.ShaderMaterial).uniforms.uSpeed.value = 13 + 5 * look.lightning;
+      (rain.material as THREE.ShaderMaterial).uniforms.uColor.value.copy(c.horizon).lerp(ca.setRGB(0.8, 0.85, 0.9), 0.5);
+      setFall(snow, look.snow, 1);
+      setFall(dust, look.dust, 6);
+
+      // Phase changes are announced once each.
+      const p = phaseOf(hour);
+      if (p !== phase) { phase = p; api.onPhase?.(p); }
+
+      // Reflections follow the sky in steps: one slot per half hour and weather.
+      envAge += step;
+      const key = Math.round(hour * 2) + ':' + target + ':' + Math.round(blend * 4);
+      if (key !== envKey && envAge >= 1) { envKey = key; envAge = 0; bakeEnvironment(key); }
+    },
+    dispose() {
+      scene.remove(sky, rain, snow, dust);
+      for (const o of [sky, rain, snow, dust]) { (o as THREE.Mesh).geometry.dispose(); ((o as THREE.Mesh).material as THREE.Material).dispose(); }
+      for (const t of envCache.values()) t.dispose();
+      envCache.clear();
+      pmrem?.dispose();
+      for (const w of wetMats) { w.m.roughness = w.roughness; w.m.color.copy(w.color); }
+    },
+  };
+  api.update(0);
+  return api;
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/three/renderer.ts': RENDERER,
   'src/game/three/lighting.ts': LIGHTING,
@@ -2886,10 +4206,12 @@ const FILES: Record<string, string> = {
   // The things a world is actually made of (admin 2026-08-27): car, tree, mountain, river, desert,
   // road, animal — each built at a REAL or a LITE tier, because "asli" and "3d" are different asks.
   'src/game/three/objects.ts': OBJECTS,
+  // A sky that lives: the clock, the day-night cycle and the weather, driving the lights above.
+  'src/game/three/atmosphere.ts': ATMOSPHERE,
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'renderer', 'lighting', 'materials', 'camera', 'world', 'environment', 'surfaces', 'humanoid', 'objects',
+  'renderer', 'lighting', 'materials', 'camera', 'world', 'environment', 'surfaces', 'humanoid', 'objects', 'atmosphere',
 ];
 
 /**
@@ -2927,6 +4249,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
       files['src/game/three/surfaces.ts'] = FILES['src/game/three/surfaces.ts'];
       files['src/game/three/environment.ts'] = FILES['src/game/three/environment.ts'];
     }
+    // atmosphere.ts drives the lights lighting.ts makes (it imports AppliedLighting).
+    if (files['src/game/three/atmosphere.ts']) files['src/game/three/lighting.ts'] = FILES['src/game/three/lighting.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
 
@@ -2969,7 +4293,15 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '  colour under perfect lighting is exactly what "not realistic" looks like.\n' +
       '- 🔴 EVERY OBJECT COMES FROM objects.ts, never hand-modelled: createCar, createMotorcycle,\n' +
       '  createBicycle, createTree, createMountain, createRiver, createDesert, createRoad,\n' +
-      '  createAnimal. Call setDetailLevel()\n' +
+      '  createAnimal (dog, cow, horse, deer, goat, tiger), createHouse, and India\'s roads —\n' +
+      '  createAutoRickshaw, createBus, createTruck, createTractor — and createTraffic() to fill a road\n' +
+      '  with them (keeps left, keeps distance, stops for the player); createWeapon({ kind }) for a\n' +
+      '  pistol, rifle, smg, shotgun, sniper, sword, axe or bow — hero.hold(weapon.root), hero.aim(true),\n' +
+      '  fire from weapon.muzzle, and bow.setDraw(held ? 1 : 0). Call setDetailLevel()\n' +      "- 🌦️ An outdoor world gets atmosphere.ts: createAtmosphere({ scene, renderer, camera, lighting })\n" +
+      "  — a day-night clock (dayLength seconds per day) and weather via setWeather('rain'|'storm'|'snow'|\n" +
+      "  'fog'|'dust'|'cloudy'|'clear', seconds). addNightLight(lamp), wet([roadMaterial]), and\n" +
+      "  onLightning = (d, delay) => setTimeout(() => audio.play('thunder'), delay * 1000). Call\n" +
+      '  atmo.update(dt) every frame AFTER the camera moves; it drives the lights, fog and sky itself.\n' +
       "  ONCE at start-up — 'real' when the user asked for real/realistic/asli/100%, 'lite' when they\n" +
       '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
       '- 🔴 A BIKE IS createMotorcycle() / createBicycle(), never a capsule over two cylinders. A\n' +

@@ -19,7 +19,7 @@ const base = () => `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
 beforeAll(() => {
   dir = mkdtempSync(join(os.tmpdir(), 'nb-dist-'));
-  for (const f of ['server.cjs', 'server.cjs.map', 'server.cjs.map.gz', 'index.js.map', 'index.html', 'build_status.json']) writeFileSync(join(dir, f), `content of ${f}`);
+  for (const f of ['server.cjs', 'server.js', 'server.cjs.map', 'server.cjs.map.gz', 'index.js.map', 'index.html', 'build_status.json']) writeFileSync(join(dir, f), `content of ${f}`);
   const app = express();
   app.use(denyServerOnlyArtifacts());
   app.use(express.static(dir));
@@ -28,7 +28,7 @@ beforeAll(() => {
 afterAll(() => { server.close(); rmSync(dir, { recursive: true, force: true }); });
 
 describe('the server artifacts answer 404, every spelling', () => {
-  for (const p of ['/server.cjs', '/server.cjs.map', '/server.cjs.map.gz', '/SERVER.CJS.MAP', '/%73erver.cjs.map', '/./server.cjs', '/assets/../server.cjs.map', '/server.cjs.m%61p', '/index.js.map', '/index.js.m%61p']) {
+  for (const p of ['/server.cjs', '/server.cjs.map', '/server.cjs.map.gz', '/SERVER.CJS.MAP', '/%73erver.cjs.map', '/./server.cjs', '/assets/../server.cjs.map', '/server.cjs.m%61p', '/index.js.map', '/index.js.m%61p', '/server.js']) {
     it(p, async () => { expect((await fetch(`${base()}${p}`)).status).toBe(404); });
   }
 });
@@ -57,9 +57,15 @@ describe('one list for both lanes', () => {
   });
 });
 
-describe('one private-file predicate (merge of #3529 and #3538)', () => {
-  it('decodes and normalizes before judging, with or without a query string', () => {
-    for (const p of ['/server.cjs', '/server.cjs.map', '/server.cjs.m%61p', '/assets/app.js.map', '/a/../server.cjs']) expect(isServerOnlyArtifactPath(p), p).toBe(true);
-    for (const p of ['/assets/app.js', '/index.html', '/server.cjs.map.txt']) expect(isServerOnlyArtifactPath(p), p).toBe(false);
+describe('the two private-file predicates are one (merge of #3529 and #3538)', () => {
+  it('there is no second predicate module — the decoded one is the only one', async () => {
+    // #3529's privateBuildFiles.ts read the RAW path and let /server.cjs.m%61p through. After the merge it
+    // survived only as an alias nothing imported (deadCodeGuard flagged it), so it was removed.
+    const { existsSync } = await import('node:fs');
+    expect(existsSync('src/server/lib/privateBuildFiles.ts')).toBe(false);
+    for (const p of ['/server.cjs', '/server.cjs.map', '/server.cjs.m%61p', '/assets/app.js.map', '/a/../server.cjs', '/server.js']) {
+      expect(isServerOnlyArtifactPath(p), p).toBe(true);
+    }
+    for (const p of ['/assets/app.js', '/index.html', '/sw.js']) expect(isServerOnlyArtifactPath(p), p).toBe(false);
   });
 });

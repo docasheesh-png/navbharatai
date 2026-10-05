@@ -20,7 +20,8 @@ import {
   __resetObservability, RATE_LIMIT, DEDUP_WINDOW_MS, type CrashlyticsSink, type ObservabilityDeps,
 } from '../src/lib/observability';
 import { clientErrorRecord } from '../src/server/routes/telemetry';
-import { isServerOnlyArtifactPath } from '../src/server/lib/serverOnlyArtifacts';
+// The one private-file check: #3529's isPrivateBuildFile was merged into it (forensic audit 2026-10-04).
+import { isServerOnlyArtifactPath as isPrivateBuildFile } from '../src/server/lib/serverOnlyArtifacts';
 import { firstComponent } from '../src/components/ErrorBoundary';
 
 const ROOT = join(__dirname, '..');
@@ -294,18 +295,17 @@ describe('§6 the server sanitizes again, and never serves the private build fil
     expect(route).not.toMatch(/x-forwarded-for|remoteAddress/);
   });
 
-  it.each(['/server.cjs', '/server.cjs.map', '/assets/index-abc.js.map', '/SERVER.CJS'])('refuses %s', (p) => {
-    expect(isServerOnlyArtifactPath(p)).toBe(true);
+  it.each(['/server.cjs', '/server.cjs.map', '/assets/index-abc.js.map', '/SERVER.CJS', '/server.js', '/server.cjs.m%61p'])('refuses %s', (p) => {
+    expect(isPrivateBuildFile(p)).toBe(true);
   });
 
   it.each(['/', '/assets/index-abc.js', '/sw.js', '/manifest.json'])('serves %s', (p) => {
-    expect(isServerOnlyArtifactPath(p)).toBe(false);
+    expect(isPrivateBuildFile(p)).toBe(false);
   });
 
   it('the guard is mounted before every static handler, and Firebase Hosting ignores the same files', () => {
     const server = read('server.ts');
-    // Since the merge with #3538 the mount is the unified, decoded guard (serverOnlyArtifacts.ts);
-    // isServerOnlyArtifactPath delegates to the same predicate, asserted in theServerSourceIsNeverServed.
+    // One mount since the two private-file checks merged into one (serverOnlyArtifacts.ts).
     const guard = server.indexOf('app.use(denyServerOnlyArtifacts());');
     expect(guard).toBeGreaterThan(0);
     expect(guard).toBeLessThan(server.indexOf('app.use(precompressedStatic(distPath))'));

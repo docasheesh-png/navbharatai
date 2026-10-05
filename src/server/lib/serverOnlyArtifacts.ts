@@ -22,7 +22,8 @@ export function isServerOnlyArtifactPath(rawPath: string): boolean {
   const base = path.posix.basename(norm).replace(/\.(?:br|gz)$/, '');
   // Any source map, too: a map is for reading an error on OUR side, never something a visitor downloads.
   // Decided on the DECODED name — `/server.cjs.m%61p` is the same file to the static handler.
-  return SERVER_ONLY_ARTIFACTS.includes(base) || base.endsWith('.map');
+  // And `/server.js` at the root — the bundle's other possible name (#3529's rule, kept when the two merged).
+  return SERVER_ONLY_ARTIFACTS.includes(base) || base.endsWith('.map') || norm === '/server.js';
 }
 
 /** Express middleware: answer 404 for a server artifact before any static handler can serve it. */

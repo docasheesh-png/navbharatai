@@ -6,6 +6,7 @@ import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../l
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { remixGate, remixRefusal } from '../lib/remixPlanGate';
 import { routeParam, routeParams } from '../lib/expressCompat';
+import { audit } from '../lib/audit';
 import {
   preparePublishBundle,
   exclusionSummary,
@@ -252,8 +253,12 @@ export function registerGalleryRoutes(app: Express): void {
     try {
       await updateGalleryApp(found.id, patch);
     } catch {
+      audit('GALLERY_REVIEW_DECISION', { reviewer: who?.email || '', id: found.id, decision, result: 'not-saved' });
       return res.status(503).json({ error: 'Could not save that decision. Please try again.' });
     }
+    // Who decided what about whose code — an approval makes it public, a removal deletes it (admin panel
+    // audit, PR 3: the store reviews were the admin decisions with no audit line at all).
+    audit('GALLERY_REVIEW_DECISION', { reviewer: who?.email || '', id: found.id, author: found.authorEmail || '', decision, note: patch.reviewNote || '', result: 'ok' });
     res.json({ ok: true, id: found.id, status: decision });
   });
 }

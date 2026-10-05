@@ -4942,9 +4942,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   Open App Mart review
                 </button>
               </div>
-              <div className="bg-card border border-dashed border-line rounded-[1.5rem] p-5">
+              {/* The gallery's review queue lives inside the Gallery screen (GalleryReviewQueue.tsx), the same
+                  way App Mart's lives inside App Mart. This card said "Not available yet" after that queue had
+                  shipped — a screen telling the admin a working feature did not exist (admin panel audit, PR 3). */}
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-3">
                 <h3 className="text-sm font-black text-ink uppercase tracking-tight">Community gallery review</h3>
-                <p className="text-[11px] text-muted mt-1">Not available yet. Apps published to the community gallery wait as pending and stay private; the screen to approve or reject them arrives in the next update.</p>
+                <p className="text-[11px] text-muted">Apps people send to the community gallery wait here as pending and stay private until approved. Read the code, then approve, reject or remove. It opens as the signed-in store admin account, not with this panel's login.</p>
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'gallery' } }))}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-[11px] font-black uppercase tracking-wider text-on-accent"
+                >
+                  Open gallery review
+                </button>
               </div>
             </div>
           )}

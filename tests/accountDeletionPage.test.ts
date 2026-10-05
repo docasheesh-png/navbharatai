@@ -125,12 +125,21 @@ describe('the built-app eraser and the page do not drift apart', () => {
       project_plans_v3: /projects and built apps/i,
       app_engineering_memory_v1: /projects and built apps/i,
       app_ai_settings: /projects and built apps/i,
+      // Q-134 (2026-10-05): two stores the erase now reaches, each named on the page.
+      workspace_user_actions_v1: /the list of things the builder asked you to do/i,
+      code_reviews: /the review comments left on them/i,
     };
     for (const { collection } of WORKSPACE_SCOPED_COLLECTIONS) {
       const phrase = described[collection];
       expect(phrase, `deletion page must describe the "${collection}" data it erases`).toBeDefined();
       expect(ACCOUNT_DELETION).toMatch(phrase);
     }
+  });
+
+  it('the user-scoped subcollections the erase now reaches are named on the page (Q-134)', () => {
+    expect(ACCOUNT_DELETION).toMatch(/the push-notification address of each phone you signed in on/);
+    expect(ACCOUNT_DELETION).toMatch(/the mentions sent to you inside NavBharatAI/);
+    expect(ACCOUNT_DELETION).toMatch(/which instructions each build ran with/);
   });
 
   it('it does NOT claim to delete the user\'s own GitHub repositories', () => {

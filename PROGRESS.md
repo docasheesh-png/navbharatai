@@ -90123,3 +90123,10 @@ explorer — which judged "blank" by the whole root. A tab that left the main ar
 "ok": the Q-147 class (the frame judged as the page) in a third lane. The explorer now asks the shared
 `MAIN_REGION_EMPTY_JS` after each press, with the paint wait's own grace for a screen still fetching. Real-browser
 lock: `tests/aTabThatEmptiesTheMainArea.test.ts`.
+
+### 2026-10-05 — Q-162: the admin's rule for the 45 undecided routes is written down
+
+Admin: *"apki salah ke anusar bana kar sara work complete finish karo"*. The recommendation becomes a CLAUDE.md
+core rule: an uncalled `/api` route is decided (screen / named outside caller / deleted) in the same PR that next
+touches its file, and the baseline shrinks with it — never a mass deletion. The census now maps every undecided
+route to its file, so the list stays actionable.

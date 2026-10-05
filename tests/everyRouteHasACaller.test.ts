@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
-import { uncalledRoutes, isCalled, stripComments } from './apiRouteCallers';
+import { uncalledRoutes, isCalled, stripComments, serverApiRoutes } from './apiRouteCallers';
 import { galleryReviewApi } from '../src/components/panels/GalleryReviewQueue';
 import { stopVersionPreview } from '../src/lib/versionPreviewStop';
 
@@ -29,6 +29,19 @@ describe('census: every /api route has a caller, or a written reason it has none
   it('the baseline only shrinks — a route that gained a caller (or was deleted) leaves it', () => {
     const stale = Object.keys(BASELINE).filter((r) => !now.includes(r));
     expect(stale, 'Remove these from tests/fixtures/uncalledApiRoutesBaseline.json').toEqual([]);
+  });
+
+  it('the undecided ones are listed per file, so a session touching that file sees what to decide (CLAUDE.md, Q-162)', () => {
+    // Not a failure: the rule is "decide it when you touch its file". This keeps the list readable by file.
+    const routes = serverApiRoutes();
+    const byFile: Record<string, string[]> = {};
+    for (const [r, why] of Object.entries(BASELINE)) {
+      if (!why.startsWith('undecided')) continue;
+      const [method, path] = r.split(' ');
+      const f = routes.find((x) => x.method === method && x.path === path)?.file ?? '(not found)';
+      (byFile[f] ??= []).push(r);
+    }
+    expect(Object.keys(byFile)).not.toContain('(not found)');
   });
 
   it('every entry says what kind of reason it is', () => {

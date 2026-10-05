@@ -50,42 +50,16 @@ service cloud.firestore {
       // P-SEC.1: `role` is server-managed (admin SDK only) — clients may never set or
       // change it, else a user could self-escalate to owner/admin. (isValidUser allows
       // up to 10 arbitrary keys, so this explicit guard is required.)
-      allow create: if isVerified() && isValidId(userId) && isOwner(userId) && isValidUser(incoming()) &&
-                       !('role' in incoming());
-      allow update: if isVerified() && isValidId(userId) && isOwner(userId) && isValidUser(incoming()) &&
-                       incoming().uid == existing().uid &&
-                       (!('role' in incoming())
-                          ? !('role' in existing())
-                          : ('role' in existing() && incoming().role == existing().role));
+      // FORENSIC AUDIT 2026-10-04: server-written only. The owner could write up to 10 arbitrary fields
+      // (plan, isAdmin, credits, tier…) — only `role` was blocked — and no client code writes this
+      // document, so any future server read of such a field would have trusted a client's value.
+      allow create, update, delete: if false;
     }
 
-    // Posts
-    match /posts/{postId} {
-      allow read: if isSignedIn();
-      allow create: if isVerified() && isValidId(postId) && isValidPost(incoming());
-      allow update: if isVerified() && isValidId(postId) && existing().userId == request.auth.uid &&
-                       isValidPost(incoming()) && incoming().userId == existing().userId;
-      allow delete: if isVerified() && isValidId(postId) && existing().userId == request.auth.uid;
-
-      match /comments/{commentId} {
-        allow read: if isSignedIn();
-        allow create: if isVerified() && isValidId(commentId) && incoming().userId == request.auth.uid;
-        allow delete: if isVerified() && isValidId(commentId) && (existing().userId == request.auth.uid || get(/databases/$(database)/documents/posts/$(postId)).data.userId == request.auth.uid);
-      }
-    }
-
-    // Groups
-    match /groups/{groupId} {
-      allow read: if isSignedIn();
-      allow create: if isVerified() && isValidId(groupId) && incoming().adminId == request.auth.uid;
-      allow update: if isVerified() && isValidId(groupId) && existing().adminId == request.auth.uid &&
-                       incoming().adminId == existing().adminId;
-
-      match /messages/{messageId} {
-        allow read: if isSignedIn();
-        allow create: if isVerified() && isValidId(messageId) && incoming().userId == request.auth.uid;
-      }
-    }
+    // FORENSIC AUDIT 2026-10-04: the template's `posts` / `groups` collections (and their comments and
+    // messages) were removed. Nothing in the app used them, yet any verified user could write unbounded
+    // documents there that every signed-in user could read — free storage and an exfil channel on
+    // NavBharatAI's quota. The default deny above now covers them.
 
     // Reports
     match /reports/{reportId} {
@@ -93,12 +67,10 @@ service cloud.firestore {
       allow create: if isVerified() && isValidId(reportId) && isValidReport(incoming());
     }
 
-    // Build jobs — signed-in owner only
+    // Build jobs — the retired engine's collection; no client touches it (forensic audit 2026-10-04: an
+    // owner could re-assign `userId` on update and push a document into another user's queries).
     match /build_jobs/{jobId} {
-      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow update: if isSignedIn() && existing().userId == request.auth.uid;
-      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+      allow read, write: if false;
     }
 
     // Wallet — owner only, no delete from client
@@ -125,11 +97,11 @@ service cloud.firestore {
       allow write: if false; // server-only
     }
 
-    // Promo redemptions — user can create own, no update/delete
+    // Promo redemptions — SERVER-ONLY (forensic audit 2026-10-04, P0). The old rule let any signed-in
+    // user CREATE `promo_pending_<anyUid>`, and the payment path read it to credit 1,000 tokens instead of
+    // the paid amount — a client write on the money path. No client reads or writes this collection.
     match /promo_redemptions/{redemptionId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow update, delete: if false;
+      allow read, write: if false;
     }
 
     // User secrets — owner only, strict
@@ -158,17 +130,18 @@ service cloud.firestore {
     }
 
     // Chat messages — owner only
+    // Referenced by no code (forensic audit 2026-10-04); the update rule let an owner re-assign `userId`.
     match /chat_messages/{messageId} {
-      allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read, write: if false;
     }
 
     // Chat agent history — owner only
+    // The client only ever CREATES these (App.tsx); update let an owner re-assign `userId` into another
+    // user's history (forensic audit 2026-10-04). Create-only, pinned to the caller.
     match /chat_agent_history/{transitionId} {
       allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
     }
 
     // Live Collaboration rooms (src/components/ide/LiveCollaboration.tsx).
@@ -236,7 +209,11 @@ service cloud.firestore {
         allow create: if canAccessCollab(roomId)
                          && incoming().authorId == request.auth.uid
                          && incoming().text is string && incoming().text.size() <= 1000;
-        allow update: if canAccessCollab(roomId);
+        // Members may mark a comment RESOLVED and nothing else (forensic audit 2026-10-04): a full update
+        // let any member rewrite another member's comment and attribute it to them.
+        allow update: if canAccessCollab(roomId)
+                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['resolved'])
+                         && request.resource.data.resolved is bool;
         allow delete: if false;
       }
       // Shared in-room AI thread (Phase 1a) — approval-gated. The member who triggers a turn writes

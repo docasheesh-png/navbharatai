@@ -89214,6 +89214,115 @@ Siblings hunted: `readAsDataURL` across the whole repo — the only generated-ap
 failed save lived only in `proShell.ts`'s `useCollection`.
 
 
+## 2026-10-04 — Q-105 was already fixed, and saying so uncovered the defect it was hiding (Q-640)
+
+**Taken because it was the one row on the older queue no live PR had claimed** — and because it read like the
+largest missing subsystem on the list: *"Post-build gates judge files the entry never imports (no reachability).
+Needs a transitive import closure from `index.html`/`main.tsx` for readiness, fake-code scan and feature heal."*
+
+🔴 **The premise was false, and safeguard #6 is why I found that out instead of rebuilding it.** The first search
+I ran was by FILENAME, not by content — `find . -iname "*reach*"` — and it printed
+`src/server/AgentV3/appReachability.ts` immediately. 245 lines, written on 2026-09-17 with autopsy e706e068, with
+`tests/appReachability.test.ts` beside it, and wired into five readers: the readiness gate
+(`ToolDispatcher.evaluate` → `splitByReachability`), the incomplete-code heal's input, the fake-feature scan and
+both simulated-content disclosures. **Had I searched for the row's own vocabulary — "transitive", "import
+closure" — I would have found nothing and built a second copy of a working subsystem.** That is the exact
+sequence that destroyed `fileMentions.ts`, one safeguard later.
+
+🔑 **And the stale row was not harmless — it was camouflage.** A row that says "this does not exist yet" is a
+row nobody re-reads the code for. Fourteen lines below the heal's own correctly-filtered input sat this:
+
+```ts
+const stubs = highSeverityAuthenticityIssues(written).filter(…not unreachable…);  // input:   filtered ✅
+const healed = await completeRunner.run(authenticityRepairInstruction(stubs));
+const after  = highSeverityAuthenticityIssues(written);                           // verdict: NOT filtered ❌
+if (after.length === 0) { … INCOMPLETE_CODE_HEALED … readiness recovery … }
+```
+
+**On autopsy e706e068's own file shape this fails completely.** A batch repair had left `App.tsx` and
+`hooks/useStudents.ts` at the project root, copies nothing imports. The heal completes every stub the app
+actually HAS; the stray's stub keeps `after.length > 0` for ever; so `INCOMPLETE_CODE_HEALED` is never recorded,
+and the readiness recovery — which lives INSIDE that `if` — never runs. The build stays NOT-ready, GreenGuard
+restores it, and the user's build failed over a file the browser never loads. **That is e706e068's own harm,
+surviving in the half its fix never touched.** The instance was fixed; the class was not — the bar the fifth
+rule's 2026-09-13 note forbids by name.
+
+**The class, and the 50/50 half.** One fact, two readers, one of them told — Q-512's class, two days running.
+But the deeper question is why the branch could exist at all, and the answer is that *"the findings about files
+the app loads"* **had no name**. It was re-spelled as a chained `.filter((x) => !isUnreachable(…))` at each of
+four call sites. Four remembered. A spelling can be forgotten; the unfiltered scan answers cheerfully either
+way, and neither `tsc` nor the suite can see a missing filter.
+
+**Fix:** `loadedFindings(findings, verdict)` in `appReachability.ts` — the `loaded` half of the split the
+readiness gate already used, given a name. All five readers now ask it, and **no reader spells the question by
+hand any more** (that absence is itself asserted). The wrong branch is not merely corrected; there is no second
+expression left to forget it in.
+
+**Lock:** `tests/aHealThatFixedEverythingIsToldSo.test.ts`, 10 cases. Seven are the pure behaviour on the real
+School-ERP file set (the stray's finding dropped, every loaded file's kept, a finding naming no file kept, and
+EVERYTHING kept when the verdict is not applicable — never a demotion). Three are a **census that pins the
+reader count at five**, so a sixth reader fails CI rather than quietly asking the other question. Reversion-
+proven three ways: the re-judge unfiltered again → 2 fail; one other reader back to its own filter → 2 fail;
+`loadedFindings` stops filtering → 2 fail.
+
+⚠️ **Honest limit.** The decision this fixes is inline in the build route's handler and cannot be called from a
+test, so what the census locks is the SHAPE of the five call sites, not the handler's behaviour — the same
+precedent `readinessJudgesOurOwnCode.test.ts` set for this file. The pure half proves the question now returns
+the right answer; the census proves both readers ask it. The live effect to watch is
+`INCOMPLETE_CODE_HEALED` appearing on a build that has stray unreachable files — before this, it could not.
+
+**Siblings hunted:** every `const after` / re-detect pair in the build route (`analyzeProjectIntegrity`,
+`lintBuiltApp`, `analyzeDesignCoverage`, `analyzeHooksRules`, `findBootKillingEnvGuards`) and every call of the
+four file-scoped scans. The asymmetry existed in exactly one place, because reachability filtering existed in
+exactly four — and that is now five, named, and counted.
+### 2026-10-04 — Forensic security / reliability audit (PR #NNNN, branch `claude/new-session-gx9294`)
+
+The admin asked for a repo-wide audit, with every finding fixed P0 → P3 and locked by a test proven by
+reversion. Eight domain audits (auth/IDOR, API surface, AI cost, preview isolation, rules, payments, GitHub,
+secrets/supply chain) were run and **every finding was re-verified by hand before it was fixed** — several
+audit claims turned out false and were dropped. Each fix below ships with a test that fails when the bug is
+put back.
+
+| Sev | Problem | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|---|
+| P0 | `/api/preview` let any caller run code on the HOST | `ServerContainerRuntime` / `SandboxManager` spawned user code with `child_process` and the server's env | user code on the platform's machine | `assertHostExecAllowed` refuses outside dev; allowlisted `hostChildEnv`; `npm install --ignore-scripts`; 5-min install kill; route needs a token | `userCodeNeverRunsOnTheHost` (census of every `child_process` importer) |
+| P0 | The preview bundler read any file on the server (`import '/etc/passwd'`, `../../server.ts`, `@/../`) | esbuild resolved paths with no root | a resolver with no boundary | `confineToWorkspace` plugin on the resolved path; `@/` confined; `file:` refused | `previewBundleStaysInsideTheProject` |
+| P0 | `/pwa/:id`, `/preview/:id` served a user's HTML as navbharatai.com | HTML sent with our origin's cookies/storage | untrusted HTML on our origin | `sendUntrustedHtml` — CSP `sandbox` without `allow-same-origin` (opaque origin) | `userHtmlNeverRunsAsNavBharatAI` |
+| P0 | The admin's Built Apps panel rendered a user's app same-origin | `srcDoc` iframe with `allow-same-origin` | same class, admin surface | `UNTRUSTED_PREVIEW_SANDBOX` | `aStrangersCodeNeverRunsInOurOrigin` (census; `PreviewSurface.tsx` = Q-140) |
+| P0 | Cashfree merchant credentials could come from the USER's vault | `getSecretValue(uid, …)` read the caller's secrets | platform credential from user input | `platformCashfreeCredentials(env)` — env only; `getSecretValue` removed | `platformCredentialsNeverComeFromAUser` |
+| P0 | Any signed-in user could plant `promo_pending_<uid>` and be credited 1,000 tokens for any payment | client-writable Firestore doc read on the money path | a client write deciding a credit | promo branch removed from `computeCreditedWallet`; rule `false` | `aClientCannotWriteTheMoneyPath` (+ emulator) |
+| P0 | host-app / host-usage trusted an email in the request body as admin | non-strict owner gate | claimed identity as authority | `requireVerifiedForMoney` + `assertVerifiedWorkspaceOwner` | `aClaimedEmailIsNeverAnAdmin` |
+| P0 | GitHub OAuth `returnUrl` could send the token to `/api/...` or a file path on our origin | path check before decoding, no deny for server paths | open redirect of a credential | `safeReturnUrl` decodes, lowercases, refuses server/file paths, drops fragments | `aGithubTokenOnlyReturnsToOurOwnApp` |
+| P0 | The org git token stayed in the sandbox's `.git/config` | hydrate copied the authenticated remote | a credential left on disk | `credentialFreeRepoUrl`; remote rewritten before copy and after push | `aGitTokenNeverStaysInTheSandbox` |
+| P1 | Every per-IP limit could be bypassed with one header; three limiters never limited | `trust proxy: true` (leftmost XFF) + `ipKeyGenerator(req)` returning the request object | caller-chosen address; wrong argument hidden by `as any` | one hop (`TRUSTED_PROXY_HOPS`, aligned with #3531), `clientAddress`, `addressRateKey` / `identityRateKey`, preview limiter | `aCallerCannotChooseItsOwnAddress` (real Express + limiter) |
+| P1 | `GET /server.cjs.map` served 27 MB of server source | build wrote it into the static root | server artifact in public dir | `denyServerOnlyArtifacts` on the DECODED name, every `.map` | `theServerSourceIsNeverServed` |
+| P1 | GitHub tokens in logs (axios errors) | error objects carry request headers | credential in an error | global axios interceptor redacts (incl. symbol-keyed headers) | `anHttpErrorNeverCarriesACredential` |
+| P1 | Anyone who guessed a shell id controlled that terminal | shells keyed by a short id only | capability without owner check | shells scoped to their workspace; UUID ids | `aTerminalBelongsToItsWorkspace` |
+| P1 | A claimed `userId` read, deployed, restored or pushed someone else's app | 14 source routes used the non-strict owner gate | claimed identity | `assertVerifiedWorkspaceOwner` on all 14 | `aClaimedUidReadsNoOnesSource` |
+| P1 | Free chat / security scan unbounded (size, attachments, history, rate) | no input limits before provider call | unmetered spend | `checkChatInput`; scan limiter + 200k-char cap | `aFreeAiRequestIsBounded` |
+| P1 | Doctor AI paid answers recorded no cost | racers returned text only | unmeasured spend | racers return `{text, spend}` | `everyPaidDoctorAiTurnIsMeasured` |
+| P1 | Professionals ran vision on attachments before the gate | order of checks | spend before allow | gate first | `nothingIsSpentBeforeATurnIsAllowed` |
+| P1 | One malformed request benched a provider for every user | any error set a cooldown | breaker poisoning | only provider-health errors cool a provider | `oneRequestNeverBenchesAProvider` |
+| P1 | The free Repo Analyst fell through to Claude Sonnet | a `callClaude` rung | free surface on a paid rung | rung removed | `aFreeSurfaceNeverRunsSonnet` |
+| P1 | Bot webhooks / MCP fetched user URLs with redirects followed | redirects unvetted | SSRF via redirect | `guardedPublicFetch`, `redirect: 'error'` | `aUserSuppliedUrlIsVettedOnEveryHop` |
+| P2 | Boot printed env values / key prefixes; `/api/agentv3/diag` public | debug logging | secret in logs | presence + length only; diag admin-only | `noEnvValueMaterialInLogsOrFiles` |
+| P2 | Webhook signature compared with `===` | non-constant-time compare | timing oracle | `timingSafeStringEqual` | `cashfreeWebhookSignature` |
+| P2 | `.env` not ignored by git / docker; no Permissions-Policy | missing config | secrets in repo/image | ignore files (identical to #3531); policy header | `localSecretsAndUnusedFeaturesStayOut` |
+| P2 | Production could boot with a test switch on | no config contract | silent security downgrade | `assertProductionConfig` (VITEST fatal; warnings for missing keys) | `productionRefusesASwitchedOffControl` |
+| P2 | Firestore: owner could write any field of `users`; template `posts`/`groups` open; `userId` re-assignable; collab comments rewritable; no Storage rules | permissive template rules | client writes the server never reads safely | rules write only what the app writes; deny-all `storage.rules` | `firestoreRulesAuditHardening` (emulator) |
+| P2 | Q-630: `verify-payment` (no sign-in) returned a fulfilled gift order's CODE to whoever held the order id — which travels in the redirect URL | the route answered with the fulfilment data as-is | a bearer value handed to an unidentified caller | code only to the buyer's verified token; client sends it | `aGiftCodeGoesOnlyToItsBuyer` |
+| P3 | Legacy `/create-order` unauthenticated; `verify-payment` returned balances by order id; Repo Analyst forwarded the session token to GitHub | dead / over-sharing routes | small leaks | 410; balances stripped; GitHub token only | `smallLeaksClosed` |
+
+**Overlap with other sessions (honest record).** #3531 carries the same trust-proxy / `clientAddress` /
+`.gitignore` change; this branch was aligned to its exact text so the second merge has the smallest conflict.
+#3529 adds `isPrivateBuildFile` for the same source-map leak — **its check reads the raw path, and
+`/server.cjs.m%61p` still returns the source through `express.static` (reproduced locally)**. Not edited here
+(another session's in-flight file); reported to the admin. When both land, one of the two middlewares should
+be removed.
+
+**Not fixed in this PR — every item is a row in `BUILD_REPORT_QUEUE.md`:** Q-140 (P0, builder preview
+same-origin, infra-blocked), Q-610 (rules must be deployed by hand to `gen-lang-client-0866594388`), Q-611
+(rotate credentials in git history), Q-612 … Q-629. Q-630 was found by the row verification and fixed here.
 
 ### Q-115: a forgotten package import is restored on the installed package's own word (2026-10-04)
 

@@ -1,0 +1,14 @@
+rules_version = '2';
+// Cloud Storage for Firebase — DENY ALL client access (forensic audit 2026-10-04).
+//
+// No client code uses the Storage SDK; the server reaches the bucket through the Admin SDK, which these
+// rules do not govern. The repo had no storage rules at all, so whatever was set in the console (possibly
+// "test mode") was the live policy and nobody could see it. Deploy this with
+// `firebase deploy --only storage --project gen-lang-client-0866594388`.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

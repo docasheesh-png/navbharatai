@@ -57,13 +57,13 @@ const empty = () => ({ tokenBalance: 0, totalMoneySpent: 0, totalTokensPurchased
 
 describe('🔴 A RECHARGE STAMP WITHOUT MONEY', () => {
   it('a real payment stamps the wallet and moves the money', () => {
-    const { wallet } = computeCreditedWallet(empty(), { amountPaid: 500, balanceAdded: 500 } as never, null, NOW);
+    const { wallet } = computeCreditedWallet(empty(), { amountPaid: 500, balanceAdded: 500 } as never, NOW);
     expect(wallet.totalMoneySpent).toBe(500);
     expect(wallet.lastRechargeAt).toBe(NOW);
   });
 
   it('🔴 a ₹0 credit no longer claims a recharge happened', () => {
-    const { wallet } = computeCreditedWallet(empty(), { amountPaid: 0, balanceAdded: 0 } as never, null, NOW);
+    const { wallet } = computeCreditedWallet(empty(), { amountPaid: 0, balanceAdded: 0 } as never, NOW);
     expect(wallet.totalMoneySpent).toBe(0);
     expect(wallet.lastRechargeAt).toBeUndefined();
   });
@@ -71,22 +71,23 @@ describe('🔴 A RECHARGE STAMP WITHOUT MONEY', () => {
   it('🔴 an unreadable amount is ₹0 — the shape that made this reachable', () => {
     // `n()` returns 0 for a string, null, undefined or NaN. Each of these used to stamp the wallet.
     for (const amountPaid of ['500', null, undefined, NaN, Infinity] as unknown[]) {
-      const { wallet } = computeCreditedWallet(empty(), { amountPaid, balanceAdded: 0 } as never, null, NOW);
+      const { wallet } = computeCreditedWallet(empty(), { amountPaid, balanceAdded: 0 } as never, NOW);
       expect(wallet.totalMoneySpent).toBe(0);
       expect(wallet.lastRechargeAt).toBeUndefined();
     }
   });
 
-  it('a promo credit adds tokens and still claims no recharge', () => {
-    const { wallet, promoApplied } = computeCreditedWallet(empty(), { amountPaid: 0, balanceAdded: 0 } as never, { mode: 'x' }, NOW);
-    expect(promoApplied).toBe(true);
-    expect(wallet.tokenBalance).toBeGreaterThan(0);
+  // The pending-promo credit (tokens without money) was removed in the forensic audit of 2026-10-04 —
+  // a client could plant it. A zero-rupee credit now adds nothing at all, and still claims no recharge.
+  it('a zero-rupee credit adds no tokens and claims no recharge', () => {
+    const { wallet } = computeCreditedWallet(empty(), { amountPaid: 0, balanceAdded: 0 } as never, NOW);
+    expect(wallet.tokenBalance ?? 0).toBe(0);
     expect(wallet.lastRechargeAt).toBeUndefined();
   });
 
   it('🔒 a wallet that ALREADY carries a stamp keeps it — this only stops a new false one', () => {
     const existing = { ...empty(), lastRechargeAt: '2026-01-01T00:00:00.000Z' };
-    const { wallet } = computeCreditedWallet(existing, { amountPaid: 0, balanceAdded: 0 } as never, null, NOW);
+    const { wallet } = computeCreditedWallet(existing, { amountPaid: 0, balanceAdded: 0 } as never, NOW);
     expect(wallet.lastRechargeAt ?? existing.lastRechargeAt).toBe('2026-01-01T00:00:00.000Z');
   });
 

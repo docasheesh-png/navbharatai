@@ -61,6 +61,19 @@ export function sanitizeRepoUrl(raw: string): string | null {
 }
 
 /**
+ * The same repo URL WITHOUT its credential — what a clone may keep as its `origin`. PURE.
+ *
+ * 🔴 FORENSIC AUDIT 2026-10-04 (P0). `git clone <url>` writes the URL it was given into `.git/config`
+ * as the `origin` remote, and the hydrate overlay copies `.git` into the user's workspace. With the
+ * platform-org GitHub App, that URL carries an INSTALLATION token for the whole organisation — so any
+ * user could open the terminal, `cat .git/config`, and read or force-push every other user's mirror
+ * repo. The credential is used for the one network call and never left on disk.
+ */
+export function credentialFreeRepoUrl(safeUrl: string): string {
+  return safeUrl.replace(/^https:\/\/[^@/]+@github\.com\//, 'https://github.com/');
+}
+
+/**
  * Why a clone failed — classified from git's real stderr INSIDE the sandbox (the raw error, which can
  * echo the token-embedded remote URL, is NEVER returned; only this code crosses the boundary). Lets the
  * caller tell the user the ACTUAL reason (expired/no credentials vs wrong account vs network) instead of
@@ -180,6 +193,9 @@ export class GitRepoSync {
         // cloneable repo reported "couldn't clone" and landed 0 files. Copy preserving only mode+timestamps
         // (ownership is meaningless in the single-user sandbox), then judge success by the FILESYSTEM — did
         // the workspace actually receive every cloned top-level entry? — NEVER by cp's exit code.
+        // Strip the credential from the cloned `origin` BEFORE `.git` is copied into the user's workspace
+        // (credentialFreeRepoUrl — the clone URL may carry an org-wide installation token).
+        `git -C /tmp/nbhydrate remote set-url origin "${credentialFreeRepoUrl(safeUrl)}" 2>/dev/null; ` +
         'cp -R --preserve=mode,timestamps /tmp/nbhydrate/. ./ 2>/dev/null; ' +
         'need=$(ls -A /tmp/nbhydrate | grep -vFx ".git" | wc -l); ' +
         'got=$(ls -A /tmp/nbhydrate | grep -vFx ".git" | while IFS= read -r e; do [ -e "./$e" ] && printf x; done | wc -c); ' +
@@ -246,7 +262,10 @@ export class GitRepoSync {
       await this.run(
         'git rev-parse --git-dir >/dev/null 2>&1 || git init -q; ' +
         'git config user.email "builder@navbharatai.dev"; ' +
-        'git config user.name "NavBharatAI Builder"',
+        'git config user.name "NavBharatAI Builder"; ' +
+        // A workspace hydrated BEFORE the credential strip still holds a token in `origin` — scrub it on
+        // the next push, so the fix reaches existing sandboxes too (credentialFreeRepoUrl).
+        `git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "${credentialFreeRepoUrl(safeUrl)}" 2>/dev/null; true`,
       );
       const commit = await this.run(
         'git add -A && (git commit -q -m "' + safeMsg + '" && echo NB_COMMITTED || echo NB_NOCHANGE)',

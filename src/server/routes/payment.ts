@@ -8,7 +8,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { doc, getDoc, setDoc, updateDoc, runTransaction, collection, query, where, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
 import { mirroredCreditPatch, rupeesToTokens } from '../lib/walletMirror';
 import { ordersToReconcile, reconcileMessage, type PendingOrderRecord } from '../lib/pendingOrders';
-import { getSecretValue } from '../lib/secrets';
+import { platformCashfreeCredentials, platformCashfreeWebhookSecret } from '../lib/cashfreeCredentials';
 import { sendSafeError } from '../lib/httpError';
 import { verifyPaymentInternal, computeCreditedWallet, TOKENS_PER_RUPEE } from '../lib/payments';
 import { DAY_ONE_STEPS } from '../lib/referralRewards';
@@ -55,7 +55,17 @@ export function isValidCashfreeSignature(opts: {
   const v2 = crypto.createHmac('sha256', secret).update(timestamp + rawBody).digest('base64');
   const v1Base64 = crypto.createHmac('sha256', secret).update(rawBody).digest('base64');
   const v1Hex = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-  return signature === v2 || signature === v1Base64 || signature === v1Hex;
+  // CONSTANT-TIME (forensic audit 2026-10-04): `===` returns as soon as a character differs, so the time a
+  // rejection takes leaks how much of a guessed signature was right. Each candidate is compared in full.
+  return [v2, v1Base64, v1Hex].some((expected) => timingSafeStringEqual(signature, expected));
+}
+
+/** Equal-length strings compared in constant time; different lengths are simply unequal. */
+export function timingSafeStringEqual(a: string, b: string): boolean {
+  const x = Buffer.from(String(a), 'utf8');
+  const y = Buffer.from(String(b), 'utf8');
+  if (x.length !== y.length) return false;
+  return crypto.timingSafeEqual(x, y);
 }
 
 /**
@@ -211,34 +221,9 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         createdAt: new Date().toISOString()
       });
 
-      // Dynamic key resolution from database fallback
-      const dbClientId = await getSecretValue(userId, 'CASHFREE_CLIENT_ID') || await getSecretValue(userId, 'CASHFREE_APP_ID');
-      const dbClientSecret = await getSecretValue(userId, 'CASHFREE_CLIENT_SECRET') || await getSecretValue(userId, 'CASHFREE_SECRET_KEY');
-
-      const clientId = (dbClientId || process.env.CASHFREE_CLIENT_ID || process.env.CASHFREE_APP_ID)?.trim();
-      const clientSecret = (dbClientSecret || process.env.CASHFREE_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY)?.trim();
-
-      // Robust detection: default to production unless the secret explicitly indicates 'test' or 'sandbox'
-      const isTestSecret = clientSecret && (
-        clientSecret.toLowerCase().includes('test') ||
-        clientSecret.toLowerCase().includes('sandbox') ||
-        clientSecret.toLowerCase().includes('sim_') ||
-        clientSecret.toUpperCase().startsWith('TEST')
-      );
-      const isTestClient = clientId && (
-        clientId.toLowerCase().includes('test') ||
-        clientId.toLowerCase().includes('sandbox') ||
-        clientId.toUpperCase().startsWith('TEST')
-      );
-
-      const env = process.env.CASHFREE_ENV || (isTestSecret || isTestClient ? 'sandbox' : 'production');
-
-      // Detect if credentials are empty or standard placeholder values
-      const isPlaceholder = !clientId || !clientSecret ||
-        clientId.toLowerCase().includes('placeholder') ||
-        clientSecret.toLowerCase().includes('placeholder') ||
-        clientId.trim() === '' ||
-        clientSecret.trim() === '';
+      // The merchant credentials are NavBharatAI's own and come only from the server environment —
+      // never from the caller's secret vault (cashfreeCredentials.ts, forensic audit 2026-10-04).
+      const { clientId, clientSecret, mode: env, placeholder: isPlaceholder } = platformCashfreeCredentials();
 
       console.log(`[CASHFREE] Creating order ${orderId} | Env: ${env} | Client: ${clientId?.substring(0, 8)}... | IsPlaceholder: ${isPlaceholder}`);
 
@@ -366,7 +351,23 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
 
     const result = await verifyPaymentInternal(orderId);
     if (result.success) {
-      return res.json(result.data);
+      // This route needs no sign-in (an order id is enough to ask), so it never returns the order OWNER's
+      // balances (forensic audit 2026-10-04): anyone holding an order id used to read them. No client
+      // reads them from here; the wallet is fetched through the owner-checked wallet route.
+      const { currentBalance: _balance, tokenBalance: _tokens, buyerUid, ...publicResult } = (result.data ?? {}) as Record<string, unknown>;
+      // A GIFT CODE is money in the hand of whoever reads it (Q-630, forensic audit 2026-10-04). The order id
+      // travels in the redirect URL, so knowing it proves nothing: the code goes only to the BUYER's own
+      // verified token. Anyone else still learns the order succeeded; the buyer also gets the code from the
+      // owner-checked `/api/payment/gift-codes`.
+      if ('giftCode' in publicResult) {
+        const callerUid = await verifyFirebaseToken(req).catch(() => null);
+        if (!callerUid || callerUid !== buyerUid) {
+          delete publicResult.giftCode;
+          delete publicResult.giftFaceInr;
+          publicResult.giftCodeDelivered = 'to-buyer-only';
+        }
+      }
+      return res.json(publicResult);
     } else {
       return res.status(400).json({ error: result.error });
     }
@@ -475,28 +476,13 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       console.log(`[CASHFREE WEBHOOK] Received webhook event for order: ${orderId}`);
 
       // Resolve the secret dynamically
-      let secret = process.env.CASHFREE_WEBHOOK_SECRET;
-
-      if (db) {
-        try {
-          const txRef = doc(db, 'payment_transactions', orderId);
-          const txSnap = await getDoc(txRef);
-          if (txSnap.exists()) {
-            const txData = txSnap.data();
-            const dbSecret = await getSecretValue(txData.userId, 'CASHFREE_WEBHOOK_SECRET');
-            if (dbSecret) {
-              secret = dbSecret;
-              console.log(`[CASHFREE WEBHOOK] Loaded db-saved webhook secret for user: ${txData.userId}`);
-            }
-          }
-        } catch (err: any) {
-          console.error('[CASHFREE WEBHOOK] Error looking up transaction user secret:', err.message);
-        }
-      }
+      // The signing secret is the platform's, from the server environment only — a value in the order
+      // owner's vault must never decide whether a webhook is genuine (cashfreeCredentials.ts).
+      const secret = platformCashfreeWebhookSecret();
 
       if (!secret) {
-        console.error('[CASHFREE WEBHOOK] Webhook signature verification rejected: CASHFREE_WEBHOOK_SECRET is not configured globally or in the user database.');
-        return res.status(400).json({ error: 'Webhook secret not configured. Please enter it in the Secret Management panel first.' });
+        console.error('[CASHFREE WEBHOOK] Webhook signature verification rejected: CASHFREE_WEBHOOK_SECRET is not configured on the server.');
+        return res.status(400).json({ error: 'Webhook secret not configured.' });
       }
 
       const signature = (req.headers['x-cf-signature'] || req.headers['cf-signature'] || '') as string;
@@ -875,7 +861,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         const walletRef = doc(db, 'user_token_wallets', userId);
         const walletSnap = await tx.get(walletRef);
         const walletData = walletSnap.exists() ? walletSnap.data() : { userId, tokenBalance: 0, totalTokensPurchased: 0, totalTokensUsed: 0, totalMoneySpent: 0, walletLedger: [], remaining_balance: 0, total_balance: 0 };
-        const { wallet: credited } = computeCreditedWallet(walletData, txData as any, null, nowIso);
+        const { wallet: credited } = computeCreditedWallet(walletData, txData as any, nowIso);
         tx.set(walletRef, credited);
         tx.set(txRef, txData);
         return credited;

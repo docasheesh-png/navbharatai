@@ -36,6 +36,8 @@
 // cold instance loses is the handle to it, and the reaper cleans those up.
 
 /** The sandbox-side capabilities a shell needs. Implemented by E2BActuator; absent on LocalActuator. */
+import { randomUUID } from 'node:crypto';
+
 export interface PtyHost {
   openPty(
     workspaceId: string,
@@ -230,7 +232,8 @@ export async function openShell(
   if (live.length >= MAX_SHELLS_PER_WORKSPACE) return { ok: false, reason: 'too_many' };
 
   seq += 1;
-  const shellId = `sh_${Date.now().toString(36)}_${seq}`;
+  // Random, never `<time>_<counter>`: an id a caller can predict is an id a caller can try (see `owned`).
+  const shellId = `sh_${randomUUID().replace(/-/g, '')}`;
   const now = Date.now();
   const session: ShellSession = {
     shellId,
@@ -277,16 +280,25 @@ function clampDim(value: number | undefined, fallback: number): number {
   return Math.max(1, Math.min(500, Math.round(value)));
 }
 
-/** Look up a shell, enforcing ownership. Returns undefined when unknown or not the caller's. */
-function owned(shellId: string, userId?: string): ShellSession | undefined {
+/**
+ * Look up a shell, enforcing ownership. Returns undefined when unknown or not the caller's.
+ *
+ * 🔴 FORENSIC AUDIT 2026-10-04 (P1). Ownership used to be "the CLAIMED userId matches, or no userId was
+ * sent at all" — and the routes passed `req.body.userId`. Every route verified that the caller owns the
+ * workspaceId it sent, but nothing tied the SHELL to that workspace: a caller could present their own
+ * workspace (passing the check), a victim's shellId (`sh_<time>_<seq>`, guessable), and no userId — and
+ * read the victim's terminal or type into it. A shell now belongs to exactly one workspace and is only
+ * reachable through that workspace — the one the route has just VERIFIED — and its id is random.
+ */
+function owned(shellId: string, workspaceId: string): ShellSession | undefined {
   const s = shells.get(shellId);
   if (!s) return undefined;
-  if (userId && s.userId && s.userId !== userId) return undefined;
+  if (typeof workspaceId !== 'string' || !workspaceId || s.workspaceId !== workspaceId) return undefined;
   return s;
 }
 
-export function getShell(shellId: string, userId?: string): ShellSnapshot | undefined {
-  const s = owned(shellId, userId);
+export function getShell(shellId: string, workspaceId: string): ShellSnapshot | undefined {
+  const s = owned(shellId, workspaceId);
   return s ? snapshot(s) : undefined;
 }
 
@@ -299,9 +311,9 @@ export function getShell(shellId: string, userId?: string): ShellSnapshot | unde
 export function readShell(
   shellId: string,
   from: number,
-  userId?: string,
+  workspaceId: string,
 ): { data: string; cursor: number; truncated: boolean; alive: boolean } | undefined {
-  const s = owned(shellId, userId);
+  const s = owned(shellId, workspaceId);
   if (!s) return undefined;
   const base = s.cursor - s.buf.length;
   const start = Math.max(0, Math.min(s.buf.length, from - base));
@@ -317,9 +329,9 @@ export function readShell(
 export function subscribeShell(
   shellId: string,
   onChunk: (chunk: string, cursor: number) => void,
-  userId?: string,
+  workspaceId: string,
 ): (() => void) | undefined {
-  const s = owned(shellId, userId);
+  const s = owned(shellId, workspaceId);
   if (!s) return undefined;
   s.subscribers.add(onChunk);
   touch(s);
@@ -335,8 +347,8 @@ export function subscribeShell(
  * does. There is deliberately no separate "interrupt" endpoint: a shell that only accepts signals we
  * thought to enumerate is a fake shell.
  */
-export async function writeShell(shellId: string, data: string, userId?: string): Promise<boolean> {
-  const s = owned(shellId, userId);
+export async function writeShell(shellId: string, data: string, workspaceId: string): Promise<boolean> {
+  const s = owned(shellId, workspaceId);
   if (!s || !s.alive) return false;
   const payload = typeof data === 'string' ? data.slice(0, MAX_INPUT_CHARS) : '';
   if (!payload) return true;
@@ -357,9 +369,9 @@ export async function resizeShell(
   shellId: string,
   cols: number,
   rows: number,
-  userId?: string,
+  workspaceId: string,
 ): Promise<boolean> {
-  const s = owned(shellId, userId);
+  const s = owned(shellId, workspaceId);
   if (!s || !s.alive) return false;
   touch(s);
   try {
@@ -371,8 +383,8 @@ export async function resizeShell(
 }
 
 /** Kill a shell and forget it. Idempotent — closing an already-closed shell is a success, not an error. */
-export async function closeShell(shellId: string, userId?: string): Promise<boolean> {
-  const s = owned(shellId, userId);
+export async function closeShell(shellId: string, workspaceId: string): Promise<boolean> {
+  const s = owned(shellId, workspaceId);
   if (!s) return false;
   s.alive = false;
   s.subscribers.clear();

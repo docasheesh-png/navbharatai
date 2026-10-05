@@ -104,6 +104,40 @@ function releaseSlot(name: string) {
   inFlight.set(name, Math.max(0, (inFlight.get(name) || 1) - 1));
 }
 
+/**
+ * Does this failure say something about the PROVIDER's health — or only about THIS request? PURE.
+ *
+ * 🔴 FORENSIC AUDIT 2026-10-04 (P1, breaker poisoning). Every failure opened the provider-wide breaker,
+ * shared across instances and escalating to minutes. A 400 caused by one caller's input (a prompt over
+ * the context window, a malformed request, a refused content class) therefore benched the free leader
+ * for EVERY user, pushing all free chat onto paid rungs — and a script sending an oversized prompt every
+ * few seconds could keep it there. Only a failure that the next caller would also hit opens the breaker:
+ * rate limits, quota, 5xx/overload, timeouts, network errors, a dead key, an empty answer. A request
+ * the provider refused BECAUSE of the request fails that request alone.
+ */
+export function isProviderHealthFailure(error: unknown): boolean {
+  const e = error as { status?: unknown; statusCode?: unknown; message?: unknown; code?: unknown } | null;
+  const status = Number(e?.status ?? e?.statusCode ?? NaN);
+  const msg = String(e?.message ?? '').toLowerCase();
+  if (Number.isFinite(status)) {
+    if (status === 429 || status >= 500 || status === 401 || status === 403 || status === 408) return true;
+    if (status >= 400 && status < 500) return false;
+  }
+  if (/\b(?:400|413|422)\b/.test(msg) || /context (?:length|window)|too long|maximum context|max(?:imum)? tokens|invalid (?:request|argument)|bad request|unsupported|content policy|safety|blocked/.test(msg)) {
+    return false;
+  }
+  return true;
+}
+
+/** Record a failure: the provider's breaker opens only for a provider-health failure (see above). */
+function noteProviderFailure(name: string, error: unknown): void {
+  if (!isProviderHealthFailure(error)) {
+    console.warn(`[CIRCUIT] ${name} refused THIS request (${String((error as { message?: unknown })?.message ?? '').slice(0, 80)}) — breaker left closed`);
+    return;
+  }
+  setCooldown(name, cooldownSeconds(error));
+}
+
 function cooldownSeconds(error: any): number {
   const msg = String(error?.message || error?.status || '');
   let base: number;
@@ -189,7 +223,7 @@ export class AIRouter {
         } catch (err: any) {
           // Genuine failure → cool the provider down. (Slow-but-successful losers
           // resolve instead of rejecting, so they are never wrongly penalized.)
-          setCooldown(p.name, cooldownSeconds(err));
+          noteProviderFailure(p.name, err);
           recordProviderLatency(p.name, 0, true);
           errors.push(`${p.name}: ${String(err?.message).slice(0, 60)}`);
           throw err;
@@ -225,7 +259,7 @@ export class AIRouter {
           telemetry: { provider: p.name, retries: errors.length, latency: response.latencyMs, success: true, fallbackReason: errors.length ? `Race failed: ${errors.slice(0, 3).join('; ')}` : undefined },
         };
       } catch (err: any) {
-        setCooldown(p.name, cooldownSeconds(err));
+        noteProviderFailure(p.name, err);
         recordProviderLatency(p.name, 0, true);
         errors.push(`${p.name}: ${String(err?.message).slice(0, 60)}`);
       } finally {
@@ -309,7 +343,7 @@ export class AIRouter {
         recordProviderLatency(p.name, Date.now() - t, false);
         return { ok: true, provider: p.name, model: p.pinnedModel, latencyMs: Date.now() - t, raced: false };
       } catch (err: any) {
-        setCooldown(p.name, cooldownSeconds(err));
+        noteProviderFailure(p.name, err);
         recordProviderLatency(p.name, 0, true);
         console.warn(`[STREAM] ${p.name} failed: ${String(err?.message).slice(0, 60)} — next rung`);
       } finally { this.release(p.name); }
@@ -389,7 +423,7 @@ export class AIRouter {
       }).then(() => {
         recordProviderLatency(p.name, Date.now() - t, false);
       }).catch((err: any) => {
-        setCooldown(p.name, cooldownSeconds(err));
+        noteProviderFailure(p.name, err);
         recordProviderLatency(p.name, 0, true);
         console.warn(`[RACE_STREAM] ${p.name} failed: ${err?.message?.slice(0, 60)}`);
       }).finally(() => {
@@ -494,9 +528,8 @@ export class AIRouter {
             },
           };
         } catch (error: any) {
-          const secs = cooldownSeconds(error);
-          console.error(`[ROUTER] ${provider.name} FAILED (${error?.message?.slice(0, 80)}), cooldown ${secs}s`);
-          setCooldown(provider.name, secs);
+          console.error(`[ROUTER] ${provider.name} FAILED (${error?.message?.slice(0, 80)})`);
+          noteProviderFailure(provider.name, error);
           recordProviderLatency(provider.name, 0, true);
           errors.push(`${provider.name}: ${error?.message?.slice(0, 60)}`);
         } finally {

@@ -68,6 +68,9 @@ async function rpc(cfg: McpServerConfig, method: string, params: unknown): Promi
   try {
     const resp = await fetch(cfg.url, {
       method: 'POST',
+      // A redirect would be followed WITH the user's headers to a target nobody checked (forensic audit
+      // 2026-10-04): the address guard above vets only the first hop. A service that redirects is refused.
+      redirect: 'error',
       signal: controller.signal,
       headers: {
         'content-type': 'application/json',

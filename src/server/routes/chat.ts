@@ -486,7 +486,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         sendEdit(`Apni picture badalne ke liye sign in karein — har badlaav asli engine par banta hai.\n\n${imageGenGuidance()}`);
         return;
       }
-      const gate = await gateToolAction(account.uid, account.email, 'image');
+      const gate = await gateToolAction(account.uid, account.email, 'image', 'picture-editing');
       if (!gate.allow) {
         sendEdit(`Aaj ke liye aapki picture-editing limit poori ho gayi hai — kal phir se try karein.\n\n${imageGenGuidance()}`);
         return;

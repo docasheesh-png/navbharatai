@@ -205,7 +205,7 @@ export function registerImageGenRoutes(app: Express): void {
         // With pricing on, the allowance above has already decided who may start; the old tool gate
         // is the pre-2026-09-30 rule and runs only when pricing is switched off.
         if (!pricing) {
-          gate = await gateToolAction(account.uid, account.email, 'image');
+          gate = await gateToolAction(account.uid, account.email, 'image', 'image-generation');
           if (!gate.allow) {
             gateRefused = true;
             if (!res.headersSent) res.status(gate.status).json(gate.body);

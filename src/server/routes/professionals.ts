@@ -125,7 +125,7 @@ export function registerProfessionalsRoutes(app: Express): void {
     // 🔴 BEFORE THE ATTACHMENTS ARE READ (forensic audit 2026-10-04, P1): the paid vision chain (Gemini →
     // Grok → Claude) used to describe up to four images for a caller this gate then REFUSED — anonymous
     // callers included — and a free-tier turn could reach Claude. Nothing is spent until the turn is allowed.
-    const gate = await gateProfessionalTurn(verifiedUserId, identityGrantEmail(identity));
+    const gate = await gateProfessionalTurn(verifiedUserId, identityGrantEmail(identity), 'professionals');
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;

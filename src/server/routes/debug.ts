@@ -39,7 +39,7 @@ export function registerDebugRoutes(app: Express): void {
     }
     // Daily allowance / Professional Pass (flag-off = no-op).
     const identity = await verifyFirebaseIdentity(req);
-    const gate = await gateToolAction(identity?.uid || null, identityGrantEmail(identity), 'ai_tool');
+    const gate = await gateToolAction(identity?.uid || null, identityGrantEmail(identity), 'ai_tool', 'debug');
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;

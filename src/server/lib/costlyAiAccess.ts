@@ -37,7 +37,8 @@ export interface CostlyAiRefusal {
 }
 
 /**
- * PURE: the refusal an anonymous caller receives. Kept separate from the lookup so the wording is
+ * PURE: the refusal an anonymous caller receives. Every gate's sign-in answer goes through this — the
+ * per-surface nouns live in `anonymousCapabilities.ts` (Q-622). Kept separate from the lookup so the wording is
  * unit-testable and identical on every route.
  *
  * It names what the visitor gets by signing in rather than what they are being denied — the credit is

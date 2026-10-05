@@ -35,6 +35,7 @@ import { getServerDb } from '../lib/serverDb';
 
 import { parseEnvNumber } from '../lib/envNumber';
 import type { GrantEmail } from '../AgentV3/featureFlag';
+import { anonymousCallerTier, type AiSurface, type CallerTier } from '../lib/anonymousCapabilities';
 export type { ToolBucket };
 
 /**
@@ -73,11 +74,11 @@ export function dailyLimitFor(bucket: ToolBucket): number {
 
 /** What a tool route needs back: run it (and whether to burn a free action), or a ready-to-send block. */
 export type ToolGateResult =
-  | {
-      allow: true; countsAgainstFree: boolean; remainingFree?: number; uid: string | null; tier: 'free' | 'paid';
+  | ({
+      allow: true; countsAgainstFree: boolean; remainingFree?: number;
       /** Carried so the route can charge the wallet without re-deriving (or re-reading) either fact. */
       isFreeListed: boolean; hasActivePass: boolean;
-    }
+    } & CallerTier)
   | { allow: false; status: number; body: Record<string, unknown> };
 
 /** The human name each bucket is refused by, so the paywall message names the thing the user just tried. */
@@ -89,6 +90,11 @@ const BUCKET_LABEL: Record<ToolBucket, string> = {
 /**
  * Decide access for one Other AI tool action. `uid`/`email` MUST be the server-verified identity.
  *
+ * `surface` is the route's entry in the anonymous table (Q-622). A caller with NO account is decided
+ * there, not here: the guest tool surfaces (AI Debugger, App Scan, the design advisor) run on the free
+ * universe under the guest daily allowance, everything else asks for an account — and no branch below can
+ * hand an anonymous caller `paid`, which this gate's flag-off path used to do.
+ *
  * The pass branches are dead weight in production since the Pass was removed (2026-08-10) — nothing
  * can grant one — but they are left intact rather than ripped out mid-flight: this function guards
  * money on every Other AI action, and the honest sequencing is to remove the pass STORE and its
@@ -98,7 +104,31 @@ export async function gateToolAction(
   uid: string | null,
   email: GrantEmail | null,
   bucket: ToolBucket,
+  surface: AiSurface,
 ): Promise<ToolGateResult> {
+  if (!uid) {
+    const anon = anonymousCallerTier(surface);
+    if (!anon.allow) return anon;
+    // Flag off → allow on the table's tier, meter nothing (an anonymous action has no account to count
+    // against — the guest daily allowance in front of the route is what bounds it).
+    if (!professionalPaidEnabled()) {
+      return { allow: true, countsAgainstFree: false, uid: null, tier: anon.tier, isFreeListed: false, hasActivePass: false };
+    }
+    // Flag on → the allowance is counted per ACCOUNT, and an anonymous action cannot be counted, so
+    // they are asked to sign in — the same answer, word for word, as before.
+    return {
+      allow: false,
+      status: 401,
+      body: {
+        error: `Please sign in to use this tool. New users get free ${BUCKET_LABEL[bucket]} every day.`,
+        code: 'login_required',
+        reason: 'login-required',
+        bucket,
+        remainingFree: 0,
+        dailyLimit: dailyLimitFor(bucket),
+      },
+    };
+  }
   const freeListed = isProfessionalFreeUser(uid, email);
   const walletSpend = aiWalletSpendEnabled();
   // Read the pass at most ONCE and share it between the two gates — it answers "unlimited access?" for
@@ -132,19 +162,19 @@ export async function gateToolAction(
   }
 
   if (!professionalPaidEnabled()) {
-    // Flag off → today's quota behaviour exactly: allow, meter nothing.
+    // Flag off → today's quota behaviour exactly for a signed-in caller: allow, meter nothing.
     return { allow: true, countsAgainstFree: false, uid, tier: 'paid', isFreeListed: freeListed, hasActivePass };
   }
 
   // Images are capped even WITH a pass; every other bucket is unlimited for a pass holder.
   const passIsUnlimitedHere = hasActivePass && bucket !== 'image';
   const dailyLimit = hasActivePass && bucket === 'image' ? imagePassDailyLimit() : dailyLimitFor(bucket);
-  const needsCount = !!uid && !freeListed && !passIsUnlimitedHere;
-  const usedToday = needsCount ? await toolUsageStore.getTodayCount(uid!, bucket) : 0;
+  const needsCount = !freeListed && !passIsUnlimitedHere;
+  const usedToday = needsCount ? await toolUsageStore.getTodayCount(uid, bucket) : 0;
 
   const decision = decideProfessionalAccess({
     enabled: true,
-    signedIn: !!uid,
+    signedIn: true,
     isFreeListed: freeListed,
     hasActivePass: passIsUnlimitedHere,
     usedToday,
@@ -159,18 +189,16 @@ export async function gateToolAction(
     };
   }
 
-  const login = decision.reason === 'login-required';
+  // Signed in (an anonymous caller was answered at the top), so the only block left is the used-up
+  // allowance. One message for everyone (admin 2026-08-10) — with the Pass gone there is no longer a
+  // "pass holder vs everyone else" distinction to draw here, and no product to point anyone at.
   const label = BUCKET_LABEL[bucket];
   return {
     allow: false,
-    status: login ? 401 : 402,
+    status: 402,
     body: {
-      error: login
-        ? `Please sign in to use this tool. New users get free ${label} every day.`
-        // One message for both cases now (admin 2026-08-10) — with the Pass gone there is no longer a
-        // "pass holder vs everyone else" distinction to draw here, and no product to point anyone at.
-        : `You've used your ${dailyLimit} free ${label} for today. They reset tomorrow.`,
-      code: login ? 'login_required' : 'tool_paywall',
+      error: `You've used your ${dailyLimit} free ${label} for today. They reset tomorrow.`,
+      code: 'tool_paywall',
       reason: decision.reason,
       bucket,
       remainingFree: 0,

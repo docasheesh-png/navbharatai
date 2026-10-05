@@ -120,7 +120,7 @@ export function registerSdaRoutes(app: Express): void {
       // (across ALL professionals), then paid from the wallet (admin 2026-09-23); Pass ⇒ unlimited,
       // anonymous ⇒ sign in. The verified identity keys the gate — never the client-claimed body userId.
       const sdaIdentity = await verifyFirebaseIdentity(req);
-      const sdaGate = await gateProfessionalTurn(sdaIdentity?.uid || null, identityGrantEmail(sdaIdentity));
+      const sdaGate = await gateProfessionalTurn(sdaIdentity?.uid || null, identityGrantEmail(sdaIdentity), 'doctor-ai');
       if (!sdaGate.allow) return res.status(sdaGate.status).json(sdaGate.body);
       const sdaTier: ProfessionalTier = sdaGate.tier;
       // What the answering model reported, filled in by whichever branch below actually answers.

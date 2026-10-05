@@ -29,7 +29,7 @@ export function registerDesignRoutes(app: Express): void {
   app.post('/api/design/suggest', guestDailyQuota('design'), inAiSpendZone(async (req: Request, res: Response) => {
     // Daily allowance / Professional Pass (flag-off = no-op).
     const identity = await verifyFirebaseIdentity(req);
-    const gate = await gateToolAction(identity?.uid || null, identityGrantEmail(identity), 'ai_tool');
+    const gate = await gateToolAction(identity?.uid || null, identityGrantEmail(identity), 'ai_tool', 'design');
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;
@@ -55,7 +55,7 @@ export function registerDesignRoutes(app: Express): void {
       return;
     }
     const paletteIdentity = await verifyFirebaseIdentity(req);
-    const paletteGate = await gateToolAction(paletteIdentity?.uid || null, identityGrantEmail(paletteIdentity), 'ai_tool');
+    const paletteGate = await gateToolAction(paletteIdentity?.uid || null, identityGrantEmail(paletteIdentity), 'ai_tool', 'design');
     if (!paletteGate.allow) {
       res.status(paletteGate.status).json(paletteGate.body);
       return;

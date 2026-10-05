@@ -167,19 +167,20 @@ describe('wiring — the gate reads it, and only to FILL a gap', () => {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
 
-  it('the release-gate assembly calls buildDiag.agentRunEvidence()', () => {
-    expect(route).toMatch(/buildDiag\.agentRunEvidence\(\)/);
+  // Since Q-101 (2026-10-05) the gate reads the ONE evidence ledger, which composes this reader unchanged.
+  it('the release-gate assembly reads the evidence ledger (which composes agentRunEvidence)', () => {
+    expect(route).toContain('fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger())');
+    expect(readFileSync(join(__dirname, '../src/server/AgentV3/evidenceLedger.ts'), 'utf8')).toContain('agentRunEvidence(commands)');
   });
 
   // 🔴 REVERSION GUARD: without the 'not-run' condition this would OVERRIDE the deterministic gate's
   // real evidence with a log reading — the fallback becoming an authority.
   it('it only fills evidence that is still not-run — it never overrides a real result', () => {
-    expect(route).toMatch(/gateEvidence\.typecheck === 'not-run' && proven\.typecheck/);
-    expect(route).toMatch(/gateEvidence\.tests === 'not-run' && proven\.tests/);
+    expect(readFileSync(join(__dirname, '../src/server/AgentV3/evidenceLedger.ts'), 'utf8')).toContain("if (entry && gate[name] === 'not-run') gate[name] = entry.outcome;");
   });
 
   it('it runs BEFORE the release gate is computed, or it could not affect it', () => {
-    const read = route.indexOf('buildDiag.agentRunEvidence()');
+    const read = route.indexOf('fillGateFromLedger(gateEvidence');
     const gate = route.indexOf('releaseGate(gateEvidence');
     expect(read).toBeGreaterThan(-1);
     expect(gate).toBeGreaterThan(-1);
@@ -187,7 +188,7 @@ describe('wiring — the gate reads it, and only to FILL a gap', () => {
   });
 
   it('it cannot break a build — wrapped in a swallowing try/catch', () => {
-    const at = route.indexOf('buildDiag.agentRunEvidence()');
+    const at = route.indexOf('fillGateFromLedger(gateEvidence');
     const around = route.slice(Math.max(0, at - 300), at + 500);
     expect(around).toMatch(/try\s*\{/);
     expect(around).toMatch(/\}\s*catch\s*\{/);

@@ -90159,3 +90159,15 @@ reads the app's already-published copy back from the publish bucket and deploys 
 rebuild, so no "which build is current" question. Owner's active app only, once per domain + app (transaction
 claim), a 5xx retried once, the owner notified either way, and the same sweep does not call the domain "down".
 Kill switch `DOMAIN_AUTOPUBLISH=off`. Lock: `tests/aNewDomainGetsThePublishedApp.test.ts`.
+
+### 2026-10-05 — Q-101: one read of everything a build already proved
+
+The write half of the ledger already existed — actors record proven facts on the build's timeline, and
+`RENDER_PROVEN_CODES` (2026-09-21) is the one render vocabulary. The gap was the READ: the release gate read the
+command log and the timeline in two separate blocks with two vocabularies, and the render answer read a third
+way. `evidenceLedger.ts` is now the one read — composing `agentRunEvidence` and `provenFromTimeline` unchanged,
+naming every fact once with where it was proven — and `BuildDiagnostics.evidenceLedger()` is its entry point.
+The gate fills from it (fill-only: a recorded failure keeps its failure, so a bill cannot move) and
+`renderProvenNow` reads it. A census fails on any direct read of either source. Not done (honestly): letting
+the agent skip a re-run of a check it already passed — that needs every fact invalidated on the next write,
+and a wrong skip would be a false pass.

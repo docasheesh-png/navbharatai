@@ -31,6 +31,7 @@ import { typecheckEvidenceFromCommands, commandOutcomeText } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
+import { readEvidenceLedger, type EvidenceLedger } from './evidenceLedger';
 import { mergeTruncation, pushBounded, boundedWindow, COMPLETE, type ChannelTruncation, type ReportTruncation } from './reportTruncation';
 import { capPromptPreview } from './promptPreviewShape';
 import { renderProvenByAnyActor, noteRenderSeen, forgetRenderSeen, RENDER_PROVEN_CODES } from './renderProof';
@@ -1216,6 +1217,15 @@ export class BuildDiagnostics {
    */
   agentRunEvidence(): AgentRunEvidence {
     return readAgentRunEvidence(this.commands);
+  }
+
+  /**
+   * THE EVIDENCE LEDGER (queue Q-101) — everything this build already proved, from its command log AND its
+   * own timeline, in one vocabulary with the source of each fact. Every verdict reads this; see
+   * `./evidenceLedger` and `tests/oneReadOfWhatIsProven.test.ts`.
+   */
+  evidenceLedger(): EvidenceLedger {
+    return readEvidenceLedger(this.commands, this.report().issues);
   }
 
   /**

@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import express from 'express';
+import { hopVerdictText, isHopReport } from '../src/components/admin/ProxyHopsCard';
 import { hopReport, hopReportFor } from '../src/server/lib/proxyHops';
 import { TRUSTED_PROXY_HOPS } from '../src/server/lib/clientAddress';
 
@@ -53,5 +54,39 @@ describe('the proxy hop count is measured, not guessed', () => {
     const admin = readFileSync('src/server/routes/admin.ts', 'utf8');
     expect(admin).toContain("app.get('/api/admin/proxy-hops', verifyAdminToken,");
     expect(readFileSync('src/server/lib/proxyHops.ts', 'utf8')).not.toMatch(/console\./);
+  });
+});
+
+/**
+ * 2026-10-05 (admin: "proxy-hops open hi nahi ho raha hai"): the route needs the admin token HEADER, which an
+ * address bar cannot send, and the reading asked the admin to look up their own IP. The class: a check only a
+ * command-line user could run. The report now carries its own verdict, and an admin card sends the token.
+ */
+describe('the admin can run the check from the panel, and is told the answer', () => {
+  it('the verdict is computed from the admin\'s own request — no IP lookup needed', () => {
+    const one = hopReport('203.0.113.7', '169.254.1.1');
+    expect(one).toMatchObject({ yourAddress: '203.0.113.7', measuredHops: 1, verdict: TRUSTED_PROXY_HOPS === 1 ? 'correct' : 'mismatch' });
+    const two = hopReport('203.0.113.7, 151.101.1.1', '169.254.1.1');
+    expect(two).toMatchObject({ measuredHops: 2 });
+    // measuredHops is exactly the count under which Express hands back the admin's own address.
+    expect(two.ipByHopCount.find((x) => x.hops === two.measuredHops)?.ip).toBe('203.0.113.7');
+    expect(hopReport(undefined, '127.0.0.1')).toMatchObject({ yourAddress: null, measuredHops: null, verdict: 'no-proxy' });
+  });
+
+  it('the card says correct, mismatch (naming the number to set) or not-measurable — never a guess', () => {
+    expect(hopVerdictText({ yourAddress: 'a', measuredHops: 1, trustedHops: 1, verdict: 'correct' })).toMatch(/^Correct\. .*1 proxy,/);
+    expect(hopVerdictText({ yourAddress: 'a', measuredHops: 2, trustedHops: 1, verdict: 'mismatch' })).toMatch(/2 proxies.*set TRUSTED_PROXY_HOPS .* to 2/);
+    expect(hopVerdictText({ yourAddress: null, measuredHops: null, trustedHops: 1, verdict: 'no-proxy' })).toMatch(/cannot measure/);
+    expect(isHopReport({ trustedHops: 1, verdict: 'correct' })).toBe(true);
+    expect(isHopReport({ error: 'Admin token required.' })).toBe(false);
+  });
+
+  it('the card is on the Safety page and sends the admin token', () => {
+    const card = readFileSync('src/components/admin/ProxyHopsCard.tsx', 'utf8');
+    expect(card).toContain("fetch('/api/admin/proxy-hops', { headers: { 'x-admin-token': adminToken }");
+    const dash = readFileSync('src/components/AdminDashboard.tsx', 'utf8');
+    const safety = dash.indexOf("{activeTab === 'security' && (");
+    expect(safety).toBeGreaterThan(-1);
+    expect(dash.indexOf('<ProxyHopsCard adminToken={adminToken} />', safety)).toBeGreaterThan(safety);
   });
 });

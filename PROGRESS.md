@@ -90107,6 +90107,79 @@ Admin, verbatim: *"rating system banao! jab bhi user ki app badhiya bane, user u
 
 **Watch for:** the first ratings should appear on Admin → Users → Ratings after users publish. Phone users get the card only with a fresh `.aab`/`.ipa`.
 
+---
+
+## 2026-10-05 — Game graphics: the 3D layer rendered, eight defects fixed at the root (external plan adapted)
+
+The admin forwarded an external plan ("NAVBHARATAI GAME ENGINE — MAJOR GRAPHICS & REALISM UPGRADE"), marked *"external suggestions (blindly ❌)"*.
+
+**What the plan assumed vs what the repo has.** The plan asked for:
+- an asset manifest, lighting presets, camera rigs and PBR materials;
+- terrain, vegetation, vehicles and characters;
+- quality tiers;
+- a "never hand-model" rule.
+
+Nearly all of it already exists: `Game3DGenerator.ts` (nine lighting moods, camera rigs, PBR surfaces, environment maps, `createCar`, `createTree`, `createRoad`, `createRiver`, `createMountain`, `createAnimal`, `createHumanoid`, and the `real`/`lite` tier) and the builder prompt's realism checklist. Games already skip the fast lane so they get the game tools (`fastLaneSkipsGame`). Rebuilding it as a parallel `game-engine/` tree would have duplicated working code.
+
+**Evidence first.** The layer was rendered in Chromium (SwiftShader), used exactly as the prompt instructs: an Indian village driving scene with `setDetailLevel('real')`, `applyEnvironment` and `surfaceMaterial`. That was its BEST case. It still had these defects:
+
+| # | Defect seen | Root cause | Fix |
+|---|---|---|---|
+| 1 | Road flickered into black zebra stripes | asphalt at y = 0, the ground's own plane | `ROAD_SURFACE_Y` = 0.03 plus `polygonOffset` on the markings |
+| 2 | One kerb and one edge line, the kerb inside the road | `break` after the first side; `(side*W)/2 + 0.15` | both sides; `side * (W/2 + 0.15)` |
+| 3 | Wheel arches floated beside the car and spun | arch inside the wheel group; x-offset applied twice | arch on the body at the wheel centre |
+| 4 | Brick/plaster houses were one flat colour | `mergeGeometries` dropped UVs | UVs carried through the merge |
+| 5 | Ground stayed flat colour in `real` | the tier lived in `objects.ts`, which `world.ts` never imported | the tier moved to `surfaces.ts` (re-exported); real ground textured; soft patches in both tiers |
+| 6 | A grid of tile seams over grass and walls | value-noise lattice did not wrap | wrapping lattice |
+| 7 | A texture's repeat changed when another material of the same kind was made | `repeat` set on the SHARED cached texture | per-repeat clones sharing one image |
+| 8 | Rivers broke into blue scraps; a dog the size of a horse; a purple cow | waves swung through y = 0 (the road's class again); one 1.4 m default for all kinds; hide tinted through the blue-grey fabric texture | `RIVER_SURFACE_Y` = 0.14; `ANIMAL_HEIGHT` per kind; hide uses plaster grain |
+
+**New object:** `createHouse` — an Indian house with:
+- a door with a frame and a step;
+- windows with a chhajja (sun-shade);
+- a plinth and washed walls;
+- a flat RCC roof with a parapet and water tank, or a clay-tile roof.
+
+The builder prompt now names it ("never a box with a cone on top").
+
+**Proof:** `tests/the3DLayerDrawsWhatItPromises.test.ts`, 15 cases, EXECUTES the generated modules with real three.js (`three@0.180.0`, added as an exact devDependency for exactly this). It checks positions, parents, UVs, materials and texture tiling. All of its original 12 cases fail against `main`'s generator. Before/after renders of an identical scene were shared with the admin.
+
+**Rejected from the plan, with reasons:**
+- **Clay, AiGameKit and AssetForge** need GPUs or Blender; NavBharatAI builds on CPU-only sandboxes. Their code is MIT, but the model weights carry their own terms. They are architectural reference only; nothing was copied. See `docs/game-engine/open-source-license-audit.md`.
+- **A parallel `game-engine/` module tree** — the layer exists.
+- **An "auto-repair until a visual score is reached" loop** — another self-heal loop is the opposite of first-pass-correct. The library is now verified by tests instead.
+
+**Honest ceiling and open items:**
+- The look is stylised-realistic, built from code: the car is still built from boxes and people are blocky.
+- The distant mountain reads bluish under day fog; that is aerial haze, not a bug.
+- Real GPU-generated assets are a money decision for the admin.
+
+### 2026-10-05 (same PR) — the camera sits BEHIND what the player drives
+
+The admin reported: *"gadi ka front side dikhta hai, jisse button ulte kaam karte hai… game ka backside dikhna chahiye"* ("the car's front is visible, so the buttons work in reverse… the back of the car should be visible").
+
+**Root cause, measured by running the models:** every model faces its local +Z (car headlights at z = +2.16, the bikes' steering heads and the animals' heads are on +Z too). Two things then combined against the player:
+- `CameraRig` places the third-person camera at +Z of its target, which is IN FRONT of the car, and it reads only the target's position, never its heading;
+- the runtime's up key is `axis.y = −1`, so a game that used `axis.y` as throttle drove backwards on W.
+
+Together the car drove at the camera with every control mirrored.
+
+**Fix, at the class:**
+- `MODEL_FORWARD` (+Z) names the one convention.
+- `CameraRig.follow(object, dt)` and a `'chase'` kind put the camera behind the object's real heading every frame and keep the rig's yaw in step.
+- `createVehicleState` and `driveVehicle(vehicle, state, input.axis(), dt)` take the RAW axis and own the signs: W forward, S brake then reverse, A/D turn to the driver's left/right, steering inverts in reverse and fades in with speed. Default start speed is 5 m/s, per the "a vehicle starts moving" rule.
+- The shell has `ctx.follow(vehicle)`.
+- The builder prompt carries a 🚗 rule: never `rig.update(vehicle.position)`, never flip a control or mirror a model.
+
+**Proof:** 7 new executable cases in `tests/the3DLayerDrawsWhatItPromises.test.ts`:
+- at four headings the tail lights are nearer the camera than the headlights;
+- with the raw axis, W moves the car away from the camera, D goes screen-right and A screen-left;
+- an untouched car keeps moving, and S brakes then reverses;
+- the shell follows with the chase rig.
+
+Reversion: placing the camera in front fails 5 of them; flipping the throttle sign fails 2. A real render from the chase rig shows the car's tail lights, and a right turn bends right on screen.
+
+**Open (recorded, not done):** a walking character still starts facing the camera until the first move. Changing the rig's default yaw would flip the world's "ahead" (−Z) for every existing shell game, and the admin's report was about vehicles, so it is left for an explicit decision.
 ### 2026-10-05 — Q-154 ✅ RESOLVED: the live hop count is measured, and it is right
 
 The admin opened **Admin → Safety → Visitor address check** on the live site (#3545 deployed). The card read:
@@ -90116,3 +90189,5 @@ recorded here). So `TRUSTED_PROXY_HOPS = 1` (#3538) is confirmed on the real hos
 The row leaves the open queue. Lock: `tests/aCallerCannotChooseItsOwnAddress.test.ts` (one reader of the address)
 and `tests/theClientIsMeasuredNotGuessed.test.ts` (the measurement and its card). If the hosting path ever
 changes (a CDN or load balancer in front of Cloud Run), the same card will say Mismatch and name the number.
+
+⚠️ **Correction to the entry above (same day):** it says the existing 3D tests "only read the source text". That is not fully true. `tests/game3dObjects.test.ts` already RUNS the generated `objects.ts` against a three.js stub (`tests/helpers/threeStub.ts`), for the bikes. It never covered the road, the car's arches, merged UVs, the ground or the textures, which is why those defects survived. The stub now carries the detail tier (`setDetailLevel` / `getDetailLevel`), since that moved into `surfaces.ts`. `tests/aRecipeBringsTheLayersItImports.test.ts` now expects `surfaces.ts` among the files a missing 3D layer brings in, because `world.ts` imports it.

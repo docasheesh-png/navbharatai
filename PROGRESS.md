@@ -90217,3 +90217,47 @@ source pins for the new `gateToolAction` argument. AppKnowledgeBase guest entry 
 falls back to cheap metered rungs under the free-chat price ceiling. That is the 2026-09-27 ten-free-messages decision,
 bounded per device and per address by `guestDailyQuota`. Removing the metered rungs for guests would leave those ten
 messages on one zero-cost rung. Recommendation: keep.
+### 2026-10-05 — Q-627 request-body limits + Q-628 MCP credentials encrypted at rest (PR #NEXT, branch `agent/q627-q628`)
+
+**Q-627 — problem:** one global `express.json({ limit: '30mb' })` in `server.ts`, and its `verify` hook kept every
+body a second time as `req.rawBody`. Any caller could post 30 MB to any route (OTP, profile, payment) and the
+server held it twice before the route ran.
+**Root cause / class:** one parser sized for the largest caller (chat attachments) applied to every route; raw bytes
+captured for the three readers that need them and paid for by all ~300.
+**Fix:** `src/server/lib/requestBodyLimits.ts` — the one parser. 1 MB default; 30 MB only on `LARGE_BODY_ROUTES`
+(61 paths found by evidence: client call sites that post base64/dataUrl/files/attachments/screenshots/history/
+package-lock, plus "doubt" entries kept large on purpose); `rawBody` only on `RAW_BODY_ROUTES` — the Cashfree
+webhook and the WhatsApp webhook (HMAC over the raw bytes) and the `/preview-app` reverse proxy (verbatim forward).
+The `/api/v1/...` prefix is resolved before matching (the parser runs before the version rewrite). An over-limit
+body is now an honest 413 `BODY_TOO_LARGE` with a sentence, logged as `[BODY_TOO_LARGE]` and sent to the admin
+Errors view — previously the global error handler turned every 413 into a generic 500.
+**Lock:** `tests/aRequestBodyIsOnlyAsLargeAsItsRouteNeeds.test.ts` — a census of every route registration (a route
+reading a payload-shaped field or passing its body to a helper must be on the large list or on the test's
+reviewed-small list with its evidence), a coverage check that no route module escapes the scan, a stale-entry
+check, a rawBody-reader census (route and file level), a server.ts guard, and a live Express check (3 MB reaches
+the build chat, 413 on an ordinary route, raw bytes only on the webhooks). Reverted-and-failed: removing
+`/api/chat/navbharat`, `/api/workspace/explain`, `/api/sync/:userId` from the list and the WhatsApp webhook from
+the raw list failed 5 tests; restoring the old `server.ts` failed 3.
+**Watch after deploy:** any `[BODY_TOO_LARGE]` log line names a route that needs adding to the list.
+**Observation (not changed):** `useChatEngine.ts` posts to `/api/chat` for non-NavBharatAI agents; the server has
+no such route (404 before and after this change).
+
+**Q-628 — problem:** MCP service headers (the user's bearer token) stored in plaintext in `agentv3_mcp_servers` and
+`agentv3_mcp_library`.
+**Fix:** `src/server/AgentV3/mcpCredentials.ts` seals headers into `headersEnc` with `lib/secrets.ts`
+(AES-256-GCM, same key as the vault and bot tokens); a stored record never carries `headers`. Both shapes read:
+legacy plaintext rows work unchanged and are re-sealed on the next write, or by a transactional migration a read
+starts. An undecryptable or tampered key fails CLOSED: `listFull`/`get` leave it out, `unreadableIds` names it,
+the check route reports "reconnect" without probing, attach answers 409, the build narrates it, and the Connected
+Services screen shows "saved key unreadable — disconnect and connect it again". A failed read no longer lets
+`add`/`remove` overwrite the list with a shorter one.
+**Sibling hunt:** every Firestore-writing server module was scanned for credential-shaped fields. Already
+encrypted: `user_secrets`, `bots` (token, app secret), `supabase_connections`; hashed: API keys, NavStore app
+passwords, vault PIN. GitHub, Hostinger and deploy tokens are per-request, never stored. Left as is (not
+third-party credentials): FCM device tokens (push addresses used as doc ids), share/team invite tokens (our own
+capability links).
+**Lock:** `tests/anMcpCredentialIsNeverStoredInTheClear.test.ts` (in-memory store: no plaintext written, round
+trip, legacy row reads and is sealed, tampered ciphertext fails closed, unreadable entry kept byte for byte, read
+failure never overwrites; census: no `headers` handling in the stores, every `servers` write sealed, no other
+writer of the two collections, route fail-closed order). Reverted-and-failed: plaintext seal + fail-open → 8
+failures; the original stores → 13 failures.

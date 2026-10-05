@@ -236,6 +236,14 @@ describe('🔒 every route that can receive a big body is on the large-body list
     for (const p of ['/api/agentv3/chat', '/api/chat/navbharat', '/api/payment/webhook', '/api/profile/photo']) expect(paths.has(p), p).toBe(true);
   });
 
+  it('every server file that registers a route is scanned (a module typed differently cannot hide)', () => {
+    // Generators hold route code inside template strings for the USER's app, and apiGraph.ts parses such
+    // code; neither registers a route on this server.
+    const registering = ALL_SERVER_FILES.filter((f) => !/Generator\.ts$|\/apiGraph\.ts$/.test(f)
+      && /\bapp\.(post|put|patch|all|delete)\(/.test(read(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')));
+    expect(registering.filter((f) => !ROUTE_FILES.includes(f))).toEqual([]);
+  });
+
   it('every route path resolves (a constant the census cannot read is a route it cannot check)', () => {
     const unresolved = SITES.filter((s) => s.path === null).map((s) => `${s.file}:${s.line} ${s.pathExpr}`);
     expect(unresolved).toEqual([]);

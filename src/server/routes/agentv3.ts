@@ -596,6 +596,7 @@ import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeSe
 import { findProjectInstructionPath, normalizeProjectInstructions, projectInstructionsBlock, projectInstructionsNotice } from '../AgentV3/projectInstructions';
 import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '../AgentV3/fileMentions';
 import { mcpServerStore } from '../AgentV3/McpServerStore';
+import { UNREADABLE_CREDENTIALS_MESSAGE } from '../AgentV3/mcpCredentials';
 import { mcpLibraryStore, MAX_SAVED_SERVICES } from '../AgentV3/McpLibraryStore';
 import { chooseFloorLead, healthLeadEnabled } from '../AgentV3/floorLead';
 import { serviceHealth, healthHeadline } from '../AgentV3/mcpHealth';
@@ -8440,11 +8441,14 @@ async function noteBuildOutcome(
       res.status(429).json({ error: 'Please wait a moment before checking your services again.' });
       return;
     }
-    const servers = await mcpServerStore.listFull(workspaceId);
+    const servers = await mcpServerStore.listOpened(workspaceId);
     if (servers.length === 0) { res.json({ results: [], headline: 'Nothing to check.' }); return; }
     // In parallel: five services at 15s each would be over a minute in sequence, and the user is
     // watching a spinner for all of it. A probe that throws is a FAILING service, never a failed check.
-    const results = (await Promise.all(servers.map(async (cfg) => {
+    // A service whose saved key cannot be read is NOT probed (Q-628): asking it without the auth it was
+    // set up with proves nothing, and the honest answer is that it needs reconnecting.
+    const results = (await Promise.all(servers.map(async ({ cfg, credentialsUnreadable }) => {
+      if (credentialsUnreadable) return serviceHealth({ id: cfg.id, toolCount: 0, error: UNREADABLE_CREDENTIALS_MESSAGE });
       const probe = await listRemoteTools(cfg).catch(() => ({ tools: [], error: 'It could not be reached just now.' }));
       return serviceHealth({ id: cfg.id, toolCount: probe.tools.length, error: probe.error });
     })));
@@ -8472,8 +8476,11 @@ async function noteBuildOutcome(
     const gate = canUseConnectedServices(facts);
     if (!gate.allowed) { res.status(403).json({ error: gate.message, reason: gate.reason }); return; }
 
-    const saved = uid ? await mcpLibraryStore.get(uid, id) : null;
-    if (!saved) { res.status(404).json({ error: 'That saved service could not be found. Connect it again.' }); return; }
+    const opened = uid ? await mcpLibraryStore.getOpened(uid, id) : null;
+    if (!opened) { res.status(404).json({ error: 'That saved service could not be found. Connect it again.' }); return; }
+    // Fail closed (Q-628): a saved key that cannot be decrypted is never sent on as "no auth".
+    if (opened.credentialsUnreadable) { res.status(409).json({ error: `That saved service could not be attached. ${UNREADABLE_CREDENTIALS_MESSAGE}`, reason: 'credentials-unreadable' }); return; }
+    const saved = opened.cfg;
 
     const urlCheck = await assertPublicHttpUrl(saved.url).catch(() => ({ ok: false }));
     const existing = await mcpServerStore.listForDisplay(workspaceId);
@@ -15684,6 +15691,7 @@ async function noteBuildOutcome(
           // proceeds exactly as it does today. It must never be able to fail or delay a build.
           try {
             const servers = await mcpServerStore.listFull(workspaceId);
+            const unreadableServers = mcpServerStore.unreadableIds(workspaceId); // Q-628, read in parallel
             // THE PAID-PLAN GATE (admin 2026-09-12). Checked BEFORE the services are contacted, so a
             // free account costs neither the network calls nor the tokens their descriptions would add
             // to every model call of this build.
@@ -15711,6 +15719,12 @@ async function noteBuildOutcome(
                   text: `🔌 Using ${mcpTools.length} tool(s) from ${servers.length} service(s) you connected.`,
                 });
               }
+            }
+            // A service whose saved key cannot be read is left out of `servers` (Q-628) — never called
+            // without its auth — and said in one plain sentence, not dropped in silence.
+            const unreadable = await unreadableServers;
+            if (unreadable.length > 0) {
+              events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: unreadable.map((sid) => `🔌 ${sid}: ${UNREADABLE_CREDENTIALS_MESSAGE}`).join(' ') });
             }
           } catch { /* connected services are additive — never a reason a build fails */ }
           // PRE-FLIGHT WRITE (mitrify autopsy 2026-08-04). The secrets .env used to be written lazily from

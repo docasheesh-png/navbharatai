@@ -90133,3 +90133,55 @@ names the paid rungs, not the free door.
 Q-660, Q-661, Q-662 and Q-663 move to ✅. Their ledger is the "Free mode removed" entry above.
 
 **Watch:** a picture should arrive on the first press on the live site.
+---
+
+## 2026-10-05 — Q-616: an image is paid for BEFORE it is drawn (hold → settle → release)
+
+**Report:** forensic audit 2026-10-04 (#3538). `/api/image/generate` only READ today's count and the wallet
+balance before an engine ran; the count moved and the ₹1 was debited after delivery, fire-and-forget (failure
+only logged), clamped at the overdraft floor. Concurrent requests each passed the read, so extra pictures went
+uncharged or pushed the wallet into overdraft.
+
+**Root cause (class):** a fixed price enforced as a READ before the work and a WRITE after it. Every concurrent
+request fits between the two moments.
+
+**Decision (admin, 2026-10-05):** option (b): hold ₹1 before the provider is called, settle on delivery, release on failure.
+
+**What changed:**
+
+- `src/server/lib/imageHold.ts` (new): `reserveImage` is the one implementation for every door that sells a picture.
+  - It takes today's slot first (`ToolUsageStore.increment`, atomic) and decides the fee from the count that call returned.
+  - A priced slot holds the ₹ in ONE wallet transaction before any engine runs.
+  - Delivery calls `settle()`: nothing more is charged, and feature-spend telemetry is recorded then.
+  - Every other exit calls `release()` from a `finally` keyed on a `delivered` flag.
+- `walletDebit.ts`:
+  - `computeRolledUpDebit` gains `allOrNothing` (refuse rather than clamp) and `holdId` (stamped on the bucket row's `openHolds`).
+  - New: `holdWalletRolledUp` (`floorInr: 0`, never overdraws), `computeRolledUpRelease` / `releaseWalletHold` (the exact inverse in the same rollup bucket: tokens, ₹, gift and carry; idempotent by hold id), `computeRolledUpSettle` / `settleWalletHold`.
+  - Owner resolution is now one helper, `walletOwnerId`, shared by every debit, hold and release.
+- `ToolUsageStore.decrement`: transactional, floored at 0, same IST day only.
+- `routes/imageGen.ts` uses the hold.
+- Sibling door `apiKeyImage.ts` (Developer API and app pictures) uses the same hold. Its old `imageStartFor` + `chargeDeliveredImage` pair is removed from `navbharatImageEngine.ts`.
+- `decideImageStart` / `needsBalance` are removed, so a read-then-charge gate cannot be re-wired.
+
+**Behaviour:** unchanged for free-listed users and with `AI_IMAGE_PRICING=off`.
+
+- A counter that cannot be written still fails open, as before.
+- A wallet that cannot be written now fails CLOSED, with an honest 503: "could not take the payment … nothing was charged".
+
+**Lock:** `tests/anImageIsPaidBeforeItIsDrawn.test.ts` (17 tests). It runs the real route and the real
+transactions against a serialised in-memory store, and is proven by 8 reversions:
+- the old route and door;
+- clamp instead of refuse;
+- no release;
+- refund never written;
+- slot never returned;
+- release leaves the hold open;
+- fee from a pre-read count;
+- a second charge on delivery.
+
+**Siblings NOT the same class (reported):**
+- `chat.ts` attachment edits count against the image bucket but never charge (a consent/pricing decision).
+- The metered tools and assistants are billed after the call by design (cost unknown up front), bounded by the overdraft floor.
+- The API key's own daily ₹ cap is still read-then-record. The money is held now, so this only lets the key's self-set cap overshoot by the in-flight requests.
+
+**Watch after deploy:** for a paid picture, the wallet image row should show one ₹1 per delivered picture, and no `openHolds` should be left behind. Any `[IMAGE_HOLD] … could NOT be given back` log line is a refund that needs a look.

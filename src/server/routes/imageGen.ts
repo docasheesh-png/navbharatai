@@ -14,16 +14,9 @@ import {
 import { cloudflareImageConfig, cloudflareServesSize, fetchCloudflareImage } from '../lib/cloudflareImage';
 import { priceShownTo, freeUsedUpdateMessage, FREE_USED_UPDATE_CODE } from '../lib/imageTier';
 import { imageProConfigured, fetchImageProHostImage } from '../lib/imageProHost';
-import {
-  imagePricingEnabled, imageFreePerDay, imagePriceInr, decideImageStart, needsBalance,
-  imageFeeForCount, freeImagesLeft,
-} from '../lib/imageAllowance';
-import { toolUsageStore } from '../tools/ToolUsageStore';
+import { imagePricingEnabled } from '../lib/imageAllowance';
+import { reserveImage, type ImageHold } from '../lib/imageHold';
 import { isProfessionalFreeUser } from '../professionals/professionalPaid';
-import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
-import { debitWalletRolledUp } from '../lib/walletDebit';
-import { featureLabel, featureRollupRef } from '../lib/walletFeature';
-import { getServerDb } from '../lib/serverDb';
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
 import { runImageEdit } from '../lib/imageEditRun';
 import { triageImageRequest } from '../lib/imageSafety';
@@ -175,31 +168,32 @@ export function registerImageGenRoutes(app: Express): void {
     // after spending would be theatre. A free image still passes through without a gate lookup, so the
     // ordinary path is unchanged and costs nothing extra.
     // ── 5 FREE IMAGES A DAY, THEN ₹1 EACH (admin 2026-09-30, `imageAllowance.ts`) ──────────────
-    // Decided BEFORE any engine is called, so a user who cannot pay is refused before anything is
-    // spent. The balance is read only once today's free pictures are used up.
     // Every picture is counted against the same 5 a day. Only a screen that showed the price is
     // charged after them; any other caller is told how to get more instead (`imageTier.ts`).
+    //
+    // 🔒 PAID FOR BEFORE IT IS DRAWN (Q-616, admin 2026-10-05). The slot and the ₹ are TAKEN here, each
+    // in one transaction, before any engine runs (`imageHold.ts`). This used to be a READ of the count
+    // and the balance, with the count moved and the ₹ debited only after delivery, fire-and-forget —
+    // so concurrent requests each passed the check and the extra pictures went uncharged or into
+    // overdraft. The `finally` below gives both back on every exit that did not deliver a picture.
     const pricing = imagePricingEnabled();
     const freeListed = isProfessionalFreeUser(account.uid, account.email);
-    const freePerDay = imageFreePerDay();
-    const priceInr = imagePriceInr();
+    let reservation: ImageHold | null = null;
     if (pricing) {
-      const usedToday = freeListed ? 0 : await toolUsageStore.getTodayCount(account.uid, 'image');
-      const facts = { freeListed, usedToday, freePerDay, priceInr };
-      // Refused before the balance is even read: this caller is not charged, whatever the wallet holds.
-      if (!priceShown && needsBalance(facts)) {
-        res.status(429).json({ error: freeUsedUpdateMessage(userWords, freePerDay), code: FREE_USED_UPDATE_CODE });
+      const r = await reserveImage({ uid: account.uid, freeListed, priceShown });
+      if (!r.ok) {
+        if (r.reason === 'price_not_shown') {
+          res.status(429).json({ error: freeUsedUpdateMessage(userWords, r.freePerDay), code: FREE_USED_UPDATE_CODE });
+        } else if (r.reason === 'needs_credit') {
+          res.status(r.status).json(r.body);
+        } else {
+          res.status(503).json({ error: 'NavBharatAI could not take the payment for this image just now, so it was not made and nothing was charged. Please try again.' });
+        }
         return;
       }
-      const balanceInr = needsBalance(facts)
-        ? await readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), account.uid).catch(() => null)
-        : null;
-      const start = decideImageStart({ ...facts, balanceInr });
-      if (!start.allow) {
-        res.status(start.status).json(start.body);
-        return;
-      }
+      reservation = r.hold;
     }
+    let delivered = false;
 
     let gate: Awaited<ReturnType<typeof gateToolAction>> | null = null;
     let gateRefused = false;
@@ -292,28 +286,11 @@ export function registerImageGenRoutes(app: Express): void {
         if (!pricing && paidRung && gate && gate.allow && gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
         // The platform's count moves on DELIVERY, like the user's — never on an attempt that failed.
         if (paidRung && !freeListed && !pricing) void imageFreePaidBudget.record();
-        // The user's day moves on DELIVERY too, whichever engine drew the picture, and the charge is
-        // decided from the count AFTER this one, so two pictures at once cannot both be the free fifth.
-        let allowance: { freeLeftToday: number; chargedInr: number } | null = null;
-        if (pricing && !freeListed) {
-          const countAfter = await toolUsageStore.increment(account.uid, 'image').catch(() => 0);
-          // A client that never showed the price is never charged, even in a race past the fifth.
-          const fee = priceShown ? imageFeeForCount(countAfter, freePerDay, priceInr) : 0;
-          if (fee > 0) {
-            // Fire-and-forget like every other small charge: a money-path failure must never cost the
-            // user the picture they have already been given.
-            const now = Date.now();
-            void debitWalletRolledUp(getServerDb() as any, account.uid, {
-              billedInr: fee,
-              rollupRef: featureRollupRef('image', now),
-              description: featureLabel('image'),
-              feature: 'image',
-            }).then((r) => {
-              if (!r.ok) console.error(`[IMAGE_GEN] ₹${fee} image charge FAILED for ${account.uid}: ${r.error} — the picture was served but not charged.`);
-            }).catch(() => undefined);
-          }
-          allowance = countAfter > 0 ? { freeLeftToday: freeImagesLeft(countAfter, freePerDay), chargedInr: fee } : null;
-        }
+        // The user's slot and price were taken BEFORE the engine ran (`reservation`, above); delivery
+        // only settles them. Nothing more is charged here.
+        const allowance = reservation && reservation.counted
+          ? { freeLeftToday: reservation.freeLeftToday ?? 0, chargedInr: reservation.feeInr }
+          : null;
         // `notes` carries the honest caveats (a style chip that was overruled, or the warning that
         // image engines cannot spell). Surfacing them is the point: a user who knows their shop name
         // may come out garbled can shorten it, where a silent bad spelling just wastes their time.
@@ -328,6 +305,8 @@ export function registerImageGenRoutes(app: Express): void {
           ...(!editing && crafted.notes.length > 0 ? { notes: crafted.notes } : {}),
           ...(allowance ? allowance : {}),
         });
+        delivered = true;
+        await reservation?.settle();
       };
       // Track WHY every rung failed so the final error is HONEST (rule 5): a content refusal (the model
       // declined a real brand / public figure / copyrighted character — e.g. "spiderman") must tell the
@@ -479,6 +458,11 @@ export function registerImageGenRoutes(app: Express): void {
       });
     } catch {
       res.status(503).json({ error: 'NavBharatAI\'s image engine is briefly busy — please try again.' });
+    } finally {
+      // 🔒 EVERY exit that did not deliver a picture gives the slot and the held ₹ back: a provider
+      // failure, a refusal, a timeout, a thrown error, a gate refusal. A flag in a `finally`, not a call
+      // on each failure branch, so a branch added later cannot forget it. Idempotent.
+      if (!delivered && reservation) await reservation.release('image not delivered');
     }
   });
 

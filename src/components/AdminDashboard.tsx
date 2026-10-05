@@ -59,7 +59,7 @@ import {
 import { adminFooterItems, type AdminFooterApi } from './admin/adminFooterApi';
 import { ReportShot } from './ReportShot';
 import { compressForReport } from '../lib/reportImage';
-import { writeFailure } from '../lib/serverAnswer';
+import { writeFailure, readAnswer, isRecord } from '../lib/serverAnswer';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -202,6 +202,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    *  whole picture in front of the admin rather than from a complaint alone. */
   const [account, setAccount] = useState<any>(null);
   const [analytics, setAnalytics] = useState<any>(null);
+  // Q-680: a refused analytics read is said, never drawn as a platform with 0 users and ₹0 revenue.
+  const [analyticsError, setAnalyticsError] = useState('');
   /**
    * Who came to NavBharatAI itself — website visits, app opens and the people who signed in.
    *
@@ -578,13 +580,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     unknownVersion: number; wrongPlatform: number; truncated: boolean; summary: string;
   } | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
+  // Q-680: a failed cohort read is its own state. Stored as the cohort, a 500 body has no
+  // latestVersionCode, and the card then told the admin ANDROID_LATEST_VERSION_CODE was not set.
+  const [updateCohortError, setUpdateCohortError] = useState('');
 
   const fetchUpdateCohort = useCallback(async () => {
     setUpdateBusy(true);
     try {
       const r = await fetch('/api/admin/update-broadcast/preview', { headers });
-      setUpdateCohort(await r.json());
-    } catch { setUpdateCohort(null); }
+      const a = await readAnswer(r, (b): b is NonNullable<typeof updateCohort> =>
+        isRecord(b) && typeof b.targetCount === 'number' && (b.latestVersionCode === null || typeof b.latestVersionCode === 'number'));
+      setUpdateCohort(a.ok ? a.value : null);
+      setUpdateCohortError(a.ok ? '' : a.sentence);
+    } catch (e) {
+      setUpdateCohort(null);
+      setUpdateCohortError(e instanceof Error ? e.message : 'Could not reach the server.');
+    }
     finally { setUpdateBusy(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
@@ -1272,9 +1283,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     setLoading(true);
     try {
       const r = await fetch('/api/admin/analytics', { headers });
-      const d = await r.json();
-      setAnalytics(d);
-    } catch (e) { console.error(e); }
+      const a = await readAnswer(r, (b): b is Record<string, unknown> =>
+        isRecord(b) && typeof b.totalUsers === 'number' && typeof b.totalRevenue === 'number');
+      if (a.ok) { setAnalytics(a.value); setAnalyticsError(''); }
+      else setAnalyticsError(a.sentence);
+    } catch (e) { console.error(e); setAnalyticsError(e instanceof Error ? e.message : 'Could not reach the server.'); }
     finally { setLoading(false); }
   }, [adminToken]);
 
@@ -1939,6 +1952,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         </div>
       )}
 
+      {analyticsError && (
+        <p role="alert" className="mb-4 rounded-xl border border-line bg-card px-4 py-3 text-xs font-semibold text-danger">
+          Could not read the platform analytics: {analyticsError}{analytics ? ' The numbers below are from the last successful read.' : ' The numbers below are not real until a read succeeds.'}
+        </p>
+      )}
       {loading && !analytics ? (
         <div className="py-24 text-center">
           <TirangaLoader className="w-10 h-10 mx-auto mb-4" />
@@ -5300,7 +5318,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
                   <Bell className="w-4 h-4 text-success" /> App Update Notification
                 </h3>
-                {updateCohort?.latestVersionCode == null ? (
+                {updateCohortError ? (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <p role="alert" className="text-xs text-danger leading-relaxed">Could not read which devices are behind: {updateCohortError}</p>
+                    <button
+                      onClick={fetchUpdateCohort}
+                      disabled={updateBusy}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-raised text-body hover:bg-raised-hover disabled:opacity-50"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : !updateCohort ? (
+                  <p className="text-xs text-muted">Checking which devices are behind…</p>
+                ) : updateCohort.latestVersionCode == null ? (
                   <p className="text-xs text-warn leading-relaxed">
                     ANDROID_LATEST_VERSION_CODE is not set in Cloud Run, so there is no release to announce.
                     Set it to the versionCode of the build you uploaded to Play, then reload.

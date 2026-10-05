@@ -19,3 +19,30 @@ export async function writeFailure(res: Response, fallback: string): Promise<str
   } catch { /* a body that is not JSON carries no sentence of its own */ }
   return fallback;
 }
+
+// A READ IS DATA ONLY WHEN IT IS 2xx AND HAS THE SHAPE THE SCREEN NEEDS (Q-680, 2026-10-05).
+//
+// The read-side sibling of the rule above. `setData(await r.json())` stored a 403 or a 500 body as if it
+// were the answer: the OTP card printed "Could not read the OTP tally: undefined", the wallet statement
+// drew a refusal as an empty history, and the update-broadcast preview offered to "Send an update
+// notification to undefined device(s)" over a failed cohort read. So a read goes through here and the
+// screen stores either the checked value or the sentence — never a body it has not looked at.
+
+export type ReadAnswer<T> = { ok: true; value: T } | { ok: false; sentence: string };
+
+/** The body when the response is 2xx and `isShape` accepts it; otherwise the sentence to show. */
+export async function readAnswer<T>(res: Response, isShape: (body: unknown) => body is T): Promise<ReadAnswer<T>> {
+  let body: unknown = null;
+  try { body = await res.json(); } catch { /* not JSON — judged below */ }
+  if (!res.ok) {
+    const text = typeof (body as { error?: unknown } | null)?.error === 'string' ? String((body as { error: string }).error).trim() : '';
+    return { ok: false, sentence: text ? text.slice(0, 300) : `The server refused the request (HTTP ${res.status}).` };
+  }
+  if (!isShape(body)) return { ok: false, sentence: 'The server answered in a shape this screen does not know.' };
+  return { ok: true, value: body };
+}
+
+/** A plain-object check for shape guards. */
+export function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}

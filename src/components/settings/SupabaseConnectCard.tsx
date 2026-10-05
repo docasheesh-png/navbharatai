@@ -19,6 +19,7 @@ import { Database, Check, Loader2, ExternalLink, AlertTriangle, ArrowLeft } from
 import { authedFetch } from '../../lib/authedFetch';
 import { V3_TAB_FLAG, V3_VIEW } from '../agentv3/v3TabPersistence';
 import { SUPABASE_NATIVE_RETURN_EVENT } from '../../lib/supabaseOauthReturn';
+import { readAnswer, isRecord } from '../../lib/serverAnswer';
 
 /**
  * True on the native (Capacitor) app. Checked at CALL TIME, not cached, because it decides how to open
@@ -46,6 +47,11 @@ interface Status {
   orgName: string | null;
 }
 
+/** The status route's answer. A refusal is not a status (Q-680). */
+export function isSupabaseStatus(b: unknown): b is Status {
+  return isRecord(b) && typeof b.available === 'boolean' && typeof b.connected === 'boolean';
+}
+
 interface Props {
   /** Used only to name the created project so it is recognisable in the user's own dashboard. */
   appLabel?: string;
@@ -71,7 +77,9 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
   const refresh = useCallback(async () => {
     try {
       const res = await authedFetch('/api/integrations/supabase/status');
-      setStatus(await res.json());
+      const a = await readAnswer(res, isSupabaseStatus);
+      // A refused or unreadable status shows the manual form, exactly like an unreachable server.
+      setStatus(a.ok ? a.value : { available: false, connected: false, orgName: null });
     } catch {
       // A status check that cannot reach the server must not render a broken-looking card; treat it
       // as "not available" so the user is simply shown the manual form instead.

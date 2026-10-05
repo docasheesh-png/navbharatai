@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { readAnswer, isRecord } from '../../lib/serverAnswer';
 
 /**
  * MOBILE OTP HEALTH — is the mobile code reaching people, and if not, WHY? (admin 2026-09-26:
@@ -40,6 +41,13 @@ export const OTP_FIX_HINT: Readonly<Record<string, string>> = {
   other: 'Not recognised. Read the detail below.',
 };
 
+/** The route's own answer: `{ ok: true, bySurface, … }`, or its `{ ok: false, reason }` (Q-680). */
+export function isOtpSummary(b: unknown): b is Summary {
+  if (!isRecord(b)) return false;
+  if (b.ok === false) return typeof b.reason === 'string';
+  return b.ok === true && Array.isArray(b.bySurface);
+}
+
 function categoryOf(key: string): string {
   return key.split(':').pop() || 'other';
 }
@@ -52,7 +60,8 @@ export function OtpHealthCard({ adminToken }: { adminToken: string }): React.Rea
     setLoading(true);
     try {
       const r = await fetch('/api/admin/otp-outcomes', { headers: { 'x-admin-token': adminToken } });
-      setData(await r.json());
+      const a = await readAnswer(r, isOtpSummary);
+      setData(a.ok ? a.value : { ok: false, reason: a.sentence });
     } catch (e) {
       setData({ ok: false, reason: e instanceof Error ? e.message : String(e) });
     } finally {

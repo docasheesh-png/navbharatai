@@ -48,7 +48,6 @@ import { deleteCustomDomain, attachCustomDomain } from './firebaseCustomDomain';
 import { publishedAppCap } from './HostingQuota';
 import { deploymentStore } from '../AgentV3/DeploymentStore';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
-import { scheduler } from './ScheduledJobs';
 
 export interface SweepDeps {
   notify: (userId: string, message: string) => Promise<unknown>;
@@ -348,30 +347,13 @@ export async function reattachSuspendedDomains(userId: string): Promise<number> 
   }
 }
 
-let _registered = false;
+let _sweepTimer: ReturnType<typeof setInterval> | null = null;
 
-/** The scheduler id — also the name Cloud Scheduler calls (`POST /api/internal/jobs/hosting-plan-sweep/run`). */
-export const HOSTING_PLAN_SWEEP_JOB = 'hosting-plan-sweep';
-
-/**
- * Register the periodic sweep at boot (idempotent; no-op under VITEST).
- *
- * Q-159 (2026-10-05): on the shared scheduler as an EXCLUSIVE job, no longer a private `setInterval`.
- * The private timer ran on EVERY instance (each sending the same reminder pass) and on none when Cloud
- * Run had scaled to zero, so a renewal reminder could be hours late. Exclusive + slot-claimed means one
- * instance per 6-hour slot, and Cloud Scheduler can wake an instance to run it.
- */
+/** Register the periodic sweep at boot (idempotent; no-op under VITEST). */
 export function registerHostingPlanSweep(): void {
-  if (process.env.VITEST || _registered) return;
-  _registered = true;
-  scheduler.register({
-    id: HOSTING_PLAN_SWEEP_JOB,
-    exclusive: true,
-    schedule: { kind: 'everyMs', ms: 6 * 60 * 60 * 1000 },
-    handler: async () => { await sweepHostingPlans(); },
-  });
-  // First pass shortly after boot (instances recycle on every deploy — don't wait 6h to remind). It
-  // goes through the claim too, so it runs only if this 6-hour slot has not run anywhere yet.
-  // Cadence never affects CORRECTNESS: decisions are pure over absolute time.
-  setTimeout(() => { void scheduler.runNow(HOSTING_PLAN_SWEEP_JOB); }, 2 * 60 * 1000);
+  if (process.env.VITEST || _sweepTimer) return;
+  // First pass shortly after boot (instances recycle on every deploy — don't wait 6h to remind),
+  // then every 6 hours. Cadence never affects CORRECTNESS: decisions are pure over absolute time.
+  setTimeout(() => { void sweepHostingPlans(); }, 2 * 60 * 1000);
+  _sweepTimer = setInterval(() => { void sweepHostingPlans(); }, 6 * 60 * 60 * 1000);
 }

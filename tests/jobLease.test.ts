@@ -216,8 +216,7 @@ describe('🔒 the wiring — the job that DELETES is the one made exclusive', (
   });
 
   it('the claim is wired from the real lease store', () => {
-    // Q-159: the slot travels with the claim, so the tick and Cloud Scheduler run one slot once.
-    expect(server).toContain('scheduler.setClaim((jobId, slot) => claimJobRun(getServerDb() as any, { jobId, slot }))');
+    expect(server).toContain('scheduler.setClaim((jobId) => claimJobRun(getServerDb() as any, { jobId }))');
   });
 
   it('🔒 THE BOOT RUN GOES THROUGH THE SCHEDULER — not straight to the handler', () => {

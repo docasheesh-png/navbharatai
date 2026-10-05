@@ -75,7 +75,8 @@ describe('a build starts only when the message confirms it (Q-200)', () => {
     const accept = route.indexOf('if (offerAccepted && lastRequestTurn) {');
     expect(accept).toBeGreaterThan(0);
     expect(route.slice(accept, accept + 300)).toContain('prompt = lastRequestTurn.text;');
-    expect(route).toContain("chatMem.recordRequest(prompt, undefined, answerThenOffer ? 'offer' : 'chat');");
+    // Q-144 added the framework-question lane in front of the offer lane; the offer lane is unchanged.
+    expect(route).toContain("chatMem.recordRequest(prompt, undefined, askFramework ? 'framework' : answerThenOffer ? 'offer' : 'chat');");
     expect(route).toContain("+ (answerThenOffer ? BUILD_OFFER_STEER : '')");
     // The chat history keeps what the user typed.
     expect(route).toContain("{ role: 'user', content: typedPrompt, ts: buildStartedAt },");

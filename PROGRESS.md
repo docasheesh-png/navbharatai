@@ -90664,3 +90664,9 @@ humanoid → surfaces.
 Not re-audited: the motorcycle and bicycle.
 
 This is a server-side change: the generator runs on the server, so every user, on web or phone, gets it for newly built games as soon as it is merged and deployed. No new `.aab` / `.ipa` is needed. Games built earlier keep their old files until they are rebuilt.
+**Correction (same day, after #3555 merged):** the Q-159 row in the batch A table above is SUPERSEDED. Another live session
+built Q-159 in #3555 (a secret-checked scheduler tick reading a durable `job_runs` record) while this branch built its own
+version; both changed the same files. With the admin's approval ("theek kar ke marge karo") this branch's Q-159 commit was
+reverted (no history rewrite) and #3555's version is the one in `main`. Batch C (Q-160, Q-162, Q-163) was also done by #3555
+and is not repeated here. **Lesson, for safeguard #6:** a claim written only on an unpushed branch is invisible — open the PR
+(or push the queue rows) BEFORE starting claimed work, so the claim exists where other sessions look.

@@ -19,9 +19,9 @@ import { Database, Check, Loader2, ExternalLink, AlertTriangle, ArrowLeft } from
 import { authedFetch } from '../../lib/authedFetch';
 import { V3_TAB_FLAG, V3_VIEW } from '../agentv3/v3TabPersistence';
 import { SUPABASE_NATIVE_RETURN_EVENT } from '../../lib/supabaseOauthReturn';
-import { readAnswer, isRecord } from '../../lib/serverAnswer';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
+import { readAnswer, isRecord } from '../../lib/serverAnswer';
 
 /**
  * True on the native (Capacitor) app. Checked at CALL TIME, not cached, because it decides how to open

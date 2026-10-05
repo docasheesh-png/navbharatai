@@ -89843,3 +89843,46 @@ whoever merges second should expect a conflict in exactly that region and keep b
 Q-104, Q-116, Q-135, Q-139, Q-146, Q-147, Q-150, Q-152, Q-153, Q-156, Q-164 (Q-152 was already-fixed, evidence in its ledger entry). Their ledgers are above in this file. Still
 open from that work, each 🟡 with what it needs in `BUILD_REPORT_QUEUE.md`: Q-154 (admin confirms `hops: 1` at
 `/api/admin/proxy-hops`), Q-162 (45 undecided routes), Q-160, Q-136 (#3533), Q-101, Q-159, Q-141, Q-163.
+
+## 2026-10-05 — Image Generator: Free mode removed (admin screenshot, "Tea shop banner")
+
+**Report:** Free mode answered every request "The free image servers are too busy right now. Please try Paid mode",
+with the admin diagnostic `browser fetch: HTTP 402 | free provider: anonymous access refused (HTTP 402)`.
+
+**Root cause:** the free provider's anonymous door now answers 402 (payment required) to everybody, both the
+user's browser and our server. Free mode was built only on that door, so it could make nothing. Its "busy" sentence
+named a cause that was not true, and its "Try again" could only fail again.
+
+**This class came back.** The 2026-09-30 fix (`freeProviderDoor.ts`) taught the server to *notice* the closed door.
+That same evening Free mode was re-split so that a closed door meant "busy, try Paid" for every request. The
+instance was detected; the condition (a mode that has no engine) survived. This fix removes the condition.
+
+**Decision (admin, 2026-10-05):** remove Free mode. The options were offered in the same turn: Cloudflare-backed
+free with a cap, buying a provider key, removing it, or only an honest message.
+
+**What changed:**
+
+- One screen, which is the old Paid page.
+  - The header is the price line.
+  - The toggle, the Free page and "Switch to Paid" are gone.
+  - Every request sends `tier: 'paid'`.
+- Server (`imageTier.ts`, `routes/imageGen.ts`):
+  - Every caller runs the same ladder and counts against the same 5 a day.
+  - Only `tier: 'paid'` is charged. A no-tier caller (an old installed phone app) gets 429 `free_used_update` after its 5, never a charge.
+  - No link is minted, and `freeFailed` is dropped by the schema.
+  - `freeProviderDoor.ts` and its test are deleted.
+- `imageGenConfigured()` counts the free provider only with a key (Q-663).
+- Text and docs updated:
+  - every AI's price sentence (`imagePriceSentence`);
+  - the Pro picture pointer;
+  - AppKnowledgeBase;
+  - the ENV registry.
+- Old free pictures stay in the device history but are not shown, under the 2026-10-01 no-watermark rule. Nothing is deleted.
+
+**Kept on purpose:** `/api/image/relay`, `imageTicket.ts` and `clientImageFetch.ts`. They still verify old
+history links; their unit tests stay.
+
+**Rows:** Q-660 … Q-663 in `BUILD_REPORT_QUEUE.md`.
+
+**Watch after deploy:** a picture should arrive on the first press. If Paid itself fails, the admin diagnostic now
+names the paid rungs, not the free door.

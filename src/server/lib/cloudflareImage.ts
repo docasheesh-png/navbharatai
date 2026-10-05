@@ -1,7 +1,7 @@
 // THE FIRST IMAGE RUNG: FLUX.1 schnell on Cloudflare Workers AI (admin 2026-09-30: "cloudflare wala bana do").
 //
 // WHY THIS PROVIDER. The free provider the image generator was built on closed its anonymous door
-// (see `freeProviderDoor.ts`), and the paid rungs behind it cost several rupees a picture. Workers AI
+// (it answered 402 to everyone by 2026-10-05), and the paid rungs behind it cost several rupees a picture. Workers AI
 // gives every account 10,000 "neurons" a day at no charge; at its published rates (4.8 neurons per
 // 512×512 tile, 9.6 per step) a 1024×1024 picture at 4 steps is about 58 neurons, so roughly 170
 // pictures a day cost nothing and each one after that about $0.0006. The model's licence (Apache 2.0)

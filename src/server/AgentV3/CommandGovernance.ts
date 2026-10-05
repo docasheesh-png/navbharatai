@@ -13,6 +13,7 @@
 // Conservative by design: patterns target unambiguously risky commands so benign
 // build/test/git commands are never flagged.
 
+import { FILE_REMOVAL_SEGMENT_RE, FILE_REMOVAL_OR_GIT_RM_SEGMENT_RE } from './fileRemovalCommands';
 import {
   shellCommandVariants, unquoteToken, hasGlob, globLiteralPrefix, interpreterTreeRemovalTargets,
 } from './shellNormalize';
@@ -380,7 +381,7 @@ export function singleSourceDeleteTargets(command: string): string[] {
   // Same reasoning as the guard above: a delete inside `sh -c "…"` deletes just as thoroughly.
   for (const cmd of shellCommandVariants(command)) {
     for (const seg of cmd.split(/[;&|\n()]+|&&|\|\||\bdo\b|\bthen\b/)) {
-      const m = /^(?:rm|unlink)\s+(.+)$/i.exec(seg.trim());
+      const m = FILE_REMOVAL_SEGMENT_RE.exec(seg.trim());
       if (!m) continue;
       for (const raw of m[1].trim().split(/\s+/)) {
         if (raw.startsWith('-')) continue;
@@ -411,7 +412,7 @@ const RUNTIME_MANIFESTS = new Set(['package.json', 'index.html', 'tsconfig.json'
 export function runtimeManifestDeletionTarget(command: string): string | null {
   for (const cmd of shellCommandVariants(command)) {
     for (const seg of cmd.split(/[;&|\n()]+|&&|\|\||\bdo\b|\bthen\b/)) {
-      const m = /^(?:rm|unlink|git\s+rm)\s+(.+)$/i.exec(seg.trim());
+      const m = FILE_REMOVAL_OR_GIT_RM_SEGMENT_RE.exec(seg.trim());
       if (!m) continue;
       for (const raw of m[1].trim().split(/\s+/)) {
         const p = cleanPathArg(raw).replace(/^\.\//, '');

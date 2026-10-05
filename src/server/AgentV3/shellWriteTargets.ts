@@ -20,6 +20,7 @@
  */
 
 import { shellCommandVariants } from './shellNormalize';
+import { FILE_REMOVAL_COMMANDS } from './fileRemovalCommands';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -156,7 +157,7 @@ export function shellRemovalTargets(command: string): { paths: string[]; globs: 
       if (!cmd) continue;
       let name = cmd.split('/').pop() ?? cmd;
       if (name === 'git' && rest[0] === 'rm') { name = 'git-rm'; rest = rest.slice(1); }
-      if (name !== 'rm' && name !== 'unlink' && name !== 'git-rm') continue;
+      if (!FILE_REMOVAL_COMMANDS.has(name) && name !== 'git-rm') continue;
       for (const operand of rest) {
         if (operand.startsWith('-')) continue;
         const raw = operand.replace(/^\.\//, '');

@@ -677,6 +677,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'agentv3_framework_question',
+    name: 'NavBharatAI Pro asks which framework when your project mixes two',
+    path: 'NavBharatAI Pro — automatic; appears as a question in the chat before a build starts',
+    description: 'When your project\'s files are one framework (for example .svelte or .vue files) but its build setup (package.json) is another (for example React), the project cannot build as it is. Instead of spending many minutes trying to reconcile them on its own, NavBharatAI Pro asks you ONE question before it writes any file: 1) keep the framework your files already use and fix the build setup to match (keeps your existing code), or 2) switch to the framework the build setup names and rebuild the files in it. Your answer starts the work you originally asked for. It asks once per mismatch, and never when your message already names a framework.',
+    howToUse: 'Answer the question with "1", "2", or the framework name (for example "keep Svelte" or "switch to React"). NavBharatAI Pro then continues your original request using that framework. To skip the question, say the framework in your message (for example "add a cart page in Svelte").',
+    relatedFeatures: ['agentv3_builder', 'agentv3_zip_import', 'agentv3_github_import'],
+    keywords: ['framework', 'svelte', 'vue', 'react', 'angular', 'framework mismatch', 'which framework', 'kaunsa framework', 'framework question', 'build setup', 'package.json', 'project not building', 'mixed framework', 'framework kyu pucha'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'connected_services',
     name: 'Connect your own tools (Notion, Linear, your company\'s service) to the builder',
     path: 'NavBharatAI Pro → More (the … button) → Connected services (MCP)',

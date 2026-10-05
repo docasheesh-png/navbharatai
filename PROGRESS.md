@@ -90106,3 +90106,13 @@ Admin, verbatim: *"rating system banao! jab bhi user ki app badhiya bane, user u
 **Proof:** `tests/rateNavBharatAfterALivePublish.test.ts`, 22 cases: the rules, the shape readers, source guards on every wiring point, and the routes over real HTTP. Reversion-proven: removing the "already rated" check fails it, and announcing on every celebration close fails it.
 
 **Watch for:** the first ratings should appear on Admin → Users → Ratings after users publish. Phone users get the card only with a fresh `.aab`/`.ipa`.
+
+### 2026-10-05 — Q-154 ✅ RESOLVED: the live hop count is measured, and it is right
+
+The admin opened **Admin → Safety → Visitor address check** on the live site (#3545 deployed). The card read:
+*"Correct. Your request passed through 1 proxy, and the server trusts exactly 1 — so it reads every visitor's
+real address, and nobody can choose their own."* Its address line showed the admin's own public address (not
+recorded here). So `TRUSTED_PROXY_HOPS = 1` (#3538) is confirmed on the real hosting path, not only reasoned.
+The row leaves the open queue. Lock: `tests/aCallerCannotChooseItsOwnAddress.test.ts` (one reader of the address)
+and `tests/theClientIsMeasuredNotGuessed.test.ts` (the measurement and its card). If the hosting path ever
+changes (a CDN or load balancer in front of Cloud Run), the same card will say Mismatch and name the number.

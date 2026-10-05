@@ -36,6 +36,7 @@ import { UnusedCardMark } from './admin/UnusedCardMark';
 import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
 import { OtpHealthCard } from './admin/OtpHealthCard';
+import { ProxyHopsCard } from './admin/ProxyHopsCard';
 import { PushHealthCard } from './admin/PushHealthCard';
 import { BuildDiscountCard } from './admin/BuildDiscountCard';
 import { FailureCategoryCard } from './admin/FailureCategoryCard';
@@ -4513,6 +4514,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── SAFETY (the old Security tab; admin panel audit PR 2) ── */}
           {activeTab === 'security' && (
             <div className="space-y-6">
+              {/* Q-154 — is every per-address limit keyed on the visitor's REAL address? Measured on the admin's own request. */}
+              <ProxyHopsCard adminToken={adminToken} />
               {/* ── THE SAFETY QUEUE ───────────────────────────────────────────────────────────
                   🔒 NOT a chat browser, and the difference is structural: a clean message writes no
                   document at all, so there is nothing else here to browse. Each row is something the

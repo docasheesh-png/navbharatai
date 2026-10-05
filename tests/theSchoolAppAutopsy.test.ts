@@ -114,7 +114,12 @@ describe('5 · screens written while the entry is still the starter are answered
   it('every write door asks it, once per agent, never on a module turn that does not own the entry', () => {
     const d = read('src/server/AgentV3/ToolDispatcher.ts');
     expect(d).toContain('shadow += await this.entryLateNoteFor(paths);');
-    expect(d).toMatch(/\+ security \+ shadow \+ theme \+ touch;/);
+    // ⚠️ THIS PINNED ITS SIBLINGS' LIST AND BROKE ON A NEW TERM — the third time in this repo
+    // (2026-10-05, the browser-only write note). `CLAUDE.md` states the rule it violated: a source
+    // guard pins ITS OWN term, never the whole tail. The invariant here is that the entry-late note
+    // is carried on `shadow` INSIDE the one guarded sum — which is what is asserted now, and what
+    // line 116 and the `_entryLateNoted` guard below already say. A sixth note must not fail this.
+    expect(d).toMatch(/return hooks \+ [^;]*\+ shadow \+[^;]*;/);
     expect(d).toMatch(/if \(this\._entryLateNoted \|\| this\._starterExpected \|\| !paths\.some\(isUiComponentPath\)\) return '';/);
   });
 });

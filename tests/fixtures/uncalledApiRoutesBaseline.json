@@ -1,7 +1,6 @@
 {
   "GET /api/admin/feature-flags": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "GET /api/admin/health-score": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
-  "GET /api/admin/proxy-hops": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
   "GET /api/admin/settings": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "GET /api/agentv3/decision-trace": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
   "GET /api/agentv3/diag": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",

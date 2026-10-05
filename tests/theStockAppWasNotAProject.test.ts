@@ -180,8 +180,15 @@ describe('4 · the shell is not a way around the green freeze', () => {
       for (const t of shellWriteTargets("cat > src/lib/seed.ts << 'EOF'\nx\nEOF")) expect(writeRefused(ws, t)).toBe(true);
       expect(new GreenFreezeError('src/lib/seed.ts', null).message).toMatch(/shell is refused too/);
     } finally { clearGreenLatch(ws); }
-    const bash = DISPATCHER.slice(DISPATCHER.indexOf("case 'bash': {"));
-    expect(bash.slice(0, 6000)).toMatch(/if \(isGreenLatched\(this\.workspaceId\)\) \{\s*for \(const target of shellWriteTargets\(command\)\) assertWriteAllowed\(this\.workspaceId, target\);/);
+    // ⚠️ THE 6000-CHARACTER WINDOW THIS USED WAS THE BYTE-WINDOW TRAP, and it fired on 2026-10-05 when
+    // a new pre-shell guard was added ABOVE the freeze check and pushed it past the cutoff. The freeze
+    // was still there; the measurement was not. `PROGRESS.md` records this exact trap four times in one
+    // day with the same remedy: anchor on real syntax, never on a byte count. Bounded to the END of the
+    // `bash` case instead, so the assertion still cannot be satisfied by code in another case.
+    const bashStart = DISPATCHER.indexOf("case 'bash': {");
+    const nextCase = DISPATCHER.indexOf("\n      case '", bashStart + 1);
+    const bash = DISPATCHER.slice(bashStart, nextCase > -1 ? nextCase : undefined);
+    expect(bash).toMatch(/if \(isGreenLatched\(this\.workspaceId\)\) \{\s*for \(const target of shellWriteTargets\(command\)\) assertWriteAllowed\(this\.workspaceId, target\);/);
   });
 });
 

@@ -104,6 +104,10 @@ describe('census: one place decides the caller\'s address', () => {
   // generator whose route is emitted into a user's app (which sets its own `trust proxy`).
   const NOT_OUR_REQUESTS = new Set([
     join('src/server/lib/clientAddress.ts'),
+    // The MEASUREMENT of that decision (Q-154, #3534): shows the admin their own request's forwarded chain
+    // and what each hop count would make req.ip, so TRUSTED_PROXY_HOPS can be confirmed against reality.
+    // It reads the header and decides nothing; no limiter and no identity reads it.
+    join('src/server/lib/proxyHops.ts'),
     join('src/server/AgentV3/SecurityAnalysis.ts'),
     join('src/server/lib/PageViewsGenerator.ts'),
   ]);

@@ -89632,6 +89632,78 @@ same-origin, infra-blocked), Q-610 (rules must be deployed by hand to `gen-lang-
 - **Q-125 ✅ (Sonnet cache reads "over-stated")** had a wrong premise, as its own row said on 2026-10-04. Anthropic's `input_tokens` excludes cache shares, so a Claude turn is UNDER-stated. That real defect is Q-343, which is 🟡 BLOCKED on the admin's money decision, with options and a recommendation. Q-125 has nothing left of its own to fix.
 - **Gate note for this branch:** the first full run caught one failure: `licenceExposure.test.ts` pins `sources.push(currencyBlock, pincodeBlock);` as proof that those two sources sit outside every gate. Q-127 had folded movies into that line. The line is restored and movies is pushed separately. That keeps the property, and the pin stays as it was.
 
+## 2026-10-05 — A payment gateway's product names are not the app's commerce words (Q-641), and what three sessions building the same six rows cost
+
+### The concurrency finding first, because it is the expensive one
+
+Reading the open PRs before starting anything (concurrency rule 1) showed **four PRs from three sessions
+had each built the same queue rows, inside one hour**:
+
+| row | built by |
+|---|---|
+| Q-147 | #3536 (this session), #3534 |
+| Q-150 | #3536 (this session), #3534, #3532 |
+| Q-515 / Q-516 / Q-518 | #3533 (this session), #3532 |
+| Q-155 | #3534, #3532 |
+
+**#3532 opened twenty seconds before #3533.** Neither could have seen the other. The cause is not a
+session's carelessness: `BUILD_REPORT_QUEUE.md`'s owner column IS the claim mechanism (sixth rule, point
+3), but a row is claimed *after* the work, when the PR opens. Three sessions read the queue at ~21:50 and
+pushed at 22:14–22:27; all three saw an unclaimed row. **The claim lands after the work it is meant to
+prevent.** Recorded for the admin as an architectural gap, not fixed here — a claim protocol changes how
+every live session works, which is the admin's call, and the sixth rule forbids self-started work while
+actionable rows remain.
+
+**#3532 then merged**, which settled it: Q-515, Q-516, Q-518, Q-150 and Q-155 are resolved on `main` by
+that session's implementation, and #3533 became redundant. Its conflicts with `main` were in
+`clickExplorer.ts` and `spacingSnap.ts` — the very files #3532 had just rewritten — so the merge was
+**aborted rather than resolved**: resolving it is racing a session whose code has landed (concurrency rule
+4), and the honest answer is that their version is in.
+
+🔑 **One piece of #3533 was NOT redundant, and re-measuring on `main` proved it was worth keeping.**
+
+### The class #3532's fix left open
+
+⚠️ **The first measurement I took was worthless and is recorded so nobody repeats it.** I probed with my
+own *paraphrase* of the 39e982bd prompt, loaded extra ecommerce words into it, got `ecommerce`, and nearly
+reported that #3532's fix did not work. It does. The controlled experiment — the same base prompt with and
+without ONE appended sentence — is the only thing that says anything:
+
+```
+                    alone        + " Payments: use Stripe Checkout, and capture orders on the backend."
+donation app        general   →  ecommerce      FLIPPED
+hospital app        healthcare→  ecommerce      FLIPPED
+trading app         trading   →  trading        held
+esports tournament  tournament→  tournament     held  ← #3532's fix, working
+real shop           ecommerce →  ecommerce      held
+```
+
+Both flipped apps were then told they lacked *"product catalog + search, inventory tracking, accounts &
+addresses"*. **A hospital appointment app asked about inventory tracking is autopsy 39e982bd's own harm,
+one domain over.**
+
+`checkout` is the NAME of a Stripe/PayPal/Razorpay product; `order` is the NAME of the record their APIs
+create. **#3532 added a `tournament` domain — which is sound and now pinned by a test — but a new domain
+rescues one app while the two WORDS stay misread for every other app that takes a payment.** This analyser
+had already fixed `\border\b` for exactly this class (autopsy 73df1fbb); `checkout` was its unhunted
+sibling, and `order` came back through the plural.
+
+**Fix:** the sixth context-gated strip in `stripNonDomainUses`, in the same shape as the five already
+there (`expo` in a React Native prompt, `book` in a study prompt, `broker`/`listing` in a trading prompt,
+`chat` in an AI-assistant prompt) — `checkout` and `order` are blanked when the prompt names a gateway AND
+nothing says goods are sold. It stands down on a cart, a product catalogue, inventory, shipping, a SKU or a
+shop, so a real shop and a food-delivery app are byte-identical; and it only ever DELETES evidence, so it
+can never invent a domain. After it, all seven cases above hold.
+
+**Lock:** `tests/aGatewaySectionIsNotAShop.test.ts`, 11 cases — four real Indian gateways (Razorpay,
+PayPal, Cashfree, PhonePe/Paytm), the precision cases, and a pin that `trading`, `tournament` and `fitness`
+are unaffected. Reversion-proven three ways: the strip dropped → 4 fail; stripping even where goods are
+sold → 1 fail; dropping the gateway gate → 1 fail.
+
+⚠️ **A second wrong assertion, recorded for the same reason as the first.** I asserted the hospital's gap
+list contained no `/inventory/`. It contains *"pharmacy / inventory"* — because a hospital really does need
+pharmacy inventory, which is the whole point of the domain being right. The test names ECOMMERCE's list
+instead. Twice in one change, the lesson is the same: an assertion about a list has to say which list.
 ### 2026-10-04 — reconciled with the PRs that merged the same rows (#3532, #3535, #3537)
 
 Four sessions worked the same queue rows at once. On merging main, the MERGED implementation won every

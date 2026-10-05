@@ -564,6 +564,10 @@ export function stripNonDomainUses(input: string): string {
   // keep their meaning in any context.
   const raw = String(text || '');
   if (AI_ASSISTANT_CONTEXT.test(raw) && !PEOPLE_CHAT.test(raw)) out = out.replace(/\b(?:chats?|conversations?|messages?)\b/gi, ' ');
+  // Same shape for "checkout" and "order": in a prompt that names a payment GATEWAY, those are the
+  // gateway's own product and record names, not a statement that the app sells anything — unless
+  // something else says goods are sold, in which case every word is kept. See PAYMENT_GATEWAY_CONTEXT.
+  if (PAYMENT_GATEWAY_CONTEXT.test(raw) && !SELLS_GOODS.test(raw)) out = out.replace(GATEWAY_COMMERCE_WORDS, ' ');
   return withoutDeclinedSentences(out);
 }
 
@@ -608,6 +612,52 @@ const STUDY_BOOK_NOUN = /\bbooks?\b(?!\s+(?:a|an|the|your|my|now|online|appointm
 
 /** Evidence that "Expo" in this prompt is the React Native toolchain (autopsy 0d297b25). */
 const REACT_NATIVE_CONTEXT = /\breact[\s-]?native\b|\beas\.json\b|\beas\s+(?:build|submit|update|cli)\b|\bconfigure\s+eas\b/i;
+
+/**
+ * 🔴 A PAYMENT GATEWAY'S OWN PRODUCT NAMES ARE NOT THE APP'S COMMERCE WORDS (autopsy 39e982bd; the
+ * class re-measured on `main` after #3532, 2026-10-05).
+ *
+ * `checkout` is the NAME of a Stripe, PayPal and Razorpay product, and `order` is the NAME of the
+ * record their APIs create. So the ordinary integration sentence every payments prompt contains —
+ * *"use Stripe Checkout, and capture orders on the backend"* — hands this analyser two of ecommerce's
+ * strongest signals from a section that says nothing about what the app sells.
+ *
+ * **Measured on `main` at 4c205bcc4, with and without that one sentence appended:**
+ *
+ * | the app | alone | + the gateway sentence |
+ * |---|---|---|
+ * | a donation app for an NGO with campaigns and donor receipts | `general` | **`ecommerce`** |
+ * | a hospital appointment app with doctors, slots and patient records | `healthcare` | **`ecommerce`** |
+ *
+ * Both were then told they lacked *"product catalog + search, inventory tracking, accounts &
+ * addresses"*. **A hospital appointment app asked about inventory tracking is autopsy 39e982bd's own
+ * harm, one domain over** — and this analyser had already fixed `\border\b` for that exact class
+ * (autopsy 73df1fbb); `checkout` was its unhunted sibling, and `order` came back through the plural.
+ *
+ * 🔒 IT STANDS DOWN THE MOMENT ANYTHING SAYS GOODS ARE SOLD. A cart, a product catalogue, inventory,
+ * shipping, a SKU, a shop — any of them and every word is kept, so a real shop is byte-identical. The
+ * strip only ever DELETES evidence, so it can never invent a domain; and `trading` and `tournament`
+ * were verified unchanged, because a domain with its own strong signal never depended on these two.
+ */
+const PAYMENT_GATEWAY_CONTEXT = /\b(?:stripe|paypal|razorpay|cashfree|payu|phonepe|paytm|instamojo|ccavenue|billdesk|braintree|adyen|square|lemon\s*squeezy|paddle|payment\s+gateways?|payments?\s+gateway)\b/i;
+/** The two words a gateway section contributes that mean "a shop" nowhere else. */
+const GATEWAY_COMMERCE_WORDS = /\b(?:checkouts?|orders?)\b/gi;
+/** Evidence the app really sells goods, which makes those words its own after all. */
+/**
+ * ⚠️ THE DEVANAGARI RUNS SIT OUTSIDE THE `\b` GROUP, AND THE FIRST DRAFT GOT IT WRONG. Writing
+ * `\b(?:carts?|…|कार्ट|दुकान)\b` makes both Hindi alternatives unmatchable — `\b` is an ASCII word
+ * boundary, so there is no boundary beside a Devanagari letter — and the repo's own census
+ * (`tests/aWordBoundaryCanSeeHindi.test.ts`, the #3509 class) failed the build on it. They are bounded
+ * the way this file bounds every Devanagari signal instead: no Devanagari letter before, and no virama
+ * after, so `सामान` does not match inside `सामान्य` while `दुकानों` still does.
+ */
+const SELLS_GOODS = new RegExp(
+  '\\b(?:carts?|add\\s+to\\s+cart|product\\s+(?:catalog(?:ue)?s?|listings?|pages?|variants?)'
+  + '|products?\\b(?!\\s+(?:owner|manager|team)\\b)|inventor(?:y|ies)|stock\\s+levels?|skus?|shipping'
+  + '|delivery\\s+address(?:es)?|warehouses?|shops?|stores?|merchandise|dropship\\w*|e-?commerce)\\b'
+  + '|(?<![\\u0900-\\u097F])(?:कार्ट|दुकान|सामान|उत्पाद)(?!\\u094D)',
+  'i',
+);
 
 const GENERIC_FEATURES: Array<{ label: string; re: RegExp }> = [
   { label: 'user authentication', re: /auth|login|sign.?in|sign.?up|account|user/i },

@@ -2433,7 +2433,9 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
             items: { type: 'string' },
             description:
               'Optional subset: renderer, lighting, materials, camera, world, environment, surfaces, '
-              + 'humanoid, objects. Default = all; imports are pulled in automatically. '
+              + 'humanoid, objects, atmosphere. Default = all; imports are pulled in automatically. '
+              + 'atmosphere = createAtmosphere(): a running day-night clock (sun, moon, stars, street lamps '
+              + 'on at dusk) and weather (clear, cloudy, rain, storm with lightning, snow, fog, dust); '
               + 'environment = sky + image-based reflections; surfaces = brick/wood/bark/stone/road/soil/'
               + 'grass/metal/cloth/tile/sand with real bump + roughness; humanoid = a correctly '
               + 'proportioned figure with joints; objects = createCar / createMotorcycle / createBicycle '

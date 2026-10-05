@@ -3669,6 +3669,529 @@ export function createBicycle(options: BicycleOptions = {}): Motorcycle {
 }
 `;
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// ATMOSPHERE — a clock and the weather (2026-10-05, the game-engine taxonomy: sky, weather, world systems).
+// A fixed preset is a photograph; a running day and changing weather make one level many places.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+const ATMOSPHERE = `import * as THREE from 'three';
+import type { AppliedLighting } from './lighting';
+
+/**
+ * A world that LIVES: the sun crosses the sky, evening turns orange, night falls with stars and the
+ * street lights come on — and the weather changes: clouds roll in, rain falls and the road darkens with
+ * it, a monsoon storm flashes and thunders, snow drifts, fog closes in, a dust storm turns the air brown.
+ *
+ * A fixed lighting preset is a photograph. The same level at four times of day and in four kinds of
+ * weather is sixteen places to play, which is why open-world games keep a clock running.
+ *
+ * It DRIVES the lights applyLighting() made (it does not add its own), so shadows, fog and reflections
+ * all keep agreeing with each other. The fog colour is ALWAYS the sky's horizon colour — the rule that
+ * keeps the world from ending at a visible seam, at every hour and in every weather.
+ *
+ * Rain, snow and dust are computed on the GPU from one buffer each: zero allocation per frame, one draw
+ * call per kind, and they follow the camera so a phone never simulates rain it cannot see.
+ */
+export type WeatherKind = 'clear' | 'cloudy' | 'rain' | 'storm' | 'snow' | 'fog' | 'dust';
+export type DayPhase = 'night' | 'dawn' | 'day' | 'dusk';
+
+export interface AtmosphereOptions {
+  scene: THREE.Scene;
+  renderer: THREE.WebGLRenderer;
+  camera: THREE.Camera;
+  /** What applyLighting() returned — the lights this drives. */
+  lighting: AppliedLighting;
+  /** Hour of the day to start at, 0..24. Default 10. */
+  hour?: number;
+  /** Real seconds for one whole in-game day. 0 stops the clock. Default 600 (ten minutes). */
+  dayLength?: number;
+  weather?: WeatherKind;
+  seed?: number;
+  /** 'lite' draws a third of the rain and snow. Default 'real'. */
+  detail?: 'real' | 'lite';
+  /** Re-bake reflections as the sky changes (needs WebGL). Default true. */
+  reflections?: boolean;
+}
+
+export interface Atmosphere {
+  /** The hour, 0..24. Assign it (or call setHour) to jump the clock. */
+  hour: number;
+  dayLength: number;
+  readonly phase: DayPhase;
+  /** 1 at noon, 0 in the dead of night. */
+  readonly daylight: number;
+  readonly weather: WeatherKind;
+  /** How wet the world is, 0..1 — it rises while it rains and dries after. */
+  readonly wetness: number;
+  /** The lightning flash right now, 0..1. */
+  readonly flash: number;
+  readonly sky: THREE.Mesh;
+  setHour(hour: number): void;
+  /** Change the weather, blending over \`seconds\`. */
+  setWeather(kind: WeatherKind, seconds?: number): void;
+  /** A light or an emissive mesh (a street lamp, a lit window) that comes on at dusk and off at dawn. */
+  addNightLight(object: THREE.Light | THREE.Mesh, strength?: number): void;
+  /** Materials that darken and shine when wet: roads, roofs, the ground. */
+  wet(materials: THREE.Material[]): void;
+  /** Called when the phase changes (dawn, day, dusk, night). */
+  onPhase?: (phase: DayPhase) => void;
+  /** Called at each lightning strike: how far away it was and when its thunder arrives (distance / 343). */
+  onLightning?: (distance: number, thunderDelay: number) => void;
+  /** Called when the weather changes — start or stop a rain/wind loop here. */
+  onWeather?: (kind: WeatherKind) => void;
+  /** Advance by dt seconds. Call once a frame (or fixed step) after the camera has moved. */
+  update(dt: number): void;
+  dispose(): void;
+}
+
+// ── The sky through a day ────────────────────────────────────────────────────────────────────────
+interface SkyKey {
+  hour: number;
+  top: number; horizon: number; ground: number;
+  key: number; keyI: number;
+  hemiSky: number; hemiGround: number; hemiI: number;
+  ambient: number; exposure: number; stars: number;
+}
+const NIGHT: Omit<SkyKey, 'hour'> = { top: 0x0a1430, horizon: 0x22345a, ground: 0x05070d, key: 0xaac4ff, keyI: 0.45, hemiSky: 0x2a3b5c, hemiGround: 0x05070d, hemiI: 0.4, ambient: 0.08, exposure: 1.15, stars: 1 };
+const DAY_KEYS: SkyKey[] = [
+  { hour: 0, ...NIGHT },
+  { hour: 4.6, ...NIGHT },
+  { hour: 6, top: 0x34497a, horizon: 0xf4a582, ground: 0x3a2c22, key: 0xffb380, keyI: 1.0, hemiSky: 0xc9a8b8, hemiGround: 0x3d3328, hemiI: 0.55, ambient: 0.12, exposure: 1.05, stars: 0.15 },
+  { hour: 7.5, top: 0x3a78c8, horizon: 0xcfe2f2, ground: 0x6b5a3e, key: 0xfff0d6, keyI: 1.9, hemiSky: 0xbfe3ff, hemiGround: 0x6b5a3e, hemiI: 0.85, ambient: 0.14, exposure: 1.0, stars: 0 },
+  { hour: 12, top: 0x2f6ecb, horizon: 0xbfd9f2, ground: 0x6b5a3e, key: 0xfff4e0, keyI: 2.3, hemiSky: 0xbfe3ff, hemiGround: 0x6b5a3e, hemiI: 0.9, ambient: 0.15, exposure: 1.0, stars: 0 },
+  { hour: 16.5, top: 0x3570c0, horizon: 0xd6dfe6, ground: 0x6b5a3e, key: 0xffe7c4, keyI: 2.0, hemiSky: 0xc4ddf0, hemiGround: 0x6b5a3e, hemiI: 0.85, ambient: 0.15, exposure: 1.0, stars: 0 },
+  { hour: 18.3, top: 0x2a2b6b, horizon: 0xff9a56, ground: 0x3a2418, key: 0xff7b3d, keyI: 2.2, hemiSky: 0xffb877, hemiGround: 0x4a2c17, hemiI: 0.65, ambient: 0.17, exposure: 1.05, stars: 0 },
+  { hour: 19.3, top: 0x141a40, horizon: 0x7a4a6a, ground: 0x1a1218, key: 0x9a7aa8, keyI: 0.6, hemiSky: 0x4a4a78, hemiGround: 0x120c10, hemiI: 0.45, ambient: 0.1, exposure: 1.1, stars: 0.5 },
+  { hour: 20.5, ...NIGHT },
+  { hour: 24, ...NIGHT },
+];
+
+// ── What each weather does on top of it ─────────────────────────────────────────────────────────
+interface WeatherLook { cloud: number; dark: number; dim: number; fog: number; grey: number; rain: number; snow: number; dust: number; lightning: number; wet: number; wind: number }
+const WEATHER: Record<WeatherKind, WeatherLook> = {
+  clear:  { cloud: 0.12, dark: 0, dim: 1,    fog: 1,    grey: 0,    rain: 0, snow: 0, dust: 0, lightning: 0, wet: 0, wind: 0.2 },
+  cloudy: { cloud: 0.7, dark: 0.15,  dim: 0.65, fog: 0.85, grey: 0.3,  rain: 0, snow: 0, dust: 0, lightning: 0, wet: 0, wind: 0.4 },
+  rain:   { cloud: 0.92, dark: 0.4, dim: 0.35, fog: 0.55, grey: 0.6,  rain: 1, snow: 0, dust: 0, lightning: 0, wet: 1, wind: 0.5 },
+  storm:  { cloud: 1, dark: 0.68,    dim: 0.2,  fog: 0.4,  grey: 0.75, rain: 1, snow: 0, dust: 0, lightning: 1, wet: 1, wind: 1 },
+  snow:   { cloud: 0.85, dark: 0.05, dim: 0.5,  fog: 0.5,  grey: 0.7,  rain: 0, snow: 1, dust: 0, lightning: 0, wet: 0, wind: 0.3 },
+  fog:    { cloud: 0.5, dark: 0,  dim: 0.55, fog: 0.18, grey: 0.5,  rain: 0, snow: 0, dust: 0, lightning: 0, wet: 0.3, wind: 0.05 },
+  dust:   { cloud: 0.3, dark: 0.1,  dim: 0.55, fog: 0.3,  grey: 0.2,  rain: 0, snow: 0, dust: 1, lightning: 0, wet: 0, wind: 1 },
+};
+const DUST_TINT = new THREE.Color(0xc9a36b);
+const SNOW_TINT = new THREE.Color(0xdfe5ec);
+
+const smooth = (t: number) => t * t * (3 - 2 * t);
+const wrapHour = (h: number) => ((h % 24) + 24) % 24;
+
+function phaseOf(hour: number): DayPhase {
+  if (hour >= 5 && hour < 7) return 'dawn';
+  if (hour >= 7 && hour < 17.8) return 'day';
+  if (hour >= 17.8 && hour < 20) return 'dusk';
+  return 'night';
+}
+
+/** The sun's direction at an hour: it rises in the east (+X) at 6, is overhead at 12, sets in the west at 18. */
+export function sunDirection(hour: number, out = new THREE.Vector3()): THREE.Vector3 {
+  const a = ((hour - 6) / 12) * Math.PI;
+  return out.set(Math.cos(a), Math.sin(a), 0.35).normalize();
+}
+
+const SKY_VERTEX = [
+  'varying vec3 vDir;',
+  'void main() {',
+  '  vDir = normalize(position);',
+  '  vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+  '  gl_Position = p.xyww;',                       // on the far plane: never in front of anything
+  '}',
+].join('\\n');
+
+const SKY_FRAGMENT = [
+  'uniform vec3 uTop; uniform vec3 uHorizon; uniform vec3 uGround; uniform vec3 uSun; uniform vec3 uSunDir;',
+  'uniform float uStars; uniform float uCloud; uniform float uTime; uniform float uFlash; uniform vec3 uCloudLit;',
+  'varying vec3 vDir;',
+  'float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
+  'float noise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+  '  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }',
+  'float fbm(vec2 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; } return v; }',
+  'void main() {',
+  '  vec3 d = normalize(vDir);',
+  '  float h = d.y;',
+  // The horizon colour hugs the horizon: in linear light a bright horizon dominates any gentle curve, so a
+  // sunset's orange climbed to the top of the screen. An exponential keeps it to the lowest ~15 degrees.
+  '  vec3 col = h > 0.0 ? mix(uHorizon, uTop, 1.0 - exp(-h * 5.0)) : mix(uHorizon, uGround, pow(clamp(-h, 0.0, 1.0), 0.4));',
+  '  if (h > 0.0) {',
+  // Stars: a sparse hash on the direction, twinkling, only where the sky is dark.
+  '    vec2 sp = floor(d.xz / (d.y + 0.35) * 220.0);',
+  '    float star = step(0.9975, hash(sp)) * (0.6 + 0.4 * sin(uTime * 3.0 + hash(sp + 7.0) * 40.0));',
+  '    col += vec3(star) * uStars * smoothstep(0.02, 0.3, h);',
+  // The sun by day, a pale moon by night — always a disc, plus a glow round it.
+  '    vec3 s = normalize(uSunDir);',
+  '    float up = step(0.0, s.y);',
+  '    vec3 body = mix(-s, s, up);',
+  '    float c = max(dot(d, body), 0.0);',
+  '    col += uSun * (pow(c, 900.0) * mix(1.2, 14.0, up) + pow(c, 12.0) * mix(0.05, 0.35, up)) * (1.0 - uCloud * 0.85);',
+  // Clouds: fbm on the sky plane, drifting with time, thicker as the weather closes in.
+  '    vec2 cp = d.xz / (d.y + 0.15) * 1.6 + vec2(uTime * 0.012, uTime * 0.005);',
+  '    float n = fbm(cp);',
+  '    float cover = smoothstep(1.0 - uCloud * 0.9 - 0.12, 1.0 - uCloud * 0.9 + 0.25, n);',
+  '    vec3 cloud = mix(uCloudLit, uHorizon * 0.8, smoothstep(0.4, 0.8, n));',
+  '    col = mix(col, cloud, cover * smoothstep(0.0, 0.18, h));',
+  '  }',
+  '  col += vec3(0.85, 0.88, 1.0) * uFlash * 0.7;',
+  '  gl_FragColor = vec4(col, 1.0);',
+  // The colours above are LINEAR, like the fog's and the lights'. Every standard material ends with these
+  // two steps; a ShaderMaterial does not unless asked. Without them the sky was written to the screen raw
+  // — darker and oversaturated (a dawn came out solid red) and never matching the fog at the horizon.
+  '  #include <tonemapping_fragment>',
+  '  #include <colorspace_fragment>',
+  '}',
+].join('\\n');
+
+const RAIN_VERTEX = [
+  'uniform vec3 uCam; uniform float uTime; uniform float uAmount; uniform vec2 uWind; uniform float uBox; uniform float uHeight; uniform float uSpeed; uniform float uLen;',
+  'attribute vec4 aSeed; attribute float aEnd;',
+  'varying float vAlpha;',
+  'void main() {',
+  '  vec3 v = vec3(uWind.x, -uSpeed, uWind.y);',
+  '  float y = uHeight * 0.6 - mod(uTime * uSpeed + aSeed.z * uHeight, uHeight);',
+  '  float t = (uHeight * 0.6 - y) / uSpeed;',
+  '  vec3 p = vec3(mod(aSeed.x * uBox + uWind.x * t, uBox) - uBox * 0.5, y, mod(aSeed.y * uBox + uWind.y * t, uBox) - uBox * 0.5);',
+  '  p -= normalize(v) * uLen * aEnd;',
+  '  vAlpha = step(aSeed.w, uAmount) * mix(0.55, 0.05, aEnd);',
+  '  gl_Position = projectionMatrix * viewMatrix * vec4(uCam + p, 1.0);',
+  '}',
+].join('\\n');
+const RAIN_FRAGMENT = ['uniform vec3 uColor; varying float vAlpha;', 'void main() { if (vAlpha <= 0.0) discard; gl_FragColor = vec4(uColor, vAlpha); }'].join('\\n');
+
+const FLAKE_VERTEX = [
+  'uniform vec3 uCam; uniform float uTime; uniform float uAmount; uniform vec2 uWind; uniform float uBox; uniform float uHeight; uniform float uSpeed; uniform float uSize; uniform float uFlutter;',
+  'attribute vec4 aSeed;',
+  'varying float vAlpha;',
+  'void main() {',
+  '  float y = uHeight * 0.6 - mod(uTime * uSpeed + aSeed.z * uHeight, uHeight);',
+  '  float t = uTime + aSeed.z * 50.0;',
+  '  vec3 p = vec3(mod(aSeed.x * uBox + uWind.x * t + sin(t * 1.3 + aSeed.w * 30.0) * uFlutter, uBox) - uBox * 0.5, y,',
+  '                mod(aSeed.y * uBox + uWind.y * t + cos(t * 1.1 + aSeed.w * 20.0) * uFlutter, uBox) - uBox * 0.5);',
+  '  vec4 mv = viewMatrix * vec4(uCam + p, 1.0);',
+  '  vAlpha = step(aSeed.w, uAmount);',
+  '  gl_PointSize = uSize * (0.6 + aSeed.w) * 300.0 / max(1.0, -mv.z);',
+  '  gl_Position = projectionMatrix * mv;',
+  '}',
+].join('\\n');
+const FLAKE_FRAGMENT = [
+  'uniform vec3 uColor; uniform float uOpacity; varying float vAlpha;',
+  'void main() { float r = length(gl_PointCoord - 0.5); if (vAlpha <= 0.0 || r > 0.5) discard; gl_FragColor = vec4(uColor, uOpacity * vAlpha * smoothstep(0.5, 0.15, r)); }',
+].join('\\n');
+
+function seeds(count: number, perDrop: number, rand: () => number): { seed: Float32Array; end: Float32Array } {
+  const seed = new Float32Array(count * perDrop * 4);
+  const end = new Float32Array(count * perDrop);
+  for (let i = 0; i < count; i++) {
+    const s = [rand(), rand(), rand(), rand()];
+    for (let k = 0; k < perDrop; k++) { seed.set(s, (i * perDrop + k) * 4); end[i * perDrop + k] = k; }
+  }
+  return { seed, end };
+}
+
+/**
+ * Give the scene a living sky: a clock, a day-night cycle and weather. See the module comment.
+ *
+ * \`\`\`
+ * const lit = applyLighting(scene, renderer, 'day');
+ * const sky = createAtmosphere({ scene, renderer, camera, lighting: lit, hour: 17, weather: 'clear' });
+ * sky.addNightLight(streetLamp);           // on at dusk, off at dawn
+ * sky.wet([roadMaterial]);                 // darkens and shines in the rain
+ * sky.onLightning = (d, delay) => setTimeout(() => audio.play('thunder'), delay * 1000);
+ * // each frame, after the camera moves:  sky.update(dt);
+ * \`\`\`
+ */
+export function createAtmosphere(options: AtmosphereOptions): Atmosphere {
+  const { scene, renderer, camera, lighting } = options;
+  const real = options.detail !== 'lite';
+  let s = ((options.seed ?? 7) * 2654435761) >>> 0 || 1;
+  const rand = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 0xffffffff; };
+
+  const baseFog = { near: lighting.preset.fog.near, far: lighting.preset.fog.far };
+  const fog = scene.fog instanceof THREE.Fog ? scene.fog : new THREE.Fog(0xffffff, baseFog.near, baseFog.far);
+  scene.fog = fog;
+  const keyOffset = Math.max(60, lighting.key.position.distanceTo(lighting.key.target.position));
+
+  // The dome sits on the far plane (xyww), so its radius only has to be inside the frustum.
+  const far = (camera as THREE.PerspectiveCamera).far ?? 1000;
+  const skyMaterial = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: {
+      uTop: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() }, uGround: { value: new THREE.Color() },
+      uSun: { value: new THREE.Color() }, uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uStars: { value: 0 },
+      uCloud: { value: 0 }, uTime: { value: 0 }, uFlash: { value: 0 }, uCloudLit: { value: new THREE.Color() },
+    },
+    vertexShader: SKY_VERTEX, fragmentShader: SKY_FRAGMENT,
+  });
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(Math.min(far * 0.5, 500), 32, 16), skyMaterial);
+  sky.name = 'atmosphere-sky';
+  sky.frustumCulled = false;
+  sky.renderOrder = -1000;
+  scene.add(sky);
+
+  const box = 36, height = 24;
+  const makeRain = () => {
+    const count = real ? 2400 : 800;
+    const { seed, end } = seeds(count, 2, rand);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 2 * 3), 3));
+    g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 4));
+    g.setAttribute('aEnd', new THREE.BufferAttribute(end, 1));
+    const m = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, fog: false,
+      uniforms: { uCam: { value: new THREE.Vector3() }, uTime: { value: 0 }, uAmount: { value: 0 }, uWind: { value: new THREE.Vector2() }, uBox: { value: box }, uHeight: { value: height }, uSpeed: { value: 14 }, uLen: { value: 0.9 }, uColor: { value: new THREE.Color(0xaebfd0) } },
+      vertexShader: RAIN_VERTEX, fragmentShader: RAIN_FRAGMENT,
+    });
+    const l = new THREE.LineSegments(g, m);
+    l.frustumCulled = false; l.visible = false; l.name = 'atmosphere-rain';
+    return l;
+  };
+  const makeFlakes = (name: string, count: number, color: number, size: number, opacity: number, speed: number, flutter: number) => {
+    const { seed } = seeds(count, 1, rand);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+    g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 4));
+    const m = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, fog: false,
+      uniforms: { uCam: { value: new THREE.Vector3() }, uTime: { value: 0 }, uAmount: { value: 0 }, uWind: { value: new THREE.Vector2() }, uBox: { value: box }, uHeight: { value: height }, uSpeed: { value: speed }, uSize: { value: size }, uFlutter: { value: flutter }, uColor: { value: new THREE.Color(color) }, uOpacity: { value: opacity } },
+      vertexShader: FLAKE_VERTEX, fragmentShader: FLAKE_FRAGMENT,
+    });
+    const p = new THREE.Points(g, m);
+    p.frustumCulled = false; p.visible = false; p.name = name;
+    return p;
+  };
+  const rain = makeRain();
+  const snow = makeFlakes('atmosphere-snow', real ? 1800 : 600, 0xffffff, 0.09, 0.9, 1.2, 0.6);
+  const dust = makeFlakes('atmosphere-dust', real ? 900 : 300, 0xb08850, 0.35, 0.22, 0.6, 1.5);
+  scene.add(rain, snow, dust);
+
+  // Night lights and wet materials.
+  const nightLights: Array<{ o: THREE.Light | THREE.Mesh; strength: number }> = [];
+  const wetMats: Array<{ m: THREE.MeshStandardMaterial; roughness: number; color: THREE.Color }> = [];
+
+  // Reflections: re-baked when the sky has visibly changed, cached, and never more than once a second.
+  const reflections = options.reflections !== false;
+  let pmrem: THREE.PMREMGenerator | null = null;
+  const envCache = new Map<string, THREE.Texture>();
+  let envAge = Infinity;
+  let envKey = '';
+  const bakeEnvironment = (key: string) => {
+    if (!reflections) return;
+    const cached = envCache.get(key);
+    if (cached) { scene.environment = cached; return; }
+    try {
+      pmrem = pmrem ?? new THREE.PMREMGenerator(renderer);
+      const bake = new THREE.Scene();
+      const dome = new THREE.Mesh(sky.geometry, skyMaterial);
+      bake.add(dome);
+      const texture = pmrem.fromScene(bake, 0.04).texture;
+      envCache.set(key, texture);
+      // Bounded: a day cycles through about a dozen looks per weather; the oldest is freed beyond that.
+      if (envCache.size > 24) { const first = envCache.keys().next().value as string; envCache.get(first)?.dispose(); envCache.delete(first); }
+      scene.environment = texture;
+    } catch { /* no WebGL here (a test, a headless check): reflections simply stay as they were */ }
+  };
+
+  // State.
+  let hour = wrapHour(options.hour ?? 10);
+  let dayLength = Math.max(0, options.dayLength ?? 600);
+  let target: WeatherKind = options.weather ?? 'clear';
+  const look: WeatherLook = { ...WEATHER[target] };
+  let from: WeatherLook = { ...look };
+  let blend = 1, blendTime = 0;
+  let wetness = look.wet;
+  let time = 0, flash = 0, flashAge = 10, nextStrike = 4 + rand() * 6;
+  let phase = phaseOf(hour);
+  let daylight = 1;
+
+  const c = { top: new THREE.Color(), horizon: new THREE.Color(), ground: new THREE.Color(), key: new THREE.Color(), hemiSky: new THREE.Color(), hemiGround: new THREE.Color() };
+  const ca = new THREE.Color(), cb = new THREE.Color(), grey = new THREE.Color();
+  const sunDir = new THREE.Vector3();
+  const camPos = new THREE.Vector3();
+  const sample = { keyI: 0, hemiI: 0, ambient: 0, exposure: 1, stars: 0 };
+
+  const sampleDay = (h: number) => {
+    let i = 0;
+    while (i < DAY_KEYS.length - 2 && DAY_KEYS[i + 1].hour <= h) i++;
+    const a = DAY_KEYS[i], b = DAY_KEYS[i + 1];
+    const t = smooth(Math.min(1, Math.max(0, (h - a.hour) / Math.max(1e-6, b.hour - a.hour))));
+    for (const k of ['top', 'horizon', 'ground', 'key', 'hemiSky', 'hemiGround'] as const) {
+      // setHex already takes sRGB into the linear working space (three's colour management). Converting
+      // again squared every channel: a sunset came out blood-red and the night sky pitch black.
+      c[k].copy(ca.setHex(a[k])).lerp(cb.setHex(b[k]), t);
+    }
+    sample.keyI = a.keyI + (b.keyI - a.keyI) * t;
+    sample.hemiI = a.hemiI + (b.hemiI - a.hemiI) * t;
+    sample.ambient = a.ambient + (b.ambient - a.ambient) * t;
+    sample.exposure = a.exposure + (b.exposure - a.exposure) * t;
+    sample.stars = a.stars + (b.stars - a.stars) * t;
+  };
+
+  const weatherColour = (col: THREE.Color, amount: number) => {
+    // Grey it toward its own brightness, darker as the cloud thickens; dust and snow tint it.
+    const l = col.r * 0.2126 + col.g * 0.7152 + col.b * 0.0722;
+    // A storm's cloud deck is slate, not the pale grey of a drizzle: \`dark\` is how much light it swallows.
+    grey.setRGB(l, l, l).multiplyScalar(1 - look.dark);
+    col.lerp(grey, look.grey * amount);
+    if (look.dust > 0) col.lerp(ca.copy(DUST_TINT).multiplyScalar(0.25 + 0.75 * daylight), look.dust * 0.75 * amount);
+    if (look.snow > 0) col.lerp(ca.copy(SNOW_TINT).multiplyScalar(0.15 + 0.85 * daylight), look.snow * 0.35 * amount);
+  };
+
+  const api: Atmosphere = {
+    get hour() { return hour; },
+    set hour(h: number) { hour = wrapHour(h); },
+    get dayLength() { return dayLength; },
+    set dayLength(v: number) { dayLength = Math.max(0, v); },
+    get phase() { return phase; },
+    get daylight() { return daylight; },
+    get weather() { return target; },
+    get wetness() { return wetness; },
+    get flash() { return flash; },
+    sky,
+    setHour(h: number) { hour = wrapHour(h); },
+    setWeather(kind: WeatherKind, seconds = 6) {
+      if (!WEATHER[kind] || kind === target) return;
+      from = { ...look };
+      target = kind;
+      blendTime = Math.max(0, seconds);
+      blend = blendTime === 0 ? 1 : 0;
+      api.onWeather?.(kind);
+    },
+    addNightLight(object, strength) {
+      const base = strength ?? ((object as THREE.Light).isLight ? (object as THREE.Light).intensity : 1.5);
+      nightLights.push({ o: object, strength: base });
+    },
+    wet(materials) {
+      for (const m of materials) {
+        const sm = m as THREE.MeshStandardMaterial;
+        if (!sm || typeof sm.roughness !== 'number' || !sm.color) continue;
+        if (wetMats.some((w) => w.m === sm)) continue;
+        wetMats.push({ m: sm, roughness: sm.roughness, color: sm.color.clone() });
+      }
+    },
+    update(dt: number) {
+      const step = Math.max(0, Math.min(dt, 0.25));
+      time += step;
+      if (dayLength > 0) hour = wrapHour(hour + (step * 24) / dayLength);
+
+      // Weather: blend every number from where it was to where it is going.
+      if (blend < 1) blend = blendTime > 0 ? Math.min(1, blend + step / blendTime) : 1;
+      const to = WEATHER[target];
+      const k = smooth(blend);
+      for (const key of Object.keys(to) as Array<keyof WeatherLook>) look[key] = from[key] + (to[key] - from[key]) * k;
+      // Wet in about 20 s of rain, dry in about a minute after it stops.
+      wetness = look.wet > wetness ? Math.min(look.wet, wetness + step / 20) : Math.max(look.wet, wetness - step / 60);
+
+      // Lightning: a storm strikes every few seconds, a double flash, then thunder after distance / 343.
+      flashAge += step;
+      if (look.lightning > 0.5) {
+        nextStrike -= step;
+        if (nextStrike <= 0) {
+          flashAge = 0;
+          const distance = 300 + rand() * 2700;
+          api.onLightning?.(distance, distance / 343);
+          nextStrike = (3 + rand() * 9) / look.lightning;
+        }
+      }
+      flash = flashAge < 0.6 ? Math.max(0, Math.exp(-flashAge * 9) + 0.6 * Math.exp(-Math.abs(flashAge - 0.22) * 30) - 0.02) : 0;
+      flash = Math.min(1, flash) * Math.min(1, look.lightning * 1.5);
+
+      // The sky at this hour, then the weather over it.
+      sampleDay(hour);
+      sunDirection(hour, sunDir);
+      daylight = Math.max(0, Math.min(1, (sample.keyI - NIGHT.keyI) / (2.3 - NIGHT.keyI)));
+      for (const key of ['top', 'horizon', 'ground', 'hemiSky'] as const) weatherColour(c[key], 1);
+      weatherColour(c.key, 0.6);
+
+      const u = skyMaterial.uniforms;
+      (u.uTop.value as THREE.Color).copy(c.top);
+      (u.uHorizon.value as THREE.Color).copy(c.horizon);
+      (u.uGround.value as THREE.Color).copy(c.ground);
+      (u.uSun.value as THREE.Color).copy(c.key);
+      (u.uSunDir.value as THREE.Vector3).copy(sunDir);
+      u.uStars.value = sample.stars * (1 - look.cloud);
+      u.uCloud.value = look.cloud;
+      u.uTime.value = time;
+      u.uFlash.value = flash;
+      (u.uCloudLit.value as THREE.Color).copy(c.key).multiplyScalar(0.35 + 0.65 * daylight).lerp(c.horizon, 0.45);
+
+      // The fog is the horizon: the one rule that hides where the world ends.
+      fog.color.copy(c.horizon);
+      fog.near = baseFog.near * look.fog;
+      fog.far = Math.max(fog.near + 10, baseFog.far * look.fog);
+      if (!(scene.background instanceof THREE.Texture)) scene.background = fog.color;
+
+      // The lights. By day the key IS the sun; at night it is the moon, opposite and blue.
+      const body = sunDir.y >= 0 ? sunDir : camPos.copy(sunDir).negate();
+      lighting.key.position.copy(lighting.key.target.position).addScaledVector(body, keyOffset);
+      lighting.key.color.copy(c.key);
+      lighting.key.intensity = sample.keyI * look.dim + flash * 3;
+      lighting.hemisphere.color.copy(c.hemiSky);
+      lighting.hemisphere.groundColor.copy(c.hemiGround);
+      lighting.hemisphere.intensity = sample.hemiI * (0.55 + 0.45 * look.dim) + flash * 1.5;
+      lighting.ambient.intensity = sample.ambient;
+      renderer.toneMappingExposure = sample.exposure * (1 + flash * 0.8);
+      scene.environmentIntensity = 0.3 + 0.7 * daylight * (0.5 + 0.5 * look.dim);
+
+      // Street lamps and windows: on as the light goes, off as it comes back.
+      const night = smooth(Math.max(0, Math.min(1, (0.45 - daylight * look.dim) / 0.35)));
+      for (const n of nightLights) {
+        if ((n.o as THREE.Light).isLight) (n.o as THREE.Light).intensity = n.strength * night;
+        else {
+          const m = (n.o as THREE.Mesh).material as THREE.MeshStandardMaterial;
+          if (m && 'emissiveIntensity' in m) m.emissiveIntensity = n.strength * night;
+        }
+      }
+      // Wet: darker and glossier — the look that makes rain read as rain on a road.
+      for (const w of wetMats) {
+        w.m.roughness = w.roughness * (1 - 0.65 * wetness);
+        w.m.color.copy(w.color).multiplyScalar(1 - 0.3 * wetness);
+      }
+
+      // Precipitation follows the camera.
+      camera.getWorldPosition(camPos);
+      sky.position.copy(camPos);
+      const wind = look.wind;
+      const setFall = (o: THREE.Object3D, amount: number, windScale: number) => {
+        const m = (o as THREE.Mesh).material as THREE.ShaderMaterial;
+        o.visible = amount > 0.01;
+        m.uniforms.uAmount.value = amount;
+        m.uniforms.uTime.value = time;
+        (m.uniforms.uCam.value as THREE.Vector3).copy(camPos);
+        (m.uniforms.uWind.value as THREE.Vector2).set(wind * windScale, wind * windScale * 0.35);
+      };
+      setFall(rain, look.rain * (0.7 + 0.3 * look.lightning), 4);   // a storm pours; rain falls
+      (rain.material as THREE.ShaderMaterial).uniforms.uSpeed.value = 13 + 5 * look.lightning;
+      (rain.material as THREE.ShaderMaterial).uniforms.uColor.value.copy(c.horizon).lerp(ca.setRGB(0.8, 0.85, 0.9), 0.5);
+      setFall(snow, look.snow, 1);
+      setFall(dust, look.dust, 6);
+
+      // Phase changes are announced once each.
+      const p = phaseOf(hour);
+      if (p !== phase) { phase = p; api.onPhase?.(p); }
+
+      // Reflections follow the sky in steps: one slot per half hour and weather.
+      envAge += step;
+      const key = Math.round(hour * 2) + ':' + target + ':' + Math.round(blend * 4);
+      if (key !== envKey && envAge >= 1) { envKey = key; envAge = 0; bakeEnvironment(key); }
+    },
+    dispose() {
+      scene.remove(sky, rain, snow, dust);
+      for (const o of [sky, rain, snow, dust]) { (o as THREE.Mesh).geometry.dispose(); ((o as THREE.Mesh).material as THREE.Material).dispose(); }
+      for (const t of envCache.values()) t.dispose();
+      envCache.clear();
+      pmrem?.dispose();
+      for (const w of wetMats) { w.m.roughness = w.roughness; w.m.color.copy(w.color); }
+    },
+  };
+  api.update(0);
+  return api;
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/three/renderer.ts': RENDERER,
   'src/game/three/lighting.ts': LIGHTING,
@@ -3683,10 +4206,12 @@ const FILES: Record<string, string> = {
   // The things a world is actually made of (admin 2026-08-27): car, tree, mountain, river, desert,
   // road, animal — each built at a REAL or a LITE tier, because "asli" and "3d" are different asks.
   'src/game/three/objects.ts': OBJECTS,
+  // A sky that lives: the clock, the day-night cycle and the weather, driving the lights above.
+  'src/game/three/atmosphere.ts': ATMOSPHERE,
 };
 
 export const GAME_3D_MODULES: readonly string[] = [
-  'renderer', 'lighting', 'materials', 'camera', 'world', 'environment', 'surfaces', 'humanoid', 'objects',
+  'renderer', 'lighting', 'materials', 'camera', 'world', 'environment', 'surfaces', 'humanoid', 'objects', 'atmosphere',
 ];
 
 /**
@@ -3724,6 +4249,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
       files['src/game/three/surfaces.ts'] = FILES['src/game/three/surfaces.ts'];
       files['src/game/three/environment.ts'] = FILES['src/game/three/environment.ts'];
     }
+    // atmosphere.ts drives the lights lighting.ts makes (it imports AppliedLighting).
+    if (files['src/game/three/atmosphere.ts']) files['src/game/three/lighting.ts'] = FILES['src/game/three/lighting.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
 
@@ -3770,7 +4297,11 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '  createAutoRickshaw, createBus, createTruck, createTractor — and createTraffic() to fill a road\n' +
       '  with them (keeps left, keeps distance, stops for the player); createWeapon({ kind }) for a\n' +
       '  pistol, rifle, smg, shotgun, sniper, sword, axe or bow — hero.hold(weapon.root), hero.aim(true),\n' +
-      '  fire from weapon.muzzle, and bow.setDraw(held ? 1 : 0). Call setDetailLevel()\n' +
+      '  fire from weapon.muzzle, and bow.setDraw(held ? 1 : 0). Call setDetailLevel()\n' +      "- 🌦️ An outdoor world gets atmosphere.ts: createAtmosphere({ scene, renderer, camera, lighting })\n" +
+      "  — a day-night clock (dayLength seconds per day) and weather via setWeather('rain'|'storm'|'snow'|\n" +
+      "  'fog'|'dust'|'cloudy'|'clear', seconds). addNightLight(lamp), wet([roadMaterial]), and\n" +
+      "  onLightning = (d, delay) => setTimeout(() => audio.play('thunder'), delay * 1000). Call\n" +
+      '  atmo.update(dt) every frame AFTER the camera moves; it drives the lights, fog and sky itself.\n' +
       "  ONCE at start-up — 'real' when the user asked for real/realistic/asli/100%, 'lite' when they\n" +
       '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
       '- 🔴 A BIKE IS createMotorcycle() / createBicycle(), never a capsule over two cylinders. A\n' +

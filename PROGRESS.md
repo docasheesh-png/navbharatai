@@ -91077,3 +91077,64 @@ The generated modules typecheck strictly. A 16-second reel of the voices was ren
 2. **The G5 weapon prompt rule named `generate_game_systems` before the numbered tool list.** That broke the
    prompt-order test, which reads first mentions. The full G5 gate caught it, and the rule now names the
    module, `weapon.ts`.
+
+### 2026-10-05 — Game engine G7: a living sky — day-night clock and weather (atmosphere.ts)
+
+Every NavBharatAI 3D game was lit by ONE frozen preset: the same noon or the same sunset for ever, with no
+clouds, rain or night. `createAtmosphere({ scene, renderer, camera, lighting })` (generate_game_3d,
+`src/game/three/atmosphere.ts`) DRIVES the lights `applyLighting` made rather than adding its own, so shadows,
+fog and reflections keep agreeing.
+
+**The clock and the sky:**
+- `dayLength` real seconds per day; 0 stops the clock.
+- The sun rises in the east, is overhead at noon and sets in the west. At night the key light is a dim, blue
+  moon from above — never from below.
+- Ten keyframes, smoothstep-blended: night, dawn, morning, noon, afternoon, sunset, dusk, night.
+- The dome sits on the far plane: a gradient, a sun or moon disc with glow, twinkling stars, and fbm clouds
+  that drift and thicken with the weather.
+- `onPhase` announces dawn, day, dusk and night, once each.
+- `addNightLight(light | emissive mesh)` switches lamps on at dusk and off at dawn — and on a dark storm
+  afternoon too.
+
+**Weather — `setWeather(kind, seconds)`** with clear, cloudy, rain, storm, snow, fog and dust:
+- Every number blends over the given time: cloud, how dark the sky is, light dim, fog distance, greying, tint,
+  rain/snow/dust amount, lightning and wind.
+- `wet(materials)` makes a road darker and glossier in about 20 s of rain, and it dries in about a minute.
+- A storm strikes lightning every few seconds (seeded): a double flash lifts exposure and the lights, then
+  `onLightning(distance, distance / 343)` brings the thunder.
+- Rain is GPU line streaks; snow and dust are GPU points. Each is one buffer and one draw call, follows the
+  camera with no per-frame allocation, and 'lite' draws a third as much.
+- Reflections are re-baked per half-hour and weather slot: cached, bounded at 24, at most once a second.
+- **The fog is always the sky's horizon colour**, the rule that hides where the world ends.
+
+**Three real defects the renders caught (all fixed before this commit; a test locks each):**
+1. **The sky shader wrote linear colour straight to the screen.** A ShaderMaterial gets no tone mapping or
+   sRGB encode unless asked, so every sky came out dark and oversaturated. Fixed by adding three's
+   `tonemapping_fragment` and `colorspace_fragment`.
+2. **Every keyframe colour was linearised TWICE.** `setHex` already converts into the linear working space,
+   and a further `convertSRGBToLinear()` squared each channel: dawn and sunset came out blood-red and night
+   pitch black.
+   - **Siblings:** the dust and snow tints had the same call; nothing else in the generators does.
+   - **Locked by:** the noon horizon uniform must equal the authored colour, and the shader must carry the
+     colour-space chunk.
+3. **A storm sky was as pale as drizzle.** Greying kept the horizon's brightness. Each weather now has a
+   `dark` amount, and a test requires storm < 0.7 × rain < cloudy.
+
+The horizon band also uses an exponential falloff, so a sunset's orange hugs the lowest ~15° instead of
+climbing the whole sky.
+
+**Locked by `tests/theWorldHasADayAndWeather.test.ts`** (16 cases, the generated module with real three.js):
+- the clock's rate, wrap and stop;
+- the sun's east-to-west path, and the moon at night;
+- light levels across the day, warm dawn and orange sunset, and the four phases once each in order;
+- the colour converted once;
+- fog equals horizon at 9 hours × 7 weathers;
+- the rain blend, wetting and drying, and lightning count, distance, thunder delay and determinism;
+- the flash decays within 0.6 s, and storm < rain < cloudy darkness;
+- snow, fog and dust each look like themselves;
+- lamps follow the night;
+- the sky follows the camera, and dispose cleans up;
+- 'lite' draws a third of the rain.
+
+The generated modules typecheck strictly. A village street was rendered in Chromium at dawn, noon, sunset and
+night, and in rain, storm (on the flash), snow, fog, dust and a rainy night: no console errors.

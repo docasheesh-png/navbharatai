@@ -90185,3 +90185,35 @@ transactions against a serialised in-memory store, and is proven by 8 reversions
 - The API key's own daily ₹ cap is still read-then-record. The money is held now, so this only lets the key's self-set cap overshoot by the in-flight requests.
 
 **Watch after deploy:** for a paid picture, the wallet image row should show one ₹1 per delivered picture, and no `openHolds` should be left behind. Any `[IMAGE_HOLD] … could NOT be given back` log line is a refund that needs a look.
+### 2026-10-05 — Q-622: an anonymous caller is never on the paid tier — one capability table (PR #NEXT, branch `agent/q622-anon`)
+
+**Problem → root cause → class.** With `PROFESSIONAL_FREE_QUOTA=off`, `gateProfessionalTurn` returned `tier: 'paid'`
+for a caller with no account (Professionals, Doctor AI, and Exam mode through it): the full chain, Claude included,
+uncharged because there is no wallet. Sibling: `gateToolAction` returned `'paid'` for an anonymous caller while
+`PROFESSIONAL_PAID_ENABLED` was off (latent: no route read that tier yet). Class: "what does a caller without an
+account get?" was answered separately inside each gate, and the answers drifted.
+
+**Fix.** `src/server/lib/anonymousCapabilities.ts` — one table per AI surface: `guest` (the free universe, bounded by
+`guestDailyQuota`), `owner-billed` (the published-app assistant, paid by the app's owner inside their caps), or
+`sign-in` (the shared `anonymousAiRefusal`). Unknown surface ⇒ sign-in. `CallerTier` ties a tier to the identity, so
+`{ uid: null, tier: 'paid' }` fails the server typecheck. `passGate` (turn + exam) and `toolGate` ask the table first,
+before any env flag; every gate call names its surface; `guestDailyQuota` takes only guest surfaces and re-checks the
+table at run time; `answerForApp` takes its tier from it. Signed-in callers: unchanged in every mode.
+
+**Route map (anonymous caller, before → after).** Professionals / Exam / Doctor AI: default sign-in → sign-in; env-off
+paid chain uncharged → sign-in. Free chat, Repo Analyst, App Review, Security Scan, AI Debugger, App Scan, design:
+free universe under the guest allowance → unchanged. AI tool gate on those: allow + `'paid'` (unread) → allow +
+`'free'`. Image generation / download / prompt improvement, picture editing, Screenshot → Code, Website → App, Pro
+builds: sign-in → sign-in (now also declared in the table, and the tool gate refuses them anonymously too). App
+assistant: owner-billed free chain → unchanged, tier from the table.
+
+**Lock.** `tests/anAnonymousCallerNeverRunsOnPaidRungs.test.ts` (22). Reverted and watched fail: old `passGate.ts` → 5;
+only the new anonymous block removed → 4 + server tsc errors; old `toolGate.ts` → 4; a guest route without
+`guestDailyQuota` → 2; a `paid` table entry → 3 + tsc error; an undeclared model-calling route file → 1. Updated:
+`professionalsRoute.test.ts` (the env-off anonymous case now asserts 401 and no engine call), `toolGate.test.ts`, two
+source pins for the new `gateToolAction` argument. AppKnowledgeBase guest entry names every sign-in surface.
+
+**🟡 Open, for the admin (not changed here).** A guest's free universe is not all ₹0: past the zero-cost leader it
+falls back to cheap metered rungs under the free-chat price ceiling. That is the 2026-09-27 ten-free-messages decision,
+bounded per device and per address by `guestDailyQuota`. Removing the metered rungs for guests would leave those ten
+messages on one zero-cost rung. Recommendation: keep.

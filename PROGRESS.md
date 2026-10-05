@@ -91138,3 +91138,40 @@ climbing the whole sky.
 
 The generated modules typecheck strictly. A village street was rendered in Chromium at dawn, noon, sunset and
 night, and in rain, storm (on the flash), snow, fog, dust and a rainy night: no console errors.
+
+### 2026-10-05 — Game engine G8: a run has rhythm and flow (systems/director.ts)
+
+A generated action game spawned at one rate for ever and ramped on one fixed curve. A new player was
+crushed by wave 4, a good one was bored by wave 2, and nobody ever got a breather.
+`new Director(options)` (generate_game_systems) adds both halves of "just right".
+
+**Rhythm:**
+- `pace` moves build → peak (intensity ≥ 0.8) → relax (after `peakSeconds`, default 14, or once the fight
+  cools) → build (after `relaxSeconds`, default 7).
+- `canSpawn` is false in the breather, and `spawnRate` is 1 / 0.5 / 0.
+- Each change emits `PACE_CHANGED`, a new GameEvent.
+
+**Flow:**
+- `skill` (0..1) falls with damage and deaths and rises with kills and with time survived untouched.
+- `difficulty` moves toward the matching value at most 0.012 a second, between 0.6 and 1.8.
+- A second death within 90 s eases it ×0.85 at once — one step, then the window restarts, so it never
+  spirals to the floor.
+- `gameId` remembers the player's skill on their own device.
+- **Honest:** it changes the challenge, never the score. `adapt: false` keeps every run identical for compared
+  scores, and then saves nothing.
+- `bind()` feeds it from PLAYER_DAMAGED, PLAYER_DIED and ENEMY_DIED, and returns the unbind.
+- It plugs into the spawner as `planWave(wave, director.difficulty)`.
+
+**Locked by `tests/aRunHasRhythmAndFlow.test.ts`** (9 cases, the generated modules):
+- a weak player is eased and a strong one pushed, within bounds;
+- the per-step change stays at most 0.012/s;
+- mercy happens once and does not spiral;
+- `adapt: false` stays at 1;
+- the remembered skill restores, and nothing is saved when not adapting;
+- smaller waves for a weak player, bigger for a strong one;
+- the order is peak → relax → build, with zero spawns in a ≥ 6 s breather;
+- a calm run never peaks;
+- `bind`/unbind works.
+
+**Proven by reversion:** removing the rate cap fails the rate case, and removing the mercy step fails the
+mercy case. The generated modules typecheck strictly. The prompt and the KB say when to use it.

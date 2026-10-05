@@ -839,15 +839,188 @@ export class MeleeWeapon {
 }
 `;
 
+const DIRECTOR = `import { events } from '../core/events';
+
+/**
+ * The Director — why a good action game feels "just right" for the whole run.
+ *
+ * Two jobs, the two things that keep a player playing:
+ *
+ *   1. PACING. Tension BUILDS as enemies arrive, PEAKS in a real fight, then the game gives a BREATHER —
+ *      no new enemies for a few seconds — before it builds again. Constant pressure is exhausting and
+ *      constant calm is boring; the rhythm between them is what "one more round" is made of.
+ *
+ *   2. FLOW. It watches how the player is doing — hurt, dying, killing, untouched — and moves difficulty
+ *      SLOWLY toward what that player can handle: a struggling player is eased, a strong one is pushed.
+ *      Slowly (about 1% a second at most), so nobody ever feels the game change under them; and after two
+ *      quick deaths it eases once, at once, because that is the moment a player quits.
+ *
+ * Honest by construction: it changes the CHALLENGE (how many enemies, how tough, how often), never the
+ * score. Where scores are compared between players (a shared leaderboard), pass \`adapt: false\`: every
+ * run then gets the same curve, so a high score means the same thing for everyone.
+ *
+ * Use it with the spawner:  planWave(wave, director.difficulty)  and only spawn while director.canSpawn.
+ */
+export type Pace = 'build' | 'peak' | 'relax';
+
+export interface DirectorOptions {
+  /** Adapt difficulty to the player. false keeps every run identical (for compared scores). Default true. */
+  adapt?: boolean;
+  minDifficulty?: number;
+  maxDifficulty?: number;
+  /** The longest a peak may last before the breather is forced. Default 14 s. */
+  peakSeconds?: number;
+  /** How long the breather lasts. Default 7 s. */
+  relaxSeconds?: number;
+  /** Remember the player's skill between sessions under this id (localStorage). */
+  gameId?: string;
+  /** Where to start when nothing is remembered, 0..1. Default 0.5 (difficulty 1). */
+  startSkill?: number;
+}
+
+const MAX_RATE = 0.012;           // difficulty change per second, at most
+const MERCY_WINDOW = 90;          // two deaths within this many seconds → ease at once
+const MERCY_STEP = 0.85;
+
+export class Director {
+  /** Multiply challenge by this: planWave(i, difficulty), enemy speed, spawn count. 1 is the designed game. */
+  difficulty = 1;
+  /** How intense the last few seconds were, 0..1. */
+  intensity = 0;
+  pace: Pace = 'build';
+  /** The running estimate of this player, 0..1. */
+  skill: number;
+  readonly adapt: boolean;
+  private readonly min: number;
+  private readonly max: number;
+  private readonly peakSeconds: number;
+  private readonly relaxSeconds: number;
+  private readonly key: string | null;
+  private paceTime = 0;
+  private sinceHurt = 0;
+  private clock = 0;
+  private lastDeath = -Infinity;
+  private saveIn = 5;
+
+  constructor(options: DirectorOptions = {}) {
+    this.adapt = options.adapt !== false;
+    this.min = Math.max(0.2, options.minDifficulty ?? 0.6);
+    this.max = Math.max(this.min, options.maxDifficulty ?? 1.8);
+    this.peakSeconds = Math.max(2, options.peakSeconds ?? 14);
+    this.relaxSeconds = Math.max(1, options.relaxSeconds ?? 7);
+    this.key = options.gameId ? 'nb-director-v1:' + options.gameId : null;
+    this.skill = clamp01(options.startSkill ?? 0.5);
+    if (this.key && this.adapt) {
+      try {
+        const saved = Number(globalThis.localStorage?.getItem(this.key));
+        if (Number.isFinite(saved) && saved > 0) this.skill = clamp01(saved);
+      } catch { /* storage blocked: start from the default */ }
+    }
+    if (this.adapt) this.difficulty = this.targetDifficulty();
+  }
+
+  /** May a new enemy appear now? False during the breather. */
+  get canSpawn(): boolean { return this.pace !== 'relax'; }
+
+  /** Spawn-rate multiplier: full while building, eased at the peak (the fight is already on), 0 in a breather. */
+  get spawnRate(): number { return this.pace === 'build' ? 1 : this.pace === 'peak' ? 0.5 : 0; }
+
+  /** The player lost this fraction of their health (0..1). */
+  playerHurt(fraction: number): void {
+    const f = clamp01(fraction);
+    this.intensity = clamp01(this.intensity + f * 1.6);
+    this.skill = clamp01(this.skill - f * 0.2);
+    this.sinceHurt = 0;
+  }
+
+  playerDied(): void {
+    this.intensity = 1;
+    this.skill = clamp01(this.skill - 0.12);
+    // Two deaths close together is the moment a player gives up — ease now, once, not a second later.
+    if (this.adapt && this.clock - this.lastDeath < MERCY_WINDOW) {
+      this.difficulty = Math.max(this.min, this.difficulty * MERCY_STEP);
+      this.lastDeath = -Infinity;
+    } else {
+      this.lastDeath = this.clock;
+    }
+    this.sinceHurt = 0;
+  }
+
+  enemyKilled(): void {
+    this.intensity = clamp01(this.intensity + 0.07);
+    this.skill = clamp01(this.skill + 0.008);
+  }
+
+  /** Advance. Call once per fixed step. */
+  update(dt: number): void {
+    const step = Math.max(0, Math.min(dt, 0.25));
+    this.clock += step;
+    this.paceTime += step;
+    this.sinceHurt += step;
+    this.intensity *= Math.exp(-step / (this.pace === 'relax' ? 2.5 : 6));
+
+    // Surviving untouched is evidence too: skill creeps up while the player is not being hurt.
+    if (this.sinceHurt > 5) this.skill = clamp01(this.skill + step * 0.003);
+
+    const was = this.pace;
+    if (this.pace === 'build' && this.intensity >= 0.8) this.pace = 'peak';
+    else if (this.pace === 'peak' && (this.paceTime >= this.peakSeconds || this.intensity < 0.35)) this.pace = 'relax';
+    else if (this.pace === 'relax' && this.paceTime >= this.relaxSeconds) this.pace = 'build';
+    if (this.pace !== was) {
+      this.paceTime = 0;
+      events.emit('PACE_CHANGED', { pace: this.pace, intensity: this.intensity, difficulty: this.difficulty });
+    }
+
+    if (this.adapt) {
+      const want = this.targetDifficulty();
+      const room = MAX_RATE * step;
+      this.difficulty += Math.max(-room, Math.min(room, want - this.difficulty));
+      this.difficulty = Math.max(this.min, Math.min(this.max, this.difficulty));
+      this.saveIn -= step;
+      if (this.saveIn <= 0) { this.saveIn = 5; this.save(); }
+    }
+  }
+
+  /** Listen to the game's own events. Returns the unsubscribe — call it when the scene ends. */
+  bind(): () => void {
+    const offs = [
+      events.on('PLAYER_DAMAGED', (p: { amount?: number; health?: number; maxHealth?: number }) => {
+        const max = p?.maxHealth ?? 100;
+        this.playerHurt(max > 0 ? (p?.amount ?? 10) / max : 0.1);
+      }),
+      events.on('PLAYER_DIED', () => this.playerDied()),
+      events.on('ENEMY_DIED', () => this.enemyKilled()),
+      events.on('GAME_OVER', () => this.save()),
+    ];
+    return () => { for (const off of offs) off(); this.save(); };
+  }
+
+  /** Remember this player's skill for next time (only with a gameId, only when adapting). */
+  save(): void {
+    if (!this.key || !this.adapt) return;
+    try { globalThis.localStorage?.setItem(this.key, this.skill.toFixed(4)); } catch { /* storage blocked */ }
+  }
+
+  private targetDifficulty(): number {
+    const s = this.skill;
+    return s >= 0.5 ? 1 + (s - 0.5) * 2 * (this.max - 1) : 1 - (0.5 - s) * 2 * (1 - this.min);
+  }
+}
+
+function clamp01(v: number): number { return Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0)); }
+`;
+
 const FILES: Record<string, string> = {
   'src/game/systems/combat.ts': COMBAT,
   'src/game/systems/ai.ts': AI,
   'src/game/systems/projectile.ts': PROJECTILE,
   'src/game/systems/spawner.ts': SPAWNER,
+  // Pacing (build → peak → breather) and slow, bounded difficulty adaptation — 2026-10-05.
+  'src/game/systems/director.ts': DIRECTOR,
   'src/game/systems/weapon.ts': WEAPON,
 };
 
-export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'ai', 'projectile', 'spawner', 'weapon'];
+export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'ai', 'projectile', 'spawner', 'weapon', 'director'];
 
 /** Generate the gameplay systems. Pure; never throws. */
 export function generateGameSystems(include?: string[]): GameSystemsResult {
@@ -888,7 +1061,11 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       "const gun = new Weapon('rifle');   // pistol | rifle | smg | shotgun | sniper | bow\n" +
       'gun.update(dt, input.isDown("attack"), muzzleWorldPos, aimDir, bullets); // camera.pitch += gun.kick\n' +
       'const sword = new MeleeWeapon(30); if (input.wasPressed("attack")) sword.swing();\n' +
-      'for (const t of sword.update(dt, player.position, player.rotation.y, targets)) (t.ref as Health).damage(sword.damage);\n' +
+      'for (const t of sword.update(dt, player.position, player.rotation.y, targets)) (t.ref as Health).damage(sword.damage);\n' +      '// The RHYTHM and the FLOW (director.ts): build → peak → breather, and difficulty that follows the player.\n' +
+      "const director = new Director({ gameId: 'my-game' });   // adapt: false when scores are compared\n" +
+      'const offDirector = director.bind();                   // listens to PLAYER_DAMAGED / DIED / ENEMY_DIED\n' +
+      'const plan = planWave(wave, director.difficulty);      // and: if (director.canSpawn) spawn…\n' +
+      '// each fixed step: director.update(dt);  on teardown: offDirector();\n' +
       '```\n' +
       'THE RULES THESE ENCODE — do not re-implement them by hand:\n' +
       '- Damage needs BOTH an attack cooldown and i-frames. With neither, an adjacent enemy deals its\n' +
@@ -904,6 +1081,9 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       '  and recoil — Weapon does all of it. A shotgun is many pellets and ONE bang. An arrow falls.\n' +
       '- A melee swing hits what is IN FRONT, in reach, once per swing — MeleeWeapon, never a radius check\n' +
       '  every frame.\n' +
+      '- A run needs RHYTHM: Director gives build → peak → a breather with no new enemies (canSpawn is\n' +
+      '  false), and moves difficulty slowly (≤1.2%/s) toward what THIS player handles, easing at once after\n' +
+      '  two quick deaths. It changes the challenge, never the score; pass adapt: false for a leaderboard.\n' +
       '- Everything is seeded and pure, so a run replays identically and difficulty is tunable.',
   };
 }

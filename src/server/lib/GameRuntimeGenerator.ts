@@ -260,7 +260,9 @@ export type GameEvent =
   | 'BOSS_SPAWNED' | 'BOSS_PHASE_CHANGED' | 'BOSS_DEFEATED'
   // The meta layer (meta.ts): what a player sees between and across rounds.
   | 'COMBO_CHANGED' | 'COMBO_MILESTONE' | 'NEW_BEST' | 'LEVEL_UP' | 'ACHIEVEMENT_UNLOCKED'
-  | 'DAILY_REWARD' | 'GOAL_COMPLETED' | 'RUN_SUMMARY';
+  | 'DAILY_REWARD' | 'GOAL_COMPLETED' | 'RUN_SUMMARY'
+  // The Director (systems/director.ts): the run's rhythm — build, peak, breather.
+  | 'PACE_CHANGED';
 
 type Handler = (payload?: any) => void;
 

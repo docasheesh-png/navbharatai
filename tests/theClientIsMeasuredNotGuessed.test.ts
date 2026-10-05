@@ -75,7 +75,7 @@ describe('the admin can run the check from the panel, and is told the answer', (
 
   it('the card says correct, mismatch (naming the number to set) or not-measurable — never a guess', () => {
     expect(hopVerdictText({ yourAddress: 'a', measuredHops: 1, trustedHops: 1, verdict: 'correct' })).toMatch(/^Correct\. .*1 proxy,/);
-    expect(hopVerdictText({ yourAddress: 'a', measuredHops: 2, trustedHops: 1, verdict: 'mismatch' })).toMatch(/2 proxies.*set TRUSTED_PROXY_HOPS .* to 2/);
+    expect(hopVerdictText({ yourAddress: 'a', measuredHops: 2, trustedHops: 1, verdict: 'mismatch' })).toMatch(/2 proxies.*TRUSTED_PROXY_HOPS .* must be changed to 2/);
     expect(hopVerdictText({ yourAddress: null, measuredHops: null, trustedHops: 1, verdict: 'no-proxy' })).toMatch(/cannot measure/);
     expect(isHopReport({ trustedHops: 1, verdict: 'correct' })).toBe(true);
     expect(isHopReport({ error: 'Admin token required.' })).toBe(false);

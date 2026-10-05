@@ -31,7 +31,7 @@ export function hopVerdictText(r: HopReport): string {
     return `Correct. Your request passed through ${proxies(r.measuredHops)}, and the server trusts exactly ${r.trustedHops} — so it reads every visitor's real address, and nobody can choose their own.`;
   }
   if (r.verdict === 'mismatch') {
-    return `Mismatch. Your request passed through ${proxies(r.measuredHops)}, but the server trusts ${r.trustedHops}. Per-address limits are keyed on the wrong address. Ask Claude to set TRUSTED_PROXY_HOPS (clientAddress.ts) to ${r.measuredHops}.`;
+    return `Mismatch. Your request passed through ${proxies(r.measuredHops)}, but the server trusts ${r.trustedHops}. Per-address limits are keyed on the wrong address. TRUSTED_PROXY_HOPS (clientAddress.ts) must be changed to ${r.measuredHops} — a code change.`;
   }
   return 'This request did not come through the hosting proxy, so it cannot measure anything. Open the admin panel on navbharatai.com (not a local or preview address) and check again.';
 }

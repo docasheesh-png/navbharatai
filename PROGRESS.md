@@ -90189,3 +90189,5 @@ recorded here). So `TRUSTED_PROXY_HOPS = 1` (#3538) is confirmed on the real hos
 The row leaves the open queue. Lock: `tests/aCallerCannotChooseItsOwnAddress.test.ts` (one reader of the address)
 and `tests/theClientIsMeasuredNotGuessed.test.ts` (the measurement and its card). If the hosting path ever
 changes (a CDN or load balancer in front of Cloud Run), the same card will say Mismatch and name the number.
+
+⚠️ **Correction to the entry above (same day):** it says the existing 3D tests "only read the source text". That is not fully true. `tests/game3dObjects.test.ts` already RUNS the generated `objects.ts` against a three.js stub (`tests/helpers/threeStub.ts`), for the bikes. It never covered the road, the car's arches, merged UVs, the ground or the textures, which is why those defects survived. The stub now carries the detail tier (`setDetailLevel` / `getDetailLevel`), since that moved into `surfaces.ts`. `tests/aRecipeBringsTheLayersItImports.test.ts` now expects `surfaces.ts` among the files a missing 3D layer brings in, because `world.ts` imports it.

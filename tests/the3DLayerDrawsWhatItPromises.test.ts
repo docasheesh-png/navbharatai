@@ -3,8 +3,9 @@
 // The admin forwarded a plan to rebuild game graphics from scratch. Before building anything, the
 // existing 3D layer (Game3DGenerator.ts — the library every generated 3D game is told to use) was
 // RENDERED in a real browser, used exactly as the builder's prompt instructs. The best case it could
-// produce had six defects, every one invisible to the existing tests because those tests only read the
-// SOURCE TEXT of the generated files:
+// produce had six defects, every one invisible to the existing tests: those either read the SOURCE TEXT
+// of the generated files, or (tests/game3dObjects.test.ts) run the bikes against a three.js STUB — none
+// of them looked at the road, the car's arches, merged UVs, the ground or the textures:
 //
 //   1. the road sat in the ground's plane, so it flickered into black zebra stripes (z-fighting);
 //   2. one kerb and one edge line (a `break` after the first side), and that kerb was inside the road;

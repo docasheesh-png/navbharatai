@@ -5848,7 +5848,8 @@ async function noteBuildOutcome(
     const message = typeof req.body?.message === 'string' ? req.body.message.slice(0, 4000) : '';
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId || !message) { res.status(400).json({ error: 'workspaceId and message are required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    // VERIFIED owner only: this route can start a paid repair, so a claimed uid is never enough (aClaimedUidReadsNoOnesSource).
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     if (!previewAutoRepairEnabled()) { res.json({ ok: true, run: false, reason: 'Automatic repair is switched off.' }); return; }
     const report = await loadDiagnostics(workspaceId).catch(() => null);
     const facts = {

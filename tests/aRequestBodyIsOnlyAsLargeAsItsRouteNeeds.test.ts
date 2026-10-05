@@ -51,6 +51,7 @@ const REVIEWED_SMALL: Record<string, string> = {
   '/api/agentv3/preview-keepalive': 'ids; `promptHash` is a hash',
   '/api/agentv3/publish': 'ids and the deploy choice; the files come from the server, not the body',
   '/api/agentv3/preview-error': '`message` is cut to 4,000 characters by the client and the server; `source` is a word',
+  '/api/agentv3/preview-error/auto-repair': '`message` is cut to 4,000 characters by the client and the server; the rest are ids and a framework word (Q-148)',
   '/api/agentv3/respond': '`requestId` and `approved`',
   '/api/agentv3/steer': '`message` is cut to 2,000 characters (sanitizeSteerMessage)',
   '/api/agentv3/queue/enqueue': '`prompt` is refused over MAX_PROMPT_LEN (20,000 characters)',

@@ -836,6 +836,10 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   const buildingRef = useRef(false);
   /** Q-148: whether this preview already asked the server about an automatic repair. */
   const autoRepairAsked = useRef(false);
+  // Read through a ref (aParentRenderIsNotAReload): the panel passes a new arrow every render, and the
+  // message listener below must not be torn down and re-bound for that.
+  const onAutoRepairRef = useRef(onAutoRepair);
+  onAutoRepairRef.current = onAutoRepair;
   buildingRef.current = !!buildPhase && buildPhase !== 'idle';
   const renderedWhileBuilding = useRef(false);
   // Returns true when the preview rendered (non-empty HTML) — the "Fix with AI" deep-refresh flow
@@ -1275,7 +1279,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
       // Q-148: after the build has ended, ask whether this crash is one the platform repairs by itself
       // (paid build, first time, reproduced in its own browser — the server decides). Asked once per
       // preview mount, so a burst of errors is one question; the server also records it once per build.
-      if (onAutoRepair && !buildingRef.current && !autoRepairAsked.current) {
+      if (onAutoRepairRef.current && !buildingRef.current && !autoRepairAsked.current) {
         autoRepairAsked.current = true;
         void (async () => {
           try {
@@ -1288,7 +1292,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
               isRecord(b) && typeof b.run === 'boolean' && typeof b.reason === 'string');
             if (a.ok && a.value.run && typeof a.value.prompt === 'string' && a.value.prompt) {
               setFailoverNote(a.value.reason);
-              onAutoRepair(a.value.prompt);
+              onAutoRepairRef.current?.(a.value.prompt);
             }
           } catch { /* the Fix with AI button is still there */ }
         })();
@@ -1298,7 +1302,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
     return () => window.removeEventListener('message', onMessage);
     // `mode` + `effectiveUrl` are read by the failover decision, so the listener must be re-bound when
     // they change — a stale closure would judge the failover against a previous render's state.
-  }, [workspaceId, userId, email, mode, effectiveUrl, onAutoRepair, framework]);
+  }, [workspaceId, userId, email, mode, effectiveUrl, framework]);
 
   // VISUAL EDITOR (v1, in-browser mode only — see ReactPreview.ts's injected inspector script).
   // Clicking an element in edit mode reports back {file, line, column, newText}; this applies it via

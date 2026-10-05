@@ -66,14 +66,14 @@ describe('the wiring', () => {
   it('the route is owner-checked, reproduces only on an awake sandbox, and claims the build before answering', () => {
     const start = route.indexOf("app.post('/api/agentv3/preview-error/auto-repair'");
     const body = route.slice(start, start + 4500);
-    expect(body).toContain('assertWorkspaceOwner(req, workspaceId)');
+    expect(body).toContain('assertVerifiedWorkspaceOwner(req, workspaceId)');
     expect(body).toContain('if (sandboxDiag().livePreviewAvailable)');
     expect(body).toContain('if (sandboxId && actuator.browseUrl && actuator.getConsoleErrors)');
     expect(body).toContain('previewAutoRepairAt: Date.now()');
   });
 
   it('the preview asks only after the build ended, once per mount, and the panel never sends over a running build', () => {
-    expect(surface).toContain('if (onAutoRepair && !buildingRef.current && !autoRepairAsked.current)');
+    expect(surface).toContain('if (onAutoRepairRef.current && !buildingRef.current && !autoRepairAsked.current)');
     expect(panel).toMatch(/onAutoRepair=\{\(repairPrompt\) => \{[\s\S]{0,300}if \(running\) return;/);
   });
 });

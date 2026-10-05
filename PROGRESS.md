@@ -89925,3 +89925,16 @@ instance (a cross-instance replay still needs the nonce, which never leaves the 
 (3) sibling found, not fixed here: App.tsx still accepts `#fb_token=` fragments / `FIREBASE_AUTH_SUCCESS` messages that
 no server sends any more. **Phones:** a frontend change reaches phone users only via a fresh `.aab`/`.ipa`
 (`docs/claude/RELEASE.md`) — none built here; app builds 2026-08-28…2026-10-05 lose signed-OUT GitHub connect until updated.
+
+### 2026-10-05 — Q-670 overdraft forgiveness, Q-671 planted Firebase token (PR #NEXT)
+
+- **Q-670** (found by the Q-614 refund work): `mirroredCreditPatch` floored every result at zero, so any
+  credit to a wallet in overdraft wiped the whole debt and booked it as lifetime credit, and an admin
+  deduction on such a wallet raised it to zero. Now a credit moves by exactly its amount and a deduction
+  floors at `min(held, 0)`. Lock: Q-670 block in `tests/walletMirror.test.ts` (3 fail when reverted).
+- **Q-671** (found by the Q-623 work): the Firebase sibling of the GitHub planting hole — three ingestion
+  paths with no legitimate sender. Removed, and a stored token is dropped on load (the only issuer ever was
+  a mock with fabricated credentials). Lock: `tests/aFirebaseTokenIsNeverPlanted.test.ts`.
+- Two Q-615 leftovers fixed: the platform-credentials census accepts `cashfreePaymentsAvailability`, and
+  the walletMirror simulator guard now asserts there is no simulator at all.
+- **Q-672** recorded OPEN: the suite leaks temp directories (24 GB seen).

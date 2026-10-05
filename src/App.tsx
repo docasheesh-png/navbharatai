@@ -921,15 +921,14 @@ export default function App() {
   const [userE2bKey, setUserE2bKey] = useState<string>(() => {
     try { return localStorage.getItem('engineer_e2b_key') || ''; } catch { return ''; }
   });
-  const [firebaseToken, setFirebaseToken] = useState<string | null>(() => localStorage.getItem('fb_token'));
-  const [firebaseUser, setFirebaseUser] = useState<any>(() => {
-    try {
-      const saved = localStorage.getItem('fb_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
+  // Q-671: a stored Firebase "DevOps link" token is never trusted. The only flow that ever issued one was a
+  // mock with fabricated credentials (routes/firebaseAuth.ts now answers "not yet available"), and every
+  // other way in was a planting hole — so whatever is stored is fake or hostile, and it is dropped.
+  const [firebaseToken, setFirebaseToken] = useState<string | null>(() => {
+    try { localStorage.removeItem('fb_token'); localStorage.removeItem('fb_user'); } catch { /* storage blocked */ }
+    return null;
   });
+  const [firebaseUser, setFirebaseUser] = useState<any>(null);
   const [githubUser, setGithubUser] = useState<any>(null);
   const [repositories, setRepositories] = useState<any[]>([]);
   const [isGHSyncing, setIsGHSyncing] = useState(false);
@@ -3016,18 +3015,9 @@ export default function App() {
         fetchGitHubUser(token);
       } else if (e.data.type === 'GITHUB_AUTH_ERROR') {
         addLog(`GitHub connection failed: ${e.data.error}`, 'error');
-      } else if (e.data.type === 'FIREBASE_AUTH_SUCCESS') {
-        // Same-origin guard: reject a cross-origin page injecting a forged Firebase token.
-        if (e.origin !== window.location.origin) return;
-        const token = e.data.token;
-        const userObj = e.data.user;
-        setFirebaseToken(token);
-        setFirebaseUser(userObj);
-        localStorage.setItem('fb_token', token);
-        localStorage.setItem('fb_user', JSON.stringify(userObj));
-        // Keep the active deployment platform synced
-        localStorage.setItem('v_deploy_platform', 'firebase');
-        addLog(`GCP/Firebase connected successfully to project: ${userObj.projectId || 'navbharat-sandbox-7729'}.`, 'success');
+      // Q-671: there is no FIREBASE_AUTH_SUCCESS handler. No server sends one (the Firebase connect route
+      // answers CANCELLED only), so a message carrying a Firebase token could only come from a page
+      // trying to plant one — the same hole Q-623 closed for GitHub.
       } else if (e.data.type === 'FIREBASE_AUTH_ERROR') {
         addLog(`Firebase connection failed: ${e.data.error}`, 'error');
         setFirebaseOauthError({
@@ -3048,18 +3038,8 @@ export default function App() {
         addLog('GitHub connected successfully via cross-tab channel.', 'success');
         fetchGitHubUser(token);
         localStorage.removeItem('gh_token_signal');
-      } else if (e.key === 'firebase_token_signal' && e.newValue) {
-        const token = e.newValue;
-        setFirebaseToken(token);
-        localStorage.setItem('fb_token', token);
-        try {
-          const userObj = JSON.parse(localStorage.getItem('fb_user') || '{}');
-          setFirebaseUser(userObj);
-        } catch {}
-        localStorage.setItem('v_deploy_platform', 'firebase');
-        addLog('Firebase pipeline updated successfully via cross-tab channel.', 'success');
-        localStorage.removeItem('firebase_token_signal');
       }
+      // Q-671: no `firebase_token_signal` listener — nothing in this app writes it any more.
     };
     window.addEventListener('storage', handleStorageChange);
 
@@ -3198,20 +3178,8 @@ export default function App() {
     // Clean URL — accepted or not, the token never stays in the address bar or history.
     if (ghReturn.kind !== 'absent') window.history.replaceState(null, '', window.location.pathname + window.location.search);
 
-    const fbFragmentToken = hashParams.get('fb_token');
-    if (fbFragmentToken) {
-      setFirebaseToken(fbFragmentToken);
-      localStorage.setItem('fb_token', fbFragmentToken);
-      try {
-        const userStr = hashParams.get('fb_user');
-        if (userStr) {
-          const decodedUser = JSON.parse(decodeURIComponent(userStr));
-          setFirebaseUser(decodedUser);
-          localStorage.setItem('fb_user', JSON.stringify(decodedUser));
-        }
-      } catch {}
-      localStorage.setItem('v_deploy_platform', 'firebase');
-      addLog('Firebase connected (via redirect).', 'success');
+    // Q-671: a `#fb_token=` fragment is never stored — no server issues one, so only a crafted link could.
+    if (hashParams.get('fb_token')) {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
 

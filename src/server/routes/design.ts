@@ -12,6 +12,7 @@ import { inAiSpendZone } from '../lib/aiSpendZone';
 import { callProfessionalAI } from '../lib/professionalRouting';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { gateToolAction, burnToolAction, chargeToolAction } from '../tools/toolGate';
+import { identityGrantEmail } from '../AgentV3/featureFlag';
 import { aiSuggestions, aiPalette, type RouteFn } from '../AgentV3/DesignAdvisor';
 import { lintDesign } from '../AppMakerLab/intelligence/DesignLinter';
 import { lintA11y } from '../AppMakerLab/intelligence/A11yLinter';
@@ -28,7 +29,7 @@ export function registerDesignRoutes(app: Express): void {
   app.post('/api/design/suggest', guestDailyQuota('design'), inAiSpendZone(async (req: Request, res: Response) => {
     // Daily allowance / Professional Pass (flag-off = no-op).
     const identity = await verifyFirebaseIdentity(req);
-    const gate = await gateToolAction(identity?.uid || null, identity?.email || null, 'ai_tool');
+    const gate = await gateToolAction(identity?.uid || null, identityGrantEmail(identity), 'ai_tool');
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;
@@ -54,7 +55,7 @@ export function registerDesignRoutes(app: Express): void {
       return;
     }
     const paletteIdentity = await verifyFirebaseIdentity(req);
-    const paletteGate = await gateToolAction(paletteIdentity?.uid || null, paletteIdentity?.email || null, 'ai_tool');
+    const paletteGate = await gateToolAction(paletteIdentity?.uid || null, identityGrantEmail(paletteIdentity), 'ai_tool');
     if (!paletteGate.allow) {
       res.status(paletteGate.status).json(paletteGate.body);
       return;

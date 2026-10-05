@@ -89862,3 +89862,21 @@ origin (domain from the admin).
 **Session incident, recorded honestly:** a `/tmp` cleanup (the suite had leaked ~24 GB of temp dirs) also deleted the
 environment's commit-signing helper `/tmp/code-sign`; commits were blocked until the session restarted. The temp-dir
 leak itself is a test-hygiene defect worth its own row.
+
+### 2026-10-05 — Q-624: an email grants nothing until the provider verified it (PR #NEXT)
+
+- **Class:** a list that matches an email (free list, cost-routing canary, sign-in exemption, store admins,
+  report admins, the professional and tool gates) trusted any address on a verified TOKEN, verified or not.
+  Email/password sign-up sends no verification, so a listed address nobody had registered yet could be claimed.
+- **Fix at the type:** `GrantEmail` (featureFlag.ts) is produced only by `grantEmail(email, emailVerified)`;
+  every grant takes it, so the compiler refuses a plain string at every present and future call site.
+  `verifyFirebaseIdentity`, the money gate, `resolveGrantEmail` and `emailForUid` carry the provider's flag.
+  The access allowlist stays an availability gate (empty in production); admin lists show a stored-email
+  label through `freeListLabelForStoredEmail` (one reader, held by a census).
+- **Siblings found while fixing:** `isReportAdmin`/`isAdminEmail` (raw provider names, admin hosting), the
+  costly-AI account (images, screenshot-to-prompt), `gateToolAction`, `gateProfessionalTurn/Exam`, and the
+  deploy-providers price label (read a claimed query email; now the verified identity).
+- **Lock:** `tests/aGrantNeedsAVerifiedEmail.test.ts` (5 fail when the check is removed).
+- **Watch:** a listed person signing in with an unverified email/password account loses the grant — list
+  their uid too, or have them verify the address.
+- Also: `tests/fixtures/sheetContractBaseline.json` AppModals 6 → 5 (Q-615 removed the simulated checkout).

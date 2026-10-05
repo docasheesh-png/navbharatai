@@ -33,7 +33,8 @@ const state = {
 };
 
 vi.mock('../src/server/lib/authMiddleware', () => ({
-  verifyFirebaseIdentity: async () => (state.uid ? { uid: state.uid, email: state.email } : null),
+  // A signed-in tester's address is provider-verified (Q-624: an unverified one grants no admin right).
+  verifyFirebaseIdentity: async () => (state.uid ? { uid: state.uid, email: state.email, emailVerified: true } : null),
   verifyFirebaseToken: async () => state.uid,
   // The shared-data routes register through the real rateLimiter; a mock module missing an export the
   // route imports crashes REGISTRATION (undefined is not a function) and takes the whole suite red

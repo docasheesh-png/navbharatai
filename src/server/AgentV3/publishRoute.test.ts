@@ -83,7 +83,8 @@ describe('the publish handler’s container branch', () => {
     const decl = before.slice(before.lastIndexOf('let containerHostingAvailable'));
     expect(decl).toContain('verifyFirebaseIdentity(req)');
     expect(decl).not.toContain('resolveReadIdentity');
-    expect(decl).toMatch(/hostingAvailability\(\{\s*isAdmin: isReportAdmin\(identity\?\.email/);
+    // Q-624: the verified identity's address, and only when the provider verified it.
+    expect(decl).toMatch(/hostingAvailability\(\{\s*isAdmin: isReportAdmin\(identityGrantEmail\(identity\)\)/);
   });
 
   it('🔒 always responds and always returns — it can never fall through to the static publish', () => {

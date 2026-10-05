@@ -16,6 +16,7 @@ import { professionalUsageStore, professionalExamUsageStore } from './Profession
 import { aiWalletSpendEnabled } from '../lib/aiTurnCharge';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { getServerDb } from '../lib/serverDb';
+import type { GrantEmail } from '../AgentV3/featureFlag';
 import { walletEmptyBody, WALLET_EMPTY_STATUS } from '../lib/walletEmptyNotice';
 
 export type ProfessionalTier = 'free' | 'paid';
@@ -68,7 +69,7 @@ async function balanceFor(uid: string): Promise<number | null> {
  *  charged, and NOT refused for an empty wallet (a free message does not need a balance). After that
  *  every answer is PAID: the paid chain, charged its real cost + markup from the one wallet, and
  *  refused only when that wallet is empty. The free-list and a Pass holder are unlimited. */
-export async function gateProfessionalTurn(uid: string | null, email: string | null): Promise<PassGateResult> {
+export async function gateProfessionalTurn(uid: string | null, email: GrantEmail | null): Promise<PassGateResult> {
   const freeListed = isProfessionalFreeUser(uid, email);
   const walletSpend = aiWalletSpendEnabled();
   const quotaOn = professionalFreeQuotaEnabled();
@@ -159,7 +160,7 @@ export type ExamGateResult =
  * model is asked, with the one thing that still works named — a smaller paper that fits the free
  * questions left — rather than a paper the student cannot pay for.
  */
-export async function gateProfessionalExam(uid: string | null, email: string | null, requested: number): Promise<ExamGateResult> {
+export async function gateProfessionalExam(uid: string | null, email: GrantEmail | null, requested: number): Promise<ExamGateResult> {
   const freeListed = isProfessionalFreeUser(uid, email);
   const walletSpend = aiWalletSpendEnabled();
   const quotaOn = professionalFreeQuotaEnabled();

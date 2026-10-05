@@ -18,6 +18,7 @@
 // scheduling, progress/todo projection, and the per-module build context. No I/O, no SDKs —
 // fully unit-testable. Durable persistence lives in ProjectPlanStore.ts.
 
+import type { GrantEmail } from './featureFlag';
 import { isPlatformContinuePrompt } from '../../lib/continueBuildPrompts';
 import type { TodoItem, TodoStatus } from './types';
 import { parseEnvFlag } from '../lib/envFlag';
@@ -105,7 +106,7 @@ export const MIN_PROJECT_MODULES = 3;
  */
 export function projectModeEnabled(
   env: NodeJS.ProcessEnv = process.env,
-  identity?: { userId?: string | null; email?: string | null },
+  identity?: { userId?: string | null; email?: GrantEmail | null },
 ): boolean {
   const flag = (env.AGENTV3_PROJECT_MODE || '').trim();
   // A plain on/off answer wins; anything else is read as an allowlist of uids/emails below.
@@ -268,7 +269,7 @@ function maskIdentity(raw: string | null | undefined): string {
 export function projectModeDiagnosis(args: {
   /** The raw `AGENTV3_PROJECT_MODE` value, exactly as the environment holds it. */
   flagRaw?: string | null;
-  identity?: { userId?: string | null; email?: string | null };
+  identity?: { userId?: string | null; email?: GrantEmail | null };
   /** The other big-app strategy, when it has already claimed this build. */
   preEmptedBy?: 'mega-roadmap' | 'plan-first' | null;
   isNewBuild?: boolean;

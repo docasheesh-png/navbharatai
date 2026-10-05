@@ -34,6 +34,7 @@ import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBa
 import { getServerDb } from '../lib/serverDb';
 
 import { parseEnvNumber } from '../lib/envNumber';
+import type { GrantEmail } from '../AgentV3/featureFlag';
 export type { ToolBucket };
 
 /**
@@ -95,7 +96,7 @@ const BUCKET_LABEL: Record<ToolBucket, string> = {
  */
 export async function gateToolAction(
   uid: string | null,
-  email: string | null,
+  email: GrantEmail | null,
   bucket: ToolBucket,
 ): Promise<ToolGateResult> {
   const freeListed = isProfessionalFreeUser(uid, email);

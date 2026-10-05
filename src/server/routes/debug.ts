@@ -4,6 +4,7 @@ import { callProfessionalAI } from '../lib/professionalRouting';
 import { workspaceRateLimiter, verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { validateBody, vobject, vstring } from '../lib/validate';
 import { gateToolAction, burnToolAction, chargeToolAction } from '../tools/toolGate';
+import { identityGrantEmail } from '../AgentV3/featureFlag';
 import {
   buildDebugSystemPrompt, buildDebugUserPrompt, parseDebugResponse, isValidDebugRequest,
 } from '../lib/debugAnalysis';
@@ -38,7 +39,7 @@ export function registerDebugRoutes(app: Express): void {
     }
     // Daily allowance / Professional Pass (flag-off = no-op).
     const identity = await verifyFirebaseIdentity(req);
-    const gate = await gateToolAction(identity?.uid || null, identity?.email || null, 'ai_tool');
+    const gate = await gateToolAction(identity?.uid || null, identityGrantEmail(identity), 'ai_tool');
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;

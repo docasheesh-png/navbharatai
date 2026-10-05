@@ -6,7 +6,7 @@
 // quota and pass length from Cloud Run WITHOUT a deploy — and the master switch defaults OFF so the
 // whole feature is inert (today's behaviour) until the pay path + UI are wired and the admin flips it.
 
-import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
+import { isAgentV3FreeUser, type GrantEmail } from '../AgentV3/featureFlag';
 
 import { parseEnvNumber } from '../lib/envNumber';
 /** Master switch. OFF (default) = no gating anywhere — professionals behave exactly like today. */
@@ -67,7 +67,7 @@ export function professionalPassDays(): number {
  * Is this VERIFIED user free (admin/tester)? Reuses the platform free-list so the same admin/test
  * accounts are free everywhere. MUST be called with the server-verified identity, never a client claim.
  */
-export function isProfessionalFreeUser(userId?: string | null, email?: string | null): boolean {
+export function isProfessionalFreeUser(userId?: string | null, email?: GrantEmail | null): boolean {
   return isAgentV3FreeUser(userId, email);
 }
 

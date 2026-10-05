@@ -3,7 +3,7 @@ import { domainOpsRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, enfo
 import { sendSafeError } from '../lib/httpError';
 import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan, readHostingPlanStatus } from '../lib/hostingPlan';
 import { getServerDb } from '../lib/serverDb';
-import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
+import { isAgentV3FreeUser, identityGrantEmail, type GrantEmail } from '../AgentV3/featureFlag';
 import {
   normalizeDomain,
   firebaseCustomDomainsEnabled,
@@ -307,7 +307,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
    * cannot answer (`known` false ⇒ allow). Rule #1 — an outage must never block a legitimate paying
    * user's setup. Only a KNOWN "no active plan" refuses.
    */
-  async function refusedForNoPlan(res: Response, uid: string, email: string | null): Promise<boolean> {
+  async function refusedForNoPlan(res: Response, uid: string, email: GrantEmail | null): Promise<boolean> {
     if (!hostingPlansEnabled() || isAgentV3FreeUser(uid, email)) return false;
     const plan = await probeHostingPlan(uid);
     if (!plan.known || plan.active) return false;
@@ -336,8 +336,8 @@ export function registerNbaiDomainsRoutes(app: Express): void {
       return;
     }
     // PLAN GATE — see `refusedForNoPlan`, which both this route and the auto-DNS start share.
-    if (await refusedForNoPlan(res, verifiedUid, identity?.email ?? null)) return;
-    if (hostingPlansEnabled() && !isAgentV3FreeUser(verifiedUid, identity?.email ?? null)) {
+    if (await refusedForNoPlan(res, verifiedUid, identityGrantEmail(identity))) return;
+    if (hostingPlansEnabled() && !isAgentV3FreeUser(verifiedUid, identityGrantEmail(identity))) {
       /**
        * THE TIER'S DOMAIN COUNT, ENFORCED (2026-09-10). Starter includes 1 domain and Growth 3, and
        * a number printed on a plan card that nothing checks is a fake feature — the second absolute
@@ -492,7 +492,7 @@ export function registerNbaiDomainsRoutes(app: Express): void {
     // creates a real zone on our own account and asks the user to repoint their nameservers. See
     // `refusedForNoPlan`.
     const startIdentity = await verifyFirebaseIdentity(req).catch(() => null);
-    if (await refusedForNoPlan(res, verifiedUid, startIdentity?.email ?? null)) return;
+    if (await refusedForNoPlan(res, verifiedUid, identityGrantEmail(startIdentity))) return;
     const host = canonicalHost(normalizeDomain(req.body?.domain));
     if (!DOMAIN_RE.test(host)) {
       res.status(400).json({ error: 'Enter a valid domain like myshop.com (no https://, no slashes).' });

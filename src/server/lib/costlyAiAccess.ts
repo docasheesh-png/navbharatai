@@ -21,11 +21,13 @@
 
 import type { Request } from 'express';
 import { verifyFirebaseIdentity } from './authMiddleware';
+import { identityGrantEmail, type GrantEmail } from '../AgentV3/featureFlag';
 
 export interface CostlyAiIdentity {
   ok: true;
   uid: string;
-  email: string | null;
+  /** Provider-verified only (Q-624) — every reader matches it against a free or admin list. */
+  email: GrantEmail | null;
 }
 
 export interface CostlyAiRefusal {
@@ -63,5 +65,5 @@ export async function requireAccountForCostlyAi(
 ): Promise<CostlyAiIdentity | CostlyAiRefusal> {
   const identity = await verifyFirebaseIdentity(req);
   if (!identity?.uid) return anonymousAiRefusal(noun);
-  return { ok: true, uid: identity.uid, email: identity.email ?? null };
+  return { ok: true, uid: identity.uid, email: identityGrantEmail(identity) };
 }

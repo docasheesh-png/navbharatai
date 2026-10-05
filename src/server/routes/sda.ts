@@ -11,6 +11,7 @@ import { isAuditReplyClean } from '../lib/clinical/auditGate';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { verifyFirebaseIdentity, rateLimiter } from '../lib/authMiddleware';
 import { gateProfessionalTurn, burnFreeMessage, type ProfessionalTier } from '../professionals/passGate';
+import { identityGrantEmail } from '../AgentV3/featureFlag';
 import { chargeForAiTurn } from '../lib/aiTurnCharge';
 import type { ChatTurnUsage } from '../lib/chatSpend';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -119,7 +120,7 @@ export function registerSdaRoutes(app: Express): void {
       // (across ALL professionals), then paid from the wallet (admin 2026-09-23); Pass ⇒ unlimited,
       // anonymous ⇒ sign in. The verified identity keys the gate — never the client-claimed body userId.
       const sdaIdentity = await verifyFirebaseIdentity(req);
-      const sdaGate = await gateProfessionalTurn(sdaIdentity?.uid || null, sdaIdentity?.email || null);
+      const sdaGate = await gateProfessionalTurn(sdaIdentity?.uid || null, identityGrantEmail(sdaIdentity));
       if (!sdaGate.allow) return res.status(sdaGate.status).json(sdaGate.body);
       const sdaTier: ProfessionalTier = sdaGate.tier;
       // What the answering model reported, filled in by whichever branch below actually answers.

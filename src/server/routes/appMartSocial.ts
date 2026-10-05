@@ -13,6 +13,7 @@ import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity, verifyFirebaseToken, rateLimiter } from '../lib/authMiddleware';
 import { routeParam } from '../lib/expressCompat';
 import { isStoreAdmin } from './navStore';
+import { identityGrantEmail } from '../AgentV3/featureFlag';
 import { listMyWebApps, listWebAppsByOwners, getWebAppsByIds, toPublicWebApp, type WebStoreApp } from '../lib/navStoreWeb';
 import { listAppsByUid, listAppsByOwners, getAppsByIds, toPublic, type StoreApp } from '../lib/navStoreStore';
 import { resolveCreators, realCreatorLookupDeps } from '../lib/storeCreator';
@@ -45,7 +46,7 @@ function unavailable(res: Response, e: unknown): Response {
 
 async function viewerOf(req: Request): Promise<{ uid: string | null; isAdmin: boolean }> {
   const me = await verifyFirebaseIdentity(req).catch(() => null);
-  return { uid: me?.uid ?? null, isAdmin: isStoreAdmin(me?.email ?? null) };
+  return { uid: me?.uid ?? null, isAdmin: isStoreAdmin(identityGrantEmail(me)) };
 }
 
 /** Comments as a viewer may see them — people resolved, blocked authors dropped. */
@@ -152,7 +153,7 @@ export function registerAppMartSocialRoutes(app: Express): void {
       if (!parent || parent.uid !== target.ownerUid) {
         void notifySocial({ recipientUid: target.ownerUid, kind: 'comment', appKey: k.key, appName: target.name, actorUid: me.uid, text: cleaned.text });
       }
-      const [comment] = await presentComments([saved], target.ownerUid, { uid: me.uid, isAdmin: isStoreAdmin(me.email) });
+      const [comment] = await presentComments([saved], target.ownerUid, { uid: me.uid, isAdmin: isStoreAdmin(identityGrantEmail(me)) });
       const counts = (await countsFor([k.key]))[k.key] ?? null;
       res.json({ comment, counts });
     } catch (e) {
@@ -168,7 +169,7 @@ export function registerAppMartSocialRoutes(app: Express): void {
     if (!c || !c.visible) return res.json({ ok: true });
     const k = parseAppKey(c.appKey);
     const target = k ? await resolveTarget(k) : null;
-    const facts = { viewerUid: me.uid, authorUid: c.uid, appOwnerUid: target?.ownerUid ?? null, isAdmin: isStoreAdmin(me.email) };
+    const facts = { viewerUid: me.uid, authorUid: c.uid, appOwnerUid: target?.ownerUid ?? null, isAdmin: isStoreAdmin(identityGrantEmail(me)) };
     if (!canRemoveComment(facts)) return res.status(403).json({ error: 'Only the person who wrote this, the app’s creator or an admin can remove it.' });
     try {
       await removeComment(c, removedBy(facts));
@@ -233,7 +234,7 @@ export function registerAppMartSocialRoutes(app: Express): void {
     const k = parseAppKey(req.query.key);
     const target = k ? await resolveTarget(k) : null;
     if (!k || !target) return res.status(404).json({ error: 'This app is no longer on App Mart.' });
-    if (target.ownerUid !== me.uid && !isStoreAdmin(me.email)) {
+    if (target.ownerUid !== me.uid && !isStoreAdmin(identityGrantEmail(me))) {
       return res.status(403).json({ error: 'Only the app’s creator can see who liked it.' });
     }
     const [likers, counts] = await Promise.all([likersOf(k.key), countsFor([k.key])]);
@@ -418,7 +419,7 @@ export function registerAppMartSocialRoutes(app: Express): void {
     if (typeof asked === 'string' && asked && asked !== 'me') {
       const other = isCreatorIdShape(asked) ? await uidForCreatorId(asked) : null;
       if (!other) return res.status(404).json({ error: 'That person could not be found.' });
-      if (other !== me.uid && !isStoreAdmin(me.email)) return res.status(403).json({ error: 'Only a creator can see who follows them.' });
+      if (other !== me.uid && !isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Only a creator can see who follows them.' });
       uid = other;
     }
     const [followers, counts] = await Promise.all([followersOf(uid), followCounts(uid)]);

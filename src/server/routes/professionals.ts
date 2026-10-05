@@ -16,6 +16,7 @@ import {
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import { professionalUsageStore, professionalExamUsageStore } from '../professionals/ProfessionalUsageStore';
 import { gateProfessionalTurn, gateProfessionalExam, examPaperCharge } from '../professionals/passGate';
+import { identityGrantEmail } from '../AgentV3/featureFlag';
 import { routeParam, routeParams } from '../lib/expressCompat';
 // ATTACHMENT RECALL (admin 2026-08-19) — the sibling of Doctor AI's report memory: a file's
 // vision-derived text is remembered for this conversation so the NEXT turn can still answer from it.
@@ -75,7 +76,7 @@ export function registerProfessionalsRoutes(app: Express): void {
       });
       return;
     }
-    const freeListed = isProfessionalFreeUser(uid, identity?.email || null);
+    const freeListed = isProfessionalFreeUser(uid, identityGrantEmail(identity));
     const pass = enabled ? await professionalPassStore.getStatus(uid) : { active: false, expiresAt: null, plan: null };
     const unlimited = !enabled || freeListed || pass.active;
     const [usedToday, examUsedToday] = unlimited
@@ -124,7 +125,7 @@ export function registerProfessionalsRoutes(app: Express): void {
     // 🔴 BEFORE THE ATTACHMENTS ARE READ (forensic audit 2026-10-04, P1): the paid vision chain (Gemini →
     // Grok → Claude) used to describe up to four images for a caller this gate then REFUSED — anonymous
     // callers included — and a free-tier turn could reach Claude. Nothing is spent until the turn is allowed.
-    const gate = await gateProfessionalTurn(verifiedUserId, identity?.email || null);
+    const gate = await gateProfessionalTurn(verifiedUserId, identityGrantEmail(identity));
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;
@@ -257,7 +258,7 @@ export function registerProfessionalsRoutes(app: Express): void {
     const verifiedUserId = identity?.uid || null;
     // The EXAM allowance, not the message one (admin 2026-09-23): 5 free questions a day, counted
     // separately, the rest charged at the same rate as a message.
-    const gate = await gateProfessionalExam(verifiedUserId, identity?.email || null, Math.min(spec.count, EXAM_MAX_QUESTIONS));
+    const gate = await gateProfessionalExam(verifiedUserId, identityGrantEmail(identity), Math.min(spec.count, EXAM_MAX_QUESTIONS));
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;

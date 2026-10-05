@@ -64,7 +64,7 @@ import { resolveUserIdentities, identityFrom, identityLabel } from '../lib/admin
 import { fetchAuthMetadata, firebaseAuthBatch, resolveJoinedAt, resolveLastActiveAt } from '../lib/adminUserActivity';
 import { parseStatusFilter, parseDateFilter, sinceMsFor, buildMatchesFilters, statusCounts, usersInBuilds } from '../lib/buildListFilter';
 import { accountTier, matchesTier, parseTierFilter, type AccountTier } from '../lib/accountTier';
-import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
+import { freeListLabelForStoredEmail } from '../AgentV3/featureFlag';
 import { sandboxStore } from '../AgentV3/SandboxStore';
 import { liveSandboxNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
 import { buildActuator } from './actuatorFactory';
@@ -902,7 +902,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           ...r,
           accountTier: accountTier({
             anonymous: resolved.anonymous,
-            freeListed: isAgentV3FreeUser(r.userId, r.email || resolved.email || null),
+            freeListed: freeListLabelForStoredEmail(r.userId, r.email || resolved.email || null), // a label (Q-624)
             wallet: resolved.paid === null ? null : { totalMoneySpent: resolved.paid ? 1 : 0 },
             walletFound: resolved.paid !== null,
           }) as AccountTier,
@@ -1245,7 +1245,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const resolved = identity ?? identityFrom(b.ownerUid, null);
         const tier: AccountTier = accountTier({
           anonymous: resolved.anonymous,
-          freeListed: isAgentV3FreeUser(b.ownerUid, resolved.email || null),
+          freeListed: freeListLabelForStoredEmail(b.ownerUid, resolved.email || null), // a label (Q-624)
           // `paid` already rode in on the identity, read from the wallet document this route fetched
           // for the name and email — so the tier costs no extra Firestore read.
           wallet: resolved.paid === null ? null : { totalMoneySpent: resolved.paid ? 1 : 0 },

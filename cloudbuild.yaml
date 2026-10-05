@@ -21,6 +21,9 @@ steps:
   # gate, a timeout, a 500, an empty body and a malformed body all CONTINUE the deploy. A step that can
   # fail for any other reason is a step that can stop every deploy, and no session here can run Cloud
   # Build to prove it would not. The image is the same cloud-sdk one the deploy step below already
+  # ⚠️ Bash variables are written `$$URL` / `$$BODY`: Cloud Build substitutes every `$NAME` in `args` itself and
+  # REJECTS a name that is neither a built-in nor a `_USER` variable — so an un-escaped `$URL` would fail
+  # every build at submit time, before any step ran. `tests/cloudBuildArgsEscapeBashVariables.test.ts`.
   # pulls, so nothing new has to be fetched for this to work.
   #
   # TO TURN IT ON: Cloud Build → Triggers → the trigger → Substitution variables →
@@ -33,19 +36,19 @@ steps:
       - |
         set +e
         URL="${_RELEASE_GATE_URL}"
-        if [ -z "$URL" ]; then
+        if [ -z "$$URL" ]; then
           echo "Release gate: _RELEASE_GATE_URL is not set on this trigger — no gate check. A freeze will NOT stop this deploy."
           exit 0
         fi
-        BODY=$(curl -fsS --max-time 20 "$URL?sha=$COMMIT_SHA" 2>/dev/null)
-        if [ -z "$BODY" ]; then
-          echo "Release gate: $URL did not answer — failing OPEN and continuing the deploy."
+        BODY=$(curl -fsS --max-time 20 "$$URL?sha=$COMMIT_SHA" 2>/dev/null)
+        if [ -z "$$BODY" ]; then
+          echo "Release gate: $$URL did not answer — failing OPEN and continuing the deploy."
           exit 0
         fi
-        case "$BODY" in
+        case "$$BODY" in
           *'"allowed":false'*|*'"allowed": false'*)
             echo "RELEASE GATE CLOSED for $COMMIT_SHA — refusing to deploy."
-            echo "$BODY"
+            echo "$$BODY"
             exit 1
             ;;
         esac

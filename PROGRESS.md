@@ -90874,3 +90874,64 @@ Smooth is 35, because the sandbox renders in software at 5 fps. The hero is visi
 **Honestly not built yet: automatic repair.** A playtest finding is a one-tap offer, not a background
 re-write. A verified repair loop (repair, re-play, keep only if the score rises) is the next step, and
 `explorerRepair.ts` is the pattern to follow.
+
+### 2026-10-05 — Game engine G3: India's roads (auto-rickshaw, bus, truck, tractor), tiger and goat, and the catalogue points at every builder
+
+**The gap.** `objectCatalog.ts` described an auto-rickshaw, a bus, a truck and a tractor in full: dimensions,
+parts, and the one "tell" that makes each read as itself. None of them had a builder, so the model hand-modelled
+each one, which produced the box-with-wheels the Phase 2 brief calls a FAIL.
+
+**Built: `createAutoRickshaw`, `createBus`, `createTruck`, `createTractor`.** Each is built from its own side
+profile at the catalogue's size and faces +Z. Their wheels are `'wheel'` groups, so `rollWheels()` and
+`driveVehicle()` work.
+- **Auto-rickshaw:** three wheels, open sides, a canvas roof on posts, handlebar steering, and a Delhi or
+  Mumbai livery.
+- **Bus:** a window band, a lit destination board, doors on the kerb (+X) side, and dual rear wheels.
+- **Truck:** a cab and load body with a gap between them, Indian truck-art bands and crown, doubled rear
+  wheels, mudflaps and a stack.
+- **Tractor:** a 0.75 m rear and 0.40 m front wheel radius, chevron-lug tread, mudguards, and the stack in
+  front of the driver.
+
+**One implementation, shared.** The car's profile extrude, wheel well and wheel code were lifted into shared
+helpers: `extrudeProfile`, `wellArc`, `roadWheel`, `partBox`, `partRod` and `lamp`. The car now uses them too,
+and the 46 existing car/3D tests stayed green across the refactor. Four private copies is how a fix lands in
+only one of them.
+
+**Defects the tests caught in the new vehicles, fixed before shipping:**
+- the bus mirrors made it 3.5 m wide (now about 0.25 m past the body);
+- the truck crown made it 3.8 m tall (spec 3.4);
+- the tractor's tread lugs sat outside the tyre radius and sank 5.5 cm into the road. The lugs are now the
+  tyre's outer 4.5 cm.
+
+**A sibling my own Phase 2 change created, fixed.** The catalogue built `big-cat` and `goat` as
+`createAnimal({ kind: 'deer' })`. That was harmless while every animal was one box, and wrong the moment
+Phase 2 gave the deer antlers: a tiger with antlers. There are now real `tiger` and `goat` kinds.
+- The tiger follows the catalogue's own tell: shoulders highest, a tail nearly the body's length, a broad head
+  carried low, big paws, and stripes.
+- The goat has swept-back horns, a beard and a flicking tail.
+
+**The catalogue never named `createHouse`** (Phase 1), so houses were still hand-modelled. It now names it.
+
+**A census so this cannot recur.** It fails when any `export function createX` in objects.ts is named by no
+catalogue entry.
+
+**Rendered on a road** with the car and a person for scale: both autos (see-through), the bus, the truck, the
+tractor, the tiger and the goat. There were no console errors.
+
+**Locked by `tests/indiasRoadsHaveTheirVehicles.test.ts`** (11 cases). Each vehicle is checked for:
+- the catalogue's size, ±12%;
+- its wheel count;
+- tyres touching the road;
+- an extruded body;
+- a draw-call budget;
+- wheels that roll.
+
+Each tell is checked too:
+- the auto has one centred front wheel, and a ray across it at head height meets nothing, while the same ray
+  hits a car;
+- the bus window band runs along more than 80% of its length, with its doors on +X;
+- the truck has a cab/cargo gap of at least 0.1 m and four rear wheels;
+- the tractor's rear-to-front wheel ratio is at least 1.7.
+
+The remaining cases are the builder census and the tiger and goat anatomy. `aHeroObjectIsNotABox` now covers
+six animal kinds, and `heroObjectSpec` moved auto/tractor/house out of its "no builder" list.

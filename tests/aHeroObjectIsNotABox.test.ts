@@ -72,7 +72,7 @@ const foldedLathes = (root: THREE.Object3D): number => meshesOf(root).filter((m)
   return !up && !down;
 }).length;
 
-const KINDS = ['dog', 'cow', 'horse', 'deer'] as const;
+const KINDS = ['dog', 'cow', 'horse', 'deer', 'goat', 'tiger'] as const;
 
 describe('the car is a car, not stacked boxes', () => {
   const bodyOf = (car: THREE.Group): THREE.Mesh => {

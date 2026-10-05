@@ -52,7 +52,9 @@ describe('🔴 the reported game gets a bike spec, and it names the builder', ()
 describe('🔒 THE CLASS FIX — an object with NO builder still gets a real spec', () => {
   // This is the whole point. The library will never have everything; what it must never do again is
   // leave the model with nothing but the word.
-  it.each(['auto-rickshaw', 'tractor', 'helicopter', 'boat', 'tank', 'drone', 'house'])(
+  // auto-rickshaw, tractor and house left this list on 2026-10-05: they have builders now
+  // (createAutoRickshaw, createTractor, and createHouse — which the catalogue had never named).
+  it.each(['elephant', 'camel', 'helicopter', 'boat', 'tank', 'drone'])(
     '%s has no builder, and gets dimensions, parts and a tell instead', (id) => {
       const spec = HERO_OBJECTS.find((s) => s.id === id)!;
       expect(spec.builder).toBeUndefined();
@@ -62,10 +64,12 @@ describe('🔒 THE CLASS FIX — an object with NO builder still gets a real spe
     });
 
   it('and the block tells the model to model it to THAT spec rather than improvise', () => {
-    const block = heroObjectContract('3d auto rickshaw driving game').block;
+    const block = heroObjectContract('3d elephant safari game').block;
     expect(block).toContain('HAND-MODEL it to this spec');
     expect(block).toContain('never as two or three primitives stuck together');
-    expect(block).toContain('THREE wheels');
+    expect(block).toContain('3.2 m at the shoulder');
+    // …and an object that HAS a builder is ordered to use it.
+    expect(heroObjectContract('3d auto rickshaw driving game').block).toContain('BUILD IT WITH createAutoRickshaw');
   });
 
   it('every entry is well formed — a half-written spec is worse than none', () => {

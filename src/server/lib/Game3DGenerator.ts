@@ -1537,6 +1537,134 @@ function mesh(geo: THREE.BufferGeometry, mat: THREE.Material, detail: Detail): T
   return m;
 }
 
+// ── VEHICLE PARTS — one implementation every vehicle shares ──────────────────────────────────────
+// The car grew these first; the rickshaw, bus, truck and tractor use the SAME ones, so a fix to a wheel
+// or a body is a fix to every vehicle (four private copies is how a bug gets fixed in one of them).
+
+/** A closed outline from (z, y) points. */
+function outlineShape(pts: number[][]): THREE.Shape {
+  const sh = new THREE.Shape();
+  sh.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) sh.lineTo(pts[i][0], pts[i][1]);
+  sh.closePath();
+  return sh;
+}
+
+/**
+ * A side profile drawn in (z = length, y = height), front at +z, extruded across the width with a rounded
+ * bevel. This is how every vehicle body here is made — the outline IS the vehicle, never a box on a box.
+ */
+function extrudeProfile(pts: number[][], width: number, bevel: number, real: boolean): THREE.BufferGeometry {
+  const depth = Math.max(0.01, width - 2 * bevel);
+  const g = new THREE.ExtrudeGeometry(outlineShape(pts), {
+    depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel,
+    bevelSegments: real ? 4 : 1, curveSegments: 1,
+  });
+  g.translate(0, 0, -depth / 2);
+  g.rotateY(-Math.PI / 2);          // profile z → model +Z (the front), extrusion → model X
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * The arch of a wheel well cut into a sill at height \`sill\`, over a wheel of radius \`wheelR\` at z = cz.
+ * Points run rear foot → over the top → front foot, so a profile drawn along its bottom from the back to
+ * the front simply includes them in order.
+ */
+function wellArc(cz: number, wheelR: number, sill: number, wellR: number, real: boolean): number[][] {
+  const a = Math.asin(Math.max(-1, Math.min(1, (wheelR - sill) / wellR)));
+  const out: number[][] = [];
+  const n = real ? 14 : 6;
+  for (let i = 0; i <= n; i++) {
+    const t = Math.PI + a - ((Math.PI + 2 * a) * i) / n;
+    out.push([cz + Math.cos(t) * wellR, wheelR + Math.sin(t) * wellR]);
+  }
+  return out;
+}
+
+interface WheelMaterials { tyre: THREE.Material; rim: THREE.Material; rimInner: THREE.Material }
+
+/**
+ * A road wheel, as a group named 'wheel' — rollWheels() and driveVehicle() spin exactly those. A tyre
+ * lathed from its rounded cross-section, a rim, and at the real tier a spoked face on the OUTER side
+ * (\`side\` = +1 for a wheel on the +X side) so a rolling wheel visibly turns. Never a torus inside it:
+ * that is what the old floating arch was, and the arch test keeps wheel groups free of them.
+ */
+function roadWheel(radius: number, width: number, side: number, d: Detail, mats: WheelMaterials, spokes = 5): THREE.Group {
+  const real = d === 'real';
+  const r = radius, h = width / 2;
+  const k = r / 0.3225;              // the car's wheel is the reference size for the small parts
+  const seg = real ? 28 : 12;
+  const rimR = r * 0.64;
+  const wheel = new THREE.Group();
+  const profile = [[rimR, -h], [r * 0.9, -h], [r * 0.97, -h * 0.86], [r, -h * 0.55], [r, h * 0.55],
+    [r * 0.97, h * 0.86], [r * 0.9, h], [rimR, h], [rimR, -h]].map(([a, b]) => new THREE.Vector2(a, b));
+  const tyre = mesh(new THREE.LatheGeometry(profile, seg), mats.tyre, d);
+  tyre.rotation.z = Math.PI / 2;
+  wheel.add(tyre);
+  const rim = mesh(new THREE.CylinderGeometry(rimR, rimR, width * 0.8, seg), real ? mats.rimInner : mats.rim, d);
+  rim.rotation.z = Math.PI / 2;
+  wheel.add(rim);
+  if (real) {
+    const face = side * width * 0.42;
+    const faceParts: THREE.Mesh[] = [];
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(rimR * 0.28, rimR * 0.28, 0.03 * k, 12));
+    hub.rotation.z = Math.PI / 2;
+    hub.position.x = face;
+    faceParts.push(hub);
+    const lip = new THREE.Mesh(new THREE.RingGeometry(rimR * 0.84, rimR, seg));
+    lip.rotation.y = (side * Math.PI) / 2;
+    lip.position.x = face + side * 0.012 * k;
+    faceParts.push(lip);
+    for (let i = 0; i < spokes; i++) {
+      const a = (i / spokes) * Math.PI * 2;
+      const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.03 * k, rimR * 0.8, 0.045 * k));
+      spoke.position.set(face, Math.cos(a) * rimR * 0.5, Math.sin(a) * rimR * 0.5);
+      spoke.rotation.x = a;
+      faceParts.push(spoke);
+    }
+    wheel.add(mesh(mergeGeometries(faceParts), mats.rim, d));
+  }
+  wheel.name = 'wheel';
+  return wheel;
+}
+
+/** Paint that reads as paint: clearcoat at the real tier, plain at lite. */
+function vehiclePaint(color: number, d: Detail): THREE.Material {
+  return d === 'real'
+    ? new THREE.MeshPhysicalMaterial({ color, roughness: 0.32, metalness: 0.6, clearcoat: 1, clearcoatRoughness: 0.1 })
+    : new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.25 });
+}
+
+function vehicleGlass(d: Detail): THREE.Material {
+  return d === 'real'
+    ? new THREE.MeshPhysicalMaterial({ color: 0x0b0f13, roughness: 0.04, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.02 })
+    : new THREE.MeshStandardMaterial({ color: 0x10151a, roughness: 0.2, metalness: 0.3 });
+}
+
+/** A posed box, for baking small parts into one mesh (one draw call per material). */
+function partBox(w: number, h: number, dd: number, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd));
+  m.position.set(x, y, z);
+  m.rotation.set(rx, ry, rz);
+  return m;
+}
+
+/** A posed cylinder along Y (a post, a stack), for baking. */
+function partRod(r: number, len: number, x: number, y: number, z: number, rx = 0, rz = 0, seg = 8): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, seg));
+  m.position.set(x, y, z);
+  m.rotation.set(rx, 0, rz);
+  return m;
+}
+
+/** A lamp that EMITS. An unlit "light" is a coloured sticker. */
+function lamp(color: number, w: number, h: number, x: number, y: number, z: number): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.03), new THREE.MeshBasicMaterial({ color }));
+  m.position.set(x, y, z);
+  return m;
+}
+
 // ── CAR ──────────────────────────────────────────────────────────────────────────────────────────
 export interface CarOptions extends BaseOpts { color?: number; length?: number }
 
@@ -1579,42 +1707,15 @@ export function createCar(options: CarOptions = {}): THREE.Group {
   // A side profile is the car. It is drawn in (z = length, y = height), front at +z, then extruded
   // across the width with a bevel so every edge is rounded — never a box with a box on top.
   const scaled = (pts: number[][]) => pts.map(([z, y]) => [z * s, y * s]);
-  const wellArc = (cz: number): number[][] => {
-    const a = Math.asin(Math.min(1, (wheelR - sill) / wellR));
-    const out: number[][] = [];
-    const n = real ? 14 : 6;
-    for (let i = 0; i <= n; i++) {
-      const t = Math.PI + a - ((Math.PI + 2 * a) * i) / n; // rear foot → over the top → front foot
-      out.push([cz + Math.cos(t) * wellR, wheelR + Math.sin(t) * wellR]);
-    }
-    return out;
-  };
-  const shapeOf = (pts: number[][]): THREE.Shape => {
-    const sh = new THREE.Shape();
-    sh.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) sh.lineTo(pts[i][0], pts[i][1]);
-    sh.closePath();
-    return sh;
-  };
-  const extrudeAcross = (pts: number[][], width: number, bevel: number): THREE.BufferGeometry => {
-    const depth = Math.max(0.01, width - 2 * bevel);
-    const g = new THREE.ExtrudeGeometry(shapeOf(pts), {
-      depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel,
-      bevelSegments: real ? 4 : 1, curveSegments: 1,
-    });
-    g.translate(0, 0, -depth / 2);
-    g.rotateY(-Math.PI / 2);          // profile z → model +Z (the front), extrusion → model X
-    g.computeVertexNormals();
-    return g;
-  };
+  const extrudeAcross = (pts: number[][], width: number, bevel: number) => extrudeProfile(pts, width, bevel, real);
 
   // Body: nose, bonnet, shoulder line, boot deck, tail — with the two wheel wells cut out of the sill.
   const bodyPts = [
     ...scaled([[2.02, 0.22], [2.12, 0.3], [2.16, 0.42], [2.15, 0.56], [2.1, 0.66], [1.98, 0.74],
       [1.6, 0.8], [1.2, 0.85], [0.92, 0.88], [0, 0.9], [-1, 0.93], [-1.5, 0.95], [-1.85, 0.96],
       [-2.05, 0.93], [-2.13, 0.86], [-2.17, 0.72], [-2.17, 0.5], [-2.12, 0.32], [-2.04, 0.22]]),
-    ...wellArc(-axleZ),
-    ...wellArc(axleZ),
+    ...wellArc(-axleZ, wheelR, sill, wellR, real),
+    ...wellArc(axleZ, wheelR, sill, wellR, real),
   ];
   const bodyBevel = 0.05 * s;
   group.add(mesh(extrudeAcross(bodyPts, W, bodyBevel), bodyMat, d));
@@ -1691,42 +1792,14 @@ export function createCar(options: CarOptions = {}): THREE.Group {
     group.add(tail);
   }
 
-  // Wheels: a rounded tyre (lathed from its cross-section) on a spoked rim, sitting IN the wells.
-  const seg = real ? 28 : 12;
+  // Wheels: a rounded tyre on a spoked rim (roadWheel, shared by every vehicle), sitting IN the wells.
   const tyreW = 0.22 * s;
-  const rimR = wheelR * 0.64;
   const linerMat = new THREE.MeshStandardMaterial({ color: 0x0b0c0e, roughness: 0.95, side: THREE.DoubleSide });
   for (const sx of [-1, 1]) {
     for (const sz of [1, -1]) {
-      const wheel = new THREE.Group();
+      const wheel = roadWheel(wheelR, tyreW, sx, d, { tyre: tyreMat, rim: rimMat, rimInner: trimMat });
       const h = tyreW / 2;
-      const profile = [[rimR, -h], [wheelR * 0.9, -h], [wheelR * 0.97, -h * 0.86], [wheelR, -h * 0.55], [wheelR, h * 0.55],
-        [wheelR * 0.97, h * 0.86], [wheelR * 0.9, h], [rimR, h], [rimR, -h]].map(([r, y]) => new THREE.Vector2(r, y));
-      const tyre = mesh(new THREE.LatheGeometry(profile, seg), tyreMat, d);
-      tyre.rotation.z = Math.PI / 2;
-      wheel.add(tyre);
-      const rim = mesh(new THREE.CylinderGeometry(rimR, rimR, tyreW * 0.8, seg), real ? trimMat : rimMat, d);
-      rim.rotation.z = Math.PI / 2;
-      wheel.add(rim);
       if (real) {
-        // Five spokes, a hub and the rim's bright lip on the OUTER face, baked into one mesh, so a
-        // rolling wheel visibly turns. The lip is a flat ring, not a torus — a torus in a wheel group is
-        // what the old floating arch was, and the arch test keeps wheel groups free of them.
-        const face = sx * tyreW * 0.42;
-        const faceParts: THREE.Mesh[] = [];
-        const hub = new THREE.Mesh(new THREE.CylinderGeometry(rimR * 0.28, rimR * 0.28, 0.03 * s, 12));
-        hub.rotation.z = Math.PI / 2;
-        hub.position.x = face;
-        faceParts.push(hub);
-        const lip = new THREE.Mesh(new THREE.RingGeometry(rimR * 0.84, rimR, seg));
-        lip.rotation.y = (sx * Math.PI) / 2;
-        lip.position.x = face + sx * 0.012 * s;
-        faceParts.push(lip);
-        for (let k = 0; k < 5; k++) {
-          const a = (k / 5) * Math.PI * 2;
-          faceParts.push(box(0.03 * s, rimR * 0.8, 0.045 * s, face, Math.cos(a) * rimR * 0.5, Math.sin(a) * rimR * 0.5, a));
-        }
-        wheel.add(mesh(mergeGeometries(faceParts), rimMat, d));
         // 🔴 THE ARCH BELONGS TO THE BODY, NOT THE WHEEL (a child of the wheel group spun with it and,
         // offset twice, floated a car-width outside the body). It is the dark liner of the wheel well,
         // fixed to the body over the wheel's own centre, so the well reads as a hole, not painted metal.
@@ -1739,7 +1812,6 @@ export function createCar(options: CarOptions = {}): THREE.Group {
         group.add(arch);
       }
       wheel.position.set(sx * (bodySide - h - 0.01 * s), wheelR, sz * axleZ);
-      wheel.name = 'wheel';
       group.add(wheel);
     }
   }
@@ -1751,6 +1823,340 @@ export function rollWheels(car: THREE.Group, speed: number, dt: number): void {
   for (const child of car.children) {
     if (child.name === 'wheel') child.rotation.x += speed * dt * 3.2;
   }
+}
+
+// ── INDIA'S ROADS: AUTO-RICKSHAW, BUS, TRUCK, TRACTOR ────────────────────────────────────────────
+// The object catalogue described all four (objectCatalog.ts: dimensions, parts, the one "tell" that makes
+// each read as itself) but had no builder for any of them, so a game asked for an auto or a bus got
+// whatever the model improvised — the box-with-wheels the admin's Phase 2 brief calls a FAIL. Each is
+// built here from its own side profile at its real size, with the shared wheel and body helpers above,
+// faces +Z like every model, and rolls with rollWheels() / driveVehicle().
+
+export interface AutoRickshawOptions extends BaseOpts {
+  /** Delhi CNG green-and-yellow, or Mumbai black-and-yellow. */
+  livery?: 'delhi' | 'mumbai';
+  color?: number;
+  length?: number;
+}
+
+/**
+ * An auto-rickshaw: 2.6 m long, 1.3 m wide, 1.7 m tall, THREE wheels (one front under the cowl, two at
+ * the back), handlebar steering, a canvas roof on thin posts — and OPEN sides, so you can see straight
+ * through it. That see-through stance is what no car has, and it is the whole silhouette.
+ */
+export function createAutoRickshaw(options: AutoRickshawOptions = {}): THREE.Group {
+  const d = tier(options);
+  const real = d === 'real';
+  const s = (options.length ?? 2.6) / 2.6;
+  const mumbai = options.livery === 'mumbai';
+  const body = vehiclePaint(options.color ?? (mumbai ? 0x1b1b1b : 0x1f8f3c), d);
+  const canopyMat = new THREE.MeshStandardMaterial({ color: mumbai ? 0xf2c230 : 0xf5c518, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+  const seatMat = new THREE.MeshStandardMaterial({ color: 0x23201d, roughness: 0.7, metalness: 0.05 });
+  const trim = new THREE.MeshStandardMaterial({ color: 0x1a1c1f, roughness: 0.5, metalness: 0.6 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xc6ccd4, roughness: 0.25, metalness: 1 });
+  const wm = { tyre: shared('fabric', d, 0x14161a, 2), rim: chrome, rimInner: trim };
+  const g = new THREE.Group();
+  const sc = (pts: number[][]) => pts.map(([z, y]) => [z * s, y * s]);
+  const r = 0.2 * s, sill = 0.28 * s;
+  const frontZ = 0.95 * s, rearZ = -0.75 * s, rearX = 0.55 * s;
+
+  // The driver's cowl — narrow, with the front wheel under it and the dashboard on top.
+  g.add(mesh(extrudeProfile([
+    ...sc([[0.62, 0.3]]), ...wellArc(frontZ, r, sill, 0.26 * s, real),
+    ...sc([[1.3, 0.3], [1.34, 0.56], [1.28, 0.96], [1.1, 1.04], [0.92, 1.0], [0.84, 0.62], [0.66, 0.56]]),
+  ], 0.78 * s, 0.05 * s, real), body, d));
+  // The floor and the passengers' tub, full width, with the rear wheel wells in its sill.
+  g.add(mesh(extrudeProfile([
+    ...sc([[-1.25, 0.28]]), ...wellArc(rearZ, r, sill, 0.27 * s, real),
+    ...sc([[0.75, 0.28], [0.75, 0.42], [-0.4, 0.42], [-0.46, 0.78], [-1.16, 0.82], [-1.27, 1.05], [-1.33, 1.0], [-1.33, 0.36]]),
+  ], 1.3 * s, 0.05 * s, real), body, d));
+  // The canvas roof, curved, dropping down at the back like the real drape.
+  g.add(mesh(extrudeProfile(sc([
+    [1.08, 1.55], [1.0, 1.66], [0.5, 1.72], [-0.5, 1.72], [-1.1, 1.68], [-1.33, 1.5], [-1.36, 1.05],
+    [-1.3, 1.05], [-1.27, 1.48], [-1.06, 1.63], [-0.5, 1.67], [0.5, 1.67], [0.98, 1.61], [1.03, 1.53],
+  ]), 1.36 * s, 0.03 * s, real), canopyMat, d));
+
+  // Posts, handlebar and the seats' frames — baked, one draw call.
+  const metal: THREE.Mesh[] = [
+    partRod(0.018 * s, 0.62 * s, 0.5 * s, 1.3 * s, 1.0 * s), partRod(0.018 * s, 0.62 * s, -0.5 * s, 1.3 * s, 1.0 * s),
+    partRod(0.02 * s, 0.9 * s, 0.63 * s, 1.24 * s, -0.42 * s), partRod(0.02 * s, 0.9 * s, -0.63 * s, 1.24 * s, -0.42 * s),
+    partRod(0.016 * s, 0.62 * s, 0, 1.08 * s, 0.82 * s, 0, Math.PI / 2),           // the handlebar
+    partRod(0.03 * s, 0.32 * s, 0, 0.92 * s, 0.86 * s, -0.5),                       // its column
+  ];
+  g.add(mesh(mergeGeometries(metal), trim, d));
+  g.add(mesh(mergeGeometries([
+    partBox(0.46 * s, 0.12 * s, 0.36 * s, 0, 0.62 * s, 0.32 * s),                  // driver's seat
+    partBox(0.3 * s, 0.18 * s, 0.3 * s, 0, 0.5 * s, 0.32 * s),
+    partBox(1.12 * s, 0.14 * s, 0.46 * s, 0, 0.88 * s, -0.86 * s),                 // passengers' bench
+    partBox(1.12 * s, 0.42 * s, 0.1 * s, 0, 1.12 * s, -1.16 * s, -0.12),
+  ]), seatMat, d));
+  const glass = mesh(new THREE.BoxGeometry(0.86 * s, 0.52 * s, 0.025 * s), vehicleGlass(d), d);
+  glass.position.set(0, 1.27 * s, 1.02 * s);
+  glass.rotation.x = -0.16;
+  g.add(glass);
+  if (real) {
+    // Grips and mirrors: the details you only see up close.
+    g.add(mesh(mergeGeometries([
+      partRod(0.024 * s, 0.1 * s, 0.32 * s, 1.08 * s, 0.82 * s, 0, Math.PI / 2), partRod(0.024 * s, 0.1 * s, -0.32 * s, 1.08 * s, 0.82 * s, 0, Math.PI / 2),
+      partBox(0.12 * s, 0.07 * s, 0.03 * s, 0.46 * s, 1.36 * s, 1.03 * s), partBox(0.12 * s, 0.07 * s, 0.03 * s, -0.46 * s, 1.36 * s, 1.03 * s),
+    ]), seatMat, d));
+  }
+  g.add(lamp(0xfff3d0, 0.16 * s, 0.12 * s, 0, 0.84 * s, 1.36 * s));
+  g.add(lamp(0xd82b1e, 0.14 * s, 0.08 * s, 0.5 * s, 0.62 * s, -1.37 * s));
+  g.add(lamp(0xd82b1e, 0.14 * s, 0.08 * s, -0.5 * s, 0.62 * s, -1.37 * s));
+
+  const front = roadWheel(r, 0.12 * s, 1, d, wm);
+  front.position.set(0, r, frontZ);
+  g.add(front);
+  for (const sx of [-1, 1]) {
+    const w = roadWheel(r, 0.13 * s, sx, d, wm);
+    w.position.set(sx * rearX, r, rearZ);
+    g.add(w);
+  }
+  return g;
+}
+
+export interface BusOptions extends BaseOpts { color?: number; stripe?: number; length?: number }
+
+/**
+ * A bus: 11 m long, 2.5 m wide, 3.2 m tall, 5.6 m wheelbase, 0.5 m wheels (dual at the back). The
+ * window band running the whole length at one height is what makes it a bus rather than a large van; the
+ * lit destination board and the doors on the KERB side (the driver's left, +X — India drives on the left)
+ * make it a working one.
+ */
+export function createBus(options: BusOptions = {}): THREE.Group {
+  const d = tier(options);
+  const real = d === 'real';
+  const s = (options.length ?? 11) / 11;
+  const W = 2.5 * s;
+  const paint = vehiclePaint(options.color ?? 0xc62828, d);
+  const stripeMat = new THREE.MeshStandardMaterial({ color: options.stripe ?? 0xf4efe1, roughness: 0.5 });
+  const glassMat = vehicleGlass(d);
+  const trim = new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.6, metalness: 0.5 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xc6ccd4, roughness: 0.25, metalness: 1 });
+  const wm = { tyre: shared('fabric', d, 0x14161a, 2), rim: chrome, rimInner: trim };
+  const g = new THREE.Group();
+  const sc = (pts: number[][]) => pts.map(([z, y]) => [z * s, y * s]);
+  const r = 0.5 * s, sill = 0.36 * s, wellR = 0.6 * s;
+  const frontAxle = 3.2 * s, rearAxle = -2.4 * s;
+
+  g.add(mesh(extrudeProfile([
+    ...sc([[-5.4, 0.36]]), ...wellArc(rearAxle, r, sill, wellR, real), ...wellArc(frontAxle, r, sill, wellR, real),
+    ...sc([[5.42, 0.36], [5.5, 0.6], [5.52, 1.4], [5.46, 2.95], [5.3, 3.16], [-5.3, 3.16], [-5.46, 3.0], [-5.5, 0.55]]),
+  ], W, 0.08 * s, real), paint, d));
+
+  // The window band down both sides, the pillars that divide it, and a stripe under it.
+  const side = W / 2 + 0.008 * s;
+  const glassParts: THREE.Mesh[] = [];
+  const pillarParts: THREE.Mesh[] = [];
+  const stripeParts: THREE.Mesh[] = [];
+  for (const sx of [-1, 1]) {
+    glassParts.push(partBox(0.02 * s, 1.0 * s, 9.6 * s, sx * side, 2.1 * s, -0.15 * s));
+    stripeParts.push(partBox(0.02 * s, 0.16 * s, 10.7 * s, sx * (side + 0.004 * s), 1.42 * s, 0));
+    for (let z = -4.8; z <= 4.6; z += 1.34) pillarParts.push(partBox(0.03 * s, 1.02 * s, 0.1 * s, sx * (side + 0.008 * s), 2.1 * s, z * s));
+  }
+  // Windscreen and back window.
+  glassParts.push(partBox(W * 0.86, 1.3 * s, 0.03 * s, 0, 2.05 * s, 5.53 * s, -0.04));
+  glassParts.push(partBox(W * 0.8, 0.8 * s, 0.03 * s, 0, 2.3 * s, -5.52 * s));
+  // Doors on the kerb side (+X): dark glass panels, front and middle.
+  for (const z of [4.1, -0.8]) glassParts.push(partBox(0.025 * s, 2.3 * s, 1.0 * s, side + 0.006 * s, 1.55 * s, z * s));
+  g.add(mesh(mergeGeometries(glassParts), glassMat, d));
+  g.add(mesh(mergeGeometries(pillarParts), paint, d));
+  g.add(mesh(mergeGeometries(stripeParts), stripeMat, d));
+  const trimParts = [
+    partBox(W * 1.02, 0.34 * s, 0.12 * s, 0, 0.55 * s, 5.5 * s), partBox(W * 1.02, 0.34 * s, 0.12 * s, 0, 0.55 * s, -5.5 * s),
+    partBox(0.04 * s, 0.14 * s, 9.6 * s, side, 0.42 * s, 0), partBox(0.04 * s, 0.14 * s, 9.6 * s, -side, 0.42 * s, 0),
+  ];
+  if (real) {
+    // Wipers, mirrors on stalks, a roof hatch line.
+    trimParts.push(partBox(0.04 * s, 0.7 * s, 0.03 * s, 0.4 * s, 1.75 * s, 5.56 * s, 0, 0, 0.5), partBox(0.04 * s, 0.7 * s, 0.03 * s, -0.4 * s, 1.75 * s, 5.56 * s, 0, 0, 0.5));
+    for (const sx of [-1, 1]) {
+      // Mirrors reach about a quarter-metre past the body, as on a real bus — not half a metre.
+      trimParts.push(partBox(0.26 * s, 0.05 * s, 0.05 * s, sx * (W / 2 + 0.1 * s), 2.75 * s, 5.35 * s));
+      trimParts.push(partBox(0.06 * s, 0.38 * s, 0.2 * s, sx * (W / 2 + 0.22 * s), 2.5 * s, 5.35 * s));
+    }
+  }
+  g.add(mesh(mergeGeometries(trimParts), trim, d));
+  // The destination board is LIT — it is a screen, not paint.
+  g.add(lamp(0xffb300, W * 0.7, 0.28 * s, 0, 2.86 * s, 5.55 * s));
+  for (const sx of [-1, 1]) {
+    g.add(lamp(0xfff3d0, 0.32 * s, 0.18 * s, sx * W * 0.36, 0.86 * s, 5.55 * s));
+    g.add(lamp(0xd82b1e, 0.22 * s, 0.4 * s, sx * W * 0.4, 1.0 * s, -5.55 * s));
+  }
+
+  const tw = 0.3 * s;
+  for (const sx of [-1, 1]) {
+    const f = roadWheel(r, tw, sx, d, wm, 8);
+    f.position.set(sx * (W / 2 - tw / 2 - 0.03 * s), r, frontAxle);
+    g.add(f);
+    // Dual rear wheels: an outer and an inner tyre on each side, the way every loaded bus runs.
+    const outer = roadWheel(r, tw, sx, d, wm, 8);
+    outer.position.set(sx * (W / 2 - tw / 2 - 0.03 * s), r, rearAxle);
+    const inner = roadWheel(r, tw, sx, d, wm, 8);
+    inner.position.set(sx * (W / 2 - tw * 1.55 - 0.03 * s), r, rearAxle);
+    g.add(outer, inner);
+  }
+  return g;
+}
+
+export interface TruckOptions extends BaseOpts { color?: number; cargoColor?: number; length?: number }
+
+/**
+ * A truck: 8.5 m long, 2.5 m wide, 3.4 m tall, 0.52 m wheels, the rear ones doubled. The GAP between the
+ * cab and the load body is the defining line — one continuous box is a bus. Dressed as India's trucks
+ * are: a high wooden body painted in bands, a decorated crown over the cab, mudflaps and a tall stack.
+ */
+export function createTruck(options: TruckOptions = {}): THREE.Group {
+  const d = tier(options);
+  const real = d === 'real';
+  const s = (options.length ?? 8.5) / 8.5;
+  const W = 2.5 * s;
+  const cab = vehiclePaint(options.color ?? 0xe65100, d);
+  const cargo = new THREE.MeshStandardMaterial({ color: options.cargoColor ?? 0xf9a825, roughness: 0.75 });
+  const bandMats = [0xc62828, 0x1565c0, 0x2e7d32].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7 }));
+  const glassMat = vehicleGlass(d);
+  const trim = new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.6, metalness: 0.5 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xc6ccd4, roughness: 0.25, metalness: 1 });
+  const wm = { tyre: shared('fabric', d, 0x14161a, 2), rim: chrome, rimInner: trim };
+  const g = new THREE.Group();
+  const sc = (pts: number[][]) => pts.map(([z, y]) => [z * s, y * s]);
+  const r = 0.52 * s, sill = 0.6 * s;
+  const frontAxle = 3.3 * s, rearAxle = -2.2 * s;
+
+  // The cab: tall, flat-nosed, the front wheels under it.
+  g.add(mesh(extrudeProfile([
+    ...sc([[2.6, 0.6]]), ...wellArc(frontAxle, r, sill, 0.62 * s, real),
+    ...sc([[4.22, 0.6], [4.3, 1.2], [4.24, 2.75], [4.02, 3.05], [2.68, 3.1], [2.6, 2.9]]),
+  ], W * 0.96, 0.08 * s, real), cab, d));
+  g.add(mesh(mergeGeometries([
+    partBox(W * 0.84, 0.86 * s, 0.03 * s, 0, 2.3 * s, 4.29 * s, -0.08),
+    partBox(0.02 * s, 0.7 * s, 0.9 * s, W * 0.49, 2.35 * s, 3.55 * s), partBox(0.02 * s, 0.7 * s, 0.9 * s, -W * 0.49, 2.35 * s, 3.55 * s),
+  ]), glassMat, d));
+
+  // The load body: floor, sides, front wall and tailgate — a high wooden box, painted in bands — with
+  // a gap behind the cab and a decorated crown arching over it.
+  const top = 3.0 * s, floorY = 1.3 * s, z0 = 2.3 * s, z1 = -4.05 * s, len = z0 - z1, mid = (z0 + z1) / 2;
+  const t = 0.09 * s;
+  g.add(mesh(mergeGeometries([
+    partBox(W, 0.14 * s, len, 0, floorY, mid),
+    partBox(t, top - floorY, len, W / 2 - t / 2, (top + floorY) / 2, mid), partBox(t, top - floorY, len, -W / 2 + t / 2, (top + floorY) / 2, mid),
+    partBox(W, top - floorY + 0.35 * s, t, 0, (top + 0.35 * s + floorY) / 2, z0),
+    partBox(W, top - floorY, t, 0, (top + floorY) / 2, z1),
+  ]), cargo, d));
+  g.add(mesh(extrudeProfile(sc([[2.36, 3.25], [2.36, 3.46], [2.33, 3.56], [2.28, 3.46], [2.28, 3.25]]), W * 0.9, 0.02 * s, real), cargo, d));
+  bandMats.forEach((m, i) => {
+    const y = (1.65 + i * 0.32) * s;
+    g.add(mesh(mergeGeometries([
+      partBox(0.012 * s, 0.14 * s, len, W / 2 + 0.006 * s, y, mid), partBox(0.012 * s, 0.14 * s, len, -W / 2 - 0.006 * s, y, mid),
+      partBox(W, 0.14 * s, 0.012 * s, 0, y, z1 - t / 2 - 0.006 * s),
+    ]), m, d));
+  });
+  // Chassis rails, bumper, mudflaps, the stack beside the cab.
+  const trimParts: THREE.Mesh[] = [
+    partBox(0.18 * s, 0.24 * s, 8.0 * s, 0.45 * s, 0.82 * s, 0.1 * s), partBox(0.18 * s, 0.24 * s, 8.0 * s, -0.45 * s, 0.82 * s, 0.1 * s),
+    partBox(W * 1.02, 0.32 * s, 0.16 * s, 0, 0.62 * s, 4.32 * s),
+    partBox(0.5 * s, 0.6 * s, 0.03 * s, W * 0.33, 0.45 * s, rearAxle - 0.7 * s), partBox(0.5 * s, 0.6 * s, 0.03 * s, -W * 0.33, 0.45 * s, rearAxle - 0.7 * s),
+    partRod(0.07 * s, 2.3 * s, W / 2 - 0.12 * s, 2.25 * s, 2.45 * s),
+  ];
+  if (real) {
+    for (const sx of [-1, 1]) trimParts.push(partBox(0.08 * s, 0.4 * s, 0.22 * s, sx * (W / 2 + 0.2 * s), 2.55 * s, 4.05 * s));
+  }
+  g.add(mesh(mergeGeometries(trimParts), trim, d));
+  for (const sx of [-1, 1]) {
+    g.add(lamp(0xfff3d0, 0.3 * s, 0.2 * s, sx * W * 0.34, 1.05 * s, 4.33 * s));
+    g.add(lamp(0xd82b1e, 0.22 * s, 0.16 * s, sx * W * 0.4, 1.0 * s, z1 - 0.1 * s));
+  }
+
+  const tw = 0.3 * s;
+  for (const sx of [-1, 1]) {
+    const f = roadWheel(r, tw, sx, d, wm, 8);
+    f.position.set(sx * (W / 2 - tw / 2 - 0.04 * s), r, frontAxle);
+    g.add(f);
+    const outer = roadWheel(r, tw, sx, d, wm, 8);
+    outer.position.set(sx * (W / 2 - tw / 2 - 0.04 * s), r, rearAxle);
+    const inner = roadWheel(r, tw, sx, d, wm, 8);
+    inner.position.set(sx * (W / 2 - tw * 1.55 - 0.04 * s), r, rearAxle);
+    g.add(outer, inner);
+  }
+  return g;
+}
+
+export interface TractorOptions extends BaseOpts { color?: number; length?: number }
+
+/**
+ * A tractor: 3.6 m long, 2.0 m wide, 2.6 m tall, REAR wheels of 0.75 m radius and front ones of 0.40 m.
+ * The huge-rear, small-front mismatch IS the tractor — equal wheels make it a truck — with a deep
+ * chevron tread, a narrow bonnet, the exhaust stack in front of the driver and the open seat above the
+ * rear axle.
+ */
+export function createTractor(options: TractorOptions = {}): THREE.Group {
+  const d = tier(options);
+  const real = d === 'real';
+  const s = (options.length ?? 3.6) / 3.6;
+  const paint = vehiclePaint(options.color ?? 0xc62828, d);
+  const dark = new THREE.MeshStandardMaterial({ color: 0x1d1f22, roughness: 0.6, metalness: 0.5 });
+  const seatMat = new THREE.MeshStandardMaterial({ color: 0x2a2420, roughness: 0.8 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xd0d4d8, roughness: 0.3, metalness: 1 });
+  const rimPaint = new THREE.MeshStandardMaterial({ color: 0xe0b100, roughness: 0.5, metalness: 0.3 });
+  const tyreMat = shared('fabric', d, 0x141518, 2);
+  const g = new THREE.Group();
+  const sc = (pts: number[][]) => pts.map(([z, y]) => [z * s, y * s]);
+  const rr = 0.75 * s, fr = 0.4 * s;
+  const rearZ = -0.75 * s, frontZ = 1.25 * s;
+
+  // Bonnet and engine — narrow, rising slightly toward the driver.
+  g.add(mesh(extrudeProfile(sc([[1.8, 0.62], [1.82, 1.36], [1.72, 1.48], [0.1, 1.52], [-0.12, 1.56], [-0.16, 0.62]]), 0.76 * s, 0.05 * s, real), paint, d));
+  // Transmission housing under the seat.
+  g.add(mesh(extrudeProfile(sc([[-0.1, 0.62], [-0.1, 1.05], [-1.05, 1.05], [-1.12, 0.62]]), 0.9 * s, 0.04 * s, real), dark, d));
+  // Mudguards over the big rear wheels: half shells in the body colour, with a flat top to sit a hand on.
+  for (const sx of [-1, 1]) {
+    const guard = mesh(new THREE.CylinderGeometry(rr + 0.08 * s, rr + 0.08 * s, 0.5 * s, real ? 20 : 10, 1, true, -0.25, Math.PI * 0.7), paint, d);
+    guard.rotation.z = Math.PI / 2;
+    guard.position.set(sx * 0.82 * s, rr, rearZ);
+    g.add(guard);
+  }
+  g.add(mesh(mergeGeometries([
+    partBox(0.5 * s, 0.1 * s, 0.45 * s, 0, 1.36 * s, -0.86 * s),                     // the seat
+    partBox(0.5 * s, 0.38 * s, 0.08 * s, 0, 1.58 * s, -1.1 * s, -0.15),
+  ]), seatMat, d));
+  const dash: THREE.Mesh[] = [
+    partRod(0.05 * s, 0.9 * s, 0.22 * s, 1.95 * s, 0.9 * s),                          // the stack, in front of the driver
+    partRod(0.025 * s, 0.5 * s, 0, 1.68 * s, -0.12 * s, -0.6),                        // steering column
+    partBox(0.62 * s, 0.32 * s, 0.05 * s, 0, 1.0 * s, 1.83 * s),                      // grille
+  ];
+  g.add(mesh(mergeGeometries(dash), dark, d));
+  const steer = mesh(new THREE.TorusGeometry(0.18 * s, 0.018 * s, 6, real ? 20 : 10), dark, d);
+  steer.position.set(0, 1.86 * s, -0.27 * s);
+  steer.rotation.x = -Math.PI / 2 + 0.6;
+  g.add(steer);
+  if (real) g.add(mesh(mergeGeometries([partRod(0.06 * s, 0.08 * s, 0.22 * s, 2.42 * s, 0.9 * s)]), chrome, d));
+  for (const sx of [-1, 1]) g.add(lamp(0xfff3d0, 0.14 * s, 0.12 * s, sx * 0.24 * s, 1.0 * s, 1.85 * s));
+
+  for (const sx of [-1, 1]) {
+    // At the real tier the chevron lugs ARE the outer 4.5 cm of the tyre: the carcass is smaller by that
+    // much and the lugs end exactly at the wheel's radius, so the tread meets the road instead of sinking in.
+    const lugDepth = real ? 0.045 * s : 0;
+    const rear = roadWheel(rr - lugDepth, 0.42 * s, sx, d, { tyre: tyreMat, rim: rimPaint, rimInner: rimPaint }, 6);
+    if (real) {
+      // The chevron tread: angled lugs round the tyre, two per step, rolling with the wheel.
+      const lugs: THREE.Mesh[] = [];
+      const n = 22;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        for (const half of [-1, 1]) {
+          const lug = partBox(0.2 * s, lugDepth + 0.02 * s, 0.11 * s, half * 0.1 * s, Math.cos(a) * (rr - (lugDepth + 0.02 * s) / 2), Math.sin(a) * (rr - (lugDepth + 0.02 * s) / 2), a, half * 0.45);
+          lugs.push(lug);
+        }
+      }
+      rear.add(mesh(mergeGeometries(lugs), tyreMat, d));
+    }
+    rear.position.set(sx * 0.82 * s, rr, rearZ);
+    g.add(rear);
+    const front = roadWheel(fr, 0.2 * s, sx, d, { tyre: tyreMat, rim: rimPaint, rimInner: rimPaint }, 5);
+    front.position.set(sx * 0.66 * s, fr, frontZ);
+    g.add(front);
+  }
+  return g;
 }
 
 // ── DRIVING ──────────────────────────────────────────────────────────────────────────────────────
@@ -2251,11 +2657,12 @@ export function createHouse(options: HouseOptions = {}): THREE.Group {
 }
 
 // ── ANIMAL ───────────────────────────────────────────────────────────────────────────────────────
-export interface AnimalOptions extends BaseOpts { height?: number; color?: number; kind?: 'deer' | 'dog' | 'cow' | 'horse' }
+export type AnimalKind = 'deer' | 'dog' | 'cow' | 'horse' | 'goat' | 'tiger';
+export interface AnimalOptions extends BaseOpts { height?: number; color?: number; kind?: AnimalKind }
 export interface Animal { root: THREE.Group; update: (dt: number, speed: number) => void }
 
 /** Height to the top of the head, in metres, by kind. The built animal is scaled to land exactly on it. */
-export const ANIMAL_HEIGHT: Readonly<Record<'deer' | 'dog' | 'cow' | 'horse', number>> = { dog: 0.62, deer: 1.25, cow: 1.5, horse: 1.75 };
+export const ANIMAL_HEIGHT: Readonly<Record<AnimalKind, number>> = { dog: 0.62, goat: 0.95, tiger: 1.05, deer: 1.25, cow: 1.5, horse: 1.75 };
 
 /**
  * A rounded, tapered piece rising from y = 0 to y = len (r0 at the base, r1 at the tip).
@@ -2291,10 +2698,15 @@ function ellipsoid(rx: number, ry: number, rz: number, d: Detail): THREE.BufferG
  * dog is a short body, a snout and a tail that curls up.
  */
 const ANATOMY = {
-  horse: { bL: 0.9, bR: 0.165, bW: 0.78, bY: 0.6, legR: 0.03, neckL: 0.4, neckTilt: 0.62, neckR: 0.075, headL: 0.3, headR: 0.06, snout: 0.62, droop: 0.78, ear: 'up', tail: 'hair', mane: true, horns: false, antlers: false, hump: false, paw: false },
-  cow:   { bL: 0.95, bR: 0.2, bW: 0.86, bY: 0.62, legR: 0.046, neckL: 0.22, neckTilt: 1.0, neckR: 0.095, headL: 0.27, headR: 0.075, snout: 0.85, droop: 0.75, ear: 'side', tail: 'tuft', mane: false, horns: true, antlers: false, hump: true, paw: false },
-  deer:  { bL: 0.72, bR: 0.12, bW: 0.74, bY: 0.6, legR: 0.022, neckL: 0.34, neckTilt: 0.42, neckR: 0.05, headL: 0.2, headR: 0.05, snout: 0.5, droop: 0.95, ear: 'big', tail: 'short', mane: false, horns: false, antlers: true, hump: false, paw: false },
-  dog:   { bL: 0.92, bR: 0.17, bW: 0.78, bY: 0.55, legR: 0.045, neckL: 0.26, neckTilt: 0.6, neckR: 0.1, headL: 0.36, headR: 0.12, snout: 0.45, droop: 0.6, ear: 'up', tail: 'curl', mane: false, horns: false, antlers: false, hump: false, paw: true },
+  horse: { bL: 0.9, bR: 0.165, bW: 0.78, bY: 0.6, legR: 0.03, neckL: 0.4, neckTilt: 0.62, neckR: 0.075, headL: 0.3, headR: 0.06, snout: 0.62, droop: 0.78, ear: 'up', tail: 'hair', mane: true, horns: 'none', antlers: false, hump: false, paw: false, stripes: false, beard: false },
+  cow:   { bL: 0.95, bR: 0.2, bW: 0.86, bY: 0.62, legR: 0.046, neckL: 0.22, neckTilt: 1.0, neckR: 0.095, headL: 0.27, headR: 0.075, snout: 0.85, droop: 0.75, ear: 'side', tail: 'tuft', mane: false, horns: 'cow', antlers: false, hump: true, paw: false, stripes: false, beard: false },
+  deer:  { bL: 0.72, bR: 0.12, bW: 0.74, bY: 0.6, legR: 0.022, neckL: 0.34, neckTilt: 0.42, neckR: 0.05, headL: 0.2, headR: 0.05, snout: 0.5, droop: 0.95, ear: 'big', tail: 'short', mane: false, horns: 'none', antlers: true, hump: false, paw: false, stripes: false, beard: false },
+  dog:   { bL: 0.92, bR: 0.17, bW: 0.78, bY: 0.55, legR: 0.045, neckL: 0.26, neckTilt: 0.6, neckR: 0.1, headL: 0.36, headR: 0.12, snout: 0.45, droop: 0.6, ear: 'up', tail: 'curl', mane: false, horns: 'none', antlers: false, hump: false, paw: true, stripes: false, beard: false },
+  // Thin legs under a light body, horns swept BACK, a beard and a flicking tail — never a small cow.
+  goat:  { bL: 0.9, bR: 0.15, bW: 0.74, bY: 0.62, legR: 0.03, neckL: 0.28, neckTilt: 0.45, neckR: 0.06, headL: 0.25, headR: 0.068, snout: 0.55, droop: 0.9, ear: 'side', tail: 'flick', mane: false, horns: 'goat', antlers: false, hump: false, paw: false, stripes: false, beard: true },
+  // The catalogue's own tell: the shoulders are the highest point, the tail is nearly the body's length,
+  // the broad head is carried LOW and level, and the paws are large. A deer with stripes is not a tiger.
+  tiger: { bL: 1.3, bR: 0.21, bW: 0.86, bY: 0.6, legR: 0.058, neckL: 0.18, neckTilt: 1.2, neckR: 0.14, headL: 0.3, headR: 0.15, snout: 0.62, droop: 0.25, ear: 'round', tail: 'long', mane: false, horns: 'none', antlers: false, hump: false, paw: true, stripes: true, beard: false },
 } as const;
 
 /**
@@ -2317,7 +2729,7 @@ export function createAnimal(options: AnimalOptions = {}): Animal {
   // animals rendered as one animal four times. Real heights to the top of the head, roughly.
   const H = options.height ?? ANIMAL_HEIGHT[kind];
   const A = ANATOMY[kind] ?? ANATOMY.deer;
-  const col = options.color ?? (kind === 'cow' ? 0xd8cfc2 : kind === 'dog' ? 0x9a6b3f : 0x8a5f38);
+  const col = options.color ?? (kind === 'cow' ? 0xd8cfc2 : kind === 'dog' ? 0x9a6b3f : kind === 'tiger' ? 0xd2782a : kind === 'goat' ? 0x5a463a : 0x8a5f38);
   // The hide is the near-white PLASTER grain, so the tint IS the animal's colour. It used to be 'fabric',
   // whose own texture is blue-grey: multiplied by a tint it turned a white cow purple and browns black.
   const hide = shared('plaster', d, col, 3);
@@ -2343,6 +2755,31 @@ export function createAnimal(options: AnimalOptions = {}): Animal {
     const hump = mesh(ellipsoid(A.bR * 0.42, A.bR * 0.4, A.bR * 0.55, d), hide, d);
     hump.position.set(0, A.bY + A.bR * 0.82, A.bL * 0.3);
     torso.add(hump);
+  }
+
+  if (A.stripes) {
+    // A tiger's stripes: dark bands over the back and flanks, following the barrel's own curve.
+    const rAt = (f: number) => {
+      for (let i = 1; i < prof.length; i++) {
+        const [r1, y1] = prof[i], [r0, y0] = prof[i - 1];
+        if (f <= y1) return (r0 + ((f - y0) / Math.max(1e-6, y1 - y0)) * (r1 - r0)) * A.bR;
+      }
+      return A.bR;
+    };
+    const bands: THREE.Mesh[] = [];
+    for (let i = 0; i < 8; i++) {
+      const f = -0.38 + i * 0.1;
+      const rr = rAt(f) * 1.015;
+      const geo = new THREE.CylinderGeometry(rr, rr, A.bL * 0.035, 14, 1, true, Math.PI / 2 + 0.25, Math.PI - 0.5);
+      geo.rotateX(Math.PI / 2);
+      geo.scale(A.bW, 1, 1);
+      const band = new THREE.Mesh(geo);
+      band.position.set(0, A.bY, f * A.bL);
+      band.rotation.z = (i % 2 ? 1 : -1) * 0.08;
+      bands.push(band);
+    }
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0x1a1410, roughness: 0.9, side: THREE.DoubleSide });
+    torso.add(mesh(mergeGeometries(bands), stripeMat, d));
   }
 
   // Neck: rises from the top of the chest, leaning forward by neckTilt.
@@ -2387,16 +2824,18 @@ export function createAnimal(options: AnimalOptions = {}): Animal {
       darkParts.push(eye);
     }
     // Ears: upright and pointed (horse, dog), big and spread (deer), out to the side (cow).
-    const earLen = A.ear === 'big' ? A.headR * 1.7 : A.ear === 'side' ? A.headR * 1.0 : A.headR * 0.95;
+    const earLen = A.ear === 'big' ? A.headR * 1.7 : A.ear === 'side' ? A.headR * 1.0 : A.ear === 'round' ? A.headR * 0.5 : A.headR * 0.95;
     const ear = part(taperGeo(A.headR * 0.28, A.headR * 0.06, earLen, real ? 8 : 5));
     ear.scale.z = 0.45;
     ear.position.set(side * A.headR * 0.5, A.headR * 0.65, -A.headR * 0.35);
-    ear.rotation.z = -side * (A.ear === 'side' ? 1.35 : A.ear === 'big' ? 0.75 : 0.25);
+    ear.rotation.z = -side * (A.ear === 'side' ? 1.35 : A.ear === 'big' ? 0.75 : A.ear === 'round' ? 0.4 : 0.25);
     hideParts.push(ear);
-    if (A.horns) {
-      const horn = part(taperGeo(A.headR * 0.22, A.headR * 0.05, A.headR * 1.3, real ? 8 : 5));
-      horn.position.set(side * A.headR * 0.45, A.headR * 0.8, -A.headR * 0.45);
-      horn.rotation.set(-0.35, 0, -side * 0.55);
+    if (A.horns !== 'none') {
+      // A cow's horns rise and spread; a goat's sweep straight back over its neck.
+      const goat = A.horns === 'goat';
+      const horn = part(taperGeo(A.headR * (goat ? 0.2 : 0.22), A.headR * 0.05, A.headR * (goat ? 1.6 : 1.3), real ? 8 : 5));
+      horn.position.set(side * A.headR * (goat ? 0.3 : 0.45), A.headR * 0.8, -A.headR * (goat ? 0.3 : 0.45));
+      horn.rotation.set(goat ? -1.15 : -0.35, 0, -side * (goat ? 0.18 : 0.55));
       hornParts.push(horn);
     }
     if (A.antlers) {
@@ -2417,6 +2856,12 @@ export function createAnimal(options: AnimalOptions = {}): Animal {
         hornParts.push(tine);
       }
     }
+  }
+  if (A.beard) {
+    const beard = part(taperGeo(A.headR * 0.22, A.headR * 0.05, A.headR * 0.9, real ? 6 : 4));
+    beard.position.set(0, -A.headR * 0.55, tipZ - A.headR * 0.75);
+    beard.rotation.x = Math.PI - 0.15;
+    darkParts.push(beard);
   }
   head.add(mesh(mergeGeometries(hideParts), hide, d));
   head.add(mesh(mergeGeometries(darkParts), dark, d));
@@ -2475,6 +2920,15 @@ export function createAnimal(options: AnimalOptions = {}): Animal {
     const tuft = mesh(ellipsoid(A.legR * 0.7, A.legR * 2.2, A.legR * 0.7, d), hair, d);
     tuft.position.set(0, -Math.cos(lean) * len, -Math.sin(lean) * len);
     tail.add(tuft);
+  } else if (A.tail === 'long') {
+    // Nearly the body's length, heavy at the root, hanging back and lifting at the tip.
+    const t = mesh(taperGeo(A.legR * 0.75, A.legR * 0.45, A.bL * 0.82, radial), hide, d);
+    t.rotation.x = Math.PI + 1.05;
+    tail.add(t);
+  } else if (A.tail === 'flick') {
+    const t = mesh(taperGeo(A.legR * 0.7, A.legR * 0.3, A.bR * 0.6, real ? 6 : 4), hide, d);
+    t.rotation.x = -0.5;
+    tail.add(t);
   } else if (A.tail === 'short') {
     const t = mesh(ellipsoid(A.bR * 0.25, A.bR * 0.4, A.bR * 0.18, d), new THREE.MeshStandardMaterial({ color: 0xece6da, roughness: 0.9 }), d);
     t.position.z = -A.bR * 0.05;
@@ -2974,7 +3428,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '  colour under perfect lighting is exactly what "not realistic" looks like.\n' +
       '- 🔴 EVERY OBJECT COMES FROM objects.ts, never hand-modelled: createCar, createMotorcycle,\n' +
       '  createBicycle, createTree, createMountain, createRiver, createDesert, createRoad,\n' +
-      '  createAnimal. Call setDetailLevel()\n' +
+      '  createAnimal (dog, cow, horse, deer, goat, tiger), createHouse, and India\'s roads —\n' +
+      '  createAutoRickshaw, createBus, createTruck, createTractor. Call setDetailLevel()\n' +
       "  ONCE at start-up — 'real' when the user asked for real/realistic/asli/100%, 'lite' when they\n" +
       '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
       '- 🔴 A BIKE IS createMotorcycle() / createBicycle(), never a capsule over two cylinders. A\n' +

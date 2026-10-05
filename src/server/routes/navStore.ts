@@ -16,6 +16,7 @@
 // thing standing between this store and anyone with a banking trojan, so the human review step is
 // what replaces it, and that is not a setting.
 
+import type { GrantEmail } from '../AgentV3/featureFlag';
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { inspectApk, MAX_APK_BYTES, publishableApkLimitBytes } from '../lib/apkInspect';
@@ -72,7 +73,7 @@ import { isNativeRequest } from '../lib/cors';
 import { audit } from '../lib/audit';
 import { recordTakedown, hashContent } from '../lib/takedownLedger';
 import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
-import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
+import { isAgentV3FreeUser, identityGrantEmail } from '../AgentV3/featureFlag';
 import { remixGate, remixRefusal } from '../lib/remixPlanGate';
 import { routeParam, routeParams } from '../lib/expressCompat';
 import {
@@ -110,7 +111,7 @@ export const STORE_CATEGORIES = [
 ] as const;
 
 /** Who may review. Read from the same admin list the rest of the platform uses. */
-export function isStoreAdmin(email: string | null): boolean {
+export function isStoreAdmin(email: GrantEmail | null): boolean { // a verified email only (Q-624)
   if (!email) return false;
   const list = (process.env.NAV_STORE_ADMINS || process.env.AGENTV3_FREE_LIST || '')
     .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
@@ -319,7 +320,7 @@ export function registerNavStoreRoutes(app: Express): void {
       categories: STORE_CATEGORIES,
       // The number users see must be the one that can actually publish (see publishableApkLimitBytes).
       maxSizeMb: publishableApkLimitBytes(MAX_APK_BYTES, MAX_SCANNABLE_BYTES) / 1024 / 1024,
-      isAdmin: isStoreAdmin(me?.email ?? null),
+      isAdmin: isStoreAdmin(identityGrantEmail(me)),
       // Named plainly so the admin knows exactly what to switch on, rather than seeing a dead button.
       missing: [
         ...(storage ? [] : ['app storage (NAV_STORE_BUCKET)']),
@@ -556,7 +557,7 @@ export function registerNavStoreRoutes(app: Express): void {
   /** The review queue, with everything a reviewer needs to decide. */
   app.get('/api/nav-store/admin/queue', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(me?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
+    if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
     try {
       const status = String(req.query.status || 'pending') as SubmissionStatus;
       const valid: SubmissionStatus[] = ['pending', 'approved', 'rejected', 'removed'];
@@ -574,7 +575,7 @@ export function registerNavStoreRoutes(app: Express): void {
    */
   app.post('/api/nav-store/admin/review', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(me?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
+    if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
 
     const { id, decision, note } = (req.body || {}) as Record<string, unknown>;
     const appId = String(id || '');
@@ -1127,7 +1128,7 @@ export function registerNavStoreRoutes(app: Express): void {
       // the two calls), and "who is the caller" must have exactly one answer per request.
       const remixerIdentity = await verifyFirebaseIdentity(req);
       const remixerUid = remixerIdentity?.uid ?? null;
-      const remixerEmail = remixerIdentity?.email ?? null;
+      const remixerEmail = identityGrantEmail(remixerIdentity);
       const target = typeof req.body?.targetWorkspaceId === 'string' ? req.body.targetWorkspaceId : '';
       if (!target) return res.status(400).json({ error: 'targetWorkspaceId is required.' });
       if (!verifiedWorkspaceReadOk(remixerUid, target)) {
@@ -1313,7 +1314,7 @@ export function registerNavStoreRoutes(app: Express): void {
    */
   app.get('/api/nav-store/web/admin/reports', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(me?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
+    if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
     try {
       res.json({ reports: await listWebAppReports() });
     } catch (e) {
@@ -1374,7 +1375,7 @@ export function registerNavStoreRoutes(app: Express): void {
   /** Admin: the listing queue + decisions. Same review discipline as the APK store. */
   app.get('/api/nav-store/web/admin/queue', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(me?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
+    if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
     try {
       // `?status=listed` returns the apps ON the store, so an app the admin just listed stays on the review
       // screen saying so, with a Remove button — the APK lane has done this since 2026-08-21, and the web
@@ -1389,7 +1390,7 @@ export function registerNavStoreRoutes(app: Express): void {
 
   app.post('/api/nav-store/web/admin/review', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(me?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
+    if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
     const id = String(req.body?.id || '');
     const decision = String(req.body?.decision || '');
     if (!id || !['listed', 'removed'].includes(decision)) {

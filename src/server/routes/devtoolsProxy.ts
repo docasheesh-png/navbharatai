@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { rateLimiter } from '../lib/authMiddleware';
 import { validateBody, vobject, vstring } from '../lib/validate';
-import { assertPublicHttpUrl } from '../lib/ssrfGuard';
+import { assertPublicHttpUrl, publicOnlyInit } from '../lib/ssrfGuard';
 
 /**
  * API Tester proxy — the REAL /api/devtools/proxy route (admin autopsy 2026-07-21).
@@ -60,7 +60,7 @@ export function registerDevtoolsProxyRoutes(app: Express): void {
       if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && typeof body.body === 'string' && body.body.length > 0) {
         init.body = body.body;
       }
-      const upstream = await fetch(url, init);
+      const upstream = await fetch(url, publicOnlyInit(init));
       // Read the body with a hard size cap so a huge/streaming response can't exhaust memory.
       const buf = await readCapped(upstream, MAX_RESPONSE_BYTES);
       const resHeaders: Record<string, string> = {};

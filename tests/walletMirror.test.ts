@@ -58,6 +58,35 @@ describe('mirroredCreditPatch — both views, same money, always a delta', () =>
   });
 });
 
+describe('Q-670 — a wallet in overdraft is neither forgiven by a credit nor raised by a deduction', () => {
+  const owing = { tokenBalance: -50_000, remaining_balance: -50_000 / TOKENS_PER_RUPEE, total_balance: 10 };
+
+  it('a credit pays the debt down by exactly its amount — it does not jump the wallet to zero', () => {
+    const p = mirroredCreditPatch(owing, 100, 'gift');
+    expect(p.tokenBalance).toBe(-49_900);
+    expect(p.remaining_balance).toBeCloseTo((-50_000 + 100) / TOKENS_PER_RUPEE, 6);
+    expect(p.giftTokensRemaining).toBe(0); // a gift that paid debt leaves no gift behind
+  });
+
+  it('lifetime credit grows by what was credited, not by the debt it wiped', () => {
+    const p = mirroredCreditPatch(owing, 100, 'paid');
+    expect(p.total_balance).toBeCloseTo(10 + 100 / TOKENS_PER_RUPEE, 6);
+  });
+
+  it('a deduction on an overdrawn wallet changes nothing, and never RAISES it', () => {
+    const p = mirroredCreditPatch(owing, -500, 'paid');
+    expect(p.tokenBalance).toBe(-50_000);
+    expect(p.remaining_balance).toBeCloseTo(owing.remaining_balance, 6);
+    expect(p.total_balance).toBeUndefined();
+  });
+
+  it('a positive wallet still floors at zero on a large deduction', () => {
+    const p = mirroredCreditPatch({ tokenBalance: 100, remaining_balance: 100 / TOKENS_PER_RUPEE }, -500, 'paid');
+    expect(p.tokenBalance).toBe(0);
+    expect(p.remaining_balance).toBe(0);
+  });
+});
+
 describe('wiring — every wallet credit is transactional, and none of them assigns a view', () => {
   const admin = readFileSync(join(process.cwd(), 'src/server/routes/admin.ts'), 'utf8');
   const payment = readFileSync(join(process.cwd(), 'src/server/routes/payment.ts'), 'utf8');
@@ -131,9 +160,11 @@ describe('store purchases — one purchase token can only ever credit once', () 
     expect(payments).toContain('if (!claimedNow) {');
   });
 
-  it('🔒 and the simulator still refuses to mint balance in production', () => {
+  it('🔒 and there is no simulator that could mint balance at all (Q-615 removed it)', () => {
+    // SUPERSEDED: this used to check the simulator refused in production. The simulator itself is gone —
+    // only Cashfree's own answer can mark an order paid (tests/aFakePaymentNeverCredits.test.ts).
     const payments = readFileSync(join(process.cwd(), 'src/server/lib/payments.ts'), 'utf8');
-    expect(payments).toContain("if (process.env.NODE_ENV === 'production')");
-    expect(payments).toContain('Refusing simulator credit in production');
+    expect(payments).not.toMatch(/isSimulator|SIMULATION|simulator credit/i);
+    expect(payments).toContain('cashfreePaymentsAvailability()');
   });
 });

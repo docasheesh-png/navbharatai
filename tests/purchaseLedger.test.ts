@@ -107,7 +107,10 @@ describe('summary, filter and sort', () => {
     expect(s.revenueRows).toBe(3);
     expect(s.pendingRows).toBe(1);
     expect(s.freeCreditRows).toBe(2);
-    expect(s.refundTracked).toBe(false);
+    // CHANGED 2026-10-05 (Q-614): web refunds are recorded now; store refunds are not, and the summary
+    // says exactly that rather than claiming either "all" or "none".
+    expect(s.refundTracked).toBe('web-only');
+    expect(s.refundedInr).toBe(0);
   });
   it('default order is latest first', () => {
     const ids = sortPurchases(rows).map((r) => r.id);

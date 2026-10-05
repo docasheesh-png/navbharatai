@@ -115,6 +115,7 @@ import { sanitizeFirestoreData } from '../../lib/firestoreUtils';
  *  to its claimed-id + random-sessionId check for those. */
 import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { authJsonHeaders } from '../../lib/authHeaders';
+import { beginGithubOauthAttempt, browserStorage, GITHUB_WEB_NONCE_KEY } from '../../lib/githubOauthNonce';
 
 /**
  * AgentV3Panel — NavBharatAI Pro (Vargen 3.0), a Claude-Code-style chat
@@ -841,7 +842,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       const reqUrl = new URL(`${window.location.origin}/api/auth/github/url`);
       reqUrl.searchParams.set('redirect_uri', redirectUri);
       reqUrl.searchParams.set('state', state);
-      const response = await fetch(reqUrl.toString());
+      // Q-623: the same one-time nonce as the app-level connect — the token that comes back is stored
+      // only if it carries this tab's nonce (see lib/githubOauthNonce.ts).
+      const nonceHeader = beginGithubOauthAttempt(browserStorage('session'), GITHUB_WEB_NONCE_KEY, Date.now());
+      const response = await fetch(reqUrl.toString(), { headers: nonceHeader });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || typeof data?.url !== 'string' || !data.url) throw new Error('Could not start GitHub sign-in — try again.');
       const githubUrl = new URL(data.url);

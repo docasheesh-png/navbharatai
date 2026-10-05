@@ -20,7 +20,10 @@ export {
   costRoutingEnabled,
   costRoutingActiveFor,
   buildRequiresSignIn,
+  grantEmail,
+  identityGrantEmail,
 } from './featureFlag';
+export type { GrantEmail } from './featureFlag';
 export { decideAffordability } from './Affordability';
 export type { AffordabilityAction, AffordabilityInput, AffordabilityDecision } from './Affordability';
 export { estimateBuildTokens, estimateBuildCost } from './PreflightEstimate';

@@ -5,9 +5,8 @@
  * have passed every check we own.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -17,6 +16,7 @@ import {
   EXPLORE_RESULT_MARKER, NEVER_PRESS, WRITE_VERBS, CONSOLE_NOISE, type PressResult,
 } from '../src/server/AgentV3/clickExplorer';
 import { repairTargets, explorerRepairFindings } from '../src/server/AgentV3/explorerRepair';
+import { makeTempDir } from './helpers/tempDir';
 
 const countries = ['India New Delhi Asia', 'Japan Tokyo Asia', 'France Paris Europe', 'Kenya Nairobi Africa', 'Peru Lima South America'];
 
@@ -120,7 +120,7 @@ describe('a search that does nothing is a failure, told in plain words', () => {
 
 describe('the runner', () => {
   it('is valid JavaScript and carries the search/sort rules as data', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-narrow-'));
+    const dir = makeTempDir('nbai-narrow-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, clickExplorerModule({ base: 'http://x/', marker: EXPLORE_RESULT_MARKER }));
     execFileSync(process.execPath, ['--check', file]);
@@ -179,7 +179,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   afterAll(() => new Promise<void>((res) => server.close(() => res())));
 
   async function explore(path: string) {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-narrow-real-'));
+    const dir = makeTempDir('nbai-narrow-real-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, clickExplorerModule({
       base: base + path, marker: EXPLORE_RESULT_MARKER, maxClicks: 12, maxSecond: 0, perParent: 0, budgetMs: 60_000, loadMs: 10_000, blockWrites: false,

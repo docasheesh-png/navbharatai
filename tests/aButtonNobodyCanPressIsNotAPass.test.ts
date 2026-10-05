@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
@@ -13,6 +12,7 @@ import { explorerRepairFindings } from '../src/server/AgentV3/explorerRepair';
 import { leanReviewInline, leanReviewAnswersInOneCall, LEAN_REVIEW_FILE_CHARS, LEAN_REVIEW_INLINE_CHARS } from '../src/server/AgentV3/ReviewerAgent';
 import { appHasNoDataEntry, dataEntryEvidence } from '../src/server/AgentV3/journeyDerivation';
 import { buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
+import { makeTempDir } from './helpers/tempDir';
 
 /**
  * AUTOPSY 8b8743a3 (2026-10-04) — "Road infinite both side street light with start restart scoring".
@@ -157,7 +157,7 @@ describe('🔒 covered is decided by the PAGE, never inferred from a timeout', (
 
   it('the generated module still parses as JavaScript', async () => {
     const { execFileSync } = await import('node:child_process');
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-covered-parse-'));
+    const dir = makeTempDir('nbai-covered-parse-');
     const file = join(dir, 'm.mjs');
     writeFileSync(file, mod);
     expect(() => execFileSync(process.execPath, ['--check', file])).not.toThrow();
@@ -310,7 +310,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   afterAll(() => new Promise<void>((res) => server.close(() => res())));
 
   async function explore(path: string) {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-covered-real-'));
+    const dir = makeTempDir('nbai-covered-real-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, clickExplorerModule({
       base: base + path.replace(/^\//, ''), marker: EXPLORE_RESULT_MARKER, maxClicks: 6,

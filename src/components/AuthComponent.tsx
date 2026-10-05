@@ -17,6 +17,9 @@ import {
   AuthProvider,
   UserCredential,
 } from 'firebase/auth';
+// Exported by firebase/auth at runtime but not surfaced by its v12 types; these were five
+// `await import('firebase/auth')` calls that split nothing (Q-625) — see firebaseAuthRuntime.ts.
+import { OAuthProvider, PhoneAuthProvider, signInWithCustomToken } from '../lib/firebaseAuthRuntime';
 import { Capacitor } from '@capacitor/core';
 import { raceNativeAuth, settleWithinOrProceed, preLoginWebSignOutAllowed } from '../lib/nativeAuthGuard';
 import { normalizePhone } from '../lib/phoneNumber';
@@ -168,9 +171,6 @@ function reportOtpSuccess(outcome: 'sent' | 'verified'): void {
  * failures that are config — not code — name the exact Firebase Console fix so the
  * admin can resolve them without a developer console.
  */
-// Prefetched at module load so handleAppleSignIn's await resolves instantly inside the click
-// handler — see the DESKTOP FIX note there. A load failure is retried by the handler's own await.
-const firebaseAuthModuleForApple = import('firebase/auth');
 
 function describeSocialError(err: any): string {
   // The two configuration faults used to be explained ON SCREEN with the auth console's menu path
@@ -215,7 +215,6 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     (async () => {
       let platform = 'web';
       try {
-        const { Capacitor } = await import('@capacitor/core');
         platform = Capacitor.getPlatform();
       } catch { /* web */ }
       if (!alive) return;
@@ -366,9 +365,6 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         // keeps the app Play-Store-compliant. Requires Firebase console: Phone provider enabled + the
         // app's SHA-1/SHA-256 fingerprints registered for com.navbharat.ai.
         const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
-        // PhoneAuthProvider is exported by `firebase/auth` at runtime but the v12 umbrella types don't
-        // surface it to tsc — resolve it dynamically (it IS present) and build the JS-SDK credential.
-        const { PhoneAuthProvider } = (await import('firebase/auth')) as any;
         await FirebaseAuthentication.removeAllListeners();
         nativeVerificationId.current = null;
         otpClaim.current = 'idle';
@@ -471,10 +467,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     const result = await handOverNativePhoneSession({
       getNativeIdToken: async () => (await FirebaseAuthentication.getIdToken()).token,
       exchange: (idToken) => fetchPhoneExchange(idToken),
-      // Exported by `firebase/auth` at runtime; the v12 umbrella types do not surface it (same as
-      // PhoneAuthProvider above), so it is resolved dynamically.
       signInWithCustomToken: async (token) => {
-        const { signInWithCustomToken } = (await import('firebase/auth')) as any;
         await signInWithCustomToken(auth, token);
       },
       signOutNative: () => FirebaseAuthentication.signOut(),
@@ -511,7 +504,6 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           otpClaim.current = (await finishNativePhoneSession()) ? 'done' : 'idle';
           return;
         }
-        const { PhoneAuthProvider } = (await import('firebase/auth')) as any;
         await signInWithCredential(auth, PhoneAuthProvider.credential(nativeVerificationId.current, otp));
       } else {
         if (!confirmationResult) { otpClaim.current = 'idle'; return; }
@@ -718,9 +710,6 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
               'Native Apple sign-in returned no identity token — enable the "Sign in with Apple" capability (Xcode) and the Apple provider in Firebase.',
             );
           }
-          // OAuthProvider is exported by firebase/auth at runtime but the v12 umbrella types don't
-          // surface it to tsc (same as PhoneAuthProvider above) — resolve it dynamically.
-          const { OAuthProvider } = (await import('firebase/auth')) as any;
           const appleProvider = new OAuthProvider('apple.com');
           credential = appleProvider.credential({ idToken, rawNonce: nativeResult.credential?.nonce });
         }
@@ -843,17 +832,14 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     setLoading(true);
     // Apple is a Firebase OAuthProvider ('apple.com'). On native iOS the socialSignIn helper routes
     // through the native "Sign in with Apple" sheet; on web it uses the popup (Apple's web OAuth).
-    // OAuthProvider is resolved dynamically (v12 umbrella types don't surface it — see the note above).
     //
-    // DESKTOP FIX (admin 2026-08-09, "desktop browser me Apple login nahi ho raha"): this await used
+    // DESKTOP FIX (admin 2026-08-09, "desktop browser me Apple login nahi ho raha"): an await here used
     // to FETCH the firebase/auth chunk inside the click handler. On a cold cache that network wait
     // consumed the browser's transient user activation, so the signInWithPopup that followed was
     // popup-BLOCKED → fell back to signInWithRedirect → which silently dies on desktop Chrome's
     // storage-partitioned return ("missing initial state"). Google never hit this because its
-    // provider is statically imported. The module promise now starts at MODULE LOAD (below), so by
-    // click time this await resolves from memory in the same tick and the popup keeps the user
-    // activation it needs.
-    const { OAuthProvider } = (await firebaseAuthModuleForApple) as any;
+    // provider is statically imported. It was first fixed with a module-load prefetch promise; since
+    // Q-625 OAuthProvider is a STATIC import like Google's, so there is no await before the popup at all.
     const provider = new OAuthProvider('apple.com');
     provider.addScope('email');
     provider.addScope('name');

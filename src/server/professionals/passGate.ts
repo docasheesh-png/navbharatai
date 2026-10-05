@@ -4,7 +4,13 @@
 // (shared across ALL professionals AND Doctor AI) are free, every answer after that is paid from the one
 // wallet; free-list and an active pass are unlimited; anonymous callers must sign in. Exam mode has its
 // own question allowance (`gateProfessionalExam`). `PROFESSIONAL_FREE_QUOTA=off` restores the previous
-// behaviour exactly. Returns the model tier + charged share for an allowed turn, or a block payload.
+// behaviour for SIGNED-IN callers. Returns the model tier + charged share for an allowed turn, or a block.
+//
+// 🔒 AN ANONYMOUS CALLER IS DECIDED BY `anonymousCapabilities.ts`, FIRST, IN BOTH MODES (Q-622). Until
+// 2026-10-05 the `off` branch below handed a caller with no account `tier: 'paid'` — the full chain,
+// Claude included — and charged nothing, because there was no wallet. The anonymous answer is no longer
+// this file's to give: the one table says the Professionals, Exam mode and Doctor AI need an account, and
+// the result types (`CallerTier`) make `{ uid: null, tier: 'paid' }` a compile error.
 
 import { decideProfessionalAccess, splitExamQuestions } from './access';
 import {
@@ -16,9 +22,13 @@ import { professionalUsageStore, professionalExamUsageStore } from './Profession
 import { aiWalletSpendEnabled } from '../lib/aiTurnCharge';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { getServerDb } from '../lib/serverDb';
+import type { GrantEmail } from '../AgentV3/featureFlag';
 import { walletEmptyBody, WALLET_EMPTY_STATUS } from '../lib/walletEmptyNotice';
+import {
+  anonymousCallerTier, type CallerTier, type ModelTier, type ProfessionalSurface,
+} from '../lib/anonymousCapabilities';
 
-export type ProfessionalTier = 'free' | 'paid';
+export type ProfessionalTier = ModelTier;
 
 /**
  * Is the wallet empty enough to refuse a turn? PURE, so the money-sensitive comparison is testable.
@@ -36,8 +46,8 @@ export function walletTooEmptyForTurn(balanceInr: number | null): boolean {
 }
 
 export type PassGateResult =
-  | {
-      allow: true; countsAgainstFree: boolean; remainingFree?: number; uid: string | null; tier: ProfessionalTier;
+  | ({
+      allow: true; countsAgainstFree: boolean; remainingFree?: number;
       /** Carried so the caller can charge the wallet without re-deriving (or re-reading) either fact. */
       isFreeListed: boolean; hasActivePass: boolean;
       /**
@@ -46,7 +56,7 @@ export type PassGateResult =
        * free message would still have been billed. Hand it straight to the charge context.
        */
       billableFraction: number;
-    }
+    } & CallerTier)
   | { allow: false; status: number; body: Record<string, unknown> };
 
 /** Read the pass once for a verified, non-free-listed caller — and only when something will use it. */
@@ -67,8 +77,24 @@ async function balanceFor(uid: string): Promise<number | null> {
  *  first `professionalFreeDailyLimit()` answers each day are FREE — the free model chain, never
  *  charged, and NOT refused for an empty wallet (a free message does not need a balance). After that
  *  every answer is PAID: the paid chain, charged its real cost + markup from the one wallet, and
- *  refused only when that wallet is empty. The free-list and a Pass holder are unlimited. */
-export async function gateProfessionalTurn(uid: string | null, email: string | null): Promise<PassGateResult> {
+ *  refused only when that wallet is empty. The free-list and a Pass holder are unlimited.
+ *
+ *  `surface` names the entry of the anonymous table that answers for a caller with NO account (Doctor AI
+ *  passes 'doctor-ai', so its sign-in prompt names Doctor AI). It changes nothing for a signed-in caller. */
+export async function gateProfessionalTurn(
+  uid: string | null,
+  email: GrantEmail | null,
+  surface: ProfessionalSurface = 'professionals',
+): Promise<PassGateResult> {
+  if (!uid) {
+    // The one table decides — before any flag is read, so no flag can hand a stranger the paid chain.
+    const anon = anonymousCallerTier(surface);
+    if (!anon.allow) return anon;
+    return {
+      allow: true, countsAgainstFree: false, uid: null, tier: anon.tier,
+      isFreeListed: false, hasActivePass: false, billableFraction: 0,
+    };
+  }
   const freeListed = isProfessionalFreeUser(uid, email);
   const walletSpend = aiWalletSpendEnabled();
   const quotaOn = professionalFreeQuotaEnabled();
@@ -77,9 +103,10 @@ export async function gateProfessionalTurn(uid: string | null, email: string | n
   const hasActivePass = await activePassFor(uid, freeListed, walletSpend || quotaOn);
 
   if (!quotaOn) {
-    // PROFESSIONAL_FREE_QUOTA=off — the previous behaviour exactly: every answer on the paid chain,
-    // charged its real cost from the first message, and an empty wallet refused up front.
-    if (walletSpend && uid && !freeListed && !hasActivePass) {
+    // PROFESSIONAL_FREE_QUOTA=off — the previous behaviour for a SIGNED-IN caller: every answer on the
+    // paid chain, charged its real cost from the first message, and an empty wallet refused up front.
+    // (An anonymous caller never reaches here — see the top of this function.)
+    if (walletSpend && !freeListed && !hasActivePass) {
       const balanceInr = await balanceFor(uid);
       if (walletTooEmptyForTurn(balanceInr)) {
         // ADMIN 2026-08-10 ("pass system hata do"): no Pass offer here — it has never been sellable.
@@ -91,9 +118,9 @@ export async function gateProfessionalTurn(uid: string | null, email: string | n
   }
 
   const freeDailyLimit = professionalFreeDailyLimit();
-  const usedToday = !!uid && !freeListed && !hasActivePass ? await professionalUsageStore.getTodayCount(uid) : 0;
+  const usedToday = !freeListed && !hasActivePass ? await professionalUsageStore.getTodayCount(uid) : 0;
   const decision = decideProfessionalAccess({
-    enabled: true, signedIn: !!uid, isFreeListed: freeListed, hasActivePass, usedToday, freeDailyLimit,
+    enabled: true, signedIn: true, isFreeListed: freeListed, hasActivePass, usedToday, freeDailyLimit,
     // "Then paid" needs a wallet to be paid FROM. Without wallet spending an over-allowance answer
     // could not be charged, so it is the old honest block rather than a silent free answer.
     overQuota: walletSpend ? 'paid' : 'block',
@@ -101,7 +128,7 @@ export async function gateProfessionalTurn(uid: string | null, email: string | n
 
   if (decision.action === 'allow') {
     if (decision.reason === 'paid-after-free') {
-      const balanceInr = await balanceFor(uid as string);
+      const balanceInr = await balanceFor(uid);
       if (walletTooEmptyForTurn(balanceInr)) {
         return {
           allow: false,
@@ -123,17 +150,15 @@ export async function gateProfessionalTurn(uid: string | null, email: string | n
       billableFraction: free ? 0 : 1,
     };
   }
-  const login = decision.reason === 'login-required';
+  // Signed in, so the only block left is the used-up allowance. Reachable only while AI_WALLET_SPEND is
+  // off — with it on, an over-allowance answer is paid instead. So there is nothing to buy here, and the
+  // message says the one true thing left.
   return {
     allow: false,
-    status: login ? 401 : 402,
+    status: 402,
     body: {
-      error: login
-        ? 'Please sign in to use the Professionals. New users get free messages every day.'
-        // Reachable only while AI_WALLET_SPEND is off — with it on, an over-allowance answer is paid
-        // instead. So there is nothing to buy here, and the message says the one true thing left.
-        : `You've used your ${freeDailyLimit} free messages for today. They reset tomorrow.`,
-      code: login ? 'login_required' : 'professional_paywall',
+      error: `You've used your ${freeDailyLimit} free messages for today. They reset tomorrow.`,
+      code: 'professional_paywall',
       reason: decision.reason,
       remainingFree: 0,
       freeDailyLimit,
@@ -142,12 +167,12 @@ export async function gateProfessionalTurn(uid: string | null, email: string | n
 }
 
 export type ExamGateResult =
-  | {
-      allow: true; uid: string | null; tier: ProfessionalTier;
+  | ({
+      allow: true;
       isFreeListed: boolean; hasActivePass: boolean;
       /** Questions of this paper the day's free allowance covers (0 when uncounted or unlimited). */
       freeQuestions: number;
-    }
+    } & CallerTier)
   | { allow: false; status: number; body: Record<string, unknown> };
 
 /**
@@ -159,7 +184,12 @@ export type ExamGateResult =
  * model is asked, with the one thing that still works named — a smaller paper that fits the free
  * questions left — rather than a paper the student cannot pay for.
  */
-export async function gateProfessionalExam(uid: string | null, email: string | null, requested: number): Promise<ExamGateResult> {
+export async function gateProfessionalExam(uid: string | null, email: GrantEmail | null, requested: number): Promise<ExamGateResult> {
+  if (!uid) {
+    const anon = anonymousCallerTier('professional-exam');
+    if (!anon.allow) return anon;
+    return { allow: true, uid: null, tier: anon.tier, isFreeListed: false, hasActivePass: false, freeQuestions: 0 };
+  }
   const freeListed = isProfessionalFreeUser(uid, email);
   const walletSpend = aiWalletSpendEnabled();
   const quotaOn = professionalFreeQuotaEnabled();
@@ -173,13 +203,6 @@ export async function gateProfessionalExam(uid: string | null, email: string | n
   const hasActivePass = await activePassFor(uid, freeListed, true);
   if (freeListed || hasActivePass) {
     return { allow: true, uid, tier: 'paid', isFreeListed: freeListed, hasActivePass, freeQuestions: 0 };
-  }
-  if (!uid) {
-    return {
-      allow: false,
-      status: 401,
-      body: { error: 'Please sign in to take a test. Every account gets free questions each day.', code: 'login_required', reason: 'login-required' },
-    };
   }
 
   const freeLimit = professionalExamFreeDailyQuestions();

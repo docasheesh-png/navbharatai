@@ -88,7 +88,7 @@ export function GitViewPanel({
               <p className="text-[9px] text-muted font-serif uppercase tracking-widest mt-1">
                 {selectedRepo
                   ? `Active Repo: ${selectedRepo.name} (${currentBranch})`
-                  : 'Sandbox Simulator Mode (GitHub Unconnected)'}
+                  : 'GitHub not connected'}
               </p>
             </div>
           </div>

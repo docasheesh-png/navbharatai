@@ -9,7 +9,7 @@
  * visibly — in CI, exactly like the click explorer's.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync, readFileSync } from 'fs';
+import { existsSync, writeFileSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import http from 'http';
@@ -21,6 +21,7 @@ import {
 import { pageCheckScript } from '../src/server/AgentV3/PageRouteCheck';
 import { journeyScript } from '../src/server/AgentV3/journeyDerivation';
 import { clickExplorerScript, clickExplorerModule, parseExploreOutput, EXPLORE_RESULT_MARKER, NEVER_PRESS, WRITE_VERBS, CONSOLE_NOISE } from '../src/server/AgentV3/clickExplorer';
+import { makeTempDir } from './helpers/tempDir';
 
 const ROUTE = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
 
@@ -130,7 +131,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   });
 
   async function runNode(source: string): Promise<string> {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-signin-real-'));
+    const dir = makeTempDir('nbai-signin-real-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, source);
     const { execFile } = await import('node:child_process');
@@ -141,7 +142,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
     parseSignInOutput(await runNode(signInModule({ base, marker: SIGN_IN_RESULT_MARKER, state, maxScreens: 6, budgetMs: 45_000, candidates }, imp)));
 
   it('signs in through a form the app already filled, and reads the screens behind it', async () => {
-    const state = join(mkdtempSync(join(tmpdir(), 'nbai-state-')), 's.json');
+    const state = join(makeTempDir('nbai-state-'), 's.json');
     const run = await signIn(basePrefilled, [], state);
     expect(run.signedIn).toBe(true);
     expect(run.note).toBe('sign-in form default');
@@ -152,7 +153,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   }, 120_000);
 
   it('types an account the app ships when the form is empty — and a wrong one is never success', async () => {
-    const state = join(mkdtempSync(join(tmpdir(), 'nbai-state-')), 's.json');
+    const state = join(makeTempDir('nbai-state-'), 's.json');
     const ok = await signIn(baseEmpty, [{ identifier: 'nope@stock.test', password: 'wrong1', source: 'demo hint on the page' }, { identifier: 'admin@stock.test', password: 'admin123', source: 'demo account in the source' }], state);
     expect(ok.signedIn).toBe(true);
     expect(ok.note).toBe('demo account in the source');
@@ -164,7 +165,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   }, 180_000);
 
   it('the click explorer, given the session, presses the controls BEHIND the door', async () => {
-    const state = join(mkdtempSync(join(tmpdir(), 'nbai-state-')), 's.json');
+    const state = join(makeTempDir('nbai-state-'), 's.json');
     expect((await signIn(basePrefilled, [], state)).signedIn).toBe(true);
     const cfg = {
       base: basePrefilled, marker: EXPLORE_RESULT_MARKER, maxClicks: 6, maxSecond: 2, perParent: 1, budgetMs: 60_000, loadMs: 10_000,

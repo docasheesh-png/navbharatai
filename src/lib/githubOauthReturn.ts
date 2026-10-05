@@ -19,16 +19,18 @@
 //
 // PURE — the parsing and the decision are here so they can be tested without a device.
 
+import { takeDeviceNonce, browserStorage, type NonceStorage } from './githubOauthNonce';
+
 /** Where the app's OAuth deep link lands. Must match the server's NATIVE_OAUTH_REDIRECT. */
 export const GITHUB_DEEP_LINK_PREFIX = 'com.navbharat.ai://github-callback';
 
 /**
- * The token carried by a deep link, or null when this is not our GitHub return.
+ * The raw token carried by a deep link, or null when there is none.
  *
- * The token rides in the FRAGMENT (`#gh_token=…`) because a fragment is not sent to servers and does not
- * land in logs the way a query string does; the query form is accepted too because it costs nothing and
- * a redirect chain can move it. Returns null for anything that is not our callback — this runs on every
- * deep link the OS hands the app, including ones we did not send. PURE.
+ * ⚠️ Q-629 (2026-10-05): the app NEVER stores this. It only RECOGNISES the shape, so a link carrying a
+ * raw token — which this build never asks for — is refused out loud instead of being mistaken for some
+ * other link. A token in a custom-scheme link is exactly what any installed app, or any web page that
+ * opens `com.navbharat.ai://…`, can forge. PURE.
  */
 export function tokenFromDeepLink(url: string | null | undefined): string | null {
   const raw = String(url ?? '');
@@ -44,13 +46,12 @@ export function tokenFromDeepLink(url: string | null | undefined): string | null
  * WHY A TICKET AND NOT THE TOKEN (security audit finding 1, HIGH). A custom URI scheme is not exclusive
  * on Android: any installed app may declare `com.navbharat.ai` and receive this link. Our GitHub scope
  * is `repo workflow` — full read/write on every private repository the user has — so the token itself
- * must never travel this way. The ticket is encrypted with the server key and bound to the uid that
- * started the flow, so an app that intercepts it holds something it can neither read nor redeem.
+ * must never travel this way. The ticket is encrypted with the server key and bound to the hash of a
+ * one-time nonce this app made (Q-629), so an app that intercepts it holds something it can neither
+ * read nor redeem.
  *
- * ⚠️ `tokenFromDeepLink` STAYS, and must. The server only sends a ticket to an app that asked for one
- * AND was authenticated at the time; if either was missing it sends the legacy token, so the client has
- * to understand both. Removing the token path would break the flow precisely when authentication was
- * unavailable — the moment it is least helpful to fail.
+ * Since Q-629 this is the ONLY way the app accepts a GitHub token from a deep link: this build always
+ * asks for the device flow, and the server never answers that request with a raw token.
  */
 export function ticketFromDeepLink(url: string | null | undefined): string | null {
   const raw = String(url ?? '');
@@ -59,15 +60,6 @@ export function ticketFromDeepLink(url: string | null | undefined): string | nul
   const ticket = new URLSearchParams(frag).get('gh_ticket');
   return ticket && ticket.trim() ? ticket : null;
 }
-
-/**
- * The query NavBharatAI adds when it wants a ticket rather than a raw token.
- *
- * Sent only by an app that understands `gh_ticket`. An older build omits it and keeps the exact flow it
- * shipped with — which is the whole reason this is opt-in: the app runs from assets baked into its APK,
- * so a server-side switch alone would break GitHub sign-in for everyone who has not updated.
- */
-export const TICKET_HANDOFF_QUERY = 'handoff=ticket';
 
 /** What the app should do when it comes back to the foreground mid-sign-in. */
 export type ResumeOutcome =
@@ -101,9 +93,12 @@ export const GITHUB_CANCELLED_MESSAGE = 'GitHub sign-in was not completed. You c
 /**
  * Exchange a handoff ticket for the real GitHub token.
  *
- * The redemption is what makes an intercepted deep link worthless: it is authenticated with the user's
- * Firebase ID token, which an app that merely grabbed the URI does not have. The ticket alone proves
- * nothing.
+ * The redemption is what makes an intercepted deep link worthless: it presents the one-time DEVICE
+ * nonce this app saved when it started the sign-in (Q-629), which an app that merely grabbed the URI
+ * does not have. No saved nonce means this app did not start a sign-in, so the ticket is not redeemed
+ * at all. The nonce is single use — taken here whatever the outcome.
+ *
+ * No Firebase identity is needed, which is why this works for a user signing IN with GitHub.
  *
  * Returns null on any failure rather than throwing. The caller is a deep-link listener with no
  * try/catch around it, and an unhandled rejection there would take down the handler for every future
@@ -112,17 +107,20 @@ export const GITHUB_CANCELLED_MESSAGE = 'GitHub sign-in was not completed. You c
 export async function redeemGithubTicket(
   ticket: string,
   deps?: {
-    headers: () => Promise<Record<string, string>>;
-    post: (url: string, init: RequestInit) => Promise<Response>;
+    post?: (url: string, init: RequestInit) => Promise<Response>;
+    storage?: NonceStorage | null;
+    nowMs?: number;
   },
 ): Promise<string | null> {
   try {
-    const headers = deps ? await deps.headers() : await (await import('./authHeaders')).authJsonHeaders();
+    const storage = deps && 'storage' in deps ? deps.storage ?? null : browserStorage('local');
+    const nonce = takeDeviceNonce(storage, deps?.nowMs ?? Date.now());
+    if (!nonce) return null; // this app started no sign-in — an unsolicited ticket is never redeemed
     const post = deps?.post ?? ((url: string, init: RequestInit) => fetch(url, init));
     const res = await post('/api/github/native-exchange', {
       method: 'POST',
-      headers,
-      body: JSON.stringify({ ticket }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket, nonce }),
     });
     if (!res.ok) return null;
     const data = await res.json();

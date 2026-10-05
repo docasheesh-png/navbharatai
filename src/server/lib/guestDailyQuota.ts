@@ -32,6 +32,7 @@ import { clientAddress } from './clientAddress';
 import { createHash } from 'crypto';
 import { doc, getServerDb, runTransaction } from './serverDb';
 import { verifyFirebaseIdentity } from './authMiddleware';
+import { anonymousCallerTier, type GuestSurface } from './anonymousCapabilities';
 
 /** The header the app sends with its anonymous device id. */
 export const GUEST_ID_HEADER = 'x-nb-guest';
@@ -162,9 +163,13 @@ export const firestoreGuestUsageStore: GuestUsageStore = {
  * Express middleware for an AI route a signed-out visitor can reach. A verified account passes untouched;
  * a visitor is counted against the shared daily budget and refused with 403 `guest_limit_reached` once it
  * is spent. 403, not 401: the free-chat client treats a 401 as an expired session and signs the user out.
+ *
+ * `surface` must be a GUEST surface of the anonymous table (`anonymousCapabilities.ts`, Q-622) — the type
+ * allows nothing else, and a visitor is still checked against the table at run time, so this middleware
+ * can never be the thing that opens a sign-in surface to strangers.
  */
 export function guestDailyQuota(
-  surface: string,
+  surface: GuestSurface,
   deps: {
     store?: GuestUsageStore;
     identify?: (req: Request) => Promise<{ uid: string } | null>;
@@ -182,6 +187,12 @@ export function guestDailyQuota(
     let signedIn = false;
     try { signedIn = Boolean((await identify(req))?.uid); } catch { signedIn = false; }
     if (signedIn) return next();
+    const capability = anonymousCallerTier(surface);
+    if (!capability.allow) {
+      // 403 for the reason above; the body is the shared sign-in prompt.
+      res.status(403).json(capability.body);
+      return;
+    }
     const ipCap = guestDailyIpCap(env, limit);
     const guestId = readGuestId(req.headers[GUEST_ID_HEADER]);
     const day = indiaDay(now());

@@ -13,6 +13,7 @@ import { appAiUsageStore } from './AppAiUsageStore';
 import { getAppAiSettings } from './AppAiSettingsStore';
 import { ownKeyFor, askWithOwnKey, type OwnKeyProvider } from './appAiOwnKey';
 import { callProfessionalAIWithUsage } from './professionalRouting';
+import { anonymousCallerTier } from './anonymousCapabilities';
 import { collectAiSpend } from './aiSpendZone';
 import { chargeForAiTurns } from './aiTurnCharge';
 import { chatTurnCost, sumChatTurnCosts } from './chatSpend';
@@ -62,7 +63,11 @@ export async function answerForApp(ask: AppAiAsk): Promise<AppAiAnswer> {
   if (!decision.allow) return { ok: false, reason: decision.reason };
   if (!spent.known) console.warn(`[APPAI] ${ask.counter.appId}: spend counters unreadable — this call was allowed without a cap check.`);
 
-  const run = await collectAiSpend(() => callProfessionalAIWithUsage(ask.system, ask.prompt, 'free'));
+  // The person asking is a visitor of the owner's app — nobody NavBharatAI knows — so the tier comes from
+  // the anonymous table (Q-622), which can never say `paid`. The owner's preview takes the same path.
+  const visitor = anonymousCallerTier('app-assistant');
+  if (!visitor.allow) return { ok: false, reason: 'disabled' };
+  const run = await collectAiSpend(() => callProfessionalAIWithUsage(ask.system, ask.prompt, visitor.tier));
   if (!run.ok) {
     console.error(`[APPAI] ${ask.counter.appId}: the assistant chain failed:`, run.error);
     return { ok: false, reason: 'disabled' };

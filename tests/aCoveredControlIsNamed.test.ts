@@ -9,16 +9,16 @@
  * the same day; this adds that the line carries no colour codes, and locks the whole of it in a real browser.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
   clickExplorerModule, CONSOLE_NOISE, EXPLORE_RESULT_MARKER, NEVER_PRESS, parseExploreOutput, PRESS_FAILURE_CAUSE,
   pressFailureNote, WRITE_VERBS,
 } from '../src/server/AgentV3/clickExplorer';
+import { makeTempDir } from './helpers/tempDir';
 
 describe('the generated runner', () => {
   const mod = clickExplorerModule({ base: 'http://x/' });
@@ -34,7 +34,7 @@ describe('the generated runner', () => {
   });
 
   it('parses', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-covered-'));
+    const dir = makeTempDir('nbai-covered-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, mod);
     execFileSync(process.execPath, ['--check', file]);
@@ -62,7 +62,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   afterAll(() => new Promise<void>((res) => server.close(() => res())));
 
   it('names the element that covered the control, and still presses the rest', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-covered-real-'));
+    const dir = makeTempDir('nbai-covered-real-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, clickExplorerModule({
       base, marker: EXPLORE_RESULT_MARKER, maxClicks: 6, maxSecond: 0, perParent: 0, budgetMs: 40_000, loadMs: 10_000, blockWrites: false,

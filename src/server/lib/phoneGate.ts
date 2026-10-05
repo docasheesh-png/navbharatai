@@ -34,7 +34,7 @@
 // testable without a network.
 
 import { normalizePhone, maskPhone } from '../../lib/phoneNumber';
-import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
+import { isAgentV3FreeUser, identityGrantEmail } from '../AgentV3/featureFlag';
 
 /** The slice of the admin Auth SDK this module uses — structural, so tests need no SDK. */
 export interface PhoneLookupAuth {
@@ -163,12 +163,12 @@ export function phoneForLog(raw: string | null | undefined): string {
  * must win), the free list second (no directory call for an admin), the real lookup last.
  */
 export async function importBlockedForPhone(
-  identity: { uid: string | null; email: string | null } | null,
+  identity: { uid: string | null; email: string | null; emailVerified?: boolean } | null,
   getAuth: () => Promise<PhoneLookupAuth | null>,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<boolean> {
   if (!importPhoneGateEnabled(env)) return false;
-  if (isAgentV3FreeUser(identity?.uid ?? null, identity?.email ?? null)) return false;
+  if (isAgentV3FreeUser(identity?.uid ?? null, identityGrantEmail(identity))) return false;
   return !(await hasVerifiedPhoneWith(identity?.uid ?? null, getAuth));
 }
 

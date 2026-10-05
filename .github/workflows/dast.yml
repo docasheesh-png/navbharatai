@@ -5,6 +5,8 @@ name: DAST (OWASP ZAP baseline)
 # auth-bypass / injection / path-traversal / misconfigured-header issues that
 # static (SAST) scanning misses. Runs nightly + on-demand (NOT on every PR — a
 # full crawl is slow/flaky and would bloat PR latency; same policy as load tests).
+# Q-620 (2026-10-05) kept that choice: the job builds the app, boots it and pulls the ZAP image, which is
+# minutes of runner time per PR for a scan whose FAIL rules guard deployed headers, not PR logic.
 on:
   schedule:
     - cron: '0 3 * * *'   # nightly 03:00 UTC
@@ -12,7 +14,7 @@ on:
 
 permissions:
   contents: read
-  issues: write   # ZAP action opens/updates a tracking issue for findings
+  issues: write   # only used if allow_issue_writing (below) is turned back on; today no issue is written
 
 jobs:
   zap-baseline:
@@ -61,9 +63,16 @@ jobs:
         with:
           target: 'http://localhost:8080'
           rules_file_name: 'security/zap-baseline.conf'
-          # Default behaviour fails the job on FAIL-level alerts (HIGH risk),
-          # warns on WARN-level — exactly the P-SEC.2 gate (HIGH fails, MED warns).
-          cmd_options: '-a'
+          # THE GATE (Q-620, 2026-10-05): a FAIL rule in security/zap-baseline.conf fails the job; a WARN
+          # rule (and any rule the file does not list) is reported in the log and the artifact, and does not.
+          #   -a  also run the alpha passive rules.
+          #   -I  do not exit non-zero on WARN. zap-baseline exits 1 on a FAIL, 2 on WARN-only, 0 when clean;
+          #       `fail_action: true` turns BOTH 1 and 2 into a red job. Without -I, all 40 nightly runs
+          #       checked (2026-08-27 to 2026-10-04) were red; the two read in full ended "FAIL-NEW: 0
+          #       WARN-NEW: 11 … exit code 2", while this comment said "HIGH fails, MED warns" — and a check
+          #       that is always red trains everyone to ignore red.
+          # tests/dastConfigSaysWhatItDoes.test.ts fails CI if these flags and this promise drift apart.
+          cmd_options: '-a -I'
           # Was `true`, and the action opened a NEW issue every night instead of updating one: 37 open
           # duplicates of the same WARN-level header findings. That volume of noise is how a real finding
           # gets missed. The full report is still kept as the run's artifact and printed in the job log.

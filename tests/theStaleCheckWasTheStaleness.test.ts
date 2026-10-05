@@ -12,8 +12,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildDepsStaleCheckCommand, dropProbesAfterDevServer, stripDevServerBackgrounding } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { isIgnoredListPath } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
@@ -22,12 +21,13 @@ import { isAffirmativelyRequested, withoutMachineText } from '../src/server/Agen
 import { requestedFeatureLabels } from '../src/server/AgentV3/RequirementCoverage';
 import { auditSummaryClaims } from '../src/server/AgentV3/claimAudit';
 import { platformFixRequestPrompt } from '../src/lib/platformFixRequest';
+import { makeTempDir } from './helpers/tempDir';
 
 const ROOT = join(__dirname, '..');
 
 /** A tiny real project on disk, installed the way the report's was. */
 function project(opts: { omit?: string } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'nbai-stale-'));
+  const dir = makeTempDir('nbai-stale-');
   const deps = { react: '^18.3.1', '@vitejs/plugin-react': '^5.0.0' };
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'p', dependencies: deps }));
   const pkg = (name: string, body: Record<string, unknown>) => {

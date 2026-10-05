@@ -117,6 +117,7 @@ const FEATURE_HOME: Record<string, string | string[]> = {
   '>Publish Capacity</h3>': 'publishing',
   'only={ENGINE_REPORTS_ON.publishing}': 'publishing',
   "storeTab: 'review'": 'review',
+  '<BotsLedgerPanel': 'bots',
   "detail: { view: 'gallery' }": 'review', // PR 3: the gallery review queue, opened from Apps → Review
   // Builds
   'onClick={clearAllReports}': 'reports',

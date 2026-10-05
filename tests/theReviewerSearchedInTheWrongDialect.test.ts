@@ -11,8 +11,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { execFileSync, execSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths,
@@ -57,7 +56,7 @@ describe('🔴 a repair that changed nothing is not a repair', () => {
 });
 
 describe('🔴 grep answers what the model meant, and never calls a failure "no matches"', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'nbai-grep-'));
+  const dir = makeTempDir('nbai-grep-');
   mkdirSync(join(dir, 'src'));
   writeFileSync(join(dir, 'src/index.css'), 'button.primary { a: 1 }\nsmall, .muted { b: 2 }\n.badge { c: 3 }\n.alert { d: 4 }\nuseState(1)\n');
   const run = (pattern: string, path = 'src/index.css') =>
@@ -102,7 +101,7 @@ describe('🔴 our bridge no longer eats the app’s DOM budget', () => {
   });
   it('the generated script still parses, in both console modes', () => {
     for (const s of [script, browsePageScript('https://5173-x.e2b.app', { recordConsole: false })]) {
-      const d = mkdtempSync(join(tmpdir(), 'nbai-browse-'));
+      const d = makeTempDir('nbai-browse-');
       writeFileSync(join(d, 'b.cjs'), s);
       expect(() => execFileSync(process.execPath, ['--check', join(d, 'b.cjs')], { stdio: 'pipe' })).not.toThrow();
     }
@@ -132,6 +131,7 @@ describe('🔴 one turn, one read per file', () => {
 // ── The three follow-ups the admin accepted the same day ("apki sabhi salah accepted") ──────────────
 import { scaffoldedComplexityDecision } from '../src/server/AgentV3/complexityRouting';
 import { missingClassClaim, classIsDefined, refuteReviewByEvidence } from '../src/server/AgentV3/reviewEvidence';
+import { makeTempDir } from './helpers/tempDir';
 
 describe('🧩 a tested template opens on the first rung', () => {
   it('the scaffolded decision is simple, keeps the score for the report, and names why', () => {

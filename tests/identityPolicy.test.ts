@@ -45,7 +45,7 @@ describe('Tier 1 — verifiedIdentity: a claimed userId is NEVER identity', () =
   });
   it('test seam: an explicit x-test-verified-uid header simulates a verified caller (opt-in, like a real token)', async () => {
     const req = fakeReq({ 'x-test-verified-uid': 'user-9', 'x-test-verified-email': 'u9@x.io' });
-    expect(await verifiedIdentity(req)).toEqual({ uid: 'user-9', email: 'u9@x.io' });
+    expect(await verifiedIdentity(req)).toEqual({ uid: 'user-9', email: 'u9@x.io', emailVerified: true }); // Q-624: the seam's address counts as verified unless `x-test-email-verified: false`
     const gate = await requireVerifiedForMoney(req);
     expect(gate).toMatchObject({ ok: true, uid: 'user-9' });
   });

@@ -14,6 +14,8 @@
 // Everything is dependency-injected (the Capacitor API is a parameter) so the logic is fully
 // unit-testable without a native runtime.
 
+import { Capacitor } from '@capacitor/core';
+import { openExternalUrl } from './mobileNative';
 import { playTapTone } from './tapTone';
 import { readTapFeedbackPrefs, TAP_FEEDBACK_DEFAULTS, type TapFeedbackPrefs } from './tapFeedbackPrefs';
 
@@ -48,7 +50,9 @@ export interface NativeShellContext {
  * guarded: one missing plugin degrades that single feature instead of killing the whole polish pass.
  */
 export async function loadNativeShellContext(): Promise<NativeShellContext> {
-  const { Capacitor } = await import('@capacitor/core');
+  // `@capacitor/core` and `./mobileNative` are STATIC imports (Q-625): main.tsx already loads both at
+  // startup, so an `import()` of either split nothing. The PLUGIN imports below stay dynamic — they are
+  // the ones that really keep native code out of the web bundle.
   if (!Capacitor.isNativePlatform()) return { Capacitor };
 
   const ctx: NativeShellContext = { Capacitor };
@@ -419,7 +423,7 @@ export function installExternalLinkHandler(
   ctx: NativeShellContext,
   root: { addEventListener: (t: string, cb: (e: Event) => void, o?: unknown) => void; removeEventListener: (t: string, cb: (e: Event) => void, o?: unknown) => void },
   ownOrigin: () => string = () => (typeof location !== 'undefined' ? location.origin : ''),
-  open: (href: string) => void = (href) => { void import('./mobileNative').then((m) => m.openExternalUrl(href)).catch(() => {}); },
+  open: (href: string) => void = (href) => openExternalUrl(href),
 ): () => void {
   if (!isNativeShell(ctx)) return () => {};
   const onClick = (e: Event): void => {

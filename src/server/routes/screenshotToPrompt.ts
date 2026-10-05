@@ -111,7 +111,7 @@ export function registerScreenshotToPromptRoutes(app: Express): void {
 
     // Daily allowance / Professional Pass (flag-off = no-op). Runs after the cheap validity check so a
     // missing image never costs the user one of their actions.
-    const gate = await gateToolAction(account.uid, account.email, 'ai_tool');
+    const gate = await gateToolAction(account.uid, account.email, 'ai_tool', 'screenshot-to-code');
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;

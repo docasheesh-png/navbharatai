@@ -3,7 +3,7 @@ import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { isStoreAdmin } from './navStore';
 import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../lib/hostingPlan';
-import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
+import { isAgentV3FreeUser, identityGrantEmail } from '../AgentV3/featureFlag';
 import { remixGate, remixRefusal } from '../lib/remixPlanGate';
 import { routeParam, routeParams } from '../lib/expressCompat';
 import { audit } from '../lib/audit';
@@ -175,7 +175,7 @@ export function registerGalleryRoutes(app: Express): void {
     const gate = remixGate({
       plansEnabled: hostingPlansEnabled(),
       uid: who?.uid ?? null,
-      freeListed: isAgentV3FreeUser(who?.uid, who?.email ?? null),
+      freeListed: isAgentV3FreeUser(who?.uid, identityGrantEmail(who)),
       // Your own published app is yours — copying it back is not taking anyone's work.
       isOwnApp: !!who?.uid && who.uid === found.uid,
       // The gallery sells nothing, so there is no purchase to honour here. App Mart's remix does.
@@ -203,7 +203,7 @@ export function registerGalleryRoutes(app: Express): void {
 
   app.get('/api/gallery/admin/pending', async (req: Request, res: Response) => {
     const who = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(who?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
+    if (!isStoreAdmin(identityGrantEmail(who))) return res.status(403).json({ error: 'Not allowed.' });
     const apps = await listGalleryApps('pending', 100);
     res.json({
       apps: apps.map((a) => ({
@@ -220,7 +220,7 @@ export function registerGalleryRoutes(app: Express): void {
   /** An admin reads the actual code before approving it — that is the entire point of the queue. */
   app.get('/api/gallery/admin/:id/source', async (req: Request, res: Response) => {
     const who = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(who?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
+    if (!isStoreAdmin(identityGrantEmail(who))) return res.status(403).json({ error: 'Not allowed.' });
     const found = await getGalleryApp(String(routeParam(req.params.id)));
     if (!found) return res.status(404).json({ error: 'Not found.' });
     res.json({ id: found.id, title: found.title, status: found.status, files: found.files });
@@ -232,7 +232,7 @@ export function registerGalleryRoutes(app: Express): void {
    */
   app.post('/api/gallery/admin/:id/review', async (req: Request, res: Response) => {
     const who = await verifyFirebaseIdentity(req);
-    if (!isStoreAdmin(who?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
+    if (!isStoreAdmin(identityGrantEmail(who))) return res.status(403).json({ error: 'Not allowed.' });
 
     const decision = String(req.body?.decision || '');
     if (!['approved', 'rejected', 'removed'].includes(decision)) {

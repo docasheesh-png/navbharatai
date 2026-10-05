@@ -201,7 +201,7 @@ describe('🔒 free chat changes the picture, or says why it cannot', () => {
   it('🔴 it is metered — free chat had never had a paid rung before this', () => {
     const branch = editBranch(body);
     expect(branch).toContain('requireAccountForCostlyAi');
-    expect(branch).toContain("gateToolAction(account.uid, account.email, 'image')");
+    expect(branch).toContain("gateToolAction(account.uid, account.email, 'image', 'picture-editing')");
     expect(branch).toContain("burnToolAction(gate.uid, 'image')");
     // The burn happens on DELIVERY. A failed edit costs the user nothing — the same "working result
     // or free" law a build obeys.

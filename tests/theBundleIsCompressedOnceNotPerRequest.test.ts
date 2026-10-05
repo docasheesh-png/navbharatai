@@ -8,14 +8,14 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { brotliCompressSync, gzipSync, brotliDecompressSync } from 'zlib';
 import type { Server } from 'http';
 import { pickEncoding, assetPathFor, precompressedStatic } from '../src/server/lib/precompressedStatic';
 import { responseCompression } from '../src/server/lib/responseCompression';
 import { cacheControlFor, UNHASHED_ASSET_CACHE } from '../src/server/lib/staticCache';
+import { makeTempDir } from './helpers/tempDir';
 
 describe('pickEncoding', () => {
   it('prefers brotli, then gzip, and honours q=0 as a refusal', () => {
@@ -54,7 +54,7 @@ describe('over real HTTP, in server.ts order', () => {
   let base = '';
 
   beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'precompressed-'));
+    dir = makeTempDir('precompressed-');
     mkdirSync(join(dir, 'assets'));
     writeFileSync(join(dir, 'assets', 'app-1.js'), js);
     writeFileSync(join(dir, 'assets', 'app-1.js.br'), brotliCompressSync(Buffer.from(js)));

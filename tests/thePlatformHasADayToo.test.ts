@@ -59,7 +59,7 @@ describe('🔒 SOURCE — one reader, after the user\'s own allowance, and the c
   const free = route.slice(route.indexOf("app.post('/api/image/generate'"), route.indexOf("app.post(\n"));
 
   it('allowPaidRung asks the platform budget AFTER the per-user gate and BEFORE any paid rung', () => {
-    const gateCall = free.indexOf("gateToolAction(account.uid, account.email, 'image')");
+    const gateCall = free.indexOf("gateToolAction(account.uid, account.email, 'image', 'image-generation')");
     const budget = free.indexOf('await imageFreePaidBudget.decide()');
     const firstPaid = Math.min(...['runImageEdit(', 'geminiImageConfigured() && !editing', 'grokImageKey()'].map((k) => free.indexOf(k)).filter((i) => i > 0));
     expect(gateCall).toBeGreaterThan(0);

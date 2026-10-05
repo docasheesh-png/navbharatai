@@ -14,9 +14,8 @@
  * 5. The screen used `.nb-hud`; the kit has `.nb-game-hud`. → the write-time note names it.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { missingMembers, declaredMembers, memberListNote, relativeImports, resolveCandidates, RECIPE_LIBRARY_PATH } from '../src/server/AgentV3/typeMembers';
 import { fastLaneSkipsGame } from '../src/server/AgentV3/fastLaneRung';
@@ -28,6 +27,7 @@ import { pageCheckScript } from '../src/server/AgentV3/PageRouteCheck';
 import { journeyScript } from '../src/server/AgentV3/journeyDerivation';
 import { mobileLayoutScript } from '../src/server/AgentV3/mobileLayoutCheck';
 import { nearestKitClass, inventedKitClassNote } from '../src/server/AgentV3/kitRestore';
+import { makeTempDir } from './helpers/tempDir';
 
 const src = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
 
@@ -166,7 +166,7 @@ describe('4 · every browser lane opens pages with reduced motion — one defini
     expect(mod.split('await press(page, ').length - 1).toBe(4);
   });
   it('the generated explorer is still valid JavaScript with no raw control character', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-race-'));
+    const dir = makeTempDir('nbai-race-');
     const file = join(dir, 'run.mjs');
     const mod = clickExplorerModule({ base: 'http://x/', storageState: '/tmp/s.json' });
     writeFileSync(file, mod);

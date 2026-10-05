@@ -76,12 +76,15 @@ export function decodeJwsPayload(jws: string): Record<string, unknown> | null {
 }
 
 const APPLE_HOST_PROD = 'https://api.storekit.itunes.apple.com';
-const APPLE_HOST_SANDBOX = 'https://api.storekit-sandbox.itunes.apple.com';
 
 /**
- * Verify one Apple transaction id. Production is tried first and SANDBOX is the automatic fallback
- * on 404 — the same transaction id lives in only one environment, and a TestFlight build's purchase
- * is a sandbox one. Without this fallback every internal test purchase would read as fraud.
+ * Verify one Apple transaction id — against Apple's PRODUCTION API only.
+ *
+ * 🔴 NO SANDBOX (Q-615, admin 2026-10-05: "agar need nahi hai, to band karo. asli kaam karne wala payment
+ * rakho. sabhi fake hatao!"). This used to fall back to Apple's sandbox on a 404, so a TestFlight or
+ * sandbox-account purchase — which costs nobody anything — added real credit to a real wallet on the live
+ * server. A sandbox transaction now answers "not found" here and credits nothing; a transaction whose
+ * signed payload says it is a Sandbox one is refused as well, whichever host returned it.
  */
 export async function verifyApplePurchase(transactionId: string): Promise<StoreVerifyResult> {
   const id = (transactionId || '').trim();
@@ -89,30 +92,30 @@ export async function verifyApplePurchase(transactionId: string): Promise<StoreV
   const jwt = appleAuthJwt();
   if (!jwt) return { ok: false, reason: 'apple verification not configured (key/issuer/bundle/private key)' };
 
-  for (const host of [APPLE_HOST_PROD, APPLE_HOST_SANDBOX]) {
-    let res;
-    try {
-      res = await _fetchImpl(`${host}/inApps/v1/transactions/${encodeURIComponent(id)}`, {
-        headers: { Authorization: `Bearer ${jwt}` },
-      });
-    } catch (e) {
-      return { ok: false, reason: `apple unreachable: ${e instanceof Error ? e.message : String(e)}` };
-    }
-    if (res.status === 404) continue; // not in this environment — try the other one
-    if (!res.ok) return { ok: false, reason: `apple HTTP ${res.status}` };
-    const body = (await res.json().catch(() => null)) as { signedTransactionInfo?: string } | null;
-    const claims = body?.signedTransactionInfo ? decodeJwsPayload(body.signedTransactionInfo) : null;
-    if (!claims) return { ok: false, reason: 'apple returned no readable transaction' };
-    // A refunded or revoked purchase must never credit — Apple stamps the moment it happened.
-    if (claims.revocationDate || claims.revocationReason !== undefined) {
-      return { ok: false, reason: 'apple transaction was refunded/revoked' };
-    }
-    const productId = typeof claims.productId === 'string' ? claims.productId : '';
-    const txnId = typeof claims.transactionId === 'string' ? claims.transactionId : id;
-    if (!productId) return { ok: false, reason: 'apple transaction has no productId' };
-    return { ok: true, productId, transactionId: txnId };
+  let res;
+  try {
+    res = await _fetchImpl(`${APPLE_HOST_PROD}/inApps/v1/transactions/${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${jwt}` },
+    });
+  } catch (e) {
+    return { ok: false, reason: `apple unreachable: ${e instanceof Error ? e.message : String(e)}` };
   }
-  return { ok: false, reason: 'apple transaction not found in production or sandbox' };
+  if (res.status === 404) return { ok: false, reason: 'apple transaction not found (test and sandbox purchases add no credit)' };
+  if (!res.ok) return { ok: false, reason: `apple HTTP ${res.status}` };
+  const body = (await res.json().catch(() => null)) as { signedTransactionInfo?: string } | null;
+  const claims = body?.signedTransactionInfo ? decodeJwsPayload(body.signedTransactionInfo) : null;
+  if (!claims) return { ok: false, reason: 'apple returned no readable transaction' };
+  if (typeof claims.environment === 'string' && claims.environment !== 'Production') {
+    return { ok: false, reason: 'apple test (sandbox) purchase — adds no credit' };
+  }
+  // A refunded or revoked purchase must never credit — Apple stamps the moment it happened.
+  if (claims.revocationDate || claims.revocationReason !== undefined) {
+    return { ok: false, reason: 'apple transaction was refunded/revoked' };
+  }
+  const productId = typeof claims.productId === 'string' ? claims.productId : '';
+  const txnId = typeof claims.transactionId === 'string' ? claims.transactionId : id;
+  if (!productId) return { ok: false, reason: 'apple transaction has no productId' };
+  return { ok: true, productId, transactionId: txnId };
 }
 
 // ─────────────────────────────── Google ───────────────────────────────
@@ -230,9 +233,12 @@ export async function verifyGooglePurchase(productId: string, purchaseToken: str
     return { ok: false, reason: `google unreachable: ${e instanceof Error ? e.message : String(e)}` };
   }
   if (!res.ok) return { ok: false, reason: `google HTTP ${res.status}` };
-  const data = (await res.json().catch(() => null)) as { purchaseState?: number; orderId?: string } | null;
+  const data = (await res.json().catch(() => null)) as { purchaseState?: number; orderId?: string; purchaseType?: number } | null;
   if (!data) return { ok: false, reason: 'google returned no purchase' };
   if (data.purchaseState !== 0) return { ok: false, reason: `google purchaseState ${data.purchaseState} (not purchased)` };
+  // `purchaseType` is ABSENT on a real purchase; 0 marks a license-tester TEST purchase — no money moved,
+  // so it adds no credit (Q-615). (1 is a promo code the admin issued in Play Console, which stays a grant.)
+  if (data.purchaseType === 0) return { ok: false, reason: 'google test purchase — adds no credit' };
   const orderId = typeof data.orderId === 'string' && data.orderId ? data.orderId : token;
   // The product id is the one WE asked Google about and Google confirmed a purchase for — so it is
   // verified, not client-asserted.

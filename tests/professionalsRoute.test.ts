@@ -69,10 +69,10 @@ describe('professional chat route — verified identity only', () => {
     expect(runChatMock.mock.calls[0][3]).toBe('uid-verified');
   });
 
-  it('anonymous request (no/invalid token): engine gets NO user id even if body claims one', async () => {
-    // With the daily allowance counted (the default since 2026-09-23) an anonymous caller is asked to
-    // sign in; the identity rule is exercised with the allowance switched off, the one state in which
-    // an anonymous turn still reaches the engine.
+  it('anonymous request with the allowance switched OFF: still asked to sign in, engine never reached', async () => {
+    // Until 2026-10-05 this was the one state in which an anonymous turn reached the engine — on the PAID
+    // chain, uncharged (Q-622). An anonymous caller is now decided by the one anonymous table, before any
+    // flag is read, so the body-claimed id can never reach the engine because the engine is never asked.
     const prev = process.env.PROFESSIONAL_FREE_QUOTA;
     process.env.PROFESSIONAL_FREE_QUOTA = 'off';
     try {
@@ -82,8 +82,9 @@ describe('professional chat route — verified identity only', () => {
         mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hello', userId: 'uid-victim' } }),
         res,
       );
-      expect(res.statusCode).toBe(200);
-      expect(runChatMock.mock.calls[0][3]).toBeUndefined();
+      expect(res.statusCode).toBe(401);
+      expect(res.body.code).toBe('login_required');
+      expect(runChatMock).not.toHaveBeenCalled();
     } finally {
       if (prev === undefined) delete process.env.PROFESSIONAL_FREE_QUOTA; else process.env.PROFESSIONAL_FREE_QUOTA = prev;
     }

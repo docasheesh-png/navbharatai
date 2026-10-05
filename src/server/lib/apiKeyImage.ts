@@ -7,9 +7,11 @@
 //   1. the key carries the "Images" permission (`ai:images`, or full access);
 //   2. the request is not banned (the platform triage, recorded like every other surface);
 //   3. the key's own daily ₹ limit is not reached;
-//   4. the account may start a picture (5 free a day, then the wallet must cover the price);
+//   4. the picture is RESERVED: today's slot taken and, past the free ones, the price HELD from the wallet,
+//      all or nothing (`reserveImage`, Q-616) — a wallet that cannot cover it is refused here;
 //   5. NavBharatAI's engines draw it;
-//   6. AFTER delivery: counted, charged (imageAllowance), and the ₹ added to the key's daily counter.
+//   6. delivered → the hold is settled and the ₹ added to the key's daily counter; anything else → the
+//      slot and the ₹ are given back (a `finally`, so no exit can skip it).
 
 import { hasScope, hashApiKey } from './ApiKeyManager';
 import { apiKeyStore, type ApiKeyAuth } from './ApiKeyStore';
@@ -20,7 +22,8 @@ import { buildSafetyFlag, recordSafetyFlag } from './safetyFlagStore';
 import { audit } from './audit';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { emailForUid } from './uidEmail';
-import { drawWithNavBharat, imageStartFor, chargeDeliveredImage, type ImagePixels } from './navbharatImageEngine';
+import { drawWithNavBharat, type ImagePixels } from './navbharatImageEngine';
+import { reserveImage } from './imageHold';
 import type { GeneratedImage } from './imageGen';
 
 export type ApiKeyImageResult =
@@ -72,19 +75,39 @@ export async function imageForApiKey(
     return { ok: false, status: 429, code: 'daily_cap_reached', message: refusalMessage('key-cap', capInr) };
   }
   const freeListed = isAgentV3FreeUser(auth.userId, email);
-  const start = await imageStartFor(auth.userId, freeListed);
-  if (!start.allow) return { ok: false, status: 402, code: 'insufficient_balance', message: start.message };
-
-  const drawn = await drawWithNavBharat(prompt, px);
-  if (!drawn.ok) {
-    if (drawn.reason === 'blocked') {
-      return { ok: false, status: 422, code: 'content_policy', message: 'That description cannot be drawn. Please describe something else.' };
+  // A key holder agreed to the price list when they made the key, so this door is a priced screen.
+  const reserved = await reserveImage({ uid: auth.userId, freeListed, priceShown: true });
+  if (!reserved.ok) {
+    if (reserved.reason === 'needs_credit') {
+      return {
+        ok: false, status: 402, code: 'insufficient_balance',
+        message: `Today's ${reserved.freePerDay} free pictures are used, and the NavBharatAI wallet needs at least ₹${reserved.priceInr} for the next one. Add balance in the NavBharatAI app.`,
+      };
     }
-    console.error(`[API_IMAGE] key ${auth.keyId} (${surface}): no engine made the picture — ${drawn.detail}`);
-    return { ok: false, status: 503, code: 'engine_unavailable', message: 'NavBharatAI could not make that picture right now. Please try again in a moment.' };
+    return {
+      // The existing "try again" code: a developer's client already retries on it, and the words say what happened.
+      ok: false, status: 503, code: 'engine_unavailable',
+      message: 'NavBharatAI could not take the payment for this picture just now, so it was not made and nothing was charged. Please try again in a moment.',
+    };
   }
-  console.info(`[API_IMAGE] key ${auth.keyId} (${surface}) served by ${drawn.engine}`);
-  const charge = await chargeDeliveredImage(auth.userId, freeListed);
-  void apiKeyUsageStore.record(auth.keyId, day, charge.chargedInr);
-  return { ok: true, image: drawn.image, chargedInr: charge.chargedInr, freeLeftToday: charge.freeLeftToday };
+  const hold = reserved.hold;
+  let delivered = false;
+  try {
+    const drawn = await drawWithNavBharat(prompt, px);
+    if (!drawn.ok) {
+      if (drawn.reason === 'blocked') {
+        return { ok: false, status: 422, code: 'content_policy', message: 'That description cannot be drawn. Please describe something else.' };
+      }
+      console.error(`[API_IMAGE] key ${auth.keyId} (${surface}): no engine made the picture — ${drawn.detail}`);
+      return { ok: false, status: 503, code: 'engine_unavailable', message: 'NavBharatAI could not make that picture right now. Please try again in a moment.' };
+    }
+    console.info(`[API_IMAGE] key ${auth.keyId} (${surface}) served by ${drawn.engine}`);
+    delivered = true;
+    await hold.settle();
+    void apiKeyUsageStore.record(auth.keyId, day, hold.feeInr);
+    return { ok: true, image: drawn.image, chargedInr: hold.feeInr, freeLeftToday: hold.counted ? hold.freeLeftToday : null };
+  } finally {
+    // Every exit without a picture — blocked, every engine failed, a thrown error — gives it all back.
+    if (!delivered) await hold.release('no picture for the key');
+  }
 }

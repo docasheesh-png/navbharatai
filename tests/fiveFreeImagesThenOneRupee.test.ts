@@ -12,7 +12,7 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 import {
-  decideImageStart, needsBalance, imageFeeForCount, freeImagesLeft, imageFreePerDay, imagePriceInr,
+  imageFeeForCount, freeImagesLeft, imageFreePerDay, imagePriceInr,
   imagePricingEnabled, imagePriceSentence, imageNeedsCreditBody,
 } from '../src/server/lib/imageAllowance';
 import {
@@ -40,6 +40,8 @@ vi.mock('../src/server/tools/ToolUsageStore', () => ({
   toolUsageStore: {
     getTodayCount: async () => usage.used,
     increment: async () => { usage.increments += 1; usage.used += 1; return usage.used; },
+    // Q-616: the slot is taken BEFORE the engine runs and given back when no picture is delivered.
+    decrement: async () => { usage.used = Math.max(0, usage.used - 1); return usage.used; },
   },
 }));
 vi.mock('../src/server/AgentV3/WalletBalance', () => ({
@@ -48,10 +50,24 @@ vi.mock('../src/server/AgentV3/WalletBalance', () => ({
 }));
 vi.mock('../src/server/lib/walletDebit', async (orig) => ({
   ...(await orig<typeof import('../src/server/lib/walletDebit')>()),
-  debitWalletRolledUp: async (_db: unknown, uid: string, tx: any) => {
+  // Q-616: the price is HELD before the engine runs (all or nothing) and given back if nothing is
+  // delivered. `money.debits` is what is held right now; a release takes its entry back out.
+  holdWalletRolledUp: async (_db: unknown, uid: string, tx: any) => {
+    if (money.balance !== null && money.balance < tx.billedInr) {
+      return { ok: false, insufficient: true, balanceInr: money.balance, error: 'Balance does not cover the charge' };
+    }
     money.debits.push({ uid, tx });
-    return { ok: true, tokensDebited: 1, tokenBalance: 0 };
+    if (money.balance !== null) money.balance -= tx.billedInr;
+    return { ok: true, ownerId: uid, tokensDebited: 100, tokenBalance: 0 };
   },
+  releaseWalletHold: async (_db: unknown, _uid: string, tx: any) => {
+    const i = money.debits.findIndex((d) => d.tx.holdId === tx.holdId);
+    if (i < 0) return { ok: true, released: false, tokensReturned: 0 };
+    const [d] = money.debits.splice(i, 1);
+    if (money.balance !== null) money.balance += d.tx.billedInr;
+    return { ok: true, released: true, tokensReturned: 100 };
+  },
+  settleWalletHold: async () => ({ ok: true, settled: true }),
 }));
 vi.mock('../src/server/lib/serverDb', async (orig) => ({
   ...(await orig<typeof import('../src/server/lib/serverDb')>()),
@@ -65,40 +81,16 @@ const JPEG = '/9j/4AAQSkZJRgABAQ==';
 // 1. THE ALLOWANCE
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 describe('5 free images a day, then ₹1 each', () => {
-  const base = { freeListed: false, freePerDay: 5, priceInr: 1 };
-
-  it('the first five start free, whatever the balance', () => {
-    for (const usedToday of [0, 1, 4]) {
-      expect(decideImageStart({ ...base, usedToday, balanceInr: 0 })).toEqual({ allow: true, free: true });
-    }
-  });
-
-  it('the sixth needs ₹1 in the wallet — and is refused with the top-up code when it is not there', () => {
-    expect(decideImageStart({ ...base, usedToday: 5, balanceInr: 1 })).toEqual({ allow: true, free: false });
-    const refused = decideImageStart({ ...base, usedToday: 5, balanceInr: 0.4 });
-    expect(refused.allow).toBe(false);
-    if (!refused.allow) {
-      expect(refused.status).toBe(402);
-      expect(refused.body.code).toBe(WALLET_EMPTY_CODE);
-      expect(String(refused.body.error)).toMatch(/used your 5 free images for today/);
-      expect(String(refused.body.error)).toMatch(/costs ₹1 from your wallet/);
-      expect(String(refused.body.error)).toMatch(/₹0\.40/);
-    }
-  });
-
-  it('an unreadable balance is let through, like every wallet gate here', () => {
-    expect(decideImageStart({ ...base, usedToday: 9, balanceInr: null })).toEqual({ allow: true, free: false });
-  });
-
-  it('free-listed accounts and a ₹0 price are never refused', () => {
-    expect(decideImageStart({ ...base, freeListed: true, usedToday: 99, balanceInr: 0 }).allow).toBe(true);
-    expect(decideImageStart({ ...base, priceInr: 0, usedToday: 99, balanceInr: 0 }).allow).toBe(true);
-  });
-
-  it('the balance is read only once the free pictures are used up', () => {
-    expect(needsBalance({ ...base, usedToday: 4 })).toBe(false);
-    expect(needsBalance({ ...base, usedToday: 5 })).toBe(true);
-    expect(needsBalance({ ...base, freeListed: true, usedToday: 5 })).toBe(false);
+  // 🔁 Q-616 (2026-10-05): "may this request start?" is no longer a READ of the count and the balance
+  // (`decideImageStart` / `needsBalance`, removed). The slot is taken and the ₹ held in one transaction each
+  // before any engine runs — `anImageIsPaidBeforeItIsDrawn.test.ts` locks that against real transactions.
+  // What stays pure and is pinned here: the fee from the count, and the refusal's words.
+  it('the refusal for a wallet that cannot cover the sixth carries the top-up code, the rule and the balance', () => {
+    const body = imageNeedsCreditBody({ freePerDay: 5, priceInr: 1, balanceInr: 0.4 });
+    expect(body.code).toBe(WALLET_EMPTY_CODE);
+    expect(String(body.error)).toMatch(/used your 5 free images for today/);
+    expect(String(body.error)).toMatch(/costs ₹1 from your wallet/);
+    expect(String(body.error)).toMatch(/₹0\.40/);
   });
 
   it('the charge is decided from the count AFTER the picture: 1–5 free, 6th on ₹1, an unwritten count free', () => {
@@ -268,7 +260,9 @@ describe('the real route', () => {
     expect(res.statusCode).toBe(402);
     expect(res.body.code).toBe(WALLET_EMPTY_CODE);
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(usage.increments).toBe(0);
+    // Q-616: the slot was taken before the check and handed straight back — the day's count is unchanged.
+    expect(usage.used).toBe(5);
+    expect(money.debits).toEqual([]);
   });
 
   it('a picture that failed is never counted and never charged', async () => {
@@ -277,8 +271,10 @@ describe('the real route', () => {
     process.env.IMAGE_GEN_POLLINATIONS = 'off';
     const res = await generate(body);
     expect(res.statusCode).toBe(502);
-    expect(usage.increments).toBe(0);
+    // Q-616: the slot and the ₹1 were taken before the engines ran, and both came back when none delivered.
+    expect(usage.used).toBe(7);
     expect(money.debits).toEqual([]);
+    expect(money.balance).toBe(100);
   });
 
   it('a non-square size is not sent to Cloudflare, which could not honour it', async () => {

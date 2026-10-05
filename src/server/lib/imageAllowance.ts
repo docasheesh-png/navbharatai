@@ -5,13 +5,17 @@
 // cost we worked out, so it does not contradict THE ONE-WALLET LAW's "never invent a cost": nothing is
 // estimated here.
 //
-// 🔒 HOW THE MONEY MOVES:
-//  - BEFORE any engine is called: a user who has used today's free images and cannot pay for one more
-//    is refused (`decideImageStart`). An unreadable balance is let through, like every wallet gate here.
-//  - AFTER a picture is delivered: the day's count is incremented ATOMICALLY and the charge is decided
-//    from the NEW count (`imageFeeForCount`). Two pictures made at the same moment therefore cannot both
-//    count as the fifth free one.
-//  - A picture that failed is never counted and never charged.
+// 🔒 HOW THE MONEY MOVES (since Q-616, 2026-10-05 — `imageHold.ts` does it, for every door):
+//  - BEFORE any engine is called: the day's count is incremented ATOMICALLY and the charge is decided from
+//    the NEW count (`imageFeeForCount`), so two pictures at the same moment cannot both be the free fifth.
+//    A priced one then has its ₹ HELD from the wallet in one all-or-nothing transaction; a wallet that
+//    cannot cover it is refused (`imageNeedsCreditBody`) and the slot is given back.
+//  - On delivery the hold is settled: nothing more is charged.
+//  - A picture that failed gets its slot and its ₹ back, so it is never counted and never charged.
+//
+// 🔁 Until 2026-10-05 the first step was a READ (`decideImageStart`, removed) and the count and the charge
+// moved only after delivery, fire-and-forget. Concurrent requests each passed the read, so extra pictures
+// went uncharged or into overdraft (forensic audit Q-616). Do not bring a read-then-charge gate back.
 //  - Free-listed accounts (the admin's own) are neither counted nor charged.
 //  - A link the BROWSER fetches itself (`IMAGE_GEN_CLIENT_FETCH`) is not counted: we cannot see whether
 //    it arrived, and charging for something that may not have arrived is the thing the billing law
@@ -29,7 +33,7 @@
 // `AI_IMAGE_PRICING=off` restores the previous behaviour exactly, with no deploy.
 
 import { parseEnvNumber } from './envNumber';
-import { walletEmptyBody, WALLET_EMPTY_STATUS } from './walletEmptyNotice';
+import { walletEmptyBody } from './walletEmptyNotice';
 
 export function imagePricingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return (env.AI_IMAGE_PRICING || '').trim().toLowerCase() !== 'off';
@@ -51,35 +55,8 @@ function inr(n: number): string {
   return `₹${n % 1 === 0 ? n.toFixed(0) : n.toFixed(2)}`;
 }
 
-export interface ImageStartInput {
-  freeListed: boolean;
-  usedToday: number;
-  freePerDay: number;
-  priceInr: number;
-  /** The wallet balance, or null when it was not read or could not be read. */
-  balanceInr: number | null;
-}
-
-export type ImageStartDecision =
-  | { allow: true; free: boolean }
-  | { allow: false; status: number; body: Record<string, unknown> };
-
-/** May this request start? PURE. */
-export function decideImageStart(i: ImageStartInput): ImageStartDecision {
-  if (i.freeListed) return { allow: true, free: true };
-  if (i.usedToday < i.freePerDay) return { allow: true, free: true };
-  if (i.priceInr <= 0) return { allow: true, free: true };
-  if (i.balanceInr === null || i.balanceInr >= i.priceInr) return { allow: true, free: false };
-  return { allow: false, status: WALLET_EMPTY_STATUS, body: imageNeedsCreditBody(i) };
-}
-
-/** Whether the balance must be read at all: only once the free pictures are used up. PURE. */
-export function needsBalance(i: Pick<ImageStartInput, 'freeListed' | 'usedToday' | 'freePerDay' | 'priceInr'>): boolean {
-  return !i.freeListed && i.priceInr > 0 && i.usedToday >= i.freePerDay;
-}
-
 /** The refusal, carrying the wallet-empty code every client already turns into a top-up prompt. PURE. */
-export function imageNeedsCreditBody(i: Pick<ImageStartInput, 'freePerDay' | 'priceInr' | 'balanceInr'>): Record<string, unknown> {
+export function imageNeedsCreditBody(i: { freePerDay: number; priceInr: number; balanceInr: number | null }): Record<string, unknown> {
   const balance = typeof i.balanceInr === 'number' && Number.isFinite(i.balanceInr) ? i.balanceInr : null;
   const balanceText = balance === null ? '' : ` Your balance is ${balance < 0 ? '-' : ''}₹${Math.abs(balance).toFixed(2)}.`;
   const error = `You have used your ${i.freePerDay} free images for today. Each image after that costs `

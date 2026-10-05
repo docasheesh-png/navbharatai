@@ -45,6 +45,8 @@ vi.mock('../src/server/tools/ToolUsageStore', () => ({
   toolUsageStore: {
     getTodayCount: async () => usage.used,
     increment: async () => { usage.increments += 1; usage.used += 1; return usage.used; },
+    // Q-616: the slot is taken BEFORE the engine runs and given back when no picture is delivered.
+    decrement: async () => { usage.used = Math.max(0, usage.used - 1); return usage.used; },
   },
 }));
 vi.mock('../src/server/AgentV3/WalletBalance', () => ({
@@ -53,10 +55,24 @@ vi.mock('../src/server/AgentV3/WalletBalance', () => ({
 }));
 vi.mock('../src/server/lib/walletDebit', async (orig) => ({
   ...(await orig<typeof import('../src/server/lib/walletDebit')>()),
-  debitWalletRolledUp: async (_db: unknown, uid: string, tx: any) => {
+  // Q-616: the price is HELD before the engine runs (all or nothing) and given back if nothing is
+  // delivered. `money.debits` is what is held right now; a release takes its entry back out.
+  holdWalletRolledUp: async (_db: unknown, uid: string, tx: any) => {
+    if (money.balance !== null && money.balance < tx.billedInr) {
+      return { ok: false, insufficient: true, balanceInr: money.balance, error: 'Balance does not cover the charge' };
+    }
     money.debits.push({ uid, tx });
-    return { ok: true, tokensDebited: 1, tokenBalance: 0 };
+    if (money.balance !== null) money.balance -= tx.billedInr;
+    return { ok: true, ownerId: uid, tokensDebited: 100, tokenBalance: 0 };
   },
+  releaseWalletHold: async (_db: unknown, _uid: string, tx: any) => {
+    const i = money.debits.findIndex((d) => d.tx.holdId === tx.holdId);
+    if (i < 0) return { ok: true, released: false, tokensReturned: 0 };
+    const [d] = money.debits.splice(i, 1);
+    if (money.balance !== null) money.balance += d.tx.billedInr;
+    return { ok: true, released: true, tokensReturned: 100 };
+  },
+  settleWalletHold: async () => ({ ok: true, settled: true }),
 }));
 vi.mock('../src/server/lib/serverDb', async (orig) => ({
   ...(await orig<typeof import('../src/server/lib/serverDb')>()),
@@ -203,7 +219,8 @@ describe('the real route', () => {
     expect(res.body.code).toBe(FREE_USED_UPDATE_CODE);
     expect(res.body.error).toMatch(/^आज की 5 फ़्री इमेज हो गई हैं/);
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(usage.increments).toBe(0);
+    // Q-616: the slot was taken before the check and handed straight back — the day's count is unchanged.
+    expect(usage.used).toBe(5);
     expect(money.debits).toEqual([]);
   });
 

@@ -61,7 +61,7 @@ import { buildPackageJson, detectProjectKind, capacitorMajorFromFiles, detectRep
 import { apkChargeInr, isChargeableApk, apkChargeRef, chargeDescription } from '../lib/apkCharge';
 import { CHARGE_PRICE_HEADER, CHARGE_APPLIED_HEADER } from '../../lib/apkChargeNotice';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
-import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
+import { isAgentV3FreeUser, identityGrantEmail } from '../AgentV3/featureFlag';
 import { debitWalletForBuild } from '../lib/walletDebit';
 import { appBuildStore } from '../lib/AppBuildStore';
 import { saveApkFailureReport } from '../lib/AdminApkReportStore';
@@ -499,7 +499,7 @@ export function registerMobileShipRoutes(app: Express): void {
           // directly instead of hunting. A PARTIAL update on purpose — writing a whole row here would
           // overwrite the workflow and the user's chosen app name with values this route does not know.
           void appBuildStore.setLatestRun(identity.uid, String(owner), String(repo), String(runId));
-          if (isAgentV3FreeUser(identity.uid, identity.email)) break;
+          if (isAgentV3FreeUser(identity.uid, identityGrantEmail(identity))) break;
           void debitWalletForBuild(getServerDb() as any, identity.uid, {
             feature: 'mobile-build',
             billedInr: apkChargeInr(),

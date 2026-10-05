@@ -2,6 +2,7 @@
 // endpoint everywhere. Kept apart from `index.ts` so the reporter's logic is testable without Capacitor.
 
 import type { CrashlyticsSink, ObservabilityDeps } from './index';
+import { Capacitor } from '@capacitor/core';
 import { offlineQueue } from '../offlineQueue';
 
 /**
@@ -10,10 +11,8 @@ import { offlineQueue } from '../offlineQueue';
  * `tests/pluginProxyIsNeverResolved.test.ts` exists to stop (see appCheckClient.ts).
  */
 export async function loadNativeCrashlytics(): Promise<CrashlyticsSink | null> {
-  const [{ Capacitor }, { FirebaseCrashlytics }] = await Promise.all([
-    import('@capacitor/core'),
-    import('@capacitor-firebase/crashlytics'),
-  ]);
+  // `@capacitor/core` is a static import (Q-625: it is in the startup chunk); the plugin stays lazy.
+  const { FirebaseCrashlytics } = await import('@capacitor-firebase/crashlytics');
   if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('FirebaseCrashlytics')) return null;
   return {
     recordException: (report, frames) => FirebaseCrashlytics.recordException({

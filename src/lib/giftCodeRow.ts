@@ -9,7 +9,8 @@ export interface GiftCodeRow {
   faceInr: number;
   /** What the buyer paid, face + platform fee. */
   paidInr: number;
-  status: 'unused' | 'redeemed';
+  /** `voided`: its purchase was refunded in full before it was redeemed, so it carries no value. */
+  status: 'unused' | 'redeemed' | 'voided';
   createdAt: string;
   redeemedAt: string | null;
 }

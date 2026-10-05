@@ -14,8 +14,7 @@
 //   6. A package the stopped build had just installed was reported as unused.
 //   7. An ambiguous edit was followed by a full re-read of the stylesheet.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync, readFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { existsSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import http from 'http';
 import type { AddressInfo } from 'net';
@@ -33,6 +32,7 @@ import { isSignInWall } from '../src/server/AgentV3/FeaturePresence';
 import { classifyPage } from '../src/server/AgentV3/PageRouteCheck';
 import { signInModule, parseSignInOutput, SIGN_IN_RESULT_MARKER } from '../src/server/AgentV3/signInExplore';
 import { unusedDependencyLine } from '../src/server/AgentV3/unusedDepPrune';
+import { makeTempDir } from './helpers/tempDir';
 
 const PROMPT = 'Build a mock test app for UPSC drug inspector exam 2026 based on previous papers, make it interactive';
 const CONTINUE = 'Continue from where you left off and finish/fix the build so the app works end-to-end. Provide me with a downloadable APK, for testing';
@@ -244,7 +244,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   afterAll(async () => { await new Promise<void>((res) => server.close(() => res())); });
 
   it('signs in with a one-tap demo button that fills the form, and reads the screens behind it', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-demo-signin-'));
+    const dir = makeTempDir('nbai-demo-signin-');
     const file = join(dir, 'run.mjs');
     const imp = `import playwright from '${PW}';\nconst { chromium } = playwright;`;
     writeFileSync(file, signInModule({ base, marker: SIGN_IN_RESULT_MARKER, state: join(dir, 's.json'), maxScreens: 6, budgetMs: 45_000, candidates: [] }, imp));

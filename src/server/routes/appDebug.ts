@@ -1,8 +1,10 @@
 import type { Express, Request, Response } from 'express';
+import { onClientGone } from '../lib/clientDisconnect';
 import { inAiSpendZone } from '../lib/aiSpendZone';
 import { callProfessionalAI } from '../lib/professionalRouting';
 import { workspaceRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { gateToolAction, burnToolAction, chargeToolAction } from '../tools/toolGate';
+import { identityGrantEmail } from '../AgentV3/featureFlag';
 import { loadWorkspaceFiles, listUserWorkspaceApps } from '../AgentV3/WorkspaceFileStore';
 import { scanFilesStatic } from '../lib/appStaticScan';
 import { scanAppGraph } from '../lib/appGraphScan';
@@ -94,7 +96,7 @@ export function registerAppDebugRoutes(app: Express): void {
     // Daily allowance / Professional Pass (flag-off = no-op). Checked BEFORE anything is loaded or
     // streamed, so a blocked caller gets a clean JSON paywall rather than a half-open stream.
     const identity = await verifyFirebaseIdentity(req);
-    const gate = await gateToolAction(identity?.uid || null, identity?.email || null, 'ai_tool');
+    const gate = await gateToolAction(identity?.uid || null, identityGrantEmail(identity), 'ai_tool', 'app-debug');
     if (!gate.allow) {
       res.status(gate.status).json(gate.body);
       return;
@@ -134,7 +136,7 @@ export function registerAppDebugRoutes(app: Express): void {
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('X-Accel-Buffering', 'no');
     let closed = false;
-    req.on('close', () => { closed = true; });
+    onClientGone(res, () => { closed = true; }); // `res`: a POST's `req` 'close' never reports a disconnect (Q-621)
     const send = (evt: Record<string, unknown>): void => {
       if (!closed) { try { res.write(JSON.stringify(evt) + '\n'); } catch { /* client gone */ } }
     };
@@ -236,7 +238,7 @@ export function registerAppDebugRoutes(app: Express): void {
   // ── Deep-dive: investigate ONE finding → root cause + full fix (interactive) ────────────────────
   app.post('/api/app-debug/investigate', workspaceRateLimiter(), guestDailyQuota('app-debug'), inAiSpendZone(async (req: Request, res: Response) => {
     const investigateIdentity = await verifyFirebaseIdentity(req);
-    const investigateGate = await gateToolAction(investigateIdentity?.uid || null, investigateIdentity?.email || null, 'ai_tool');
+    const investigateGate = await gateToolAction(investigateIdentity?.uid || null, identityGrantEmail(investigateIdentity), 'ai_tool', 'app-debug');
     if (!investigateGate.allow) {
       res.status(investigateGate.status).json(investigateGate.body);
       return;

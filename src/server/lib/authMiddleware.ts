@@ -22,6 +22,7 @@ import { getServerDb, doc, getDoc } from './serverDb';
 import { readBanStatus, suspendedMessage } from './banGate';
 import { audit } from './audit';
 import { routeParam } from './expressCompat';
+import { grantEmail, type GrantEmail } from '../AgentV3/featureFlag';
 
 /**
  * firebase-admin init options. Passes an EXPLICIT projectId when the environment provides one, so the
@@ -200,7 +201,7 @@ export async function verifiedPhoneNumber(req: Request): Promise<string | null> 
  * when no valid Bearer token). Use this where the email also drives an authorization decision (e.g.
  * an allowlist) so the check can't be spoofed by a client-supplied `email` body field.
  */
-export async function verifyFirebaseIdentity(req: Request): Promise<{ uid: string; email: string | null } | null> {
+export async function verifyFirebaseIdentity(req: Request): Promise<{ uid: string; email: string | null; emailVerified: boolean } | null> {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) return null;
   const token = header.slice(7);
@@ -208,7 +209,9 @@ export async function verifyFirebaseIdentity(req: Request): Promise<{ uid: strin
     const auth = await getAdminAuth();
     if (!auth) return null;
     const decoded = await auth.verifyIdToken(token);
-    return { uid: decoded.uid, email: typeof decoded.email === 'string' ? decoded.email : null };
+    // `emailVerified` travels with the email (Q-624): an email GRANTS nothing unless the provider verified
+    // it — see `grantEmail` in AgentV3/featureFlag.ts. Display uses still read `email` as before.
+    return { uid: decoded.uid, email: typeof decoded.email === 'string' ? decoded.email : null, emailVerified: decoded.email_verified === true };
   } catch {
     return null;
   }
@@ -224,7 +227,7 @@ export async function verifyFirebaseIdentity(req: Request): Promise<{ uid: strin
  * the caller degrades EXACTLY as before this fallback existed. VITEST-skipped.
  */
 /** Minimal shape we depend on for the account lookup — injectable so the core is unit-testable. */
-export interface UserLookupAuth { getUser(uid: string): Promise<{ email?: string | null; displayName?: string | null }>; }
+export interface UserLookupAuth { getUser(uid: string): Promise<{ email?: string | null; emailVerified?: boolean; displayName?: string | null }>; }
 
 /** Testable CORE: resolve the account email for an ALREADY-verified uid via an injected auth provider.
  *  Best-effort — returns null on a missing provider, a lookup throw, or an empty/absent email. Pure of
@@ -247,6 +250,31 @@ export async function resolveVerifiedEmailWith(
 export async function resolveVerifiedEmail(uid: string): Promise<string | null> {
   if (process.env.VITEST || !uid) return null;
   return resolveVerifiedEmailWith(uid, getAdminAuth as unknown as () => Promise<UserLookupAuth | null>);
+}
+
+/** Testable CORE of `resolveGrantEmail`: the account email for an already-verified uid, ONLY when the
+ *  provider verified it (Q-624). Same best-effort contract as `resolveVerifiedEmailWith`. */
+export async function resolveGrantEmailWith(
+  uid: string,
+  getAuth: () => Promise<UserLookupAuth | null>,
+): Promise<GrantEmail | null> {
+  if (!uid) return null;
+  try {
+    const auth = await getAuth();
+    if (!auth) return null;
+    const user = await auth.getUser(uid);
+    return grantEmail(user.email, user.emailVerified);
+  } catch {
+    return null;
+  }
+}
+
+/** The account email as a GRANT input (free list, canary, admin) — verified addresses only (Q-624).
+ *  `resolveVerifiedEmail` stays for display and contact, where an unverified address is still the
+ *  address the user typed. VITEST-skipped like its sibling. */
+export async function resolveGrantEmail(uid: string): Promise<GrantEmail | null> {
+  if (process.env.VITEST || !uid) return null;
+  return resolveGrantEmailWith(uid, getAdminAuth as unknown as () => Promise<UserLookupAuth | null>);
 }
 
 /**

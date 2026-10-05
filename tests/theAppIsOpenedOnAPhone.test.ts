@@ -8,14 +8,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   mobileLayoutModule, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict,
   MOBILE_RESULT_MARKER, MIN_TAP_PX,
 } from '../src/server/AgentV3/mobileLayoutCheck';
 import { buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
+import { makeTempDir } from './helpers/tempDir';
 
 describe('the verdict says what a phone user meets, in three outcomes', () => {
   it('a page that scrolls sideways names the element that does it', () => {
@@ -108,7 +108,7 @@ describe.skipIf(!haveBrowser)('in a real browser at phone size', () => {
   afterAll(() => new Promise<void>((res) => server.close(() => res())));
 
   async function measure(path: string) {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-mobile-'));
+    const dir = makeTempDir('nbai-mobile-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, mobileLayoutModule({ base: base + path, marker: MOBILE_RESULT_MARKER, w: 390, h: 844, minTap: MIN_TAP_PX, loadMs: 15_000 }, `import playwright from '${PW}';\nconst { chromium } = playwright;`));
     const { execFile } = await import('node:child_process');

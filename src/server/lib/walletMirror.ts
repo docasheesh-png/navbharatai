@@ -69,8 +69,8 @@ export function rupeesToTokens(inr: number): number {
 /**
  * The patch that moves BOTH views of the wallet by `tokensDelta`.
  *
- * `tokensDelta` may be negative (an admin deduction). Both views are floored at zero TOGETHER — from
- * the SAME clamped token figure — so a deduction larger than the balance can never leave one view at
+ * `tokensDelta` may be negative (an admin deduction). Both views are floored TOGETHER — at zero, or at the
+ * wallet's own overdraft when it already holds one (Q-670) — from the SAME clamped token figure — so a deduction larger than the balance can never leave one view at
  * zero and the other negative, which is how a "corrected" wallet ends up owing itself money.
  *
  * `total_balance` (the lifetime-credited figure) is moved only by a genuine CREDIT: a deduction is not
@@ -84,11 +84,19 @@ export function mirroredCreditPatch(
   const w = current || {};
   const delta = Number.isFinite(tokensDelta) ? tokensDelta : 0;
   const heldTokens = num(w.tokenBalance);
-  const nextTokens = Math.max(0, heldTokens + delta);
+  // 🔴 A CREDIT MOVES THE BALANCE BY EXACTLY ITS AMOUNT, EVEN BELOW ZERO (Q-670, found 2026-10-05). The floor
+  // used to be `max(0, held + delta)` for every delta. On a wallet already in overdraft (a build may debit
+  // past zero) that turned a ₹1 credit into "the whole debt forgiven": −50,000 + 100 landed at 0, and
+  // `total_balance` recorded 50,000 tokens of lifetime credit nobody paid. A deduction on such a wallet
+  // RAISED it to 0. Now a credit pays the debt down by what it is worth, and a deduction never takes a
+  // positive balance below zero and never moves a negative one at all — the floor is min(held, 0).
+  const floorTokens = Math.min(0, heldTokens);
+  const nextTokens = delta >= 0 ? heldTokens + delta : Math.max(floorTokens, heldTokens + delta);
   // The amount that ACTUALLY moved after the floor — so ₹ follows the real change, not the requested
   // one. Asking to remove 500 tokens from a 100-token wallet moves 100, and ₹ moves by 100's worth.
   const appliedTokens = nextTokens - heldTokens;
   const appliedInr = TOKENS_PER_RUPEE > 0 ? appliedTokens / TOKENS_PER_RUPEE : 0;
+  const heldInr = num(w.remaining_balance);
 
   // A GIFT raises the gift figure; PAID money leaves it alone. Either way it is clamped to the new
   // balance, so a DEDUCTION (a negative delta, which only the admin path sends) takes the gift down
@@ -99,7 +107,7 @@ export function mirroredCreditPatch(
 
   const patch: MirroredPatch = {
     tokenBalance: nextTokens,
-    remaining_balance: Math.max(0, num(w.remaining_balance) + appliedInr),
+    remaining_balance: appliedInr >= 0 ? heldInr + appliedInr : Math.max(Math.min(0, heldInr), heldInr + appliedInr),
     giftTokensRemaining: Math.max(0, Math.min(giftNow, nextTokens)),
   };
   if (appliedTokens > 0) patch.total_balance = num(w.total_balance) + appliedInr;

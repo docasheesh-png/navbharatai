@@ -1,10 +1,11 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { onStreamClosed } from '../lib/clientDisconnect';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
 import { decideMarkupOnProof, markupNeedsPreview, markupWaiverSettledLine } from '../AgentV3/previewEarnsMarkup';
 import { moduleTurnEtaLine, moduleTurnEtaNote, skipsOpeningEta } from '../AgentV3/moduleTurnEta';
 import { isPlatformFixRequest, inBrowserPreviewFixGuidance } from '../../lib/platformFixRequest';
-import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
+import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveGrantEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
 import { HIT_PATH, parseHit, parseBytesReport, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
 import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
@@ -160,6 +161,8 @@ import {
   readWalletBalanceInr,
   firestoreWalletReader,
   decidePaidGate,
+  identityGrantEmail,
+  type GrantEmail,
 } from '../AgentV3';
 // ADMIN-SDK binding (bypasses rules) — getDb() here feeds only the wallet read/debit money path.
 import { getServerDb as getDb } from '../lib/serverDb';
@@ -469,7 +472,7 @@ import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextB
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
-import { provenFromTimeline } from '../AgentV3/provenFromTimeline';
+import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLedger';
 import { appRenderedRecord } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
@@ -593,6 +596,7 @@ import { buildServicesProbeCommand, parseProcessList, splitProcsSection, mergeSe
 import { findProjectInstructionPath, normalizeProjectInstructions, projectInstructionsBlock, projectInstructionsNotice } from '../AgentV3/projectInstructions';
 import { parseFileMentions, fileMentionsBlock, unresolvedMentionsNotice } from '../AgentV3/fileMentions';
 import { mcpServerStore } from '../AgentV3/McpServerStore';
+import { UNREADABLE_CREDENTIALS_MESSAGE } from '../AgentV3/mcpCredentials';
 import { mcpLibraryStore, MAX_SAVED_SERVICES } from '../AgentV3/McpLibraryStore';
 import { chooseFloorLead, healthLeadEnabled } from '../AgentV3/floorLead';
 import { serviceHealth, healthHeadline } from '../AgentV3/mcpHealth';
@@ -771,8 +775,9 @@ export function resolveBuildIdentity(verifiedUid: string | null, claimedUid: str
  * Phase-0 policy; it supersedes the old Fix-26 claimed-email degrade (a real admin's transient token blip
  * still self-heals — the client force-refreshes its token on the resulting 401 and retries). Pure + tested.
  */
-export function entitlementEmail(verified: { email: string | null } | null): string | null {
-  return verified ? verified.email : null;
+export function entitlementEmail(verified: { email: string | null; emailVerified?: boolean } | null): GrantEmail | null {
+  // Verified ADDRESSES only, not just verified tokens (Q-624): see `grantEmail`.
+  return identityGrantEmail(verified);
 }
 
 /**
@@ -2035,7 +2040,7 @@ export function decideBuildBilledUsd(
   sinkTotal: { inputTokens: number; outputTokens: number },
   powerLevel: BillingPowerLevel | boolean,
   userId: string | null | undefined,
-  email: string | null | undefined,
+  email: GrantEmail | null | undefined,
   /**
    * What this build's E2B sandbox cost us (admin 2026-08-11: "e2b ka kharcha bill me jodo").
    *
@@ -2540,11 +2545,11 @@ if (!process.env.VITEST && process.env.NODE_ENV !== 'test') {
  * inputs (config flags + the already-read wallet) — unit-testable.
  */
 export function statusEntitlement(
-  verified: { uid: string; email: string | null } | null,
+  verified: { uid: string; email: string | null; emailVerified?: boolean } | null,
   wallet: FreeTierWallet | null,
 ): { billed: boolean; powerUnlocked: boolean } {
   const uid = verified?.uid ?? null;
-  const email = verified?.email ?? null;
+  const email = identityGrantEmail(verified);
   const billed = isAgentV3PaidPublicEnabled() && !isAgentV3FreeUser(uid, email);
   const powerUnlocked = isAgentV3FreeUser(uid, email) || (!!uid && !isFreeTierUser(wallet));
   return { billed, powerUnlocked };
@@ -3279,7 +3284,7 @@ export function cheapFloorAllowedForTier(startTier?: string, rolloutKey?: string
  * A uid is matched exactly (Firebase uids are case-sensitive); an email is matched
  * case-insensitively (so `Admin@x.com` in the list matches `admin@x.com`). Pure + exported.
  */
-export function cheapFloorAllowedForUser(userId: string | null | undefined, email?: string | null): boolean {
+export function cheapFloorAllowedForUser(userId: string | null | undefined, email?: GrantEmail | null): boolean {
   const allow = (process.env.AGENTV3_CHEAP_FLOOR_USERS || '').split(',').map(s => s.trim()).filter(Boolean);
   if (allow.length === 0) return true; // no allowlist → every user (default, unchanged)
   if (userId && allow.includes(userId)) return true; // exact uid match (case-sensitive)
@@ -3810,7 +3815,7 @@ export { redactProviderError };
  * query param). Env `AGENTV3_REPORT_ADMINS` (comma-separated emails) overrides; unset defaults to the known
  * admins. Fails CLOSED — an unknown/empty email is NOT admin, so a lookup failure yields the anonymized view.
  */
-export function isReportAdmin(email: string | null | undefined): boolean {
+export function isReportAdmin(email: GrantEmail | null | undefined): boolean {
   // Delegates to the shared list in lib/adminEmails so surfaces outside this route (the Monitor's
   // alert notifier) resolve the SAME admins by construction, never a copied allowlist that drifts.
   return isAdminEmail(email);
@@ -4919,7 +4924,7 @@ async function noteBuildOutcome(
     // Fix 68 (White-Label Law §3) — only the ADMIN sees the raw report with real provider/model names; every
     // normal user gets the provider-anonymous view. Resolve the VERIFIED email (never the spoofable query
     // param) and fail CLOSED (no email / lookup failure ⇒ anonymized).
-    const showProviderDetail = isReportAdmin(await resolveVerifiedEmail(verifiedReportUid ?? '').catch(() => null));
+    const showProviderDetail = isReportAdmin(await resolveGrantEmail(verifiedReportUid ?? '').catch(() => null));
     if (workspaceId && !verifiedWorkspaceReadOk(verifiedReportUid, workspaceId)) {
       res.status(403).json({ error: 'This build report belongs to another account.' });
       return;
@@ -5495,13 +5500,13 @@ async function noteBuildOutcome(
     // A server app runs only on a plan — the probe is cached and fails CLOSED (`known: false` ⇒ no
     // plan), so a lookup that could not answer never opens a paid path. See hostApp.hostingAvailability.
     const hostPlan = await probeHostingPlan(userId).catch(() => ({ active: false, known: false }));
-    const gate = hostingAvailability({ isAdmin: isReportAdmin(email), hasPlan: hostPlan.active === true });
+    const gate = hostingAvailability({ isAdmin: isReportAdmin(identityGrantEmail(verified)), hasPlan: hostPlan.active === true });
     if (!gate.available) { res.status(503).json({ ok: false, reason: 'unavailable', error: gate.message }); return; }
 
     // …and how many servers the plan actually bought. `publishedAppCap` bounds how many apps EXIST;
     // this bounds how many hold a container image, which is the cost no traffic overage offsets.
     const serverGate = serverAppLimit({
-      isAdmin: isReportAdmin(email),
+      isAdmin: isReportAdmin(identityGrantEmail(verified)),
       liveServerWorkspaceIds: await liveServerWorkspaceIdsFor(userId ?? ''),
       workspaceId,
       // The SAME plain read the publish quota uses, so "which tier does this user hold" has one answer
@@ -5584,7 +5589,7 @@ async function noteBuildOutcome(
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // Cost figures are OUR infrastructure spend, which the white-label law keeps admin-side. A user
     // never sees a provider line item — they see the wallet, once slice 2c debits it.
-    if (!isReportAdmin(email)) { res.status(403).json({ error: 'Not available for this account.' }); return; }
+    if (!isReportAdmin(identityGrantEmail(verified))) { res.status(403).json({ error: 'Not available for this account.' }); return; }
 
     const gate = hostingAvailability({ isAdmin: true });
     if (!gate.available) { res.status(503).json({ ok: false, error: gate.message }); return; }
@@ -7198,7 +7203,7 @@ async function noteBuildOutcome(
       if (!res.writableEnded) res.write(JSON.stringify({ type: 'ping' }) + '\n');
       else clearInterval(heartbeatTimer);
     }, 15_000);
-    req.on('close', () => { clearInterval(heartbeatTimer); rb.subscribers.delete(sub); });
+    onStreamClosed(res, () => { clearInterval(heartbeatTimer); rb.subscribers.delete(sub); }); // `res`: see clientDisconnect.ts
   });
 
   // CROSS-DEVICE LIVE SYNC (poll): a SECOND device watching the same account's build polls this for
@@ -7837,7 +7842,7 @@ async function noteBuildOutcome(
   async function terminalAccessFor(req: Request): Promise<{ access: TerminalAccess; uid: string | null }> {
     const verified = await verifiedIdentity(req).catch(() => null);
     const uid = verified?.uid ?? null;
-    const unlimited = isAgentV3FreeUser(uid, verified?.email ?? null);
+    const unlimited = isAgentV3FreeUser(uid, identityGrantEmail(verified));
     // No verified user ⇒ nothing to meter against. The shell routes' own ownership checks already
     // refuse an anonymous caller, so this cannot become a free-for-all.
     const usedSeconds = uid ? await terminalUsageStore.getTodaySeconds(uid).catch(() => 0) : 0;
@@ -8106,8 +8111,7 @@ async function noteBuildOutcome(
       if (quotaUid) void chargeTerminalSeconds(quotaUid, detachStream(terminalMeters, quotaUid, shellId, Date.now()));
       unsubscribe();
     };
-    req.on('close', cleanup);
-    res.on('close', cleanup);
+    onStreamClosed(res, cleanup);
   });
 
   /** Keystrokes → the TTY. Ctrl+C is just the real \x03 byte arriving here; there is no special case. */
@@ -8305,7 +8309,7 @@ async function noteBuildOutcome(
   async function mcpIdentity(req: Request): Promise<{ uid: string | null; facts: McpPlanFacts }> {
     const identity = process.env.VITEST ? null : await verifyFirebaseIdentity(req);
     const uid = identity?.uid || null;
-    const email = identity?.email || (uid ? await resolveVerifiedEmail(uid) : null);
+    const email = identityGrantEmail(identity) || (uid ? await resolveGrantEmail(uid) : null);
     const isFreeListed = isAgentV3FreeUser(uid, email);
     if (!uid) return { uid: null, facts: { signedIn: false, hasActivePlan: false, planKnown: true, isFreeListed } };
     const probe = await probeHostingPlan(uid).catch(() => ({ active: false, known: false }));
@@ -8437,11 +8441,14 @@ async function noteBuildOutcome(
       res.status(429).json({ error: 'Please wait a moment before checking your services again.' });
       return;
     }
-    const servers = await mcpServerStore.listFull(workspaceId);
+    const servers = await mcpServerStore.listOpened(workspaceId);
     if (servers.length === 0) { res.json({ results: [], headline: 'Nothing to check.' }); return; }
     // In parallel: five services at 15s each would be over a minute in sequence, and the user is
     // watching a spinner for all of it. A probe that throws is a FAILING service, never a failed check.
-    const results = (await Promise.all(servers.map(async (cfg) => {
+    // A service whose saved key cannot be read is NOT probed (Q-628): asking it without the auth it was
+    // set up with proves nothing, and the honest answer is that it needs reconnecting.
+    const results = (await Promise.all(servers.map(async ({ cfg, credentialsUnreadable }) => {
+      if (credentialsUnreadable) return serviceHealth({ id: cfg.id, toolCount: 0, error: UNREADABLE_CREDENTIALS_MESSAGE });
       const probe = await listRemoteTools(cfg).catch(() => ({ tools: [], error: 'It could not be reached just now.' }));
       return serviceHealth({ id: cfg.id, toolCount: probe.tools.length, error: probe.error });
     })));
@@ -8469,8 +8476,11 @@ async function noteBuildOutcome(
     const gate = canUseConnectedServices(facts);
     if (!gate.allowed) { res.status(403).json({ error: gate.message, reason: gate.reason }); return; }
 
-    const saved = uid ? await mcpLibraryStore.get(uid, id) : null;
-    if (!saved) { res.status(404).json({ error: 'That saved service could not be found. Connect it again.' }); return; }
+    const opened = uid ? await mcpLibraryStore.getOpened(uid, id) : null;
+    if (!opened) { res.status(404).json({ error: 'That saved service could not be found. Connect it again.' }); return; }
+    // Fail closed (Q-628): a saved key that cannot be decrypted is never sent on as "no auth".
+    if (opened.credentialsUnreadable) { res.status(409).json({ error: `That saved service could not be attached. ${UNREADABLE_CREDENTIALS_MESSAGE}`, reason: 'credentials-unreadable' }); return; }
+    const saved = opened.cfg;
 
     const urlCheck = await assertPublicHttpUrl(saved.url).catch(() => ({ ok: false }));
     const existing = await mcpServerStore.listForDisplay(workspaceId);
@@ -9039,7 +9049,7 @@ async function noteBuildOutcome(
             const identity = await verifyFirebaseIdentity(req).catch(() => null);
             const publishPlan = await probeHostingPlan(userId).catch(() => ({ active: false, known: false }));
             containerHostingAvailable = hostingAvailability({
-              isAdmin: isReportAdmin(identity?.email ?? null),
+              isAdmin: isReportAdmin(identityGrantEmail(identity)),
               hasPlan: publishPlan.active === true,
             }).available;
           } catch { /* unresolvable ⇒ not available ⇒ today's Render path, unchanged */ }
@@ -9348,6 +9358,7 @@ async function noteBuildOutcome(
     }
     // hasGithub is a boolean hint only — never accept a token in a GET query string.
     const hasGithub = req.query.hasGithub === 'true' || req.query.hasGithub === '1';
+    const labelIdentity = hostingPlansEnabled() ? await verifyFirebaseIdentity(req).catch(() => null) : null;
     res.json({
       providers: deployProviderStatus({ userId, githubToken: hasGithub ? 'present' : undefined }),
       default: DEFAULT_DEPLOY_PROVIDER,
@@ -9358,12 +9369,11 @@ async function noteBuildOutcome(
       // (admin 2026-08-21). NULL means they would not be charged — plans are off, or they are on the
       // free list — and the button then shows no price rather than quoting one that will never apply.
       //
-      // The identity here comes from the query string and is NOT verified, which is fine for a LABEL
-      // and only for a label: the real charge is enforced on the connect route against a verified
-      // identity. Claiming someone else's email can only hide a price from yourself; it cannot buy the
-      // plan. The number is read live from hostingPlanPriceInr() so an env price change needs no
+      // The label reads the VERIFIED identity (Q-624), the same one the connect route charges against,
+      // so the price shown and the price charged cannot disagree. The real charge is still enforced
+      // on the connect route. The number is read live from hostingPlanPriceInr() so an env price change needs no
       // deploy and can never drift from what is actually charged.
-      customDomainPriceInr: hostingPlansEnabled() && !isAgentV3FreeUser(userId, email)
+      customDomainPriceInr: hostingPlansEnabled() && !isAgentV3FreeUser(labelIdentity?.uid ?? null, identityGrantEmail(labelIdentity))
         ? hostingPlanPriceInr()
         : null,
     });
@@ -9479,7 +9489,7 @@ async function noteBuildOutcome(
   app.get('/api/agentv3/app-signature-status', async (req: Request, res: Response) => {
     const identity = process.env.VITEST ? null : await verifyFirebaseIdentity(req);
     const uid = identity?.uid || null;
-    const email = identity?.email || (uid ? await resolveVerifiedEmail(uid) : null);
+    const email = identityGrantEmail(identity) || (uid ? await resolveGrantEmail(uid) : null);
     const freeListed = isAgentV3FreeUser(uid, email);
     const hasActivePlan = uid && !freeListed
       ? await probeHostingPlan(uid).then((p) => (p.known ? p.active : null)).catch(() => null)
@@ -9940,7 +9950,7 @@ async function noteBuildOutcome(
     // safe — server-side account email, never client-claimed) so exemption holds regardless of token claims.
     // Best-effort: null on failure → degrades to exactly today's behavior. Only runs when the token lacked one.
     if (!email && verified?.uid) {
-      email = await resolveVerifiedEmail(verified.uid);
+      email = await resolveGrantEmail(verified.uid);
     }
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
@@ -11383,7 +11393,7 @@ async function noteBuildOutcome(
     rb.subscribers.add(primary);
     runningBuilds.set(buildKey, rb);
     buildLeaseRb = rb;
-    req.on('close', () => { rb.subscribers.delete(primary); });
+    onStreamClosed(res, () => { rb.subscribers.delete(primary); }); // `res`: a POST's `req` 'close' never reports a disconnect
     // ETERNAL SESSIONS: tap every outgoing build event into a compact durable timeline (tool
     // calls, file changes, diffs, preview, terminal facts). Persisted once in the finally below
     // and replayed on reopen, so a restored session shows the SAME Claude-style action rows,
@@ -15681,6 +15691,7 @@ async function noteBuildOutcome(
           // proceeds exactly as it does today. It must never be able to fail or delay a build.
           try {
             const servers = await mcpServerStore.listFull(workspaceId);
+            const unreadableServers = mcpServerStore.unreadableIds(workspaceId); // Q-628, read in parallel
             // THE PAID-PLAN GATE (admin 2026-09-12). Checked BEFORE the services are contacted, so a
             // free account costs neither the network calls nor the tokens their descriptions would add
             // to every model call of this build.
@@ -15708,6 +15719,12 @@ async function noteBuildOutcome(
                   text: `🔌 Using ${mcpTools.length} tool(s) from ${servers.length} service(s) you connected.`,
                 });
               }
+            }
+            // A service whose saved key cannot be read is left out of `servers` (Q-628) — never called
+            // without its auth — and said in one plain sentence, not dropped in silence.
+            const unreadable = await unreadableServers;
+            if (unreadable.length > 0) {
+              events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: unreadable.map((sid) => `🔌 ${sid}: ${UNREADABLE_CREDENTIALS_MESSAGE}`).join(' ') });
             }
           } catch { /* connected services are additive — never a reason a build fails */ }
           // PRE-FLIGHT WRITE (mitrify autopsy 2026-08-04). The secrets .env used to be written lazily from
@@ -20756,7 +20773,7 @@ async function noteBuildOutcome(
        */
       const renderProvenNow = (): boolean => {
         if (previewVerifiedRendered) return true;
-        try { return provenFromTimeline(buildDiag.report().issues).preview === 'passed'; }
+        try { return renderProvenInLedger(buildDiag.evidenceLedger()); }
         catch { return false; }
       };
 
@@ -22588,27 +22605,12 @@ async function noteBuildOutcome(
         // evidence set above, and a suite that could not EXECUTE is not counted in either direction.
         // Safe for billing by construction: a RED gate flips a build to free only on
         // shippingIssueCount('error'), which test evidence does not contribute to.
-        try {
-          const proven = buildDiag.agentRunEvidence();
-          if (gateEvidence.typecheck === 'not-run' && proven.typecheck) gateEvidence.typecheck = proven.typecheck;
-          if (gateEvidence.tests === 'not-run' && proven.tests) gateEvidence.tests = proven.tests;
-        } catch { /* evidence recovery is best-effort and must never touch a build */ }
-        // THE SAME READ, over the other half of the ledger (autopsy 697b38ee, 6th appearance). The
-        // command log settles typecheck and tests; the facts an ACTOR proved — the app loaded in a
-        // real browser, an address really went up — are recorded on the build's own timeline and were
-        // read back by nobody. See provenFromTimeline.ts, including why this cannot change a bill.
-        try {
-          const seen = provenFromTimeline(buildDiag.report().issues);
-          if (gateEvidence.pages === 'not-run' && seen.pages) gateEvidence.pages = seen.pages;
-          // Fill-only, exactly like the two above: a preview recorded as `'failed'` keeps its failure,
-          // and a `'passed'` that is already there is untouched. This can only turn an UNPROVEN preview
-          // into a proven one, which removes no failure and adds none — see provenFromTimeline.ts on why
-          // that cannot move a bill.
-          if (gateEvidence.preview === 'not-run' && seen.preview) gateEvidence.preview = seen.preview;
-          if (gateEvidence.previewUrlPublished === undefined && seen.previewUrlPublished !== undefined) {
-            gateEvidence.previewUrlPublished = seen.previewUrlPublished;
-          }
-        } catch { /* evidence recovery is best-effort and must never touch a build */ }
+        // THE EVIDENCE LEDGER (Q-101, autopsy 697b38ee): one read of everything this build already proved —
+        // typecheck and tests from the command log, pages and preview from facts an actor recorded on the
+        // timeline. FILL-ONLY: a recorded failure keeps its failure, so this moves the sentence, never the
+        // bill (see evidenceLedger.ts / provenFromTimeline.ts).
+        try { fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger()); }
+        catch { /* evidence recovery is best-effort and must never touch a build */ }
         const gateFindings = () => ({
           // Counted from what this build actually recorded, so the gate and the report cannot disagree.
           blockers: buildDiag.shippingIssueCount('error'),

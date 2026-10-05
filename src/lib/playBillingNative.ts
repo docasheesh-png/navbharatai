@@ -9,6 +9,7 @@
 // cannot strand a user who has not updated.
 
 import type { PurchaseOutcome } from './storePurchase';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 
 /** What Google's purchase sheet reported. `pending` is a real Play state (e.g. cash-at-store in India). */
 export interface NativePurchase {
@@ -75,7 +76,6 @@ export function isPlayBillingPlatform(platform: string | null | undefined): bool
 async function plugin(): Promise<{ api: PlayBillingPlugin } | null> {
   if (cached) return { api: cached };
   try {
-    const { Capacitor, registerPlugin } = await import('@capacitor/core');
     // Android, not "native": Play Billing is a Google Play service, and iOS has no such plugin.
     if (!isPlayBillingPlatform(Capacitor.getPlatform())) return null;
     cached = registerPlugin<PlayBillingPlugin>('PlayBilling');

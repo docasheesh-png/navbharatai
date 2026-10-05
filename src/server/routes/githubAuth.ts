@@ -6,13 +6,29 @@ import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import {
   NATIVE_STATE_LEGACY,
   STATE_TTL_MS,
+  GITHUB_NONCE_HEADER,
+  isOauthNonce,
+  deviceChallenge,
   signNativeState,
+  signDeviceState,
   parseNativeState,
+  isRefusedNativeState,
   makeTicket,
+  makeDeviceTicket,
   readTicket,
+  readDeviceTicket,
+  TicketLedger,
+  legacyTokenReturnEnabled,
   nativeReturnUrl,
 } from '../lib/githubNativeHandoff';
+import { signWebState, parseWebState, webReturnFragment } from '../lib/githubWebState';
 import { spaFallbackShouldDefer } from '../lib/spaFallback';
+
+/** Device tickets already redeemed on this instance — see TicketLedger for the honest limit. */
+const deviceTicketLedger = new TicketLedger();
+
+/** What a user on an app build too old for the current GitHub hand-off is told. */
+const UPDATE_APP_MESSAGE = 'Please update the NavBharatAI app to connect GitHub.';
 
 /**
  * Key for signing the OAuth `state`. Reuses the secret the platform already requires rather than adding
@@ -102,25 +118,39 @@ export function registerGithubAuthRoutes(app: Express): void {
     if (!clientId) return res.status(500).json({ error: 'GitHub Client ID not configured' });
 
     let state = (req.query.state as string) || '';
+    const handoff = String(req.query.handoff || '');
+    const nonce = req.headers[GITHUB_NONCE_HEADER];
 
-    // A v2 app asks for the ticket flow by sending the legacy state PLUS its Firebase ID token. We
-    // upgrade the state to a signed one carrying the verified uid, so the callback knows who to bind
-    // the ticket to. Both halves are required, and neither is assumed:
-    //
-    //   • the app must ASK (`?handoff=ticket`), because an old app must keep getting the old state;
-    //   • the caller must be AUTHENTICATED, because binding a ticket to a uid we did not verify would
-    //     let anyone name whichever user they liked.
-    //
-    // If either is missing we fall through to today's behaviour exactly. That is not a security
-    // downgrade — an unauthenticated caller could not have been protected by a uid binding anyway, and
-    // the flow is no worse than it was yesterday.
-    if (state === NATIVE_STATE_LEGACY && String(req.query.handoff || '') === 'ticket') {
-      const identity = await verifyFirebaseIdentity(req);
-      if (identity?.uid) {
+    if (state === NATIVE_STATE_LEGACY) {
+      if (handoff === 'device') {
+        // CURRENT APP (Q-629): bind the ticket to the HASH of a nonce the app made, so it works for a
+        // user who is not signed in yet. A missing or malformed nonce is refused — never downgraded.
+        if (!isOauthNonce(nonce)) {
+          return sendSafeError(res, 400, 'GitHub sign-in could not start securely. Please try again.');
+        }
+        state = signDeviceState(handoffSecret(), deviceChallenge(nonce), Date.now() + STATE_TTL_MS);
+      } else if (handoff === 'ticket') {
+        // AN APP BUILT 2026-08-28 … 2026-10-05: the uid-bound ticket, which needs a verified identity.
+        // 🔴 Q-629: when the identity check fails this used to FALL BACK to the legacy state, i.e. a
+        // request that asked for the safe flow was quietly given the token-in-URL one. It now stops.
+        const identity = await verifyFirebaseIdentity(req);
+        if (!identity?.uid) {
+          console.warn('[GITHUB_AUTH_URL] ticket handoff requested without a verified identity — refused, no legacy fallback');
+          return sendSafeError(res, 401, 'Sign in to NavBharatAI first, or update the app, to connect GitHub.');
+        }
         state = signNativeState(handoffSecret(), identity.uid, Date.now() + STATE_TTL_MS);
-      } else {
-        console.warn('[GITHUB_AUTH_URL] ticket handoff requested without a verified identity — using the legacy state');
+      } else if (!legacyTokenReturnEnabled()) {
+        // A pre-ticket build. Only it asks for the bare state, and only the legacy switch serves it.
+        return sendSafeError(res, 400, UPDATE_APP_MESSAGE);
       }
+    } else {
+      // WEB (Q-623): the tab's nonce is signed into the state with the vetted return URL. A request
+      // without one is an old tab from before this change; it is told to reload rather than sent on a
+      // round trip to GitHub whose token the callback would refuse to release.
+      if (!isOauthNonce(nonce)) {
+        return sendSafeError(res, 400, 'Please reload NavBharatAI and connect GitHub again.');
+      }
+      state = signWebState(handoffSecret(), safeReturnUrl(state) || '', nonce, Date.now() + STATE_TTL_MS);
     }
     const redirectUri = GITHUB_REDIRECT_URI;
     const scope = GITHUB_SCOPE;
@@ -132,7 +162,8 @@ export function registerGithubAuthRoutes(app: Express): void {
     githubUrl.searchParams.set('scope', scope);
     githubUrl.searchParams.set('state', state);
 
-    console.log('[GITHUB_AUTH_URL] Safe URL construction succeeded:', githubUrl.toString());
+    // The state is not logged: it carries the attempt's nonce (web) or challenge (native).
+    console.log('[GITHUB_AUTH_URL] Safe URL construction succeeded');
 
     res.json({
       url: githubUrl.toString(),
@@ -171,6 +202,29 @@ export function registerGithubAuthRoutes(app: Express): void {
 
     if (!code) return res.status(400).json({ error: 'No code provided' });
 
+    // DECIDE WHO MAY RECEIVE THE TOKEN BEFORE THE CODE IS EXCHANGED. A state nobody can vouch for is
+    // refused here, so a code we will not deliver is never turned into a live token at all.
+    //
+    // NATIVE: a ticket for a v2 (uid) or device (nonce, Q-629) app; the raw token only for the bare
+    // legacy state and only while the legacy switch is on. A broken v2/device state is refused and
+    // NEVER degraded to the legacy path — that would hand an attacker the whole fix for a typo.
+    // WEB (Q-623): only a signed state carrying the starting tab's nonce. See lib/githubWebState.ts.
+    const nativeState = parseNativeState(handoffSecret(), state, Date.now());
+    if (isRefusedNativeState(nativeState)) {
+      console.warn(`[GITHUB_AUTH_CALLBACK] refusing native return: ${nativeState.kind} (${nativeState.reason})`);
+      return sendSafeError(res, 400, 'This sign-in link is no longer valid. Please try connecting GitHub again.');
+    }
+    const legacyTokenReturn = legacyTokenReturnEnabled();
+    if (nativeState.kind === 'legacy' && !legacyTokenReturn) {
+      console.warn('[GITHUB_AUTH_CALLBACK] refusing legacy native return: the legacy token return is switched off');
+      return sendSafeError(res, 400, UPDATE_APP_MESSAGE);
+    }
+    const webState = nativeState.kind === 'none' ? parseWebState(handoffSecret(), state, Date.now()) : null;
+    if (webState && webState.kind !== 'web') {
+      console.warn(`[GITHUB_AUTH_CALLBACK] refusing web return: ${webState.kind === 'none' ? 'unsigned state' : `state ${webState.reason}`}`);
+      return sendSafeError(res, 400, 'This GitHub sign-in was not started from this browser. Please connect GitHub again from NavBharatAI.');
+    }
+
     try {
       console.log(`[GITHUB_AUTH_CALLBACK] Fetching access token from GitHub. Redirect URI: ${redirectUri}`);
       const response = await axios.post('https://github.com/login/oauth/access_token', {
@@ -186,40 +240,31 @@ export function registerGithubAuthRoutes(app: Express): void {
       if (error) throw new Error(error_description || error);
 
       // NATIVE app: hand the credential back through the app's own custom scheme so the user returns to
-      // the installed app instead of being stranded on the website in a browser.
-      //
-      // A v2 app gets a TICKET, not the token — a custom scheme is claimable by any installed app, and
-      // our scope is `repo workflow`. A pre-v2 app still gets the raw token, unchanged, because it runs
-      // from assets baked into its APK and cannot be updated by a server deploy. See
-      // lib/githubNativeHandoff.ts for the whole argument.
-      const nativeState = parseNativeState(handoffSecret(), state, Date.now());
-      if (nativeState.kind === 'v2-invalid') {
-        // NEVER degrade to the legacy token path here. Doing so would hand an attacker the entire fix:
-        // send a deliberately broken v2 state and the server helpfully reverts to putting a
-        // repo-scoped token in a hijackable deep link.
-        console.warn(`[GITHUB_AUTH_CALLBACK] refusing native return: v2 state ${nativeState.reason}`);
-        return sendSafeError(res, 400, 'This sign-in link is no longer valid. Please try connecting GitHub again.');
-      }
-      if (nativeState.kind === 'legacy' || nativeState.kind === 'v2') {
+      // the installed app instead of being stranded on the website in a browser. A custom scheme is
+      // claimable by any installed app and our scope is `repo workflow`, so a current app gets a TICKET
+      // it alone can redeem, never the token. See lib/githubNativeHandoff.ts for the whole argument.
+      if (nativeState.kind === 'legacy' || nativeState.kind === 'v2' || nativeState.kind === 'device') {
         let ticket: string | null = null;
-        if (nativeState.kind === 'v2') {
-          // A failure here means encryption is unavailable, which in production means
-          // SECRET_ENCRYPTION_KEY is unset — `encrypt` refuses the dev fallback there on purpose.
-          try { ticket = makeTicket(access_token, nativeState.uid, Date.now(), encrypt); }
-          catch (e: any) { console.error('[GITHUB_AUTH_CALLBACK] ticket encryption failed:', e?.message || e); }
-        }
-        const nativeReturn = nativeReturnUrl(nativeState, access_token, ticket);
+        // A failure here means encryption is unavailable, which in production means
+        // SECRET_ENCRYPTION_KEY is unset — `encrypt` refuses the dev fallback there on purpose.
+        try {
+          if (nativeState.kind === 'v2') ticket = makeTicket(access_token, nativeState.uid, Date.now(), encrypt);
+          if (nativeState.kind === 'device') ticket = makeDeviceTicket(access_token, nativeState.challenge, Date.now(), encrypt);
+        } catch (e: any) { console.error('[GITHUB_AUTH_CALLBACK] ticket encryption failed:', e?.message || e); }
+        const nativeReturn = nativeReturnUrl(nativeState, access_token, ticket, legacyTokenReturn);
         if (nativeReturn) return res.redirect(nativeReturn);
         return sendSafeError(res, 500, 'GitHub sign-in could not be completed securely. Please try again.');
       }
 
-      // Only honour an allow-listed return URL — a crafted `state=https://evil.com` must not
-      // be able to exfiltrate the token via redirect.
-      const returnUrl = safeReturnUrl(state as string);
+      // WEB: from here on the state is a verified web state (checked above, before the exchange).
+      const nonce = webState?.kind === 'web' ? webState.nonce : '';
+      // The return URL was vetted when it was signed; it is vetted again, so a change to the allowlist
+      // takes effect on states already in flight.
+      const returnUrl = webState?.kind === 'web' ? safeReturnUrl(webState.returnUrl) : null;
 
       if (returnUrl) {
-        // Full redirect flow: token in fragment (fragment is safer for tokens), URL-encoded.
-        return res.redirect(`${returnUrl}#gh_token=${encodeURIComponent(access_token)}`);
+        // Full redirect flow: token AND the tab's nonce in the fragment (never sent to a server).
+        return res.redirect(`${returnUrl}${webReturnFragment(access_token, nonce)}`);
       }
 
       // Popup flow with dual local storage sync + opener postMessage
@@ -249,22 +294,20 @@ export function registerGithubAuthRoutes(app: Express): void {
 
             <script>
               const token = ${jsLiteral(access_token)};
+              const nonce = ${jsLiteral(nonce)};
               const returnUrl = ${jsLiteral(returnUrl || "https://navbharatai.com/")};
+              const returnFragment = ${jsLiteral(webReturnFragment(access_token, nonce))};
               // Post the (repo+workflow scope) token ONLY to this exact trusted origin, never '*'
               // (a wildcard target would let any page that opened this popup read the token).
               const targetOrigin = ${jsLiteral(oauthTargetOrigin(returnUrl))};
 
+              // Q-623: this page never writes the token into storage itself. It hands the token and the
+              // starting tab's nonce to the app, and the app stores it only if the nonce is the one it
+              // saved — a page that wrote storage directly would plant a token no tab asked for.
               function handleReturnToApp() {
                 try {
-                  localStorage.setItem('gh_token', token);
-                  localStorage.setItem('gh_token_signal', token);
-                } catch(e) {
-                  console.error('Local storage write failure:', e);
-                }
-
-                try {
                   if (window.opener) {
-                    window.opener.postMessage({ type: 'GITHUB_AUTH_SUCCESS', token: token }, targetOrigin);
+                    window.opener.postMessage({ type: 'GITHUB_AUTH_SUCCESS', token: token, nonce: nonce }, targetOrigin);
                   }
                 } catch(e) {
                   console.error('PostMessage handshake failure:', e);
@@ -274,31 +317,28 @@ export function registerGithubAuthRoutes(app: Express): void {
 
                 // Fallback: if window.close() fails, redirect current window
                 setTimeout(() => {
-                  window.location.href = returnUrl + '#gh_token=' + token;
+                  window.location.href = returnUrl + returnFragment;
                 }, 100);
               }
 
               // Auto-run connection sync and closure
               try {
-                localStorage.setItem('gh_token', token);
-                localStorage.setItem('gh_token_signal', token);
-
                 if (window.opener) {
-                  window.opener.postMessage({ type: 'GITHUB_AUTH_SUCCESS', token: token }, targetOrigin);
+                  window.opener.postMessage({ type: 'GITHUB_AUTH_SUCCESS', token: token, nonce: nonce }, targetOrigin);
                   setTimeout(() => {
                     window.close();
                   }, 1200);
                 } else {
                   // Direct tab fallback
                   setTimeout(() => {
-                    window.location.href = returnUrl + '#gh_token=' + token;
+                    window.location.href = returnUrl + returnFragment;
                   }, 1200);
                 }
               } catch(e) {
                 console.error('Handshake execution failure:', e);
                 // Fallback direct redirection
                 setTimeout(() => {
-                  window.location.href = returnUrl + '#gh_token=' + token;
+                  window.location.href = returnUrl + returnFragment;
                 }, 1000);
               }
             </script>
@@ -353,6 +393,19 @@ export function registerGithubAuthRoutes(app: Express): void {
    * `wrong-user` is the one worth alerting on.
    */
   app.post('/api/github/native-exchange', async (req: Request, res: Response) => {
+    // DEVICE TICKET (Q-629): redeemed by presenting the nonce whose hash the ticket was bound to. No
+    // account needed — that is the point: it works for a user signing IN with GitHub. Single use.
+    if (req.body?.nonce !== undefined) {
+      const device = readDeviceTicket(req.body?.ticket, req.body?.nonce, Date.now(), decrypt, deviceTicketLedger);
+      if (!device.ok) {
+        console.warn(`[GITHUB_NATIVE_EXCHANGE] device ticket refused (${device.reason})`);
+        return sendSafeError(res, 400, 'This GitHub sign-in link is no longer valid. Please connect GitHub again.');
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ token: device.token });
+    }
+
+    // UID TICKET: app builds from 2026-08-28 … 2026-10-05, which send no nonce.
     const identity = await verifyFirebaseIdentity(req);
     if (!identity?.uid) {
       return sendSafeError(res, 401, 'Sign in to NavBharatAI before connecting GitHub.');

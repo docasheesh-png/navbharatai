@@ -6,9 +6,8 @@
  * its screen, and presses it again after the reload.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { writeFileSync, mkdtempSync, existsSync } from 'node:fs';
+import { writeFileSync, existsSync } from 'node:fs';
 import { execFileSync, execFile } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -16,6 +15,7 @@ import {
   deriveJourneys, reachWordFor, journeyScript, parseJourneyResults, TOOLS_DIR, type Journey,
 } from '../src/server/AgentV3/journeyDerivation';
 import { playwrightImport } from '../src/server/AgentV3/sandboxBrowserScript';
+import { makeTempDir } from './helpers/tempDir';
 
 const MARKER = 'nbai-check-7';
 
@@ -81,7 +81,7 @@ describe('a form no page reaches gets a journey that opens its screen first', ()
     const script = journeyScript('http://x/', js, MARKER);
     expect(script).toContain('reach: "design"');
     const body = script.slice(script.indexOf("<<'NBAI_EOF'\n") + 13, script.lastIndexOf('\nNBAI_EOF'));
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-reach-'));
+    const dir = makeTempDir('nbai-reach-');
     writeFileSync(join(dir, 'run.mjs'), body);
     execFileSync(process.execPath, ['--check', join(dir, 'run.mjs')]);
     // A single backslash inside the TS template would reach the page as a different character.
@@ -134,7 +134,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
     const script = journeyScript(base, js, MARKER);
     const body = script.slice(script.indexOf("<<'NBAI_EOF'\n") + 13, script.lastIndexOf('\nNBAI_EOF'))
       .replace(playwrightImport(TOOLS_DIR), `import playwright from '${PW}';\nconst { chromium } = playwright;`);
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-reach-real-'));
+    const dir = makeTempDir('nbai-reach-real-');
     writeFileSync(join(dir, 'run.mjs'), body);
     const stdout = await new Promise<string>((res, rej) => execFile(process.execPath, [join(dir, 'run.mjs')], { env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: BROWSERS }, timeout: 90_000 }, (e, out) => (e ? rej(e) : res(out))));
     const r = parseJourneyResults(stdout)[0] as unknown as { verdict: string; note: string; via?: string };

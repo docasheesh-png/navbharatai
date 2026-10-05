@@ -64,7 +64,9 @@ describe('census: no helper mixes a user\'s vault with the platform\'s environme
       const src = readFileSync(f, 'utf8');
       expect(src, f).not.toMatch(/loadUserVaultSecrets|user_secrets/);
       expect(src, f).not.toMatch(/process\.env\.CASHFREE_(?:APP_ID|SECRET_KEY|CLIENT_ID|CLIENT_SECRET|WEBHOOK_SECRET)/);
-      expect(src, f).toMatch(/platformCashfree/);
+      // Through the platform's own credential module: `platformCashfree…` or, since Q-615, the one
+      // availability decision `cashfreePaymentsAvailability` (cashfreeCredentials.ts) built on it.
+      expect(src, f).toMatch(/platformCashfree|cashfreePaymentsAvailability/);
     }
   });
 });

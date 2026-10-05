@@ -32,10 +32,17 @@ export function usageDocId(userId: string, bucket: ToolBucket): string {
   return `${userId}__${bucket}`;
 }
 
-class ToolUsageStore {
+export class ToolUsageStore {
   private db: admin.firestore.Firestore | null = null;
 
+  /**
+   * `dbProvider` exists for tests that run the REAL transaction logic against an in-memory store
+   * (`anImageIsPaidBeforeItIsDrawn.test.ts`). Production passes nothing and gets the shared handle.
+   */
+  constructor(private readonly dbProvider?: () => admin.firestore.Firestore | null) {}
+
   private getDb(): admin.firestore.Firestore | null {
+    if (this.dbProvider) return this.dbProvider();
     if (process.env.VITEST || process.env.NODE_ENV === 'test') return null;
     try {
       if (!this.db) {
@@ -77,6 +84,37 @@ class ToolUsageStore {
         const base = data && data.date === today && Number.isFinite(data.count) && data.count > 0 ? Math.floor(data.count) : 0;
         const count = base + 1;
         t.set(ref, { userId, bucket, date: today, count, updatedAt: nowIso } as ToolUsageDoc);
+        return count;
+      });
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Give back ONE action that `increment` reserved but that never happened (Q-616, 2026-10-05).
+   *
+   * The image generator now takes its slot BEFORE an engine runs, so that two pictures started at the
+   * same moment cannot both be the free fifth — and a slot taken for a picture that then failed must
+   * be returned, or a failed picture would cost the user one of their free ones.
+   *
+   * Transactional, floored at 0, and only on the day the slot was taken (`reservedAt`): a picture that
+   * failed just after midnight must not take a slot from the NEW day's count, which it never used.
+   * Best-effort and never throws — the worst case is one free picture fewer, never a wrong charge.
+   */
+  async decrement(userId: string, bucket: ToolBucket, reservedAt: number = Date.now()): Promise<number> {
+    const db = this.getDb();
+    if (!db || !userId) return 0;
+    const day = istDayKey(reservedAt);
+    try {
+      const ref = doc(db, 'tool_daily_usage', usageDocId(userId, bucket));
+      return await runTransaction(db, async (t: any) => {
+        const snap = await t.get(ref);
+        const data = snap.exists() ? (snap.data() as ToolUsageDoc | undefined) : undefined;
+        // Another day's count, or nothing to give back: leave it exactly as it is.
+        if (!data || data.date !== day || !Number.isFinite(data.count) || data.count <= 0) return 0;
+        const count = Math.floor(data.count) - 1;
+        t.set(ref, { ...data, count, updatedAt: new Date().toISOString() } as ToolUsageDoc);
         return count;
       });
     } catch {

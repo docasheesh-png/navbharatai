@@ -88,6 +88,11 @@ export interface DebitedWallet {
    * NOT a safe test for "did anything change".
    */
   applied: boolean;
+  /**
+   * True when an ALL-OR-NOTHING charge (`allOrNothing`) was refused because the balance could not cover
+   * it in full. Nothing was applied. Only a hold can see this; an ordinary debit clamps instead.
+   */
+  refused?: boolean;
 }
 
 /**
@@ -209,6 +214,42 @@ export interface WalletRollupTx {
   rollupRef: string;
   /** Ledger text for the bucket, e.g. "AI assistants". No provider names (white-label law). */
   description: string;
+  /**
+   * ALL OR NOTHING (Q-616, 2026-10-05). Unset, a charge the balance cannot cover is CLAMPED at the floor
+   * and the rest absorbed — right for a charge settled after the work, which cannot be un-done. Set, the
+   * charge is REFUSED instead (`refused: true`, nothing applied) — right for a price taken BEFORE the work,
+   * where refusing costs nobody anything. A hold passes this with `floorInr: 0`, so it never overdraws.
+   */
+  allOrNothing?: boolean;
+  /**
+   * Makes this charge a HOLD that can be given back exactly once (`computeRolledUpRelease`). The id is
+   * stamped on the bucket row's `openHolds`, which is what makes the release idempotent: a release that
+   * finds no matching id has nothing to give back.
+   */
+  holdId?: string;
+}
+
+/**
+ * One hold still open on a rollup row. `owed` is the charge in exact (possibly fractional) tokens, which
+ * the release gives back to the token; `gift` is how much of it came out of the welcome gift.
+ */
+export interface OpenHold {
+  id: string;
+  owed: number;
+  gift: number;
+}
+
+/**
+ * How many open holds one bucket row remembers. A hold lives for one request (about a minute), and the
+ * image route is rate-limited far below this per account, so only a hold already settled can roll off.
+ */
+export const MAX_OPEN_HOLDS = 50;
+
+function openHoldsOf(row: unknown): OpenHold[] {
+  const raw = (row as { openHolds?: unknown } | null | undefined)?.openHolds;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((h): h is OpenHold => !!h && typeof h.id === 'string' && h.id !== ''
+    && typeof h.owed === 'number' && Number.isFinite(h.owed) && h.owed >= 0);
 }
 
 /**
@@ -240,20 +281,39 @@ export function computeRolledUpDebit(
     return { wallet: w, tokensDebited: 0, applied: false };
   }
 
+  const ledger: any[] = Array.isArray(w.walletLedger) ? w.walletLedger : [];
+  const existingIndex = ledger.findIndex((e) => e && e.rollupRef === tx.rollupRef);
+  const existingHolds = existingIndex >= 0 ? openHoldsOf(ledger[existingIndex]) : [];
+  // A hold already on the row was already taken: idempotent, exactly like a build ref.
+  if (tx.holdId && existingHolds.some((h) => h.id === tx.holdId)) {
+    return { wallet: w, tokensDebited: 0, applied: false };
+  }
+
   // The same floor, for the same reason — see computeDebitedWallet. A rollup can cross it just as a
   // build can: many small assistant charges in one day add up exactly like one large one.
   const floored = floorCharge(w, tx.billedInr, tx.floorInr);
+  // An all-or-nothing charge is never partly taken: if the floor would bite, nothing moves at all.
+  if (tx.allOrNothing && floored.clamped) {
+    return { wallet: w, tokensDebited: 0, applied: false, refused: true };
+  }
   const carriedIn = Math.min(Math.max(n(w[TOKEN_CARRY_FIELD]), 0), 1);
-  const owed = inrToDebitTokens(floored.chargedInr) + carriedIn;
+  const owedForThis = inrToDebitTokens(floored.chargedInr);
+  const owed = owedForThis + carriedIn;
   const tokens = Math.floor(owed);
   const carryOut = Math.round((owed - tokens) * 1e6) / 1e6;
 
-  const ledger: any[] = Array.isArray(w.walletLedger) ? w.walletLedger : [];
-  const existingIndex = ledger.findIndex((e) => e && e.rollupRef === tx.rollupRef);
   const priorTokens = existingIndex >= 0 ? Math.abs(n(ledger[existingIndex]?.amountCoinsOrTokens)) : 0;
   const bucketTokens = priorTokens + tokens;
   const bucketInr = Math.round((bucketTokens / TOKENS_PER_RUPEE) * 100) / 100;
   const chargeInr = Math.round((tokens / TOKENS_PER_RUPEE) * 100) / 100;
+
+  const rollupBalance = n(w.tokenBalance) - tokens;
+  const nextGift = Math.max(0, Math.min(giftAfterSpend(w, tokens), rollupBalance));
+  // Open holds ride along on EVERY rewrite of the row, a plain charge included — a row rewritten without
+  // them would make an in-flight hold impossible to give back.
+  const holds = tx.holdId
+    ? [...existingHolds, { id: tx.holdId, owed: owedForThis, gift: Math.max(0, giftRemaining(w) - nextGift) }]
+    : existingHolds;
 
   const row = {
     type: 'usage',
@@ -264,6 +324,7 @@ export function computeRolledUpDebit(
     rollupRef: tx.rollupRef,
     ...(tx.feature ? { feature: tx.feature } : {}),
     ...(floored.absorbedInr > 0 ? { absorbedInr: floored.absorbedInr } : {}),
+    ...(holds.length > 0 ? { openHolds: holds.slice(-MAX_OPEN_HOLDS) } : {}),
   };
 
   // The updated row moves to the END so the ledger stays in time order and the ledger cap trims the
@@ -273,7 +334,6 @@ export function computeRolledUpDebit(
   const rolled = appendLedgerEntry(w, row, { replaceRollupRef: tx.rollupRef });
   const nextLedger = rolled.ledger;
 
-  const rollupBalance = n(w.tokenBalance) - tokens;
   const wallet: Record<string, any> = {
     ...w,
     tokenBalance: rollupBalance,
@@ -282,7 +342,7 @@ export function computeRolledUpDebit(
     [TOKEN_CARRY_FIELD]: carryOut,
     // A chat turn is ordinary spending, so it eats the gift first — there is deliberately no
     // `paid-only` option here: a rollup can only ever be assistant usage, never a plan.
-    giftTokensRemaining: Math.max(0, Math.min(giftAfterSpend(w, tokens), rollupBalance)),
+    giftTokensRemaining: nextGift,
     walletLedger: nextLedger,
     [LEDGER_OPENING_FIELD]: rolled.openingTokens,
     [LEDGER_DROPPED_FIELD]: rolled.droppedCount,
@@ -290,6 +350,123 @@ export function computeRolledUpDebit(
     updatedAt: now,
   };
   return { wallet, tokensDebited: tokens, applied: true };
+}
+
+export interface WalletReleaseTx {
+  /** The bucket the hold was taken into. */
+  rollupRef: string;
+  /** The hold to give back. */
+  holdId: string;
+  /** Ledger text for the bucket — the same text the hold used. */
+  description: string;
+  feature?: WalletFeature;
+}
+
+export interface ReleasedWallet {
+  wallet: Record<string, any>;
+  /** Whole tokens put back on the balance. */
+  tokensReturned: number;
+  /** False when there was nothing to give back: never held, or already released. */
+  applied: boolean;
+}
+
+/**
+ * PURE: give back ONE hold taken by `computeRolledUpDebit` with a `holdId` (Q-616, 2026-10-05).
+ *
+ * 🔒 A REVERSAL IN THE SAME BUCKET, NOT A CREDIT. The money never really left: the picture it was held
+ * for was not made. So the bucket row's total goes back DOWN by the held amount and the balance comes
+ * back UP by the same tokens — the statement still balances (opening + Σ rows = balance), and the user
+ * sees one image line for the day carrying only what they actually paid. A credit line instead would
+ * show a charge and a refund for a picture that never existed, and `mirroredCreditPatch` is the wrong
+ * tool for the same reason: it would raise the lifetime-credited figure for money nobody paid in.
+ *
+ * Exactly the inverse of the debit, field by field: tokens and ₹ move by the same money (₹ derived
+ * from the tokens), `totalTokensUsed` falls back, the gift the hold ate is restored, and the carried
+ * sub-token remainder is restored too, so a price that is not a whole number of tokens is returned to
+ * the token rather than rounded.
+ *
+ * IDEMPOTENT: the hold's id is removed from the row as it is given back, so a second release finds
+ * nothing and changes nothing. A transaction retry re-reads the row and re-applies the same delta.
+ */
+export function computeRolledUpRelease(
+  current: Record<string, any>,
+  tx: WalletReleaseTx,
+  now: string,
+): ReleasedWallet {
+  const w = current || {};
+  const n = (v: any): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const noop: ReleasedWallet = { wallet: w, tokensReturned: 0, applied: false };
+  if (!tx.rollupRef || !tx.holdId) return noop;
+  const ledger: any[] = Array.isArray(w.walletLedger) ? w.walletLedger : [];
+  const row = ledger.find((e) => e && e.rollupRef === tx.rollupRef);
+  if (!row) return noop;
+  const holds = openHoldsOf(row);
+  const hold = holds.find((h) => h.id === tx.holdId);
+  if (!hold) return noop;
+
+  // Give back exactly what was owed. The debit took floor(owed + carry) whole tokens and kept the rest
+  // as carry; the inverse returns the smallest whole number of tokens that, with the carry, repays it.
+  const carriedIn = Math.min(Math.max(n(w[TOKEN_CARRY_FIELD]), 0), 1);
+  const tokens = Math.max(0, Math.ceil(hold.owed - carriedIn - 1e-9));
+  const carryOut = Math.min(Math.max(Math.round((carriedIn + tokens - hold.owed) * 1e6) / 1e6, 0), 0.999999);
+
+  const priorTokens = Math.abs(n(row.amountCoinsOrTokens));
+  const bucketTokens = Math.max(0, priorTokens - tokens);
+  const bucketInr = Math.round((bucketTokens / TOKENS_PER_RUPEE) * 100) / 100;
+  const returnedInr = Math.round((tokens / TOKENS_PER_RUPEE) * 100) / 100;
+  const stillOpen = holds.filter((h) => h.id !== tx.holdId);
+
+  const nextRow = {
+    type: 'usage',
+    amountCoinsOrTokens: -bucketTokens,
+    moneySpent: 0,
+    timestamp: now,
+    description: `${tx.description} — ${bucketTokens.toLocaleString()} tokens (₹${bucketInr.toFixed(2)})`,
+    rollupRef: tx.rollupRef,
+    ...(tx.feature ? { feature: tx.feature } : (row.feature ? { feature: row.feature } : {})),
+    ...(n(row.absorbedInr) > 0 ? { absorbedInr: row.absorbedInr } : {}),
+    ...(stillOpen.length > 0 ? { openHolds: stillOpen } : {}),
+  };
+  const rolled = appendLedgerEntry(w, nextRow, { replaceRollupRef: tx.rollupRef });
+
+  const nextBalance = n(w.tokenBalance) + tokens;
+  const wallet: Record<string, any> = {
+    ...w,
+    tokenBalance: nextBalance,
+    totalTokensUsed: Math.max(0, n(w.totalTokensUsed) - tokens),
+    remaining_balance: Math.round((n(w.remaining_balance) + returnedInr) * 100) / 100,
+    [TOKEN_CARRY_FIELD]: carryOut,
+    giftTokensRemaining: Math.max(0, Math.min(giftRemaining(w) + Math.min(hold.gift, tokens), nextBalance)),
+    walletLedger: rolled.ledger,
+    [LEDGER_OPENING_FIELD]: rolled.openingTokens,
+    [LEDGER_DROPPED_FIELD]: rolled.droppedCount,
+    ...(rolled.droppedCount > n(w[LEDGER_DROPPED_FIELD]) ? { [LEDGER_OPENING_AT_FIELD]: now } : {}),
+    updatedAt: now,
+  };
+  return { wallet, tokensReturned: tokens, applied: true };
+}
+
+/**
+ * PURE: close ONE hold whose work was delivered. The money stays taken; only the hold's id leaves the row,
+ * so a later release finds nothing to give back. The row keeps its place — nothing was charged now.
+ */
+export function computeRolledUpSettle(
+  current: Record<string, any>,
+  tx: { rollupRef: string; holdId: string },
+  now: string,
+): { wallet: Record<string, any>; applied: boolean } {
+  const w = current || {};
+  const ledger: any[] = Array.isArray(w.walletLedger) ? w.walletLedger : [];
+  const row = ledger.find((e) => e && e.rollupRef === tx.rollupRef);
+  const holds = openHoldsOf(row);
+  if (!row || !holds.some((h) => h.id === tx.holdId)) return { wallet: w, applied: false };
+  const stillOpen = holds.filter((h) => h.id !== tx.holdId);
+  const { openHolds: _closed, ...rest } = row;
+  const nextRow = stillOpen.length > 0 ? { ...rest, openHolds: stillOpen } : rest;
+  return {
+    wallet: { ...w, walletLedger: ledger.map((e) => (e === row ? nextRow : e)), updatedAt: now },
+    applied: true,
+  };
 }
 
 export type WalletDebitResult =
@@ -316,6 +493,20 @@ function recordFeatureSpend(tx: { feature?: WalletFeature; billedInr?: number },
 }
 
 /**
+ * The wallet a charge for `userId` lands on: the CANONICAL one when this account was merged into another
+ * (no-op unless WALLET_MERGE_RESOLVE=on). Best-effort: on any resolver error the raw uid is used. One
+ * copy, shared by every debit, hold and release, so a hold and its release can never resolve to two
+ * different wallets.
+ */
+async function walletOwnerId(db: any, userId: string): Promise<string> {
+  if (!walletMergeResolveEnabled()) return userId;
+  return resolveCanonicalWalletId(async (u) => {
+    const s = await getDoc(doc(db, 'user_token_wallets', u));
+    return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
+  }, userId).catch(() => userId);
+}
+
+/**
  * Atomically debit a user's wallet for a finished build. Reads + writes the SAME doc the wallet
  * routes and the payment credit path use (`user_token_wallets/{userId}`). A user whose wallet doc
  * doesn't exist yet is debited from a zeroed wallet — the debt is recorded honestly rather than
@@ -334,14 +525,7 @@ export async function debitWalletForBuild(
   try {
     // One-wallet: debit the CANONICAL wallet if this account was merged into another, so a build on a
     // merged/retired account correctly charges the unified balance (matches the wallet-read resolution).
-    // No-op unless WALLET_MERGE_RESOLVE=on. Best-effort: on any resolver error we debit the raw uid.
-    let ownerId = userId;
-    if (walletMergeResolveEnabled()) {
-      ownerId = await resolveCanonicalWalletId(async (u) => {
-        const s = await getDoc(doc(db, 'user_token_wallets', u));
-        return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
-      }, userId).catch(() => userId);
-    }
+    const ownerId = await walletOwnerId(db, userId);
     const walletRef = doc(db, 'user_token_wallets', ownerId);
     const debited = await runTransaction(db, async (t: any) => {
       const snap = await t.get(walletRef);
@@ -387,13 +571,7 @@ export async function debitWalletRolledUp(
     return { ok: false, error: `Non-debitable amount: ${tx.billedInr}` };
   }
   try {
-    let ownerId = userId;
-    if (walletMergeResolveEnabled()) {
-      ownerId = await resolveCanonicalWalletId(async (u) => {
-        const s = await getDoc(doc(db, 'user_token_wallets', u));
-        return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
-      }, userId).catch(() => userId);
-    }
+    const ownerId = await walletOwnerId(db, userId);
     const walletRef = doc(db, 'user_token_wallets', ownerId);
     const debited = await runTransaction(db, async (t: any) => {
       const snap = await t.get(walletRef);
@@ -410,5 +588,120 @@ export async function debitWalletRolledUp(
     };
   } catch (err: any) {
     return { ok: false, error: err?.message || 'Wallet debit transaction failed' };
+  }
+}
+
+export type WalletHoldResult =
+  | { ok: true; ownerId: string; tokensDebited: number; tokenBalance: number }
+  /** The balance cannot cover the full charge. Nothing was taken. `balanceInr` is what it holds. */
+  | { ok: false; insufficient: true; balanceInr: number; error: string }
+  | { ok: false; insufficient?: false; error: string };
+
+/**
+ * TAKE A PRICE BEFORE THE WORK, ALL OR NOTHING (Q-616, 2026-10-05).
+ *
+ * The image generator used to READ the balance up front and debit after the picture, fire-and-forget,
+ * clamped at the overdraft floor. Two pictures started together each saw ₹1 and each was drawn; the
+ * second debit then pushed the wallet into overdraft or failed into a log line. A read and a later write
+ * are two moments, and every concurrent request fits between them.
+ *
+ * 🔒 SO THE CHECK AND THE CHARGE ARE ONE TRANSACTION. Firestore serialises two transactions on the same
+ * wallet, so the second one sees the first one's debit: with ₹1 in the wallet exactly one hold succeeds
+ * and the other is refused with the real balance. `floorInr: 0` + `allOrNothing` means a hold never takes
+ * a wallet below zero and is never partly taken.
+ *
+ * The same rollup bucket, the same ledger appender, the same wallet resolution as every other small
+ * charge — this is `debitWalletRolledUp` with two settings, not a second money path. Feature-spend
+ * telemetry is NOT recorded here: a hold may still be given back. `settleWalletHold` records it once the
+ * work was delivered. Never throws.
+ */
+export async function holdWalletRolledUp(
+  db: any,
+  userId: string,
+  tx: Omit<WalletRollupTx, 'floorInr' | 'allOrNothing'> & { holdId: string },
+): Promise<WalletHoldResult> {
+  if (!db) return { ok: false, error: 'Database not initialized' };
+  if (!userId) return { ok: false, error: 'Missing userId' };
+  if (!tx.holdId) return { ok: false, error: 'Missing holdId' };
+  if (!Number.isFinite(tx.billedInr) || tx.billedInr <= 0) {
+    return { ok: false, error: `Non-debitable amount: ${tx.billedInr}` };
+  }
+  try {
+    const ownerId = await walletOwnerId(db, userId);
+    const walletRef = doc(db, 'user_token_wallets', ownerId);
+    const held = await runTransaction(db, async (t: any) => {
+      const snap = await t.get(walletRef);
+      const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
+      const result = computeRolledUpDebit(current, { ...tx, floorInr: 0, allOrNothing: true }, new Date().toISOString());
+      if (result.applied) t.set(walletRef, result.wallet);
+      return result;
+    });
+    const tokenBalance = typeof held.wallet.tokenBalance === 'number' ? held.wallet.tokenBalance : 0;
+    if (held.refused) {
+      return { ok: false, insufficient: true, balanceInr: tokenBalance / TOKENS_PER_RUPEE, error: 'Balance does not cover the charge' };
+    }
+    return { ok: true, ownerId, tokensDebited: held.tokensDebited, tokenBalance };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Wallet hold transaction failed' };
+  }
+}
+
+/**
+ * GIVE A HOLD BACK — the work it was taken for did not happen. One transaction, on the wallet the hold
+ * was taken from: `ownerId` from `holdWalletRolledUp` when the caller has it, otherwise resolved from
+ * `userId` the same way the hold resolved it. Idempotent (see `computeRolledUpRelease`): calling it
+ * twice, or for a hold that was never taken, returns `released: false` and changes nothing. Never throws.
+ */
+export async function releaseWalletHold(
+  db: any,
+  userId: string,
+  tx: WalletReleaseTx,
+  knownOwnerId?: string,
+): Promise<{ ok: true; released: boolean; tokensReturned: number } | { ok: false; error: string }> {
+  if (!db) return { ok: false, error: 'Database not initialized' };
+  if (!userId && !knownOwnerId) return { ok: false, error: 'Missing userId' };
+  try {
+    const ownerId = knownOwnerId || await walletOwnerId(db, userId);
+    const walletRef = doc(db, 'user_token_wallets', ownerId);
+    const out = await runTransaction(db, async (t: any) => {
+      const snap = await t.get(walletRef);
+      if (!snap.exists()) return { applied: false, tokensReturned: 0 };
+      const result = computeRolledUpRelease(snap.data(), tx, new Date().toISOString());
+      if (result.applied) t.set(walletRef, result.wallet);
+      return { applied: result.applied, tokensReturned: result.tokensReturned };
+    });
+    return { ok: true, released: out.applied, tokensReturned: out.tokensReturned };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Wallet release transaction failed' };
+  }
+}
+
+/**
+ * A hold's work was delivered: the money stays where it is — nothing more is charged, the balance does not
+ * move. The hold's id leaves the row's `openHolds` (so the row says truthfully that nothing is in flight,
+ * and no later release could give a delivered picture's money back), and the platform's per-feature spend
+ * is recorded now — the step `holdWalletRolledUp` deliberately skipped. Never throws.
+ */
+export async function settleWalletHold(
+  db: any,
+  userId: string,
+  tx: { rollupRef: string; holdId: string; feature?: WalletFeature; billedInr: number },
+  knownOwnerId?: string,
+): Promise<{ ok: true; settled: boolean } | { ok: false; error: string }> {
+  recordFeatureSpend(tx, userId);
+  if (!db) return { ok: false, error: 'Database not initialized' };
+  try {
+    const ownerId = knownOwnerId || await walletOwnerId(db, userId);
+    const walletRef = doc(db, 'user_token_wallets', ownerId);
+    const settled = await runTransaction(db, async (t: any) => {
+      const snap = await t.get(walletRef);
+      if (!snap.exists()) return false;
+      const result = computeRolledUpSettle(snap.data(), tx, new Date().toISOString());
+      if (result.applied) t.set(walletRef, result.wallet);
+      return result.applied;
+    });
+    return { ok: true, settled };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Wallet settle transaction failed' };
   }
 }

@@ -8,8 +8,7 @@
 // still pass. And the sibling the hunt found: an unresponsive light/dark switch was handed the SEARCH box's
 // repair instruction.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -19,6 +18,7 @@ import {
   type PressResult, type ExploreRun,
 } from '../src/server/AgentV3/clickExplorer';
 import { explorerRepairFindings } from '../src/server/AgentV3/explorerRepair';
+import { makeTempDir } from './helpers/tempDir';
 
 describe('which names promise something to look at', () => {
   it.each(['View Details', 'View', 'Details', 'Open', 'Read more', 'Learn more', 'View all', 'विवरण देखें'])('promises: %s', (n) => expect(PROMISES_VIEW.test(n)).toBe(true));
@@ -83,7 +83,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   afterAll(() => new Promise<void>((res) => server.close(() => res())));
 
   it('only the dead "View Details" fails; a dialog, a scroll, a new tab, a file picker, Copy and Show more all pass', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-view-real-'));
+    const dir = makeTempDir('nbai-view-real-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, clickExplorerModule({
       base, marker: EXPLORE_RESULT_MARKER, maxClicks: 12, maxSecond: MAX_SECOND_LEVEL_CLICKS, perParent: MAX_SECOND_LEVEL_PER_PARENT, maxPrimed: MAX_PRIMED_RETRIES,

@@ -38,6 +38,14 @@ export interface ConnectedService {
   id: string;
   url: string;
   hasAuth: boolean;
+  /** The saved key could not be read on the server (Q-628) — the service is not used until reconnected. */
+  needsReconnect?: boolean;
+}
+
+/** The small line under a service: its address and the state of its key, never the key. */
+function keyNote(s: ConnectedService): string {
+  if (s.needsReconnect) return ' · saved key unreadable — disconnect and connect it again';
+  return s.hasAuth ? ' · key saved' : '';
 }
 
 interface Props {
@@ -236,10 +244,10 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
         <ul className="flex flex-col gap-1.5">
           {services.map((s) => (
             <li key={s.id} className="flex items-center gap-2 rounded-lg border border-line bg-raised px-3 py-2">
-              <Puzzle className="w-4 h-4 shrink-0 text-success" />
+              <Puzzle className={`w-4 h-4 shrink-0 ${s.needsReconnect ? 'text-warn' : 'text-success'}`} />
               <div className="min-w-0 flex-1">
                 <div className="text-body font-medium truncate">{s.id}</div>
-                <div className="text-[11px] text-faint truncate">{s.url}{s.hasAuth ? ' · key saved' : ''}</div>
+                <div className="text-[11px] text-faint truncate">{s.url}{keyNote(s)}</div>
                 {health[s.id] && (
                   <div className={`text-[11px] ${health[s.id].state === 'working' ? 'text-success' : 'text-warn'}`}>
                     {health[s.id].message}
@@ -296,7 +304,7 @@ export const ConnectedServices: React.FC<Props> = ({ workspaceId, authedFetch })
                     : <Link2 className="w-4 h-4 shrink-0 text-muted" />}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-body font-medium">{s.id}</span>
-                    <span className="block truncate text-[11px] text-faint">{s.url}{s.hasAuth ? ' · key saved' : ''}</span>
+                    <span className="block truncate text-[11px] text-faint">{s.url}{keyNote(s)}</span>
                   </span>
                 </button>
                 <button

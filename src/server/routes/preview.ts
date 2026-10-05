@@ -377,8 +377,8 @@ export function registerPreviewRoutes(app: Express, limiter: RequestHandler = pr
         if (typeof v === 'string' && k.toLowerCase() !== 'host') headers[k] = v;
       }
       const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
-      // Forward the request body. Prefer the captured raw bytes (set by the
-      // express.json `verify` hook in server.ts); fall back to re-serialising the
+      // Forward the request body. Prefer the captured raw bytes (kept for this route by
+      // RAW_BODY_ROUTES in src/server/lib/requestBodyLimits.ts); fall back to re-serialising the
       // already-parsed JSON body so POSTs from the previewed app aren't dropped.
       let body: any = undefined;
       if (hasBody) {

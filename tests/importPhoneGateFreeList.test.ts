@@ -26,7 +26,12 @@ afterEach(() => { if (saved === undefined) delete process.env.AGENTV3_FREE_LIST;
 describe('importBlockedForPhone — the free list is checked, like every other gate', () => {
   it('🔒 a free-list account with NO verified number is NOT blocked', () => {
     // The exact lockout. Before the fix this returned true and the admin could not import at all.
-    return expect(importBlockedForPhone({ uid: 'u1', email: ADMIN_EMAIL }, noPhone)).resolves.toBe(false);
+    return expect(importBlockedForPhone({ uid: 'u1', email: ADMIN_EMAIL, emailVerified: true }, noPhone)).resolves.toBe(false);
+  });
+
+  it('🔒 Q-624: the listed address counts only when the provider VERIFIED it', () => {
+    // An email/password account that claimed the admin's address without verifying it is not the admin.
+    return expect(importBlockedForPhone({ uid: 'u9', email: ADMIN_EMAIL, emailVerified: false }, noPhone)).resolves.toBe(true);
   });
 
   it('🔒 the match is on EMAIL — a uid-only caller would silently never match', () => {
@@ -59,7 +64,7 @@ describe('importBlockedForPhone — the free list is checked, like every other g
     const boom = async () => { throw new Error('directory down'); };
     expect(await importBlockedForPhone({ uid: 'u2', email: 'x@y.com' }, boom as never)).toBe(true);
     // …but an exempt account never reaches the directory at all, so an outage cannot lock them out.
-    expect(await importBlockedForPhone({ uid: 'u1', email: ADMIN_EMAIL }, boom as never)).toBe(false);
+    expect(await importBlockedForPhone({ uid: 'u1', email: ADMIN_EMAIL, emailVerified: true }, boom as never)).toBe(false);
   });
 });
 

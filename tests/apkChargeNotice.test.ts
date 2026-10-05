@@ -122,7 +122,7 @@ describe('WIRING — the server reports it and the screen says it', () => {
     const at = server.indexOf("'/api/mobile-ship/artifacts'");
     expect(at).toBeGreaterThan(-1);
     const seg = server.slice(at, server.indexOf('res.json({ artifacts })', at));
-    expect(seg).toContain('isAgentV3FreeUser(identity.uid, identity.email)');
+    expect(seg).toContain('isAgentV3FreeUser(identity.uid, identityGrantEmail(identity))');
     const dl = server.indexOf("'/api/mobile-ship/download'");
     expect(server.slice(dl, server.indexOf('res.send(got.bytes)', dl))).toContain("CHARGE_APPLIED_HEADER, 'false'");
   });

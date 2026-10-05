@@ -11,6 +11,8 @@
  */
 
 /** Env override (comma-separated), else the known admins. */
+import type { GrantEmail } from '../AgentV3/featureFlag';
+
 export function adminEmailList(): string[] {
   const raw = process.env.AGENTV3_REPORT_ADMINS;
   return (raw && raw.trim() ? raw : 'aashishcpmt09@gmail.com,doc.asheesh@icloud.com')
@@ -20,7 +22,7 @@ export function adminEmailList(): string[] {
 }
 
 /** Is this VERIFIED address an admin? Never call it with a spoofable value (a query param, a header). */
-export function isAdminEmail(email: string | null | undefined): boolean {
+export function isAdminEmail(email: GrantEmail | null | undefined): boolean { // verified only (Q-624)
   const e = String(email ?? '').trim().toLowerCase();
   if (!e) return false;
   return adminEmailList().includes(e);

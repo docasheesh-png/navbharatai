@@ -259,7 +259,7 @@ describe('🔒 the promises that live in the routes', () => {
 
   it('only the creator (or an admin) may see who liked, and nothing anywhere lists who disliked', () => {
     const likers = handler("app.get('/api/app-mart/social/likers'");
-    expect(likers).toContain('target.ownerUid !== me.uid && !isStoreAdmin(me.email)');
+    expect(likers).toContain('target.ownerUid !== me.uid && !isStoreAdmin(identityGrantEmail(me))');
     expect(likers).toContain('status(403)');
     expect(routes).not.toMatch(/dislikers/i);
     expect(store).not.toMatch(/dislikers/i);
@@ -267,8 +267,8 @@ describe('🔒 the promises that live in the routes', () => {
   });
 
   it('no response carries an email — `email` is used only to ask whether the caller is an admin', () => {
-    const uses = routes.split('\n').filter((l) => /email/i.test(l));
-    for (const l of uses) expect(l, l).toMatch(/isStoreAdmin\((me\?\.email \?\? null|me\.email)\)/);
+    const uses = routes.split('\n').filter((l) => /email/i.test(l) && !/^import /.test(l));
+    for (const l of uses) expect(l, l).toMatch(/isStoreAdmin\(identityGrantEmail\(me\)\)/);
   });
 
   it('the likers list and profile hand out public people, never account ids', () => {

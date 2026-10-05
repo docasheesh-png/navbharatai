@@ -6,14 +6,14 @@
  * backend keeps the old rule — no account is ever created there.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync, readFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { existsSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import http from 'http';
 import type { AddressInfo } from 'net';
 import {
   authLivesInTheBrowser, signInScript, signInModule, parseSignInOutput, signInReportLine, SIGN_IN_RESULT_MARKER,
 } from '../src/server/AgentV3/signInExplore';
+import { makeTempDir } from './helpers/tempDir';
 
 /** The report's shape: an auth context over localStorage, a password form, no server. */
 const SCHOOL = {
@@ -142,7 +142,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   afterAll(async () => { for (const s of servers) await new Promise<void>((res) => s.close(() => res())); });
 
   async function runNode(source: string): Promise<string> {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-signup-real-'));
+    const dir = makeTempDir('nbai-signup-real-');
     const file = join(dir, 'run.mjs');
     writeFileSync(file, source);
     const { execFile } = await import('node:child_process');
@@ -150,7 +150,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   }
   const imp = `import playwright from '${PW}';\nconst { chromium } = playwright;`;
   const signIn = async (base: string, mayCreateAccount: boolean) => {
-    const out = await runNode(signInModule({ base, marker: SIGN_IN_RESULT_MARKER, state: join(mkdtempSync(join(tmpdir(), 'nbai-state-')), 's.json'), maxScreens: 6, budgetMs: 45_000, candidates: [], mayCreateAccount }, imp));
+    const out = await runNode(signInModule({ base, marker: SIGN_IN_RESULT_MARKER, state: join(makeTempDir('nbai-state-'), 's.json'), maxScreens: 6, budgetMs: 45_000, candidates: [], mayCreateAccount }, imp));
     return { out, run: parseSignInOutput(out) };
   };
 

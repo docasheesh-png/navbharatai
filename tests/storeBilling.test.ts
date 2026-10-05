@@ -130,7 +130,10 @@ describe('Apple verification', () => {
     expect(r).toEqual({ ok: true, productId: 'nbai.tokens.99', transactionId: '2000000123' });
   });
 
-  it('falls back to SANDBOX on 404 — a TestFlight purchase is not fraud', async () => {
+  // SUPERSEDED 2026-10-05 (Q-615, the admin: "sabhi fake hatao"). This used to assert that a 404 fell back
+  // to Apple's SANDBOX so a TestFlight purchase would credit. The admin decided a purchase that costs nobody
+  // anything never adds real credit, so the opposite is asserted now.
+  it('asks PRODUCTION only — a sandbox (TestFlight) purchase credits nothing', async () => {
     appleKeys();
     const hosts: string[] = [];
     _setStoreFetchForTests(async (url) => {
@@ -139,9 +142,22 @@ describe('Apple verification', () => {
       return { ok: true, status: 200, json: async () => ({ signedTransactionInfo: jws({ productId: 'nbai.tokens.249', transactionId: 'T9' }) }) };
     });
     const r = await verifyApplePurchase('T9');
-    expect(r.ok).toBe(true);
-    expect(hosts[0]).toContain('storekit.itunes');       // production first
-    expect(hosts[1]).toContain('storekit-sandbox');      // then sandbox
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('sandbox purchases add no credit');
+    expect(hosts).toHaveLength(1);
+    expect(hosts[0]).toContain('api.storekit.itunes');
+    expect(hosts.some((h) => h.includes('storekit-sandbox'))).toBe(false);
+  });
+
+  it('a transaction signed as a Sandbox one is refused even if production answered', async () => {
+    appleKeys();
+    _setStoreFetchForTests(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ signedTransactionInfo: jws({ productId: 'nbai.tokens.99', transactionId: 'T2', environment: 'Sandbox' }) }),
+    }));
+    const r = await verifyApplePurchase('T2');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('sandbox');
   });
 
   it('a REFUNDED purchase credits nothing', async () => {
@@ -191,6 +207,17 @@ describe('Google verification', () => {
         : { ok: true, status: 200, json: async () => ({ purchaseState: 0, orderId: 'GPA.3311' }) });
     const r = await verifyGooglePurchase('nbai.tokens.499', 'ptoken');
     expect(r).toEqual({ ok: true, productId: 'nbai.tokens.499', transactionId: 'GPA.3311' });
+  });
+
+  it('a license-tester TEST purchase (purchaseType 0) credits nothing (Q-615)', async () => {
+    googleKeys();
+    _setStoreFetchForTests(async (url) =>
+      url.includes('oauth2')
+        ? { ok: true, status: 200, json: async () => ({ access_token: 'tok' }) }
+        : { ok: true, status: 200, json: async () => ({ purchaseState: 0, purchaseType: 0, orderId: 'GPA.TEST' }) });
+    const r = await verifyGooglePurchase('nbai.tokens.99', 'ptoken');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('test purchase');
   });
 
   it('a forged token (store says 404) credits nothing', async () => {

@@ -19,6 +19,7 @@
 import { collectDeviceCheck } from './deviceIntegrityNative';
 import { authedHeaders } from './authHeaders';
 import { STEP_ORDER, WEB_STEPS, type RewardStep } from './referralStepNames';
+import { Capacitor } from '@capacitor/core';
 
 export type ReferralSurface = 'android' | 'web';
 
@@ -30,7 +31,6 @@ export function referralSurfaceFor(platform: string | null | undefined): Referra
 /** The surface this app is running on, asked once per call. Anything unknowable is the web. */
 export async function currentReferralSurface(): Promise<ReferralSurface> {
   try {
-    const { Capacitor } = await import('@capacitor/core');
     return referralSurfaceFor(Capacitor.getPlatform());
   } catch {
     return 'web';

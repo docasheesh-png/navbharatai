@@ -86,7 +86,12 @@ export const THREE_STUB = {
 };
 
 /** What the generated objects.ts imports from './surfaces'. */
+// The detail tier moved into surfaces.ts (2026-10-05) so the ground and the objects read ONE setting;
+// objects.ts imports and re-exports it, so the stub carries the same small state.
+let STUB_DETAIL: 'real' | 'lite' = 'lite';
 export const SURFACES_STUB = {
   surfaceMaterial: (kind: string, opts: Record<string, unknown> = {}) => ({ kind: 'surface:' + kind, params: opts, dispose() {} }),
   enableAO: <T,>(g: T): T => g,
+  setDetailLevel: (d: 'real' | 'lite') => { STUB_DETAIL = d; },
+  getDetailLevel: () => STUB_DETAIL,
 };

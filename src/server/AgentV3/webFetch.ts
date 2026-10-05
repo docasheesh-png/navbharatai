@@ -10,7 +10,7 @@
 // reach things the internet cannot (cloud metadata at 169.254.169.254, 10.x/192.168.x hosts, localhost
 // admin ports). Every defence below is load-bearing — do not relax one because a fetch failed.
 
-import { assertPublicHttpUrl } from '../lib/ssrfGuard';
+import { assertPublicHttpUrl, publicOnlyInit } from '../lib/ssrfGuard';
 
 /** Hard ceiling on what we will pull down, before extraction. 2 MB of HTML is already a huge page. */
 export const WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024;
@@ -111,12 +111,12 @@ export async function webFetchUrl(rawUrl: string, opts: WebFetchOptions = {}): P
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), WEB_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(rawUrl, {
+    const res = await fetch(rawUrl, publicOnlyInit({
       method: 'GET',
       redirect: 'error',
       signal: controller.signal,
       headers: { 'user-agent': 'NavBharatAI/1.0 (+https://navbharatai.com)', accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5' },
-    });
+    }));
 
     const contentType = res.headers.get('content-type');
     if (!res.ok) {

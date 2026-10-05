@@ -52,6 +52,7 @@
 import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
 import { BROWSER_PAGE_OPTIONS } from './signInExplore';
 import { DESTRUCTIVE_LOCAL_WORDS, SPENDING_LOCAL_WORDS, DEVANAGARI_NEVER_WORDS } from './localActionWords';
+import { MAIN_REGION_EMPTY_JS, BROWSE_MAIN_GRACE_MS } from './PreviewVerify';
 
 /** Where the pre-baked Playwright and its browsers live inside the sandbox image. */
 export const EXPLORE_TOOLS_DIR = '/home/user/.e-tools';
@@ -692,7 +693,11 @@ function measure() {
       if (b.scrollTop || b.scrollLeft) scroll += '|' + n + ':' + Math.round(b.scrollTop) + ',' + Math.round(b.scrollLeft);
     }
   } catch (e) { scroll = ''; }
-  return { len: text.length, head: text.slice(0, 160), rich, scroll, sig: document.body ? hash(document.body.innerHTML) + ':' + hash(document.body.innerText || '') : '' };
+  // The app's own MAIN region left literally empty under a painted frame (Q-136 / Q-147's class): the ONE shared
+  // in-browser question, so this lane cannot drift from the preview verdict and the per-route check.
+  let mainEmpty = false;
+  try { mainEmpty = (${MAIN_REGION_EMPTY_JS})(); } catch (e) { mainEmpty = false; }
+  return { len: text.length, head: text.slice(0, 160), rich, scroll, mainEmpty, sig: document.body ? hash(document.body.innerHTML) + ':' + hash(document.body.innerText || '') : '' };
 }
 
 // The page's COLOURS: html, body and the first 60 visible elements of the app, leaving out the pressed
@@ -943,12 +948,22 @@ async function pressOne(browser, target, discoverAgainst) {
     await press(page, hit.i);
     await settle(page);
     const overlay = await page.locator('vite-error-overlay, #nextjs-portal, .react-error-overlay').count().catch(() => 0);
-    const after = await page.evaluate(measure).catch(() => null);
+    let after = await page.evaluate(measure).catch(() => null);
+    // A main region that empties may be a screen fetching its data: give it the same short grace the paint
+    // wait gives, inside this press's own budget, before calling it the frame alone.
+    if (after && after.mainEmpty && !before.mainEmpty) {
+      const until = Date.now() + ${BROWSE_MAIN_GRACE_MS};
+      while (Date.now() < until && after && after.mainEmpty) {
+        await page.waitForTimeout(250);
+        after = await page.evaluate(measure).catch(() => after);
+      }
+    }
     const moved = page.url() !== beforeUrl;
     res.changed = moved || !after || after.sig !== before.sig;
     const missingPage = moved && (navStatus >= 400 || (after && after.len < 300 && /^(cannot get|404\\b|page not found|not found)/i.test(after.head)));
     if (overlay > 0) { res.verdict = 'crashed'; res.note = 'the app crashed into an error overlay'; }
     else if (before.len > 0 && after && after.len === 0 && !after.rich) { res.verdict = 'blank'; res.note = 'the screen went blank'; }
+    else if (!before.mainEmpty && after && after.mainEmpty) { res.verdict = 'blank'; res.note = "only the app's frame was left — its main area went empty"; }
     else if (missingPage) { res.verdict = 'broken-link'; res.note = 'it opened a page that does not exist'; }
     else if (res.errors.length > 0) { res.verdict = 'error'; res.note = 'the app threw an error when it was pressed'; }
     else { res.verdict = 'ok'; res.note = moved ? 'it opened another page, which loaded' : 'it responded'; }

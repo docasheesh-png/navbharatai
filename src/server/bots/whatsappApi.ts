@@ -7,6 +7,7 @@
 
 import type { BotReply } from './botFlowRunner';
 import type { Fetcher } from './telegramApi';
+import { safeStrEqual } from '../lib/adminAuth';
 
 const GRAPH = 'https://graph.facebook.com/v20.0';
 
@@ -47,13 +48,14 @@ export async function waSendMessage(token: string, phoneNumberId: string, to: st
 }
 
 /** The Meta webhook verification handshake (GET). Returns the challenge to echo when the mode + verify
- *  token match the bot's stored secret, else null (→ 403). Pure. */
+ *  token match the bot's stored secret, else null (→ 403). Constant-time on the token (Q-612 sibling hunt:
+ *  every webhook secret in this connector is compared without leaking timing). Pure. */
 export function verifyWhatsAppSubscription(query: unknown, verifyToken: string): string | null {
   const q = query as Record<string, string | undefined>;
   const mode = q?.['hub.mode'];
   const tok = q?.['hub.verify_token'];
   const challenge = q?.['hub.challenge'];
-  if (mode === 'subscribe' && tok && tok === verifyToken && typeof challenge === 'string') return challenge;
+  if (mode === 'subscribe' && typeof tok === 'string' && tok && verifyToken && safeStrEqual(tok, verifyToken) && typeof challenge === 'string') return challenge;
   return null;
 }
 

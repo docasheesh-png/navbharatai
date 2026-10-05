@@ -13,8 +13,7 @@
 //   3. The kit had no shop layout at all — no header row, no product grid, no struck-through MRP — so a
 //      model had nothing to reach for and invented names nobody styled.
 import { describe, it, expect } from 'vitest';
-import { existsSync, writeFileSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
@@ -25,6 +24,7 @@ import { DESIGN_KIT_CSS } from '../src/server/AgentV3/sandbox/AppMakerLab/genera
 import { parseCssBlocks, kitClasses } from '../src/server/AgentV3/kitRestore';
 import { DESIGN_KIT_VOCABULARY } from '../src/server/AgentV3/SimpleBuilder';
 import { architectSystemPrompt } from '../src/server/AgentV3/systemPrompt';
+import { makeTempDir } from './helpers/tempDir';
 
 // The shape of the page in the screenshot: plain HTML, a small stylesheet that styles none of its classes,
 // and product cards written by a script.
@@ -167,7 +167,7 @@ const haveBrowser = existsSync(PW) && existsSync(BROWSERS);
 
 describe.skipIf(!haveBrowser)('in a real browser, on a phone', () => {
   it('a link-button has a button\'s shape, the grid has two columns, the MRP is struck through', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-shop-'));
+    const dir = makeTempDir('nbai-shop-');
     writeFileSync(join(dir, 'page.html'), `<!doctype html><html><head><meta name="viewport" content="width=device-width">
       <style>${DESIGN_KIT_CSS}</style></head><body style="padding:16px">
       <header class="nb-header"><a class="nb-brand" href="#">Nemi Mart</a><input class="nb-search" placeholder="Search"></header>

@@ -63,7 +63,9 @@ describe('SupabaseConnectCard.tsx: native platform opens an in-app browser, neve
     const at = card.indexOf('if (native) {');
     expect(at, 'the native branch in connect() is gone').toBeGreaterThan(-1);
     const nativeBranch = card.slice(at, card.indexOf('window.location.assign', at));
-    expect(nativeBranch).toContain('@capacitor/browser');
+    // `Browser` is a static import since Q-625 (the package is in the startup chunk), so the branch
+    // names the plugin and the import line names the package.
+    expect(card).toContain("import { Browser } from '@capacitor/browser';");
     expect(nativeBranch).toContain('Browser.open(');
   });
 

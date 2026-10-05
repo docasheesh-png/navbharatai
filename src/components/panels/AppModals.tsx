@@ -1,10 +1,9 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { ExternalLink, ShieldCheck, Sparkles, X, AlertCircle, Settings, Globe, Lock } from 'lucide-react';
+import { ExternalLink, ShieldCheck, Sparkles, AlertCircle, Settings, Globe, Lock } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { cn } from '../../lib/utils';
 import { AuthComponent } from '../AuthComponent';
 import { PROVIDER_CONFIG } from '../../types';
-import { triggerCashfreeCheckout } from '../../services/paymentService';
 import type { User as FirebaseUser } from 'firebase/auth';
 
 export interface AppModalsProps {
@@ -26,12 +25,6 @@ export interface AppModalsProps {
   pendingKey: string;
   setPendingKey: (v: string) => void;
   handleKeySave: (provider: string, key: string) => void;
-  // Checkout modal
-  showCheckoutModal: boolean;
-  setShowCheckoutModal: (v: boolean) => void;
-  paymentSession: any;
-  user: FirebaseUser | null;
-  verifyBillingPayment: (status: string) => void;
   // Workspace preparing overlay
   isWorkspacePreparing: boolean;
   // Workspace prep error
@@ -51,7 +44,6 @@ export function AppModals({
   githubRedirectingMessage, githubDebugData, setGithubRedirectingMessage,
   firebaseOauthError, setFirebaseOauthError,
   pendingProvider, setPendingProvider, pendingKey, setPendingKey, handleKeySave,
-  showCheckoutModal, setShowCheckoutModal, paymentSession, user, verifyBillingPayment,
   isWorkspacePreparing,
   workspacePrepError, setWorkspacePrepError,
   isPreviewBuilding, previewBuildStage, detectedFramework,
@@ -277,104 +269,6 @@ export function AppModals({
                   </div>
                 </div>
               </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Secure Cashfree Simulator / Status Modal */}
-      <AnimatePresence>
-        {showCheckoutModal && paymentSession && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowCheckoutModal(false)}
-              className="absolute inset-0 bg-scrim backdrop-blur-md"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 30 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 30 }}
-              className="bg-card border border-line rounded-[2.5rem] shadow-3xl w-full max-w-md relative z-[1001] overflow-hidden p-6 sm:p-8"
-            >
-              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-indigo-600 text-on-accent"></div>
-
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <div className="flex items-center gap-2 text-accent-text font-mono text-[10px] font-bold uppercase tracking-wider mb-1">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse text-on-accent"></span>
-                    {paymentSession.isSimulator ? "Development Simulation Gateway" : "Cashfree Secure Gateway"}
-                  </div>
-                  <h3 className="text-xl font-black text-ink uppercase tracking-tight">
-                    {paymentSession.isSimulator ? "Simulate Payment Integration" : "Cashfree Order Active"}
-                  </h3>
-                </div>
-                <button
-                  onClick={() => setShowCheckoutModal(false)}
-                  className="p-1.5 hover:bg-raised rounded-xl text-muted hover:text-ink transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="bg-well border border-line rounded-2xl p-5 mb-6 space-y-3">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-muted font-semibold">Order ID:</span>
-                  <span className="text-ink font-mono font-bold">#{paymentSession.orderId}</span>
-                </div>
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-muted font-semibold">Customer ID:</span>
-                  <span className="text-ink font-mono">{user?.uid?.substring(0, 8)}...</span>
-                </div>
-                <div className="border-t border-line pt-3 flex justify-between items-center">
-                  <span className="text-xs text-muted font-semibold">Recharge Amount:</span>
-                  <span className="text-success font-mono font-black text-lg">₹{parseFloat(paymentSession.orderAmount || paymentSession.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                </div>
-              </div>
-
-              {paymentSession.isSimulator ? (
-                <div className="space-y-4">
-                  <p className="text-xs text-muted leading-relaxed">
-                    You are running without client or secret keys. We have loaded the NavBharat simulated gateway so that you can verify transactions, credit user wallets, and inspect telemetry.
-                  </p>
-
-                  <div className="space-y-2.5 pt-2">
-                    <button
-                      onClick={() => verifyBillingPayment('SUCCESS')}
-                      className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-on-accent rounded-xl font-bold uppercase tracking-widest text-xs shadow-lg shadow-emerald-600/15 transition-all text-center"
-                    >
-                      👍 Simulate PASS (Credit ₹{paymentSession.orderAmount})
-                    </button>
-                    <button
-                      onClick={() => verifyBillingPayment('FAILED')}
-                      className="w-full py-3 bg-surface border border-red-500/20 text-danger hover:bg-red-500/10 rounded-xl font-bold uppercase tracking-widest text-xs transition-all text-center"
-                    >
-                      👎 Simulate FAIL (Decline)
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4 text-center">
-                  <p className="text-xs text-muted leading-relaxed">
-                    The payment gateway script is initializing. You are being redirected to Cashfree's secure site where you can finalize the recharge transaction securely.
-                  </p>
-
-                  <div className="py-2.5 flex items-center justify-center space-x-2.5">
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce text-on-accent" style={{ animationDelay: '0ms' }} />
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce text-on-accent" style={{ animationDelay: '150ms' }} />
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce text-on-accent" style={{ animationDelay: '300ms' }} />
-                  </div>
-
-                  <button
-                    onClick={() => triggerCashfreeCheckout(paymentSession.paymentSessionId, paymentSession.environment)}
-                    className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-on-accent rounded-xl font-bold uppercase tracking-widest text-xs shadow-lg shadow-indigo-600/15 transition-all"
-                  >
-                    🚀 If not redirected, click here
-                  </button>
-                </div>
-              )}
             </motion.div>
           </div>
         )}

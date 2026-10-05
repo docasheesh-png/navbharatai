@@ -55,9 +55,12 @@ describe('the image generator has a free mode and a paid mode', () => {
     expect(SCOPE_ROUTES['ai:images' as keyof typeof SCOPE_ROUTES]).toEqual({ method: 'POST', path: '/api/v1/images/generations' });
     const route = code(read('src/server/routes/developerApi.ts'));
     expect(route).toMatch(/app\.post\('\/api\/images\/generations', ipLimiter, apiKeyAuth, requireScope\('ai:images'\)/);
-    const engine = code(read('src/server/lib/navbharatImageEngine.ts'));
-    expect(engine).toContain('imageFeeForCount(');
-    expect(engine).toContain("feature: 'image'");
+    // Q-616 (2026-10-05): the price is decided and HELD in the one shared reservation, which this door
+    // and the Image Generator both call — never a second copy of the rule.
+    const hold = code(read('src/server/lib/imageHold.ts'));
+    expect(hold).toContain('imageFeeForCount(');
+    expect(hold).toContain("feature: 'image'");
+    expect(code(read('src/server/lib/apiKeyImage.ts'))).toContain('reserveImage(');
   });
 
   // 🔁 2026-09-30 (admin: "per day 5 image free for user, uske bad 1₹/image"): Paid mode has a daily

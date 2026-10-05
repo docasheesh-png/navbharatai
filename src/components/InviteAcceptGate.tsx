@@ -9,6 +9,8 @@
 // works in any theme without depending on global CSS.
 
 import { useEffect, useState } from 'react';
+import { getAuth } from 'firebase/auth';
+import { getApp } from 'firebase/app';
 
 type Phase = 'hidden' | 'loading' | 'invalid' | 'ready' | 'accepting' | 'done' | 'signin' | 'error';
 
@@ -81,8 +83,6 @@ export function InviteAcceptGate() {
   const accept = async () => {
     setPhase('accepting');
     try {
-      const { getAuth } = await import('firebase/auth');
-      const { getApp } = await import('firebase/app');
       const auth = getAuth(getApp());
       // Wait for auth state to restore (currentUser can be null immediately after load).
       const user = await new Promise<import('firebase/auth').User | null>((resolve) => {

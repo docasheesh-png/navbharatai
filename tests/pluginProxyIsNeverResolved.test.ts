@@ -28,7 +28,10 @@ function stripComments(src: string): string {
 export function pluginNames(src: string): Set<string> {
   const names = new Set<string>();
   // import { A, B as C } from '@capacitor…'   /   const { A } = await import('@capacitor…')
-  const destructure = /(?:import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*|\{([^}]*)\}\s*=\s*(?:await\s+)?import\(\s*)(['"][^'"]+['"])/g;
+  // `[^{}]`, not `[^}]` (Q-625): with `[^}]` a destructure that is the FIRST statement of a block was
+  // matched from the block's own `{`, so the names came out as "const { A" and the plugin was never
+  // seen — the scanner went blind exactly where a loader is most often written.
+  const destructure = /(?:import\s*(?:type\s*)?\{([^{}]*)\}\s*from\s*|\{([^{}]*)\}\s*=\s*(?:await\s+)?import\(\s*)(['"][^'"]+['"])/g;
   for (const m of src.matchAll(destructure)) {
     if (!PLUGIN_PACKAGE.test(m[3])) continue;
     if (/import\s+type\s*\{/.test(m[0])) continue;
@@ -128,6 +131,15 @@ describe('a Capacitor plugin proxy is never the value a promise resolves to', ()
         return Browser.open({ url: 'x' });
       }`;
     expect(proxyResolutions(fixed)).toEqual([]);
+  });
+
+  it('🔴 a plugin destructured as the FIRST statement of a block is still seen (Q-625 scanner fix)', () => {
+    const shipped = `
+      async function loadNativeAppCheck() {
+        const { FirebaseAppCheck } = await import('@capacitor-firebase/app-check');
+        return FirebaseAppCheck;
+      }`;
+    expect(proxyResolutions(shipped)).toEqual(['FirebaseAppCheck: return FirebaseAppCheck']);
   });
 
   it('no client file does it', () => {

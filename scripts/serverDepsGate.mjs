@@ -148,7 +148,10 @@ function main() {
 
     if (missing.length === 0) {
       console.log(`[serverDepsGate] PASS — all ${externalPackages.length} external packages the production bundle requires are real "dependencies".`);
-      process.exit(0);
+      // `process.exitCode` + return, never `process.exit()` (Q-672): exit() ends the process on the spot,
+      // so the `finally` below never ran and every run left its ~13 MB bundle in the OS temp dir.
+      process.exitCode = 0;
+      return;
     }
 
     console.error('[serverDepsGate] FAIL — the production image would crash on boot before listening on its port.');
@@ -164,7 +167,7 @@ function main() {
     console.error('Fix: move each package above into "dependencies" in package.json (and run');
     console.error('`npm install --package-lock-only` to update the lockfile), or remove the runtime import');
     console.error('if the package was never meant to run in production.');
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }

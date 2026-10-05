@@ -35,7 +35,9 @@ describe('🔒 Website Checkup route', () => {
   });
 
   it('🔒 fetches ONLY through the shared SSRF guard, re-validated on every redirect hop', () => {
-    expect(engine).toContain("import { assertPublicHttpUrl } from './ssrfGuard';");
+    expect(engine).toContain("import { assertPublicHttpUrl, publicOnlyInit } from './ssrfGuard';");
+    // And the connection itself is vetted (Q-617): no second, unchecked DNS answer between check and connect.
+    expect(engine).toMatch(/await fetch\(current, publicOnlyInit\(/);
     expect(engine).toContain('await assertPublicHttpUrl(current)');
     // The guard is inside the redirect loop, so each hop is checked, not just the first URL.
     expect(engine).toMatch(/for \(let hop[\s\S]*assertPublicHttpUrl\(current\)/);

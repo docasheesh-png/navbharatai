@@ -4,9 +4,12 @@ import { appendLedgerEntry, LEDGER_OPENING_FIELD, LEDGER_DROPPED_FIELD } from '.
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Credits user_token_wallets /
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
 import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
-import { platformCashfreeCredentials } from './cashfreeCredentials';
+import { cashfreePaymentsAvailability } from './cashfreeCredentials';
 import { mintCodeForOrder } from './giftCodeStore';
+import { recordedReversedInr, settleRecordedReversalAtCredit } from './paymentReversal';
+import { applyOrderReversal } from './paymentReversalStore';
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
+import { orderCreditedTokens, recordedPlatformFee, type WalletCreditTx } from './orderCredit';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import { parseEnvNumber } from './envNumber';
 import {
@@ -72,43 +75,11 @@ export function inrToDebitTokens(inr: number): number {
   return Math.round(inr * TOKENS_PER_RUPEE * 1e6) / 1e6; // exact to a millionth of a token
 }
 
-/** Tokens a purchase credits, derived ONLY from the amount actually paid (net of our fee). Pure. */
-export function creditableTokens(netPaidRupees: unknown): number {
-  const paid = Number(netPaidRupees);
-  if (!Number.isFinite(paid) || paid <= 0) return 0;
-  return Math.round(paid * TOKENS_PER_RUPEE);
-}
-
-export interface WalletCreditTx {
-  userId: string;
-  amountPaid: number;
-  balanceAdded: number;
-  /**
-   * The platform fee this payment carried, in ₹ — written by the route that CREATED the order, from
-   * the rate that was disclosed to the user on that screen. Absent on a transaction created before
-   * the fee existed, and absent on a store purchase (Play/Apple packs are priced with their fee
-   * already inside), and absent means ZERO: those credit in full, exactly as they were sold.
-   */
-  platformFeeInr?: number;
-}
-
-/**
- * The platform fee actually recorded on a transaction.
- *
- * 🔑 READ FROM THE TRANSACTION, NOT RE-COMPUTED FROM THE CURRENT RATE. The user agreed to a split on
- * the screen where they paid; if the admin changes the rate while an order sits pending, re-deriving
- * it here would credit a different amount than the one they were shown. The stored number is written
- * by our own route, never by the client, so reading it is not trusting the caller.
- *
- * Clamped to [0, amountPaid] so no corrupt or hand-edited row can ever produce a negative credit.
- */
-export function recordedPlatformFee(txData: WalletCreditTx): number {
-  const paid = Number(txData.amountPaid);
-  const fee = Number(txData.platformFeeInr);
-  if (!Number.isFinite(paid) || paid <= 0) return 0;
-  if (!Number.isFinite(fee) || fee <= 0) return 0;
-  return Math.min(fee, paid);
-}
+// The order→tokens arithmetic lives in `orderCredit.ts` since Q-614 (2026-10-05): the refund clawback
+// must remove exactly what the credit added, so both read ONE formula. Re-exported so every existing
+// importer of these names from this module is unchanged.
+export { creditableTokens, recordedPlatformFee, orderCreditedTokens, orderNetPaidInr } from './orderCredit';
+export type { WalletCreditTx } from './orderCredit';
 
 /**
  * PURE credit computation: given the CURRENT wallet doc and a verified paid order, return the FULL new wallet doc after crediting. No I/O. The caller runs read→compute→write
@@ -130,7 +101,6 @@ export function computeCreditedWallet(
   // NavBharatAI's revenue and never reaches the balance. `totalMoneySpent` below still records the
   // GROSS — that field answers "how much has this user paid us", which is the full amount.
   const platformFee = recordedPlatformFee(txData);
-  const netPaid = Math.round((amountPaid - platformFee) * 100) / 100;
   // SECURITY C4 stands: the tokens still derive from the VERIFIED paid amount, only now net of our
   // own server-written fee — never from anything the client sent.
   //
@@ -146,7 +116,10 @@ export function computeCreditedWallet(
   // Collapsing them removes the duplicated money arithmetic this file's own header warns about: a
   // money rule with two homes is free to drift between them, which is exactly how the pass price came
   // to read ₹50 on one screen and ₹100 on another.
-  const tokensToCredit = creditableTokens(netPaid);
+  //
+  // 🔒 `orderCreditedTokens` (orderCredit.ts) is the net-paid → tokens formula, and the refund clawback
+  // (paymentReversal.ts) reads the SAME function, so a refund removes exactly what this added (Q-614).
+  const tokensToCredit = orderCreditedTokens(txData);
 
   const update: Record<string, any> = {};
 
@@ -215,9 +188,83 @@ export function computeCreditedWallet(
 /**
  * Reusable internal payment verification + wallet-credit service.
  * Extracted from the server.ts monolith (Phase 1) with behavior unchanged.
- * Verifies a Cashfree order (or simulates when keys are placeholder), then
+ * Verifies a Cashfree order with Cashfree itself (there is no simulator — Q-615), then
  * credits the user's wallet/tokens idempotently.
  */
+/** A wallet document for an account that has never had one. */
+function newWalletFor(userId: string): Record<string, any> {
+  return {
+    userId,
+    unlockedModes: [],
+    tokenBalance: 0,
+    totalTokensPurchased: 0,
+    totalTokensUsed: 0,
+    totalMoneySpent: 0,
+    lastRechargeAt: null,
+    walletLedger: [],
+    remaining_balance: 0,
+    total_balance: 0,
+    total_output_tokens_used: 0,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * A GIFT CODE product: mint the code, credit NOBODY's wallet, and return.
+ *
+ * 🔴 THE BUYER IS NOT CREDITED, and that is the product rather than an omission. They bought a code for
+ * somebody else; crediting their own balance as well would hand out the money twice. `balanceAdded` was
+ * written as 0 at order creation for the same reason.
+ *
+ * Runs AFTER the order was claimed (PENDING→SUCCESS), and again on any later call that finds the order
+ * claimed but carrying no code (Q-613): `mintCodeForOrder` is idempotent on the order id, so a resumed
+ * mint returns the same code and never mints twice — the webhook, the redirect return and the sign-in
+ * reconcile sweep can all arrive for one order.
+ *
+ * ⚠️ THE FACE VALUE COMES FROM THE TX DOC, which the SERVER wrote from its own arithmetic at order
+ * creation — never from a client field.
+ */
+async function fulfilGiftOrder(db: any, txRef: any, orderId: string, txData: any): Promise<{ success: boolean; data?: any; error?: string }> {
+  const face = Number((txData as { giftFaceInr?: unknown }).giftFaceInr);
+  if (!Number.isFinite(face) || face <= 0) {
+    console.error(
+      `[GIFT] Order ${orderId} paid ₹${txData.amountPaid} but carries no face value — NOTHING minted; ` +
+      `this payment needs a manual refund.`,
+    );
+    try { await updateDoc(txRef, { fulfilmentError: 'gift_face_missing', fulfilledAt: new Date().toISOString() }); } catch { /* logged above */ }
+    return { success: false, error: 'That gift purchase could not be completed. Please contact support for a refund.' };
+  }
+  const code = await mintCodeForOrder(db, {
+    orderId,
+    buyerUid: txData.userId,
+    faceInr: face,
+    paidInr: Number(txData.amountPaid) || 0,
+    feeInr: recordedPlatformFee(txData),
+    nowMs: Date.now(),
+    randomBytes: (n: number) => new Uint8Array(randomBytes(n)),
+  });
+  try { await updateDoc(txRef, { giftCode: code, fulfilledAt: new Date().toISOString() }); } catch { /* the code exists; the audit note is best-effort */ }
+  // 🔴 A REFUND THAT ARRIVED BEFORE THE CODE EXISTED (Q-614). The refund webhook found no code to void
+  // and recorded its totals on the order; the code minted just now must not go out at full value. The
+  // order is RE-READ (the `txData` above may predate the refund), and the reduction goes through the same
+  // transaction every reversal uses, keyed on the order's own marker, so it can never apply twice.
+  let faceNow = face;
+  try {
+    const fresh = await getDoc(txRef);
+    if (fresh.exists() && recordedReversedInr(fresh.data()) > 0) {
+      const reversal = await applyOrderReversal(db, { orderId, refundedInr: null, disputeLostInr: null });
+      if (reversal.status === 'gift-code-voided') {
+        return { success: false, error: 'This gift purchase was refunded, so its code is no longer valid.' };
+      }
+      if (reversal.status === 'gift-code-reduced' && typeof reversal.giftFaceInr === 'number') faceNow = reversal.giftFaceInr;
+    }
+  } catch (e: any) {
+    console.error(`[GIFT] Order ${orderId}: could not apply a recorded refund to the new code — ${e?.message}`);
+  }
+  // `buyerUid` is for the route's owner check only; `verify-payment` strips it before answering (Q-630).
+  return { success: true, data: { giftCode: code, giftFaceInr: faceNow, paidInr: Number(txData.amountPaid) || 0, buyerUid: txData.userId } };
+}
+
 export async function verifyPaymentInternal(orderId: string): Promise<{ success: boolean; data?: any; error?: string }> {
   const db = getDb() as any;
   if (!db) return { success: false, error: 'Database not initialized' };
@@ -231,28 +278,30 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
 
     const txData = txSnap.data();
     if (txData.paymentStatus === 'SUCCESS') {
+      // A GIFT order claimed but never minted (the process died between the claim and the mint) is
+      // finished here, not reported as done: `mintCodeForOrder` is idempotent on the order id, so the
+      // webhook's retry or the buyer's next check completes it (Q-613, forensic audit 2026-10-04).
+      if (String(txData.productType || '') === 'gift_code' && !txData.giftCode && !txData.fulfilmentError) {
+        return fulfilGiftOrder(db, txRef, orderId, txData);
+      }
       return { success: true, data: { alreadyProcessed: true, balanceAdded: txData.balanceAdded } };
     }
 
-    const userId = txData.userId;
     // The merchant credentials are NavBharatAI's own and come only from the server environment —
     // never from the order owner's secret vault (cashfreeCredentials.ts, forensic audit 2026-10-04).
-    const { clientId, clientSecret, mode: env, placeholder: isPlaceholder } = platformCashfreeCredentials();
+    // There is NO simulator branch (Q-615): an order is paid only when Cashfree itself says PAID. Without
+    // real keys, or with test keys in production, nothing is verified and nothing is credited.
+    const availability = cashfreePaymentsAvailability();
+    if (!availability.ok) {
+      console.error(`[CASHFREE] Cannot verify order ${orderId}: ${availability.code}`);
+      return { success: false, error: availability.message };
+    }
+    const { clientId, clientSecret, mode: env } = availability;
 
     let isPaid = false;
     let cfOrderIdRef = 'cf_' + orderId;
 
-    const isSimulatorOrder = isPlaceholder || txData.isSimulator || orderId.startsWith('sim_');
-    if (isSimulatorOrder) {
-      // The dev simulator credits a real wallet. That is acceptable ONLY outside production —
-      // in production a missing/placeholder credential must NEVER mint free balance. Fail safe.
-      if (process.env.NODE_ENV === 'production') {
-        console.error(`[CASHFREE] Refusing simulator credit in production for order ${orderId} — real Cashfree credentials are required.`);
-        return { success: false, error: 'Payment provider is not configured. Please contact support.' };
-      }
-      console.log(`[CASHFREE SIMULATION] (non-production) Marking order ${orderId} as paid inside verification simulator.`);
-      isPaid = true;
-    } else {
+    {
       const cfUrl = env === 'production'
         ? `https://api.cashfree.com/pg/orders/${orderId}`
         : `https://sandbox.cashfree.com/pg/orders/${orderId}`;
@@ -281,12 +330,53 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       }
     }
 
+    if (isPaid && !['professional_pass', 'gift_code'].includes(String(txData.productType || ''))) {
+      // 🔴 ONE TRANSACTION FOR THE CLAIM AND THE CREDIT (Q-613, forensic audit 2026-10-04). They used to be
+      // two: the PENDING→SUCCESS flip committed, THEN the wallet credit ran. A process that died between
+      // them (a deploy, an OOM, a lost Firestore call) left the order SUCCESS with nothing credited — and
+      // every later call (the webhook's retry, the buyer's check, the reconcile sweep, which reads only
+      // PENDING) answered "already processed". The customer had paid and would never be credited. Now both
+      // writes commit together or not at all, so a retry always finds the order still PENDING and finishes
+      // it. Exactly-once is unchanged: a concurrent caller re-reads SUCCESS inside its own transaction.
+      // (SECURITY C4: tokens still derive from the VERIFIED paid amount inside computeCreditedWallet.)
+      const walletRef = doc(db, 'user_token_wallets', txData.userId);
+      const credited = await runTransaction(db, async (tx: any) => {
+        const snap = await tx.get(txRef);
+        if (!snap.exists() || snap.data().paymentStatus === 'SUCCESS') return null; // claimed by a concurrent call
+        const walletSnap = await tx.get(walletRef);
+        const walletData = walletSnap.exists() ? walletSnap.data() : newWalletFor(txData.userId);
+        const nowIso = new Date().toISOString();
+        const fresh = snap.data() as WalletCreditTx & Record<string, unknown>;
+        const { wallet: creditedWallet } = computeCreditedWallet(walletData, fresh, nowIso);
+        // A refund or chargeback recorded on this order BEFORE it was credited (Q-614) is taken back in
+        // this same transaction — otherwise the credit would add the full amount after the reversal
+        // had already been handled, and nothing would ever take it back.
+        const reversal = settleRecordedReversalAtCredit(creditedWallet, fresh, orderCreditedTokens(fresh), orderId, nowIso);
+        const wallet = reversal ? reversal.wallet : creditedWallet;
+        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef, ...(reversal ? reversal.txPatch : {}) });
+        tx.set(walletRef, wallet);
+        return wallet;
+      });
+      if (!credited) {
+        return { success: true, data: { alreadyProcessed: true, balanceAdded: txData.balanceAdded } };
+      }
+      return {
+        success: true,
+        data: {
+          balanceAdded: txData.balanceAdded,
+          currentBalance: credited.remaining_balance,
+          tokenBalance: credited.tokenBalance,
+        },
+      };
+    }
+
     if (isPaid) {
       // SECURITY (H1): atomically claim the PENDING→SUCCESS flip so N concurrent /verify-payment calls
       // on ONE genuinely-paid order can't each credit the wallet (a TOCTOU double-spend — the old
       // getDoc-status → updateDoc → credit had a race window). Only the caller that WINS the flip
-      // proceeds to credit; the others observe SUCCESS and return alreadyProcessed. The credit block
-      // below therefore runs for exactly one caller per order and needs no further locking.
+      // proceeds; the others observe SUCCESS and return alreadyProcessed. Since Q-613 this separate claim
+      // serves only the PASS and GIFT products (wallet credits claim inside their own transaction above);
+      // a gift order claimed but not yet minted is resumed by the SUCCESS branch at the top.
       const claimedNow = await runTransaction(db, async (tx: any) => {
         const snap = await tx.get(txRef);
         if (!snap.exists()) return false;
@@ -363,67 +453,11 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
        * and for the same reason: the amount paid and the thing delivered are two different numbers.
        */
       if (String(txData.productType || '') === 'gift_code') {
-        const face = Number((txData as { giftFaceInr?: unknown }).giftFaceInr);
-        if (!Number.isFinite(face) || face <= 0) {
-          console.error(
-            `[GIFT] Order ${orderId} paid ₹${txData.amountPaid} but carries no face value — NOTHING minted; ` +
-            `this payment needs a manual refund.`,
-          );
-          try { await updateDoc(txRef, { fulfilmentError: 'gift_face_missing', fulfilledAt: new Date().toISOString() }); } catch { /* logged above */ }
-          return { success: false, error: 'That gift purchase could not be completed. Please contact support for a refund.' };
-        }
-        const code = await mintCodeForOrder(db, {
-          orderId,
-          buyerUid: txData.userId,
-          faceInr: face,
-          paidInr: Number(txData.amountPaid) || 0,
-          feeInr: recordedPlatformFee(txData),
-          nowMs: Date.now(),
-          randomBytes: (n: number) => new Uint8Array(randomBytes(n)),
-        });
-        try { await updateDoc(txRef, { giftCode: code, fulfilledAt: new Date().toISOString() }); } catch { /* the code exists; the audit note is best-effort */ }
-        // `buyerUid` is for the route's owner check only; `verify-payment` strips it before answering (Q-630).
-        return { success: true, data: { giftCode: code, giftFaceInr: face, paidInr: Number(txData.amountPaid) || 0, buyerUid: txData.userId } };
+        return fulfilGiftOrder(db, txRef, orderId, txData);
       }
 
-      const walletRef = doc(db, 'user_token_wallets', txData.userId);
-      const DEFAULT_WALLET: Record<string, any> = {
-        userId: txData.userId,
-        unlockedModes: [],
-        tokenBalance: 0,
-        totalTokensPurchased: 0,
-        totalTokensUsed: 0,
-        totalMoneySpent: 0,
-        lastRechargeAt: null,
-        walletLedger: [],
-        remaining_balance: 0,
-        total_balance: 0,
-        total_output_tokens_used: 0,
-        updatedAt: new Date().toISOString(),
-      };
-
-      // CONCURRENCY (fix): credit the wallet INSIDE a transaction that re-reads the wallet
-      // in-transaction. Two concurrent credits to the SAME wallet (two orders, webhook + client
-      // poll, or a coupon credit) used to lost-update because the old getDoc→compute→full setDoc ran
-      // outside any transaction. Now Firestore aborts+retries this transaction on a concurrent commit,
-      // so every credit re-reads the latest balance and adds its delta on top — never overwrites.
-      // (SECURITY C4: tokens still derive from the VERIFIED paid amount inside computeCreditedWallet.)
-      const integratedWallet = await runTransaction(db, async (tx: any) => {
-        const walletSnap = await tx.get(walletRef);
-        const walletData = walletSnap.exists() ? walletSnap.data() : { ...DEFAULT_WALLET };
-        const { wallet } = computeCreditedWallet(walletData, txData as WalletCreditTx, new Date().toISOString());
-        tx.set(walletRef, wallet);
-        return wallet;
-      });
-
-      return {
-        success: true,
-        data: {
-          balanceAdded: txData.balanceAdded,
-          currentBalance: integratedWallet.remaining_balance,
-          tokenBalance: integratedWallet.tokenBalance
-        }
-      };
+      // Unreachable: wallet products are claimed and credited in one transaction above; pass and gift
+      // orders returned in their branches.
     }
 
     return { success: false, error: 'Order not paid or invalid status' };

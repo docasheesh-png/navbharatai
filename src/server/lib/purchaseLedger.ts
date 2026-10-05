@@ -13,11 +13,16 @@
 // the sense that credit moved, and they are shown, but they are never revenue — the old "Token
 // Purchases" tile counted coupon redemptions as successful payments.
 //
-// ⚠️ REFUNDS ARE NOT RECORDED ANYWHERE. The Cashfree webhook and the verifier only ever move a row
-// from PENDING to SUCCESS; no writer produces REFUNDED, and a refund issued in the Cashfree dashboard
-// leaves the row here saying SUCCESS. The summary carries `refundTracked: false` so the screen says so
-// rather than presenting a refunded payment as revenue by silence. Building refund tracking needs the
-// gateway's refund event wired in; that is a separate change and is recorded as an open item.
+// ⚠️ REFUNDS — RECORDED FOR THE WEB RAIL ONLY (Q-614, 2026-10-05; this note used to say "REFUNDS ARE
+// NOT RECORDED ANYWHERE", which was true until then). A Cashfree refund or a lost chargeback now reaches
+// the signed webhook, which re-reads the amounts from Cashfree and writes `refundedInr` /
+// `disputeLostInr` on the order (and takes the tokens back — `paymentReversalStore.ts`). The row keeps
+// its SUCCESS status — the money DID arrive — and carries the reversed ₹ beside it as `refundedInr`.
+// Google Play and App Store refunds are still NOT recorded: no store notification is wired (it needs
+// infrastructure the admin configures — see BUILD_REPORT_QUEUE.md Q-614). So the summary says
+// `refundTracked: 'web-only'` and the screen says exactly that, rather than implying store rows are final.
+// `revenueInr` stays GROSS (money that arrived); `refundedInr` is reported next to it, not netted out
+// silently.
 //
 // PURE. Rows are untrusted JSON.
 
@@ -57,6 +62,8 @@ export interface PurchaseRow {
   storePriceInr: number | null;
   /** True only for a row that counts toward Total Revenue. */
   revenue: boolean;
+  /** ₹ returned to the payer since (successful refunds + lost chargebacks), capped at `amountInr`. 0 when none recorded. */
+  refundedInr: number;
 }
 
 function str(v: unknown): string {
@@ -168,6 +175,7 @@ export function purchaseRow(id: string, raw: unknown): PurchaseRow {
     platformFeeInr: optionalMoney(tx.platformFeeInr),
     storePriceInr: optionalMoney(tx.storePriceInr),
     revenue: isRevenueRow(tx),
+    refundedInr: Math.min(money(tx.amountPaid), Math.round((money(tx.refundedInr) + money(tx.disputeLostInr)) * 100) / 100),
   };
 }
 
@@ -182,14 +190,16 @@ export interface PurchaseSummary {
   freeCreditRows: number;
   creditedInr: number;
   creditedTokens: number;
-  /** Refunds are not recorded by any writer — see the module header. Always false today. */
-  refundTracked: false;
+  /** ₹ refunded or charged back on revenue rows (recorded for the web rail only — see the header). */
+  refundedInr: number;
+  /** Which rails record refunds: the web (Cashfree) rail only, today — see the module header. */
+  refundTracked: 'web-only';
 }
 
 export function summarisePurchases(rows: readonly PurchaseRow[]): PurchaseSummary {
-  let revenueInr = 0, revenueRows = 0, pendingRows = 0, failedRows = 0, freeCreditRows = 0, creditedInr = 0, creditedTokens = 0;
+  let revenueInr = 0, revenueRows = 0, pendingRows = 0, failedRows = 0, freeCreditRows = 0, creditedInr = 0, creditedTokens = 0, refundedInr = 0;
   for (const r of rows) {
-    if (r.revenue) { revenueInr += r.amountInr; revenueRows++; }
+    if (r.revenue) { revenueInr += r.amountInr; revenueRows++; refundedInr += r.refundedInr || 0; }
     if (r.status === 'PENDING') pendingRows++;
     else if (r.status === 'FAILED') failedRows++;
     else if (r.status === 'SUCCESS') {
@@ -204,7 +214,8 @@ export function summarisePurchases(rows: readonly PurchaseRow[]): PurchaseSummar
     revenueRows, pendingRows, failedRows, freeCreditRows,
     creditedInr: Math.round(creditedInr * 100) / 100,
     creditedTokens,
-    refundTracked: false,
+    refundedInr: Math.round(refundedInr * 100) / 100,
+    refundTracked: 'web-only',
   };
 }
 

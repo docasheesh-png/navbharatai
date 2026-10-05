@@ -17,6 +17,8 @@ import type { Auth, User as FirebaseUser } from 'firebase/auth';
 import { raceNativeAuth } from './nativeAuthGuard';
 import { popupFailureAction } from '../components/socialSignInPolicy';
 import { markRedirectStarted } from './redirectSignInMarker';
+import { Capacitor } from '@capacitor/core';
+import { sendEmailVerification, GithubAuthProvider, linkWithCredential, linkWithPopup, linkWithRedirect } from 'firebase/auth';
 
 /** Is `github.com` among this account's linked sign-in providers? Client-side mirror of the server's
  *  `githubIsLinked` (referralRewards.ts) — kept separate rather than shared, because that module reads
@@ -31,7 +33,6 @@ export function isGithubLinked(user: Pick<FirebaseUser, 'providerData'> | null |
  *  only becomes `emailVerified` once the user opens it, so the caller must `user.reload()` (or wait for
  *  the user to come back and re-check) rather than assume success from this call returning. */
 export async function sendVerificationEmail(user: FirebaseUser): Promise<void> {
-  const { sendEmailVerification } = await import('firebase/auth');
   await sendEmailVerification(user);
 }
 
@@ -64,8 +65,6 @@ export async function linkGithubAccount(auth: Auth): Promise<LinkGithubOutcome> 
   if (!user) throw new Error('You need to be signed in to connect GitHub.');
   if (isGithubLinked(user)) return 'ok'; // already done — defensive, the caller should have hidden this
 
-  const { Capacitor } = await import('@capacitor/core');
-
   if (Capacitor.isNativePlatform()) {
     const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
     const nativeResult = await raceNativeAuth(
@@ -79,7 +78,6 @@ export async function linkGithubAccount(auth: Auth): Promise<LinkGithubOutcome> 
     if (!accessToken) {
       throw new Error('GitHub did not return an access token — please try again.');
     }
-    const { GithubAuthProvider, linkWithCredential } = await import('firebase/auth');
     const credential = GithubAuthProvider.credential(accessToken);
     // The OAuth token also powers repo connect (GitViewPanel/GitPanel) — captured exactly like the
     // sign-in path does, so connecting here doubles as connecting a repo source with no extra step.
@@ -88,7 +86,6 @@ export async function linkGithubAccount(auth: Auth): Promise<LinkGithubOutcome> 
     return 'ok';
   }
 
-  const { GithubAuthProvider, linkWithPopup, linkWithRedirect } = await import('firebase/auth');
   const provider = new GithubAuthProvider();
   provider.addScope('repo');
   provider.addScope('read:user');

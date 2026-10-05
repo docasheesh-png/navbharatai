@@ -164,7 +164,8 @@ describe('🔒 ONE QUESTION, ONE ANSWER — source guards over routes/agentv3.ts
 
   it('the shared answer exists and reads the ledger', () => {
     expect(src).toContain('const renderProvenNow = (): boolean =>');
-    expect(src).toContain('provenFromTimeline(buildDiag.report().issues).preview');
+    // Since Q-101 (2026-10-05) through the one ledger read, which composes provenFromTimeline unchanged.
+    expect(src).toContain('renderProvenInLedger(buildDiag.evidenceLedger())');
   });
 
   it('🔴 all THREE consumers ask it — not two of them', () => {

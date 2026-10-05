@@ -25,6 +25,7 @@ import { createPortal } from 'react-dom';
 import { X, Smartphone, Loader2, ShieldCheck } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { RecaptchaVerifier, linkWithCredential, type Auth } from 'firebase/auth';
+import { linkWithPhoneNumber, PhoneAuthProvider } from '../lib/firebaseAuthRuntime';
 import { normalizePhone } from '../lib/phoneNumber';
 import { authJsonHeaders } from '../lib/authHeaders';
 import { otpFailureCategory, otpUserMessage } from '../lib/otpFailure';
@@ -43,12 +44,11 @@ function surface(): string {
 
 /**
  * `linkWithPhoneNumber` and `PhoneAuthProvider` exist at runtime but the v12 umbrella types do not
- * surface them to tsc — the same resolution `AuthComponent` already uses for `PhoneAuthProvider`, kept
- * identical here so both sites fail (or work) the same way rather than one drifting.
+ * surface them to tsc. They come from the SAME module `AuthComponent` reads `PhoneAuthProvider` from
+ * (`firebaseAuthRuntime.ts`), so both sites fail (or work) the same way rather than one drifting.
  */
 async function phoneAuthApi(): Promise<{ linkWithPhoneNumber: Function; PhoneAuthProvider: { credential: (id: string, code: string) => unknown } }> {
-  const mod = (await import('firebase/auth')) as any;
-  return { linkWithPhoneNumber: mod.linkWithPhoneNumber, PhoneAuthProvider: mod.PhoneAuthProvider };
+  return { linkWithPhoneNumber, PhoneAuthProvider };
 }
 
 export interface VerifyPhoneSheetProps {

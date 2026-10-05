@@ -120,7 +120,7 @@ describe('🔒 the route — POST /api/agentv3/host-app', () => {
     expect(handler).toContain('await requireVerifiedForMoney(req)');
     expect(handler).not.toContain('resolveReadIdentity(req)');
     expect(handler).toContain('const email = verified.email;');
-    expect(handler).toContain('isAdmin: isReportAdmin(email)');
+    expect(handler).toContain('isAdmin: isReportAdmin(identityGrantEmail(verified))');
     expect(handler).not.toMatch(/isReportAdmin\(req\.body/);
   });
 

@@ -15,6 +15,7 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { listBuildHistory, fetchBuildVersion } from '../../services/buildService';
 import type { VersionMeta } from '../../services/buildService';
 import { SkeletonList } from '../ui/Skeleton';
+import { SaveToFolderButton } from './SaveToFolderButton';
 
 export interface FileConflict {
   file: File;
@@ -233,6 +234,7 @@ export function FilesPanel({
             >
               <Upload className="w-3 h-3" /> Upload
             </button>
+            <SaveToFolderButton files={files} />
             {hasGeneratedCode && (
               <button
                 onClick={onDownloadZip}

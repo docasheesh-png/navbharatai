@@ -32,7 +32,7 @@ describe('draftAfterFailedSend', () => {
 describe('the composer follows the rule — at the source, since a hook cannot be rendered here', () => {
   const free = readFileSync(join(process.cwd(), 'src/components/ide/AIImageGenerator.tsx'), 'utf8');
 
-  for (const [name, src, handler] of [['free composer', free, 'const handleGenerate = async (tierNow: ImageTier = tier) => {']] as const) {
+  for (const [name, src, handler] of [['free composer', free, 'const handleGenerate = async () => {']] as const) {
     it(`${name}: the box is emptied BEFORE the request goes out, and restored on failure`, () => {
       const start = src.indexOf(handler);
       expect(start).toBeGreaterThan(0);
@@ -53,7 +53,7 @@ describe('the composer follows the rule — at the source, since a hook cannot b
   }
 
   it('the free composer also restores when the wallet refuses — they will send it again after topping up', () => {
-    const start = free.indexOf('const handleGenerate = async (tierNow: ImageTier = tier) => {');
+    const start = free.indexOf('const handleGenerate = async () => {');
     const body = free.slice(start, free.indexOf('\n  };', start));
     const creditAt = body.indexOf('if (noCredit) {');
     const restoreAt = body.indexOf('draftAfterFailedSend(cur, typed)', creditAt);

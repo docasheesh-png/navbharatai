@@ -89851,3 +89851,45 @@ open from that work, each 🟡 with what it needs in `BUILD_REPORT_QUEUE.md`: Q-
 - The admin ran **Build E2B Builder Template** (run #10, branch `main` at 56571ce, template kind `default`) and it finished green. `infra/e2b/build.mjs` waits for `Template.build` and throws if the build fails, so a green job means the `navbharat-builder` template was rebuilt and published. Its warm primer now includes `@types/react` and `@types/react-dom` (the change from #3528).
 - **Watch on the next real build:** the setState / props type-error pair (seen three times, last in cc3ef776) should not come back. If it does, check that Cloud Run `E2B_TEMPLATE_ID` points at `navbharat-builder`.
 - **Incident the same morning:** from about 04:14 UTC, every GitHub Actions job (CI, image scan, DAST and this workflow) was refused with *"recent account payments have failed or your spending limit needs to be increased"*. The last job to run before that was the iOS `.ipa` build at 02:44 UTC. The admin fixed the billing, and run #10 then passed. CI runs that failed in that window are not evidence of anything about the code; they must be re-run before any merge.
+## 2026-10-05 — Image Generator: Free mode removed (admin screenshot, "Tea shop banner")
+
+**Report:** Free mode answered every request "The free image servers are too busy right now. Please try Paid mode",
+with the admin diagnostic `browser fetch: HTTP 402 | free provider: anonymous access refused (HTTP 402)`.
+
+**Root cause:** the free provider's anonymous door now answers 402 (payment required) to everybody, both the
+user's browser and our server. Free mode was built only on that door, so it could make nothing. Its "busy" sentence
+named a cause that was not true, and its "Try again" could only fail again.
+
+**This class came back.** The 2026-09-30 fix (`freeProviderDoor.ts`) taught the server to *notice* the closed door.
+That same evening Free mode was re-split so that a closed door meant "busy, try Paid" for every request. The
+instance was detected; the condition (a mode that has no engine) survived. This fix removes the condition.
+
+**Decision (admin, 2026-10-05):** remove Free mode. The options were offered in the same turn: Cloudflare-backed
+free with a cap, buying a provider key, removing it, or only an honest message.
+
+**What changed:**
+
+- One screen, which is the old Paid page.
+  - The header is the price line.
+  - The toggle, the Free page and "Switch to Paid" are gone.
+  - Every request sends `tier: 'paid'`.
+- Server (`imageTier.ts`, `routes/imageGen.ts`):
+  - Every caller runs the same ladder and counts against the same 5 a day.
+  - Only `tier: 'paid'` is charged. A no-tier caller (an old installed phone app) gets 429 `free_used_update` after its 5, never a charge.
+  - No link is minted, and `freeFailed` is dropped by the schema.
+  - `freeProviderDoor.ts` and its test are deleted.
+- `imageGenConfigured()` counts the free provider only with a key (Q-663).
+- Text and docs updated:
+  - every AI's price sentence (`imagePriceSentence`);
+  - the Pro picture pointer;
+  - AppKnowledgeBase;
+  - the ENV registry.
+- Old free pictures stay in the device history but are not shown, under the 2026-10-01 no-watermark rule. Nothing is deleted.
+
+**Kept on purpose:** `/api/image/relay`, `imageTicket.ts` and `clientImageFetch.ts`. They still verify old
+history links; their unit tests stay.
+
+**Rows:** Q-660 … Q-663 in `BUILD_REPORT_QUEUE.md`.
+
+**Watch after deploy:** a picture should arrive on the first press. If Paid itself fails, the admin diagnostic now
+names the paid rungs, not the free door.

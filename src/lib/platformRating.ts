@@ -78,3 +78,60 @@ export function commentPrompt(stars: number): string {
 
 /** Same cap as the server (MAX_RATING_COMMENT_CHARS) so the box never accepts what will be cut. */
 export const RATING_COMMENT_MAX = 500;
+
+// ─── The admin's view ──────────────────────────────────────────────────────────────────────────────
+
+export interface RatingRowView {
+  uid: string;
+  email: string | null;
+  stars: number;
+  comment: string;
+  platform: 'web' | 'android' | 'ios';
+  ratedAt: number;
+}
+
+export interface RatingsOverviewView {
+  count: number;
+  average: number | null;
+  distribution: [number, number, number, number, number];
+  recent: RatingRowView[];
+}
+
+/**
+ * Read `GET /api/admin/platform-ratings`. Shape-checked: anything else is null and the card shows an
+ * error — never an "average 0.0 from 0 ratings" assembled out of fallbacks over a failed request.
+ */
+export function readRatingsOverview(body: unknown): RatingsOverviewView | null {
+  if (!body || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+  const d = b.distribution;
+  if (typeof b.count !== 'number' || !Array.isArray(d) || d.length !== 5 || !d.every((n) => typeof n === 'number')) return null;
+  if (b.average !== null && typeof b.average !== 'number') return null;
+  if (!Array.isArray(b.recent)) return null;
+  const recent: RatingRowView[] = [];
+  for (const r of b.recent) {
+    if (!r || typeof r !== 'object') continue;
+    const x = r as Record<string, unknown>;
+    if (typeof x.stars !== 'number' || x.stars < 1 || x.stars > 5) continue;
+    recent.push({
+      uid: typeof x.uid === 'string' ? x.uid : '',
+      email: typeof x.email === 'string' ? x.email : null,
+      stars: x.stars,
+      comment: typeof x.comment === 'string' ? x.comment : '',
+      platform: x.platform === 'android' || x.platform === 'ios' ? x.platform : 'web',
+      ratedAt: typeof x.ratedAt === 'number' ? x.ratedAt : 0,
+    });
+  }
+  return {
+    count: b.count,
+    average: b.average as number | null,
+    distribution: d as RatingsOverviewView['distribution'],
+    recent,
+  };
+}
+
+/** Width of one star's bar, as a whole percent of the largest bucket (0 when nobody rated). */
+export function barPercent(n: number, distribution: ReadonlyArray<number>): number {
+  const max = Math.max(0, ...distribution);
+  return max > 0 ? Math.round((n / max) * 100) : 0;
+}

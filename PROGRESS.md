@@ -90592,3 +90592,55 @@ their ledgers are the five 2026-10-05 entries above. Two watch items carried fro
 domain connected after a publish should show the app within ~15 minutes with one notification. Still open from
 that PR: **Q-159** — 🟡 the code is live; it needs the admin to set `SCHEDULER_TICK_SECRET` and create the Cloud
 Scheduler job (steps in the queue row).
+
+### 2026-10-05 — Game graphics Phase 2: the car, the human and the animals are no longer boxes
+
+The admin's brief ("if the player vehicle still looks like a box: FAIL; if the human still looks like stacked
+blocks: FAIL") was adapted, not transcribed. A fixed benchmark scene was rendered from `main` first, with the same
+camera, lighting and renderer used for the after renders. It confirmed the brief: on `main` the car was four stacked
+boxes, the human was box limbs with a box head and a box of hair, and the four animals were one box rig at four sizes.
+
+**What changed, all in `src/server/lib/Game3DGenerator.ts`:**
+- **Car.** The body is an extruded side profile with the wheel wells cut out of it. On top sits a glass greenhouse,
+  narrower than the body and framed by pillars. Tyres are lathed and rims have spokes. The real tier adds seams,
+  handles, grilles, a plate and dark well liners. These contracts are unchanged: the `'wheel'` groups, four
+  body-mounted `'wheel-arch'` meshes (now the well liners), the emitting head and tail lights, and front = +Z.
+- **Human.**
+  - The torso is lathed. Limbs are tapered capsules. The head has a jaw, nose, ears, eyes and hair. Shoes have a
+    heel and a toe.
+  - The neck is visible, and the crown now lands on the requested height. `torsoH` was `0.30·H`, which left a 1.8 m
+    figure 1.66 m tall.
+  - The joints API and the gait are unchanged.
+- **Animals.**
+  - Each has a lathed barrel body, tapered legs, hooves or paws, and a head that tapers to a muzzle.
+  - Each kind carries its identifiers: a horse's mane and hair tail, a zebu cow's hump and horns, a deer's antlers
+    and scut, a dog's snout and curled tail.
+  - The rig is scaled so the head lands exactly on `ANIMAL_HEIGHT`.
+- **Cost.**
+  - Small parts that share a material are baked into one mesh. The real-tier car draws in 27 calls (the old box car
+    took 29) and the human in 16.
+  - The single merge helper now lives in `surfaces.ts` (`mergeGeometries`, which applies a posed part's transform).
+    `world.ts`'s private copy is gone, and `humanoid.ts` pulls in `surfaces.ts` through the recipe closure.
+- **A defect found during the work.** A lathed piece shorter than its two round caps folded through itself and
+  rendered as a flat disc (the dog's neck). The caps are now held to 45% of the length in both the animal and
+  humanoid helpers.
+
+**The lock.** `tests/aHeroObjectIsNotABox.test.ts` (14 cases) executes the generated modules with real three.
+Against `main`'s generator it fails 12 of 14. Removing only the cap guard fails the cow case. In
+`Game3DGenerator.test.ts`, two source-text pins were updated to the new code, and a closure test now covers
+humanoid → surfaces.
+
+**Docs.**
+- `docs/game-engine/asset-inventory.md`: the L0–L3 levels, the per-object inventory with measured triangle and
+  draw-call counts, and what L3 needs.
+- `docs/game-engine/open-source-license-audit.md`: nothing external was added.
+- `AppKnowledgeBase.ts`: a new entry.
+
+**Honestly not built.**
+- **AssetProvider / manifest.** With one provider it would be speculative; it is worth building when a second
+  provider exists.
+- **L3 meshes.** These need the admin's GPU or CC0 decision.
+
+Not re-audited: the motorcycle and bicycle.
+
+This is a server-side change: the generator runs on the server, so every user, on web or phone, gets it for newly built games as soon as it is merged and deployed. No new `.aab` / `.ipa` is needed. Games built earlier keep their old files until they are rebuilt.

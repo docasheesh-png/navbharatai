@@ -369,8 +369,11 @@ describe('generateGame3D — the objects a world is made of', () => {
     expect(objects).toMatch(/const tier = \(o\?: BaseOpts\): Detail => o\?\.detail \?\? getDetailLevel\(\)/);
   });
 
-  it('the CAR is a silhouette, not a box — bonnet, cabin, boot, arches, glass, emitting lights', () => {
-    for (const part of ['bonnet', 'cabin', 'boot', 'wheelbase', 'arch', 'glassMat']) {
+  it('the CAR is a silhouette, not a box — a profile with wheel wells, arches, glass, emitting lights', () => {
+    // Phase 2 (2026-10-05): the body is a side profile extruded across the width, with the wheel wells
+    // cut into the sill. The geometry itself is measured in tests/aHeroObjectIsNotABox.test.ts; these
+    // names only pin that the pieces exist in the source.
+    for (const part of ['ExtrudeGeometry', 'wellArc', 'wheelbase', 'arch', 'glassMat', 'bonnet', 'boot']) {
       expect(objects, part).toContain(part);
     }
     // A light that does not emit is a coloured sticker.
@@ -419,8 +422,14 @@ describe('generateGame3D — the objects a world is made of', () => {
   it('the LITE tier really is lighter — no texture generation, fewer segments', () => {
     // The light tier skips surfaceMaterial entirely: on a phone the texture memory IS the budget.
     expect(objects).toMatch(/The light tier deliberately skips the texture maps/);
-    expect(objects).toMatch(/d === 'real' \? 24 : 10/);   // wheel segments
+    expect(objects).toMatch(/real \? 28 : 12/);           // wheel segments (measured in tests/aHeroObjectIsNotABox.test.ts)
     expect(objects).toMatch(/d === 'real' \? 96 : 32/);   // mountain resolution
+  });
+
+  it('asking for the humanoid pulls in surfaces — it imports the one shared merge from there', () => {
+    const only = generateGame3D(['humanoid']);
+    expect(only.files['src/game/three/humanoid.ts']).toContain("from './surfaces'");
+    expect(only.files['src/game/three/surfaces.ts']).toContain('export function mergeGeometries');
   });
 
   it('asking for objects pulls in surfaces AND environment — it imports one and needs the other', () => {

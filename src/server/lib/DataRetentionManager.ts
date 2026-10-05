@@ -21,6 +21,8 @@ import { getServerDb } from './serverDb';
 export interface RetentionDocRef {
   get(): Promise<{ exists: boolean }>;
   delete(): Promise<unknown>;
+  /** A subcollection under this document (USER_SCOPED_SUBCOLLECTIONS). Optional so older fakes still fit. */
+  collection?(name: string): { limit(n: number): { get(): Promise<{ docs: Array<{ ref: { delete(): Promise<unknown> } }> }> } };
 }
 export interface RetentionQuery {
   get(): Promise<{ docs: Array<{ ref: { delete(): Promise<unknown> } }> }>;
@@ -124,6 +126,28 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    * and is disclosed in the same place.
    */
 ];
+
+/**
+ * Records that live in a SUBCOLLECTION under a document whose id IS the uid (Q-134 sibling, 2026-10-05).
+ *
+ * 🔴 FIRESTORE DOES NOT CASCADE. `users` is erased above by deleting `users/{uid}` — and that left
+ * `users/{uid}/deviceTokens` (the phone's push token) and `users/{uid}/notifications` (mention texts)
+ * fully intact and unreachable. `promptAudits/{uid}/entries` (the head of every build's system prompt)
+ * was in no erase path at all. Each entry was read at its own store:
+ *  - users/{uid}/deviceTokens   — DeviceTokenStore.ts:50
+ *  - users/{uid}/notifications  — MentionNotificationStore.ts:88
+ *  - promptAudits/{uid}/entries — PromptAuditStore.ts (one doc per build)
+ */
+export const USER_SCOPED_SUBCOLLECTIONS: readonly { parent: string; sub: string }[] = [
+  { parent: 'users', sub: 'deviceTokens' },
+  { parent: 'users', sub: 'notifications' },
+  { parent: 'promptAudits', sub: 'entries' },
+];
+
+/** Subdocuments erased per page. */
+const ERASE_PAGE = 300;
+/** Hard stop so a pathological subcollection can never spin forever inside a request. */
+const MAX_ERASE_PAGES = 200;
 
 // ── TTL retention policies ────────────────────────────────────────────────────────────────────────
 
@@ -336,7 +360,10 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
   { collection: 'workspace_memory_v3', reason: "what the engine has learned about the user's app" },
   { collection: 'workspace_manual_edits_v3', reason: "the user's own hand edits, which must not be overwritten" },
   { collection: 'workspace_embeddings_v3', reason: "a derived index of the user's code — deleting it degrades their builds" },
-  { collection: 'workspace_diagnostics_v3', reason: 'one report per workspace, replaced in place — it does not grow with time' },
+  // ⚠️ CORRECTED 2026-10-05 (Q-134): this said the collection "does not grow with time". The latest-report
+  // doc is replaced in place, but every settled build also writes `{workspace}/history/{startedAt}`, and
+  // that subcollection grew for ever. It is on SUBCOLLECTION_RETENTION_POLICIES (180 days) now.
+  { collection: 'workspace_diagnostics_v3', reason: "the latest report per workspace, replaced in place. Its `history` subcollection is on a 180-day clock (SUBCOLLECTION_RETENTION_POLICIES)" },
   { collection: 'project_plans_v3', reason: "the plan the user's app is being built against" },
   { collection: 'app_engineering_memory_v1', reason: "the app's requirement ledger, open issues and change log — bounded per app, erased with the workspace" },
   { collection: 'app_builds', reason: "the user's own build record" },
@@ -344,6 +371,114 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
   { collection: 'user_costs', reason: 'money. A billing record deleted on a timer cannot be reconciled or disputed' },
   { collection: 'hosting_usage', reason: 'per-user metering that the bill is derived from' },
 ];
+
+// ── Subcollection retention (Q-134, admin-approved 2026-10-05) ───────────────────────────────────────
+
+/**
+ * A TTL on a subcollection that lives under every document of a parent collection.
+ *
+ * Purged PARENT BY PARENT, never with a collection-group query. A group query on a generic name like
+ * `history` would also sweep any future store's subcollection of that name, and it needs a
+ * collection-group index this project does not deploy. A query on ONE parent's subcollection uses the
+ * single-field index Firestore keeps automatically.
+ */
+export interface SubcollectionRetentionPolicy {
+  parent: string;
+  subcollection: string;
+  ttlDays: number;
+  timestampField: string;
+  timestampKind: TimestampKind;
+  /** Documents deleted per run across all parents. Defaults to DEFAULT_MAX_PER_RUN. */
+  maxPerRun?: number;
+}
+
+export const SUBCOLLECTION_RETENTION_POLICIES: readonly SubcollectionRetentionPolicy[] = [
+  /**
+   * Past build reports (`DiagnosticsStore.saveDiagnosticsHistory`): one document per settled build, per
+   * workspace, and nothing deleted them except erasing the workspace (Q-134). They are the evidence every
+   * autopsy is built from, so the window is long: 180 days, the span of the removal and safety records.
+   * The LATEST report of each workspace is the parent document itself and is not on this clock.
+   * `savedAt: Date.now()` ⇒ `epochMs`.
+   */
+  { parent: 'workspace_diagnostics_v3', subcollection: 'history', ttlDays: 180, timestampField: 'savedAt', timestampKind: 'epochMs' },
+  /**
+   * The prompt audit trail (`PromptAuditStore.ts`): one document per build, per user, appended for ever
+   * — the same growth as the build-report history and found in the same hunt. Read only as the newest
+   * 200, so 180 days (the build reports' window, which it explains) loses nothing anyone reads.
+   * `ts: Date.now()` ⇒ `epochMs`.
+   */
+  { parent: 'promptAudits', subcollection: 'entries', ttlDays: 180, timestampField: 'ts', timestampKind: 'epochMs' },
+];
+
+/** The two operations a subcollection purge needs. Satisfied by `adminSubcollectionSource` and by test fakes. */
+export interface SubcollectionSource {
+  /** Up to `pageSize` parent document ids after `afterId` (exclusive), in id order. */
+  parentIds(parent: string, afterId: string | null, pageSize: number): Promise<string[]>;
+  /** Delete up to `max` documents of `parent/{id}/{sub}` whose `field` is below `bound`. Returns how many. */
+  deleteExpiredUnder(parent: string, id: string, sub: string, field: string, bound: Date | number | string, max: number): Promise<number>;
+}
+
+/** How many parent documents one run may look under. A backlog beyond it drains over later runs. */
+export const MAX_PARENTS_PER_RUN = 20000;
+const PARENT_PAGE = 300;
+
+/**
+ * Delete subcollection records older than each policy's TTL, parent by parent, bounded per run. Uses a
+ * `< cutoff` bound, so it can only remove OLD records. Best-effort per policy; never throws.
+ */
+export async function purgeExpiredSubcollections(
+  src: SubcollectionSource,
+  nowMs: number,
+  policies: readonly SubcollectionRetentionPolicy[] = SUBCOLLECTION_RETENTION_POLICIES,
+): Promise<PurgeReport> {
+  const collections: PurgeResult[] = [];
+  for (const policy of policies) {
+    const cutoffMs = retentionCutoffMs(nowMs, policy.ttlDays);
+    const bound = retentionBound(cutoffMs, policy.timestampKind);
+    const cap = Math.max(1, Math.floor(policy.maxPerRun ?? DEFAULT_MAX_PER_RUN));
+    const name = `${policy.parent}/*/${policy.subcollection}`;
+    let deleted = 0;
+    try {
+      let after: string | null = null;
+      let scanned = 0;
+      while (deleted < cap && scanned < MAX_PARENTS_PER_RUN) {
+        const ids = await src.parentIds(policy.parent, after, PARENT_PAGE);
+        if (ids.length === 0) break;
+        for (const id of ids) {
+          if (deleted >= cap) break;
+          deleted += await src.deleteExpiredUnder(policy.parent, id, policy.subcollection, policy.timestampField, bound, cap - deleted);
+        }
+        scanned += ids.length;
+        after = ids[ids.length - 1];
+        if (ids.length < PARENT_PAGE) break;
+      }
+      collections.push({ collection: name, deleted, cutoffMs });
+    } catch (e) {
+      collections.push({ collection: name, deleted, cutoffMs, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return { collections, totalDeleted: collections.reduce((s, r) => s + r.deleted, 0) };
+}
+
+/** The production SubcollectionSource over the admin SDK. Reads parent REFERENCES only (`select()`). */
+export function adminSubcollectionSource(db: admin.firestore.Firestore): SubcollectionSource {
+  return {
+    async parentIds(parent, afterId, pageSize) {
+      let q = db.collection(parent).orderBy(admin.firestore.FieldPath.documentId()).select().limit(pageSize);
+      if (afterId) q = q.startAfter(afterId);
+      const snap = await q.get();
+      return snap.docs.map((d) => d.id);
+    },
+    async deleteExpiredUnder(parent, id, sub, field, bound, max) {
+      const snap = await db.collection(parent).doc(id).collection(sub).where(field, '<', bound).limit(max).get();
+      if (snap.empty) return 0;
+      const batch = db.batch();
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+      return snap.size;
+    },
+  };
+}
 
 /** Is this collection deliberately kept forever, rather than merely missing a policy? PURE. */
 export function isRetainedIndefinitely(collection: string): boolean {
@@ -402,6 +537,23 @@ export async function deleteUserData(db: RetentionFirestore, uid: string): Promi
       collections.push({ collection: entry.collection, deleted, error: e instanceof Error ? e.message : String(e) });
     }
   }
+  for (const entry of USER_SCOPED_SUBCOLLECTIONS) {
+    const name = `${entry.parent}/{uid}/${entry.sub}`;
+    let deleted = 0;
+    try {
+      const parent = db.collection(entry.parent).doc(uid);
+      if (typeof parent.collection !== 'function') throw new Error('this database handle cannot reach subcollections');
+      for (let page = 0; page < MAX_ERASE_PAGES; page++) {
+        const snap = await parent.collection(entry.sub).limit(ERASE_PAGE).get();
+        if (snap.docs.length === 0) break;
+        for (const d of snap.docs) { await d.ref.delete(); deleted++; }
+        if (snap.docs.length < ERASE_PAGE) break;
+      }
+      collections.push({ collection: name, deleted });
+    } catch (e) {
+      collections.push({ collection: name, deleted, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
   return { uid, collections, totalDeleted: collections.reduce((s, r) => s + r.deleted, 0) };
 }
 
@@ -441,6 +593,12 @@ export async function purgeExpired(
 
 // ── Production admin Firestore accessor (VITEST-skip, mirrors UserProfileStore) ──────────────────────
 let cachedDb: admin.firestore.Firestore | null = null;
+/** The subcollection purge's source in production, or null under test / without a database. */
+export function getSubcollectionRetentionSource(): SubcollectionSource | null {
+  const db = getRetentionDb();
+  return db ? adminSubcollectionSource(db as unknown as admin.firestore.Firestore) : null;
+}
+
 export function getRetentionDb(): RetentionFirestore | null {
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return null;
   try {

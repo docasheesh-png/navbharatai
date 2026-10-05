@@ -894,11 +894,15 @@ setInterval(() => {
           // sweep's guard walks, because `server.ts` sits at the repo ROOT and not under `src/`.
           if (envFlag('DATA_RETENTION_PURGE_ENABLED')) {
             const runPurge = () => import('./src/server/lib/DataRetentionManager')
-              .then(({ getRetentionDb, purgeExpired }) => {
+              .then(async ({ getRetentionDb, purgeExpired, getSubcollectionRetentionSource, purgeExpiredSubcollections }) => {
                 const db = getRetentionDb();
-                return db ? purgeExpired(db, Date.now()) : null;
+                const top = db ? await purgeExpired(db, Date.now()) : null;
+                // Q-134: subcollections under every parent (past build reports), purged parent by parent.
+                const sub = getSubcollectionRetentionSource();
+                const nested = sub ? await purgeExpiredSubcollections(sub, Date.now()) : null;
+                return (top?.totalDeleted ?? 0) + (nested?.totalDeleted ?? 0);
               })
-              .then((r) => { if (r && r.totalDeleted) console.log(`[P-DATA.4] retention purge removed ${r.totalDeleted} expired record(s)`); })
+              .then((n) => { if (n) console.log(`[P-DATA.4] retention purge removed ${n} expired record(s)`); })
               .catch(() => { /* best-effort — purge must never affect the server */ });
             // `exclusive`: this DELETES, and every instance runs its own tick loop. The deletes are
             // idempotent, so N instances would not destroy anything they should not — they would

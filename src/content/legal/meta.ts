@@ -36,7 +36,7 @@ export const LEGAL_META: LegalMeta[] = [
     subtitle: 'What data we collect, why, where it lives, and your rights (DPDP Act)',
     // Kept as a literal because this file must not import the policy BODY (see the header). The two
     // dates are held equal by tests/appCheck.test.ts instead.
-    updated: '4 October 2026',
+    updated: '5 October 2026',
     settingsTile: true,
   },
   {

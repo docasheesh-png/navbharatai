@@ -90246,3 +90246,12 @@ the agent skip a re-run of a check it already passed — that needs every fact i
 and a wrong skip would be a false pass.
 
 ⚠️ **Correction to the entry above (same day):** it says the existing 3D tests "only read the source text". That is not fully true. `tests/game3dObjects.test.ts` already RUNS the generated `objects.ts` against a three.js stub (`tests/helpers/threeStub.ts`), for the bikes. It never covered the road, the car's arches, merged UVs, the ground or the textures, which is why those defects survived. The stub now carries the detail tier (`setDetailLevel` / `getDetailLevel`), since that moved into `surfaces.ts`. `tests/aRecipeBringsTheLayersItImports.test.ts` now expects `surfaces.ts` among the files a missing 3D layer brings in, because `world.ts` imports it.
+
+### 2026-10-05 — #3555 merged: Q-101, Q-136, Q-160, Q-162, Q-163 leave the open queue
+
+#3555 merged (staged with #3554 by the merging session). Its resolved rows move to ✅ and leave the open table;
+their ledgers are the five 2026-10-05 entries above. Two watch items carried from those ledgers: Q-160's
+"Save to folder" has not yet been pressed in a real desktop Chrome against a real disk, and Q-163's first real
+domain connected after a publish should show the app within ~15 minutes with one notification. Still open from
+that PR: **Q-159** — 🟡 the code is live; it needs the admin to set `SCHEDULER_TICK_SECRET` and create the Cloud
+Scheduler job (steps in the queue row).

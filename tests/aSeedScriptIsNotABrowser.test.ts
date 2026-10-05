@@ -58,19 +58,30 @@ describe('🌐 the list of globals is MEASURED in the running node, not assumed'
     }
   });
 
-  it('and the two that node DOES define are deliberately not on it', () => {
-    // node 22 has both, so a file using only these runs fine and must never be refused.
-    expect(typeof globalThis.navigator).not.toBe('undefined');
-    expect(typeof globalThis.fetch).not.toBe('undefined');
+  // ⚠️ THE NODE THIS TEST RUNS ON IS NOT ALWAYS THE SANDBOX'S NODE. The sandbox images pin node 22
+  // (asserted below); CI (`.github/workflows/ci.yml`) runs node 20, and the first version of this file
+  // asserted `process.versions.node` is 22 — green on every developer machine, red on every CI run.
+  // `navigator` only exists from node 21, so the two assertions that need the sandbox's node run only
+  // where that node is; the undefined-list measurement above holds on 20 and 22 alike (checked on both).
+  const nodeMajor = Number(process.versions.node.split('.')[0]);
+
+  it('the two that node 22 DOES define are deliberately not on it', () => {
+    // A file using only these runs fine on the sandbox's node and must never be refused.
     expect(BROWSER_ONLY_GLOBALS as readonly string[]).not.toContain('navigator');
     expect(BROWSER_ONLY_GLOBALS as readonly string[]).not.toContain('fetch');
   });
 
+  it.runIf(nodeMajor >= 22)('…and on the sandbox\'s own major this node really defines both', () => {
+    expect(typeof globalThis.navigator).not.toBe('undefined');
+    expect(typeof globalThis.fetch).not.toBe('undefined');
+  });
+
   it('matches the node the sandbox images actually pin', () => {
-    // The measurement above is only evidence if it is the same major version the build runs on.
+    // The measurement above is evidence for the sandbox because the list is undefined on every node
+    // major this suite runs on (20 in CI, 22 locally and in the sandbox) — not because CI's node is 22.
     const dockerfile = fs.readFileSync(path.join(__dirname, '../infra/e2b/e2b.Dockerfile'), 'utf8');
     expect(dockerfile).toMatch(/FROM node:22\b/);
-    expect(process.versions.node.split('.')[0]).toBe('22');
+    expect(nodeMajor).toBeGreaterThanOrEqual(20);
   });
 });
 

@@ -89535,7 +89535,7 @@ the right answer; the census proves both readers ask it. The live effect to watc
 `lintBuiltApp`, `analyzeDesignCoverage`, `analyzeHooksRules`, `findBootKillingEnvGuards`) and every call of the
 four file-scoped scans. The asymmetry existed in exactly one place, because reachability filtering existed in
 exactly four — and that is now five, named, and counted.
-### 2026-10-04 — Forensic security / reliability audit (PR #NNNN, branch `claude/new-session-gx9294`)
+### 2026-10-04 — Forensic security / reliability audit (PR #3538, branch `claude/new-session-gx9294`)
 
 The admin asked for a repo-wide audit, with every finding fixed P0 → P3 and locked by a test proven by
 reversion. Eight domain audits (auth/IDOR, API surface, AI cost, preview isolation, rules, payments, GitHub,
@@ -89792,6 +89792,30 @@ gate, instead of saying a freeze would not hold.
 open PR #3530, which moves this card to a new page; the edit here is two small blocks inside the card, so
 whoever merges second should expect a conflict in exactly that region and keep both changes.
 
+## 2026-10-04/05 — Merging session: the day's merges, what the merge gate itself taught, and what the admin still owns
+
+**Merged to `main` by the merging session (order):** #3514 · #3515 · #3517 · #3522 · #3523 · #3524 · #3525 · #3526 · #3527 · #3528 · #3529 · #3501 · #3531 · #3532 · #3535 · #3537 · #3538 · #3539 · #3540 · #3534 · #3541. Merged by the admin: #3516 · #3518 · #3519 · #3520 · #3521. Earlier in the day: #3477–#3497, #3503, #3505–#3513 (see the morning entries).
+
+**Three defects the merge gate found that no PR's own CI could see — each fixed at the class:**
+- **The job's own 30-minute cap cancelled green-bound runs.** With eight or nine PR runs in flight the shared runners stretched every run to 21–30 min, and the later-started run of a pair hit `The job has exceeded the maximum execution time of 30m0s`. `ci.yml` `timeout-minutes` is 45 (#3524). The Q-500 row names both causes (that cap, and the merging session's own deliberate cancels of interim runs on queued PRs).
+- **A report begun before a reset reached the sink installed after it** (`src/lib/observability/index.ts`): `setUserContext` hashes the uid and loads the SDK asynchronously; a test reset between those steps let the stale continuation call `setUserId` on the next harness — an order-dependent failure on #3531/#3532. The module carries a generation token now; `tests/aStaleReportNeverReachesTheNextHarness.test.ts` is reversion-proven.
+- **Two source-map guards with two predicates** (#3529's raw-path `isPrivateBuildFile`, #3538's decoded `denyServerOnlyArtifacts`): `/server.cjs.m%61p` passed the first. One decoded predicate now; `tests/theServerSourceIsNeverServed.test.ts` asserts the two agree.
+- **The release-gate step would have failed every Cloud Build submit** (#3540): its bash variables were written `$URL` / `$BODY`, and Cloud Build substitutes every `$NAME` in step args before bash runs — an unknown substitution fails the build at submit, i.e. the fix for "a freeze that stops nothing" would have stopped every deploy. The step now writes `$$URL` / `$$BODY`; `tests/cloudBuildArgsEscapeBashVariables.test.ts` fails on any bare non-built-in `$NAME` in `cloudbuild.yaml`, and the run-the-step harness applies Cloud Build's `$$` → `$` rewrite before executing the script, so the script RUN in the test is the script Cloud Build runs.
+- Also: `zip-stream` 7 is ESM-only and `require()` returned the module namespace, so every `/api/download-zip` threw `m is not a constructor` while tsc and the suite stayed green — `src/server/lib/interopDefault.ts` is the one rule, used by `routes/zip.ts` and `firebaseAdminModule.ts` (#3501).
+
+**The duplicate-work class fired six times today**, each a row worked by two or three sessions at once: Q-515/Q-516/Q-518 (#3532 vs #3533), Q-150 (#3532, #3534, #3536), Q-147 (#3534, #3536), the entry-first write note (#3523 vs #3524 — made one rule said once), the sign-in sanity (#3526 vs #3527 — unified by #3527's author), and the Q-154 proxy-hop measurement (#3534) landing on top of #3538's `clientAddress` census — the census refused the report's hand read of the header in CI, and the read moved into `proxyHops.ts` as the one listed measurement of a decision `clientAddress.ts` alone makes. #3532 was taken for its rows; #3533, #3534 and #3536 carry rebase notes naming the parts that are still wanted. **A row that is being worked needs its owner written into the queue BEFORE the work starts** — the sixth rule's "a row carrying another session's PR number is TAKEN" protects nothing while the number is written at PR time.
+
+**Merge method for the chain was MERGE COMMITS, not squash** (the slice-chain exception, again): after one squash every later staged head became un-mergeable on overlapping queue hunks and GitHub created no CI run for a dirty PR, so a squash chain would have cost one 25-minute re-run per PR, serially.
+
+**Admin actions surfaced today (not code):**
+- 🔴 **Q-611** — real credentials sit in git HISTORY (`.env.example` in the 2026-06-09 initial commit, placeholders since 2026-06-11; the Cashfree-shaped secret confirmed by an independent scan): rotate the Cashfree secret (+ webhook secret, same value), the Anthropic key, the Gemini key and the GitHub OAuth client secret, and update Cloud Run.
+- **Q-610** — deploy the hardened rules after #3538: `firebase deploy --only firestore:rules,storage --project gen-lang-client-0866594388`.
+- **Q-574** — run the manual `e2b-template` workflow (#3528's primer change).
+- Crashlytics (#3529) and every phone-side change today reach phones only with a fresh `.aab`/`.ipa` — built only when the admin asks.
+- **#3540's gate is inert until the Cloud Build trigger carries the `_RELEASE_GATE_URL` substitution** (empty ⇒ the step says so and exits 0; nothing changes for deploys until it is set).
+- **#3530** (admin panel nine-tab menu) is green and clean and waits on the admin's explicit go-ahead, per its own description.
+
+**Queue pruned in this entry's PR:** every IN PROGRESS row whose owner PR is merged is deleted from `BUILD_REPORT_QUEUE.md` (the sixth rule: a row moves to ✅ when its PR is MERGED and is then deleted from the open table; its ledger is the PR itself and the autopsy entries above). 🟡 BLOCKED rows stay; Q-574 (E2B template rebuild) and the other admin-owned rows are untouched.
 ### 2026-10-05 — #3534 merged: its resolved rows leave the open queue
 
 #3534 merged (`main` after 7f95104c). Per the sixth rule, the rows it resolved move to ✅ and leave the open table:

@@ -472,7 +472,7 @@ import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextB
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
-import { provenFromTimeline } from '../AgentV3/provenFromTimeline';
+import { fillGateFromLedger, renderProvenInLedger } from '../AgentV3/evidenceLedger';
 import { appRenderedRecord } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
@@ -20773,7 +20773,7 @@ async function noteBuildOutcome(
        */
       const renderProvenNow = (): boolean => {
         if (previewVerifiedRendered) return true;
-        try { return provenFromTimeline(buildDiag.report().issues).preview === 'passed'; }
+        try { return renderProvenInLedger(buildDiag.evidenceLedger()); }
         catch { return false; }
       };
 
@@ -22605,27 +22605,12 @@ async function noteBuildOutcome(
         // evidence set above, and a suite that could not EXECUTE is not counted in either direction.
         // Safe for billing by construction: a RED gate flips a build to free only on
         // shippingIssueCount('error'), which test evidence does not contribute to.
-        try {
-          const proven = buildDiag.agentRunEvidence();
-          if (gateEvidence.typecheck === 'not-run' && proven.typecheck) gateEvidence.typecheck = proven.typecheck;
-          if (gateEvidence.tests === 'not-run' && proven.tests) gateEvidence.tests = proven.tests;
-        } catch { /* evidence recovery is best-effort and must never touch a build */ }
-        // THE SAME READ, over the other half of the ledger (autopsy 697b38ee, 6th appearance). The
-        // command log settles typecheck and tests; the facts an ACTOR proved — the app loaded in a
-        // real browser, an address really went up — are recorded on the build's own timeline and were
-        // read back by nobody. See provenFromTimeline.ts, including why this cannot change a bill.
-        try {
-          const seen = provenFromTimeline(buildDiag.report().issues);
-          if (gateEvidence.pages === 'not-run' && seen.pages) gateEvidence.pages = seen.pages;
-          // Fill-only, exactly like the two above: a preview recorded as `'failed'` keeps its failure,
-          // and a `'passed'` that is already there is untouched. This can only turn an UNPROVEN preview
-          // into a proven one, which removes no failure and adds none — see provenFromTimeline.ts on why
-          // that cannot move a bill.
-          if (gateEvidence.preview === 'not-run' && seen.preview) gateEvidence.preview = seen.preview;
-          if (gateEvidence.previewUrlPublished === undefined && seen.previewUrlPublished !== undefined) {
-            gateEvidence.previewUrlPublished = seen.previewUrlPublished;
-          }
-        } catch { /* evidence recovery is best-effort and must never touch a build */ }
+        // THE EVIDENCE LEDGER (Q-101, autopsy 697b38ee): one read of everything this build already proved —
+        // typecheck and tests from the command log, pages and preview from facts an actor recorded on the
+        // timeline. FILL-ONLY: a recorded failure keeps its failure, so this moves the sentence, never the
+        // bill (see evidenceLedger.ts / provenFromTimeline.ts).
+        try { fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger()); }
+        catch { /* evidence recovery is best-effort and must never touch a build */ }
         const gateFindings = () => ({
           // Counted from what this build actually recorded, so the gate and the report cannot disagree.
           blockers: buildDiag.shippingIssueCount('error'),

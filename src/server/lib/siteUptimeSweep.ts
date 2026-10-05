@@ -12,7 +12,8 @@
  * admin list. Every dependency is injectable so the orchestration is tested without a network.
  */
 import * as admin from 'firebase-admin';
-import { checkDomainServing } from './domainServingCheck';
+import { checkDomainServing, type ServingState } from './domainServingCheck';
+import { autoPublishToNewDomain, realAutoPublishDeps, type AutoPublishOutcome } from './domainAutoPublish';
 import { activeDomainLinks, type DomainLinkRecord } from './firebaseDomainLink';
 import { saveNotification } from './AdminNotificationStore';
 import { resolveEmailConfig, sendAlertEmail } from './alertEmail';
@@ -32,6 +33,10 @@ export interface SweepDeps {
   email: (userId: string, message: string) => Promise<boolean>;
   now: () => number;
   env: NodeJS.ProcessEnv;
+  /** The raw serving state (Q-163) — so an EMPTY site can be told apart from a broken one. */
+  serving?: (domain: string) => Promise<ServingState | undefined>;
+  /** Put the already-published app on a domain whose site is still empty (Q-163). Never throws. */
+  autoPublish?: (link: DomainLinkRecord) => Promise<AutoPublishOutcome>;
 }
 
 async function ownerEmail(userId: string): Promise<string | null> {
@@ -62,6 +67,8 @@ export const realDeps: SweepDeps = {
   },
   now: () => Date.now(),
   env: process.env,
+  serving: async (domain) => (await checkDomainServing(domain).catch(() => null))?.state,
+  autoPublish: (link) => autoPublishToNewDomain(link, realAutoPublishDeps),
 };
 
 export interface SweepSummary {
@@ -78,12 +85,20 @@ export async function runSiteUptimeSweep(deps: Partial<SweepDeps> = {}): Promise
   const links = await d.links(maxDomainsPerSweep(d.env)).catch(() => [] as DomainLinkRecord[]);
   const summary: SweepSummary = { probed: 0, alertedDown: 0, alertedUp: 0, skipped: null };
   const cooldown = cooldownMs(d.env);
+  const useServing = !deps.probe && typeof d.serving === 'function';
   const queue = [...links];
   const worker = async () => {
     for (let link = queue.shift(); link; link = queue.shift()) {
       try {
         const prev = await d.load(link.domain, link.workspaceId, link.userId);
-        const outcome = await d.probe(link.domain);
+        // A caller that injects its own `probe` keeps exactly that behaviour; otherwise the raw state is read
+        // once, so an empty site (connected after the last publish) can be given the published app (Q-163).
+        const state = useServing ? await d.serving!(link.domain) : undefined;
+        let outcome = useServing ? outcomeFromServing(state) : await d.probe(link.domain);
+        if (state === 'nothing_published' && d.autoPublish) {
+          // Published just now ⇒ not "down": the next sweep probes the domain for real.
+          if ((await d.autoPublish(link).catch(() => 'failed' as const)) === 'published') outcome = 'unknown';
+        }
         const now = d.now();
         const { next, action } = decideUptime(prev, outcome, now, cooldown);
         summary.probed += 1;

@@ -148,7 +148,9 @@ describe('the defect, at the two producers', () => {
 
 describe('the consumers', () => {
   it('the gate fill is FILL-ONLY — a preview recorded as failed keeps its failure', () => {
-    expect(ROUTE).toContain("if (gateEvidence.preview === 'not-run' && seen.preview) gateEvidence.preview = seen.preview;");
+    // Since Q-101 the fill lives in the one ledger helper, for every fact at once (preview included).
+    expect(ROUTE).toContain('fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger())');
+    expect(readFileSync('src/server/AgentV3/evidenceLedger.ts', 'utf8')).toContain("if (entry && gate[name] === 'not-run') gate[name] = entry.outcome;");
   });
 
   it('the runtime verdict asks the ledger, not one pass’s local memory', () => {
@@ -161,7 +163,7 @@ describe('the consumers', () => {
     const at = ROUTE.indexOf('const renderProvenNow = (): boolean =>');
     expect(at).toBeGreaterThan(-1);
     const near = ROUTE.slice(at, at + 700);
-    expect(near).toContain("provenFromTimeline(buildDiag.report().issues).preview === 'passed'");
+    expect(near).toContain('renderProvenInLedger(buildDiag.evidenceLedger())');
     expect(ROUTE).toContain('{ previewRendered: renderProvenNow() }');
     // A module turn also passes the shell it awaits (autopsy 0311186f); the render question is unchanged.
     expect(ROUTE).toMatch(/runtimeUncheckedRecord\(\{ previewRendered: renderProvenNow\(\)(?:, awaitingShell: moduleAwaitsShell)? \}\)/);

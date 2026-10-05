@@ -90526,5 +90526,60 @@ recorded here). So `TRUSTED_PROXY_HOPS = 1` (#3538) is confirmed on the real hos
 The row leaves the open queue. Lock: `tests/aCallerCannotChooseItsOwnAddress.test.ts` (one reader of the address)
 and `tests/theClientIsMeasuredNotGuessed.test.ts` (the measurement and its card). If the hosting path ever
 changes (a CDN or load balancer in front of Cloud Run), the same card will say Mismatch and name the number.
+### 2026-10-05 — Q-136: a state-routed app's tab that opens only the frame is named
+
+The per-route check (Lane B) visits routes; a state-routed app has none, so its screens are reached by the click
+explorer — which judged "blank" by the whole root. A tab that left the main area empty under a painted nav read
+"ok": the Q-147 class (the frame judged as the page) in a third lane. The explorer now asks the shared
+`MAIN_REGION_EMPTY_JS` after each press, with the paint wait's own grace for a screen still fetching. Real-browser
+lock: `tests/aTabThatEmptiesTheMainArea.test.ts`.
+
+### 2026-10-05 — Q-162: the admin's rule for the 45 undecided routes is written down
+
+Admin: *"apki salah ke anusar bana kar sara work complete finish karo"*. The recommendation becomes a CLAUDE.md
+core rule: an uncalled `/api` route is decided (screen / named outside caller / deleted) in the same PR that next
+touches its file, and the baseline shrinks with it — never a mass deletion. The census now maps every undecided
+route to its file, so the list stays actionable.
+
+### 2026-10-05 — Q-159: scheduled work no longer needs a server that happens to be awake
+
+Admin chose Cloud Scheduler. The in-process scheduler kept `nextRun` in memory, so an instance that woke at 04:05
+believed today's 04:00 bill was tomorrow's, and with no instance up at 04:00 nothing ran at all. Now every
+instance records each exclusive job's run in `job_runs/{id}`, and `POST /api/internal/scheduler-tick` (secret
+header) runs whatever is due by THAT record — first sight seeds instead of running, an unreadable record runs
+nothing, the lease still picks one instance. The plan sweep (renewal reminders) left its private `setInterval` for
+the shared scheduler as an exclusive job. 🟡 Live once the admin sets `SCHEDULER_TICK_SECRET` and creates the
+Cloud Scheduler job (steps in the queue row). Lock: `tests/scheduledWorkDoesNotNeedAnAwakeServer.test.ts`.
+
+### 2026-10-05 — Q-160: "Save to folder" — Open Folder can write back, on a press, safely
+
+Admin chose the cautious option. A project opened from a folder now remembers that folder (and each file's
+disk timestamp at read time); the Files panel shows "Save to folder". A press, after a confirmation, writes only
+changed and new files — never a delete, never over a file edited on disk since (named instead), never into a
+folder that held a different project (under half the files shared ⇒ refused), never outside it or into
+node_modules/.git/dist. Lock: `tests/saveToFolderWritesOnlyWhatChanged.test.ts`. Not exercised in a real Chrome
+against a real disk here (no desktop browser with a picker in this container) — the API calls are the
+standard File System Access ones, and the logic is tested against a fake disk.
+
+### 2026-10-05 — Q-163: a domain connected after the last publish gets the published app by itself
+
+Admin chose option (b). The uptime sweep (every 15 minutes, one instance) already probes every connected domain;
+when the site is still EMPTY (the hosting service's two-marker "nothing published" page), `domainAutoPublish.ts`
+reads the app's already-published copy back from the publish bucket and deploys it to the domain's site — no
+rebuild, so no "which build is current" question. Owner's active app only, once per domain + app (transaction
+claim), a 5xx retried once, the owner notified either way, and the same sweep does not call the domain "down".
+Kill switch `DOMAIN_AUTOPUBLISH=off`. Lock: `tests/aNewDomainGetsThePublishedApp.test.ts`.
+
+### 2026-10-05 — Q-101: one read of everything a build already proved
+
+The write half of the ledger already existed — actors record proven facts on the build's timeline, and
+`RENDER_PROVEN_CODES` (2026-09-21) is the one render vocabulary. The gap was the READ: the release gate read the
+command log and the timeline in two separate blocks with two vocabularies, and the render answer read a third
+way. `evidenceLedger.ts` is now the one read — composing `agentRunEvidence` and `provenFromTimeline` unchanged,
+naming every fact once with where it was proven — and `BuildDiagnostics.evidenceLedger()` is its entry point.
+The gate fills from it (fill-only: a recorded failure keeps its failure, so a bill cannot move) and
+`renderProvenNow` reads it. A census fails on any direct read of either source. Not done (honestly): letting
+the agent skip a re-run of a check it already passed — that needs every fact invalidated on the next write,
+and a wrong skip would be a false pass.
 
 ⚠️ **Correction to the entry above (same day):** it says the existing 3D tests "only read the source text". That is not fully true. `tests/game3dObjects.test.ts` already RUNS the generated `objects.ts` against a three.js stub (`tests/helpers/threeStub.ts`), for the bikes. It never covered the road, the car's arches, merged UVs, the ground or the textures, which is why those defects survived. The stub now carries the detail tier (`setDetailLevel` / `getDetailLevel`), since that moved into `surfaces.ts`. `tests/aRecipeBringsTheLayersItImports.test.ts` now expects `surfaces.ts` among the files a missing 3D layer brings in, because `world.ts` imports it.

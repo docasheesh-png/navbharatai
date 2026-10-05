@@ -298,6 +298,15 @@ the code (it is actually read somewhere) on 2026-07-11.
   as the vaccine repair budget noted in that flag's own entry.
   **What to watch:** `FUZZ_ROBUSTNESS` findings in the admin build report. A build that suddenly takes
   ~90s longer at the very end is this pass; unset the key to revert instantly.
+- **Scheduled work without an awake server — Cloud Scheduler tick (built 2026-10-05, Q-159, NOT live until set):**
+  `SCHEDULER_TICK_SECRET` (16+ random characters). Cloud Scheduler calls `POST https://navbharatai.com/api/internal/scheduler-tick`
+  with header `x-scheduler-secret: <the same value>` every 5 minutes; the tick runs every exclusive job (plan sweep and
+  renewal reminders, hosting daily bill, image cleanup, outbound rescan, site uptime, retention purge when enabled) that
+  is due by the durable `job_runs` record. Unset ⇒ the route answers 503, so a half-done setup shows red in the Cloud
+  Scheduler console. The admin's choice over `--min-instances 1` (2026-10-05): it costs nothing while idle.
+- **New domain gets the published app by itself (built 2026-10-05, Q-163):** `DOMAIN_AUTOPUBLISH` — kill switch,
+  **default ON**; `off` stops the uptime sweep putting the already-published app (from `PUBLISHED_APPS_BUCKET`'s copy)
+  on a connected domain whose site is still empty. Once per domain + app, owner's active app only.
 - **Payment recovery (shipped 2026-08-04):** `PAYMENT_RECONCILE_MIN_AGE_MINUTES` (2),
   `PAYMENT_RECONCILE_MAX_AGE_DAYS` (7), `PAYMENT_RECONCILE_MAX_ORDERS` (5). On sign-in the server settles
   the user's own unfinished orders against Cashfree. ⚠️ CORRECTION 2026-08-10: this entry used to say

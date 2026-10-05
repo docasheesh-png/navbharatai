@@ -90963,3 +90963,47 @@ new Indian vehicles and the car.
 Rendered on a road with houses and trees after 8 simulated seconds: autos, cars, the bus and a truck in their
 lanes, with no console errors. The prompt now says a driving or city game has traffic. The builder census
 treats `createTraffic` as a system, not a catalogue object.
+
+### 2026-10-05 — Game engine G5: weapons that feel like weapons
+
+A generated shooter usually spawned one projectile per click and called it a gun, and a sword was a radius
+check that hit sixty times a second. Two halves now come from the library.
+
+**The behaviour — `src/game/systems/weapon.ts` (generate_game_systems, closure weapon → projectile):**
+- `Weapon(kind)` with presets for pistol, rifle, smg, shotgun, sniper and bow: a fire rate, semi/auto, a
+  magazine, and a reload you can be caught in. An empty gun clicks (`WEAPON_EMPTY`) and starts its own reload.
+- Spread blooms while spraying (capped at `MAX_BLOOM`) and settles when you stop. Pellets are uniform over the
+  cone's disc. A shotgun is many pellets and ONE `WEAPON_FIRED` (`FireOptions.silent`). An arrow falls.
+- Recoil comes out as `weapon.kick`, which decays on its own.
+- **The fire rate is exact at 60 fps.** A cooldown that is RESET on each shot rounds every gap up to whole
+  frames, so 13 rounds a second quietly became 12. A shot due mid-step now carries its lateness into the next
+  gap — only while the trigger is held continuously, so no shot after a pause comes early.
+- A cooldown counts as ready under 1 µs: 30 steps of 1/60 leave about 1e-16, which made a twice-a-second
+  sword wait one extra frame.
+- `MeleeWeapon` swings once per cooldown and lands ONCE, at its strike moment, on targets in front
+  (`meleeHits`: within the arc, within reach counting each target's radius, nearest first).
+
+**The models — `createWeapon({ kind })` in objects.ts:**
+- Pistol, rifle, smg, shotgun and sniper (with a scope) are built from side profiles. Sword and axe are there
+  too. The grip is at the origin and the barrel points along +Z, with a `muzzle` to fire from.
+- The sword blade is LOFTED with a diamond section: it thins toward the point AND toward both edges, so it
+  catches the light as a ground bevel. An extrude of one thickness reads as a ruler.
+- The bow really draws: `setDraw(0..1)` bends both limbs back from the grip, pulls the string into a V that
+  meets the limb tips and the nock, and shows an arrow on it.
+- **Found while building it:** the first bow's string sat 8 cm behind its own limb tips, a sign error in the
+  string's position.
+- The humanoid gained `leftHand` / `rightHand` grips, `hold(item)` and `aim(on)`.
+
+The catalogue's sword, gun and bow entries now name `createWeapon`; the builder census demanded it. The prompt
+says a weapon is two things, both from the library.
+
+**Locked by `tests/aGunFeelsLikeAGun.test.ts`** (12 cases):
+- fire rates, held vs pressed, and the dry click plus reload;
+- bloom bounded inside the cone, shotgun pellets with one bang, and the arrow's drop;
+- melee in front, once per swing;
+- the models' sizes, grips and muzzles, and the sword's taper and bevel;
+- the bow's draw, with the string meeting the tips and the nock at every draw;
+- a humanoid holding and aiming.
+
+The generated modules typecheck strictly. They were also rendered in a real browser: a rack of all eight,
+plus a rifleman, a swordsman and an archer at full draw, with no console errors.

@@ -1196,7 +1196,16 @@ export interface Humanoid {
     rightShoulder: THREE.Group; rightElbow: THREE.Group;
     leftHip: THREE.Group; leftKnee: THREE.Group;
     rightHip: THREE.Group; rightKnee: THREE.Group;
+    /** Where a held object goes — the palm, at the end of each forearm. */
+    leftHand: THREE.Group; rightHand: THREE.Group;
   };
+  /**
+   * Put an object in the right hand: a weapon from createWeapon(), a torch, a phone. Its +Z points where
+   * the arm points (models face +Z). Pass null to empty the hand.
+   */
+  hold: (item: THREE.Object3D | null) => void;
+  /** Raise the arms to aim what the right hand holds, straight ahead, while the legs keep walking. */
+  aim: (on: boolean) => void;
   /** Drive the pose. dt in seconds; speed in world units/second; grounded false while airborne. */
   update: (dt: number, speed: number, grounded?: boolean) => void;
   dispose: () => void;
@@ -1374,7 +1383,10 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
     thumb.position.set(-side * limbT * 0.05, -foreArmH - limbT * 0.2, limbT * 0.32);
     thumb.rotation.x = 0.5;
     elbow.add(baked([segment(limbT * 0.43, limbT * 0.33, foreArmH, skinM), hand, thumb], skinM));
-    return { shoulder, elbow };
+    const grip = new THREE.Group();
+    grip.position.y = -foreArmH - limbT * 0.35;
+    elbow.add(grip);
+    return { shoulder, elbow, grip };
   };
 
   const leg = (side: number) => {
@@ -1409,6 +1421,8 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
   const leftLeg = leg(-1), rightLeg = leg(1);
 
   let phase = 0;
+  let aiming = false;
+  let held: THREE.Object3D | null = null;
   const update = (dt: number, speed: number, grounded = true) => {
     const moving = speed > 0.05;
     // Stride frequency rises with speed but saturates — a sprint is a faster stride, not a blur.
@@ -1442,7 +1456,15 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
 
     // Small counter-rotations: the body twists against the stride and bobs twice per cycle. Tiny
     // numbers, and they are most of the difference between "animated" and "alive".
-    chest.rotation.y = -s * swing * 0.18;
+    if (aiming) {
+      // Gun arm straight out in front, the other hand supporting it; the torso stops twisting.
+      right.shoulder.rotation.x = -Math.PI / 2; right.elbow.rotation.x = 0;
+      left.shoulder.rotation.x = -Math.PI / 2 + 0.15; left.elbow.rotation.x = -0.35;
+      left.shoulder.rotation.z = -0.45;
+    } else {
+      left.shoulder.rotation.z = 0;
+    }
+    chest.rotation.y = aiming ? 0 : -s * swing * 0.18;
     hips.rotation.y = s * swing * 0.1;
     hips.position.y = legH + (moving ? Math.abs(Math.sin(phase * 2)) * 0.02 * (1 + speed * 0.1) : Math.sin(phase) * 0.006);
     spine.rotation.x = moving ? Math.min(0.02 + speed * 0.012, 0.16) : 0.01;
@@ -1458,7 +1480,19 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
       rightShoulder: right.shoulder, rightElbow: right.elbow,
       leftHip: leftLeg.hip, leftKnee: leftLeg.knee,
       rightHip: rightLeg.hip, rightKnee: rightLeg.knee,
+      leftHand: left.grip, rightHand: right.grip,
     },
+    hold: (item: THREE.Object3D | null) => {
+      if (held) right.grip.remove(held);
+      held = item;
+      if (item) {
+        // The hand's −Y runs down the forearm, so an object's +Z must turn onto it.
+        item.rotation.set(Math.PI / 2, 0, 0);
+        item.position.set(0, 0, 0);
+        right.grip.add(item);
+      }
+    },
+    aim: (on: boolean) => { aiming = on; update(0, 0, true); },
     update,
     dispose: () => { for (const d of disposables) d.dispose(); },
   };
@@ -2157,6 +2191,176 @@ export function createTractor(options: TractorOptions = {}): THREE.Group {
     g.add(front);
   }
   return g;
+}
+
+// ── WEAPONS (models) ─────────────────────────────────────────────────────────────────────────────
+export type WeaponModelKind = 'pistol' | 'rifle' | 'smg' | 'shotgun' | 'sniper' | 'sword' | 'axe' | 'bow';
+export interface WeaponModelOptions extends BaseOpts { kind?: WeaponModelKind }
+export interface WeaponModel {
+  root: THREE.Group;
+  /** The barrel tip (or arrow rest, or blade tip). Read its world position to fire from it. */
+  muzzle: THREE.Object3D;
+  kind: WeaponModelKind;
+  /**
+   * Bow only: draw it, 0 (at rest) to 1 (full draw). The limbs bend back, the string pulls into a V and an
+   * arrow sits on it while it is drawn. Drive it from the trigger: \`model.setDraw?.(held ? 1 : 0)\` — or ease
+   * toward it for a slow, tense draw.
+   */
+  setDraw?: (amount: number) => void;
+}
+
+/**
+ * A hand-held weapon at real size, built from its own side profile like the vehicles — a gun is a stock,
+ * a receiver, a magazine and a grip, not a box with a cylinder on it. The GRIP is at the origin and the
+ * barrel points along +Z, so humanoid.hold(weapon.root) puts it in the hand pointing where the arm points.
+ * Pair it with the Weapon / MeleeWeapon systems (generate_game_systems, weapon.ts) for how it fires.
+ */
+export function createWeapon(options: WeaponModelOptions = {}): WeaponModel {
+  const d = tier(options);
+  const real = d === 'real';
+  const kind = options.kind ?? 'rifle';
+  const root = new THREE.Group();
+  const gunmetal = new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.45, metalness: 0.8 });
+  const polymer = new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.7, metalness: 0.1 });
+  const wood = shared('wood', d, 0x7a4a26, 1);
+  const steel = new THREE.MeshStandardMaterial({ color: 0xd5d9de, roughness: 0.2, metalness: 1 });
+  const muzzle = new THREE.Object3D();
+  muzzle.name = 'muzzle';
+  const barrel = (r: number, z0: number, z1: number, y: number, mat: THREE.Material) => {
+    const b = mesh(new THREE.CylinderGeometry(r, r, z1 - z0, real ? 12 : 6), mat, d);
+    b.rotation.x = Math.PI / 2;
+    b.position.set(0, y, (z0 + z1) / 2);
+    root.add(b);
+  };
+  const body = (pts: number[][], width: number, mat: THREE.Material) => root.add(mesh(extrudeProfile(pts, width, Math.min(0.006, width / 4), real), mat, d));
+
+  if (kind === 'pistol') {
+    body([[-0.05, 0.0], [-0.06, 0.06], [0.15, 0.06], [0.15, 0.01], [0.02, 0.0], [0.0, -0.1], [-0.045, -0.11], [-0.03, 0.0]], 0.03, gunmetal);
+    barrel(0.008, 0.15, 0.165, 0.04, polymer);
+    muzzle.position.set(0, 0.04, 0.165);
+  } else if (kind === 'rifle' || kind === 'smg') {
+    const k = kind === 'smg' ? 0.62 : 1;
+    // Stock, receiver, handguard, the magazine curving forward and the pistol grip — one outline.
+    body([[-0.42 * k, -0.12], [-0.42 * k, 0.03], [-0.15, 0.06], [0.36 * k, 0.06], [0.36 * k, -0.02], [0.1, -0.02],
+      [0.1, -0.2], [0.04, -0.2], [0.03, -0.03], [-0.02, -0.03], [-0.05, -0.12], [-0.1, -0.12], [-0.08, -0.03], [-0.16, -0.03], [-0.3 * k, -0.12]], 0.045, polymer);
+    barrel(0.011, 0.36 * k, 0.58 * k, 0.035, gunmetal);
+    if (real) root.add(mesh(mergeGeometries([partBox(0.02, 0.03, 0.12, 0, 0.08, 0.0), partBox(0.012, 0.035, 0.02, 0, 0.078, 0.33 * k)]), gunmetal, d));
+    muzzle.position.set(0, 0.035, 0.58 * k);
+  } else if (kind === 'shotgun') {
+    body([[-0.45, -0.13], [-0.45, 0.02], [-0.18, 0.05], [0.05, 0.05], [0.05, -0.03], [-0.06, -0.03], [-0.1, -0.12], [-0.15, -0.12], [-0.13, -0.03], [-0.25, -0.05]], 0.045, wood);
+    barrel(0.016, 0.05, 0.62, 0.035, gunmetal);
+    // The pump: a wooden fore-end round the magazine tube.
+    const pump = mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.2, real ? 12 : 6), wood, d);
+    pump.rotation.x = Math.PI / 2;
+    pump.position.set(0, 0.0, 0.32);
+    root.add(pump);
+    muzzle.position.set(0, 0.035, 0.62);
+  } else if (kind === 'sniper') {
+    body([[-0.5, -0.13], [-0.5, 0.03], [-0.2, 0.05], [0.3, 0.05], [0.3, -0.03], [-0.04, -0.03], [-0.08, -0.13], [-0.14, -0.13], [-0.12, -0.03], [-0.3, -0.06]], 0.05, new THREE.MeshStandardMaterial({ color: 0x4b5340, roughness: 0.7 }));
+    barrel(0.012, 0.3, 0.85, 0.035, gunmetal);
+    barrel(0.024, -0.12, 0.16, 0.11, polymer);   // the scope
+    muzzle.position.set(0, 0.035, 0.85);
+  } else if (kind === 'sword') {
+    // A blade that tapers to a point, a crossguard, a wrapped grip and a pommel.
+    // The blade is LOFTED, not extruded: a diamond section at every station, so it thins toward the point
+    // AND toward both edges and its faces catch the light as a ground bevel. An extruded slab of one
+    // thickness reads as a ruler.
+    const stations: number[][] = [];
+    for (let k = 0; k <= 8; k++) { const t = k / 8; stations.push([0.1 + 0.72 * t, 0.024 - 0.006 * t, 0.0045 - 0.0017 * t]); }
+    stations.push([0.92, 0.0004, 0.0004]);
+    const ring = (st: number[]) => [[0, st[1], st[0]], [st[2], 0, st[0]], [0, -st[1], st[0]], [-st[2], 0, st[0]]];
+    const tri: number[] = [];
+    for (let k = 0; k + 1 < stations.length; k++) {
+      const a = ring(stations[k]), c = ring(stations[k + 1]);
+      for (let f = 0; f < 4; f++) {
+        const g = (f + 1) % 4;
+        tri.push(...a[f], ...a[g], ...c[g], ...a[f], ...c[g], ...c[f]);
+      }
+    }
+    const base = ring(stations[0]);
+    tri.push(...base[0], ...base[2], ...base[1], ...base[0], ...base[3], ...base[2]);
+    const blade = new THREE.BufferGeometry();
+    blade.setAttribute('position', new THREE.Float32BufferAttribute(tri, 3));
+    blade.computeVertexNormals();      // non-indexed: every facet keeps its own normal — a crisp bevel
+    const bladeMesh = mesh(blade, steel, d);
+    bladeMesh.name = 'blade';
+    root.add(bladeMesh);
+    root.add(mesh(mergeGeometries([partBox(0.03, 0.2, 0.03, 0, 0, 0.09)]), gunmetal, d));
+    barrel(0.016, -0.1, 0.08, 0, new THREE.MeshStandardMaterial({ color: 0x3b2416, roughness: 0.8 }));
+    const pommel = mesh(new THREE.SphereGeometry(0.025, 10, 8), gunmetal, d);
+    pommel.position.z = -0.11;
+    root.add(pommel);
+    muzzle.position.set(0, 0, 0.92);
+  } else if (kind === 'axe') {
+    barrel(0.018, -0.15, 0.6, 0, wood);
+    // The head: a flared bit on one side, a poll on the other.
+    body([[0.5, 0.0], [0.62, 0.0], [0.66, 0.18], [0.46, 0.2], [0.52, 0.05]], 0.03, steel);
+    muzzle.position.set(0, 0.1, 0.66);   // the leading edge of the bit
+  } else {
+    // Bow, held upright: two limbs sweeping forward from a wrapped grip at the origin, 1.5 m tip to tip,
+    // the string 0.2 m behind the grip at rest (the brace height). Each limb pivots at the grip, so a draw
+    // bends both back; the string is two segments meeting at the nock, and the arrow rides on it.
+    const R = 1.5, half = 0.75, brace = 0.2, DRAW = 0.55, lean = 0.13;
+    const sweep = Math.asin(half / R);
+    const limbs: THREE.Group[] = [];
+    const tips: THREE.Vector3[] = [];
+    for (const side of [1, -1]) {
+      const pts: THREE.Vector3[] = [];
+      for (let i = 0; i <= 8; i++) {
+        const a = 0.04 + ((sweep - 0.04) * i) / 8;
+        pts.push(new THREE.Vector3(0, side * (R * Math.sin(a) - 0.06), -(R - R * Math.cos(a))));
+      }
+      const limb = new THREE.Group();
+      limb.position.y = side * 0.06;
+      limb.add(mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), real ? 24 : 8, 0.014, real ? 8 : 5), wood, d));
+      root.add(limb);
+      limbs.push(limb);
+      tips.push(pts[pts.length - 1].clone());
+    }
+    const grip = mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.14, real ? 10 : 6), new THREE.MeshStandardMaterial({ color: 0x3b2416, roughness: 0.85 }), d);
+    root.add(grip);
+    const cord = new THREE.MeshStandardMaterial({ color: 0xe8e2d0, roughness: 0.6 });
+    const strings = [0, 1].map(() => { const s = mesh(new THREE.CylinderGeometry(0.0025, 0.0025, 1, 4), cord, d); root.add(s); return s; });
+    // The arrow: shaft, head and fletching, its nock end at the group's origin, pointing +Z.
+    const arrow = new THREE.Group();
+    const shaft = mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.72, real ? 6 : 4), wood, d);
+    shaft.rotation.x = Math.PI / 2; shaft.position.z = 0.36;
+    const head = mesh(new THREE.ConeGeometry(0.01, 0.04, real ? 6 : 4), steel, d);
+    head.rotation.x = Math.PI / 2; head.position.z = 0.74;
+    arrow.add(shaft, head);
+    for (let k = 0; k < 3; k++) {
+      const vane = mesh(new THREE.BoxGeometry(0.001, 0.014, 0.08), new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.7 }), d);
+      const a = (k * Math.PI * 2) / 3;
+      vane.position.set(Math.sin(a) * 0.009, Math.cos(a) * 0.009, 0.07);
+      vane.rotation.z = -a;
+      arrow.add(vane);
+    }
+    root.add(arrow);
+    const up = new THREE.Vector3(0, 1, 0), tip = new THREE.Vector3(), nock = new THREE.Vector3(), seg = new THREE.Vector3();
+    const setDraw = (amount: number) => {
+      const t = Math.max(0, Math.min(1, amount));
+      const nockZ = -brace - DRAW * t;
+      nock.set(0, 0, nockZ);
+      limbs.forEach((limb, k) => {
+        const side = k === 0 ? 1 : -1;
+        limb.rotation.x = -side * lean * t;
+        tip.copy(tips[k]).applyEuler(limb.rotation).add(limb.position);
+        seg.subVectors(nock, tip);
+        const s = strings[k];
+        s.position.copy(tip).addScaledVector(seg, 0.5);
+        s.scale.y = seg.length();
+        s.quaternion.setFromUnitVectors(up, seg.normalize());
+      });
+      arrow.visible = t > 0.02;
+      arrow.position.z = nockZ;
+    };
+    setDraw(0);
+    muzzle.position.set(0, 0.02, 0.03);   // the arrow rest, just above the grip
+    root.add(muzzle);
+    return { root, muzzle, kind, setDraw };
+  }
+  root.add(muzzle);
+  return { root, muzzle, kind };
 }
 
 // ── TRAFFIC ──────────────────────────────────────────────────────────────────────────────────────
@@ -3564,7 +3768,9 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '  createBicycle, createTree, createMountain, createRiver, createDesert, createRoad,\n' +
       '  createAnimal (dog, cow, horse, deer, goat, tiger), createHouse, and India\'s roads —\n' +
       '  createAutoRickshaw, createBus, createTruck, createTractor — and createTraffic() to fill a road\n' +
-      '  with them (keeps left, keeps distance, stops for the player). Call setDetailLevel()\n' +
+      '  with them (keeps left, keeps distance, stops for the player); createWeapon({ kind }) for a\n' +
+      '  pistol, rifle, smg, shotgun, sniper, sword, axe or bow — hero.hold(weapon.root), hero.aim(true),\n' +
+      '  fire from weapon.muzzle, and bow.setDraw(held ? 1 : 0). Call setDetailLevel()\n' +
       "  ONCE at start-up — 'real' when the user asked for real/realistic/asli/100%, 'lite' when they\n" +
       '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
       '- 🔴 A BIKE IS createMotorcycle() / createBicycle(), never a capsule over two cylinders. A\n' +

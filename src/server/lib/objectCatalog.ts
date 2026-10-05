@@ -525,17 +525,17 @@ const SPORT: CatalogEntry[] = [
 
 /** Things characters hold. */
 const WEAPONS: CatalogEntry[] = [
-  { id: 'sword', name: 'sword / axe / blade', category: 'weapon',
+  { id: 'sword', name: 'sword / axe / blade', category: 'weapon', builder: "createWeapon({ kind: 'sword' }) — or kind: 'axe'",
     words: 'sword|blade|katana|talwar|sabre|saber|axe|kulhadi|dagger|knife|spear|trishul', hi: 'तलवार|कुल्हाड़ी|भाला',
     dims: 'sword 1.00 m overall, blade 0.80 m x 0.05 m tapering to a point, grip 0.15 m; axe 0.9 m haft; spear 2.1 m',
     parts: ['a blade with a visible edge bevel, never a flat slab', 'a crossguard wider than the grip', 'a wrapped grip', 'a pommel counterweight', 'an off-centre head with a bit and a poll (axe)'],
     tell: 'The blade TAPERS in both width and thickness toward the point. A constant-width box is a ruler.' },
-  { id: 'gun', name: 'firearm', category: 'weapon',
+  { id: 'gun', name: 'firearm', category: 'weapon', builder: "createWeapon({ kind: 'rifle' }) — or kind: 'pistol' | 'smg' | 'shotgun' | 'sniper'",
     words: 'gun|rifle|pistol|shooter|shooting\\s*game|sniper|ak\\s*-?\\s*47|shotgun|revolver', hi: 'बंदूक|राइफल|पिस्तौल',
     dims: 'rifle 1.00 m long, barrel 0.50 m, magazine 0.25 m; pistol 0.20 m; a bullet leaves at 800 m/s',
     parts: ['a barrel clearly THINNER than the receiver', 'a magazine below the receiver', 'a pistol grip and trigger guard', 'a stock against the shoulder (rifle)', 'iron sights or an optic on top', 'a muzzle the effects fire from'],
     tell: 'Thin barrel, thick receiver, grip at an angle to both. One tapered box reads as a plank.' },
-  { id: 'bow', name: 'bow / sling / thrown weapon', category: 'weapon',
+  { id: 'bow', name: 'bow / sling / thrown weapon', category: 'weapon', builder: "createWeapon({ kind: 'bow' }) — a sling or a grenade is still hand-modelled",
     words: 'bow\\s*and\\s*arrow|bow|arrow|archery|crossbow|catapult|sling|grenade|dhanush', hi: 'धनुष|तीर',
     dims: 'bow 1.7 m tall with a 0.55 m draw; arrow 0.75 m; a grenade 0.09 m across',
     parts: ['limbs that BEND when drawn, and straighten when released', 'a string thinner than the limbs, under visible tension', 'an arrow with a head, shaft and fletching', 'a grip at the centre', 'a nocking point'],

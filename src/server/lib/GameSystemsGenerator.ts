@@ -407,6 +407,11 @@ export interface FireOptions {
   radius?: number;
   gravity?: number;
   ownerId?: string;
+  /**
+   * Fire without announcing it. A weapon that sends several projectiles per shot (a shotgun's pellets)
+   * emits ONE WEAPON_FIRED itself; per-projectile events gave one shot eight flashes and eight bangs.
+   */
+  silent?: boolean;
 }
 
 export class ProjectileSystem {
@@ -442,7 +447,7 @@ export class ProjectileSystem {
     slot.radius = options.radius ?? 0.15;
     slot.gravity = options.gravity ?? 0;
     slot.ownerId = options.ownerId;
-    events.emit('WEAPON_FIRED', { position: { ...options.position } });
+    if (!options.silent) events.emit('WEAPON_FIRED', { position: { ...options.position } });
     return true;
   }
 
@@ -620,14 +625,229 @@ export function fallenOutOfWorld<T extends WaveTrackable>(enemies: T[], killFloo
 }
 `;
 
+const WEAPON = `/**
+ * WEAPONS — the part of a shooter that decides whether it feels like one.
+ *
+ * A generated shooter usually spawns one projectile per click and calls it a gun. Every weapon a player
+ * has held behaves in ways that click cannot: a rifle keeps firing while the trigger is held and a
+ * pistol does not; a magazine runs dry and a reload takes time you can be caught in; shots spread wider
+ * the longer you hold the trigger and tighten when you stop; the barrel kicks; a shotgun is eight pellets
+ * with ONE bang; an arrow falls. All of it is here, pure and seeded, firing through ProjectileSystem.
+ *
+ * Melee is the same idea for a blade: a swing hits what is IN FRONT, within reach and inside an arc,
+ * once per swing — never everything around the player, never sixty times a second.
+ */
+import { events } from '../core/events';
+import type { ProjectileSystem, ProjectileTarget, Vec3 } from './projectile';
+
+export type WeaponKind = 'pistol' | 'rifle' | 'smg' | 'shotgun' | 'sniper' | 'bow';
+
+export interface WeaponSpec {
+  /** Shots per second at most. */
+  fireRate: number;
+  /** Fires while the trigger is HELD (rifle, SMG) — or once per press (pistol, shotgun, sniper, bow). */
+  auto: boolean;
+  magazine: number;
+  /** Seconds to reload — you cannot fire during it. */
+  reload: number;
+  damage: number;
+  /** Projectile speed, m/s. */
+  speed: number;
+  /** Half-angle of the shot cone, radians, when fired calmly. */
+  spread: number;
+  /** Projectiles per shot (a shotgun's pellets). */
+  pellets: number;
+  /** Upward kick per shot, radians — apply weapon.kick to the camera pitch. */
+  recoil: number;
+  /** Gravity on the projectile (an arrow drops; a bullet, at game ranges, does not). */
+  gravity: number;
+  /** Seconds a projectile lives — its range. */
+  life: number;
+}
+
+export const WEAPONS: Readonly<Record<WeaponKind, WeaponSpec>> = {
+  pistol:  { fireRate: 4,   auto: false, magazine: 12, reload: 1.2, damage: 20, speed: 70,  spread: 0.012, pellets: 1, recoil: 0.035, gravity: 0,     life: 1.5 },
+  rifle:   { fireRate: 9,   auto: true,  magazine: 30, reload: 2.0, damage: 14, speed: 95,  spread: 0.018, pellets: 1, recoil: 0.02,  gravity: 0,     life: 2 },
+  smg:     { fireRate: 13,  auto: true,  magazine: 32, reload: 1.6, damage: 9,  speed: 75,  spread: 0.04,  pellets: 1, recoil: 0.012, gravity: 0,     life: 1.2 },
+  shotgun: { fireRate: 1.2, auto: false, magazine: 6,  reload: 2.6, damage: 9,  speed: 60,  spread: 0.09,  pellets: 8, recoil: 0.09,  gravity: 0,     life: 0.6 },
+  sniper:  { fireRate: 0.8, auto: false, magazine: 5,  reload: 2.8, damage: 90, speed: 170, spread: 0.002, pellets: 1, recoil: 0.13,  gravity: 0,     life: 2.5 },
+  bow:     { fireRate: 1.1, auto: false, magazine: 1,  reload: 0.55, damage: 35, speed: 42, spread: 0.006, pellets: 1, recoil: 0,     gravity: -9.8,  life: 4 },
+};
+
+/** How far the cone may widen while the trigger is held: this many times the calm spread. */
+export const MAX_BLOOM = 2.5;
+/**
+ * A cooldown counts down in fixed steps of 1/60, which floating point never lands on 0 exactly: 30 steps
+ * of 1/60 leave ~1e-16 behind, and a strict \`> 0\` would make every "twice a second" weapon wait one
+ * extra frame. Anything under a microsecond is ready.
+ */
+const READY = 1e-6;
+
+export class Weapon {
+  readonly spec: WeaponSpec;
+  readonly kind: WeaponKind | 'custom';
+  ammo: number;
+  /** Seconds of reload left; 0 when ready. */
+  reloading = 0;
+  /** The camera kick to add to the view's pitch this frame. Decays on its own. */
+  kick = 0;
+  private cooldown = 0;
+  private bloom = 1;
+  private wasHeld = false;
+  /** The trigger was held and the gun ready last step — a late shot now carries its lateness. */
+  private streak = false;
+  private seed: number;
+
+  constructor(kind: WeaponKind | WeaponSpec = 'pistol', seed = 1) {
+    this.spec = typeof kind === 'string' ? WEAPONS[kind] : kind;
+    this.kind = typeof kind === 'string' ? kind : 'custom';
+    this.ammo = this.spec.magazine;
+    this.seed = (seed >>> 0) || 1;
+  }
+
+  /** The current cone half-angle — wider while firing, back to calm when you stop. */
+  get spread(): number { return this.spec.spread * this.bloom; }
+
+  /** Start a reload. False when already full or already reloading. */
+  reload(): boolean {
+    if (this.reloading > 0 || this.ammo >= this.spec.magazine) return false;
+    this.reloading = this.spec.reload;
+    return true;
+  }
+
+  /**
+   * Advance one FIXED step. Returns how many shots left the barrel. \`muzzle\` is the barrel tip in world
+   * space and \`aim\` the direction the player is aiming (it need not be normalised).
+   */
+  update(dt: number, triggerHeld: boolean, muzzle: Vec3, aim: Vec3, projectiles: ProjectileSystem, ownerId?: string): number {
+    // The time between shots rarely divides into 1/60 s steps (13 rounds a second is 4.6 frames). A
+    // cooldown RESET on each shot rounds every gap up to whole frames and quietly turns 13/s into 12/s, so
+    // a shot that comes due mid-step CARRIES how late it is into the next gap. Only while the trigger is
+    // held continuously: the first shot after a pause, a reload or a fresh press is never early.
+    const owed = this.cooldown - dt;
+    this.cooldown = Math.max(0, owed);
+    this.kick *= Math.exp(-10 * dt);
+    if (!triggerHeld) this.bloom = Math.max(1, this.bloom - dt * 3);
+    const pressed = triggerHeld && !this.wasHeld;
+    this.wasHeld = triggerHeld;
+    const wantsShot = this.spec.auto ? triggerHeld : pressed;
+    const late = this.streak && wantsShot && owed < 0 ? Math.min(dt, -owed) : 0;
+    this.streak = wantsShot && this.reloading === 0;
+
+    if (this.reloading > 0) {
+      this.reloading = Math.max(0, this.reloading - dt);
+      if (this.reloading === 0) {
+        this.ammo = this.spec.magazine;
+        events.emit('WEAPON_RELOADED', { kind: this.kind });
+      }
+      return 0;
+    }
+    if (!wantsShot || this.cooldown > READY) return 0;
+    if (this.ammo <= 0) {
+      // Dry: say so (a click) — tapped or held through the last round alike — and start the reload the
+      // player obviously wants. The reload then blocks this branch, so the click sounds once.
+      events.emit('WEAPON_EMPTY', { kind: this.kind });
+      this.reload();
+      return 0;
+    }
+
+    this.ammo -= 1;
+    this.cooldown = 1 / this.spec.fireRate - late;
+    const len = Math.hypot(aim.x, aim.y, aim.z) || 1;
+    const fx = aim.x / len, fy = aim.y / len, fz = aim.z / len;
+    // Two axes perpendicular to the aim, so the cone is a cone whichever way the player looks.
+    const ux0 = Math.abs(fy) < 0.99 ? 0 : 1, uy0 = Math.abs(fy) < 0.99 ? 1 : 0;   // world up, unless aiming straight up
+    let rx = -fz * uy0, ry = fz * ux0, rz = fx * uy0 - fy * ux0;                   // right = aim × up
+    const rl = Math.hypot(rx, ry, rz) || 1; rx /= rl; ry /= rl; rz /= rl;
+    const vx = ry * fz - rz * fy, vy = rz * fx - rx * fz, vz = rx * fy - ry * fx;
+    for (let i = 0; i < this.spec.pellets; i++) {
+      // Uniform over the cone's disc, not its square — a square pattern reads as a bug.
+      const r = this.spread * Math.sqrt(this.random());
+      const a = this.random() * Math.PI * 2;
+      const ox = Math.cos(a) * r, oy = Math.sin(a) * r;
+      projectiles.fire({
+        position: { ...muzzle },
+        direction: { x: fx + rx * ox + vx * oy, y: fy + ry * ox + vy * oy, z: fz + rz * ox + vz * oy },
+        speed: this.spec.speed, damage: this.spec.damage, life: this.spec.life, gravity: this.spec.gravity,
+        ownerId, silent: true,
+      });
+    }
+    // ONE shot is one bang and one flash, however many pellets it carried.
+    events.emit('WEAPON_FIRED', { position: { ...muzzle }, kind: this.kind });
+    this.kick += this.spec.recoil;
+    this.bloom = Math.min(MAX_BLOOM, this.bloom + 0.35);
+    if (this.ammo === 0 && this.spec.magazine === 1) this.reload();   // a bow nocks the next arrow itself
+    return 1;
+  }
+
+  private random(): number {
+    this.seed ^= this.seed << 13; this.seed ^= this.seed >>> 17; this.seed ^= this.seed << 5;
+    return ((this.seed >>> 0) % 1000000) / 1000000;
+  }
+}
+
+/**
+ * What a melee swing hits: targets IN FRONT of the attacker (within \`arc\` of where it faces, on the
+ * ground plane), within \`range\` of it, counting each target's own radius. Nearest first.
+ * \`facingYaw\` is the attacker's rotation.y — every model in the library faces its local +Z.
+ */
+export function meleeHits(origin: Vec3, facingYaw: number, targets: ProjectileTarget[], range = 1.8, arc = Math.PI * 0.6): ProjectileTarget[] {
+  const fx = Math.sin(facingYaw), fz = Math.cos(facingYaw);
+  const out: Array<{ t: ProjectileTarget; d: number }> = [];
+  for (const t of targets) {
+    const dx = t.position.x - origin.x, dz = t.position.z - origin.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist - t.radius > range) continue;
+    if (dist > 1e-6) {
+      const cos = (dx * fx + dz * fz) / dist;
+      if (cos < Math.cos(arc / 2)) continue;
+    }
+    out.push({ t, d: dist });
+  }
+  return out.sort((a, b) => a.d - b.d).map((o) => o.t);
+}
+
+/**
+ * A blade or a fist: one swing per cooldown, and each swing lands ONCE, at its strike moment — not on
+ * every frame the arc overlaps a target.
+ */
+export class MeleeWeapon {
+  private cooldown = 0;
+  private windup = -1;
+  constructor(public readonly damage = 30, public readonly rate = 1.6, public readonly range = 1.8, public readonly arc = Math.PI * 0.6, public readonly strikeDelay = 0.12) {}
+
+  /** Start a swing; false while the last one is still recovering. */
+  swing(): boolean {
+    if (this.cooldown > READY || this.windup >= 0) return false;
+    this.windup = this.strikeDelay;
+    this.cooldown = 1 / this.rate;
+    events.emit('MELEE_SWING', {});
+    return true;
+  }
+
+  /** Advance; returns the targets hit on THIS step (empty except at the strike moment). */
+  update(dt: number, origin: Vec3, facingYaw: number, targets: ProjectileTarget[]): ProjectileTarget[] {
+    this.cooldown = Math.max(0, this.cooldown - dt);
+    if (this.windup < 0) return [];
+    this.windup -= dt;
+    if (this.windup > 0) return [];
+    this.windup = -1;
+    const hits = meleeHits(origin, facingYaw, targets, this.range, this.arc);
+    if (hits.length) events.emit('MELEE_HIT', { count: hits.length });
+    return hits;
+  }
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/systems/combat.ts': COMBAT,
   'src/game/systems/ai.ts': AI,
   'src/game/systems/projectile.ts': PROJECTILE,
   'src/game/systems/spawner.ts': SPAWNER,
+  'src/game/systems/weapon.ts': WEAPON,
 };
 
-export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'ai', 'projectile', 'spawner'];
+export const GAME_SYSTEM_MODULES: readonly string[] = ['combat', 'ai', 'projectile', 'spawner', 'weapon'];
 
 /** Generate the gameplay systems. Pure; never throws. */
 export function generateGameSystems(include?: string[]): GameSystemsResult {
@@ -644,6 +864,8 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       const base = (path.split('/').pop() || '').replace(/\.ts$/i, '').toLowerCase();
       if (wanted.has(base)) files[path] = content;
     }
+    // weapon.ts fires through projectile.ts.
+    if (files['src/game/systems/weapon.ts']) files['src/game/systems/projectile.ts'] = FILES['src/game/systems/projectile.ts'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
 
@@ -662,6 +884,11 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       'const decision = stepEnemyAI(enemy.state, { player, neighbours, canSeePlayer }, DEFAULT_ENEMY, dt);\n' +
       'if (decision.wantsAttack && swing.tryUse()) hp.damage(10, enemy.state.position);\n' +
       'for (const hit of bullets.update(dt, targets)) (hit.target.ref as Health).damage(hit.damage);\n' +
+      '// A GUN is a Weapon, not one projectile per click (weapon.ts):\n' +
+      "const gun = new Weapon('rifle');   // pistol | rifle | smg | shotgun | sniper | bow\n" +
+      'gun.update(dt, input.isDown("attack"), muzzleWorldPos, aimDir, bullets); // camera.pitch += gun.kick\n' +
+      'const sword = new MeleeWeapon(30); if (input.wasPressed("attack")) sword.swing();\n' +
+      'for (const t of sword.update(dt, player.position, player.rotation.y, targets)) (t.ref as Health).damage(sword.damage);\n' +
       '```\n' +
       'THE RULES THESE ENCODE — do not re-implement them by hand:\n' +
       '- Damage needs BOTH an attack cooldown and i-frames. With neither, an adjacent enemy deals its\n' +
@@ -673,6 +900,10 @@ export function generateGameSystems(include?: string[]): GameSystemsResult {
       '- The AI only REQUESTS an attack; a Cooldown decides if it happens.\n' +
       '- A wave is cleared when every enemy is dead OR has fallen out of the world — otherwise one enemy\n' +
       '  through the floor hangs the level forever.\n' +
+      '- A gun has a fire rate, semi/auto, a magazine, a reload you can be caught in, spread that blooms\n' +
+      '  and recoil — Weapon does all of it. A shotgun is many pellets and ONE bang. An arrow falls.\n' +
+      '- A melee swing hits what is IN FRONT, in reach, once per swing — MeleeWeapon, never a radius check\n' +
+      '  every frame.\n' +
       '- Everything is seeded and pure, so a run replays identically and difficulty is tunable.',
   };
 }

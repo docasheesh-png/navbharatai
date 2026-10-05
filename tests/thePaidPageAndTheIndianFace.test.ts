@@ -176,25 +176,20 @@ describe('Paid is a page, and it shows only its own pictures', () => {
 describe('the screen is wired to the rule', () => {
   const ui = readFileSync(join(__dirname, '../src/components/ide/AIImageGenerator.tsx'), 'utf8');
 
-  it('every visit still opens on Free — the only default that cannot spend a balance', () => {
-    expect(ui).toContain("useState<ImageTier>('free')");
-  });
-
-  it('paging runs on the PAGE\'s feed, never on the whole history', () => {
-    expect(ui).toContain('feedFor(history, tier)');
+  // 🔁 2026-10-05: Free mode removed — the screen IS the paid page, so its feed rule is the paid one.
+  it('the screen shows only pictures the paid ladder made — an old watermarked free one never lands here', () => {
+    expect(ui).toContain("feedFor(history, 'paid')");
     expect(ui).toContain('usePagedList(visibleHistory)');
     expect(ui).not.toContain('usePagedList(history)');
   });
 
-  it('a picture records which page made it', () => {
-    expect(ui).toContain('tier: tierNow');
+  it('a picture records which ladder made it', () => {
+    expect(ui).toMatch(/timestamp: Date\.now\(\),[\s\S]{0,300}tier: 'paid',/);
   });
 
-  // The chip is gone on purpose: a press that only lights a chip is what left a free picture under a
-  // lit PAID label. Leaving the page is now a visible act with its own control.
-  it('the in-place Free/Paid chip row is gone', () => {
+  it('no mode chip and no Free page are left to switch between', () => {
     expect(ui).not.toContain('aria-label="Image mode"');
-    expect(ui).toContain('Back to Free mode');
+    expect(ui).not.toContain('Back to Free mode');
   });
 });
 

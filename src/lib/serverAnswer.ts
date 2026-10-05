@@ -28,7 +28,9 @@ export async function writeFailure(res: Response, fallback: string): Promise<str
 // notification to undefined device(s)" over a failed cohort read. So a read goes through here and the
 // screen stores either the checked value or the sentence — never a body it has not looked at.
 
-export type ReadAnswer<T> = { ok: true; value: T } | { ok: false; sentence: string };
+// Both members name both fields, so reading `a.sentence` / `a.value` compiles under the client's
+// non-strict tsconfig, where `a.ok` does not narrow a union.
+export type ReadAnswer<T> = { ok: true; value: T; sentence?: undefined } | { ok: false; value?: undefined; sentence: string };
 
 /** The body when the response is 2xx and `isShape` accepts it; otherwise the sentence to show. */
 export async function readAnswer<T>(res: Response, isShape: (body: unknown) => body is T): Promise<ReadAnswer<T>> {

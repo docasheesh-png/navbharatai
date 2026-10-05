@@ -1,4 +1,4 @@
-import { callGemini, callClaude, callGroq } from '../lib/aiCalls';
+import { callGemini, callGroq } from '../lib/aiCalls';
 import { parseRepoRef, fetchPublicRepo, type RepoSnapshot } from './githubFetch';
 
 /**
@@ -70,7 +70,9 @@ export function buildRepoContext(s: RepoSnapshot): string {
 
 async function resilientCall(systemPrompt: string, prompt: string): Promise<string> {
   try { const t = await callGemini(prompt, undefined, [], systemPrompt); if (t && t.trim()) return t; } catch { /* fall through */ }
-  try { const t = await callClaude(prompt, undefined, [], systemPrompt); if (t && t.trim()) return t; } catch { /* fall through */ }
+  // No Claude rung (forensic audit 2026-10-04, P1): this surface is free and unbilled, guests included, and
+  // any Gemini failure — a deliberate safety block too — used to fall through to Sonnet on our bill. The
+  // free chain never runs Sonnet/Opus (ROUTING_AND_BILLING.md); Gemini → Groq, then an honest refusal.
   try { const t = await callGroq(`${systemPrompt}\n\n${prompt}`, undefined, []); if (t && t.trim()) return t; } catch { /* fall through */ }
   throw new Error('All AI providers are busy right now. Please try again in a moment.');
 }

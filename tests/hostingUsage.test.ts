@@ -125,7 +125,8 @@ describe('🔒 the route — POST /api/agentv3/host-usage measures BEFORE anythi
 
   it('exists, is admin-only, and checks ownership too', () => {
     expect(handler).not.toBe('');
-    expect(handler).toContain('assertWorkspaceOwner(req, workspaceId)');
+    expect(handler).toContain('assertVerifiedWorkspaceOwner(req, workspaceId)'); // verified owner (audit 2026-10-04)
+    expect(handler).toContain('await requireVerifiedForMoney(req)');
     expect(handler).toContain('isReportAdmin(email)');
   });
 

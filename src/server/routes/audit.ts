@@ -4,6 +4,7 @@ import { getSecurityContext } from '../lib/prompts';
 import { sendSafeError } from '../lib/httpError';
 import { SCAN_STAGES, secretFindings, configFindings, countFindings, scanVerdict, type ScanFinding } from '../lib/securityScan';
 import { guestDailyQuota } from '../lib/guestDailyQuota';
+import { rateLimiter } from '../lib/authMiddleware';
 
 /**
  * Security-scan + website-audit routes.
@@ -27,8 +28,33 @@ import { guestDailyQuota } from '../lib/guestDailyQuota';
  * real and already earned. "No issues found" from a scan that quietly skipped its last stage is the
  * exact lie this change removes.
  */
+/**
+ * How much of the project the AI review READS (forensic audit 2026-10-04, P1). The whole `files` map used to
+ * go into one model call, unbounded — up to the 30 MB body limit — with web-search grounding on, for any
+ * signed-in caller with no limit at all. The deterministic stages still read every file; the AI review reads
+ * the first files up to this budget and says so when it stopped.
+ */
+export const SCAN_AI_MAX_CHARS = 200_000;
+
+/** The files the AI review reads, within budget, and whether anything was left out. PURE. */
+export function filesForAiReview(fileMap: Record<string, unknown>): { files: Record<string, string>; omitted: number } {
+  const files: Record<string, string> = {};
+  let used = 0;
+  let omitted = 0;
+  for (const [path, content] of Object.entries(fileMap)) {
+    if (typeof content !== 'string') continue;
+    const cost = path.length + content.length;
+    if (used + cost > SCAN_AI_MAX_CHARS) { omitted++; continue; }
+    files[path] = content;
+    used += cost;
+  }
+  return { files, omitted };
+}
+
 export function registerAuditRoutes(app: Express): void {
-  app.post('/api/security/scan', guestDailyQuota('security-scan'), async (req: Request, res: Response) => {
+  // A per-account (per-address for a guest) hourly bound — the route had none for a signed-in caller.
+  const scanLimiter = rateLimiter({ name: 'security-scan', authed: 30, anon: 10, noun: 'scans' });
+  app.post('/api/security/scan', scanLimiter, guestDailyQuota('security-scan'), async (req: Request, res: Response) => {
     const { target, files } = req.body ?? {};
     const geminiKey = req.headers['x-gemini-key'] as string | undefined;
 
@@ -67,8 +93,9 @@ export function registerAuditRoutes(app: Express): void {
       let reviewOk = true;
       let reviewError = '';
       try {
+        const forAi = filesForAiReview(fileMap);
         const prompt = `Perform a deep security scan on the following target: ${target}.
-Current Project Files (if applicable): ${JSON.stringify(fileMap)}
+Current Project Files (if applicable): ${JSON.stringify(forAi.files)}${forAi.omitted > 0 ? `\n(${forAi.omitted} more files were not included in this review because of its size limit.)` : ''}
 Analyze the target for any vulnerabilities, configuration issues, or exposed secrets.
 
 The following issues were ALREADY found by a deterministic scanner — do not repeat them, and do not

@@ -162,7 +162,7 @@ describe('🔒 POST /api/agentv3/github/push-app — the missing control, wired 
 
   it('exists, and is ownership-checked before it touches anything', () => {
     expect(handler).not.toBe('');
-    expect(handler).toContain('assertWorkspaceOwner(req, workspaceId)');
+    expect(handler).toContain('assertVerifiedWorkspaceOwner(req, workspaceId)'); // verified owner (forensic audit 2026-10-04)
   });
 
   it('🔒 uses the USER\'S token, so the repo is theirs and their own host can read it', () => {

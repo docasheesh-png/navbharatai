@@ -179,9 +179,8 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
    * this call). So the "Have a promo code?" box answered every code — valid or not — with "Validation
    * failed", blaming the user's code for a missing endpoint.
    *
-   * Recorded because the server still carries the other half: `computeCreditedWallet` reads a pending
-   * `promo_redemptions/promo_pending_*` document that nothing has ever written, precisely because this
-   * was its only would-be writer.
+   * The server's other half — a pending-promo branch in `computeCreditedWallet` — was removed in the
+   * forensic audit of 2026-10-04: the Firestore rules let any client plant that document.
    *
    * The working promo redemption is `redeemPromoCoupon` below (`POST /api/payment/redeem-coupon`,
    * surfaced in Wallet & Billing) — a user with a code still has a real place to use it.
@@ -423,7 +422,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
         orderId: paymentSession.orderId,
         isSimulator: paymentSession.isSimulator,
         transactionStatus: status
-      });
+      }, { headers: await authedHeaders() }); // the buyer's token: a gift code is returned only to its buyer (Q-630)
       if (res.data.success) {
         addLog(`Payment for ORDER #${paymentSession.orderId} verified successfully! credited ₹${paymentSession.orderAmount}.`, 'success');
         reportPurchaseOnce(paymentSession.orderId, Number(paymentSession.orderAmount));
@@ -556,7 +555,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
    */
   const verifyOrderAndReport = useCallback(async (orderRef: string) => {
     try {
-      const res = await axios.post('/api/payment/verify-payment', { orderId: orderRef });
+      const res = await axios.post('/api/payment/verify-payment', { orderId: orderRef }, { headers: await authedHeaders() });
       const data = res.data || {};
       if (data.professionalPass) {
         addLog(`Professional Pass activated for Order #${orderRef} (${data.days} days).`, 'success');

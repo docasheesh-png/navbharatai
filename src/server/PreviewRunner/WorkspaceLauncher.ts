@@ -14,8 +14,10 @@ export class WorkspaceLauncher {
     }
 
     installDependencies(workspaceId: string, packageManager: string): [string, string[]] {
-        // Return [command, args]
-        return [packageManager, ['install']];
+        // Return [command, args]. `--ignore-scripts` (forensic audit 2026-10-04): the package.json being
+        // installed is the USER's, and its preinstall/install/postinstall scripts are arbitrary commands.
+        // npm, pnpm, yarn and bun all accept the flag.
+        return [packageManager, ['install', '--ignore-scripts']];
     }
 
     getStartCommand(workspaceId: string, packageManager: string, port?: number): [string, string[]] {

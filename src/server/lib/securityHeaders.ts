@@ -66,3 +66,29 @@ export const securityHeadersConfig: HelmetOptions = {
   crossOriginEmbedderPolicy: false,
   crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
 };
+
+/**
+ * Permissions-Policy — powerful features this platform never uses are switched OFF for the page and for
+ * everything it frames (forensic audit 2026-10-04; ZAP rule 10063 flagged the header as missing).
+ *
+ * ⚠️ DELIBERATELY NOT LISTED: camera, microphone, geolocation, motion sensors, payment, MIDI, XR,
+ * clipboard, fullscreen, autoplay. The app uses some of them itself (voice, screen share) and DELEGATES
+ * the rest to the preview frames (`PREVIEW_IFRAME_ALLOW`) so a user's app can use them; a policy that
+ * named them `(self)` would silently break that delegation to cross-origin previews. Only features with
+ * no user in the platform or its previews are denied here, so this can only remove capability nobody has.
+ */
+export const PERMISSIONS_POLICY = [
+  'usb=()',
+  'serial=()',
+  'hid=()',
+  'bluetooth=()',
+  'browsing-topics=()',
+  'interest-cohort=()',
+].join(', ');
+
+export function permissionsPolicyMiddleware() {
+  return (_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void): void => {
+    res.setHeader('Permissions-Policy', PERMISSIONS_POLICY);
+    next();
+  };
+}

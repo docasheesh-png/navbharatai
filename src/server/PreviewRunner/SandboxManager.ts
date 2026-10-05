@@ -1,13 +1,17 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
+import { assertHostExecAllowed, hostChildEnv } from '../lib/actuatorGuard';
 
 export class SandboxManager {
     private processes: Map<string, ChildProcess> = new Map();
 
     launch(workspaceId: string, cmd: string, args: string[], env: Record<string, string>, memoryLimitMB: number): number {
+        // 🔒 This spawns a USER's app on the host: refused outside development, and the child gets an
+        // allowlisted environment — never the server's secrets (forensic audit 2026-10-04, actuatorGuard.ts).
+        assertHostExecAllowed('The host preview launcher');
         const child = spawn(cmd, args, {
             cwd: path.resolve(workspaceId),
-            env: { ...process.env, ...env, NODE_OPTIONS: `--max-old-space-size=${memoryLimitMB}` },
+            env: hostChildEnv({ ...env, NODE_OPTIONS: `--max-old-space-size=${memoryLimitMB}` }),
             detached: true
         });
         

@@ -90116,3 +90116,10 @@ recorded here). So `TRUSTED_PROXY_HOPS = 1` (#3538) is confirmed on the real hos
 The row leaves the open queue. Lock: `tests/aCallerCannotChooseItsOwnAddress.test.ts` (one reader of the address)
 and `tests/theClientIsMeasuredNotGuessed.test.ts` (the measurement and its card). If the hosting path ever
 changes (a CDN or load balancer in front of Cloud Run), the same card will say Mismatch and name the number.
+### 2026-10-05 — Q-136: a state-routed app's tab that opens only the frame is named
+
+The per-route check (Lane B) visits routes; a state-routed app has none, so its screens are reached by the click
+explorer — which judged "blank" by the whole root. A tab that left the main area empty under a painted nav read
+"ok": the Q-147 class (the frame judged as the page) in a third lane. The explorer now asks the shared
+`MAIN_REGION_EMPTY_JS` after each press, with the paint wait's own grace for a screen still fetching. Real-browser
+lock: `tests/aTabThatEmptiesTheMainArea.test.ts`.

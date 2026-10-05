@@ -36,6 +36,7 @@ import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
 import { OtpHealthCard } from './admin/OtpHealthCard';
 import { AppCheckCard } from './admin/AppCheckCard';
+import { PlatformRatingsCard } from './admin/PlatformRatingsCard';
 import { AdminAuditLogPanel } from './admin/AdminAuditLogPanel';
 import { ProxyHopsCard } from './admin/ProxyHopsCard';
 import { PushHealthCard } from './admin/PushHealthCard';
@@ -3461,6 +3462,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           </div>
         </div>
       )}
+
+          {/* Users → Ratings: ratings of NavBharatAI itself, asked once after a user's app goes live
+              (PlatformRatingHost). */}
+          {activeTab === 'ratings' && (
+            <div className="space-y-4">
+              <PlatformRatingsCard adminToken={adminToken} />
+            </div>
+          )}
 
           {activeTab === 'userreports' && (
             <div className="space-y-4">

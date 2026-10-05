@@ -31,6 +31,7 @@ import { PublishCelebration } from './PublishCelebration';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 import { auth as firebaseAuth } from '../../lib/firebase';
 import { celebrationFor, type CelebrationKind } from '../../lib/firstPublish';
+import { announceRatingMoment, isRatingMoment } from '../../lib/platformRating';
 import { usePublishState } from '../../hooks/usePublishState';
 import { pendingActions, badgeAt, badgeLabelAt } from '../../lib/actionNavigator';
 import { usePreviewDwell } from '../../hooks/usePreviewDwell';
@@ -3046,7 +3047,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const [siteAnalytics, setSiteAnalytics] = useState<SiteAnalyticsView | null>(null);
   // The first-ever-publish celebration. Null until the server says this user has never published
   // before AND we have looked at the link (see deployLive).
-  const [celebration, setCelebration] = useState<{ kind: CelebrationKind; url: string; firstPublish: boolean } | null>(null);
+  // `rateAfter`: this publish went live, so closing its card is the moment to ask for a rating (PlatformRatingHost).
+  const [celebration, setCelebration] = useState<{ kind: CelebrationKind; url: string; firstPublish: boolean; rateAfter: boolean } | null>(null);
   // Hosting Phase 1 — the "Publish" chooser (host on NavBharatAI vs bring-your-own), opened from Deploy.
   const [showHostingChooser, setShowHostingChooser] = useState(false);
   /**
@@ -3535,7 +3537,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             });
             if (kind === 'none') return;
             setShowHostingChooser(false);
-            setCelebration({ kind, url: data.url, firstPublish: data?.firstPublish === true });
+            setCelebration({
+              kind, url: data.url, firstPublish: data?.firstPublish === true,
+              rateAfter: isRatingMoment({ ok: true, url: data.url, linkLive }),
+            });
           })();
         }
         // `warning` is the server's honest note when the publish succeeded via the preview-equivalent
@@ -4261,7 +4266,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           kind={celebration.kind}
           url={celebration.url}
           firstPublish={celebration.firstPublish}
-          onClose={() => setCelebration(null)}
+          onClose={() => {
+            // The rating card comes AFTER the user has seen their link — never on top of it.
+            if (celebration.rateAfter) announceRatingMoment();
+            setCelebration(null);
+          }}
         />
       )}
 

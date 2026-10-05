@@ -23,6 +23,7 @@ import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { NbaiDomainConnect } from '../agentv3/NbaiDomainConnect';
 import { usePublishState } from '../../hooks/usePublishState';
 import { auth } from '../../lib/firebase';
+import { announceRatingMoment, isRatingMoment } from '../../lib/platformRating';
 
 interface ProApp {
   workspaceId: string;
@@ -130,6 +131,8 @@ export function ConnectMyWebsitePanel({ onBack, uid }: ConnectMyWebsitePanelProp
         // dead, and a build error carries the compiler output the user actually needs.
         if (!res.ok) { setPublishMsg(data?.detail ? `${data.error}\n\n${data.detail}` : (data?.error || 'Could not publish your app.')); return; }
         setPublishMsg(typeof data?.url === 'string' && data.url ? `Your app is live at ${data.url}` : (data?.message || 'Published.'));
+        // A live publish is the moment to ask for a rating — the same one the Publish sheet raises.
+        if (isRatingMoment({ ok: true, url: data?.url, linkLive: null })) announceRatingMoment();
       } catch {
         setPublishMsg('Could not reach NavBharatAI. Check your connection and try again.');
       } finally {

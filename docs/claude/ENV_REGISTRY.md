@@ -2597,6 +2597,22 @@ the flag entries above promise.
   the entry is written (`earlyPreviewCue.ts`; a desktop opens the preview itself). 🔒 Only a capitalised import becomes
   a card — a missing helper keeps the empty stub. The fast lane's tier order is deliberately unchanged. Test-locked
   with a real-browser render in `tests/theAppIsOnScreenWhileItIsBuilt.test.ts`.
+- **🌐 `AGENTV3_BROWSER_ONLY_GUARD` — BROWSER-ONLY CODE IS NOT RUN IN NODE (queue row Q-146, 2026-10-05).
+  ⚠️ NOT set; default ON; `off` removes both the write note and the run refusal.**
+  `BrowserOnlyInNode.ts`. A report recorded the cost: the agent ran a browser-oriented localStorage seed with
+  `npx tsx`, it failed on `window is not defined` — deterministically, since node has no such global — and the
+  agent then hand-mocked `window` into a stack overflow: **4 failures, ~10 minutes** of a user's build on a
+  command whose outcome was knowable before it ran. Two layers, as the fifth rule's step 5 requires: (1) the
+  WRITE that creates a script-named file using browser globals says so while the file is open, so the run is
+  never attempted; (2) the `bash` case refuses the run if it is attempted anyway, naming the one path that
+  works — and saying explicitly **not** to mock the browser, which is the improvisation that turned one failure
+  into four. 🔒 The global list is MEASURED against `node:22-bookworm` (what all three E2B Dockerfiles pin), and
+  `navigator`/`fetch` are deliberately excluded because node 22 defines them; the test re-measures in the running
+  node, so a future runtime that defines one fails CI instead of leaving the guard wrong. Precision: it stands
+  down on a `typeof` guard, on a `globalThis.x =` polyfill, on an imported binding of the same name, and for
+  every ordinary app file — a component using `localStorage` SHOULD, and gets no note. Built in the shape of the
+  five guards beside it (`ScaffoldGuard`, `gitCloneGuard`, `PreviewGuard`, `fixNodeModulesTypo`, the
+  empty-command refusal). Test-locked in `tests/aSeedScriptIsNotABrowser.test.ts`, reversion-proven six ways.
 - **🙋 `AGENTV3_ASK_UNRELATED` — A DIFFERENT APP IS ASKED ABOUT, NOT BUILT INTO THE ONE THAT IS HERE (admin
   2026-09-30, verbatim: *"puch lo user se!"*, on autopsy 1389f0d5: a Genesis-4 PDF was built INTO a calculator).
   ⚠️ NOT set; default ON; `off` restores the old edit-always behaviour.** `unrelatedRequest.ts`. A build order on

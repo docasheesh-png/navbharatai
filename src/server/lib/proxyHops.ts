@@ -28,6 +28,16 @@ export interface HopReport {
   trustedHops: number;
   /** Read this: find your own public address in `ipByHopCount`; that `hops` is the value to set. */
   howToRead: string;
+  /**
+   * The answer itself, for the admin card (2026-10-05: an admin cannot open this route from the address bar —
+   * it needs the admin token header — and should not have to look up their own IP either). In the ADMIN'S
+   * OWN request nothing is forged, so the LEFT-most forwarded entry is their own address, and its position
+   * from the right is the hop count the server should trust. `null` when the request carried no forwarded
+   * chain at all (it did not come through the hosting path).
+   */
+  yourAddress: string | null;
+  measuredHops: number | null;
+  verdict: 'correct' | 'mismatch' | 'no-proxy';
 }
 
 export function hopReport(xff: string | string[] | undefined, remoteAddress: string | undefined): HopReport {
@@ -36,9 +46,13 @@ export function hopReport(xff: string | string[] | undefined, remoteAddress: str
   const chain = [...forwardedFor, String(remoteAddress ?? '')].filter(Boolean);
   const ipByHopCount: Array<{ hops: number; ip: string }> = [];
   for (let hops = 1; hops < chain.length; hops++) ipByHopCount.push({ hops, ip: chain[chain.length - 1 - hops] });
+  const measuredHops = forwardedFor.length > 0 ? chain.length - 1 : null;
   return {
     forwardedFor,
     remoteAddress: String(remoteAddress ?? ''),
+    yourAddress: forwardedFor[0] ?? null,
+    measuredHops,
+    verdict: measuredHops === null ? 'no-proxy' : measuredHops === TRUSTED_PROXY_HOPS ? 'correct' : 'mismatch',
     ipByHopCount,
     trustedHops: TRUSTED_PROXY_HOPS,
     howToRead: `Find YOUR OWN public IP address (search "what is my ip") in ipByHopCount. The server runs with trust proxy = ${TRUSTED_PROXY_HOPS} today; if your address is at hops ${TRUSTED_PROXY_HOPS} the setting is right, otherwise its hops is the number to set (TRUSTED_PROXY_HOPS in clientAddress.ts). If it appears nowhere, the request did not pass through the normal hosting path.`,

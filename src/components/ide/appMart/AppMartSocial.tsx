@@ -13,7 +13,7 @@
 //
 // Colours are theme TOKENS only (tests/themeTokensOnly.test.ts): a new file has a literal baseline of 0.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ThumbsUp, ThumbsDown, MessageCircle, Loader2, Flag, Trash2, UserX, Reply, MoreHorizontal, X,
@@ -230,6 +230,17 @@ export function CommentsSection({ appKey, onOpenProfile, onCounts, onOpenLikers 
   const [openReplies, setOpenReplies] = useState<Record<string, boolean>>({});
   const [now, setNow] = useState(() => Date.now());
 
+  // 🔴 THE CALLBACK IS READ THROUGH A REF, NEVER LISTED AS A DEPENDENCY (admin 2026-10-05: "comment ke liye
+  // click kare to screen vibrate hoti rehti hai, jabki loading ke liye kuch hai hi nahi"). The parent passes
+  // `onCounts` as an inline arrow, so it is a NEW function on every parent render. With it in `load`'s
+  // dependencies the screen looped for ever: load → onCounts → the parent's counts change → it re-renders →
+  // a new onCounts → a new `load` → the effect below runs again → the spinner comes back → fetch → … Each
+  // turn of the loop was one request to the server and one flash of "loading". The comments load when the
+  // APP changes (or the viewer signs in), never because a parent re-rendered.
+  // `tests/aParentRenderIsNotAReload.test.ts` fails on any client hook that does this again.
+  const onCountsRef = useRef(onCounts);
+  useEffect(() => { onCountsRef.current = onCounts; }, [onCounts]);
+
   const load = useCallback(async (before?: number) => {
     setLoading(true); setError('');
     try {
@@ -237,14 +248,14 @@ export function CommentsSection({ appKey, onOpenProfile, onCounts, onOpenLikers 
       setComments((prev) => (before ? [...prev, ...d.comments] : d.comments));
       setHasMore(d.hasMore);
       setViewer(d.viewer);
-      if (d.counts && onCounts) onCounts(d.counts);
+      if (d.counts) onCountsRef.current?.(d.counts);
       setNow(Date.now());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Comments could not be loaded.');
     } finally {
       setLoading(false);
     }
-  }, [appKey, onCounts]);
+  }, [appKey]);
 
   useEffect(() => { void load(); }, [load, signedIn]);
 

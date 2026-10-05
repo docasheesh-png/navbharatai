@@ -3085,6 +3085,18 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Money") stil
     keywords: ['release gate', 'freeze', 'deploy freeze', 'release approval', 'block deploy', 'freeze window', 'change freeze', 'approval gate', 'hold release', 'incident freeze', 'stop deploy'],
   },
   {
+    id: 'admin-visitor-address-check',
+    name: 'Visitor address check (proxy hop count)',
+    path: 'Admin Dashboard → Safety → Visitor address check (admin only)',
+    description: `Confirms that every per-address limit (admin login lockout, OTP send limit, the free guest quota) counts each visitor by their REAL address, not one they could write into a header. It measures, on the admin's own request, how many proxies sit in front of the server and compares that with the number the server trusts:
+• Correct — the counts match, nobody can choose their own address
+• Mismatch — names the number the setting should be changed to
+• Cannot measure — the panel was opened somewhere other than navbharatai.com (a local or preview address)`,
+    howToUse: 'Admin login required. Open the Admin Dashboard → Safety. The Visitor address check runs by itself at the top; press "Check again" to repeat it. No IP lookup is needed — it reads your own request.',
+    relatedFeatures: ['admin', 'admin-mfa'],
+    keywords: ['proxy hops', 'trust proxy', 'visitor address', 'real ip', 'ip address', 'x-forwarded-for', 'rate limit address', 'proxy check', 'ip check'],
+  },
+  {
     id: 'admin-mfa',
     name: 'Admin Two-Factor Authentication (2FA / TOTP)',
     path: 'Admin Dashboard → Safety → Two-Factor Authentication (admin only)',

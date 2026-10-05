@@ -89844,6 +89844,16 @@ Q-104, Q-116, Q-135, Q-139, Q-146, Q-147, Q-150, Q-152, Q-153, Q-156, Q-164 (Q-1
 open from that work, each 🟡 with what it needs in `BUILD_REPORT_QUEUE.md`: Q-154 (admin confirms `hops: 1` at
 `/api/admin/proxy-hops`), Q-162 (45 undecided routes), Q-160, Q-136 (#3533), Q-101, Q-159, Q-141, Q-163.
 
+### 2026-10-05 — Q-154: the hop check could only be run from a command line; now it is an admin card
+
+Admin: *"navbharatai.com/admin/api/admin/proxy-hops open hi nahi ho raha hai"*. Two causes, the second one mine: the
+path had an extra `/admin/`, and even the right path answers 401 from an address bar, because the route needs the
+`x-admin-token` HEADER that only the admin panel sends. Telling the admin to "open the URL" was asking for
+something they could not do — and then to look up their own IP. Class: a check only a command-line user could run.
+Fix: the report computes its own verdict from the admin's own request (the left-most forwarded entry is theirs —
+nothing is forged in their own browser), and `ProxyHopsCard` on **Admin → Safety** sends the token and says
+Correct / Mismatch (naming the number) / Cannot measure. The route left the uncalled-route baseline (it has a
+caller now). Lock: `tests/theClientIsMeasuredNotGuessed.test.ts`.
 ### 2026-10-05 — App Mart: the comments sheet flickered for ever ("screen vibrate hoti rehti hai")
 
 Admin: *"navbharatai → app mart → instant play app → comment … click kare to screen vibrate hoti rehti hai, aisa lagta

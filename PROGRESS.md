@@ -90736,3 +90736,59 @@ humanoid → surfaces.
 Not re-audited: the motorcycle and bicycle.
 
 This is a server-side change: the generator runs on the server, so every user, on web or phone, gets it for newly built games as soon as it is merged and deployed. No new `.aab` / `.ipa` is needed. Games built earlier keep their old files until they are rebuilt.
+### 2026-10-05 — Game engine G1: the meta layer, so a built game brings the player back
+
+The admin asked: *"navbharatai jab game banaye to user ko navbharatai ki latt lag jaye"*. An audit of the
+game generators found almost nothing that brings a player back. There were no achievements, no XP or levels,
+no combo, no daily reason to return, no near-miss moment and no haptics. Two of the pieces that did exist
+were broken:
+- **The best score never persisted.** `state.highScore` existed, but nothing ever called `save()` or
+  `load()`, so every reload reset "best" to 0.
+- **Resuming from pause looked like a new game.** `setStatus('playing')` from pause emitted `GAME_STARTED`,
+  and `GAME_RESUMED`, which is declared and which the HUD subscribes to, never fired.
+
+**Built: `src/game/core/meta.ts`**, emitted by `generate_game_runtime`, the tool every game calls first.
+- A best score that persists per `gameId`.
+- NEW BEST, plus the near miss: "only N more", shown when a round reaches 80% of the best.
+- A combo multiplier (`combo.hit(points)`, broken when the player takes damage).
+- Scale-free XP. It rewards playing, lasting and improving, never raw score size, so a 10-point game and a
+  10,000-point game level at the same pace.
+- Levels with named unlocks.
+- 11 built-in achievements, plus game-specific ones.
+- A daily streak with a once-a-day bonus.
+- Three daily goals. They are seeded per day and drawn only from what the game has actually shown it does,
+  with targets scaled from the player's own bests.
+- Announcements (`mountMetaToasts`) and `summaryLines()` for any game-over screen.
+
+**Shell wiring.** The 3D shell starts all of this itself:
+- it calls `startMeta`, mounts the toasts, ticks the combo, and breaks it on `PLAYER_DAMAGED`;
+- the HUD shows Best and the combo multiplier;
+- the game-over screen is the round summary, with a "Play again" that is focused on arrival and that
+  Enter, Space or R also trigger.
+
+**Prompt and tool description.** Both now tell every game, 2D games included, to wire it.
+
+**Defects found by the tests and fixed:**
+- A round the player walked away from leaked into the next game: its start time and its combo carried over.
+- A brand-new player got only two daily goals. An always-available "play for N minutes" goal now makes three.
+- Vibrating before the first tap logged a console error. `buzz()` now waits for `navigator.userActivation`.
+
+**Rendered in Chromium** with the real shell. Round 1 showed NEW BEST, a level-up with its unlock, two
+achievements and the next goal. Round 2 showed "So close! Only 26 more to beat your best (200)". There were
+0 console errors. All 29 generated game files typecheck under `--strict` against real React and three types;
+the check was confirmed to be real by planting an error and watching it fail.
+
+**Locked by `tests/aGameBringsThePlayerBack.test.ts`** (19 cases). It covers:
+- persistence across a reload, a per-game save, and broken or old storage;
+- NEW BEST only when the best really falls, the near miss, XP scale-freedom, level unlocks, and achievements
+  that fire once;
+- combo maths;
+- the daily reward and streak across days;
+- goal selection and progress;
+- pause semantics, and the walked-away round;
+- shell wiring;
+- a guard that the module contains no `Math.random`, no purchase or currency words, and no countdown
+  pressure.
+
+**Ethics, stated in the module and in the prompt.** Engagement comes through mastery and progress. There are
+no loot boxes, no paid randomness, no fake timers and no guilt messages. Many players are children.

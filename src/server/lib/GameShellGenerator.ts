@@ -38,6 +38,7 @@ import { Input } from './core/input';
 import { GameFeel } from './core/feel';
 import { events } from './core/events';
 import { state, setStatus, resetRun } from './core/state';
+import { startMeta, mountMetaToasts, combo } from './core/meta';
 import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
@@ -74,6 +75,13 @@ export interface GameOptions {
    * buttons, or false ONLY for a game that has its own touch controls — never to "simplify".
    */
   touchControls?: TouchControlsOptions | false;
+  /**
+   * Names this game's save (best score, XP, level, achievements, daily streak — meta.ts). Give every
+   * game its own id, or two games on one site share one best score.
+   */
+  gameId?: string;
+  /** Rewards unlocked at a level, shown when it is reached: { 3: 'Red car', 5: 'Night track' }. */
+  unlocks?: Record<number, string>;
 }
 
 export interface GameContext {
@@ -155,6 +163,14 @@ export class Game {
       positionOf: (p) => p?.position ?? null,
     }));
 
+    // WHAT BRINGS THE PLAYER BACK: best score that survives a reload, XP + levels, achievements, a daily
+    // streak and goals, and the announcements for each (meta.ts). Started here so no game can forget it.
+    // Re-started on every construction because dispose() clears the event bus it listens on.
+    startMeta({ gameId: options.gameId, unlocks: options.unlocks });
+    this.disposers.push(mountMetaToasts(options.container));
+    // Taking a hit ends the combo — that is what makes a clean run worth more than a long one.
+    this.disposers.push(events.on('PLAYER_DAMAGED', () => combo.break()));
+
     // A GPU reset or a backgrounded mobile tab fires this. Unprevented, the canvas stays black forever
     // and the game looks crashed to the player.
     const onLost = (e: Event) => { e.preventDefault(); this.loop.setPaused(true); };
@@ -203,6 +219,7 @@ export class Game {
   /** FIXED 60Hz. Everything that affects the simulation lives here and nowhere else. */
   private fixedUpdate(delta: number): void {
     this.feel.update(delta);
+    combo.update(delta);
 
     // Mouse/stick look MUST be consumed here, not in render: endFrame() below zeroes it, and endFrame
     // runs before the next render. Read it there and the camera never turns at all.
@@ -364,9 +381,10 @@ export function GameCanvas({ options, onReady, className = '', fullscreen = true
 }
 `;
 
-const HUD = `import { useEffect, useState } from 'react';
+const HUD = `import { useEffect, useRef, useState } from 'react';
 import { events } from '../core/events';
 import { state, type GameState } from '../core/state';
+import { meta, combo, summaryLines } from '../core/meta';
 import type { Game } from '../Game';
 
 /**
@@ -386,7 +404,7 @@ function useGameState(): GameState {
     const offs = [
       'SCORE_CHANGED', 'PLAYER_DAMAGED', 'PLAYER_HEALED', 'PLAYER_DIED',
       'GAME_STARTED', 'GAME_OVER', 'GAME_WON', 'GAME_PAUSED', 'GAME_RESUMED',
-      'LEVEL_STARTED', 'LEVEL_COMPLETED', 'ITEM_COLLECTED',
+      'LEVEL_STARTED', 'LEVEL_COMPLETED', 'ITEM_COLLECTED', 'COMBO_CHANGED', 'RUN_SUMMARY',
     ].map((e) => events.on(e, sync));
     sync(); // an event fired between render and subscribe would otherwise be missed
     return () => { for (const off of offs) off(); };
@@ -409,6 +427,20 @@ const button: React.CSSProperties = {
 
 export function Hud({ game }: { game: Game }) {
   const s = useGameState();
+  const again = useRef<HTMLButtonElement>(null);
+  const over = s.status === 'gameover' || s.status === 'won';
+
+  // ONE TAP TO PLAY AGAIN. The button takes focus the moment the round ends, and Enter, Space or R
+  // restart from anywhere. Every extra step between "I lost" and "again" is where a player stops.
+  useEffect(() => {
+    if (!over) return;
+    again.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'r' || e.key === 'R') { e.preventDefault(); game.restart(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [over, game]);
 
   // Esc pauses. Bound to the window because the player expects it to work wherever focus is.
   useEffect(() => {
@@ -425,7 +457,11 @@ export function Hud({ game }: { game: Game }) {
     <>
       {/* pointerEvents none, or the HUD silently eats clicks meant for the game */}
       <div style={{ position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', right: 'max(12px, env(safe-area-inset-right))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff', pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.8)', zIndex: 5 }}>
-        <div style={{ fontWeight: 700, fontSize: 18 }}>Score {s.score}</div>
+        <div style={{ fontWeight: 700, fontSize: 18 }}>
+          Score {s.score}
+          <span style={{ opacity: 0.7, fontSize: 13, marginLeft: 10 }}>Best {s.highScore}</span>
+          {combo.multiplier > 1 ? <span style={{ marginLeft: 10, color: '#fde047' }}>x{combo.multiplier}</span> : null}
+        </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <div style={{ width: 120, height: 10, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden' }}>
             {/* health is an ABSOLUTE value, not a percentage — a game with 250 max HP would peg the
@@ -449,12 +485,15 @@ export function Hud({ game }: { game: Game }) {
         </div>
       ) : null}
 
-      {s.status === 'gameover' || s.status === 'won' ? (
+      {over ? (
         <div style={overlay}>
-          <div>
+          <div style={{ maxWidth: 420, padding: '0 16px' }}>
             <h2 style={{ fontSize: 30, fontWeight: 800 }}>{s.status === 'won' ? 'You win' : 'Game over'}</h2>
-            <p style={{ opacity: 0.85, marginTop: 6 }}>Score {s.score}</p>
-            <button style={button} onClick={() => game.restart()}>Play again</button>
+            {/* The run summary: the first line is the hook — a new best, or exactly how close it was. */}
+            {(meta.lastSummary ? summaryLines(meta.lastSummary) : ['Score ' + s.score]).map((line, i) => (
+              <p key={i} style={i === 0 ? { fontSize: 20, fontWeight: 800, marginTop: 8, color: '#fde047' } : { opacity: 0.88, marginTop: 4 }}>{line}</p>
+            ))}
+            <button ref={again} style={button} onClick={() => game.restart()}>Play again</button>
           </div>
         </div>
       ) : null}

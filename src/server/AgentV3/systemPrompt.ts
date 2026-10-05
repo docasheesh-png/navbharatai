@@ -789,6 +789,15 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '    1. generate_game_runtime  — ALWAYS FIRST. Fixed-timestep loop, input (incl. touch), events,',
     '       pooling, save/load, game feel. A hand-written requestAnimationFrame loop makes the game run',
     '       at a different SPEED on every monitor.',
+    // 🔁 ADMIN 2026-10-05: "navbharatai jab game banaye to user ko navbharatai ki latt lag jaye". A game
+    // that forgets everything when it ends is played once — best score, progress and a fast restart are
+    // what bring a player back, and the runtime already ships them (meta.ts).
+    '       🔁 IT ALSO SHIPS meta.ts — WHAT BRINGS THE PLAYER BACK. Every game calls startMeta({ gameId })',
+    '       once (the 3D shell does it for you), scores successful actions with combo.hit(points), and ends',
+    '       a round on a screen showing summaryLines(meta.lastSummary) — NEW BEST, or "only N more to beat',
+    '       your best" — with a big, already-focused "Play again". No best score, no progress, or a slow',
+    '       restart means the game is played once. Reward playing and improving: NEVER loot boxes, paid',
+    '       randomness, fake timers or guilt messages.',
     '    2. generate_game_3d       — only for 3D. Colour management, lighting presets, camera rigs,',
     '       procedural world. Adds `three`.',
     // 🎨 ADMIN 2026-08-26, from a real 3D game: "not so realistic". The audit found the lighting was

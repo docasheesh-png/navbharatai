@@ -2452,7 +2452,10 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'and a cheap phone, and an alt-tab cannot teleport the player), polled Input with keyboard + '
         + 'mouse + touch-joystick + virtual buttons behind ONE action map, an EventBus, an object Pool, '
         + 'game state with save/load, and GameFeel (trauma-squared screen shake, hit-stop, easing, '
-        + 'frame-rate-independent damp). NO dependency is added and nothing here is engine-specific, so it '
+        + 'frame-rate-independent damp), and META — what brings a player back: a best score that survives a '
+        + 'reload, NEW BEST and near-miss ("only 12 more") moments, a combo multiplier, XP + levels with '
+        + 'unlocks, achievements, and a daily streak with three daily goals, with on-screen announcements. '
+        + 'NO dependency is added and nothing here is engine-specific, so it '
         + 'serves a 2D canvas and a 3D scene equally. '
         + 'DO NOT hand-roll a requestAnimationFrame loop, a keydown handler or a bullet array — every one '
         + 'of those has a known failure (frame-rate-dependent physics, lost key presses, GC stutter) that '
@@ -2463,7 +2466,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: loop, input, events, pool, feel, state. Default = all; imports are pulled in automatically.',
+            description: 'Optional subset: loop, input, events, pool, feel, state, meta. Default = all; imports are pulled in automatically.',
           },
         },
       },

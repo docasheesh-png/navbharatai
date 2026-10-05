@@ -29,6 +29,9 @@ const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
  */
 const REVIEWED_SMALL: Record<string, string> = {
   '/api/admin/mfa/verify': '`code` is a 6-digit TOTP code',
+  '/api/gallery/admin/:id/review': '`decision` is one of three words; `note` is cut to 500 characters by readReviewReason (storeReviewReason.ts, Q-681); `reasonContract` is a number',
+  '/api/nav-store/admin/review': 'ids, `decision` (three words) and a `note` cut to 500 characters by readReviewReason (Q-681)',
+  '/api/nav-store/web/admin/review': 'ids, `decision` (three words) and a `note` cut to 500 characters by readReviewReason (Q-681)',
   '/api/platform-rating': '`stars` is 1–5 and the note is cut to MAX_RATING_COMMENT_CHARS (500) by parseRatingSubmission (#3552)',
   '/api/admin/mfa/disable': '`code` is a 6-digit TOTP code',
   '/api/referral/:userId/redeem': '`code` is a referral code',

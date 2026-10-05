@@ -3,7 +3,8 @@ import {
   retentionCutoffMs, isExpired, deleteUserData, purgeExpired,
   USER_SCOPED_COLLECTIONS, RETENTION_POLICIES, RETAINED_INDEFINITELY,
   retentionBound, isRetainedIndefinitely, collectionsNeedingRetention, DEFAULT_MAX_PER_RUN,
-  type RetentionFirestore, type RetentionPolicy,
+  USER_SCOPED_SUBCOLLECTIONS, purgeExpiredSubcollections, SUBCOLLECTION_RETENTION_POLICIES,
+  type RetentionFirestore, type RetentionPolicy, type SubcollectionSource,
 } from './DataRetentionManager';
 
 // ── Minimal in-memory Firestore satisfying RetentionFirestore ──────────────────────────────────────
@@ -22,6 +23,21 @@ class MockFirestore implements RetentionFirestore {
         return {
           async get() { return { exists: store.col(name).has(id) }; },
           async delete() { store.col(name).delete(id); },
+          // A subcollection is stored as its own path, `parent/{id}/sub` — and, as in Firestore,
+          // deleting the parent above leaves it untouched.
+          collection(sub: string) {
+            const path = `${name}/${id}/${sub}`;
+            return {
+              limit(n: number) {
+                return {
+                  async get() {
+                    const ids = [...store.col(path).keys()].slice(0, n);
+                    return { docs: ids.map((sid) => ({ ref: { async delete() { store.col(path).delete(sid); } } })) };
+                  },
+                };
+              },
+            };
+          },
         };
       },
       where(field: string, op: '==' | '<', value: unknown) {
@@ -102,6 +118,21 @@ describe('deleteUserData — right-to-be-forgotten cascade', () => {
     expect(db.has('user_build_history', 'b1')).toBe(false);
     // users(1) + user_profiles(1) + user_token_wallets(1) + user_costs(2) + chat_sessions(1) + user_build_history(1)
     expect(report.totalDeleted).toBe(7);
+  });
+
+  it("erases the user's subcollections too — deleting users/{uid} leaves them behind (Q-134)", async () => {
+    db.seed('users/u1/deviceTokens', 't1', { token: 'fcm-1' });
+    db.seed('users/u1/notifications', 'n1', { text: '@you' });
+    db.seed('users/u1/notifications', 'n2', { text: '@you again' });
+    db.seed('promptAudits/u1/entries', '1700000000000', { ts: 1700000000000 });
+    db.seed('users/u2/deviceTokens', 't2', { token: 'fcm-2' });
+    const report = await deleteUserData(db, 'u1');
+    expect(db.count('users/u1/deviceTokens')).toBe(0);
+    expect(db.count('users/u1/notifications')).toBe(0);
+    expect(db.count('promptAudits/u1/entries')).toBe(0);
+    expect(db.count('users/u2/deviceTokens')).toBe(1);
+    expect(report.collections.find((c) => c.collection === 'users/{uid}/notifications')?.deleted).toBe(2);
+    expect(USER_SCOPED_SUBCOLLECTIONS.map((e) => `${e.parent}/${e.sub}`)).toEqual(['users/deviceTokens', 'users/notifications', 'promptAudits/entries']);
   });
 
   it('NEVER touches another user’s data (isolation)', async () => {
@@ -276,5 +307,76 @@ describe('🔒 what is deliberately kept forever, and what is merely undecided',
       expect(['date', 'epochMs', 'iso']).toContain(p.timestampKind);
       expect(p.ttlDays).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('purgeExpiredSubcollections — past build reports and prompt audits on a 180-day clock (Q-134)', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const NOW = 1000 * DAY;
+  /** parent → id → sub → docId → row */
+  function fakeSource(tree: Record<string, Record<string, Record<string, Record<string, Row>>>>) {
+    const calls: string[] = [];
+    const src: SubcollectionSource = {
+      async parentIds(parent, afterId, pageSize) {
+        const ids = Object.keys(tree[parent] ?? {}).sort();
+        const from = afterId ? ids.findIndex((i) => i > afterId) : 0;
+        return from < 0 ? [] : ids.slice(from, from + pageSize);
+      },
+      async deleteExpiredUnder(parent, id, sub, field, bound, max) {
+        calls.push(`${parent}/${id}/${sub}`);
+        const docs = tree[parent]?.[id]?.[sub] ?? {};
+        let n = 0;
+        for (const [k, row] of Object.entries(docs)) {
+          if (n >= max) break;
+          const v = row[field];
+          if (typeof v === 'number' && typeof bound === 'number' && v < bound) { delete docs[k]; n++; }
+        }
+        return n;
+      },
+    };
+    return { src, calls };
+  }
+
+  it('the build-report history is on the clock at 180 days, by its numeric savedAt', () => {
+    expect(SUBCOLLECTION_RETENTION_POLICIES).toContainEqual({ parent: 'workspace_diagnostics_v3', subcollection: 'history', ttlDays: 180, timestampField: 'savedAt', timestampKind: 'epochMs' });
+  });
+
+  it('deletes only reports older than 180 days, under every workspace', async () => {
+    const tree = { workspace_diagnostics_v3: {
+      'agentv3-a-1': { history: { old: { savedAt: NOW - 200 * DAY }, fresh: { savedAt: NOW - 10 * DAY } } },
+      'agentv3-b-1': { history: { old: { savedAt: NOW - 181 * DAY } } },
+    } };
+    const { src } = fakeSource(tree);
+    const r = await purgeExpiredSubcollections(src, NOW, [SUBCOLLECTION_RETENTION_POLICIES[0]]);
+    expect(r.totalDeleted).toBe(2);
+    expect(Object.keys(tree.workspace_diagnostics_v3['agentv3-a-1'].history)).toEqual(['fresh']);
+    expect(Object.keys(tree.workspace_diagnostics_v3['agentv3-b-1'].history)).toEqual([]);
+  });
+
+  it('is bounded per run, so a backlog drains over several nights', async () => {
+    const history: Record<string, Row> = {};
+    for (let i = 0; i < 30; i++) history[`h${i}`] = { savedAt: NOW - 400 * DAY };
+    const tree = { workspace_diagnostics_v3: { w: { history } } };
+    const { src } = fakeSource(tree);
+    const r = await purgeExpiredSubcollections(src, NOW, [{ ...SUBCOLLECTION_RETENTION_POLICIES[0], maxPerRun: 12 }]);
+    expect(r.totalDeleted).toBe(12);
+    expect(Object.keys(history)).toHaveLength(18);
+  });
+
+  it('pages through more parents than one page holds', async () => {
+    const parents: Record<string, Record<string, Record<string, Row>>> = {};
+    for (let i = 0; i < 650; i++) parents[`w${String(i).padStart(4, '0')}`] = { history: { x: { savedAt: NOW - 365 * DAY } } };
+    const { src } = fakeSource({ workspace_diagnostics_v3: parents });
+    const r = await purgeExpiredSubcollections(src, NOW, [{ ...SUBCOLLECTION_RETENTION_POLICIES[0], maxPerRun: 10_000 }]);
+    expect(r.totalDeleted).toBe(650);
+  });
+
+  it('a failing source is recorded, never thrown', async () => {
+    const src: SubcollectionSource = {
+      async parentIds() { throw new Error('index missing'); },
+      async deleteExpiredUnder() { return 0; },
+    };
+    const r = await purgeExpiredSubcollections(src, NOW);
+    expect(r.collections[0].error).toBe('index missing');
   });
 });

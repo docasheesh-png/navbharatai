@@ -64,6 +64,7 @@ import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { renderPreview } from '../runtime/renderPreview';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { escapeHtml } from '../../lib/escapeHtml';
+import { readReviewReason, recordedReviewReason, NO_REASON_LEGACY } from '../../lib/storeReviewReason';
 import { bakeIsCurrent } from '../runtime/previewRuntimeSignature';
 import { assessPublishSafety } from '../lib/storePublishSafety';
 import { userProfileStore } from '../lib/UserProfileStore';
@@ -577,12 +578,16 @@ export function registerNavStoreRoutes(app: Express): void {
     const me = await verifyFirebaseIdentity(req);
     if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
 
-    const { id, decision, note } = (req.body || {}) as Record<string, unknown>;
+    const { id, decision } = (req.body || {}) as Record<string, unknown>;
     const appId = String(id || '');
     const allowed = ['approved', 'rejected', 'removed'];
     if (!appId || !allowed.includes(String(decision))) {
       return res.status(400).json({ error: 'An app id and a decision (approved, rejected or removed) are required.' });
     }
+    // Q-681: a reject / remove deletes the creator's APK, so it carries the admin's own reason.
+    const why = readReviewReason(req.body, decision !== 'approved');
+    if (!why.ok) return res.status(400).json({ error: why.error });
+    const note = decision === 'approved' ? why.reason : recordedReviewReason(why);
 
     try {
       const found = await getApp(appId);
@@ -596,7 +601,7 @@ export function registerNavStoreRoutes(app: Express): void {
         status,
         reviewedAt: Date.now(),
         reviewedBy: me?.email || 'admin',
-        reviewNote: typeof note === 'string' ? note.slice(0, 500) : undefined,
+        reviewNote: note ?? undefined,
       });
       // A removed app must actually stop existing, not merely stop being listed.
       if (status === 'removed' || status === 'rejected') {
@@ -610,7 +615,7 @@ export function registerNavStoreRoutes(app: Express): void {
           name: found.appName,
           ownerUid: found.uid,
           ownerEmail: found.developer?.email,
-          reason: typeof note === 'string' && note.trim() ? note.trim() : `${status} by admin`,
+          reason: note || NO_REASON_LEGACY,
           actor: 'admin',
           removedBy: me?.email || 'admin',
           removedAt: Date.now(),
@@ -618,7 +623,7 @@ export function registerNavStoreRoutes(app: Express): void {
         await deleteApk(found.storagePath);
       }
 
-      audit('STORE_APK_REVIEW_DECISION', { reviewer: me?.email || '', id: appId, ownerUid: found.uid, before: found.status, decision: status, note: typeof note === 'string' ? note.slice(0, 500) : '', result: 'ok' });
+      audit('STORE_APK_REVIEW_DECISION', { reviewer: me?.email || '', id: appId, ownerUid: found.uid, before: found.status, decision: status, note: note || '', reasonGiven: !why.legacy, result: 'ok' });
       res.json({ ok: true, id: appId, status });
       // Congratulate the creator AFTER the response — the same "side effects after the response"
       // discipline web/publish's bake already uses below, so a slow/unconfigured email provider can
@@ -1396,6 +1401,10 @@ export function registerNavStoreRoutes(app: Express): void {
     if (!id || !['listed', 'removed'].includes(decision)) {
       return res.status(400).json({ error: 'An app id and a decision (listed or removed) are required.' });
     }
+    // Q-681: a removal deletes the creator's app, so it carries the admin's own reason.
+    const why = readReviewReason(req.body, decision === 'removed');
+    if (!why.ok) return res.status(400).json({ error: why.error });
+    const removalReason = recordedReviewReason(why);
     try {
       const found = await getWebApp(id);
       if (!found) return res.status(404).json({ error: 'No such app.' });
@@ -1409,18 +1418,18 @@ export function registerNavStoreRoutes(app: Express): void {
           contentId: id,
           name: found.name,
           ownerUid: found.uid,
-          reason: typeof req.body?.note === 'string' ? req.body.note : 'removed by admin',
+          reason: removalReason,
           actor: 'admin',
           removedBy: me?.email || 'admin',
           removedAt: Date.now(),
           contentHash: hashContent(await getWebAppFiles(id).catch(() => null)),
           findings: (found.safetyFindings ?? []).map((f) => `${f.severity}:${f.rule}`),
         });
-        await removeWebApp(id, typeof req.body?.note === 'string' ? req.body.note : 'removed by admin', me?.email || 'admin');
+        await removeWebApp(id, removalReason, me?.email || 'admin');
       } else {
         await updateWebApp(id, { status: 'listed', reviewedAt: Date.now(), reviewedBy: me?.email || 'admin' });
       }
-      audit('STORE_WEB_REVIEW_DECISION', { reviewer: me?.email || '', id, ownerUid: found.uid, before: found.status, decision, note: typeof req.body?.note === 'string' ? req.body.note.slice(0, 500) : '', result: 'ok' });
+      audit('STORE_WEB_REVIEW_DECISION', { reviewer: me?.email || '', id, ownerUid: found.uid, before: found.status, decision, note: decision === 'removed' ? removalReason : (why.reason || ''), reasonGiven: decision !== 'removed' || !why.legacy, result: 'ok' });
       res.json({ ok: true, id, status: decision });
       // Congratulate the creator AFTER the response — same discipline as web/publish's bake above,
       // so a slow/unconfigured email provider can never hold up the admin's review screen.

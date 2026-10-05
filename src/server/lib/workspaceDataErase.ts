@@ -36,7 +36,9 @@ export interface WorkspaceScopedCollection {
  *   workspace_checkpoints_v3  .doc(workspaceId).collection('items')
  *   workspace_embeddings_v3   .doc(workspaceId).collection('files')
  *   workspace_memory_v3       .doc(workspaceId)
- *   workspace_diagnostics_v3  .doc(workspaceId)
+ *   workspace_diagnostics_v3  .doc(workspaceId).collection('history') ← every past build report (Q-134)
+ *   workspace_user_actions_v1 .doc(workspaceId).collection('items')   ← what the engine asked the user to do (Q-134)
+ *   code_reviews              .doc(workspaceId).collection('comments') ← review comments on the app (Q-134)
  *   workspace_manual_edits_v3 .doc(workspaceId)
  *   project_plans_v3          .doc(workspaceId)
  *   app_engineering_memory_v1 .doc(workspaceId)                      ← requirement ledger, issues, change log
@@ -51,7 +53,14 @@ export const WORKSPACE_SCOPED_COLLECTIONS: readonly WorkspaceScopedCollection[] 
   { collection: 'workspace_checkpoints_v3', sub: 'items' },
   { collection: 'workspace_embeddings_v3', sub: 'files' },
   { collection: 'workspace_memory_v3' },
-  { collection: 'workspace_diagnostics_v3' },
+  // 🔴 Q-134 (2026-10-05): listed with NO sub, so an account erase deleted each workspace's latest report
+  // and left its whole `history` subcollection behind — every past build report, unreachable and kept.
+  { collection: 'workspace_diagnostics_v3', sub: 'history' },
+  // Q-134 sibling: the user-actions store (UserActionStore.ts) was in no erase path at all.
+  { collection: 'workspace_user_actions_v1', sub: 'items' },
+  // Q-134 sibling: review comments on the user's app (CodeReviewStore.ts), keyed by a workspace id the
+  // route has already checked with `ownedByVerifiedUid` — so the id range below reaches exactly them.
+  { collection: 'code_reviews', sub: 'comments' },
   { collection: 'workspace_manual_edits_v3' },
   { collection: 'project_plans_v3' },
   { collection: 'app_engineering_memory_v1' },

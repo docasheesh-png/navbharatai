@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, ArrowDownRight, ArrowUpRight, CheckCircle2, HelpCircle, RefreshCw } from 'lucide-react';
 import { authedHeaders } from '../../lib/authHeaders';
+import { readAnswer, isRecord } from '../../lib/serverAnswer';
 
 /**
  * YOUR STATEMENT — every credit, every debit, and whether it adds up.
@@ -44,6 +45,11 @@ interface Statement {
   notes?: string[];
 }
 
+/** The statement route's answer — a refusal (`{ error }`) is not a statement with no rows (Q-680). */
+export function isStatement(b: unknown): b is Statement {
+  return isRecord(b) && b.ok === true && Array.isArray(b.rows);
+}
+
 const inr = (n: number | undefined): string =>
   `₹${(Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -62,7 +68,8 @@ export const WalletStatementPanel: React.FC<{ userId: string }> = ({ userId }) =
     setLoading(true);
     try {
       const res = await fetch(`/api/wallet/${encodeURIComponent(userId)}/statement`, { headers: await authedHeaders() });
-      setData(await res.json());
+      const a = await readAnswer(res, isStatement);
+      setData(a.ok ? a.value : { ok: false, notes: [a.sentence] });
     } catch (e) {
       // An unreachable statement says so. Rendering an empty one would read as "you have no history",
       // which on a money screen is the most alarming possible way to be wrong.

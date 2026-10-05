@@ -28,6 +28,8 @@ import { BROWSE_VIEWS, kindFilterOptions, shelvesFor, emptyViewMessage, viewNeed
 import { readStoreStatus, storeStatusReport, type StoreStatus } from './appMart/storeStatus';
 import { parseAppMartTarget } from '../../lib/appMartTarget';
 import { writeFailure } from '../../lib/serverAnswer';
+import { readAdminReason } from '../../lib/adminActionReason';
+import { REVIEW_REASON_CONTRACT } from '../../lib/storeReviewReason';
 
 // Nav App Store — publish your Android app, and install other people's.
 //
@@ -175,6 +177,22 @@ export interface NavAppStoreProps {
 // for everything this deliberately leaves alone.
 const STORE_PLATFORM = nativePlatformName();
 const HIDE_ANDROID_INSTALLS = androidInstallsHidden(STORE_PLATFORM);
+
+/**
+ * Ask the admin for the reason behind a reject / remove (Q-681). `null` when they cancel. A reason the
+ * server would refuse (empty, too short) is asked again with the rule, up to three times.
+ */
+function askReviewReason(question: string): string | null {
+  let text = question;
+  for (let i = 0; i < 3; i++) {
+    const raw = window.prompt(text, '');
+    if (raw === null) return null;
+    const read = readAdminReason(raw);
+    if ('reason' in read) return read.reason;
+    text = `${read.error}\n\n${question}`;
+  }
+  return null;
+}
 
 export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initialTab, initialPublishWorkspaceId, socialTarget }) => {
   const [tab, setTab] = useState<Tab>(initialTab ?? 'browse');
@@ -614,7 +632,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       const res = await fetch('/api/nav-store/web/admin/review', {
         method: 'POST',
         headers: await authedHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ id, decision, ...(note ? { note } : {}) }),
+        // `reasonContract`: this client enforces the reason (Q-681), so the server refuses a removal without one.
+        body: JSON.stringify({ id, decision, ...(note ? { note } : {}), reasonContract: REVIEW_REASON_CONTRACT }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
@@ -652,7 +671,8 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       const res = await fetch('/api/nav-store/admin/review', {
         method: 'POST',
         headers: await authedHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ id, decision, ...(note ? { note } : {}) }),
+        // `reasonContract`: this client enforces the reason (Q-681), so the server refuses a removal without one.
+        body: JSON.stringify({ id, decision, ...(note ? { note } : {}), reasonContract: REVIEW_REASON_CONTRACT }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
@@ -677,8 +697,10 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
    * saved decision.
    */
   const adminRemoveFromStore = useCallback(async (kind: 'web' | 'apk', id: string, name: string) => {
-    if (!window.confirm(`Remove "${name}" from App Mart?\n\nIt disappears for everyone, its link stops working, and its files are deleted. This cannot be undone.`)) return;
-    const note = 'Removed by an admin from the app page';
+    // Q-681: the admin's own reason, never a sentence filled in for them (this used to send "Removed by an
+    // admin from the app page" on every removal). Cancel = no removal.
+    const note = askReviewReason(`Remove "${name}" from App Mart?\n\nIt disappears for everyone, its link stops working, and its files are deleted. This cannot be undone.\n\nWrite the reason (kept in the removal record):`);
+    if (note === null) return;
     const ok = kind === 'web' ? await decideWeb(id, 'removed', note) : await decide(id, 'removed', note);
     if (!ok || !liveRef.current) return;
     if (kind === 'web') setDetailApp(null); else setOpenApp(null);
@@ -1685,7 +1707,10 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                           {reviewing === a.id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} Publish
                         </button>
                         <button
-                          onClick={() => void decide(a.id, 'rejected')}
+                          onClick={() => {
+                            const note = askReviewReason(`Reject "${a.appName}"?\n\nIts APK is deleted. Write the reason (shown to the creator and kept in the removal record):`);
+                            if (note !== null) void decide(a.id, 'rejected', note);
+                          }}
                           disabled={reviewing === a.id}
                           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-raised hover:bg-raised-hover text-xs font-semibold text-body disabled:opacity-40"
                         >

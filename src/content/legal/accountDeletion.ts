@@ -13,7 +13,7 @@
 // is erased is worse than no page, because people rely on it and stop asking.
 
 export const ACCOUNT_DELETION_TITLE = 'Delete your NavBharatAI account';
-export const ACCOUNT_DELETION_UPDATED = '1 October 2026';
+export const ACCOUNT_DELETION_UPDATED = '5 October 2026';
 
 export const ACCOUNT_DELETION = `# Delete your NavBharatAI account
 
@@ -56,8 +56,9 @@ When your deletion request is completed, we remove:
 
 - your **account record and profile** (name, email address, phone number, profile picture);
 - your **chat history** across every NavBharatAI assistant;
-- your **projects and built apps**, including their files and any archives you uploaded;
-- your **build history and diagnostics** tied to your account;
+- your **projects and built apps**, including their files and any archives you uploaded, the review comments left on them, and the list of things the builder asked you to do for them;
+- your **build history and diagnostics** tied to your account, including the reports of past builds and the record of which instructions each build ran with;
+- your **notifications and devices** — the mentions sent to you inside NavBharatAI, and the push-notification address of each phone you signed in on;
 - your **wallet, token balance and usage records**;
 - any **API keys and credentials** you stored in the secrets vault;
 - your **App Lock PIN** — the 4-digit PIN that locks parts of NavBharatAI, including that vault;

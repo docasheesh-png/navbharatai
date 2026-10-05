@@ -90,9 +90,12 @@ describe('imageGenModels', () => {
 });
 
 describe('imageGenConfigured', () => {
-  it('is always true while the free Pollinations provider is on (no key needed)', () => {
-    expect(imageGenConfigured({} as NodeJS.ProcessEnv)).toBe(true);
-    expect(imageGenConfigured({ IMAGE_GEN_POLLINATIONS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(false);
+  // 🔁 2026-10-05: the key-less door answers 402 to everyone, so the free provider is an engine only
+  // WITH our account key (Free mode removed, `imageTier.ts`).
+  it('counts the free provider only with its account key — the key-less door is no engine', () => {
+    expect(imageGenConfigured({} as NodeJS.ProcessEnv)).toBe(false);
+    expect(imageGenConfigured({ POLLINATIONS_API_KEY: 'sk_x' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    expect(imageGenConfigured({ IMAGE_GEN_POLLINATIONS: 'off', POLLINATIONS_API_KEY: 'sk_x' } as unknown as NodeJS.ProcessEnv)).toBe(false);
   });
   it('is true when a Gemini OR Grok/xAI key is present, even with Pollinations off', () => {
     const off = { IMAGE_GEN_POLLINATIONS: 'off' };

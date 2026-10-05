@@ -198,8 +198,10 @@ describe('image generation — the paid rungs are metered by who SERVES, not by 
     // 🔁 2026-10-01: every rung now NAMES itself on delivery (a third argument), so the admin can
     // finally tell which engine drew a picture. Which rungs are PAID is unchanged — that is the only
     // thing this case is about, so it is asserted on the flag rather than on the whole call.
-    // The free rung delivers without the paid flag; both paid rungs pass it.
-    expect(img).toContain("await deliver(pr.image, false, 'free-provider (anonymous)'); return;");
+    // The near-free Cloudflare rung delivers without the paid flag; the anonymous free rung is gone
+    // (Free mode removed 2026-10-05).
+    expect(img).toContain("await deliver(cr.image, false, 'cloudflare-flux'); return;");
+    expect(img).not.toContain("'free-provider (anonymous)'");
     // Three paid deliveries now: Gemini, xAI, and the edit rung.
     expect((img.match(/deliver\(img, true, /g) || []).length).toBe(2);
     expect(img).toContain("deliver(out.image, true, 'edit'); return;");

@@ -453,8 +453,8 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
   app.post('/api/payment/webhook', async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      // Verify the HMAC over the EXACT bytes received (captured by the express.json `verify` hook
-      // in server.ts as req.rawBody), NOT a re-serialized JSON.stringify(req.body) — the latter
+      // Verify the HMAC over the EXACT bytes received (kept as req.rawBody for this route only —
+      // RAW_BODY_ROUTES in src/server/lib/requestBodyLimits.ts), NOT a re-serialized JSON.stringify(req.body) — the latter
       // changes the bytes and makes every legitimate webhook fail signature validation. Fall back
       // to re-serialization only if the raw bytes are somehow unavailable (no worse than before).
       const rawBody: string = (req as any).rawBody

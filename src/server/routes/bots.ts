@@ -64,7 +64,7 @@ function stampThrottled(botId: string, kind: keyof BotStamp, now: number): void 
   void botStore.stamp(botId, { [kind]: now });
 }
 
-/** The raw request bytes captured by express.json's verify hook in server.ts. */
+/** The raw request bytes — kept for the webhook route only (RAW_BODY_ROUTES in src/server/lib/requestBodyLimits.ts). */
 function rawBodyOf(req: Request): Buffer | undefined {
   const raw = (req as Request & { rawBody?: unknown }).rawBody;
   return Buffer.isBuffer(raw) ? raw : undefined;

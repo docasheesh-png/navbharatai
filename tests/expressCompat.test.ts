@@ -88,7 +88,8 @@ describe('🔒 the wiring — what would break the server at STARTUP if it regre
   });
 
   it('🔒 the body default is restored AFTER the parsers, or it would overwrite a real body', () => {
-    const parser = server.indexOf('app.use(express.json({');
+    // The global JSON parser is requestBodyLimits.ts's `jsonBodyParser` since Q-627 (per-route limits).
+    const parser = server.indexOf('app.use(jsonBodyParser(');
     const normal = server.indexOf('app.use(normalizeMissingBody)');
     expect(parser).toBeGreaterThan(-1);
     expect(normal).toBeGreaterThan(parser);

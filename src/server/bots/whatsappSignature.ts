@@ -53,7 +53,8 @@ export function isMetaAppSecret(value: unknown): value is string {
  * Verify Meta's `X-Hub-Signature-256` header against the EXACT raw request bytes.
  *
  * The raw bytes matter: re-serialising the parsed JSON changes whitespace and escapes, so the HMAC would
- * never match. `server.ts` stores them on `req.rawBody` in express.json's verify hook. Constant-time
+ * never match. The global JSON parser keeps them as `req.rawBody` for this route only (RAW_BODY_ROUTES in
+ * src/server/lib/requestBodyLimits.ts). Constant-time
  * compare; a missing body, header or secret is a failure, never a pass.
  */
 export function verifyMetaSignature(rawBody: Buffer | string | undefined | null, header: unknown, appSecret: string): boolean {

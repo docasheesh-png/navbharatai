@@ -23,7 +23,7 @@ import { appPortsFrom, isSecondaryAppPort, type AppPortMap } from './appPorts';
 import { sandboxStore } from './SandboxStore';
 import { buildPreKillPortCommand, detachBackgroundJobs, isLongRunningCommand, BACKGROUND_JOB_LOG } from './sandbox/EngineerAI/actuators/devServerHost';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
-import { browserCodeInNodeHint } from './browserCodeInNode';
+import { browserCodeInNodeHint, nodeRunTarget, shouldRefuseBrowserOnlyRun, browserOnlyRunMessage, browserOnlyWriteNote } from './browserCodeInNode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { inspectCredentials } from './credentialSafety';
 import { probeCredentials, realProbeFetch, credentialProbeEnabled, relevantToApp, type ProbeVerdict } from './credentialProbe';
@@ -146,6 +146,7 @@ import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { cloneDestination, shouldRefuseClone, cloneGuardMessage } from './gitCloneGuard';
 import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
+
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
 import { ensureTsconfigBaseUrl } from './TsconfigGuard';
 import { applyFullStackGuards, dedupeSameModuleImports } from './FullStackGuards';
@@ -3698,7 +3699,13 @@ export class ToolDispatcher {
     // The entry-first hand-back (autopsy 39e982bd) and `entryLateNoteFor` (autopsy 68f0a486) are ONE rule said
     // once — whichever fires first silences the other (merged 2026-10-04, #3523 + #3524).
     shadow += await this.entryFirstNote(files);
-    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch;
+    // A seed/migration script written with browser globals cannot be RUN (queue row Q-146) — said at the
+    // write, so the agent never reaches for `npx tsx`. The guard in the `bash` case is the second layer.
+    let browserScript = '';
+    for (const p of paths) {
+      try { browserScript += browserOnlyWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+    }
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch + browserScript;
   }
 
   /**
@@ -4706,6 +4713,29 @@ export class ToolDispatcher {
             } catch { /* audit best-effort */ }
             this.state?.appendTerminal(cmsg);
             return cmsg;
+          }
+        }
+        // BROWSER-ONLY CODE IS NOT RUN IN NODE (queue row Q-146). A browser-oriented localStorage seed
+        // was run with `npx tsx`, failed on `window is not defined` — deterministically, since node has
+        // no such global — and the agent then hand-mocked `window` into a stack overflow: 4 failures,
+        // ~10 minutes of the user's build on a command whose outcome was knowable before it ran. Same
+        // answer as the five guards above: decide before the shell, and hand back the path that works.
+        // One read, and ONLY when the command really is `node`/`tsx`/`ts-node` pointed at a project
+        // file — an ordinary command pays nothing. Kill switch AGENTV3_BROWSER_ONLY_GUARD=off.
+        const runTarget = nodeRunTarget(command);
+        if (runTarget) {
+          let runSource: string | null = null;
+          try { runSource = await this.actuator.readFile(this.workspaceId, runTarget.file); } catch { runSource = null; }
+          const browserUses = shouldRefuseBrowserOnlyRun(runTarget, runSource);
+          if (browserUses.length > 0) {
+            const bmsg = browserOnlyRunMessage(runTarget, browserUses);
+            try {
+              getWorkspaceMemory(this.workspaceId).recordAudit(
+                `browser-only guard refused ${runTarget.runner} ${runTarget.file} (${browserUses.map((u) => u.global).join(', ')})`,
+              );
+            } catch { /* audit best-effort */ }
+            this.state?.appendTerminal(bmsg);
+            return bmsg;
           }
         }
         // THE SHELL IS NOT A WAY AROUND THE GREEN FREEZE (autopsy 8e124182). The freeze lives in the

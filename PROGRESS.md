@@ -89844,7 +89844,7 @@ Q-104, Q-116, Q-135, Q-139, Q-146, Q-147, Q-150, Q-152, Q-153, Q-156, Q-164 (Q-1
 open from that work, each 🟡 with what it needs in `BUILD_REPORT_QUEUE.md`: Q-154 (admin confirms `hops: 1` at
 `/api/admin/proxy-hops`), Q-162 (45 undecided routes), Q-160, Q-136 (#3533), Q-101, Q-159, Q-141, Q-163.
 
-### 2026-10-05 — Forensic audit follow-up (PR #NEXT): Q-613, Q-617, Q-619, Q-621 + the admin's decisions
+### 2026-10-05 — Forensic audit follow-up (PR #3551): Q-613, Q-617, Q-619, Q-621 + the admin's decisions
 
 | Item | Root cause | Class | Fix | Lock |
 |---|---|---|---|---|
@@ -89863,7 +89863,7 @@ origin (domain from the admin).
 environment's commit-signing helper `/tmp/code-sign`; commits were blocked until the session restarted. The temp-dir
 leak itself is a test-hygiene defect worth its own row.
 
-### 2026-10-05 — Q-624: an email grants nothing until the provider verified it (PR #NEXT)
+### 2026-10-05 — Q-624: an email grants nothing until the provider verified it (PR #3551)
 
 - **Class:** a list that matches an email (free list, cost-routing canary, sign-in exemption, store admins,
   report admins, the professional and tool gates) trusted any address on a verified TOKEN, verified or not.
@@ -89880,7 +89880,7 @@ leak itself is a test-hygiene defect worth its own row.
 - **Watch:** a listed person signing in with an unverified email/password account loses the grant — list
   their uid too, or have them verify the address.
 - Also: `tests/fixtures/sheetContractBaseline.json` AppModals 6 → 5 (Q-615 removed the simulated checkout).
-### 2026-10-05 — Q-612: WhatsApp bots answer only Meta; the admin's bot ledger (PR #NEXT)
+### 2026-10-05 — Q-612: WhatsApp bots answer only Meta; the admin's bot ledger (PR #3551)
 
 Admin decision 2026-10-05, option (a), plus: *"kis kis user ne bot banaye hai, uska bhi hisab admin panel me rakho!"*
 
@@ -89894,7 +89894,7 @@ in-place "Save App Secret" that keeps the webhook URL), a signed bot's last refu
 message (tracked from today, throttled), unsigned traffic and bad-signature stamps, totals. AppKnowledgeBase updated
 (`bot_builder`, new `admin-bot-ledger`, the admin tab list). **What existing bot owners must do:** add their App Secret
 from the Bot Builder notice before 2026-11-05, or their WhatsApp bot stops replying.
-### 2026-10-05 — Q-614: a refund or chargeback takes back the tokens that payment bought (PR #NEXT)
+### 2026-10-05 — Q-614: a refund or chargeback takes back the tokens that payment bought (PR #3551)
 
 Admin decision (a), 2026-10-05. Before this, every signed Cashfree webhook went to `verifyPaymentInternal`
 ("fulfil this order") and nothing anywhere took tokens back after a refund or a lost chargeback.
@@ -89912,7 +89912,7 @@ token view at zero with `max(0, held + delta)`, so on a wallet already in OVERDR
 delta (a 100-token gift to a −50,000 wallet lands at 0, forgiving the debt and over-counting `total_balance`),
 and an admin DEDUCTION on such a wallet raises it to 0. The refund path avoids it (it never calls the patch for
 a wallet at or below zero); the coupon / referral / admin-adjustment writers do not.
-### 2026-10-05 — Q-623 + Q-629: a GitHub token is accepted only for a sign-in this client started (PR #NEXT, branch `agent/github-handoff`)
+### 2026-10-05 — Q-623 + Q-629: a GitHub token is accepted only for a sign-in this client started (PR #3551, branch `agent/github-handoff`)
 
 | Item | Root cause | Class | Fix | Lock |
 |---|---|---|---|---|
@@ -89926,7 +89926,7 @@ instance (a cross-instance replay still needs the nonce, which never leaves the 
 no server sends any more. **Phones:** a frontend change reaches phone users only via a fresh `.aab`/`.ipa`
 (`docs/claude/RELEASE.md`) — none built here; app builds 2026-08-28…2026-10-05 lose signed-OUT GitHub connect until updated.
 
-### 2026-10-05 — Q-670 overdraft forgiveness, Q-671 planted Firebase token (PR #NEXT)
+### 2026-10-05 — Q-670 overdraft forgiveness, Q-671 planted Firebase token (PR #3551)
 
 - **Q-670** (found by the Q-614 refund work): `mirroredCreditPatch` floored every result at zero, so any
   credit to a wallet in overdraft wiped the whole debt and booked it as lifetime credit, and an admin
@@ -90185,7 +90185,7 @@ transactions against a serialised in-memory store, and is proven by 8 reversions
 - The API key's own daily ₹ cap is still read-then-record. The money is held now, so this only lets the key's self-set cap overshoot by the in-flight requests.
 
 **Watch after deploy:** for a paid picture, the wallet image row should show one ₹1 per delivered picture, and no `openHolds` should be left behind. Any `[IMAGE_HOLD] … could NOT be given back` log line is a refund that needs a look.
-### 2026-10-05 — Q-622: an anonymous caller is never on the paid tier — one capability table (PR #NEXT, branch `agent/q622-anon`)
+### 2026-10-05 — Q-622: an anonymous caller is never on the paid tier — one capability table (PR #3551, branch `agent/q622-anon`)
 
 **Problem → root cause → class.** With `PROFESSIONAL_FREE_QUOTA=off`, `gateProfessionalTurn` returned `tier: 'paid'`
 for a caller with no account (Professionals, Doctor AI, and Exam mode through it): the full chain, Claude included,
@@ -90217,7 +90217,7 @@ source pins for the new `gateToolAction` argument. AppKnowledgeBase guest entry 
 falls back to cheap metered rungs under the free-chat price ceiling. That is the 2026-09-27 ten-free-messages decision,
 bounded per device and per address by `guestDailyQuota`. Removing the metered rungs for guests would leave those ten
 messages on one zero-cost rung. Recommendation: keep.
-### 2026-10-05 — Q-627 request-body limits + Q-628 MCP credentials encrypted at rest (PR #NEXT, branch `agent/q627-q628`)
+### 2026-10-05 — Q-627 request-body limits + Q-628 MCP credentials encrypted at rest (PR #3551, branch `agent/q627-q628`)
 
 **Q-627 — problem:** one global `express.json({ limit: '30mb' })` in `server.ts`, and its `verify` hook kept every
 body a second time as `req.rawBody`. Any caller could post 30 MB to any route (OTP, profile, payment) and the

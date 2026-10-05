@@ -90294,3 +90294,39 @@ are `import()`ed by one screen and statically imported by another LAZY chunk. Th
 from the enclosing block's `{` when the destructure was the block's first statement, so it never saw the plugin
 name. `[^}]` → `[^{}]`, with a fixture test (reversion-proven).
 
+## 2026-10-05 — Q-620: the DAST job does what its comment says
+
+**Problem (forensic audit 2026-10-04):** `dast.yml` said "HIGH fails, MED warns", but passed `fail_action: true`
+without `-I`, and `security/zap-baseline.conf` had no FAIL rule.
+
+**Evidence (real runs, not theory):** all 40 nightly runs checked (2026-08-27 → 2026-10-04) are red. The two
+read in full (2026-09-30, 2026-10-04) end `FAIL-NEW: 0 … WARN-NEW: 11 … PASS: 59` and
+`The process '/usr/bin/docker' failed with exit code 2`. zap-baseline exits 2 on WARN-only and the action turns
+exit 1 and exit 2 into a failure when `fail_action` is true. So the job was red over informational findings every
+night, and had no rule that could mark a real one.
+
+**Root cause / class:** a gate whose stated policy is not derived from its flags — the comment was the only
+place the policy existed, and nothing compared it with what runs.
+
+**Fix:**
+- `cmd_options: '-a -I'`: a FAIL rule fails the job, a WARN (or unlisted) rule is reported and does not.
+- `zap-baseline.conf` classifies all 70 rules this ZAP version runs (the ids printed by the real nightly
+  log): 13 FAIL (vulnerable JS library, anti-clickjacking, directory browsing, Heartbleed, CSP missing,
+  X-ChromeLogger-Data, PII, hash disclosure, CORS misconfiguration, source code disclosure, weak auth method,
+  malicious script domain, session id in URL) — every one PASSED on the real runs, so red now means a regression;
+  55 WARN with reasons; 2 IGNORE with reasons (10112, an informational auth marker; 90005, which inspects the
+  requests ZAP's own spider sends).
+- Two parser facts found in the action's source and written into the file: the action passes the rules file to
+  ZAP (`-c`) only when it has at least one IGNORE row, and its reader stops at a blank line.
+- DAST stays nightly + manual, not per PR: building, booting and pulling the ZAP image costs minutes per PR for a
+  scan of deployed headers.
+
+**Lock:** `tests/dastConfigSaysWhatItDoes.test.ts` derives the behaviour from the flags and compares it with the
+promise comment, parses the conf the way both parsers do (3 TAB fields, no blank line, an IGNORE row present,
+every IGNORE with a reason), checks all 70 real rule ids are classified and that none of the 11 that fire today is
+FAIL. Reversion-proven: removing `-I`, and removing the IGNORE rows, each fail it.
+
+**Watch after merge:** the next nightly DAST run should be green. Separately, the 2026-10-05 run never started
+("recent account payments have failed or your spending limit needs to be increased") — GitHub billing on the
+admin's account, outside this fix.
+

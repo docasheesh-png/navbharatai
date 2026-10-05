@@ -1,4 +1,11 @@
 /**
+ * ONE IMAGE GENERATOR SINCE 2026-10-05 — Free mode removed on the admin's word (`imageTier.ts`).
+ * The 2026-09-30 two-mode text below is kept as history; the route tests now lock the one-mode rules:
+ *  A. Every caller runs the same ladder and counts against the same 5 a day.
+ *  B. Only a screen that showed the price (`tier: 'paid'`) is ever charged. A caller that sent no tier
+ *     (an installed phone app) gets its free pictures and then a plain sentence — never a charge.
+ *  C. No link is ever handed out: the anonymous free door answered 402 to everyone.
+ *
  * FREE AND PAID, ON ONE SCREEN (admin 2026-09-30).
  *
  * Admin, verbatim: *"pahle ek system tha, free + paid (dono the) wahi bana do! free wala sabhi ke liye
@@ -15,15 +22,11 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
-import {
-  imageTierOf, freeBusyMessage, editNeedsPaidMessage, FREE_BUSY_CODE, NEEDS_PAID_CODE,
-} from '../src/server/lib/imageTier';
+import { priceShownTo, freeUsedUpdateMessage, FREE_USED_UPDATE_CODE } from '../src/server/lib/imageTier';
 import {
   imageProConfigured, imageProAuthHeaders, parseImageProResponse, pendingResultUrl, jobFailed,
   fetchImageProHostImage, buildImageProTextRequest,
 } from '../src/server/lib/imageProHost';
-import { paidCanAnswer } from '../src/lib/imageAllowanceLine';
-import { resetAnonymousDoor, noteAnonymousResult } from '../src/server/lib/freeProviderDoor';
 
 process.env.VITEST = 'true';
 
@@ -64,46 +67,25 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUg==';
 const env = (o: Record<string, string>) => o as unknown as NodeJS.ProcessEnv;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-describe('which mode a request is for', () => {
-  it('only the word "paid" is Paid; everything else — an installed phone app sends nothing — is Free', () => {
-    expect(imageTierOf({ tier: 'paid' })).toBe('paid');
-    expect(imageTierOf({ tier: ' PAID ' })).toBe('paid');
-    for (const t of [undefined, null, 'free', 'pro', 'Paid-please', 1, true]) expect(imageTierOf({ tier: t })).toBe('free');
-    expect(imageTierOf(null)).toBe('free');
-  });
-
-  it('the screen offers the switch only for the two codes Paid mode can answer', () => {
-    expect(paidCanAnswer({ code: FREE_BUSY_CODE })).toBe('free_busy');
-    expect(paidCanAnswer({ code: NEEDS_PAID_CODE })).toBe('needs_paid');
-    expect(paidCanAnswer({ code: 'wallet_empty' })).toBe('');
-    expect(paidCanAnswer({ code: 'blocked' })).toBe('');
-    expect(paidCanAnswer(null)).toBe('');
+describe('consent to a price', () => {
+  it('only the word "paid" — the current screen, which shows the price — may be charged', () => {
+    expect(priceShownTo({ tier: 'paid' })).toBe(true);
+    expect(priceShownTo({ tier: ' PAID ' })).toBe(true);
+    for (const t of [undefined, null, 'free', 'pro', 'Paid-please', 1, true]) expect(priceShownTo({ tier: t })).toBe(false);
+    expect(priceShownTo(null)).toBe(false);
   });
 });
 
-describe('"the free servers are busy — try Paid", in the user\'s own language', () => {
-  it('English for English', () => {
-    expect(freeBusyMessage('a red car on a hill')).toMatch(/^The free image servers are too busy right now\. Please try Paid mode/);
-    expect(editNeedsPaidMessage('make the sky blue')).toMatch(/Paid mode/);
+describe('"today\'s free images are used — update the app", in the user\'s language', () => {
+  it('English, Devanagari Hindi and Roman Hindi, each naming the count, the price and the way out', () => {
+    expect(freeUsedUpdateMessage('a red car on a hill', 5)).toMatch(/^You have used your 5 free images for today\. To make more \(₹1 each\), update the NavBharatAI app/);
+    expect(freeUsedUpdateMessage('पहाड़ पर लाल कार की फ़ोटो', 5)).toMatch(/^आज की 5 फ़्री इमेज हो गई हैं/);
+    expect(freeUsedUpdateMessage('ek sher ki photo banao', 3)).toMatch(/^Aaj ki 3 free images ho gayi hain/);
+    expect(freeUsedUpdateMessage('photo of a banner', 5)).toMatch(/^You have used/);
   });
 
-  it('Devanagari Hindi, Tamil and Bengali prompts get their own script', () => {
-    expect(freeBusyMessage('पहाड़ पर लाल कार की फ़ोटो')).toMatch(/^फ़्री इमेज सर्वर अभी बहुत व्यस्त हैं/);
-    expect(freeBusyMessage('மலையில் சிவப்பு கார்')).toMatch(/^இலவச படச் சேவையகங்கள்/);
-    expect(freeBusyMessage('পাহাড়ে লাল গাড়ি')).toMatch(/^ফ্রি ইমেজ সার্ভার/);
-    expect(editNeedsPaidMessage('आसमान नीला कर दो')).toMatch(/^अपनी फ़ोटो बदलना Paid मोड में होता है/);
-  });
-
-  it('Roman Hindi gets Roman Hindi — but one shared English word is not enough', () => {
-    expect(freeBusyMessage('ek sher ki photo banao')).toMatch(/^Free image server abhi bahut busy hain/);
-    expect(freeBusyMessage('photo of a banner')).toMatch(/^The free image servers/);
-  });
-
-  it('every language names Paid mode in the Latin word the toggle shows', () => {
-    for (const p of ['a car', 'ek car ki photo banao', 'लाल कार', 'சிவப்பு கார்', 'ಕೆಂಪು ಕಾರು', 'लाल गाड़ी चाहिए', 'سرخ گاڑی']) {
-      expect(freeBusyMessage(p), p).toContain('Paid');
-      expect(editNeedsPaidMessage(p), p).toContain('Paid');
-    }
+  it('🔒 it never calls the cause "busy": the old sentence told every user a reason that was not true', () => {
+    for (const p of ['a car', 'ek car ki photo banao', 'लाल कार']) expect(freeUsedUpdateMessage(p, 5)).not.toMatch(/busy|व्यस्त/i);
   });
 });
 
@@ -180,10 +162,8 @@ describe('the real route', () => {
       'IMAGE_GEN_POLLINATIONS', 'IMAGE_GEN_CLIENT_FETCH', 'POLLINATIONS_API_KEY', 'AGENTV3_FREE_LIST', 'AI_IMAGE_PRICING',
       'CLOUDFLARE_AI_TOKEN', 'IMAGE_GEN_CLOUDFLARE', 'IMAGE_PRO_KEY', 'IMAGE_PRO_ENDPOINT', 'IMAGE_PRO_AUTH_SCHEME', 'IMAGE_PRO_ENABLED']) delete process.env[k];
     process.env.SECRET_ENCRYPTION_KEY = 'route-secret';
-    process.env.IMAGE_GEN_ANON_PROBE = 'off';
     process.env.CLOUDFLARE_ACCOUNT_ID = 'acc1';
     process.env.CLOUDFLARE_API_TOKEN = 'cf-token';
-    resetAnonymousDoor();
     usage.used = 0; usage.increments = 0;
     money.balance = 100; money.debits = [];
     fetchSpy = vi.fn(async () => new Response('down', { status: 500 }));
@@ -191,7 +171,6 @@ describe('the real route', () => {
   });
   afterEach(() => {
     vi.unstubAllGlobals();
-    resetAnonymousDoor();
     process.env = { ...saved };
   });
 
@@ -205,35 +184,47 @@ describe('the real route', () => {
   const body = { prompt: 'a red car', style: 'photo', size: 'square', type: 'Photograph' };
   const hosts = () => fetchSpy.mock.calls.map((c) => new URL(String(c[0])).host);
 
-  it('Free mode is free for everybody: a link from the user\'s own connection, nothing counted, nothing charged', async () => {
-    usage.used = 50;
-    money.balance = 0;
+  it('🔒 a request with no tier (an installed phone app) runs the ladder and is counted — never handed a link', async () => {
+    fetchSpy.mockImplementation(async (url: string) => new URL(String(url)).host === 'api.cloudflare.com'
+      ? new Response(JSON.stringify({ result: { image: PNG } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      : new Response('down', { status: 500 }));
     const res = await generate(body);
-    expect(res.statusCode).toBe(200);
-    expect(res.body.mode).toBe('client-fetch');
-    expect(fetchSpy).not.toHaveBeenCalled(); // not even Cloudflare: Free mode is the free provider only
+    expect(res.body.mode).toBeUndefined();
+    expect(res.body.url).toBeUndefined();
+    expect(hosts()[0]).toBe('api.cloudflare.com');
+    expect(hosts()).not.toContain('image.pollinations.ai');
+  });
+
+  it('🔒 no tier, today\'s free pictures used: a plain sentence in their language, no engine called, no charge — whatever the wallet holds', async () => {
+    usage.used = 5;
+    money.balance = 100;
+    const res = await generate({ ...body, prompt: 'पहाड़ पर लाल कार' });
+    expect(res.statusCode).toBe(429);
+    expect(res.body.code).toBe(FREE_USED_UPDATE_CODE);
+    expect(res.body.error).toMatch(/^आज की 5 फ़्री इमेज हो गई हैं/);
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(usage.increments).toBe(0);
     expect(money.debits).toEqual([]);
   });
 
-  it('Free mode, free provider refusing: the user\'s language, the Paid pointer, and no paid engine spent', async () => {
-    process.env.GROK_API_KEY = 'xai-test';
+  it('🔒 the screen that showed the price, past its 5: the same request is served and charged ₹1', async () => {
+    usage.used = 5;
     process.env.IMAGE_PRO_KEY = 'k1';
     process.env.IMAGE_PRO_ENDPOINT = 'https://host.example/run';
-    noteAnonymousResult('HTTP 401');
-    const res = await generate({ ...body, prompt: 'पहाड़ पर लाल कार' });
-    expect(res.statusCode).toBe(503);
-    expect(res.body.code).toBe(FREE_BUSY_CODE);
-    expect(res.body.error).toMatch(/^फ़्री इमेज सर्वर अभी बहुत व्यस्त हैं/);
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(usage.increments).toBe(0);
+    fetchSpy.mockImplementation(async (url: string) => String(url) === 'https://host.example/run'
+      ? new Response(JSON.stringify({ data: [{ b64_json: PNG }] }), { status: 200 })
+      : new Response('down', { status: 500 }));
+    const res = await generate({ ...body, tier: 'paid' });
+    expect(res.statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(money.debits.map((d) => d.tx.billedInr)).toEqual([1]);
   });
 
-  it('Free mode, an edit of the user\'s own photo: pointed at Paid mode before anything is called', async () => {
-    const res = await generate({ ...body, prompt: 'ek sher ki photo banao aur background badlo', initImage: `data:image/png;base64,${PNG}` });
-    expect(res.statusCode).toBe(409);
-    expect(res.body.code).toBe(NEEDS_PAID_CODE);
-    expect(res.body.error).toMatch(/^Apni photo badalna Paid mode me hota hai/);
+  it('an edit with no tier is no longer refused as "Paid only": it goes to the edit rung like any other caller', async () => {
+    const res = await generate({ ...body, prompt: 'background badlo', initImage: `data:image/png;base64,${PNG}` });
+    expect(res.body.code).toBeUndefined();
+    // No edit engine is configured in this test, so the answer is the honest "not available".
+    expect(res.statusCode).toBe(503);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -251,12 +242,15 @@ describe('the real route', () => {
     expect(usage.increments).toBe(1);
   });
 
-  it('Paid mode never hands out a link, even when the free provider\'s door is open', async () => {
+  it('Paid mode never hands out a link', async () => {
     process.env.CLOUDFLARE_API_TOKEN = '';
     const res = await generate({ ...body, tier: 'paid' });
     expect(res.body.mode).toBeUndefined();
     expect(res.body.url).toBeUndefined();
-    expect(res.statusCode).toBe(502);
+    // 🔒 With no engine but the key-less free provider, the server is honestly NOT configured: that door
+    // answers 402 to everyone, so it is no engine (`imageGenConfigured`).
+    expect(res.statusCode).toBe(503);
+    expect(res.body.error).toMatch(/not configured/);
   });
 
   it('🔒 a Paid edit never reaches a text-to-image rung — Cloudflare, the keyed provider and the host all stay untouched', async () => {

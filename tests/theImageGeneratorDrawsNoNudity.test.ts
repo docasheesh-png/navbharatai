@@ -163,11 +163,13 @@ describe('every caller scans before it reaches Pollinations (source guard)', () 
   const route = readFileSync(join(process.cwd(), 'src/server/routes/imageGen.ts'), 'utf8');
   const chat = readFileSync(join(process.cwd(), 'src/server/routes/chat.ts'), 'utf8');
 
-  it('the image route refuses a banned prompt before minting the browser link', () => {
+  it('the image route refuses a banned prompt before any text-to-image rung (no link is minted since 2026-10-05)', () => {
     const scanAt = route.indexOf('scanPollinationsPrompt(prompt)');
-    const linkAt = route.indexOf('pollinationsImageUrl(prompt');
     expect(scanAt).toBeGreaterThan(-1);
-    expect(linkAt).toBeGreaterThan(scanAt);
+    for (const rung of ['fetchCloudflareImage(', 'fetchPollinationsImage(', 'fetchImageProHostImage(']) {
+      expect(route.indexOf(rung), rung).toBeGreaterThan(scanAt);
+    }
+    expect(route).not.toContain('pollinationsImageUrl(');
   });
 
   it('free chat makes no picture at all, so none can skip the scan (admin 2026-09-30: "banana bhi nahi hai")', () => {

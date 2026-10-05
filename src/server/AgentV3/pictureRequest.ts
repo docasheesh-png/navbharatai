@@ -75,12 +75,12 @@ export const PICTURE_REQUEST_STEER =
   + 'draw pictures, and nothing has been built. Reply briefly and warmly, in the user\'s own language: '
   + `pictures are made in **${IMAGE_STUDIO_MODE_NAME}** — ${PICTURE_STUDIO_PATH}. Describe the picture there `
   + 'and press send. If the user attached a photo and wants it changed (for example the full person, a wider '
-  + 'frame, a new background), say that Paid mode there can change an attached photo: attach it, then type '
+  + 'frame, a new background), say that the same screen can change an attached photo: attach it, then type '
   + 'only what should change. Do not describe, imagine or claim to have made the picture. End with one line: '
   + 'if they wanted an APP that makes pictures, they can say so (for example "build an image generator app") '
   + 'and you will build it.';
 
 /** The answer when no model could write one. English, deterministic, names no vendor. */
 export function pictureRequestFallback(): string {
-  return `NavBharatAI Pro builds apps and websites, so I haven't built anything for this one. Pictures are made in **${IMAGE_STUDIO_MODE_NAME}**: ${PICTURE_STUDIO_PATH}. Describe the picture there and press send. To change a photo you have, switch to Paid mode there, attach the photo and type only what should change.\n\nIf you wanted an app that makes pictures, just say "build an image generator app" and I'll build it.`;
+  return `NavBharatAI Pro builds apps and websites, so I haven't built anything for this one. Pictures are made in **${IMAGE_STUDIO_MODE_NAME}**: ${PICTURE_STUDIO_PATH}. Describe the picture there and press send. To change a photo you have, attach it there and type only what should change.\n\nIf you wanted an app that makes pictures, just say "build an image generator app" and I'll build it.`;
 }

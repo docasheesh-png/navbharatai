@@ -32,17 +32,17 @@ describe('the image generator has a free mode and a paid mode', () => {
   // changed the mode without regenerating, so a watermarked FREE picture stayed on screen under a lit
   // PAID label. They are replaced here by the rules that still matter, and the page's own behaviour
   // is locked in `thePaidPageAndTheIndianFace.test.ts`.
-  it('the screen opens on Free, never stores the choice, and leaves for Paid rather than flipping', () => {
+  // 🔁 2026-10-05 — FREE MODE REMOVED on the admin's word, after the free provider's anonymous door
+  // answered 402 to every request. One screen, which shows the price and says so on every request.
+  it('one screen: no mode toggle, no Free page, and every request tells the server the price was shown', () => {
     const gen = code(read('src/components/ide/AIImageGenerator.tsx'));
-    expect(gen).toContain("useState<ImageTier>('free')");
-    // Both pages are still reachable, and leaving one is an explicit act with its own control.
-    expect(gen).toContain("setTier('paid')");
-    expect(gen).toContain("setTier('free')");
-    expect(gen).not.toContain('aria-label="Image mode"');
-    // A remembered Paid is a charge the user did not decide on this visit.
+    expect(gen).not.toContain('setTier(');
+    expect(gen).not.toContain('Switch to Paid');
+    expect(gen).not.toContain('Free mode');
+    expect(gen).not.toContain("mode === 'client-fetch'");
+    expect(gen).toContain("tier: 'paid',");
+    // A remembered choice that charges is still forbidden, even with nothing left to choose.
     expect(gen).not.toMatch(/localStorage\.[a-zA-Z]+\([^)]*tier/i);
-    // The chosen mode reaches the server on every request.
-    expect(gen).toContain('tier: tierNow,');
   });
 
   // 🔁 2026-10-04 — THE IMAGE DOOR IS BACK, ON THE ADMIN'S WORD. It was removed with the paid tier on
@@ -72,12 +72,13 @@ describe('the image generator has a free mode and a paid mode', () => {
     expect(gen).toMatch(/readOptionsOpen/);
   });
 
-  it('AppKnowledgeBase describes one tool with two modes, the price, and names the TEXT opacity slider', () => {
+  it('AppKnowledgeBase describes one tool with one price, and names the TEXT opacity slider', () => {
     const kb = read('src/server/AppContext/AppKnowledgeBase.ts');
     const entry = kb.slice(kb.indexOf("id: 'ai_image_gen'"), kb.indexOf("id: 'ai_image_gen'") + 30000);
-    expect(entry).toMatch(/FREE AND PAID ARE TWO SEPARATE PAGES/); // 2026-10-01: a page, not a chip
-    expect(entry).toMatch(/FREE mode is free for everyone, with no daily limit and no charge/);
-    expect(entry).toMatch(/the first 5 Paid images every day are FREE, then ₹1 per image/);
+    // 2026-10-05: one screen, one price — and the entry must not tell an AI that a Free mode exists.
+    expect(entry).toMatch(/ONE SCREEN, ONE PRICE \(2026-10-05\): the first 5 images every day are FREE, then ₹1 per image/);
+    expect(entry).toMatch(/There is no Free mode any more/);
+    expect(entry).not.toMatch(/no daily limit/);
     expect(entry).toMatch(/TEXT OPACITY with the slider directly under Size/);
     expect(entry).toMatch(/SEPARATE slider/);
   });

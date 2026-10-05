@@ -10,7 +10,7 @@
  *     A generic "publish failed" would leave them retrying the same thing forever — and the whole
  *     point of the refusal is that they can act on it.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { Globe, Search, Sparkles, Upload, AlertTriangle, GitFork } from 'lucide-react';
@@ -20,6 +20,7 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { cardClasses } from '../ui/variants';
+import { GalleryReviewQueue, galleryReviewApi } from './GalleryReviewQueue';
 
 interface GalleryPanelProps {
   user: FirebaseUser | null;
@@ -93,6 +94,8 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadMine(); }, [loadMine]);
+  // Only a reviewer ever sees the queue — the server decides that, not this screen.
+  const reviewApi = useMemo(() => galleryReviewApi(authedHeaders), []);
 
   const publish = async () => {
     setPublishing(true); setMessage(''); setBlockers([]);
@@ -231,6 +234,8 @@ export const GalleryPanel: React.FC<GalleryPanelProps> = ({ user, files, onRemix
           </div>
         )}
       </div>
+
+      {user && <GalleryReviewQueue key={user.uid} api={reviewApi} onDecided={load} />}
 
       {/* ── Browse ───────────────────────────────────────────────────────────────────────────── */}
       <div className={cn(cardClasses(), 'p-5 space-y-3')}>

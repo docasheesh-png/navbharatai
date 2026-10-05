@@ -89213,6 +89213,266 @@ Siblings hunted: `readAsDataURL` across the whole repo — the only generated-ap
 (the rest is NavBharatAI's own client sending images to APIs, not storing them). The `catch {}` that hid a
 failed save lived only in `proShell.ts`'s `useCollection`.
 
+### 2026-10-04 — Q-104: a Hindi request is sized like its English twin
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-104 sizer / ETA / cost estimate blind to Devanagari | every size signal (`RE`, `COMPLEX_APP_SIGNAL`, `BIG_SOFTWARE_NOUN`, `CLEARLY_SMALL`, the ETA's counters) is Latin; the script-neutral floor counts commas only | signals in one script, a request in another | one glossary, `src/server/lib/devanagariTechTerms.ts`, applied at each sizer's entry; predicates read original + an English line, counters read the gloss alone | `tests/aHindiRequestIsSizedLikeItsEnglishTwin.test.ts` — twins identical; a census fails on any new reader that skips the glossary; glossary off → 12 fail, one sibling reverted → census fails |
+
+Measured before: ecommerce with login/payment/cart/admin panel 30 vs 58; real-time chat 15 vs 58; calculator
+`app_unsized` vs `simple_app`. After: all eight twins identical. Siblings found and fixed in the same change:
+ProjectPlan's project gate (`BIG_SOFTWARE_NOUN` — "स्कूल मैनेजमेंट सिस्टम" was not big software),
+`complexityRouting.statesAScope`, `appScopeAnalyzer` (small-app hint and subject). The short-order case
+("एक टूडू ऐप बनाओ") was already rescued in the live route by the platform's `new_build` floor; only its label
+was wrong, now `simple_app`.
+
+### 2026-10-04 — Q-150: a credential label is not a credential value
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-150 error logs flagged as credential leaks | `lineLogsCredential` = console call AND a sensitive word anywhere on the line | a label read as a value | reads values only: a sensitive name in code (`password`, `user.password`, `${apiKey}`), or a string label ending on one (`"password:"`, `` `token=${t}` ``) followed by a non-error value; `PostEditReviewer`'s label-matching "typo" entry replaced by the shared detector | `tests/theLabelIsNotTheValue.test.ts` (old detector → 5 fail; old reviewer → 2 fail incl. the census of console+credential regexes) |
+
+What it cost before: the false finding is the readiness gate's one HARD compliance block, and the deterministic
+heal (`credentialLogRedaction.ts`) "fixed" it by emptying the call — `console.error('Failed to reset password',
+err)` became `console.error()`, deleting a working error log. Recall went up too: `'API key:', key` and
+`` `token=${t}` `` were missed before and are caught now.
+
+### 2026-10-04 — Q-155: the build report names the saved keys an app did not get
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-155 `withheldSecretNames` never shown | written and tested with the scoping change (2026-08-17), never called | an explanation built and never shown | `loadUserVaultScope` (one vault read → injected keys + withheld names); the build records `SECRETS_WITHHELD` with names only and the Settings path | `tests/aWithheldKeyIsNamed.test.ts` — names, no values, list capped; source guards on the one read; census: every `secretScope` export is used by live code |
+
+### 2026-10-04 — Q-147: the app's frame is not its page
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-147 chrome-only render read as rendered | `analyzePreviewHtml` judged visible text, which the nav supplies; sibling `PageRouteCheck.classifyPage` judged body text the same way | the frame judged as the page | grace for an empty main inside the shared paint deadline (no capture is slower than before); a main region still LITERALLY empty in a browser capture that saw paint is named in both checks; one predicate `MAIN_REGION_EMPTY_JS` | `tests/onlyTheFrameRendered.test.ts` — precision (canvas, spinner, image, empty-state never accused; curl / unmarked captures never judged), real browser for both scripts, each half reverted → fails |
+
+The precision trap, measured before shipping: stopping at first paint photographs `<main>` empty while a page
+fetches (`if (!data) return null`), so the verdict alone would have accused working apps. The grace is what
+makes the verdict safe; it is bounded by the existing paint deadline so the 30 s script timeouts still hold.
+
+### 2026-10-04 — Q-156: a saved value that is not the provider's key shape is named
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-156 no format validation for injected secrets | the catalogue knew test prefixes but not what a real value looks like, so nothing could tell `doc.asheesh` from a Razorpay key id | a value the provider could never have issued, passed on as a key | `valuePrefixes` on 19 variables with a provider-fixed shape; `credentialSafety` `wrong-shape` notice (name + expected prefixes, never the value), value still injected as saved; AppKnowledgeBase vault entry updated | `tests/aKeyThatIsNotTheProvidersShape.test.ts` (the report's value; reverted → 2 fail; census that no test prefix falls outside its shapes) |
+
+Not judged on purpose: a provider whose secret has no fixed shape (`RAZORPAY_KEY_SECRET`, `SMTP_PASS`) — the report's
+phone-number-like secret cannot be told from a real one by shape, and guessing would be the precision failure
+`credentialSafety` exists to avoid. The live provider probe (`credentialProbe.ts`) is what answers those.
+
+Q-153 re-checked the same day: its upstream half is already shipped (`envLoading.ts`); the remaining runtime half
+is recorded in the queue with the breakage it must avoid (`NODE_ENV=production` reaching the agent's `npm install`).
+
+### 2026-10-04 — Q-139: a cut-off stylesheet or package.json is a syntax error
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-139 no truncation guard for CSS/JSON writes | `findSyntaxErrors` / `firstSyntaxError` filtered to JS/TS before parsing | a truncation guard blind to every file type but one | JSON via `JSON.parse` (BOM stripped; tsconfig/jsconfig/.vscode/eslintrc/babelrc/prettierrc JSONC skipped); CSS via esbuild's parser, counting only the cut-off warnings; a write-guard hint per file type | `tests/aCutOffStylesheetIsBroken.test.ts` (reverted → 3 fail); `SyntaxCheck.test.ts`'s "invalid JSON is skipped" fixture updated to valid JSON with the reason beside it |
+
+HTML is deliberately not judged — a browser renders a truncated document, and no parser signature tells a cut-off
+page from a valid one, so a rule there would be a guess. Every consumer of the gate now sees JSON/CSS too: the
+write guard, the final readiness count, the heal before/after comparison and the store preflight.
+
+### 2026-10-04 — Q-122 closed: it was already fixed (evidence)
+
+Q-122 ("`UI_WITHOUT_BUILD` false positive when only `App.tsx` was edited") was migrated into the queue on 2026-10-01
+from the 70115adf note, but the fix had already landed: `uiWithoutBuild.ts` rule 0 — "CAN WE EVEN SEE THE WHOLE
+PROJECT?" — returns no verdict when the view holds no `package.json` (a scaffold-less fragment is proof of a
+partial view, never of a missing builder), recorded at "FIXED — `UI_WITHOUT_BUILD` judged a project it could not
+see" above. The exact case is locked by `tests/uiWithoutBuild.test.ts` (`paths: ['src/App.tsx'], packageJsonFiles:
+[]` → not stranded). Row removed; nothing to build.
+
+### 2026-10-04 — Q-129: Stop reaches the Gemini/Vertex runner
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-129 Gemini runner cannot cancel on Stop | `GeminiToolRunner.runTurn` never read `params.signal`; its only bound was the 120 s per-call timeout | a waiting path that does not hear Stop | `throwIfStopped` before the call, `config.abortSignal` to the SDK, `raceStop` on the wait | `tests/stopReachesEveryProvider.test.ts` (a stalled call ends within 2 s of Stop; reverted → 3 fail; census over every `implements TurnRunner`) |
+
+### 2026-10-04 — Q-131 closed: argued not a defect, and its one real gap already fixed (evidence)
+
+Q-131 ("two definitions of 'was the build stopped?'") was migrated on 2026-10-01 from the first note, but the
+correction recorded right after it (search: "CORRECTION FIRST — the premise I recorded above was false") settles
+it: a model's own `stop_build` DOES raise the abort signal through `setStopBuild` → `abortBuild(…, 'user-stop')`,
+so the two readers ask two different questions correctly — "did the run end early at all?" (the abort signal,
+retry and run proof) and "was an engine's capability ever judged?" (the upsell). Unifying them would make one
+wrong. The one real gap — our own interruptions reaching the upsell — is closed by `interruptedBeforeAnyVerdict`
+(`buildAbortCause.ts`, exhaustive over `AbortCause`), wired at both upsell sites and locked by
+`tests/ourOwnInterruptionIsNotAnEngineLimit.test.ts`. Row removed.
+
+### 2026-10-04 — Q-132 closed: re-audited, already fixed, now locked by a census
+
+Q-132 ("passes write the durable store directly, bypassing Green Freeze" — five route sites recorded in 2026-09)
+was re-audited site by site against today's route. The class was closed by later work: `writeUnlessFrozen`
+(SignBridge autopsy, 12 call sites — keeps a fix on any sandbox failure EXCEPT a freeze refusal) and
+`ToolDispatcher.landHealWrite` (the heal sites). Every durable save after the first `latchGreen` follows
+"sandbox write, then record", so a refusal throws before anything is kept; the two pre-latch sites that swallow
+a failure (integrity normalisation, the heal revert) run before the latch exists. What was missing was a lock on
+the CLASS: `tests/aFrozenWriteIsNeverKept.test.ts` now fails when any post-latch site swallows a sandbox write
+and keeps the content (proven by injecting one at the entry-dedupe site → the census names agentv3.ts:25611).
+Row removed.
+
+### 2026-10-04 — Q-130: a free build's unattended chain is counted on every instance
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-130 free-build time cap counted per instance | the chain map lived in one instance's memory (`freeBuildTimeCap.ts` said so itself) | a limit on spend kept where only one instance can see it | `FreeBuildChainStore.ts` (Firestore `free_build_chains`); `noteFreeBuildStartShared` / `decideFreePauseShared` take the larger count, add the window exactly once, write back before the pause is announced; bounded (2.5 s) and fail-open | `tests/aFreeChainIsCountedOnEveryInstance.test.ts` (cross-instance, real-request reset, failing store, hung store); two source guards in `aFreeBuildHoldsTheMachineForLess.test.ts` follow the shared calls |
+
+The fail direction was checked deliberately: a store that cannot be read leaves the memory count (the old
+behaviour), and the window is added once even when the store hangs — an earlier draft with a route-level timeout
+and fallback would have counted it twice and stopped a build early.
+
+### 2026-10-04 — Q-151 closed: the chunked zip upload already survives the load balancer (evidence)
+
+Q-151 ("zip chunk upload assumes every chunk reaches the same Cloud Run instance") was migrated from the 2026-08
+open note, but `src/server/lib/zipUploadStore.ts` fixed it (admin report "161 MB zip upload nahi ho rahi"): the
+upload record lives in Firestore (`zip_uploads`) and every chunk is its own Cloud Storage object
+(`zip-uploads/<id>/<index>.part`, zero-padded so listing order is numeric order), so any instance validates and any
+instance assembles. It is active wherever a bucket is set — `NAV_STORE_BUCKET` (set in Cloud Run per
+`docs/claude/ENV_REGISTRY.md`) or `FIREBASE_STORAGE_BUCKET` — and keeps the single-instance path only where there
+is one instance (local dev, CI). Locked by `src/server/lib/zipUploadStore.test.ts` and
+`src/server/routes/zipUpload.test.ts`. Row removed.
+
+### 2026-10-04 — Queue audit of the rows migrated on 2026-10-01 (evidence for each change)
+
+A read-only audit of 21 migrated rows against today's code. Changes made from it:
+
+- **Q-105 closed (already fixed):** `src/server/AgentV3/appReachability.ts` walks the app from `index.html`;
+  used by the readiness / fake-code scan, the incomplete-code heal and the simulated-data scan; locked by
+  `tests/appReachability.test.ts` and `tests/readinessJudgesOurOwnCode.test.ts` (fix note "The missing subsystem,
+  built", 2026-09-17).
+- **Q-118 split:** the TS-error→missing-package half is done (`tscErrorCause.ts`, `tests/tscErrorCause.test.ts`);
+  the destructive-delete half stays OPEN as recorded.
+- **Q-125 closed as superseded:** its premise was corrected by Q-343 (Claude turns are under-stated, not
+  over-stated), which is BLOCKED on the admin's money decision; one row per fact.
+- **Q-158 closed and now LOCKED:** the only client import of `AppKnowledgeBase` went with Offline AI on 2026-09-14,
+  but nothing stopped a new one. `tests/theKnowledgeBaseStaysOnTheServer.test.ts` fails on any client import
+  (proven by injecting one).
+- **Q-159 → 🟡 BLOCKED** with the four fields: guaranteed scheduled jobs need Cloud Scheduler (console) or
+  `--min-instances 1` (cost) — the admin's choice; recommendation Cloud Scheduler.
+- Still OPEN after the audit, unchanged: Q-111, Q-113, Q-115, Q-116, Q-126, Q-127, Q-133, Q-134, Q-135, Q-136,
+  Q-143, Q-144, Q-146, Q-148, Q-163, Q-164; Q-162 needs a fresh repo-wide count before it can be judged.
+
+### 2026-10-04 — Q-113: the wallet load stops fetching usage logs no screen shows
+
+`usePaymentEngine.fetchWallet` fired four calls in parallel on every wallet load; the usage-logs call filled
+`billingLogs`, which App passed to `BillingPanel`, which destructured it and never read it. Removed end to end
+(fetch, state, prop). Lock: `tests/theWalletLoadFetchesOnlyWhatIsShown.test.ts` — no logs fetch, no `billingLogs`
+anywhere in the client, and every remaining call has a reader. Client typecheck, unused-import scan and the 200
+billing/payment tests green.
+
+### 2026-10-04 — Q-164: the Monitor's request count is the number of real model calls
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-164 `aiRequests` = one per provider per build | `recordPlatformBuild` reports token TOTALS once per provider; `recordModelCall` added 1 per report | a count read from a total that does not carry it | ledger counts calls on `add` (`callsByProvider`); `providerCalls` on `PlatformBuildRecord`; `MetricsRegistry.recordModelCall(…, calls)`, sink and timeline forward it; absent ⇒ 1 | `tests/theMonitorCountsRealCalls.test.ts` (reverted → 2 fail) |
+
+⚠️ For whoever reads the Monitor next: request counts step UP at this deploy — that is the measurement becoming
+true, not a change in traffic. Token and cost totals are unchanged.
+
+### 2026-10-04 — Q-127: a two-part question gets every live answer
+
+`liveDataContext` returned at the first source that answered; since a live answer skips the web search in
+`liveSearchContext`, the second half of "kanpur me barish hogi kya, aur dollar ka rate kitna hai" was dropped.
+Every source now runs side by side (each still checks its own shape first and fetches nothing when it does not
+match) and every non-empty block is joined in a fixed order. Lock: `tests/aTwoPartQuestionGetsBothAnswers.test.ts`
+(both answers; one-part unchanged with only the matching host fetched; one source failing keeps the other).
+Recorded rather than guessed: a live part plus a NON-live part ("mausam aur gold rate") still skips search for
+the second — the queue row keeps that narrower half.
+
+### 2026-10-04 — Q-135: a pipe whose first program never ran is not a success
+
+`pipedGateExitCodeWarning` covered only gate tools (tsc, eslint, test runners, builds). Now, for any other piped
+command that exited 0, `pipedMissingCommandWarning` reads the SHELL's own not-found line and fires only when it
+names the program the pipe started with — so `prisma migrate deploy | tail` with no prisma is reported, while
+`grep -r "command not found" app.log | head` is not. Lock: `tests/aPipeThatNeverRanIsNotASuccess.test.ts`.
+
+### 2026-10-04 — Q-146: browser code run under node is named once
+
+`browserCodeInNodeHint` (pure) is appended to the bash tool's result when a server-side JS run (node, tsx,
+ts-node, bun, deno, `npx tsx`, an `npm run …seed…`) fails with a browser global's ReferenceError. It says the code
+can never run there, that a polyfill would only fake the result (data written to a fake localStorage never
+reaches the app), and that sample data belongs in the app's first load. Guidance only. Lock:
+`tests/browserCodeIsNotRunUnderNode.test.ts` (pure cases + the real dispatcher bash path).
+
+### 2026-10-04 — Q-115: an icon used once and imported nowhere is healed from the package itself
+
+Autopsy 424ecdab ended RED on `<IndianRupee />` and `<Clock />` — lucide-react icons used once and imported
+nowhere. `addMissingProjectImports` could only copy an import the project had already made, by design ("a guess
+that invents an import turns a broken build into one that will not parse"). The missing fact was the package's
+own export list, which the sandbox has: `readPackageExports` asks it with one bounded `node --input-type=module`
+run over the project's dependencies (only when an unbound JSX tag exists), and the JSX pass adds the import only
+for a single owning package. Precision rules: JSX tag names only (lucide exports an `Image` icon; `new Image()`
+must never be bound to it), the project's own module wins, ambiguity ⇒ nothing, inputs validated before the
+shell. Lock: `tests/anIconTheProjectNeverImportedIsHealed.test.ts`.
+
+### 2026-10-04 — Q-141: the knowledge base no longer claims the release gate stops live deploys
+
+The `admin-release-gate` AppKnowledgeBase entry said "the deploy pipeline checks /api/release/gate and refuses to
+deploy when the gate is closed". The live site deploys through Cloud Build, which has no such step; only the
+backup GitHub workflow checks it, and only with `RELEASE_GATE_URL` set (unset today). Every AI in NavBharatAI
+would have told an admin a freeze protects production when it does not. The entry now states exactly where it
+is enforced. The enforcement itself is 🟡 BLOCKED on the admin approving a `cloudbuild.yaml` step (options and
+recommendation in the queue row).
+
+### 2026-10-04 — Q-116: a big project's graph is filled at build start (the cap was the last hollow cause)
+
+The "pre-edit knowledge gate" was recorded when the graph was hollow on every cold resume. That cause was killed
+upstream on 2026-09-18 (`warmIndexFiles` refills stubs) — prevention, which the 50/50 law prefers to a refusal.
+Re-tracing found the one cause left: the build-start call used the default `maxFiles` of 80, so on a bigger app
+every file past the 80th stayed a stub (and the other call site already used 1,500). Now 400 files with an 8 s
+start-new-reads bound (`WARM_INDEX_BUILD_START_MS`), so a big project cannot hold up the start; the instrument
+still names what is left. Lock: `tests/aBigProjectIsNotHollow.test.ts`.
+
+
+### 2026-10-04 — Q-154: the proxy hop count is measured, not guessed
+
+`trust proxy: true` keys anonymous rate limits on the left-most `X-Forwarded-For` entry, which the caller writes.
+The right value is a hop count, and a wrong count would key every anonymous user to one proxy address — so it is
+measured. New admin-only `GET /api/admin/proxy-hops` (`proxyHops.ts`, pure, nothing logged) shows what `req.ip`
+would be under each count for the admin's own request. 🟡 BLOCKED on the admin opening it once on the live site.
+Lock: `tests/theClientIsMeasuredNotGuessed.test.ts` (agrees with Express itself for every count).
+
+### 2026-10-04 — Q-162: every API route has a caller, or a written reason — and two dead features found
+
+Recounted: 526 `/api` routes, 85 with nothing in the app calling them. The class is a server action whose
+client half was never wired, and it hid two real defects: (1) the community gallery's review queue — every
+submission is created `pending` and `POST /api/gallery/admin/:id/review` is the only path to `approved`, but no
+screen called it, so "Send for review" promised a review nobody could perform and the gallery could never list a
+single app. New `GalleryReviewQueue` inside the Gallery screen, shown only when the server says the viewer is a
+reviewer; Approve appears only beside code that was opened. (2) Closing a version preview never called the stop
+route, so the old version kept its port; `stopVersionPreview` now runs on dismiss (best effort). Lock:
+`tests/everyRouteHasACaller.test.ts` + `tests/fixtures/uncalledApiRoutesBaseline.json` (new uncalled route fails CI;
+baseline only shrinks; every entry carries its reason kind). 45 `undecided` routes are 🟡 BLOCKED on the admin's
+yes to deciding each one when its file is next touched.
+
+### 2026-10-04 — Q-153: the app's own script sees the app's `.env` when the agent runs it
+
+`node scripts/seed.js` reading `process.env.DATABASE_URL` without dotenv crashed on `undefined` although `.env`
+held the value; only the dev server loaded `.env`. A blanket load would let `NODE_ENV=production` reach the
+agent's `npm install`, so the fix is narrow: when the whole command is `node|tsx <file>` or `npm run <task>`
+(not build/dev/start/test/lint/install hooks), it runs under Node's `--env-file=.env` — dotenv syntax, and the
+environment always wins. Missing `.env`, or npm not being the plain Node script, falls back to the original
+command. Kill switch `AGENTV3_AGENT_CMD_ENV_FILE=off`. Lock: `tests/theAppsScriptSeesItsEnv.test.ts`.
+
+### 2026-10-04 — the last migrated rows re-checked: Q-152 already fixed; Q-136, Q-160, Q-101 recorded blocked
+
+- **Q-152 ✅ (already fixed):** bulk landing (2026-08-03) turned a large import's landing from one round trip per
+  file into one archive + one extract; the minutes lazy materialization was designed to hide no longer exist.
+- **Q-136 🟡:** the click explorer already reaches a state-routed app's screens; its blank test is root-level,
+  so an empty main area after a tab press passes (the Q-147 class, third lane). Blocked only because
+  `clickExplorer.ts` is in three other sessions' open PRs.
+- **Q-160 🟡:** writing back to a user's own folder is irreversible from our side — options and a recommendation
+  ("Save to folder" on a press, skipping files changed on disk) are in the row.
+- **Q-101 🟡:** the evidence ledger's read half exists; the write half rewires every verdict and is recommended
+  as a three-PR sequence after the engine PRs in flight land.
+
+### 2026-10-04 — Q-113 resolved by #3531 (merged); this branch's identical change folded into it
+
+#3531 merged the same `billingLogs` removal. The merge kept main's `usePaymentEngine.ts` verbatim and removed the
+Q-113 row (resolved on merge). `tests/theWalletLoadFetchesOnlyWhatIsShown.test.ts` stays as a second lock.
 
 ## 2026-10-04 — Q-105 was already fixed, and saying so uncovered the defect it was hiding (Q-640)
 
@@ -89372,6 +89632,88 @@ same-origin, infra-blocked), Q-610 (rules must be deployed by hand to `gen-lang-
 - **Q-125 ✅ (Sonnet cache reads "over-stated")** had a wrong premise, as its own row said on 2026-10-04. Anthropic's `input_tokens` excludes cache shares, so a Claude turn is UNDER-stated. That real defect is Q-343, which is 🟡 BLOCKED on the admin's money decision, with options and a recommendation. Q-125 has nothing left of its own to fix.
 - **Gate note for this branch:** the first full run caught one failure: `licenceExposure.test.ts` pins `sources.push(currencyBlock, pincodeBlock);` as proof that those two sources sit outside every gate. Q-127 had folded movies into that line. The line is restored and movies is pushed separately. That keeps the property, and the pin stays as it was.
 
+## 2026-10-05 — A payment gateway's product names are not the app's commerce words (Q-641), and what three sessions building the same six rows cost
+
+### The concurrency finding first, because it is the expensive one
+
+Reading the open PRs before starting anything (concurrency rule 1) showed **four PRs from three sessions
+had each built the same queue rows, inside one hour**:
+
+| row | built by |
+|---|---|
+| Q-147 | #3536 (this session), #3534 |
+| Q-150 | #3536 (this session), #3534, #3532 |
+| Q-515 / Q-516 / Q-518 | #3533 (this session), #3532 |
+| Q-155 | #3534, #3532 |
+
+**#3532 opened twenty seconds before #3533.** Neither could have seen the other. The cause is not a
+session's carelessness: `BUILD_REPORT_QUEUE.md`'s owner column IS the claim mechanism (sixth rule, point
+3), but a row is claimed *after* the work, when the PR opens. Three sessions read the queue at ~21:50 and
+pushed at 22:14–22:27; all three saw an unclaimed row. **The claim lands after the work it is meant to
+prevent.** Recorded for the admin as an architectural gap, not fixed here — a claim protocol changes how
+every live session works, which is the admin's call, and the sixth rule forbids self-started work while
+actionable rows remain.
+
+**#3532 then merged**, which settled it: Q-515, Q-516, Q-518, Q-150 and Q-155 are resolved on `main` by
+that session's implementation, and #3533 became redundant. Its conflicts with `main` were in
+`clickExplorer.ts` and `spacingSnap.ts` — the very files #3532 had just rewritten — so the merge was
+**aborted rather than resolved**: resolving it is racing a session whose code has landed (concurrency rule
+4), and the honest answer is that their version is in.
+
+🔑 **One piece of #3533 was NOT redundant, and re-measuring on `main` proved it was worth keeping.**
+
+### The class #3532's fix left open
+
+⚠️ **The first measurement I took was worthless and is recorded so nobody repeats it.** I probed with my
+own *paraphrase* of the 39e982bd prompt, loaded extra ecommerce words into it, got `ecommerce`, and nearly
+reported that #3532's fix did not work. It does. The controlled experiment — the same base prompt with and
+without ONE appended sentence — is the only thing that says anything:
+
+```
+                    alone        + " Payments: use Stripe Checkout, and capture orders on the backend."
+donation app        general   →  ecommerce      FLIPPED
+hospital app        healthcare→  ecommerce      FLIPPED
+trading app         trading   →  trading        held
+esports tournament  tournament→  tournament     held  ← #3532's fix, working
+real shop           ecommerce →  ecommerce      held
+```
+
+Both flipped apps were then told they lacked *"product catalog + search, inventory tracking, accounts &
+addresses"*. **A hospital appointment app asked about inventory tracking is autopsy 39e982bd's own harm,
+one domain over.**
+
+`checkout` is the NAME of a Stripe/PayPal/Razorpay product; `order` is the NAME of the record their APIs
+create. **#3532 added a `tournament` domain — which is sound and now pinned by a test — but a new domain
+rescues one app while the two WORDS stay misread for every other app that takes a payment.** This analyser
+had already fixed `\border\b` for exactly this class (autopsy 73df1fbb); `checkout` was its unhunted
+sibling, and `order` came back through the plural.
+
+**Fix:** the sixth context-gated strip in `stripNonDomainUses`, in the same shape as the five already
+there (`expo` in a React Native prompt, `book` in a study prompt, `broker`/`listing` in a trading prompt,
+`chat` in an AI-assistant prompt) — `checkout` and `order` are blanked when the prompt names a gateway AND
+nothing says goods are sold. It stands down on a cart, a product catalogue, inventory, shipping, a SKU or a
+shop, so a real shop and a food-delivery app are byte-identical; and it only ever DELETES evidence, so it
+can never invent a domain. After it, all seven cases above hold.
+
+**Lock:** `tests/aGatewaySectionIsNotAShop.test.ts`, 11 cases — four real Indian gateways (Razorpay,
+PayPal, Cashfree, PhonePe/Paytm), the precision cases, and a pin that `trading`, `tournament` and `fitness`
+are unaffected. Reversion-proven three ways: the strip dropped → 4 fail; stripping even where goods are
+sold → 1 fail; dropping the gateway gate → 1 fail.
+
+⚠️ **A second wrong assertion, recorded for the same reason as the first.** I asserted the hospital's gap
+list contained no `/inventory/`. It contains *"pharmacy / inventory"* — because a hospital really does need
+pharmacy inventory, which is the whole point of the domain being right. The test names ECOMMERCE's list
+instead. Twice in one change, the lesson is the same: an assertion about a list has to say which list.
+### 2026-10-04 — reconciled with the PRs that merged the same rows (#3532, #3535, #3537)
+
+Four sessions worked the same queue rows at once. On merging main, the MERGED implementation won every
+overlap and this branch's duplicate was removed: Q-115 (#3537's `installedExports`; this branch's
+`readPackageExports` and its test deleted), Q-130 (#3537's `freeChainStore`; `FreeBuildChainStore.ts` and its
+test deleted), Q-155 (#3532's `withheldVaultSecretNames`; `loadUserVaultScope`/`secretsWithheldLine` removed),
+Q-127 and Q-129 (#3535). The ledger entries above for those rows describe code that no longer exists — they are
+kept as the audit trail, corrected here. Kept, because the merged PRs did not reach them: the Q-150 siblings
+(the post-edit reviewer's private pattern; "API key" with a space missing from the word list) and the census
+tests for Q-129 (every TurnRunner hears Stop), Q-127 and Q-132, which pass unchanged against the merged code.
 ## 2026-10-04 — Q-141: a freeze that stopped nothing, and the sentence that said it would
 
 **The row, verbatim:** *"Release gate is not enforced on the deploy path that runs (Cloud Build), yet
@@ -89474,3 +89816,9 @@ whoever merges second should expect a conflict in exactly that region and keep b
 - **#3530** (admin panel nine-tab menu) is green and clean and waits on the admin's explicit go-ahead, per its own description.
 
 **Queue pruned in this entry's PR:** every IN PROGRESS row whose owner PR is merged is deleted from `BUILD_REPORT_QUEUE.md` (the sixth rule: a row moves to ✅ when its PR is MERGED and is then deleted from the open table; its ledger is the PR itself and the autopsy entries above). 🟡 BLOCKED rows stay; Q-574 (E2B template rebuild) and the other admin-owned rows are untouched.
+### 2026-10-05 — #3534 merged: its resolved rows leave the open queue
+
+#3534 merged (`main` after 7f95104c). Per the sixth rule, the rows it resolved move to ✅ and leave the open table:
+Q-104, Q-116, Q-135, Q-139, Q-146, Q-147, Q-150, Q-152, Q-153, Q-156, Q-164 (Q-152 was already-fixed, evidence in its ledger entry). Their ledgers are above in this file. Still
+open from that work, each 🟡 with what it needs in `BUILD_REPORT_QUEUE.md`: Q-154 (admin confirms `hops: 1` at
+`/api/admin/proxy-hops`), Q-162 (45 undecided routes), Q-160, Q-136 (#3533), Q-101, Q-159, Q-141, Q-163.

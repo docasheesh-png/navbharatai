@@ -18,6 +18,7 @@
 
 import { countEnumeratedFeatures, notAFeatureLine, BIG_SOFTWARE_NOUN, sectionedSpecSize } from '../AgentV3/enumeratedFeatures';
 import { withoutMachineText } from './machineText';
+import { glossDevanagari, withEnglishReading } from './devanagariTechTerms';
 import { MEDIA_PLAYER_APP } from './RequirementGapAnalyzer';
 
 export type AppSize = 'small' | 'large';
@@ -206,8 +207,9 @@ export function requestSubject(raw: string): string {
 
 /** Is the app ITSELF small and single-purpose? Read from the subject only. PURE. */
 export function namesASmallApp(raw: string): boolean {
-  const subject = requestSubject(raw);
-  return (CLEARLY_SMALL.test(subject) || MEDIA_PLAYER_APP.test(subject)) && !BIG_SOFTWARE_NOUN.test(String(raw ?? ''));
+  // A Hindi subject ("एक कैलकुलेटर ऐप") is read in English too (Q-104, `devanagariTechTerms.ts`).
+  const subject = glossDevanagari(requestSubject(raw));
+  return (CLEARLY_SMALL.test(subject) || MEDIA_PLAYER_APP.test(subject)) && !BIG_SOFTWARE_NOUN.test(withEnglishReading(String(raw ?? '')));
 }
 
 /**
@@ -252,12 +254,14 @@ export function analyzeAppScope(prompt: string): AppScope {
   const text = String(prompt || '');
   const signals: string[] = [];
 
-  const famous = FAMOUS_APPS.find((f) => namesAsProduct(text, f.re));
-  const heavy = HEAVY_INFRA.filter((h) => h.re.test(text));
+  // Predicates read a Hindi request in English too (Q-104); the feature COUNT reads the request itself.
+  const readable = withEnglishReading(text);
+  const famous = FAMOUS_APPS.find((f) => namesAsProduct(readable, f.re));
+  const heavy = HEAVY_INFRA.filter((h) => h.re.test(readable));
   const feats = featureCount(text);
   // The DECISION still reads any small word (unchanged: narrowing it would send 8 of 7,403 test prompts to
   // the roadmap planner — a behaviour change nobody decided). Only the REASON is read from the subject.
-  const smallHint = CLEARLY_SMALL.test(text) && !BIG_SOFTWARE_NOUN.test(text);
+  const smallHint = CLEARLY_SMALL.test(readable) && !BIG_SOFTWARE_NOUN.test(readable);
   const smallSubject = namesASmallApp(text);
 
   if (famous) signals.push(`asks to clone ${famous.name}`);
@@ -273,7 +277,7 @@ export function analyzeAppScope(prompt: string): AppScope {
   }
   if (smallSubject) signals.push('single-purpose app — buildable in one shot');
   else if (smallHint) {
-    const word = (text.match(CLEARLY_SMALL)?.[0] ?? '').trim();
+    const word = (readable.match(CLEARLY_SMALL)?.[0] ?? '').trim();
     const subject = requestSubject(text).slice(0, 60);
     signals.push(`mentions a small feature ("${word}") but the app itself is "${subject || 'not named'}" — kept as one build (today's behaviour)`);
   } else signals.push('no mega-signal — treated as an ordinary one-shot app (today\'s behaviour)');

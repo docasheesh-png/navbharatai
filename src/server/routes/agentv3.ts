@@ -144,6 +144,7 @@ import {
   agentLifecycle,
   getWorkspaceMemory,
   warmIndexFiles,
+  WARM_INDEX_BUILD_START_MS,
   reflectOnBuild,
   reflectionNote,
   summarizeProject,
@@ -1855,6 +1856,8 @@ export interface BillingLedgerView {
   entries: () => ProviderModelEntry[];
   byProvider: () => Record<string, { inputTokens: number; outputTokens: number }>;
   total: () => { inputTokens: number; outputTokens: number };
+  /** How many model calls each provider answered (Q-164) — the Monitor's request count. Optional. */
+  callsByProvider?: () => Record<string, number>;
 }
 
 /**
@@ -12721,6 +12724,7 @@ async function noteBuildOutcome(
             // …and WHICH RUNG ran, so the admin's cost panel prices the model instead of the family's
             // dearest rate. The same entries the bill is priced from, one line above.
             providerEntries: billingCtx.providerLedger.entries(),
+            providerCalls: billingCtx.providerLedger.callsByProvider?.(),
             sandboxSeconds: watchdogLivePreview.measuredSeconds,
           });
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
@@ -16170,7 +16174,11 @@ async function noteBuildOutcome(
             // episodes and file-list hints survive server restarts this way.
             const wsMem = getWorkspaceMemory(workspaceId);
             await restoreWorkspaceMemory(workspaceId, wsMem).catch(() => {});
-            await warmIndexFiles(wsMem, fileTree, (p) => actuator.readFile(workspaceId, p));
+            // 🔴 THE CAP WAS THE HOLLOW GRAPH'S LAST CAUSE (queue Q-116). The default 80 files left every file
+            // past the 80th as a STUB on a bigger app — exactly the projects that most need the graph (the
+            // contract card, the invariants and grounding all read it). 400 files, bounded by time so a big
+            // project never holds up the build's start; anything left is still counted by the line below.
+            await warmIndexFiles(wsMem, fileTree, (p) => actuator.readFile(workspaceId, p), { maxFiles: 400, deadlineMs: WARM_INDEX_BUILD_START_MS });
             // 🔎 MEASURE THE HOLLOW GRAPH (open root cause #2, 2026-09-17). A cold resume indexes every
             // previously-known file with `RESTORED_STUB`, which puts it in `graph.files` — and
             // `warmIndexFiles` skips files it already knows, so those keep EMPTY facts (no imports, no
@@ -24791,6 +24799,7 @@ async function noteBuildOutcome(
         // …and WHICH RUNG ran. Without this the panel priced every provider at its family's dearest
         // rate — a `glm-4.7-flashx` build read 8.6× high on the screen used to judge engine spend.
         providerEntries: providerLedger.entries(),
+        providerCalls: providerLedger.callsByProvider?.(),
         // OUR VM cost, measured whether or not the user was charged for it.
         sandboxSeconds: livePreviewCharge.measuredSeconds,
       });

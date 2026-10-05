@@ -36,6 +36,7 @@
 import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
 import { newPageOptionsExpr } from './signInExplore';
 import { declaredRoutes } from './routerPaths';
+import { MAIN_REGION_EMPTY_JS, BROWSE_MAIN_GRACE_MS, BROWSE_PAINT_POLL_MS } from './PreviewVerify';
 
 /** How many page routes to actually open. A 40-page app must not add minutes to every build. */
 export const MAX_PAGE_ROUTES = 6;
@@ -181,7 +182,7 @@ const base = ${JSON.stringify(base)};
 const routes = ${list};
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 for (const route of routes) {
-  const out = { route, status: null, text: 0, errors: [], settled: false, vitals: null, a11y: [], finalPath: null };
+  const out = { route, status: null, text: 0, mainEmpty: false, errors: [], settled: false, vitals: null, a11y: [], finalPath: null };
   // Signed in when the app's screens are behind a sign-in page (signInExplore.ts), anonymous otherwise.
   const page = await browser.newPage(${newPageOptionsExpr(opts.storageState)});
   page.on('pageerror', (e) => { if (out.errors.length < 3) out.errors.push(String(e.message).slice(0, 200)); });
@@ -200,6 +201,14 @@ for (const route of routes) {
     // WHERE THE BROWSER ENDED UP. A route the app does not serve is usually caught by a catch-all that
     // sends it HOME — which paints, and would otherwise be reported as this route rendering.
     try { out.finalPath = new URL(page.url()).pathname; } catch (err) { /* unknown is simply not recorded */ }
+    // ONLY THE FRAME? (Q-147.) A route that matches no page still paints the nav, so body text alone
+    // called it rendered. An empty main region gets the same short grace the paint wait gives it, then
+    // the answer is recorded; classifyPage judges it.
+    out.mainEmpty = await page.evaluate(${MAIN_REGION_EMPTY_JS}).catch(() => false);
+    for (let g = 0; out.mainEmpty && g < ${Math.ceil(BROWSE_MAIN_GRACE_MS / BROWSE_PAINT_POLL_MS)}; g++) {
+      await page.waitForTimeout(${BROWSE_PAINT_POLL_MS});
+      out.mainEmpty = await page.evaluate(${MAIN_REGION_EMPTY_JS}).catch(() => false);
+    }
     out.text = await page.evaluate(() => (document.body ? document.body.innerText.trim().length : 0));
     // Real Web Vitals, read from the page itself — no Lighthouse, no extra navigation, no dependency.
     // buffered:true hands us the entries that already happened before we started observing.
@@ -285,7 +294,7 @@ export interface PageResult {
  * errors"; and console errors on a page that DID render are worth reporting but are not a broken page —
  * calling them one would fail apps that log a warning, i.e. most of them. PURE.
  */
-export function classifyPage(r: { route: string; status: number | null; text: number; errors: string[]; finalPath?: string | null }): PageResult {
+export function classifyPage(r: { route: string; status: number | null; text: number; errors: string[]; finalPath?: string | null; mainEmpty?: boolean }): PageResult {
   const base = { route: r.route, status: r.status, text: r.text, errors: r.errors };
   // A page the browser was sent AWAY from was not shown. Whatever painted belongs to somewhere else, so it
   // proves nothing about this route — neither that it works nor that it is broken (a login redirect is a
@@ -303,6 +312,10 @@ export function classifyPage(r: { route: string; status: number | null; text: nu
   // THE ONE THIS EXISTS FOR: a good status and an empty page. Every other check would call this a pass.
   if (r.text === 0) {
     return { ...base, verdict: 'blank', note: `${r.route} answered ${r.status} but rendered NOTHING — the page loaded and painted an empty screen${r.errors[0] ? ` (${r.errors[0]})` : ''}` };
+  }
+  // The nav painted and the page did not: the frame is not the page (Q-147).
+  if (r.mainEmpty === true) {
+    return { ...base, verdict: 'blank', note: `${r.route} showed only the app's frame — its main area stayed empty (the route matches no page, or the screen rendered nothing)${r.errors[0] ? ` (${r.errors[0]})` : ''}` };
   }
   if (r.errors.length > 0) {
     return { ...base, verdict: 'script-error', note: `${r.route} rendered, but threw errors in the browser (${r.errors[0]})` };
@@ -348,7 +361,7 @@ export function parsePageCheck(stdout: string | null | undefined): PageResult[] 
     const at = line.indexOf(PAGE_RESULT_MARKER);
     if (at < 0) continue;
     try {
-      const raw = JSON.parse(line.slice(at + PAGE_RESULT_MARKER.length)) as { route?: unknown; status?: unknown; text?: unknown; errors?: unknown; settled?: unknown; vitals?: unknown; a11y?: unknown; finalPath?: unknown };
+      const raw = JSON.parse(line.slice(at + PAGE_RESULT_MARKER.length)) as { route?: unknown; status?: unknown; text?: unknown; mainEmpty?: unknown; errors?: unknown; settled?: unknown; vitals?: unknown; a11y?: unknown; finalPath?: unknown };
       if (typeof raw.route !== 'string' || !raw.route) continue;
       const rv = raw.vitals as { lcp?: unknown; cls?: unknown; ttfb?: unknown } | null | undefined;
       out.push({
@@ -358,6 +371,7 @@ export function parsePageCheck(stdout: string | null | undefined): PageResult[] 
           text: typeof raw.text === 'number' ? raw.text : 0,
           errors: Array.isArray(raw.errors) ? raw.errors.filter((e): e is string => typeof e === 'string') : [],
           finalPath: typeof raw.finalPath === 'string' ? raw.finalPath : null,
+          mainEmpty: raw.mainEmpty === true,
         }),
         settled: raw.settled === true,
         a11y: Array.isArray(raw.a11y)

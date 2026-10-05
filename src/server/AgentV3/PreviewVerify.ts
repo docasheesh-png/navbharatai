@@ -76,6 +76,18 @@ export interface PreviewCaptureContext {
 export const BROWSE_PAINT_DEADLINE_MS = 10_000;
 /** How often to look. Short enough that a fast app is barely delayed. */
 export const BROWSE_PAINT_POLL_MS = 250;
+/**
+ * After the first paint, how long an EMPTY main region may take to fill before the capture is taken
+ * (Q-147). Only a page whose `<main>` is still empty pays it; `emptyMainRegion` judges what is left.
+ */
+export const BROWSE_MAIN_GRACE_MS = 3_000;
+
+/**
+ * The in-browser question "is the main region still empty?" — ONE definition for every script that asks it
+ * (the shared paint wait and the per-route page check), so they cannot disagree about one page. A plain
+ * ES5 function expression, inlined into the scripts as text. Mirrors `emptyMainRegion` on the live DOM.
+ */
+export const MAIN_REGION_EMPTY_JS = "function(){var m=document.querySelector('main,[role=main]');return !!m&&m.children.length===0&&!(m.innerText||'').trim();}";
 
 /** The marker the in-sandbox script prints so we know whether the app had painted when we looked. */
 export const PAINT_MARKER = 'NBAI_PAINTED:';
@@ -331,6 +343,18 @@ export function analyzePreviewHtml(html: string, capture: PreviewCaptureContext 
     if (!blind) problems.push("the app's root element is empty — the UI never rendered (a runtime error likely crashed it before render)");
   }
 
+  // 🔴 ONLY THE FRAME RENDERED (queue Q-147). A nav bar and a header have text, so every check above
+  // passed — while the app's main area was EMPTY: the route matched no page, or the screen rendered
+  // nothing. The user lands on a menu over a blank space, and this read "rendered". Judged only on a
+  // browser capture that SAID it saw the app paint (`source: 'browser'` and `painted: true` — never a
+  // capture without that context, because a server-rendered page can ship an empty `<main>` its client
+  // code fills later), and only when the main region is LITERALLY empty — no element at all. A canvas
+  // game, a spinner, an image or an empty-state card are elements, so they are never accused: the
+  // precision bar is a page a person would call blank.
+  if (problems.length === 0 && capture.source === 'browser' && capture.painted === true && text.length >= 5 && emptyMainRegion(h)) {
+    problems.push("only the app's frame rendered — its main area is empty, so the screen a user lands on shows nothing (a route that matches no page, or a screen that rendered nothing)");
+  }
+
   // No error signal but also no visible content → a blank page.
   if (problems.length === 0 && text.length < 5) {
     if (blind) return blindVerdict(capture, 'the preview showed no visible content');
@@ -338,6 +362,21 @@ export function analyzePreviewHtml(html: string, capture: PreviewCaptureContext 
   }
 
   return { rendered: problems.length === 0, problems };
+}
+
+/**
+ * A `<main>` (or `role="main"`) element with nothing in it but whitespace or comments — and no other main
+ * region that has content. PURE.
+ */
+export function emptyMainRegion(html: string): boolean {
+  const h = String(html ?? '');
+  const regions = [
+    ...[...h.matchAll(/<main\b[^>]*>([\s\S]*?)<\/main>/gi)].map((m) => m[1]),
+    ...[...h.matchAll(/<(\w+)\b[^>]*\brole=["']main["'][^>]*>([\s\S]*?)<\/\1>/gi)].map((m) => m[2]),
+  ];
+  if (regions.length === 0) return false;
+  const empty = (inner: string) => inner.replace(/<!--[\s\S]*?-->/g, '').trim() === '';
+  return regions.some(empty) && !regions.some((r) => !empty(r));
 }
 
 /**

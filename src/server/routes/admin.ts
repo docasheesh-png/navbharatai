@@ -171,6 +171,7 @@ import { hasEverPaid } from '../AgentV3/FreeTierBuildRouting';
 import { walletPassesPaidFilter } from '../lib/adminUserListQuery';
 import { parsePaidFilter, parseSortDirection, directed } from '../../lib/adminUserSort';
 import { isRevenueRow, purchaseRow, filterPurchases, sortPurchases, summarisePurchases, type PurchaseRowWithUser, type PurchaseStatusFilter, type PurchaseSort } from '../lib/purchaseLedger';
+import { hopReportFor } from '../lib/proxyHops';
 
 /**
  * Admin dashboard routes extracted from the server.ts monolith (Phase 1).
@@ -776,6 +777,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         points: [], summary: null, providers: {},
       },
     });
+  });
+
+  // Q-154 — measure the proxy hop count instead of guessing it (see proxyHops.ts, which owns the one header
+  // read; the address itself is decided only by clientAddress.ts). The ADMIN's own request only.
+  app.get('/api/admin/proxy-hops', verifyAdminToken, (req: Request, res: Response) => {
+    res.json(hopReportFor(req));
   });
 
   // G2 — daily metrics history (last N days of persisted MetricsSnapshots).

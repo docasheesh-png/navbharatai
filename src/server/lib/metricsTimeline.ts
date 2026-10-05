@@ -346,20 +346,21 @@ class MetricsTimeline {
     } catch { /* never break a build on telemetry */ }
   }
 
-  /** Record one model call's real token use + cost. Never throws. */
-  recordModelCall(provider: string, inputTokens: number, outputTokens: number, costUsd: number, now = Date.now()): void {
+  /** Record model calls' real token use + cost (`calls` of them — one by default). Never throws. */
+  recordModelCall(provider: string, inputTokens: number, outputTokens: number, costUsd: number, now = Date.now(), calls = 1): void {
     try {
       const b = this.bucketFor(now);
       const inTok = Math.max(0, Math.round(inputTokens || 0));
       const outTok = Math.max(0, Math.round(outputTokens || 0));
       const micros = Math.max(0, Math.round((costUsd || 0) * 1_000_000));
-      b.counters.aiRequests += 1;
+      const n = Number.isFinite(calls) && calls >= 1 ? Math.floor(calls) : 1;
+      b.counters.aiRequests += n;
       b.counters.inputTokens += inTok;
       b.counters.outputTokens += outTok;
       b.counters.costMicroUsd += micros;
       const key = safeProviderKey(provider);
       const p = b.providers[key] || (b.providers[key] = { requests: 0, inputTokens: 0, outputTokens: 0, costMicroUsd: 0 });
-      p.requests += 1;
+      p.requests += n;
       p.inputTokens += inTok;
       p.outputTokens += outTok;
       p.costMicroUsd += micros;
@@ -581,7 +582,7 @@ export function attachMetricsTimeline(): void {
       // and the in-memory totals died with each Cloud Run instance. Best-effort and never awaited.
       void metricsStore.save().catch(() => {});
     },
-    onModelCall: (provider, inputTokens, outputTokens, costUsd) =>
-      metricsTimeline.recordModelCall(provider, inputTokens, outputTokens, costUsd),
+    onModelCall: (provider, inputTokens, outputTokens, costUsd, calls) =>
+      metricsTimeline.recordModelCall(provider, inputTokens, outputTokens, costUsd, Date.now(), calls ?? 1),
   });
 }

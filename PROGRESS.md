@@ -90129,3 +90129,12 @@ after the next store bundle.
 
 **Correction to my own reply the same day:** I told the admin that setting `_RELEASE_GATE_URL` alone would not enforce the
 gate. That was wrong — the step was already in `cloudbuild.yaml`; setting the substitution is the whole remaining action.
+### 2026-10-05 — Q-154 ✅ RESOLVED: the live hop count is measured, and it is right
+
+The admin opened **Admin → Safety → Visitor address check** on the live site (#3545 deployed). The card read:
+*"Correct. Your request passed through 1 proxy, and the server trusts exactly 1 — so it reads every visitor's
+real address, and nobody can choose their own."* Its address line showed the admin's own public address (not
+recorded here). So `TRUSTED_PROXY_HOPS = 1` (#3538) is confirmed on the real hosting path, not only reasoned.
+The row leaves the open queue. Lock: `tests/aCallerCannotChooseItsOwnAddress.test.ts` (one reader of the address)
+and `tests/theClientIsMeasuredNotGuessed.test.ts` (the measurement and its card). If the hosting path ever
+changes (a CDN or load balancer in front of Cloud Run), the same card will say Mismatch and name the number.

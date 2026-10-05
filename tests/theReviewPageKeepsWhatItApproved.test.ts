@@ -58,7 +58,9 @@ describe('an admin can remove ANY app from its own page', () => {
     expect(UI).toContain("adminRemoveFromStore('apk', openApp.id, openApp.appName)");
   });
   it('every removal is confirmed first — no bare remove call is left', () => {
-    expect(UI).toMatch(/const adminRemoveFromStore = useCallback\(async[\s\S]{0,200}window\.confirm\(/);
+    // Q-681 (2026-10-05): the confirmation is now the reason prompt — it states what removal does, and
+    // Cancel (or no reason) removes nothing. It used to be a confirm() followed by a fabricated note.
+    expect(UI).toMatch(/const adminRemoveFromStore = useCallback\(async[\s\S]{0,400}askReviewReason\(`Remove[\s\S]{0,300}if \(note === null\) return;/);
     expect(UI).not.toMatch(/void decide\([^)]*'removed'\)/);
     expect(UI).not.toMatch(/void decideWeb\([^)]*'removed'\)/);
   });

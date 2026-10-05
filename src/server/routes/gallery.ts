@@ -7,6 +7,7 @@ import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { remixGate, remixRefusal } from '../lib/remixPlanGate';
 import { routeParam, routeParams } from '../lib/expressCompat';
 import { audit } from '../lib/audit';
+import { readReviewReason, recordedReviewReason } from '../../lib/storeReviewReason';
 import {
   preparePublishBundle,
   exclusionSummary,
@@ -238,6 +239,9 @@ export function registerGalleryRoutes(app: Express): void {
     if (!['approved', 'rejected', 'removed'].includes(decision)) {
       return res.status(400).json({ error: 'decision must be "approved", "rejected" or "removed".' });
     }
+    // Q-681: a reject / remove deletes the author's code, so it carries the reviewer's own reason.
+    const why = readReviewReason(req.body, decision !== 'approved');
+    if (!why.ok) return res.status(400).json({ error: why.error });
     const found = await getGalleryApp(String(routeParam(req.params.id)));
     if (!found) return res.status(404).json({ error: 'Not found.' });
 
@@ -245,7 +249,7 @@ export function registerGalleryRoutes(app: Express): void {
       status: decision as GalleryApp['status'],
       reviewedAt: Date.now(),
       reviewedBy: who?.email || '',
-      reviewNote: String(req.body?.note || '').slice(0, 500),
+      reviewNote: decision === 'approved' ? (why.reason || '') : recordedReviewReason(why),
     };
     // Rejected or removed code stops existing here, rather than sitting in a document we still hold.
     if (decision !== 'approved') patch.files = {};
@@ -258,7 +262,7 @@ export function registerGalleryRoutes(app: Express): void {
     }
     // Who decided what about whose code — an approval makes it public, a removal deletes it (admin panel
     // audit, PR 3: the store reviews were the admin decisions with no audit line at all).
-    audit('GALLERY_REVIEW_DECISION', { reviewer: who?.email || '', id: found.id, author: found.authorEmail || '', decision, note: patch.reviewNote || '', result: 'ok' });
+    audit('GALLERY_REVIEW_DECISION', { reviewer: who?.email || '', id: found.id, author: found.authorEmail || '', decision, note: patch.reviewNote || '', reasonGiven: !why.legacy, result: 'ok' });
     res.json({ ok: true, id: found.id, status: decision });
   });
 }

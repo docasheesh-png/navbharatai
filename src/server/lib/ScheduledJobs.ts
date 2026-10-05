@@ -6,8 +6,10 @@
 // never stops the others. Internal consumers (P-DATA.4 retention purge, future backups/digests) register
 // here instead of hand-rolling intervals.
 //
-// Scope (honest): this runs while a Cloud Run instance is ALIVE. A guaranteed cron that survives
-// scale-to-0 needs Cloud Scheduler / Cloud Tasks (external infra) — the follow-up. `computeNextRun` is
+// Scope (honest): this runs while a Cloud Run instance is ALIVE. With `--min-instances 0` and no traffic
+// there is no instance, so nothing ticks (Q-159). Cloud Scheduler closes that by calling
+// `POST /api/internal/jobs/:id/run` (routes/scheduledJobs.ts), which runs the same job through `runNow`;
+// the slot kept in its lease means the two triggers never both run one slot. `computeNextRun` is
 // pure (deterministic given `fromMs`) so the schedule math is fully unit-testable without a real clock.
 
 export type Schedule =
@@ -25,6 +27,22 @@ export function computeNextRun(schedule: Schedule, fromMs: number): number {
   const d = new Date(fromMs);
   const todayAt = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), schedule.hour, schedule.minute, 0, 0);
   return todayAt > fromMs ? todayAt : todayAt + DAY_MS;
+}
+
+/**
+ * The most recent slot of `schedule` at or before `nowMs` (Q-159). Every trigger of an exclusive job
+ * names the slot it is running, so this instance's tick and an external Cloud Scheduler call agree on
+ * what "this run" means. `everyMs` slots are aligned to the epoch, not to when an instance booted —
+ * otherwise two instances booted a minute apart would disagree. Pure + deterministic.
+ */
+export function lastSlotAtOrBefore(schedule: Schedule, nowMs: number): number {
+  if (schedule.kind === 'everyMs') {
+    const ms = Math.max(1, Math.floor(schedule.ms));
+    return Math.floor(nowMs / ms) * ms;
+  }
+  const d = new Date(nowMs);
+  const todayAt = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), schedule.hour, schedule.minute, 0, 0);
+  return todayAt <= nowMs ? todayAt : todayAt - DAY_MS;
 }
 
 export interface ScheduledJob {
@@ -53,7 +71,7 @@ export interface ScheduledJob {
  * Injected rather than imported so the scheduler stays free of Firestore and fully testable; the
  * server wires the real one at startup. Absent ⇒ every job runs, which is exactly today's behaviour.
  */
-export type RunClaim = (jobId: string) => Promise<boolean>;
+export type RunClaim = (jobId: string, slot?: number) => Promise<boolean>;
 
 interface JobState {
   job: ScheduledJob;
@@ -151,7 +169,7 @@ export class Scheduler {
     if (st.job.exclusive && this.claim) {
       // A claim that throws must not stop the job — see claimJobRun: a database hiccup silently
       // cancelling every scheduled job is far worse than one duplicated run.
-      mayRun = await this.claim(st.job.id).catch(() => true);
+      mayRun = await this.claim(st.job.id, lastSlotAtOrBefore(st.job.schedule, nowMs)).catch(() => true);
     }
     if (!mayRun) {
       st.skipped = (st.skipped ?? 0) + 1;
@@ -177,6 +195,12 @@ export class Scheduler {
 
   stop(): void {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
+  }
+
+  /** Is `id` a registered, enabled job that must run on ONE instance? The external trigger runs only these. */
+  isExclusive(id: string): boolean {
+    const st = this.jobs.get(id);
+    return !!st && (st.job.enabled ?? true) && st.job.exclusive === true;
   }
 
   list(): JobStatus[] {

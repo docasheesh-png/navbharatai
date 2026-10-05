@@ -54,6 +54,7 @@ import { registerWorkspaceHealthRoutes } from './src/server/routes/healthCheck';
 import { registerUndefinedHookCheckRoutes } from './src/server/routes/undefinedHookCheck';
 import { registerDepConstraintCheckRoutes } from './src/server/routes/depConstraintCheck';
 import { registerReleaseGateRoutes } from './src/server/routes/releaseGate';
+import { registerScheduledJobRoutes } from './src/server/routes/scheduledJobs';
 import { registerTeamLibraryRoutes } from './src/server/routes/teamLibrary';
 import { registerTraceabilityRoutes } from './src/server/routes/traceability';
 import { registerExplainCodeRoutes } from './src/server/routes/explainCode';
@@ -803,6 +804,7 @@ setInterval(() => {
   registerUndefinedHookCheckRoutes(app); // AgentV3 — undefined-hook-call check (POST /api/workspace/hook-resolution-check)
   registerDepConstraintCheckRoutes(app); // P-AI.14 — dependency version-constraint check (POST /api/workspace/dependency-check)
   registerReleaseGateRoutes(app); // P-DEPLOY.5 — public release freeze/approval gate status (GET /api/release/gate)
+  registerScheduledJobRoutes(app); // Q-159 — Cloud Scheduler runs one-instance jobs when no instance is awake
   registerTeamLibraryRoutes(app); // P-COLLAB.4 — team-scoped shared library (prompts/templates/components)
   registerTraceabilityRoutes(app); // P-PME.12 — requirement→file→test traceability matrix (POST/GET /api/workspace/traceability)
   registerExplainCodeRoutes(app); // P-DEV.10 — deterministic code explanation (POST /api/workspace/explain)
@@ -1099,7 +1101,8 @@ setInterval(() => {
             .then(({ claimJobRun }) => import('./src/server/lib/serverDb').then(({ getServerDb }) => {
               // Resolved per CALL, not at wiring time: the db may not be set yet at boot, and a null
               // store means the job runs — never that it is silently cancelled.
-              scheduler.setClaim((jobId) => claimJobRun(getServerDb() as any, { jobId }));
+              // The slot travels with the claim (Q-159): this tick and Cloud Scheduler run one slot once.
+              scheduler.setClaim((jobId, slot) => claimJobRun(getServerDb() as any, { jobId, slot }));
             }))
             .catch(() => { /* no claim wired ⇒ every job runs, exactly as before */ })
             // Either way the boot run happens — a claim that could not be wired must delay the purge,

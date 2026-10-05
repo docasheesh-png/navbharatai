@@ -24,6 +24,20 @@
 export interface JobLease {
   owner: string;
   expiresAt: number;
+  /**
+   * The schedule slot (`lastSlotAtOrBefore`) the most recent claim was for (Q-159, 2026-10-05). Two
+   * triggers now fire the same job — this instance's own tick and Cloud Scheduler calling the job route
+   * on a cold instance — and they must not both run one slot. The lease alone cannot tell them apart
+   * once it has expired, so the slot is kept beside it, in the same document, in the same transaction.
+   */
+  lastSlot?: number;
+}
+
+/** Has a run already been claimed for this slot (or a later one)? PURE. */
+export function slotAlreadyClaimed(existing: Partial<JobLease> | null | undefined, slot: number | undefined): boolean {
+  if (typeof slot !== 'number' || !Number.isFinite(slot)) return false;
+  const last = Number(existing?.lastSlot);
+  return Number.isFinite(last) && last >= slot;
 }
 
 export type LeaseDecision = 'claim' | 'skip';
@@ -102,7 +116,7 @@ export interface LeaseStore {
  */
 export async function claimJobRun(
   store: LeaseStore | null | undefined,
-  opts: { jobId: string; owner?: string; nowMs?: number; ttlMs?: number },
+  opts: { jobId: string; owner?: string; nowMs?: number; ttlMs?: number; slot?: number },
 ): Promise<boolean> {
   if (!store || !opts.jobId) return true;
   const owner = opts.owner || processOwnerId();
@@ -112,8 +126,14 @@ export async function claimJobRun(
     return await store.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       const existing = (snap.exists ? snap.data() : undefined) as JobLease | undefined;
+      if (slotAlreadyClaimed(existing, opts.slot)) return false;
       if (leaseDecision(existing ?? null, { owner, nowMs }) === 'skip') return false;
-      tx.set(ref, { ...nextLease({ owner, nowMs, ttlMs: opts.ttlMs ?? DEFAULT_LEASE_TTL_MS }), jobId: opts.jobId });
+      const lastSlot = typeof opts.slot === 'number' && Number.isFinite(opts.slot) ? opts.slot : existing?.lastSlot;
+      tx.set(ref, {
+        ...nextLease({ owner, nowMs, ttlMs: opts.ttlMs ?? DEFAULT_LEASE_TTL_MS }),
+        jobId: opts.jobId,
+        ...(typeof lastSlot === 'number' && Number.isFinite(lastSlot) ? { lastSlot } : {}),
+      });
       return true;
     });
   } catch {

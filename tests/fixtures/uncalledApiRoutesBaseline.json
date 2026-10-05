@@ -65,7 +65,6 @@
   "POST /api/guider/grade": "legacy-bundled: kept as a no-op for phone apps still running an old bundled frontend (build.ts)",
   "POST /api/guider/plan": "legacy-bundled: kept as a no-op for phone apps still running an old bundled frontend (build.ts)",
   "POST /api/images/generations": "external: the public developer API, also called by generated apps (Settings \u2192 Developer API shows the call)",
-  "POST /api/internal/jobs/:id/run": "external: Cloud Scheduler, with the x-scheduler-secret header (Q-159, routes/scheduledJobs.ts)",
   "POST /api/mobile-ship/kit": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/observability/anomaly": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
   "POST /api/payment/webhook": "external: a provider calls it (payment / Telegram / WhatsApp webhook)",

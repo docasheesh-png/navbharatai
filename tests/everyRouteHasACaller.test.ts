@@ -81,7 +81,7 @@ describe('the gallery review queue', () => {
     await api.review('a b', 'approved', 'Looks good');
     expect(calls[1].url).toBe('/api/gallery/admin/a%20b/source');
     expect(calls[2].url).toBe('/api/gallery/admin/a%20b/review');
-    expect(JSON.parse(String(calls[2].init?.body))).toEqual({ decision: 'approved', note: 'Looks good', reasonContract: 1 });
+    expect(JSON.parse(String(calls[2].init?.body))).toEqual({ decision: 'approved', note: 'Looks good' });
   });
 
   it('a decision the server did not confirm is an error, never a silent success', async () => {

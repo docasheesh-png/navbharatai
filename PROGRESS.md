@@ -90072,3 +90072,10 @@ PR 3 covers four server capabilities that existed with no screen, plus the two s
 - **Gate on the merged state caught two things, both fixed:**
   - `aboutUsTellsTheTruth` pinned the exact `requireAdmin` import line. It is widened to allow `adminUsername` beside it; the shared-guard property is unchanged.
   - `appMartSocial`'s rule is that an email is used only for the admin check. The comment-removal audit now names the admin by uid.
+### 2026-10-05 — #3547 merged: Q-660 … Q-663 leave the open queue
+
+#3547 was squash-merged at `affa6a28` on the admin's word ("marge karo"), after CI ran green on head `e14b3aab`. Earlier CI runs never started because of the GitHub billing limit; once that was cleared, CI ran and passed.
+
+Q-660, Q-661, Q-662 and Q-663 move to ✅. Their ledger is the "Free mode removed" entry above.
+
+**Watch:** a picture should arrive on the first press on the live site.

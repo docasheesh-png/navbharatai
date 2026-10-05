@@ -141,6 +141,7 @@ import { isExternalToolName, parseToolName } from './mcpClient';
 import { callRemoteTool } from './mcpTransport';
 import type { SafeMcpTool } from './mcpClient';
 import type { McpServerConfig } from './mcpTransport';
+import { featureFileGuardEnabled, protectedFeatureFileDeletion, protectedFeatureFileMessage } from './featureFileGuard';
 import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, runtimeManifestDeletionTarget, runtimeManifestDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { cloneDestination, shouldRefuseClone, cloneGuardMessage } from './gitCloneGuard';
@@ -4824,6 +4825,27 @@ export class ToolDispatcher {
                 getWorkspaceMemory(this.workspaceId).recordAudit(
                   `[BLOCKED-DESTRUCTIVE] refused delete of still-imported file ${target} (${importers.length} importer(s))`,
                 );
+              } catch { /* audit best-effort */ }
+              this.state?.appendTerminal(blockMsg);
+              return blockMsg;
+            }
+          }
+          // Q-118: nothing imports it, but its name says it builds a feature the user asked for, and no
+          // other file carries that feature — deleting it removes a requested feature (featureFileGuard.ts).
+          if (featureFileGuardEnabled() && deleteTargets.length > 0) {
+            let requests: string[] = [];
+            let projectFiles: string[] = [];
+            try {
+              const mem = getWorkspaceMemory(this.workspaceId);
+              requests = [this.coverageRequest ?? this.userRequest ?? '', ...mem.recentRequests(6).reverse()];
+              projectFiles = mem.knownFilePaths();
+            } catch { /* no memory ⇒ no requests ⇒ nothing protected, exactly as before */ }
+            for (const target of deleteTargets) {
+              const hit = protectedFeatureFileDeletion(target, requests, projectFiles);
+              if (!hit) continue;
+              const blockMsg = protectedFeatureFileMessage(target, hit);
+              try {
+                getWorkspaceMemory(this.workspaceId).recordAudit(`[BLOCKED-FEATURE-FILE] refused delete of ${target} (builds requested "${hit.word}")`);
               } catch { /* audit best-effort */ }
               this.state?.appendTerminal(blockMsg);
               return blockMsg;

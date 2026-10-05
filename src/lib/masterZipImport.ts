@@ -23,6 +23,7 @@ import { chunkFilesForSync, totalFilesBytes } from './chunkFilesForSync';
 import { importDropSummary, type DropCounts } from './importDropReport';
 import { authJsonHeaders } from './authHeaders';
 import { readFolderInBrowser, isFolderImportSupported, pickProjectFolder } from './folderImport';
+import { linkFolder } from './folderWriteBack';
 
 export interface MasterImportProgress {
   /** What the user should be told is happening right now. */
@@ -183,6 +184,8 @@ export async function importProjectFolder(
   const { imported, failedBatches } = await uploadExtractedFiles(payload, workspaceId, userId, email, onProgress);
   const summary = importDropSummary({ kept: imported, totalEntries: read.totalEntries, dropped: read.dropped });
   const warn = partialSaveWarning(failedBatches, imported);
+  // Remember the folder so "Save to folder" (Q-160) can write changes back — on a press, never on its own.
+  linkFolder({ handle: root, name: folderName, original: { ...read.files }, stamps: { ...read.stamps } });
   return {
     via: 'browser',
     files: read.files,

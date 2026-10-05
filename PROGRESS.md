@@ -90140,3 +90140,13 @@ header) runs whatever is due by THAT record — first sight seeds instead of run
 nothing, the lease still picks one instance. The plan sweep (renewal reminders) left its private `setInterval` for
 the shared scheduler as an exclusive job. 🟡 Live once the admin sets `SCHEDULER_TICK_SECRET` and creates the
 Cloud Scheduler job (steps in the queue row). Lock: `tests/scheduledWorkDoesNotNeedAnAwakeServer.test.ts`.
+
+### 2026-10-05 — Q-160: "Save to folder" — Open Folder can write back, on a press, safely
+
+Admin chose the cautious option. A project opened from a folder now remembers that folder (and each file's
+disk timestamp at read time); the Files panel shows "Save to folder". A press, after a confirmation, writes only
+changed and new files — never a delete, never over a file edited on disk since (named instead), never into a
+folder that held a different project (under half the files shared ⇒ refused), never outside it or into
+node_modules/.git/dist. Lock: `tests/saveToFolderWritesOnlyWhatChanged.test.ts`. Not exercised in a real Chrome
+against a real disk here (no desktop browser with a picker in this container) — the API calls are the
+standard File System Access ones, and the logic is tested against a fake disk.

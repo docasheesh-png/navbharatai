@@ -90079,3 +90079,30 @@ PR 3 covers four server capabilities that existed with no screen, plus the two s
 Q-660, Q-661, Q-662 and Q-663 move to ✅. Their ledger is the "Free mode removed" entry above.
 
 **Watch:** a picture should arrive on the first press on the live site.
+
+---
+
+## 2026-10-05 — Rate NavBharatAI: asked once, after an app goes live (admin: "rating system banao!")
+
+Admin, verbatim: *"rating system banao! jab bhi user ki app badhiya bane, user usko deploy kare successfully, tabhi rating ka notification aa jaye! jis user ne rating nahi kari hai, uske liye!!"*
+
+**Already existed (searched by filename and by `rating`, `review`, `feedback`, `InAppReview`):** the Play/App Store native review card (`mobileEngagement.ts`, `MobileEngagementGate`), which opens on app start after 3 opens and 2 days. It is tied to time, not to a success, and the store never tells us whether a person rated, so it cannot keep the admin's rule. It is unchanged and deliberately NOT chained to the new card. Play's in-app review guidelines forbid asking for an opinion before showing the store card, and sending only happy users to the store is review gating.
+
+**What was built:**
+- **The moment.** `announceRatingMoment()` is raised only after a publish that went live (`isRatingMoment`: server ok + a link + the link not proven dead). The Publish sheet raises it when its "Your app is live" card closes, never on top of the link. Connect my website raises it on its own success.
+- **One listener.** `PlatformRatingHost`, mounted once in `main.tsx`, asks the server whether this person may be asked, then shows the card.
+- **The person.** The record lives in `platform_ratings/{uid}`:
+  - A user who has rated is never asked again, on any device.
+  - "Not now", close, Escape or a tap outside pause the question for 3 days, then 7, then 30.
+  - The card appears at most once per browser session.
+  - A store that cannot answer means "do not ask".
+- **Real.** The card says "Thank you" only after the server confirms the save. A failed save says so and keeps the stars.
+- **Admin view: Admin → Users → Ratings** (`PlatformRatingsCard`).
+  - It shows the exact average and per-star counts (five count aggregations over every rating, not a sample).
+  - It lists the newest 100 ratings with their notes, filterable to Newest, 1–3 stars, or With a note.
+  - A non-overview body is an error, never "0 ratings".
+- **Privacy.** `platform_ratings` is classified as `user` and added to `USER_SCOPED_COLLECTIONS`, so deleting an account erases it.
+
+**Proof:** `tests/rateNavBharatAfterALivePublish.test.ts`, 22 cases: the rules, the shape readers, source guards on every wiring point, and the routes over real HTTP. Reversion-proven: removing the "already rated" check fails it, and announcing on every celebration close fails it.
+
+**Watch for:** the first ratings should appear on Admin → Users → Ratings after users publish. Phone users get the card only with a fresh `.aab`/`.ipa`.

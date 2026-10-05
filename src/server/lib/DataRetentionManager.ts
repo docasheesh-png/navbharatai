@@ -72,6 +72,8 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'chat_sessions', key: { field: 'userId' } },
   { collection: 'user_vault_pin', key: 'docId' },
   { collection: 'agentv3_mcp_library', key: 'docId' },
+  /** The user's rating of NavBharatAI (`platformRatingStore.ts`) — doc id IS the uid. */
+  { collection: 'platform_ratings', key: 'docId' },
   /**
    * The per-buyer daily gift-code tally (`giftCodeStore.ts`). Its doc id is `<uid>_<day>`, so it is
    * reached by the `uid` FIELD rather than the id — the same shape `user_costs` uses.

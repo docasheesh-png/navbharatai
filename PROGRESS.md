@@ -89371,3 +89371,81 @@ same-origin, infra-blocked), Q-610 (rules must be deployed by hand to `gen-lang-
 - **Q-122 ✅ (`UI_WITHOUT_BUILD` false positive when only `App.tsx` was edited)** was already fixed. After build 70115adf, `uiWithoutBuildVerdict` got a "complete view" guard: with no `package.json` in view, it refuses to judge, because what it sees is a fragment. `tests/uiWithoutBuild.test.ts` encodes exactly this case: the view `['src/App.tsx']` gives no finding. The row was never removed after that fix.
 - **Q-125 ✅ (Sonnet cache reads "over-stated")** had a wrong premise, as its own row said on 2026-10-04. Anthropic's `input_tokens` excludes cache shares, so a Claude turn is UNDER-stated. That real defect is Q-343, which is 🟡 BLOCKED on the admin's money decision, with options and a recommendation. Q-125 has nothing left of its own to fix.
 - **Gate note for this branch:** the first full run caught one failure: `licenceExposure.test.ts` pins `sources.push(currencyBlock, pincodeBlock);` as proof that those two sources sit outside every gate. Q-127 had folded movies into that line. The line is restored and movies is pushed separately. That keeps the property, and the pin stays as it was.
+
+## 2026-10-04 — Q-141: a freeze that stopped nothing, and the sentence that said it would
+
+**The row, verbatim:** *"Release gate is not enforced on the deploy path that runs (Cloud Build), yet
+AppKnowledgeBase says it is. Either add the gate step (admin) or correct the KB text now."*
+
+🔴 **Verified before touching anything, and it is worse than the row says.** `ReleaseGate.ts` is correct,
+its store is correct, its route is correct. The only CHECK lived in `.github/workflows/deploy.yml`, behind
+`if: steps.guard.outputs.ready == 'true'` — which requires the `GCP_SA_KEY` + `GCP_PROJECT_ID` repo
+secrets, and `CLAUDE.md` records that those are not set, so that whole workflow skips cleanly and deploys
+nothing. `cloudbuild.yaml` is what ships every merge, and it had no gate step at all. **The release gate
+was enforced on exactly zero live paths**, while `AppKnowledgeBase.ts` — what every AI in NavBharatAI
+answers from — said *"the deploy pipeline checks the public GET /api/release/gate?sha=<commit> before
+promoting and refuses to deploy when the gate is closed."*
+
+**So an admin freezing releases during a live incident saw `Frozen: YES` in red on the admin board, and
+the next merge deployed anyway.** That is the second absolute rule broken outright — and it is worse than
+a faked indicator, because the indicator was TRUE. The control it reads was connected to nothing.
+
+🔑 **THE CLASS: a claim about a pipeline, written in prose, in a file the pipeline cannot see.** No
+typecheck, no test and no reviewer could ever have caught the drift, because the sentence in
+`AppKnowledgeBase.ts` and the YAML in `cloudbuild.yaml` had no relationship at all. So the fix is not a
+better sentence — it is the relationship.
+
+### Both halves, and neither alone would have done
+
+**(a) The enforcement.** Step 0 of `cloudbuild.yaml`, in the same cloud-sdk image the deploy step already
+pulls (so nothing new has to be fetchable), running FIRST — during a freeze there is no reason to pay for
+a five-minute Docker build either. **Its only non-zero exit is an explicit `"allowed":false` from our own
+endpoint.** Not configured, unreachable, a timeout, a 500, an empty body and a malformed body all exit 0
+and continue the deploy, because a step that can fail for any other reason is a step that can stop every
+deploy — and no session here can run Cloud Build to prove otherwise. `_RELEASE_GATE_URL` defaults to
+empty, so until the admin sets it on the trigger the step prints one line and stands down.
+
+**(b) The honesty, which deliberately does not rest on a claim.** The gate route now records every time a
+pipeline really asks it, and `freezeEnforcementNote` answers from that MEASUREMENT: with nothing recorded
+it says *"⚠️ A FREEZE DOES NOT STOP A DEPLOY TODAY. No deploy pipeline has ever asked this endpoint"* and
+names the one substitution to set; once a pipeline has asked, the evidence outranks the table. That
+sentence now appears on every admin read of the gate, in the POST answer when a freeze is switched ON, on
+the admin board's Release gate card beside `Frozen: YES`, and in the KB entry.
+
+⚠️ **The evidence lives in its own Firestore document, and that is not tidiness.** `ReleaseGateStore.set`
+writes the config with `merge: false`, so a field kept on the same document would be silently erased the
+next time an admin changed the freeze — and the erased field is the one thing that proves the wiring
+works. Same collection (`platform_config`), so it is already classified.
+
+### Proof
+
+`tests/aFreezeThatStopsNothing.test.ts`, 25 cases.
+
+- It **parses** `cloudbuild.yaml` and `deploy.yml` with `js-yaml` and fails when `DEPLOY_PATHS` disagrees
+  with what they actually contain — the sentence cannot drift from the pipeline again.
+- It sweeps **every** declared substitution for the MUST_MATCH trap this file's own comments record (Cloud
+  Build fails a build on a substitution declared and never used, and equally on one used and never
+  declared) — not only the one added here.
+- It **runs the step** against a real HTTP server for all five outcomes, asserting the exit status.
+- Reversion-proven six ways: the step removed → 8 fail · fail-open turned into fail-closed → 3 fail · the
+  KB's old sentence restored → 1 fail · the table claiming the primary path is live → 5 fail · the route
+  no longer recording the evidence → 1 fail · the admin card dropping the sentence → 1 fail.
+
+⚠️ **A NEAR-MISS WORTH MORE THAN THE FIX, and it is a new entry in this file's collection of them.** The
+first draft ran the step with `execFileSync`. That blocks the test process's own event loop — so the HTTP
+server living in the same process could never accept curl's connection, every case timed out at curl's
+`--max-time 20`, and all five landed in the "the gate did not answer" branch. **Five green-looking cases
+that proved nothing, including the one case that matters: a closed gate read as exit 0.** It was caught
+only because three assertions expected the OTHER outcome. A synchronous child and an in-process server
+cannot both work; `execFile` + `await` is the shape.
+
+🟡 **ONE ADMIN ACTION REMAINS, and it is the only thing between this and a binding freeze:**
+Cloud Build → Triggers → the trigger → Substitution variables → `_RELEASE_GATE_URL` =
+`https://<the live app host>/api/release/gate`. The admin board will then say a pipeline really asked the
+gate, instead of saying a freeze would not hold.
+
+**Siblings hunted:** every surface that mentions the gate — `routes/releaseGate.ts`, `routes/admin.ts`
+(both verbs), `AppKnowledgeBase.ts`, the admin card in `EngineReportsPanel.tsx`, and `APITester.tsx`
+(which only lists the endpoint and claims nothing). ⚠️ `EngineReportsPanel.tsx` is being restructured by
+open PR #3530, which moves this card to a new page; the edit here is two small blocks inside the card, so
+whoever merges second should expect a conflict in exactly that region and keep both changes.

@@ -90106,3 +90106,26 @@ Admin, verbatim: *"rating system banao! jab bhi user ki app badhiya bane, user u
 **Proof:** `tests/rateNavBharatAfterALivePublish.test.ts`, 22 cases: the rules, the shape readers, source guards on every wiring point, and the routes over real HTTP. Reversion-proven: removing the "already rated" check fails it, and announcing on every celebration close fails it.
 
 **Watch for:** the first ratings should appear on Admin → Users → Ratings after users publish. Phone users get the card only with a fresh `.aab`/`.ipa`.
+
+---
+
+## 2026-10-05 — Approved queue decisions, batch A: Q-680, Q-134, Q-681, Q-141, Q-159
+
+Admin, verbatim: *"wali sabhi ke liye 'haan'"* — yes to every recommendation on the open decision rows. Batch A is the
+admin-panel and platform half; the engine rows (Q-118, Q-137, Q-143, Q-144, Q-148) and Q-160, Q-162, Q-163 follow.
+Q-613/616/623/624 were NOT touched: open PR #3551 (another session) owns them.
+
+| Row | Problem | Root cause / class | Siblings fixed | Lock (reverted → fails) |
+|---|---|---|---|---|
+| Q-680 ✅ | OTP card stored a 403/500 body as data | A client READ moving a body into state without `res.ok` + shape — the read-side sibling of the client-write rule | ReferralCostCard, WalletStatementPanel, SupabaseConnectCard, the update-broadcast preview (a 500 read as "ANDROID_LATEST_VERSION_CODE is not set"), admin analytics (a failed read drawn as 0 users) | `tests/aClientReadChecksTheServerAnswer.test.ts` (census, one-line and two-line shapes) |
+| Q-134 🟡 | Build-report history never pruned | A growing store with no retention decision — invisible for SUBCOLLECTIONS, which no census covered | Account erase missed `workspace_diagnostics_v3/*/history`, `users/{uid}/deviceTokens`, `users/{uid}/notifications`, `promptAudits/{uid}/entries`, `workspace_user_actions_v1/*/items`, `code_reviews/*/comments` (Firestore does not cascade); the retention comment claimed diagnostics "does not grow"; the Privacy Policy now states the 180-day window. Remaining owner-field parents → Q-682 | `tests/everySubcollectionIsClassified.test.ts`, `DataRetentionManager.test.ts` |
+| Q-681 🟡 | Store reject/remove accepted no reason | Same class as PR 1's placeholder reasons, on the three store-review routes | The App Mart Remove sent a fabricated "Removed by an admin from the app page" | `tests/aStoreRemovalCarriesTheAdminsReason.test.ts` |
+| Q-141 🟡 | Release gate not on Cloud Build | Already fixed and merged (`55d559540`); the queue row was stale | — | existing gate tests |
+| Q-159 🟡 | Jobs only run inside a live instance | In-process scheduler + scale-to-zero; a second trigger would double-run without a shared slot | The plan sweep ran on EVERY instance through a private `setInterval` | `tests/scheduledJobsRunWhenNoInstanceIsAwake.test.ts` |
+
+**Admin actions this batch needs (after merge):** `DATA_RETENTION_PURGE_ENABLED=on`; `SCHEDULED_JOBS_SECRET` + the Cloud
+Scheduler jobs (`docs/claude/ENV_REGISTRY.md`, 2026-10-05); `_RELEASE_GATE_URL` on the Cloud Build trigger; Q-681 phase 2
+after the next store bundle.
+
+**Correction to my own reply the same day:** I told the admin that setting `_RELEASE_GATE_URL` alone would not enforce the
+gate. That was wrong — the step was already in `cloudbuild.yaml`; setting the substitution is the whole remaining action.

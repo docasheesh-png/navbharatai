@@ -89051,6 +89051,23 @@ cancels of #3515 (19:57), #3518 (20:44) and #3523 (20:45) read "The job has exce
 of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR runs in flight slowed every run to
 21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
 words before naming a cause — a cancelled run names its canceller.
+## 2026-10-04 — Admin panel audit, PR 2: the nine-tab information architecture (local branch, built on PR 1)
+
+Built on PR 1's head (a52b601) in the local branch `local/admin-pr2`; NOT pushed yet, because PR #3522 is frozen
+and is not merged. Nine sections (`src/lib/adminTabs.ts`): Home, Users (All users | Complaints), Apps (All apps |
+Publishing | Review), Builds (Reports | Phone builds | Engine health), AI Engines, Money, Safety, Messages, Settings.
+- Features moved, not rewritten; the Diagnostics tab is dissolved (`ENGINE_REPORTS_ON`, each report on one page).
+- Apps → Review opens App Mart's existing review through the existing `navbharat:navigate` event; the community
+  gallery review screen is PR 3 and the page says so. Safety says plainly that the audit-log screen and App Check
+  card are PR 3.
+- Settings holds no real setting any more (fake ones removed in PR 1); it points to Messages and Money.
+- Found during the 10-point audit: single-channel Reclaim deleted without a confirmation (Reclaim all had one) —
+  confirmation added. App Mart's own review routes (`/api/nav-store/admin/review`, `/web/admin/review`) write no
+  audit line — recorded as a PR 3 item (server change, out of PR 2's scope).
+- `tests/theAdminMenuHasNineTabs.test.ts` carries a feature census: a feature that disappears or renders on two
+  pages fails CI. Checked in a real browser (desktop 1366px and phone 390px): every tab and page opens, no page error.
+
+**Update (same day):** #3522 merged, so PR 2 was re-applied on `main` (fabdadf65) in the designated branch and pushed. The two commits cherry-picked cleanly, and #3521's App Mart changes left the `storeTab: 'review'` link working. The full gate ran on that state: typecheck, unused imports, native guard, server typecheck, build, bundle, boot and server deps all passed. In vitest, 34255 passed and 1 failed: `nodeModulesIsNotAFile` caught the gate worktree's own `node_modules` symlink, the exact local artifact that test exists for, not code in this change.
 
 
 ### Q-127: a live-data question that asks two things gets both (2026-10-04)
@@ -89632,6 +89649,10 @@ same-origin, infra-blocked), Q-610 (rules must be deployed by hand to `gen-lang-
 - **Q-125 ✅ (Sonnet cache reads "over-stated")** had a wrong premise, as its own row said on 2026-10-04. Anthropic's `input_tokens` excludes cache shares, so a Claude turn is UNDER-stated. That real defect is Q-343, which is 🟡 BLOCKED on the admin's money decision, with options and a recommendation. Q-125 has nothing left of its own to fix.
 - **Gate note for this branch:** the first full run caught one failure: `licenceExposure.test.ts` pins `sources.push(currencyBlock, pincodeBlock);` as proof that those two sources sit outside every gate. Q-127 had folded movies into that line. The line is restored and movies is pushed separately. That keeps the property, and the pin stays as it was.
 
+
+### Queue rows closed on merge (2026-10-04)
+
+Q-113 (#3531), Q-127 / Q-129 / Q-131 / Q-132 (#3535) and Q-115 / Q-130 (#3537) are merged. Their ledgers are in the entries above, so they leave `BUILD_REPORT_QUEUE.md`'s open table. Three of these rows had gone back to "OPEN" with no owner during the staging merges. That shows why a row's state must follow the merge itself, not a copy of the file on one branch.
 ## 2026-10-05 — A payment gateway's product names are not the app's commerce words (Q-641), and what three sessions building the same six rows cost
 
 ### The concurrency finding first, because it is the expensive one

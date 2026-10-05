@@ -23,7 +23,7 @@
 // PURE — no React, no DOM. The I/O half (publishing the api, rendering the strip) lives at the two
 // call sites.
 
-import type { AdminTabBadges } from '../../lib/adminTabBadges';
+import type { AdminTabBadges, TabBadge } from '../../lib/adminTabBadges';
 import { formatBadge, badgeNeedsAttention } from '../../lib/adminTabBadges';
 
 /** One tab, as the footer needs it: enough to draw, never enough to decide. */
@@ -68,7 +68,7 @@ export interface AdminFooterTab {
  */
 export function adminFooterItems(
   tabs: readonly AdminFooterTab[],
-  badges: AdminTabBadges | null | undefined,
+  badges: AdminTabBadges | Readonly<Record<string, TabBadge | null>> | null | undefined,
 ): AdminFooterItem[] {
   return tabs.map((tab) => {
     const badge = badges ? (badges as unknown as Record<string, unknown>)[tab.id] : null;

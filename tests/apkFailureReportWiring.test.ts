@@ -20,6 +20,7 @@ const read = (rel: string): string => readFileSync(join(__dirname, '..', rel), '
 const mobileShip = read('src/server/routes/mobileShip.ts');
 const adminRoutes = read('src/server/routes/admin.ts');
 const dashboard = read('src/components/AdminDashboard.tsx');
+const tabs = read('src/lib/adminTabs.ts');
 
 describe('mobileShip.ts: a failed store build reports itself to the admin automatically', () => {
   it('the /runs poll fires the report ONLY on a failure conclusion, gated on a verified identity', () => {
@@ -83,10 +84,11 @@ describe('admin.ts: the APK Reports inbox has its own admin-only routes', () => 
 });
 
 describe('AdminDashboard.tsx: APK Reports is its OWN nav page, separate from Build Reports', () => {
-  it('is a distinct tab id, listed in the header nav', () => {
-    expect(dashboard).toContain("id: 'apkreports', label: 'APK Reports'");
+  it('is a distinct page id, listed under the Builds tab (admin 2026-10-04, D2)', () => {
+    // The nine-tab menu put both inboxes under one tab — as two SEPARATE pages, never one list.
+    expect(tabs).toContain("{ id: 'apkreports', label: 'Phone builds' }");
     // Must be a genuinely separate id from the AgentV3 inbox, not an alias / filter of it.
-    expect(dashboard).toContain("id: 'reports',   label: 'Build Reports'");
+    expect(tabs).toContain("{ id: 'reports', label: 'Reports' }");
   });
 
   it('fetches its own endpoint when the tab is opened', () => {

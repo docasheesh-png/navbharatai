@@ -7,7 +7,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import express from 'express';
-import { hopReport } from '../src/server/lib/proxyHops';
+import { hopReport, hopReportFor } from '../src/server/lib/proxyHops';
+import { TRUSTED_PROXY_HOPS } from '../src/server/lib/clientAddress';
 
 describe('the proxy hop count is measured, not guessed', () => {
   it('lists what req.ip would be under every hop count', () => {
@@ -33,6 +34,19 @@ describe('the proxy hop count is measured, not guessed', () => {
       req.app = app;
       expect(req.ip, `hops ${hops}`).toBe(ip);
     }
+  });
+
+  it('names the count the server runs with, so the admin can confirm it rather than compute it', () => {
+    const r = hopReportFor({ headers: { 'x-forwarded-for': '203.0.113.7, 35.191.2.2' }, socket: { remoteAddress: '169.254.1.1' } });
+    expect(r.trustedHops).toBe(TRUSTED_PROXY_HOPS);
+    expect(r.ipByHopCount.find((x) => x.hops === TRUSTED_PROXY_HOPS)?.ip).toBe('35.191.2.2');
+    expect(r.howToRead).toContain(`trust proxy = ${TRUSTED_PROXY_HOPS}`);
+  });
+
+  it('the route hands the request to the module; admin.ts itself reads no forwarding header', () => {
+    const admin = readFileSync('src/server/routes/admin.ts', 'utf8');
+    expect(admin).toContain('hopReportFor(req)');
+    expect(admin).not.toMatch(/headers\s*\[\s*['"`]x-forwarded-for/i);
   });
 
   it('is admin-only and logs nothing', () => {

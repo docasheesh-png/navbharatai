@@ -90670,3 +90670,69 @@ version; both changed the same files. With the admin's approval ("theek kar ke m
 reverted (no history rewrite) and #3555's version is the one in `main`. Batch C (Q-160, Q-162, Q-163) was also done by #3555
 and is not repeated here. **Lesson, for safeguard #6:** a claim written only on an unpushed branch is invisible — open the PR
 (or push the queue rows) BEFORE starting claimed work, so the claim exists where other sessions look.
+
+---
+
+## 2026-10-05 — Approved queue decisions, batch B: Q-118, Q-143, Q-144, Q-137, Q-148 (#3558)
+
+| Row | Problem | Root cause / class | Siblings fixed | Lock (reverted → fails) |
+|---|---|---|---|---|
+| Q-118 ✅ | A feature component nothing imports could be deleted | Every delete guard protected structure, none protected a REQUESTED feature (`featureFileGuard.ts`) | `shred` passed four guards: three parsers each kept their own delete-verb list → one list, `fileRemovalCommands.ts`, census-locked | `tests/aRequestedFeatureFileIsNotDeleted.test.ts` |
+| Q-143 ✅ | An uninstalled package a loaded file imports never blocked READY | Missing deps were advisory only; now blocking after the reconciler, scoped by reachability and an installed tree | — | `tests/aPackageTheAppLoadsMustBeInstalled.test.ts` |
+| Q-144 ✅ | A framework mismatch was warned about, then thrashed on | The model cannot know which framework the user meant → the turn asks, once, before any file is written | — | `tests/aFrameworkMismatchIsAskedNotThrashed.test.ts` |
+| Q-137 ✅ (already fixed) | Preview copy stale after a confirmed repair | Fixed 2026-09-30 (autopsy 876afca9): the copy is re-taken once after ANY pass that changed the app — option (b) exactly. The queue row was stale | — | `tests/theCopyFollowsEveryPass.test.ts`, `tests/theCalculatorAutopsy.test.ts` |
+| Q-148 ✅ | A crash after the build ended was only recorded | No path from a reported crash to a repair without a press → `previewAutoRepair.ts` + `/preview-error/auto-repair`: paid builds, once per build, reproduced in the sandbox's own browser on an awake sandbox; the client sends the repair as a normal turn | — | `tests/aPostBuildCrashIsRepairedOnceWhenSeen.test.ts` |
+
+**Watch for:** on the next paid build whose preview crashes after it ends, the chat should show "Automatic repair (once)" and the
+report should carry `previewAutoRepairAt`; a second crash of the same build keeps the Fix with AI button.
+### 2026-10-05 — Game graphics Phase 2: the car, the human and the animals are no longer boxes
+
+The admin's brief ("if the player vehicle still looks like a box: FAIL; if the human still looks like stacked
+blocks: FAIL") was adapted, not transcribed. A fixed benchmark scene was rendered from `main` first, with the same
+camera, lighting and renderer used for the after renders. It confirmed the brief: on `main` the car was four stacked
+boxes, the human was box limbs with a box head and a box of hair, and the four animals were one box rig at four sizes.
+
+**What changed, all in `src/server/lib/Game3DGenerator.ts`:**
+- **Car.** The body is an extruded side profile with the wheel wells cut out of it. On top sits a glass greenhouse,
+  narrower than the body and framed by pillars. Tyres are lathed and rims have spokes. The real tier adds seams,
+  handles, grilles, a plate and dark well liners. These contracts are unchanged: the `'wheel'` groups, four
+  body-mounted `'wheel-arch'` meshes (now the well liners), the emitting head and tail lights, and front = +Z.
+- **Human.**
+  - The torso is lathed. Limbs are tapered capsules. The head has a jaw, nose, ears, eyes and hair. Shoes have a
+    heel and a toe.
+  - The neck is visible, and the crown now lands on the requested height. `torsoH` was `0.30·H`, which left a 1.8 m
+    figure 1.66 m tall.
+  - The joints API and the gait are unchanged.
+- **Animals.**
+  - Each has a lathed barrel body, tapered legs, hooves or paws, and a head that tapers to a muzzle.
+  - Each kind carries its identifiers: a horse's mane and hair tail, a zebu cow's hump and horns, a deer's antlers
+    and scut, a dog's snout and curled tail.
+  - The rig is scaled so the head lands exactly on `ANIMAL_HEIGHT`.
+- **Cost.**
+  - Small parts that share a material are baked into one mesh. The real-tier car draws in 27 calls (the old box car
+    took 29) and the human in 16.
+  - The single merge helper now lives in `surfaces.ts` (`mergeGeometries`, which applies a posed part's transform).
+    `world.ts`'s private copy is gone, and `humanoid.ts` pulls in `surfaces.ts` through the recipe closure.
+- **A defect found during the work.** A lathed piece shorter than its two round caps folded through itself and
+  rendered as a flat disc (the dog's neck). The caps are now held to 45% of the length in both the animal and
+  humanoid helpers.
+
+**The lock.** `tests/aHeroObjectIsNotABox.test.ts` (14 cases) executes the generated modules with real three.
+Against `main`'s generator it fails 12 of 14. Removing only the cap guard fails the cow case. In
+`Game3DGenerator.test.ts`, two source-text pins were updated to the new code, and a closure test now covers
+humanoid → surfaces.
+
+**Docs.**
+- `docs/game-engine/asset-inventory.md`: the L0–L3 levels, the per-object inventory with measured triangle and
+  draw-call counts, and what L3 needs.
+- `docs/game-engine/open-source-license-audit.md`: nothing external was added.
+- `AppKnowledgeBase.ts`: a new entry.
+
+**Honestly not built.**
+- **AssetProvider / manifest.** With one provider it would be speculative; it is worth building when a second
+  provider exists.
+- **L3 meshes.** These need the admin's GPU or CC0 decision.
+
+Not re-audited: the motorcycle and bicycle.
+
+This is a server-side change: the generator runs on the server, so every user, on web or phone, gets it for newly built games as soon as it is merged and deployed. No new `.aab` / `.ipa` is needed. Games built earlier keep their old files until they are rebuilt.

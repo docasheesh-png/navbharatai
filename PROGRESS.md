@@ -89915,3 +89915,24 @@ binding.
 runner list*, then put `npm` into that list and **no test failed** — the file pattern rejects `run` anyway,
 so the exclusion is over-determined. What the list really protects is the FINDING: removing `tsx` from it
 fails 3 tests, and that is what the test now asserts. A proof that does not bite is not a proof.
+
+### Two existing pins broke on this change, and both were pinning the wrong thing (2026-10-05)
+
+The first full gate run came back `2 failed`. Neither was a defect in the change; both were source guards
+asserting a brittle proxy instead of their own invariant — **and this repo has written down both traps
+already**, which is why they are corrected here rather than worked around.
+
+- **`theSchoolAppAutopsy` pinned `/\+ security \+ shadow \+ theme \+ touch;/`** — its SIBLINGS' list, ending
+  on whichever term happened to be last. Adding a sixth note broke it. `CLAUDE.md` states the rule it
+  violated in as many words: *a source guard must pin its own term, never its siblings' list* — and this is
+  the **third** time it has fired (twice on consecutive days in September). Relaxed to
+  `/return hooks \+ [^;]*\+ shadow \+[^;]*;/`: the real invariant is that the entry-late note is carried on
+  `shadow` inside the ONE guarded sum, which is also what the two assertions beside it already say.
+- **`theStockAppWasNotAProject` measured `bash.slice(0, 6000)`** — the byte-window trap. The new pre-shell
+  guard sits ABOVE the green-freeze check and pushed it past the 6000-character cutoff. **The freeze was
+  still there; the measurement was not.** `PROGRESS.md` records this exact trap four times in one day with
+  the same remedy — *anchor on real syntax, never on a byte count* — so it is now bounded to the END of the
+  `bash` case (`indexOf("\n      case '")`), which keeps the assertion unsatisfiable by code in another case.
+
+Both relaxations were proven to still bite: removing `shadow` from the sum fails the first, and deleting the
+green-freeze block fails the second.

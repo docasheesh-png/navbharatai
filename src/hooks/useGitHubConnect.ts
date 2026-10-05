@@ -5,6 +5,9 @@
 // injected; App.tsx destructures the SAME identifiers back, so every JSX/effect caller is unchanged.
 
 import { clearGithubConnection } from '../lib/githubTokenStore';
+import {
+  beginGithubOauthAttempt, browserStorage, GITHUB_DEVICE_NONCE_KEY, GITHUB_WEB_NONCE_KEY,
+} from '../lib/githubOauthNonce';
 export interface GitHubConnectDeps {
   activeView: any;
   currentSessionId: string;
@@ -61,28 +64,20 @@ export function useGitHubConnect(deps: GitHubConnectDeps) {
       reqUrl.searchParams.set('redirect_uri', redirectUri);
       reqUrl.searchParams.set('state', state);
 
-      // ASK FOR A TICKET, NOT THE TOKEN (security audit finding 1, HIGH). On native the OAuth result
-      // comes back through `com.navbharat.ai://…`, and a custom URI scheme is claimable by any
-      // installed app — while this token carries `repo workflow`, i.e. full read/write on all of the
-      // user's private repositories. With this query AND a verified Firebase identity, the server
-      // returns an encrypted, uid-bound ticket instead, which only this user can redeem.
+      // A ONE-TIME NONCE FOR THIS ATTEMPT (Q-623 web, Q-629 native). The server signs it into `state`;
+      // the token is accepted on return ONLY with this exact nonce, then the nonce is deleted.
       //
-      // Both halves are sent together and the server needs both. If either is missing it falls back to
-      // exactly today's behaviour, which is what keeps already-installed apps working: they run from
-      // assets baked into their APK and cannot be changed by a server deploy.
-      let authHeader: Record<string, string> = {};
-      if (isNative) {
-        reqUrl.searchParams.set('handoff', 'ticket');
-        try {
-          const { authJsonHeaders } = await import('../lib/authHeaders');
-          authHeader = await authJsonHeaders();
-        } catch {
-          // No session to prove yet. The server will notice and issue the legacy state; sign-in still
-          // works, just without the upgrade. Failing the whole flow here would be far worse.
-        }
-      }
+      //   • WEB: kept in this tab's sessionStorage and echoed back beside the token, so a planted
+      //     `#gh_token=` link — which cannot know it — is discarded.
+      //   • NATIVE: the deep link carries a TICKET, never the token (a custom scheme is claimable by any
+      //     installed app, and this token has `repo workflow`). The ticket is redeemed by presenting
+      //     this nonce, so it works for a user who is not signed in to NavBharatAI yet.
+      if (isNative) reqUrl.searchParams.set('handoff', 'device');
+      const nonceHeader = isNative
+        ? beginGithubOauthAttempt(browserStorage('local'), GITHUB_DEVICE_NONCE_KEY, Date.now())
+        : beginGithubOauthAttempt(browserStorage('session'), GITHUB_WEB_NONCE_KEY, Date.now());
 
-      const response = await fetch(reqUrl.toString(), { headers: authHeader });
+      const response = await fetch(reqUrl.toString(), { headers: nonceHeader });
       
       if (!response.ok) {
         throw new Error('Failed to retrieve GitHub Authorization parameters from server context.');

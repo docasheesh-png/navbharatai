@@ -4,6 +4,7 @@ import { setUserContext, clearUserContext, setCrashKey, setFeatureContext, featu
 import React, { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
 import { tokenFromDeepLink, ticketFromDeepLink, redeemGithubTicket, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
+import { takeGithubReturnFragment, consumeGithubNonce, browserStorage, GITHUB_WEB_NONCE_KEY } from './lib/githubOauthNonce';
 // Native Supabase-connect return — the SAME deep-link shape, its own path (2026-09-14 fix).
 import { nonceFromSupabaseDeepLink, errorFromSupabaseDeepLink, SUPABASE_NATIVE_RETURN_EVENT } from './lib/supabaseOauthReturn';
 import { restartScreenEnter, shouldAnimateViewChange } from './lib/screenTransition';
@@ -3005,6 +3006,8 @@ export default function App() {
         // served same-origin). A cross-origin sender here means a hostile page trying to inject
         // its own GitHub token into this session — reject it.
         if (e.origin !== window.location.origin) return;
+        // Q-623: and only for a sign-in THIS tab started — the popup echoes the tab's one-time nonce.
+        if (!consumeGithubNonce(browserStorage('session'), GITHUB_WEB_NONCE_KEY, e.data.nonce, Date.now())) return;
         const token = e.data.token;
         setGithubToken(token);
         localStorage.setItem('gh_token', token);
@@ -3121,29 +3124,24 @@ export default function App() {
         const handle = await CapApp.addListener('appUrlOpen', (data: { url?: string }) => {
           if (handleSupabaseUrlOpen(data?.url)) return; // see handleSupabaseUrlOpen above
           if (handleAppLinkOpen(data?.url)) return; // an https navbharatai.com link — see above
-          // A TICKET, when the server had a verified identity to bind one to; the raw token otherwise.
-          // Both are handled because the server chooses, not the client — see githubOauthReturn.ts.
-          // The ticket path exists because a custom URI scheme is claimable by any installed app, and
-          // this token carries `repo workflow` on all of the user's private repositories.
+          // ONLY A TICKET is accepted, redeemed with this app's one-time device nonce (Q-629). A raw
+          // `gh_token` link is recognised and REFUSED: this build never asks for one, and a token in a
+          // custom-scheme link is what any installed app or web page can forge.
           const ticket = ticketFromDeepLink(data?.url);
           const directToken = tokenFromDeepLink(data?.url);
           if (!ticket && !directToken) return; // not our GitHub deep link — ignore
 
           void (async () => {
-            let token = directToken;
-            if (ticket) {
-              token = await redeemGithubTicket(ticket);
-              if (!token) {
-                // The ticket is single-purpose and short-lived; a failure here is a dead end, not
-                // something to retry silently. Say so and clear the overlay rather than spinning.
-                addLog('GitHub sign-in could not be completed. Please try connecting again.', 'error');
-                recordNonFatal('GitHub sign-in ticket could not be redeemed', 'github');
-                setGithubRedirectingMessage(null);
-                void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
-                return;
-              }
+            const token = ticket ? await redeemGithubTicket(ticket) : null;
+            if (!token) {
+              // The ticket is single-purpose and short-lived; a failure here is a dead end, not
+              // something to retry silently. Say so and clear the overlay rather than spinning.
+              addLog('GitHub sign-in could not be completed. Please try connecting again.', 'error');
+              recordNonFatal(ticket ? 'GitHub sign-in ticket could not be redeemed' : 'GitHub deep link with a raw token refused', 'github');
+              setGithubRedirectingMessage(null);
+              void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
+              return;
             }
-            if (!token) return;
           setGithubToken(token);
           localStorage.setItem('gh_token', token);
           rememberGithubOwner(auth.currentUser?.uid);
@@ -3185,18 +3183,20 @@ export default function App() {
       } catch { /* not native / plugin absent — the web flows above handle the token */ }
     })();
 
-    // Check for fragment token (supporting full redirect flow)
+    // Fragment token from the full-redirect flow — stored ONLY for a sign-in this tab started (Q-623).
     const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const fragmentToken = hashParams.get('gh_token');
-    if (fragmentToken) {
-      setGithubToken(fragmentToken);
-      localStorage.setItem('gh_token', fragmentToken);
+    const ghReturn = takeGithubReturnFragment(window.location.hash, browserStorage('session'), Date.now());
+    if (ghReturn.kind === 'accepted') {
+      setGithubToken(ghReturn.token);
+      localStorage.setItem('gh_token', ghReturn.token);
       rememberGithubOwner(auth.currentUser?.uid);
       addLog('GitHub connected (via redirect).', 'success');
-      fetchGitHubUser(fragmentToken);
-      // Clean URL
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      fetchGitHubUser(ghReturn.token);
+    } else if (ghReturn.kind === 'rejected') {
+      addLog('A GitHub sign-in link was ignored because it was not started from this tab. Connect GitHub again if you meant to.', 'warn');
     }
+    // Clean URL — accepted or not, the token never stays in the address bar or history.
+    if (ghReturn.kind !== 'absent') window.history.replaceState(null, '', window.location.pathname + window.location.search);
 
     const fbFragmentToken = hashParams.get('fb_token');
     if (fbFragmentToken) {

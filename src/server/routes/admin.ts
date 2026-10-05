@@ -34,6 +34,7 @@ import {
 } from '../lib/adminWelcomeGift';
 import { audit } from '../lib/audit';
 import { readAdminReason, readTokenDelta, broadcastScopeConfirmed } from '../../lib/adminActionReason';
+import { isRestorableStatus } from '../../lib/adminAppModeration';
 import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } from '../lib/buildDiscount';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
@@ -2716,14 +2717,18 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // never republish (the deploy choke point re-checks status). Honest — reports the real result.
   app.post('/api/admin/deployments/:workspaceId/takedown', verifyAdminToken, async (req: Request, res: Response) => {
     const { workspaceId } = routeParams(req.params);
-    const { reason } = req.body || {};
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+    // A ban removes somebody's live site and writes the 180-day record FROM this sentence (admin panel
+    // audit, PR 3): it is the admin's own reason or the request is refused — the screen is not the boundary.
+    const reasonRead = readAdminReason((req.body ?? {}).reason);
+    if (!('reason' in reasonRead)) return res.status(400).json({ error: reasonRead.error });
+    const reason = reasonRead.reason;
     try {
       // Delete the live channel FIRST (real unpublish); idempotent (404 = already gone). If it throws
       // (e.g. missing IAM role), surface it honestly and do NOT claim the app was taken down.
       await new FirebaseHostingDeployer().deleteChannel(workspaceId);
       const marked = await deploymentStore.setStatus(workspaceId, 'taken_down');
-      audit('ADMIN_APP_TAKEDOWN', { workspaceId, reason: reason || '', ip: req.ip });
+      audit('ADMIN_APP_TAKEDOWN', { admin: adminUsername(), workspaceId, reason, result: 'ok', ip: req.ip });
       /**
        * The 180-day record (IT Rules, 2021 Rule 3(1)(g)). Written only AFTER the channel is really
        * gone, because this route's whole discipline is that it never claims a takedown it did not
@@ -2737,7 +2742,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         surface: 'navbharat_hosting',
         contentId: workspaceId,
         ownerUid: owner?.userId,
-        reason: typeof reason === 'string' ? reason : '',
+        reason,
         actor: 'admin',
         removedBy: 'admin',
         removedAt: Date.now(),
@@ -2771,20 +2776,23 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
    */
   app.post('/api/admin/deployments/:workspaceId/unpublish', verifyAdminToken, async (req: Request, res: Response) => {
     const { workspaceId } = routeParams(req.params);
-    const { reason } = req.body || {};
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+    // Same rule as the ban: the live site of a real person goes, so the record says why, in the admin's words.
+    const reasonRead = readAdminReason((req.body ?? {}).reason);
+    if (!('reason' in reasonRead)) return res.status(400).json({ error: reasonRead.error });
+    const reason = reasonRead.reason;
     try {
       // The live channel goes FIRST, exactly as the takedown does — the registry must never say a
       // site is offline while it is still serving. A throw here means we do NOT touch the status.
       await new FirebaseHostingDeployer().deleteChannel(workspaceId);
       const marked = await deploymentStore.setStatus(workspaceId, 'unpublished');
-      audit('ADMIN_APP_UNPUBLISH', { workspaceId, reason: reason || '', ip: req.ip });
+      audit('ADMIN_APP_UNPUBLISH', { admin: adminUsername(), workspaceId, reason, result: 'ok', ip: req.ip });
       const owner = await deploymentStore.get(workspaceId).catch(() => null);
       await recordTakedown({
         surface: 'navbharat_hosting',
         contentId: workspaceId,
         ownerUid: owner?.userId,
-        reason: `[unpublished — owner may republish] ${typeof reason === 'string' ? reason : ''}`.trim(),
+        reason: `[unpublished — owner may republish] ${reason}`,
         actor: 'admin',
         removedBy: 'admin',
         removedAt: Date.now(),
@@ -3378,15 +3386,30 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
-  // Restore a held/taken-down app to active (reverses an over-eager takedown/hold). Does NOT
-  // re-publish — the owner must redeploy; this only clears the registry block.
+  // Restore a held/taken-down app (reverses an over-eager takedown or an automatic hold). It does NOT
+  // re-publish — the site stays offline and the OWNER publishes again; this only lifts the block.
+  //
+  // Admin panel audit, PR 3: this route existed with no button, so a mistaken ban could not be undone
+  // from the app at all. Now that the screen offers it, it carries the same discipline as the ban it
+  // reverses: the admin's own reason, the admin's name and the status it replaced in the audit line, and
+  // it acts only on an app that is actually banned or held — restoring anything else would "succeed"
+  // and change nothing, or worse, mark an unpublished app as live while no site is serving.
   app.post('/api/admin/deployments/:workspaceId/restore', verifyAdminToken, async (req: Request, res: Response) => {
     const { workspaceId } = routeParams(req.params);
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+    const reasonRead = readAdminReason((req.body ?? {}).reason);
+    if (!('reason' in reasonRead)) return res.status(400).json({ error: reasonRead.error });
+    const reason = reasonRead.reason;
     try {
-      const ok = await deploymentStore.setStatus(workspaceId, 'active');
-      audit('ADMIN_APP_RESTORED', { workspaceId, ip: req.ip });
-      res.json({ ok, workspaceId, status: 'active' });
+      const current = await deploymentStore.get(workspaceId);
+      const before = current?.status ?? null;
+      if (!current || !isRestorableStatus(before)) {
+        return res.status(409).json({ error: 'Only a banned or held app can be restored.', status: before });
+      }
+      const ok = await deploymentStore.setStatus(workspaceId, 'unpublished');
+      audit('ADMIN_APP_RESTORED', { admin: adminUsername(), workspaceId, before, after: 'unpublished', reason, result: ok ? 'ok' : 'not-saved', ip: req.ip });
+      if (!ok) return res.status(500).json({ error: 'The restore was not saved.' });
+      res.json({ ok: true, workspaceId, status: 'unpublished' });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 

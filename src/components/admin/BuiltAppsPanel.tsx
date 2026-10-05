@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Globe, Search, ExternalLink, Eye, X, Ban as BanIcon } from 'lucide-react';
+import { Globe, Search, ExternalLink, Eye, X, Ban as BanIcon, RotateCcw } from 'lucide-react';
 import {
-  canBan, canUnpublish, matchesBuiltApp, previewPlan, publishStateView, replaceRow, type BuiltAppRow,
+  canBan, canUnpublish, isRestorableStatus, matchesBuiltApp, previewPlan, publishStateView, replaceRow, type BuiltAppRow, type ModerationAction,
 } from '../../lib/adminAppModeration';
 import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
 
@@ -43,7 +43,7 @@ export interface BuiltAppsPanelProps {
   headers: Record<string, string>;
   openAccount: (uid: string) => void;
   toast: (msg: string) => void;
-  onModerate: (workspaceId: string, action: 'unpublish' | 'ban') => void;
+  onModerate: (workspaceId: string, action: ModerationAction) => void;
   /** Set by the dashboard after an Unpublish / Ban landed, so the affected row is re-read in place. */
   moderated: { workspaceId: string; tick: number } | null;
 }
@@ -236,6 +236,16 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-600/10 hover:bg-red-600/20 border border-red-500/30 text-[10px] font-black uppercase tracking-wider text-danger"
               >
                 <BanIcon size={11} /> Ban
+              </button>
+            )}
+            {/* Restore lifts a ban or an automatic hold — the only two states the owner cannot leave alone.
+                The server checks the same rule (isRestorableStatus) and refuses anything else. */}
+            {isRestorableStatus(d.status) && (
+              <button
+                onClick={() => onModerate(d.workspaceId, 'restore')}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised border border-line text-[10px] font-black uppercase tracking-wider text-body hover:text-ink"
+              >
+                <RotateCcw size={11} /> Restore
               </button>
             )}
           </div>

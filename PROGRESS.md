@@ -90180,3 +90180,12 @@ Together the car drove at the camera with every control mirrored.
 Reversion: placing the camera in front fails 5 of them; flipping the throttle sign fails 2. A real render from the chase rig shows the car's tail lights, and a right turn bends right on screen.
 
 **Open (recorded, not done):** a walking character still starts facing the camera until the first move. Changing the rig's default yaw would flip the world's "ahead" (−Z) for every existing shell game, and the admin's report was about vehicles, so it is left for an explicit decision.
+### 2026-10-05 — Q-154 ✅ RESOLVED: the live hop count is measured, and it is right
+
+The admin opened **Admin → Safety → Visitor address check** on the live site (#3545 deployed). The card read:
+*"Correct. Your request passed through 1 proxy, and the server trusts exactly 1 — so it reads every visitor's
+real address, and nobody can choose their own."* Its address line showed the admin's own public address (not
+recorded here). So `TRUSTED_PROXY_HOPS = 1` (#3538) is confirmed on the real hosting path, not only reasoned.
+The row leaves the open queue. Lock: `tests/aCallerCannotChooseItsOwnAddress.test.ts` (one reader of the address)
+and `tests/theClientIsMeasuredNotGuessed.test.ts` (the measurement and its card). If the hosting path ever
+changes (a CDN or load balancer in front of Cloud Run), the same card will say Mismatch and name the number.

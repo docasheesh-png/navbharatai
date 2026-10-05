@@ -27,7 +27,9 @@ describe('a recipe brings the layers it imports', () => {
     const missing = missingLayerFiles(ran, new Set(Object.keys(ran)));
     expect([...missing.keys()].sort()).toEqual([
       'src/game/three/camera.ts', 'src/game/three/lighting.ts', 'src/game/three/materials.ts',
-      'src/game/three/renderer.ts', 'src/game/three/world.ts',
+      // world.ts imports surfaces.ts since 2026-10-05 (the ground reads the detail tier and is textured
+      // in the real tier) — so the closure must bring it too, or the added world.ts would not compile.
+      'src/game/three/renderer.ts', 'src/game/three/surfaces.ts', 'src/game/three/world.ts',
     ]);
     expect([...missing.values()].every((f) => f.recipe === 'generate_game_3d')).toBe(true);
     expect(missing.get('src/game/three/renderer.ts')!.content).toBe(GAME_RECIPES.generate_game_3d().files['src/game/three/renderer.ts']);

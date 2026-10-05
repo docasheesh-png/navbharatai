@@ -137,6 +137,10 @@ describe('🧊 the Cloud Build step cannot stop a deploy by accident', () => {
  * against a real HTTP server, and check the exit status — because "a step that cannot stop a deploy by
  * accident" is a claim about behaviour, and this repo has paid for source guards that read like proofs.
  * Cloud Build substitutes `${_RELEASE_GATE_URL}` before bash sees it, which is what the replace does.
+ * It ALSO rewrites every `$$` to a single `$` — that is how a bash variable (`$$URL`, `$$BODY`) reaches
+ * bash as `$URL` / `$BODY` instead of being read as a (missing) substitution and failing the submit.
+ * The harness applies the same two rewrites, in the same order Cloud Build does, so the script RUN here
+ * is the script Cloud Build runs — `tests/cloudBuildArgsEscapeBashVariables.test.ts` holds the escaping.
  */
 describe('🧊 the step RUN — only a closed gate exits non-zero', () => {
   const script = String(((yaml.load(CLOUDBUILD) as { steps: Array<{ args?: string[] }> }).steps[0].args ?? [])[1] ?? '');
@@ -157,7 +161,7 @@ describe('🧊 the step RUN — only a closed gate exits non-zero', () => {
    * fail-open path while actually proving nothing at all.
    */
   const runStep = (url: string): Promise<{ code: number; out: string }> => {
-    const resolved = script.split('${_RELEASE_GATE_URL}').join(url);
+    const resolved = script.split('${_RELEASE_GATE_URL}').join(url).split('$$').join('$');
     return new Promise((resolve) => {
       execFile('bash', ['-c', resolved], {
         env: { ...process.env, COMMIT_SHA: 'deadbeefcafe' }, encoding: 'utf8', timeout: 30_000,

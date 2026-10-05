@@ -29,7 +29,7 @@ export type AdminTabId =
 /** What is on screen. Old tab ids are kept where the page itself did not change. */
 export type AdminPageId =
   | 'monitor'
-  | 'users' | 'userreports'
+  | 'users' | 'userreports' | 'ratings'
   | 'apps' | 'publishing' | 'review' | 'bots'
   | 'reports' | 'apkreports' | 'health'
   | 'engines'
@@ -45,7 +45,12 @@ export const ADMIN_TABS: readonly AdminTabDef[] = [
   { id: 'home', label: 'Home', pages: [{ id: 'monitor', label: 'Overview' }] },
   // Complaints stay a SEPARATE page from the user list (admin 2026-08-21): a person telling us about
   // the product or about another person must never be buried among account rows.
-  { id: 'users', label: 'Users', pages: [{ id: 'users', label: 'All users' }, { id: 'userreports', label: 'Complaints' }] },
+  // Ratings (2026-10-05) are their own page: a rating is an opinion of NavBharatAI, not a complaint.
+  { id: 'users', label: 'Users', pages: [
+    { id: 'users', label: 'All users' },
+    { id: 'userreports', label: 'Complaints' },
+    { id: 'ratings', label: 'Ratings' },
+  ] },
   { id: 'apps', label: 'Apps', pages: [
     { id: 'apps', label: 'All apps' },
     { id: 'publishing', label: 'Publishing' },

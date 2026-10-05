@@ -209,7 +209,8 @@ describe('🔒 NULL IS NOT ZERO, one level up', () => {
 describe('the inboxes that must stay separate are separate pages', () => {
   it('complaints and the user list', () => {
     const users = ADMIN_TABS.find((t) => t.id === 'users')!;
-    expect(users.pages.map((p) => p.id)).toEqual(['users', 'userreports']);
+    // Ratings (2026-10-05) are a third page of their own: an opinion of NavBharatAI is not a complaint.
+    expect(users.pages.map((p) => p.id)).toEqual(['users', 'userreports', 'ratings']);
   });
 
   it('phone builds and build reports, each with its own badge', () => {

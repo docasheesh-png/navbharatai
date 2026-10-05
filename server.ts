@@ -74,6 +74,7 @@ import { registerWorkspaceFileRoutes } from './src/server/routes/workspaceFiles'
 import { registerMobileSetupRoutes } from './src/server/routes/mobileSetup';
 import { registerNavStoreRoutes } from './src/server/routes/navStore';
 import { registerAppMartSocialRoutes } from './src/server/routes/appMartSocial';
+import { registerPlatformRatingRoutes } from './src/server/routes/platformRating';
 import { registerAppAiRoutes } from './src/server/routes/appAi';
 import { registerAppAiOwnerRoutes } from './src/server/routes/appAiOwner';
 import { registerReportRoutes } from './src/server/routes/reports';
@@ -703,6 +704,9 @@ setInterval(() => {
   // App Mart social — likes, dislikes, comments, creator profiles and their notifications. Reads are
   // open; every write needs a verified sign-in. See routes/appMartSocial.ts.
   registerAppMartSocialRoutes(app);
+  // Rate NavBharatAI — asked once a user's app goes live, never again once they have rated. Writes need
+  // a verified sign-in; the summary is admin-only. See routes/platformRating.ts.
+  registerPlatformRatingRoutes(app);
 
   // The AI gateway a PUBLISHED app calls — no key to paste, the owner's own wallet pays. Public and
   // cross-origin by design; every defence it has is in routes/appAi.ts. Off unless APP_AI_GATEWAY=on.

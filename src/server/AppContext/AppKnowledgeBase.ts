@@ -697,6 +697,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'rate_navbharatai',
+    name: 'Rate NavBharatAI (asked once, after your app goes live)',
+    path: 'Publish your app → when the "Your app is live" card is closed, a "How was building it with NavBharatAI?" card appears (also after Connect my website publishes). Admin: Admin → Users → Ratings',
+    description: 'When an app you built is published and its link works, NavBharatAI asks once how building it went: one to five stars, plus an optional note (a low rating asks what we should fix, a high one what you liked). Your rating is saved to your account, so you are never asked again once you have rated — on any device. "Not now", the close button or a tap outside simply pauses the question: it comes back after a later successful publish, at most once in 3 days, then 7, then once a month. You are never asked during a build, before your app is live, or more than once in a visit, and the card only says "Thank you" after your rating has really been saved — if saving fails it tells you and keeps your choice. This is separate from the Play Store / App Store review card on phones. The admin reads every rating — the average, how many gave each number of stars, and the newest ratings with their notes, filterable to 1–3 stars or to ratings with a note — on Admin → Users → Ratings.',
+    howToUse: 'Publish an app (NavBharatAI Pro → Publish, or Connect my website). When your app is live and you close the "Your app is live" card, choose 1–5 stars, optionally write a few words, and tap "Submit rating" — or "Not now" to be asked later. Admins: open Admin → Users → Ratings and use Newest / 1–3 stars / With a note.',
+    relatedFeatures: ['agentv3_deploy', 'publish_rollback'],
+    keywords: ['rating', 'rate', 'rate navbharatai', 'review navbharatai', 'feedback', 'stars', 'star rating', 'rating do', 'rating kaise de', 'rating kahan', 'feedback do', 'review do', 'kaisa laga', 'experience', 'ratings dekho', 'user ratings', 'average rating', 'rating card', 'rating popup', 'rating notification', 'rating band karo', 'not now rating'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'diff_review',
     name: 'See exactly what the AI changed — and put any part of it back',
     path: 'Header → Diff tab (opens after a build, comparing against the files from just before it)',

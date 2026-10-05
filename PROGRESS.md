@@ -89912,3 +89912,16 @@ token view at zero with `max(0, held + delta)`, so on a wallet already in OVERDR
 delta (a 100-token gift to a −50,000 wallet lands at 0, forgiving the debt and over-counting `total_balance`),
 and an admin DEDUCTION on such a wallet raises it to 0. The refund path avoids it (it never calls the patch for
 a wallet at or below zero); the coupon / referral / admin-adjustment writers do not.
+### 2026-10-05 — Q-623 + Q-629: a GitHub token is accepted only for a sign-in this client started (PR #NEXT, branch `agent/github-handoff`)
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-623 a `#gh_token=` link planted an attacker's token | the client stored any fragment token; the OAuth `state` was only a return URL, with no per-attempt value | a credential trusted for WHERE it arrived, not because this client asked for it | one-time nonce: client (sessionStorage, `X-NBAI-GitHub-Nonce` header) → signed web state (`githubWebState.ts`, same `hmac`/key as native) → echoed beside the token → stored only on match, then deleted (`githubOauthNonce.ts`). Unsigned state refused before the code exchange. Siblings: postMessage intake, the popup page writing `gh_token`/`gh_token_signal` directly, AgentV3Panel's starter | `tests/aGithubTokenNeedsTheNonceThisTabSaved.test.ts`, `tests/aGithubHandoffIsBoundToTheDeviceNonce.test.ts` — 10 reversions, each failed |
+| Q-629 legacy native hand-off put the token in a claimable deep link, and v2 fell back to it | the uid ticket needs a signed-in user; when identity failed the server silently issued the legacy state | a request for the safe flow quietly given the unsafe one | admin option (a): device nonce — state carries only its SHA-256, deep link carries an encrypted ticket, redeemed once with the nonce (works signed-out). `handoff=ticket` without identity → 401. The app refuses a raw-token deep link. Legacy return behind `GITHUB_NATIVE_LEGACY_TOKEN_RETURN` (default ON for pre-2026-08-28 installs) | same two files + updated `githubNativeHandoff.test.ts` |
+
+**Open, honestly:** (1) the legacy token-in-URL return is still served while `GITHUB_NATIVE_LEGACY_TOKEN_RETURN` is on — the
+admin turns it `off` once enough phones carry the new bundle; (2) single use of a device ticket is per Cloud Run
+instance (a cross-instance replay still needs the nonce, which never leaves the app except in the redeem body);
+(3) sibling found, not fixed here: App.tsx still accepts `#fb_token=` fragments / `FIREBASE_AUTH_SUCCESS` messages that
+no server sends any more. **Phones:** a frontend change reaches phone users only via a fresh `.aab`/`.ipa`
+(`docs/claude/RELEASE.md`) — none built here; app builds 2026-08-28…2026-10-05 lose signed-OUT GitHub connect until updated.

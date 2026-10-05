@@ -46,6 +46,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   not "it is set in Cloud Run".)
 - **GitHub storage:** `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
   `GITHUB_ORG`, `GITHUB_STORAGE_ENABLED`, `GITHUB_PR_MODE`
+- **GitHub native sign-in, legacy switch (Q-629, added 2026-10-05):** `GITHUB_NATIVE_LEGACY_TOKEN_RETURN`
+  — NOT set; **unset means ON**. While on, an app build from before 2026-08-28 (#2706), which sends the bare
+  `nbai-native` state, still gets the GitHub token in the `com.navbharat.ai://github-callback#gh_token=…`
+  deep link — the only thing that build can read. Set it to `off` to retire that path once enough users
+  run a bundle with the device-nonce flow; old installs then see "Please update the NavBharatAI app to
+  connect GitHub." ⚠️ While on, a crafted authorize link with `state=nbai-native` still makes the server
+  put a token in a deep link any installed app can claim — the switch, not the app, is the exposure.
+  Read by `legacyTokenReturnEnabled()` in `src/server/lib/githubNativeHandoff.ts`; nothing else reads it.
 - **Payments:** `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY` (code also accepts the `CASHFREE_CLIENT_ID` /
   `CASHFREE_CLIENT_SECRET` pair — use ONE pair, not both), `CASHFREE_WEBHOOK_SECRET`
   (✅ **SET in Cloud Run by the admin 2026-08-10** — the third delivery path for a payment is now live;

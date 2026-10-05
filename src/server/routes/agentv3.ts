@@ -556,6 +556,7 @@ import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
+import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt } from '../AgentV3/previewAutoRepair';
 import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
 import { frameworkMismatchFromListing, messageNamesAFramework, answersFrameworkQuestion, frameworkQuestionMarker, frameworkQuestionSteer, frameworkAnswerNote } from '../AgentV3/frameworkQuestion';
 import type { FrameworkCoherence } from '../AgentV3/ProjectImport';
@@ -5830,6 +5831,59 @@ async function noteBuildOutcome(
     } catch {
       res.json({ ok: false }); // best-effort — never break the client over a diagnostics append
     }
+  });
+
+  /**
+   * Q-148 (admin-approved (b) 2026-10-05): a crash reported AFTER the build ended is repaired once,
+   * automatically — only on a paid build, only the first time, and only when the platform reproduces it in
+   * the sandbox's own headless browser on a sandbox that is already awake (previewAutoRepair.ts). This
+   * route decides and returns the repair request; the client sends it as an ordinary build turn, billed
+   * exactly like a pressed "Fix with AI". It spends nothing itself.
+   */
+  app.post('/api/agentv3/preview-error/auto-repair', previewPollRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const framework = typeof req.body?.framework === 'string' ? req.body.framework : 'vite-react';
+    const message = typeof req.body?.message === 'string' ? req.body.message.slice(0, 4000) : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
+    if (!workspaceId || !message) { res.status(400).json({ error: 'workspaceId and message are required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!previewAutoRepairEnabled()) { res.json({ ok: true, run: false, reason: 'Automatic repair is switched off.' }); return; }
+    const report = await loadDiagnostics(workspaceId).catch(() => null);
+    const facts = {
+      buildEnded: !!report && typeof report.endedAt === 'number',
+      powerLevel: report?.billing?.powerLevel ?? null,
+      noClaude: report?.billing?.noClaude === true,
+      previewAutoRepairAt: report?.previewAutoRepairAt ?? null,
+    };
+    const pre = autoRepairPrecheck(facts);
+    if (pre) { res.json({ ok: true, ...pre }); return; }
+    // REPRODUCE — on a sandbox that is ALREADY awake, never one started just to check.
+    let reproduced: boolean | null = null;
+    let seen: string[] = [];
+    try {
+      if (sandboxDiag().livePreviewAvailable) {
+        const actuator = buildActuator();
+        const sandboxId = actuator.getSandboxId ? await raceTimeout(actuator.getSandboxId(workspaceId), 4_000, 'autoRepairSandbox').catch(() => null) : null;
+        if (sandboxId && actuator.browseUrl && actuator.getConsoleErrors) {
+          const port = (await raceTimeout(sandboxStore.getRecipe(workspaceId), 3_000, 'autoRepairRecipe').catch(() => null))?.port ?? oneShotDevPort(framework);
+          const since = Date.now() - 1;
+          await raceTimeout(actuator.browseUrl(workspaceId, `http://127.0.0.1:${port}`, { recordConsole: true }), 75_000, 'autoRepairBrowse');
+          const captured = await raceTimeout(actuator.getConsoleErrors(workspaceId, since), 20_000, 'autoRepairConsole');
+          if (captured.captured) {
+            seen = filterActionableErrors(captured.errors).map((e) => e.text);
+            reproduced = seen.length > 0;
+          }
+        }
+      }
+    } catch { reproduced = null; /* could not look — the decision says so, and the button stays */ }
+    const decision = autoRepairDecision({ ...facts, reproduced });
+    if (decision.run && report) {
+      // Claimed BEFORE the client sends the repair, so a second report of the same crash cannot start a second one.
+      await saveDiagnostics(workspaceId, { ...report, previewAutoRepairAt: Date.now() }).catch(() => {});
+    }
+    res.json({ ok: true, ...decision, ...(decision.run ? { prompt: autoRepairPrompt(message, seen) } : {}) });
   });
 
   // Public, lightweight preview-capability probe — ONLY the sandbox diagnosis (no

@@ -90619,3 +90619,18 @@ version; both changed the same files. With the admin's approval ("theek kar ke m
 reverted (no history rewrite) and #3555's version is the one in `main`. Batch C (Q-160, Q-162, Q-163) was also done by #3555
 and is not repeated here. **Lesson, for safeguard #6:** a claim written only on an unpushed branch is invisible — open the PR
 (or push the queue rows) BEFORE starting claimed work, so the claim exists where other sessions look.
+
+---
+
+## 2026-10-05 — Approved queue decisions, batch B: Q-118, Q-143, Q-144, Q-137, Q-148 (#3558)
+
+| Row | Problem | Root cause / class | Siblings fixed | Lock (reverted → fails) |
+|---|---|---|---|---|
+| Q-118 ✅ | A feature component nothing imports could be deleted | Every delete guard protected structure, none protected a REQUESTED feature (`featureFileGuard.ts`) | `shred` passed four guards: three parsers each kept their own delete-verb list → one list, `fileRemovalCommands.ts`, census-locked | `tests/aRequestedFeatureFileIsNotDeleted.test.ts` |
+| Q-143 ✅ | An uninstalled package a loaded file imports never blocked READY | Missing deps were advisory only; now blocking after the reconciler, scoped by reachability and an installed tree | — | `tests/aPackageTheAppLoadsMustBeInstalled.test.ts` |
+| Q-144 ✅ | A framework mismatch was warned about, then thrashed on | The model cannot know which framework the user meant → the turn asks, once, before any file is written | — | `tests/aFrameworkMismatchIsAskedNotThrashed.test.ts` |
+| Q-137 ✅ (already fixed) | Preview copy stale after a confirmed repair | Fixed 2026-09-30 (autopsy 876afca9): the copy is re-taken once after ANY pass that changed the app — option (b) exactly. The queue row was stale | — | `tests/theCopyFollowsEveryPass.test.ts`, `tests/theCalculatorAutopsy.test.ts` |
+| Q-148 ✅ | A crash after the build ended was only recorded | No path from a reported crash to a repair without a press → `previewAutoRepair.ts` + `/preview-error/auto-repair`: paid builds, once per build, reproduced in the sandbox's own browser on an awake sandbox; the client sends the repair as a normal turn | — | `tests/aPostBuildCrashIsRepairedOnceWhenSeen.test.ts` |
+
+**Watch for:** on the next paid build whose preview crashes after it ends, the chat should show "Automatic repair (once)" and the
+report should carry `previewAutoRepairAt`; a second crash of the same build keeps the Fix with AI button.

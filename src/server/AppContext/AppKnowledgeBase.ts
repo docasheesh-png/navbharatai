@@ -687,6 +687,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'agentv3_post_build_auto_repair',
+    name: 'Automatic repair of a crash found after the build (once)',
+    path: 'NavBharatAI Pro — automatic; appears in the chat as "Automatic repair (once)" after the preview crashes',
+    description: 'If your app crashes in the preview AFTER the build has finished, NavBharatAI Pro opens the app in its own browser to check. When it sees the same crash, and the build ran on a paid tier, it repairs it automatically — once per build — as a normal build turn, billed like pressing "Fix with AI". It never runs while a build is running, never on the free tier, never a second time for the same build, and never for a crash its own browser could not see (that one keeps the "Fix with AI" button).',
+    howToUse: 'Nothing to do — keep the preview open. If the automatic repair does not happen (free tier, not reproduced, or already used once for this build), press "Fix with AI" on the error.',
+    relatedFeatures: ['agentv3_preview', 'agentv3_builder', 'agentv3_build_report'],
+    keywords: ['auto repair', 'automatic fix', 'crash after build', 'preview error', 'preview crash', 'app crash', 'apne aap fix', 'automatic repair', 'fix with ai', 'error aaya', 'preview toot gaya', 'app band ho gaya'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'connected_services',
     name: 'Connect your own tools (Notion, Linear, your company\'s service) to the builder',
     path: 'NavBharatAI Pro → More (the … button) → Connected services (MCP)',

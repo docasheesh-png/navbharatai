@@ -617,6 +617,8 @@ export interface BuildDiagnosticsReport {
   generatedFiles?: GeneratedFileRecord[];
   /** Preview failures (in-browser / live runtime) captured after the build — a build can pass yet not render. */
   previewErrors?: PreviewErrorRecord[];
+  /** When this build was last repaired automatically after it ended (Q-148, previewAutoRepair.ts) — once per build. */
+  previewAutoRepairAt?: number;
   /** Which provider delivered each build turn → turn count (e.g. { GLM: 18, CLAUDE: 2 }). Shows whether
    *  the cheap floor (GLM/KIMI) actually built it or it fell back to Claude. Absent if nothing recorded. */
   providerDelivery?: Record<string, number>;

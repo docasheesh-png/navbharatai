@@ -30,6 +30,7 @@ import { inBrowserRefusal } from './inBrowserRefusal';
 import { shouldShowNotServingSurface } from './previewFraming';
 import { pickedElementPrompt, type PickedElement } from './previewPick';
 import { authJsonHeaders } from '../../lib/authHeaders';
+import { readAnswer, isRecord } from '../../lib/serverAnswer';
 import { LIVE_SERVER_PAID_NOTE, LIVE_SERVER_PAID_TAG, isLiveServerNoticeDismissed, dismissLiveServerNotice } from '../../lib/liveServerNotice';
 import { previewAddressLabel } from './previewAddress';
 import { choosePreviewSource, modeForSource, previewSourceLabel, previewSourceTitle, previewToolsFor, type PreviewChoice } from './previewSource';
@@ -171,7 +172,7 @@ const TOOLBAR_ROW =
   'flex items-center gap-2 px-3 py-1.5 border-b border-line text-xs text-muted '
   + 'overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
 
-export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, buildPhase, bootSignal, onFixError, onFileEdited, onAskAiAboutElement, versionUrl, versionSha, onExitVersion }: { url?: string;
+export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId, userId, email, framework, autoResume, paneVisible, reloadSignal, buildPhase, bootSignal, onFixError, onAutoRepair, onFileEdited, onAskAiAboutElement, versionUrl, versionSha, onExitVersion }: { url?: string;
   /** The saved copy of THIS build (its real `dist/`), from the build stream — framed the moment the build settles. */
   snapshotUrl?: string; snapshotIdleNote?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean;
   /**
@@ -183,7 +184,9 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
    * silently reintroduce the sandbox-cost leak this prop was added to close — see
    * `shouldWatchLivePreview` in previewKeepAlive.ts for the full history.
    */
-  paneVisible: boolean; reloadSignal?: number; buildPhase?: BuildPhase; bootSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void;
+  paneVisible: boolean; reloadSignal?: number; buildPhase?: BuildPhase; bootSignal?: number; onFixError?: (errorText: string) => void;
+  /** Q-148: the server reproduced a post-build crash on a paid build — send this repair request as the next turn (once). */
+  onAutoRepair?: (prompt: string) => void; onFileEdited?: (path: string, content: string) => void; onAskAiAboutElement?: (context: string) => void;
   /**
    * AN OLDER CHECKPOINT, RUNNING. Set while the user is looking at a previous version of their app
    * (Checkpoints → Preview). It takes over the frame so the address never leaves this page — the same
@@ -831,6 +834,8 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   // change does not rebuild the loader, and the last render remembers whether it was such a render so
   // the end of the build replaces the cards with the honest final state.
   const buildingRef = useRef(false);
+  /** Q-148: whether this preview already asked the server about an automatic repair. */
+  const autoRepairAsked = useRef(false);
   buildingRef.current = !!buildPhase && buildPhase !== 'idle';
   const renderedWhileBuilding = useRef(false);
   // Returns true when the preview rendered (non-empty HTML) — the "Fix with AI" deep-refresh flow
@@ -1267,12 +1272,33 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         body: JSON.stringify({ workspaceId, userId, email, source, message: d.message.slice(0, 4000) }),
         keepalive: true,
       }).catch(() => { /* best-effort — capturing the error must never disrupt the preview */ });
+      // Q-148: after the build has ended, ask whether this crash is one the platform repairs by itself
+      // (paid build, first time, reproduced in its own browser — the server decides). Asked once per
+      // preview mount, so a burst of errors is one question; the server also records it once per build.
+      if (onAutoRepair && !buildingRef.current && !autoRepairAsked.current) {
+        autoRepairAsked.current = true;
+        void (async () => {
+          try {
+            const r = await fetch('/api/agentv3/preview-error/auto-repair', {
+              method: 'POST',
+              headers: await authJsonHeaders(),
+              body: JSON.stringify({ workspaceId, userId, email, framework, source, message: d.message!.slice(0, 4000) }),
+            });
+            const a = await readAnswer(r, (b): b is { run: boolean; reason: string; prompt?: string } =>
+              isRecord(b) && typeof b.run === 'boolean' && typeof b.reason === 'string');
+            if (a.ok && a.value.run && typeof a.value.prompt === 'string' && a.value.prompt) {
+              setFailoverNote(a.value.reason);
+              onAutoRepair(a.value.prompt);
+            }
+          } catch { /* the Fix with AI button is still there */ }
+        })();
+      }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
     // `mode` + `effectiveUrl` are read by the failover decision, so the listener must be re-bound when
     // they change — a stale closure would judge the failover against a previous render's state.
-  }, [workspaceId, userId, email, mode, effectiveUrl]);
+  }, [workspaceId, userId, email, mode, effectiveUrl, onAutoRepair, framework]);
 
   // VISUAL EDITOR (v1, in-browser mode only — see ReactPreview.ts's injected inspector script).
   // Clicking an element in edit mode reports back {file, line, column, newText}; this applies it via

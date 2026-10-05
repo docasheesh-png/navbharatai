@@ -5907,6 +5907,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   );
                   setShowWorkspace(false);
                 }}
+                onAutoRepair={(repairPrompt) => {
+                  // Q-148: the server reproduced a crash after the build ended, on a paid build, and this
+                  // is its first automatic repair. Sent as an ordinary turn — never over a running build.
+                  if (running) return;
+                  setShowWorkspace(false);
+                  void send({ text: repairPrompt, importUrl: '' });
+                }}
                 onFileEdited={(path, content) => {
                   // Visual Editor saved a real edit — keep this panel's OWN Files-tab cache honest, and
                   // push it through the SAME onFilesSync bridge a build's own file writes use, so the

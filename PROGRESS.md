@@ -90150,3 +90150,12 @@ folder that held a different project (under half the files shared ⇒ refused), 
 node_modules/.git/dist. Lock: `tests/saveToFolderWritesOnlyWhatChanged.test.ts`. Not exercised in a real Chrome
 against a real disk here (no desktop browser with a picker in this container) — the API calls are the
 standard File System Access ones, and the logic is tested against a fake disk.
+
+### 2026-10-05 — Q-163: a domain connected after the last publish gets the published app by itself
+
+Admin chose option (b). The uptime sweep (every 15 minutes, one instance) already probes every connected domain;
+when the site is still EMPTY (the hosting service's two-marker "nothing published" page), `domainAutoPublish.ts`
+reads the app's already-published copy back from the publish bucket and deploys it to the domain's site — no
+rebuild, so no "which build is current" question. Owner's active app only, once per domain + app (transaction
+claim), a 5xx retried once, the owner notified either way, and the same sweep does not call the domain "down".
+Kill switch `DOMAIN_AUTOPUBLISH=off`. Lock: `tests/aNewDomainGetsThePublishedApp.test.ts`.

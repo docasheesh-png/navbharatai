@@ -296,6 +296,9 @@ the code (it is actually read somewhere) on 2026-07-11.
   renewal reminders, hosting daily bill, image cleanup, outbound rescan, site uptime, retention purge when enabled) that
   is due by the durable `job_runs` record. Unset ⇒ the route answers 503, so a half-done setup shows red in the Cloud
   Scheduler console. The admin's choice over `--min-instances 1` (2026-10-05): it costs nothing while idle.
+- **New domain gets the published app by itself (built 2026-10-05, Q-163):** `DOMAIN_AUTOPUBLISH` — kill switch,
+  **default ON**; `off` stops the uptime sweep putting the already-published app (from `PUBLISHED_APPS_BUCKET`'s copy)
+  on a connected domain whose site is still empty. Once per domain + app, owner's active app only.
 - **Payment recovery (shipped 2026-08-04):** `PAYMENT_RECONCILE_MIN_AGE_MINUTES` (2),
   `PAYMENT_RECONCILE_MAX_AGE_DAYS` (7), `PAYMENT_RECONCILE_MAX_ORDERS` (5). On sign-in the server settles
   the user's own unfinished orders against Cashfree. ⚠️ CORRECTION 2026-08-10: this entry used to say

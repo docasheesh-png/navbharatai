@@ -16,6 +16,8 @@
 import { dropShadowingEntries } from './entryShadow';
 import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE } from './noEvalRule';
 import { posix } from 'node:path';
+import { appAiGatewayEnabled } from '../lib/appAiGateway';
+import { generateAiIntegration } from '../lib/AiGenerator';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { deadlineFromBudget, isReasoningRungHandoff } from './turnDeadline';
 import { judgeRepair } from './repairAcceptance';
@@ -379,6 +381,43 @@ function entryFilesHint(framework: string): string {
   return /next/i.test(framework)
     ? 'the App Router entry app/page.tsx (and app/layout.tsx when the shell changes) — a Next.js app has NO src/main.tsx and NO index.html; a component nothing imports from app/ is never shown'
     : 'e.g. src/App.tsx, index.html';
+}
+
+/** Words that say the APP ITSELF uses AI (not that the user wants an AI to build it). */
+const IN_APP_AI_RE = /\b(?:ai|a\.i\.|artificial intelligence|gpt|chatgpt|openai|llm|gemini|chatbot|ai[- ]powered|machine learning|smart (?:suggestions?|replies|categori[sz]ation))\b/i;
+
+/** Where NavBharatAI's keyless AI client lives in a browser app (the `generate_ai` recipe writes the same file). */
+export const LANE_AI_CLIENT_PATH = 'src/lib/ai.ts';
+
+/**
+ * The keyless AI client the fast lane writes FIRST when the app itself uses AI, or null. PURE.
+ *
+ * 🔴 WHY (build e52cebbf, 2026-10-06 — "a personal finance app that automatically categorises expenses
+ * using AI"). The fast lane's planner and per-file prompts never heard of NavBharatAI's keyless AI route —
+ * that rule (`GATEWAY_AI_RULE`) lives only in the full builder's prompt — and the one AI rule they did get
+ * said "AI is real, wired to the user's own provider through its keys". So the lane planned
+ * `src/lib/openai.ts`, which read an OpenAI key from the browser's localStorage and called OpenAI from the
+ * page. The full builder then wired `src/lib/ai.ts` beside it, and the app carried two AI clients.
+ *
+ * Same file, same content as `run_recipe generate_ai { provider: "navbharat" }`, so the full builder finds
+ * the route already in place. Only when the gateway is on, the app is a browser app the lane builds, and
+ * the request names AI for the app.
+ */
+export function laneAiClient(prompt: string, framework: string | undefined, env: NodeJS.ProcessEnv = process.env): OneShotFile | null {
+  if (!appAiGatewayEnabled(env)) return null;
+  if (!frameworkSupportsContractFile(framework)) return null;
+  if (!IN_APP_AI_RE.test(String(prompt ?? ''))) return null;
+  const content = generateAiIntegration('navbharat').files[LANE_AI_CLIENT_PATH];
+  return content ? { path: LANE_AI_CLIENT_PATH, content } : null;
+}
+
+/** What every lane call is told when `laneAiClient` wrote the client. PURE. */
+export function laneAiNote(): string {
+  return `\n\nAI IN THIS APP — ALREADY WIRED: ${LANE_AI_CLIENT_PATH} exists and is correct. Import generateText(prompt, system?), `
+    + 'chat(messages, system?) and isAiReady() from it. Do NOT plan or write any AI provider client (no openai.ts, no '
+    + 'OpenAI/Gemini/Anthropic calls from the page), and never read, store or ask for an API key in browser code. '
+    + 'Never let an AI call block what the user did: save and show their data first, add the AI result after, and keep '
+    + 'a plain non-AI fallback for when isAiReady() is false or the call fails.';
 }
 
 export function manifestSystemPrompt(framework: string, scaffoldPaths?: readonly string[]): string {
@@ -1696,6 +1735,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // One budget for the whole lane, read ONCE — the race below and the tier arithmetic inside must agree.
   const laneBudgetMs = deps.overallTimeoutMs ?? fastLaneBudgetMs(deps.complex === true);
   const generatedSoFar: OneShotFile[] = [];
+  // The app's AI client, written first and by us, never generated (build e52cebbf) — see `laneAiClient`.
+  const aiClient = laneAiClient(deps.prompt, deps.framework);
+  if (aiClient) {
+    deps = { ...deps, prompt: `${deps.prompt}${laneAiNote()}` };
+    generatedSoFar.push(aiClient);
+  }
   // Q-422 (autopsy 1eaa5f5a, admin chose "wait, but show the finished files"): once the lane has decided
   // to hand off, the tier still waits for the calls already in flight — 67 s there, with nothing on the
   // user's screen. The files finished so far are saved and announced the moment the decision is taken,
@@ -1775,7 +1820,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // very FIRST generation pass overwrote it with a version missing the `extends React.Component`
       // clause. The prompt now says these are provided, and this filter means that instruction cannot be
       // ignored: a boilerplate path is dropped from the plan whatever the model answered.
-      const planned = parseFileManifest(manifestText);
+      const planned = parseFileManifest(manifestText).filter((m) => !aiClient || m.path !== aiClient.path);
       const provided = new Set(providedBoilerplate(deps.scaffoldPaths));
       const droppedBoilerplate = planned.filter((m) => provided.has(m.path)).map((m) => m.path);
       const keptProvided = droppedBoilerplate.length ? planned.filter((m) => !provided.has(m.path)) : planned;
@@ -2045,8 +2090,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       }
       // The contract file is produced, not generated: it leads `written` so every tier's dependency
       // context includes it, and is excluded from the "did the model generate enough?" counts below.
-      const written: OneShotFile[] = contractFile ? [contractFile] : [];
-      const generatedCount = () => written.length - (contractFile ? 1 : 0);
+      const written: OneShotFile[] = [...(contractFile ? [contractFile] : []), ...(aiClient ? [aiClient] : [])];
+      const generatedCount = () => written.length - (contractFile ? 1 : 0) - (aiClient ? 1 : 0);
       const generateStartedAt = Date.now();
       clock.generateStartedAt = generateStartedAt; // read by phasesNow while this loop is still running
       for (let ti = 0; ti < tiers.length; ti++) {

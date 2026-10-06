@@ -14,7 +14,9 @@
 // admin can reach it.
 
 import { parseEnvFlag } from '../lib/envFlag';
-import { appsProject, appsRegion, serviceNameFor, deployAppToCloudRun } from './cloudRunHosting';
+import { appsProject, appsRegion, hostedServiceName, deployAppToCloudRun } from './cloudRunHosting';
+import { hostedRepublishRefusal } from './hostedAppLifecycle';
+import type { DeploymentRecord } from './DeploymentStore';
 import { packWorkspaceArchive } from './sourceArchive';
 import { appsImageRepo, buildStagingBucket, buildTag, buildAppContainer } from './containerBuild';
 import { planBackendEnv, backendEnvNote } from './backendEnvVars';
@@ -101,7 +103,7 @@ export type HostAppOutcome =
     }
   | {
       ok: false;
-      reason: 'unavailable' | 'no-source' | 'too-large' | 'unpackable' | 'build-failed' | 'deploy-failed';
+      reason: 'unavailable' | 'blocked' | 'no-source' | 'too-large' | 'unpackable' | 'build-failed' | 'deploy-failed';
       message: string;
       /** Provider detail for the ADMIN report only — never rendered to a user. */
       detail?: string;
@@ -121,6 +123,15 @@ export async function hostAppOnNavBharatCloud(
     files: Record<string, string>;
     /** The user's saved secrets — planBackendEnv decides which of them the service may receive. */
     vaultSecrets?: Record<string, string> | null;
+    /**
+     * This workspace's deployment record, REQUIRED (`null` when it has none). It is what refuses a banned
+     * or held app before anything is built, and it names the service a redeploy must update — see
+     * `hostedRepublishRefusal` and `hostedServiceName`. Required rather than optional so a new caller
+     * cannot skip the ban check by forgetting it.
+     */
+    existing: Pick<DeploymentRecord, 'status' | 'service'> | null;
+    /** Told when the deploy enters each phase, so the caller's attempt record follows it (hostedDeployments.ts). */
+    onPhase?: (phase: 'building' | 'deploying') => Promise<void> | void;
     /** A Google access token for the apps project. */
     token: string;
     env?: NodeJS.ProcessEnv;
@@ -132,6 +143,9 @@ export async function hostAppOnNavBharatCloud(
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<HostAppOutcome> {
   const env = opts.env ?? process.env;
+  // FIRST, before any cost: a banned or held app is never rebuilt (hostedAppLifecycle.ts).
+  const refusal = hostedRepublishRefusal(opts.existing);
+  if (refusal) return { ok: false, reason: 'blocked', message: refusal };
   const project = appsProject(env);
   if (!project.projectId) return { ok: false, reason: 'unavailable', message: project.message };
   const region = appsRegion(env);
@@ -171,7 +185,8 @@ export async function hostAppOnNavBharatCloud(
     };
   }
 
-  const service = serviceNameFor(opts.workspaceId, opts.appName);
+  const service = hostedServiceName(opts.workspaceId, opts.appName, opts.existing?.service);
+  await Promise.resolve(opts.onPhase?.('building')).catch(() => undefined);
   const tag = buildTag(opts.now ?? Date.now(), opts.workspaceId);
   const built = await buildAppContainer({
     token: opts.token,
@@ -195,12 +210,14 @@ export async function hostAppOnNavBharatCloud(
    * point: there is one rule about what a deployed app may hold, and both hosts obey it.
    */
   const envPlan = planBackendEnv(opts.vaultSecrets ?? null, opts.files ?? {});
+  await Promise.resolve(opts.onPhase?.('deploying')).catch(() => undefined);
   const deployed = await deployAppToCloudRun({
     token: opts.token,
     projectId: project.projectId,
     region,
     workspaceId: opts.workspaceId,
     appName: opts.appName,
+    existingService: opts.existing?.service ?? null,
     image: built.image,
     envVars: envPlan.envVars,
   }, fetchImpl);

@@ -152,12 +152,20 @@ describe('the wiring — the capability must actually be reachable', () => {
   it('BOTH routes delete the live channel BEFORE touching the registry', () => {
     // The registry must never say a site is offline while it is still serving. Order is the whole
     // guarantee, so a refactor that reverses it has to fail here.
-    for (const marker of ["setStatus(workspaceId, 'taken_down')", "setStatus(workspaceId, 'unpublished')"]) {
-      const at = route.indexOf(marker);
-      expect(at).toBeGreaterThan(0);
-      const before = route.slice(Math.max(0, at - 700), at);
-      expect(before).toContain('deleteChannel(workspaceId)');
+    // Since 2026-10-06 both go through ONE function, `takeAppOffline`, which removes the channel AND every
+    // server of the app before it writes the status — so the order is pinned there, once.
+    for (const marker of ["takeAppOffline(workspaceId, 'taken_down', offlineDeps)", "takeAppOffline(workspaceId, 'unpublished', offlineDeps)"]) {
+      expect(route.indexOf(marker)).toBeGreaterThan(0);
     }
+    expect(route).toContain('deleteChannel: (workspaceId) => new FirebaseHostingDeployer().deleteChannel(workspaceId),');
+    const life = readFileSync(join(__dirname, '..', 'src/server/AgentV3/hostedAppLifecycle.ts'), 'utf8');
+    const fn = life.slice(life.indexOf('export async function takeAppOffline'));
+    const ch = fn.indexOf('await deps.deleteChannel(workspaceId);');
+    const sv = fn.indexOf('await removeHostedServersOrThrow(');
+    const st = fn.indexOf('return deps.setStatus(workspaceId, status);');
+    expect(ch).toBeGreaterThan(-1);
+    expect(sv).toBeGreaterThan(ch);
+    expect(st).toBeGreaterThan(sv);
   });
 
   it('BOTH routes write the 180-day removal record — a ban is not the only removal', () => {

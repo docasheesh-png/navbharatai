@@ -231,6 +231,12 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
    */
   { collection: 'takedown_records', ttlDays: 180, timestampField: 'removedAt', timestampKind: 'epochMs' },
   /**
+   * One record per server deploy attempt (hostedDeployments.ts, 2026-10-06): its states and a failure
+   * category, no secret and no provider text. Useful while a deploy is recent; history older than 180 days
+   * answers no question anyone asks. `createdAt: Date.now()` — epochMs.
+   */
+  { collection: 'hosted_deploy_attempts', ttlDays: 180, timestampField: 'createdAt', timestampKind: 'epochMs' },
+  /**
    * A free build's unattended chain (freeChainStore.ts, Q-130). The engine ignores a record untouched for
    * six hours, so a day-old one is dead weight — one per workspace that ever paused, never read again.
    * `touchedAt: Date.now()` ⇒ `epochMs`.

@@ -91537,6 +91537,53 @@ on Android, so it always falls back to the share sheet.
 **What to watch:** the first `.aab`'s merged manifest must contain no `READ_MEDIA_*`. Play's check
 re-runs when the new bundle is added.
 
+## 2026-10-06 — Q-702: NavBharat Cloud gets one lifecycle (the "hosting foundation" spec, adapted)
+
+**The ask.** The admin forwarded an external, 16-phase "managed backend hosting foundation" spec, with the warning
+"external suggestions: blind follow ❌". A forensic read showed that most of the spec already exists, for example:
+- a separate apps project (D4);
+- a verified-owner chain;
+- plans and `backendApps` caps;
+- `HOSTING_CAPS`, size and build ceilings;
+- metering and the daily bill;
+- the inventory/reclaim against the 1,000-service ceiling.
+
+Building a parallel `HostingProvider/RuntimeManager/...` layer would have been PR #1/#4 again. So the work went to
+the real defects instead. The map of spec phase → code is `docs/HOSTING_ARCHITECTURE.md`.
+
+**Five root causes, all in the existing server path:**
+1. **Ban evasion.** `/host-app` and the Publish→host branch never read the record's status, and
+   `recordHostedDeployment` then wrote `active` over `taken_down`.
+   → `hostedRepublishRefusal`, inside `hostAppOnNavBharatCloud` itself, before any cost. `existing` is now a REQUIRED
+   argument, so a new caller cannot forget it.
+2. **"Offline" left the server running.** The admin ban, the admin unpublish and `hostingPlanSweep` deleted only the
+   Firebase channel. The debt pause in `hostingBillingSweep` deleted nothing.
+   → `takeAppOffline` (channel → every tagged Cloud Run service → status; throws and marks nothing if anything
+   survives), used by all of them. The owner unpublish uses the same `removeHostedServers`.
+3. **The rename leak.** `deployAppToCloudRun` derived the service name from the current app name.
+   → `hostedServiceName` reuses the recorded name (only if it carries the workspace tag). `removeWorkspaceServers`
+   lists what EXISTS, so leftovers from past renames are removed too.
+4. **No idempotency or trace.**
+   → `hostedDeployments.ts`: one transition table; a lease per workspace (Firestore transaction, fail-open, stale
+   after build cap + 10 min); attempt records with events; `[hosting-event]` lines that carry no message and no secret.
+5. **Drifted duplicate.** Only the uncalled `/host-app` enforced `serverAppLimit`.
+   → `serverPublish.ts` is now the single sequence. `/host-app` and `/host-usage` were deleted (Q-162: no caller; the
+   latter also had the rename bug and duplicated the daily sweep). The plan is probed for the VERIFIED uid, never the
+   body's `userId`.
+
+**Lock:** `tests/aServerAppHasOneLifecycle.test.ts` (25 behavioural tests, 3 censuses). Three bugs were put back
+and each was caught: the ban refusal removed; the lease ignored (two builds); a direct `plan_paused` write.
+`publishRoute.test.ts` and `hostingDailyBill.test.ts` guards were moved to the new shapes.
+
+**Exposure:** none live. Hosting is admin-only (`NAVBHARAT_CLOUD_PUBLIC` unset) and the debt pause sits behind
+`NAVBHARAT_BILL_HOSTING` (unset). These had to be fixed BEFORE either switch is flipped.
+
+**Decision opened:** Q-703. A `held` app is not taken offline by the re-scan. The recommendation is (a): fix the
+words, not the behaviour.
+
+**Next step:** a deployment-history screen on the Publish sheet that reads `hosted_deploy_attempts`, which is also
+what lets a 409 "already deploying" show live progress. After that, server rollback to the previous Cloud Run
+revision.
 ### 2026-10-06 — CI red on every PR again at 17:14 UTC: one new npm advisory on a transitive package, fixed by one lockfile bump
 
 The audit gate went red on #3573 (hosting lifecycle) with nothing in that diff to blame — the same class as the

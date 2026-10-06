@@ -53,6 +53,108 @@ export function isSupabaseStatus(b: unknown): b is Status {
   return isRecord(b) && typeof b.available === 'boolean' && typeof b.connected === 'boolean';
 }
 
+/** One database the user's apps are wired to, as `/project-health` reports it (2026-10-06). */
+export interface DatabaseHealth {
+  projectRef: string;
+  state: string;
+  name: string;
+  canWake: boolean;
+  message: string;
+}
+
+/** The health route's answer. A refusal is not a health report (Q-680). */
+export function isDatabaseHealthList(b: unknown): b is { connected: boolean; projects: DatabaseHealth[] } {
+  return isRecord(b) && typeof b.connected === 'boolean' && Array.isArray(b.projects)
+    && b.projects.every((p) => isRecord(p) && typeof p.projectRef === 'string' && typeof p.state === 'string'
+      && typeof p.canWake === 'boolean' && typeof p.message === 'string');
+}
+
+/** The wake route's answer. */
+export function isWakeAnswer(b: unknown): b is { ok: true; state: string; message: string } {
+  return isRecord(b) && b.ok === true && typeof b.state === 'string' && typeof b.message === 'string';
+}
+
+/**
+ * A SLEEPING DATABASE, SHOWN WHERE IT IS FIXED (2026-10-06). Supabase pauses a free project after about a
+ * week without use, and an app on it cannot load or save data. This lists only the databases that are NOT
+ * simply working, with Supabase's state in plain words, and a Wake button for a paused one. Waking is the
+ * user's tap — NavBharatAI never wakes a database on its own (see supabaseProjectState.ts).
+ */
+function SleepingDatabases() {
+  const [items, setItems] = useState<DatabaseHealth[] | null>(null);
+  const [note, setNote] = useState('');
+  const [waking, setWaking] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await authedFetch('/api/integrations/supabase/project-health');
+      const a = await readAnswer(res, isDatabaseHealthList);
+      if (!a.ok) { setNote(a.sentence); return; }
+      setItems(a.value.projects.filter((p) => p.state !== 'ready'));
+    } catch {
+      // A check that cannot reach the server says nothing rather than claiming the databases are fine.
+      setItems(null);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const wake = async (projectRef: string): Promise<void> => {
+    setWaking(projectRef); setNote('');
+    try {
+      const res = await authedFetch('/api/integrations/supabase/wake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectRef }),
+      });
+      const a = await readAnswer(res, isWakeAnswer);
+      if (!a.ok) { setNote(a.sentence); return; }
+      // ACCEPTED, not awake: the row now says it is waking, and "Check again" shows when it is back.
+      const answer = a.value;
+      setItems((cur) => (cur ?? []).map((p) => (p.projectRef === projectRef
+        ? { ...p, state: answer.state, canWake: false, message: answer.message } : p)));
+    } catch {
+      setNote('Could not reach NavBharatAI. Check your connection and try again.');
+    } finally {
+      setWaking(null);
+    }
+  };
+
+  if (!items || items.length === 0) return note ? <p className="mt-3 text-[11px] text-warn leading-snug">{note}</p> : null;
+  return (
+    <div className="mt-3 space-y-2">
+      {items.map((p) => (
+        <div key={p.projectRef} className="rounded-xl border border-line bg-raised p-3">
+          <p className="text-[11px] text-warn flex items-start gap-1.5 leading-snug">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+            <span>{p.message}</span>
+          </p>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {p.canWake && (
+              <button
+                onClick={() => void wake(p.projectRef)}
+                disabled={waking !== null}
+                className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg border border-line text-ink hover:bg-raised disabled:opacity-50"
+              >
+                {waking === p.projectRef ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
+                {waking === p.projectRef ? 'Waking…' : 'Wake database'}
+              </button>
+            )}
+            <button
+              onClick={() => void load()}
+              disabled={waking !== null}
+              className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-line text-muted hover:text-ink disabled:opacity-50"
+            >
+              Check again
+            </button>
+          </div>
+        </div>
+      ))}
+      {note && <p className="text-[11px] text-warn leading-snug">{note}</p>}
+    </div>
+  );
+}
+
 interface Props {
   /** Used only to name the created project so it is recognisable in the user's own dashboard. */
   appLabel?: string;
@@ -211,6 +313,8 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
         // than borrowing the "ready" wording from a path that really did set tables up.
         setReused(true);
         setDone(`${data.reusedNote || 'This app now uses a database you already made.'} Your app will use it automatically — no keys to copy.`);
+        // Attached, but asleep: saying only "your app will use it" would hand them a database that answers nothing.
+        if (typeof data?.asleepNote === 'string' && data.asleepNote) setError(data.asleepNote);
       } else if (data?.schemaApplied === false) {
         setDone('Your database was created and your app is wired to it, but its tables could not be '
           + 'set up yet. ' + (data?.schemaNote || 'Try "Create database" again in a moment.'));
@@ -292,6 +396,7 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
               Want this app to have its own separate database instead? Create a new one
             </button>
           )}
+          <SleepingDatabases />
           {busy === 'create' && (
             <p className="text-[10px] text-muted mt-2 leading-snug">
               This takes a minute or two — Supabase has to start the database before it can be used.

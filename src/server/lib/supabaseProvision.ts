@@ -221,6 +221,34 @@ export async function createProject(
 /** The only status that means "you can connect to it now". */
 export const PROJECT_READY_STATUS = 'ACTIVE_HEALTHY';
 
+// The ONE reading of Supabase's status vocabulary — creation (`waitUntilReady` below) and the later
+// awake/asleep checks (`supabaseProjectState.ts`) both use it, so the two can never disagree on a word.
+/** What a project's status means for an app that uses it. */
+export type ProjectState =
+  | 'ready'      // ACTIVE_HEALTHY — the app can use it
+  | 'paused'     // INACTIVE — asleep; the app cannot load or save data until it is woken
+  | 'waking'     // RESTORING / COMING_UP / RESTARTING — on its way back, nothing to do but wait
+  | 'busy'       // PAUSING / RESIZING / UPGRADING / GOING_DOWN — Supabase is doing something to it
+  | 'unhealthy'  // ACTIVE_UNHEALTHY — running, but Supabase says something is wrong
+  | 'failed'     // INIT_FAILED / RESTORE_FAILED / PAUSE_FAILED — needs the user's Supabase dashboard
+  | 'removed'    // REMOVED — the project no longer exists
+  | 'unknown';   // a status this code does not recognise — never acted on
+
+/** Supabase's status word → what it means for the app. A word we have never seen is `unknown`, never a guess. */
+export function classifyProjectStatus(status: unknown): ProjectState {
+  switch (String(status ?? '').trim().toUpperCase()) {
+    case 'ACTIVE_HEALTHY': return 'ready';
+    case 'INACTIVE': return 'paused';
+    case 'RESTORING': case 'COMING_UP': case 'RESTARTING': return 'waking';
+    case 'PAUSING': case 'RESIZING': case 'UPGRADING': case 'GOING_DOWN': return 'busy';
+    case 'ACTIVE_UNHEALTHY': return 'unhealthy';
+    case 'INIT_FAILED': case 'RESTORE_FAILED': case 'PAUSE_FAILED': return 'failed';
+    case 'REMOVED': return 'removed';
+    default: return 'unknown';
+  }
+}
+
+
 export interface WaitOptions {
   /** Total budget. A fresh Supabase project routinely needs well over a minute. */
   timeoutMs?: number;
@@ -259,6 +287,14 @@ export async function waitUntilReady(
     if (res && res.ok) {
       const body = (await res.json().catch(() => null)) as { status?: unknown } | null;
       if (body?.status === PROJECT_READY_STATUS) return { ok: true };
+      // A project that FAILED to come up will never become ready — waiting out the whole budget and then
+      // saying "still starting up" would be a false statement about a dead project.
+      const state = classifyProjectStatus(body?.status);
+      if (state === 'failed' || state === 'removed') {
+        return { ok: false, failure: 'api-error', detail: String(body?.status ?? ''),
+          message: 'Supabase could not start your new database (it reports the project as failed). '
+            + 'Open your Supabase dashboard to see why, then try again.' };
+      }
     } else if (res && (res.status === 401 || res.status === 403)) {
       // Authorisation cannot recover by waiting — fail fast instead of burning the whole budget.
       return classifyStatus(res.status, await res.text().catch(() => ''), 'read');

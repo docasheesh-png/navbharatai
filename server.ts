@@ -973,6 +973,21 @@ setInterval(() => {
               },
             });
           }
+          // SLEEPING DATABASES (2026-10-06): Supabase pauses a free project after about a week without use,
+          // and an app on it cannot load or save data. Once a day, tell each owner — once per episode, with a
+          // tap straight to the Wake button. Never wakes anything itself (supabaseProjectState.ts says why).
+          // Exclusive: one instance asks Supabase. Kill switch SUPABASE_PAUSE_WATCH=off.
+          scheduler.register({
+            id: 'supabase-pause-watch',
+            exclusive: true,
+            schedule: { kind: 'dailyAtUtc', hour: 5, minute: 10 },
+            handler: async () => {
+              await import('./src/server/lib/supabasePauseWatch')
+                .then(({ runSupabasePauseWatch }) => runSupabasePauseWatch())
+                .then((r) => { if (r.notified || r.unreadable) console.log(`[supabase-pause-watch] accounts ${r.accounts}, checked ${r.checked}, owners told ${r.notified}, grants lapsed ${r.unreadable}`); })
+                .catch(() => { /* a reminder sweep must never affect the server */ });
+            },
+          });
           // MONITOR ALERTS — the admin is TOLD when build success, preview rate or build time leaves
           // its normal range, instead of finding out by happening to open the panel. Every 15 minutes;
           // the sweep itself decides what is worth saying (new / still-firing-after-a-cooldown /

@@ -79,6 +79,7 @@ export const PROCESS_ONLY_CODES = new Set([
   'HEAL_NOT_DURABLE',         // our repair wrote twice to one file; the user never sees repair passes
   'SUMMARY_OFF_TOPIC',        // about OUR closing summary's wording, and already said above the summary
   'DATABASE_OFFER_AT_START',  // we OFFERED (or created) a database — a thing we did for them, not a fault
+  'DATABASE_ASLEEP',          // the user's own Supabase project is paused — their account's state, not the app's code
   'TIME_TO_FIRST_CALL',       // our setup time before the first model call (it was in NEVER_SUGGEST only)
   // Our template seeding and a user's Stop (autopsy 31254f9a): facts about the ENGINE's run, never the app.
   'GOLDEN_SCAFFOLD_SKIPPED', 'LLM_CALL_STOPPED', 'SIMPLE_BUILD_STOPPED', 'DOMAIN_KNOWLEDGE', 'DURABLE_HOLDS_ONLY_STARTER',

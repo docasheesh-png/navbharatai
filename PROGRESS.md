@@ -91650,7 +91650,7 @@ with `npm audit --json`.
   here: a scheduled `npm audit` on `main` (daily, before India's working hours) that opens the bump PR itself,
   so the first red is the fix PR and never somebody else's.
 
-## 2026-10-06 (later): e52cebbf + b4745cb1 — the rest of the ledger, after the admin's answers (PR #3574)
+## 2026-10-06 (later): e52cebbf + b4745cb1 — the rest of the ledger, after the admin's answers (PR #3577; #3574 merged the first half)
 
 The admin answered *"Q-727 = b / waki aap karo! apne suggestion ke anusar"*: bill a stop after an in-build render as a
 working app, agree that the five Q-731 items are not defects, and fix the rest.

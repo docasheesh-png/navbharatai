@@ -359,6 +359,9 @@ arrives, and it is never seen again.
    state, owner (PR number), last action. Rows move to ✅ only when the PR that resolves them is MERGED, and
    are then deleted from the open table (their ledger stays in `PROGRESS.md`). With several live sessions
    (see below), a row carrying another session's PR number is TAKEN — pick another or ask.
+   **A deleted row's ID is appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, and
+   the queue is edited on a FRESH `main`, never rebuilt from an older copy** — #3543 did that and silently
+   reopened closed rows (2026-10-06); `tests/aClosedQueueRowStaysClosed.test.ts` now fails on it.
 4. **No new self-started work while the queue has an actionable row.** Before starting anything — a feature,
    a refactor, the fifth rule's proactive suggestions, an idea of our own — read `BUILD_REPORT_QUEUE.md`. If a
    row is actionable (not BLOCKED), it comes first. **The admin's explicit instruction overrides the order,

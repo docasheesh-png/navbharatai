@@ -91296,3 +91296,28 @@ config gate → 1; first page only → 2.
 responses"** in Play Console → Users and permissions — the voided list needs it; purchase verification does
 not. Until then each run records `refused` and Revenue says Play refunds are NOT being checked. App Store
 refunds remain unwired (out of scope).
+### 2026-10-06 — The build-report queue had silently un-resolved five items; closed rows can no longer come back
+
+**Found while picking the next queue row:** Q-129 ("the Gemini runner cannot cancel on Stop") was listed OPEN,
+but the fix (`957490e9d`, tests in `GeminiToolRunner.test.ts`) has been on `main` since #3535. Tracing why showed
+a CLASS, not one stale row.
+
+- **Root cause:** #3543 ("rows of the merged PRs leave the open table") rewrote `BUILD_REPORT_QUEUE.md` from a copy
+  older than #3534's merge. On top of its intended removals, it put back the pre-#3534 text of the rows #3534
+  had worked:
+  - **Q-129 and Q-151 reopened** although both were fixed and closed;
+  - **Q-111, Q-114 and Q-126** fell from four-field 🟡 BLOCKED records back to bare "OPEN";
+  - Q-101 and Q-154 were reverted too, but later sessions had already corrected them.
+  - Nothing noticed for a day. A plain `git log` hides it because the revert sits inside a merge commit.
+- **Fixed:** Q-111, Q-114 and Q-126 are restored to their #3534 records, and the Q-129 and Q-151 rows are removed.
+- **Class closed — `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`:** an append-only register of every ID that has left
+  the open table. It is seeded with 314 IDs from the file's full first-parent history on `main`. Every departure
+  was audited: all were removed by the PR that resolved them, or as rows owned by merged PRs (#3451, #3452,
+  #3491 checked by hand for the eight that left inside plain merge commits).
+  - It lives in its OWN file, because a register inside the queue would be reverted by the same stale copy.
+- **Locked by `tests/aClosedQueueRowStaysClosed.test.ts`:** no closed ID is in the open table, the register holds
+  well-formed unique IDs, open IDs are unique, and the incident's five rows hold. Proven by reversion: pasting
+  `main`'s stale Q-129 row back fails two cases.
+- **CLAUDE.md rule 3** gains one sentence: append the ID when deleting a row, and edit the queue on a fresh `main`.
+- **Honest limit:** the register catches a RESURRECTED row. A stale copy that downgrades a row which is still open
+  (BLOCKED → OPEN, as Q-111 was) is not caught mechanically. The fresh-main rule is the guard for that half.

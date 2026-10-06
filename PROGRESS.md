@@ -91366,3 +91366,34 @@ message from the user until #3531 found it by hand. Nothing stopped the count fr
   which is a product question, not a deletion.
   - App.tsx and AgentV3Panel.tsx are where most live sessions work.
   - Q-600 stays OPEN for that sweep, one file at a time, its state recorded in the row.
+
+### 2026-10-06 — Q-601: one live source's answer is no longer the whole answer
+
+"delhi ka mausam aur aaj gold rate" got the weather and lost the gold rate. `liveSearchContext` returned as soon
+as any live source answered (`if (liveBlock) return liveBlock`), and no live source serves gold, so the web search
+that would have answered the other half never ran. Q-127 (#3535) fixed this class between two LIVE sources; this
+is the half where a live source sits next to a plain web question. The row asked for a dependable rule, not a
+guessed keyword list.
+
+- **The rule is the sources' own code.** `liveTopicCovered(text)` (liveDataSources.ts) is the OR of the exact
+  gates `liveDataContext`'s sources run before fetching: `detectTransitQuery`, `WEATHER_SIGNAL`, `AQI_SIGNAL`,
+  `detectCurrency`, `detectPincode` and `MOVIE_SIGNAL`. No network is involved, and licence or key switches are
+  deliberately not applied.
+- **Per clause:** when a live block answers, `uncoveredLiveClauses` splits the message at the joins people use to
+  ask two things ("aur", "and", "और", "tatha", "?", ";").
+  - Any clause that `needsLiveSearch` and that no live source would take is web-searched on its own, and both
+    blocks are returned.
+  - A message every clause of which a source covers still never searches.
+  - With no live answer, the whole message is searched exactly as before.
+- **Locked by `tests/oneLiveAnswerIsNotTheWholeAnswer.test.ts`** (8 cases):
+  - the real input, where the search query holds only the gold half;
+  - covered questions never search, and an empty extra search returns the live answer alone;
+  - the no-live path is unchanged;
+  - clauses are split in Hinglish, Hindi and English;
+  - a **census**: every source `liveDataContext` runs has its gate in `liveTopicCovered`, so a new source cannot
+    silently fall out of the rule.
+  - **Proven by reversion:** the old early return fails the bug case, and dropping one gate fails the census.
+- ⚠️ **Caught on the way, by the Write tool reporting "updated":** the first name I chose,
+  `aTwoPartQuestionGetsBothAnswers.test.ts`, was Q-127's existing test, and it had been overwritten. It was
+  restored from git before any commit (its 3 cases pass), and the new test has its own name, written create-only.
+- Q-601 leaves the open table with this PR, and its ID is in the closed register.

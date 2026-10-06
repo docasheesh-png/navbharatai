@@ -41,7 +41,7 @@
 // panel's licence register, so the panel cannot say "off" while calls keep going out. Still a PAUSE,
 // not the fix — the fix is a commercial plan, which is the admin's decision.
 
-import { liveTransitContext } from './transitLive';
+import { liveTransitContext, detectTransitQuery } from './transitLive';
 import { liveWeatherSourceEnabled } from '../../lib/licenceExposure';
 import { fetchCityAirQuality, aqiCategory, cpcbAqiConfigured } from './cpcbAirQuality';
 import { attributionsFor } from './govData/registry';
@@ -277,6 +277,25 @@ export interface LiveDataOptions {
  * '' means "nothing live applies — let the web search answer". Transit (env-keyed) is tried first
  * because a train/PNR/flight number is the most specific shape a message can have.
  */
+/**
+ * Would ANY live source here take this text? The sources' OWN gates (regexes and detectors, no network),
+ * so the answer is what the sources would actually do — never a guessed topic list (Q-601, 2026-10-06).
+ * `liveSearchContext` uses it per clause: a clause that needs today's facts and that no source covers
+ * ("aaj gold rate" next to "delhi ka mausam") still gets a web search instead of being dropped.
+ * A source added to `liveDataContext` must add its gate here; `liveTopicCovered.test.ts` fails if not.
+ * Licence or key switches are deliberately NOT applied: they decide whether a source answers today,
+ * and when it does not, its whole message already goes to the web search.
+ */
+export function liveTopicCovered(text: string): boolean {
+  const t = String(text ?? '');
+  return !!detectTransitQuery(t)
+    || WEATHER_SIGNAL.test(t)
+    || AQI_SIGNAL.test(t)
+    || !!detectCurrency(t)
+    || !!detectPincode(t)
+    || MOVIE_SIGNAL.test(t);
+}
+
 export async function liveDataContext(message: string, opts: LiveDataOptions = {}): Promise<string> {
   const env = opts.env ?? process.env;
   const fetchImpl = opts.fetchImpl ?? fetch;

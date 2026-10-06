@@ -91206,3 +91206,15 @@ could be dodged.
 
 **Proven by reversion:** with the flanker's sideways steer at 0, the surround case fails. The prompt, the
 module instructions and the KB say when to use each.
+
+### 2026-10-06 — Admin decision: a low-scoring game is NOT repaired automatically — the one-tap button stays
+
+Asked after #3561 whether a game scoring below `PLAYABLE_SCORE` (75) in NavBharatAI's own playtest
+(`gamePlaytest.ts`) should repair itself with an automatic, user-paid turn, the admin chose the **one-tap
+"Make the game playable" button** (`buildFindingSuggestions`). The user decides when to spend.
+
+**Standing decision — do not re-propose it as a default:**
+- Automatic repair stays limited to the case the admin approved earlier: a post-build crash the platform
+  reproduces, on a paid tier, once per build (#3560, `previewAutoRepair.ts`).
+- A playtest result is shown and offered as a fix, never acted on by itself.
+- Revisit only if the admin raises it.

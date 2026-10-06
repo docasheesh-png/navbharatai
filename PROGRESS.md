@@ -91260,3 +91260,39 @@ bundle); Q-621 is OPEN for its second half (thread the signal into `executeStrea
 
 **Admin, after merge:** give the Cloud Build service account `roles/firebaserules.admin` on
 `gen-lang-client-0866594388`, then read the next build's `deploy-security-rules` log.
+
+### 2026-10-06 — Q-690: a Google Play refund or chargeback takes back the tokens that pack bought
+
+**Why.** Q-614 (#3551) made a Cashfree refund or chargeback take its tokens back; the store rails were left
+out, so a Play pack refunded after its first verify kept everything it credited. The fix — a daily check of
+Play's voided-purchases list with the existing service account — was recommended on 2026-10-06 and accepted by
+the admin ("ok banao").
+
+**What was built.**
+- `src/server/lib/playVoidedPurchases.ts` — `runPlayVoidedPurchases()`. Reads
+  `GET …/applications/{pkg}/purchases/voidedpurchases` (`type=0`, full voids only, `nextPageToken` paging)
+  through `readGoogleVoidedPurchasesPage` in `storeVerify.ts`, authenticated by the verifier's own
+  `googleAccessToken` (same `GOOGLE_PLAY_SA_JSON`, same scope, one token per run). Each void is matched to
+  our row by the id the credit wrote (`storeTransactionDocId('google', orderId ‖ purchaseToken)`, provider
+  `GOOGLE_PLAY`) and reversed through the ONE `applyOrderReversal` at the full `storePriceInr` — reasons 6/7
+  as a lost dispute ("Chargeback"), the rest as a refund. `voidedReason` / `voidedSource` and their plain-word
+  labels are written on the order (new optional `recordFields`) and in the statement line (new optional
+  `ledgerNote` → `ClawbackInput.note`).
+- Durable cursor `payment_reversal_cursors/google_play_voided`: advanced only after a whole page applies
+  with no error; window = cursor − 24 h, clamped to Google's 30 days (an older cursor is reported as a gap).
+- Daily `exclusive` scheduler job `play-voided-purchases` at 06:00 UTC in `server.ts` — so the Q-159
+  Cloud Scheduler tick catches it up too. Not configured ⇒ `not-configured`, no call.
+- Admin visibility: the outcome is merged into `job_runs/play-voided-purchases` as `lastResult`; the admin
+  purchases route returns `playRefundCheck` and Revenue shows it in one sentence (`playRefundCheckText`),
+  including "NOT being checked" when unconfigured or refused. `refundTracked` is now `web-and-google-play`.
+
+**Lock.** `tests/aPlayRefundTakesBackWhatItBought.test.ts` — 17 tests over the real job, the real Play client
+(through storeVerify's fetch seam, with a real RSA service-account key) and the real reversal against an
+in-memory Firestore. Reversions, each restored after: reverse the credit instead of the store price → 6 fail;
+no idempotency marker → 2; cursor advanced past an errored page → 1; unknown purchase as an error → 3; no
+config gate → 1; first page only → 2.
+
+**Open (admin).** Grant the service account **"View financial data, orders and cancellation survey
+responses"** in Play Console → Users and permissions — the voided list needs it; purchase verification does
+not. Until then each run records `refused` and Revenue says Play refunds are NOT being checked. App Store
+refunds remain unwired (out of scope).

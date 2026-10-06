@@ -109,7 +109,8 @@ describe('summary, filter and sort', () => {
     expect(s.freeCreditRows).toBe(2);
     // CHANGED 2026-10-05 (Q-614): web refunds are recorded now; store refunds are not, and the summary
     // says exactly that rather than claiming either "all" or "none".
-    expect(s.refundTracked).toBe('web-only');
+    // CHANGED 2026-10-06 (Q-690): Google Play refunds are recorded too, by the daily voided-purchases check.
+    expect(s.refundTracked).toBe('web-and-google-play');
     expect(s.refundedInr).toBe(0);
   });
   it('default order is latest first', () => {

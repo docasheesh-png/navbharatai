@@ -1056,6 +1056,32 @@ setInterval(() => {
             },
           });
           /**
+           * GOOGLE PLAY REFUNDS AND CHARGEBACKS (Q-690, admin 2026-10-06). Once a day, read Play's
+           * Voided Purchases list with the purchase verifier's own service account and take back the
+           * tokens each voided pack bought — the same `applyOrderReversal` the Cashfree webhook uses.
+           *
+           * 🔒 `exclusive`: it moves money. The reversal is idempotent, so two instances could not take
+           * twice — but the lease is the design and the marker is the proof, exactly as for the bill.
+           * Unconfigured (no package name / service account) it records "not-configured" and calls
+           * nothing. 06:00 UTC, after the bill and the cleanup, so the three never share a quota window.
+           * The outcome lands in `job_runs/play-voided-purchases`, which the admin's Revenue page shows.
+           */
+          scheduler.register({
+            id: 'play-voided-purchases',
+            exclusive: true,
+            schedule: { kind: 'dailyAtUtc', hour: 6, minute: 0 },
+            handler: async () => {
+              await import('./src/server/lib/playVoidedPurchases')
+                .then(({ runPlayVoidedPurchases }) => runPlayVoidedPurchases())
+                .then((r) => {
+                  if (r.status !== 'ok' || r.seen > 0) {
+                    console.log(`[play-voided] ${r.status}: seen ${r.seen}, reversed ${r.reversed}, already ${r.alreadyReversed}, unknown ${r.unknown}, errors ${r.errors}${r.reason ? ` — ${r.reason}` : ''}`);
+                  }
+                })
+                .catch(() => { /* a refund sweep must never affect the server; the next day re-reads the window */ });
+            },
+          });
+          /**
            * LIVE USD→INR — the rate every build's bill is converted at.
            *
            * 🔴 THE BUG THIS CLOSES (revenue audit 2026-09-10). `refreshUsdInrRate()` has existed, and

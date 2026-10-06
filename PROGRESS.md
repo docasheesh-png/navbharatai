@@ -91607,3 +91607,27 @@ with `npm audit --json`.
   merging session must notice a red PR is not the PR's own. A standing recommendation for the admin, not built
   here: a scheduled `npm audit` on `main` (daily, before India's working hours) that opens the bump PR itself,
   so the first red is the fix PR and never somebody else's.
+
+## 2026-10-06 — Q-704: user apps and their builds no longer run as the default identity (P0)
+
+**Found** by the hosting launch-readiness audit; the admin then made it a P0 task. The external spec was adapted:
+no parallel architecture was built.
+- `buildServiceSpec` named no `serviceAccount`, so every hosted app ran as `219549203609-compute@developer…`.
+- Builds named none either, and on a 2026 project Cloud Build's default is that same account.
+- So any user code could take that account's token: a request handler, or an npm `postinstall` script.
+- Whatever a build needs (push to `nbai-apps`, read the shared staging bucket) every RUNNING app held too.
+  If the account kept Editor, it also held every other app's services and secrets.
+
+**Root cause:** untrusted code ran under an identity chosen by default, not by design.
+
+**Fix (`appsIdentity.ts`, docs §11):**
+- Runtime: a dedicated ROLE-LESS account, shared by every app. A token that opens nothing shares nothing, and
+  per-app accounts would hit the 100-account quota long before the 1,000-service cap.
+- Build: a separate narrow account.
+- Both are validated. Hosting fails closed without them, the admin included.
+- The deploy is pinned to the image digest, and the staged source is deleted right after the build.
+
+**Lock:** `tests/userCodeNeverRunsAsTheDefaultIdentity.test.ts` (12 tests, 3 reversions proven).
+
+**NOT verified against Google.** That needs the admin's console steps, the IAM script and the probe app (Q-705).
+**Residual P1 (Q-706):** builds share one narrow identity (read, not overwrite), and there is no egress allow-list.

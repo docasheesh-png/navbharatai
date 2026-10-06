@@ -91206,3 +91206,28 @@ could be dodged.
 
 **Proven by reversion:** with the flanker's sideways steer at 0, the surround case fails. The prompt, the
 module instructions and the KB say when to use each.
+
+### 2026-10-06 — CI red on every PR at 01:47 UTC: five npm advisories published overnight, fixed by five patch bumps
+
+The audit gate (`scripts/auditGate.mjs`, BLOCKS new high/critical) went red on a 12-line docs PR (#3562)
+with nothing in the diff to blame: five advisories reached the npm registry after `main` 5c40abc4 went
+green on 2026-10-05. Reproduced locally on `main` with `npm audit --json`.
+
+| Package | Was → now | Advisory | How it reaches us |
+|---|---|---|---|
+| `proxy-addr` | 2.0.7 → 2.0.8 | GHSA-jqcg-44mw-7w3h (critical) — IP spoofing via an IPv4-mapped IPv6 trust subnet | runtime, via `express` (the trust-proxy path #3538 just set to one hop) |
+| `compression` | 1.8.1 → 1.8.2 | GHSA-vc2v-76pw-4v95 (high) — memory leak on a premature response close | runtime, the per-request fallback behind `STATIC_PRECOMPRESSED` |
+| `source-map-js` | 1.2.1 → 1.2.2 | GHSA-68fv-2mgg-jv7q (high) — event-loop DoS via indexed section offsets | build only, via `postcss` / Tailwind / vitest coverage |
+| `@capacitor/android` | 8.5.0 → 8.5.1 | GHSA-rvm3-566m-v7fv (critical) — remote content loadable at the app origin via the internal HTTP proxy path | the phone shell; reaches users only with a fresh `.aab` |
+| `@capacitor/ios` | 8.4.1 → 8.4.3 | GHSA-rvm3-566m-v7fv (critical) — same | the phone shell; reaches users only with a fresh `.ipa` |
+
+- **Real bumps, not allowlist rows**: every one has a fixed release inside its existing semver range, so
+  `package.json` moves only the three direct ranges and the lockfile moves exactly these five entries
+  (verified: no other `version` line in `package-lock.json` changed). `@capacitor/core` stays 8.5.0, which
+  satisfies both new peer ranges (`^8.5.0` / `^8.4.0`).
+- **Gate on the bumped tree**: audit gate ✅ (0 critical, 5 high, all five pre-triaged), both typechecks,
+  no-unused-imports, license gate, `npm run build`, bundle budget, boot smoke-check, server
+  production-dependency gate, and the dependency/native-shell/compression/proxy-trust test files.
+- ⚠️ **The two Capacitor advisories are only closed on a phone once a new store build ships.** The next
+  `.aab`/`.ipa` the admin asks for carries 8.5.1 / 8.4.3; build 147 on Play and the current TestFlight
+  build still run 8.5.0 / 8.4.1. Per the 2026-09-07 rule, a store build is made only when the admin asks.

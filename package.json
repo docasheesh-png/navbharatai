@@ -61,7 +61,7 @@
     "axios": "^1.20.0",
     "cashfree-pg": "^6.0.6",
     "clsx": "^2.1.1",
-    "compression": "^1.8.1",
+    "compression": "^1.8.2",
     "dockerode": "^5.0.1",
     "dotenv": "^17.2.3",
     "e2b": "^2.50.0",
@@ -99,9 +99,9 @@
     "zip-stream": "^7.0.5"
   },
   "devDependencies": {
-    "@capacitor/android": "^8.5.0",
+    "@capacitor/android": "^8.5.1",
     "@capacitor/cli": "^8.4.1",
-    "@capacitor/ios": "^8.4.1",
+    "@capacitor/ios": "^8.4.3",
     "@csstools/postcss-cascade-layers": "^6.0.0",
     "@csstools/postcss-color-mix-function": "^4.0.14",
     "@csstools/postcss-oklab-function": "^5.0.8",

@@ -188,11 +188,13 @@ describe('Google verification', () => {
     process.env.GOOGLE_PLAY_PACKAGE_NAME = 'com.navbharat.ai';
   };
 
-  it('credits only purchaseState 0 — a PENDING (unpaid UPI) purchase is refused', async () => {
+  // Play's ProductPurchase.purchaseState: 0 purchased · 1 cancelled · 2 pending. (This test once called 1
+  // "pending"; the code was right — only 0 credits — but the label was not. Both non-paid states are pinned.)
+  it.each([[2, 'PENDING (unpaid UPI)'], [1, 'CANCELLED']])('credits only purchaseState 0 — state %i, a %s purchase, is refused', async (state) => {
     googleKeys();
     _setStoreFetchForTests(async (url) => {
       if (url.includes('oauth2')) return { ok: true, status: 200, json: async () => ({ access_token: 'tok' }) };
-      return { ok: true, status: 200, json: async () => ({ purchaseState: 1, orderId: 'GPA.1' }) };
+      return { ok: true, status: 200, json: async () => ({ purchaseState: state, orderId: 'GPA.1' }) };
     });
     const r = await verifyGooglePurchase('nbai.tokens.99', 'ptoken');
     expect(r.ok).toBe(false);

@@ -21,6 +21,9 @@ import { freeChatModeGuide, FREE_IMAGE_REQUEST_DIRECTIVE, IMAGE_STUDIO_MODE_NAME
 import { looksLikeImageEdit } from '../../lib/imageEdit';
 import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
 import { gateToolAction, burnToolAction } from '../tools/toolGate';
+import { reserveImage } from '../lib/imageHold';
+import { chatEditFreeUsedMessage } from '../lib/imageTier';
+import { isProfessionalFreeUser } from '../professionals/professionalPaid';
 import { guestDailyQuota } from '../lib/guestDailyQuota';
 import { POLLINATIONS_BLOCK_MESSAGE } from '../lib/pollinationsGuard';
 import { checkChatInput } from '../lib/chatInputLimits';
@@ -486,22 +489,48 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         sendEdit(`Apni picture badalne ke liye sign in karein — har badlaav asli engine par banta hai.\n\n${imageGenGuidance()}`);
         return;
       }
-      const gate = await gateToolAction(account.uid, account.email, 'image', 'picture-editing');
-      if (!gate.allow) {
-        sendEdit(`Aaj ke liye aapki picture-editing limit poori ho gayi hai — kal phir se try karein.\n\n${imageGenGuidance()}`);
+      // ONE ALLOWANCE FOR EVERY PICTURE (Q-683, admin 2026-10-06). With image pricing on, an edit here takes a
+      // slot of the same 5 free a day as the Image Generator, atomically and BEFORE the engine runs, and gives
+      // it back if no picture arrives. The chat never shows a price, so `priceShown` is false: past the free
+      // 5 the edit is refused with the way to make more, never charged. Pricing off → the old tool gate.
+      const reservation = await reserveImage({
+        uid: account.uid,
+        freeListed: isProfessionalFreeUser(account.uid, account.email),
+        priceShown: false,
+      });
+      if (!reservation.ok) {
+        sendEdit(reservation.reason === 'price_not_shown'
+          ? chatEditFreeUsedMessage(message, reservation.freePerDay)
+          : `Abhi picture badal nahi paayi 😔 — thodi der me dubara try karein.\n\n${imageGenGuidance()}`);
         return;
       }
+      const hold = reservation.hold;
+      let gate: Awaited<ReturnType<typeof gateToolAction>> | null = null;
+      if (!hold.counted) {
+        gate = await gateToolAction(account.uid, account.email, 'image', 'picture-editing');
+        if (!gate.allow) {
+          sendEdit(`Aaj ke liye aapki picture-editing limit poori ho gayi hai — kal phir se try karein.\n\n${imageGenGuidance()}`);
+          return;
+        }
+      }
       console.log(`[CHAT/IMAGE-EDIT] tier=${tier} editing an attached picture`);
-      const out = await runImageEdit(dataUrl, message);
-      if (out.blocked) {
-        sendEdit(POLLINATIONS_BLOCK_MESSAGE);
-      } else if (out.image) {
-        if (gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
-        sendEdit(`Ye rahi aapki badli hui picture 🎨\n\n${imageMarkdown(out.image, 'edited image')}\n\nAur kuch badalna ho to bata dein.\n\n${imageGenToolPointer()}`);
-      } else if (out.refusal) {
-        sendEdit(`${IMAGE_REFUSAL_MESSAGE}\n\n${imageGenGuidance()}`);
-      } else {
-        sendEdit(`Abhi picture badal nahi paayi 😔 — thodi der me dubara try karein.\n\n${imageGenGuidance()}`);
+      let delivered = false;
+      try {
+        const out = await runImageEdit(dataUrl, message);
+        if (out.blocked) {
+          sendEdit(POLLINATIONS_BLOCK_MESSAGE);
+        } else if (out.image) {
+          delivered = true;
+          await hold.settle();
+          if (gate?.allow && gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
+          sendEdit(`Ye rahi aapki badli hui picture 🎨\n\n${imageMarkdown(out.image, 'edited image')}\n\nAur kuch badalna ho to bata dein.\n\n${imageGenToolPointer()}`);
+        } else if (out.refusal) {
+          sendEdit(`${IMAGE_REFUSAL_MESSAGE}\n\n${imageGenGuidance()}`);
+        } else {
+          sendEdit(`Abhi picture badal nahi paayi 😔 — thodi der me dubara try karein.\n\n${imageGenGuidance()}`);
+        }
+      } finally {
+        if (!delivered) await hold.release('chat picture edit not delivered');
       }
       return;
     }

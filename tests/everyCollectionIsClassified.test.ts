@@ -50,6 +50,7 @@ const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' |
 
   job_leases:          { kind: 'platform', why: 'one doc per job id; a lease that expires by its own clock' },
   job_runs:            { kind: 'platform', why: 'one doc per scheduled job id: when it last ran (schedulerTick.ts, Q-159); replaced in place, no person in it' },
+  payment_reversal_cursors: { kind: 'platform', why: "one doc per store rail: the newest voided purchase already applied (playVoidedPurchases.ts, Q-690); a timestamp replaced in place, no person in it" },
   domain_autopublish:  { kind: 'platform', why: 'one once-only marker per connected domain: which app was auto-published to it and when (domainAutoPublish.ts, Q-163); no uid, replaced in place' },
   agentv3_build_leases: { kind: 'platform', why: 'one doc per BUILDING workspace, deleted when the build ends and stale after 90 s — holds a uid only while that build runs (workspaceBuildLease.ts)' },
   metrics_timeline:    { kind: 'platform', why: 'one doc per time bucket — see the SCALE-PLAN entry' },

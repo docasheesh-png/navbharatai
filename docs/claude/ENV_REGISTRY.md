@@ -4038,3 +4038,12 @@ the flag entries above promise.
   over several nights. **What to watch:** Cloud Run logs carry `[P-DATA.4] retention purge removed N expired record(s)`
   on a run that found something; nothing is logged when nothing had expired. To stop it, unset the key (or set `off`)
   and redeploy — the job is then not registered at all.
+
+### 2026-10-06 — the sleeping-database watch (Q-700)
+
+- `SUPABASE_PAUSE_WATCH` — **NOT set, and does not need to be: the watch is ON by default.** Only `off` stops it.
+  Read by `src/server/lib/supabasePauseWatch.ts`; the job is `supabase-pause-watch` (05:10 UTC, exclusive, so the
+  Q-159 Cloud Scheduler tick also runs it). It only READS each connected user's Supabase project state and tells the
+  owner once per episode when one is paused, failed or removed. **It never wakes a project** — only the owner's Wake
+  button in Settings → Database does (see `supabaseProjectState.ts` for why).
+

@@ -91445,6 +91445,40 @@ purge ever run? the Privacy Policy states retention windows as fact") are now en
 policy per run. **Watch for:** `[P-DATA.4] retention purge removed N expired record(s)` in the Cloud Run logs over the
 next nights; its absence on a busy collection (e.g. `server_logs` older than 30 days) would mean the job is not running.
 
+## 2026-10-06 — Q-700: a sleeping Supabase database is seen everywhere, and woken only by its owner's tap
+
+**Asked by the admin** ("backend hosting me abhi kya kya problem hai? … jo jo aap kar sakte ho, woh karo"). Of the
+backend-hosting problems listed, this was the one a session could fix without an admin decision or console work.
+
+**The problem.** Supabase pauses a FREE project after about a week without use. Every one-click database we create is
+a free project in the user's account, so the typical small site is exactly the app whose database falls asleep — and
+no code read a project's state after the day it was created. The live site kept opening with no data; Database
+Studio passed on Supabase's raw error; a build reused a sleeping database as if it were fine (and narrated an
+ATTACHED database as "created"); a new project stuck in INIT_FAILED was waited on for 3 minutes, then reported as
+"still starting up".
+
+**Class:** a provider-side state that breaks the user's app and that no code ever reads. **Fixed at every place the
+user meets the database:** settings card (list + Wake), Studio (`database-asleep`), build start (`DATABASE_ASLEEP`),
+reuse (`asleepNote`), creation (`waitUntilReady` fail-fast), and a daily owner notice (`supabase-pause-watch`, once
+per episode, tappable into Settings → Database). One vocabulary: `classifyProjectStatus` (a census fails any other
+file reading a status word itself).
+
+🔒 **Waking is never automatic.** Re-waking every pause would be a keep-alive that defeats Supabase's free-plan pause
+on purpose, and the cost of Supabase judging our OAuth app abusive would fall on every user's one-click database at
+once. Census: `restoreProject(` has exactly one caller, the Wake route, which checks ownership and `canWake` first.
+
+**Sibling found on the way (privacy):** `supabase_connections` — the user's encrypted Supabase grant, able to act in
+their own Supabase account — was in NO account-erase path. Now in `USER_SCOPED_COLLECTIONS`. The census missed it
+because it only reads EXPORTED collection constants; 58 private ones are invisible to it → **Q-701 (OPEN)**.
+
+**Lock:** `tests/aSleepingDatabaseIsSeenAndWokenOnlyByItsOwner.test.ts` (20 tests). Reversions: an automatic restore
+inside the watch → the one-caller census fails; the grant removed from the erase list → `everyCollectionIsClassified`
+fails. **Watch for, live:** a `[supabase-pause-watch]` log line once a paused project exists; the Wake button in
+Settings → Database. Kill switch `SUPABASE_PAUSE_WATCH=off`.
+
+**Still the admin's (from the same answer, recorded so tonight's discussion starts from facts):** D2 — a starter
+database on NavBharatAI's own Supabase org (ROADMAP §11, OPEN); the six `NAVBHARAT_RATE_*` keys and
+`NAVBHARAT_BILL_HOSTING`; deploying the Cloudflare Worker; then `NAVBHARAT_CLOUD_PUBLIC`. None of these was touched.
 ### 2026-10-06 — Play Console blocked the Android release: "Use alternative system pickers for photos / videos" (Q-697 ✅, Q-698 🟡, Q-699 OPEN)
 
 **Report:** an admin screenshot of Play Console → Publishing overview: "1 issue found — Use alternative system

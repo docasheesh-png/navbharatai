@@ -114,6 +114,15 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   /** An uploaded profile photo (profileAvatar.ts, 2026-10-01): one doc under the public creator code, holding `uid`. */
   { collection: 'profile_avatars', key: { field: 'uid' } },
   /**
+   * The user's Supabase grant (supabaseConnectionStore.ts) — doc id IS the uid. 🔴 It was in NO erase path
+   * until 2026-10-06: a deleted account left behind encrypted tokens that could still act inside the
+   * person's own Supabase account. Found while building the sleeping-database watch; the census could not
+   * see it because the collection name was a private constant (now exported).
+   */
+  { collection: 'supabase_connections', key: 'docId' },
+  /** What each owner was last told about a sleeping database (supabasePauseWatch.ts) — `userId` field. */
+  { collection: 'supabase_pause_notices', key: { field: 'userId' } },
+  /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *
    * It looks like it belongs here — it carries a uid — and adding it would feel like completing the

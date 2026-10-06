@@ -91322,7 +91322,7 @@ a CLASS, not one stale row.
 - **Honest limit:** the register catches a RESURRECTED row. A stale copy that downgrades a row which is still open
   (BLOCKED → OPEN, as Q-111 was) is not caught mechanically. The fresh-main rule is the guard for that half.
 
-## 2026-10-06 — Q-618: the production server no longer runs as root; #3565's rows closed (#NEXT)
+## 2026-10-06 — Q-618: the production server no longer runs as root; #3565's rows closed (#3566)
 
 #3565 merged (Q-683, Q-610, Q-690). Q-683 leaves the queue and is added to the closed-ID register. Q-610 and
 Q-690 are now 🟡 BLOCKED on one admin grant each: `roles/firebaserules.admin` for Cloud Build, and the Play

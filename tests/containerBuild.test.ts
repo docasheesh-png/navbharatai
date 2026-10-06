@@ -135,18 +135,28 @@ describe('buildAppContainer — honest at every branch, never throws', () => {
   const base = {
     token: 't', projectId: 'apps-prod', region: 'asia-south1', bucket: 'apps-prod_cloudbuild',
     service: 'mitrify-ab12', tag: '20260907', archive: Buffer.from('tar'), pollMs: 1, maxWaitMs: 1000,
+    buildServiceAccount: 'nbai-app-builder@apps-prod.iam.gserviceaccount.com',
+  };
+  const DIGEST = `sha256:${'b'.repeat(64)}`;
+  /** The two trusted calls after a successful build: delete the staged source, read the tag's digest. */
+  const afterBuild = (url: string, init: any, tagStatus = 200): Response | null => {
+    if (url.includes('storage/v1/b/') && init?.method === 'DELETE') return okRes({});
+    if (url.includes('artifactregistry.googleapis.com')) return okRes({ version: `x/versions/${DIGEST}` }, tagStatus);
+    return null;
   };
 
   it('uploads, builds, and returns the image it actually produced', async () => {
     let polls = 0;
     const res = await buildAppContainer(base, (async (url: any, init: any) => {
       if (String(url).includes('uploadType=media')) return okRes({});
+      const after = afterBuild(String(url), init); if (after) return after;
       if (init?.method === 'POST') return okRes({ metadata: { build: { id: 'b1', status: 'QUEUED' } } });
       polls += 1;
       return okRes({ id: 'b1', status: polls >= 2 ? 'SUCCESS' : 'WORKING' });
     }) as any, noSleep);
     expect(res.ok).toBe(true);
-    expect(res.ok && res.image).toBe('asia-south1-docker.pkg.dev/apps-prod/nbai-apps/mitrify-ab12:20260907');
+    // P0 2026-10-06: the image is PINNED TO ITS DIGEST, never the movable tag.
+    expect(res.ok && res.image).toBe(`asia-south1-docker.pkg.dev/apps-prod/nbai-apps/mitrify-ab12@${DIGEST}`);
     expect(res.ok && res.buildId).toBe('b1');
   });
 
@@ -198,6 +208,7 @@ describe('buildAppContainer — honest at every branch, never throws', () => {
     let polls = 0;
     const res = await buildAppContainer(base, (async (url: any, init: any) => {
       if (String(url).includes('uploadType=media')) return okRes({});
+      const after = afterBuild(String(url), init); if (after) return after;
       if (init?.method === 'POST') return okRes({ metadata: { build: { id: 'b3', status: 'WORKING' } } });
       polls += 1;
       if (polls === 1) return okRes({}, 503);          // a hiccup

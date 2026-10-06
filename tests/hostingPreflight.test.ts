@@ -14,6 +14,13 @@ import {
  */
 const ok = (id = 'x') => classifyResponse({ id, label: 'L', status: 200, body: null, apiName: 'A', role: 'R' });
 
+/** A project with BOTH dedicated identities configured (appsIdentity.ts, P0 2026-10-06). */
+const IDS = {
+  NAVBHARAT_APPS_PROJECT: 'apps-1',
+  NAVBHARAT_APPS_RUNTIME_SA: 'nbai-app-runtime@apps-1.iam.gserviceaccount.com',
+  NAVBHARAT_APPS_BUILD_SA: 'nbai-app-builder@apps-1.iam.gserviceaccount.com',
+};
+
 describe('🔒 isApiDisabled — a 403 is TWO different problems', () => {
   it('recognises a disabled API from the structured reason', () => {
     expect(isApiDisabled(403, { error: { details: [{ reason: 'SERVICE_DISABLED' }] } })).toBe(true);
@@ -156,7 +163,7 @@ describe('runHostingPreflight', () => {
 
   it('a fully working project reports ready', async () => {
     const r = await runHostingPreflight({
-      token: 't', env: { NAVBHARAT_APPS_PROJECT: 'apps-1' } as any, fetchImpl: answering(200, {}),
+      token: 't', env: IDS as any, fetchImpl: answering(200, {}),
     });
     expect(r.verdict).toBe('ready');
     expect(r.projectId).toBe('apps-1');
@@ -166,11 +173,12 @@ describe('runHostingPreflight', () => {
   it('🔒 every missing step is reported in ONE pass — not one deploy at a time', async () => {
     // The admin should leave the console having fixed everything, not return four times.
     const r = await runHostingPreflight({
-      token: 't', env: { NAVBHARAT_APPS_PROJECT: 'apps-1' } as any,
+      token: 't', env: IDS as any,
       fetchImpl: answering(403, { error: { details: [{ reason: 'SERVICE_DISABLED' }] } }),
     });
     expect(r.verdict).toBe('blocked');
-    expect(r.checks.filter((c) => c.state === 'failed').length).toBe(4);
+    // Four APIs + the two identities' existence checks (P0 2026-10-06).
+    expect(r.checks.filter((c) => c.state === 'failed').length).toBe(6);
   });
 
   it('the region and repo name in the remedy are the ones the engine really uses', async () => {
@@ -185,7 +193,7 @@ describe('runHostingPreflight', () => {
 
   it('a network failure is unknown, not a verdict on the admin\'s setup', async () => {
     const dead = (async () => { throw new Error('offline'); }) as unknown as typeof fetch;
-    const r = await runHostingPreflight({ token: 't', env: { NAVBHARAT_APPS_PROJECT: 'apps-1' } as any, fetchImpl: dead });
+    const r = await runHostingPreflight({ token: 't', env: IDS as any, fetchImpl: dead });
     expect(r.verdict).toBe('incomplete');
     expect(r.checks.filter((c) => c.state === 'failed').length).toBe(0);
   });

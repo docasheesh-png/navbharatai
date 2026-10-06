@@ -204,6 +204,11 @@ export interface ServiceSpecInput {
   envVars?: Array<{ key: string; value: string }>;
   /** Recorded on the service so the console, the reaper and any audit can tell whose app this is. */
   workspaceId: string;
+  /**
+   * The identity the container runs as — the dedicated, role-less runtime account (appsIdentity.ts).
+   * REQUIRED: omitting it is how every app ended up running as the project's default account.
+   */
+  serviceAccount: string;
 }
 
 /**
@@ -215,6 +220,8 @@ export interface ServiceSpecInput {
 export function buildServiceSpec(input: ServiceSpecInput): Record<string, unknown> {
   return {
     template: {
+      // 🔒 Never the default account: whatever this identity can do, every line of the user's code can do.
+      serviceAccount: input.serviceAccount,
       containers: [{
         image: input.image,
         resources: { limits: { cpu: HOSTING_CAPS.cpu, memory: HOSTING_CAPS.memory } },
@@ -509,13 +516,15 @@ export async function deployAppToCloudRun(
     appName?: string | null;
     /** The service this workspace ALREADY runs as (its deployment record). See `hostedServiceName`. */
     existingService?: string | null;
+    /** The dedicated runtime account (appsIdentity.ts). Required. */
+    serviceAccount: string;
     image: string;
     envVars?: Array<{ key: string; value: string }>;
   },
   fetchImpl: typeof fetch = fetch,
 ): Promise<HostingResult> {
   const service = hostedServiceName(opts.workspaceId, opts.appName, opts.existingService);
-  const spec = buildServiceSpec({ image: opts.image, envVars: opts.envVars, workspaceId: opts.workspaceId });
+  const spec = buildServiceSpec({ image: opts.image, envVars: opts.envVars, workspaceId: opts.workspaceId, serviceAccount: opts.serviceAccount });
   try {
     const create = buildCreateServiceRequest(opts.token, opts.projectId, opts.region, service, spec);
     let res = await fetchImpl(create.url, { method: create.method, headers: create.headers, body: create.body });

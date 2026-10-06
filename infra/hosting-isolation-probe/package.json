@@ -1,0 +1,11 @@
+{
+  "name": "nbai-hosting-isolation-probe",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hosted like any user app; proves from INSIDE the build and the runtime that neither identity can reach anything. See docs/HOSTING_ARCHITECTURE.md §11.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "postinstall": "node probe.js build",
+    "start": "node probe.js serve"
+  }
+}

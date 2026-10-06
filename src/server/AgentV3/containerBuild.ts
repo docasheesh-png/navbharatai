@@ -95,6 +95,12 @@ export interface CreateBuildInput {
   bucket: string;
   object: string;
   image: string;
+  /**
+   * The DEDICATED build account (appsIdentity.ts), as `projects/<p>/serviceAccounts/<email>`. Required: a
+   * build runs the app's own install scripts, and without this Cloud Build runs them as the project's
+   * default account.
+   */
+  serviceAccount: string;
 }
 
 /**
@@ -116,8 +122,36 @@ export function buildCreateBuildRequest(token: string, projectId: string, region
         args: ['build', input.image, `--builder=${BUILDPACKS_BUILDER}`, '--path=.', '--publish'],
       }],
       timeout: `${BUILD_TIMEOUT_SECONDS}s`,
+      // 🔒 Never the default account (appsIdentity.ts). A user-specified build account REQUIRES a logging
+      // choice; Cloud Logging only means no shared logs bucket either.
+      serviceAccount: input.serviceAccount,
+      options: { logging: 'CLOUD_LOGGING_ONLY' },
     }),
   };
+}
+
+/** Artifact Registry REST API. */
+export const ARTIFACT_REGISTRY_API = 'https://artifactregistry.googleapis.com/v1';
+
+/** Read one tag of one image — what it points at is the digest we deploy. PURE. */
+export function buildGetTagRequest(token: string, projectId: string, region: string, repo: string, pkg: string, tag: string): BuildRequest {
+  return {
+    url: `${ARTIFACT_REGISTRY_API}/projects/${projectId}/locations/${region}/repositories/${encodeURIComponent(repo)}/packages/${encodeURIComponent(pkg)}/tags/${encodeURIComponent(tag)}`,
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token.trim()}` },
+  };
+}
+
+/** The `sha256:…` digest a tag resource points at, or null. PURE. */
+export function digestFromTag(raw: unknown): string | null {
+  const v = raw && typeof raw === 'object' ? (raw as { version?: unknown }).version : null;
+  const m = /\/versions\/(sha256:[a-f0-9]{64})$/.exec(typeof v === 'string' ? v : '');
+  return m ? m[1] : null;
+}
+
+/** The image address pinned to a digest — immune to a tag being moved or overwritten. PURE. */
+export function imageByDigest(projectId: string, region: string, service: string, digest: string, repo = 'nbai-apps'): string {
+  return `${region}-docker.pkg.dev/${projectId}/${repo}/${service}@${digest}`;
 }
 
 export function buildGetBuildRequest(token: string, projectId: string, region: string, buildId: string): BuildRequest {
@@ -210,6 +244,8 @@ export async function buildAppContainer(
     tag: string;
     archive: Buffer;
     imageRepo?: string;
+    /** The dedicated build account's email (appsIdentity.ts). Required — see CreateBuildInput. */
+    buildServiceAccount: string;
     /** Bounded wait for the build. Never longer than the build's own timeout. */
     maxWaitMs?: number;
     pollMs?: number;
@@ -231,7 +267,10 @@ export async function buildAppContainer(
       };
     }
 
-    const create = buildCreateBuildRequest(opts.token, opts.projectId, opts.region, { bucket: opts.bucket, object, image });
+    const create = buildCreateBuildRequest(opts.token, opts.projectId, opts.region, {
+      bucket: opts.bucket, object, image,
+      serviceAccount: `projects/${opts.projectId}/serviceAccounts/${opts.buildServiceAccount}`,
+    });
     const createRes = await fetchImpl(create.url, { method: create.method, headers: create.headers, body: create.body as any });
     if (!createRes.ok) {
       return {
@@ -247,10 +286,35 @@ export async function buildAppContainer(
       return { ok: false, reason: 'refused', message: 'The build service accepted the request but did not say which build it started. Nothing was deployed.' };
     }
 
+    /**
+     * A finished build: PIN the image to its digest and remove the staged source.
+     *  • The deploy runs `image@sha256:…`, never the tag — a tag can be moved by anything holding push
+     *    rights to the shared repository (every build does), a digest cannot. An unreadable digest is a
+     *    refusal, not a fallback to the tag: deploying something we cannot identify is the failure mode.
+     *  • The staged source is deleted the moment the build is over, so another build's identity has no
+     *    window to read it (the daily sweep in imageCleanupSweep.ts remains the backstop).
+     */
+    const finishBuild = async (buildId: string): Promise<ContainerBuildResult> => {
+      const del = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(opts.bucket)}/o/${encodeURIComponent(object)}`;
+      await fetchImpl(del, { method: 'DELETE', headers: { Authorization: `Bearer ${opts.token.trim()}` } }).catch(() => null);
+      const repo = opts.imageRepo ?? 'nbai-apps';
+      const tagReq = buildGetTagRequest(opts.token, opts.projectId, opts.region, repo, opts.service, opts.tag);
+      const tagRes = await fetchImpl(tagReq.url, { method: tagReq.method, headers: tagReq.headers }).catch(() => null);
+      const digest = tagRes && tagRes.ok ? digestFromTag(await tagRes.json().catch(() => null)) : null;
+      if (!digest) {
+        return {
+          ok: false, reason: 'refused', buildId,
+          message: 'Your app was built, but the built image could not be identified exactly, so it was not deployed. Try publishing again.',
+          detail: `tag lookup ${tagRes ? `HTTP ${tagRes.status}` : 'unreachable'} for ${opts.service}:${opts.tag}`,
+        };
+      }
+      return { ok: true, image: imageByDigest(opts.projectId, opts.region, opts.service, digest, repo), buildId };
+    };
+
     const deadline = Date.now() + (opts.maxWaitMs ?? BUILD_TIMEOUT_SECONDS * 1000);
     let last: ParsedBuild = started;
     while (Date.now() < deadline) {
-      if (last.phase === 'success') return { ok: true, image, buildId: last.id };
+      if (last.phase === 'success') return await finishBuild(last.id);
       if (last.phase === 'failed') {
         return { ok: false, reason: 'build-failed', message: buildFailureMessage(last.phase, last.status), buildId: last.id, detail: last.detail || last.logUrl };
       }
@@ -261,7 +325,7 @@ export async function buildAppContainer(
       // A lost poll is not a failed build — keep the previous reading and try again inside the window.
       if (next) last = next;
     }
-    if (last.phase === 'success') return { ok: true, image, buildId: last.id };
+    if (last.phase === 'success') return await finishBuild(last.id);
     if (last.phase === 'failed') {
       return { ok: false, reason: 'build-failed', message: buildFailureMessage(last.phase, last.status), buildId: last.id, detail: last.detail || last.logUrl };
     }

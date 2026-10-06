@@ -16,19 +16,31 @@ async function pushFetch(url: string, init: RequestInit): Promise<Response> {
   }
 }
 
-/** Register (or refresh) this device's FCM token for the signed-in user. Best-effort: returns false
- *  instead of throwing, since registration is a background bootstrap step, never a user-facing action. */
-export async function registerDeviceToken(userId: string, token: string, platform: 'android' | 'ios' | 'web', appVersionCode?: number | null): Promise<boolean> {
+/**
+ * Register (or refresh) this device's FCM token, and say how it went: `status` is the server's HTTP
+ * status, or null when the request never reached it (offline, timeout). Never throws.
+ *
+ * The status is what makes a server-side refusal visible (2026-10-06, the push autopsy): a plain
+ * boolean made "our server said 401" and "the phone was offline" the same silent `false`, so the last
+ * link of the registration chain was the one link nobody could see.
+ */
+export async function registerDeviceTokenResult(userId: string, token: string, platform: 'android' | 'ios' | 'web', appVersionCode?: number | null): Promise<{ ok: boolean; status: number | null }> {
   try {
     const res = await pushFetch(`/api/push/${userId}/register-token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, platform, appVersionCode: appVersionCode ?? null }),
     });
-    return res.ok;
+    return { ok: res.ok, status: res.status };
   } catch {
-    return false;
+    return { ok: false, status: null };
   }
+}
+
+/** Register (or refresh) this device's FCM token for the signed-in user. Best-effort: returns false
+ *  instead of throwing, since registration is a background bootstrap step, never a user-facing action. */
+export async function registerDeviceToken(userId: string, token: string, platform: 'android' | 'ios' | 'web', appVersionCode?: number | null): Promise<boolean> {
+  return (await registerDeviceTokenResult(userId, token, platform, appVersionCode)).ok;
 }
 
 /** Unregister this device's token (e.g. on sign-out). Best-effort. */

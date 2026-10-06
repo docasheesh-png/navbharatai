@@ -18,6 +18,7 @@ import { Capacitor } from '@capacitor/core';
 import { isAppCheckProtected } from './appCheckRoutes';
 import { app } from './firebase';
 import { recordNonFatal } from './observability';
+import { iosBuildHasAppAttest } from './iosBuildCapabilities';
 
 export const APP_CHECK_HEADER = 'X-Firebase-AppCheck';
 /** The longest a request waits for a token. A request that waits longer goes without one. */
@@ -93,7 +94,7 @@ export function wrapFetchWithAppCheck(
 interface AppCheckWindow {
   fetch: typeof fetch;
   location: { origin: string };
-  Capacitor?: { isNativePlatform?: () => boolean };
+  Capacitor?: { isNativePlatform?: () => boolean; getPlatform?: () => string };
 }
 
 /** Read the published site key. null on any failure — an unreachable config means "App Check off". */
@@ -154,10 +155,16 @@ export function __resetAppCheckInstall(): void { installed = false; }
 export async function installAppCheck(
   w: AppCheckWindow = window as unknown as AppCheckWindow,
   deps: { loadNative?: () => Promise<NativeAppCheck | null> } = {},
-): Promise<'installed' | 'installed-native' | 'native-unavailable' | 'no-key' | 'failed' | 'already'> {
+): Promise<'installed' | 'installed-native' | 'native-unavailable' | 'not-in-build' | 'no-key' | 'failed' | 'already'> {
   if (installed) return 'already';
   try {
     if (w.Capacitor?.isNativePlatform?.()) {
+      // AN IPHONE BUILD SIGNED WITHOUT THE APP ATTEST ENTITLEMENT CANNOT ATTEST (iosBuildCapabilities.ts,
+      // the same class as the push failure of 2026-10-06). The native provider is App Attest on every
+      // iOS 14+ device, so starting it there only buys a failed attestation behind every guarded
+      // request — each of which then waits for a token that cannot come. Such a build sends no token,
+      // exactly as before; it simply stops asking.
+      if (w.Capacitor?.getPlatform?.() === 'ios' && !iosBuildHasAppAttest()) return 'not-in-build';
       // PHONE APPS — Play Integrity (Android) / App Attest (iOS). No site key: the provider is chosen by
       // the native SDK, and the device, not a web page, is what gets vouched for.
       const native = await (deps.loadNative ?? loadNativeAppCheck)();

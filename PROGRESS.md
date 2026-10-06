@@ -91378,6 +91378,55 @@ guessed keyword list.
   restored from git before any commit (its 3 cases pass), and the new test has its own name, written create-only.
 - Q-601 leaves the open table with this PR, and its ID is in the closed register.
 
+### 2026-10-06 — Crashlytics "Push registration failed" (iOS 1.0 (108), iPhone 15): the iPhone app used push its build was never signed with
+
+**Report:** Crashlytics non-fatal, `capacitor://localhost/assets/index-Dt-cGxOu.js — gt`, "[handled] Error: Push
+registration failed", 1 event, 1 user, iOS 26.6.1. The admin also pasted an external (ChatGPT) prompt, which was
+adapted rather than transcribed: no real-device claim is made from here.
+
+**Root cause (evidence, not theory):** iOS runs #108 and #109 skipped "Enable push-notifications entitlement
+(opt-in)", because `enable_push_notifications` defaults OFF until the Apple/Firebase setup is done. Without
+`aps-environment`, iOS never issues an APNs token, so `FirebaseMessaging.getToken()` can never succeed. Yet
+`pushNotifications.ts` still asked the user for permission and still asked for a token on every sign-in. The
+catch reported only `err.name`, which on Capacitor is "Error", so the cause was discarded.
+
+**Class:** an opt-in iOS capability that the build adds while the bundle assumes it is always there. The build
+never told the bundle what it was signed with.
+
+**Ledger:**
+- **Q-691 ✅** A build without push asked for permission and reported a certain failure.
+  - Fix: the same workflow input now stamps `VITE_IOS_PUSH`, read by the new `src/lib/iosBuildCapabilities.ts`, and the iOS path returns before any prompt.
+  - Test: "THE REPORTED CASE" in `pushNotifications.test.ts`. Reverting the gate made it fail.
+- **Q-692 ✅** The report could not tell permission, token, server and plugin failures apart.
+  - Fix: each step runs inside `atStage`, so the message is `Push registration failed at <stage>: <native cause>`, with keys `stage`, `platform` and `code`.
+  - The text still passes observability's sanitizer, and a test proves the token never appears in a report.
+  - Reverting to the name-only report failed 2 tests.
+- **Q-693 ✅ (latent; it would have bitten the first flag-ON build)** Capacitor 8.4.1's generated AppDelegate has no remote-notification callbacks, and the plugin learns the APNs token only from `.capacitorDidRegisterForRemoteNotifications`.
+  - Fix: the push step injects all three forwards, with a guard that fails the build if they are missing.
+  - The injection was run against the real template: it lands in the right place and is idempotent.
+  - A source guard fails if any forward is removed.
+  - A late APNs token is now handled correctly: the code waits once for the plugin's own retained `tokenReceived` event (20 s) and never calls `getToken` again. The test asserts one call.
+- **Q-694 ✅** The server refusing the token was a silent `false`.
+  - Fix: `registerDeviceTokenResult` returns the status, so a refusal is reported as "the server answered N" and an offline phone as "the request did not reach the server".
+- **Q-695 ✅ Siblings.**
+  - App Check started App Attest on iOS builds without the entitlement. It now returns `'not-in-build'` and never loads the plugin.
+  - The Fastfile's `sigh force:` covered Sign in with Apple and push but not App Attest. It now covers App Attest too.
+  - Sign in with Apple was reviewed and deliberately not stamped. It defaults ON, Guideline 4.8 keeps its button, and its failure message is already specific. The reason is recorded in the census test.
+  - The AppKnowledgeBase push entry claimed the App Store app sends pushes. It now says iPhone push is not switched on yet.
+- **Q-696 🟡 BLOCKED (admin):**
+  - the Apple Developer Push capability;
+  - an APNs `.p8` uploaded to Firebase Cloud Messaging;
+  - a flag-ON `.ipa`;
+  - the real-iPhone test (MOBILE_PUBLISHING.md §7.5 step 4).
+
+  The new AppDelegate code has never compiled in Xcode. The first flag-ON build is its first compile.
+
+**Class lock:** `tests/anIosCapabilityIsUsedOnlyWhenTheBuildHasIt.test.ts` holds three censuses, each proven by reversion:
+- every entitlement input is either stamped into the bundle or has its exemption recorded;
+- every opt-in entitlement forces a fresh provisioning profile;
+- every client module driving `@capacitor-firebase/messaging` or `@capacitor-firebase/app-check` imports the stamp.
+
+**What to watch:** the reported issue reaches iPhones only through a NEW `.ipa`, because the fix is frontend plus workflow. On a flag-OFF build the issue must stop appearing. On a flag-ON build any remaining failure names its stage.
 ---
 
 ## 2026-10-06 — Q-159 closed: the scheduler tick is live (admin console work)

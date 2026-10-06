@@ -12,7 +12,7 @@ Economics and plans are in `HOSTING_ECONOMICS_ROADMAP.md`. The product plan is i
 |---|---|---|
 | **Control plane** | Users, workspaces (apps), deployment registry, plans, quotas, wallet, billing sweeps, the deploy orchestration | The platform's Cloud Run service `navbharat-ai-prod` and Firestore, in GCP project `gen-lang-client-0866594388` |
 | **Data plane: static** | Built frontends | Firebase Hosting channels (`Deployment.ts`). A bucket plus Cloudflare Worker path is written but not deployed (`bucketPublish.ts`, `infra/cloudflare/mitrify-apps-worker.js`) |
-| **Data plane: servers** | User backends, one container each | Cloud Run in a **separate project**, `navbharatai-user-apps`, on a separate billing account (admin decision D4) |
+| **Data plane: servers** | User backends, one container each | Cloud Run in a **separate project**, `navbharatai-user-apps`, on a separate billing account (admin decision D4). Each container runs as the dedicated **role-less** runtime identity `NAVBHARAT_APPS_RUNTIME_SA` — never the default account (§11) |
 | **Data plane: data** | User databases, auth, files | The **user's own** Supabase project, created through OAuth (`supabaseProvision.ts`). The only exception is `window.NavData`: small quota-bound rows on our Firestore (`navStoreWebData.ts`) |
 | **Build / preview** | Untrusted generated code while it is being built | E2B sandboxes (`sandbox/EngineerAI/actuators/E2BActuator.ts`). Container images are built by Cloud Build **in the apps project** (`containerBuild.ts`) |
 
@@ -66,6 +66,7 @@ Every route that touches an app runs the same chain, in this order:
   These go on every service and are never unlimited.
 - **Source cap:** 40 MB packed (`NAVBHARAT_MAX_SOURCE_MB`). **Build cap:** 900 s (`BUILD_TIMEOUT_SECONDS`).
 - **Runtime user:** Google buildpacks run the app as the non-root `cnb` user. There is no Dockerfile from the user.
+- **Runtime identity:** a dedicated role-less service account. **Build identity:** a separate narrow one. Both are validated, and hosting is off without them (§11).
 - **Server-app cap:** `serverAppLimit`. Since 2026-10-06 it is enforced on the one server-publish path (§6).
 - **Not yet configurable per plan:** egress network restrictions, and a per-app request rate. See §9.
 
@@ -176,3 +177,102 @@ Nothing deletes the user's source files or their Supabase data.
 - **Up to the 1,000-service ceiling:** one region, one apps project. Inventory and reclaim keep dead services from eating the cap.
 - **Beyond it:** shard by apps project. `appsProject()` is the single resolver, so a second project is a routing change in one place, keyed by a stable function of the `workspaceId`.
 - **Always-on:** a paid tier with `minInstanceCount: 1` (ROADMAP §11 slice 7), never the default.
+
+---
+
+## 11. Trust boundaries and multi-tenant isolation (P0, 2026-10-06)
+
+### 11a. What was found (forensic, from the code)
+
+| Stage | Identity it ran as | What user code could take |
+|---|---|---|
+| Build (`containerBuild.ts`, Cloud Build) | **No `serviceAccount` given.** On a 2026 project, Cloud Build's default is the project's **default compute account** `219549203609-compute@developer.gserviceaccount.com` | `npm install` runs the app's own `preinstall` / `postinstall` scripts inside the build. Any of them can mint that account's token from the metadata server |
+| Runtime (`cloudRunHosting.ts`, Cloud Run) | **No `template.serviceAccount`.** So: the **same default compute account** | Any request handler can mint that token. The metadata server is always reachable from inside Cloud Run and cannot be firewalled |
+| Image | Deployed **by tag** | Anything holding push rights could move a tag |
+| Staged source | Left in the shared bucket until the daily sweep | Every app's source sat readable by the build account for up to a day |
+
+**Blast radius.** The runtime and the build shared one identity. So whatever a build needs — push to the shared repository `nbai-apps`, read the shared staging bucket — **every running user app held too**: every other app's images and source code. Worse: if the default account still held the **Editor** role (Google grants it unless an org policy forbids it, and this session cannot read the project's IAM), any app could also:
+- read every other app's environment, which means their secrets;
+- rewrite or delete every other app's service;
+- start builds on our bill.
+
+**Root cause.** Untrusted code ran under an identity chosen by default, not by design. Nothing named the identity, so nothing could restrict it.
+
+### 11b. The boundary now
+
+```
+CONTROL PLANE  (gen-lang-client-0866594388, identity 950841184325-compute@…)
+  orchestrates: uploads the source, starts the build AS the builder, deploys the service AS the runtime,
+  pins the digest, deletes the staged source.  User code NEVER runs here.
+        │  (iam.serviceAccountUser on both accounts — "actAs", nothing more)
+        ▼
+DATA PLANE  (navbharatai-user-apps)
+  ┌ BUILD  — NAVBHARAT_APPS_BUILD_SA  (narrow, shared by builds)
+  │   roles: Artifact Registry Writer on repo `nbai-apps` ONLY · Storage Object Viewer on the staging bucket ONLY
+  │          · Logs Writer at project level.  No Cloud Run, no Secret Manager, no IAM, no platform project.
+  └ RUNTIME — NAVBHARAT_APPS_RUNTIME_SA (ROLE-LESS, shared by every app)
+      roles: NONE, anywhere.  Its token opens nothing: not another app's service, image, source or secrets,
+      not the control plane.
+```
+
+**Why ONE role-less runtime account instead of one per app.**
+- A token with no permissions grants nothing. Sharing it across apps therefore shares nothing, and App A's compromise cannot reach App B.
+- An app's data lives in the user's **own** Supabase project, with credentials scoped to that one app (`secretScope.ts`).
+- An app's secrets are its own environment variables. Nothing in Google is granted to the app.
+- Per-app accounts would only matter if apps held per-app Google resources. They would also collide with the per-project service-account quota (100 by default) far below the 1,000-service ceiling.
+- **If per-app Google resources are ever added** (a bucket, a secret), they go through a **control-plane broker**: it authenticates the caller and returns a short-lived grant scoped to that one app. The runtime identity is never granted anything.
+
+**Enforced in code** (`appsIdentity.ts`, locked by `tests/userCodeNeverRunsAsTheDefaultIdentity.test.ts`):
+- Both accounts must be user-managed accounts **of the apps project**. Google default accounts are refused, and runtime ≠ build.
+- Without both, `hostingAvailability` and `hostAppOnNavBharatCloud` refuse. This **fails closed, for the admin too**.
+- The service spec carries `template.serviceAccount`; the build carries `serviceAccount` plus `CLOUD_LOGGING_ONLY`.
+- The deploy runs `image@sha256:…`, read from the tag right after the build. An unidentifiable image is never deployed.
+- The staged source is deleted as soon as its build ends. The daily sweep is the backstop.
+- Censuses: no other file builds a Cloud Run service template or a Cloud Build build.
+
+### 11c. Per-resource answers (threat model: App A is fully compromised)
+
+| A tries to… | Result, by design | Enforced by |
+|---|---|---|
+| Read/modify/delete B's Cloud Run service, or read B's env (secrets) | 403 | Runtime account has no `run.*` permissions |
+| Invoke B's service | Allowed. **Every hosted app is a public website** (`allUsers` invoker). This is not a privilege; it is what any visitor can do | — |
+| Read B's source (staging bucket) / pull or overwrite B's image | Runtime: 403. Build: see the residual risk below | Runtime account has no role; immutable tags + digest deploys |
+| Read Secret Manager | 403 (no secrets exist; the account has no role) | Runtime account has no role |
+| Reach the control plane (platform Firestore, Cloud Run, IAM) | 403 | Neither account has any role in the platform project |
+| Mint a token from the metadata server | Succeeds, **and the token opens nothing** | The account is role-less (the metadata server itself cannot be blocked) |
+| Reach B's database | Only with B's credentials, which only B's environment holds | `secretScope.ts`, `planBackendEnv` |
+| User A → User B logs / deployment / env / usage via our API | 403 | `assertVerifiedWorkspaceOwner` on every route, verified identity only |
+
+### 11d. Residual risk — honest
+
+- **Builds share one narrow identity.** During its own build, a malicious app's install script can use the builder's token to:
+  - **pull** other apps' images, i.e. read their built code;
+  - **read** any staged source that exists at that moment — only concurrent builds, because sources are now deleted right after each build.
+
+  It **cannot** overwrite a deployed image: tags are immutable, and deploys pin the digest.
+
+  **The fix:** a credential-less build step. The install and build run with **no** token (the metadata route is blocked from the build container); only a separate trusted step holds the push right. That needs a real Cloud Build prototype, verified against Google, before it can be claimed. **Until it exists, this stays an OPEN P1 before public launch.**
+- **Network egress is unrestricted.** Mining, spam and outbound attacks are bounded by `HOSTING_CAPS` (3 instances, 1 vCPU), the plan's server cap, takedown, and the outbound Web Risk re-scan. There is no egress allow-list.
+- **Verification of real IAM is not possible from the session.** The session has no gcloud, and the platform identity cannot read IAM policy. See 11f.
+
+### 11e. Migration of the existing apps — no breakage
+
+Hosting is admin-only today (`NAVBHARAT_CLOUD_PUBLIC` unset), so the only hosted services are the admin's test apps. In order:
+1. Create both accounts and grant only the roles in 11b. Set `NAVBHARAT_APPS_RUNTIME_SA` and `NAVBHARAT_APPS_BUILD_SA` in the platform's Cloud Run, and turn on immutable tags on `nbai-apps`.
+   - **Until this is done, hosting refuses** (fail closed). Already-running services keep serving as they are.
+2. Publish each existing hosted app again. It is rebuilt as the builder and redeployed as the runtime account, on the same service, by digest.
+3. Run `scripts/verifyHostingIsolation.sh`: every service must show the runtime account. Publish `infra/hosting-isolation-probe` and read `/` and `/build`.
+4. Only then **remove Editor from the default compute account** (`gcloud projects remove-iam-policy-binding … --role=roles/editor`).
+   - Do it *after* step 3, so a forgotten old service is found by the script, not by an outage.
+   - Never leave both the old broad access and the new identities in place indefinitely.
+
+### 11f. Verification (what counts as evidence)
+
+| Evidence | Covers | Who |
+|---|---|---|
+| `tests/userCodeNeverRunsAsTheDefaultIdentity.test.ts` (12 tests; 3 reversions proven) | The code always names the right identity, fails closed, and deploys by digest | CI |
+| `scripts/verifyHostingIsolation.sh` | The REAL IAM: role-less runtime, narrow builder, no Editor on the default account, every service on the runtime account, immutable tags, uniform bucket access, no keys | Admin, in Cloud Shell |
+| `infra/hosting-isolation-probe` (published like a user app) | From INSIDE the runtime and the build: every cross-tenant and control-plane call must be denied; `testIamPermissions` must return nothing on either project | Admin publishes; anyone reads `/` and `/build` |
+
+**Isolation counts as verified only when all three pass.**
+

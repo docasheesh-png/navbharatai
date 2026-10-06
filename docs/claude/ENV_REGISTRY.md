@@ -4047,3 +4047,15 @@ the flag entries above promise.
   owner once per episode when one is paused, failed or removed. **It never wakes a project** — only the owner's Wake
   button in Settings → Database does (see `supabaseProjectState.ts` for why).
 
+### 2026-10-06 — the two identities user code runs as (P0 hosting isolation)
+
+- `NAVBHARAT_APPS_RUNTIME_SA`: ⚠️ **NOT SET — and NavBharat Cloud hosting now REFUSES (admin included) until it is.**
+  It names the dedicated, **role-less** service account every hosted user app runs as. It must be an account of
+  `navbharatai-user-apps`, never a Google default. Suggested: `nbai-app-runtime@navbharatai-user-apps.iam.gserviceaccount.com`.
+- `NAVBHARAT_APPS_BUILD_SA`: ⚠️ **NOT SET — same refusal.** It names the dedicated build account. Roles:
+  Artifact Registry Writer on `nbai-apps` only, Storage Object Viewer on the staging bucket only, and Logs Writer.
+  It must differ from the runtime account. Suggested: `nbai-app-builder@navbharatai-user-apps.iam.gserviceaccount.com`.
+- Before these, every user app and build ran as the default compute account `219549203609-compute@developer…`.
+  Read by `src/server/AgentV3/appsIdentity.ts`. The full design, the setup steps and the verification are in
+  `docs/HOSTING_ARCHITECTURE.md` §11.
+

@@ -133,6 +133,7 @@ import { classifyChannels, channelCeilingVerdict, channelCap, isDefaultChannel }
 import { bucketOnlyPublishEnabled } from '../AgentV3/bucketOnlyPublish';
 import { GoogleAuth } from 'google-auth-library';
 import { classifyHostedServices, hostingCapacity } from '../AgentV3/hostedServiceInventory';
+import { takeAppOffline, type OfflineDeps } from '../AgentV3/hostedAppLifecycle';
 import {
   appsProject, appsRegion, buildListServicesRequest, parseServiceList, SERVICES_PER_PROJECT_CAP,
 } from '../AgentV3/cloudRunHosting';
@@ -255,6 +256,13 @@ function snapshotHealDeps(): HealDeps {
     clearSnapshot: (ws, url) => sandboxStore.clearSnapshot(ws, url),
   };
 }
+
+/** What `takeAppOffline` needs, wired to the real stores — shared by the ban and the admin unpublish. */
+const offlineDeps: OfflineDeps = {
+  deleteChannel: (workspaceId) => new FirebaseHostingDeployer().deleteChannel(workspaceId),
+  get: (workspaceId) => deploymentStore.get(workspaceId),
+  setStatus: (workspaceId, status) => deploymentStore.setStatus(workspaceId, status),
+};
 
 export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequestHandler): void {
   // Admin server-side login — issues the daily HMAC token used by verifyAdminToken.
@@ -2746,8 +2754,10 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       // Delete the live channel FIRST (real unpublish); idempotent (404 = already gone). If it throws
       // (e.g. missing IAM role), surface it honestly and do NOT claim the app was taken down.
-      await new FirebaseHostingDeployer().deleteChannel(workspaceId);
-      const marked = await deploymentStore.setStatus(workspaceId, 'taken_down');
+      // The static channel, then EVERY server of the workspace, then the status — one implementation for every
+      // offline path (hostedAppLifecycle.ts, 2026-10-06). A ban used to leave a NavBharat Cloud app answering at its
+      // run.app address. Throws — so nothing is marked — unless all of it is confirmed gone.
+      const marked = await takeAppOffline(workspaceId, 'taken_down', offlineDeps);
       audit('ADMIN_APP_TAKEDOWN', { admin: adminUsername(), workspaceId, reason, result: 'ok', ip: req.ip });
       /**
        * The 180-day record (IT Rules, 2021 Rule 3(1)(g)). Written only AFTER the channel is really
@@ -2804,8 +2814,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       // The live channel goes FIRST, exactly as the takedown does — the registry must never say a
       // site is offline while it is still serving. A throw here means we do NOT touch the status.
-      await new FirebaseHostingDeployer().deleteChannel(workspaceId);
-      const marked = await deploymentStore.setStatus(workspaceId, 'unpublished');
+      // Same rule as the ban: channel, every server, then the status (hostedAppLifecycle.ts).
+      const marked = await takeAppOffline(workspaceId, 'unpublished', offlineDeps);
       audit('ADMIN_APP_UNPUBLISH', { admin: adminUsername(), workspaceId, reason, result: 'ok', ip: req.ip });
       const owner = await deploymentStore.get(workspaceId).catch(() => null);
       await recordTakedown({

@@ -91537,7 +91537,7 @@ re-runs when the new bundle is added.
   - a 76% `utils.ts` rewrite;
   - 2 edit anchor misses.
 
-**Root causes fixed (rows Q-720 … Q-726, PR pending):**
+**Root causes fixed (rows Q-720 … Q-726, #3574):**
 
 1. **Q-720.** A helper the plan gave its own file was given a second home (`src/utils.ts`). The helpers had diverged: ₹ in one, $ in the other. Fix: `helperOwners`.
 2. **Q-721.** The salvage typecheck said "no errors" when the compiler had not run. Fix: the NOT-READY marker is now read as "never ran" in `tscNeverRan`. BR2-T fixed this class earlier, but missed this sibling.

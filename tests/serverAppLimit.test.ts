@@ -97,8 +97,12 @@ describe('WIRING — the catalogue number is what the gate enforces', () => {
 
   it('the route asks the gate, and refuses with a named reason rather than a generic 500', () => {
     const route = require('fs').readFileSync(require('path').join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
+    // Since 2026-10-06 on the ONE server-publish path (serverPublish.ts) — it used to live only on the
+    // uncalled /host-app route, so Publish never enforced it.
     expect(route).toContain('serverAppLimit({');
-    expect(route).toContain("reason: 'server_app_limit'");
+    const seq = require('fs').readFileSync(require('path').join(process.cwd(), 'src/server/AgentV3/serverPublish.ts'), 'utf8');
+    expect(seq).toContain("code: 'server_app_limit'");
+    expect(seq.indexOf('deps.serverCap(')).toBeLessThan(seq.indexOf('deps.store.claim('));
     // The count must come from the registry, not be assumed — an assumed zero spends the allowance
     // from scratch on every publish and makes the cap unreachable.
     expect(route).toContain('liveServerWorkspaceIdsFor(');

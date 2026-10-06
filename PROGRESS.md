@@ -91516,3 +91516,27 @@ on Android, so it always falls back to the share sheet.
 
 **What to watch:** the first `.aab`'s merged manifest must contain no `READ_MEDIA_*`. Play's check
 re-runs when the new bundle is added.
+
+### 2026-10-06 — CI red on every PR again at 17:14 UTC: one new npm advisory on a transitive package, fixed by one lockfile bump
+
+The audit gate went red on #3573 (hosting lifecycle) with nothing in that diff to blame — the same class as the
+01:47 UTC entry above: an advisory reached the npm registry after `main` a7d824bc went green. Reproduced on `main`
+with `npm audit --json`.
+
+| Package | Was → now | Advisory | How it reaches us |
+|---|---|---|---|
+| `@modelcontextprotocol/sdk` | 1.29.0 → 1.32.1 | GHSA-6qxp-vccf-f47h (high, CVSS 7.5) — the SDK's OAuth client could send credentials to an authorization server chosen by the MCP server; fixed in 1.31.0 | transitive only: `@google/genai` (`^1.25.2`) and `firebase-tools` (`^1.24.0`). NavBharatAI never calls the SDK's OAuth client; the bump closes the finding, not a live exposure |
+
+- **A real bump, not an allowlist row**: the fixed release sits inside both dependants' ranges, so `package.json`
+  is untouched and the lockfile moves exactly this one entry (`npm update @modelcontextprotocol/sdk
+  --package-lock-only`; verified no other `version` line changed). The package's own dependency list is the same
+  shape as 1.29.0's, so no new transitive package enters the tree.
+- **Gate on the bumped tree** (the CI list, re-read from `ci.yml`): audit gate, license gate, both typechecks,
+  no-unused-imports, native-shell guard, `npm run build`, bundle budget, boot smoke-check, server
+  production-dependency gate, and the dependency test files.
+- **Class, not instance**: this is the fifth time in a week that a freshly published advisory has turned every open
+  PR red (#3421 `@grpc/grpc-js` 2026-09-30, #3464 `basic-ftp` 2026-10-01, #3476 four advisories 2026-10-04, #3563 five
+  advisories 2026-10-06 01:47, and this one at 17:14). The gate is doing its job; the cost is that the
+  merging session must notice a red PR is not the PR's own. A standing recommendation for the admin, not built
+  here: a scheduled `npm audit` on `main` (daily, before India's working hours) that opens the bump PR itself,
+  so the first red is the fix PR and never somebody else's.

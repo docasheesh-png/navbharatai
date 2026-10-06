@@ -59,6 +59,7 @@ import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeC
 import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eAutoScaffold';
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice, simulatedDataSubjectLabel, simulatedResultIssues, simulatedResultNotice } from '../AgentV3/AuthenticityAnalysis';
+import { findBrowserAiKeyUse, browserAiKeyReportLine } from '../AgentV3/browserAiKeyScan';
 import { findFakeFeatures, fakeFeatureNotice, fakeFeatureReportLine, impliedRequirementsFor, noFakeFeaturesEnabled, withHonestyBanner, type FakeFeatureFinding } from '../AgentV3/fakeFeatureScan';
 import { loadedFindings } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
@@ -12796,7 +12797,9 @@ async function noteBuildOutcome(
             decidedBilledUsd: decided.effectiveBilledUsd,
             realCostUsd: decided.realCostUsd,
             sandboxUsd: decided.sandboxUsd,
-            previewProven: buildObs.previewRendered === true,
+            // The same fact the settle reads (Q-727 = b): the final check's flag OR an in-build green pass
+            // in the evidence ledger.
+            previewProven: buildObs.previewRendered === true || (buildDiagRef ? renderProvenInLedger(buildDiagRef.evidenceLedger()) : false),
             // Absent ⇒ false ⇒ the rule stands down, which is the direction that cannot over-charge.
             expectsArtifacts: billingCtx.expectsArtifacts === true,
             enabled: markupNeedsPreview(),
@@ -23457,6 +23460,19 @@ async function noteBuildOutcome(
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 
+      // ⛔ AN AI KEY IN THE PAGE (autopsy e52cebbf, Q-730). Browser code this build wrote calls an AI provider
+      // directly, so the provider key lives where every visitor can read it. The builder was told while the
+      // file was open (ToolDispatcher); this is the report's record, on any build that wrote — the reported
+      // one was stopped by the user, and the key box was already on its screen. See browserAiKeyScan.ts.
+      try {
+        if (!isImportTurn && writtenFiles.size > 0) {
+          const aiKeyHits = findBrowserAiKeyUse(Object.fromEntries(writtenFiles));
+          if (aiKeyHits.length > 0) {
+            buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'AI_KEY_IN_BROWSER', autoResolved: false, message: browserAiKeyReportLine(aiKeyHits).slice(0, 900) });
+          }
+        }
+      } catch { /* a report line is best-effort — it must never break the build */ }
+
       // 🤖 A CHAT SOLD AS AN ASSISTANT MUST BE ONE — OR SAY IT IS NOT (autopsy 466c260a). The sibling of
       // the block above for a made-up MIND: assistant-side messages in an app that makes no network or
       // AI call anywhere can only be fixed text. Checked first on this turn's writes (free), then
@@ -24667,6 +24683,10 @@ async function noteBuildOutcome(
                 // THE THIRD MEANING OF "not green" — see the field's own docblock. A turn that wrote
                 // nothing has no changes to keep, lose or verify, and the guard must not say it does.
                 filesWrittenThisTurn: writtenFiles.size,
+                // Q-728: "could not be opened" is false when nothing changed since the in-build render,
+                // or when the user stopped the build before anyone tried.
+                writesAfterGreen: inBuildGreenAt > 0 ? postGreenWrites.length : undefined,
+                stoppedByUser: abortCauseOf(abort.signal) === 'user-stop',
               });
               buildDiag.record({
                 phase: 'build', severity: 'info', code: `GREEN_GUARD_${decision.action.toUpperCase()}`,
@@ -25005,15 +25025,21 @@ async function noteBuildOutcome(
        * failed" (`zeroBillForUnrenderedPreview`) and not "the build failed" (`zeroBillForFailedBuild`),
        * but "we never managed to look" — which is what billed ₹613 on a build whose gate said UNKNOWN.
        */
+      /**
+       * 🔒 ONE FACT FOR EVERY BILL: "was the app seen running in a real browser during this build?"
+       * (admin 2026-10-06, Q-727 = b). The final check's flag OR the evidence ledger's in-build green
+       * pass — build e52cebbf rendered at the in-build check and was stopped before the final one, and
+       * was billed as an app that never ran. Both money rules read this one name, never their own copy.
+       */
+      const appSeenRunningForBill = buildObs.previewRendered === true || renderProvenNow();
       const markupDecision = decideMarkupOnProof({
         decidedBilledUsd: effectiveBilledUsd,
         realCostUsd: decidedRealCostUsd,
         sandboxUsd: decidedSandboxUsd,
-        previewProven: buildObs.previewRendered === true,
+        previewProven: appSeenRunningForBill,
         expectsArtifacts,
         enabled: markupNeedsPreview(),
         awaitingShell: moduleAwaitsShell,
-        renderSeenInBuild: buildObs.previewRendered !== true && renderProvenNow(),
       });
       /**
        * 🔴 A MONEY STATEMENT IS MADE ONCE, AFTER THE MONEY IS FINAL (autopsy 586295b7, 2026-09-20).
@@ -25230,14 +25256,13 @@ async function noteBuildOutcome(
       const cancelBill = (process.env.AGENTV3_BILL_CANCELLED ?? '').trim().toLowerCase() !== 'off'
         ? decideCancelledBuildBill({
           abortCause: abortCauseOf(abort.signal),
-          renderSeenInBuild: buildObs.previewRendered !== true && renderProvenNow(),
           filesWritten: writtenFiles.size,
           // Our own template, untouched, is not the user's app — see `preseededUnchanged`. A scaffold
           // file the builder REWROTE has different content and so is correctly counted as delivered.
           // ⚠️ `writtenFiles` itself is deliberately NOT filtered: `shouldRetryEmptyBuild` and the
           // render rescue both read its size and mean something different by it.
           preseededUnchanged: [...preseededGolden].filter(([p, c]) => writtenFiles.get(p) === c).length,
-          appRendered: buildObs.previewRendered === true,
+          appRendered: appSeenRunningForBill,
           // An unverified EDIT may have left the user's working app worse than it started — see
           // `editingExistingApp` (autopsy 95598899). Read after appRendered, so a verified edit is
           // still charged in full.
@@ -25246,7 +25271,7 @@ async function noteBuildOutcome(
           // 🔒 THE TWO DISCOUNTS DO NOT STACK (admin 2026-09-21). `effectiveBilledUsd` has already
           // had the service margin WAIVED a few lines above whenever the app was never seen running
           // — and that is the only state in which the half-off band is reachable at all, because
-          // both rules read the same `buildObs.previewRendered`. Halving a margin-free bill charges
+          // both rules read the same `appSeenRunningForBill`. Halving a margin-free bill charges
           // the user less than the build cost US, on every stopped build. These two numbers floor it
           // at our real cost: a cancellation may take our margin, never our cost.
           realCostUsd: decidedRealCostUsd,

@@ -20,6 +20,9 @@ import { decideCancelledBuildBill } from '../src/server/AgentV3/cancelledBuildBi
 import { findUiElements, type ScannedElement } from '../src/server/AgentV3/UiElementFinder';
 import { NO_FAKE_FEATURE_RULE } from '../src/server/AgentV3/noEvalRule';
 import type { AbortCause } from '../src/server/AgentV3/buildAbortCause';
+import { decideGreenGuard } from '../src/server/AgentV3/GreenGuard';
+import { BuildDiagnostics, narrationIsProbeMiss } from '../src/server/AgentV3/BuildDiagnostics';
+import { findBrowserAiKeyUse, browserAiKeyWriteNote, isBrowserSource } from '../src/server/AgentV3/browserAiKeyScan';
 
 const read = (p: string) => readFileSync(resolve(__dirname, '..', p), 'utf8');
 const route = read('src/server/routes/agentv3.ts');
@@ -157,20 +160,30 @@ describe('5 · a build the user stopped is not a failed build', () => {
   });
 });
 
-describe('6 · the bill\'s sentence does not deny a render the ledger saw', () => {
-  it('the margin waiver says the app rendered when it did', () => {
-    const d = decideMarkupOnProof({ decidedBilledUsd: 1.4, realCostUsd: 0.34, sandboxUsd: 0.01, previewProven: false, expectsArtifacts: true, renderSeenInBuild: true });
-    expect(d.reason).toMatch(/^The app rendered in a real browser during this build/);
-    expect(d.userMessage).toMatch(/Your app was running during this build/);
-    expect(d.billedUsd).toBeCloseTo(0.35); // the money is unchanged — that decision is the admin's
+describe('6 · a stop after the app rendered in a real browser is billed as a working app (admin, Q-727 = b)', () => {
+  const facts = { abortCause: 'user-stop' as AbortCause, filesWritten: 12, decidedBilledUsd: 1.4, realCostUsd: 0.34 };
+
+  it('every money site reads ONE fact: the final check OR the ledger\'s in-build green pass', () => {
+    expect(route).toContain('const appSeenRunningForBill = buildObs.previewRendered === true || renderProvenNow();');
+    expect(route).toContain('previewProven: appSeenRunningForBill,');
+    expect(route).toContain('appRendered: appSeenRunningForBill,');
+    // The watchdog decides the same build's bill on a long run, so it reads the same ledger.
+    expect(route).toContain('previewProven: buildObs.previewRendered === true || (buildDiagRef ? renderProvenInLedger(buildDiagRef.evidenceLedger()) : false),');
+    // No money site still reads the final-check flag alone.
+    expect(route).not.toMatch(/previewProven: buildObs\.previewRendered === true,/);
+    expect(route).not.toMatch(/appRendered: buildObs\.previewRendered === true,\s*\/\/ An unverified EDIT/);
   });
 
-  it('the cancelled-build reason says so too, and the amount is the same as without it', () => {
-    const facts = { abortCause: 'user-stop' as AbortCause, filesWritten: 12, appRendered: false, decidedBilledUsd: 0.35, realCostUsd: 0.34 };
-    const seen = decideCancelledBuildBill({ ...facts, renderSeenInBuild: true });
-    const unseen = decideCancelledBuildBill(facts);
-    expect(seen.reason).toMatch(/after the app had rendered in a real browser/);
-    expect(seen.billedUsd).toBe(unseen.billedUsd);
+  it('seen running ⇒ the markup is kept and the stop is charged as a working app', () => {
+    expect(decideMarkupOnProof({ decidedBilledUsd: 1.4, realCostUsd: 0.34, previewProven: true, expectsArtifacts: true }).billedUsd).toBe(1.4);
+    const bill = decideCancelledBuildBill({ ...facts, appRendered: true });
+    expect(bill.delivery).toBe('working-app');
+    expect(bill.billedUsd).toBe(1.4);
+  });
+
+  it('never seen running ⇒ unchanged: margin waived, files-saved rule', () => {
+    expect(decideMarkupOnProof({ decidedBilledUsd: 1.4, realCostUsd: 0.34, previewProven: false, expectsArtifacts: true }).billedUsd).toBeCloseTo(0.34);
+    expect(decideCancelledBuildBill({ ...facts, decidedBilledUsd: 0.34, appRendered: false }).delivery).toBe('files-saved');
   });
 });
 
@@ -192,5 +205,90 @@ describe('7 · asked for an input, the finder returns the input', () => {
     const scan = read('src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts');
     expect(scan).toContain("e.labels&&e.labels[0]&&e.labels[0].textContent");
     expect(scan).toContain('inputType:isCtl?');
+  });
+});
+
+describe('8 · the green guard does not say "could not be opened" about a stopped, unchanged app (Q-728)', () => {
+  const base = { before: { green: true, at: 2_000 }, turnStartedAt: 1_000, after: { green: false }, hasSnapshot: true, provenBroken: false, filesWrittenThisTurn: 14 };
+
+  it('nothing written after the in-build render ⇒ "the saved files are the version that rendered"', () => {
+    const d = decideGreenGuard({ ...base, writesAfterGreen: 0, stoppedByUser: true });
+    expect(d.action).toBe('none');
+    expect(d.reason).toMatch(/^Nothing was written after the app rendered earlier in this build/);
+    expect(d.reason).not.toMatch(/could not be opened/);
+  });
+
+  it('a stop with writes after the render says it was stopped, not that opening failed', () => {
+    const d = decideGreenGuard({ ...base, writesAfterGreen: 3, stoppedByUser: true });
+    expect(d.reason).toMatch(/^The build was stopped before/);
+    expect(d.reason).not.toMatch(/could not be opened/);
+  });
+
+  it('without the new facts the old wording stands, and a render from an earlier build never claims "unchanged"', () => {
+    expect(decideGreenGuard(base).reason).toMatch(/could not be opened/);
+    expect(decideGreenGuard({ ...base, before: { green: true, at: 500 }, writesAfterGreen: 0 }).reason).toMatch(/could not be opened/);
+  });
+
+  it('the route passes both facts', () => {
+    expect(route).toContain('writesAfterGreen: inBuildGreenAt > 0 ? postGreenWrites.length : undefined,');
+    expect(route).toContain("stoppedByUser: abortCauseOf(abort.signal) === 'user-stop',\n              });");
+  });
+});
+
+describe('9 · the model describing its own missed selector is not an engine error (Q-729)', () => {
+  // The exact narration from build b4745cb1.
+  const REAL = 'The add-transaction form is visible and the app rendered with no console errors, but the form field selector timed out, likely because the placeholder isn\'t exactly as expected. Let me inspect the actual inputs.';
+  const severityOf = (line: string) => {
+    const d = new BuildDiagnostics({ now: () => 1 });
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: line, ts: 1 } as never);
+    return d.report().issues.find((i) => i.code === 'AGENT_NOTE')?.severity;
+  };
+
+  it('the real line is a warning (a struggle point), not an error', () => {
+    expect(narrationIsProbeMiss(REAL)).toBe(true);
+    expect(severityOf(REAL)).toBe('warning');
+  });
+
+  it('an engine failure stays an error, even beside a missed selector', () => {
+    expect(severityOf('The dev server failed to start — port 5173 error.')).toBe('error');
+    expect(narrationIsProbeMiss('The dev server failed to start and the selector timed out.')).toBe(false);
+    expect(severityOf('npm install failed with an error.')).toBe('error');
+  });
+});
+
+describe('10 · an AI provider called from the page is caught, wherever it was written (Q-730)', () => {
+  // The shape build e52cebbf wrote: a key from localStorage, sent from the page to the provider.
+  const PAGE = [
+    "const key = localStorage.getItem('openai-api-key') || '';",
+    "const res = await fetch('https://api.openai.com/v1/chat/completions', {",
+    "  method: 'POST', headers: { Authorization: `Bearer ${key}` },",
+  ].join('\n');
+
+  it('the page that calls the provider is found, with its line', () => {
+    expect(findBrowserAiKeyUse({ 'src/lib/openai.ts': PAGE })).toEqual([
+      { file: 'src/lib/openai.ts', line: 2, shape: 'provider-host', snippet: "const res = await fetch('https://api.openai.com/v1/chat/completions', {" },
+    ]);
+  });
+
+  it('a browser SDK client and a bundled provider key are the same defect', () => {
+    expect(findBrowserAiKeyUse({ 'src/ai.ts': 'new OpenAI({ apiKey, dangerouslyAllowBrowser: true })' })[0]?.shape).toBe('browser-sdk');
+    expect(findBrowserAiKeyUse({ 'src/ai.ts': 'const k = import.meta.env.VITE_OPENAI_API_KEY;' })[0]?.shape).toBe('bundled-key');
+  });
+
+  it('server code, tests and our own keyless client are never flagged', () => {
+    for (const f of ['server/lib/ai.ts', 'api/chat.ts', 'src/pages/api/chat.ts', 'app/api/chat/route.ts', 'src/ai.test.ts', 'supabase/functions/ai/index.ts']) {
+      expect(isBrowserSource(f)).toBe(false);
+    }
+    expect(isBrowserSource('src/api/client.ts')).toBe(true);
+    for (const provider of ['navbharat', 'openai', 'anthropic'] as const) {
+      expect(findBrowserAiKeyUse(generateAiIntegration(provider).files)).toEqual([]);
+    }
+  });
+
+  it('the builder hears it with the file open, and the report records it', () => {
+    expect(browserAiKeyWriteNote('src/lib/openai.ts', PAGE)).toMatch(/AI KEY IN THE PAGE — src\/lib\/openai\.ts:2/);
+    expect(browserAiKeyWriteNote('src/lib/ai.ts', generateAiIntegration('navbharat').files['src/lib/ai.ts'])).toBe('');
+    expect(read('src/server/AgentV3/ToolDispatcher.ts')).toContain('security += browserAiKeyWriteNote(p, files[p]);');
+    expect(route).toContain("code: 'AI_KEY_IN_BROWSER'");
   });
 });

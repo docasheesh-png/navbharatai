@@ -117,6 +117,7 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER,
 } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
+import { browserAiKeyWriteNote } from './browserAiKeyScan';
 import { uploadStorageWriteNote } from './browserFileStore';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
@@ -3658,6 +3659,8 @@ export class ToolDispatcher {
       // A login / payment / OTP / email that only pretends (admin 2026-10-04, NO FAKE BUTTON) — said while
       // the file is open, where the real provider is cheapest to wire. Kill switch AGENTV3_NO_FAKE_FEATURES=off.
       try { if (noFakeFeaturesEnabled()) security += fakeFeatureWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // An AI provider called from the page with a key the page must hold (autopsy e52cebbf, Q-730).
+      try { security += browserAiKeyWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
       // An uploaded file read into text, headed for a store that holds 5 MB (autopsy 68f0a486, Q-542) — once per
       // build, with the IndexedDB file store the right fix needs, while the file is still open.
       if (!this._uploadStorageNoted) {

@@ -16,7 +16,7 @@
 
 import { WebSearch, formatSearchResults } from '../AgentV3/WebSearch';
 import { webFetchUrl, capText } from '../AgentV3/webFetch';
-import { liveDataContext } from './liveDataSources';
+import { liveDataContext, liveTopicCovered } from './liveDataSources';
 
 /** Fresh-fact signals in English + Hindi/Hinglish. Kept deliberately specific to avoid over-searching. */
 const FRESH_SIGNAL =
@@ -172,8 +172,34 @@ export async function liveSearchContext(message: string, opts: LiveSearchOptions
   // ordinary search below runs, exactly as before.
   const live = opts.liveData ?? ((m: string) => liveDataContext(m, { now: opts.now }));
   const liveBlock = await live(message).catch(() => '');
-  if (liveBlock) return liveBlock;
+  if (liveBlock) {
+    // ONE SOURCE'S ANSWER IS NOT THE WHOLE ANSWER (Q-601, 2026-10-06). "delhi ka mausam aur aaj gold
+    // rate" got the weather and lost the gold rate: no live source serves gold, and a live block used to
+    // skip the search outright. A clause that needs today's facts and that no live source would take
+    // (the sources' own gates, `liveTopicCovered`) is searched on its own, and both blocks go back.
+    // A message every clause of which a source covers still never searches — the fast path stays fast.
+    const uncovered = uncoveredLiveClauses(message);
+    if (uncovered.length === 0) return liveBlock;
+    const searched = await searchBlock(uncovered.join('; '), opts);
+    return searched ? `${liveBlock}\n\n${searched}` : liveBlock;
+  }
+  return searchBlock(message, opts);
+}
 
+/**
+ * The clauses of a message that need live facts but that no live source would answer. PURE + exported
+ * for testing. A clause is what the user joined with "aur" / "and" / "और" / "tatha" / "plus", a question
+ * mark or a semicolon — the joins a person uses to ask two things at once.
+ */
+export function uncoveredLiveClauses(message: string): string[] {
+  return String(message ?? '')
+    .split(/\s+(?:aur|and|tatha|evam|plus)\s+|\s*और\s*|[?;]+/i)
+    .map((c) => c.trim())
+    .filter((c) => c.length >= 3 && needsLiveSearch(c) && !liveTopicCovered(c));
+}
+
+/** The web-search block for `message` — the ordinary path, and the uncovered half of a two-part question. */
+async function searchBlock(message: string, opts: LiveSearchOptions): Promise<string> {
   const limit = Math.max(1, Math.min(opts.limit ?? 5, 10));
   const client = opts.client ?? new WebSearch();
   const query = shapeSearchQuery(message, opts.now ?? new Date());

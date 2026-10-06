@@ -91444,3 +91444,41 @@ already on `main`, the 180-day build-report window (Q-134) and every published r
 purge ever run? the Privacy Policy states retention windows as fact") are now enforced, bounded at 500 deletions per
 policy per run. **Watch for:** `[P-DATA.4] retention purge removed N expired record(s)` in the Cloud Run logs over the
 next nights; its absence on a busy collection (e.g. `server_logs` older than 30 days) would mean the job is not running.
+
+### 2026-10-06 — Play Console blocked the Android release: "Use alternative system pickers for photos / videos" (Q-697 ✅, Q-698 🟡, Q-699 OPEN)
+
+**Report:** an admin screenshot of Play Console → Publishing overview: "1 issue found — Use alternative system
+pickers for photos / videos" (Policy), which blocks sending changes for review.
+
+**Root cause:** `android/app/src/main/AndroidManifest.xml` declared `READ_MEDIA_IMAGES` and `READ_MEDIA_AUDIO`
+"for file uploads". Play allows broad photo and video access only to apps whose core purpose needs the gallery.
+Nothing in the app used either permission:
+- uploads are the WebView's `<input type="file">`, which Capacitor opens with the system picker
+  (`ACTION_GET_CONTENT`; the picked file comes with its own grant);
+- camera capture uses `CAMERA` plus the FileProvider;
+- `@capacitor-community/media` asks for media access only in `androidGalleryMode`, which is not enabled.
+
+No native dependency's manifest declares them either (checked: only `POST_NOTIFICATIONS`, from messaging).
+
+**Class:** the Play-restricted permission list guarded only the apps NavBharatAI BUILDS
+(`nativeCapabilities.ts`). NavBharatAI's own manifest was never checked against it.
+
+**Fix (Q-697):**
+- The two grants are removed.
+- `tools:node="remove"` markers for READ_MEDIA_IMAGES, READ_MEDIA_VIDEO and READ_MEDIA_VISUAL_USER_SELECTED stop
+  any library from merging them back.
+- `PLAY_RESTRICTED_ANDROID_PERMISSIONS` is now one exported list, used by both the user-app registry test and the
+  new `tests/playRestrictedPermissionsStayOut.test.ts`.
+- The new test runs three censuses: the app manifest grants none of the list; every native dependency's manifest
+  that declares one is stripped; capacitor.config never turns on the media plugin's gallery mode. Each was proven
+  by reversion (4 reversions, 4 failures).
+- The user-app sibling was checked: the camera plugin's own manifest (7.0.5, downloaded) declares no permission.
+
+**Q-698 🟡 (admin):** build a new `.aab` from `main`, put it in every active track, and answer the
+photo/video declaration if Play still shows it.
+
+**Q-699 OPEN, found on the way:** Android "Save to Photos" has never saved. Plugin 9.x needs `albumIdentifier`
+on Android, so it always falls back to the share sheet.
+
+**What to watch:** the first `.aab`'s merged manifest must contain no `READ_MEDIA_*`. Play's check
+re-runs when the new bundle is added.

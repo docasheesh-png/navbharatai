@@ -30,6 +30,19 @@
 
 import { withoutMachineText } from '../lib/machineText';
 
+/**
+ * Android permissions Google Play restricts to apps whose core purpose needs them — requesting one
+ * without that purpose blocks the release in Play Console. ONE list for both the apps NavBharatAI
+ * builds (this registry) and NavBharatAI's own Android app (tests/playRestrictedPermissionsStayOut):
+ * the own app was never checked against it, and on 2026-10-06 its READ_MEDIA_IMAGES blocked a release.
+ */
+export const PLAY_RESTRICTED_ANDROID_PERMISSIONS: readonly string[] = [
+  'READ_SMS', 'RECEIVE_SMS', 'READ_CALL_LOG', 'WRITE_CALL_LOG', 'PROCESS_OUTGOING_CALLS',
+  'READ_MEDIA_IMAGES', 'READ_MEDIA_VIDEO', 'READ_MEDIA_VISUAL_USER_SELECTED',
+  'MANAGE_EXTERNAL_STORAGE', 'SCHEDULE_EXACT_ALARM', 'USE_EXACT_ALARM', 'ACCESS_BACKGROUND_LOCATION',
+  'BIND_ACCESSIBILITY_SERVICE', 'QUERY_ALL_PACKAGES', 'REQUEST_INSTALL_PACKAGES', 'USE_FULL_SCREEN_INTENT',
+];
+
 /** The Capacitor major every version in this table was verified against. */
 export const REGISTRY_CAPACITOR_MAJOR = 7;
 /** The exact Capacitor 7 core the builder installs beside a plugin (latest 7.x on 2026-09-27). */

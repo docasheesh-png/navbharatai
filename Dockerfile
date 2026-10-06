@@ -84,6 +84,23 @@ COPY --from=builder /app/dist ./dist
 
 ENV PORT=8080
 
+# THE SERVER DOES NOT RUN AS ROOT (queue row Q-618, forensic audit 2026-10-04; admin 2026-10-06 "ok banao").
+# `node:22-slim` ships an unprivileged `node` user (uid 1000, HOME=/home/node). Everything copied above stays
+# owned by root, so the running server can READ its code and assets but cannot rewrite them: a remote-code
+# bug can no longer replace dist/server.cjs or a module in node_modules for the next request.
+#
+# What the server writes, audited 2026-10-06 (every fs/child_process site in server.ts + src/server):
+#   - os.tmpdir() (zip uploads, preview bundles, materialised workspaces) — /tmp is writable by `node`.
+#   - npm's own logs under $HOME/.npm — /home/node belongs to `node`.
+#   - /app/job_storage (LocalFileJobStore) — a dev-only store; its boot mkdir is caught and no production
+#     route writes a job file, so a refused mkdir changes nothing.
+#   - The local-actuator fallback (only when no E2B key and no Docker) writes under WORKSPACES_ROOT, which
+#     defaulted to /workspaces — a directory only root can create. It now points into /tmp, so that
+#     fallback keeps working as `node`. A Cloud Run value for WORKSPACES_ROOT still wins.
+ENV WORKSPACES_ROOT=/tmp/workspaces
+
+USER node
+
 EXPOSE 8080
 
 CMD ["npm","start"]

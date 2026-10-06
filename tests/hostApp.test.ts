@@ -21,13 +21,21 @@ const okRes = (body: unknown, status = 200) => ({
 });
 const noSleep = async () => {};
 
-const ON = { NAVBHARAT_CLOUD: 'on', NAVBHARAT_APPS_PROJECT: 'apps-prod' } as unknown as NodeJS.ProcessEnv;
+const ON = {
+  NAVBHARAT_CLOUD: 'on', NAVBHARAT_APPS_PROJECT: 'apps-prod',
+  // P0 2026-10-06: hosting is OFF without the two dedicated identities (appsIdentity.ts).
+  NAVBHARAT_APPS_RUNTIME_SA: 'nbai-app-runtime@apps-prod.iam.gserviceaccount.com',
+  NAVBHARAT_APPS_BUILD_SA: 'nbai-app-builder@apps-prod.iam.gserviceaccount.com',
+} as unknown as NodeJS.ProcessEnv;
+const DIGEST = `sha256:${'a'.repeat(64)}`;
 
 /** A fake Google that builds and deploys successfully — each test breaks one step of it. */
 function happyCloud(over: { build?: string; deployStatus?: number; iamStatus?: number; service?: unknown } = {}) {
   return (async (url: any, init: any) => {
     const u = String(url);
     if (u.includes('uploadType=media')) return okRes({});
+    if (u.includes('storage/v1/b/') && init?.method === 'DELETE') return okRes({});
+    if (u.includes('artifactregistry.googleapis.com')) return okRes({ version: `projects/apps-prod/locations/asia-south1/repositories/nbai-apps/packages/x/versions/${DIGEST}` });
     if (u.includes('cloudbuild.googleapis.com') && init?.method === 'POST') {
       return okRes({ metadata: { build: { id: 'b1', status: over.build ?? 'SUCCESS' } } });
     }

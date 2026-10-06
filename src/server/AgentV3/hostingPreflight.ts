@@ -25,6 +25,7 @@
 
 import { appsProject, appsRegion, buildListServicesRequest } from './cloudRunHosting';
 import { appsImageRepo, BUILD_API } from './containerBuild';
+import { appsServiceAccount } from './appsIdentity';
 import { MONITORING_API } from './hostingUsage';
 
 export const ARTIFACT_REGISTRY_API = 'https://artifactregistry.googleapis.com/v1';
@@ -183,6 +184,20 @@ export async function runHostingPreflight(opts: {
   };
   if (!project.projectId) return blocked('Not checked — the apps project is not configured yet.');
 
+  /**
+   * 🔒 THE TWO IDENTITIES user code runs as (appsIdentity.ts, P0 2026-10-06). Checked as CONFIGURATION here
+   * (set, not a Google default, of the apps project) and for EXISTENCE below. What this check CANNOT see is
+   * which roles each account holds — the platform's identity is not allowed to read the project's IAM
+   * policy, and should not be — so "has no roles" is verified by the admin's script,
+   * scripts/verifyHostingIsolation.sh, and by the isolation probe app (infra/hosting-isolation-probe).
+   */
+  const identityEmails: Array<[string, string, string]> = [];
+  for (const [role, id, label] of [['runtime', 'runtimeIdentity', 'App runtime identity'], ['build', 'buildIdentity', 'App build identity']] as const) {
+    const r = appsServiceAccount(role, project.projectId, env);
+    if (r.ok) identityEmails.push([id, label, r.email]);
+    else checks.push({ id, label, state: 'failed', detail: r.message, remedy: 'Create the dedicated account and set its address in Cloud Run — see docs/HOSTING_ARCHITECTURE.md §11.' });
+  }
+
   if (!opts.token) {
     checks.push({
       id: 'credentials', label: 'Google credential', state: 'failed',
@@ -234,6 +249,15 @@ export async function runHostingPreflight(opts: {
     apiName: 'Cloud Monitoring API', role: 'Monitoring Viewer',
   }));
 
+  for (const [id, label, email] of identityEmails) {
+    const sa = await ask(`https://iam.googleapis.com/v1/projects/${p}/serviceAccounts/${encodeURIComponent(email)}`);
+    checks.push(classifyResponse({
+      id, label, status: sa.status, body: sa.body,
+      apiName: 'Identity and Access Management (IAM) API', role: 'Service Account User',
+      missingRemedy: `Create the service account ${email} in the apps project (IAM → Service accounts), with NO project roles.`,
+    }));
+  }
+
   return { verdict: preflightVerdict(checks), projectId: p, region, checks, nextAction: nextAction(checks) };
 }
 
@@ -244,4 +268,6 @@ const REMOTE_CHECKS: ReadonlyArray<readonly [string, string]> = [
   ['cloudBuild', 'Cloud Build'],
   ['artifactRegistry', 'Image repository'],
   ['monitoring', 'Usage metering'],
+  ['runtimeIdentity', 'App runtime identity'],
+  ['buildIdentity', 'App build identity'],
 ];

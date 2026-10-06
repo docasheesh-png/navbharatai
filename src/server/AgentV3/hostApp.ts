@@ -16,6 +16,7 @@
 import { parseEnvFlag } from '../lib/envFlag';
 import { appsProject, appsRegion, hostedServiceName, deployAppToCloudRun } from './cloudRunHosting';
 import { hostedRepublishRefusal } from './hostedAppLifecycle';
+import { appsIdentities } from './appsIdentity';
 import type { DeploymentRecord } from './DeploymentStore';
 import { packWorkspaceArchive } from './sourceArchive';
 import { appsImageRepo, buildStagingBucket, buildTag, buildAppContainer } from './containerBuild';
@@ -87,6 +88,10 @@ export function hostingAvailability(
   }
   const project = appsProject(env);
   if (!project.projectId) return { available: false, message: project.message };
+  // 🔒 FAILS CLOSED, the admin included: no user code runs until it has its own role-less identity and its
+  // build has its own narrow one (appsIdentity.ts). The default account is never a fallback.
+  const ids = appsIdentities(project.projectId, env);
+  if (!ids.ok) return { available: false, message: ids.message };
   return { available: true, message: '' };
 }
 
@@ -148,6 +153,8 @@ export async function hostAppOnNavBharatCloud(
   if (refusal) return { ok: false, reason: 'blocked', message: refusal };
   const project = appsProject(env);
   if (!project.projectId) return { ok: false, reason: 'unavailable', message: project.message };
+  const ids = appsIdentities(project.projectId, env);
+  if (!ids.ok) return { ok: false, reason: 'unavailable', message: ids.message };
   const region = appsRegion(env);
 
   const archive = packWorkspaceArchive(opts.files ?? {});
@@ -197,6 +204,7 @@ export async function hostAppOnNavBharatCloud(
     service,
     tag,
     archive: archive.data,
+    buildServiceAccount: ids.identities.build,
     maxWaitMs: opts.maxWaitMs,
     pollMs: opts.pollMs,
   }, fetchImpl, sleep);
@@ -218,6 +226,7 @@ export async function hostAppOnNavBharatCloud(
     workspaceId: opts.workspaceId,
     appName: opts.appName,
     existingService: opts.existing?.service ?? null,
+    serviceAccount: ids.identities.runtime,
     image: built.image,
     envVars: envPlan.envVars,
   }, fetchImpl);

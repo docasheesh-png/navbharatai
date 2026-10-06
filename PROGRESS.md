@@ -91516,3 +91516,46 @@ on Android, so it always falls back to the share sheet.
 
 **What to watch:** the first `.aab`'s merged manifest must contain no `READ_MEDIA_*`. Play's check
 re-runs when the new bundle is added.
+
+## 2026-10-06: Autopsy e52cebbf + b4745cb1 ("personal finance app that categorises expenses using AI", 2 builds, both stopped)
+
+**Tally:**
+
+- ✅ Self-healed (5):
+  - 2 type errors fixed;
+  - a missing import added;
+  - `.spacer` defined;
+  - 2 duplicate-export writes rejected.
+- 🔀 Worked around (2): GLM crawl benched twice per build.
+- ⏭️ Skipped (1): 12 write-time typechecks during install.
+- ❌ Shipped broken (2):
+  - adding a transaction never saved;
+  - the lane's `openai.ts` read an API key from the browser.
+- 🥵 Struggles:
+  - 5 minutes, 15 reads and a loop guard hunting the save bug;
+  - 4 bad selectors;
+  - a 76% `utils.ts` rewrite;
+  - 2 edit anchor misses.
+
+**Root causes fixed (rows Q-720 … Q-726, PR pending):**
+
+1. **Q-720.** A helper the plan gave its own file was given a second home (`src/utils.ts`). The helpers had diverged: ₹ in one, $ in the other. Fix: `helperOwners`.
+2. **Q-721.** The salvage typecheck said "no errors" when the compiler had not run. Fix: the NOT-READY marker is now read as "never ran" in `tscNeverRan`. BR2-T fixed this class earlier, but missed this sibling.
+3. **Q-722.** The preview AI shim claimed `available: true` where `ask()` cannot answer, which is our own verification browser. The app awaited the AI before saving, so nothing saved.
+   - `available` is now honest.
+   - `ai.ts` and the published gateway now bound every wait.
+   - Every builder is told never to await the AI before saving.
+4. **Q-723.** The fast lane never knew the keyless AI route, so it wrote an OpenAI client that took the key from localStorage. Fix: the lane now writes `src/lib/ai.ts` itself, and the shared rule now says no key ever goes into the page.
+5. **Q-724.** A user stop was recorded as a failure in the reflection, the lesson, the retrospective, `priorFailedBuilds` and the session's failed turns. All five now leave a stop out.
+6. **Q-725.** The bill's sentences denied a render that the evidence ledger had seen. The wording now says the app rendered; the amount is unchanged.
+7. **Q-726.** `find_ui_element` never returned `<input>` elements. Form controls now carry their label and type, and "field" is a role.
+
+All seven are locked in `tests/theFinanceAppCouldNotSave.test.ts` (21 cases). Q-721, Q-722 and Q-726 were proven by putting the bug back and watching the tests fail.
+
+**Open:**
+
+- **Q-727 🟡 (money, admin's decision):** should a stop after an in-build render be billed as a working app?
+- **Q-728:** the green-guard wording on a stop.
+- **Q-729:** narration recorded at error severity.
+- **Q-730:** no scanner flags an AI key used from the browser.
+- **Q-731 🟡:** five items argued as not defects.

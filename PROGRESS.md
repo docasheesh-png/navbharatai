@@ -91268,3 +91268,28 @@ a CLASS, not one stale row.
 - **CLAUDE.md rule 3** gains one sentence: append the ID when deleting a row, and edit the queue on a fresh `main`.
 - **Honest limit:** the register catches a RESURRECTED row. A stale copy that downgrades a row which is still open
   (BLOCKED → OPEN, as Q-111 was) is not caught mechanically. The fresh-main rule is the guard for that half.
+
+### 2026-10-06 — Q-600: unused client locals are ratcheted — the backlog can only shrink
+
+The queue's Q-600 was OPEN: `tsc --noUnusedLocals` listed about 93 client locals that nothing reads. Measured
+today it is **95 locals in 19 files** (App.tsx 46, AgentV3Panel.tsx 11, LiveCollaboration.tsx 9, AIChat.tsx 6, …).
+Each is state set but never shown, or a handler never wired. `saveError` in ProfilePage was one: it hid an error
+message from the user until #3531 found it by hand. Nothing stopped the count from growing.
+
+- **Fix, at no extra CI time:** `scripts/noUnusedImports.mjs` already runs exactly that tsc check on every CI
+  build, and only filtered out unused IMPORTS.
+  - It now also counts unused locals per file (TS6133 off an import line, TS6196, TS6198) against
+    `scripts/unusedLocalsBaseline.json`.
+  - A file that GAINS one fails CI.
+  - A file that LOSES one fails until the baseline is lowered (`node scripts/noUnusedImports.mjs
+    --update-baseline`), so the slack can never be spent again.
+  - The flag can create a missing baseline, but it never raises an existing one.
+- **Locked by** `compareUnusedLocals` unit tests, a baseline-shape check and a source guard, all in
+  `tests/noUnusedImportsScript.test.ts` (13 pass).
+  - **Proven both ways on the real tree:** a probe local added to `AICodeReview.tsx` gives "1 → 2" and exit 1.
+    Removing its `hasTabIndex` gives "went DOWN — lock it in" and exit 1. The file was restored both times.
+- **Not done on purpose:** the sweep itself. Deleting a local can change behaviour, and some are forgotten
+  wire-ups rather than dead code. `hasTabIndex` is an accessibility check that is computed and never reported,
+  which is a product question, not a deletion.
+  - App.tsx and AgentV3Panel.tsx are where most live sessions work.
+  - Q-600 stays OPEN for that sweep, one file at a time, its state recorded in the row.

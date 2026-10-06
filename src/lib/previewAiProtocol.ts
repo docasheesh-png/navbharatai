@@ -85,7 +85,11 @@ export function previewAiShimSource(): string {
       }, ${PREVIEW_AI_IMAGE_TIMEOUT_MS});
     });
   }
-  window.NavAI = { app: 'preview', available: true, preview: true, image: image, ask: function (prompt, opts) {
+  // 🔴 available says whether ask() CAN answer here (build b4745cb1, 2026-10-06). It was hard-coded true, so a
+  // page opened at the top level — the build's own verification browser, or the preview link in a new tab —
+  // showed "AI ready" while every ask() rejected at once. The finance app awaited that rejection before
+  // saving, so nothing ever saved, and the builder spent five minutes looking for the bug in the app.
+  window.NavAI = { app: 'preview', available: hasParent(), preview: true, image: image, ask: function (prompt, opts) {
     return new Promise(function (resolve, reject) {
       if (!hasParent()) { reject(new Error('Open this app inside NavBharatAI to try its assistant before publishing.')); return; }
       var id = 'a' + (++seq) + '_' + Date.now();

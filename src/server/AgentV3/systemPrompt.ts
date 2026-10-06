@@ -98,7 +98,10 @@ export const GATEWAY_AI_RULE =
   'own (a plain React/Vite or HTML app), do NOT write your own API calls and do NOT ask for an API key. ' +
   'Call run_recipe with name "generate_ai" and input { "provider": "navbharat" }: it writes src/lib/ai.ts, which answers ' +
   'through NavBharatAI with no key. Use generateText()/chat() from it, and show isAiReady() === false as ' +
-  'a clear "the assistant is not available here" state, never canned answers. In your final message tell ' +
+  'a clear "the assistant is not available here" state, never canned answers. An AI call must NEVER block ' +
+  'the user\'s own action: save and show what they entered FIRST, then add the AI result (a category, a ' +
+  'summary) when it arrives; if the call fails or isAiReady() is false, keep their data and use a plain ' +
+  'non-AI fallback. Never await an AI answer before saving. In your final message tell ' +
   'the user plainly: the AI already answers in the NavBharatAI preview (charged to their balance, with a ' +
   'small daily limit there), and for everyone once they PUBLISH; they can switch it off or use their own ' +
   'OpenAI/Anthropic key any time in Keys & Secrets. ' +

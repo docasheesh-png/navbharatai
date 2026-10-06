@@ -18,6 +18,8 @@ export interface SessionHistoryEntry {
   endedAt?: number;
   ok?: boolean;
   dataLossCount?: number;
+  /** The user pressed Stop on that turn — not a failure (build b4745cb1). */
+  userStopped?: boolean | null;
 }
 
 export interface SessionSummary {
@@ -62,7 +64,8 @@ export function summarizeSession(
     turns: past.length + 1,
     elapsedMs: Math.max(0, nowMs - first),
     dataLossTotal: past.reduce((n, h) => n + (Number.isFinite(h.dataLossCount) ? (h.dataLossCount as number) : 0), 0),
-    failedTurns: past.filter((h) => h.ok === false).length,
+    // A turn the user stopped did not fail (build b4745cb1).
+    failedTurns: past.filter((h) => h.ok === false && h.userStopped !== true).length,
     truncated: past.length >= historyLimit,
   };
 }

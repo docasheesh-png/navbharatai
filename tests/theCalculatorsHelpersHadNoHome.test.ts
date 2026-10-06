@@ -124,10 +124,12 @@ describe('1 · the contract\'s helpers get a home before file one', () => {
 
   it('the lane applies it after the contract file is decided and before the files are built', () => {
     const src = strip(read('src/server/AgentV3/SimpleBuilder.ts'));
-    const owner = src.indexOf('utilOwnerFor(manifest, names,');
+    // Since build e52cebbf the lane asks `helperOwners`, which gives a helper the file named after it and
+    // hands the rest to `utilOwnerFor` — the same single owner as before.
+    const owner = src.indexOf('helperOwners(manifest, names,');
     expect(owner).toBeGreaterThan(src.indexOf('contractFile = { path: contractPath, content: mod.source };'));
     expect(owner).toBeLessThan(src.indexOf('Building ${manifest.length} file(s)'));
-    expect(src).toContain('contract = `${contract}${utilOwnerNote(names, owner.path)}`;');
+    expect(src).toContain('contract = `${contract}${utilOwnerNote(owner.names, owner.path)}`;');
   });
 });
 

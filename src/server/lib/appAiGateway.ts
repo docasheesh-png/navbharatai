@@ -292,13 +292,14 @@ export function gatewayScriptHtml(appId: string, token: string, origin: string):
   const imageFallback = 'The picture maker in this app is not available right now. Please try again later.';
   return `<script ${APP_AI_MARKER}="1">(function(){try{
 var U=${JSON.stringify(url)},I=${JSON.stringify(imageUrl)},T=${JSON.stringify(token)},F=${JSON.stringify(fallback)},G=${JSON.stringify(imageFallback)};
+function S(ms){try{if(typeof AbortController!=="function")return undefined;var c=new AbortController();setTimeout(function(){c.abort();},ms);return c.signal;}catch(e){return undefined;}}
 window.NavAI={app:${JSON.stringify(appId)},available:true,ask:function(p,o){
-return fetch(U,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:T,prompt:String(p==null?"":p),system:(o&&o.system)||""})})
+return fetch(U,{method:"POST",signal:S(90000),headers:{"Content-Type":"application/json"},body:JSON.stringify({token:T,prompt:String(p==null?"":p),system:(o&&o.system)||""})})
 .then(function(r){return r.json().catch(function(){return{ok:false,message:F};});})
 .catch(function(){return{ok:false,message:F};})
 .then(function(d){if(d&&d.ok&&typeof d.text==="string")return d.text;throw new Error((d&&d.message)||F);});
 },image:function(p,o){
-return fetch(I,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:T,prompt:String(p==null?"":p),width:o&&o.width,height:o&&o.height})})
+return fetch(I,{method:"POST",signal:S(150000),headers:{"Content-Type":"application/json"},body:JSON.stringify({token:T,prompt:String(p==null?"":p),width:o&&o.width,height:o&&o.height})})
 .then(function(r){return r.json().catch(function(){return{ok:false,message:G};});})
 .catch(function(){return{ok:false,message:G};})
 .then(function(d){if(d&&d.ok&&typeof d.image==="string")return d.image;throw new Error((d&&d.message)||G);});

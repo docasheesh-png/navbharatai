@@ -97,53 +97,57 @@ describe('🔒 the two flags — inert by default, admin-only after that', () =>
   });
 });
 
-describe('🔒 the route — POST /api/agentv3/host-app', () => {
+/**
+ * 🔒 THE ROUTE. `/api/agentv3/host-app` was DELETED on 2026-10-06 (no caller, and a drifted duplicate of the
+ * Publish path — see serverPublish.ts). Every rule this block pinned on it is pinned here on the ONE path
+ * that remains: the publish handler's container branch plus the sequence it hands off to.
+ */
+describe('🔒 the server publish path (the publish route + serverPublish.ts)', () => {
   const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
-  const handler = (() => {
-    const at = route.indexOf("app.post('/api/agentv3/host-app'");
-    return at === -1 ? '' : route.slice(at, route.indexOf('app.post(', at + 40));
+  const seq = readFileSync(join(__dirname, '..', 'src/server/AgentV3/serverPublish.ts'), 'utf8');
+  const publish = (() => {
+    const at = route.indexOf("app.post('/api/agentv3/publish'");
+    return at === -1 ? '' : route.slice(at, route.indexOf('\n  app.', at + 40));
   })();
+  const deps = route.slice(route.indexOf('const serverPublishDeps: ServerPublishDeps = {'), route.indexOf('const serverPublishDeps: ServerPublishDeps = {') + 2000);
 
-  it('exists, and checks ownership before it touches anything', () => {
-    expect(handler).not.toBe('');
-    // The VERIFIED owner gate since the forensic audit of 2026-10-04 (a claimed uid owned nothing here).
-    expect(handler).toContain('assertVerifiedWorkspaceOwner(req, workspaceId)');
-    const ownAt = handler.indexOf('assertVerifiedWorkspaceOwner');
-    expect(handler.indexOf('hostingAvailability')).toBeGreaterThan(ownAt);
-    expect(handler.indexOf('hostAppOnNavBharatCloud')).toBeGreaterThan(ownAt);
+  it('the duplicate route is gone, and the publish route checks ownership before it touches anything', () => {
+    expect(route).not.toContain("app.post('/api/agentv3/host-app'");
+    expect(publish).not.toBe('');
+    const ownAt = publish.indexOf('assertVerifiedWorkspaceOwner(req, workspaceId)');
+    expect(ownAt).toBeGreaterThan(-1);
+    expect(publish.indexOf('hostingAvailability(')).toBeGreaterThan(ownAt);
+    expect(publish.indexOf('runServerPublish(')).toBeGreaterThan(ownAt);
   });
 
-  it('🔒 admin access is decided by the VERIFIED identity, never a body-supplied email', () => {
-    // 🔴 This used to pin `await resolveReadIdentity(req)` — which falls back to the BODY's email without a
-    // token, i.e. the exact hole this test's name forbids (forensic audit 2026-10-04, P0). Pinned now: the
-    // Tier-1 verified identity, and the email the admin check reads comes from it.
-    expect(handler).toContain('await requireVerifiedForMoney(req)');
-    expect(handler).not.toContain('resolveReadIdentity(req)');
-    expect(handler).toContain('const email = verified.email;');
-    expect(handler).toContain('isAdmin: isReportAdmin(identityGrantEmail(verified))');
-    expect(handler).not.toMatch(/isReportAdmin\(req\.body/);
+  it('🔒 admin access and the plan are decided by the VERIFIED identity, never a body-supplied one', () => {
+    expect(publish).toContain('const identity = await verifyFirebaseIdentity(req)');
+    expect(publish).toContain('hostIsAdmin = isReportAdmin(identityGrantEmail(identity));');
+    expect(publish).toContain('probeHostingPlan(hostOwnerUid)');
+    expect(publish).not.toMatch(/isReportAdmin\(req\.body/);
   });
 
-  it('🔒 the gate runs BEFORE any file is read or any token is minted — an off feature costs nothing', () => {
-    const gateAt = handler.indexOf('hostingAvailability(');
+  it('🔒 the gate runs BEFORE any token is minted — an off feature costs nothing', () => {
+    const gateAt = publish.indexOf('hostingAvailability(');
     expect(gateAt).toBeGreaterThan(-1);
-    expect(handler.indexOf('loadWorkspaceFiles')).toBeGreaterThan(gateAt);
-    expect(handler.indexOf('new GoogleAuth')).toBeGreaterThan(gateAt);
+    expect(publish.indexOf('runServerPublish(')).toBeGreaterThan(gateAt);
+    // The token is minted inside the sequence, after the cap and the lease.
+    expect(seq.indexOf('deps.token()')).toBeGreaterThan(seq.indexOf('deps.store.claim('));
   });
 
-  it('🔒 the provider\'s own words never reach the response — white-label law', () => {
-    expect(handler).toContain('console.error(`[host-app]');
-    // The body carries OUR message, never the detail.
-    expect(handler).not.toMatch(/json\(\{[^}]*detail: result\.detail/);
+  it("🔒 the provider's own words never reach the response — white-label law", () => {
+    expect(seq).toContain('deps.logDetail?.(`[publish→host]');
+    expect(seq).not.toMatch(/body:[^}]*hosted\.detail/);
   });
 
-  it('secrets are loaded SCOPED to this app, so hosting inherits the build path\'s least privilege', () => {
-    expect(handler).toContain('loadUserVaultSecrets(userId, workspaceId)');
+  it("secrets are loaded SCOPED to this app, so hosting inherits the build path's least privilege", () => {
+    expect(deps).toContain('loadUserVaultSecrets(ownerUid, workspaceId)');
   });
 
-  it('each refusal gets a status that matches its reason', () => {
-    expect(handler).toContain("result.reason === 'unavailable' ? 503");
-    expect(handler).toContain("result.reason === 'no-source' || result.reason === 'unpackable' ? 422");
+  it('each refusal gets a status that matches its reason — one mapping', () => {
+    expect(seq).toContain("case 'unavailable': return 503;");
+    expect(seq).toContain("case 'no-source': case 'unpackable': case 'too-large': return 422;");
+    expect(seq).toContain("case 'blocked': return 403;");
   });
 });
 

@@ -84,7 +84,17 @@ describe('the publish handler’s container branch', () => {
     expect(decl).toContain('verifyFirebaseIdentity(req)');
     expect(decl).not.toContain('resolveReadIdentity');
     // Q-624: the verified identity's address, and only when the provider verified it.
-    expect(decl).toMatch(/hostingAvailability\(\{\s*isAdmin: isReportAdmin\(identityGrantEmail\(identity\)\)/);
+    expect(decl).toContain('hostIsAdmin = isReportAdmin(identityGrantEmail(identity));');
+    expect(decl).toMatch(/hostingAvailability\(\{\s*isAdmin: hostIsAdmin/);
+    // 2026-10-06: the PLAN is the verified uid's too — a claimed body uid must not borrow someone's plan.
+    expect(decl).toContain('probeHostingPlan(hostOwnerUid)');
+    expect(decl).not.toContain('probeHostingPlan(userId)');
+  });
+
+  it('🔒 hands the whole server publish to the ONE sequence (serverPublish.ts), with the verified owner', () => {
+    expect(branch).toContain('runServerPublish({');
+    expect(branch).toContain('ownerUid: hostOwnerUid,');
+    expect(branch).not.toContain('hostAppOnNavBharatCloud(');
   });
 
   it('🔒 always responds and always returns — it can never fall through to the static publish', () => {
@@ -99,21 +109,25 @@ describe('the publish handler’s container branch', () => {
     expect(branch).toContain('} catch (e) {');
   });
 
+  // These invariants moved with the code into serverPublish.ts (2026-10-06); they are pinned there now.
+  const seq = codeOf(read('src/server/AgentV3/serverPublish.ts'));
+
   it('🔒 records the deployment before reporting success', () => {
-    const ok = branch.indexOf('recordHostedDeployment({');
-    const reply = branch.indexOf('ok: true,');
+    const ok = seq.indexOf('await deps.record({');
+    const reply = seq.indexOf('ok: true,');
     expect(ok).toBeGreaterThan(-1);
     expect(ok).toBeLessThan(reply);
   });
 
   it('🔒 never puts the provider’s own words in the response body', () => {
     // hosted.detail is a build log. The white-label law keeps it admin-side.
-    expect(branch).toContain('console.error(`[publish→host]');
-    expect(branch).not.toMatch(/res\.[a-z]+\([^)]*hosted\.detail/);
+    expect(seq).toContain('deps.logDetail?.(`[publish→host]');
+    expect(seq).not.toMatch(/body:[^}]*hosted\.detail/);
+    expect(branch).not.toContain('hosted.detail');
   });
 
   it('reports Cloud Run’s own readiness rather than inferring it from a URL', () => {
-    expect(branch).toContain('hosted.ready');
+    expect(seq).toContain('hosted.ready');
   });
 });
 
@@ -129,8 +143,11 @@ describe('a hosted app is a published app', () => {
   it('🔒 both hosting routes record through the SAME helper', () => {
     // Two routes now host an app. A registry write copied into both is the drift this codebase has
     // paid for repeatedly.
+    // Since 2026-10-06 there is ONE hosting path (the duplicate /host-app route was deleted), wired once.
     const route = read('src/server/routes/agentv3.ts');
-    expect(route.split('recordHostedDeployment({').length - 1).toBe(2);
+    expect(route.split('recordHostedDeployment(').length - 1).toBe(1);
+    expect(route.split('hostAppOnNavBharatCloud(').length - 1).toBe(1);
+    expect(route).not.toContain("app.post('/api/agentv3/host-app'");
     expect(route).not.toMatch(/deploymentStore\.record\([^)]*navbharat-cloud/s);
   });
 

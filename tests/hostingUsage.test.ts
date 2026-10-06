@@ -116,38 +116,26 @@ describe('readHostingUsage — every gap is named, and gaps under-bill', () => {
   });
 });
 
-describe('🔒 the route — POST /api/agentv3/host-usage measures BEFORE anything is charged', () => {
+/**
+ * 🔒 `/api/agentv3/host-usage` was DELETED on 2026-10-06: nothing in the app called it, it re-derived the
+ * service name from the app's CURRENT name (the rename bug `DeploymentRecord.service` exists to prevent),
+ * and the daily `hosting-daily-bill` sweep already measures every hosted app. The measurement rules it
+ * carried are pinned on the sweep, the one place that measures now.
+ */
+describe('🔒 measurement lives in the daily sweep — the duplicate admin route is gone', () => {
   const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
-  const handler = (() => {
-    const at = route.indexOf("app.post('/api/agentv3/host-usage'");
-    return at === -1 ? '' : route.slice(at, route.indexOf('app.post(', at + 40));
-  })();
+  const sweep = readFileSync(join(__dirname, '..', 'src/server/AgentV3/hostingBillingSweep.ts'), 'utf8');
 
-  it('exists, is admin-only, and checks ownership too', () => {
-    expect(handler).not.toBe('');
-    expect(handler).toContain('assertVerifiedWorkspaceOwner(req, workspaceId)'); // verified owner (audit 2026-10-04)
-    expect(handler).toContain('await requireVerifiedForMoney(req)');
-    expect(handler).toContain('isReportAdmin(identityGrantEmail(verified))');
+  it('the route no longer exists', () => {
+    expect(route).not.toContain("app.post('/api/agentv3/host-usage'");
   });
 
-  it('🔒 it REPORTS what would be billed without charging anyone', () => {
-    expect(handler).toContain('wouldBill: hostingBillableUsd(cost)');
-    expect(handler).toContain('billingOn: hostingBillingEnabled()');
-    // No wallet path here — debiting is slice 2c, and it must not sneak into a reporting route.
-    // ⚠️ Anchored on the real debit FUNCTIONS, not on the words: an earlier version of this test
-    // matched /charge/i and failed on the handler's own prose ("without charging anyone"). A test that
-    // reads comments is a test that blocks correct code.
-    for (const fn of ['debitWalletForBuild(', 'debitWalletRolledUp(', 'chargeForAiTurn', 'computeDebitedWallet(', 'chargeHostingForDay(']) {
-      expect(handler, fn).not.toContain(fn);
-    }
+  it('the sweep measures the RECORDED service, never one re-derived from a renamed app', () => {
+    expect(sweep).toContain("const serviceName = String(app.service ?? '').trim() || serviceNameFor(app.workspaceId, null);");
   });
 
   it('both kinds of gap reach the report — unmeasured usage AND unbilled rates', () => {
-    expect(handler).toContain('usageGapNote(measured)');
-    expect(handler).toContain('hostingCostNote(cost)');
-  });
-
-  it('the window is bounded, so one call cannot ask Google for a year of data', () => {
-    expect(handler).toContain('Math.min(720, Math.max(1, Number(req.body?.hours) || 24))');
+    expect(sweep).toContain('usageGapNote(measured)');
+    expect(sweep).toContain('hostingCostNote');
   });
 });

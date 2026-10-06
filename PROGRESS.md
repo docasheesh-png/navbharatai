@@ -91243,7 +91243,7 @@ green on 2026-10-05. Reproduced locally on `main` with `npm audit --json`.
   `.aab`/`.ipa` the admin asks for carries 8.5.1 / 8.4.3; build 147 on Play and the current TestFlight
   build still run 8.5.0 / 8.4.1. Per the 2026-09-07 rule, a store build is made only when the admin asks.
 
-## 2026-10-06 — The admin's "ok banao": chat picture edits, rules shipped with every merge, Play refunds, queue cleanup (#NEXT)
+## 2026-10-06 — The admin's "ok banao": chat picture edits, rules shipped with every merge, Play refunds, queue cleanup (#3565)
 
 The admin accepted every recommendation for the rows #3551 left open. This PR builds the ones that are code.
 
@@ -91322,6 +91322,26 @@ a CLASS, not one stale row.
 - **Honest limit:** the register catches a RESURRECTED row. A stale copy that downgrades a row which is still open
   (BLOCKED → OPEN, as Q-111 was) is not caught mechanically. The fresh-main rule is the guard for that half.
 
+## 2026-10-06 — Q-618: the production server no longer runs as root; #3565's rows closed (#3566)
+
+#3565 merged (Q-683, Q-610, Q-690). Q-683 leaves the queue and is added to the closed-ID register. Q-610 and
+Q-690 are now 🟡 BLOCKED on one admin grant each: `roles/firebaserules.admin` for Cloud Build, and the Play
+Console "View financial data" permission for the service account. #3565's PROGRESS heading carried a `#NEXT`
+placeholder; it now reads #3565.
+
+**Q-618.** The runtime stage of the `Dockerfile` had no `USER`, so the server ran as root and a code-execution bug
+could rewrite `dist/server.cjs` or any module for every later request. It now ends `ENV WORKSPACES_ROOT=/tmp/workspaces`
++ `USER node`; everything copied stays root-owned, so the server can read its code but not change it.
+- **Audit before the change** (every `fs` / `child_process` site in `server.ts` + `src/server`, and what the bundle
+  actually includes): writes go to `os.tmpdir()`; npm's own logs go to `/home/node` (owned by `node`);
+  `/app/job_storage` (`LocalFileJobStore`) is a dev-only store whose boot `mkdir` is caught and that no production
+  route writes; the no-sandbox local-actuator fallback wrote under `/workspaces` (root-only), so `WORKSPACES_ROOT`
+  now points into /tmp. No runtime dependency writes into `node_modules` or `$HOME`.
+- **Lock:** `tests/theServerDoesNotRunAsRoot.test.ts` — the USER line, its order before `CMD`, no root switch
+  after it, code copied before it without `--chown`, the fallback root in /tmp (USER line removed → 3 fail).
+- **Honest limit:** no Docker in this session, so the image itself was not booted here. CI's boot check runs the
+  bundle, not the container. **Watch on the first deploy:** the Cloud Run revision reaches `Server running`, and one
+  real build completes. The revert is the one `USER node` line.
 ### 2026-10-06 — Q-600: unused client locals are ratcheted — the backlog can only shrink
 
 The queue's Q-600 was OPEN: `tsc --noUnusedLocals` listed about 93 client locals that nothing reads. Measured
@@ -91559,6 +91579,53 @@ All seven are locked in `tests/theFinanceAppCouldNotSave.test.ts` (21 cases). Q-
 - **Q-729:** narration recorded at error severity.
 - **Q-730:** no scanner flags an AI key used from the browser.
 - **Q-731 🟡:** five items argued as not defects.
+## 2026-10-06 — Q-702: NavBharat Cloud gets one lifecycle (the "hosting foundation" spec, adapted)
+
+**The ask.** The admin forwarded an external, 16-phase "managed backend hosting foundation" spec, with the warning
+"external suggestions: blind follow ❌". A forensic read showed that most of the spec already exists, for example:
+- a separate apps project (D4);
+- a verified-owner chain;
+- plans and `backendApps` caps;
+- `HOSTING_CAPS`, size and build ceilings;
+- metering and the daily bill;
+- the inventory/reclaim against the 1,000-service ceiling.
+
+Building a parallel `HostingProvider/RuntimeManager/...` layer would have been PR #1/#4 again. So the work went to
+the real defects instead. The map of spec phase → code is `docs/HOSTING_ARCHITECTURE.md`.
+
+**Five root causes, all in the existing server path:**
+1. **Ban evasion.** `/host-app` and the Publish→host branch never read the record's status, and
+   `recordHostedDeployment` then wrote `active` over `taken_down`.
+   → `hostedRepublishRefusal`, inside `hostAppOnNavBharatCloud` itself, before any cost. `existing` is now a REQUIRED
+   argument, so a new caller cannot forget it.
+2. **"Offline" left the server running.** The admin ban, the admin unpublish and `hostingPlanSweep` deleted only the
+   Firebase channel. The debt pause in `hostingBillingSweep` deleted nothing.
+   → `takeAppOffline` (channel → every tagged Cloud Run service → status; throws and marks nothing if anything
+   survives), used by all of them. The owner unpublish uses the same `removeHostedServers`.
+3. **The rename leak.** `deployAppToCloudRun` derived the service name from the current app name.
+   → `hostedServiceName` reuses the recorded name (only if it carries the workspace tag). `removeWorkspaceServers`
+   lists what EXISTS, so leftovers from past renames are removed too.
+4. **No idempotency or trace.**
+   → `hostedDeployments.ts`: one transition table; a lease per workspace (Firestore transaction, fail-open, stale
+   after build cap + 10 min); attempt records with events; `[hosting-event]` lines that carry no message and no secret.
+5. **Drifted duplicate.** Only the uncalled `/host-app` enforced `serverAppLimit`.
+   → `serverPublish.ts` is now the single sequence. `/host-app` and `/host-usage` were deleted (Q-162: no caller; the
+   latter also had the rename bug and duplicated the daily sweep). The plan is probed for the VERIFIED uid, never the
+   body's `userId`.
+
+**Lock:** `tests/aServerAppHasOneLifecycle.test.ts` (25 behavioural tests, 3 censuses). Three bugs were put back
+and each was caught: the ban refusal removed; the lease ignored (two builds); a direct `plan_paused` write.
+`publishRoute.test.ts` and `hostingDailyBill.test.ts` guards were moved to the new shapes.
+
+**Exposure:** none live. Hosting is admin-only (`NAVBHARAT_CLOUD_PUBLIC` unset) and the debt pause sits behind
+`NAVBHARAT_BILL_HOSTING` (unset). These had to be fixed BEFORE either switch is flipped.
+
+**Decision opened:** Q-703. A `held` app is not taken offline by the re-scan. The recommendation is (a): fix the
+words, not the behaviour.
+
+**Next step:** a deployment-history screen on the Publish sheet that reads `hosted_deploy_attempts`, which is also
+what lets a 409 "already deploying" show live progress. After that, server rollback to the previous Cloud Run
+revision.
 ### 2026-10-06 — CI red on every PR again at 17:14 UTC: one new npm advisory on a transitive package, fixed by one lockfile bump
 
 The audit gate went red on #3573 (hosting lifecycle) with nothing in that diff to blame — the same class as the

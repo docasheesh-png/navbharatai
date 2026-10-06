@@ -164,6 +164,23 @@ export function serviceNameFor(workspaceId: string, appName?: string | null): st
   return `${stem}-${hash}`.slice(0, NAME_MAX).replace(/-+$/, '');
 }
 
+/**
+ * The service a deploy of this workspace must target. PURE.
+ *
+ * 🔴 THE RENAME LEAK (2026-10-06). The deploy used to derive the name from the app's CURRENT name every
+ * time. After a rename the derived name is new, so the create did not 409, a SECOND service came up, and
+ * the record was overwritten with it — leaving the old service public at its old URL, untracked, holding
+ * one of the 1,000 slots, and untouched by "Take offline" (which deletes the recorded one). The record's
+ * own comment already said the name is "stored, never re-derived"; the deploy was the one place that did
+ * not obey it. A recorded name is reused as long as it carries this workspace's tag — a record pointing
+ * at somebody else's service is never trusted.
+ */
+export function hostedServiceName(workspaceId: string, appName?: string | null, existingService?: string | null): string {
+  const recorded = String(existingService ?? '').trim();
+  if (recorded && /^[a-z][a-z0-9-]{0,62}$/.test(recorded) && serviceBelongsTo(recorded, workspaceId)) return recorded;
+  return serviceNameFor(workspaceId, appName);
+}
+
 export interface RunRequest {
   url: string;
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -350,6 +367,72 @@ export async function deleteHostedService(
   }
 }
 
+/**
+ * EVERY service this workspace runs — not just the recorded one. NEVER throws.
+ *
+ * A workspace should run exactly one, but a rename before 2026-10-06 (see `hostedServiceName`) could leave
+ * two, and only listing what EXISTS finds the second. Matched by the rename-proof tag. `complete: false`
+ * means the listing was cut short, so "nothing found" proves nothing.
+ */
+export async function listWorkspaceServices(
+  opts: { token: string; projectId: string; region: string; workspaceId: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ services: string[]; complete: boolean }> {
+  const found: string[] = [];
+  let pageToken = '';
+  try {
+    // Bounded by the cap itself: 1,000 services at 100 a page is ten pages, never more.
+    for (let page = 0; page < Math.ceil(SERVICES_PER_PROJECT_CAP / 100) + 1; page += 1) {
+      const req = buildListServicesRequest(opts.token, opts.projectId, opts.region, 100, pageToken);
+      const res = await fetchImpl(req.url, { method: req.method, headers: req.headers });
+      if (!res.ok) return { services: found, complete: false };
+      const parsed = parseServiceList(await res.json().catch(() => null));
+      for (const name of parsed.names) if (serviceBelongsTo(name, opts.workspaceId)) found.push(name);
+      if (!parsed.nextPageToken) return { services: found, complete: true };
+      pageToken = parsed.nextPageToken;
+    }
+    return { services: found, complete: false };
+  } catch {
+    return { services: found, complete: false };
+  }
+}
+
+export interface ServerRemoval {
+  /** Every service that is now gone (deleted, or already gone). */
+  removed: string[];
+  /** Services that still exist because the delete was refused or unreachable. */
+  failed: string[];
+  /** False when the listing was cut short — something of this workspace's may still be running. */
+  complete: boolean;
+}
+
+/**
+ * Take EVERY server of this workspace off the internet. NEVER throws.
+ *
+ * 🔴 WHY IT EXISTS (2026-10-06). Five paths mark an app offline — admin ban, admin unpublish, the two
+ * plan-pause sweeps, owner unpublish — and only the last one ever touched Cloud Run. The others removed
+ * the static channel and wrote `taken_down` / `unpublished` / `plan_paused` while the app's SERVER kept
+ * answering at its run.app address: a banned app still live, a lapsed plan still running on our bill.
+ * One function, used by every path, deletes the recorded service AND anything else carrying the tag.
+ * `ok` is true only when nothing of the workspace is known to be running.
+ */
+export async function removeWorkspaceServers(
+  opts: { token: string; projectId: string; region: string; workspaceId: string; recordedService?: string | null },
+  fetchImpl: typeof fetch = fetch,
+): Promise<ServerRemoval & { ok: boolean }> {
+  const listed = await listWorkspaceServices(opts, fetchImpl);
+  const targets = new Set(listed.services);
+  const recorded = String(opts.recordedService ?? '').trim();
+  if (recorded && serviceBelongsTo(recorded, opts.workspaceId)) targets.add(recorded);
+  const removed: string[] = [];
+  const failed: string[] = [];
+  for (const service of targets) {
+    const del = await deleteHostedService({ token: opts.token, projectId: opts.projectId, region: opts.region, service }, fetchImpl);
+    (del.ok ? removed : failed).push(service);
+  }
+  return { removed, failed, complete: listed.complete, ok: failed.length === 0 && listed.complete };
+}
+
 /** A Cloud Run service, narrowed to what we use. */
 export interface ParsedService {
   name: string;
@@ -424,12 +507,14 @@ export async function deployAppToCloudRun(
     region: string;
     workspaceId: string;
     appName?: string | null;
+    /** The service this workspace ALREADY runs as (its deployment record). See `hostedServiceName`. */
+    existingService?: string | null;
     image: string;
     envVars?: Array<{ key: string; value: string }>;
   },
   fetchImpl: typeof fetch = fetch,
 ): Promise<HostingResult> {
-  const service = serviceNameFor(opts.workspaceId, opts.appName);
+  const service = hostedServiceName(opts.workspaceId, opts.appName, opts.existingService);
   const spec = buildServiceSpec({ image: opts.image, envVars: opts.envVars, workspaceId: opts.workspaceId });
   try {
     const create = buildCreateServiceRequest(opts.token, opts.projectId, opts.region, service, spec);

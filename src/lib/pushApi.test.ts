@@ -9,7 +9,7 @@ vi.mock('./firebase', () => ({
   },
 }));
 
-import { registerDeviceToken, unregisterDeviceToken } from './pushApi';
+import { registerDeviceToken, registerDeviceTokenResult, unregisterDeviceToken } from './pushApi';
 
 const okJson = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
 const errJson = (status: number) => ({ ok: false, status, json: async () => ({}) }) as unknown as Response;
@@ -52,6 +52,15 @@ describe('pushApi', () => {
   it('registerDeviceToken returns false (never throws) when fetch itself rejects', async () => {
     fetchMock.mockRejectedValueOnce(new Error('network down'));
     await expect(registerDeviceToken('user-1', 'fcm-tok', 'web')).resolves.toBe(false);
+  });
+
+  it('registerDeviceTokenResult tells a server refusal (its status) from a request that never arrived (null)', async () => {
+    fetchMock.mockResolvedValueOnce(errJson(401));
+    await expect(registerDeviceTokenResult('user-1', 'fcm-tok', 'ios')).resolves.toEqual({ ok: false, status: 401 });
+    fetchMock.mockRejectedValueOnce(new Error('network down'));
+    await expect(registerDeviceTokenResult('user-1', 'fcm-tok', 'ios')).resolves.toEqual({ ok: false, status: null });
+    fetchMock.mockResolvedValueOnce(okJson({ success: true }));
+    await expect(registerDeviceTokenResult('user-1', 'fcm-tok', 'ios')).resolves.toEqual({ ok: true, status: 200 });
   });
 
   it('unregisterDeviceToken DELETEs with the token in the body', async () => {

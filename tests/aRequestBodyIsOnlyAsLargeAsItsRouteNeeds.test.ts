@@ -104,6 +104,7 @@ const REVIEWED_SMALL: Record<string, string> = {
   '/api/payment/webhook': 'a Cashfree payment event (on RAW_BODY_ROUTES for its signature)',
   '/api/payment/store/verify': 'a store purchase token',
   '/api/integrations/supabase/provision': 'an app label and a workspace id',
+  '/api/integrations/supabase/wake': 'one project ref',
   '/api/profile': '`photoUrl` is a URL cut to 500 characters; the picture itself goes to /api/profile/photo',
   '/api/referral/:userId/claim-failed': 'a reason and a message cut to 300 characters',
   '/api/team/:teamId/mentions/resolve': 'mention ids',

@@ -169,9 +169,15 @@ jobs:
           fi
           echo "::warning::CRASH-TEST BUILD — for verifying Crashlytics on a test device only. Do not distribute."
 
+      # The bundle is told which OPT-IN capabilities this build is signed with (iosBuildCapabilities.ts).
+      # The SAME inputs add the entitlements further down, so the app and its signature cannot disagree:
+      # build 108 was signed without aps-environment while its JavaScript still asked for a push token,
+      # and every sign-in reported the certain failure to Crashlytics ("Push registration failed").
       - name: Build the web bundle
         env:
           VITE_CRASH_TEST: ${{ inputs.crash_test && '1' || '' }}
+          VITE_IOS_PUSH: ${{ inputs.enable_push_notifications && '1' || '' }}
+          VITE_IOS_APP_ATTEST: ${{ inputs.enable_app_attest && '1' || '' }}
         run: npm run build
 
       # The ios/ native project is NOT committed (it is generated per-machine). Generate it fresh here.
@@ -375,6 +381,36 @@ jobs:
           puts 'OK: App.entitlements wired to the App target (push notifications).'
           RUBY
           echo "Push-notifications entitlement in place."
+          # Hand APNs' answer to the plugin. Capacitor's generated AppDelegate has NO remote-notification
+          # callbacks, and @capacitor-firebase/messaging learns the APNs device token ONLY from the
+          # `.capacitorDidRegisterForRemoteNotifications` notification posted here (its README, and
+          # FirebaseMessagingPlugin.swift `load()`). Without it the plugin's `apnsTokenReceived` never
+          # fires and a background data message never reaches it. ios/ is regenerated on every build, so
+          # it is injected here, like the Google Sign-In redirect above.
+          AD="ios/App/App/AppDelegate.swift"
+          if ! grep -q "capacitorDidRegisterForRemoteNotifications" "$AD"; then
+            cat > "$RUNNER_TEMP/apns-forwarding.swift" <<'SWIFT'
+
+              func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+                  NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications, object: deviceToken)
+              }
+
+              func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+                  NSLog("[NavBharatAI] APNs registration failed: %@", error.localizedDescription)
+                  NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+              }
+
+              func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+                  NotificationCenter.default.post(name: Notification.Name.init("didReceiveRemoteNotification"), object: completionHandler, userInfo: userInfo)
+              }
+          SWIFT
+            # Insert before the class's final closing brace (the template ends with the class).
+            APNS_FILE="$RUNNER_TEMP/apns-forwarding.swift" perl -0pi -e 'BEGIN { local $/; open my $f, "<", $ENV{APNS_FILE} or die; $m = <$f>; } s/\n\}\s*\z/\n$m\n}\n/' "$AD"
+          fi
+          for want in capacitorDidRegisterForRemoteNotifications capacitorDidFailToRegisterForRemoteNotifications didReceiveRemoteNotification; do
+            grep -q "$want" "$AD" || { echo "::error::AppDelegate APNs forwarding missing ($want) — the template changed. Fix the injection."; exit 1; }
+          done
+          echo "AppDelegate forwards APNs registration to the plugin."
 
       # App Attest (OPT-IN — see the workflow_dispatch input above). `production` is the only environment
       # App Store and TestFlight builds use. PREREQUISITES (one-time, by hand): (1) Apple Developer →
@@ -532,6 +568,9 @@ jobs:
           # Opt-in push notifications: when true, forces sigh to regenerate the provisioning profile so
           # it picks up the aps-environment entitlement injected above.
           ENABLE_PUSH: ${{ inputs.enable_push_notifications }}
+          # Opt-in App Attest: the same stale-profile hazard as push — a profile cached from before the
+          # capability was enabled would omit the entitlement and fail the export.
+          ENABLE_APP_ATTEST: ${{ inputs.enable_app_attest }}
           FASTLANE_SKIP_UPDATE_CHECK: "1"
           FASTLANE_HIDE_CHANGELOG: "1"
           FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: "120"

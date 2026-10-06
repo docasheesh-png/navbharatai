@@ -79,7 +79,7 @@ interface NotificationItem {
    * — a free-form link on a broadcast record would turn the admin's message form into a way to send
    * every user a tappable address. An unrecognised value simply renders as a plain message.
    */
-  action?: 'open-reports' | 'open-billing' | 'open-app-mart';
+  action?: 'open-reports' | 'open-billing' | 'open-app-mart' | 'open-database';
   /**
    * For `open-app-mart` only: WHERE in App Mart — an app (`web:<id>` / `apk:<id>`), a profile, or your
    * followers. Checked against the one grammar in src/lib/appMartTarget.ts before it is used, so it can
@@ -412,6 +412,23 @@ export function NotificationPanel({ inbox, onClose, onOpenReports, pinned }: {
                     >
                       {row}
                       <span className="block text-[10px] font-bold text-warn mt-1">Tap to add credit →</span>
+                    </button>
+                  );
+                }
+                // A sleeping database (supabasePauseWatch.ts): straight to Settings → Database, where the Wake
+                // button is — the same navigation channel and screen the build panel's database link uses.
+                if (n.action === 'open-database') {
+                  return (
+                    <button
+                      key={n.id}
+                      onClick={() => {
+                        close();
+                        window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'settings', settingsScreen: 'database' } }));
+                      }}
+                      className="w-full text-left px-4 py-3 hover:bg-raised transition-colors"
+                    >
+                      {row}
+                      <span className="block text-[10px] font-bold text-warn mt-1">Tap to open your database settings →</span>
                     </button>
                   );
                 }

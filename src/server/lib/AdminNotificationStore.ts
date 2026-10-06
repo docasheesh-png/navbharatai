@@ -34,9 +34,10 @@ export type NotificationTarget =
  * value is that the fix is one tap away. It routes through the app's existing `navbharat:navigate`
  * channel, the same one the build panel's Add-credits button uses, so it can reach no new screen.
  */
-export type NotificationAction = 'open-reports' | 'open-billing';
+export type NotificationAction = 'open-reports' | 'open-billing' | 'open-database';
 
-export const NOTIFICATION_ACTIONS: readonly NotificationAction[] = ['open-reports', 'open-billing'];
+/** `open-database` opens Settings → App Settings → Database, where a sleeping database is woken (2026-10-06). */
+export const NOTIFICATION_ACTIONS: readonly NotificationAction[] = ['open-reports', 'open-billing', 'open-database'];
 
 /** Accept only an action this build knows. Anything else becomes "no action" — a plain message. */
 export function readNotificationAction(raw: unknown): NotificationAction | undefined {

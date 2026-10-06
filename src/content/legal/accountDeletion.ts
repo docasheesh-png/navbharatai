@@ -72,6 +72,7 @@ When your deletion request is completed, we remove:
 - your **rating of NavBharatAI** — the stars and the note you gave after one of your apps went live, and any "Not now" pause on that question;
 - your **saved sessions and preferences**;
 - your **connection to GitHub**, if you had connected one. (This removes NavBharatAI's access. It does **not** delete anything in your own GitHub account — that stays yours.)
+- your **connection to Supabase**, if you had connected one, and our record of which sleeping-database reminders we already sent you. (This removes NavBharatAI's copy of the access. It does **not** delete your Supabase projects or anything in them — they stay in your own Supabase account; to revoke the access fully, also remove the NavBharatAI app in your Supabase account settings.)
 
 **Your unused token balance is not refundable on deletion.** Deleting the account ends access to it, so please spend or withdraw value first if that matters to you.
 

@@ -22,7 +22,9 @@
 import { getServerDb } from './serverDb';
 import { encrypt, decrypt } from './secrets';
 
-const COLLECTION = 'supabase_connections';
+/** Exported so the collection census (tests/everyCollectionIsClassified.test.ts) can see it — it holds a user's Supabase grant. */
+export const SUPABASE_CONNECTIONS_COLLECTION = 'supabase_connections';
+const COLLECTION = SUPABASE_CONNECTIONS_COLLECTION;
 
 export interface SupabaseConnection {
   /** Short-lived token used for Management API calls. */

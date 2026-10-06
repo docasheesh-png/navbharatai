@@ -27,6 +27,7 @@ import { appHasOwnDatabase, reusableDatabase } from './databaseReuse';
 import { audit } from './audit';
 import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { projectRefFromUrl } from './supabaseData';
+import { getProjectState, projectStateMessage, stateNeedsOwner } from './supabaseProjectState';
 
 /** Where a database is created when the caller expresses no preference. */
 export const DEFAULT_REGION = 'ap-south-1';
@@ -148,6 +149,64 @@ export interface ProvisionSuccess {
    */
   reused?: true;
   fromWorkspaceId?: string;
+  /**
+   * Set when the REUSED database is not working right now — most often asleep, because Supabase pauses a
+   * free project after about a week without use (2026-10-06). Attaching it is still right (it is the
+   * user's data), but saying "your app will use it" without this would hand them a database that answers
+   * nothing. Only checked when the Supabase grant is there to ask with; absent means "not known to be asleep".
+   */
+  asleepNote?: string;
+}
+
+/**
+ * What the BUILD tells the user once its database is in place. PURE.
+ *
+ * 🔴 It used to say "Database created" every time — including when nothing was created and an existing
+ * database was attached (the reuse path), and including when that database was asleep. Both builds
+ * narrated a fact that was false. One function now words all of it, for both places a build provisions.
+ */
+export function databaseReadyNarration(r: ProvisionSuccess, when: 'start' | 'mid-build'): string {
+  if (r.reused) {
+    const base = '✅ This app now uses the database you already have in your Supabase account — no new project was created.';
+    return r.asleepNote ? `${base} ⚠️ ${r.asleepNote}` : base;
+  }
+  if (r.schemaApplied === false) {
+    return '✅ Database created in your Supabase account and wired into your app — its tables could not be set up yet, so I will create them as the build continues.';
+  }
+  return when === 'start'
+    ? '✅ Database created in your Supabase account. Your app will save its data there from the start.'
+    : '✅ Database created in your Supabase account and wired into your app. Your data stays in your own account.';
+}
+
+/**
+ * Is the database a BUILD is about to use asleep? Same answer as the reuse path, bounded so a slow Supabase
+ * can never hold a build: past `capMs` the answer is "not known", and the build goes on exactly as before.
+ */
+export async function connectedDatabaseAsleepNote(uid: string, url: string | undefined, capMs = 4_000): Promise<string | undefined> {
+  if (!projectRefFromUrl(url)) return undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cap = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), capMs); });
+  try {
+    return await Promise.race([reusedDatabaseAsleepNote(uid, url), cap]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Is the database being reused asleep (or gone)? A sentence for the user, or undefined. Never throws. */
+async function reusedDatabaseAsleepNote(uid: string, url: string | undefined): Promise<string | undefined> {
+  try {
+    const ref = projectRefFromUrl(url);
+    if (!ref) return undefined;
+    const conn = await getConnection(uid);
+    if (!conn) return undefined;
+    const fresh = await freshAccessToken(uid, conn);
+    if (!fresh.ok) return undefined;
+    const seen = await getProjectState(fresh.token, ref);
+    return seen.ok && stateNeedsOwner(seen.state) ? projectStateMessage(seen.state, seen.name) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface ProvisionFailure {
@@ -206,9 +265,11 @@ export async function provisionDatabaseForUser(uid: string, input: ProvisionInpu
           };
         }
         try { audit('SUPABASE_DATABASE_REUSED', { userId: uid, ok: true }); } catch { /* audit never blocks */ }
+        const asleepNote = await reusedDatabaseAsleepNote(uid, existing.env.VITE_SUPABASE_URL);
         return {
           ok: true,
           reused: true,
+          ...(asleepNote ? { asleepNote } : {}),
           ...(existing.workspaceId ? { fromWorkspaceId: existing.workspaceId } : {}),
           projectRef: projectRefFromUrl(existing.env.VITE_SUPABASE_URL) ?? '',
           projectName: '',

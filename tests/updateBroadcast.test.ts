@@ -204,7 +204,8 @@ describe('the admin can really do it, and cannot do it by accident', () => {
     expect(client).toContain('async function currentVersionCode()');
     // Asserted by SHAPE, not by variable name — the previous version of this line broke on a rename
     // while the behaviour was unchanged, which is a test failing for the wrong reason.
-    expect(client).toMatch(/registerDeviceToken\(userId, token, platform, \w+\)/);
+    // `registerDeviceTokenResult` (2026-10-06) is the same call returning the server's status as well.
+    expect(client).toMatch(/registerDeviceToken(?:Result)?\(userId, token, platform, \w+\)/);
     expect(route).toContain('appVersionCode');
   });
 

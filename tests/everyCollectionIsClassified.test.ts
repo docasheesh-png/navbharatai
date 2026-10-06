@@ -40,6 +40,8 @@ const root = resolve(__dirname, '..');
 const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' | 'retained'; why: string }> = {
   user_vault_pin:      { kind: 'user', why: "the user's App Lock PIN record — doc id IS the uid" },
   agentv3_mcp_library: { kind: 'user', why: "the user's saved MCP servers — doc id IS the uid" },
+  supabase_connections: { kind: 'user', why: "the user's Supabase OAuth grant (encrypted tokens) — doc id IS the uid; erased with the account" },
+  supabase_pause_notices: { kind: 'user', why: "what an owner was last told about a sleeping Supabase database (supabasePauseWatch.ts) — `userId` field, erased with the account" },
   platform_ratings:    { kind: 'user', why: "the user's 1–5 star rating of NavBharatAI and its note (platformRatingStore.ts) — doc id IS the uid, erased with the account" },
 
   site_configs:        { kind: 'workspace', why: "per-app config, doc id is the workspaceId" },

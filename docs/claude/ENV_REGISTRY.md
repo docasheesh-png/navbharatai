@@ -304,6 +304,12 @@ the code (it is actually read somewhere) on 2026-07-11.
   renewal reminders, hosting daily bill, image cleanup, outbound rescan, site uptime, retention purge when enabled) that
   is due by the durable `job_runs` record. Unset ⇒ the route answers 503, so a half-done setup shows red in the Cloud
   Scheduler console. The admin's choice over `--min-instances 1` (2026-10-05): it costs nothing while idle.
+  ✅ **SET 2026-10-06 — the admin reports `SCHEDULER_TICK_SECRET` set in Cloud Run and the Cloud Scheduler job created**
+  ("done"). Name recorded only; the value was never written anywhere in this repo. Not verified from a session (the
+  session network cannot reach the live host): the proof is the Cloud Scheduler job's Force run reading Success —
+  503 = the Cloud Run value is missing or under 16 characters, 401 = the two values differ.
+  ✅ **VERIFIED 2026-10-06:** the admin's Force run of job `scheduler-tick` (asia-southeast1, `*/5 * * * *`) read
+  **Success** in the Cloud Scheduler console (admin screenshot). Q-159 is closed.
 - **New domain gets the published app by itself (built 2026-10-05, Q-163):** `DOMAIN_AUTOPUBLISH` — kill switch,
   **default ON**; `off` stops the uptime sweep putting the already-published app (from `PUBLISHED_APPS_BUCKET`'s copy)
   on a connected domain whose site is still empty. Once per domain + app, owner's active app only.
@@ -4019,3 +4025,25 @@ the flag entries above promise.
 
 - **`WHATSAPP_SIGNATURE_REQUIRED_AFTER`** (NOT set; default `2026-11-05T00:00:00Z` in `src/server/bots/whatsappSignature.ts`) — an ISO date or date-time. Until then, a hosted WhatsApp bot connected WITHOUT a Meta App Secret (every bot connected before 2026-10-05) is still served, and its owner sees a notice in the Bot Builder naming this date. After it, such a bot's deliveries are refused (403) until the owner adds the App Secret. Bots connected from 2026-10-05 must give the App Secret at connect, and their deliveries are checked against `X-Hub-Signature-256` at once — this date does not affect them. An unreadable value is ignored (logged once per read) and the default applies. Set it only to give owners more time; moving it earlier cuts off legacy bots sooner.
 - **No new secret in Cloud Run.** Each bot's App Secret is the USER's own (their Meta app), stored encrypted in the `bots` collection with the existing `SECRET_ENCRYPTION_KEY` / `SECRET_KEY_V<N>` (`lib/secrets.ts`).
+
+### 2026-10-06 — the retention purge is switched on (Q-110, Q-134)
+
+- `DATA_RETENTION_PURGE_ENABLED` — ✅ **SET to `on` by the admin, 2026-10-06** (name recorded only). Read through
+  `envFlag` in `server.ts`, so `on` / `true` / `1` all count. It registers the exclusive `retention-purge` job (daily
+  03:00 UTC, also once at boot through the claim; the Cloud Scheduler tick from Q-159 catches it up when no instance
+  was awake) which runs every `RETENTION_POLICIES` entry and every `SUBCOLLECTION_RETENTION_POLICIES` entry in
+  `DataRetentionManager.ts` — among them `server_logs` 30 d, `build_jobs` 90 d, the 180-day removal / safety /
+  admin-audit records, `site_analytics` 30 d (the Privacy Policy's stated window), and past build reports
+  (`workspace_diagnostics_v3/*/history`) 180 d. Each policy deletes at most 500 documents per run, so a backlog drains
+  over several nights. **What to watch:** Cloud Run logs carry `[P-DATA.4] retention purge removed N expired record(s)`
+  on a run that found something; nothing is logged when nothing had expired. To stop it, unset the key (or set `off`)
+  and redeploy — the job is then not registered at all.
+
+### 2026-10-06 — the sleeping-database watch (Q-700)
+
+- `SUPABASE_PAUSE_WATCH` — **NOT set, and does not need to be: the watch is ON by default.** Only `off` stops it.
+  Read by `src/server/lib/supabasePauseWatch.ts`; the job is `supabase-pause-watch` (05:10 UTC, exclusive, so the
+  Q-159 Cloud Scheduler tick also runs it). It only READS each connected user's Supabase project state and tells the
+  owner once per episode when one is paused, failed or removed. **It never wakes a project** — only the owner's Wake
+  button in Settings → Database does (see `supabaseProjectState.ts` for why).
+

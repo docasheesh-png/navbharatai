@@ -97,11 +97,12 @@ platform :ios do
     # Same reasoning applies to push notifications (opt-in via ENABLE_PUSH=true, admin 2026-07-26): a
     # stale cached profile from before the Push Notifications capability was enabled on the App ID would
     # otherwise be reused and omit the aps-environment entitlement, so a push-enabled build also forces
-    # regeneration.
+    # regeneration. App Attest (ENABLE_APP_ATTEST=true) is the third opt-in entitlement and forces it too —
+    # it was the one sibling left out (2026-10-06).
     sigh(
       api_key: api_key,
       app_identifier: APP_IDENTIFIER,
-      force: ENV["APPLE_SIGNIN"] == "true" || ENV["ENABLE_PUSH"] == "true",
+      force: ENV["APPLE_SIGNIN"] == "true" || ENV["ENABLE_PUSH"] == "true" || ENV["ENABLE_APP_ATTEST"] == "true",
     )
 
     # The Capacitor project ships with automatic signing; switch it to manual so the archive uses the

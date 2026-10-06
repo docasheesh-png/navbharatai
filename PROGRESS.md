@@ -91397,3 +91397,166 @@ guessed keyword list.
   `aTwoPartQuestionGetsBothAnswers.test.ts`, was Q-127's existing test, and it had been overwritten. It was
   restored from git before any commit (its 3 cases pass), and the new test has its own name, written create-only.
 - Q-601 leaves the open table with this PR, and its ID is in the closed register.
+
+### 2026-10-06 — Crashlytics "Push registration failed" (iOS 1.0 (108), iPhone 15): the iPhone app used push its build was never signed with
+
+**Report:** Crashlytics non-fatal, `capacitor://localhost/assets/index-Dt-cGxOu.js — gt`, "[handled] Error: Push
+registration failed", 1 event, 1 user, iOS 26.6.1. The admin also pasted an external (ChatGPT) prompt, which was
+adapted rather than transcribed: no real-device claim is made from here.
+
+**Root cause (evidence, not theory):** iOS runs #108 and #109 skipped "Enable push-notifications entitlement
+(opt-in)", because `enable_push_notifications` defaults OFF until the Apple/Firebase setup is done. Without
+`aps-environment`, iOS never issues an APNs token, so `FirebaseMessaging.getToken()` can never succeed. Yet
+`pushNotifications.ts` still asked the user for permission and still asked for a token on every sign-in. The
+catch reported only `err.name`, which on Capacitor is "Error", so the cause was discarded.
+
+**Class:** an opt-in iOS capability that the build adds while the bundle assumes it is always there. The build
+never told the bundle what it was signed with.
+
+**Ledger:**
+- **Q-691 ✅** A build without push asked for permission and reported a certain failure.
+  - Fix: the same workflow input now stamps `VITE_IOS_PUSH`, read by the new `src/lib/iosBuildCapabilities.ts`, and the iOS path returns before any prompt.
+  - Test: "THE REPORTED CASE" in `pushNotifications.test.ts`. Reverting the gate made it fail.
+- **Q-692 ✅** The report could not tell permission, token, server and plugin failures apart.
+  - Fix: each step runs inside `atStage`, so the message is `Push registration failed at <stage>: <native cause>`, with keys `stage`, `platform` and `code`.
+  - The text still passes observability's sanitizer, and a test proves the token never appears in a report.
+  - Reverting to the name-only report failed 2 tests.
+- **Q-693 ✅ (latent; it would have bitten the first flag-ON build)** Capacitor 8.4.1's generated AppDelegate has no remote-notification callbacks, and the plugin learns the APNs token only from `.capacitorDidRegisterForRemoteNotifications`.
+  - Fix: the push step injects all three forwards, with a guard that fails the build if they are missing.
+  - The injection was run against the real template: it lands in the right place and is idempotent.
+  - A source guard fails if any forward is removed.
+  - A late APNs token is now handled correctly: the code waits once for the plugin's own retained `tokenReceived` event (20 s) and never calls `getToken` again. The test asserts one call.
+- **Q-694 ✅** The server refusing the token was a silent `false`.
+  - Fix: `registerDeviceTokenResult` returns the status, so a refusal is reported as "the server answered N" and an offline phone as "the request did not reach the server".
+- **Q-695 ✅ Siblings.**
+  - App Check started App Attest on iOS builds without the entitlement. It now returns `'not-in-build'` and never loads the plugin.
+  - The Fastfile's `sigh force:` covered Sign in with Apple and push but not App Attest. It now covers App Attest too.
+  - Sign in with Apple was reviewed and deliberately not stamped. It defaults ON, Guideline 4.8 keeps its button, and its failure message is already specific. The reason is recorded in the census test.
+  - The AppKnowledgeBase push entry claimed the App Store app sends pushes. It now says iPhone push is not switched on yet.
+- **Q-696 🟡 BLOCKED (admin):**
+  - the Apple Developer Push capability;
+  - an APNs `.p8` uploaded to Firebase Cloud Messaging;
+  - a flag-ON `.ipa`;
+  - the real-iPhone test (MOBILE_PUBLISHING.md §7.5 step 4).
+
+  The new AppDelegate code has never compiled in Xcode. The first flag-ON build is its first compile.
+
+**Class lock:** `tests/anIosCapabilityIsUsedOnlyWhenTheBuildHasIt.test.ts` holds three censuses, each proven by reversion:
+- every entitlement input is either stamped into the bundle or has its exemption recorded;
+- every opt-in entitlement forces a fresh provisioning profile;
+- every client module driving `@capacitor-firebase/messaging` or `@capacitor-firebase/app-check` imports the stamp.
+
+**What to watch:** the reported issue reaches iPhones only through a NEW `.ipa`, because the fix is frontend plus workflow. On a flag-OFF build the issue must stop appearing. On a flag-ON build any remaining failure names its stage.
+---
+
+## 2026-10-06 — Q-159 closed: the scheduler tick is live (admin console work)
+
+The admin set `SCHEDULER_TICK_SECRET` in Cloud Run and created the Cloud Scheduler job `scheduler-tick`
+(asia-southeast1, every 5 minutes, `POST https://navbharatai.com/api/internal/scheduler-tick` with the
+`x-scheduler-secret` header). A Force run read **Success** (admin screenshot, 2026-10-06). The code is #3555's;
+this entry records the live proof. **Watch for:** "Status of last execution" stays Success; a 503 would mean the
+Cloud Run value was lost on a redeploy, a 401 that one of the two values was changed. Q-159 → closed register.
+
+## 2026-10-06 — Q-134 and Q-110 closed: the retention purge is on
+
+The admin set `DATA_RETENTION_PURGE_ENABLED=on` in Cloud Run. With #3556's subcollection policy and #3555's tick
+already on `main`, the 180-day build-report window (Q-134) and every published retention window (Q-110: "has the
+purge ever run? the Privacy Policy states retention windows as fact") are now enforced, bounded at 500 deletions per
+policy per run. **Watch for:** `[P-DATA.4] retention purge removed N expired record(s)` in the Cloud Run logs over the
+next nights; its absence on a busy collection (e.g. `server_logs` older than 30 days) would mean the job is not running.
+
+## 2026-10-06 — Q-700: a sleeping Supabase database is seen everywhere, and woken only by its owner's tap
+
+**Asked by the admin** ("backend hosting me abhi kya kya problem hai? … jo jo aap kar sakte ho, woh karo"). Of the
+backend-hosting problems listed, this was the one a session could fix without an admin decision or console work.
+
+**The problem.** Supabase pauses a FREE project after about a week without use. Every one-click database we create is
+a free project in the user's account, so the typical small site is exactly the app whose database falls asleep — and
+no code read a project's state after the day it was created. The live site kept opening with no data; Database
+Studio passed on Supabase's raw error; a build reused a sleeping database as if it were fine (and narrated an
+ATTACHED database as "created"); a new project stuck in INIT_FAILED was waited on for 3 minutes, then reported as
+"still starting up".
+
+**Class:** a provider-side state that breaks the user's app and that no code ever reads. **Fixed at every place the
+user meets the database:** settings card (list + Wake), Studio (`database-asleep`), build start (`DATABASE_ASLEEP`),
+reuse (`asleepNote`), creation (`waitUntilReady` fail-fast), and a daily owner notice (`supabase-pause-watch`, once
+per episode, tappable into Settings → Database). One vocabulary: `classifyProjectStatus` (a census fails any other
+file reading a status word itself).
+
+🔒 **Waking is never automatic.** Re-waking every pause would be a keep-alive that defeats Supabase's free-plan pause
+on purpose, and the cost of Supabase judging our OAuth app abusive would fall on every user's one-click database at
+once. Census: `restoreProject(` has exactly one caller, the Wake route, which checks ownership and `canWake` first.
+
+**Sibling found on the way (privacy):** `supabase_connections` — the user's encrypted Supabase grant, able to act in
+their own Supabase account — was in NO account-erase path. Now in `USER_SCOPED_COLLECTIONS`. The census missed it
+because it only reads EXPORTED collection constants; 58 private ones are invisible to it → **Q-701 (OPEN)**.
+
+**Lock:** `tests/aSleepingDatabaseIsSeenAndWokenOnlyByItsOwner.test.ts` (20 tests). Reversions: an automatic restore
+inside the watch → the one-caller census fails; the grant removed from the erase list → `everyCollectionIsClassified`
+fails. **Watch for, live:** a `[supabase-pause-watch]` log line once a paused project exists; the Wake button in
+Settings → Database. Kill switch `SUPABASE_PAUSE_WATCH=off`.
+
+**Still the admin's (from the same answer, recorded so tonight's discussion starts from facts):** D2 — a starter
+database on NavBharatAI's own Supabase org (ROADMAP §11, OPEN); the six `NAVBHARAT_RATE_*` keys and
+`NAVBHARAT_BILL_HOSTING`; deploying the Cloudflare Worker; then `NAVBHARAT_CLOUD_PUBLIC`. None of these was touched.
+### 2026-10-06 — Play Console blocked the Android release: "Use alternative system pickers for photos / videos" (Q-697 ✅, Q-698 🟡, Q-699 OPEN)
+
+**Report:** an admin screenshot of Play Console → Publishing overview: "1 issue found — Use alternative system
+pickers for photos / videos" (Policy), which blocks sending changes for review.
+
+**Root cause:** `android/app/src/main/AndroidManifest.xml` declared `READ_MEDIA_IMAGES` and `READ_MEDIA_AUDIO`
+"for file uploads". Play allows broad photo and video access only to apps whose core purpose needs the gallery.
+Nothing in the app used either permission:
+- uploads are the WebView's `<input type="file">`, which Capacitor opens with the system picker
+  (`ACTION_GET_CONTENT`; the picked file comes with its own grant);
+- camera capture uses `CAMERA` plus the FileProvider;
+- `@capacitor-community/media` asks for media access only in `androidGalleryMode`, which is not enabled.
+
+No native dependency's manifest declares them either (checked: only `POST_NOTIFICATIONS`, from messaging).
+
+**Class:** the Play-restricted permission list guarded only the apps NavBharatAI BUILDS
+(`nativeCapabilities.ts`). NavBharatAI's own manifest was never checked against it.
+
+**Fix (Q-697):**
+- The two grants are removed.
+- `tools:node="remove"` markers for READ_MEDIA_IMAGES, READ_MEDIA_VIDEO and READ_MEDIA_VISUAL_USER_SELECTED stop
+  any library from merging them back.
+- `PLAY_RESTRICTED_ANDROID_PERMISSIONS` is now one exported list, used by both the user-app registry test and the
+  new `tests/playRestrictedPermissionsStayOut.test.ts`.
+- The new test runs three censuses: the app manifest grants none of the list; every native dependency's manifest
+  that declares one is stripped; capacitor.config never turns on the media plugin's gallery mode. Each was proven
+  by reversion (4 reversions, 4 failures).
+- The user-app sibling was checked: the camera plugin's own manifest (7.0.5, downloaded) declares no permission.
+
+**Q-698 🟡 (admin):** build a new `.aab` from `main`, put it in every active track, and answer the
+photo/video declaration if Play still shows it.
+
+**Q-699 OPEN, found on the way:** Android "Save to Photos" has never saved. Plugin 9.x needs `albumIdentifier`
+on Android, so it always falls back to the share sheet.
+
+**What to watch:** the first `.aab`'s merged manifest must contain no `READ_MEDIA_*`. Play's check
+re-runs when the new bundle is added.
+
+### 2026-10-06 — CI red on every PR again at 17:14 UTC: one new npm advisory on a transitive package, fixed by one lockfile bump
+
+The audit gate went red on #3573 (hosting lifecycle) with nothing in that diff to blame — the same class as the
+01:47 UTC entry above: an advisory reached the npm registry after `main` a7d824bc went green. Reproduced on `main`
+with `npm audit --json`.
+
+| Package | Was → now | Advisory | How it reaches us |
+|---|---|---|---|
+| `@modelcontextprotocol/sdk` | 1.29.0 → 1.32.1 | GHSA-6qxp-vccf-f47h (high, CVSS 7.5) — the SDK's OAuth client could send credentials to an authorization server chosen by the MCP server; fixed in 1.31.0 | transitive only: `@google/genai` (`^1.25.2`) and `firebase-tools` (`^1.24.0`). NavBharatAI never calls the SDK's OAuth client; the bump closes the finding, not a live exposure |
+
+- **A real bump, not an allowlist row**: the fixed release sits inside both dependants' ranges, so `package.json`
+  is untouched and the lockfile moves exactly this one entry (`npm update @modelcontextprotocol/sdk
+  --package-lock-only`; verified no other `version` line changed). The package's own dependency list is the same
+  shape as 1.29.0's, so no new transitive package enters the tree.
+- **Gate on the bumped tree** (the CI list, re-read from `ci.yml`): audit gate, license gate, both typechecks,
+  no-unused-imports, native-shell guard, `npm run build`, bundle budget, boot smoke-check, server
+  production-dependency gate, and the dependency test files.
+- **Class, not instance**: this is the fifth time in a week that a freshly published advisory has turned every open
+  PR red (#3421 `@grpc/grpc-js` 2026-09-30, #3464 `basic-ftp` 2026-10-01, #3476 four advisories 2026-10-04, #3563 five
+  advisories 2026-10-06 01:47, and this one at 17:14). The gate is doing its job; the cost is that the
+  merging session must notice a red PR is not the PR's own. A standing recommendation for the admin, not built
+  here: a scheduled `npm audit` on `main` (daily, before India's working hours) that opens the bump PR itself,
+  so the first red is the fix PR and never somebody else's.

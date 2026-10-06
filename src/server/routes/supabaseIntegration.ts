@@ -42,7 +42,11 @@ import {
   primaryKeySql, buildInsertSql, buildUpdateSql, buildDeleteSql, buildBulkInsertSql, verifySingleRow,
 } from '../lib/supabaseWrite';
 import { audit } from '../lib/audit';
-import { loadUserVaultSecrets } from '../lib/secrets';
+import { loadUserVaultSecrets, loadUserVaultRows } from '../lib/secrets';
+import {
+  getProjectState, restoreProject, projectStateMessage, canWake, stateNeedsOwner,
+} from '../lib/supabaseProjectState';
+import { projectRefsInVault } from '../lib/supabasePauseWatch';
 import { provisionDatabaseForUser, freshAccessToken } from '../lib/supabaseProvisionFlow';
 import { reusedDatabaseNote } from '../lib/databaseReuse';
 import { getConversationStore } from './agentv3';
@@ -354,6 +358,7 @@ export function registerSupabaseIntegrationRoutes(
     res.json({
       ok: true,
       ...(result.reused ? { reused: true, reusedNote: reusedDatabaseNote(fromApp), ...(fromApp ? { fromApp } : {}) } : {}),
+      ...(result.asleepNote ? { asleepNote: result.asleepNote } : {}),
       projectRef: result.projectRef,
       projectName: result.projectName,
       url: result.url,
@@ -364,6 +369,80 @@ export function registerSupabaseIntegrationRoutes(
       serverConnection: result.serverConnection,
       ...(result.schemaNote ? { schemaNote: result.schemaNote } : {}),
     });
+  });
+
+  // ── Is the database AWAKE? (2026-10-06) ─────────────────────────────────────────────────────────
+  // Supabase pauses a free project after about a week without use, and an app on a paused database
+  // cannot load or save anything. These two routes are how the owner SEES that and wakes it. Waking is
+  // only ever this button — never automatic (see supabaseProjectState.ts for why).
+
+  /** The verified user's grant, a live token, and every project their apps are wired to. */
+  async function userProjects(uid: string): Promise<
+    { ok: true; token: string; refs: string[] } | { ok: false; status: number; error: string; connected: boolean }
+  > {
+    const conn = await getConnection(uid).catch(() => null);
+    if (!conn) return { ok: false, status: 200, error: '', connected: false };
+    const refs = projectRefsInVault(await loadUserVaultRows(uid).catch(() => []));
+    const fresh = await freshAccessToken(uid, conn);
+    if (!fresh.ok) return { ok: false, status: fresh.status, error: fresh.message, connected: true };
+    return { ok: true, token: fresh.token, refs };
+  }
+
+  app.get('/api/integrations/supabase/project-health', async (req: Request, res: Response) => {
+    const uid = await verifyFirebaseToken(req);
+    if (!uid) { res.status(401).json({ error: 'Please sign in first.' }); return; }
+    const access = await userProjects(uid);
+    if (!access.ok) {
+      // Not connected is an ANSWER (nothing to check), not an error; a lapsed grant is an error with the fix in it.
+      if (!access.connected) { res.json({ connected: false, projects: [] }); return; }
+      res.status(access.status).json({ error: access.error });
+      return;
+    }
+    // Bounded: a user has a handful of databases at most, and each is one Supabase call.
+    const projects = await Promise.all(access.refs.slice(0, 8).map(async (ref) => {
+      const seen = await getProjectState(access.token, ref).catch(() => null);
+      if (!seen || !seen.ok) {
+        return { projectRef: ref, state: 'unchecked', name: '', canWake: false,
+          message: seen && !seen.ok ? seen.message : 'NavBharatAI could not check this database just now.' };
+      }
+      return { projectRef: ref, state: seen.state, name: seen.name, canWake: canWake(seen.state),
+        message: projectStateMessage(seen.state, seen.name) };
+    }));
+    res.json({ connected: true, projects });
+  });
+
+  app.post('/api/integrations/supabase/wake', async (req: Request, res: Response) => {
+    const uid = await verifyFirebaseToken(req);
+    if (!uid) { res.status(401).json({ error: 'Please sign in first.' }); return; }
+    const projectRef = typeof req.body?.projectRef === 'string' ? req.body.projectRef.trim().toLowerCase() : '';
+    const access = await userProjects(uid);
+    if (!access.ok) {
+      res.status(access.connected ? access.status : 400)
+        .json({ error: access.connected ? access.error : 'Connect your Supabase account first, then wake the database.' });
+      return;
+    }
+    // Only a database one of THIS user's apps is wired to. Supabase would refuse a foreign project anyway;
+    // checking here means the refusal is ours and plain, not a provider error.
+    if (!projectRef || !access.refs.includes(projectRef)) {
+      res.status(403).json({ error: 'That database is not one of your apps\' databases.' });
+      return;
+    }
+    // Asked FIRST: restoring a project that is not paused cannot help, and saying "waking it" would be untrue.
+    const seen = await getProjectState(access.token, projectRef);
+    if (!seen.ok) { res.status(seen.failure === 'unauthorized' ? 401 : 502).json({ error: seen.message }); return; }
+    if (!canWake(seen.state)) {
+      res.status(409).json({ error: projectStateMessage(seen.state, seen.name) || 'This database is already awake.', state: seen.state });
+      return;
+    }
+    const woke = await restoreProject(access.token, projectRef);
+    try { audit('SUPABASE_PROJECT_WAKE', { userId: uid, ok: woke.ok }); } catch { /* audit never blocks */ }
+    if (!woke.ok) {
+      if (woke.detail) console.error(`[SUPABASE-WAKE] ${woke.failure}: ${woke.detail}`);
+      res.status(woke.failure === 'plan-limit' ? 409 : woke.failure === 'unauthorized' ? 401 : 502).json({ error: woke.message, failure: woke.failure });
+      return;
+    }
+    // ACCEPTED is not AWAKE — the project is now waking, and the answer says exactly that.
+    res.json({ ok: true, state: 'waking', message: projectStateMessage('waking', seen.name) });
   });
 
   // ── Data GUI (ROADMAP #1 Phase 2.1) ────────────────────────────────────────────────────────────
@@ -431,15 +510,23 @@ export function registerSupabaseIntegrationRoutes(
    * once, and no route can be forgotten.
    */
   async function execSql(access: SqlAccess, sql: string): Promise<{ ok: true; rows: Array<Record<string, unknown>> } | { ok: false; failure: string; message: string; detail?: string }> {
-    return access.kind === 'supabase-api'
-      ? runQuery(access.token, access.projectRef, sql)
-      : runPostgresQuery(access.connectionString, sql);
+    if (access.kind !== 'supabase-api') return runPostgresQuery(access.connectionString, sql);
+    const result = await runQuery(access.token, access.projectRef, sql);
+    if (result.ok || result.failure === 'unauthorized') return result;
+    // A SLEEPING DATABASE answers every query with an error that reads like our bug (2026-10-06). Only on
+    // a failure — never on the happy path — ask what state the project is in, and if Supabase has paused
+    // it, say THAT, with the way to wake it, instead of Supabase's raw words.
+    const seen = await getProjectState(access.token, access.projectRef).catch(() => null);
+    if (seen && seen.ok && stateNeedsOwner(seen.state)) {
+      return { ok: false, failure: 'database-asleep', message: projectStateMessage(seen.state, seen.name), detail: result.detail };
+    }
+    return result;
   }
 
   /** Turn a classified data failure into a response — the provider's own text never goes out. */
   function sendDataError(res: Response, err: { failure: string; message: string; detail?: string }): void {
     if (err.detail) console.error(`[SUPABASE-DATA] ${err.failure}: ${err.detail}`);
-    res.status(err.failure === 'unauthorized' ? 401 : err.failure === 'bad-request' ? 400 : 502)
+    res.status(err.failure === 'unauthorized' ? 401 : err.failure === 'bad-request' ? 400 : err.failure === 'database-asleep' ? 409 : 502)
       .json({ error: err.message, failure: err.failure });
   }
 

@@ -173,7 +173,7 @@ import {
   LEASE_HEARTBEAT_MS, BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
 } from '../AgentV3/workspaceBuildLease';
 import { getConnection } from '../lib/supabaseConnectionStore';
-import { provisionDatabaseForUser, freshAccessToken } from '../lib/supabaseProvisionFlow';
+import { provisionDatabaseForUser, freshAccessToken, databaseReadyNarration, connectedDatabaseAsleepNote } from '../lib/supabaseProvisionFlow';
 import { setupSupabasePayments, supabasePaymentsEnabled, PAYMENT_SECRET_NAMES } from '../lib/supabasePayments';
 import { projectRefFromUrl } from '../lib/supabaseData';
 import { databaseReadiness } from '../AgentV3/databaseNeed';
@@ -15770,8 +15770,8 @@ async function noteBuildOutcome(
                 const made = await provisionDatabaseForUser(userId, { appLabel: prompt.slice(0, 40), workspaceId }).catch(() => null);
                 if (made && made.ok) {
                   vaultSecrets = await loadUserVaultSecrets(userId, workspaceId).catch(() => vaultSecrets);
-                  emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '✅ Database created in your Supabase account. Your app will save its data there from the start.' });
-                  buildDiag.record({ phase: 'plan', severity: 'info', code: 'DATABASE_OFFER_AT_START', message: `Created the user's database at build start (${need.reasons.join(', ')}).`, autoResolved: true });
+                  emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: databaseReadyNarration(made, 'start') });
+                  buildDiag.record({ phase: 'plan', severity: 'info', code: 'DATABASE_OFFER_AT_START', message: `${made.reused ? 'Attached the user\'s existing database' : 'Created the user\'s database'} at build start (${need.reasons.join(', ')})${made.asleepNote ? ' — it is ASLEEP (Supabase paused it); the user was told how to wake it' : ''}.`, autoResolved: true });
                 } else {
                   emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${made && !made.ok ? made.error : 'Your database could not be created just now.'} I will build with data kept on this device for now.` });
                   buildDiag.record({ phase: 'plan', severity: 'warning', code: 'DATABASE_OFFER_AT_START', message: 'The user approved a database at build start and it could not be created.', detail: made && !made.ok ? made.error : 'provisioning threw', autoResolved: false });
@@ -15779,6 +15779,19 @@ async function noteBuildOutcome(
               }
             }
           } catch { /* the offer is best-effort — a failure leaves the build exactly as it was */ }
+          // IS THE CONNECTED DATABASE ASLEEP? (2026-10-06) Supabase pauses a free project after about a week
+          // without use; a build wired to it then produces an app whose every read fails in the preview, and
+          // the user is left to guess why. Asked once, capped at 4 s, never when the offer above just spoke
+          // about the database itself. A fact about the user's own Supabase account — never the app's defect.
+          try {
+            if (!databaseOfferedAtStart && userDatabaseContext(vaultSecrets)) {
+              const asleep = await connectedDatabaseAsleepNote(userId, vaultSecrets.VITE_SUPABASE_URL);
+              if (asleep) {
+                emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${asleep}` });
+                buildDiag.record({ phase: 'plan', severity: 'warning', code: 'DATABASE_ASLEEP', message: 'The app\'s connected Supabase database is not running (paused, failed or removed); the user was told how to wake it.', detail: asleep, autoResolved: false });
+              }
+            }
+          } catch { /* a status check never changes a build */ }
           // ENGINEER_DB_PROVIDER is an internal marker (which DB the user connected), not an app secret —
           // keep it OUT of the built app's .env; it is only used to build the DB context prompt below.
           const { [DB_PROVIDER_MARKER]: _dbMarker, ...appEnv } = vaultSecrets;
@@ -15963,12 +15976,7 @@ async function noteBuildOutcome(
               emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${result && !result.ok ? result.error : 'Your database could not be created just now.'}` });
               return null;
             }
-            emit({
-              type: 'narration', agent: 'architect', ts: Date.now(),
-              text: result.schemaApplied === false
-                ? '✅ Database created in your Supabase account and wired into your app — its tables could not be set up yet, so I will create them as the build continues.'
-                : '✅ Database created in your Supabase account and wired into your app. Your data stays in your own account.',
-            });
+            emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: databaseReadyNarration(result, 'mid-build') });
             return result.env;
           });
         }

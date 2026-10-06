@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- BACKUP IS DELIBERATE NOW, NOT ACCIDENTAL (2026-08-28). `allowBackup="true"` with no rules
          meant Android backed up the whole data directory — including the WebView caches. The per-app
@@ -186,12 +187,26 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- Storage: file uploads/downloads. Scoped by SDK — legacy read/write only up to Android 12 (API 32);
-         Android 13+ uses the granular media reads. WRITE is legacy-only (maxSdk 28). -->
+    <!-- Storage: legacy read/write for old Android only (READ up to Android 12 / API 32, WRITE up to API 28). -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
+    <!-- ⛔ NO BROAD PHOTO / VIDEO ACCESS (2026-10-06 — Play Console blocked a release: "Use alternative system
+         pickers for photos / videos"). Google Play allows READ_MEDIA_IMAGES / READ_MEDIA_VIDEO only for apps
+         whose CORE purpose needs the whole gallery; this app only ever needs a photo the user picks.
+         They were declared here "for file uploads", but nothing used them:
+           • a file upload is the WebView's <input type="file">, which Capacitor opens with the system
+             picker (ACTION_GET_CONTENT) — the picked file arrives with its own grant, no permission;
+           • taking a photo uses CAMERA + the FileProvider above;
+           • "Save to Photos" (@capacitor-community/media) only asks for media access in its
+             `androidGalleryMode`, which this app does not enable — capacitor.config.ts must keep it off.
+         The `tools:node="remove"` lines also strip them if any library's manifest ever merges them in,
+         so the bundle Play reviews cannot carry them. READ_MEDIA_AUDIO was removed with them: nothing read
+         audio files either (the voice feature records with RECORD_AUDIO).
+         Locked by tests/playRestrictedPermissionsStayOut.test.ts. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" tools:node="remove" />
 
     <!-- Advertising ID — REQUIRED to declare explicitly once an app targets Android 13 (API 33) and
          has an advertising-ID collector in the build (Meta's SDK, added when FACEBOOK_APP_ID/

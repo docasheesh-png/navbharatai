@@ -407,6 +407,26 @@ done would break the build's provisioning-profile step):
    profile to regenerate (step 1 is what makes the regenerated profile valid). Leave OFF for a build without
    push (today's default — nothing changes for users until you do steps 1–2 and rebuild with the flag on).
 
+**⚠️ CORRECTION 2026-10-06 — "nothing changes for users" was not true until this date.** A build with the flag
+OFF still asked iPhone users for notification permission and still asked Firebase for a token, which can never
+succeed without `aps-environment`; every sign-in on build 108 sent Crashlytics "Error: Push registration
+failed". Now the same toggle also tells the app (`VITE_IOS_PUSH`, read in `src/lib/iosBuildCapabilities.ts`),
+so a flag-OFF build never asks and never reports, and a flag-ON build:
+- has the three APNs callbacks injected into `AppDelegate.swift` (Capacitor's template has none, and the plugin
+  learns the APNs token only from them);
+- reports any failure as `Push registration failed at <stage>: <cause>` (stage = permission / token /
+  register…), so Crashlytics shows WHICH link of the chain broke.
+
+The same now holds for `enable_app_attest` (`VITE_IOS_APP_ATTEST`), and an App Attest build also forces a fresh
+provisioning profile, like push and Sign in with Apple.
+
+4. **Test on a real iPhone (nothing in CI can do this):** install the flag-ON TestFlight build fresh → sign in
+   → the permission prompt appears → Allow → from the admin panel send a test push with the app in the
+   BACKGROUND (it must appear as a banner) and in the FOREGROUND → tap it (it must open the right screen). Then
+   reinstall, choose **Don't Allow**, and confirm no Crashlytics issue appears for that. If a "Push
+   registration failed at token" issue appears, its cause names what Apple or Firebase refused (most often a
+   missing APNs key in step 2).
+
 ---
 
 ## 7.6 Ad conversion measurement — running Facebook / Instagram ads for installs

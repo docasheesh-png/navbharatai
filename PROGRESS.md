@@ -91387,3 +91387,11 @@ The admin set `SCHEDULER_TICK_SECRET` in Cloud Run and created the Cloud Schedul
 `x-scheduler-secret` header). A Force run read **Success** (admin screenshot, 2026-10-06). The code is #3555's;
 this entry records the live proof. **Watch for:** "Status of last execution" stays Success; a 503 would mean the
 Cloud Run value was lost on a redeploy, a 401 that one of the two values was changed. Q-159 → closed register.
+
+## 2026-10-06 — Q-134 and Q-110 closed: the retention purge is on
+
+The admin set `DATA_RETENTION_PURGE_ENABLED=on` in Cloud Run. With #3556's subcollection policy and #3555's tick
+already on `main`, the 180-day build-report window (Q-134) and every published retention window (Q-110: "has the
+purge ever run? the Privacy Policy states retention windows as fact") are now enforced, bounded at 500 deletions per
+policy per run. **Watch for:** `[P-DATA.4] retention purge removed N expired record(s)` in the Cloud Run logs over the
+next nights; its absence on a busy collection (e.g. `server_logs` older than 30 days) would mean the job is not running.

@@ -585,6 +585,21 @@ FAILED build ₹811). The Opus tiers are untouched.
   cache-miss rate → real cost is a slight OVER-estimate (margin-safe). A later slice can capture
   `cache_read` usage to bill even lower.
 
+### "Seen running" for a bill includes the in-build render (admin decision 2026-10-06, Q-727 = b) — ⚠️ CONFIRM WITH ADMIN BEFORE CHANGING
+
+Build e52cebbf rendered in a real browser at the in-build green check (314 s, `IN_BUILD_GREEN` in the
+evidence ledger). The user then stopped it before the final check, and the bill treated it as an app
+that never ran: margin waived, files-saved rule (₹34.16). Asked to choose, the admin picked **(b)**:
+*"Q-727 = b"*. An app seen rendering in a real browser during the build is billed as a working app.
+
+- **One fact, one name:** `appSeenRunningForBill = buildObs.previewRendered === true || renderProvenNow()`
+  in `routes/agentv3.ts`. The markup rule (`decideMarkupOnProof.previewProven`) and the cancelled-build
+  rule (`decideCancelledBuildBill.appRendered` → `working-app`, full charge) both read it. The watchdog
+  path reads the same OR against `buildDiagRef`'s ledger. No money site reads the final-check flag alone
+  (`tests/theFinanceAppCouldNotSave.test.ts` §6).
+- **Unchanged:** a build with nothing written is still free; a render only of our untouched starter is
+  not a render of the app (the ledger's own rule); an app never seen rendering still pays real cost only.
+
 ### THE ONE-WALLET LAW — every AI spends the SAME balance (admin-mandated 2026-08-01, shipped 2026-08-04)
 
 **Admin verbatim: "user unhin 50,000 token se kharch kare, har jagah."** The gifted balance used to be

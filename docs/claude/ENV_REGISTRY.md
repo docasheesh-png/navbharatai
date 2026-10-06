@@ -304,6 +304,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   renewal reminders, hosting daily bill, image cleanup, outbound rescan, site uptime, retention purge when enabled) that
   is due by the durable `job_runs` record. Unset ⇒ the route answers 503, so a half-done setup shows red in the Cloud
   Scheduler console. The admin's choice over `--min-instances 1` (2026-10-05): it costs nothing while idle.
+  ✅ **SET 2026-10-06 — the admin reports `SCHEDULER_TICK_SECRET` set in Cloud Run and the Cloud Scheduler job created**
+  ("done"). Name recorded only; the value was never written anywhere in this repo. Not verified from a session (the
+  session network cannot reach the live host): the proof is the Cloud Scheduler job's Force run reading Success —
+  503 = the Cloud Run value is missing or under 16 characters, 401 = the two values differ.
 - **New domain gets the published app by itself (built 2026-10-05, Q-163):** `DOMAIN_AUTOPUBLISH` — kill switch,
   **default ON**; `off` stops the uptime sweep putting the already-published app (from `PUBLISHED_APPS_BUCKET`'s copy)
   on a connected domain whose site is still empty. Once per domain + app, owner's active app only.

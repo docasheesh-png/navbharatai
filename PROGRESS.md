@@ -91243,7 +91243,7 @@ green on 2026-10-05. Reproduced locally on `main` with `npm audit --json`.
   `.aab`/`.ipa` the admin asks for carries 8.5.1 / 8.4.3; build 147 on Play and the current TestFlight
   build still run 8.5.0 / 8.4.1. Per the 2026-09-07 rule, a store build is made only when the admin asks.
 
-## 2026-10-06 — The admin's "ok banao": chat picture edits, rules shipped with every merge, Play refunds, queue cleanup (#NEXT)
+## 2026-10-06 — The admin's "ok banao": chat picture edits, rules shipped with every merge, Play refunds, queue cleanup (#3565)
 
 The admin accepted every recommendation for the rows #3551 left open. This PR builds the ones that are code.
 
@@ -91322,6 +91322,26 @@ a CLASS, not one stale row.
 - **Honest limit:** the register catches a RESURRECTED row. A stale copy that downgrades a row which is still open
   (BLOCKED → OPEN, as Q-111 was) is not caught mechanically. The fresh-main rule is the guard for that half.
 
+## 2026-10-06 — Q-618: the production server no longer runs as root; #3565's rows closed (#3566)
+
+#3565 merged (Q-683, Q-610, Q-690). Q-683 leaves the queue and is added to the closed-ID register. Q-610 and
+Q-690 are now 🟡 BLOCKED on one admin grant each: `roles/firebaserules.admin` for Cloud Build, and the Play
+Console "View financial data" permission for the service account. #3565's PROGRESS heading carried a `#NEXT`
+placeholder; it now reads #3565.
+
+**Q-618.** The runtime stage of the `Dockerfile` had no `USER`, so the server ran as root and a code-execution bug
+could rewrite `dist/server.cjs` or any module for every later request. It now ends `ENV WORKSPACES_ROOT=/tmp/workspaces`
++ `USER node`; everything copied stays root-owned, so the server can read its code but not change it.
+- **Audit before the change** (every `fs` / `child_process` site in `server.ts` + `src/server`, and what the bundle
+  actually includes): writes go to `os.tmpdir()`; npm's own logs go to `/home/node` (owned by `node`);
+  `/app/job_storage` (`LocalFileJobStore`) is a dev-only store whose boot `mkdir` is caught and that no production
+  route writes; the no-sandbox local-actuator fallback wrote under `/workspaces` (root-only), so `WORKSPACES_ROOT`
+  now points into /tmp. No runtime dependency writes into `node_modules` or `$HOME`.
+- **Lock:** `tests/theServerDoesNotRunAsRoot.test.ts` — the USER line, its order before `CMD`, no root switch
+  after it, code copied before it without `--chown`, the fallback root in /tmp (USER line removed → 3 fail).
+- **Honest limit:** no Docker in this session, so the image itself was not booted here. CI's boot check runs the
+  bundle, not the container. **Watch on the first deploy:** the Cloud Run revision reaches `Server running`, and one
+  real build completes. The revert is the one `USER node` line.
 ### 2026-10-06 — Q-600: unused client locals are ratcheted — the backlog can only shrink
 
 The queue's Q-600 was OPEN: `tsc --noUnusedLocals` listed about 93 client locals that nothing reads. Measured
@@ -91564,3 +91584,26 @@ words, not the behaviour.
 **Next step:** a deployment-history screen on the Publish sheet that reads `hosted_deploy_attempts`, which is also
 what lets a 409 "already deploying" show live progress. After that, server rollback to the previous Cloud Run
 revision.
+### 2026-10-06 — CI red on every PR again at 17:14 UTC: one new npm advisory on a transitive package, fixed by one lockfile bump
+
+The audit gate went red on #3573 (hosting lifecycle) with nothing in that diff to blame — the same class as the
+01:47 UTC entry above: an advisory reached the npm registry after `main` a7d824bc went green. Reproduced on `main`
+with `npm audit --json`.
+
+| Package | Was → now | Advisory | How it reaches us |
+|---|---|---|---|
+| `@modelcontextprotocol/sdk` | 1.29.0 → 1.32.1 | GHSA-6qxp-vccf-f47h (high, CVSS 7.5) — the SDK's OAuth client could send credentials to an authorization server chosen by the MCP server; fixed in 1.31.0 | transitive only: `@google/genai` (`^1.25.2`) and `firebase-tools` (`^1.24.0`). NavBharatAI never calls the SDK's OAuth client; the bump closes the finding, not a live exposure |
+
+- **A real bump, not an allowlist row**: the fixed release sits inside both dependants' ranges, so `package.json`
+  is untouched and the lockfile moves exactly this one entry (`npm update @modelcontextprotocol/sdk
+  --package-lock-only`; verified no other `version` line changed). The package's own dependency list is the same
+  shape as 1.29.0's, so no new transitive package enters the tree.
+- **Gate on the bumped tree** (the CI list, re-read from `ci.yml`): audit gate, license gate, both typechecks,
+  no-unused-imports, native-shell guard, `npm run build`, bundle budget, boot smoke-check, server
+  production-dependency gate, and the dependency test files.
+- **Class, not instance**: this is the fifth time in a week that a freshly published advisory has turned every open
+  PR red (#3421 `@grpc/grpc-js` 2026-09-30, #3464 `basic-ftp` 2026-10-01, #3476 four advisories 2026-10-04, #3563 five
+  advisories 2026-10-06 01:47, and this one at 17:14). The gate is doing its job; the cost is that the
+  merging session must notice a red PR is not the PR's own. A standing recommendation for the admin, not built
+  here: a scheduled `npm audit` on `main` (daily, before India's working hours) that opens the bump PR itself,
+  so the first red is the fix PR and never somebody else's.

@@ -19,6 +19,7 @@
 // charge it never agreed to.
 
 import { detectLanguageHint } from '../AgentV3/LanguageDetect';
+import { IMAGE_STUDIO_MODE_NAME } from './freeChatModeGuide';
 
 /** The code a client sees when its free pictures are used and it cannot be charged. */
 export const FREE_USED_UPDATE_CODE = 'free_used_update';
@@ -44,4 +45,20 @@ export function freeUsedUpdateMessage(prompt: string, freePerDay: number): strin
   if (detectLanguageHint(said)?.code === 'hi') return HINDI(freePerDay);
   const hits = new Set((said.toLowerCase().match(HINGLISH_WORDS) ?? []).map((w) => w.trim()));
   return hits.size >= 2 ? HINGLISH(freePerDay) : EN(freePerDay);
+}
+
+// ── A PICTURE EDITED INSIDE THE CHAT (admin 2026-10-06, Q-683) ─────────────────────────────────────────
+// The chat never shows a price, so a picture edited there is never charged. It does count against the same
+// 5 free pictures a day as the Image Generator (one allowance, wherever the picture is made); after them, the
+// chat says where more can be made — the screen that shows the price — instead of a charge nobody agreed to.
+const CHAT_EN = (n: number): string => `You have used your ${n} free pictures for today. More pictures (₹1 each) are made in Mode → ${IMAGE_STUDIO_MODE_NAME}, or come back tomorrow for ${n} more free.`;
+const CHAT_HINGLISH = (n: number): string => `Aaj ki ${n} free pictures ho gayi hain. Aur pictures (₹1 each) Mode → ${IMAGE_STUDIO_MODE_NAME} me banti hain, ya kal ${n} nayi free pictures ke liye aaiye.`;
+const CHAT_HINDI = (n: number): string => `आज की ${n} फ़्री पिक्चर हो गई हैं। और पिक्चर (₹1 प्रति पिक्चर) Mode → ${IMAGE_STUDIO_MODE_NAME} में बनती हैं, या कल ${n} नई फ़्री पिक्चर के लिए आइए।`;
+
+/** "Today's free pictures are used — the Image Generator makes more", in the user's own script. PURE. */
+export function chatEditFreeUsedMessage(prompt: string, freePerDay: number): string {
+  const said = String(prompt ?? '');
+  if (detectLanguageHint(said)?.code === 'hi') return CHAT_HINDI(freePerDay);
+  const hits = new Set((said.toLowerCase().match(HINGLISH_WORDS) ?? []).map((w) => w.trim()));
+  return hits.size >= 2 ? CHAT_HINGLISH(freePerDay) : CHAT_EN(freePerDay);
 }

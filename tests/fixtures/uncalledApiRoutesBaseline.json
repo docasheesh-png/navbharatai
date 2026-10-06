@@ -43,8 +43,6 @@
   "POST /api/admin/rotate-keys": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
   "POST /api/admin/settings": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/agentv3/exec": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
-  "POST /api/agentv3/host-app": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
-  "POST /api/agentv3/host-usage": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/agentv3/preview-keepalive": "injected: the script the server injects into a running preview pings it (previewKeepAlive.ts)",
   "POST /api/audit/full": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/auth/firebase/connect": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",

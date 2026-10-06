@@ -60,6 +60,8 @@ import { HOSTING_OVERAGE_INR_PER_GB } from '../../lib/hostingTiers';
 import { readWalletBalanceInr, firestoreWalletReader } from './WalletBalance';
 import { saveNotification } from '../lib/AdminNotificationStore';
 import { deploymentStore as deployments } from './DeploymentStore';
+import { FirebaseHostingDeployer } from './Deployment';
+import { takeAppOffline } from './hostedAppLifecycle';
 import { debitWalletRolledUp } from '../lib/walletDebit';
 import { getServerDb } from '../lib/serverDb';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -485,10 +487,23 @@ async function settleDebt(
     return;
   }
 
+  // 🔴 REALLY offline (2026-10-06). This loop used to write `plan_paused` and remove NOTHING — the static
+  // channel and the server both kept answering while the owner was told their sites were offline. Each app
+  // now goes through the one offline path; an app whose removal is not confirmed stays marked as it was.
+  let offline = 0;
   for (const app of owned) {
-    await deployments.setStatus(app.workspaceId, 'plan_paused').catch(() => false);
+    try {
+      await takeAppOffline(app.workspaceId, 'plan_paused', {
+        deleteChannel: (id) => new FirebaseHostingDeployer().deleteChannel(id),
+        get: (id) => deployments.get(id),
+        setStatus: (id, status) => deployments.setStatus(id, status),
+      });
+      offline += 1;
+    } catch (e) {
+      out.notes.push(`${ownerId}: ${app.workspaceId} could NOT be taken offline — ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
-  out.notes.push(`${ownerId}: owes ₹${owedInr.toFixed(2)} past the ${HOSTING_DEBT_GRACE_DAYS}-day grace — ${owned.length} app(s) taken offline.`);
+  out.notes.push(`${ownerId}: owes ₹${owedInr.toFixed(2)} past the ${HOSTING_DEBT_GRACE_DAYS}-day grace — ${offline} of ${owned.length} app(s) taken offline.`);
   await saveNotification({
     message: `Your sites are offline because ₹${owedInr.toFixed(2)} of extra traffic is still unpaid. Nothing has been deleted — add balance to your wallet, then open your app and press Publish to put it back online.`,
     target: { type: 'user', userId: ownerId },

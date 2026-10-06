@@ -29,15 +29,20 @@ function anAdminAddress(): string {
 }
 
 describe('a token-less request claiming the admin\'s email is refused', () => {
-  for (const route of ['POST /api/agentv3/host-app', 'POST /api/agentv3/host-usage']) {
-    it(route, async () => {
-      const handler = routes.get(route);
-      expect(handler).toBeTruthy();
-      const res = mockRes();
-      await handler(mockReq({ body: { workspaceId: 'agentv3-anon-aaaaaaaa', userId: 'x', email: anAdminAddress() } }), res);
-      expect(res.statusCode).toBe(401);
-    });
-  }
+  // `/host-app` and `/host-usage` were DELETED on 2026-10-06 (no caller; see serverPublish.ts). The door this
+  // block tested on them must stay shut: neither route exists, and the one remaining server-publish path takes
+  // admin from the verified token only (pinned in tests/hostApp.test.ts and publishRoute.test.ts).
+  it('the two admin-gated hosting routes no longer exist', () => {
+    expect(routes.get('POST /api/agentv3/host-app')).toBeUndefined();
+    expect(routes.get('POST /api/agentv3/host-usage')).toBeUndefined();
+  });
+
+  it('the server publish never reads the claimed email for its admin decision', () => {
+    const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    expect(src).toContain('hostIsAdmin = isReportAdmin(identityGrantEmail(identity));');
+    expect(src).not.toMatch(/hostIsAdmin = isReportAdmin\((req\.body|email)/);
+    void anAdminAddress; void mockReq; void mockRes;
+  });
 });
 
 describe('census: no admin decision in agentv3.ts reads a claimed identity', () => {

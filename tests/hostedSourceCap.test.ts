@@ -104,7 +104,10 @@ describe('WIRING — it runs on the real publish path', () => {
 
   it('it refuses with its own named reason, so a report can tell it from a build failure', () => {
     expect(src).toContain("reason: 'too-large'");
-    expect(src).toContain("'unavailable' | 'no-source' | 'too-large'");
+    expect(src).toContain("'unavailable' | 'blocked' | 'no-source' | 'too-large'");
+    // …and the one status mapping reports it as the app's own problem (422), not as our outage.
+    const seq = readFileSync(join(__dirname, '..', 'src/server/AgentV3/serverPublish.ts'), 'utf8');
+    expect(seq).toContain("case 'no-source': case 'unpackable': case 'too-large': return 422;");
   });
 
   it('and it runs BEFORE the build — a refusal after paying for Cloud Build minutes is not a cap', () => {

@@ -169,9 +169,10 @@ describe('🔒 the wiring — unpublish gives the hosting slot back', () => {
     return at === -1 ? '' : route.slice(at, route.indexOf('app.post(', at + 40));
   })();
 
-  it('the unpublish route deletes the Cloud Run service too', () => {
-    expect(handler).toContain('deleteHostedService({');
-    expect(handler).toContain('serviceNameFor(workspaceId');
+  it('the unpublish route deletes the Cloud Run service too — EVERY one of the app, through the shared function', () => {
+    // 2026-10-06: `removeHostedServers` deletes the recorded service AND any other carrying the workspace's
+    // rename-proof tag (a rename used to leave a second one public).
+    expect(handler).toContain('await removeHostedServers(workspaceId, rec);');
   });
 
   it('🔒 it runs AFTER the channel delete that gates the response, and cannot fail the takedown', () => {
@@ -179,7 +180,7 @@ describe('🔒 the wiring — unpublish gives the hosting slot back', () => {
     // because a Cloud Run delete did not answer would refuse the thing that already succeeded — and a
     // surviving service is classified as reclaimable waste, so it is visible rather than lost.
     const channelAt = handler.indexOf('deleteChannel(workspaceId)');
-    const hostAt = handler.indexOf('deleteHostedService({');
+    const hostAt = handler.indexOf('await removeHostedServers(workspaceId, rec);');
     expect(channelAt).toBeGreaterThan(-1);
     expect(hostAt).toBeGreaterThan(channelAt);
     const block = handler.slice(hostAt - 400, hostAt + 800);

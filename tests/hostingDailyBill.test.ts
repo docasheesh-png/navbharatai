@@ -254,7 +254,9 @@ describe('the sweep', () => {
     expect(sweep).toContain("decideDebtAction({");
     expect(sweep).toContain("if (action === 'none') return;");
     expect(sweep).toContain("if (action === 'warn')");
-    expect(sweep).toMatch(/action === 'warn'[\s\S]*?setStatus\(app\.workspaceId, 'plan_paused'\)/);
+    // 2026-10-06: through the ONE offline path, which removes the channel and the server BEFORE marking —
+    // the old loop wrote `plan_paused` and removed nothing.
+    expect(sweep).toMatch(/action === 'warn'[\s\S]*?takeAppOffline\(app\.workspaceId, 'plan_paused'/);
     // Marked, never deleted — the files stay and the app returns on publish.
     expect(sweep).not.toContain('deleteHostedService');
   });
@@ -294,7 +296,11 @@ describe('the takedown’s matching fix', () => {
   const route = codeOf(read('src/server/routes/agentv3.ts'));
 
   it('🔒 deletes the RECORDED service — a derived one would leak a slot out of a hard cap of 1,000', () => {
-    expect(route).toContain("const recordedService = String(rec?.service ?? '').trim();");
-    expect(route).toContain('service: recordedService || serviceNameFor(workspaceId,');
+    // Since 2026-10-06 through the one implementation, which deletes the recorded service AND every other
+    // service carrying the workspace's rename-proof tag (hostedAppLifecycle.ts → removeWorkspaceServers).
+    expect(route).toContain('await removeHostedServers(workspaceId, rec);');
+    const cr = read('src/server/AgentV3/cloudRunHosting.ts');
+    expect(cr).toContain("const recorded = String(opts.recordedService ?? '').trim();");
+    expect(cr).toContain('if (recorded && serviceBelongsTo(recorded, opts.workspaceId)) targets.add(recorded);');
   });
 });

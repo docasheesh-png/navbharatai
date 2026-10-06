@@ -49,6 +49,7 @@ import { deleteCustomDomain, attachCustomDomain } from './firebaseCustomDomain';
 import { publishedAppCap } from './HostingQuota';
 import { deploymentStore } from '../AgentV3/DeploymentStore';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
+import { takeAppOffline } from '../AgentV3/hostedAppLifecycle';
 
 export interface SweepDeps {
   notify: (userId: string, message: string) => Promise<unknown>;
@@ -87,8 +88,13 @@ const realDeps: SweepDeps = {
   appsForUser: (userId) => deploymentStore.listByUser(userId, 500),
   pauseApp: async (workspaceId) => {
     // Real removal first — see the interface note. If this throws, nothing is marked.
-    await new FirebaseHostingDeployer().deleteChannel(workspaceId);
-    await deploymentStore.setStatus(workspaceId, 'plan_paused');
+    // The channel, then the app's SERVER too (hostedAppLifecycle.ts, 2026-10-06) — a lapsed plan must not
+    // keep a container running on our bill. Throws unless all of it is gone, so nothing is marked on a half-pause.
+    await takeAppOffline(workspaceId, 'plan_paused', {
+      deleteChannel: (id) => new FirebaseHostingDeployer().deleteChannel(id),
+      get: (id) => deploymentStore.get(id),
+      setStatus: (id, status) => deploymentStore.setStatus(id, status),
+    });
   },
   now: () => new Date(),
 };

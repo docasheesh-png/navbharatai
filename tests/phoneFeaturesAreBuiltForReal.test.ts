@@ -10,6 +10,7 @@ import { join } from 'path';
 import {
   NATIVE_CAPABILITIES, REGISTRY_CAPACITOR_MAJOR, REGISTRY_CAPACITOR_CORE, requestedCapabilities,
   capabilitiesInPackageJson, nativeCapabilityBrief, alignNativePlugins, nativePermissionScript,
+  PLAY_RESTRICTED_ANDROID_PERMISSIONS,
 } from '../src/server/AgentV3/nativeCapabilities';
 import { buildPackageJson } from '../src/server/lib/mobileProjectAssembler';
 import { generateShipKit } from '../src/server/lib/mobileShipKit';
@@ -35,7 +36,7 @@ describe('the registry itself', () => {
   });
   it('🔒 Play-restricted permissions are never requested', () => {
     const all = NATIVE_CAPABILITIES.flatMap((c) => c.androidPermissions.map((p) => p.name));
-    for (const banned of ['READ_SMS', 'READ_CALL_LOG', 'READ_MEDIA_IMAGES', 'READ_MEDIA_VIDEO', 'SCHEDULE_EXACT_ALARM', 'USE_EXACT_ALARM', 'ACCESS_BACKGROUND_LOCATION', 'BIND_ACCESSIBILITY_SERVICE', 'QUERY_ALL_PACKAGES']) {
+    for (const banned of PLAY_RESTRICTED_ANDROID_PERMISSIONS) {
       expect(all).not.toContain(banned);
     }
   });

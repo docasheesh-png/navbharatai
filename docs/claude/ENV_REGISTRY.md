@@ -4039,7 +4039,7 @@ the flag entries above promise.
   on a run that found something; nothing is logged when nothing had expired. To stop it, unset the key (or set `off`)
   and redeploy — the job is then not registered at all.
 
-### 2026-10-06 — the sleeping-database watch (Q-697)
+### 2026-10-06 — the sleeping-database watch (Q-700)
 
 - `SUPABASE_PAUSE_WATCH` — **NOT set, and does not need to be: the watch is ON by default.** Only `off` stops it.
   Read by `src/server/lib/supabasePauseWatch.ts`; the job is `supabase-pause-watch` (05:10 UTC, exclusive, so the

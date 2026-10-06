@@ -89,6 +89,9 @@ describe('the page and the deletion code do not drift apart', () => {
       profile_avatars: /profile photo you uploaded/i,
       // Added 2026-10-05 with the Rate NavBharatAI card.
       platform_ratings: /rating of NavBharatAI/i,
+      // Added 2026-10-06 (Q-697): the Supabase grant was in no erase path at all.
+      supabase_connections: /connection to Supabase/i,
+      supabase_pause_notices: /sleeping-database reminders/i,
     };
     for (const { collection } of USER_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

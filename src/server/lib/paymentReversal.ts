@@ -238,6 +238,11 @@ export interface ClawbackInput {
   reversalRef: string;
   /** Extra words for the statement line, e.g. "gift code purchase". */
   what?: string;
+  /**
+   * Why the payment was reversed, in plain words, for the statement line — e.g. the store's own reason
+   * for a voided purchase ("accidental purchase; requested by you"). Shown in brackets after the label.
+   */
+  note?: string;
 }
 
 export interface ClawbackOutcome {
@@ -280,7 +285,7 @@ export function computeClawedBackWallet(
 
   const label = input.kind === 'chargeback' ? 'Chargeback' : 'Refund';
   const inr = Math.round(num(input.reversedInr) * 100) / 100;
-  const subject = input.what ? ` of your ${input.what}` : '';
+  const subject = (input.what ? ` of your ${input.what}` : '') + (input.note ? ` (${input.note})` : '');
   const removed = applied > 0
     ? `${applied.toLocaleString()} tokens (₹${(applied / TOKENS_PER_RUPEE).toFixed(2)}) removed`
     : 'no tokens removed';

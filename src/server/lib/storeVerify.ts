@@ -245,6 +245,107 @@ export async function verifyGooglePurchase(productId: string, purchaseToken: str
   return { ok: true, productId: pid, transactionId: orderId };
 }
 
+// ─────────────────────── Google: voided purchases (Q-690) ───────────────────────
+
+/** One entry of Play's Voided Purchases list, normalised. Times are epoch milliseconds. */
+export interface GoogleVoidedPurchase {
+  purchaseToken: string;
+  orderId: string;
+  voidedTimeMillis: number;
+  purchaseTimeMillis: number;
+  /** 0 user · 1 developer · 2 Google. -1 when absent. */
+  voidedSource: number;
+  /** 0 other · 1 remorse · 2 not received · 3 defective · 4 accidental · 5 fraud · 6 friendly fraud · 7 chargeback · 8 unacknowledged. -1 when absent. */
+  voidedReason: number;
+}
+
+export type GoogleVoidedPage =
+  | { ok: true; purchases: GoogleVoidedPurchase[]; nextPageToken: string | null }
+  | { ok: false; status: number | null; reason: string };
+
+function int64(v: unknown): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+}
+
+function smallInt(v: unknown): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  return Number.isInteger(n) ? n : -1;
+}
+
+/**
+ * Read ONE page of Play's Voided Purchases list — refunds, chargebacks and cancellations of purchases
+ * already made (`GET …/applications/{pkg}/purchases/voidedpurchases`).
+ *
+ * The caller mints the access token once per run with `googleAccessToken` (the SAME service account and
+ * the same Developer API scope `verifyGooglePurchase` uses) and passes it here, so a run of several pages
+ * signs one JWT, not one per page.
+ *
+ * Parameters (Play Developer API v3): `startTime` / `endTime` in epoch ms — Google refuses a `startTime`
+ * older than 30 days and ignores both once a page `token` is given; `type=0` lists in-app products only
+ * (NavBharatAI sells consumable token packs and no subscriptions, so `type=1` would add nothing to clawback);
+ * `maxResults` caps a page. `includeQuantityBasedPartialRefund` is left at its default (false), so every
+ * entry is a WHOLE purchase voided — a full refund or chargeback, never a partial one. Paging is `tokenPagination.nextPageToken`, sent back as `token`.
+ *
+ * ⚠️ PERMISSION: this list is financial data. The service account must hold "View financial data, orders
+ * and cancellation survey responses" in Play Console → Users and permissions — "Manage orders" alone is
+ * what `verifyGooglePurchase` needs, and is NOT enough here. Without it Google answers 401/403, which this
+ * returns as `ok:false` with the status, never as an empty list.
+ */
+export async function readGoogleVoidedPurchasesPage(input: {
+  accessToken: string;
+  packageName: string;
+  startTimeMs: number;
+  endTimeMs: number;
+  pageToken?: string | null;
+  maxResults?: number;
+}): Promise<GoogleVoidedPage> {
+  const params = new URLSearchParams();
+  params.set('startTime', String(Math.floor(input.startTimeMs)));
+  params.set('endTime', String(Math.floor(input.endTimeMs)));
+  params.set('type', '0');
+  params.set('maxResults', String(Math.max(1, Math.min(1000, Math.floor(input.maxResults ?? 1000)))));
+  if (input.pageToken) params.set('token', input.pageToken);
+  let res;
+  try {
+    res = await _fetchImpl(
+      `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(input.packageName)}/purchases/voidedpurchases?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${input.accessToken}` } },
+    );
+  } catch (e) {
+    return { ok: false, status: null, reason: `google unreachable: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  if (!res.ok) {
+    const hint = res.status === 401 || res.status === 403
+      ? ' — the service account needs "View financial data" in Play Console → Users and permissions'
+      : '';
+    return { ok: false, status: res.status, reason: `google HTTP ${res.status}${hint}` };
+  }
+  const body = (await res.json().catch(() => null)) as {
+    voidedPurchases?: unknown; tokenPagination?: { nextPageToken?: unknown };
+  } | null;
+  if (!body || typeof body !== 'object') return { ok: false, status: res.status, reason: 'google returned no readable voided-purchases page' };
+  const list = Array.isArray(body.voidedPurchases) ? body.voidedPurchases : [];
+  const purchases: GoogleVoidedPurchase[] = [];
+  for (const raw of list) {
+    if (!raw || typeof raw !== 'object') continue;
+    const r = raw as Record<string, unknown>;
+    const purchaseToken = typeof r.purchaseToken === 'string' ? r.purchaseToken.trim() : '';
+    const orderId = typeof r.orderId === 'string' ? r.orderId.trim() : '';
+    if (!purchaseToken && !orderId) continue;
+    purchases.push({
+      purchaseToken,
+      orderId,
+      voidedTimeMillis: int64(r.voidedTimeMillis),
+      purchaseTimeMillis: int64(r.purchaseTimeMillis),
+      voidedSource: smallInt(r.voidedSource),
+      voidedReason: smallInt(r.voidedReason),
+    });
+  }
+  const next = body.tokenPagination?.nextPageToken;
+  return { ok: true, purchases, nextPageToken: typeof next === 'string' && next ? next : null };
+}
+
 /** Route a verification to the right store. */
 export async function verifyStorePurchase(
   platform: StorePlatform,

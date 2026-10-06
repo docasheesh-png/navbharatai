@@ -29,6 +29,8 @@ import { listDailyOtpOutcomes, summariseOtpOutcomes } from '../lib/otpOutcomes';
 import { runPushPreflight } from '../lib/pushPreflight';
 import { adminEmailList } from '../lib/adminEmails';
 import { mirroredCreditPatch } from '../lib/walletMirror';
+import { playRefundCheckView, PLAY_VOIDED_JOB } from '../lib/playVoidedPurchases';
+import { JOB_RUNS_COLLECTION } from '../lib/schedulerTick';
 import {
   welcomeGiftEligible, walletRefusal, planWelcomeGift, parseNewUserDays, bulkWelcomeGiftRefusal,
   ADMIN_WELCOME_GIFT_TOKENS, ADMIN_WELCOME_GIFT_RUPEES, BULK_WELCOME_GIFT_MAX, NEW_USER_MAX_DAYS,
@@ -2048,9 +2050,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.get('/api/admin/purchases', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      const [txSnap, walletSnap] = await Promise.all([
+      const [txSnap, walletSnap, playRun] = await Promise.all([
         getDocs(collection(db, 'payment_transactions')),
         getDocs(collection(db, 'user_token_wallets')),
+        // Q-690 — the daily Play refund check's last outcome. Its own failure must not cost the admin the
+        // purchase table, so an unreadable record reads as "never run" (which the screen says plainly).
+        getDoc(doc(db, JOB_RUNS_COLLECTION, PLAY_VOIDED_JOB)).then((s: any) => (s.exists() ? s.data() : null)).catch(() => null),
       ]);
       const who = new Map<string, { email: string; name: string }>();
       for (const d of walletSnap.docs) {
@@ -2088,6 +2093,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         summary: summarisePurchases(filtered),
         // Over everything, so the tile at the top never moves when a filter is applied.
         overall: summarisePurchases(all),
+        // Which store refunds are being taken back, and when that was last checked (Q-690).
+        playRefundCheck: playRefundCheckView(playRun),
       });
     } catch (e: any) {
       console.error('[ADMIN] /purchases failed:', e?.message);

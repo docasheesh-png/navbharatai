@@ -405,6 +405,7 @@ describe('the admin\'s purchase ledger reports refunds honestly', () => {
     expect(row.refundedInr).toBe(51);
     const s = summarisePurchases([row]);
     expect(s.refundedInr).toBe(51);
-    expect(s.refundTracked).toBe('web-only');
+    // CHANGED 2026-10-06 (Q-690): Google Play is tracked by its daily voided-purchases check; Apple is not.
+    expect(s.refundTracked).toBe('web-and-google-play');
   });
 });

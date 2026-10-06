@@ -10,6 +10,9 @@
 // Store refund notification would call it with the store's refunded amount the day that infrastructure
 // exists (see `reversalPaidBasisInr` for the store basis). There is deliberately no unauthenticated
 // endpoint for those rails here — see BUILD_REPORT_QUEUE.md Q-614 for what has to be configured first.
+// UPDATE 2026-10-06 (Q-690): Google Play is now wired — a daily PULL of Play's Voided Purchases list
+// (`playVoidedPurchases.ts`) calls `applyOrderReversal` with the purchase's full store price. No push
+// endpoint was needed. App Store refunds are still not wired.
 
 import axios from 'axios';
 import { doc, getDoc, runTransaction } from './serverDb';
@@ -127,7 +130,20 @@ export interface ReversalResult {
  */
 export async function applyOrderReversal(
   db: any,
-  input: { orderId: string; refundedInr: number | null; disputeLostInr: number | null; now?: string },
+  input: {
+    orderId: string;
+    refundedInr: number | null;
+    disputeLostInr: number | null;
+    now?: string;
+    /**
+     * Facts about the reversal to keep ON the order, written with the totals in the same transaction —
+     * e.g. a store's `voidedReason` / `voidedSource`. Never one of `REVERSAL_FIELDS` (those are this
+     * function's own arithmetic, and a caller overwriting them would defeat the idempotency marker).
+     */
+    recordFields?: Record<string, string | number | boolean>;
+    /** Plain words for the user's statement line (see `ClawbackInput.note`). */
+    ledgerNote?: string;
+  },
 ): Promise<ReversalResult> {
   const now = input.now ?? new Date().toISOString();
   const txRef = doc(db, 'payment_transactions', input.orderId);
@@ -175,7 +191,12 @@ export async function applyOrderReversal(
     const storedDisputes = money(tx[REVERSAL_FIELDS.disputeLostInr]);
     const refunded = Math.max(storedRefunded, money(input.refundedInr));
     const disputeLost = Math.max(storedDisputes, money(input.disputeLostInr));
+    const reserved = new Set<string>(Object.values(REVERSAL_FIELDS));
+    const recordFields = Object.fromEntries(
+      Object.entries(input.recordFields ?? {}).filter(([k]) => !reserved.has(k) && k !== 'reversalCheckedAt'),
+    );
     const totals: Record<string, unknown> = {
+      ...recordFields,
       [REVERSAL_FIELDS.refundedInr]: refunded,
       [REVERSAL_FIELDS.disputeLostInr]: disputeLost,
       reversalCheckedAt: now,
@@ -250,6 +271,7 @@ export async function applyOrderReversal(
       kind,
       reversalRef: input.orderId,
       ...(isGift ? { what: 'gift code purchase' } : {}),
+      ...(input.ledgerNote ? { note: input.ledgerNote } : {}),
     }, now);
     t.set(walletRef, out.wallet);
     t.update(txRef, {

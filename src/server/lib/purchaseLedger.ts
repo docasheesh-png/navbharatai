@@ -21,6 +21,11 @@
 // Google Play and App Store refunds are still NOT recorded: no store notification is wired (it needs
 // infrastructure the admin configures — see BUILD_REPORT_QUEUE.md Q-614). So the summary says
 // `refundTracked: 'web-only'` and the screen says exactly that, rather than implying store rows are final.
+// UPDATE 2026-10-06 (Q-690): Google Play refunds and chargebacks are recorded too — a daily pull of Play's
+// Voided Purchases list (`playVoidedPurchases.ts`) writes the same fields through the same reversal. So the
+// summary says `refundTracked: 'web-and-google-play'`, and because that check only works once the admin has
+// configured it, the admin route returns its last run beside the summary (`playRefundCheck`) and the screen
+// shows THAT — never a bare "tracked". App Store refunds are still not recorded.
 // `revenueInr` stays GROSS (money that arrived); `refundedInr` is reported next to it, not netted out
 // silently.
 //
@@ -190,10 +195,13 @@ export interface PurchaseSummary {
   freeCreditRows: number;
   creditedInr: number;
   creditedTokens: number;
-  /** ₹ refunded or charged back on revenue rows (recorded for the web rail only — see the header). */
+  /** ₹ refunded or charged back on revenue rows (web and Google Play rails — see the header). */
   refundedInr: number;
-  /** Which rails record refunds: the web (Cashfree) rail only, today — see the module header. */
-  refundTracked: 'web-only';
+  /**
+   * Which rails record refunds: the web (Cashfree) rail, and Google Play through its daily voided-purchases
+   * check (whose own last run the admin route reports — see the module header). Never the App Store, today.
+   */
+  refundTracked: 'web-and-google-play';
 }
 
 export function summarisePurchases(rows: readonly PurchaseRow[]): PurchaseSummary {
@@ -215,7 +223,7 @@ export function summarisePurchases(rows: readonly PurchaseRow[]): PurchaseSummar
     creditedInr: Math.round(creditedInr * 100) / 100,
     creditedTokens,
     refundedInr: Math.round(refundedInr * 100) / 100,
-    refundTracked: 'web-only',
+    refundTracked: 'web-and-google-play',
   };
 }
 

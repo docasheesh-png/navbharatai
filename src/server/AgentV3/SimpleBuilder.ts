@@ -842,6 +842,50 @@ export function utilOwnerFor(manifest: ReadonlyArray<SimpleFileSpec>, names: rea
   return { path: dir === '.' ? `utils.${ext}` : `${dir}/utils.${ext}`, added: true };
 }
 
+/**
+ * The helpers that a planned file is NAMED after (`formatCurrency` ↔ `src/utils/formatCurrency.ts`). PURE.
+ *
+ * 🔴 WHY (build e52cebbf, 2026-10-06 — "a personal finance app that categorises expenses using AI"). The
+ * plan had one file per helper, `src/utils/formatCurrency.ts` and `src/utils/formatDate.ts`, and the contract
+ * declared exactly `formatCurrency` and `formatDate`. Every rule in `utilOwnerFor` looks for ONE file that owns
+ * ALL the helpers, so the two files tied in `helperModuleByWords` and the lane ADDED `src/utils.ts` as well.
+ * Both homes were then written: one formatted rupees, the other dollars, and the full builder spent steps
+ * rewriting `src/utils.ts` (a 76% shrink the write guard flagged) to undo the duplicate.
+ *
+ * A file whose basename IS the helper's name owns that helper, whatever its purpose line says. Only plain
+ * `.ts`/`.js` modules (a `.tsx` component named `formatDate` is not where a helper lives), never the contract
+ * file, and a name two planned files share stays unassigned rather than guessed. PURE.
+ */
+export function helperFilesByName(manifest: ReadonlyArray<SimpleFileSpec>, names: readonly string[], contractPath: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const n of names) {
+    const hits = manifest.filter((f) => f.path !== contractPath && /\.[jt]s$/.test(f.path) && !/\.d\.ts$/.test(f.path)
+      && posix.basename(f.path).replace(/\.[jt]s$/, '').toLowerCase() === n.toLowerCase());
+    if (hits.length === 1) out.set(n, hits[0].path);
+  }
+  return out;
+}
+
+/**
+ * Every home the contract's helpers get: one per helper a planned file is named after
+ * (`helperFilesByName`), then ONE owner for the rest (`utilOwnerFor`), which may be a new `utils.ts`. PURE.
+ */
+export function helperOwners(manifest: ReadonlyArray<SimpleFileSpec>, names: readonly string[], contractPath: string): Array<UtilOwner & { names: string[] }> {
+  const byName = helperFilesByName(manifest, names, contractPath);
+  const owners: Array<UtilOwner & { names: string[] }> = [];
+  for (const [n, path] of byName) {
+    const same = owners.find((o) => o.path === path);
+    if (same) same.names.push(n); else owners.push({ path, added: false, names: [n] });
+  }
+  const rest = names.filter((n) => !byName.has(n));
+  const owner = utilOwnerFor(manifest, rest, contractPath);
+  if (owner) {
+    const same = owners.find((o) => o.path === owner.path);
+    if (same) same.names.push(...rest); else owners.push({ ...owner, names: rest });
+  }
+  return owners;
+}
+
 /** Words too common in a file's purpose line to say which helpers it holds. */
 const OWNER_STOPWORDS = new Set(['with', 'from', 'into', 'that', 'this', 'file', 'files', 'logic', 'helper', 'helpers', 'util', 'utils', 'utility', 'utilities', 'function', 'functions', 'shared', 'component', 'components', 'module', 'value', 'values']);
 
@@ -1890,13 +1934,13 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // contract declares and no planned file owns is given one, before file one, and every call is told.
       if (contract && utilOwnerEnabled() && frameworkSupportsContractFile(deps.framework)) {
         const names = contractUtilSignatures(contract);
-        const owner = utilOwnerFor(manifest, names, contractPath || contractFilePath(manifest));
-        if (owner) {
+        // One home per helper a planned file is named after, then one owner for the rest (build e52cebbf).
+        for (const owner of helperOwners(manifest, names, contractPath || contractFilePath(manifest))) {
           const existing = manifest.find((f) => f.path === owner.path);
-          if (existing) existing.purpose = utilOwnerPurpose(names, existing.purpose);
-          else manifest.push({ path: owner.path, purpose: utilOwnerPurpose(names) });
-          contract = `${contract}${utilOwnerNote(names, owner.path)}`;
-          if (owner.added) deps.log?.(`🧰 ${names.length} shared helper(s) had no file to live in — added ${owner.path} for them.`);
+          if (existing) existing.purpose = utilOwnerPurpose(owner.names, existing.purpose);
+          else manifest.push({ path: owner.path, purpose: utilOwnerPurpose(owner.names) });
+          contract = `${contract}${utilOwnerNote(owner.names, owner.path)}`;
+          if (owner.added) deps.log?.(`🧰 ${owner.names.length} shared helper(s) had no file to live in — added ${owner.path} for them.`);
         }
         // …and so do the shared CONSTANTS (autopsy 6ae30b33): one owner, named before file one.
         const values = contractValueExports(contract);

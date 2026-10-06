@@ -91243,7 +91243,7 @@ green on 2026-10-05. Reproduced locally on `main` with `npm audit --json`.
   `.aab`/`.ipa` the admin asks for carries 8.5.1 / 8.4.3; build 147 on Play and the current TestFlight
   build still run 8.5.0 / 8.4.1. Per the 2026-09-07 rule, a store build is made only when the admin asks.
 
-## 2026-10-06 — The admin's "ok banao": chat picture edits, rules shipped with every merge, Play refunds, queue cleanup (#NEXT)
+## 2026-10-06 — The admin's "ok banao": chat picture edits, rules shipped with every merge, Play refunds, queue cleanup (#3565)
 
 The admin accepted every recommendation for the rows #3551 left open. This PR builds the ones that are code.
 
@@ -91322,6 +91322,26 @@ a CLASS, not one stale row.
 - **Honest limit:** the register catches a RESURRECTED row. A stale copy that downgrades a row which is still open
   (BLOCKED → OPEN, as Q-111 was) is not caught mechanically. The fresh-main rule is the guard for that half.
 
+## 2026-10-06 — Q-618: the production server no longer runs as root; #3565's rows closed (#3566)
+
+#3565 merged (Q-683, Q-610, Q-690). Q-683 leaves the queue and is added to the closed-ID register. Q-610 and
+Q-690 are now 🟡 BLOCKED on one admin grant each: `roles/firebaserules.admin` for Cloud Build, and the Play
+Console "View financial data" permission for the service account. #3565's PROGRESS heading carried a `#NEXT`
+placeholder; it now reads #3565.
+
+**Q-618.** The runtime stage of the `Dockerfile` had no `USER`, so the server ran as root and a code-execution bug
+could rewrite `dist/server.cjs` or any module for every later request. It now ends `ENV WORKSPACES_ROOT=/tmp/workspaces`
++ `USER node`; everything copied stays root-owned, so the server can read its code but not change it.
+- **Audit before the change** (every `fs` / `child_process` site in `server.ts` + `src/server`, and what the bundle
+  actually includes): writes go to `os.tmpdir()`; npm's own logs go to `/home/node` (owned by `node`);
+  `/app/job_storage` (`LocalFileJobStore`) is a dev-only store whose boot `mkdir` is caught and that no production
+  route writes; the no-sandbox local-actuator fallback wrote under `/workspaces` (root-only), so `WORKSPACES_ROOT`
+  now points into /tmp. No runtime dependency writes into `node_modules` or `$HOME`.
+- **Lock:** `tests/theServerDoesNotRunAsRoot.test.ts` — the USER line, its order before `CMD`, no root switch
+  after it, code copied before it without `--chown`, the fallback root in /tmp (USER line removed → 3 fail).
+- **Honest limit:** no Docker in this session, so the image itself was not booted here. CI's boot check runs the
+  bundle, not the container. **Watch on the first deploy:** the Cloud Run revision reaches `Server running`, and one
+  real build completes. The revert is the one `USER node` line.
 ### 2026-10-06 — Q-600: unused client locals are ratcheted — the backlog can only shrink
 
 The queue's Q-600 was OPEN: `tsc --noUnusedLocals` listed about 93 client locals that nothing reads. Measured

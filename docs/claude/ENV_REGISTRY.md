@@ -777,6 +777,16 @@ the code (it is actually read somewhere) on 2026-07-11.
   confirms Google is configured AND the installed build carries the native plugin. A user on an
   older `.aab`, or a device with no Play Store, silently keeps the working web rail rather than
   losing the ability to top up. Test-locked in `tests/storePurchase.test.ts`.
+  🔁 **2026-10-06 (Q-690) — the SAME two keys now also drive the daily Play refund check** (no new key).
+  `GOOGLE_PLAY_SA_JSON` + `GOOGLE_PLAY_PACKAGE_NAME` are read by `playVoidedPurchases.ts`, an exclusive
+  scheduler job (`play-voided-purchases`, 06:00 UTC) that reads Play's Voided Purchases list and takes
+  back the tokens of every refunded or charged-back pack. It is NOT gated on `STORE_BILLING`, on
+  purpose: a pack bought while billing was on can still be refunded after it is switched off. Either
+  key missing ⇒ the run records `not-configured` and calls nothing. ⚠️ **One extra Play Console
+  permission is needed, and it is not the one purchase verification needs:** Play Console → Users and
+  permissions → this service account → **"View financial data, orders and cancellation survey
+  responses"**. Without it Google answers 401/403 and every run records `refused` with that hint (shown
+  on admin → Revenue). Test-locked in `tests/aPlayRefundTakesBackWhatItBought.test.ts`.
   ⚠️ **BEFORE FLIPPING IT ON, four things must be true or a user will hit a dead button:**
   (1) the four products exist and are **ACTIVE** in Play Console → Monetise → In-app products with
   the EXACT ids `nbai.tokens.99` / `.249` / `.499` / `.999` and prices **₹119 / ₹299 / ₹599 /

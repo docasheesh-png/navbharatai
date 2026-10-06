@@ -101,6 +101,46 @@ steps:
       - 'push'
       - 'gcr.io/$PROJECT_ID/navbharat-cloud-run:latest'
 
+  # Step 3b — THE SECURITY RULES SHIP WITH THE CODE THAT RELIES ON THEM (queue row Q-610, admin 2026-10-06).
+  #
+  # 🔴 WHY. `firestore.rules` and `storage.rules` were only ever deployed by hand, and #3538 hardened both
+  # (deny-all storage, closed collections) — so the repo said one thing and production enforced another
+  # until somebody remembered a CLI command, with `.firebaserc`'s default pointing at the HOSTING project
+  # (`navbharatai-3395f`), the wrong one. Now every merge deploys the rules to the project the server
+  # actually reads: `gen-lang-client-0866594388` (CLAUDE.md: FIREBASE_PROJECT_ID must be this one).
+  #
+  # ⚠️ IT CAN NEVER STOP A DEPLOY, and on purpose. It runs just BEFORE the deploy step (nothing may run after the image goes live —
+  # `tests/thePruneMustNotRaceTheDeploy.test.ts`), `allowFailure: true`, and
+  # its script always exits 0 — a missing IAM role, an npm hiccup or a rules compile error is printed as
+  # ONE plain line naming what to fix, never a failed release. A rules compile error is still caught
+  # before merge by the emulator tests (`tests/firestoreRulesAuditHardening`).
+  #
+  # ONE-TIME SETUP (admin): give the Cloud Build service account the **Firebase Rules Admin** role
+  # (`roles/firebaserules.admin`) on `gen-lang-client-0866594388`. Until then this step prints
+  # "Rules NOT deployed: permission" on every build and changes nothing.
+  - name: 'node:22-slim'
+    id: 'deploy-security-rules'
+    allowFailure: true
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set +e
+        OUT=$(npx --yes firebase-tools@15.18.0 deploy --only firestore:rules,storage --project gen-lang-client-0866594388 --non-interactive 2>&1)
+        CODE=$$?
+        echo "$$OUT" | tail -20
+        if [ "$$CODE" -eq 0 ]; then
+          echo "Rules deployed to gen-lang-client-0866594388 (firestore + storage) for $COMMIT_SHA."
+        else
+          case "$$OUT" in
+            *PERMISSION_DENIED*|*"does not have permission"*|*"403"*)
+              echo "Rules NOT deployed: permission. Give the Cloud Build service account roles/firebaserules.admin on gen-lang-client-0866594388." ;;
+            *)
+              echo "Rules NOT deployed (exit $$CODE). The app deploy above is unaffected; see the output." ;;
+          esac
+        fi
+        exit 0
+
   # Step 4: Deploy the immutable image revision to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'

@@ -91243,6 +91243,59 @@ green on 2026-10-05. Reproduced locally on `main` with `npm audit --json`.
   `.aab`/`.ipa` the admin asks for carries 8.5.1 / 8.4.3; build 147 on Play and the current TestFlight
   build still run 8.5.0 / 8.4.1. Per the 2026-09-07 rule, a store build is made only when the admin asks.
 
+## 2026-10-06 — The admin's "ok banao": chat picture edits, rules shipped with every merge, Play refunds, queue cleanup (#NEXT)
+
+The admin accepted every recommendation for the rows #3551 left open. This PR builds the ones that are code.
+
+| Row | Problem → root cause | Fix | Lock |
+|---|---|---|---|
+| Q-683 (new, found by Q-616) | A picture edited inside the chat used the old tool gate, which counted the picture only AFTER delivery and never refused past the daily 5 — a side door around the allowance #3551 closed for the Image Generator | `chat.ts` reserves with the one shared `reserveImage({ priceShown: false })` before the engine, settles on delivery, releases from a `finally`; the chat never charges (it never shows a price) and past the 5 it says where more pictures are made, in the user's own words (`chatEditFreeUsedMessage`) | `tests/aChatPictureEditCountsAgainstTheDay.test.ts` (old `chat.ts` → 2 fail) |
+| Q-610 | Rules were deployed only by hand, so hardened rules could sit in the repo while production enforced the old ones | Cloud Build step `deploy-security-rules` deploys `firestore:rules,storage` to `gen-lang-client-0866594388` with the pinned firebase-tools, BEFORE the Cloud Run deploy, `allowFailure` + always `exit 0`; a missing permission prints the role to grant | `tests/theSecurityRulesShipWithTheCode.test.ts` (7) |
+
+**Queue:** the 17 rows #3551 resolved leave the open table (Q-613, 615, 616, 617, 619, 620, 622, 623, 624, 625, 627,
+628, 670, 671, 672, 673, 674; their ledger is the #3551 entry above). Q-622's open question was answered "keep" by
+the admin on 2026-10-06 (guests stay on the bounded free universe — the conversion funnel). Q-612, Q-614 and Q-629
+are re-scoped to what is actually left (the 2026-11-05 cut-over, App Store refunds, the legacy flag after the new
+bundle); Q-621 is OPEN for its second half (thread the signal into `executeStream`).
+
+**Admin, after merge:** give the Cloud Build service account `roles/firebaserules.admin` on
+`gen-lang-client-0866594388`, then read the next build's `deploy-security-rules` log.
+
+### 2026-10-06 — Q-690: a Google Play refund or chargeback takes back the tokens that pack bought
+
+**Why.** Q-614 (#3551) made a Cashfree refund or chargeback take its tokens back; the store rails were left
+out, so a Play pack refunded after its first verify kept everything it credited. The fix — a daily check of
+Play's voided-purchases list with the existing service account — was recommended on 2026-10-06 and accepted by
+the admin ("ok banao").
+
+**What was built.**
+- `src/server/lib/playVoidedPurchases.ts` — `runPlayVoidedPurchases()`. Reads
+  `GET …/applications/{pkg}/purchases/voidedpurchases` (`type=0`, full voids only, `nextPageToken` paging)
+  through `readGoogleVoidedPurchasesPage` in `storeVerify.ts`, authenticated by the verifier's own
+  `googleAccessToken` (same `GOOGLE_PLAY_SA_JSON`, same scope, one token per run). Each void is matched to
+  our row by the id the credit wrote (`storeTransactionDocId('google', orderId ‖ purchaseToken)`, provider
+  `GOOGLE_PLAY`) and reversed through the ONE `applyOrderReversal` at the full `storePriceInr` — reasons 6/7
+  as a lost dispute ("Chargeback"), the rest as a refund. `voidedReason` / `voidedSource` and their plain-word
+  labels are written on the order (new optional `recordFields`) and in the statement line (new optional
+  `ledgerNote` → `ClawbackInput.note`).
+- Durable cursor `payment_reversal_cursors/google_play_voided`: advanced only after a whole page applies
+  with no error; window = cursor − 24 h, clamped to Google's 30 days (an older cursor is reported as a gap).
+- Daily `exclusive` scheduler job `play-voided-purchases` at 06:00 UTC in `server.ts` — so the Q-159
+  Cloud Scheduler tick catches it up too. Not configured ⇒ `not-configured`, no call.
+- Admin visibility: the outcome is merged into `job_runs/play-voided-purchases` as `lastResult`; the admin
+  purchases route returns `playRefundCheck` and Revenue shows it in one sentence (`playRefundCheckText`),
+  including "NOT being checked" when unconfigured or refused. `refundTracked` is now `web-and-google-play`.
+
+**Lock.** `tests/aPlayRefundTakesBackWhatItBought.test.ts` — 17 tests over the real job, the real Play client
+(through storeVerify's fetch seam, with a real RSA service-account key) and the real reversal against an
+in-memory Firestore. Reversions, each restored after: reverse the credit instead of the store price → 6 fail;
+no idempotency marker → 2; cursor advanced past an errored page → 1; unknown purchase as an error → 3; no
+config gate → 1; first page only → 2.
+
+**Open (admin).** Grant the service account **"View financial data, orders and cancellation survey
+responses"** in Play Console → Users and permissions — the voided list needs it; purchase verification does
+not. Until then each run records `refused` and Revenue says Play refunds are NOT being checked. App Store
+refunds remain unwired (out of scope).
 ### 2026-10-06 — The build-report queue had silently un-resolved five items; closed rows can no longer come back
 
 **Found while picking the next queue row:** Q-129 ("the Gemini runner cannot cancel on Stop") was listed OPEN,

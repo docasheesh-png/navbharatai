@@ -39,6 +39,10 @@ export interface ScannedElement {
   borderRadius?: string;
   /** For <img>: the resolved source URL. */
   src?: string;
+  /** For a form control: its label text (an associated <label>, aria-label, placeholder or name). */
+  label?: string;
+  /** For a form control: its type (`text`, `number`, `date`, `textarea`, `select`…). */
+  inputType?: string;
 }
 
 export interface UiMatch {
@@ -103,6 +107,8 @@ const COLOR_WORDS = COLOR_HUES.map((h) => h.name).concat(['gray']);
 const DOT_WORDS = ['dot', 'dote', 'circle', 'badge', 'indicator', 'bullet', 'bindi', 'point'];
 const IMAGE_WORDS = ['logo', 'image', 'img', 'picture', 'photo', 'icon', 'avatar'];
 const BUTTON_WORDS = ['button', 'btn', 'link', 'cta'];
+/** A form control (build b4745cb1): asked for "description input field", the answer is the <input>. */
+const FIELD_WORDS = ['input', 'field', 'textbox', 'textarea', 'dropdown', 'select', 'textfield'];
 
 /** What a plain-language visual description is actually asking for. PURE. */
 export function parseVisualQuery(query: string): {
@@ -110,12 +116,13 @@ export function parseVisualQuery(query: string): {
   wantsDot: boolean;
   wantsImage: boolean;
   wantsButton: boolean;
+  wantsField: boolean;
   textTerms: string[];
 } {
   const q = (query || '').toLowerCase();
   const words = q.split(/[^a-z0-9]+/i).filter(Boolean);
   const colors = COLOR_WORDS.filter((c) => words.includes(c)).map((c) => (c === 'gray' ? 'grey' : c));
-  const stop = new Set([...COLOR_WORDS, ...DOT_WORDS, ...IMAGE_WORDS, ...BUTTON_WORDS,
+  const stop = new Set([...COLOR_WORDS, ...DOT_WORDS, ...IMAGE_WORDS, ...BUTTON_WORDS, ...FIELD_WORDS,
     'the', 'a', 'an', 'on', 'in', 'at', 'of', 'is', 'it', 'small', 'tiny', 'little', 'big', 'large',
     'page', 'home', 'top', 'bottom', 'left', 'right', 'corner', 'remove', 'delete', 'hide', 'hatao',
     'find', 'where', 'kaha', 'kahan', 'par', 'se', 'ko', 'wala', 'wali', 'near', 'next', 'to']);
@@ -124,6 +131,7 @@ export function parseVisualQuery(query: string): {
     wantsDot: DOT_WORDS.some((w) => words.includes(w)),
     wantsImage: IMAGE_WORDS.some((w) => words.includes(w)),
     wantsButton: BUTTON_WORDS.some((w) => words.includes(w)),
+    wantsField: FIELD_WORDS.some((w) => words.includes(w)),
     textTerms: words.filter((w) => w.length > 2 && !stop.has(w)),
   };
 }
@@ -138,7 +146,7 @@ export function findUiElements(elements: ScannedElement[], query: string, limit 
   const matches: UiMatch[] = [];
 
   // Did the query name a STRUCTURE (a shape or an element role), not just a colour?
-  const askedStructure = want.wantsDot || want.wantsImage || want.wantsButton;
+  const askedStructure = want.wantsDot || want.wantsImage || want.wantsButton || want.wantsField;
 
   for (const el of elements) {
     const reasons: string[] = [];
@@ -157,8 +165,10 @@ export function findUiElements(elements: ScannedElement[], query: string, limit 
     }
     if (want.wantsImage && (el.tag === 'img' || el.tag === 'svg')) { score += 30; structuralHit = true; reasons.push(`<${el.tag}>`); }
     if (want.wantsButton && (el.tag === 'button' || el.tag === 'a')) { score += 30; structuralHit = true; reasons.push(`<${el.tag}>`); }
+    const isControl = el.tag === 'input' || el.tag === 'textarea' || el.tag === 'select';
+    if (want.wantsField && isControl) { score += 30; structuralHit = true; reasons.push(`<${el.tag}${el.inputType ? ` type=${el.inputType}` : ''}>`); }
 
-    const hay = `${el.text ?? ''} ${el.className ?? ''} ${el.id ?? ''} ${el.src ?? ''}`.toLowerCase();
+    const hay = `${el.text ?? ''} ${el.label ?? ''} ${el.className ?? ''} ${el.id ?? ''} ${el.src ?? ''}`.toLowerCase();
     let textHit = false;
     for (const term of want.textTerms) {
       if (hay.includes(term)) { score += 20; textHit = true; reasons.push(`matches "${term}"`); }
@@ -189,6 +199,7 @@ function describeElement(m: UiMatch): string {
   if (el.className) bits.push(`class="${el.className.slice(0, 160)}"`);
   if (el.id) bits.push(`id="${el.id}"`);
   if (el.text) bits.push(`text="${el.text.slice(0, 60)}"`);
+  if (el.label) bits.push(`label="${el.label.slice(0, 60)}"`);
   if (el.src) bits.push(`src="${el.src.slice(0, 120)}"`);
   if (el.rect) bits.push(`at ${Math.round(el.rect.x)},${Math.round(el.rect.y)} ${Math.round(el.rect.w)}×${Math.round(el.rect.h)}px`);
   if (el.bg && colorFamily(el.bg)) bits.push(`bg ${el.bg}`);

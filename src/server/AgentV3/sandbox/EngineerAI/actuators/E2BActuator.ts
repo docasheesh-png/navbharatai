@@ -2785,12 +2785,21 @@ ${paintWaitJs('p')}
       if(cs.visibility==='hidden'||cs.display==='none'||Number(cs.opacity)===0) continue;
       var host=e.closest?e.closest('[data-nbai-src]'):null;
       var own=e.children.length===0?(e.textContent||'').trim():'';
+      // A form control has no text of its own: its NAME is its label (build b4745cb1 — the finder returned
+      // the label and the .field wrapper, never the <input id="desc"> itself).
+      var tg=e.tagName;
+      var isCtl=tg==='INPUT'||tg==='TEXTAREA'||tg==='SELECT';
+      var lab='';
+      if(isCtl){try{lab=((e.labels&&e.labels[0]&&e.labels[0].textContent)||e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.getAttribute('name')||'').trim();}catch(x){lab='';}}
+      var nm=isCtl?e.getAttribute('name'):null;
       res.push({
         tag:e.tagName.toLowerCase(),
         className:typeof e.className==='string'?e.className.slice(0,240):'',
         id:e.id||undefined,
         text:own?own.slice(0,120):undefined,
-        selector:(e.id?('#'+e.id):(e.tagName.toLowerCase()+(typeof e.className==='string'&&e.className.trim()?('.'+e.className.trim().split(/\\\\s+/).slice(0,3).join('.')):''))).slice(0,160),
+        label:lab?lab.slice(0,120):undefined,
+        inputType:isCtl?(e.getAttribute('type')||tg.toLowerCase()):undefined,
+        selector:(e.id?('#'+e.id):(nm?(tg.toLowerCase()+'[name="'+nm.replace(/"/g,'')+'"]'):'')||(e.tagName.toLowerCase()+(typeof e.className==='string'&&e.className.trim()?('.'+e.className.trim().split(/\\\\s+/).slice(0,3).join('.')):''))).slice(0,160),
         source:host?(host.getAttribute('data-nbai-src')||undefined):undefined,
         rect:{x:r.x,y:r.y,w:r.width,h:r.height},
         bg:cs.backgroundColor,

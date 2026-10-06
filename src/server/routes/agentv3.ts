@@ -375,7 +375,7 @@ import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
-import { hasTscErrors, tscNeverRan, looksLikeBrokenTscInstall, buildScriptTypecheckVerdict } from '../AgentV3/TscGate';
+import { hasTscErrors, tscNeverRan, looksLikeBrokenTscInstall, buildScriptTypecheckVerdict, salvageTypecheckLine } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
@@ -655,6 +655,7 @@ import { detectMonorepo } from '../AgentV3/monorepoAnalysis';
 import { unsendKeepCount } from '../AgentV3/unsend';
 import { planFileGuardianFromListing } from '../AgentV3/FileGuardian';
 import { summarizeSession, sessionSummaryLine } from '../AgentV3/sessionSummary';
+import { isUserStoppedBuild } from '../lib/buildFailureCategory';
 import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportSweep';
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
 import { ensureViteConfig } from '../AgentV3/ViteConfigGuard';
@@ -13580,7 +13581,8 @@ async function noteBuildOutcome(
       // report instead of each report looking like a first attempt. Best-effort, non-blocking.
       void listDiagnosticsHistory(workspaceId, 50)
         .then((h) => {
-          buildDiag.setPriorFailedBuilds(h.filter((e) => e.ok === false).length);
+          // A build the user STOPPED did not fail (build b4745cb1 counted one as a prior failure).
+          buildDiag.setPriorFailedBuilds(h.filter((e) => e.ok === false && !isUserStoppedBuild(e)).length);
           // THE SESSION, not just this turn (admin 2026-08-06). Two complaints, one root cause: a
           // 58-minute session reported as 18 minutes, and three workspace wipes no report mentioned —
           // both because startedAt/endedAt and the data-loss events are PER TURN. Built from the SAME
@@ -18060,9 +18062,13 @@ async function noteBuildOutcome(
           if (sb.reason !== 'verify_failed' && writeTypecheckEnabled() && sb.salvagedPaths.some((p) => /\.(?:ts|tsx)$/.test(p))) {
             try {
               const tc = await withTimeout(actuator.runCommand(workspaceId, writeTypecheckCommand()), 20_000, 'salvage-typecheck');
-              const errs = String(tc?.stdout ?? '').split('\n').filter((l) => /error TS\d+/.test(l));
+              const tcOut = `${String(tc?.stdout ?? '')}\n${String(tc?.stderr ?? '')}`;
+              const errs = tcOut.split('\n').filter((l) => /error TS\d+/.test(l));
               if (errs.length) unverifiedErrors = `They were never compiled; the compiler's errors on the project right now:\n${errs.slice(0, 20).join('\n')}\n`;
-              buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE_TYPECHECK', message: errs.length ? `The salvaged files were typechecked before the hand-off: ${errs.length} error(s) handed to the full builder with them.` : 'The salvaged files were typechecked before the hand-off: no errors.', autoResolved: true });
+              // 🔴 Build e52cebbf: "no errors" was recorded off the write-time command's NOT-READY marker (the
+              // install was still running), and the full builder later met two real errors in a salvaged file.
+              // The one reader of "did the compiler run" decides; a check that never ran says so.
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE_TYPECHECK', message: salvageTypecheckLine(tcOut, errs.length), autoResolved: true });
             } catch { /* no compiler yet or a slow check — the builder meets the errors at its first write, as before */ }
           }
           const salvageErrors = sb.reason === 'verify_failed' && sb.verifyErrors
@@ -23409,6 +23415,7 @@ async function noteBuildOutcome(
           summary: result.summary,
           steps: result.steps,
           episodes: reflectMem.snapshot().episodes,
+          stoppedByUser: abortCauseOf(abort.signal) === 'user-stop',
         });
         reflectMem.recordNote(reflectionNote(reflection));
         // D10 SELF-LEARNING: distil the actual BUILD REPORT (root cause + the real unresolved problems +
@@ -23418,13 +23425,15 @@ async function noteBuildOutcome(
         // cross-project user brain below. Best-effort.
         try {
           const diag = buildDiag.report();
-          const lesson = buildLessonFromDiagnostics({ ok: result.ok, rootCause: diag.rootCause, problems: diag.problems });
+          // A user stop is not a failure to learn from (build b4745cb1): its "lesson" is recalled as one.
+          const lesson = abortCauseOf(abort.signal) === 'user-stop' ? null
+            : buildLessonFromDiagnostics({ ok: result.ok, rootCause: diag.rootCause, problems: diag.problems });
           if (lesson) reflectMem.recordNote(lesson);
         } catch { /* lesson distillation is best-effort */ }
         // P-PME.5 — on a FAILED build, capture a structured retrospective (classified failure +
         // root-cause hint + reusable warning) and promote it into the SAME project memory the next
         // build recalls — so repeated failure patterns are learned, not re-hit. Best-effort.
-        if (!result.ok) {
+        if (!result.ok && abortCauseOf(abort.signal) !== 'user-stop') {
           /**
            * 🔎 SIBLING (rule 3). The per-workspace retrospective classified from `result.summary` — the
            * agent's own narrative — for the same reason the ledger nearly did, and with the same
@@ -24838,6 +24847,7 @@ async function noteBuildOutcome(
         expectsArtifacts,
         enabled: markupNeedsPreview(),
         awaitingShell: moduleAwaitsShell,
+        renderSeenInBuild: buildObs.previewRendered !== true && renderProvenNow(),
       });
       /**
        * 🔴 A MONEY STATEMENT IS MADE ONCE, AFTER THE MONEY IS FINAL (autopsy 586295b7, 2026-09-20).
@@ -25054,6 +25064,7 @@ async function noteBuildOutcome(
       const cancelBill = (process.env.AGENTV3_BILL_CANCELLED ?? '').trim().toLowerCase() !== 'off'
         ? decideCancelledBuildBill({
           abortCause: abortCauseOf(abort.signal),
+          renderSeenInBuild: buildObs.previewRendered !== true && renderProvenNow(),
           filesWritten: writtenFiles.size,
           // Our own template, untouched, is not the user's app — see `preseededUnchanged`. A scaffold
           // file the builder REWROTE has different content and so is correctly counted as delivered.

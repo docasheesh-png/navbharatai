@@ -21,7 +21,7 @@ export interface RecurringError {
 }
 
 export interface BuildReflection {
-  outcome: 'success' | 'failure';
+  outcome: 'success' | 'failure' | 'stopped';
   errorsEncountered: number;
   fixesApplied: number;
   unresolvedErrors: number;
@@ -92,6 +92,11 @@ export function reflectOnBuild(input: {
   summary: string;
   steps: number;
   episodes: Episode[];
+  /**
+   * The user pressed Stop (build b4745cb1, 2026-10-06). A stop is not a failure: the next build was told
+   * "Build failed in 31 steps" about a build that had rendered and was stopped while wrapping up.
+   */
+  stoppedByUser?: boolean;
 }): BuildReflection {
   // Sort a shallow copy by ts so "later" is well-defined regardless of input order.
   const sorted = [...input.episodes].sort((a, b) => a.ts - b.ts);
@@ -134,9 +139,10 @@ export function reflectOnBuild(input: {
   );
   const lessons = [...recurringLessons, ...pairLessons].slice(0, MAX_LESSONS);
 
-  const outcome: 'success' | 'failure' = input.ok ? 'success' : 'failure';
+  const stopped = !input.ok && input.stoppedByUser === true;
+  const outcome: BuildReflection['outcome'] = input.ok ? 'success' : stopped ? 'stopped' : 'failure';
   const summary =
-    `Build ${input.ok ? 'succeeded' : 'failed'} in ${input.steps} steps; ` +
+    `Build ${input.ok ? 'succeeded' : stopped ? 'was stopped by the user' : 'failed'} ${stopped ? 'after' : 'in'} ${input.steps} steps; ` +
     `${errorsEncountered} error(s), ${fixesApplied} fix(es), ${unresolvedErrors} unresolved.`;
 
   return { outcome, errorsEncountered, fixesApplied, unresolvedErrors, recurringErrors, lessons, summary };

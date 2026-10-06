@@ -51,10 +51,20 @@ interface NavAiBridge { app: string; available: boolean; ask(prompt: string, opt
 
 function bridge(): NavAiBridge | null {
   const w = globalThis as unknown as { NavAI?: NavAiBridge };
-  return w.NavAI && typeof w.NavAI.ask === 'function' ? w.NavAI : null;
+  return w.NavAI && typeof w.NavAI.ask === 'function' && w.NavAI.available !== false ? w.NavAI : null;
 }
 
-/** True once this app is published and its assistant is live. */
+/** An answer that never comes must not freeze the app: after this long the call gives up with words. */
+const AI_TIMEOUT_MS = 90_000;
+
+function withTimeout(p: Promise<string>): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('The assistant took too long to answer. Please try again.')), AI_TIMEOUT_MS);
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
+/** True when the assistant can answer on this page: inside the NavBharatAI preview, or once published. */
 export function isAiReady(): boolean {
   return bridge() !== null;
 }
@@ -65,7 +75,7 @@ const NOT_READY = 'The assistant is not available here. It answers inside the Na
 export async function generateText(prompt: string, system?: string): Promise<string> {
   const b = bridge();
   if (!b) throw new Error(NOT_READY);
-  return b.ask(prompt, system ? { system } : undefined);
+  return withTimeout(b.ask(prompt, system ? { system } : undefined));
 }
 
 export interface ChatMessage { role: 'user' | 'assistant'; content: string; }
@@ -80,7 +90,7 @@ export async function chat(messages: ChatMessage[], system?: string): Promise<st
   const transcript = messages
     .map((m) => (m.role === 'assistant' ? 'Assistant: ' : 'User: ') + m.content)
     .join('\\n');
-  return b.ask(transcript + '\\nAssistant:', system ? { system } : undefined);
+  return withTimeout(b.ask(transcript + '\\nAssistant:', system ? { system } : undefined));
 }
 `;
 
@@ -89,7 +99,8 @@ const NAVBHARAT_INSTRUCTIONS =
   'generateText(prompt) or chat(messages) from src/lib/ai.ts and call them straight from the browser. ' +
   'The assistant answers in the NavBharatAI preview for the app owner (small daily limit there) and, once ' +
   'the app is PUBLISHED, for everyone; opened anywhere else isAiReady() is false and the helpers say so ' +
-  'rather than failing quietly. Each answer is charged to the app owner\'s NavBharatAI balance, and each ' +
+  'rather than failing quietly. An AI call must never block what the user did: save and show their own ' +
+  'data FIRST, then add the AI result; if the call fails, keep the data and use a plain fallback. Each answer is charged to the app owner\'s NavBharatAI balance, and each ' +
   'app has a daily limit, so a busy day can never drain the balance. The owner can switch it off, or put ' +
   'their own OpenAI/Anthropic key in Keys & Secrets — it then answers on their key, server-side, with no ' +
   'change to this code and no key in the page.';

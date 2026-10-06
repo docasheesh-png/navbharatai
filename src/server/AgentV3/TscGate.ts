@@ -61,7 +61,11 @@ export function looksLikeMissingTscBinary(output: string | null | undefined): bo
     || /\btsc:\s*(?:command\s+)?not found\b/i.test(output)
     || /could not determine executable to run/i.test(output)
     // Our own ensure step says so in words when every install attempt failed (autopsy 12c642ed).
-    || /(?:^|\n)NBAI_TSC_UNAVAILABLE:/.test(output);
+    || /(?:^|\n)NBAI_TSC_UNAVAILABLE:/.test(output)
+    // …and the write-time command says so when the install is still running or the compiler is missing
+    // (`WRITE_TYPECHECK_NOT_READY_MARKER`). Build e52cebbf: the fast lane's salvage check read that marker as
+    // "no errors" because it carries no `error TS` line — a pass for a compiler that never started.
+    || /(?:^|\n)\s*NBAI_WRITE_TSC_NOT_READY\b/.test(output);
 }
 
 /**
@@ -250,4 +254,17 @@ export function buildScriptTypecheckVerdict(c: { command?: string | null; stdout
   // together with the bundler's own line — which, after `tsc … &&`, can only appear if tsc passed.
   if ((c.exitCode === 0 || c.exitCode == null) && /\bbuilt in\s+\d/.test(out)) return 'passed';
   return undefined;
+}
+
+/**
+ * The report line for the fast lane's salvage typecheck (build e52cebbf, 2026-10-06). "No errors" only
+ * when the compiler really ran and passed; a check that never started — the install still running, the
+ * binary missing, a torn install — says it could not check, because a clean line there is a claim nobody
+ * verified. PURE.
+ */
+export function salvageTypecheckLine(output: string | null | undefined, errorCount: number): string {
+  if (errorCount > 0) return `The salvaged files were typechecked before the hand-off: ${errorCount} error(s) handed to the full builder with them.`;
+  const verdict = tscVerdict(output);
+  if (verdict === 'passed') return 'The salvaged files were typechecked before the hand-off: no errors.';
+  return 'The salvaged files could NOT be typechecked before the hand-off: the compiler was not ready yet (dependencies still installing). They are unverified, not clean.';
 }

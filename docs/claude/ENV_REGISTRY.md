@@ -308,6 +308,8 @@ the code (it is actually read somewhere) on 2026-07-11.
   ("done"). Name recorded only; the value was never written anywhere in this repo. Not verified from a session (the
   session network cannot reach the live host): the proof is the Cloud Scheduler job's Force run reading Success —
   503 = the Cloud Run value is missing or under 16 characters, 401 = the two values differ.
+  ✅ **VERIFIED 2026-10-06:** the admin's Force run of job `scheduler-tick` (asia-southeast1, `*/5 * * * *`) read
+  **Success** in the Cloud Scheduler console (admin screenshot). Q-159 is closed.
 - **New domain gets the published app by itself (built 2026-10-05, Q-163):** `DOMAIN_AUTOPUBLISH` — kill switch,
   **default ON**; `off` stops the uptime sweep putting the already-published app (from `PUBLISHED_APPS_BUCKET`'s copy)
   on a connected domain whose site is still empty. Once per domain + app, owner's active app only.

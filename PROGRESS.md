@@ -91377,3 +91377,13 @@ guessed keyword list.
   `aTwoPartQuestionGetsBothAnswers.test.ts`, was Q-127's existing test, and it had been overwritten. It was
   restored from git before any commit (its 3 cases pass), and the new test has its own name, written create-only.
 - Q-601 leaves the open table with this PR, and its ID is in the closed register.
+
+---
+
+## 2026-10-06 — Q-159 closed: the scheduler tick is live (admin console work)
+
+The admin set `SCHEDULER_TICK_SECRET` in Cloud Run and created the Cloud Scheduler job `scheduler-tick`
+(asia-southeast1, every 5 minutes, `POST https://navbharatai.com/api/internal/scheduler-tick` with the
+`x-scheduler-secret` header). A Force run read **Success** (admin screenshot, 2026-10-06). The code is #3555's;
+this entry records the live proof. **Watch for:** "Status of last execution" stays Success; a 503 would mean the
+Cloud Run value was lost on a redeploy, a 401 that one of the two values was changed. Q-159 → closed register.

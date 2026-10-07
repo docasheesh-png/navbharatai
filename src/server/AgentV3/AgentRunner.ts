@@ -20,7 +20,7 @@ import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
 import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarration, truncationSteeredPaths } from './TruncationRecovery';
-import { newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
+import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
@@ -720,6 +720,8 @@ export class AgentRunner {
     // the EXACT same non-progressing tool call to the threshold, inject a corrective steer so it changes
     // approach instead of looping to the step cap (a weak build ran the same empty grep ~6 times → ok:None).
     const repeatProbe = newRepeatProbeState();
+    let finalLoopSteerSent = false;
+    let noOpTurnsAfterFinal = 0;
     const loopGuardOn = loopGuardEnabled();
     const loopThreshold = loopGuardThreshold();
     try {
@@ -1377,12 +1379,27 @@ export class AgentRunner {
           // Honest narration per severity: the FINAL steer means the model ignored an earlier nudge and
           // the same dead call is now banned — say that, rather than repeating the softer first line.
           const escalated = loopSteer.includes('LOOP GUARD — FINAL');
+          if (escalated) finalLoopSteerSent = true;
           events.emit({
             type: 'narration', agent: agentRole, ts: Date.now(),
+            // Honest about what happens next: a refused probe is refused; anything else ends the run if it
+            // keeps repeating (Q-738) — the old line said "blocking it" while nothing blocked a bash.
             text: escalated
-              ? '⚠️ Still repeating the same step — blocking it and moving on to finish the app.'
+              ? '⚠️ Still repeating the same step — told to stop; this run ends if it keeps going.'
               : '⚠️ Noticed a repeated step that isn\'t making progress — nudging a change of approach.',
           });
+        }
+        // 🔒 A RUN THAT ONLY DOES NOTHING ENDS (Q-738). After the FINAL steer, every further turn made only of
+        // no-op calls (an empty command, a refused probe) counts; the third ends the run with an honest summary
+        // instead of paying for more turns that cannot change anything.
+        if (finalLoopSteerSent && loopGuardOn && isNoOpTurn(turn.toolUses, (n, i) => isProbeBanned(repeatProbe, n, i))) {
+          noOpTurnsAfterFinal += 1;
+          if (noOpTurnsAfterFinal >= MAX_NO_OP_TURNS_AFTER_FINAL) {
+            const summary = 'Stopped this run: after being told twice to stop, the model kept sending steps that do '
+              + `nothing (${noOpTurnsAfterFinal} more turns of empty or refused calls). Nothing further would have changed.`;
+            events.emit({ type: 'narration', agent: agentRole, text: `⚠️ ${summary}`, ts: Date.now() });
+            return { ok: false, summary, steps, usage, billedUsd: billed() };
+          }
         }
         // TIME BUDGET — the one thing the model was never told (see `budgetStagesSent` above). Rides the
         // message the runner already appends, so it costs no call and cannot block a build.

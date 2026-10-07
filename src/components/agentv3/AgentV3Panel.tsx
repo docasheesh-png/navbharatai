@@ -149,7 +149,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>, opts?: { live?: boolean }) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, errorBeforeBuildStarted, start, respond, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, errorBeforeBuildStarted, start, respond, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -1809,6 +1809,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     try {
       const result = await run(targetWorkspaceId, (p) => setZipProgress(p.label));
       if (!result) return; // the user cancelled the picker — a normal outcome, not a failure
+      // The session now HAS a workspace, even though no build ran — without this, Publish and Report stay
+      // disabled on a fresh chat over an app that is right there in the preview (agentV3Reducer.adoptWorkspace).
+      adoptWorkspace(targetWorkspaceId);
       // The tree is already in hand on the browser path — paint Files immediately instead of making the
       // user wait on a round trip for data this tab just read itself.
       if (result.files) { try { onFilesSync?.(result.files); } catch { /* the read-back below still covers it */ } }

@@ -42,6 +42,23 @@ function applyFileChange(files: FileChange[], change: FileChange): FileChange[] 
   return [...without, change];
 }
 
+/**
+ * A session that gained a workspace WITHOUT a build — today, a project import — takes it as its own.
+ *
+ * 🔴 WHY (admin 2026-10-07, the isolation-probe zip): `state.workspaceId` was set by one thing only, the
+ * build stream's `workspace` event. A zip or repo import lands files in the session's deterministic
+ * workspace, previews them, audits them — and never tells the state, so on a FRESH chat Publish and Report
+ * stayed disabled (`!state.workspaceId`) over an app that was right there in the preview.
+ *
+ * Never replaces a live id: a session already attached to a workspace keeps it, and a blank id is ignored.
+ * PURE.
+ */
+export function adoptWorkspace(state: AgentV3ClientState, workspaceId: string | null | undefined): AgentV3ClientState {
+  const id = String(workspaceId ?? '').trim();
+  if (!id || state.workspaceId) return state;
+  return agentV3Reducer(state, { type: 'workspace', workspaceId: id, ts: Date.now() } as AgentV3WireEvent);
+}
+
 export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEvent): AgentV3ClientState {
   switch (event.type) {
     case 'workspace':

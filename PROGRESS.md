@@ -91743,3 +91743,27 @@ spends 30 s+ at the password step must land signed in; if it ever does not, that
 ### 2026-10-07 (evening) — NavBharat Cloud bring-up EXECUTED by the admin in Cloud Shell
 
 `navbharatCloudBringUp.sh` ran with three steps. `validate` passed: 19/19 permissions were in the live catalogue and the repo is DOCKER. `apply` added both accounts and all resource-level bindings and turned immutable tags ON; the bucket and the five custom roles already existed and matched the design. Verify passed all 8 checks, and the default compute account holds no roles at all. `wire` set both identity env vars on `navbharat-ai-prod` (revision `-04563-vqp`). `NAVBHARAT_CLOUD_PUBLIC` is still unset, so hosting is admin-only. Recorded in ENV_REGISTRY. **Next:** the admin publishes the isolation probe (zip import → Publish), then reads `/` and `/build`. That covers C-4 (does the builder's `objects.get` suffice?), the `allUsers` binding under org `doc-asheesh-org`, and the first real build → digest → Cloud Run → HTTPS. Classification: still NOT READY until that answers.
+
+## 2026-10-07 (night) — Autopsy d0b2fcd6 (mitrify GitHub import + a "do not change anything" survey turn)
+
+14 items, Q-735..Q-748. Tally: ✅ self-heal 2 (the package.json heals, both against the wrong manifest) · 🔀 workaround 1
+(the starter manifest restored over the import) · ⏭️ skip 1 (the durable-save failure was swallowed) · ❌ shipped imperfect 4
+(the app ran as our starter, the DB migration was skipped, files changed on a read-only turn, the redacted workflow lines) ·
+🥵 struggle 6 (108 s before the first call, 12 empty bash calls, two installs racing, 80 calls for one survey, false
+findings, the 60 s save). Each fix below has a test that fails when the bug is put back.
+
+| ID | Root cause → class | Fix | Lock |
+|---|---|---|---|
+| Q-737 | Detectors matched the PEM MARKER, not key material; `SecretRedactor` hid workflow lines that only *named* a key, so the model's view differed from the disk → five drifted private-key definitions | One `pemKeyMaterial.ts` (min body, RFC1421 headers, `\n` escapes) used by SecretRedactor, SecurityAnalysis, threatModelAnalysis, appStaticScan, websiteCheckup | `aPrivateKeyIsItsMaterialNotItsMarker` (includes a census: no new private-key regex outside the module) |
+| Q-736 | The heal budget ignored `expectsArtifacts`, so a survey turn was repaired | `healMax = 0` when the turn expects no artifacts | `aSurveyTurnIsNeverRepaired` |
+| Q-742 | `sql` tagged templates were flagged as injection; a Firebase web `apiKey` was flagged as a leak | `isSafeTaggedTemplate` (raw/unsafe stay flagged), plus the shared `firebaseWebConfig.ts` (needs 2+ config fields); 7 obsolete NOT_A_SECRET rows removed | `aParameterisedQueryAndAFirebaseWebKeyAreNotLeaks` |
+| Q-739 | The npm "lock" was a marker file, so two installs shared one node_modules (ENOTEMPTY) | In-process promise chain per sandbox, plus a wait on a fresh lock from another process | `twoInstallsNeverShareANodeModules` |
+| Q-735 | One 175-file Firestore commit hit the 60 s deadline AFTER writing; the throw skipped the index, and both layers swallowed it | Batches bounded by bytes; a failed batch is read back and only exact matches are indexed; `MergeResult` reported, with `IMPORT_NOT_DURABLE` and a narration | `anImportIsSavedOrSaysItWasNot` |
+| Q-740 | A bulk tar landing bypassed the actuator's warm cache, so `_restoreEmptyManifest` put our starter's package.json over the import. This also settles the OPEN 2026-10-04 empty-package.json root cause | `noteFilesLanded` from bulkLand; the restore never writes our starter over a real project | `anImportedManifestIsNeverReplacedByOurStarter` |
+| Q-738 | LOOP GUARD FINAL could not stop `bash`, so empty calls ran on and the narration claimed "blocking" | The third no-op turn after FINAL ends the run with `ok:false` and an honest summary; the narration was corrected | `aRunThatOnlyDoesNothingEnds` |
+| Q-743 / Q-744 | Consequences of Q-736 + Q-740, and of Q-736 + Q-737/738 | Closed by those fixes | Their tests |
+
+🟡 **BLOCKED:**
+- **Q-741:** needs a timing measurement on the next import.
+- **Q-745:** pushing a failed build to GitHub is the admin's decision. Recommendation: (c) push to a `wip/` branch.
+- **Q-746, Q-747, Q-748:** proposed as not-defects, pending the admin's agreement.

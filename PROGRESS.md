@@ -91767,3 +91767,7 @@ findings, the 60 s save). Each fix below has a test that fails when the bug is p
 - **Q-741:** needs a timing measurement on the next import.
 - **Q-745:** pushing a failed build to GitHub is the admin's decision. Recommendation: (c) push to a `wip/` branch.
 - **Q-746, Q-747, Q-748:** proposed as not-defects, pending the admin's agreement.
+
+## 2026-10-07: Q-734 closed — #3584 merged (a project imported into a fresh chat can be published)
+
+The row was removed from the open queue and its ID appended to the closed register. Autopsy d0b2fcd6's fixes are in PR #3585; rows Q-735..Q-744 name it as owner.

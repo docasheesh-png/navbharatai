@@ -91689,3 +91689,10 @@ no parallel architecture was built.
 
 **NOT verified against Google.** That needs the admin's console steps, the IAM script and the probe app (Q-705).
 **Residual P1 (Q-706):** builds share one narrow identity (read, not overwrite), and there is no egress allow-list.
+
+## 2026-10-07: e52cebbf + b4745cb1 — RESOLUTION (#3574 and #3577 merged)
+
+BUILD REPORT e52cebbf + b4745cb1 — RESOLUTION
+Items: 12 · ✅ Resolved: 12 · 🟡 Blocked: 0 · Remaining: 0
+Q-720…Q-724, Q-726 ✅ merged in #3574 · Q-725, Q-727 (admin: b), Q-728, Q-729, Q-730 ✅ merged in #3577 · Q-731 ✅ not-defects, admin agreed.
+FINAL: ✅ COMPLETE (Remaining = 0). Rows removed from the open queue and their IDs appended to the closed register.

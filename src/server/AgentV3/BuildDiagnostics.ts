@@ -77,6 +77,7 @@ export const PROCESS_ONLY_CODES = new Set([
   'VERIFY_DID_NOT_RUN',       // our fast-lane typecheck could not execute — the class of RUNTIME_UNCHECKED
   'GREEN_GUARD_UNVERIFIED',   // "could not be opened to check this turn" — the class of PREVIEW_UNVERIFIED
   'HEAL_NOT_DURABLE',         // our repair wrote twice to one file; the user never sees repair passes
+  'IMPORT_NOT_DURABLE',       // our store did not confirm saving an import (autopsy d0b2fcd6, Q-735) — their app is unchanged
   'SUMMARY_OFF_TOPIC',        // about OUR closing summary's wording, and already said above the summary
   'DATABASE_OFFER_AT_START',  // we OFFERED (or created) a database — a thing we did for them, not a fault
   'DATABASE_ASLEEP',          // the user's own Supabase project is paused — their account's state, not the app's code

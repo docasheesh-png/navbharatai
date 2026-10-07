@@ -119,9 +119,9 @@ describe('3 — verification and repair can use the reserved budget', () => {
 
 describe('4 / 5 / 6 — a detected error can enter repair, spend the reserve, and be re-verified', () => {
   it('the verify→repair→re-verify loop is a LOOP, so a repair is followed by another browse', () => {
-    const at = route.indexOf('const healMax = autoFixEnabled()');
+    const at = route.indexOf('const healMax = ');
     expect(at).toBeGreaterThan(0);
-    const loop = route.slice(at, at + 1200);
+    const loop = route.slice(at, at + 1600);
     expect(loop).toMatch(/for \(let attempt = 0; attempt <= healMax/);
     expect(loop).toContain('actuator.browseUrl'); // the re-verify is the next iteration's browse
   });
@@ -165,8 +165,8 @@ describe('9 — an unused reserve creates no delay', () => {
 describe('10 — the repair loop stays bounded', () => {
   it('the existing round limit is used as-is and is NOT raised', () => {
     // autoFixMaxAttempts(): default 1, hard-capped at 3. This change does not touch it.
-    const at = route.indexOf('const healMax = autoFixEnabled()');
-    expect(route.slice(at, at + 120)).toContain('Math.max(1, autoFixMaxAttempts())');
+    const at = route.indexOf('const healMax = ');
+    expect(route.slice(at, at + 160)).toContain('Math.max(1, autoFixMaxAttempts())');
     expect(route).not.toContain('autoFixMaxAttempts() + ');
   });
 

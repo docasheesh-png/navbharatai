@@ -21,7 +21,7 @@ import { registerShareRoutes } from './src/server/routes/share';
 import { audit } from './src/server/lib/audit';
 import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
 import { appCheckGuard } from './src/server/lib/appCheck';
-import { securityHeadersConfig, permissionsPolicyMiddleware } from './src/server/lib/securityHeaders';
+import { securityHeadersConfig, permissionsPolicyMiddleware, popupReturnOpenerPolicyMiddleware, withoutOpenerPolicy } from './src/server/lib/securityHeaders';
 import { responseCompression } from './src/server/lib/responseCompression';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { envFlag } from './src/server/lib/envFlag';
@@ -311,6 +311,9 @@ setInterval(() => {
   // directive is shaped the way it is (Firebase Auth popups, live-preview iframes, OAuth opener).
   app.use(helmet(securityHeadersConfig));
   app.use(permissionsPolicyMiddleware());
+  // …except on the pages that run INSIDE a sign-in popup and answer the app: our opener policy there cut
+  // the popup off from the app, and Google login failed for anyone who took >10 s to type (Q-732).
+  app.use(popupReturnOpenerPolicyMiddleware());
   app.use(traceMiddleware);
   // gzip for JSON/HTML/JS/CSS — an ALLOWLIST so it can never buffer a live stream (the v5 build's
   // text/plain NDJSON progress, chat's event-stream). See responseCompression.ts for the reasoning
@@ -498,7 +501,8 @@ setInterval(() => {
         // because nothing actually failed. Google was unaffected: the popup flow hands its result back
         // by postMessage and never needs a cookie to survive a cross-site return. See authProxyCookies.
         const host = String(req.headers?.host || '').split(':')[0];
-        res.writeHead(pres.statusCode || 502, rewriteProxyHeaders(pres.headers as Record<string, unknown>, host));
+        // …and never an opener policy of its own: this page answers the window that opened it (Q-732).
+        res.writeHead(pres.statusCode || 502, withoutOpenerPolicy(rewriteProxyHeaders(pres.headers as Record<string, unknown>, host)));
         pres.pipe(res, { end: true });
       },
     );

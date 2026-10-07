@@ -91696,3 +91696,24 @@ BUILD REPORT e52cebbf + b4745cb1 — RESOLUTION
 Items: 12 · ✅ Resolved: 12 · 🟡 Blocked: 0 · Remaining: 0
 Q-720…Q-724, Q-726 ✅ merged in #3574 · Q-725, Q-727 (admin: b), Q-728, Q-729, Q-730 ✅ merged in #3577 · Q-731 ✅ not-defects, admin agreed.
 FINAL: ✅ COMPLETE (Remaining = 0). Rows removed from the open queue and their IDs appended to the closed register.
+
+## 2026-10-07: Q-732 — Google web login sometimes stayed logged out (root cause: our own COOP header on the popup's pages)
+
+Admin: *"kabhi kabhi (30% time) google login nahi hota hai … google id/pass → login successfully → back to navbharatai →
+still logout"* — confirmed web only (phone and desktop browser), no error shown.
+
+- **Evidence (real Chromium, two origins, the exact popup shape):** with `Cross-Origin-Opener-Policy:
+  same-origin-allow-popups` on our handler page, the app saw the popup "closed" 0.4 s after it went to the provider and the
+  return page had no `window.opener`; without it, "closed" only on the real close and the result was posted back. Google's
+  sign-in pages send COOP only as report-only, so it was OUR header doing it. Same measurement for the GitHub-callback shape.
+- **Why 30%:** Firebase polls `popup.closed` (2 s), waits 8 s for a result, then rejects `popup-closed-by-user`; our grace
+  window added 2.5 s and then treated it as the user's cancel, silently. Quick account-pick users still got in through
+  Firebase's storage relay; anyone who typed an email + password (>~10 s) did not.
+- **Class:** a page that answers `window.opener` carried the opener page's COOP. **Fix:** `POPUP_RETURN_PATHS` +
+  `popupReturnOpenerPolicyMiddleware` (after helmet), `withoutOpenerPolicy` on the `/__/auth` proxy. **Siblings:** GitHub
+  repo-connect callback (fixed by the same list); Supabase-connect had already been moved to a full-page redirect on
+  2026-08-20 blaming "GitHub's COOP" — that diagnosis was this header; the redirect still works and was left alone.
+  The 2026-07-11 2.5 s grace was the same bug treated at the symptom.
+- **Lock:** `tests/aPopupReturnPageKeepsItsOpener.test.ts` — app keeps COOP, popup-return pages have none, proxy cannot add
+  one back, census of every server page posting to `window.opener` (reverted-and-failed for middleware, proxy strip, list).
+  Real server booted locally: `/`, `/settings` keep COOP; `/api/auth/github/callback`, `/api/auth/firebase`, `/__/auth/*` none.

@@ -92,3 +92,71 @@ export function permissionsPolicyMiddleware() {
     next();
   };
 }
+
+/**
+ * 🔴 A PAGE THAT ANSWERS ITS OPENER MUST NOT CARRY OUR OPENER POLICY (admin 2026-10-07, Q-732).
+ *
+ * Admin, verbatim: *"kabhi kabhi (30% time) google login nahi hota hai … google id/pass → login
+ * successfully → back to navbharatai → still logout"* — web only, phone and desktop browsers, no error.
+ *
+ * `crossOriginOpenerPolicy: 'same-origin-allow-popups'` above is right for the APP page (the opener):
+ * it lets the windows it opens stay connected to it. But helmet sent it on EVERY response, including
+ * the pages that run INSIDE those windows and must hand a result back: Firebase's sign-in handler
+ * (`/__/auth/handler`, proxied from Firebase because authDomain is our own domain) and the GitHub
+ * callback. Measured in real Chromium (two origins, the exact shape of the flow):
+ *
+ *   handler WITH this header  → the app saw the popup as "closed" 0.4 s after it went to Google, and
+ *                               the return page found `window.opener === null`
+ *   handler WITHOUT it        → "closed" only when the popup really closed; the result was posted back
+ *
+ * A document with `same-origin-allow-popups` that navigates to a cross-origin page with no policy
+ * (Google's sign-in pages only send a REPORT-ONLY policy) forces a browsing-context-group switch, and
+ * that switch severs the popup from the app for good. Firebase polls `popup.closed` every 2 s, sees
+ * "closed", waits 8 s for a result, then rejects `auth/popup-closed-by-user`; the app gave it 2.5 s
+ * more and then treated it as the user's own cancel — silently. So a user who picked an account in a
+ * few seconds got in (the result still crawled through Firebase's storage relay in time), and a user
+ * who typed an email and password — longer than ~10 s — stayed logged out with no error. That is the
+ * 30%. The 2026-07-11 grace window and the 2026-08-20 move of Supabase-connect to a full-page redirect
+ * ("GitHub's COOP severs window.opener") were both this same header, treated at the symptom.
+ *
+ * So: the opener keeps its policy; a popup-return page gets none (the browser default, which is what
+ * Firebase's own handler on *.firebaseapp.com has always run under). `tests/aPopupReturnPageKeepsItsOpener.test.ts`
+ * holds the census — a new server page that talks to `window.opener` must be listed here or CI fails.
+ */
+export const POPUP_RETURN_PATHS: readonly string[] = [
+  '/__/auth',                    // Firebase sign-in handler + iframe (Google / GitHub / Apple), proxied
+  '/__/firebase',                // Firebase helper config the handler loads, proxied
+  '/api/auth/github/callback',   // GitHub repo-connect popup return (githubAuth.ts)
+  '/auth/github',                // …same handler, legacy path
+  '/api/github/callback',        // …same handler, legacy path
+  '/api/auth/firebase',          // Firebase DevOps "not available" popup page (firebaseAuth.ts)
+];
+
+/** True when `path` is a popup-return page, or under one. PURE. */
+export function isPopupReturnPath(path: string | null | undefined): boolean {
+  const p = String(path || '');
+  return POPUP_RETURN_PATHS.some((prefix) => p === prefix || p.startsWith(`${prefix}/`));
+}
+
+/**
+ * Removes the opener policy from popup-return pages. Mounted right after helmet (server.ts), so it
+ * undoes exactly the one header helmet just set and nothing else.
+ */
+export function popupReturnOpenerPolicyMiddleware() {
+  return (req: { path?: string }, res: { removeHeader: (k: string) => void }, next: () => void): void => {
+    if (isPopupReturnPath(req.path)) res.removeHeader('Cross-Origin-Opener-Policy');
+    next();
+  };
+}
+
+/**
+ * The upstream's own response headers for a proxied popup-return page, minus any opener policy. The
+ * proxy writes these with `writeHead`, which would otherwise put an upstream policy straight back. PURE.
+ */
+export function withoutOpenerPolicy<T extends Record<string, unknown>>(headers: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(headers || {})) {
+    if (k.toLowerCase() !== 'cross-origin-opener-policy') out[k] = v;
+  }
+  return out as T;
+}

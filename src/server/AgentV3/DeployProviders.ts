@@ -47,6 +47,13 @@ const firebaseProvider: DeployProvider = {
 };
 
 // The live registry. Providers are added here as each real implementation lands (no placeholders).
+//
+// 🔒 NAVBHARAT CLOUD (`navbharat-cloud`) IS DELIBERATELY NOT HERE (2026-10-07). This interface is a STATIC
+// host: `deploy()` is handed the built `dist/` files and a body-claimed `userId`. A server app needs its
+// source, the VERIFIED owner, the plan, the server-app cap, the deploy lease and the attempt record — all of
+// which `runServerPublish` (serverPublish.ts) carries and this interface cannot. The publish route reaches it
+// by the app's shape (`choosePublishRoute`), not through this registry.
+// Locked by tests/navbharatCloudIsNotAStaticDeployProvider.test.ts.
 const PROVIDERS: DeployProvider[] = [firebaseProvider];
 
 /** Register a provider (used by each provider module + tests). Replaces any existing same-id entry. */

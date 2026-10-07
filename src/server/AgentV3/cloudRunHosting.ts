@@ -445,8 +445,14 @@ export interface ParsedService {
   name: string;
   /** The public https URL, once Cloud Run has assigned one. */
   uri: string;
-  /** True when the service reports itself ready to serve. */
+  /** True when the service reports itself ready to serve — AND serves the generation we asked for. */
   ready: boolean;
+  /** Reconciliation is over: the answer below is final for the spec we sent. */
+  settled: boolean;
+  /** Settled, and the desired state was NOT reached (the revision did not start, or never took traffic). */
+  failed: boolean;
+  /** Google's own reason when it failed — for the admin log, never for the user. '' otherwise. */
+  failureDetail: string;
 }
 
 /**
@@ -460,14 +466,35 @@ export interface ParsedService {
 export function parseService(raw: unknown): ParsedService | null {
   const s = raw && typeof raw === 'object' ? raw as Record<string, any> : null;
   if (!s || typeof s.name !== 'string' || !s.name.trim()) return null;
-  const conditions = Array.isArray(s.conditions) ? s.conditions : [];
-  const ready = conditions.some(
-    (c: any) => c && c.type === 'Ready' && String(c.state ?? '').toUpperCase() === 'CONDITION_SUCCEEDED',
-  );
+  /**
+   * 🔴 v2 KEEPS READINESS IN `terminalCondition` (2026-10-07). This module calls the v2 API, where
+   * `conditions` holds only the sub-resources (RoutesReady, ConfigurationsReady) — so looking for
+   * `type: 'Ready'` there meant `ready` could never be true against the real API. The array is still read as
+   * a fallback, so a v1-shaped answer degrades to the old behaviour rather than to a wrong one.
+   */
+  const terminal = s.terminalCondition && typeof s.terminalCondition === 'object'
+    ? s.terminalCondition
+    : (Array.isArray(s.conditions) ? s.conditions : []).find((c: any) => c && c.type === 'Ready');
+  const state = String(terminal?.state ?? '').toUpperCase();
+  /**
+   * Settled = reconciliation is over. An answer that does not carry the field at all is taken as settled,
+   * because there is nothing to wait for in it — waiting on a field that never comes would only burn time.
+   */
+  const settled = s.reconciling !== true;
+  // The generation we asked for is the one serving. A failed UPDATE leaves `observedGeneration` on the last
+  // serving one (Google's own definition), so an old revision answering is not our deploy succeeding.
+  const gen = Number(s.generation);
+  const observed = Number(s.observedGeneration);
+  const generationServing = !(Number.isFinite(gen) && Number.isFinite(observed)) || observed >= gen;
+  const ready = state === 'CONDITION_SUCCEEDED' && generationServing;
+  const failed = settled && (state === 'CONDITION_FAILED' || (state === 'CONDITION_SUCCEEDED' && !generationServing));
   return {
     name: s.name.trim(),
     uri: typeof s.uri === 'string' ? s.uri.trim().replace(/\/+$/, '') : '',
     ready,
+    settled,
+    failed,
+    failureDetail: failed ? String(terminal?.message ?? '').slice(0, 500) : '',
   };
 }
 
@@ -498,7 +525,20 @@ export function hostingFailureMessage(status: number, projectId: string): string
 
 export type HostingResult =
   | { ok: true; url: string; service: string; ready: boolean }
-  | { ok: false; reason: 'not-configured' | 'refused' | 'no-url'; message: string };
+  | {
+      ok: false;
+      reason: 'not-configured' | 'refused' | 'no-url' | 'start-failed';
+      message: string;
+      /** Google's own words, for the ADMIN log only — never rendered to a user (white-label law). */
+      detail?: string;
+    };
+
+/**
+ * How long a deploy waits for Cloud Run to finish reconciling, and how often it looks. A server normally
+ * settles well inside a minute; the bound exists so a stuck one cannot hold the publish open for ever.
+ */
+export const SERVICE_READY_WAIT_MS = 240_000;
+export const SERVICE_READY_POLL_MS = 4_000;
 
 /**
  * Create or update the app's Cloud Run service, make it public, and report its URL. NEVER throws —
@@ -520,20 +560,63 @@ export async function deployAppToCloudRun(
     serviceAccount: string;
     image: string;
     envVars?: Array<{ key: string; value: string }>;
+    readyWaitMs?: number;
+    readyPollMs?: number;
   },
   fetchImpl: typeof fetch = fetch,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<HostingResult> {
   const service = hostedServiceName(opts.workspaceId, opts.appName, opts.existingService);
   const spec = buildServiceSpec({ image: opts.image, envVars: opts.envVars, workspaceId: opts.workspaceId, serviceAccount: opts.serviceAccount });
   try {
     const create = buildCreateServiceRequest(opts.token, opts.projectId, opts.region, service, spec);
     let res = await fetchImpl(create.url, { method: create.method, headers: create.headers, body: create.body });
+    /** This deploy brought the service into existence — so on failure, nobody else owns it. */
+    let created = res.ok;
     if (res.status === 409) {
+      created = false;
       const upd = buildUpdateServiceRequest(opts.token, opts.projectId, opts.region, service, spec);
       res = await fetchImpl(upd.url, { method: upd.method, headers: upd.headers, body: upd.body });
     }
     if (!res.ok) {
       return { ok: false, reason: 'refused', message: hostingFailureMessage(res.status, opts.projectId) };
+    }
+
+    /**
+     * 🔴 WAIT FOR THE ANSWER (2026-10-07). Create and update are accepted long before the revision serves,
+     * and the service used to be read ONCE, at that moment, then made public and reported deployed whatever
+     * it said. A container that crashed on start was therefore recorded live and — on a first deploy — left
+     * as a public service nobody had recorded. Bounded by attempts, not by a clock, so the wait is exact.
+     */
+    const get = buildGetServiceRequest(opts.token, opts.projectId, opts.region, service);
+    const waitMs = Math.max(0, opts.readyWaitMs ?? SERVICE_READY_WAIT_MS);
+    const pollMs = Math.max(1, opts.readyPollMs ?? SERVICE_READY_POLL_MS);
+    const attempts = Math.max(1, Math.ceil(waitMs / pollMs));
+    let parsed: ParsedService | null = null;
+    for (let i = 0; i < attempts; i += 1) {
+      if (i > 0) await sleep(pollMs);
+      const getRes = await fetchImpl(get.url, { method: get.method, headers: get.headers });
+      parsed = getRes.ok ? parseService(await getRes.json().catch(() => null)) : null;
+      if (parsed?.settled) break;
+    }
+
+    if (parsed?.failed) {
+      if (created) {
+        // Ours, unrecorded, and serving nothing: removed, so a failed first deploy leaves no orphan behind.
+        await deleteHostedService({ token: opts.token, projectId: opts.projectId, region: opts.region, service }, fetchImpl);
+        return {
+          ok: false, reason: 'start-failed', detail: parsed.failureDetail,
+          message: 'Your app was built, but its server did not start, so nothing was made public. The most common '
+            + 'cause is a server that does not listen on the port given in the PORT environment variable, or one '
+            + 'that stops with an error while starting. Fix the server\'s start code and publish again.',
+        };
+      }
+      return {
+        ok: false, reason: 'start-failed', detail: parsed.failureDetail,
+        message: 'The new version of your app did not start, so the version already live keeps serving and nothing '
+          + 'changed for your visitors. The most common cause is a server that does not listen on the port given in '
+          + 'the PORT environment variable, or one that stops with an error while starting.',
+      };
     }
 
     // Public access is its own call, and its failure is REPORTED rather than swallowed: a service
@@ -549,9 +632,6 @@ export async function deployAppToCloudRun(
       };
     }
 
-    const get = buildGetServiceRequest(opts.token, opts.projectId, opts.region, service);
-    const getRes = await fetchImpl(get.url, { method: get.method, headers: get.headers });
-    const parsed = getRes.ok ? parseService(await getRes.json().catch(() => null)) : null;
     // No URL is a refusal, not a success with a blank field: the caller is about to point a domain at
     // this address, and pointing one at '' is worse than not pointing it at all.
     if (!parsed?.uri) {

@@ -4059,3 +4059,21 @@ the flag entries above promise.
   Read by `src/server/AgentV3/appsIdentity.ts`. The full design, the setup steps and the verification are in
   `docs/HOSTING_ARCHITECTURE.md` §11.
 
+
+### 2026-10-07 — the two identities are SET (admin, hand-to-hand, `scripts/navbharatCloudBringUp.sh`)
+
+- ✅ `NAVBHARAT_APPS_RUNTIME_SA` = `nbai-app-runtime@navbharatai-user-apps.iam.gserviceaccount.com` — **SET** on
+  `navbharat-ai-prod` by `navbharatCloudBringUp.sh wire` (revision `navbharat-ai-prod-04563-vqp`). Supersedes the
+  "NOT SET" line above. The account holds **no roles** (verify check 1 PASS).
+- ✅ `NAVBHARAT_APPS_BUILD_SA` = `nbai-app-builder@navbharatai-user-apps.iam.gserviceaccount.com` — **SET**, same
+  revision. Corrects the role list above: Artifact Registry Writer on `nbai-apps`, the custom `nbaiBuildSourceReader`
+  (`storage.objects.get` only — NOT Storage Object Viewer, which would let a build list every app's source) on the
+  staging bucket, and Logs Writer on the project.
+- What `apply` found and did in `navbharatai-user-apps` (verify: **IAM half PASSED, all 8 checks**):
+  - Both accounts now exist.
+  - The bucket `navbharatai-user-apps_cloudbuild` and the five custom roles **already existed**, matched the design and were left untouched. The bucket is asia-south1, uniform access, public access prevention enforced, lifecycle Delete age 1 on `nbai-source/`.
+  - Resource-level bindings were added, and immutable tags are ON.
+  - The default compute account `219549203609-compute@` holds **no roles at all**, so the "remove Editor" step planned earlier is not needed.
+- **NOT changed, deliberately:** `NAVBHARAT_CLOUD_PUBLIC` stays unset (admin-only hosting). The platform account's broad
+  project roles (`run.admin`, `storage.admin`, `artifactregistry.writer`, `cloudbuild.builds.editor`, project-level
+  `iam.serviceAccountUser`) stay until the isolation probe reads ISOLATED and a real app deploys.

@@ -91739,3 +91739,7 @@ still logout"* — confirmed web only (phone and desktop browser), no error show
 
 Row removed from the open queue, ID appended to the closed register. Live check after deploy: a Google login that
 spends 30 s+ at the password step must land signed in; if it ever does not, that is a new report, not this row.
+
+### 2026-10-07 (evening) — NavBharat Cloud bring-up EXECUTED by the admin in Cloud Shell
+
+`navbharatCloudBringUp.sh` ran with three steps. `validate` passed: 19/19 permissions were in the live catalogue and the repo is DOCKER. `apply` added both accounts and all resource-level bindings and turned immutable tags ON; the bucket and the five custom roles already existed and matched the design. Verify passed all 8 checks, and the default compute account holds no roles at all. `wire` set both identity env vars on `navbharat-ai-prod` (revision `-04563-vqp`). `NAVBHARAT_CLOUD_PUBLIC` is still unset, so hosting is admin-only. Recorded in ENV_REGISTRY. **Next:** the admin publishes the isolation probe (zip import → Publish), then reads `/` and `/build`. That covers C-4 (does the builder's `objects.get` suffice?), the `allUsers` binding under org `doc-asheesh-org`, and the first real build → digest → Cloud Run → HTTPS. Classification: still NOT READY until that answers.

@@ -91717,3 +91717,8 @@ still logout"* — confirmed web only (phone and desktop browser), no error show
 - **Lock:** `tests/aPopupReturnPageKeepsItsOpener.test.ts` — app keeps COOP, popup-return pages have none, proxy cannot add
   one back, census of every server page posting to `window.opener` (reverted-and-failed for middleware, proxy strip, list).
   Real server booted locally: `/`, `/settings` keep COOP; `/api/auth/github/callback`, `/api/auth/firebase`, `/__/auth/*` none.
+
+## 2026-10-07: Q-732 closed — #3579 merged (Google web login / COOP on popup-return pages)
+
+Row removed from the open queue, ID appended to the closed register. Live check after deploy: a Google login that
+spends 30 s+ at the password step must land signed in; if it ever does not, that is a new report, not this row.

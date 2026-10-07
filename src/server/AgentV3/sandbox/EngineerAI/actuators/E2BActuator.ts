@@ -4,7 +4,7 @@ import { shouldRunAuditFix, AUDIT_FIX_COMMAND, AUDIT_FIX_TIMEOUT_MS } from '../.
 import { commandFailureResult, commandLogTail } from '../../../../lib/sandboxCommandError';
 import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
-import { starterFilesToComplete, MAX_FRAGMENT_FILES } from '../../../starterFragment';
+import { starterFilesToComplete, MAX_FRAGMENT_FILES, isOurStarterFile, starterTemplates } from '../../../starterFragment';
 import { applyStrictTrial } from '../../../strictTrial';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
@@ -46,6 +46,9 @@ const USER_ACTIVITY_WRITE_MS = 60_000;
 // five-minute build was followed by three quarters of an hour of billed idle VM, usually for someone
 // who had already closed the tab.
 const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
+
+/** How many source files the workspace holds, outside dependencies and VCS — a starter has a handful. */
+const REAL_PROJECT_PROBE = "find . -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' \\) -not -path './node_modules/*' -not -path './.git/*' 2>/dev/null | head -200 | wc -l";
 
 /**
  * Bounds on putting a dead workspace's app back into a fresh machine (`_restoreFreshSandbox`).
@@ -820,11 +823,22 @@ export class E2BActuator implements IEngineerActuator {
         .run(EMPTY_MANIFEST_EVIDENCE_COMMAND, { cwd: WORKSPACE_ROOT, timeoutMs: 10_000 })
         .then((r) => `${r.stdout}${r.stderr}`)
         .catch(() => '');
-      let restore = pickManifestRestore(this._fileCache.get(workspaceId)?.get('package.json'));
+      // 🔒 NEVER OUR STARTER OVER SOMEONE'S PROJECT (autopsy d0b2fcd6, Q-740). Both copies can be stale —
+      // the cache missed a bulk landing, the durable index missed a timed-out save — and both then held our
+      // starter's manifest, which was written over an imported app. In a workspace holding a real project
+      // (more files than any starter has), the starter manifest is not a candidate: an empty file fails
+      // loudly; a wrong app's manifest fails silently, which is worse.
+      const realProject = await sandbox.commands
+        .run(REAL_PROJECT_PROBE, { cwd: WORKSPACE_ROOT, timeoutMs: 10_000 })
+        .then((r) => Number((r.stdout || '').trim()) > MAX_FRAGMENT_FILES)
+        .catch(() => false);
+      const usable = (c: string | null | undefined): string | null | undefined =>
+        realProject && typeof c === 'string' && isOurStarterFile('package.json', c, starterTemplates()) ? null : c;
+      let restore = pickManifestRestore(usable(this._fileCache.get(workspaceId)?.get('package.json')));
       if (!restore) {
         const saved = await withTimeout(loadWorkspaceFiles(workspaceId), DURABLE_RESTORE_LOAD_MS, 'loadWorkspaceFiles(manifest)')
           .catch(() => null);
-        restore = pickManifestRestore(saved?.['package.json']);
+        restore = pickManifestRestore(usable(saved?.['package.json']));
       }
       if (restore) await sandbox.files.write(`${WORKSPACE_ROOT}/package.json`, restore);
       const note = emptyManifestNote(Boolean(restore), evidence);
@@ -1688,6 +1702,11 @@ export class E2BActuator implements IEngineerActuator {
       // a workspace that genuinely has no files, and the build report carries the same line.
       console.error(`[E2BActuator] fresh-sandbox restore FAILED for ${workspaceId}: ${summarizeRestore(outcome)}`);
     }
+  }
+
+  /** A bulk landing wrote these — the cache must describe the project that is really there (Q-740). */
+  noteFilesLanded(workspaceId: string, files: Record<string, string>): void {
+    for (const [rel, content] of Object.entries(files)) this._cacheFileWrite(workspaceId, rel.replace(/^\.?\/+/, ''), content);
   }
 
   /** Record a source-file write in the bounded per-workspace cache (for recreate-after-death restore). */

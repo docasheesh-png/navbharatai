@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
+import { agentV3Reducer, adoptWorkspace as adoptWorkspaceState } from '../components/agentv3/agentV3Reducer';
 import { createRevealPacer } from '../components/agentv3/revealPacer';
 import { carryOverActivity } from '../components/agentv3/activityTimeline';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
@@ -56,6 +56,8 @@ export interface UseAgentV3Build {
   start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
+  /** A project import gave this session a workspace without a build — adopt it unless one is already live. */
+  adoptWorkspace: (workspaceId: string) => void;
   /** Restore the workspace to a checkpoint commit. `message` is the SERVER's sentence — it is the
    *  only side that knows why a restore did not happen, and those reasons are not interchangeable.
    *  ⚠️ NO UI CALLS THIS SINCE 2026-09-20 (admin: "system A ko hata do … B hi lagao"). The History
@@ -388,6 +390,11 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   // Keep the latest workspace id available to restore() without a stale closure.
   workspaceIdRef.current = state.workspaceId;
+
+  /** A project import gave this session a workspace without a build — adopt it (see adoptWorkspace). */
+  const adoptWorkspace = useCallback((workspaceId: string) => {
+    setState((prev) => adoptWorkspaceState(prev, workspaceId));
+  }, []);
 
   const reset = useCallback(() => {
     // Invalidate any in-flight resume()/subscribeLive() from a PREVIOUS session first, and cancel the
@@ -1664,5 +1671,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

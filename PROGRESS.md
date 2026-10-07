@@ -91696,3 +91696,11 @@ BUILD REPORT e52cebbf + b4745cb1 — RESOLUTION
 Items: 12 · ✅ Resolved: 12 · 🟡 Blocked: 0 · Remaining: 0
 Q-720…Q-724, Q-726 ✅ merged in #3574 · Q-725, Q-727 (admin: b), Q-728, Q-729, Q-730 ✅ merged in #3577 · Q-731 ✅ not-defects, admin agreed.
 FINAL: ✅ COMPLETE (Remaining = 0). Rows removed from the open queue and their IDs appended to the closed register.
+
+### 2026-10-07 — NavBharat Cloud vs the DeployProvider registry: traced, NOT integrated (architectural conflict)
+
+Admin asked to expose `hostAppOnNavBharatCloud` as DeployProvider `navbharat-cloud` via a thin adapter, and to stop and report if the generic interface could not carry it safely. It cannot:
+- `DeployProvider.deploy(ws, files)` gets the BUILT `dist/` of the STATIC branch, which runs only when `planDeployment` says static suffices. A server app never reaches it, and a container built from `dist/` has no server.
+- `DeployContext.userId` is the body's claimed uid (`/publish` and the AI `deploy` tool). The server path needs the VERIFIED uid for plan, server cap, vault and attempt record.
+- `deploy()` returns a bare URL, so 403 cap / 409 in-progress / 422 / 503 + deploymentId would be lost. `withDeploymentPersistence` would also double-record beside `runServerPublish`.
+NavBharat Cloud is ALREADY selected by Publish, by app shape (`choosePublishRoute` → `runServerPublish`). Change: a comment in `DeployProviders.ts` + `tests/navbharatCloudIsNotAStaticDeployProvider.test.ts`. The test locks: no `navbharat-cloud` registry entry, every provider is static, one caller of `hostAppOnNavBharatCloud`, `runServerPublish` entered once with the verified owner. Proven by reversion: registering an adapter fails 3 tests, a second host caller fails 1. If a user-chosen server host is ever wanted, it needs its own `ServerHostProvider` contract carrying the verified context; it should not be forced into the static one. No PR (not requested).

@@ -91771,3 +91771,15 @@ findings, the 60 s save). Each fix below has a test that fails when the bug is p
 ## 2026-10-07: Q-734 closed — #3584 merged (a project imported into a fresh chat can be published)
 
 The row was removed from the open queue and its ID appended to the closed register. Autopsy d0b2fcd6's fixes are in PR #3585; rows Q-735..Q-744 name it as owner.
+
+## 2026-10-07: autopsy d0b2fcd6, 9 rows closed (#3585 merged)
+
+Q-735, Q-736, Q-737, Q-738, Q-739, Q-740, Q-742, Q-743 and Q-744 were removed from the open queue and their IDs appended to the closed register. The ledger is in the "Autopsy d0b2fcd6" entry above.
+
+**Watch on the next real GitHub import:**
+- the durable read lists the import's files, not 11;
+- no `STARTER_STILL_SHOWING`, and no `IMPORT_DB_MIGRATIONS_SKIPPED` from `ENOTEMPTY`;
+- a "do not change" survey turn runs no repair;
+- empty `bash` calls stop after FINAL.
+
+**Still 🟡 BLOCKED from this report:** Q-741 (timing), Q-745 (decision), Q-746, Q-747 and Q-748 (not-defect agreement).

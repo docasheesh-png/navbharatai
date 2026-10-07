@@ -21365,7 +21365,14 @@ async function noteBuildOutcome(
         // Only if there's comfortable time left before the wall-clock cap (verify + a heal pass).
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
       ) {
-        const healMax = autoFixEnabled() ? Math.max(1, autoFixMaxAttempts()) : 1; // ≥1 fix attempt
+        /**
+         * 🔒 AN IMPORT/SURVEY TURN IS LOOKED AT, NEVER REPAIRED (autopsy d0b2fcd6, Q-736). The user said "do not
+         * change any files yet"; every other automatic writer is gated on `expectsArtifacts`, and this loop
+         * was the one that was not — its repair run installed packages, edited three files and rewrote the
+         * iOS workflow on a read-only turn. A budget of 0 keeps the look (attempt 0 verifies and reports
+         * honestly) and removes the repair.
+         */
+        const healMax = !expectsArtifacts ? 0 : autoFixEnabled() ? Math.max(1, autoFixMaxAttempts()) : 1; // ≥1 fix attempt on a build turn
         // Restarting a dead process is NOT a repair attempt and must not spend the repair budget —
         // otherwise one crashed dev server silently costs the app its only chance at a real fix. Bounded
         // on its own so a server that refuses to stay up cannot loop.

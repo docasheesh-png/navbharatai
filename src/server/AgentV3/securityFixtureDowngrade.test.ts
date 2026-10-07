@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { scanSecurity, isFixtureFile } from './SecurityAnalysis';
 
@@ -46,7 +47,7 @@ describe('the SAME credential in REAL source still BLOCKS (high) — no security
   it('a REAL AWS key / private key stays HIGH even in a fixture file (never demo-safe)', () => {
     // These are never legit demo data — a real-format AWS key or private key is a genuine red flag.
     expect(sev('src/data/mockData.ts', `const k = 'AKIA1234567890ABCDEF';`, 'aws-access-key')).toBe('high');
-    expect(sev('src/mocks/keys.ts', `const p = '-----BEGIN RSA PRIVATE KEY-----';`, 'private-key')).toBe('high');
+    expect(sev('src/mocks/keys.ts', `const p = \`${(generateKeyPairSync('rsa', { modulusLength: 1024 }).privateKey.export({ type: 'pkcs1', format: 'pem' }) as string)}\`;`, 'private-key')).toBe('high');
   });
 
   it('a code vulnerability (jwt none-algorithm) stays HIGH even in a fixture', () => {

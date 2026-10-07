@@ -67,8 +67,6 @@ const NOT_A_SECRET: Record<string, string> = {
   'firebase-applet-config.json|hardcoded-provider-token': 'Firebase web API key — public by design',
   'src/firebase-applet-config.json|hardcoded-provider-token': 'Firebase web API key — public by design',
   'src/config/firebase.ts|hardcoded-provider-token': 'Firebase web API key fallback — public by design',
-  '.github/workflows/ios-ipa.yml|private-key': 'PEM header/footer text used to rebuild a key from a repo secret — no key material',
-  'src/server/lib/mobileShipKit.ts|private-key': 'the same PEM header/footer text inside a generated workflow — no key material',
   'src/server/AgentV3/SecurityAnalysis.ts|url-embedded-credentials': 'the detection regex itself',
   'src/server/lib/DeployArtifactGenerator.ts|connection-string-credentials': "local docker-compose dev database passwords in a template for the USER's app",
   'src/components/ide/GitPanel.tsx|hardcoded-auth-header': "a literal placeholder ('vercel-api') sent to our own route, not a credential",

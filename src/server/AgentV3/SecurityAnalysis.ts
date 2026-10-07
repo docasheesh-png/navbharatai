@@ -6,6 +6,7 @@
 // `evaluate` tool can report concrete, real security defects for the team to fix —
 // never a synthetic "looks secure".
 
+import { PEM_PRIVATE_KEY_MARKER, containsPemPrivateKey } from '../lib/pemKeyMaterial';
 import { enclosingTag } from './jsxTags';
 import { isLiveEnvFilePath } from '../../lib/envFile';
 
@@ -33,7 +34,7 @@ interface Rule {
    * expression up to its balancing `)`. A same-line guard on a multi-line construct is the class that
    * has now produced false findings in three analyzers (8a92e5ed, c847b523, and this rule).
    */
-  contextual?: 'tag' | 'call';
+  contextual?: 'tag' | 'call' | 'following';
   /** A hardcoded-CREDENTIAL-VALUE rule (a secret string baked into data), as opposed to a code
    *  vulnerability. In an obvious mock/fixture/demo file these are almost always DEMO fixtures, not a
    *  real leak — so they are downgraded to 'low' there (still reported, never a build-failing 'high').
@@ -206,8 +207,12 @@ const RULES: Rule[] = [
   {
     rule: 'private-key',
     severity: 'high',
-    re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/,
+    re: PEM_PRIVATE_KEY_MARKER,
     message: 'Private key committed in source — remove it immediately.',
+    // The marker is only a pre-filter: code that MENTIONS it (our own iOS workflow rebuilds a PEM from a
+    // secret with `sed`/`echo`) holds no key. A finding needs the base64 body (pemKeyMaterial.ts, Q-737).
+    contextual: 'following',
+    ignore: (_m, _line, following) => !containsPemPrivateKey(following),
   },
   {
     rule: 'eval-usage',
@@ -724,7 +729,9 @@ export function scanSecurity(file: string, content: string): SecurityFinding[] {
         ? enclosingTag(content, lineStart[i] + m.index) ?? undefined
         : r.contextual === 'call'
           ? callSpanAt(content, lineStart[i] + m.index) ?? undefined
-          : undefined;
+          : r.contextual === 'following'
+            ? content.slice(lineStart[i] + m.index, lineStart[i] + m.index + 8000)
+            : undefined;
       if (!(r.ignore && r.ignore(m, line, context))) {
         const severity: Severity = credsBelongHere && r.demoDowngrade ? 'low' : r.severity;
         findings.push({ file, line: i + 1, severity, rule: r.rule, message: r.message });

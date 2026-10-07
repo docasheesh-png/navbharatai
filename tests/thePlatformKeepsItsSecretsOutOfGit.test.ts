@@ -62,11 +62,6 @@ const SECRET_RULES = new Set([
  * any file — or a new rule firing in a listed one — fails CI. Adding a row is a decision with a reason.
  */
 const NOT_A_SECRET: Record<string, string> = {
-  'android/app/google-services.json|hardcoded-provider-token': 'Firebase web API key — public by design; protected by Firestore rules, App Check and API-key restrictions',
-  'ios-config/GoogleService-Info.plist|hardcoded-provider-token': 'Firebase web API key — public by design',
-  'firebase-applet-config.json|hardcoded-provider-token': 'Firebase web API key — public by design',
-  'src/firebase-applet-config.json|hardcoded-provider-token': 'Firebase web API key — public by design',
-  'src/config/firebase.ts|hardcoded-provider-token': 'Firebase web API key fallback — public by design',
   'src/server/AgentV3/SecurityAnalysis.ts|url-embedded-credentials': 'the detection regex itself',
   'src/server/lib/DeployArtifactGenerator.ts|connection-string-credentials': "local docker-compose dev database passwords in a template for the USER's app",
   'src/components/ide/GitPanel.tsx|hardcoded-auth-header': "a literal placeholder ('vercel-api') sent to our own route, not a credential",

@@ -310,10 +310,10 @@ setInterval(() => {
   // src/server/lib/securityHeaders.ts so it can be unit-tested; see that file for why each
   // directive is shaped the way it is (Firebase Auth popups, live-preview iframes, OAuth opener).
   app.use(helmet(securityHeadersConfig));
+  app.use(permissionsPolicyMiddleware());
   // …except on the pages that run INSIDE a sign-in popup and answer the app: our opener policy there cut
   // the popup off from the app, and Google login failed for anyone who took >10 s to type (Q-732).
   app.use(popupReturnOpenerPolicyMiddleware());
-  app.use(permissionsPolicyMiddleware());
   app.use(traceMiddleware);
   // gzip for JSON/HTML/JS/CSS — an ALLOWLIST so it can never buffer a live stream (the v5 build's
   // text/plain NDJSON progress, chat's event-stream). See responseCompression.ts for the reasoning

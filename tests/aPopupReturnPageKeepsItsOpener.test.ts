@@ -74,7 +74,7 @@ describe('2 · the proxied handler cannot get an opener policy back from upstrea
     expect(withoutOpenerPolicy({ 'cross-origin-opener-policy': 'x' })).toEqual({});
   });
 
-  it('server.ts mounts the exemption right after helmet and strips the proxy response', () => {
+  it('server.ts mounts the exemption after helmet, before the proxy, and strips the proxy response', () => {
     const s = read('server.ts');
     const helmetAt = s.indexOf('app.use(helmet(securityHeadersConfig));');
     const exemptAt = s.indexOf('app.use(popupReturnOpenerPolicyMiddleware());');

@@ -9631,7 +9631,8 @@ async function noteBuildOutcome(
       // volatile sandbox and the File Guardian later restores the stale durable copy, silently
       // destroying the edit. mergeWorkspaceFiles UNIONS paths so a partial set never drops other files.
       // Awaited so a subsequent build reads the fresh truth. Best-effort — never blocks the import.
-      try { await mergeWorkspaceFiles(workspaceId, files as Record<string, string>); } catch { /* durable persist is best-effort */ }
+      // The durable outcome travels in the response (Q-735) — a save that did not happen is not reported as one.
+      const durable = await mergeWorkspaceFiles(workspaceId, files as Record<string, string>).catch(() => null);
       // Phase S2 — when this import is a MANUAL IDE EDIT (source: 'ide-edit', sent by the editor's
       // debounced syncer), record the paths so the NEXT v5.0 build acknowledges them ("I noticed you
       // edited N files…") and builds on top of them. Bulk repo imports / uploads do NOT set this flag,
@@ -9703,7 +9704,7 @@ async function noteBuildOutcome(
           needsGithub = true; // large import, no GitHub connected — let the client offer to connect
         }
       }
-      res.json({ imported: written.length, skipped: skipped.length, ...(github ? { github } : {}), ...(needsGithub ? { needsGithub: true } : {}) });
+      res.json({ imported: written.length, skipped: skipped.length, ...(durable ? { durable: { status: durable.status, saved: durable.indexed, unconfirmed: durable.unconfirmed.length } } : {}), ...(github ? { github } : {}), ...(needsGithub ? { needsGithub: true } : {}) });
     } catch (err: any) {
       res.status(500).json({ error: toSafeClientMessage(err, 'Failed to import the files.') });
     }
@@ -11635,8 +11636,28 @@ async function noteBuildOutcome(
       // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
       // empty": without it the import lives only in the ephemeral sandbox.
       try { opts.diag?.enterPhase?.('saving your project so it survives a restart'); } catch { /* best-effort */ }
-      try { await mergeWorkspaceFiles(workspaceId, importedFiles); } catch { /* durable persist is best-effort */ }
-      finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
+      /**
+       * 🔒 THE SAVE IS CHECKED, NOT ASSUMED (autopsy d0b2fcd6, Q-735). This line used to be best-effort and
+       * silent: when the commit timed out, the user's 175-file app stayed out of the durable index and the
+       * whole turn treated it as our starter. A store that did not save it says so — to the admin report and,
+       * in plain words, to the user — instead of the next turn quietly losing it.
+       */
+      try {
+      const durable = await mergeWorkspaceFiles(workspaceId, importedFiles).catch((e) => ({ status: 'failed' as const, indexed: 0, unconfirmed: Object.keys(importedFiles), error: String(e) }));
+      if (durable.status === 'failed' || durable.status === 'partial') {
+        try {
+          opts.diag?.record({
+            phase: 'build', severity: 'warning', code: 'IMPORT_NOT_DURABLE', autoResolved: false,
+            message: `The imported project is in the workspace, but the durable copy holds ${durable.indexed} of ${Object.keys(importedFiles).length} file(s) — ${durable.unconfirmed.length} could not be confirmed saved.`,
+            detail: `${durable.status}${durable.error ? ` · ${durable.error}` : ''} · unconfirmed: ${durable.unconfirmed.slice(0, 20).join(', ')}`,
+          });
+        } catch { /* diagnostics are best-effort */ }
+        emit({
+          type: 'narration', agent: 'architect', ts: Date.now(),
+          text: `⚠️ Your project is here and working in this session, but ${durable.unconfirmed.length} of its ${Object.keys(importedFiles).length} files could not be saved permanently yet. Keep this chat open; if it restarts, import the project again.`,
+        });
+      }
+      } finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
       framework = validation.framework;
       // TELL THE REPORT (autopsy d6deaaf0): the diagnostics object captured `framework` at build
       // start, before the import existed, so it kept the request default while the manifest recorded

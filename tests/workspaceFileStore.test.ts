@@ -52,9 +52,9 @@ describe('listWorkspaceFilePaths (metadata-only, best-effort under VITEST)', () 
 });
 
 describe('mergeWorkspaceFiles (best-effort, no Firestore in tests)', () => {
-  it('never throws and resolves to undefined when there is no DB', async () => {
-    await expect(mergeWorkspaceFiles('ws-1', { 'a.ts': 'x' })).resolves.toBeUndefined();
-    await expect(mergeWorkspaceFiles('ws-1', {})).resolves.toBeUndefined();
+  it('never throws, and says there is no store rather than claiming a save (Q-735)', async () => {
+    await expect(mergeWorkspaceFiles('ws-1', { 'a.ts': 'x' })).resolves.toMatchObject({ status: 'no-store', indexed: 0 });
+    await expect(mergeWorkspaceFiles('ws-1', {})).resolves.toMatchObject({ status: 'no-store' });
   });
   it('saveWorkspaceFiles also stays a safe no-op under VITEST', async () => {
     await expect(saveWorkspaceFiles('ws-1', { 'a.ts': 'x' })).resolves.toBeUndefined();

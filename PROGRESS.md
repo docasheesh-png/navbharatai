@@ -91714,3 +91714,28 @@ The admin asked for an autonomous real bring-up against GCP. **The session has n
 
 Also added `scripts/navbharatCloudBringUp.sh`, one additive owner command (snapshot / validate / apply / verify / wire). Its logic was exercised against an offline fake gcloud: it stops on an absent permission, stops on an existing role with different permissions (with no binding made), makes zero creates on re-run, and does nothing without YES. It is locked by `tests/theBringUpScriptIsAdditiveAndNarrow.test.ts`. A correction to my earlier precheck command: `list-testable-permissions` may omit `SUPPORTED` (the enum default), so an empty level means supported; the script handles this.
 **Still unproven (needs GCP):** a real build/deploy/HTTPS answer, C-4 (whether builder `objects.get` suffices for the source fetch), A/B isolation via the probe, cleanup under immutable tags, and `allUsers` vs any org policy. Classification: NOT READY.
+## 2026-10-07: Q-732 — Google web login sometimes stayed logged out (root cause: our own COOP header on the popup's pages)
+
+Admin: *"kabhi kabhi (30% time) google login nahi hota hai … google id/pass → login successfully → back to navbharatai →
+still logout"* — confirmed web only (phone and desktop browser), no error shown.
+
+- **Evidence (real Chromium, two origins, the exact popup shape):** with `Cross-Origin-Opener-Policy:
+  same-origin-allow-popups` on our handler page, the app saw the popup "closed" 0.4 s after it went to the provider and the
+  return page had no `window.opener`; without it, "closed" only on the real close and the result was posted back. Google's
+  sign-in pages send COOP only as report-only, so it was OUR header doing it. Same measurement for the GitHub-callback shape.
+- **Why 30%:** Firebase polls `popup.closed` (2 s), waits 8 s for a result, then rejects `popup-closed-by-user`; our grace
+  window added 2.5 s and then treated it as the user's cancel, silently. Quick account-pick users still got in through
+  Firebase's storage relay; anyone who typed an email + password (>~10 s) did not.
+- **Class:** a page that answers `window.opener` carried the opener page's COOP. **Fix:** `POPUP_RETURN_PATHS` +
+  `popupReturnOpenerPolicyMiddleware` (after helmet), `withoutOpenerPolicy` on the `/__/auth` proxy. **Siblings:** GitHub
+  repo-connect callback (fixed by the same list); Supabase-connect had already been moved to a full-page redirect on
+  2026-08-20 blaming "GitHub's COOP" — that diagnosis was this header; the redirect still works and was left alone.
+  The 2026-07-11 2.5 s grace was the same bug treated at the symptom.
+- **Lock:** `tests/aPopupReturnPageKeepsItsOpener.test.ts` — app keeps COOP, popup-return pages have none, proxy cannot add
+  one back, census of every server page posting to `window.opener` (reverted-and-failed for middleware, proxy strip, list).
+  Real server booted locally: `/`, `/settings` keep COOP; `/api/auth/github/callback`, `/api/auth/firebase`, `/__/auth/*` none.
+
+## 2026-10-07: Q-732 closed — #3579 merged (Google web login / COOP on popup-return pages)
+
+Row removed from the open queue, ID appended to the closed register. Live check after deploy: a Google login that
+spends 30 s+ at the password step must land signed in; if it ever does not, that is a new report, not this row.

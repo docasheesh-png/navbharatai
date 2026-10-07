@@ -2,10 +2,15 @@
   "name": "nbai-hosting-isolation-probe",
   "version": "1.0.0",
   "private": true,
-  "description": "Hosted like any user app; proves from INSIDE the build and the runtime that neither identity can reach anything. See docs/HOSTING_ARCHITECTURE.md §11.",
-  "engines": { "node": ">=20" },
+  "description": "Hosted like any user app; proves from INSIDE the build and the runtime that neither identity can reach anything. Express on purpose: the publish planner (deployPlan.ts NODE_SERVER_DEPS) recognises an Express server, so Publish sends this app down the Cloud Run path. See docs/HOSTING_ARCHITECTURE.md §11.",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "postinstall": "node probe.js build",
     "start": "node probe.js serve"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
   }
 }

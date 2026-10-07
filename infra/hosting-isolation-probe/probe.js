@@ -6,10 +6,9 @@
 //   build   → runs during `npm install` on Cloud Build; writes build-result.json (baked into the image)
 //   serve   → the running app: GET /  = runtime result,  GET /build = what the build saw
 //
-// It never fails the build and never prints a token. No dependencies.
+// It never fails the build and never prints a token. One dependency, Express — see the server below for why.
 'use strict';
 const fs = require('node:fs');
-const http = require('node:http');
 const path = require('node:path');
 
 const MD = 'http://metadata.google.internal/computeMetadata/v1';
@@ -119,13 +118,19 @@ if (process.argv[2] === 'build') {
     console.log(`[isolation-probe] build verdict: ${r.verdict} as ${r.identity}`);
   }).catch((e) => console.log(`[isolation-probe] build probe error: ${e && e.message}`)).finally(() => process.exit(0));
 } else {
-  const port = Number(process.env.PORT) || 8080;
-  http.createServer(async (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    if (req.url === '/build') {
-      res.end(fs.existsSync(RESULT_FILE) ? fs.readFileSync(RESULT_FILE) : JSON.stringify({ verdict: 'UNKNOWN', notes: ['The build probe did not run.'] }));
-      return;
-    }
-    res.end(JSON.stringify(await probe('runtime'), null, 2));
-  }).listen(port);
+  // 🔒 EXPRESS, NOT node:http (2026-10-07). The publish planner recognises a server by its framework
+  // (deployPlan.ts NODE_SERVER_DEPS: express, fastify, koa, …). A bare node:http server is classified as
+  // `unknown` and published as a STATIC site — so the probe would never reach Cloud Run and would prove
+  // nothing. Express is required only here, at serve time; the build phase above needs no dependency.
+  const express = require('express');
+  const app = express();
+  app.get('/build', (_req, res) => {
+    res.type('application/json');
+    res.send(fs.existsSync(RESULT_FILE) ? fs.readFileSync(RESULT_FILE) : JSON.stringify({ verdict: 'UNKNOWN', notes: ['The build probe did not run.'] }));
+  });
+  app.get('/', async (_req, res) => {
+    res.type('application/json');
+    res.send(JSON.stringify(await probe('runtime'), null, 2));
+  });
+  app.listen(Number(process.env.PORT) || 8080);
 }

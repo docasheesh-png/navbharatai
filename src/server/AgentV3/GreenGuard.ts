@@ -129,6 +129,15 @@ export function decideGreenGuard(input: {
    * re-acquire the old behaviour by forgetting it — the typechecker asks the question instead.
    */
   filesWrittenThisTurn: number;
+  /**
+   * How many writes landed AFTER this build's own in-build green render (postGreenWrites.ts), when the
+   * build had one. Zero means the files ARE the version that rendered (build e52cebbf, 2026-10-06: the
+   * user stopped it 4 minutes after the render and nothing had been written since, yet the guard said
+   * "the app could not be opened to check them"). Optional: absent keeps the older wording.
+   */
+  writesAfterGreen?: number;
+  /** The user pressed Stop. "Could not be opened" is then not what happened: nobody tried. Optional. */
+  stoppedByUser?: boolean;
 }): GreenDecision {
   // 🔴 AN ABSENT COUNT IS NOT A COUNT OF ZERO — and the first draft of this very fix got that wrong,
   // which is the same mistake the fix exists to remove. A caller that does not state the number has
@@ -161,12 +170,21 @@ export function decideGreenGuard(input: {
       // WE NEVER LOOKED. Undoing the user's work on a guess is the one thing this guard must not do —
       // it destroys real edits for reasons that live entirely outside their code (a paused sandbox, a
       // dev server that stopped, a snapshot taken before the app painted). The good state stays saved.
+      // The render this guard holds came from THIS build and nothing was written after it: the files
+      // are the version that rendered, so there is nothing unchecked to speak of.
+      const renderedThisBuild = typeof input.turnStartedAt === 'number' && typeof input.before?.at === 'number' && input.before.at >= input.turnStartedAt;
+      const unchangedSinceGreen = renderedThisBuild && typeof input.writesAfterGreen === 'number'
+        && Number.isFinite(input.writesAfterGreen) && input.writesAfterGreen <= 0;
       return {
         action: 'none',
         reason: wroteNothing
           // Nothing was written, so "your changes were kept" would be a claim about changes that do
           // not exist — the exact sentence autopsy 586295b7 caught being told to a user.
           ? 'Nothing was written this turn, so there was nothing to keep or undo. The last known good version is still saved and untouched.'
+          : unchangedSinceGreen
+            ? 'Nothing was written after the app rendered earlier in this build, so the saved files are the version that rendered. The last known good version is still saved and untouched.'
+          : input.stoppedByUser === true
+            ? 'The build was stopped before this turn\u2019s latest changes could be checked; they were kept, and an unverified turn is never undone. The last known good version is still saved and untouched.'
           : 'This turn\u2019s changes were kept: the app could not be opened to check them, and an unverified turn is never undone. The last known good version is still saved and untouched.',
       };
     }

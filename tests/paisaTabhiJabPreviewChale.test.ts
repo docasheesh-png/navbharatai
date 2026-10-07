@@ -134,10 +134,12 @@ describe('🔒 the wiring — a rule on one settle path is a rule a long build e
     expect(calls).toBeGreaterThanOrEqual(2);
   });
 
-  it('both read the SAME render proof — buildObs.previewRendered, one fact one write', () => {
+  it('both read the SAME render proof — the final check OR the ledger\'s in-build green (admin 2026-10-06, Q-727 = b)', () => {
+    expect(route).toContain('const appSeenRunningForBill = buildObs.previewRendered === true || renderProvenNow();');
     const at = route.split('decideMarkupOnProof(');
+    expect(at.length).toBeGreaterThanOrEqual(3);
     for (const frag of at.slice(1)) {
-      expect(frag.slice(0, 400)).toContain('buildObs.previewRendered === true');
+      expect(frag.slice(0, 600)).toMatch(/previewProven: (?:appSeenRunningForBill,|buildObs\.previewRendered === true \|\| \(buildDiagRef \? renderProvenInLedger\(buildDiagRef\.evidenceLedger\(\)\) : false\),)/);
     }
   });
 

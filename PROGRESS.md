@@ -91650,6 +91650,22 @@ with `npm audit --json`.
   here: a scheduled `npm audit` on `main` (daily, before India's working hours) that opens the bump PR itself,
   so the first red is the fix PR and never somebody else's.
 
+## 2026-10-06 (later): e52cebbf + b4745cb1 — the rest of the ledger, after the admin's answers (PR #3577; #3574 merged the first half)
+
+The admin answered *"Q-727 = b / waki aap karo! apne suggestion ke anusar"*: bill a stop after an in-build render as a
+working app, agree that the five Q-731 items are not defects, and fix the rest.
+
+| ID | Problem | Root cause → class | Fix | Lock |
+|---|---|---|---|---|
+| Q-727 | A stop after `IN_BUILD_GREEN` was billed as "never ran" | Three money sites read the final-check flag alone, while the ledger already knew → "seen running" had two meanings | `appSeenRunningForBill` (final check OR ledger) read by markup, cancel bill and watchdog; the wording-only `renderSeenInBuild` removed; decision recorded in `ROUTING_AND_BILLING.md` | §6, reverted-and-failed |
+| Q-725 | The bill's sentence denied the render | Same as Q-727 | Covered by Q-727: the sentences are no longer reached for such a build | §6 |
+| Q-728 | `GREEN_GUARD_NONE`: "could not be opened" on a stopped, unchanged app | The guard was never told about the stop or the writes after green → a verdict missing two of its inputs | `writesAfterGreen` + `stoppedByUser` | §8, reverted-and-failed |
+| Q-729 | A model's missed selector recorded as an engine ERROR | A failure verb made any short line an error, whatever its subject | `narrationIsProbeMiss` (engine subject in the same sentence stays an error); no sibling classifier found | §9 uses the real line, reverted-and-failed |
+| Q-730 | Nothing read built browser code for an AI key in the page | Q-723 fixed the writer (fast lane), not the reader → no net for any other lane | `browserAiKeyScan.ts` at write time (ToolDispatcher) and end of build (`AI_KEY_IN_BROWSER`); our own AI templates proven clean | §10, reverted-and-failed |
+| Q-731 | Five items argued as not defects | — | Admin agreed; resolved as not-defects | queue row |
+
+Watch on the next real build: a stopped build that had an in-build green shows `delivery: working-app` with the margin
+kept; a model narration about a selector shows as a warning.
 ## 2026-10-06 — Q-704: user apps and their builds no longer run as the default identity (P0)
 
 **Found** by the hosting launch-readiness audit; the admin then made it a P0 task. The external spec was adapted:

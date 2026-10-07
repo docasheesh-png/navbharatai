@@ -95,6 +95,13 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'The database tables in this app have no row-level security, so anyone who opens the published app could read or change every row. Turn row-level security on for every table and add policies so each signed-in person can only read and write their OWN rows, with anything public explicitly marked read-only. Keep the app working after the change.',
   },
   {
+    // Autopsy e52cebbf (Q-730): the app asked its visitors to paste an AI key, and sent it from the page.
+    code: 'AI_KEY_IN_BROWSER',
+    title: 'Take the AI key out of your app',
+    detail: 'Your app calls an AI service straight from the page, so its key would be visible to everyone who opens it.',
+    prompt: 'This app calls an AI provider directly from browser code, so the provider key has to live in the page where every visitor can read and spend it. Replace every such call with NavBharatAI\'s built-in keyless AI helper (generateText / chat), remove any box or setting that asks for an AI key and any key read from storage or the environment in browser code, and keep the feature working. Save the user\'s own data first, then add the AI result when it arrives.',
+  },
+  {
     code: 'BOOT_KILLING_ENV_GUARD',
     title: 'Stop one missing key from killing the app',
     detail: 'If one setting is missing, the whole app refuses to start instead of just that one feature.',

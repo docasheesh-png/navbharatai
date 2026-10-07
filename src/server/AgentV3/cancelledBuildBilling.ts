@@ -134,12 +134,6 @@ export interface CancelledBuildFacts {
   /** Did the platform OPEN the app in a real browser and see it render? */
   appRendered: boolean;
   /**
-   * The evidence ledger saw a real-browser render during the build (IN_BUILD_GREEN) although `appRendered`
-   * was never set, because the stop came before the final check (build e52cebbf, 2026-10-06). Wording only:
-   * the bill still follows `appRendered` until the admin decides otherwise (queue row).
-   */
-  renderSeenInBuild?: boolean;
-  /**
    * Was this turn EDITING an app that already existed, rather than building a new one?
    *
    * 🔴 THE CASE THIS MODULE COULD NOT SEE (autopsy 95598899, 2026-09-18). A user with a working
@@ -320,9 +314,7 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
     delivery: 'files-saved',
     applies: true,
     costFloorApplied,
-    reason: f.renderSeenInBuild
-      ? `user stopped the build after the app had rendered in a real browser during it, but before its final check — billed on the files-saved rule (${costFloorApplied ? 'floored at our real cost' : 'half the work done'}) because the final proof was never recorded`
-      : costFloorApplied
+    reason: costFloorApplied
       ? 'user stopped the build with files saved but no app verified running — the service margin was already waived for the same reason, so the charge is floored at what the build really cost us rather than halved again (a cancellation may take our margin, never our cost)'
       : 'user stopped the build with files saved but no app verified running — charged half the work done',
     userMessage: billedUsd > 0
@@ -331,7 +323,7 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
         // sentence beside it. This is the same statement `previewEarnsMarkup` makes, and the route
         // suppresses that one when this fires so the user is never told twice.
         ? 'You stopped this build. Your files are saved and I can carry on from here whenever you like. '
-          + (f.renderSeenInBuild ? 'Your app had already rendered, but it was stopped before its final check, so you have been charged only what the work done so far actually ' : 'Because the app was not finished, you have been charged only what the work done so far actually ')
+          + 'Because the app was not finished, you have been charged only what the work done so far actually '
           + 'cost to run — no service charge on top, and nothing like a full build.'
         : 'You stopped this build. Your files are saved and I can carry on from here whenever you like. Because the app was not finished, you have been charged HALF of what the work done so far cost — not a full build.')
       : null,

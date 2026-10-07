@@ -179,6 +179,9 @@ describe('the consumers', () => {
 
   it('the result event and the cancelled bill both read that same copy', () => {
     expect(ROUTE).toContain('appRendered: buildObs.previewRendered === true');
+    // The bill reads it too, widened by the ledger's in-build green pass (admin 2026-10-06, Q-727 = b).
+    expect(ROUTE).toContain('const appSeenRunningForBill = buildObs.previewRendered === true || renderProvenNow();');
+    expect(ROUTE).toContain('appRendered: appSeenRunningForBill,');
   });
 
   it('…and `emptyBuildFailureSummary` was NOT one of the affected readers — stated, not assumed', () => {

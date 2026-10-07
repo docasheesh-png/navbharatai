@@ -73,13 +73,6 @@ export function decideMarkupOnProof(input: {
    * bill is the same real cost, only the sentence says what happened.
    */
   awaitingShell?: string | null;
-  /**
-   * The evidence ledger saw the app render in a real browser during this build (IN_BUILD_GREEN), but the
-   * proof this rule reads was never set — the build was stopped before its final check (build e52cebbf,
-   * 2026-10-06). The MONEY is unchanged here (that is the admin's decision, recorded in the queue); only the
-   * sentence stops saying "never confirmed running" about an app that rendered.
-   */
-  renderSeenInBuild?: boolean;
 }): MarkupDecision {
   const decided = Number(input.decidedBilledUsd);
   const unchanged: MarkupDecision = {
@@ -101,17 +94,12 @@ export function decideMarkupOnProof(input: {
   return {
     billedUsd: real,
     markupApplied: false,
-    reason: (input.renderSeenInBuild
-      ? 'The app rendered in a real browser during this build, but the build ended before its final check, so the service margin was waived: billed at real cost only '
-      : 'The app was never confirmed running here, so the service margin was waived: billed at real cost only ')
+    reason: `The app was never confirmed running here, so the service margin was waived: billed at real cost only `
       + `($${real.toFixed(4)} instead of $${decided.toFixed(4)}).`,
     userMessage: input.awaitingShell
       ? `This turn built one part of your app, and there is nothing to open until "${input.awaitingShell}" `
         + 'puts it together, so you have been charged only what this turn actually cost to run — no service '
         + 'charge on top.'
-      : input.renderSeenInBuild
-        ? 'Your app was running during this build, but the build ended before its final check, so you have been '
-          + 'charged only what this build actually cost to run — no service charge on top.'
       : 'I could not confirm your app running here, so you have been charged only what this build '
         + 'actually cost to run — no service charge on top. Your files are saved; send a follow-up and I will '
         + 'get it running.',

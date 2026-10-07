@@ -281,6 +281,24 @@ const PROBLEM_WORD_SOURCE =
  * for the rest of that build. It traded false positives on fix-turns for false NEGATIVES on ordinary
  * builds, which is the same trade in the other direction.
  */
+/**
+ * A UI PROBE THAT MISSED IS THE MODEL'S OWN TOOL STEP, NOT AN ENGINE ERROR (build b4745cb1, 2026-10-06, Q-729).
+ * "The add-transaction form is visible and the app rendered with no console errors, but the form field
+ * selector timed out … Let me inspect the actual inputs." was filed as severity ERROR: "timed out" is a
+ * failure verb, whoever its subject is. Here the subject is a selector the model guessed, on an app it had
+ * just watched render — a struggle point (warning), never the build failing. A failure whose subject is
+ * the ENGINE (dev server, build, install, sandbox, port, compiler) in the same sentence stays an error.
+ * PURE.
+ */
+export function narrationIsProbeMiss(text: string): boolean {
+  const t = String(text ?? '');
+  const probe = /\b(?:selector|locator|element|xpath|query ?selector|click|tap)\b[^.!?\n]{0,60}\b(?:timed out|failed|could not|cannot|not found)\b/i.test(t)
+    || /\b(?:could not|cannot|failed to)\s+(?:find|locate|match|click|tap|select)\b/i.test(t);
+  if (!probe) return false;
+  const engine = /\b(?:dev server|server|build|install(?:ation)?|sandbox|port|compil\w*|typecheck|tsc|npm|dependenc\w*|preview)\b[^.!?\n]{0,60}\b(?:failed|cannot|could not|unavailable|timed out)\b/i.test(t);
+  return !engine;
+}
+
 function stripBenignCompounds(text: string): string {
   return String(text ?? '')
     .replace(/\berrors?[- ](boundar(?:y|ies)|handling|handlers?|messages?|states?|pages?|toasts?|ui|display)\b/gi, '')
@@ -1857,7 +1875,7 @@ export class BuildDiagnostics {
         if (statusLike && problemWord && !platformNotice
           && !(remediationIntent && !failureVerb)
           && !(echoesPrompt && !failureVerb)) {
-          this.record({ phase: 'build', severity: failureVerb ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
+          this.record({ phase: 'build', severity: failureVerb && !narrationIsProbeMiss(tForMatch) ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
         } else {
           this.record({ phase: 'build', severity: 'info', code: 'AGENT_STEP', message: t.slice(0, 400), autoResolved: true });
         }

@@ -6,6 +6,8 @@
 // `evaluate` tool can report concrete, real security defects for the team to fix —
 // never a synthetic "looks secure".
 
+import { PEM_PRIVATE_KEY_MARKER, containsPemPrivateKey } from '../lib/pemKeyMaterial';
+import { isFirebaseWebConfigKey } from '../lib/firebaseWebConfig';
 import { enclosingTag } from './jsxTags';
 import { isLiveEnvFilePath } from '../../lib/envFile';
 
@@ -33,7 +35,7 @@ interface Rule {
    * expression up to its balancing `)`. A same-line guard on a multi-line construct is the class that
    * has now produced false findings in three analyzers (8a92e5ed, c847b523, and this rule).
    */
-  contextual?: 'tag' | 'call';
+  contextual?: 'tag' | 'call' | 'following' | 'around';
   /** A hardcoded-CREDENTIAL-VALUE rule (a secret string baked into data), as opposed to a code
    *  vulnerability. In an obvious mock/fixture/demo file these are almost always DEMO fixtures, not a
    *  real leak — so they are downgraded to 'low' there (still reported, never a build-failing 'high').
@@ -132,6 +134,19 @@ const SECURITY_CONTEXT = /\b(secret|token|password|passwd|otp|nonce|session|salt
 // every inline SVG (xmlns="http://www.w3.org/2000/svg") and XML namespace declaration.
 const NAMESPACE_HTTP = /\bxmlns(?::\w+)?\s*=|http:\/\/(?:www\.)?(?:w3\.org|xmlns\.com|purl\.org|sodipodi\.sourceforge\.net|inkscape\.org|ns\.adobe\.com|schemas\.[\w.]+)/i;
 
+/**
+ * A TAGGED template (`sql\`… ${x}\``, drizzle's `sql`, `Prisma.sql`, `$queryRaw`) hands its values to the
+ * tag separately — it is a parameterised query, not string building. Only a tag that says it is unsafe
+ * (`raw`, `…Unsafe`) builds raw SQL. `at` is the index of the opening backtick in `line`. PURE.
+ */
+export function isSafeTaggedTemplate(line: string, at: number): boolean {
+  if (line[at] !== '`') return false;
+  const tag = /([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*$/.exec(line.slice(0, at))?.[1];
+  if (!tag) return false;
+  if (/^(?:return|typeof|await|yield|case|in|of|new|void|delete|throw|else)$/.test(tag)) return false;
+  return !/unsafe/i.test(tag) && !/(?:^|\.)raw$/i.test(tag);
+}
+
 const RULES: Rule[] = [
   {
     rule: 'hardcoded-secret',
@@ -141,7 +156,8 @@ const RULES: Rule[] = [
     // false positive of a validation/UI message (password = "Password must be 8 characters").
     re: /\b(api[_-]?key|secret|password|passwd|access[_-]?token|auth[_-]?token|client[_-]?secret)\b\s*[:=]\s*['"`]([^'"`\s]{8,})['"`]/i,
     message: 'Hardcoded credential — load it from an environment variable instead.',
-    ignore: (m) => isPlaceholderValue(m[2] ?? m[0]),
+    contextual: 'around',
+    ignore: (m, _line, around) => isPlaceholderValue(m[2] ?? m[0]) || isFirebaseWebConfigKey(around),
     demoDowngrade: true,
   },
   {
@@ -206,8 +222,12 @@ const RULES: Rule[] = [
   {
     rule: 'private-key',
     severity: 'high',
-    re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/,
+    re: PEM_PRIVATE_KEY_MARKER,
     message: 'Private key committed in source — remove it immediately.',
+    // The marker is only a pre-filter: code that MENTIONS it (our own iOS workflow rebuilds a PEM from a
+    // secret with `sed`/`echo`) holds no key. A finding needs the base64 body (pemKeyMaterial.ts, Q-737).
+    contextual: 'following',
+    ignore: (_m, _line, following) => !containsPemPrivateKey(following),
   },
   {
     rule: 'eval-usage',
@@ -476,6 +496,9 @@ const RULES: Rule[] = [
     // Parameterised queries (`query('… WHERE id = ?', [id])`) are still not flagged.
     re: /`(?=[^`]*\$\{)[^`]*\b(?:insert\s+into\s+[\w."\[]|delete\s+from\s+[\w."\[][^`]*\bwhere\b|update\s+[\w."\[][\w."\]]*\s+set\s+[^`]*=|select\s+\*\s+from\s+[\w."\[]|select\s+[^`]{1,80}?\bfrom\s+[\w."\[][^`]*\bwhere\b)|['"][^'"]*\b(?:insert\s+into\s+[\w."\[]|delete\s+from\s+[\w."\[][^'"]*\bwhere\b|update\s+[\w."\[][\w."\]]*\s+set\b|select\s+\*\s+from\s+[\w."\[]|select\s+[^'"]{1,80}?\bfrom\s+[\w."\[][^'"]*\bwhere\b)[^'"]*['"]\s*\+\s*(?!['"])\S/i,
     message: 'SQL query built from interpolated/concatenated input — this enables SQL injection; use parameterised queries (placeholders + a values array) instead.',
+    // A tagged template is parameterised by the tag (drizzle `sql`, `Prisma.sql`, `$queryRaw`) — autopsy
+    // d0b2fcd6 (Q-742) flagged `sqlExpr\`UPDATE … ${x}\`` as a build-breaker.
+    ignore: (m, line) => isSafeTaggedTemplate(line, m.index),
   },
   {
     rule: 'nosql-injection',
@@ -578,7 +601,8 @@ const RULES: Rule[] = [
     // inside .env templates — this covers code.)
     re: /\bgh[posru]_[A-Za-z0-9]{30,}|\bgithub_pat_[A-Za-z0-9_]{30,}|\bAIza[0-9A-Za-z_-]{30,}|\bxox[baprs]-[A-Za-z0-9-]{10,}|\b[rs]k_live_[A-Za-z0-9]{16,}|\bsk-ant-[A-Za-z0-9_-]{20,}/,
     message: 'Hardcoded API credential (GitHub/Google/Slack/Stripe/Anthropic token) in source — remove it, load it from an environment variable, and rotate the key since it was committed.',
-    ignore: (m) => PLACEHOLDER.test(m[0]),
+    contextual: 'around',
+    ignore: (m, _line, around) => PLACEHOLDER.test(m[0]) || (/^AIza/.test(m[0]) && isFirebaseWebConfigKey(around)),
   },
   {
     rule: 'unsafe-target-blank',
@@ -724,7 +748,11 @@ export function scanSecurity(file: string, content: string): SecurityFinding[] {
         ? enclosingTag(content, lineStart[i] + m.index) ?? undefined
         : r.contextual === 'call'
           ? callSpanAt(content, lineStart[i] + m.index) ?? undefined
-          : undefined;
+          : r.contextual === 'following'
+            ? content.slice(lineStart[i] + m.index, lineStart[i] + m.index + 8000)
+            : r.contextual === 'around'
+              ? content.slice(Math.max(0, lineStart[i] + m.index - 800), lineStart[i] + m.index + 800)
+              : undefined;
       if (!(r.ignore && r.ignore(m, line, context))) {
         const severity: Severity = credsBelongHere && r.demoDowngrade ? 'low' : r.severity;
         findings.push({ file, line: i + 1, severity, rule: r.rule, message: r.message });

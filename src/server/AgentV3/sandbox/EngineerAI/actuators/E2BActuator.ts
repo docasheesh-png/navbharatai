@@ -4,7 +4,7 @@ import { shouldRunAuditFix, AUDIT_FIX_COMMAND, AUDIT_FIX_TIMEOUT_MS } from '../.
 import { commandFailureResult, commandLogTail } from '../../../../lib/sandboxCommandError';
 import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
-import { starterFilesToComplete, MAX_FRAGMENT_FILES } from '../../../starterFragment';
+import { starterFilesToComplete, MAX_FRAGMENT_FILES, isOurStarterFile, starterTemplates } from '../../../starterFragment';
 import { applyStrictTrial } from '../../../strictTrial';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
@@ -47,6 +47,9 @@ const USER_ACTIVITY_WRITE_MS = 60_000;
 // who had already closed the tab.
 const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
+/** How many source files the workspace holds, outside dependencies and VCS — a starter has a handful. */
+const REAL_PROJECT_PROBE = "find . -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' \\) -not -path './node_modules/*' -not -path './.git/*' 2>/dev/null | head -200 | wc -l";
+
 /**
  * Bounds on putting a dead workspace's app back into a fresh machine (`_restoreFreshSandbox`).
  *
@@ -82,7 +85,7 @@ import { browseConsoleCaptureEnabled, CANCELLED_REQUEST_RE } from '../../../rend
 import { gunzipSync } from 'zlib';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../../../../lib/generatedDirs';
 import type { ActuatorCommandTiming } from '../../../commandTiming';
-import { NPM_INSTALL_LOCK, PRIME_NODE_MODULES, WARM_NODE_MODULES } from '../../../tscCommand';
+import { NPM_INSTALL_LOCK, NPM_INSTALL_LOCK_FRESH, INSTALL_WAIT_SECONDS, PRIME_NODE_MODULES, WARM_NODE_MODULES } from '../../../tscCommand';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -820,11 +823,22 @@ export class E2BActuator implements IEngineerActuator {
         .run(EMPTY_MANIFEST_EVIDENCE_COMMAND, { cwd: WORKSPACE_ROOT, timeoutMs: 10_000 })
         .then((r) => `${r.stdout}${r.stderr}`)
         .catch(() => '');
-      let restore = pickManifestRestore(this._fileCache.get(workspaceId)?.get('package.json'));
+      // 🔒 NEVER OUR STARTER OVER SOMEONE'S PROJECT (autopsy d0b2fcd6, Q-740). Both copies can be stale —
+      // the cache missed a bulk landing, the durable index missed a timed-out save — and both then held our
+      // starter's manifest, which was written over an imported app. In a workspace holding a real project
+      // (more files than any starter has), the starter manifest is not a candidate: an empty file fails
+      // loudly; a wrong app's manifest fails silently, which is worse.
+      const realProject = await sandbox.commands
+        .run(REAL_PROJECT_PROBE, { cwd: WORKSPACE_ROOT, timeoutMs: 10_000 })
+        .then((r) => Number((r.stdout || '').trim()) > MAX_FRAGMENT_FILES)
+        .catch(() => false);
+      const usable = (c: string | null | undefined): string | null | undefined =>
+        realProject && typeof c === 'string' && isOurStarterFile('package.json', c, starterTemplates()) ? null : c;
+      let restore = pickManifestRestore(usable(this._fileCache.get(workspaceId)?.get('package.json')));
       if (!restore) {
         const saved = await withTimeout(loadWorkspaceFiles(workspaceId), DURABLE_RESTORE_LOAD_MS, 'loadWorkspaceFiles(manifest)')
           .catch(() => null);
-        restore = pickManifestRestore(saved?.['package.json']);
+        restore = pickManifestRestore(usable(saved?.['package.json']));
       }
       if (restore) await sandbox.files.write(`${WORKSPACE_ROOT}/package.json`, restore);
       const note = emptyManifestNote(Boolean(restore), evidence);
@@ -835,7 +849,32 @@ export class E2BActuator implements IEngineerActuator {
     }
   }
 
+  /**
+   * The install running in each sandbox, so a second one WAITS for it instead of starting beside it.
+   *
+   * 🔴 THE LOCK THAT WAS NOT ONE (autopsy d0b2fcd6, Q-739). `_npmInstallLocked` only TOUCHED the marker —
+   * it never waited for someone else's. The marker held off the typecheck, but two of our own installs (the
+   * import's migration step and the dev-server health check, both through `_npmInstall`) still ran into one
+   * `node_modules` at once: `ENOTEMPTY: directory not empty, rename …/node_modules/@babel/…` twice, and the
+   * database migration was skipped. Now: one install per sandbox in this process, and a bounded wait on a
+   * fresh marker another process holds.
+   */
+  private _installsInFlight = new WeakMap<object, Promise<unknown>>();
+
   private async _npmInstallLocked(sandbox: Sandbox): Promise<{ success: boolean; log: string }> {
+    const before = this._installsInFlight.get(sandbox) ?? Promise.resolve();
+    const mine = before.catch(() => undefined).then(() => this._npmInstallExclusive(sandbox));
+    this._installsInFlight.set(sandbox, mine.catch(() => undefined));
+    return mine;
+  }
+
+  private async _npmInstallExclusive(sandbox: Sandbox): Promise<{ success: boolean; log: string }> {
+    // Another PROCESS (a second server instance on the same machine) may hold the marker: wait for it, bounded
+    // — the same wait the typecheck uses, so a marker left by a crash costs seconds, not the install.
+    await sandbox.commands
+      .run(`_nbw=0; while ${NPM_INSTALL_LOCK_FRESH} && [ $_nbw -lt ${INSTALL_WAIT_SECONDS} ]; do sleep 1; _nbw=$((_nbw+1)); done`,
+        { timeoutMs: (INSTALL_WAIT_SECONDS + 5) * 1000 })
+      .catch(() => {});
     // 🔒 THE INSTALL SAYS IT IS RUNNING (autopsy 120eb52f). A typecheck that found the tree "stale" used to
     // start its own `npm install` into the same node_modules as this one, and `typescript` came out torn.
     // `TSC_ENSURE` waits while this marker is fresh. Best-effort both ways: a marker we could not write
@@ -1663,6 +1702,11 @@ export class E2BActuator implements IEngineerActuator {
       // a workspace that genuinely has no files, and the build report carries the same line.
       console.error(`[E2BActuator] fresh-sandbox restore FAILED for ${workspaceId}: ${summarizeRestore(outcome)}`);
     }
+  }
+
+  /** A bulk landing wrote these — the cache must describe the project that is really there (Q-740). */
+  noteFilesLanded(workspaceId: string, files: Record<string, string>): void {
+    for (const [rel, content] of Object.entries(files)) this._cacheFileWrite(workspaceId, rel.replace(/^\.?\/+/, ''), content);
   }
 
   /** Record a source-file write in the bounded per-workspace cache (for recreate-after-death restore). */

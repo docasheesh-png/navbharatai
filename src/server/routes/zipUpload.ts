@@ -321,7 +321,8 @@ export function registerZipUploadRoutes(app: Express): void {
       try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
       const { written, skipped } = await writeWorkspaceFiles(actuator, workspaceId, files);
       // Durable persist — without this the import lives only in an ephemeral sandbox and vanishes.
-      try { await mergeWorkspaceFiles(workspaceId, files); } catch { /* best-effort, mirrors import-files */ }
+      // Durable outcome travels in the response (Q-735) — a save that did not happen is not reported as one.
+      const durable = await mergeWorkspaceFiles(workspaceId, files).catch(() => null);
       // HONEST OUTCOME (admin 2026-08-04). The extractor already counts every refusal in eight labelled
       // categories, and this response used to discard all of it — so a media-heavy 1 GB project reported
       // a green "Imported 400 files" while 3,600 were silently gone. The counts and the archive's real
@@ -330,6 +331,7 @@ export function registerZipUploadRoutes(app: Express): void {
       // user does not have).
       const dropped = { ...extracted.dropped, overCap: (extracted.dropped?.overCap ?? 0) + skipped.length };
       res.json({
+        ...(durable ? { durable: { status: durable.status, saved: durable.indexed, unconfirmed: durable.unconfirmed.length } } : {}),
         ok: true,
         fileName: shared?.fileName ?? u?.fileName ?? 'project.zip',
         fileCount,

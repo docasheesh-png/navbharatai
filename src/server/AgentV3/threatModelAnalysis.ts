@@ -8,6 +8,8 @@
 // fires only on an unambiguous, exploitable pattern, never a vague heuristic. PURE + dependency-free
 // (regex over source text), never throws. ADVISORY only in `evaluate` — never blocks a build.
 
+import { PEM_PRIVATE_KEY_MARKER, pemKeyAtLine } from '../lib/pemKeyMaterial';
+import { isFirebaseWebConfigKey, firebaseConfigAroundLine } from '../lib/firebaseWebConfig';
 export type ThreatKind =
   | 'client-secret' | 'cors-wildcard-credentials' | 'sql-injection' | 'xss-dangerous-html' | 'eval-injection';
 
@@ -35,7 +37,8 @@ const SECRET_PATTERNS: Array<{ re: RegExp; what: string }> = [
   { re: /\bghp_[0-9A-Za-z]{36}\b/, what: 'a GitHub personal access token' },
   { re: /\bxox[baprs]-[0-9A-Za-z-]{10,}/, what: 'a Slack token' },
   { re: /\bSG\.[0-9A-Za-z_\-]{16,}\.[0-9A-Za-z_\-]{16,}/, what: 'a SendGrid API key' },
-  { re: /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/, what: 'a private key' },
+  // Marker as a pre-filter only; the loop confirms the key body (pemKeyMaterial.ts, Q-737).
+  { re: PEM_PRIVATE_KEY_MARKER, what: 'a private key' },
 ];
 
 /** True for a placeholder/example value that is NOT a real leak (your_key_here, xxxx, env refs). */
@@ -65,7 +68,9 @@ export function analyzeThreatModel(sources: Array<{ path: string; content: strin
       // (1) Secret hardcoded in CLIENT code — it ships to the browser and is trivially extractable.
       if (isClient && !looksPlaceholder(line)) {
         for (const s of SECRET_PATTERNS) {
-          if (s.re.test(line)) {
+          if (s.re.test(line) && (s.re !== PEM_PRIVATE_KEY_MARKER || pemKeyAtLine(lines, i))
+            // A Firebase WEB config key belongs in client code — public by design (Q-742).
+            && !(/\bAIza/.test(line) && isFirebaseWebConfigKey(firebaseConfigAroundLine(lines, i)))) {
             out.push({ kind: 'client-secret', severity: 'high', file: path, line: n,
               message: `${s.what} is hardcoded in client-side code — it ships to every visitor's browser. Move it server-side and reference it via an API.` });
             break;

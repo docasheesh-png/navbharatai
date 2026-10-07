@@ -286,55 +286,133 @@ export async function resetWorkspaceFilesForApprovedRebuild(workspaceId: string,
   }
 }
 
+/** What a merge achieved — the import reports it honestly instead of assuming (Q-735). */
+export interface MergeResult {
+  /** saved: every file indexed · partial: some · failed: none · no-store: no database here · nothing: empty input */
+  status: 'saved' | 'partial' | 'failed' | 'no-store' | 'nothing';
+  /** Paths now in the durable index from this merge. */
+  indexed: number;
+  /** Paths whose write could not be confirmed — not indexed, so a restore never points at a missing doc. */
+  unconfirmed: string[];
+  error?: string;
+}
+
+/** The four operations a merge needs — Firestore in production, a fake in tests. */
+export interface MergeStore {
+  commit(docs: ReadonlyArray<readonly [string, string]>): Promise<void>;
+  /** The stored content of each path (undefined when absent or unreadable). */
+  read(paths: readonly string[]): Promise<Map<string, string | undefined>>;
+  readIndex(): Promise<string[]>;
+  writeIndex(paths: string[]): Promise<void>;
+}
+
+/** Bytes per Firestore batch — well under the 10 MiB request limit, so one commit cannot outrun its deadline. */
+export const MERGE_BATCH_BYTES = 4 * 1024 * 1024;
+
+/** Split entries into batches bounded by count AND bytes. PURE. */
+export function mergeBatches(entries: ReadonlyArray<readonly [string, string]>, maxDocs = BATCH, maxBytes = MERGE_BATCH_BYTES): Array<Array<readonly [string, string]>> {
+  const out: Array<Array<readonly [string, string]>> = [];
+  let cur: Array<readonly [string, string]> = [];
+  let bytes = 0;
+  for (const e of entries) {
+    const b = Buffer.byteLength(e[1], 'utf8') + Buffer.byteLength(e[0], 'utf8');
+    if (cur.length > 0 && (cur.length >= maxDocs || bytes + b > maxBytes)) { out.push(cur); cur = []; bytes = 0; }
+    cur.push(e);
+    bytes += b;
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+
+/**
+ * The merge itself, over an injected store.
+ *
+ * 🔴 THE IMPORT THAT WAS NEVER SAVED (autopsy d0b2fcd6, Q-735). 175 imported files were committed in one
+ * batch; the commit took the client's full 60 s deadline and threw. The content docs had been written (the
+ * next read of the subcollection took 6.6 s), but the throw skipped the index union, so the durable copy
+ * still listed only our 11-file starter: the turn treated the user's app as the starter, a recycle would have
+ * lost it, and a Publish would have shipped the starter. Nobody was told — the failure was swallowed twice.
+ *
+ * Now: batches are bounded by bytes; a batch that throws is CHECKED, not assumed — each of its paths is read
+ * back and indexed only if the stored content is exactly what we wrote; and the caller is told what was saved.
+ */
+export async function mergeIntoStore(store: MergeStore, entries: ReadonlyArray<readonly [string, string]>, concurrency = MERGE_COMMIT_CONCURRENCY): Promise<MergeResult> {
+  if (entries.length === 0) return { status: 'nothing', indexed: 0, unconfirmed: [] };
+  const batches = mergeBatches(entries);
+  const confirmed: string[] = [];
+  const failed: Array<Array<readonly [string, string]>> = [];
+  let lastError = '';
+  for (let i = 0; i < batches.length; i += concurrency) {
+    const slice = batches.slice(i, i + concurrency);
+    const results = await Promise.allSettled(slice.map((b) => store.commit(b)));
+    results.forEach((r, k) => {
+      if (r.status === 'fulfilled') confirmed.push(...slice[k].map(([p]) => p));
+      else { failed.push(slice[k]); lastError = String((r.reason as Error)?.message ?? r.reason).slice(0, 200); }
+    });
+  }
+  const unconfirmed: string[] = [];
+  for (const b of failed) {
+    const stored = await store.read(b.map(([p]) => p)).catch(() => new Map<string, string | undefined>());
+    for (const [p, c] of b) (stored.get(p) === c ? confirmed : unconfirmed).push(p);
+  }
+  if (confirmed.length === 0) return { status: 'failed', indexed: 0, unconfirmed, error: lastError };
+  try {
+    const existing = liveIndexPaths(await store.readIndex());
+    await store.writeIndex(Array.from(new Set([...existing, ...confirmed])));
+  } catch (e) {
+    return { status: 'failed', indexed: 0, unconfirmed: entries.map(([p]) => p), error: String((e as Error)?.message ?? e).slice(0, 200) };
+  }
+  return { status: unconfirmed.length === 0 ? 'saved' : 'partial', indexed: confirmed.length, unconfirmed, ...(lastError ? { error: lastError } : {}) };
+}
+
 /**
  * MERGE a PARTIAL set of files into the durable workspace (upsert only the given files, UNION their
  * paths into the authoritative list). Unlike `saveWorkspaceFiles` (which REPLACES the path list and
  * would drop every unchanged file when given a partial set), this never forgets existing files — so
- * a single IDE edit can be persisted durably without wiping the rest of the project. This is what
- * makes a manual IDE edit survive sandbox recycling (the File Guardian then sees the fresh content,
- * not a stale durable copy). Best-effort — never throws.
+ * a single IDE edit can be persisted durably without wiping the rest of the project. Never throws; the
+ * result says what was saved (see mergeIntoStore).
  */
-export async function mergeWorkspaceFiles(workspaceId: string, partial: Record<string, string>): Promise<void> {
+export async function mergeWorkspaceFiles(workspaceId: string, partial: Record<string, string>): Promise<MergeResult> {
   const db = getDb();
-  if (!db) return;
+  if (!db) return { status: 'no-store', indexed: 0, unconfirmed: [] };
   // PHANTOM-FILE GUARD — same rule as saveWorkspaceFiles. This is the path a zip/GitHub import and
   // every single IDE edit take, so it is the likeliest door for an absolute path to walk through.
   const entries = Object.entries(normalizeFileMapKeys(partial || {}).files)
     .filter(([, c]) => typeof c === 'string' && Buffer.byteLength(c, 'utf8') <= MAX_FILE_BYTES);
-  if (entries.length === 0) return;
-  try {
-    const root = db.collection(COLLECTION).doc(workspaceId);
-    const filesCol = root.collection('files');
-    // 1) Upsert ONLY the changed/added content docs.
-    //
-    // The commits run CONCURRENTLY (bounded). They used to be awaited one after another, so a large
-    // import paid every batch's round trip end-to-end — the same "serial awaits over a network" class
-    // that once made the sandbox landing take 648 seconds (see WorkspaceFiles.ts). Batches are
-    // independent upserts of DISTINCT docs, so ordering between them carries no meaning and running
-    // them together is safe by construction. Bounded so a huge import can't open unlimited sockets.
-    const commits: Array<Promise<unknown>> = [];
-    for (let i = 0; i < entries.length; i += BATCH) {
+  if (entries.length === 0) return { status: 'nothing', indexed: 0, unconfirmed: [] };
+  const root = db.collection(COLLECTION).doc(workspaceId);
+  const filesCol = root.collection('files');
+  const store: MergeStore = {
+    commit: async (docs) => {
       const batch = db.batch();
-      for (const [path, content] of entries.slice(i, i + BATCH)) {
-        batch.set(filesCol.doc(fileDocId(path)), { path, content });
+      for (const [path, content] of docs) batch.set(filesCol.doc(fileDocId(path)), { path, content });
+      await batch.commit();
+    },
+    read: async (paths) => {
+      const out = new Map<string, string | undefined>();
+      for (let i = 0; i < paths.length; i += 100) {
+        const chunk = paths.slice(i, i + 100);
+        const snaps = await db.getAll(...chunk.map((p) => filesCol.doc(fileDocId(p))));
+        snaps.forEach((snap, k) => out.set(chunk[k], snap.exists && typeof snap.data()?.content === 'string' ? snap.data()!.content : undefined));
       }
-      commits.push(batch.commit());
-      if (commits.length >= MERGE_COMMIT_CONCURRENCY) {
-        await Promise.all(commits.splice(0, commits.length));
-      }
-    }
-    if (commits.length) await Promise.all(commits);
-    // 2) UNION the authoritative path list (never drop unchanged files).
-    const meta = await root.get();
-    const existing: string[] = liveIndexPaths(meta.exists ? meta.data()?.paths : undefined);
-    const union = Array.from(new Set([...existing, ...entries.map(([p]) => p)]));
-    const safe = capPathsToDocLimit(union);
-    if (safe.capped > 0) notePersistenceFailure('workspace_files', 'write', new Error(`durable path index capped: ${safe.capped} of ${union.length} paths exceeded the 1MB metadata-doc limit (files remain in the sandbox / git)`));
-    await root.set({ paths: safe.paths, count: safe.paths.length, savedAt: Date.now() }, { merge: true });
-  } catch (e) {
-    // Best-effort — a merge failure never blocks anything — but surface it (see saveWorkspaceFiles).
-    notePersistenceFailure('workspace_files', 'write', e);
+      return out;
+    },
+    readIndex: async () => {
+      const meta = await root.get();
+      return meta.exists ? (meta.data()?.paths ?? []) : [];
+    },
+    writeIndex: async (paths) => {
+      const safe = capPathsToDocLimit(paths);
+      if (safe.capped > 0) notePersistenceFailure('workspace_files', 'write', new Error(`durable path index capped: ${safe.capped} of ${paths.length} paths exceeded the 1MB metadata-doc limit (files remain in the sandbox / git)`));
+      await root.set({ paths: safe.paths, count: safe.paths.length, savedAt: Date.now() }, { merge: true });
+    },
+  };
+  const result = await mergeIntoStore(store, entries);
+  if (result.status === 'failed' || result.status === 'partial') {
+    // Surface it (see saveWorkspaceFiles) — and the caller now gets the same truth back.
+    notePersistenceFailure('workspace_files', 'write', new Error(`merge ${result.status}: ${result.unconfirmed.length} of ${entries.length} unconfirmed${result.error ? ` — ${result.error}` : ''}`));
   }
+  return result;
 }
 
 /**

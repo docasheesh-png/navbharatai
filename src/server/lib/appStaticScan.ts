@@ -11,6 +11,8 @@
 //
 // Pure + fully unit-testable. No I/O, no LLM, no provider names — safe on any file map.
 
+import { PEM_PRIVATE_KEY_MARKER, pemKeyAtLine } from './pemKeyMaterial';
+import { isFirebaseWebConfigKey, firebaseConfigAroundLine } from './firebaseWebConfig';
 export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low';
 
 export interface StaticFinding {
@@ -50,7 +52,8 @@ const SECRET_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /\bghp_[A-Za-z0-9]{30,}\b/, label: 'GitHub personal access token' },
   { re: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/, label: 'GitHub fine-grained token' },
   { re: /\bxox[baprs]-[0-9A-Za-z-]{10,}\b/, label: 'Slack token' },
-  { re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/, label: 'private key' },
+  // Marker as a pre-filter only; the loop confirms the key body (pemKeyMaterial.ts, Q-737).
+  { re: PEM_PRIVATE_KEY_MARKER, label: 'private key' },
 ];
 
 /** Generic `password/secret/apiKey = "literal"` — only when the literal looks real, not a placeholder. */
@@ -92,7 +95,9 @@ export function scanFileStatic(path: string, content: string): StaticFinding[] {
     // 1) Possible hardcoded secret — highest signal, scan every file type.
     let secretLabel = '';
     for (const { re, label } of SECRET_PATTERNS) {
-      if (re.test(raw)) { secretLabel = label; break; }
+      if (re.test(raw) && (re !== PEM_PRIVATE_KEY_MARKER || pemKeyAtLine(lines, i))
+        // A Firebase WEB config key ships in every Firebase web app — public by design (Q-742).
+        && !(/\bAIza/.test(raw) && isFirebaseWebConfigKey(firebaseConfigAroundLine(lines, i)))) { secretLabel = label; break; }
     }
     if (!secretLabel) {
       const m = GENERIC_SECRET_RE.exec(raw);

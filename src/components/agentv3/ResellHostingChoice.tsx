@@ -68,8 +68,8 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
       setNote(data?.message || data?.error || 'That did not finish. If you were charged, it will show in your wallet.');
       if (res.ok) {
         const again = await authedFetch(`/api/agentv3/resell/options?workspaceId=${encodeURIComponent(workspaceId)}`);
-        const next = await again.json().catch(() => null);
-        if (next?.server && next?.database) setOptions(next as ResellOptions);
+        const data = await again.json().catch(() => null);
+        if (data && 'server' in data && 'database' in data) setOptions(data as ResellOptions);
       }
     } catch (err) {
       setNote(fetchFailureLine(err, {
@@ -97,8 +97,8 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
       setNote(data?.error || (res.ok ? 'Stopped. Unused days were returned to your wallet.' : 'It was not stopped. Nothing was refunded.'));
       if (res.ok) {
         const again = await authedFetch(`/api/agentv3/resell/options?workspaceId=${encodeURIComponent(workspaceId)}`);
-        const next = await again.json().catch(() => null);
-        if (next?.server && next?.database) setOptions(next as ResellOptions);
+        const data = await again.json().catch(() => null);
+        if (data && 'server' in data && 'database' in data) setOptions(data as ResellOptions);
       }
     } catch (err) {
       setNote(fetchFailureLine(err, {

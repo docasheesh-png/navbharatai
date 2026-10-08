@@ -129,7 +129,7 @@ export function HostingAddonCard({ userId, onWalletChanged, onToast }: {
                   type="button"
                   disabled={!agreed || busy !== ''}
                   onClick={() => void add(addon)}
-                  className="rounded-lg bg-indigo-600 text-white text-[12px] font-bold px-3 py-2 disabled:opacity-40"
+                  className="rounded-lg bg-indigo-600 text-on-accent text-[12px] font-bold px-3 py-2 disabled:opacity-40"
                 >
                   {busy === addon.id ? 'Adding…' : `Pay ₹${addon.priceInr}`}
                 </button>
@@ -144,7 +144,7 @@ export function HostingAddonCard({ userId, onWalletChanged, onToast }: {
                       type="button"
                       disabled={busy !== ''}
                       onClick={() => void remove(row)}
-                      className="inline-flex items-center gap-1 text-red-400 font-bold disabled:opacity-40"
+                      className="inline-flex items-center gap-1 text-danger font-bold disabled:opacity-40"
                     >
                       <X className="w-3.5 h-3.5" /> {busy === row.ref ? 'Removing…' : 'Remove'}
                     </button>

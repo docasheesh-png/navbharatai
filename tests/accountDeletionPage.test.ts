@@ -92,6 +92,16 @@ describe('the page and the deletion code do not drift apart', () => {
       // Added 2026-10-06 (Q-700): the Supabase grant was in no erase path at all.
       supabase_connections: /connection to Supabase/i,
       supabase_pause_notices: /sleeping-database reminders/i,
+      /**
+       * Added 2026-10-08 (Q-760) — the four stores that held a WORKING CREDENTIAL and were in no erase
+       * path at all. The page's existing "API keys and credentials you stored in the secrets vault"
+       * line already covered the vault; the other three were described to nobody, which is why this
+       * test failed the moment the registry grew. That is the direction it is meant to fail in.
+       */
+      user_secrets: /API keys and credentials\*\* you stored in the secrets vault/i,
+      api_keys: /NavBharatAI API keys/i,
+      bots: /chat bots/i,
+      webhooks: /addresses NavBharatAI posted your build events to/i,
     };
     for (const { collection } of USER_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

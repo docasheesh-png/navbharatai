@@ -91936,3 +91936,99 @@ nothing is lost by removing the rows — only the false claim. Their IDs are app
 - **Q-704**'s residuals were already split out when it was written: **Q-705** (🟡 BLOCKED, the admin's
   Cloud IAM steps) and **Q-706** (OPEN, the two isolation gaps the identity fix does not close). Both
   stay in the queue; closing Q-704 does not touch them.
+
+---
+
+## 2026-10-08 — Q-760: a credential outlived the account it belonged to (four stores)
+
+**Found while widening the collection census for Q-701** — not reported by anyone. Q-701's whole premise
+is that `tests/everyCollectionIsClassified.test.ts` sees only EXPORTED `*_COLLECTION` constants, so ~57
+private constants and ~53 inline `collection('x')` literals are invisible to the one guard that is
+supposed to make an unclassified store fail CI. Scanning for them to do that work turned up four
+collections that hold a **working credential** and are in no erase path at all.
+
+**What `DELETE /api/profile` actually did.** It calls `deleteUserData` (registry-driven),
+`deleteUserWorkspaceData` (the workspace-id prefix range) and `deleteAuthAccount`. The Firebase Auth
+record goes, so the person can never sign in again — which is what makes this hard to notice. Access
+through a credential does not need a sign-in:
+
+| Store | What it holds | Why it still worked |
+|---|---|---|
+| `user_secrets` | the person's own API keys and database passwords, encrypted | nothing deleted them; rows are only ever SOFT-deleted elsewhere ("the vault has never destroyed a user's stored key", `supabaseProvisionFlow.ts`), so a retired row keeps its ciphertext too |
+| `api_keys` | a live NavBharatAI API key | `findByHash` (`ApiKeyStore.ts:112`) resolves ANY non-revoked key to its owner and never asks whether the owner exists. The free daily images on that path (`apiKeyImage.ts`) are drawn at NavBharatAI's cost |
+| `bots` | a chat bot's `token` AND `appSecret` | credentials for a third-party messaging platform, untouched |
+| `webhooks` | the outbound URLs we POST the person's build events to | doc id IS the uid, and the uid was never erased here |
+
+**The class, and it had already been caught once.** `supabase_connections` is the same shape, found on
+2026-10-06: *"a deleted account left behind encrypted tokens that could still act inside the person's own
+Supabase account"*, and its own registry comment says the census could not see it **because the collection
+name was a private constant**. The instance was fixed; the siblings were never hunted. That is precisely
+what the fifth rule's 2026-09-30 section forbids, and it is the second time this exact mechanism (a private
+constant hiding a store from the census) has produced a live defect.
+
+**The honesty half (fifth rule, step 5).** The Delete-account screen and `AppKnowledgeBase`'s
+`settings_delete_account` entry both already told the user that "saved API keys and sessions" are deleted,
+and Privacy Policy §9 promises erasure within 30 days with four stated exceptions — none of which is a
+credential. So the app was making a false statement to the user. **No knowledge-base edit was needed: the
+code now matches what the entry already claims.** That is the right direction for this fix; editing the
+claim to match the code would have been the wrong one.
+
+**The fix.** Four entries in `USER_SCOPED_COLLECTIONS`, each key strategy read from the real read/write
+path rather than guessed (the module's own SAFETY note: a wrong strategy either misses data or deletes the
+wrong person's):
+- `user_secrets` → `{ field: 'user_id' }` — written at `routes/secrets.ts:128` and
+  `supabaseProvisionFlow.ts:105`, read at `secrets.ts:227` and four places in `routes/secrets.ts`. A
+  `user_id` query takes the soft-deleted rows too, which is the point.
+- `api_keys` → `{ field: 'userId' }` (`ApiKeyStore.ts:77`). Deleting the row IS the fix for the auth hole:
+  `findByHash` then finds nothing, so no extra owner-existence check was added.
+- `bots` → `{ field: 'ownerUid' }` (`BotStore.ts:178`).
+- `webhooks` → `'docId'` (`WebhookManager.ts:63` read, `:90`/`:106` writes).
+
+**The test, and why it reads SOURCE.** `tests/aCredentialDiesWithTheAccount.test.ts` (5 tests). A registry
+entry agreeing with itself proves nothing — the entry has to agree with the code that writes the rows, or
+a renamed field leaves an erase that reports a confident `deleted: 0`. So one test greps each store's own
+file for the query it registers. Reversion-proven twice: the four entries removed → **3 fail**;
+`ownerUid` renamed to `owner_uid` in `BotStore.ts`'s real query → **1 fail** (the drift guard, exactly the
+case it exists for).
+
+**Left open, recorded not dropped.** `bot_sessions` (`Q-761`) is keyed `${botId}_${chatId}`, so neither
+key strategy reaches it. It holds no credential; it needs a cascade keyed by the bot rather than the user,
+which is a different shape from every other registry entry and is its own decision.
+
+**Still the bigger item: Q-701.** This PR fixes the four worst instances. The CLASS — a hand-maintained
+registry guarded by a census that cannot see most of the code — is only killed when the census is widened.
+The scan so far finds **~95 collection names in no registry at all**, and about thirty of them are
+user-keyed: `conversation_memory_v1`, `professional_user_memory`, `sonic_voice_memory`,
+`agentv3_conversations` (+ its `turns`/`timeline` subcollections), `userPrefs`, `user_brain_v3`,
+`user_mistakes_v3`, `user_diagnostics_v3`, `user_notification_reads`, `terminal_daily_usage`,
+`tool_daily_usage`, `professional_passes`, `promptAudits`, `gallery_apps`, `nav_store_apps`,
+`nav_store_web_apps`, `wallet_balance_alerts`, `agentv3_onboarding_credits`, `ai_usage_logs`,
+`zip_uploads` and more — plus roughly fourteen workspace-keyed stores that `WORKSPACE_SCOPED_COLLECTIONS`
+does not list (`agentv3_deployments`, `agentv3_sandboxes`, `buildTraces`, `build_queues_v3`,
+`incrementalCache`, `mega_roadmaps_v3`, `workspace_traceability`, `agentv3_provider_state`,
+`agentv3_attachment_memory`, `agentv3_build_outcome`, `app_ai_apps`, …). Each needs its key strategy read
+from its own store before it is registered — nothing goes in on a guess — and the widened census should
+also enforce the obligation per KIND (a `workspace` collection must be in the workspace eraser), which is
+the part that makes the drift impossible rather than merely corrected once.
+
+Also recorded while scanning: the widened scan must **strip comments** — `'coll'` in `serverDb.ts`'s doc
+comment is a false positive — and must not treat a subcollection segment (`files`, `items`, `turns`,
+`entries`, `members`) as a top-level collection; those are Q-682's territory.
+
+**⚠️ CORRECTION, found by the repo's own guard before this PR left the machine.** The paragraph above
+says "No knowledge-base edit was needed". That is true of `AppKnowledgeBase.ts` and FALSE of the public
+deletion page: `tests/accountDeletionPage.test.ts` failed the full gate with *"deletion page must describe
+the user_secrets data it erases"*. It holds `USER_SCOPED_COLLECTIONS` against
+`src/content/legal/accountDeletion.ts` and requires a plain-words description of every collection the
+eraser touches — so growing the registry without growing the page is a CI failure by design. Google Play
+requires that page to say what is deleted; a registry that erases four more things than the page admits
+to would have understated it.
+
+The page now names all four (the vault line already covered `user_secrets`; the NavBharatAI API keys, the
+chat bots with their token and app secret, and the webhook addresses were described to nobody), and the
+guard's map carries each with the reason. Reversion-proven: the webhook bullet removed → that test fails.
+
+**The lesson is about the gate, not the page.** This is the second time in two days that running the FULL
+suite at the END, on the final state, caught something a targeted run could not: the tests I chose to run
+(retention, census, queue, the new credential test — 60 passing) all passed, and the one that mattered was
+in a file I had no reason to think about. Safeguard #5's "at the end, on the final state" is not ceremony.

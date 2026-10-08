@@ -107,6 +107,13 @@ describe('NavBharatAI\'s own release workflow', () => {
     expect(steps[at('permissions')].run).toContain('scripts/checkBundlePermissions.ts android/app/build/outputs/bundle/release/app-release.aab');
   });
 
+  it('uploads with `tracks:` — never the deprecated `track:`, and never both (the action refuses both)', () => {
+    const upload = (yaml.load(wf) as { jobs: Record<string, { steps: Array<{ id?: string; with?: Record<string, unknown> }> }> })
+      .jobs[Object.keys((yaml.load(wf) as { jobs: object }).jobs)[0]].steps.find((s) => s.id === 'play_upload')!.with!;
+    expect(upload.tracks).toBe('internal');
+    expect(upload).not.toHaveProperty('track');
+  });
+
   it('🔒 the summary never calls a permission-stopped upload "not ticked"', () => {
     const summary = steps.find((s) => s.name === 'Summary')!.run!;
     const guard = summary.indexOf('steps.permissions.outcome');

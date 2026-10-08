@@ -69,6 +69,18 @@ RUN npm prune --omit=dev
 # ---------- Stage 2: runtime ----------
 FROM node:22-slim AS runtime
 
+# OS SECURITY UPDATES ARE INSTALLED AT BUILD TIME (2026-10-08, Q-750).
+# The nightly image scan went red on 2026-10-05 and stayed red: `node:22-slim` (Debian 12) still shipped
+# perl-base 5.36.0-7+deb12u3 with three CRITICAL CVEs (CVE-2026-13221, CVE-2026-42496, CVE-2026-8376) that
+# Debian had already fixed in deb12u4. The image carried whatever the base tag carried, so a CVE Debian had
+# patched stayed in production until Docker Hub republished the tag. This upgrades the OS packages to
+# Debian's current security fixes on every build. Node itself is not an apt package here (it lives in
+# /usr/local), so this never changes the Node version. Runs as root, before `USER node` below.
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 ENV NODE_ENV=production

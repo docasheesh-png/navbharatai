@@ -91812,3 +91812,22 @@ Q-735, Q-736, Q-737, Q-738, Q-739, Q-740, Q-742, Q-743 and Q-744 were removed fr
 ## 2026-10-08: Q-749 closed (#3587 merged)
 
 The row was removed from the open queue and its ID appended to the closed register. **Live proof to watch:** the next `.aab` run shows a "Bundle permissions" notice annotation listing every permission, with none on Play's restricted list. Q-698 stays 🟡 BLOCKED on the admin's Play Console step.
+
+## 2026-10-08 — .aab #151: proof that the bundle has no READ_MEDIA_*; image scan red for 4 nights (Q-750); deprecated `track` (Q-751)
+
+**#151** (the admin: "aap 151 banao") was built from `main` at `23ece92a1` and uploaded to Play's internal track. It was the first run with the Q-749 check.
+- The bundle's real permissions: ACCESS_COARSE/FINE_LOCATION, ACCESS_NETWORK_STATE, BIND_JOB_SERVICE, CAMERA, DUMP, INTERNET, MODIFY_AUDIO_SETTINGS, POST_NOTIFICATIONS, READ/WRITE_EXTERNAL_STORAGE, RECORD_AUDIO, VIBRATE, WAKE_LOCK. None is restricted, and there is **no READ_MEDIA_***.
+- Bundle 150 came from the same manifest. So Play's "photo and video pickers" block is not about our current bundles. The next step on Q-698 is the admin's ("Update affected bundles", or Proceed anyway with this list).
+
+**Q-750:** `main`'s nightly Trivy image scan had been red since 2026-10-05.
+- Reproduced with Trivy 0.73.0 on `node:22-slim`: three CRITICAL CVEs in perl-base deb12u3 (CVE-2026-13221, CVE-2026-42496, CVE-2026-8376), all fixed in deb12u4.
+- **Class 1:** a shipped image that does not take the OS's own security fixes. The runtime stage now runs `apt-get update && apt-get upgrade` as root, before `USER node`. Node lives in /usr/local, so it is unaffected.
+- **Sibling:** the Cloud Run Dockerfile that `backendDeployConfig.ts` generates for users' backends gets the same line.
+- **Class 2:** a security gate whose failure carries no readable reason. The CRITICAL step now writes JSON, and jq turns each finding into an `::error` annotation and a summary line. The session found the CVEs only by downloading Trivy and scanning the base image itself.
+- **Lock:** `tests/anImageCarriesDebiansSecurityFixes.test.ts`. It runs a census of every shipped Dockerfile (the repo's and the generated ones) and runs the workflow's own jq on a real Trivy report. Four reversions, four failures.
+
+**Q-751:** run #151 warned that the pinned Play upload action deprecates `track`. Now `tracks: internal`; the pinned action's code maps both to ["internal"] and refuses both together.
+
+**Watch:**
+- the image-scan run on the PR branch goes green;
+- the next `.aab` run shows no `track` deprecation warning.

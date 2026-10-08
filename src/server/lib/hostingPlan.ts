@@ -38,6 +38,7 @@ import {
   HOSTING_TIERS, LEGACY_HOSTING_PLAN_ID, hostingAgreementTerms, isKnownPlanId, purchasableTier,
   tierForPlanId, tierRank, HOSTING_OVERAGE_INR_PER_GB, type HostingTier, type HostingTierId,
 } from '../../lib/hostingTiers';
+import { activeAddonCount } from '../../lib/hostingAddons';
 
 /**
  * TWO TIERS SINCE 2026-09-10 (admin: "do tier banao, credit bundle karo, 20 GB theek hai").
@@ -142,6 +143,10 @@ export interface HostingPlanStatus {
   renewalPriceInr: number;
   /** ₹ per GB past the included allowance. */
   overageInrPerGb: number;
+  /** Paid extra-website slots that are still inside their period. */
+  extraSites: number;
+  /** Paid extra-domain slots that are still inside their period. */
+  extraDomains: number;
 }
 
 /**
@@ -601,6 +606,8 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
     priceInr: hostingPlanPriceInr(), days: HOSTING_PLAN_DAYS,
     tiers: HOSTING_TIERS, tier: null, renewalPriceInr: hostingPlanPriceInr(),
     overageInrPerGb: HOSTING_OVERAGE_INR_PER_GB,
+    extraSites: 0,
+    extraDomains: 0,
   };
   if (!db || !userId) return base;
   try {
@@ -621,12 +628,15 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
     // one of the two left this function half-injectable: a caller could pass a time, watch the renewal
     // honour it, and still get an `active` computed from today's real date. Caught by its own test.
     const nowMs = nowIso ? Date.parse(nowIso) : undefined;
+    const clock = Number.isFinite(nowMs as number) ? (nowMs as number) : Date.now();
     return {
       ...base,
       active: hostingPlanActive(wallet, Number.isFinite(nowMs as number) ? (nowMs as number) : undefined),
       plan: plan && isKnownPlanId(plan.id) ? plan : null,
       tier: heldTier,
       renewalPriceInr: plan && isKnownPlanId(plan.id) ? planPriceInr(plan.id) : hostingPlanPriceInr(),
+      extraSites: activeAddonCount(wallet, 'extra_site', clock),
+      extraDomains: activeAddonCount(wallet, 'extra_domain', clock),
     };
   } catch {
     return base;

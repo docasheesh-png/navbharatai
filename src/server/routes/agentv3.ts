@@ -316,6 +316,7 @@ import { planDeployment, deployDecision, choosePublishRoute } from '../AgentV3/d
 import { recordHostedDeployment } from '../AgentV3/hostedDeploymentRecord';
 import { firestoreDeployStore } from '../AgentV3/hostedDeployments';
 import { runServerPublish, type ServerPublishDeps } from '../AgentV3/serverPublish';
+import { registerResellHostingRoutes } from './resellHosting';
 import { removeHostedServers } from '../AgentV3/hostedAppLifecycle';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
 import { repoAvailableForDeploy, resolveDeployRepo, ownRepoMemoryPatch, renameStorageRepoPatch } from '../AgentV3/deployRepoMemory';
@@ -332,7 +333,7 @@ import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
 import { summarizeRestore, type SandboxRestoreOutcome } from '../AgentV3/sandboxRestore';
-import { publishedAppCap, publishedAppCapForTier, readHostingTierForQuota } from '../lib/HostingQuota';
+import { publishedAppCap, publishedAppCapForAccount, readHostingAllowance, readHostingTierForQuota } from '../lib/HostingQuota';
 import { hostingPlansEnabled, hostingPlanPriceInr, readHostingPlanStatus } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
 import {
@@ -540,6 +541,7 @@ import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuator
 import { loadUserVaultSecrets, withheldVaultSecretNames, secretsWithheldNote } from '../lib/secrets';
 import { secretRequestPrompt, postBuildKeyAsks, postBuildKeyPrompt } from '../AgentV3/secretRequest';
 import { connectActions } from '../AgentV3/connectActions';
+import { buildNeedsNotice, type ServerPlanOffer } from '../AgentV3/buildNeeds';
 import { saveUserActions } from '../AgentV3/UserActionStore';
 import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
 import { userStorageContext } from '../AgentV3/userStorageContext';
@@ -4110,6 +4112,23 @@ const serverPublishDeps: ServerPublishDeps = {
 };
 
 export function registerAgentV3Routes(app: Express): void {
+  // Extra server / database. Charge happens inside these handlers, only after delivery.
+  // The normal Publish path is unchanged and does not add ₹149 on top of a plan.
+  registerResellHostingRoutes(app, {
+    publishServer: (input) => runServerPublish(input, {
+      ...serverPublishDeps,
+      serverCap: async () => ({ available: true, message: '' }),
+    }),
+    liveServerWorkspaces: liveServerWorkspaceIdsFor,
+    teardownServer: async (workspaceId, service) => {
+      const removed = await removeHostedServers(workspaceId, {
+        providerId: NAVBHARAT_CLOUD_PROVIDER,
+        service: service ?? '',
+      });
+      if (removed.ok) await deploymentStore.setStatus(workspaceId, 'unpublished').catch(() => false);
+      return { ok: removed.ok };
+    },
+  });
   // WHY WAS THIS SANDBOX STARTED? One zone per request, opened before every route below, so a create
   // or resume deep inside any handler can name its cause (sandboxSessionZone.ts). Decides nothing.
   app.use('/api/agentv3', sandboxReasonMiddleware);
@@ -8162,12 +8181,13 @@ async function noteBuildOutcome(
     const tier = await readHostingPlanStatus(getDb() as any, identity.uid)
       .then((st) => st.tier)
       .catch(() => null);
+    const allowance = await readHostingAllowance(identity.uid).catch(() => null);
     res.json({
       apps,
       paused,
       // The cap is stated with the list so "5 of 5 used" is visible before a publish is refused. It
-      // follows the user's PLAN, so a Growth customer is not told they are at the free limit of 5.
-      cap: publishedAppCapForTier(tier),
+      // follows the user's PLAN plus any extra-website add-on they have paid for.
+      cap: publishedAppCapForAccount(tier, allowance?.extraSites ?? 0),
       freeCap: publishedAppCap(),
       planName: tier?.name ?? null,
       used: apps.length,
@@ -25881,7 +25901,8 @@ async function noteBuildOutcome(
           const detected = detectAppRequirements({ files: writtenFiles, prompt });
           const implied = impliedRequirementsFor(fakeFeatures).filter((r) => !detected.some((d) => d.id === r.id));
           const missing = unconfiguredRequirements([...detected, ...implied], vaultSecrets);
-          const notice = appRequirementsNotice(missing, detectLanguageHint(prompt)?.code ?? null);
+          const lang = detectLanguageHint(prompt)?.code ?? null;
+          const notice = appRequirementsNotice(missing, lang);
           if (notice) {
             result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${notice}` };
             buildDiag.record({
@@ -25919,23 +25940,24 @@ async function noteBuildOutcome(
             // extra read is the user's Supabase grant, which decides the WORDING ("one press" vs
             // "connect your own"), never whether the row appears. Best-effort by construction: a
             // failure leaves the tray exactly as it is today.
+            // Facts already in hand: the durable files (not this turn's diff) and the Supabase grant.
+            // A server row is `planDeployment` — the same classifier Publish uses — never the prompt.
+            // The plan probe only decides whether the row may open Billing. Unknown → no purchase link.
             try {
               const supabaseConnected = !!(await getConnection(userId).catch(() => null))?.orgId;
-              // The DURABLE copy, not `writtenFiles`: on an EDIT turn the written set is the diff, and
-              // `appNeedsDatabase` reads the app's own source for persistence signals — judging a
-              // two-file edit would report "no database needed" about an app full of them. The build's
-              // own save has already run by this point, so this read IS the app. Same source the
-              // readiness endpoint uses, so the tray and that screen cannot disagree.
               const appFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
-              const rows = connectActions({
-                database: databaseReadiness({
-                  files: appFiles,
-                  vaultSecrets,
-                  dbEnvNames: ALL_DB_ENV_VARS,
-                  supabaseConnected,
-                }),
-              }, buildId, Date.now());
+              const database = databaseReadiness({ files: appFiles, vaultSecrets, dbEnvNames: ALL_DB_ENV_VARS, supabaseConnected });
+              const needsServer = !!planDeployment(appFiles).backend;
+              let serverPlan: ServerPlanOffer = 'none';
+              if (needsServer && hostingPlansEnabled()) {
+                const probe = await probeHostingPlan(userId).catch(() => ({ active: false, known: false as const }));
+                if (probe.known) serverPlan = probe.active ? 'included' : 'buy';
+              }
+              const server = { needsServer, plan: serverPlan };
+              const rows = connectActions({ database, server, lang }, buildId, Date.now());
               if (rows.length > 0) await saveUserActions(workspaceId, rows);
+              const needsText = buildNeedsNotice({ database, server }, lang);
+              if (needsText) result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${needsText}` };
             } catch { /* a task row must never affect a finished build */ }
           }
         } catch {

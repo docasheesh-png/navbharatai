@@ -91783,3 +91783,28 @@ Q-735, Q-736, Q-737, Q-738, Q-739, Q-740, Q-742, Q-743 and Q-744 were removed fr
 - empty `bash` calls stop after FINAL.
 
 **Still 🟡 BLOCKED from this report:** Q-741 (timing), Q-745 (decision), Q-746, Q-747 and Q-748 (not-defect agreement).
+
+## 2026-10-08 — Store builds .aab #150 and .ipa #110 (admin asked); Play still blocks review → Q-749 (bundle permissions are read before Play)
+
+**Builds:** the admin said "aab/ipa bana dena … banao aur upload karo". Both ran from `main` at `b1f401cbe` (CI green), with the same inputs as #149 and #109.
+- `.aab` #150 uploaded to Play's internal track.
+- `.ipa` #110 uploaded to TestFlight and processed.
+- Both runs are green.
+
+**Report (admin screenshots):** release 150 is "Not yet sent for review". Publishing overview says "1 issue found — Use alternative system pickers for photos / videos" (READ_MEDIA_IMAGES / READ_MEDIA_VIDEO, "remove … from all tracks").
+
+**Investigation:**
+- Bundle 150 is the first built after #3571 (merged 2026-10-06 16:04; run #149 was 03:27).
+- None of the 15 native plugin manifests declares READ_MEDIA_*.
+- The app manifest strips READ_MEDIA_IMAGES, READ_MEDIA_VIDEO and READ_MEDIA_VISUAL_USER_SELECTED with `tools:node="remove"`.
+- The likeliest holder is an older bundle in another active track, and Play checks every track. The admin's next step is recorded on Q-698 ("Update affected bundles" names the version codes).
+- The artifact could not be opened from the session: GitHub serves artifacts from a host the session may not reach.
+
+**Q-749, the class:** a bundle reached Play with its real permissions unread. Q-698 named "the first .aab" as the proof, but no step read it.
+- **Fix:** `src/server/lib/bundlePermissions.ts` reads the `android.permission.*` names out of the .aab's proto manifest, by length prefix, so a following field tag is never glued on.
+- `scripts/checkBundlePermissions.ts` runs in `android-aab.yml` after the build and before the Play upload. It posts the list as an annotation and fails on a name in `PLAY_RESTRICTED_ANDROID_PERMISSIONS`. An unreadable bundle is a warning, not a stop.
+- The Summary step no longer reports a permission-stopped upload as "upload_to_play was not ticked".
+- **Sibling:** the workflow generated for users' apps (`mobileShipKit.ts`) runs the same decoder, inlined with Function#toString, and the list inlined at generation. It warns and never fails, because a user's app may legitimately declare one in Play.
+- **Lock:** `tests/aBundleIsCheckedBeforePlaySeesIt.test.ts` (12 tests). It covers a real zip through the script, and the generated script run under Node. Four reversions, four failures: greedy decoder, step removed, summary guard removed, user step removed.
+
+**Watch:** the next `.aab` run must show a "Bundle permissions" notice annotation listing the permissions, with none restricted. If it shows READ_MEDIA_*, the cause is in our bundle, not in Play's tracks.

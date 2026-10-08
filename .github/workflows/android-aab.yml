@@ -198,6 +198,18 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 14
 
+      # 🔒 THE BUNDLE'S REAL PERMISSIONS, READ BEFORE PLAY SEES THEM (2026-10-08, Q-749).
+      #
+      # Play judges the bundle it receives, not our manifest. Run #150 uploaded bundle 150 and Play would not
+      # send the release for review ("Use alternative system pickers for photos / videos"). Nothing in that run
+      # could say whether bundle 150 itself carried a READ_MEDIA_* permission or an older bundle in another
+      # track did. This step reads the permissions out of the finished .aab, posts them as an annotation (a
+      # session can read it over the API), and fails if one is on PLAY_RESTRICTED_ANDROID_PERMISSIONS, so the
+      # upload below never runs for a bundle Play would refuse. An unreadable bundle is a warning, not a stop.
+      - name: Check the bundle's real permissions (Play-restricted list)
+        id: permissions
+        run: npx tsx scripts/checkBundlePermissions.ts android/app/build/outputs/bundle/release/app-release.aab
+
       # OPTIONAL auto-publish: push the freshly-signed .aab straight to Google Play's INTERNAL testing
       # track. Runs ONLY when the run requested it (upload_to_play) — the pre-flight above already proved
       # the PLAY_SERVICE_ACCOUNT_JSON secret is present, so this never dies half-way. Play App Signing
@@ -284,6 +296,11 @@ jobs:
             echo "- Meta app events: **off** (FACEBOOK_APP_ID / FACEBOOK_CLIENT_TOKEN not set) — no Facebook SDK is in this bundle." >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
+          # A bundle stopped by the permissions step must never be reported as "upload_to_play was not ticked"
+          # just because the upload step was skipped (Q-749).
+          if [ "${{ steps.permissions.outcome }}" = "failure" ]; then
+            echo "⛔ **Not uploaded** — the bundle requests a permission Google Play restricts (the red permissions step names it). Play would not send it for review, so nothing was sent." >> "$GITHUB_STEP_SUMMARY"
+          else
           case "${{ steps.play_upload.outcome }}" in
             success)
               if [ "${{ inputs.changes_not_sent_for_review }}" = "true" ]; then
@@ -299,5 +316,6 @@ jobs:
               echo "⚠️ **The upload to Google Play FAILED** (outcome: \`${{ steps.play_upload.outcome }}\`) — read the red step above for Google's own reason. **Nothing reached Play**, so upload the artifact above by hand: Play Console → Testing → Internal testing → Create new release. The bundle itself is fine; only the upload failed." >> "$GITHUB_STEP_SUMMARY"
               ;;
           esac
+          fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "versionCode = ${{ github.run_number }} (auto-increments each run, as Play requires). Bundled mode: the app runs from the bundle built in this workflow (API calls still hit navbharatai.com) — auth and all features work unchanged." >> "$GITHUB_STEP_SUMMARY"

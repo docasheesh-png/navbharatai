@@ -31,7 +31,9 @@ export type MoneyAction =
   | 'wallet-recharge'
   | 'professional-pass'
   | 'hosting-plan-purchase'
-  | 'hosting-plan-auto-renew';
+  | 'hosting-plan-auto-renew'
+  | 'hosting-addon-purchase'
+  | 'hosting-addon-remove';
 
 /**
  * Which toggle covers which action. PURE, and the reason it is a function rather than four inline
@@ -52,6 +54,8 @@ export function areaForMoneyAction(action: MoneyAction): AppLockArea {
     case 'professional-pass':
     case 'hosting-plan-purchase':
     case 'hosting-plan-auto-renew':
+    case 'hosting-addon-purchase':
+    case 'hosting-addon-remove':
       return 'subscription';
   }
 }

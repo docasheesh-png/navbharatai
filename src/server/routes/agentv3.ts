@@ -332,7 +332,7 @@ import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
 import { summarizeRestore, type SandboxRestoreOutcome } from '../AgentV3/sandboxRestore';
-import { publishedAppCap, publishedAppCapForTier, readHostingTierForQuota } from '../lib/HostingQuota';
+import { publishedAppCap, publishedAppCapForAccount, readHostingAllowance, readHostingTierForQuota } from '../lib/HostingQuota';
 import { hostingPlansEnabled, hostingPlanPriceInr, readHostingPlanStatus } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
 import {
@@ -8162,12 +8162,13 @@ async function noteBuildOutcome(
     const tier = await readHostingPlanStatus(getDb() as any, identity.uid)
       .then((st) => st.tier)
       .catch(() => null);
+    const allowance = await readHostingAllowance(identity.uid).catch(() => null);
     res.json({
       apps,
       paused,
       // The cap is stated with the list so "5 of 5 used" is visible before a publish is refused. It
-      // follows the user's PLAN, so a Growth customer is not told they are at the free limit of 5.
-      cap: publishedAppCapForTier(tier),
+      // follows the user's PLAN plus any extra-website add-on they have paid for.
+      cap: publishedAppCapForAccount(tier, allowance?.extraSites ?? 0),
       freeCap: publishedAppCap(),
       planName: tier?.name ?? null,
       used: apps.length,

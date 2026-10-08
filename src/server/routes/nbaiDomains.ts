@@ -303,14 +303,19 @@ export function registerNbaiDomainsRoutes(app: Express): void {
    *
    * Returns true when it has already answered — the caller just returns.
    *
-   * 🔒 Two exemptions are deliberate and must stay: the admin/tester free-list, and a plan store that
-   * cannot answer (`known` false ⇒ allow). Rule #1 — an outage must never block a legitimate paying
-   * user's setup. Only a KNOWN "no active plan" refuses.
+   * 🔒 Exemptions that must stay: the admin/tester free-list, a plan store that cannot answer
+   * (`known` false ⇒ allow), and a paid extra-domain add-on. Rule #1 — an outage must never block
+   * a legitimate paying user's setup. Only a KNOWN "no active plan" AND no domain add-on refuses.
    */
   async function refusedForNoPlan(res: Response, uid: string, email: GrantEmail | null): Promise<boolean> {
     if (!hostingPlansEnabled() || isAgentV3FreeUser(uid, email)) return false;
     const plan = await probeHostingPlan(uid);
     if (!plan.known || plan.active) return false;
+    // A paid extra-domain slot is itself the right to connect one domain. Read through the same
+    // status the cap uses, so a merged wallet cannot be seen by one check and missed by the other.
+    // Unreadable ⇒ extraDomains 0 ⇒ no exemption (fail closed).
+    const addonStatus = await readHostingPlanStatus(getServerDb() as any, uid);
+    if ((addonStatus.extraDomains ?? 0) > 0) return false;
     res.status(402).json({
       error: `Using your own domain is part of a hosting plan (from ₹${hostingPlanPriceInr()}/month, paid from your wallet — it also removes the "Made with NavBharatAI" badge). On the free plan your app is still published and live on its NavBharatAI link. Start a plan from Billing → Plans, then connect your domain.`,
       needsPlan: true,
@@ -350,13 +355,15 @@ export function registerNbaiDomainsRoutes(app: Express): void {
        */
       try {
         const status = await readHostingPlanStatus(getServerDb() as any, verifiedUid);
-        const allowed = status.tier?.domains ?? 0;
+        const allowed = (status.tier?.domains ?? 0) + (status.extraDomains ?? 0);
         if (allowed > 0) {
           const existing = (await firebaseDomainLinksForUser(verifiedUid)).filter((l) => !l.suspended);
           const alreadyThis = existing.some((l) => l.domain === canonicalHost(normalizeDomain(req.body?.domain)));
           if (!alreadyThis && existing.length >= allowed) {
             res.status(402).json({
-              error: `Your ${status.tier?.name} plan covers ${allowed} domain${allowed === 1 ? '' : 's'}, and ${allowed === 1 ? 'one is' : `${existing.length} are`} already connected. Move to a bigger plan in Billing → Plans, or disconnect a domain first.`,
+              error: allowed === (status.tier?.domains ?? 0)
+                ? `Your ${status.tier?.name ?? 'plan'} covers ${allowed} domain${allowed === 1 ? '' : 's'}, and ${allowed === 1 ? 'one is' : `${existing.length} are`} already connected. Add a domain in Billing, move to a bigger plan, or disconnect one first.`
+                : `You can connect ${allowed} domain${allowed === 1 ? '' : 's'} (${status.extraDomains} added on), and ${existing.length} ${existing.length === 1 ? 'is' : 'are'} already connected. Add another in Billing, or disconnect one first.`,
               needsPlan: true,
               domainLimit: allowed,
               connected: existing.length,

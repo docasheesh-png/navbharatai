@@ -8,7 +8,11 @@ import { appLockBlocks } from '../lib/appLockEnforce';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
 import { readHostingPlanStatus, purchaseHostingPlan, setHostingPlanAutoRenew } from '../lib/hostingPlan';
+import { readHostingAddons, purchaseHostingAddon, removeHostingAddon } from '../lib/hostingAddonLedger';
 import { HOSTING_TIERS } from '../../lib/hostingTiers';
+import { publishedAppCapForTier, liveAppCount } from '../lib/HostingQuota';
+import { deploymentStore } from '../AgentV3/DeploymentStore';
+import { firebaseDomainLinksForUser } from '../lib/firebaseDomainLink';
 import { registerHostingPlanSweep, reattachSuspendedDomains } from '../lib/hostingPlanSweep';
 import { sendSafeError } from '../lib/httpError';
 import { userSafeUsageLog } from '../lib/usageLogPublic';
@@ -158,6 +162,80 @@ export function registerWalletRoutes(app: Express): void {
     const ok = await setHostingPlanAutoRenew(getDb() as any, routeParam(req.params.userId), autoRenew);
     if (!ok) return res.status(404).json({ error: 'No hosting plan found on this account yet.' });
     return res.json({ ok: true, autoRenew });
+  });
+
+  // ---------- Hosting add-ons (one thing at a time, 2026-10-09) ----------
+  // A sellable add-on is delivered in the same transaction as the debit. Anything we cannot
+  // actually hand over is refused here and never charged. Removal refunds unused days only
+  // after the slot is no longer in use.
+
+  app.get('/api/wallet/:userId/hosting-addons', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    try {
+      const menu = await readHostingAddons(getDb() as any, routeParam(req.params.userId));
+      return res.json(menu);
+    } catch (err: any) {
+      return sendSafeError(res, 500, 'Unable to load add-ons right now.', err, 'hosting addons');
+    }
+  });
+
+  app.post('/api/wallet/:userId/hosting-addons/purchase', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    try {
+      const blocked = await appLockBlocks(req, routeParam(req.params.userId), 'hosting-addon-purchase');
+      if (blocked) return res.status(blocked.status).json(blocked.body);
+      const result = await purchaseHostingAddon(
+        getDb() as any,
+        routeParam(req.params.userId),
+        typeof req.body?.addonId === 'string' ? req.body.addonId : '',
+        { agreedToTerms: req.body?.agreedToTerms === true, clientRef: req.body?.clientRef },
+      );
+      if (!result.ok) {
+        const status = (result.reason === 'insufficient' || result.reason === 'gift_only') ? 402
+          : (result.reason === 'not_available' || result.reason === 'disabled') ? 503
+          : 400;
+        return res.status(status).json(result);
+      }
+      return res.json(result);
+    } catch (err: any) {
+      return sendSafeError(res, 500, 'Could not add that — nothing was charged. Please try again.', err, 'hosting addon purchase');
+    }
+  });
+
+  app.post('/api/wallet/:userId/hosting-addons/remove', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    try {
+      const blocked = await appLockBlocks(req, routeParam(req.params.userId), 'hosting-addon-remove');
+      if (blocked) return res.status(blocked.status).json(blocked.body);
+      const userId = routeParam(req.params.userId);
+      const ref = typeof req.body?.ref === 'string' ? req.body.ref : '';
+      const menu = await readHostingAddons(getDb() as any, userId);
+      const row = menu.active.find((a) => a.ref === ref);
+      if (!row) return res.status(404).json({ ok: false, error: 'That add-on was not found. Nothing was changed.' });
+      const status = await readHostingPlanStatus(getDb() as any, userId);
+      let base = 0;
+      let inUse = 0;
+      if (row.addonId === 'extra_site') {
+        const records = await deploymentStore.listByUser(userId, 500).catch(() => null);
+        if (!records) {
+          return res.status(503).json({ ok: false, error: 'Could not check your live websites, so this was left in place. Nothing was refunded.' });
+        }
+        base = publishedAppCapForTier(status.tier);
+        inUse = liveAppCount(records);
+      } else if (row.addonId === 'extra_domain') {
+        const links = await firebaseDomainLinksForUser(userId).catch(() => null);
+        if (!links) {
+          return res.status(503).json({ ok: false, error: 'Could not check your domains, so this was left in place. Nothing was refunded.' });
+        }
+        base = status.tier?.domains ?? 0;
+        inUse = links.filter((l) => !l.suspended).length;
+      }
+      const result = await removeHostingAddon(getDb() as any, userId, ref, base, inUse);
+      if (!result.ok) {
+        const http = result.reason === 'still_in_use' ? 409 : result.reason === 'not_found' ? 404 : 503;
+        return res.status(http).json(result);
+      }
+      return res.json(result);
+    } catch (err: any) {
+      return sendSafeError(res, 500, 'Could not remove that. It is still active and nothing was refunded.', err, 'hosting addon remove');
+    }
   });
 
   /**

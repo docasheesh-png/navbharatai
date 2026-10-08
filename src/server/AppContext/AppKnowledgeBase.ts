@@ -900,6 +900,23 @@ What happens if it is NOT renewed (honest answer): you get in-app reminders 5 da
     ],
   },
   {
+    id: 'hosting_addon',
+    name: 'Hosting add-ons — extra website ₹49, extra domain ₹49',
+    path: 'Billing (wallet) → Add-ons, under the Plans card',
+    description: `ADD-ONS sit beside the hosting plans (2026-10-09). A user adds one thing at a time and can remove it at any time.
+• EXTRA WEBSITE — ₹49 / 30 days. Raises how many apps they may keep published on NavBharatAI by one, on top of the free 3 or their plan. Up to 10.
+• EXTRA DOMAIN — ₹49 / 30 days. The right to connect one more domain of their own. They still buy the domain name elsewhere. Up to 10. A free account with this add-on can connect that many domains without buying Starter.
+• SERVER, SMALL DATABASE, PRIVATE DATABASE and EXTRA TRAFFIC are listed as NOT FOR SALE. There is no button. The server refuses them and charges nothing. Do NOT tell a user they can buy a server or a database as an add-on, and do NOT tell them traffic packs are for sale. Say plainly that those are not sold yet because we will not take money for something we cannot hand over.
+REMOVING: unused days are returned to the wallet. If the extra website is still published, or the extra domain is still connected, removal is refused and nothing is refunded — they unpublish or disconnect first, then remove. A purchase that fails charges nothing. The welcome gift cannot buy an add-on.
+The Plans themselves (Starter ₹299, Growth ₹599, the old ₹99 plan) are unchanged.`,
+    howToUse: 'Open Billing → find Add-ons under Plans. To add one, open it, read the four lines, tick OK, and pay from the wallet. To remove one, press Remove on that row. If it says the add-on is still in use, unpublish the extra site or disconnect the domain first.',
+    relatedFeatures: ['hosting_plan', 'connect_domain'],
+    keywords: [
+      'add on', 'addon', 'extra website', 'extra domain', '49', 'add-on hatao', 'slot',
+      'server add on', 'database add on', 'extra site',
+    ],
+  },
+  {
     id: 'engineer_ai',
     name: 'Engineer AI (retired → use NavBharatAI Pro)',
     path: 'RETIRED. App building is now NavBharatAI Pro — Sidebar → "NavBharatAI Pro".',

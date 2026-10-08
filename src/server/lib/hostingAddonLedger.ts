@@ -270,9 +270,11 @@ export async function readHostingAddons(db: any, userId: string, nowMs: number =
   }
 }
 
+type AddonFailReason = Extract<AddonPurchaseOutcome, { ok: false }>['reason'];
+
 export type AddonPurchaseResult =
   | { ok: true; addon: HostingAddonRecord; charged: boolean; tokenBalance: number; terms: readonly string[] }
-  | { ok: false; reason: AddonPurchaseOutcome extends { ok: false; reason: infer R } ? R : never; error: string; shortfallTokens?: number };
+  | { ok: false; reason: AddonFailReason; error: string; shortfallTokens?: number };
 
 export async function purchaseHostingAddon(
   db: any,

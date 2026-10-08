@@ -72,7 +72,7 @@ export const HOSTING_ADDONS: readonly HostingAddon[] = [
     days: 30,
     max: 5,
     sellable: false,
-    unavailableReason: 'A server is not on sale yet. We will not take money for one until we can prove it is actually running.',
+    unavailableReason: 'Not sold from this list. On Publish, choose “NavBharatAI runs the server” — ₹149 is taken only after the server is live. Or host it yourself, which stays free from us.',
     summary: 'A real server for login, payments or an API.',
   },
   {
@@ -92,7 +92,7 @@ export const HOSTING_ADDONS: readonly HostingAddon[] = [
     days: 30,
     max: 3,
     sellable: false,
-    unavailableReason: 'A private database is not on sale yet. One costs us money every day it exists, so it is sold only when creating it and deleting it are both real.',
+    unavailableReason: 'Not sold from this list. On Publish, choose NavBharatAI’s database — ₹1,499 is taken only after the database is ready. Or connect your own Supabase, which stays free from us.',
     summary: 'A private database for one app.',
   },
   {
@@ -128,6 +128,8 @@ export interface HostingAddonRecord {
   purchasedAt: string;
   expiresAt: string;
   agreedAt: string;
+  /** Set only when this row was written after a real server URL or database id came back. */
+  proof?: string;
 }
 
 const REF_RE = /^[A-Za-z0-9_-]{8,64}$/;

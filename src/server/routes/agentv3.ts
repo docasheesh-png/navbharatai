@@ -316,6 +316,7 @@ import { planDeployment, deployDecision, choosePublishRoute } from '../AgentV3/d
 import { recordHostedDeployment } from '../AgentV3/hostedDeploymentRecord';
 import { firestoreDeployStore } from '../AgentV3/hostedDeployments';
 import { runServerPublish, type ServerPublishDeps } from '../AgentV3/serverPublish';
+import { registerResellHostingRoutes } from './resellHosting';
 import { removeHostedServers } from '../AgentV3/hostedAppLifecycle';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
 import { repoAvailableForDeploy, resolveDeployRepo, ownRepoMemoryPatch, renameStorageRepoPatch } from '../AgentV3/deployRepoMemory';
@@ -4110,6 +4111,23 @@ const serverPublishDeps: ServerPublishDeps = {
 };
 
 export function registerAgentV3Routes(app: Express): void {
+  // Extra server / database. Charge happens inside these handlers, only after delivery.
+  // The normal Publish path is unchanged and does not add ₹149 on top of a plan.
+  registerResellHostingRoutes(app, {
+    publishServer: (input) => runServerPublish(input, {
+      ...serverPublishDeps,
+      serverCap: async () => ({ available: true, message: '' }),
+    }),
+    liveServerWorkspaces: liveServerWorkspaceIdsFor,
+    teardownServer: async (workspaceId, service) => {
+      const removed = await removeHostedServers(workspaceId, {
+        providerId: NAVBHARAT_CLOUD_PROVIDER,
+        service: service ?? '',
+      });
+      if (removed.ok) await deploymentStore.setStatus(workspaceId, 'unpublished').catch(() => false);
+      return { ok: removed.ok };
+    },
+  });
   // WHY WAS THIS SANDBOX STARTED? One zone per request, opened before every route below, so a create
   // or resume deep inside any handler can name its cause (sandboxSessionZone.ts). Decides nothing.
   app.use('/api/agentv3', sandboxReasonMiddleware);

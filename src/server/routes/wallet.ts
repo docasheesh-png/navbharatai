@@ -209,6 +209,18 @@ export function registerWalletRoutes(app: Express): void {
       const menu = await readHostingAddons(getDb() as any, userId);
       const row = menu.active.find((a) => a.ref === ref);
       if (!row) return res.status(404).json({ ok: false, error: 'That add-on was not found. Nothing was changed.' });
+      // A server or a database is not a slot. Refunding here would return the money while the
+      // Cloud Run service or the Supabase project kept running. Stop it from Publish, which
+      // deletes it first and only then returns unused days.
+      if (row.addonId === 'server' || row.addonId === 'dedicated_db') {
+        return res.status(409).json({
+          ok: false,
+          reason: 'still_in_use',
+          error: row.addonId === 'server'
+            ? 'A server is stopped from Publish, not from this list. It is taken down first; only then are unused days returned. Nothing was refunded.'
+            : 'A database is removed from Publish, not from this list. It is deleted first; only then are unused days returned. Nothing was refunded.',
+        });
+      }
       const status = await readHostingPlanStatus(getDb() as any, userId);
       let base = 0;
       let inUse = 0;

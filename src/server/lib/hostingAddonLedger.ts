@@ -111,6 +111,70 @@ export function computeAddonPurchase(
   };
 }
 
+/** Add-ons that may be billed only after something real was handed over. Not the Billing "Add" button. */
+const DELIVERED_ADDONS = new Set<HostingAddonId>(['server', 'dedicated_db']);
+
+/**
+ * Same debit as a slot, but ONLY for a server or a database, and ONLY with proof that it exists.
+ * A missing proof is a refusal. The wallet is not written by this function; the caller writes it
+ * in the same transaction, and only after the server URL or the database id is in hand.
+ */
+export function computeDeliveredAddonPurchase(
+  current: Record<string, any> | null | undefined,
+  nowIso: string,
+  addonId: string,
+  opts: { agreedToTerms?: boolean; clientRef?: unknown; proof?: unknown },
+): AddonPurchaseOutcome {
+  const addon = addonById(addonId);
+  if (!addon || !DELIVERED_ADDONS.has(addon.id)) return { ok: false, reason: 'not_available' };
+  const proof = typeof opts.proof === 'string' ? opts.proof.trim() : '';
+  if (proof.length < 8) return { ok: false, reason: 'not_available' };
+  if (!hostingPlansEnabled()) return { ok: false, reason: 'disabled' };
+  if (!opts.agreedToTerms) return { ok: false, reason: 'agreement_required' };
+  if (!validAddonRef(opts.clientRef)) return { ok: false, reason: 'bad_ref' };
+  const clientRef = opts.clientRef;
+
+  const w = current || {};
+  const nowMs = Date.parse(nowIso);
+  const existing = rowsOf(w).find((r) => r.ref === clientRef);
+  if (existing && existing.addonId === addon.id) {
+    return { ok: true, wallet: w, addon: existing, charged: false };
+  }
+  if (activeAddonCount(w, addon.id, nowMs) >= addon.max) return { ok: false, reason: 'at_cap' };
+
+  const needed = inrToDebitTokens(addon.priceInr);
+  const balance = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
+  if (balance < needed) return { ok: false, reason: 'insufficient', shortfallTokens: Math.ceil(needed - balance) };
+  const giftBlock = checkPlanPayable(w, needed);
+  if (giftBlock) {
+    return { ok: false, reason: 'gift_only', shortfallTokens: giftBlock.shortfallTokens, giftTokens: giftBlock.giftTokens, paidTokens: giftBlock.paidTokens };
+  }
+
+  const periodStartMs = Number.isFinite(nowMs) ? nowMs : Date.parse(nowIso);
+  const record: HostingAddonRecord = {
+    ref: clientRef,
+    addonId: addon.id,
+    purchasedAt: nowIso,
+    expiresAt: new Date(periodStartMs + addon.days * 24 * 60 * 60 * 1000).toISOString(),
+    agreedAt: nowIso,
+    proof,
+  };
+  const debited = computeDebitedWallet(w, {
+    billedInr: addon.priceInr,
+    buildRef: `hostingaddon_${clientRef}`,
+    feature: 'hosting-addon',
+    description: `Hosting add-on — ${addon.name} (${addon.days} days)`,
+    spends: 'paid-only',
+  }, nowIso);
+  const nextRows = rowsOf(debited.wallet).filter((r) => r.ref !== clientRef).concat(record);
+  return {
+    ok: true,
+    charged: debited.applied,
+    addon: record,
+    wallet: { ...debited.wallet, hostingAddons: nextRows, hasHostingAddons: true },
+  };
+}
+
 /** ₹ of unused time on a live add-on, rounded DOWN so a refund never exceeds what was paid. */
 export function unusedAddonValueInr(row: HostingAddonRecord, nowMs: number): number {
   const spec = addonById(row.addonId);
@@ -264,6 +328,95 @@ export async function purchaseHostingAddon(
         return { ok: false, reason: 'at_cap', error: `You already have the maximum of ${addon.max}. Nothing was charged.` };
       }
       return { ok: false, reason: 'not_available', error: 'That add-on is not for sale. Nothing was charged.' };
+    }
+    return {
+      ok: true,
+      addon: outcome.addon,
+      charged: outcome.charged,
+      tokenBalance: typeof outcome.wallet.tokenBalance === 'number' ? outcome.wallet.tokenBalance : 0,
+      terms: addonAgreementTerms(addon),
+    };
+  } catch {
+    return { ok: false, reason: 'disabled', error: 'Could not complete that — nothing was charged. Please try again.' };
+  }
+}
+
+export async function previewDeliveredCharge(
+  db: any,
+  userId: string,
+  addonId: 'server' | 'dedicated_db',
+  clientRef: string,
+): Promise<{ active: Array<{ ref: string; proof?: string }> | null; canPay: boolean | null }> {
+  if (!db || !userId) return { active: null, canPay: null };
+  try {
+    const ownerId = await canonicalId(db, userId);
+    const snap = await getDoc(doc(db, 'user_token_wallets', ownerId));
+    const data = snap.exists() ? (snap.data() as Record<string, any>) : { tokenBalance: 0, walletLedger: [] };
+    const active = activeAddonRows(data)
+      .filter((r) => r.addonId === addonId)
+      .map((r) => ({ ref: r.ref, proof: r.proof }));
+    const preview = computeDeliveredAddonPurchase(data, new Date().toISOString(), addonId, {
+      agreedToTerms: true,
+      clientRef,
+      proof: 'preflight-ok',
+    });
+    if (!preview.ok) return { active, canPay: false };
+    const exp = Date.parse(preview.addon.expiresAt);
+    const stillPaid = Number.isFinite(exp) && exp > Date.now();
+    return { active, canPay: preview.charged || stillPaid };
+  } catch {
+    return { active: null, canPay: null };
+  }
+}
+
+export async function chargeDeliveredHostingAddon(
+  db: any,
+  userId: string,
+  addonId: 'server' | 'dedicated_db',
+  opts: { agreedToTerms?: boolean; clientRef?: unknown; proof?: unknown },
+  nowIso?: string,
+): Promise<AddonPurchaseResult> {
+  const addon = addonById(addonId);
+  if (!hostingPlansEnabled()) return { ok: false, reason: 'disabled', error: 'Add-ons are not available right now. Nothing was charged.' };
+  if (!addon || !DELIVERED_ADDONS.has(addon.id)) {
+    return { ok: false, reason: 'not_available', error: 'That is not sold this way. Nothing was charged.' };
+  }
+  if (typeof opts.proof !== 'string' || opts.proof.trim().length < 8) {
+    return { ok: false, reason: 'not_available', error: 'Nothing was charged — there is no live server or ready database to pay for.' };
+  }
+  if (!db || !userId) return { ok: false, reason: 'disabled', error: 'Please try again in a moment. Nothing was charged.' };
+  try {
+    const ownerId = await canonicalId(db, userId);
+    const ref = doc(db, 'user_token_wallets', ownerId);
+    const when = nowIso ?? new Date().toISOString();
+    const outcome = await runTransaction(db, async (t: any) => {
+      const snap = await t.get(ref);
+      const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
+      const result = computeDeliveredAddonPurchase(current, when, addonId, opts);
+      if (result.ok) t.set(ref, result.wallet);
+      return result;
+    });
+    if (!outcome.ok) {
+      if (outcome.reason === 'insufficient') {
+        return { ok: false, reason: 'insufficient', shortfallTokens: outcome.shortfallTokens, error: 'Your wallet balance is not enough — please recharge first. Nothing was charged.' };
+      }
+      if (outcome.reason === 'gift_only') {
+        const giftInr = Math.round(((outcome.giftTokens ?? 0) / TOKENS_PER_RUPEE) * 100) / 100;
+        const shortInr = Math.round(((outcome.shortfallTokens ?? 0) / TOKENS_PER_RUPEE) * 100) / 100;
+        return {
+          ok: false,
+          reason: 'gift_only',
+          shortfallTokens: outcome.shortfallTokens,
+          error: `Your welcome gift is for building apps, not for add-ons. ₹${giftInr.toFixed(2)} of your balance is the gift. Add ₹${shortInr.toFixed(2)} — nothing was charged.`,
+        };
+      }
+      if (outcome.reason === 'agreement_required') {
+        return { ok: false, reason: 'agreement_required', error: 'Please tick the terms before adding this. Nothing was charged.' };
+      }
+      if (outcome.reason === 'at_cap') {
+        return { ok: false, reason: 'at_cap', error: `You already have the maximum of ${addon.max}. Nothing was charged.` };
+      }
+      return { ok: false, reason: outcome.reason, error: 'That could not be charged. Nothing was charged.' };
     }
     return {
       ok: true,

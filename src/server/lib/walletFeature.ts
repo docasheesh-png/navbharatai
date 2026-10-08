@@ -25,6 +25,7 @@ export const WALLET_FEATURES = [
   { id: 'mobile-build', label: 'Android / iOS build' },
   { id: 'remix', label: 'App Store purchase' },
   { id: 'hosting-plan', label: 'Hosting plan' },
+  { id: 'hosting-addon', label: 'Hosting add-on' },
   { id: 'hosting', label: 'App hosting (daily)' },
   { id: 'doctor', label: 'Doctor AI' },
   { id: 'professionals', label: 'Professionals AI' },

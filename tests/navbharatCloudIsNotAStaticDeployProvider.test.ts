@@ -64,12 +64,18 @@ describe('the one door into NavBharat Cloud', () => {
     expect(route).toMatch(/host:\s*\(opts\)\s*=>\s*hostAppOnNavBharatCloud\(opts\)/);
   });
 
-  it('🔒 that sequence is entered only from Publish, with the VERIFIED owner — never the body uid', () => {
+  it('🔒 Publish uses the verified owner, and the paid extra server is the only other door', () => {
     const callers = serverFiles.filter((f) => f !== 'src/server/AgentV3/serverPublish.ts' && /runServerPublish\s*\(/.test(code(f)));
     expect(callers).toEqual(['src/server/routes/agentv3.ts']);
     const route = code('src/server/routes/agentv3.ts');
-    expect(route.match(/runServerPublish\s*\(/g)?.length).toBe(1);
+    // Two calls, both in this file: the normal Publish, and the paid extra which forwards an
+    // input the resell route already built from the verified identity (never a uid in the body).
+    expect(route.match(/runServerPublish\s*\(/g)?.length).toBe(2);
     expect(route).toMatch(/runServerPublish\(\{[\s\S]{0,200}ownerUid:\s*hostOwnerUid,\s*isAdmin:\s*hostIsAdmin,/);
+    expect(route).toContain('publishServer: (input) => runServerPublish(input,');
+    const resell = code('src/server/routes/resellHosting.ts');
+    expect(resell).toContain('ownerUid: who.uid');
+    expect(resell).not.toMatch(/ownerUid:\s*req\.body/);
   });
 
   it('a server app is routed to the container by its SHAPE, and a static one never is', () => {

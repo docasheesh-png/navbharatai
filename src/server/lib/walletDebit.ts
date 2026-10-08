@@ -1,6 +1,6 @@
 import { doc, getDoc, runTransaction } from './serverDb'; // admin-SDK binding (bypasses rules) — see serverDb.ts
 import { inrToDebitTokens, TOKENS_PER_RUPEE } from './payments';
-import { giftAfterSpend, giftRemaining } from './giftSpend';
+import { giftAfterSpend, giftRemaining, paidSpendableTokens } from './giftSpend';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
 
 // BILLING PHASE 1 (admin plan 2026-07-10) — the missing HALF of the money path.
@@ -69,11 +69,13 @@ export interface WalletDebitTx {
    * Whose money this charge comes out of (see `giftSpend.ts`).
    *
    * `gift-first` (the default, and what every build and chat turn uses) spends the welcome gift
-   * before the user's own money. `paid-only` is for a PLAN, which the gift may not buy — the balance
-   * still falls, but the gift figure is left alone, because the rupees that moved were paid ones.
+   * before the user's own money. `paid-only` is for a PURCHASE (a plan, an add-on, a remix, the
+   * ₹1 app-file charge). The gift may not buy those.
    *
-   * ⚠️ The CALLER must have already established that enough paid money exists (`checkPlanPayable`).
-   * This field records which bucket the money came from; it is not itself the gate.
+   * 🔒 `paid-only` REFUSES the whole charge when the paid part of the balance cannot cover it.
+   * The gift figure is left untouched and nothing is written. A forgotten preflight cannot spend
+   * the gift by accident. The caller should still preflight (`checkPlanPayable`) so the user hears
+   * why, instead of a silent no-op.
    */
   spends?: 'gift-first' | 'paid-only';
 }
@@ -150,6 +152,14 @@ export function computeDebitedWallet(
   // at −₹506 and another at −₹1,198). A build that was legitimately allowed to start at ₹1 used to
   // settle for whatever it had cost, in one debit, with nothing bounding it.
   const floored = floorCharge(w, tx.billedInr, tx.floorInr);
+  // A purchase may not dip into the welcome gift. Refuse the whole charge — do not take part of it
+  // from the gift and do not push the gift balance negative to "cover" it.
+  if (tx.spends === 'paid-only') {
+    const owed = inrToDebitTokens(floored.chargedInr);
+    if (owed > paidSpendableTokens(w) + 1e-9) {
+      return { wallet: w, tokensDebited: 0, applied: false, refused: true };
+    }
+  }
   const carriedIn = Math.min(Math.max(n(w[TOKEN_CARRY_FIELD]), 0), 1); // defensive: 0 ≤ carry < 1
   // ⚠️ The CARRY follows what was actually CHARGED, never what was owed. Carrying the absorbed part
   // would quietly re-bill on the next charge the very rupees we just said we would eat.
@@ -470,7 +480,7 @@ export function computeRolledUpSettle(
 }
 
 export type WalletDebitResult =
-  | { ok: true; tokensDebited: number; tokenBalance: number }
+  | { ok: true; tokensDebited: number; tokenBalance: number; refused?: boolean }
   | { ok: false; error: string };
 
 
@@ -543,6 +553,7 @@ export async function debitWalletForBuild(
       ok: true,
       tokensDebited: debited.tokensDebited,
       tokenBalance: typeof debited.wallet.tokenBalance === 'number' ? debited.wallet.tokenBalance : 0,
+      ...(debited.refused ? { refused: true } : {}),
     };
   } catch (err: any) {
     return { ok: false, error: err?.message || 'Wallet debit transaction failed' };

@@ -10,6 +10,7 @@
  */
 import { cn } from '../../lib/utils';
 import { HostingPlanCard } from './HostingPlanCard';
+import { HostingAddonCard } from './HostingAddonCard';
 import { ReferralPanel } from './ReferralPanel';
 import { WalletStatementPanel } from './WalletStatementPanel';
 import type { ReferralProgress } from '../../hooks/useReferralProgress';
@@ -982,7 +983,12 @@ export function BillingPanel(props: BillingPanelProps) {
             userId={user.uid}
             area="subscription"
             embedded
-            render={() => <HostingPlanCard userId={user.uid} onWalletChanged={onFetchWallet} onToast={onToast} />}
+            render={() => (
+              <>
+                <HostingPlanCard userId={user.uid} onWalletChanged={onFetchWallet} onToast={onToast} />
+                <HostingAddonCard userId={user.uid} onWalletChanged={onFetchWallet} onToast={onToast} />
+              </>
+            )}
           />
 
           {/* Phase 4.2 — This Month's AI Cost card */}

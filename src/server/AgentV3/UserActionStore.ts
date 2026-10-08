@@ -19,7 +19,7 @@ import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import {
   MAX_ACTIONS, mergeUserActions,
-  type UserAction, type UserActionClosedBy, type UserActionKind, type UserActionStatus,
+  type UserAction, type UserActionClosedBy, type UserActionKind, type UserActionLink, type UserActionStatus,
 } from './userActions';
 
 const COLLECTION = 'workspace_user_actions_v1';
@@ -38,9 +38,20 @@ function getDb(): admin.firestore.Firestore | null {
   }
 }
 
-const KINDS: readonly UserActionKind[] = ['secret', 'approve', 'question'];
+const KINDS: readonly UserActionKind[] = ['secret', 'approve', 'question', 'connect'];
 const STATUSES: readonly UserActionStatus[] = ['open', 'done', 'not_needed', 'superseded'];
 const CLOSED_BY: readonly UserActionClosedBy[] = ['user', 'verified', 'ai', 'system'];
+function readCta(raw: unknown): UserActionLink | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const c = raw as Record<string, unknown>;
+  const label = typeof c.label === 'string' ? c.label.trim().slice(0, 80) : '';
+  if (!label) return undefined;
+  if (c.view === 'billing') return { view: 'billing', label };
+  if (c.view === 'settings' && c.settingsScreen === 'database') {
+    return { view: 'settings', settingsScreen: 'database', label };
+  }
+  return undefined;
+}
 
 /**
  * Validate a stored row back into a `UserAction`, or null. PURE and exported for tests.
@@ -62,7 +73,7 @@ export function normalizeUserAction(raw: unknown): UserAction | null {
     id,
     kind,
     title: title.slice(0, 300),
-    why: typeof r.why === 'string' ? r.why.slice(0, 500) : '',
+    why: typeof r.why === 'string' ? r.why.slice(0, 800) : '',
     blocking: r.blocking === true,
     buildId: typeof r.buildId === 'string' ? r.buildId : '',
     status,
@@ -72,6 +83,8 @@ export function normalizeUserAction(raw: unknown): UserAction | null {
   // silently-empty tray — so every optional field is set only when it genuinely has a value.
   if (typeof r.envName === 'string' && r.envName) out.envName = r.envName;
   if (typeof r.callId === 'string' && r.callId) out.callId = r.callId;
+  const cta = readCta(r.cta);
+  if (cta) out.cta = cta;
   if (typeof r.closedAt === 'number' && r.closedAt > 0) out.closedAt = r.closedAt;
   if (CLOSED_BY.includes(r.closedBy as UserActionClosedBy)) out.closedBy = r.closedBy as UserActionClosedBy;
   return out;

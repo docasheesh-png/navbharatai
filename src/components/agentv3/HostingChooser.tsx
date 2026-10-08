@@ -33,6 +33,7 @@ import { LONG_REQUEST_TIMEOUT_MS, fetchFailureLine, isFetchTimeout } from '../..
 import { badgeAt, badgeLabelAt, type PendingAction } from '../../lib/actionNavigator';
 import { ActionDot } from '../ActionDot';
 import { advancedPublishStartsOpen, ADVANCED_PUBLISH_LABEL, ADVANCED_PUBLISH_HINT } from '../../lib/advancedPublish';
+import { ResellHostingChoice } from './ResellHostingChoice';
 import { FREE_PUBLISHED_APPS } from '../../lib/hostingTiers';
 import {
   DEPLOY_BACKEND_FAILURE, PROVISION_DB_FAILURE, PUSH_APP_FAILURE, PUSH_APP_UNCONFIRMED_LINE,
@@ -1492,6 +1493,12 @@ export function HostingChooser({
         </div>
 
         {/* Full-stack note + sync law */}
+        <ResellHostingChoice
+          workspaceId={workspaceId}
+          authedFetch={authedFetch}
+          onOpenDatabaseSettings={onOpenDatabaseSettings}
+          busy={busy}
+        />
         <div className="px-4 pb-4 flex flex-col gap-2">
           <div className="flex items-start gap-2 text-[11px] text-warn bg-amber-500/10 border border-amber-900/40 rounded-lg px-3 py-2">
             <Server className="w-3.5 h-3.5 mt-0.5 shrink-0" />

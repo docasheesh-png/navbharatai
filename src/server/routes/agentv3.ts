@@ -541,6 +541,7 @@ import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuator
 import { loadUserVaultSecrets, withheldVaultSecretNames, secretsWithheldNote } from '../lib/secrets';
 import { secretRequestPrompt, postBuildKeyAsks, postBuildKeyPrompt } from '../AgentV3/secretRequest';
 import { connectActions } from '../AgentV3/connectActions';
+import { buildNeedsNotice, type ServerPlanOffer } from '../AgentV3/buildNeeds';
 import { saveUserActions } from '../AgentV3/UserActionStore';
 import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
 import { userStorageContext } from '../AgentV3/userStorageContext';
@@ -25900,7 +25901,8 @@ async function noteBuildOutcome(
           const detected = detectAppRequirements({ files: writtenFiles, prompt });
           const implied = impliedRequirementsFor(fakeFeatures).filter((r) => !detected.some((d) => d.id === r.id));
           const missing = unconfiguredRequirements([...detected, ...implied], vaultSecrets);
-          const notice = appRequirementsNotice(missing, detectLanguageHint(prompt)?.code ?? null);
+          const lang = detectLanguageHint(prompt)?.code ?? null;
+          const notice = appRequirementsNotice(missing, lang);
           if (notice) {
             result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${notice}` };
             buildDiag.record({
@@ -25938,23 +25940,24 @@ async function noteBuildOutcome(
             // extra read is the user's Supabase grant, which decides the WORDING ("one press" vs
             // "connect your own"), never whether the row appears. Best-effort by construction: a
             // failure leaves the tray exactly as it is today.
+            // Facts already in hand: the durable files (not this turn's diff) and the Supabase grant.
+            // A server row is `planDeployment` — the same classifier Publish uses — never the prompt.
+            // The plan probe only decides whether the row may open Billing. Unknown → no purchase link.
             try {
               const supabaseConnected = !!(await getConnection(userId).catch(() => null))?.orgId;
-              // The DURABLE copy, not `writtenFiles`: on an EDIT turn the written set is the diff, and
-              // `appNeedsDatabase` reads the app's own source for persistence signals — judging a
-              // two-file edit would report "no database needed" about an app full of them. The build's
-              // own save has already run by this point, so this read IS the app. Same source the
-              // readiness endpoint uses, so the tray and that screen cannot disagree.
               const appFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
-              const rows = connectActions({
-                database: databaseReadiness({
-                  files: appFiles,
-                  vaultSecrets,
-                  dbEnvNames: ALL_DB_ENV_VARS,
-                  supabaseConnected,
-                }),
-              }, buildId, Date.now());
+              const database = databaseReadiness({ files: appFiles, vaultSecrets, dbEnvNames: ALL_DB_ENV_VARS, supabaseConnected });
+              const needsServer = !!planDeployment(appFiles).backend;
+              let serverPlan: ServerPlanOffer = 'none';
+              if (needsServer && hostingPlansEnabled()) {
+                const probe = await probeHostingPlan(userId).catch(() => ({ active: false, known: false as const }));
+                if (probe.known) serverPlan = probe.active ? 'included' : 'buy';
+              }
+              const server = { needsServer, plan: serverPlan };
+              const rows = connectActions({ database, server, lang }, buildId, Date.now());
               if (rows.length > 0) await saveUserActions(workspaceId, rows);
+              const needsText = buildNeedsNotice({ database, server }, lang);
+              if (needsText) result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${needsText}` };
             } catch { /* a task row must never affect a finished build */ }
           }
         } catch {

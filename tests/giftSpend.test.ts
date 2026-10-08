@@ -176,4 +176,35 @@ describe('the rule is enforced where money moves, not only where it is read', ()
     expect(plan).toContain('Your welcome gift is for building apps, not for buying a plan');
     expect(plan).toContain('your gift stays exactly where it is');
   });
+
+  it('a remix and the ₹1 app file are purchases — paid money only', () => {
+    expect(src('src/server/lib/navStoreRemixPurchase.ts')).toContain("spends: 'paid-only'");
+    expect(src('src/server/lib/navStoreRemixPurchase.ts')).toContain('checkPlanPayable(');
+    expect(src('src/server/routes/mobileShip.ts')).toContain("spends: 'paid-only'");
+  });
+});
+
+describe('a purchase debit cannot spend the welcome gift', () => {
+  it('refuses a gift-only wallet and leaves every figure where it was', () => {
+    const before = w(5000, 5000);
+    const after = computeDebitedWallet(before, {
+      billedInr: 1, buildRef: 'apk1', description: 'APK', spends: 'paid-only',
+    }, 'now');
+    expect(after.refused).toBe(true);
+    expect(after.applied).toBe(false);
+    expect(after.tokensDebited).toBe(0);
+    expect(after.wallet.tokenBalance).toBe(5000);
+    expect(after.wallet.giftTokensRemaining).toBe(5000);
+    expect(after.wallet.walletLedger).toEqual([]);
+  });
+
+  it('takes the paid part and leaves the gift', () => {
+    const after = computeDebitedWallet(w(5000, 4000), {
+      billedInr: 1, buildRef: 'apk2', description: 'APK', spends: 'paid-only',
+    }, 'now');
+    expect(after.refused).toBeUndefined();
+    expect(after.applied).toBe(true);
+    expect(after.wallet.giftTokensRemaining).toBe(4000);
+    expect(after.wallet.tokenBalance).toBe(5000 - TOKENS_PER_RUPEE);
+  });
 });

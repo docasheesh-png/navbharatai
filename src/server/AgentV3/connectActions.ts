@@ -39,6 +39,9 @@
 
 import type { UserAction } from './userActions';
 import { actionKey } from './userActions';
+import { databaseNeedText, serverNeedText, type ServerNeedFacts } from './buildNeeds';
+
+export type { ServerNeedFacts, ServerPlanOffer } from './buildNeeds';
 
 /** The slice of `DatabaseReadiness` this needs. Structural, so the real type fits without an import cycle. */
 export interface DatabaseFacts {
@@ -65,19 +68,53 @@ export const DATABASE_SUBJECT = 'database';
  * to connect their own account first. ⚠️ Neither half names the PROVIDER — the row is read by
  * somebody who may never have chosen one, and the Database screen it sends them to names it there.
  */
+/** The one subject string a server row is keyed on. Stable, so the same ask never becomes two rows. */
+export const SERVER_SUBJECT = 'server';
+
 export function databaseConnectAction(
   facts: DatabaseFacts | null | undefined,
   buildId: string,
   now: number,
+  lang?: string | null,
 ): UserAction | null {
-  if (!facts || !facts.needsDatabase || facts.connected) return null;
+  if (!facts) return null;
+  const text = databaseNeedText(facts, lang);
+  if (!text) return null;
   return {
     id: actionKey('connect', DATABASE_SUBJECT),
     kind: 'connect',
-    title: 'Connect a database',
-    why: facts.canProvision
-      ? 'Your app saves data, and no database is connected yet — so nothing it saves will survive. Your database account is already connected, so this is one press.'
-      : 'Your app saves data, and no database is connected yet — so nothing it saves will survive. Connect your own database account in Settings and this is done.',
+    title: text.title,
+    why: text.why,
+    cta: text.cta,
+    blocking: false,
+    buildId,
+    status: 'open',
+    createdAt: now,
+  };
+}
+
+/**
+ * The server row, or `null` when the built files have no server.
+ *
+ * The purchase link exists ONLY for `plan: 'buy'` — plans are on, and we know this user has none —
+ * and it opens Billing → Plans. It does not charge. `included` and `none` explain the need and do
+ * not offer a button, because a button on a plan they already hold, or on a plan we could not read,
+ * would be selling something we are not sure they need to buy.
+ */
+export function serverConnectAction(
+  facts: ServerNeedFacts | null | undefined,
+  buildId: string,
+  now: number,
+  lang?: string | null,
+): UserAction | null {
+  const text = serverNeedText(facts, lang);
+  if (!text) return null;
+  return {
+    id: actionKey('connect', SERVER_SUBJECT),
+    kind: 'connect',
+    title: text.title,
+    why: text.why,
+    ...(text.cta ? { cta: text.cta } : {}),
     blocking: false,
     buildId,
     status: 'open',
@@ -91,10 +128,13 @@ export function databaseConnectAction(
  * changing.
  */
 export function connectActions(
-  input: { database?: DatabaseFacts | null },
+  input: { database?: DatabaseFacts | null; server?: ServerNeedFacts | null; lang?: string | null },
   buildId: string,
   now: number,
 ): UserAction[] {
-  const rows = [databaseConnectAction(input.database, buildId, now)];
+  const rows = [
+    databaseConnectAction(input.database, buildId, now, input.lang),
+    serverConnectAction(input.server, buildId, now, input.lang),
+  ];
   return rows.filter((r): r is UserAction => r !== null);
 }

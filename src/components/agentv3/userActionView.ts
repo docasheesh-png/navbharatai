@@ -20,6 +20,11 @@ export interface UserActionView {
   kind: UserActionKind;
   title: string;
   why: string;
+  /**
+   * Opens a real screen. Never a charge. `billing` is Plans; `settings` + `database` is the user's
+   * own database. The tray ignores any other shape.
+   */
+  cta?: { view: 'billing' | 'settings'; settingsScreen?: 'database'; label: string };
   envName?: string;
   callId?: string;
   blocking: boolean;

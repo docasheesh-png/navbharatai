@@ -7,9 +7,8 @@
 // its real permissions unread. Both workflows that build an .aab now read them: ours stops the upload, the one
 // generated for users' apps warns.
 import { describe, it, expect } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import JSZip from 'jszip';
 import yaml from 'js-yaml';
@@ -18,6 +17,7 @@ import {
 } from '../src/server/lib/bundlePermissions';
 import { PLAY_RESTRICTED_ANDROID_PERMISSIONS } from '../src/server/AgentV3/nativeCapabilities';
 import { generateShipKit } from '../src/server/lib/mobileShipKit';
+import { makeTempDir } from './helpers/tempDir';
 
 /** One protobuf string field: tag, one-byte length, UTF-8 bytes. */
 const str = (tag: number, s: string): number[] => [tag, s.length, ...Buffer.from(s, 'utf8')];
@@ -76,7 +76,7 @@ async function aab(bytes: Uint8Array): Promise<string> {
   const zip = new JSZip();
   zip.file('base/manifest/AndroidManifest.xml', bytes);
   zip.file('base/dex/classes.dex', 'x');
-  const dir = mkdtempSync(join(tmpdir(), 'aab-'));
+  const dir = makeTempDir('nbai-aab-');
   const path = join(dir, 'app-release.aab');
   writeFileSync(path, await zip.generateAsync({ type: 'nodebuffer' }));
   return path;
@@ -130,7 +130,7 @@ describe('the workflow generated for a user\'s app (the sibling)', () => {
   });
 
   it('🔒 the inlined script really runs: it warns on a restricted permission and never fails the build', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'nbai-perm-'));
+    const dir = makeTempDir('nbai-perm-');
     writeFileSync(join(dir, 'check.cjs'), script);
     const runOn = (bytes: Uint8Array) => {
       writeFileSync(join(dir, 'manifest.pb'), bytes);

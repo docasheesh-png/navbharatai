@@ -91908,3 +91908,31 @@ Both are reversion-proven (5 reversions, 5 failures, across the two rounds).
 **What to watch:** on the next Android build, tap Save to Photos in the image generator — it should
 report "Saved to your Photos ✓" and the image should appear in a **NavBharatAI** album, with no share
 sheet, no permission prompt, and a single `.png` on the end of the file name.
+## 2026-10-08: Q-618, Q-650 and Q-704 closed (#3566, #3546, #3576 all merged)
+
+Found at the start of a session, doing safeguard #1's fresh-state check: three rows still read **IN
+PROGRESS** with an owner PR, and all three of those PRs were already merged into `main` — #3566
+(Q-618, the server runs as the unprivileged `node` user), #3546 (Q-650, a browser-only script is
+refused before it is run) and #3576 (Q-704, user apps and their builds no longer run as the apps
+project's default identity).
+
+**Why this was worth a PR of its own rather than left for whoever noticed next.** The sixth absolute
+rule makes an owner PR number mean *this row is TAKEN* — it is the signal a concurrent session reads
+to decide what NOT to pick up. Three rows carrying a merged PR therefore lie in the one direction
+that wastes the most work: they hide finished items behind a "someone is on it" marker, and with no
+open PRs at the time there was no session for a reader to go and ask. The queue is the contract; a
+contract that misreports its own state is the defect, independent of the code it points at.
+
+Each row's ledger stays in `PROGRESS.md` (2026-10-06 for Q-618 and Q-704, 2026-10-05 for Q-650), so
+nothing is lost by removing the rows — only the false claim. Their IDs are appended to
+`docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in this same commit, and the queue was edited on a FRESH
+`main`, both because of the #3543 incident that reopened closed rows from a stale copy.
+
+**What each row left behind, carried forward rather than dropped:**
+- **Q-618** asked for one post-merge observation: the first deploy's boot line and one real build. 20+
+  commits have merged to `main` since (each one a Cloud Run deploy), so the `USER node` change did not
+  break boot — the observation it asked for has been made by the deploy history itself.
+- **Q-650** said in its own words "Moves to ✅ on merge" — nothing outstanding.
+- **Q-704**'s residuals were already split out when it was written: **Q-705** (🟡 BLOCKED, the admin's
+  Cloud IAM steps) and **Q-706** (OPEN, the two isolation gaps the identity fix does not close). Both
+  stay in the queue; closing Q-704 does not touch them.

@@ -91808,3 +91808,7 @@ Q-735, Q-736, Q-737, Q-738, Q-739, Q-740, Q-742, Q-743 and Q-744 were removed fr
 - **Lock:** `tests/aBundleIsCheckedBeforePlaySeesIt.test.ts` (12 tests). It covers a real zip through the script, and the generated script run under Node. Four reversions, four failures: greedy decoder, step removed, summary guard removed, user step removed.
 
 **Watch:** the next `.aab` run must show a "Bundle permissions" notice annotation listing the permissions, with none restricted. If it shows READ_MEDIA_*, the cause is in our bundle, not in Play's tracks.
+
+## 2026-10-08: Q-749 closed (#3587 merged)
+
+The row was removed from the open queue and its ID appended to the closed register. **Live proof to watch:** the next `.aab` run shows a "Bundle permissions" notice annotation listing every permission, with none on Play's restricted list. Q-698 stays 🟡 BLOCKED on the admin's Play Console step.

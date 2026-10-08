@@ -99,6 +99,35 @@ describe('the page and the deletion code do not drift apart', () => {
        * test failed the moment the registry grew. That is the direction it is meant to fail in.
        */
       user_secrets: /API keys and credentials\*\* you stored in the secrets vault/i,
+      /**
+       * Added 2026-10-08 (Q-701) — the personal data the REGISTRY never saw. Every one of these was
+       * keyed to one person and in no erase path, because the census could only see EXPORTED
+       * `*_COLLECTION` constants and each of these names is a private constant or an inline literal.
+       * They are grouped on the page on purpose: twenty-one separate bullets would be a wall nobody
+       * reads, and the point of this page is that somebody actually reads it.
+       */
+      conversation_memory_v1: /chat and voice memory/i,
+      professional_user_memory: /what a professional assistant had noted about you/i,
+      sonic_voice_memory: /the voice-chat turns/i,
+      agentv3_conversations: /build conversation you had with the builder/i,
+      userPrefs: /builder settings and the record of what the builder learned/i,
+      user_brain_v3: /the lessons it kept/i,
+      user_mistakes_v3: /the mistakes ledger/i,
+      user_diagnostics_v3: /diagnostics report of your own last build/i,
+      terminal_daily_usage: /terminal seconds/i,
+      tool_daily_usage: /tool and picture calls/i,
+      ai_usage_logs: /the AI usage rows behind/i,
+      agentv3_onboarding_credits: /your free-build credit/i,
+      wallet_balance_alerts: /the balance warnings we had already sent you/i,
+      professional_passes: /professional pass/i,
+      user_notification_reads: /which admin notices you had already read/i,
+      zip_uploads: /\.zip archives/i,
+      agentv3_sheet_files: /spreadsheets you gave to a build/i,
+      shares: /share links/i,
+      pwa_apps: /instantly-hosted apps/i,
+      user_referrals: /referral record/i,
+      /** Said with its limit, because half of this one is not ours to do. */
+      custom_domains: /connected domains.*not\*\* change anything at your domain registrar/is,
       api_keys: /NavBharatAI API keys/i,
       bots: /chat bots/i,
       webhooks: /addresses NavBharatAI posted your build events to/i,
@@ -141,6 +170,25 @@ describe('the built-app eraser and the page do not drift apart', () => {
       // Q-134 (2026-10-05): two stores the erase now reaches, each named on the page.
       workspace_user_actions_v1: /the list of things the builder asked you to do/i,
       code_reviews: /the review comments left on them/i,
+      /**
+       * Added 2026-10-08 (Q-701) — twelve stores keyed by the workspace id that the eraser's range
+       * already reaches but the registry never listed, so none of them was erased. Two more were
+       * found and deliberately left OUT rather than registered on a guess: `app_ai_apps` (doc id is
+       * the APP id) and `build_history` (doc id is a bare sessionId) — neither is inside the
+       * `agentv3-{uid}-` range, and both are recorded in `BUILD_REPORT_QUEUE.md`.
+       */
+      agentv3_attachment_memory: /everything the builder kept about each app/i,
+      agentv3_build_outcome: /its build state/i,
+      buildTraces: /decisions it took/i,
+      build_queues_v3: /its build state/i,
+      incrementalCache: /the caches it reused between builds/i,
+      agentv3_provider_state: /its build state/i,
+      workspace_traceability: /everything the builder kept about each app/i,
+      migrationHistory: /everything the builder kept about each app/i,
+      mega_roadmaps_v3: /its plan and roadmap/i,
+      sboms: /the software bill of materials/i,
+      agentv3_deployments: /our record of where it/i,
+      agentv3_sandboxes: /the sandbox it ran in/i,
     };
     for (const { collection } of WORKSPACE_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

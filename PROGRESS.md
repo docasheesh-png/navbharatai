@@ -91813,6 +91813,101 @@ Q-735, Q-736, Q-737, Q-738, Q-739, Q-740, Q-742, Q-743 and Q-744 were removed fr
 
 The row was removed from the open queue and its ID appended to the closed register. **Live proof to watch:** the next `.aab` run shows a "Bundle permissions" notice annotation listing every permission, with none on Play's restricted list. Q-698 stays 🟡 BLOCKED on the admin's Play Console step.
 
+## 2026-10-08 — Q-699: Android "Save to Photos" has never saved, and the obvious fix would have broken iOS
+
+**Report:** Q-699, found on the way through Q-697 (the Play policy block). The image generator's
+one-tap "Save to Photos" works on iOS and has never worked on Android.
+
+**Root cause, read from the plugin's own Android source rather than inferred** —
+`node_modules/@capacitor-community/media/android/.../MediaPlugin.java`, `_saveMedia`:
+
+```java
+String album = call.getString("albumIdentifier");
+if (album != null) { albumDir = new File(album); }
+else { call.reject("Album identifier required", EC_ARG_ERROR); return; }
+```
+
+Our call was `Media.savePhoto({ path: written.uri })` — no `albumIdentifier`. So on Android it threw
+**every single time**, and `handleDownload`'s `catch` fell through to the OS share sheet. Nothing was
+faked (the "Saved to your Photos ✓" note only ever ran on the success path) and nothing was lost (the
+share sheet can still save), but the one-tap save the button promises was iOS-only.
+
+### 🔴 The trap, and why this is a platform-branched fix rather than a one-line one
+
+The obvious fix is "always pass `albumIdentifier`". It would have **broken iOS**, the one platform that
+worked. The field means two different things, and the plugin's own typings say so:
+
+| | Android | iOS |
+|---|---|---|
+| What it is | a filesystem **path** (`new File(album)`) | an opaque **PHAssetCollection localIdentifier** |
+| Required? | **yes** — rejected without it | **no** — an unknown value is rejected with "Unable to find that album" |
+
+The typings add a second reason to leave iOS alone: *"On iOS 14+, if the identifier is not specified
+… **add-only** permissions will be requested instead of full permissions."* So on iOS the
+no-identifier call is not a gap — it is the better call. iOS behaviour is byte-for-byte unchanged and
+two tests lock it.
+
+This is the "a fix must never trade one problem for another" rule catching a real trade before it
+shipped.
+
+### Why the plugin's album API and NOT a new MediaStore plugin
+
+Q-699's own note suggested writing through Android's MediaStore into `Pictures/NavBharatAI`. That is
+the better long-term home — it survives an uninstall — but it needs **new native Java, and this repo
+has no Android SDK**: it could not be compiled here, let alone run, before shipping. Shipping native
+code nobody can build is the "built but not really working" state the second absolute rule forbids.
+
+The plugin's existing album API reaches the gallery with **zero new native code**, and crucially with
+**no permission**: `_getAlbumsPath()` returns `getExternalMediaDirs()[0]` (the app's own external
+media directory), and `isStoragePermissionGranted()` returns `true` outright while `androidGalleryMode`
+is off — which it is, and which Q-697's test pins. So the Play-restricted `READ_MEDIA_IMAGES` that
+Q-697 removed does **not** come back.
+
+**Fix:** `src/lib/saveToGallery.ts` — Android resolves (and first-time creates) a `NavBharatAI` album
+and passes its path; every other platform calls `savePhoto({ path })` exactly as before. The plugin's
+`createAlbum` is **not** idempotent (it rejects an existing album with "Album already exists"), so that
+rejection is swallowed on purpose and the identifier always comes from `getAlbums()` — the only source
+that reports the real path. Any failure **throws**, by contract, so the caller's share-sheet fallback
+still runs; a silent resolve here would turn a failed save into a "Saved to your Photos ✓" the user
+never got.
+
+**Siblings:** hunted across the whole repo — `savePhoto`/`saveVideo`/`@capacitor-community/media` has
+exactly **one** call site, so this class has no second instance.
+
+**Lock:** `src/lib/saveToGallery.test.ts` (11 tests), reversion-proven three ways:
+- the naive "always pass the identifier" fix → **2 iOS tests fail**;
+- the original bug (Android branch removed) → **5 fail**;
+- a silent empty identifier instead of a throw → **3 fail**.
+
+⚠️ **The honest limit, recorded rather than implied.** There is no Android SDK in this environment, so
+this is **not device-verified**: the JS is fully tested and the native behaviour is read from the
+plugin's own source, but the real proof is the next `.aab` on a real phone. **The Q-699 row therefore
+stays IN PROGRESS until then, not closed on merge.** Also recorded: files under
+`Android/media/<package>/` are removed when the app is uninstalled, and some OEM galleries index that
+directory late — the MediaStore route stays the better long-term home for a session that can build
+Android.
+
+### ⚠️ Two defects in my own first draft, caught by reading the plugin instead of trusting my call
+
+Recorded because both would have shipped silently, and each is a precision hole worth keeping:
+
+1. **`photo.png.png`.** `copyFile` does `fileName + extension`, taking the extension from the SOURCE
+   file, so passing our already-suffixed `photo.png` would have written `photo.png.png` into the
+   user's gallery. The plugin's typings say it in one line — *"Do not include extension. Android
+   only."* — which I only read after the Java. `albumFileName()` strips it, and the all-extension
+   edge (`.png`) returns the input rather than an empty name.
+2. **I changed iOS while claiming I had not.** My first draft forwarded `fileName` on every platform,
+   including iOS, where the old call was `savePhoto({ path })` alone. `fileName` is documented
+   *Android only* (iOS names the asset with a UUID), so this was a change to the one working platform
+   in exchange for nothing — exactly the trade this PR exists to avoid, committed by me in the act of
+   avoiding it. iOS now sends `{ path }` and a test asserts the WHOLE payload, so an extra key is
+   itself the regression.
+
+Both are reversion-proven (5 reversions, 5 failures, across the two rounds).
+
+**What to watch:** on the next Android build, tap Save to Photos in the image generator — it should
+report "Saved to your Photos ✓" and the image should appear in a **NavBharatAI** album, with no share
+sheet, no permission prompt, and a single `.png` on the end of the file name.
 ## 2026-10-08: Q-618, Q-650 and Q-704 closed (#3566, #3546, #3576 all merged)
 
 Found at the start of a session, doing safeguard #1's fresh-state check: three rows still read **IN

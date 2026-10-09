@@ -24593,6 +24593,7 @@ async function noteBuildOutcome(
                 });
                 const rm = buildRemoveCommand(plan.remove);
                 if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'green-guard-remove'); } catch { /* best-effort */ } }
+                reconcileCapturedWrites(writtenFiles, plan); // GT-4: a later deadline/advisory save must not resurrect the broken files
                 await saveWorkspaceFiles(workspaceId, snapshot);
                 saved = true;
                 persisted = snapshot;

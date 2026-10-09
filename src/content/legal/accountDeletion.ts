@@ -78,6 +78,8 @@ When your deletion request is completed, we remove:
   to redeem, and a payment record is one of the things we are required to keep — see below.);
 - your **App Mart likes, dislikes and comments** — every 👍 and 👎 you gave, every comment and reply you wrote, your App Mart notifications, the list of people you blocked, the creators you follow and the people who follow you, the profile photo you uploaded, and the link between your public creator code and your account (so your App Mart profile stops opening). Other people's replies to your comments are not theirs to lose, but they can no longer be reached once your comment is gone;
 - your **rating of NavBharatAI** — the stars and the note you gave after one of your apps went live, and any "Not now" pause on that question;
+- your **cross-device workspace** — the copy of your chat sessions and your last built app that we
+  keep so they follow you from one device to another;
 - your **chat and voice memory** — what each NavBharatAI assistant remembered about you to keep a
   conversation going, the voice-chat turns, what a professional assistant had noted about you, and every
   build conversation you had with the builder;

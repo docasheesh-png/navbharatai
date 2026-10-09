@@ -3036,6 +3036,20 @@ export class ToolDispatcher {
   }
 
   /**
+   * P3b (AGENTV3_WORKING_SET) — the CURRENT content of a workspace file, for the working-set block the
+   * runner appends to the model's view. Read-only, bounded by a short timeout; null on any failure so a
+   * slow or missing file simply drops out of the block.
+   */
+  async readForWorkingSet(path: string): Promise<string | null> {
+    try {
+      const content = await withTimeout(this.actuator.readFile(this.workspaceId, path), 3_000, 'working-set-read');
+      return typeof content === 'string' ? content : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Write one game recipe's files. A file already holding EXACTLY the recipe's content is not rewritten
    * and is reported as unchanged (autopsy 6a55d939: the builder ran the whole recipe sequence twice and
    * the controller three more times; every re-run said "Updated" about files it had not changed, and each

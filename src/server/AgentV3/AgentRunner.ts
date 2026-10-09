@@ -1,4 +1,5 @@
 import { NOT_READY_HEADLINE, NOT_READY_HEADLINE_CONTINUE } from './notReadyHeadline';
+import { compactForBudget, recentlyTouchedPaths, tokenCompactEnabled, withWorkingSet, workingSetBlock, workingSetConfig, workingSetEnabled } from './reliability/contextBudget';
 import { QualityMonitor, handoffNote } from './reliability/qualityEscalation';
 import type { AgentEventStream } from './AgentEventStream';
 import { isStarterBlocker, starterSummary } from './stillTheStarterApp';
@@ -831,9 +832,27 @@ export class AgentRunner {
           // payload — the fix for the 233KB prompt that timed out the cheap floor. No-op on a small
           // build. Disabled by setting transcriptKeepRecent to 0 turns is not offered; instead
           // AGENTV3_MODEL_COMPACT=off bypasses entirely for a clean A/B if ever needed.
-          const modelMessages = envKillSwitch('AGENTV3_MODEL_COMPACT')
+          let modelMessages = envKillSwitch('AGENTV3_MODEL_COMPACT')
             ? messages
-            : compactTranscriptForModel(messages, { keepRecentMessages: modelKeepRecent, maxOldToolResultChars: modelMaxOldToolResultChars });
+            : tokenCompactEnabled()
+              // P3a (AGENTV3_TOKEN_COMPACT) — verbatim until ~50% of the window, then gentle, then tight.
+              ? compactForBudget(messages, (system ?? '').length, compactTranscriptForModel).messages
+              : compactTranscriptForModel(messages, { keepRecentMessages: modelKeepRecent, maxOldToolResultChars: modelMaxOldToolResultChars });
+          // P3b (AGENTV3_WORKING_SET) — the fresh on-disk content of recently touched files, appended last.
+          if (workingSetEnabled() && typeof dispatcher.readForWorkingSet === 'function') {
+            try {
+              const wsCfg = workingSetConfig();
+              const paths = recentlyTouchedPaths(messages, wsCfg.files);
+              if (paths.length) {
+                const files: Array<{ path: string; content: string }> = [];
+                for (const p of paths) {
+                  const c = await dispatcher.readForWorkingSet(p);
+                  if (typeof c === 'string') files.push({ path: p, content: c });
+                }
+                modelMessages = withWorkingSet(modelMessages, workingSetBlock(files, wsCfg));
+              }
+            } catch { /* the working set is advisory — never blocks a turn */ }
+          }
           const turnCall = client.runTurn({
             model,
             system,

@@ -3,10 +3,11 @@ import { ImageLightbox } from '../chat/ImageLightbox';
 import { ComposerShell, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS } from '../chat/ComposerShell';
 import { playTapTone } from '../../lib/tapTone';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
-import { Bot, User, Send, Sparkles, Heart, Zap, ShieldCheck, Languages, ShieldAlert, CheckCircle2, Save, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Zap, CheckCircle2, Save, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
+import { stripChatMarkers } from '../../lib/chatMarkers';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { CHAT_MARKDOWN_PLUGINS } from '../../lib/chatMarkdown';
@@ -474,7 +475,9 @@ export const AIChat: React.FC<AIChatProps> = ({
     console.log(`[AIChat] isLoading changed to: ${isLoading}`);
   }, [isLoading]);
 
-  const [showModeDropdown, setShowModeDropdown] = useState(false);
+  // `showModeDropdown` was state nothing set and nothing read. The Free chat's mode picker is a
+  // SHEET that App.tsx owns and this component only asks to open (`onOpenModePicker`), so a local
+  // dropdown flag here could never have been the thing that opened it. Removed by Q-600's sweep.
   const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   // AI replies the user flagged with Report — hidden on this screen at once (the person asked not to see
@@ -553,33 +556,25 @@ export const AIChat: React.FC<AIChatProps> = ({
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  const parseMessageAndTriggers = (msg: Message) => {
-    const text = String(msg.text || '');
-    const match = text.match(/\[ACTION_SECRET_HELPER:([^\]]+)\]/i);
-    if (match) {
-      const providerId = match[1].toLowerCase().trim();
-      const cleanedText = text.replace(/\[ACTION_SECRET_HELPER:[^\]]+\]/gi, '').trim();
-      return { providerId, cleanedText, deservesManual: false };
-    }
+  /**
+   * 🔴 A BADGE WHOSE INPUT IS FROZEN, SO IT WAS DELETED AND NOT SHOWN (Q-600's sweep, 2026-10-09).
+   *
+   * `getDisplayIntent` mapped `activeIntent` to a label, icon and colour for seven personas ("Architect
+   * Mode", "Security Auditor", …) and `intentUI` computed it on every render. Nothing rendered it, and
+   * the obvious reading — a forgotten wire-up worth finishing, as the room's Code tab and the deploy
+   * step strip both were — is wrong here.
+   *
+   * `activeIntent` is `useState<string>('social')` in App.tsx and **nothing in the repository ever calls
+   * `setActiveIntent`**, so the value is permanently `'social'`, which is not one of the seven cases: the
+   * badge would have rendered the default, "Navbharat AI", on every message for ever. That is a status
+   * indicator that does not reflect state, which the second absolute rule forbids outright. Building it
+   * would have shipped a fake.
+   *
+   * The dead `activeIntent` prop chain itself (App.tsx → ViewPanels → NBIChatPanel → here) is recorded
+   * as its own queue row rather than removed in passing: it crosses App.tsx, which Q-600 says to leave
+   * while other sessions may be editing it.
+   */
 
-    const deservesManual = msg.sender === 'ai' && /api key|secret key|stripe_secret_key|gemini_api_key|claude_api_key|openai_api_key|groq_api_key|deepseek_api_key/i.test(text);
-    return { providerId: null, cleanedText: text, deservesManual };
-  };
-
-    const getDisplayIntent = (intent: string) => {
-
-      switch(intent) {
-         case 'greeting': return { label: 'Social Assistant', icon: Heart, color: 'text-danger bg-rose-500/10' };
-         case 'build': return { label: 'Architect Mode', icon: Zap, color: 'text-accent-text bg-indigo-500/10' };
-         case 'technical': return { label: 'Technical Guru', icon: ShieldCheck, color: 'text-success bg-emerald-500/10' };
-         case 'emotional': return { label: 'Empathetic Companion', icon: Languages, color: 'text-warn bg-amber-500/10' };
-         case 'security': return { label: 'Security Auditor', icon: ShieldAlert, color: 'text-accent-text bg-indigo-500/10 border-indigo-500/20' };
-         case 'github': return { label: 'GitHub Cloud Architect', icon: Github, color: 'text-ink bg-well' };
-         default: return { label: 'Navbharat AI', icon: Sparkles, color: 'text-accent-text bg-raised' };
-      }
-    };
-
-  const intentUI = getDisplayIntent(activeIntent);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -598,12 +593,9 @@ export const AIChat: React.FC<AIChatProps> = ({
     const isAI = msg.sender === 'ai';
     const text = msgText;
     const hasSources = text.includes('Sources:') || text.includes('References:');
-    let displayContent = text;
-    
-    // Pro Mode: Hide raw code, show action status
-// (Removed message hiding)
-
-    const isQuestion = isAI && (text.includes('?') || text.includes('what kind of') || text.includes('would you like'));
+    // `displayContent` and `isQuestion` were computed here and read nowhere. `displayContent` was a
+    // leftover of the removed 'hide raw code in Pro mode' branch (its own comment said so); nothing ever
+    // asked whether a reply was a question. Removed by Q-600's sweep.
 
     // ── Special markers ─────────────────────────────────────────────────────
     const hasSwitchToBuild = isAI && text.includes('__SWITCH_TO_BUILD__');
@@ -611,14 +603,13 @@ export const AIChat: React.FC<AIChatProps> = ({
     const hasViewPreview   = isAI && text.includes('__VIEW_PREVIEW__');
     const hasDeployActions = isAI && text.includes('__DEPLOY_ACTIONS__');
     const hasAutoPlan      = isAI && text.includes('__AUTO_PLAN__');
-    const cleanText = text
-      .replace('__SWITCH_TO_BUILD__', '')
-      .replace('__URGENT_BUILD__', '')
-      .replace('__VIEW_PREVIEW__', '')
-      .replace('__DEPLOY_ACTIONS__', '')
-      .replace('__AUTO_PLAN__', '')
-      .replace('__AUTO_BUILD__', '')
-      .trim();
+    // 🔴 EVERY marker the prompt asks the model for, stripped in ONE place (`lib/chatMarkers.ts`).
+    // This list used to be written out here, and it was missing `[ACTION_SECRET_HELPER:provider]` —
+    // which the prompt told the model to append to EVERY message about an API key. The only code that
+    // could remove it was a local in this file that nothing called, so the user read the raw marker in
+    // the message bubble. Chat history is stored, so stripping still matters for messages already
+    // written; the prompt no longer asks for new ones. See that module for the whole finding.
+    const cleanText = stripChatMarkers(text);
     const deployFiles = (msg as any).meta?.deployFiles as Record<string, string> | undefined;
     const deployAppName = (msg as any).meta?.appName as string | undefined;
     const suggestions = (msg as any).meta?.suggestions as string[] | undefined;

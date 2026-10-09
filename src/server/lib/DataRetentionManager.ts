@@ -174,9 +174,12 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    *  · `webhooks`      — the outbound URLs NavBharatAI posts the person's build events to. Verified: the
    *    doc id IS the uid (WebhookManager.ts:63 read, :90 and :106 writes).
    *
-   * ⚠️ `bot_sessions` is NOT here and cannot be: its doc id is `${botId}_${chatId}` (BotStore.ts:283), which
-   * is reachable from the bot, not from the uid. It holds no credential — per-chat conversation state — and it
-   * is recorded as an open sibling in `BUILD_REPORT_QUEUE.md`, not silently dropped.
+   * ⚠️ `bot_sessions` is NOT here, and the reason is still true: its doc id is `${botId}_${chatId}`
+   * (BotStore.ts:283), which is reachable from the bot, not from the uid, so no key strategy in THIS
+   * registry can express it. What has changed (Q-761, 2026-10-09) is that it is no longer merely
+   * recorded: `derivedIdErase.ts` resolves the bot ids first and sweeps `bot_sessions/{botId}_` by id
+   * range, and it runs BEFORE this cascade precisely because this cascade deletes the `bots` the keys
+   * come from.
    */
   { collection: 'user_secrets', key: { field: 'user_id' } },
   { collection: 'api_keys', key: { field: 'userId' } },

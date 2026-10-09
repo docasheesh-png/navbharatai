@@ -92859,6 +92859,116 @@ real device. No row now reads `IN PROGRESS` against a merged PR.
 
 ---
 
+## 2026-10-09 — Q-761 · Q-762 · Q-764 · Q-765: four queue rows were ONE missing reachability shape
+
+**The class, named plainly: a Firestore document whose id is DERIVED.** Account deletion had exactly
+two ways to find a document — the doc id IS the uid (or a verified field equals it,
+`DataRetentionManager`), or the doc id is a workspace id inside the `agentv3-{uid}-` range
+(`workspaceDataErase`). A store whose id is *built* out of a key the eraser holds, but not equal to it
+and not carried in the body, is reachable by neither. There is nothing to query.
+
+Every session that met one of these did the right thing and got the same result. It read the store,
+correctly judged the document unreachable, and correctly refused to register it on a guess — which
+left a queue row. Four rows accumulated that way:
+
+| Row | Store | Why no key reached it |
+|---|---|---|
+| Q-762 | `adrDecisions`, `techDebt` | id `${uid}__${projectId}`, body `{records\|items, updatedAt}` — no uid field at all |
+| Q-764 | `build_history` + `versions` | a BARE sessionId; the `agentv3-{uid}-` range cannot match it |
+| Q-761 | `bot_sessions` | id `${botId}_${chatId}` — reachable from the BOT, never from the uid |
+| Q-765 | `app_ai_apps` | id is the public APP id, so the workspace range cannot reach it |
+
+**The 50/50 half that mattered.** Fixing four stores is the first half. The other half is why a
+correct judgement kept producing a permanent gap: *"I cannot express this key"* had no answer except
+a queue row. So `src/server/lib/derivedIdErase.ts` is that answer — a third reachability shape that
+resolves the key first and then deletes the exact id:
+
+- the uid itself → the `${uid}__` prefix range (Q-762);
+- the user's `bots` (`ownerUid`) → an id range per `${botId}_` (Q-761);
+- `user_build_history.sessionId` **and** the workspace id range with the prefix stripped, unioned
+  because neither source is provably complete alone → `build_history/{key}`, `versions` first (Q-764).
+
+**And Q-765 turned out not to need it.** Reading the store answered what the guess could not: `mint`
+is the only writer of `app_ai_apps` in the repo and always sets `userId`, so the existing user
+registry reaches it exactly. It is a plain `{field: 'userId'}` entry — which is the point of reading
+the store rather than inventing a mechanism for it.
+
+**Ordering is load-bearing, and it is why the route changed.** Every key above is derived from a
+parent the *other two* erasers delete. Run second, this would resolve no keys, delete nothing, and
+report success — the "an erase that LOOKS complete and is not" failure `workspaceDataErase` was
+written to prevent. So `DELETE /api/profile` calls it FIRST, and a partial failure therefore leaves
+every parent findable, so running it again finishes the job.
+
+**The class is locked where the class lives.** `tests/everyCollectionIsClassified.test.ts` already
+refuses to let a `user`-kind collection exist without an erase path, and it reads the named module
+rather than trusting the map — so all four stores are now `user` kind pointing at `derivedIdErase`,
+and the four `blocked` entries are gone. Proven by reversion: removing `bot_sessions` from the
+eraser map fails two assertions, one of them *"user-keyed but never erased: bot_sessions"*. The scan
+also widened — `store` joined `DB_HANDLES`, so collection literals on that handle are now counted.
+
+**Writing the key tests found a real gap in my own code.** `buildHistoryKeysFor` split a workspace id
+on the `agentv3-{uid}-` prefix without applying the hyphenated-uid refusal `planWorkspaceErase` makes
+for exactly that reason: `agentv3-abc-d-pro-1` is both `abc-d`'s workspace `pro-1` and `abc`'s
+workspace `d-pro-1`, so the split could have handed the eraser a key belonging to a different person.
+The pure guard is now in the function that performs the split, and both refusals are reversion-proven
+in `tests/aDerivedDocumentIdIsReachable.test.ts` (14 assertions).
+
+**Honesty fixed too (fifth rule, step 5).** `AppKnowledgeBase`'s delete-account entry already promised
+"build history" was erased, and until this change that was false. It is true now, and the entry also
+names the two things a user would not have guessed: their bots' conversations, and their recorded
+architecture decisions and tech-debt notes.
+
+**Queue: 76 rows, 4 OPEN** (Q-600, Q-381, Q-706, Q-767). Q-767 still lists `bot_sessions` and that is
+correct: account deletion reaching it is a different duty from a retention window for the sessions of
+bots whose owner is still here.
+
+**And the gate found two more things the change implied, which is the whole argument for running it
+last on the final state.** Neither was in any report:
+
+- `tests/accountDeletionPage.test.ts` refuses to let the eraser wipe data the public deletion page
+  does not describe in plain words. Registering `app_ai_apps` failed it immediately. The page now
+  names three more things, in the terms a user would notice rather than ours: every saved version of
+  every app they could have restored, the conversations each bot had with the people who messaged it,
+  and the assistant inside any app they published — *"it stops answering, which is the point: it was
+  answering as you."*
+- `tests/everySubcollectionIsClassified.test.ts` flagged `build_history/{id}/versions`, and the
+  classification it already carried is the interesting part. It was `bounded`, which was TRUE —
+  `MAX_SAVED_VERSIONS` per session, oldest dropped on every save — and that kind only ever claimed the
+  data cannot GROW. It said nothing about erasure, so the label read as coverage while every saved
+  version survived account deletion for ever. That is Q-134's defect wearing a different word. The
+  kind now takes an `erasedBy` obligation, and the test reads the named module rather than trusting
+  the map — reversion-proven by renaming the string: *"derivedIdErase.ts does not mention 'versions',
+  so it cannot be erasing it."*
+
+---
+
+## 2026-10-09 — #3614 narrowed to Q-761 and Q-764, because #3611 got there first
+
+Correcting the entry above rather than erasing it. `#3614` was built for four rows; **#3611** (another
+session, opened 12:12, CI green) already owned two of them, and I did not list the open PRs immediately
+before starting. Safeguard #6 exists for exactly that, and the cost was two of four rows done twice.
+
+So the overlap is withdrawn from my side, not argued:
+
+- `adrDecisions` and `techDebt` (**Q-762**) — the `UID_PREFIXED_COLLECTIONS` registry and
+  `planUidPrefixErase` are removed from `derivedIdErase.ts`. #3611 fixes them by making the writers
+  store `userId`.
+- `app_ai_apps` (**Q-765**) — the `{field: 'userId'}` entry, its deletion-page bullet and that bullet's
+  guard entry are reverted. #3611 registers it.
+- Both rows are back in `BUILD_REPORT_QUEUE.md`, both IDs removed from the closed register, and each row
+  now names **#3611** as its owner so no third session takes it again. Their census entries go back to
+  `blocked` naming that PR.
+
+**What stays is what was only mine:** `bot_sessions` (Q-761) and `build_history` + `versions` (Q-764),
+the derived-key resolution for both, the `erasedBy` obligation on subcollections, and the class guard.
+
+**And one real difference is recorded rather than settled.** #3611 refuses a doc-id prefix range on the
+grounds that a uid containing the separator makes `a__b` ambiguous with `a` + `b__…` — *"a compliance
+gap is recoverable; deleting a different person's data is not"*. That is sound. It also means their fix
+cannot reach a row written **before** it, which they state plainly: a live project self-heals on its
+next build, an abandoned one does not. A uid prefix range would reach those, and the ambiguity they
+refuse becomes impossible once any uid outside `[A-Za-z0-9]` is refused outright. Put to the admin, in
+the row and in the thread. Not taken by overwriting somebody else's in-flight change.
 ## 2026-10-09 — a control string the user was reading, and the contract that had no holder (Q-600 batch three, Q-781)
 
 **What a user actually saw.** Whenever the chat AI talked about an API key, the message bubble contained

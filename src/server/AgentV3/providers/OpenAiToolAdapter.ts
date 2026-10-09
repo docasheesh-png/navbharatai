@@ -13,6 +13,7 @@
 // translation — the intricate, breakage-prone part — is fully unit-testable without
 // any live key. The runner that actually calls a provider wraps these functions.
 
+import { recalledReasoning, rememberReasoning, reasoningPassbackEnabled } from '../reliability/reasoningPassback';
 import type { ClaudeToolDef, ToolUse, TurnResult, TurnUsage } from '../ClaudeClient';
 
 // ── Minimal structural OpenAI shapes (we depend on fields, not the SDK types) ──────
@@ -33,6 +34,8 @@ export interface OpenAiMessage {
   content: string | null;
   tool_calls?: OpenAiToolCall[];
   tool_call_id?: string;
+  /** P4c — only ever set when AGENTV3_REASONING_PASSBACK is on and the target model reads it. */
+  reasoning_content?: string;
 }
 
 export interface OpenAiCompletionLike {
@@ -122,7 +125,7 @@ function toolResultText(content: unknown): string {
  * OpenAI `assistant.tool_calls` / `role:'tool'` messages so a function-calling model
  * sees a well-formed conversation.
  */
-export function transcriptToOpenAI(messages: unknown[], system?: string): OpenAiMessage[] {
+export function transcriptToOpenAI(messages: unknown[], system?: string, opts: { reasoningPassback?: boolean } = {}): OpenAiMessage[] {
   const out: OpenAiMessage[] = [];
   if (system && system.trim()) out.push({ role: 'system', content: system });
   if (!Array.isArray(messages)) return out;
@@ -150,6 +153,10 @@ export function transcriptToOpenAI(messages: unknown[], system?: string): OpenAi
         }));
       const msg: OpenAiMessage = { role: 'assistant', content: text || null };
       if (toolCalls.length) msg.tool_calls = toolCalls;
+      if (opts.reasoningPassback && toolCalls.length) {
+        const r = recalledReasoning(toolCalls.map((tc) => tc.id));
+        if (r) msg.reasoning_content = r;
+      }
       out.push(msg);
       continue;
     }
@@ -249,6 +256,11 @@ export function parseOpenAiCompletion(completion: OpenAiCompletionLike): TurnRes
         input: parseArgs(tc.function?.arguments, truncatedTurn),
       }))
     : [];
+
+  // P4c — remember the reasoning behind these tool calls, so the next request can hand it back.
+  if (reasoning && toolUses.length && reasoningPassbackEnabled()) {
+    try { rememberReasoning(toolUses.map((t) => t.id), reasoning); } catch { /* best-effort */ }
+  }
 
   const rawContent: unknown[] = [];
   if (text) rawContent.push({ type: 'text', text });

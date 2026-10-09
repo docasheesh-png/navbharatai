@@ -1,4 +1,5 @@
 import { NOT_READY_HEADLINE, NOT_READY_HEADLINE_CONTINUE } from './notReadyHeadline';
+import { QualityMonitor, handoffNote } from './reliability/qualityEscalation';
 import type { AgentEventStream } from './AgentEventStream';
 import { isStarterBlocker, starterSummary } from './stillTheStarterApp';
 import type { WorkspaceState } from './WorkspaceState';
@@ -55,6 +56,13 @@ import { resolveToolAlias, toolAliasNote } from './toolAlias';
  */
 export interface AgentRunnerOptions {
   client: TurnRunner;
+  /**
+   * P4b (fix/build-reliability, AGENTV3_QUALITY_ESCALATE) — called when the quality monitor sees the
+   * build struggling (truncation ×2, edit fail ×3, tsc not dropping). The route moves the build UP one
+   * model on its sticky chain and answers what happened; on an escalation the runner adds a handoff note
+   * to the next turn. Omitted ⇒ no monitoring at all (the default).
+   */
+  onQualityEscalate?: (reason: string) => { escalated: boolean; fromModel?: string; toModel?: string };
   dispatcher: ToolDispatcher;
   state: WorkspaceState;
   events: AgentEventStream;
@@ -472,6 +480,9 @@ export class AgentRunner {
    * file, which by definition happens on a later turn. Paths only — a bounded handful per build.
    */
   private readonly _truncationSteered = new Set<string>();
+  /** P4b — quality monitor + the files this run touched (for the handoff note). Inert unless onQualityEscalate is set. */
+  private readonly _quality = new QualityMonitor();
+  private readonly _touched: string[] = [];
   /** The ETA line the user was last shown, or null; never throws (see `liveUserMessageTurn`). */
   private shownEta(): string | null {
     try { return this.opts.currentEta?.() ?? null; } catch { return null; }
@@ -1453,7 +1464,37 @@ export class AgentRunner {
             }
           }
         } catch { /* the done check is advisory — it must never break a build */ }
-        const steer = [truncationSteer, loopSteer, budgetText, doneText].filter(Boolean).join('\n\n') || null;
+        // P4b — QUALITY ESCALATION (opt-in). Observes this turn's truncation / edit failures / tsc trend;
+        // when the monitor trips, the route moves the build up one model and the next model gets a note.
+        let handoffText: string | null = null;
+        if (this.opts.onQualityEscalate) {
+          try {
+            let editFailures = 0;
+            let editSuccesses = 0;
+            turn.toolUses.forEach((tu, idx) => {
+              const p = (tu.input as { path?: unknown })?.path;
+              if (typeof p === 'string' && /^(write_file|edit_file|append_file)$/.test(tu.name)) {
+                const at = this._touched.indexOf(p);
+                if (at >= 0) this._touched.splice(at, 1);
+                this._touched.push(p);
+              }
+              if (tu.name !== 'edit_file') return;
+              if ((resultBlocks[idx] as { is_error?: boolean } | undefined)?.is_error === true) editFailures += 1;
+              else editSuccesses += 1;
+            });
+            const tscErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;
+            const decision = this._quality.observe({ truncated: Boolean(turn.truncated || turn.stopReason === 'max_tokens'), editFailures, editSuccesses, tscErrors });
+            if (decision.escalate && decision.reason) {
+              const out = this.opts.onQualityEscalate(decision.reason);
+              this._quality.acknowledge(out.escalated);
+              if (out.escalated) {
+                handoffText = handoffNote({ fromModel: out.fromModel, toModel: out.toModel, reason: decision.reason, touchedFiles: this._touched, tscErrors });
+                events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: `🔁 Switching to a stronger engine${out.toModel ? ` (${out.toModel})` : ''}: ${decision.reason}.` });
+              }
+            }
+          } catch { /* quality escalation is best-effort — it must never break a build */ }
+        }
+        const steer = [truncationSteer, loopSteer, budgetText, doneText, handoffText].filter(Boolean).join('\n\n') || null;
         messages.push({ role: 'user', content: steer ? [...resultBlocks, { type: 'text', text: steer }] : resultBlocks });
         messageTs.push(Date.now());
         if (steer) platformMsgIdx.add(messages.length - 1);

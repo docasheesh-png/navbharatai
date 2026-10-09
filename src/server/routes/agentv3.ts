@@ -1,4 +1,6 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { reliabilityFlag } from '../AgentV3/reliability/flags';
+import { createStickyState, escalateSticky } from '../AgentV3/reliability/stickyRung';
 import { onStreamClosed } from '../lib/clientDisconnect';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
@@ -3717,6 +3719,8 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
   /** The BUILD's bench memory, shared by every runner the build constructs — see
    *  MultiProviderOptions.bench. Omitted ⇒ this runner benches for itself alone, as before. */
   bench?: BuildBenchRegistry;
+  /** P4 (fix/build-reliability) — sticky start; see MultiProviderOptions.sticky. Omitted ⇒ unchanged. */
+  sticky?: { remember: boolean };
 }): TurnRunner {
   const level = toPowerLevel(opts.tier as PowerLevel | boolean | string | undefined | null);
   const parsed = tierLadder(level);
@@ -3769,6 +3773,7 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
     ...(opts.onAttemptWasted ? { onAttemptWasted: opts.onAttemptWasted } : {}),
     ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
     ...(opts.bench ? { bench: opts.bench } : {}),
+    ...(opts.sticky ? { sticky: opts.sticky } : {}),
   });
 }
 
@@ -13980,6 +13985,12 @@ async function noteBuildOutcome(
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         complex: buildIsComplex, // a complex app opens on KIMI, not the flash rung — see makeFastTextRunner
         bench: buildBench,
+        // P4 (fix/build-reliability) — sticky start, default OFF. STICKY_RUNG remembers the rung that
+        // answered; QUALITY_ESCALATE alone only honours explicit upward escalations. Never below rung 0's
+        // guarded chain, so the weak no-Claude guard above still decides what can be reached.
+        ...((reliabilityFlag('STICKY_RUNG') || reliabilityFlag('QUALITY_ESCALATE'))
+          ? { sticky: { remember: reliabilityFlag('STICKY_RUNG') } }
+          : {}),
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
@@ -16446,6 +16457,20 @@ async function noteBuildOutcome(
         ...baseRunnerOpts,
         client,
         model,
+        // P4b (fix/build-reliability, AGENTV3_QUALITY_ESCALATE, default OFF) — quality signals move the
+        // build UP one model on the sticky chain. `noClaude` forbids a Claude target outright, so a weak
+        // build can never be escalated onto Claude (user rule 2026-10-09).
+        ...(reliabilityFlag('QUALITY_ESCALATE')
+          ? {
+              onQualityEscalate: (reason: string) => {
+                const out = escalateSticky(buildBench.sticky ??= createStickyState(), { noClaude: noClaudeBuild });
+                try {
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'QUALITY_ESCALATE', message: out.escalated ? `Escalated ${out.fromModel ?? '?'} → ${out.toModel ?? '?'}: ${reason}` : `Escalation refused (${out.reason ?? 'n/a'}): ${reason}`, autoResolved: true });
+                } catch { /* diagnostics are best-effort */ }
+                return out;
+              },
+            }
+          : {}),
         // ── THE CORRECTION RESERVE, ENFORCED ─────────────────────────────────────────────────────
         // Generation stops at the reserve line instead of at the wall, so the verify → repair →
         // re-verify stage below has a budget of its own rather than whatever generation happened to

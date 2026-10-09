@@ -101,6 +101,10 @@ When your deletion request is completed, we remove:
   the uptime history we kept for it. (This removes OUR record. It does **not** change anything at your
   domain registrar or your own host, which are not ours to touch — remove the DNS records there if you
   want the name completely free.)
+- the **engineering notes the builder kept for you** — the design decisions it recorded for each
+  project and the list of rough edges it was tracking in your code;
+- the **AI identity of each app you published** — the record of which of your apps may use
+  NavBharatAI's AI, and as you;
 - **everything the builder kept about each app** — its plan and roadmap, its build state, the trail of
   decisions it took, the caches it reused between builds, the software bill of materials for each
   build, the app's own site settings, and the outside services it was wired to talk to together with

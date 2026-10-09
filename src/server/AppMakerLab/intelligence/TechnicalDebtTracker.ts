@@ -117,7 +117,10 @@ export async function recordDebt(userId: string, projectId: string, findings: In
   const db = getDb() as any;
   if (db) {
     try {
-      await setDoc(docRef(db, userId, projectId), { items: merged, updatedAt: nowIso }, { merge: true });
+      // 🔒 `userId` IS STORED (Q-762) — same reason as `adrDecisions`: the doc id is
+      // `${userId}__${projectId}`, so without a field there is no way to find this person's rows,
+      // and their tech-debt list outlived their account.
+      await setDoc(docRef(db, userId, projectId), { userId, items: merged, updatedAt: nowIso }, { merge: true });
     } catch (err) {
       console.error('[TECH_DEBT] save failed:', err);
     }

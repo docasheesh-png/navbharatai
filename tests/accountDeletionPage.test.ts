@@ -134,6 +134,14 @@ describe('the page and the deletion code do not drift apart', () => {
        * be workspace-keyed at all — its doc id is the domain — so it is a user entry now.
        */
       site_uptime: /the uptime history we kept for it/i,
+      /**
+       * Added 2026-10-09 (Q-762, Q-765). All three were `blocked` in the census — not forgotten —
+       * because their document ids could not be searched by. Two writers now store `userId`; the
+       * third always did.
+       */
+      adrDecisions: /the design decisions it recorded for each\s*\n?\s*project/i,
+      techDebt: /the list of rough edges it was tracking in your code/i,
+      app_ai_apps: /AI identity of each app you published/i,
       api_keys: /NavBharatAI API keys/i,
       bots: /chat bots/i,
       webhooks: /addresses NavBharatAI posted your build events to/i,

@@ -105,6 +105,16 @@ export const WORKSPACE_SCOPED_COLLECTIONS: readonly WorkspaceScopedCollection[] 
   /** The app's SBOMs — `sboms/{workspaceId}/builds/{buildId}` (`routes/sbom.ts:52`). */
   { collection: 'sboms', sub: 'builds' },
   /**
+   * ── 🔴 ONE MORE, AND IT WAS HIDDEN BY A CONSTANT'S NAME (Q-784, 2026-10-09) ───────────────────────
+   * Which store app this workspace was born as a remix of (`navStoreWeb.ts:722`,
+   * `.collection(REMIX_ORIGINS).doc(workspaceId)`). The doc id IS the workspace id, so the range below
+   * has always been able to reach it — it was simply never listed, and the collection census could not
+   * say so either, because its scan matched a const whose NAME contains COLLECTION and this one is
+   * called `REMIX_ORIGINS`. Form 4 of that scan now resolves a const by its VALUE, which is what
+   * surfaced this store, two App Mart money stores, and nothing else.
+   */
+  { collection: 'nav_store_remix_origins' },
+  /**
    * ── 🔴 THREE MORE, AND THESE WERE NOT NEWLY DISCOVERED (Q-701 PR B, 2026-10-09) ──────────────────
    * `site_configs`, `agentv3_mcp_servers` and `site_uptime` were ALREADY classified `workspace` in
    * `tests/everyCollectionIsClassified.test.ts` — since before Q-701 — and were in no erase path at

@@ -237,8 +237,18 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'zip_uploads', key: { field: 'uid' } },
   /** A spreadsheet they uploaded (`spreadsheetFileStore.ts:47` writes `uid`). */
   { collection: 'agentv3_sheet_files', key: { field: 'uid' } },
-  /** A share link of their app (`ShareStore.ts`, ShareRecord.ownerId). */
-  { collection: 'shares', key: { field: 'ownerId' } },
+  /**
+   * A share link of their app (`ShareStore.ts`, ShareRecord.ownerId).
+   *
+   * 🔴 `subs: ['feedback']` ADDED BY Q-784 — Q-134's class, THIRD instance. `ShareStore.ts:276` writes
+   * `shares/{token}/feedback/{autoId}`: what visitors said about the shared app, in auto-id documents
+   * one level under the share. Firestore does not cascade, so deleting the share document alone left
+   * every one of those behind, intact and with no path left to reach them. The registry has had the
+   * `subs` capability since Q-701 and this entry simply never used it — which is why the hunt for this
+   * shape is now mechanical (`tests/noParentIsErasedWithoutItsChildren.test.ts`) rather than a thing
+   * somebody has to remember to do again.
+   */
+  { collection: 'shares', key: { field: 'ownerId' }, subs: ['feedback'] },
   /** A domain they connected (`firebaseDomainLink.ts:38` writes `userId`, `:63` queries it; the doc id is
    *  the DOMAIN). Note what this does and does not do: it removes NavBharatAI's record of the link —
    *  there is no other delete path in that module, suspension is only a field — and it does NOT unbind
@@ -732,6 +742,14 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
    */
   { collection: 'hosting_billing', reason: "the proof one owner's wallet was debited for one app-day, written with `create` SO THAT a re-run cannot charge twice — deleting it re-arms the double charge, and it is a record of money besides (Privacy §9, tax law)" },
   { collection: 'hosting_period_usage', reason: 'the running traffic total an overage charge is the difference from, plus any unpaid debt (`owedInr`) — a timer here would re-bill a settled period or erase a real debt' },
+  /**
+   * Q-784. Two App Mart money stores that were in NO registry and in no census entry either — hidden
+   * from the collection scan purely because their constants are called `PURCHASES` and
+   * `PENDING_CREDITS` rather than `*COLLECTION*`. Both are money, so both are `payment_transactions`'
+   * class; the second is the sharper one, because it is money we OWE.
+   */
+  { collection: 'nav_store_purchases', reason: "one doc per (app, buyer): the record of a sale AND the buyer's own proof of purchase; money, so it outlives the account (Privacy §9's first exception, tax law)" },
+  { collection: 'nav_store_pending_credits', reason: 'money OWED to a creator whose credit failed to land, written so the sale can be reconciled by hand — a debt an account closure or a timer erases is a debt nobody can pay' },
 ];
 
 // ── Subcollection retention (Q-134, admin-approved 2026-10-05) ───────────────────────────────────────

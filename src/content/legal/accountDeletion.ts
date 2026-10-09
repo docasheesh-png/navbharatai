@@ -109,8 +109,8 @@ When your deletion request is completed, we remove:
   NavBharatAI's AI, and as you;
 - **everything the builder kept about each app** — its plan and roadmap, its build state, the trail of
   decisions it took, the caches it reused between builds, the software bill of materials for each
-  build, the app's own site settings, and the outside services it was wired to talk to together with
-  the keys we held for them;
+  build, the app's own site settings, the note of which App Mart app it was remixed from,
+  and the outside services it was wired to talk to together with the keys we held for them;
 - the **live preview and deployment of each app** — the sandbox it ran in and our record of where it
   was deployed;
 - the records your app stored in the NavBharatAI database — the small database started from Publish, including its records and the operation counters kept beside them;

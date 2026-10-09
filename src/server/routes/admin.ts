@@ -185,6 +185,9 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'app_ai_usage', 'app_ai_visitors', 'image_free_paid_daily', 'mobile_build_outcomes',
   'agentv3_free_chains', 'hosted_deploy_attempts', 'referral_claim_outcomes', 'auth_otp_outcomes',
   'app_mart_notifications', 'app_mart_comment_reports', 'payment_transactions',
+  // Q-784: two App Mart money stores that were in no registry at all, hidden from the collection
+  // census because their constants are named `PURCHASES` and `PENDING_CREDITS`.
+  'nav_store_purchases', 'nav_store_pending_credits',
 ];
 import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
 import { routeParam, routeParams } from '../lib/expressCompat';

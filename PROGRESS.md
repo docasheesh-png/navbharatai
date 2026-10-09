@@ -92363,3 +92363,65 @@ a code twice, and the new backlog size (47) is pinned. Reversion-proven: comment
 
 **The row stays OPEN — 47 remain.** Under the sixth absolute rule a row leaves the table only when it is
 finished, and this is batch one of a shrinking backlog, not the end of it.
+---
+
+## 2026-10-09 — The queue after four merges: four rows closed, and one that was quietly lying
+
+All four PRs are on `main`: #3592 (Q-707), #3593 (Q-760), #3594 (Q-701 PR A), #3595 (Q-701 PR B).
+Under the sixth absolute rule a row leaves the open table only when its PR is MERGED, so **Q-707,
+Q-760, Q-701 and Q-768** are removed here and their IDs appended to
+`docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` **in the same commit**, on a FRESH `main` — both because of
+the #3543 incident that reopened closed rows from a stale copy, which
+`tests/aClosedQueueRowStaysClosed.test.ts` now fails on.
+
+### 🔴 And Q-699 was in the exact false state I had closed three other rows for, this morning
+
+The first task of this session was #3589: three rows sitting at `IN PROGRESS` with their owner PR
+already merged. The ledger for it says plainly why that matters — *"a contract that misreports its own
+state is the defect"* — because an owner PR number means a session is working the row, and a concurrent
+session reads it to decide what NOT to pick up.
+
+**Q-699 was the fourth, and I left it there myself.** Its code merged in #3590 yesterday; the row still
+read `IN PROGRESS | #3590`. I had decided deliberately that it was not RESOLVED — the Android gallery
+save is not proven without a real device — and then recorded that decision in the one state that says
+the opposite of it. Nobody was working it. The sixth rule has exactly two final states and
+"IN PROGRESS with a merged PR" is neither.
+
+It is now **🟡 BLOCKED — REQUIRES ACTION (device check)** with all four fields, owner cleared:
+- **What:** that Android's one-tap gallery save actually works on a real device.
+- **Why:** no Android SDK and no phone in this session, so the only honest proof is a real `.aab`.
+- **Needs**, five things on one tap of Save to Photos: the toast says "Saved to your Photos ✓"; the image
+  appears in a **NavBharatAI** album; **no** share sheet; **no** permission prompt; a single `.png`
+  extension and not `photo.png.png`.
+- **Already tried:** the plugin's own `MediaPlugin.java` and `MediaPlugin.swift` read rather than its
+  README; its typings confirm `fileName` carries no extension and is Android-only, which is why
+  `albumFileName()` strips it; the album is resolved `getAlbums → createAlbum → getAlbums` because
+  `savePhoto` rejects on Android without an `albumIdentifier`; and the iOS call is kept byte-for-byte as
+  `{ path }`, asserted on the WHOLE payload after a first draft of mine changed iOS while claiming it
+  had not.
+
+**The lesson is about the shape of the mistake, not the row.** Fixing three instances of a class in the
+morning and leaving the fourth in place by the evening — in the same file, while writing the ledger that
+named the class — is the sibling-hunting failure the fifth rule's 2026-09-30 section is about, in
+miniature. The queue's own guards cannot catch it either: nothing compares a row's owner against
+GitHub's merge state. That is worth building, and is recorded as the next queue-hygiene item rather than
+claimed as done here.
+
+### On the merges themselves
+
+`main` moved under all three stacked branches, because #3592 was merged while they were open and then
+each of mine landed in turn. Every one was merged in with `git merge origin/main` and **the full gate
+re-run on the merged state** — never on the pre-merge state, which proves nothing about what is being
+pushed.
+
+The conflicts were worth the care they took. Squash-merging a stack guarantees them: the branch holds
+#3593's real commits while `main` holds their squashed equivalent, so git sees the same addition on both
+sides. For #3594 all three conflicts had an EMPTY `origin/main` side, so keeping ours lost nothing — but
+that was **checked, not assumed**, and then checked again by counting the lines that differ from `main`
+and accounting for each one. For #3595 the `main` side was NOT empty in three of five hunks, and the
+diff showed ours was `theirs` plus PR B's own edits in every case. Seven lines read as "removed from
+main" across both merges; every one was a line this work had rewritten.
+
+Gates on the merged states: #3593 **35,821 passed**, #3594 **35,827 passed**, #3595 **35,834 passed** —
+plus `tsc` ×2, `noUnusedImports`, `native:guard`, `build`, `test:bundle`, `boot:check` and
+`deps:server-gate` on each.

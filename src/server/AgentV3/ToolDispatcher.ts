@@ -426,6 +426,7 @@ import { containsSymbol } from './codemodScope';
 import { codemodTruncationNote } from './codemodTruncation';
 import { getEmbeddingStore } from './EmbeddingSearch';
 import { redactSecrets, redactDeep } from './SecretRedactor';
+import { isSecretFilePath, maskSecretFile, SECRET_MASK, secretPlaceholderWriteMessage } from './secretFileView';
 // Where the sandbox browser may go: its own preview, or the real public web — never an internal
 // infrastructure address. Handing a model a browser with an unrestricted address bar is an SSRF
 // primitive; see lib/browseTarget.ts.
@@ -1316,7 +1317,6 @@ export class ToolDispatcher {
       try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
       const merged = mergeDotEnv(existing, this.userSecretsEnv);
       await this.actuator.writeFile(this.workspaceId, '.env', merged);
-      try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
       // Keep .env out of git — always, even if the app already had one.
       try {
         let gi = '';
@@ -1457,7 +1457,6 @@ export class ToolDispatcher {
         try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
         const merged = mergeDotEnv(existing, lines);
         await this.actuator.writeFile(this.workspaceId, '.env', merged);
-        try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
         // Keep .env out of git.
         try {
           let gi = '';
@@ -1587,7 +1586,6 @@ export class ToolDispatcher {
       // Written LAST, so it wins over the sandbox-local URL merged moments earlier.
       const merged = mergeDotEnv(existing, env);
       await this.actuator.writeFile(this.workspaceId, '.env', merged);
-      try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
       try {
         let gi = '';
         try { gi = await withTimeout(this.actuator.readFile(this.workspaceId, '.gitignore'), 5_000, 'gi-read'); } catch { gi = ''; }
@@ -4214,6 +4212,9 @@ export class ToolDispatcher {
           // real path(s) appended — the agent gets to correct itself on the FIRST miss instead of looping.
           throw new Error(`${base}${hint}`.trim());
         }
+        if (isSecretFilePath(reqPath)) {
+          full = maskSecretFile(reqPath, full, new Set(Object.keys(this.userSecretsEnv)));
+        }
         // RANGED READ (Fix 36b — HMS report 2026-07-07): a big file's tool result gets its middle
         // trimmed by the transcript ceiling, and a plain re-read returns the SAME trimmed view — the
         // model concluded the FILE was "truncated at exactly N lines" and destructively 'repaired' a
@@ -4341,6 +4342,9 @@ export class ToolDispatcher {
         // A rewrite of the global stylesheet keeps the design-kit rules it dropped (autopsy e725e002).
         const kitKeep = kind === 'modify' ? this.keepDesignKit(path, content, existingContent) : { content, note: '' };
         content = kitKeep.content;
+        if (isSecretFilePath(path) && content.includes(SECRET_MASK)) {
+          throw new Error(secretPlaceholderWriteMessage(path));
+        }
         // Self-destruct guard (StudySync autopsy 2026-07-16): refuse to BLANK a populated source file.
         // Overwriting src/App.tsx with "" deletes its code and breaks every importer — the same
         // catastrophe as `rm`, but via the tool path (bypasses the shell guard). Checked BEFORE writing
@@ -4613,6 +4617,9 @@ export class ToolDispatcher {
         const editKit = this.keepDesignKit(path, deduped, existing);
         const updated = editKit.content;
         const editKitNote = editKit.note;
+        if (isSecretFilePath(path) && updated.includes(SECRET_MASK)) {
+          throw new Error(secretPlaceholderWriteMessage(path));
+        }
         // Self-destruct guard: an edit that reduces a populated source file to empty/whitespace blanks it
         // — same catastrophe as deletion. Refuse before writing so the file survives (StudySync autopsy).
         if (isDestructiveEmptyOverwrite(path, existing, updated)) {
@@ -6497,8 +6504,8 @@ export class ToolDispatcher {
             ? 'This was a FILTERED run. Run run_tests with no filter before calling the build done.\n'
             : '') +
           (outcome.failingTests.length ? `failing:\n  ${outcome.failingTests.slice(0, 20).join('\n  ')}\n` : '') +
-          `\n[stdout tail]\n${stdout.slice(-1500)}` +
-          (stderr ? `\n[stderr tail]\n${stderr.slice(-800)}` : '');
+          `\n[stdout tail]\n${redactSecrets(stdout.slice(-1500))}` +
+          (stderr ? `\n[stderr tail]\n${redactSecrets(stderr.slice(-800))}` : '');
         this.state?.appendTerminal(detail);
         return detail;
       }
@@ -8401,7 +8408,6 @@ export class ToolDispatcher {
           try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'secrets-env-read'); } catch { existing = ''; }
           const merged = mergeDotEnv(existing, saved);
           await this.actuator.writeFile(this.workspaceId, '.env', merged);
-          try { this.onFileWrite?.('.env', merged); } catch { /* durable record is best-effort */ }
           // The user's real keys must never reach their git repo.
           try {
             let gi = '';
@@ -8909,7 +8915,8 @@ export class ToolDispatcher {
             allOk = allOk && ok;
             planOk = planOk && ok;
             exitCodes.push(r.exitCode);
-            out.push(`${ok ? '✓' : '✗'} [${plan.tool}] ${cmd} → exit ${r.exitCode}${ok ? '' : `\n${(r.stderr || r.stdout || '').slice(-600)}`}`);
+            const tail = redactSecrets((r.stderr || r.stdout || '').slice(-600));
+            out.push(`${ok ? '✓' : '✗'} [${plan.tool}] ${cmd} → exit ${r.exitCode}${ok ? '' : `\n${tail}`}`);
             if (!ok) break; // a failed step blocks the rest of this tool's chain — report honestly, don't push on
           }
           // GA-6 — persist THIS plan's run (tool, commands, outcome, exit codes) so a later build remembers it.
@@ -10505,7 +10512,7 @@ export class ToolDispatcher {
                 'preview-managed-dev-start',
               );
               const healOut = `${heal.stdout || ''}\n${heal.stderr || ''}`;
-              const tail = healOut.trim().slice(-200);
+              const tail = redactSecrets(healOut.trim().slice(-200));
               healNote = ` A managed dev-server start was attempted${tail ? ` (${tail})` : ''}.`;
               // AUTHORITATIVE VERDICT: the managed launcher runs the SAME port check (buildPortWaitCommand)
               // that pollPort re-runs, then prints its result. When it confirms the port UP, TRUST it — a

@@ -1735,3 +1735,18 @@ describe('deriveRootCause — a build that ended without recording an outcome', 
       .toBe('Build completed successfully with no problems recorded.');
   });
 });
+
+describe('recordCommand stores redacted command output (TD-4)', () => {
+  it('does not keep a database password or a recognised token', () => {
+    const d = new BuildDiagnostics({ now: () => 1 });
+    const token = 'sk-FAKEtokenvalue0123456789abcd';
+    d.recordCommand({
+      command: 'DATABASE_URL=postgres://u:FAKEPASS@h/db npx prisma migrate',
+      exitCode: 1,
+      stderr: `Authorization: Bearer ${token}`,
+    });
+    const blob = JSON.stringify(d.report());
+    expect(blob).not.toContain('FAKEPASS');
+    expect(blob).not.toContain(token);
+  });
+});

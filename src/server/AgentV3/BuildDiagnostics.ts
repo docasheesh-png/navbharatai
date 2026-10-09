@@ -18,6 +18,7 @@ import { isProjectSummaryNarration } from './ProjectSummary';
 import { isTransientStatusLine } from './workingHeartbeat';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
+import { redactSecrets } from './SecretRedactor';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
 import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { sandboxCost, describeSandboxCost } from './sandboxCost';
@@ -1089,6 +1090,13 @@ export class BuildDiagnostics {
   private compatibleAuditFixRan = false;
 
   recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number; timing?: CommandTiming }): void {
+    // TD-4: one door. The audit parser below still sees vulnerability counts; it does not need values.
+    rec = {
+      ...rec,
+      command: redactSecrets(rec.command),
+      stdout: rec.stdout === undefined ? undefined : redactSecrets(rec.stdout),
+      stderr: rec.stderr === undefined ? undefined : redactSecrets(rec.stderr),
+    };
     // NPM ALREADY TOLD US (dukaan report 2026-08-12). That build's install printed "8 vulnerabilities
     // (4 moderate, 4 high)" and the report said nothing at all — not "clean", not "couldn't check". The
     // OSV-backed dep-health gate returns '' for BOTH outcomes, so silence proved nothing either way,

@@ -92693,3 +92693,36 @@ Reversion-proven both ways: emptying the step strip fails, and `setActiveStep(4)
 **Baseline 86 → 78**, both files out of `unusedLocalsBaseline.json` (18 files → 16). **Q-600 stays
 OPEN** — 78 locals in 16 files, of which `App.tsx` (46) and `AgentV3Panel.tsx` (11) are 57 and are
 left alone while other sessions may be editing them. The remaining small files are the next batch.
+
+## 2026-10-09 — Q-771 closed (#3609 merged). Where the session's work stands.
+
+**Q-771 ✅ RESOLVED.** #3609 merged as `555a3e6`, so the row left the open table and `Q-771` was
+appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main`.
+
+**Four items shipped today, in merge order:** Q-621 (#3599, the other session's), Q-770 (#3607),
+Q-381 batch one (#3601), Q-771 (#3609).
+
+**What is left on the rows this session touched, stated plainly rather than as "done":**
+
+- **Q-600 — OPEN.** 78 unused locals in 16 files, down from 95 in 19. **57 of the 78 are `App.tsx`
+  (46) and `AgentV3Panel.tsx` (11)**, which the row itself says to leave alone while other sessions
+  may be editing them — and on a day when `main` took eight merges in seven hours, that condition
+  held the whole time. The remaining 21 are in small files and are the next batch.
+- **Q-381 — OPEN.** 47 finding codes still in no registry. The ones left are not like batch one's:
+  each needs a decision about what a user should be told (`TOOL_ERROR`, `STUCK_TOOL`, the `OUTCOME_*`
+  roll-ups, `FEATURE_COVERAGE`, `SIMULATED_DATA_SHIPPED`), and `PLATFORM_SOURCE_WORKSPACE` is the
+  one at ERROR severity, so it is money-adjacent.
+- **Q-769 — OPEN.** `@google-cloud/vertexai` exposes no abort hook, so a Vertex rung's request
+  cannot be cancelled when the client leaves. Mitigated (consumption stops), not fixed. Recorded
+  with two options and a recommendation.
+
+**The pattern worth carrying forward, because it is what both Q-600 batches found.** Twice in one
+day an unused local turned out to be a finished feature or a maintained value that no screen read —
+P-DESIGN.7's shared editor and line comments, then the deploy panel's step and elapsed timer. The
+class is *real state the code maintains on every run that nothing renders*, and nothing in the
+toolchain can catch it: an unrendered value passes `tsc`, passes every test, and costs real work at
+runtime (a Firestore listener, a 10 Hz ticker) to display nothing. The two verdicts went opposite
+ways — build the UI where the backend was already real and documented, delete where the design had
+been superseded and the leftover pointed at a placeholder endpoint. **So the remaining 21 small-file
+locals should be read as possible features, not as lint.** The count is the symptom; the call sites
+are the evidence.

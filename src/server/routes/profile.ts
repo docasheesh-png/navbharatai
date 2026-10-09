@@ -13,6 +13,7 @@ import type { Express, Request, Response } from 'express';
 import { doc, getDoc, getServerDb as getDb } from '../lib/serverDb';
 import { verifyFirebaseToken, verifyFirebaseIdentity, deleteAuthAccount, rateLimiter } from '../lib/authMiddleware';
 import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
+import { deleteUserDerivedIdData } from '../lib/derivedIdErase';
 import { deleteUserWorkspaceData } from '../lib/workspaceDataErase';
 import { eraseSyncedWorkspace, type SyncEraseFirestore } from '../lib/syncWorkspaceErase';
 import { sendSafeError } from '../lib/httpError';
@@ -263,6 +264,16 @@ export function registerProfileRoutes(app: Express): void {
     const db = getRetentionDb();
     if (!db) return res.status(503).json({ error: 'Data store unavailable — please try again shortly.' });
     try {
+      // DERIVED IDS FIRST OF ALL — BEFORE ANYTHING THAT DELETES THE KEYS THEY ARE DERIVED FROM.
+      // `derivedIdErase` reaches documents whose id is BUILT from a key rather than equal to one:
+      // `bot_sessions/{botId}_{chatId}` (from the user's `bots`) and `build_history/{sessionId}` (from
+      // `user_build_history` and the workspace id range). The two erasers below delete exactly those
+      // parents, so running this second would resolve no keys, delete nothing, and report success —
+      // the "an erase that LOOKS complete and is not" failure the apps eraser was written to prevent.
+      // Best-effort like the rest: reported, never thrown, so it can never block the deletion the user
+      // actually asked for.
+      const derived = await deleteUserDerivedIdData(identity.uid)
+        .catch((e) => ({ uid: identity.uid, collections: [], totalDeleted: 0, keys: { bots: 0, historySessions: 0 }, error: e instanceof Error ? e.message : String(e) }));
       // DATA FIRST, THEN THE CREDENTIAL. Erasing the sign-in first would strand any data whose
       // deletion then failed, with the owner unable to sign in and retry.
       const report = await deleteUserData(db, identity.uid);
@@ -308,6 +319,11 @@ export function registerProfileRoutes(app: Express): void {
         // built app. `probed` says how many chunk ids were swept, so the number is checkable rather
         // than a bare claim.
         synced,
+        // Its own line too, for the same reason as `apps` and `synced`: these are documents no key
+        // could previously reach, so someone checking whether their data is really gone should be able
+        // to see that they were swept. `keys` says how many derived ids were resolved, so the counts
+        // are checkable rather than a bare claim.
+        derived,
       });
     } catch (err: any) {
       return sendSafeError(res, 500, 'Deletion failed. Please try again.', err, 'account deletion');

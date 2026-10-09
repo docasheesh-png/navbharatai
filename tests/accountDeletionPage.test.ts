@@ -137,6 +137,13 @@ describe('the page and the deletion code do not drift apart', () => {
       api_keys: /NavBharatAI API keys/i,
       bots: /chat bots/i,
       webhooks: /addresses NavBharatAI posted your build events to/i,
+      /**
+       * Added 2026-10-09 (Q-765). Its doc id is the public APP id, so Q-701 left it out rather than
+       * guess the key; reading the store settled it — `mint` is its only writer and always sets
+       * `userId`. The page says what the user would actually notice: the app's assistant stops
+       * answering, because it was answering as them.
+       */
+      app_ai_apps: /assistant inside any app you published/i,
     };
     for (const { collection } of USER_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

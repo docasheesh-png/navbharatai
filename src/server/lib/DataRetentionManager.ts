@@ -174,9 +174,12 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    *  · `webhooks`      — the outbound URLs NavBharatAI posts the person's build events to. Verified: the
    *    doc id IS the uid (WebhookManager.ts:63 read, :90 and :106 writes).
    *
-   * ⚠️ `bot_sessions` is NOT here and cannot be: its doc id is `${botId}_${chatId}` (BotStore.ts:283), which
-   * is reachable from the bot, not from the uid. It holds no credential — per-chat conversation state — and it
-   * is recorded as an open sibling in `BUILD_REPORT_QUEUE.md`, not silently dropped.
+   * ⚠️ `bot_sessions` is NOT here, and the reason is still true: its doc id is `${botId}_${chatId}`
+   * (BotStore.ts:283), which is reachable from the bot, not from the uid, so no key strategy in THIS
+   * registry can express it. What has changed (Q-761, 2026-10-09) is that it is no longer merely
+   * recorded: `derivedIdErase.ts` resolves the bot ids first and sweeps `bot_sessions/{botId}_` by id
+   * range, and it runs BEFORE this cascade precisely because this cascade deletes the `bots` the keys
+   * come from.
    */
   { collection: 'user_secrets', key: { field: 'user_id' } },
   { collection: 'api_keys', key: { field: 'userId' } },
@@ -257,6 +260,24 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    * registry reaches it exactly, which is where a domain-keyed record of one person's domain belongs.
    */
   { collection: 'site_uptime', key: { field: 'userId' } },
+  /**
+   * The app's AI-registry row — which published app may call NavBharatAI's AI, and as whom
+   * (`AppAiRegistryStore.ts:61/83`). Q-765, 2026-10-09.
+   *
+   * 🔴 IT WAS IN NO ERASE PATH, AND THE REASON IT WAS LEFT OUT WAS SOUND. Its doc id is the public APP
+   * id, so the workspace eraser's `agentv3-{uid}-` range cannot reach it, and Q-701 recorded it as an
+   * open row rather than registering it on a guess. Reading it settles the question the guess could
+   * not: `mint` is the ONLY writer in the repo (`DeploymentStore.ts:626` is its one caller) and it
+   * always sets `userId` in the body, so the uid FIELD reaches it exactly — this registry's existing
+   * strategy, once the body had actually been read.
+   *
+   * The row carries a live nonce, so deleting it is also what stops a published page's assistant token
+   * resolving after its owner is gone (`appAiGateway` resolves through `get(appId)`).
+   *
+   * ⚠️ `userId` is written as `userId || ''`, which is empty for an `agentv3-anon-…` publish. That is
+   * not a gap here: an anonymous publish has no account, so there is no account deletion to reach it.
+   */
+  { collection: 'app_ai_apps', key: { field: 'userId' } },
   /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *

@@ -208,6 +208,9 @@ describe('the built-app eraser and the page do not drift apart', () => {
       migrationHistory: /everything the builder kept about each app/i,
       mega_roadmaps_v3: /its plan and roadmap/i,
       sboms: /the software bill of materials/i,
+      // Q-784: hidden from the collection census by its constant's name (`REMIX_ORIGINS`), so it sat in
+      // no erase path while the census reported every store accounted for.
+      nav_store_remix_origins: /which App Mart app it was remixed from/i,
       site_configs: /the app's own site settings/i,
       agentv3_mcp_servers: /the outside services it was wired to talk to/i,
       agentv3_deployments: /our record of where it/i,

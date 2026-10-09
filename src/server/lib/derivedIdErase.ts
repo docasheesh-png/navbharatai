@@ -52,6 +52,8 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
 import { workspacePrefixFor } from './workspaceIdentity';
+// Q-784: the same ownership predicate the workspace eraser applies to every document its range matched.
+import { eraseableWorkspaceId } from './workspaceDataErase';
 
 /** U+F8FF is a very high code point, so [prefix, prefix+U+F8FF] is exactly the prefix range. */
 const RANGE_END_CHAR = String.fromCharCode(0xf8ff);
@@ -103,6 +105,33 @@ export function planBotSessionErase(botId: string | null | undefined): PrefixRan
  *
  * PURE.
  */
+/**
+ * The range of `workspaceId` FIELD values belonging to `uid`, or null when it cannot be formed safely.
+ *
+ * 🔴 THE FOURTH REACHABILITY SHAPE (Q-784). `build_events` is appended with `.add()`, so its document
+ * id is random, and its only link to a person is a `workspaceId` FIELD — `agentv3-{uid}-…`. So:
+ *  · `deleteUserData`'s `{field}` strategy cannot reach it: that is EQUALITY against the uid, and this
+ *    field holds a workspace id, of which one person has many.
+ *  · `deleteUserWorkspaceData` cannot reach it: that sweeps a range over the DOCUMENT ID, and this
+ *    document's id says nothing about anybody.
+ *  · `planBotSessionErase` above cannot reach it: there is no key to derive and then look up.
+ * A RANGE over the FIELD is the one query that matches exactly those documents, and Firestore serves it
+ * from the single-field index it maintains automatically — no composite index to deploy.
+ *
+ * ⚠️ IT REFUSES THE SAME UID `ownedWorkspaceIds` REFUSES, and for the same reason: the prefix is
+ * `agentv3-{uid}-`, so a uid containing `-` makes `agentv3-a-b-` ambiguous between uid `a-b` and uid `a`
+ * with a workspace suffix starting `b-`. A compliance gap is recoverable; deleting a different person's
+ * data is not. Every caller still verifies each matched document before deleting it, because "the range
+ * should already guarantee this" is not a safety property when the action is irreversible.
+ */
+export function planWorkspaceFieldErase(uid: string | null | undefined): PrefixRange | null {
+  const id = String(uid ?? '').trim();
+  if (!id || id.includes('-')) return null;
+  const prefix = workspacePrefixFor(id);
+  if (!prefix) return null;
+  return { startAt: prefix, endAt: `${prefix}${RANGE_END_CHAR}` };
+}
+
 export function buildHistoryKeysFor(
   uid: string,
   sessionIds: readonly string[],
@@ -203,6 +232,42 @@ async function deleteIdRange(
   return { documents, children };
 }
 
+/**
+ * Delete every document of `collection` whose `field` falls in `range`, verifying each one first.
+ *
+ * Re-queries from the start of the range each page rather than paging with a cursor: the deletions
+ * shrink the result set, and a cursor over a field with repeated values can stall. `progressed` is the
+ * guard that makes that safe — a page where every document was REFUSED by the verifier would otherwise
+ * be re-read until MAX_PAGES, so the loop stops the moment a page deletes nothing.
+ */
+async function deleteFieldRange(
+  store: admin.firestore.Firestore,
+  collection: string,
+  field: string,
+  range: PrefixRange,
+  keep: (value: string) => boolean,
+): Promise<number> {
+  let documents = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const snap = await store.collection(collection)
+      .orderBy(field).startAt(range.startAt).endAt(range.endAt)
+      .limit(PAGE)
+      .get();
+    if (snap.empty) break;
+    let progressed = false;
+    for (const doc of snap.docs) {
+      const value = String((doc.data() as Record<string, unknown>)[field] ?? '');
+      if (!keep(value)) continue;
+      await doc.ref.delete();
+      documents++;
+      progressed = true;
+    }
+    if (!progressed) break;
+    if (snap.size < PAGE) break;
+  }
+  return documents;
+}
+
 /** The bot ids this user owns, read BEFORE `deleteUserData` removes them (`BotStore.ts:178`: `ownerUid`). */
 async function ownedBotIds(store: admin.firestore.Firestore, uid: string): Promise<string[]> {
   const snap = await store.collection('bots').where('ownerUid', '==', uid).get();
@@ -300,6 +365,29 @@ export async function deleteUserDerivedIdData(uid: string): Promise<DerivedErase
     historyError = e instanceof Error ? e.message : String(e);
   }
   collections.push({ collection: 'build_history', documents: historyDocs, children: historyChildren, error: historyError });
+
+  // ── `build_events`, found by a RANGE over its `workspaceId` FIELD (Q-784) ────────────────────────
+  //
+  // Every event the build bus ever published for one of this person's apps: the event type, the sender,
+  // a trimmed payload preview and the workspace id — which contains their uid. Neither other eraser can
+  // see it (see planWorkspaceFieldErase), so it survived account deletion entirely; Q-767's 90-day
+  // window bounded that to 90 days, and §9 publishes 30 for personal data after a deletion, so the
+  // window alone was not enough to keep the promise.
+  let eventDocs = 0;
+  let eventError: string | undefined;
+  const eventRange = planWorkspaceFieldErase(uid);
+  try {
+    if (eventRange) {
+      eventDocs = await deleteFieldRange(
+        store, 'build_events', 'workspaceId', eventRange,
+        // The same ownership question the workspace eraser asks of each document it matched.
+        (workspaceId) => eraseableWorkspaceId(uid, workspaceId),
+      );
+    }
+  } catch (e) {
+    eventError = e instanceof Error ? e.message : String(e);
+  }
+  collections.push({ collection: 'build_events', documents: eventDocs, children: 0, error: eventError });
 
   return {
     uid,

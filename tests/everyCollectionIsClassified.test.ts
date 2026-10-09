@@ -88,6 +88,19 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
     why: 'the id is `${botId}_${chatId}`, so the key is the BOT — resolved from `bots where ownerUid == uid` '
       + 'before the cascade deletes those bots, then swept as an id range (Q-761)',
   },
+  /**
+   * 🔴 THE FOURTH REACHABILITY SHAPE (Q-784). Not a derived doc ID this time — a random one, with the
+   * owner in a `workspaceId` FIELD. Equality on the uid cannot match it (one person has many workspace
+   * ids) and the document-id range cannot see it (the id says nothing about anybody), so account
+   * deletion had no query for it at all and every build event of every app survived the account.
+   */
+  build_events: {
+    file: DERIVED_ERASER,
+    calledAs: DERIVED_CALL,
+    why: 'appended with `.add()`, so the id is random; the only link to a person is the `workspaceId` '
+      + 'field, swept by a RANGE over that FIELD (`planWorkspaceFieldErase`) with each matched document '
+      + "verified by the workspace eraser's own ownership predicate (Q-784)",
+  },
   build_history: {
     file: DERIVED_ERASER,
     calledAs: DERIVED_CALL,
@@ -256,6 +269,14 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   // ── 🟡 Accounted for, obligation NOT met: each names the row that owns it ─────────────────────
   gallery_apps: { kind: 'blocked', why: 'Q-766 — a `uid` field, and it survives deletion today. It is a PUBLIC listing that can have been bought, so erasing it because the AUTHOR left would destroy a stranger\'s purchase (the `gift_codes` reasoning). The admin decides: erase, or unlist and de-identify' },
   nav_store_apps: { kind: 'blocked', why: 'Q-766 — same shape as `gallery_apps`: a `uid` field, a public App Mart listing, purchasable' },
+  /**
+   * ── The three stores form 4 found (Q-784, 2026-10-09) ──────────────────────────────────────────────
+   * Invisible to forms 1–3 only because their constants are not named `*COLLECTION*`. Each was read at
+   * its own write path before being classified here, never inferred from its name.
+   */
+  nav_store_purchases: { kind: 'forever', why: "one doc per (app, buyer): `{appId, buyerUid, creatorUid, priceInr, creatorInr, at}` — a record of a SALE, and the buyer's own proof of purchase (`listPurchases` reads it by `buyerUid`). Money, so it outlives the account like `payment_transactions` (Privacy §9's first exception)" },
+  nav_store_pending_credits: { kind: 'forever', why: "money OWED to a creator whose credit failed to land (`navStoreRemixPurchase.ts:267`): `{appId, creatorUid, creatorInr, ref, at}`, written so the sale can be reconciled by hand. A debt a timer or an account closure erases is a debt nobody can pay — the `hosting_period_usage` / `owedInr` argument exactly" },
+  nav_store_remix_origins: { kind: 'workspace', why: "which store app a workspace was born as a remix of (`navStoreWeb.ts:722`) — the doc id IS the workspaceId, so the eraser's id range reaches it the moment it is registered, which until Q-784 it was not" },
   nav_store_web_apps: { kind: 'blocked', why: 'Q-766 — same as above, plus `files`/`baked`/`screenshots` subcollections that Q-682 owns' },
   /** ✅ Q-762, 2026-10-09: `adrMemory.ts` now stores `userId`, so the field query reaches it. */
   adrDecisions: { kind: 'user', why: "the person's own architecture decisions — doc id is `${userId}__${projectId}`, reached by the `userId` the writer now stores" },
@@ -272,7 +293,7 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   app_ai_apps:   { kind: 'user', why: "which app may call NavBharatAI's AI and as whom — doc id is the APP id, so the workspace range cannot reach it; reached by its `userId` field" },
   analytics_daily:  { kind: 'retained', why: 'one doc per UTC day of product-analytics counts and the activation funnel — no person in it; purged at 400 days, and `getFunnel` never asks for more than 365 (Q-767)' },
   analytics_events: { kind: 'user', why: "which screens and actions one person used — a real `userId` per event, so it is erased with the account AND purged at 30 days, the `server_logs` window for a raw stream beside a durable rollup (Q-767). Nothing in the repo reads it: see Q-783" },
-  build_events:     { kind: 'retained', why: "the build event bus's durable trail, one doc per published event with a trimmed payload; purged at 90 days — the ceiling Privacy §9 publishes for technical logs (Q-767)" },
+  build_events:     { kind: 'user', why: "the build event bus's durable trail, one doc per published event with a trimmed payload and the `workspaceId` it belongs to — which contains the uid. Purged at 90 days (Q-767, the technical-log ceiling Privacy §9 publishes) AND erased with the account by `derivedIdErase.ts`, because 90 days is longer than the 30 §9 promises after a deletion (Q-784)" },
   guest_daily_usage: { kind: 'retained', why: "a signed-out visitor's daily message count under a one-way code; purged at 3 days, which is both the `expireAt` the writer already computes and the 'deleted after a few days' Privacy §12 publishes (Q-767)" },
   abuseLedger:   { kind: 'retained', why: "the jailbreak/abuse ledger, doc id IS the uid — kept OUT of the user registry on the `safety_flags` precedent (a record the abuser can erase is not a record) and purged at 180 days instead, the window Privacy §9 publishes for safety records (Q-767)" },
   user_reports:  { kind: 'retained', why: 'support tickets carrying `reporterUid` and `target.ownerUid`; purged at 180 days like `app_mart_comment_reports`, and the policy declares `subs: [\'shot\']` so the screenshot goes with the report instead of outliving it unreachable (Q-767)' },
@@ -302,6 +323,21 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
  *   2. `collection(db, 'x')` and `doc(db, 'x', …)` — the web-SDK forms; in the second the FIRST
  *      segment is a collection.
  *   3. `<handle>.collection('x')` where the handle is a Firestore ROOT.
+ *   4. `<handle>.collection(IDENT)` where IDENT is a const bound to a string literal in the SAME file —
+ *      whatever that const is NAMED.
+ *
+ * 🔴 FORM 4 WAS ADDED BY Q-784 (2026-10-09), AND IT IS THE SAME DEFECT THIS FILE EXISTS TO END, ONE
+ * LAYER DOWN. Form 1 matches a const whose NAME contains COLLECTION. `navStoreRemixPurchase.ts` calls
+ * its constants `PURCHASES` and `PENDING_CREDITS`, and `navStoreWeb.ts` calls one `REMIX_ORIGINS` — so
+ * three real top-level stores were invisible to all four forms, and this file passed while saying it had
+ * seen every collection. Two of them hold MONEY (`nav_store_purchases` is a record of a sale;
+ * `nav_store_pending_credits` is money OWED to a creator that failed to credit) and the third
+ * (`nav_store_remix_origins`) is keyed by a workspace id and was in no erase path.
+ *
+ * The lesson is safeguard #6's, mechanized: "my search found nothing" almost always means the wrong word
+ * was guessed, and a scan keyed on a NAMING CONVENTION inherits every convention nobody followed. Form 4
+ * is keyed on the VALUE instead — a const holding a string, used on a database handle — so a store can no
+ * longer hide behind what its constant was called.
  *
  * 🔒 AND IT DECLARES WHAT IT COULD NOT READ, rather than skipping it. A receiver that is not a known
  * root (today only `root`, which is always a `.doc()` ref) lands in `UNREADABLE_RECEIVERS` and must be
@@ -338,6 +374,18 @@ const CONST_FORM = /(?:export\s+)?const\s+(?!.*SUBCOLLECTION)[A-Z0-9_]*COLLECTIO
 const WEB_COLLECTION_FORM = /\bcollection\(\s*(?:db|d)\b[^,]*,\s*'([a-zA-Z0-9_]+)'\s*\)/g;
 const WEB_DOC_FORM = /\bdoc\(\s*(?:db|d)\b[^,]*,\s*'([a-zA-Z0-9_]+)'\s*,/g;
 const ADMIN_FORM = /\b([a-zA-Z_][a-zA-Z0-9_]*)\.collection\('([a-zA-Z0-9_]+)'\)/g;
+/**
+ * Form 4 — `<handle>.collection(IDENT)`, with IDENT resolved against the file's own string consts.
+ *
+ * Deliberately NOT restricted to `*COLLECTION*` names: that restriction is what hid three stores. The
+ * safety comes from the two other conditions instead — the receiver must be a known root handle (so
+ * `root.collection(FILES_SUB)` and any `.doc(x).collection(SUB)` chain are not matched: the text before
+ * `.collection(` there is a `)`, not an identifier), and the const must resolve to a plain string
+ * literal in the same file.
+ */
+const ADMIN_IDENT_FORM = /\b([a-zA-Z_][a-zA-Z0-9_]*)\.collection\(\s*([A-Z][A-Z0-9_]*)\s*\)/g;
+/** Every `const NAME = 'value'` in a file, so form 4 can resolve an identifier to the real store name. */
+const STRING_CONST = /\bconst\s+([A-Z][A-Z0-9_]*)\s*=\s*'([a-zA-Z0-9_]+)'/g;
 
 interface ScanResult {
   collections: { name: string; file: string }[];
@@ -364,6 +412,15 @@ function scanServer(): ScanResult {
         if (DB_HANDLES.has(m[1])) { collections.push({ name: m[2], file: rel }); continue; }
         if (!unreadable.has(m[1])) unreadable.set(m[1], new Set());
         unreadable.get(m[1])!.add(rel);
+      }
+      // Form 4 (Q-784): the file's own string consts, then any `<root handle>.collection(CONST)`.
+      STRING_CONST.lastIndex = 0;
+      const named = new Map<string, string>();
+      for (const m of src.matchAll(STRING_CONST)) named.set(m[1], m[2]);
+      ADMIN_IDENT_FORM.lastIndex = 0;
+      for (const m of src.matchAll(ADMIN_IDENT_FORM)) {
+        const value = named.get(m[2]);
+        if (value && DB_HANDLES.has(m[1])) collections.push({ name: value, file: rel });
       }
     }
   };
@@ -402,6 +459,19 @@ describe('every declared collection is classified', () => {
     expect(names, "`doc(db, 'x', …)` is not being read").toContain('user_workspaces');
     // A web-SDK collection call — `collection(db, 'user_secrets')` (secrets.ts:146).
     expect(names, "`collection(db, 'x')` is not being read").toContain('user_secrets');
+    /**
+     * Form 4's witnesses (Q-784). These three are reachable ONLY through it: their constants are called
+     * `PURCHASES`, `PENDING_CREDITS` and `REMIX_ORIGINS`, so no `*COLLECTION*` name pattern and no
+     * string literal in a `.collection()` call can reach them.
+     *
+     * 🔴 THIS ASSERTION IS NOT DECORATION — it was added because its absence was PROVEN. Narrowing form
+     * 4 back to `*COLLECTION*` names left this whole file green: every obligation here is checked against
+     * what the scan FOUND, so a scan that finds less simply has less to object to, and the three stores
+     * sat in CLASSIFICATION being quietly unexamined. A census is only ever as honest as its witnesses.
+     */
+    expect(names, '`<db>.collection(CONST)` is not being read (form 4)').toContain('nav_store_purchases');
+    expect(names, 'form 4 missed the money store it was added for').toContain('nav_store_pending_credits');
+    expect(names, 'form 4 missed the workspace-keyed store it was added for').toContain('nav_store_remix_origins');
 
     // And a floor, so a refactor cannot quietly shrink the world the obligations are checked against.
     // 144 at the time of writing; the floor is deliberately below that so adding a store is not a

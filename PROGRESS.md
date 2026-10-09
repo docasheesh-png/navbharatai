@@ -91983,3 +91983,29 @@ file in the report.
 found while hunting siblings, but each feeds a different decision with a different failure mode, and
 widening detection in all of them in one PR would change behaviour nobody has measured. Q-707's own
 scope was deployPlan + the sibling it named; the rest is recorded here as a known, bounded follow-up.
+
+## 2026-10-09 — queue closure: Q-699 and Q-707 (both owner PRs merged)
+
+Housekeeping under the sixth absolute rule, point 3: a row leaves the open table only when the PR that
+resolves it is MERGED, and its ID is appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same
+commit. Both rows were still `IN PROGRESS` with their owner PRs already on `main`, which is exactly the
+state that makes the queue report false work — an item that is done still counted as in flight.
+
+- **Q-699 ✅** — Android "Save to Photos" never saved (`@capacitor-community/media` 9.x rejects
+  `savePhoto` without `albumIdentifier` on Android). Resolved by **#3590** (merged, `1550192`). Verified
+  on this `main`, not taken on trust: `src/lib/saveToGallery.ts` is the single platform-branching place
+  (Android resolves/creates the `Pictures/NavBharatAI` album and passes `albumIdentifier`; iOS keeps the
+  `path`-only call that already worked), with `src/lib/saveToGallery.test.ts` locking both branches.
+  ⚠️ **What to watch for on the next real build:** the JS path is fully tested, but no session can run an
+  Android device — the live proof is the next `.aab` on a real phone (one tap, image appears in
+  Photos → NavBharatAI). If that tap still lands on the share sheet, reopen with the device log.
+- **Q-707 ✅** — the publish planner classified an app whose server is bare `node:http` as `unknown` →
+  `staticHostingSufficient: true`, so it shipped as a static site with its API dead and the publish
+  reported as a success. Resolved by **#3592** (merged, `6ec3fe0`). Verified on this `main`:
+  `deployPlan.ts`'s `nodeServer()` now falls through to `createsCoreHttpServer(files)`, shared with
+  `BackendPresence` rather than re-listed, and the shape census covers `createSecureServer` too.
+  The five other files carrying their own copy of the framework list (`RuntimeRouter.ts`,
+  `ProjectImport.ts`, `serviceGraph.ts`, `previewSnapshot.ts`, `ProjectSummary.ts`) stay a recorded,
+  bounded follow-up from #3592's own ledger — not reopened here.
+
+Open table after this change: 74 rows. No row's state was altered and no earlier entry was rewritten.

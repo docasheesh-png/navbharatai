@@ -290,6 +290,19 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'techDebt', key: { field: 'userId' } },
   { collection: 'app_ai_apps', key: { field: 'userId' } },
   /**
+   * Which screens and actions a person used (`AnalyticsPipeline.recordAnalyticsEvent`): one document
+   * per event with their real `userId`, the event name and the funnel stage. Q-767 came to it for the
+   * missing retention window and found it was in no erase path either — behavioural data about a
+   * person that survived their account.
+   *
+   * ⚠️ `'anon'` is written when there is no signed-in user, and an exact match on a real 28-character
+   * uid can never equal it, so the signed-out rows are untouched by this entry — they are bounded by
+   * the 30-day policy instead. That 30-day window is also what BOUNDS this erase: the `{field}` branch
+   * queries without a limit, and one person's lifetime of events would be an unbounded read. A month of
+   * one person's events is not.
+   */
+  { collection: 'analytics_events', key: { field: 'userId' } },
+  /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *
    * It looks like it belongs here — it carries a uid — and adding it would feel like completing the
@@ -357,6 +370,19 @@ export interface RetentionPolicy {
   timestampKind: TimestampKind;
   /** Documents deleted per run. Defaults to DEFAULT_MAX_PER_RUN; the purge is never unbounded. */
   maxPerRun?: number;
+  /**
+   * Subcollections under EACH EXPIRED document, page-deleted BEFORE the document itself.
+   *
+   * 🔴 Q-767. The purge used to call `d.ref.delete()` and nothing else, so a policy on a parent that
+   * owns children would have deleted the parent and left the children alive and UNREACHABLE — exactly
+   * Q-134's defect, in the other mechanism. `user_reports` is the collection that proved it: the
+   * screenshot is deliberately a separate document (`user_reports/{id}/shot/{shotId}`) because a
+   * compressed image is a large fraction of Firestore's 1 MiB limit, so expiring the report alone
+   * would have left the PICTURE behind for ever — the one part of a support ticket that can show a
+   * person's face. Deleting children first costs an extra query per expired document and is the only
+   * ordering that can ever be correct, because Firestore does not cascade.
+   */
+  subs?: readonly string[];
 }
 
 /**
@@ -520,6 +546,129 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
    * `at: Date.now()` ⇒ `epochMs`.
    */
   { collection: 'app_mart_comment_reports', ttlDays: 180, timestampField: 'at', timestampKind: 'epochMs' },
+
+  // ── Q-767: the eleven stores that grew on a clock with nothing to delete them ───────────────────────
+  //
+  // 🔴 EVERY WINDOW BELOW IS TAKEN FROM A SENTENCE THE PRIVACY POLICY ALREADY PUBLISHES, not chosen.
+  // That is the whole method of this batch: where the policy speaks, the policy IS the answer, and a
+  // number invented here would be a second promise nobody made. Where it is silent, the nearest
+  // registered precedent sets the window and the entry says which one and why.
+  //
+  // ⚠️ THE CONDITION BEHIND ALL ELEVEN (the other 50%). They were not individually forgotten — nothing
+  // could SEE them. `collectionsNeedingRetention` is fed `GROWING_COLLECTIONS`, a hand-written list in
+  // `routes/admin.ts`, and a hand-written list cannot warn about the store nobody added to it. That is
+  // how `site_analytics` shipped a published 30-day promise with no mechanism, and eleven more sat
+  // undeleted behind the same blind spot. `tests/aGrowingStoreCannotHideFromTheBoard.test.ts` now makes
+  // the blind spot impossible: every collection with a policy here must appear in that inventory.
+
+  /**
+   * The signed-out visitor's daily message count (`guestDailyQuota.ts`) — and the SECOND published
+   * promise this repo was not keeping.
+   *
+   * 🔴 Privacy §12 says, in these words: *"On our side it is stored only as a one-way code beside a
+   * daily message count, and that count is deleted after a few days."* Nothing deleted it. The module
+   * even writes an `expireAt` field for a Firestore TTL policy, with the comment "harmless without
+   * one" — and no TTL policy was ever configured on the project, so the field was decoration. A
+   * promise whose mechanism is a console setting nobody made is the `site_analytics` shape exactly.
+   *
+   * 3 days is not a new number: it is the `expireAt` the writer already computes (`day + 3 days`), so
+   * this keeps the author's own intent and the published sentence at once. The counter is read only on
+   * its OWN India day (the day is part of the doc id), so an older document cannot change a decision.
+   * It also matters more than its size suggests: the ids are `${day}_ip_${hash}` and `${day}_dev_${key}`,
+   * and a hashed IP address is personal data under the DPDP Act — keeping it for ever was the defect,
+   * not the storage cost. `day` is the doc id AND a field ('YYYY-MM-DD'), so it is its own timestamp.
+   */
+  { collection: 'guest_daily_usage', ttlDays: 3, timestampField: 'day', timestampKind: 'iso' },
+  /**
+   * The product-analytics day rollup (`AnalyticsPipeline.ts`): ONE document per UTC day of COUNTS —
+   * `totalEvents`, a per-event tally and the signup→build→deploy→pay funnel. No person in it, checked
+   * field by field against the writer. 400 days for the `metrics_snapshots` / `build_failures` reason:
+   * at one document a day a long window is nearly free, and the funnel is read as a TREND, which needs
+   * last year to compare against. `getFunnel` caps its own query at 365 days, so 400 cannot delete a
+   * number anybody is shown. `date` is the doc id AND a field, ISO and lexicographic ⇒ `iso`.
+   */
+  { collection: 'analytics_daily', ttlDays: 400, timestampField: 'date', timestampKind: 'iso' },
+  /**
+   * The raw event behind that rollup — one document per analytics event, carrying the real `userId`.
+   *
+   * 30 days, the `server_logs` window, for the same shape: a raw stream kept beside a durable rollup,
+   * where the counts are the lasting record and the rows are the drill-down. It is the shorter of the
+   * two windows in this pair deliberately, because this is the half that names a person.
+   *
+   * 🟡 AND IT IS WRITTEN BY SOMETHING NOTHING READS. `recordAnalyticsEvent` appends here on every
+   * event "for cohort/segmentation drill-down" and no query in the repository ever reads the
+   * collection — the drill-down was never built. A window and an account-deletion entry (it is in
+   * USER_SCOPED_COLLECTIONS now) are required either way, so both are here; but if that drill-down is
+   * not coming, the honest fix is to stop writing a store that holds a uid and answers no question.
+   * That is a product decision, recorded as Q-783 rather than taken quietly here.
+   */
+  { collection: 'analytics_events', ttlDays: 30, timestampField: 'ts', timestampKind: 'epochMs' },
+  /**
+   * The build event bus's durable trail (`eventStore.ts`): one document per published event, with a
+   * trimmed payload preview and the `workspaceId` it belongs to.
+   *
+   * 90 days — the ceiling Privacy §9 publishes for the class it belongs to: *"technical logs are
+   * retained for up to 90 days"*. It is finer-grained than a build report (180 days) and coarser than
+   * a server log line (30), and the published sentence is what decides it rather than that ordering.
+   * Read as the newest 500 for one workspace or correlation id, so age past the window answers nothing.
+   * `ts` is the bus event's own epoch-millisecond stamp.
+   */
+  { collection: 'build_events', ttlDays: 90, timestampField: 'ts', timestampKind: 'epochMs' },
+  /**
+   * The jailbreak / abuse ledger (`AbuseDetector.ts`): one document per offending account, doc id IS
+   * the uid, holding the last 50 events.
+   *
+   * 180 days, and it is NOT in USER_SCOPED_COLLECTIONS, for the `safety_flags` reason stated in full
+   * there: *a record of abuse the abuser can erase by deleting their account is not a record.* Privacy
+   * §9 publishes exactly this pair — safety-check records kept 180 days, surviving account deletion for
+   * that period — so this window is that sentence, applied to the ledger the sentence describes.
+   * The hard block it feeds counts violations in a ONE-HOUR window, so nothing older than an hour
+   * changes a decision; 180 days is kept for human review, not for the gate. `updatedAt` is an ISO
+   * string here (`nowIso`), not a number — the one policy in this batch whose kind is `iso` by write
+   * path rather than by being a day key, and a `date` bound against it would match nothing in silence.
+   */
+  { collection: 'abuseLedger', ttlDays: 180, timestampField: 'updatedAt', timestampKind: 'iso' },
+  /**
+   * What a user reported to support (`userReportStore.ts`): the problem, the app it is about, the
+   * thread, `reporterUid` and `target.ownerUid` — and a screenshot in its OWN subcollection.
+   *
+   * 180 days, the `app_mart_comment_reports` precedent: a report a person must be able to review,
+   * which has to outlive either account for that period and must not become a permanent file. Privacy
+   * §9 publishes 180 days for the report-and-review records it names; a support ticket is the same
+   * kind of record and gets the same window rather than a new one.
+   *
+   * 🔴 `subs: ['shot']` IS THE POINT, NOT A DETAIL. The screenshot is a separate document by design
+   * (a compressed image against a 1 MiB cap), so expiring the report without it would have left the
+   * picture — the only part that can show a face — alive and unreachable for ever. `at: Date.now()`.
+   */
+  { collection: 'user_reports', ttlDays: 180, timestampField: 'at', timestampKind: 'epochMs', subs: ['shot'] },
+  /**
+   * A reported phone build (`AdminApkReportStore.ts`): one document per `.apk`/`.aab` a user reported
+   * as broken, carrying their `userId` and what the build did. `reportedAt: Date.now()` ⇒ `epochMs`.
+   *
+   * 180 days — Privacy §9's build-report sentence: *"the reports of your past builds … are kept for
+   * 180 days so a defect can be traced"*. This is one of the reports that sentence is about.
+   */
+  { collection: 'admin_apk_reports', ttlDays: 180, timestampField: 'reportedAt', timestampKind: 'epochMs' },
+  /**
+   * The full build report (`AdminBuildReportStore.ts`), carrying `userId` and `workspaceId` — the
+   * literal subject of the published sentence above, so the same 180 days, from the same sentence.
+   *
+   * ⚠️ `savedAt: Date.now()` is the field, NOT `meta.reportedAt` that the admin list orders by. Only
+   * `saveReport` creates a document and it always writes `savedAt`; the status writer is a
+   * `{merge:true}` set that leaves it alone. The ordering field was the tempting choice and would have
+   * been correct here too — but `savedAt` is the one the WRITE PATH guarantees on every document, and
+   * a field that is merely usually present is how a purge silently stops deleting.
+   */
+  { collection: 'admin_build_reports', ttlDays: 180, timestampField: 'savedAt', timestampKind: 'epochMs' },
+  /**
+   * The admin's triage of those reports (`AdminBuildTriageStore.ts`): one document per build digest
+   * with its state and note. `updatedAt: now` ⇒ `epochMs`.
+   *
+   * 180 days, tied to the reports it triages rather than chosen: a triage that outlives its subject is
+   * a verdict about a report nobody can open any more.
+   */
+  { collection: 'admin_build_triage', ttlDays: 180, timestampField: 'updatedAt', timestampKind: 'epochMs' },
 ];
 
 /**
@@ -559,6 +708,30 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
    */
   { collection: 'payment_transactions', reason: 'a record of money received; tax and accounting law requires it, and Privacy §9 names it as an exception to erasure' },
   { collection: 'hosting_usage', reason: 'per-user metering that the bill is derived from' },
+  /**
+   * Q-767. Both hosting stores were filed as "a money input, so the question is which window the law
+   * wants" — and the answer is that neither belongs on a clock at all, for a reason stronger than the
+   * legal one: THE DOCUMENT IS THE GUARD.
+   *
+   * `hosting_billing` is written with Firestore's `create`, never `set`, precisely so that a second run
+   * for the same (owner, day) FAILS — the document's existence is the proof that this person's wallet
+   * was already debited for that day. Delete it on a timer and the guard goes with it: any later run or
+   * backfill reaching that day would charge them a second time, which the store's own header calls the
+   * one outcome billing law never permits. A retention window here would not have trimmed a log, it
+   * would have re-armed a double charge.
+   *
+   * `hosting_period_usage` is the same in the other direction: it carries `gbBilled` (what the overage
+   * charge is the DIFFERENCE from, so deleting it re-charges the whole period) and `owedInr` with
+   * `owedSince` — money a user still owes. A timer that quietly erases an unpaid debt, or silently
+   * re-bills a settled period, is not retention hygiene.
+   *
+   * Beside that, they are `payment_transactions`' class anyway — a record of money, which Privacy §9
+   * names as its first exception to erasure and Indian tax law requires. Which is also why neither is
+   * in USER_SCOPED_COLLECTIONS: a billing record that closing the account erases cannot be reconciled
+   * or disputed afterwards, by either side.
+   */
+  { collection: 'hosting_billing', reason: "the proof one owner's wallet was debited for one app-day, written with `create` SO THAT a re-run cannot charge twice — deleting it re-arms the double charge, and it is a record of money besides (Privacy §9, tax law)" },
+  { collection: 'hosting_period_usage', reason: 'the running traffic total an overage charge is the difference from, plus any unpaid debt (`owedInr`) — a timer here would re-bill a settled period or erase a real debt' },
 ];
 
 // ── Subcollection retention (Q-134, admin-approved 2026-10-05) ───────────────────────────────────────
@@ -641,7 +814,9 @@ export async function purgeExpiredSubcollections(
         after = ids[ids.length - 1];
         if (ids.length < PARENT_PAGE) break;
       }
-      collections.push({ collection: name, deleted, cutoffMs });
+      // Capped here means the same thing as in purgeExpired, and is reported the same way: the SIBLING
+      // mechanism had the identical silence, and fixing one of a pair is how Q-764 came back twice.
+      collections.push({ collection: name, deleted, cutoffMs, ...(deleted >= cap ? { capped: true } : {}) });
     } catch (e) {
       collections.push({ collection: name, deleted, cutoffMs, error: e instanceof Error ? e.message : String(e) });
     }
@@ -765,7 +940,23 @@ export async function deleteUserData(db: RetentionFirestore, uid: string): Promi
 }
 
 // ── TTL purge ───────────────────────────────────────────────────────────────────────────────────────
-export interface PurgeResult { collection: string; deleted: number; cutoffMs: number; error?: string; }
+export interface PurgeResult {
+  collection: string;
+  deleted: number;
+  cutoffMs: number;
+  error?: string;
+  /**
+   * The run deleted its full `maxPerRun` allowance, so there was more left over.
+   *
+   * 🔴 Q-767. A cap below a collection's ARRIVAL RATE is not a slow drain — it is a retention window
+   * that never closes, while every list in the repository says the collection is on a clock. At 500 a
+   * night a store taking 5,000 writes a day grows by 4,500 a day for ever and reports itself purged.
+   * There is no way to know the real rate from here (no production metrics in a session), so the
+   * honest fix is not to guess a bigger number: it is to make the condition SAY SO. One capped run is
+   * normal and means a backlog is draining; capped every night means the number is wrong.
+   */
+  capped?: boolean;
+}
 export interface PurgeReport { collections: PurgeResult[]; totalDeleted: number; }
 
 /**
@@ -789,13 +980,39 @@ export async function purgeExpired(
       const cap = Math.max(1, Math.floor(policy.maxPerRun ?? DEFAULT_MAX_PER_RUN));
       if (typeof q.limit === 'function') q = q.limit(cap);
       const snap = await q.get();
-      for (const d of snap.docs) { await d.ref.delete(); deleted++; }
-      collections.push({ collection: policy.collection, deleted, cutoffMs });
+      for (const d of snap.docs) {
+        // CHILDREN FIRST, then the document — see RetentionPolicy.subs. Firestore does not cascade, so
+        // the other order leaves the children alive with no path to them. A handle that cannot reach
+        // subcollections is a REAL failure for a policy that declares them, not something to shrug at:
+        // it would report an expiry that left the heaviest half of the record behind.
+        for (const sub of policy.subs ?? []) {
+          if (typeof d.ref.collection !== 'function') {
+            throw new Error(`${policy.collection}: this database handle cannot reach the '${sub}' subcollection`);
+          }
+          for (let page = 0; page < MAX_ERASE_PAGES; page++) {
+            const kids = await d.ref.collection(sub).limit(ERASE_PAGE).get();
+            if (kids.docs.length === 0) break;
+            for (const kd of kids.docs) { await kd.ref.delete(); deleted++; }
+            if (kids.docs.length < ERASE_PAGE) break;
+          }
+        }
+        await d.ref.delete();
+        deleted++;
+      }
+      collections.push({ collection: policy.collection, deleted, cutoffMs, ...(deleted >= cap ? { capped: true } : {}) });
     } catch (e) {
       collections.push({ collection: policy.collection, deleted, cutoffMs, error: e instanceof Error ? e.message : String(e) });
     }
   }
   return { collections, totalDeleted: collections.reduce((s, r) => s + r.deleted, 0) };
+}
+
+/**
+ * The collections whose last run hit their cap — i.e. where more was expired than one run may remove.
+ * PURE. Used by the scheduled job to say so in the logs instead of reporting a clean purge.
+ */
+export function cappedCollections(report: PurgeReport): string[] {
+  return report.collections.filter((c) => c.capped).map((c) => c.collection);
 }
 
 // ── Production admin Firestore accessor (VITEST-skip, mirrors UserProfileStore) ──────────────────────

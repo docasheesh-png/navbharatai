@@ -37,11 +37,19 @@ const root = resolve(__dirname, '..');
  *  · `workspace` — keyed by a workspaceId. MUST be in `WORKSPACE_SCOPED_COLLECTIONS` (erased with the app).
  *  · `platform`  — ours: a lease, a counter, a bucket, a day rollup. No user owns it.
  *  · `retained`  — grows and is purged on a clock. MUST have a `RETENTION_POLICIES` entry.
+ *  · `forever`   — grows and is kept DELIBERATELY. MUST have a `RETAINED_INDEFINITELY` entry (with its reason).
  *  · `blocked`   — its obligation is NOT met, and a queue row owns the reason. MUST name a `Q-###`.
  *
  * 🔴 `workspace` CARRIED NO OBLIGATION UNTIL Q-701 (2026-10-08), and that is how twelve stores of the
  * user's own app data sat in no erase path while this file called them classified. A label with nothing
  * behind it reads as coverage; `user` and `retained` always had a consequence, `workspace` did not.
+ *
+ * 🔴 AND `forever` DID NOT EXIST UNTIL Q-767 (2026-10-09) — the same defect, one kind over. There was no
+ * label for a store kept for ever ON PURPOSE, so `payment_transactions`, `app_builds` and `hosting_usage`
+ * were all filed as `platform`, the one kind that obliges nothing, each with a `why` that CLAIMED a
+ * `RETAINED_INDEFINITELY` entry while nothing here checked that the entry existed. Prose is not a
+ * registry. Deleting that entry would have left the store silently unaccounted for and this file green,
+ * which is exactly the state Q-701 was opened to end.
  *
  * 🔒 `blocked` EXISTS SO THAT "UNRESOLVED" CANNOT BE SILENT — the sixth absolute rule as a test. A store
  * whose erasure is undecided, or whose retention window nobody has chosen, is not quietly mislabelled
@@ -49,7 +57,7 @@ const root = resolve(__dirname, '..');
  * row that is closed while the store is still here will fail the queue's own guards, not this one, which
  * is the right division: this test proves the store is ACCOUNTED FOR, not that the work is done.
  */
-type Kind = 'user' | 'workspace' | 'platform' | 'retained' | 'blocked';
+type Kind = 'user' | 'workspace' | 'platform' | 'retained' | 'forever' | 'blocked';
 /**
  * `user`-kind collections erased by a DEDICATED MODULE rather than by `USER_SCOPED_COLLECTIONS`.
  *
@@ -232,9 +240,9 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   admin_notifications:    { kind: 'platform', why: 'one doc per notice the ADMIN wrote; who read it is `user_notification_reads` above' },
   teams:                  { kind: 'platform', why: 'a team outlives any one member — doc id is the teamId; a member row lives in its `members` sub (Q-682), and removing a member is a status change, not a delete' },
   teamInvites:            { kind: 'platform', why: 'one doc per invite token, belonging to the team that sent it rather than to either side' },
-  payment_transactions:   { kind: 'platform', why: 'one doc per order id — a money record. Privacy §9\'s FIRST stated exception to erasure, and now in RETAINED_INDEFINITELY so this file stops being silent about it' },
-  app_builds:             { kind: 'platform', why: 'one doc per (user, repo) GitHub build — already RETAINED_INDEFINITELY as part of the build record' },
-  hosting_usage:          { kind: 'platform', why: 'one doc per (user, month) of hosting usage — already RETAINED_INDEFINITELY as a billing input' },
+  payment_transactions:   { kind: 'forever', why: 'one doc per order id — a money record. Privacy §9\'s FIRST stated exception to erasure; `forever` since Q-767, so the RETAINED_INDEFINITELY entry this line used to merely assert is now checked' },
+  app_builds:             { kind: 'forever', why: "one doc per (user, repo) GitHub build — kept as part of the user's own build record (RETAINED_INDEFINITELY, now checked: Q-767)" },
+  hosting_usage:          { kind: 'forever', why: 'one doc per (user, month) of hosting usage — the metering a bill is derived from (RETAINED_INDEFINITELY, now checked: Q-767)' },
 
   // ── Purged on a clock ────────────────────────────────────────────────────────────────────────
   build_jobs:        { kind: 'retained', why: 'one doc per queued build job; purged on its own window' },
@@ -262,18 +270,18 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   build_history: { kind: 'user', why: "every build's version metadata for every app — keyed by a BARE sessionId, which `derivedIdErase.ts` resolves from `user_build_history` and the workspace id range, `versions` subcollection first (Q-764)" },
   /** ✅ Q-765, 2026-10-09: registered by its `userId` field, which it has always carried. */
   app_ai_apps:   { kind: 'user', why: "which app may call NavBharatAI's AI and as whom — doc id is the APP id, so the workspace range cannot reach it; reached by its `userId` field" },
-  analytics_daily:  { kind: 'blocked', why: 'Q-767 — a day rollup that grows for ever with no retention window chosen' },
-  analytics_events: { kind: 'blocked', why: 'Q-767 — an event stream, appended with `.add()`, that grows for ever with no window' },
-  build_events:     { kind: 'blocked', why: 'Q-767 — the build event bus, appended with `.add()`, no window' },
-  guest_daily_usage: { kind: 'blocked', why: 'Q-767 — ids are `${day}_ip_${hash}` / `${day}_dev_${key}`: a hashed IP is personal data under the DPDP Act and nothing deletes it' },
-  abuseLedger:   { kind: 'blocked', why: "Q-767 — doc id IS the uid, but it is an ABUSE record: the `safety_flags` precedent says a record the abuser can erase by deleting their account is not a record. It needs a window, not a user entry" },
-  user_reports:  { kind: 'blocked', why: 'Q-767 — support tickets carrying `reporterUid` and `target.ownerUid` plus screenshot subcollections; a support/safety record needing a window, like `app_mart_comment_reports`' },
-  admin_apk_reports:   { kind: 'blocked', why: 'Q-767 — one doc per reported APK build, carrying `userId`; no window' },
-  admin_build_reports: { kind: 'blocked', why: 'Q-767 — the full build report, carrying `userId` and `workspaceId`; no window' },
-  admin_build_triage:  { kind: 'blocked', why: 'Q-767 — one triage doc per build digest; no window' },
+  analytics_daily:  { kind: 'retained', why: 'one doc per UTC day of product-analytics counts and the activation funnel — no person in it; purged at 400 days, and `getFunnel` never asks for more than 365 (Q-767)' },
+  analytics_events: { kind: 'user', why: "which screens and actions one person used — a real `userId` per event, so it is erased with the account AND purged at 30 days, the `server_logs` window for a raw stream beside a durable rollup (Q-767). Nothing in the repo reads it: see Q-783" },
+  build_events:     { kind: 'retained', why: "the build event bus's durable trail, one doc per published event with a trimmed payload; purged at 90 days — the ceiling Privacy §9 publishes for technical logs (Q-767)" },
+  guest_daily_usage: { kind: 'retained', why: "a signed-out visitor's daily message count under a one-way code; purged at 3 days, which is both the `expireAt` the writer already computes and the 'deleted after a few days' Privacy §12 publishes (Q-767)" },
+  abuseLedger:   { kind: 'retained', why: "the jailbreak/abuse ledger, doc id IS the uid — kept OUT of the user registry on the `safety_flags` precedent (a record the abuser can erase is not a record) and purged at 180 days instead, the window Privacy §9 publishes for safety records (Q-767)" },
+  user_reports:  { kind: 'retained', why: 'support tickets carrying `reporterUid` and `target.ownerUid`; purged at 180 days like `app_mart_comment_reports`, and the policy declares `subs: [\'shot\']` so the screenshot goes with the report instead of outliving it unreachable (Q-767)' },
+  admin_apk_reports:   { kind: 'retained', why: 'one doc per reported phone build, carrying `userId`; purged at 180 days — the build-report window Privacy §9 publishes (Q-767)' },
+  admin_build_reports: { kind: 'retained', why: 'the full build report, carrying `userId` and `workspaceId` — the literal subject of Privacy §9\'s 180-day sentence, purged by `savedAt` (the field every write guarantees, not the one the list sorts by) (Q-767)' },
+  admin_build_triage:  { kind: 'retained', why: 'one triage doc per build digest; purged at 180 days, tied to the reports it triages so a verdict cannot outlive the report it is about (Q-767)' },
   bot_sessions:  { kind: 'user', why: "per-chat state for one of the person's bots — id is `${botId}_${chatId}`, so `derivedIdErase.ts` resolves the bot ids first and sweeps each `${botId}_` range (Q-761)" },
-  hosting_billing:      { kind: 'blocked', why: 'Q-767 — one doc per (subject, day) of hosting billing; a money input, so the question is which window the law wants, not whether to erase' },
-  hosting_period_usage: { kind: 'blocked', why: 'Q-767 — one doc per (user, period) of hosting usage; same question as `hosting_billing`' },
+  hosting_billing:      { kind: 'forever', why: "one doc per (owner, day): the proof a wallet was debited, written with `create` SO THAT a re-run cannot charge twice — on RETAINED_INDEFINITELY, because deleting it re-arms the double charge (Q-767)" },
+  hosting_period_usage: { kind: 'forever', why: 'one doc per (user, plan period): the running total an overage charge is the DIFFERENCE from, plus any unpaid `owedInr` — on RETAINED_INDEFINITELY, a timer would re-bill a settled period or erase a debt (Q-767)' },
   promptAudits: { kind: 'blocked', why: "Q-701 — `promptAudits/{uid}/entries` IS erased (a USER_SCOPED_SUBCOLLECTIONS entry), and the parent document is deliberately NOT registered because nothing writes it: an entry would report `deleted: 0` for ever. Listed here so the parent is accounted for rather than invisible" },
 };
 
@@ -504,6 +512,26 @@ describe('every declared collection is classified', () => {
       if (v.kind !== 'blocked') continue;
       const claimed = erasedUser.has(name) || erasedWs.has(name) || policied.has(name);
       expect(claimed, `${name} is marked blocked but is already covered — classify it properly`).toBe(false);
+    }
+  });
+
+  it('🔒 every `forever`-kind collection is really on RETAINED_INDEFINITELY, with a reason', () => {
+    /**
+     * Q-767. The claim "kept for ever, deliberately" is the only classification a reader cannot check
+     * by looking for a deletion — there is nothing to find. So it is the one that most needs a registry
+     * behind it, and it was the one that had none: three stores asserted the entry in prose.
+     */
+    const forever = new Map(RETAINED_INDEFINITELY.map((r) => [r.collection, r.reason]));
+    const missing = Object.entries(CLASSIFICATION)
+      .filter(([, v]) => v.kind === 'forever')
+      .map(([name]) => name)
+      .filter((name) => !forever.has(name));
+    expect(missing, `called deliberately-kept but absent from RETAINED_INDEFINITELY: ${missing.join(', ')}`)
+      .toEqual([]);
+    // The reason is the whole value of that registry — an entry without one is a line of code, not a decision.
+    for (const [name, v] of Object.entries(CLASSIFICATION)) {
+      if (v.kind !== 'forever') continue;
+      expect(forever.get(name)!.length, `${name} is kept for ever with no reason recorded`).toBeGreaterThan(20);
     }
   });
 

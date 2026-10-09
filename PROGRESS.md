@@ -93116,3 +93116,94 @@ a refusal for any uid outside `[A-Za-z0-9]`, which makes that ambiguity impossib
 already-written rows. That is a real advantage, and it is still not mine to take by racing their file:
 the row is theirs, the operation is irreversible, and safeguard #3 says ask. Put to the admin rather
 than resolved unilaterally.
+
+## 2026-10-09 — Q-767: the eleven stores that grew with nothing deleting them
+
+**One autopsy ledger row per item, as the sixth absolute rule requires.** Every window below is a
+sentence the Privacy Policy already publishes; where it is silent, the nearest registered precedent
+decides and the entry in `DataRetentionManager.ts` names which one.
+
+| store | window | where the number comes from |
+|---|---|---|
+| `guest_daily_usage` | 3 days | §12: *"that count is deleted after a few days"* — and the writer's own `expireAt` (day + 3) |
+| `analytics_events` | 30 days | `server_logs`' window: a raw stream beside a durable rollup. The half that names a person gets the shorter window |
+| `build_events` | 90 days | §9: *"technical logs are retained for up to 90 days"* |
+| `analytics_daily` | 400 days | `metrics_snapshots` / `build_failures`: one doc a day, read as a trend. `getFunnel` caps itself at 365 |
+| `abuseLedger` | 180 days | §9's safety-record pair: 180 days AND surviving account deletion (`safety_flags` precedent) |
+| `user_reports` | 180 days + `subs: ['shot']` | `app_mart_comment_reports`: a report a person must be able to review |
+| `admin_build_reports` | 180 days | §9: *"the reports of your past builds … are kept for 180 days"* |
+| `admin_apk_reports` | 180 days | the same sentence — a reported phone build is one of those reports |
+| `admin_build_triage` | 180 days | tied to the reports it triages: a verdict must not outlive its subject |
+| `hosting_billing` | **kept for ever** | the document IS the double-charge guard (`create`, never `set`) |
+| `hosting_period_usage` | **kept for ever** | holds `gbBilled` (the charge is a difference from it) and unpaid `owedInr` |
+
+**Four things the queue row did not know, each a root cause of its own:**
+
+1. 🔴 **A second published promise with no mechanism.** §12 says the signed-out visitor's daily count is
+   *"deleted after a few days"*. Nothing deleted it. The module even computes an `expireAt` for a
+   Firestore TTL policy, with the comment "harmless without one" — and no TTL policy was ever configured
+   on the project, so the field was decoration. This is the `site_analytics` shape exactly (2026-09-02's
+   class: the policy states a limit as fact, the mechanism is nowhere), and it mattered more than its
+   size suggests: the ids are `${day}_ip_${hash}`, and a hashed IP is personal data under the DPDP Act.
+
+2. 🔴 **`purgeExpired` would have orphaned every support screenshot — Q-134's class in the OTHER
+   mechanism.** The purge called `d.ref.delete()` and nothing else, which was harmless only because no
+   policy had ever been written for a collection that owns children. `user_reports/{id}/shot/{shotId}`
+   holds the screenshot as its own document by design (a compressed image against Firestore's 1 MiB
+   cap), so expiring the report alone would have left the picture — the one part of a ticket that can
+   show a person's face — alive and unreachable for ever. Q-134 added `subs` to the ERASE registry in
+   October and nobody asked whether the second deleting mechanism had the same hole. It did.
+   `RetentionPolicy.subs` now pages children out first, and a handle that cannot reach a declared
+   subcollection fails loudly rather than reporting an expiry that left half the record behind.
+
+3. 🔴 **The two "money input" stores belong on no clock at all**, and for a reason stronger than tax law:
+   `hosting_billing` is written with Firestore's `create`, never `set`, precisely so a second run for the
+   same (owner, day) FAILS — the document's existence is the proof that wallet was already debited. A
+   retention window there would not have trimmed a log, it would have re-armed a double charge.
+   `hosting_period_usage` is the mirror: `gbBilled` is what the overage charge is the DIFFERENCE from, so
+   deleting it re-bills the whole period, and `owedInr`/`owedSince` is money a user still owes.
+
+4. 🔴 **`analytics_events` was in no ERASE path either.** Q-767 came to it for a missing window and found
+   one row per event carrying the person's real uid, surviving their account. It is now
+   `{field:'userId'}` in `USER_SCOPED_COLLECTIONS` and described on the deletion page, whose stated
+   "30 days" is tied by test to the registry's `ttlDays` so the two cannot drift.
+
+**THE OTHER 50% — why eleven stores could be forgotten at once.** They were not eleven oversights. The
+Load board's storage warning is `collectionsNeedingRetention(GROWING_COLLECTIONS)`, and
+`GROWING_COLLECTIONS` is a hand-typed array in `routes/admin.ts` carrying the comment "verified by
+reading each store on 2026-09-07". A hand-typed inventory cannot warn about the store nobody typed into
+it, so each of the eleven was invisible to the only number that asks the question, from the day it
+shipped — and so was `site_analytics`. `tests/aGrowingStoreCannotHideFromTheBoard.test.ts` makes that
+impossible: a collection with a retention policy GROWS (that is why it has a clock), so the policy list
+is a mechanical lower bound on the inventory, and CI fails on any drift in either direction.
+
+**A second hole found in the same place, and fixed with it.** The census had no label for a store kept
+for ever ON PURPOSE, so `payment_transactions`, `app_builds` and `hosting_usage` were all filed as
+`platform` — the one kind that obliges nothing — each with a `why` that CLAIMED a `RETAINED_INDEFINITELY`
+entry while nothing checked the entry existed. Prose is not a registry; that is the same "label with
+nothing behind it" defect Q-701 found in `workspace`. The census gained a **`forever`** kind whose
+obligation is a real entry *with a reason*, and the five stores moved onto it.
+
+**And a window nobody can keep no longer reports itself kept.** Each policy may delete at most
+`maxPerRun` (500) documents a night. For a store whose arrival rate is higher — `build_events` takes one
+row per published bus event — the cap is not a slow drain: the collection grows for ever while every
+registry says it is on a clock, and the old log line (a single total) read like a clean run. Nothing in a
+session can measure the real rate, so this does not guess a larger number: `PurgeResult.capped` is set
+when a run spends its whole allowance, `cappedCollections()` reports it, and the nightly job warns with
+the collection names. One capped night is a backlog draining; capped every night means that number is
+wrong. Added to **both** purge mechanisms — fixing one of a pair is how Q-764 came back twice.
+
+**Proof.** 9 TTL policies + 2 `RETAINED_INDEFINITELY` entries + 1 erase entry, 30 new tests across
+`tests/aGrowingStoreCannotHideFromTheBoard.test.ts` (17) and
+`tests/anExpiredReportTakesItsScreenshot.test.ts` (13), each class proven by reversion — children-first
+removed, an inventory entry dropped, a window widened past "a few days", `abuseLedger`'s kind flipped to
+`date` (the silent-delete-nothing defect), a `RETAINED_INDEFINITELY` entry deleted, the erase entry
+removed, the capped flag and its log un-wired, and the page's number changed — nine reversions, each
+failing the specific guard that owns it.
+
+**Still open, and recorded rather than taken: Q-783.** `analytics_events` is written on every event and
+**nothing in the repository reads it** — the "cohort/segmentation drill-down" it exists for was never
+built. The window and the erase entry are needed either way and are done; whether to keep writing a store
+that holds a uid and answers no question is a product decision. Recommendation in the row: stop writing
+it (the funnel reads the day rollup and loses nothing), but not taken here, because deleting a writer on
+our own initiative removes a capability its author intended.

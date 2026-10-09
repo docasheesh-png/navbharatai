@@ -145,6 +145,13 @@ describe('the page and the deletion code do not drift apart', () => {
       api_keys: /NavBharatAI API keys/i,
       bots: /chat bots/i,
       webhooks: /addresses NavBharatAI posted your build events to/i,
+      /**
+       * Added 2026-10-09 (Q-767). Q-767 came to `analytics_events` for its missing retention window and
+       * found it was in no erase path either — one row per event carrying the real uid, surviving the
+       * account. The page says the 30-day window too, so a reader is not left thinking this is the only
+       * thing that ever removes them.
+       */
+      analytics_events: /record of which screens and actions you used/i,
     };
     for (const { collection } of USER_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

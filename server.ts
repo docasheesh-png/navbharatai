@@ -902,15 +902,36 @@ setInterval(() => {
           // sweep's guard walks, because `server.ts` sits at the repo ROOT and not under `src/`.
           if (envFlag('DATA_RETENTION_PURGE_ENABLED')) {
             const runPurge = () => import('./src/server/lib/DataRetentionManager')
-              .then(async ({ getRetentionDb, purgeExpired, getSubcollectionRetentionSource, purgeExpiredSubcollections }) => {
+              .then(async ({ getRetentionDb, purgeExpired, getSubcollectionRetentionSource, purgeExpiredSubcollections, cappedCollections }) => {
                 const db = getRetentionDb();
                 const top = db ? await purgeExpired(db, Date.now()) : null;
                 // Q-134: subcollections under every parent (past build reports), purged parent by parent.
                 const sub = getSubcollectionRetentionSource();
                 const nested = sub ? await purgeExpiredSubcollections(sub, Date.now()) : null;
-                return (top?.totalDeleted ?? 0) + (nested?.totalDeleted ?? 0);
+                /**
+                 * 🔴 Q-767 — WHICH STORES RAN OUT OF ALLOWANCE, said out loud.
+                 *
+                 * Each policy may delete at most `maxPerRun` (500 by default) documents per night. For a
+                 * store whose daily ARRIVAL rate is higher than that, the cap is not a slow drain: the
+                 * collection grows for ever while every registry in the repo says it is on a clock, and the
+                 * old log line — a single total — reported that as a successful purge. Nothing in a session
+                 * can measure the real arrival rate, so this does not guess a bigger number; it makes the
+                 * condition visible. One capped night is a backlog draining. Capped EVERY night means that
+                 * collection's `maxPerRun` is below its write rate and the window is not really being kept.
+                 */
+                const capped = [...cappedCollections(top ?? { collections: [], totalDeleted: 0 }),
+                                ...cappedCollections(nested ?? { collections: [], totalDeleted: 0 })];
+                return { n: (top?.totalDeleted ?? 0) + (nested?.totalDeleted ?? 0), capped };
               })
-              .then((n) => { if (n) console.log(`[P-DATA.4] retention purge removed ${n} expired record(s)`); })
+              .then(({ n, capped }) => {
+                if (n) console.log(`[P-DATA.4] retention purge removed ${n} expired record(s)`);
+                if (capped.length) {
+                  console.warn(
+                    `[P-DATA.4] hit the per-run cap on: ${capped.join(', ')} — more had expired than one run may `
+                    + 'remove. Normal while a backlog drains; every night means maxPerRun is below the write rate.',
+                  );
+                }
+              })
               .catch(() => { /* best-effort — purge must never affect the server */ });
             // `exclusive`: this DELETES, and every instance runs its own tick loop. The deletes are
             // idempotent, so N instances would not destroy anything they should not — they would

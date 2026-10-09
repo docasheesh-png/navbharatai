@@ -4038,6 +4038,15 @@ the flag entries above promise.
   over several nights. **What to watch:** Cloud Run logs carry `[P-DATA.4] retention purge removed N expired record(s)`
   on a run that found something; nothing is logged when nothing had expired. To stop it, unset the key (or set `off`)
   and redeploy — the job is then not registered at all.
+  **Q-767 (2026-10-09) added eleven more stores to what this one flag deletes**, so it now carries noticeably more
+  work per night: `guest_daily_usage` 3 d (the count §12 promises is "deleted after a few days"), `analytics_events`
+  30 d, `build_events` 90 d, `analytics_daily` 400 d, and 180 d for `abuseLedger`, `user_reports` (its `shot`
+  screenshot subcollection swept first), `admin_apk_reports`, `admin_build_reports` and `admin_build_triage`.
+  `hosting_billing` and `hosting_period_usage` were deliberately left OFF the clock and put on
+  `RETAINED_INDEFINITELY` — the first one's document is the guard that stops a day being billed twice.
+  **A second log line to watch:** `[P-DATA.4] hit the per-run cap on: …` names any collection that spent its whole
+  500-document allowance. Once or twice is a backlog draining; the SAME collection every night means its write rate
+  is above the cap, the window is not really being kept, and that policy needs an explicit `maxPerRun`.
 
 ### 2026-10-06 — the sleeping-database watch (Q-700)
 

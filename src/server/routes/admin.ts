@@ -169,6 +169,22 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'workspace_files_v3', 'workspace_assets_v3', 'workspace_checkpoints_v3', 'workspace_embeddings_v3',
   'workspace_memory_v3', 'workspace_diagnostics_v3', 'workspace_manual_edits_v3', 'project_plans_v3',
   'app_engineering_memory_v1',
+  // ── Q-767 ───────────────────────────────────────────────────────────────────────────────────────────
+  // 🔴 THIS LIST BEING HAND-WRITTEN IS WHY Q-767 EXISTED. Eleven stores grew with nothing deleting them,
+  // and the one number that could have said so — `collectionsNeedingRetention(GROWING_COLLECTIONS)` —
+  // reads only this array, so a store nobody typed here was invisible to the Load board from the day it
+  // shipped. That is how `site_analytics` published a 30-day promise it was not keeping.
+  // 🔒 It is no longer only hand-kept: `tests/aGrowingStoreCannotHideFromTheBoard.test.ts` fails CI when
+  // a collection has a retention policy and is missing from this inventory. A store put on a clock IS a
+  // store that grows — that is why it needed the clock — so the two lists can never drift apart again.
+  'guest_daily_usage', 'analytics_daily', 'analytics_events', 'build_events', 'abuseLedger',
+  'user_reports', 'admin_apk_reports', 'admin_build_reports', 'admin_build_triage',
+  'hosting_billing', 'hosting_period_usage',
+  // Already on clocks, and absent from this inventory for the same reason the eleven above were.
+  'takedown_records', 'safety_flags', 'admin_audit_log', 'build_jobs', 'build_failures',
+  'app_ai_usage', 'app_ai_visitors', 'image_free_paid_daily', 'mobile_build_outcomes',
+  'agentv3_free_chains', 'hosted_deploy_attempts', 'referral_claim_outcomes', 'auth_otp_outcomes',
+  'app_mart_notifications', 'app_mart_comment_reports', 'payment_transactions',
 ];
 import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
 import { routeParam, routeParams } from '../lib/expressCompat';

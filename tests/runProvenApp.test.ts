@@ -120,7 +120,7 @@ describe('the route wiring — the CODE of each late flip, comments stripped', (
 
   it('all THREE late flips ask runProof() before failing the build', () => {
     // 1. the release gate's RED
-    const gate = code.indexOf("if (gate.state === 'red' && gateBlockers > 0 && settled && settled.ok) {");
+    const gate = code.indexOf("if (gate.state === 'red' && (gateBlockers > 0 || runtimeRed) && settled && settled.ok) {");
     expect(gate).toBeGreaterThan(-1);
     const gateBody = code.slice(gate, code.indexOf("code: 'OUTCOME_RELEASE_GATE_RED'", gate));
     expect(gateBody).toContain('const held = runProof();');

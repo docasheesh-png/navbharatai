@@ -15,6 +15,7 @@
 export type BuildOutcome =
   | 'BUILD_SUCCESS'    // files written, compiles, and the live app was verified (preview/runtime ok)
   | 'BUILD_PARTIAL'    // files written + compiles, but the live app was NOT verified (best-effort skipped)
+  | 'BUILD_UNVERIFIED' // files written, and nothing was checked — not a claim that it compiles
   | 'TYPECHECK_FAILED' // tsc errors remained after repair
   | 'BUILD_FAILED'     // no files produced, OR the production build (npm run build) failed though tsc passed
   | 'PREVIEW_FAILED'   // app compiles but the preview never came up (NOT a build failure — ship-with-warning)
@@ -56,8 +57,8 @@ export function classifyBuildOutcome(s: BuildSignals): BuildOutcome {
   if (compiles && liveVerified) return 'BUILD_SUCCESS';
   // Compiles but the live app was not verified (preview/runtime not run) — built, not fully proven.
   if (compiles) return 'BUILD_PARTIAL';
-  // Files exist but nothing was verified at all (no tsc, no preview) — best-effort partial.
-  return 'BUILD_PARTIAL';
+  // Files exist but nothing was verified at all (no tsc, no preview). Not "compiles".
+  return 'BUILD_UNVERIFIED';
 }
 
 /** A short, honest human label for the chat/report. */
@@ -65,6 +66,7 @@ export function buildOutcomeLabel(outcome: BuildOutcome): string {
   switch (outcome) {
     case 'BUILD_SUCCESS': return 'Build verified — compiles and the live app works. ✓';
     case 'BUILD_PARTIAL': return 'Built and compiles — live preview not fully verified.';
+    case 'BUILD_UNVERIFIED': return 'Files written — nothing has been verified yet (no compile or preview check ran).';
     case 'TYPECHECK_FAILED': return 'Build failed — TypeScript errors.';
     case 'BUILD_FAILED': return 'Build failed — the app could not be produced.';
     case 'PREVIEW_FAILED': return 'App built (compiles) but the preview did not come up.';

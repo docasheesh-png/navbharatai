@@ -93279,3 +93279,73 @@ a report: the sibling hunt the fourth absolute rule requires. Q-767 fixed the Lo
 inventory so a growing store cannot hide; Q-784 fixed the census's name-keyed scan so a store cannot
 hide behind what its constant was called. Both were instruments that read as coverage while being
 blind — which is the single most expensive shape in this repository's history.
+
+## 2026-10-09 — Q-682: four of eight subcollections, and the fifth reachability shape
+
+The admin answered *"sabhi Q complete karo"*, which is this row's own requested input ("the admin's
+yes/no per item (or 'all as recommended')"), so its recommendations stand. Four of eight are done;
+the four under `nav_store_web_apps` are the same decision as Q-766 and go with it.
+
+🔴 **First, honestly: Q-767 and Q-784 RE-DISCOVERED two of these.** `shares/*/feedback` and
+`user_reports/*/shot` were named in this row on 2026-10-05, with recommendations, waiting on a
+decision. I searched the registries and the collection census and reported them as newly found. The
+fifth rule says to check whether a class has come back before by searching `PROGRESS.md` **and the
+queue** — I searched the code and not the queue. The fixes happen to be exactly what this row
+recommended, which is luck, not method.
+
+**Done:**
+- ✅ `user_reports/*/shot` — rec (5), the 180-day policy. Shipped in #3616, which also had to teach
+  `purgeExpired` to delete children **at all**: it never did, so the first policy on a parent with
+  children would have orphaned every screenshot.
+- ✅ `shares/*/feedback` — rec (2), erased with the owner's shares (#3617).
+- ✅ `teams/*/members`, ✅ `teams/*/library` — recs (1) and (3). Reaching them exposed three things:
+
+**(a) `teams` was classified `platform` on a sentence true about the wrong noun.** The census said
+"a team outlives any one member". It does outlive a MEMBER — but `teamId === owner uid`
+(`TeamStore.ts:14`, and `requireTeamManager` short-circuits on `uid === teamId`), so the document id
+IS a person's uid and the record is theirs. Nothing in the repository ever deleted a team, so an
+owner's team, its member list — holding **other people's uid and email** — and its shared library
+survived their account for ever. It is `user` now with `subs: ['members','library']`.
+
+Why the team goes with its owner rather than being left to the remaining members: ownership is the
+doc id, so once the account is gone **nobody can own it** — `canManageTeam` admits the owner by
+`requesterUid === teamId`. The alternative is an unmanageable team holding third parties' email
+addresses for ever, which is worse for those third parties than deleting it.
+
+**(b) THE FIFTH REACHABILITY SHAPE — my document under somebody else's parent.** The four shapes the
+erasers could express all assume the eraser can reach the PARENT: the id is the uid; a field equals
+the uid; the id is a workspace id in my range; the id or field is derived from a key I hold.
+`teams/{someoneElse}/members/{myUid}` is the mirror image — the document is mine (its id is my uid,
+and it holds my email) and the parent is somebody else's. No key points at that parent, so there was
+nothing to query and nothing to declare. `removeMember` makes it worse by design: it writes
+`status: 'removed'` and keeps the record, so the team can show who left.
+
+`FOREIGN_PARENT_USER_DOCS` is that shape named, and it is a SCAN — no index answers "which teams is
+this person in" without a collection-group query, which this project deploys no indexes for. Bounded,
+references only, paid once per account deletion. A handle that cannot list parents **throws**, because
+silently skipping would report a clean erase while leaving other people's email addresses behind.
+
+**(c) The `docId` branch of `deleteUserData` ignored `subs` entirely.** Latent only because every
+entry with children happened to be a `{field}` one — the registry would have declared the children and
+no code would have read it. That is the **third** place "delete the parent, forget the children" had to
+be fixed: the field branch (Q-701), `purgeExpired` (Q-767), and this. `teams` is the first `docId`
+entry that owns children, and one of them holds other people's email addresses.
+
+**Also closed a gap in the census that let (a) happen:** every obligation there read ONE way — a `user`
+label must have an erase entry. The reverse was unchecked, so a store could be registered for deletion
+and still be labelled `platform` ("no user owns it"), with this file agreeing to both claims at once.
+
+**Still open — the four `nav_store_web_apps` subs, and a contradiction worth stating.** Rec (4) says
+erase the creator's listing with its `files`/`baked`/`screenshots`. That contradicts Q-766's
+recommendation to keep the app and de-identify the creator, and **Q-766 is right**:
+`nav_store_purchases` proves people BUY these listings, so erasing one takes away something a buyer
+paid for. De-identification removes the personal data (the uid, the creator code) while the app's files
+stay what they always were — the product. Doing both rows in one PR on that basis, with the `reports`
+sub on the 180-day safety clock.
+
+**Proof.** 9 new tests (`tests/aMembershipDiesWithTheMember.test.ts`), two new census kinds with
+mechanically-checked obligations (`parent-subs`, `retained-parent`) and a `foreignParent` flag, and
+three reversions: the foreign-parent sweep removed, the team's `subs` removed, the `docId` branch's
+sub sweep removed — each failing the guard that owns it. The `DataRetentionManager` mock gained
+`listDocuments` and `doc()` on subcollections rather than the eraser losing its checks: a mock more
+forgiving than the real database is a test that passes for code that cannot work.

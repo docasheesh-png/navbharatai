@@ -92140,3 +92140,49 @@ This is worth recording because the first instinct was the wrong one: a failing 
 automatically a failing change. Here the change was right and the assertion was carrying a belief
 nobody had checked against the data. The repo having two naming conventions is a real (small)
 inconsistency, but it is not one a test may fix on a live database.
+## 2026-10-08 — Q-707: a plain `node:http` server was published as a static site, silently
+
+**Report:** Q-707, found by the C-1 hosting re-audit and deliberately left unfixed there (that PR
+changed only the probe).
+
+**Root cause:** every server detector in this codebase recognised a server by its **framework**.
+`deployPlan.ts` had `NODE_SERVER_DEPS` (express, fastify, koa, NestJS, Hapi, Apollo) and
+`importsNodeServer` matching the same list. An app whose server is plain `node:http` matches none of
+them → `shape: 'unknown'` → `staticHostingSufficient: true` → **published as a static site, with its
+API dead and the user told the publish succeeded.** Q-707's own proof: the real `planDeployment()` on
+the hosting probe returned exactly that.
+
+**The class, and the sibling the row told me to check.** The same blind spot is in
+`BackendPresence.ts`, with a *different* harm: `hasBackend: false` → the in-browser preview shows a
+frontend whose API calls all fail, **without** the honest "this app needs a live server" banner that
+exists precisely for that case. Its endpoint fallback cannot rescue it either — `extractEndpoints`
+matches `app.get('/x')` and decorators, while a bare http server routes on `req.url`. Verified by
+reading `apiGraph.ts`, not assumed.
+
+So the fix is **one shared detector** (`coreHttpServer.ts`) that both modules call, not a second
+framework list in each — the class rule, and the reason `safeRelPath` once had four drifted copies.
+
+**🔒 The precision that makes this safe.** A CLIENT imports `http` too. Treating the import alone as
+a server would REFUSE a working static publish — which is the 2026-08-25 harm (a dev dependency read
+as a server) in a new costume. So the import is never sufficient: the file must also CREATE a server.
+`createServer(` / `createSecureServer(` is the signal, because no client ever calls it.
+
+**Lock:** `coreHttpServer.test.ts` — a census of real server SHAPES (require, `node:` prefix, ESM
+default, ESM named, https, http2, createServer with no listen in the same file) and of things that
+are NOT servers (an `http.get` client, an https client, `createServer` from Vite, prose, a non-code
+file). Plus the two end-to-end facts that matter: such an app now plans as `node-server` /
+`fullstack`, BackendPresence shows the banner, **and the two detectors are asserted to AGREE** — the
+drift the shared module exists to prevent. 21 tests, reversion-proven three ways (detector disabled →
+10 fail; client guard removed → 3 fail including the "a Vite SPA is still static" no-new-refusals
+case; `createSecureServer` support removed → 1 fail).
+
+⚠️ **My own gap, caught by my own census on its first run:** I wrote the signal as the literal
+`createServer(`, and **`createSecureServer` does not contain that substring** — so http2's and tls's
+spelling would have been missed. That is exactly why the census is of shapes rather than of the one
+file in the report.
+
+**Not fixed here, deliberately:** `RuntimeRouter.ts`, `ProjectImport.ts`, `serviceGraph.ts`,
+`previewSnapshot.ts` and `ProjectSummary.ts` carry their own copies of the framework list. They were
+found while hunting siblings, but each feeds a different decision with a different failure mode, and
+widening detection in all of them in one PR would change behaviour nobody has measured. Q-707's own
+scope was deployPlan + the sibling it named; the rest is recorded here as a known, bounded follow-up.

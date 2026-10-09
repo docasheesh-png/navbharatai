@@ -19,7 +19,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { globSync } from 'glob';
-import { USER_SCOPED_SUBCOLLECTIONS, SUBCOLLECTION_RETENTION_POLICIES } from '../src/server/lib/DataRetentionManager';
+import {
+  USER_SCOPED_SUBCOLLECTIONS, SUBCOLLECTION_RETENTION_POLICIES,
+  USER_SCOPED_COLLECTIONS, RETENTION_POLICIES, FOREIGN_PARENT_USER_DOCS,
+} from '../src/server/lib/DataRetentionManager';
 import { WORKSPACE_SCOPED_COLLECTIONS } from '../src/server/lib/workspaceDataErase';
 
 const root = resolve(__dirname, '..');
@@ -31,11 +34,22 @@ type Kind =
   | { kind: 'user'; parent: string }
   /** Capped per parent by the store itself, so it cannot grow with time. */
   | { kind: 'bounded'; why: string }
+  /**
+   * Declared as a `subs` of the PARENT's own `USER_SCOPED_COLLECTIONS` entry, which deletes the children
+   * before the parent (Q-682). Covers both parent shapes the registry supports: a parent found by a
+   * FIELD (`shares`, by `ownerId`) and a parent whose doc id is the uid (`teams`).
+   */
+  | { kind: 'parent-subs'; parent: string }
+  /**
+   * Bounded by the PARENT's own `RETENTION_POLICIES` entry carrying `subs`, so the children expire with
+   * the record rather than outliving it (Q-767: `user_reports/{id}/shot`).
+   */
+  | { kind: 'retained-parent'; parent: string }
   /** Neither erased nor bounded yet: an OPEN queue row owns the decision. */
   | { kind: 'open'; row: string; why: string };
 
 /** "file › sub" → what it is. `clock` adds the second obligation: a SUBCOLLECTION_RETENTION_POLICIES entry. */
-const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string }> = {
+const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string; foreignParent?: true }> = {
   'src/server/AgentV3/WorkspaceFileStore.ts › files': { kind: 'workspace', parent: 'workspace_files_v3' },
   'src/server/AgentV3/WorkspaceAssetStore.ts › assets': { kind: 'workspace', parent: 'workspace_assets_v3' },
   'src/server/AgentV3/CheckpointStore.ts › items': { kind: 'workspace', parent: 'workspace_checkpoints_v3' },
@@ -65,14 +79,29 @@ const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string }>
   },
   'src/server/lib/navStoreWebData.ts › dataSub': { kind: 'bounded', why: 'NavData rows: MAX_ROWS_PER_APP per app, the quota that IS the admin authorization' },
 
-  'src/server/lib/ShareStore.ts › feedback': { kind: 'open', row: 'Q-682', why: 'feedback on a share link; shares are keyed by token with an ownerId field and are in no erase path' },
-  'src/server/lib/TeamStore.ts › members': { kind: 'open', row: 'Q-682', why: "a member record holds the member's uid and email; deleting that member's account does not remove it" },
-  'src/server/lib/TeamLibraryStore.ts › library': { kind: 'open', row: 'Q-682', why: 'team-owned; what happens when the team owner deletes their account is undecided' },
+  /**
+   * ── Q-682, resolved 2026-10-09 as that row recommended ───────────────────────────────────────────
+   * The admin's answer to "yes/no per item" was to complete the row, so its own recommendations stand.
+   */
+  'src/server/lib/ShareStore.ts › feedback': { kind: 'parent-subs', parent: 'shares' },
+  /**
+   * TWO obligations, because it has two homes. `teams/{myUid}/members` is my own team's list, erased as
+   * a `subs` of the `teams` entry; `teams/{someoneElse}/members/{myUid}` is MY record under SOMEBODY
+   * ELSE'S parent — the fifth reachability shape, which no registry could express until Q-682, so a
+   * departing member's uid and email stayed in every team they had joined.
+   */
+  'src/server/lib/TeamStore.ts › members': { kind: 'parent-subs', parent: 'teams', foreignParent: true },
+  'src/server/lib/TeamLibraryStore.ts › library': { kind: 'parent-subs', parent: 'teams' },
   'src/server/lib/navStoreWeb.ts › files': { kind: 'open', row: 'Q-682', why: "a published store listing's bytes; not reached by the account erase" },
   'src/server/lib/navStoreWeb.ts › baked': { kind: 'open', row: 'Q-682', why: 'the baked page of a store listing; same parent as files' },
   'src/server/lib/navStoreWeb.ts › screenshots': { kind: 'open', row: 'Q-682', why: 'listing screenshots; same parent as files' },
   'src/server/lib/navStoreWeb.ts › reports': { kind: 'open', row: 'Q-682', why: 'abuse reports about a listing; a safety record that should get the 180-day policy' },
-  'src/server/lib/userReportStore.ts › shot': { kind: 'open', row: 'Q-682', why: "the screenshot attached to a user's report; user_reports has no retention policy" },
+  /**
+   * Q-682's recommendation (5) — the 180-day retention policy, not deletion on erase: a support ticket
+   * is a record a person must be able to review, like `app_mart_comment_reports`. Shipped in Q-767,
+   * which also had to teach `purgeExpired` to delete children at all.
+   */
+  'src/server/lib/userReportStore.ts › shot': { kind: 'retained-parent', parent: 'user_reports' },
 };
 
 /** The generic erasers name subcollections through a variable; they are the mechanism, not a store. */
@@ -157,6 +186,43 @@ describe('every subcollection is classified', () => {
       if (!c.clock || !('parent' in c)) continue;
       expect(SUBCOLLECTION_RETENTION_POLICIES.some((p) => p.parent === c.parent && p.subcollection === key.split(' › ')[1]), key).toBe(true);
     }
+  });
+
+  it('a `parent-subs` child is really declared on its parent\'s erase entry', () => {
+    // Not prose: the parent's own USER_SCOPED_COLLECTIONS entry must name this subcollection, which is
+    // what makes `deleteUserData` page the children out BEFORE the parent.
+    for (const [key, c] of Object.entries(CLASSIFICATION)) {
+      if (c.kind !== 'parent-subs') continue;
+      const sub = key.split(' › ')[1];
+      const entry = USER_SCOPED_COLLECTIONS.find((e) => e.collection === c.parent);
+      expect(entry, `${key}: '${c.parent}' is not erased with the account at all`).toBeDefined();
+      expect(entry!.subs ?? [], key).toContain(sub);
+    }
+  });
+
+  it('a `retained-parent` child is really declared on its parent\'s retention policy', () => {
+    for (const [key, c] of Object.entries(CLASSIFICATION)) {
+      if (c.kind !== 'retained-parent') continue;
+      const sub = key.split(' › ')[1];
+      const policy = RETENTION_POLICIES.find((p) => p.collection === c.parent);
+      expect(policy, `${key}: '${c.parent}' is on no clock, so its children expire with nothing`).toBeDefined();
+      expect(policy!.subs ?? [], key).toContain(sub);
+    }
+  });
+
+  it('🔒 a child that also lives under SOMEBODY ELSE\'S parent is swept there too', () => {
+    // The fifth reachability shape. Without this the member row in MY OWN team would be erased and the
+    // one in every team I joined would not — a half-erase that reads as done.
+    for (const [key, c] of Object.entries(CLASSIFICATION)) {
+      if (!c.foreignParent || !('parent' in c)) continue;
+      const sub = key.split(' › ')[1];
+      expect(
+        FOREIGN_PARENT_USER_DOCS.some((f) => f.parent === c.parent && f.sub === sub),
+        `${key} is also written under other people's parents and must be swept there`,
+      ).toBe(true);
+    }
+    // And every entry in that registry records WHY, since a scan is the expensive mechanism.
+    for (const f of FOREIGN_PARENT_USER_DOCS) expect(f.why.length).toBeGreaterThan(30);
   });
 
   it('every open entry points at a row that is in the queue', () => {

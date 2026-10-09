@@ -152,6 +152,11 @@ describe('the page and the deletion code do not drift apart', () => {
        * thing that ever removes them.
        */
       analytics_events: /record of which screens and actions you used/i,
+      /**
+       * Q-682. `teams` was classified `platform` on a half-truth — a team outlives a MEMBER, but
+       * `teamId === owner uid`, so the document is the owner's own and nothing ever deleted it.
+       */
+      teams: /a team belongs to the account that created it/i,
     };
     for (const { collection } of USER_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

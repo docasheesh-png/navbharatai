@@ -252,7 +252,15 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   site_content:           { kind: 'platform', why: 'a single document holding the public About text' },
   own_audience_totals:    { kind: 'platform', why: 'one doc per page: lifetime view counters, no person in it' },
   admin_notifications:    { kind: 'platform', why: 'one doc per notice the ADMIN wrote; who read it is `user_notification_reads` above' },
-  teams:                  { kind: 'platform', why: 'a team outlives any one member — doc id is the teamId; a member row lives in its `members` sub (Q-682), and removing a member is a status change, not a delete' },
+  /**
+   * 🔴 CORRECTED 2026-10-09 (Q-682). This said `platform`, because "a team outlives any one member".
+   * A team does outlive a MEMBER — but `teamId === owner uid` (`TeamStore.ts:14`, and
+   * `requireTeamManager` short-circuits on `uid === teamId`), so the document id IS a person's uid and
+   * the record is theirs. Nothing ever deleted a team, so an owner's team, its `members` list — holding
+   * OTHER people's uid and EMAIL — and its shared `library` survived their account for ever. The
+   * original sentence was true about the wrong noun.
+   */
+  teams:                  { kind: 'user', why: "the team this person OWNS: `teamId === owner uid`, so the doc id IS the uid. Erased with the account along with its `members` and `library` subs; a member's own row in SOMEBODY ELSE'S team is the fifth reachability shape, swept by FOREIGN_PARENT_USER_DOCS (Q-682)" },
   teamInvites:            { kind: 'platform', why: 'one doc per invite token, belonging to the team that sent it rather than to either side' },
   payment_transactions:   { kind: 'forever', why: 'one doc per order id — a money record. Privacy §9\'s FIRST stated exception to erasure; `forever` since Q-767, so the RETAINED_INDEFINITELY entry this line used to merely assert is now checked' },
   app_builds:             { kind: 'forever', why: "one doc per (user, repo) GitHub build — kept as part of the user's own build record (RETAINED_INDEFINITELY, now checked: Q-767)" },
@@ -584,6 +592,21 @@ describe('every declared collection is classified', () => {
       const claimed = erasedUser.has(name) || erasedWs.has(name) || policied.has(name);
       expect(claimed, `${name} is marked blocked but is already covered — classify it properly`).toBe(false);
     }
+  });
+
+  it('🔒 a collection the eraser DELETES is not labelled as nobody\'s — the obligation runs both ways', () => {
+    /**
+     * Q-682. Every obligation in this file read one way: a `user` label must have an erase entry. The
+     * reverse was unchecked, so a store could be REGISTERED for account deletion and still be labelled
+     * `platform` — "no user owns it" — and this file would agree with both claims at once. `teams` was
+     * exactly that for a day: classified `platform` on the true-but-irrelevant fact that a team outlives
+     * a member, while `teamId === owner uid` made it one person's own record.
+     */
+    const erased = new Set(USER_SCOPED_COLLECTIONS.map((c) => c.collection));
+    const mislabelled = Object.entries(CLASSIFICATION)
+      .filter(([name, v]) => erased.has(name) && v.kind !== 'user')
+      .map(([name, v]) => `${name} (labelled ${v.kind}, but account deletion erases it)`);
+    expect(mislabelled, mislabelled.join('\n')).toEqual([]);
   });
 
   it('🔒 every `forever`-kind collection is really on RETAINED_INDEFINITELY, with a reason', () => {

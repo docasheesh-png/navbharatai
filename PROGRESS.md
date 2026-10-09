@@ -92140,6 +92140,132 @@ This is worth recording because the first instinct was the wrong one: a failing 
 automatically a failing change. Here the change was right and the assertion was carrying a belief
 nobody had checked against the data. The repo having two naming conventions is a real (small)
 inconsistency, but it is not one a test may fix on a live database.
+
+---
+
+## 2026-10-09 — Q-701 PR B: the census can finally see the codebase (46 → 144), and every kind now owes something
+
+**What the guard was actually doing.** `tests/everyCollectionIsClassified.test.ts` is the test that makes
+a new Firestore store fail CI until somebody decides what it is. Its scan read exactly one pattern:
+`export const *COLLECTION = '…'`. So a private constant or an inline `db.collection('x')` was invisible,
+and three live defects came out of that one blind spot — `supabase_connections` (a deleted account's
+Supabase tokens, kept), Q-760 (four stores holding a working credential, kept), Q-701 PR A (33 stores of
+personal and app data, in no erase path).
+
+**The widened scan reads three forms**, each needed by something real here:
+1. `const *COLLECTION* = 'x'`, exported or not — but **never** `*SUBCOLLECTION*`;
+2. `collection(db, 'x')` and `doc(db, 'x', …)` (in the second the FIRST segment is the collection);
+3. `<handle>.collection('x')` where the handle is a Firestore root.
+
+It strips comments first, because `serverDb.ts`'s doc comment says `doc(db, 'coll', 'id')` and an earlier
+draft of this scan duly reported a collection called `coll`. And `FEEDBACK_SUBCOLLECTION = 'feedback'`
+contains the substring COLLECTION, which is how `feedback`, `history` and `members` first appeared as
+top-level stores.
+
+🔒 **It declares what it could not read.** A receiver that is not a known root goes into
+`UNREADABLE_RECEIVERS` and must be listed with its reason — today only `root`, which is always a `.doc()`
+reference, so what follows it is a subcollection. A **new** unknown receiver fails the test, because a
+scan that silently skips what it does not understand is precisely how this one went blind for 98
+collections.
+
+### Every kind now carries an obligation, and the new one found three stores immediately
+
+`user` ⇒ in `USER_SCOPED_COLLECTIONS`. `retained` ⇒ a `RETENTION_POLICIES` entry. Both always had a
+consequence. **`workspace` had none** — it was a label with nothing behind it, which reads as coverage
+from every direction, and that is how twelve stores of the user's own app data sat unerased while this
+file called them classified.
+
+Adding `workspace` ⇒ in `WORKSPACE_SCOPED_COLLECTIONS` failed on its first run with **three stores that
+were classified `workspace` before Q-701 existed**:
+- `site_configs` — the app's own site settings, doc id is the workspaceId. Registered.
+- `agentv3_mcp_servers` — the app's MCP wiring: which outside services it may call **and the keys held
+  for them**. Doc id is the workspaceId. Registered. It was being kept for ever.
+- `site_uptime` — and **its classification was itself wrong.** It said `workspace`, with the reason "one
+  record per connected domain, not per user" — a sentence that argues against its own label. Its doc id
+  IS the domain (`siteUptimeStore.ts:12`), so the workspace eraser's `agentv3-{uid}-` range could never
+  reach it. The body carries `userId` (`siteUptime.ts:81`), so it is now a user entry, which is where a
+  domain-keyed record of one person's domain belongs.
+
+### 🟡 A fifth kind, so that "unresolved" cannot be silent
+
+`blocked` — the obligation is **not** met, and a queue row owns the reason, which the test requires the
+reason to name (`/\bQ-\d{3}\b/`). This is the sixth absolute rule expressed as a test. Without it, the
+only way to make this file pass for a store whose erasure is undecided would be to mislabel it
+`platform`, and a false label is worse than an open row. A second test refuses the opposite error: a
+`blocked` store that is *already* covered by one of the registries is a false claim in the other
+direction, and fails.
+
+Nineteen stores are `blocked`, each naming Q-761 through Q-767.
+
+### 🔴 My own reversion proof found a hole in the test I had just written
+
+Reverting the scan to exported-constants-only left **all ten tests green** — on 46 collections instead of
+144. Every obligation is checked against what the scan FOUND, so narrowing the scan narrows the world
+being judged and nothing complains. **A guard whose coverage its own tests cannot see is a guard that can
+be switched off by accident, which is a fair description of how this started.**
+
+So each form now has a named witness that only that form can find — `conversation_memory_v1` (private
+constant), `api_keys` (inline `db.collection`), `user_workspaces` (`doc(db,'x',…)`), `user_secrets`
+(`collection(db,'x')`) — plus a floor of 130 on the total, set below today's 144 so adding a store is not
+a failure while losing a tenth of them is.
+
+**Reversion-proven five ways:** the scan narrowed to exported constants → the FORM test fails · a
+workspace entry dropped from the eraser → the workspace obligation fails · the `Q-###` removed from a
+blocked reason → that test fails · comment stripping disabled → `coll` appears, 2 fail · the
+`*SUBCOLLECTION*` exclusion removed → `feedback`/`history`/`members` appear, 2 fail.
+
+### Also closed here
+
+`payment_transactions` is now in `RETAINED_INDEFINITELY` with its reason: a record of money received,
+which tax and accounting law requires and which Privacy §9 names as the first of its four exceptions to
+erasure. Nothing ever deleted it, so this changes no behaviour — it ends the census being silent about
+the one collection whose retention is a legal duty rather than a choice. (Q-767's remaining twelve still
+need a window each.)
+
+**A third guard fired, and the fix had to strengthen it rather than loosen it.**
+`tests/anMcpCredentialIsNeverStoredInTheClear.test.ts` keeps a census: only the two MCP store files may
+name `agentv3_mcp_servers` / `agentv3_mcp_library`, with ONE exemption —
+`DataRetentionManager.ts`, "because it names the library only to DELETE it with the account". Registering
+the app's MCP wiring in `workspaceDataErase.ts` made a second file name it, and the test failed.
+
+The tempting fix is to add the file to an allowlist and move on. That would have quietly dropped the
+part of the assertion that matters: the exemption is from *"is this a store"*, **not** from *"it must
+never write"*. So both erasers are now named as erasers and the **no-write assertion is applied to both**
+— an eraser that started writing to these collections still fails. Proven by adding a function to
+`workspaceDataErase.ts` that writes `{ servers: [] }` and watching the test name the file.
+
+Worth recording because it is the same shape as the `workspaceDataErase` naming check earlier in this
+PR and the opposite conclusion: there, the assertion carried a belief that was wrong (snake_case names)
+and the test gave way; here the assertion was right and only its *scope* needed to grow. A failing guard
+has to be read, not pattern-matched.
+
+**And a fourth thing the gate caught, which was not mine: a flaky test whose flake was in the assertion.**
+`tests/vaultPin.test.ts` failed in PR B's gate run on a change that touched nothing near it —
+`expect(hashPin('8274', newSalt())).not.toContain('8274')`, with the digest built from a RANDOM salt. A
+64-character hex digest has 61 four-character windows, each matching a given hex sequence with
+probability 16⁻⁴, so roughly one run in 1,100 fails. The run that failed produced
+`…ab7e90ef8274edfd…`.
+
+**Measured rather than asserted:** 2,000,000 random 32-byte digests gave 1 in 1,063 observed against
+1 in 1,074 predicted.
+
+That is the worst kind of red: it appears in an unrelated PR and the first instinct is to go looking at
+the change. It was also testing nothing — four of a PIN's digits appearing somewhere in sixty-four is
+not a leak. So the substring claim moved to a FIXED-salt case where the digest is identical on every
+machine and every run, and the random-salt case keeps the property that actually matters, that two
+salts give two hashes.
+
+**The sibling was hunted, not waited for.** `'stores only the hash — the record never contains the code'`
+ran the same shape over `JSON.stringify(writePinRecord(…))`, which carries ~128 hex characters of random
+salt, so a six-digit OTP would appear in it about once in 136,000 runs — rarer, and therefore worse,
+because it would fire years from now in somebody else's unrelated PR. It now asserts on the record's
+FIELDS: no field equals the code, no non-random field contains it, and the two hash fields are checked
+for shape. That is deterministic AND a stricter statement than scanning a blob. Proven by reversion:
+adding `otp_debug: '427391'` to the stored record fails it by name.
+
+A wider sibling sweep found no third instance — the other ~18 `not.toContain` assertions in the suite
+run against text the code produced deterministically (redaction, sealed secrets, generated workflow
+files), where the claim is sound and is the point of the test. Recorded as Q-768.
 ## 2026-10-08 — Q-707: a plain `node:http` server was published as a static site, silently
 
 **Report:** Q-707, found by the C-1 hosting re-audit and deliberately left unfixed there (that PR

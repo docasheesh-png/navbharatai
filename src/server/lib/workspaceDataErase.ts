@@ -99,6 +99,19 @@ export const WORKSPACE_SCOPED_COLLECTIONS: readonly WorkspaceScopedCollection[] 
   { collection: 'migrationHistory' },
   /** The app's SBOMs — `sboms/{workspaceId}/builds/{buildId}` (`routes/sbom.ts:52`). */
   { collection: 'sboms', sub: 'builds' },
+  /**
+   * ── 🔴 THREE MORE, AND THESE WERE NOT NEWLY DISCOVERED (Q-701 PR B, 2026-10-09) ──────────────────
+   * `site_configs`, `agentv3_mcp_servers` and `site_uptime` were ALREADY classified `workspace` in
+   * `tests/everyCollectionIsClassified.test.ts` — since before Q-701 — and were in no erase path at
+   * all. Nothing caught it because `workspace` carried no obligation: the label alone read as
+   * coverage. Adding that obligation found them on its first run. Two belong here; the third did not
+   * (see below), which is why each was read rather than registered as a batch.
+   */
+  /** The app's own site config — doc id is the workspaceId (`siteConfigStore.ts:37/50`). */
+  { collection: 'site_configs' },
+  /** The app's MCP wiring: the servers it may call and the keys for them — doc id is the workspaceId
+   *  (`McpServerStore.ts:82/92/154`). Credential-adjacent, and it was being kept for ever. */
+  { collection: 'agentv3_mcp_servers' },
 ];
 
 export type EraseRefusal = 'unusable-uid' | 'ambiguous-uid';

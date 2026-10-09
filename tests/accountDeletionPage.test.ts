@@ -127,7 +127,13 @@ describe('the page and the deletion code do not drift apart', () => {
       pwa_apps: /instantly-hosted apps/i,
       user_referrals: /referral record/i,
       /** Said with its limit, because half of this one is not ours to do. */
-      custom_domains: /connected domains.*not\*\* change anything at your domain registrar/is,
+      custom_domains: /connected domains.*not\*\* change anything at your/is,
+      /**
+       * Added 2026-10-09 (Q-701 PR B). All three were ALREADY classified `workspace` before Q-701 and
+       * were in no erase path, because that kind carried no obligation. `site_uptime` turned out not to
+       * be workspace-keyed at all — its doc id is the domain — so it is a user entry now.
+       */
+      site_uptime: /the uptime history we kept for it/i,
       api_keys: /NavBharatAI API keys/i,
       bots: /chat bots/i,
       webhooks: /addresses NavBharatAI posted your build events to/i,
@@ -187,6 +193,8 @@ describe('the built-app eraser and the page do not drift apart', () => {
       migrationHistory: /everything the builder kept about each app/i,
       mega_roadmaps_v3: /its plan and roadmap/i,
       sboms: /the software bill of materials/i,
+      site_configs: /the app's own site settings/i,
+      agentv3_mcp_servers: /the outside services it was wired to talk to/i,
       agentv3_deployments: /our record of where it/i,
       agentv3_sandboxes: /the sandbox it ran in/i,
     };

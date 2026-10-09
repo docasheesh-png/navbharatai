@@ -91937,6 +91937,335 @@ nothing is lost by removing the rows — only the false claim. Their IDs are app
   Cloud IAM steps) and **Q-706** (OPEN, the two isolation gaps the identity fix does not close). Both
   stay in the queue; closing Q-704 does not touch them.
 
+---
+
+## 2026-10-08 — Q-760: a credential outlived the account it belonged to (four stores)
+
+**Found while widening the collection census for Q-701** — not reported by anyone. Q-701's whole premise
+is that `tests/everyCollectionIsClassified.test.ts` sees only EXPORTED `*_COLLECTION` constants, so ~57
+private constants and ~53 inline `collection('x')` literals are invisible to the one guard that is
+supposed to make an unclassified store fail CI. Scanning for them to do that work turned up four
+collections that hold a **working credential** and are in no erase path at all.
+
+**What `DELETE /api/profile` actually did.** It calls `deleteUserData` (registry-driven),
+`deleteUserWorkspaceData` (the workspace-id prefix range) and `deleteAuthAccount`. The Firebase Auth
+record goes, so the person can never sign in again — which is what makes this hard to notice. Access
+through a credential does not need a sign-in:
+
+| Store | What it holds | Why it still worked |
+|---|---|---|
+| `user_secrets` | the person's own API keys and database passwords, encrypted | nothing deleted them; rows are only ever SOFT-deleted elsewhere ("the vault has never destroyed a user's stored key", `supabaseProvisionFlow.ts`), so a retired row keeps its ciphertext too |
+| `api_keys` | a live NavBharatAI API key | `findByHash` (`ApiKeyStore.ts:112`) resolves ANY non-revoked key to its owner and never asks whether the owner exists. The free daily images on that path (`apiKeyImage.ts`) are drawn at NavBharatAI's cost |
+| `bots` | a chat bot's `token` AND `appSecret` | credentials for a third-party messaging platform, untouched |
+| `webhooks` | the outbound URLs we POST the person's build events to | doc id IS the uid, and the uid was never erased here |
+
+**The class, and it had already been caught once.** `supabase_connections` is the same shape, found on
+2026-10-06: *"a deleted account left behind encrypted tokens that could still act inside the person's own
+Supabase account"*, and its own registry comment says the census could not see it **because the collection
+name was a private constant**. The instance was fixed; the siblings were never hunted. That is precisely
+what the fifth rule's 2026-09-30 section forbids, and it is the second time this exact mechanism (a private
+constant hiding a store from the census) has produced a live defect.
+
+**The honesty half (fifth rule, step 5).** The Delete-account screen and `AppKnowledgeBase`'s
+`settings_delete_account` entry both already told the user that "saved API keys and sessions" are deleted,
+and Privacy Policy §9 promises erasure within 30 days with four stated exceptions — none of which is a
+credential. So the app was making a false statement to the user. **No knowledge-base edit was needed: the
+code now matches what the entry already claims.** That is the right direction for this fix; editing the
+claim to match the code would have been the wrong one.
+
+**The fix.** Four entries in `USER_SCOPED_COLLECTIONS`, each key strategy read from the real read/write
+path rather than guessed (the module's own SAFETY note: a wrong strategy either misses data or deletes the
+wrong person's):
+- `user_secrets` → `{ field: 'user_id' }` — written at `routes/secrets.ts:128` and
+  `supabaseProvisionFlow.ts:105`, read at `secrets.ts:227` and four places in `routes/secrets.ts`. A
+  `user_id` query takes the soft-deleted rows too, which is the point.
+- `api_keys` → `{ field: 'userId' }` (`ApiKeyStore.ts:77`). Deleting the row IS the fix for the auth hole:
+  `findByHash` then finds nothing, so no extra owner-existence check was added.
+- `bots` → `{ field: 'ownerUid' }` (`BotStore.ts:178`).
+- `webhooks` → `'docId'` (`WebhookManager.ts:63` read, `:90`/`:106` writes).
+
+**The test, and why it reads SOURCE.** `tests/aCredentialDiesWithTheAccount.test.ts` (5 tests). A registry
+entry agreeing with itself proves nothing — the entry has to agree with the code that writes the rows, or
+a renamed field leaves an erase that reports a confident `deleted: 0`. So one test greps each store's own
+file for the query it registers. Reversion-proven twice: the four entries removed → **3 fail**;
+`ownerUid` renamed to `owner_uid` in `BotStore.ts`'s real query → **1 fail** (the drift guard, exactly the
+case it exists for).
+
+**Left open, recorded not dropped.** `bot_sessions` (`Q-761`) is keyed `${botId}_${chatId}`, so neither
+key strategy reaches it. It holds no credential; it needs a cascade keyed by the bot rather than the user,
+which is a different shape from every other registry entry and is its own decision.
+
+**Still the bigger item: Q-701.** This PR fixes the four worst instances. The CLASS — a hand-maintained
+registry guarded by a census that cannot see most of the code — is only killed when the census is widened.
+The scan so far finds **~95 collection names in no registry at all**, and about thirty of them are
+user-keyed: `conversation_memory_v1`, `professional_user_memory`, `sonic_voice_memory`,
+`agentv3_conversations` (+ its `turns`/`timeline` subcollections), `userPrefs`, `user_brain_v3`,
+`user_mistakes_v3`, `user_diagnostics_v3`, `user_notification_reads`, `terminal_daily_usage`,
+`tool_daily_usage`, `professional_passes`, `promptAudits`, `gallery_apps`, `nav_store_apps`,
+`nav_store_web_apps`, `wallet_balance_alerts`, `agentv3_onboarding_credits`, `ai_usage_logs`,
+`zip_uploads` and more — plus roughly fourteen workspace-keyed stores that `WORKSPACE_SCOPED_COLLECTIONS`
+does not list (`agentv3_deployments`, `agentv3_sandboxes`, `buildTraces`, `build_queues_v3`,
+`incrementalCache`, `mega_roadmaps_v3`, `workspace_traceability`, `agentv3_provider_state`,
+`agentv3_attachment_memory`, `agentv3_build_outcome`, `app_ai_apps`, …). Each needs its key strategy read
+from its own store before it is registered — nothing goes in on a guess — and the widened census should
+also enforce the obligation per KIND (a `workspace` collection must be in the workspace eraser), which is
+the part that makes the drift impossible rather than merely corrected once.
+
+Also recorded while scanning: the widened scan must **strip comments** — `'coll'` in `serverDb.ts`'s doc
+comment is a false positive — and must not treat a subcollection segment (`files`, `items`, `turns`,
+`entries`, `members`) as a top-level collection; those are Q-682's territory.
+
+**⚠️ CORRECTION, found by the repo's own guard before this PR left the machine.** The paragraph above
+says "No knowledge-base edit was needed". That is true of `AppKnowledgeBase.ts` and FALSE of the public
+deletion page: `tests/accountDeletionPage.test.ts` failed the full gate with *"deletion page must describe
+the user_secrets data it erases"*. It holds `USER_SCOPED_COLLECTIONS` against
+`src/content/legal/accountDeletion.ts` and requires a plain-words description of every collection the
+eraser touches — so growing the registry without growing the page is a CI failure by design. Google Play
+requires that page to say what is deleted; a registry that erases four more things than the page admits
+to would have understated it.
+
+The page now names all four (the vault line already covered `user_secrets`; the NavBharatAI API keys, the
+chat bots with their token and app secret, and the webhook addresses were described to nobody), and the
+guard's map carries each with the reason. Reversion-proven: the webhook bullet removed → that test fails.
+
+**The lesson is about the gate, not the page.** This is the second time in two days that running the FULL
+suite at the END, on the final state, caught something a targeted run could not: the tests I chose to run
+(retention, census, queue, the new credential test — 60 passing) all passed, and the one that mattered was
+in a file I had no reason to think about. Safeguard #5's "at the end, on the final state" is not ceremony.
+
+---
+
+## 2026-10-08 — Q-701 PR A: the personal data the registry could not see (33 stores registered)
+
+**The premise, restated because it is the whole point.** `tests/everyCollectionIsClassified.test.ts`
+makes an unclassified Firestore store fail CI — and it could only see **exported** `*_COLLECTION`
+constants. A private `const COLLECTION = '…'` or an inline `db.collection('x')` was invisible to it.
+That is how `supabase_connections` escaped account deletion (its own registry comment says so), how the
+four credentials in Q-760 escaped, and how the 33 stores below escaped.
+
+**The widened scan, now written and proven, finds 144 top-level collections. The census saw 46.**
+
+### What PR A registers
+
+**21 user-keyed stores into `USER_SCOPED_COLLECTIONS`**, each key strategy read at its own store:
+`conversation_memory_v1`, `professional_user_memory`, `sonic_voice_memory`, `agentv3_conversations`,
+`user_diagnostics_v3`, `user_notification_reads`, `userPrefs`, `user_brain_v3`, `user_mistakes_v3`,
+`terminal_daily_usage`, `tool_daily_usage`, `professional_passes`, `wallet_balance_alerts`,
+`agentv3_onboarding_credits`, `zip_uploads`, `agentv3_sheet_files`, `shares`, `custom_domains`,
+`pwa_apps`, `ai_usage_logs`, `user_referrals`.
+
+**12 workspace-keyed stores into `WORKSPACE_SCOPED_COLLECTIONS`**: `agentv3_attachment_memory`,
+`agentv3_build_outcome`, `agentv3_deployments`, `agentv3_provider_state`, `agentv3_sandboxes`,
+`buildTraces`, `build_queues_v3`, `incrementalCache`, `mega_roadmaps_v3`, `workspace_traceability`,
+`migrationHistory`, `sboms` (+ its `builds` sub).
+
+### 🔴 The part that would have been a FALSE fix
+
+`agentv3_conversations` is matched by a `userId` FIELD and its messages live one level down in `turns`
+and `timeline` (`FirestoreConversationStore.ts:142/146`). Firestore does not cascade.
+`USER_SCOPED_SUBCOLLECTIONS` only covers the other shape — `parent/{uid}/sub`, a document whose own id
+IS the uid — so it cannot express this one. **Registering the collection without its children would
+have deleted each conversation's header and orphaned every message in it**, while the deletion page
+promises "every build conversation you had with the builder". That is Q-134's defect in a new place.
+
+So `UserScopedCollection` gained `subs?: readonly string[]`: for each matched document, the named
+subcollections are page-deleted FIRST, then the document. A handle that cannot reach subcollections
+**throws** rather than reporting a deletion that did not happen — and the parent is then left alone,
+because deleting it would orphan the messages for ever.
+
+`tests/theErasureReachesEveryChild.test.ts` (6 tests) holds: the subs are declared; the messages die;
+**children before parent** (asserted on the recorded delete ORDER); another person's conversation is
+untouched; the reported count includes the children; and the unreachable-handle case reports its error
+and deletes nothing. Reversion-proven twice: `subs` dropped → **5 fail**; the parent moved before its
+children → **2 fail**.
+
+### Three places my own first answer was wrong, caught by reading rather than assuming
+
+- **`promptAudits` is deliberately NOT registered.** `promptAudits/{uid}/entries` is already a
+  subcollection entry, and I was about to add the parent — but **nothing anywhere writes the parent
+  document** (`PromptAuditStore.ts:71` writes only the subcollection), so it is a virtual ancestor with
+  no fields. An entry would delete nothing and report `deleted: 0` for ever: a row that reads as
+  coverage while covering nothing.
+- **`migrationHistory`'s parameter is called `projectId`**, which is exactly why it was checked: both
+  callers pass `this.workspaceId` (`ToolDispatcher.ts:8896`, `:8916`), so the doc id IS the workspace id
+  and the eraser's range reaches it.
+- **`app_ai_apps` was left OUT** (Q-765): its doc id is the APP id, so the `agentv3-{uid}-` range cannot
+  match it. Registering it would have been a guess, and the registry's SAFETY note forbids guesses
+  because a wrong strategy either misses data or deletes the wrong person's.
+
+### The page had to grow with the registry, and the repo enforces that
+
+`tests/accountDeletionPage.test.ts` requires a plain-words description of every registered collection,
+because Google Play requires that page to say what is deleted. It failed on the first run with 33
+missing descriptions — by design. The page now names all of them, grouped (21 separate bullets would be
+a wall nobody reads, and the point of that page is that somebody reads it). `custom_domains` is written
+**with its limit**: our record goes, and nothing changes at the person's registrar or host, which are
+not ours to touch.
+
+### Recorded, not dropped — six new rows
+
+- **Q-762** the composite-id class: `adrDecisions` and `techDebt` use `${userId}__${projectId}` with no
+  uid in the body, so nothing can find them by uid. Fix the writers, then register; older rows stay a
+  stated residue. A prefix range was considered and REJECTED for the ambiguity `workspaceDataErase`
+  already documents.
+- **Q-763** `user_workspaces`: the base doc is only a manifest; the payload is in `${uid}__c{i}` chunks.
+  Registering it as `'docId'` would have been the same false fix as above. A dedicated eraser reads
+  `chunkCount` and deletes exact ids.
+- **Q-764** `build_history` is keyed by a bare sessionId — outside both erasers.
+- **Q-765** `app_ai_apps`, above.
+- **Q-766** 🟡 the admin's decision: a published App Mart listing can have been BOUGHT, so erasing it
+  because the AUTHOR left would destroy a stranger's purchase — the `gift_codes` reasoning. Options and
+  a recommendation (unlist + de-identify) are in the row.
+- **Q-767** twelve stores that grow with no retention window, plus `payment_transactions` which belongs
+  in `RETAINED_INDEFINITELY`.
+
+**PR B is the class fix** and is why this row stays open: the widened scan (comments stripped,
+`*SUBCOLLECTION*` constants excluded, a receiver allowlist whose unknown-receiver report must stay
+empty) plus the per-kind obligation — a `workspace` kind must be in the workspace eraser, a `retained`
+kind must have a policy. Shipping B first would have meant a check failing on ~30 known violations:
+either a red CI or a disabled check, both worse than this order.
+
+**A second guard fired on PR A, and it was pointing at its own assumption.**
+`src/server/lib/workspaceDataErase.test.ts` asserted every registered collection matches
+`/^[a-z][a-z0-9_]+$/`, so registering `buildTraces` failed it. The pattern was written as a shape check
+against a typo or an empty string, but it quietly encoded a NAMING POLICY the repo does not follow:
+`buildTraces`, `incrementalCache` and `migrationHistory` are the real, live Firestore names, and
+`adrDecisions`, `techDebt`, `abuseLedger`, `userPrefs`, `promptAudits`, `teamInvites` and `deviceTokens`
+are camelCase elsewhere. Renaming a live collection is a data migration, not a tidy-up — and it would
+orphan every document already written under the old name — so **the test is what gives**. It now accepts
+either convention and says why, and it still rejects a malformed name: proven by adding
+`{ collection: 'bad-name' }` and watching it fail.
+
+This is worth recording because the first instinct was the wrong one: a failing assertion is not
+automatically a failing change. Here the change was right and the assertion was carrying a belief
+nobody had checked against the data. The repo having two naming conventions is a real (small)
+inconsistency, but it is not one a test may fix on a live database.
+
+---
+
+## 2026-10-09 — Q-701 PR B: the census can finally see the codebase (46 → 144), and every kind now owes something
+
+**What the guard was actually doing.** `tests/everyCollectionIsClassified.test.ts` is the test that makes
+a new Firestore store fail CI until somebody decides what it is. Its scan read exactly one pattern:
+`export const *COLLECTION = '…'`. So a private constant or an inline `db.collection('x')` was invisible,
+and three live defects came out of that one blind spot — `supabase_connections` (a deleted account's
+Supabase tokens, kept), Q-760 (four stores holding a working credential, kept), Q-701 PR A (33 stores of
+personal and app data, in no erase path).
+
+**The widened scan reads three forms**, each needed by something real here:
+1. `const *COLLECTION* = 'x'`, exported or not — but **never** `*SUBCOLLECTION*`;
+2. `collection(db, 'x')` and `doc(db, 'x', …)` (in the second the FIRST segment is the collection);
+3. `<handle>.collection('x')` where the handle is a Firestore root.
+
+It strips comments first, because `serverDb.ts`'s doc comment says `doc(db, 'coll', 'id')` and an earlier
+draft of this scan duly reported a collection called `coll`. And `FEEDBACK_SUBCOLLECTION = 'feedback'`
+contains the substring COLLECTION, which is how `feedback`, `history` and `members` first appeared as
+top-level stores.
+
+🔒 **It declares what it could not read.** A receiver that is not a known root goes into
+`UNREADABLE_RECEIVERS` and must be listed with its reason — today only `root`, which is always a `.doc()`
+reference, so what follows it is a subcollection. A **new** unknown receiver fails the test, because a
+scan that silently skips what it does not understand is precisely how this one went blind for 98
+collections.
+
+### Every kind now carries an obligation, and the new one found three stores immediately
+
+`user` ⇒ in `USER_SCOPED_COLLECTIONS`. `retained` ⇒ a `RETENTION_POLICIES` entry. Both always had a
+consequence. **`workspace` had none** — it was a label with nothing behind it, which reads as coverage
+from every direction, and that is how twelve stores of the user's own app data sat unerased while this
+file called them classified.
+
+Adding `workspace` ⇒ in `WORKSPACE_SCOPED_COLLECTIONS` failed on its first run with **three stores that
+were classified `workspace` before Q-701 existed**:
+- `site_configs` — the app's own site settings, doc id is the workspaceId. Registered.
+- `agentv3_mcp_servers` — the app's MCP wiring: which outside services it may call **and the keys held
+  for them**. Doc id is the workspaceId. Registered. It was being kept for ever.
+- `site_uptime` — and **its classification was itself wrong.** It said `workspace`, with the reason "one
+  record per connected domain, not per user" — a sentence that argues against its own label. Its doc id
+  IS the domain (`siteUptimeStore.ts:12`), so the workspace eraser's `agentv3-{uid}-` range could never
+  reach it. The body carries `userId` (`siteUptime.ts:81`), so it is now a user entry, which is where a
+  domain-keyed record of one person's domain belongs.
+
+### 🟡 A fifth kind, so that "unresolved" cannot be silent
+
+`blocked` — the obligation is **not** met, and a queue row owns the reason, which the test requires the
+reason to name (`/\bQ-\d{3}\b/`). This is the sixth absolute rule expressed as a test. Without it, the
+only way to make this file pass for a store whose erasure is undecided would be to mislabel it
+`platform`, and a false label is worse than an open row. A second test refuses the opposite error: a
+`blocked` store that is *already* covered by one of the registries is a false claim in the other
+direction, and fails.
+
+Nineteen stores are `blocked`, each naming Q-761 through Q-767.
+
+### 🔴 My own reversion proof found a hole in the test I had just written
+
+Reverting the scan to exported-constants-only left **all ten tests green** — on 46 collections instead of
+144. Every obligation is checked against what the scan FOUND, so narrowing the scan narrows the world
+being judged and nothing complains. **A guard whose coverage its own tests cannot see is a guard that can
+be switched off by accident, which is a fair description of how this started.**
+
+So each form now has a named witness that only that form can find — `conversation_memory_v1` (private
+constant), `api_keys` (inline `db.collection`), `user_workspaces` (`doc(db,'x',…)`), `user_secrets`
+(`collection(db,'x')`) — plus a floor of 130 on the total, set below today's 144 so adding a store is not
+a failure while losing a tenth of them is.
+
+**Reversion-proven five ways:** the scan narrowed to exported constants → the FORM test fails · a
+workspace entry dropped from the eraser → the workspace obligation fails · the `Q-###` removed from a
+blocked reason → that test fails · comment stripping disabled → `coll` appears, 2 fail · the
+`*SUBCOLLECTION*` exclusion removed → `feedback`/`history`/`members` appear, 2 fail.
+
+### Also closed here
+
+`payment_transactions` is now in `RETAINED_INDEFINITELY` with its reason: a record of money received,
+which tax and accounting law requires and which Privacy §9 names as the first of its four exceptions to
+erasure. Nothing ever deleted it, so this changes no behaviour — it ends the census being silent about
+the one collection whose retention is a legal duty rather than a choice. (Q-767's remaining twelve still
+need a window each.)
+
+**A third guard fired, and the fix had to strengthen it rather than loosen it.**
+`tests/anMcpCredentialIsNeverStoredInTheClear.test.ts` keeps a census: only the two MCP store files may
+name `agentv3_mcp_servers` / `agentv3_mcp_library`, with ONE exemption —
+`DataRetentionManager.ts`, "because it names the library only to DELETE it with the account". Registering
+the app's MCP wiring in `workspaceDataErase.ts` made a second file name it, and the test failed.
+
+The tempting fix is to add the file to an allowlist and move on. That would have quietly dropped the
+part of the assertion that matters: the exemption is from *"is this a store"*, **not** from *"it must
+never write"*. So both erasers are now named as erasers and the **no-write assertion is applied to both**
+— an eraser that started writing to these collections still fails. Proven by adding a function to
+`workspaceDataErase.ts` that writes `{ servers: [] }` and watching the test name the file.
+
+Worth recording because it is the same shape as the `workspaceDataErase` naming check earlier in this
+PR and the opposite conclusion: there, the assertion carried a belief that was wrong (snake_case names)
+and the test gave way; here the assertion was right and only its *scope* needed to grow. A failing guard
+has to be read, not pattern-matched.
+
+**And a fourth thing the gate caught, which was not mine: a flaky test whose flake was in the assertion.**
+`tests/vaultPin.test.ts` failed in PR B's gate run on a change that touched nothing near it —
+`expect(hashPin('8274', newSalt())).not.toContain('8274')`, with the digest built from a RANDOM salt. A
+64-character hex digest has 61 four-character windows, each matching a given hex sequence with
+probability 16⁻⁴, so roughly one run in 1,100 fails. The run that failed produced
+`…ab7e90ef8274edfd…`.
+
+**Measured rather than asserted:** 2,000,000 random 32-byte digests gave 1 in 1,063 observed against
+1 in 1,074 predicted.
+
+That is the worst kind of red: it appears in an unrelated PR and the first instinct is to go looking at
+the change. It was also testing nothing — four of a PIN's digits appearing somewhere in sixty-four is
+not a leak. So the substring claim moved to a FIXED-salt case where the digest is identical on every
+machine and every run, and the random-salt case keeps the property that actually matters, that two
+salts give two hashes.
+
+**The sibling was hunted, not waited for.** `'stores only the hash — the record never contains the code'`
+ran the same shape over `JSON.stringify(writePinRecord(…))`, which carries ~128 hex characters of random
+salt, so a six-digit OTP would appear in it about once in 136,000 runs — rarer, and therefore worse,
+because it would fire years from now in somebody else's unrelated PR. It now asserts on the record's
+FIELDS: no field equals the code, no non-random field contains it, and the two hash fields are checked
+for shape. That is deterministic AND a stricter statement than scanning a blob. Proven by reversion:
+adding `otp_debug: '427391'` to the stored record fails it by name.
+
+A wider sibling sweep found no third instance — the other ~18 `not.toContain` assertions in the suite
+run against text the code produced deterministically (redaction, sealed secrets, generated workflow
+files), where the claim is sound and is the point of the test. Recorded as Q-768.
 ## 2026-10-08 — Q-707: a plain `node:http` server was published as a static site, silently
 
 **Report:** Q-707, found by the C-1 hosting re-audit and deliberately left unfixed there (that PR

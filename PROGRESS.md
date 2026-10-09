@@ -93349,3 +93349,74 @@ three reversions: the foreign-parent sweep removed, the team's `subs` removed, t
 sub sweep removed — each failing the guard that owns it. The `DataRetentionManager` mock gained
 `listDocuments` and `doc()` on subcollections rather than the eraser losing its checks: a mock more
 forgiving than the real database is a test that passes for code that cannot work.
+
+## 2026-10-09 — Q-766 (with Q-682's last four): the app outlives its author, the author does not outlive in it
+
+The admin chose *"all as recommended"*, so recommendation (b) ships: **erase what was never public,
+de-identify and unlist what was.** `publishedListingErase.ts` + `LISTING_POLICIES`, wired into
+`DELETE /api/profile` and reported on its own line — a de-identify count is not a deletion count, and
+folding it into one would tell a user the opposite of what happened to their published apps.
+
+**Why this was a decision and not a one-line fix.** Three stores are keyed to one person by a plain
+`uid` field and all three survived account deletion. Registering them as ordinary erases would have
+been one line in the registry — and wrong. They are PUBLIC LISTINGS, and an App Mart app can be
+BOUGHT; Terms §4 makes such a purchase non-refundable *because the app can be run free before buying*.
+Erasing a listing because its AUTHOR closed their account would take away something a stranger paid
+for and cannot get back.
+
+**Two facts read off the code that refine recommendation (b) rather than restate it:**
+
+1. 🔒 **`unlisted` still SERVES.** `routes/navStore.ts` 404s a web app only on `status === 'removed'`,
+   so "unlist" really does preserve the buyer's access. Moving a listing to `removed` would have
+   satisfied the word and destroyed the purpose — the kind of fix that passes review and breaks a user.
+2. 🔴 **`gallery_apps` and `nav_store_apps` carry no `priceInr` at all.** Nothing in either store can be
+   bought, so the money argument — the entire basis of the recommendation — applies to the web store
+   ALONE, which is why those two delete a never-public submission outright. The census had called
+   `nav_store_apps` "purchasable"; it is not, and that is corrected with the evidence beside it.
+
+**"De-identified" had to be defined field by field, because each store carries more than a uid:**
+
+| store | identity it carried | what happens |
+|---|---|---|
+| `gallery_apps` | `uid`, `authorEmail`, `authorName` | pending/rejected deleted; published de-identified + unlisted |
+| `nav_store_apps` | `uid` + a whole `developer` block: name, EMAIL, phone, website | same |
+| `nav_store_web_apps` | `uid`, `workspaceId` — which IS `agentv3-{uid}-…`, so it carries the uid under another name (Q-762's class) | never deleted; de-identified, `listed` → `unlisted` |
+
+The uid becomes a tombstone (`CREATOR_GONE`) rather than `''` or a field delete, so every reader can
+tell "this app has no creator any more" from "the creator was not loaded" — and so the money path can
+ask.
+
+🔴 **And the money path had to close with it.** A de-identified paid listing is still purchasable, and
+`settleRemixPurchase` credits `creatorUid` — now a tombstone, whose wallet does not exist. Charging
+there would be NavBharatAI taking a stranger's money for a person who cannot be paid. `creatorHasLeft`
+delivers it **free** instead, which is this function's own established answer whenever it cannot charge
+properly ("wallet unavailable — delivered free"), and the reasoning `HostingBillingStore` states as
+*when in doubt, we eat it*. Refusing would punish the buyer for somebody else's departure.
+
+**Both published pages were corrected, because the old text became FALSE.** The deletion page promised
+*"we do not remove a published app unless you ask"* — deletion now unlists every listing automatically.
+It states the three consequences a reader cannot undo: the identity goes, the app is kept for whoever
+bought it, and a paid app stops being sellable. Privacy §9 now names the anonymise-rather-than-delete
+outcome instead of leaving it to the general sentence; a general sentence is not a disclosure when the
+specific outcome is one a reader would never guess — that the app they published survives their own
+account deletion.
+
+**Q-682's last four close here too.** `files`, `baked` and `screenshots` are KEPT with the listing —
+they ARE the app a buyer paid for — and `reports` goes on the 180-day clock, the window §9 publishes
+for every other report-and-review record. That sub is the one thing under a listing that does **not**
+belong to the author: it holds the REPORTER's uid, and an abuse record an author can erase by closing
+their account is not a record (the `safety_flags` precedent). So Q-682 is now 8/8.
+
+**Two small things the work turned up, both fixed:**
+- The subcollection census read my new module's generic `doc.ref.collection(sub)` loop as a store named
+  `sub`. It has a `MECHANISM` exclusion list for exactly this (`derivedIdErase.ts` is on it); the new
+  module joined it rather than a non-store being classified.
+- A JSDoc comment containing `` `nav_store_web_apps/*/reports` `` **ended the comment early** — `*/`
+  closes a block comment — and broke the file's parse. Worth recording because it cost a confusing
+  minute: the error pointed at a line twenty rows below the real cause.
+
+**Proof.** 14 new tests (`tests/aBuyersAppOutlivesItsAuthor.test.ts`), a new census kind
+(`de-identified`) whose obligation is a real `LISTING_POLICIES` entry naming the fields it clears, and
+**five reversions**, each failing the guard that owns it: `unlistTo` set to `removed` (which would 404
+every buyer), the `developer` block left in place, the purchase guard removed, the web store made to
+delete on `unlisted`, and the page's false promise put back.

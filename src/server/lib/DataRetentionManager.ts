@@ -846,6 +846,18 @@ export const SUBCOLLECTION_RETENTION_POLICIES: readonly SubcollectionRetentionPo
    * `ts: Date.now()` ⇒ `epochMs`.
    */
   { parent: 'promptAudits', subcollection: 'entries', ttlDays: 180, timestampField: 'ts', timestampKind: 'epochMs' },
+  /**
+   * What a viewer reported about a published App Mart app (`navStoreWeb.reportWebApp`): the reason, and
+   * the REPORTER's uid. Q-682 item 8.
+   *
+   * 180 days, the window Privacy §9 publishes for every other report-and-review record —
+   * `app_mart_comment_reports`, `safety_flags`, the removal records. It is also the one subcollection
+   * under a published listing that must NOT die with the listing's de-identification: an abuse record
+   * an author can erase by closing their account is not a record (the `safety_flags` precedent), and it
+   * holds the REPORTER's identity, not the author's, so the author's departure is no reason to drop it.
+   * `at: Date.now()` ⇒ `epochMs`.
+   */
+  { parent: 'nav_store_web_apps', subcollection: 'reports', ttlDays: 180, timestampField: 'at', timestampKind: 'epochMs' },
 ];
 
 /** The two operations a subcollection purge needs. Satisfied by `adminSubcollectionSource` and by test fakes. */

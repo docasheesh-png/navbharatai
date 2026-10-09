@@ -32,8 +32,14 @@ type Kind =
   | { kind: 'workspace'; parent: string }
   /** Under a document whose id is the uid. MUST be in USER_SCOPED_SUBCOLLECTIONS (erased with the account). */
   | { kind: 'user'; parent: string }
-  /** Capped per parent by the store itself, so it cannot grow with time. */
-  | { kind: 'bounded'; why: string }
+  /**
+   * Capped per parent by the store itself, so it cannot grow with time.
+   *
+   * `parent` is optional and only needed when such a subcollection ALSO carries a clock — Q-766's
+   * `nav_store_web_apps` → `reports` is bounded per listing and still gets 180 days, because it holds the
+   * REPORTER's identity and must outlive the author's departure.
+   */
+  | { kind: 'bounded'; why: string; parent?: string }
   /**
    * Declared as a `subs` of the PARENT's own `USER_SCOPED_COLLECTIONS` entry, which deletes the children
    * before the parent (Q-682). Covers both parent shapes the registry supports: a parent found by a
@@ -90,10 +96,24 @@ const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string; f
    */
   'src/server/lib/TeamStore.ts › members': { kind: 'parent-subs', parent: 'teams', foreignParent: true },
   'src/server/lib/TeamLibraryStore.ts › library': { kind: 'parent-subs', parent: 'teams' },
-  'src/server/lib/navStoreWeb.ts › files': { kind: 'open', row: 'Q-682', why: "a published store listing's bytes; not reached by the account erase" },
-  'src/server/lib/navStoreWeb.ts › baked': { kind: 'open', row: 'Q-682', why: 'the baked page of a store listing; same parent as files' },
-  'src/server/lib/navStoreWeb.ts › screenshots': { kind: 'open', row: 'Q-682', why: 'listing screenshots; same parent as files' },
-  'src/server/lib/navStoreWeb.ts › reports': { kind: 'open', row: 'Q-682', why: 'abuse reports about a listing; a safety record that should get the 180-day policy' },
+  /**
+   * ── Q-682 items 6–8, resolved with Q-766 (2026-10-09) ────────────────────────────────────────────
+   * These three ARE the app. A listing can have been bought, and Terms §4 makes that purchase
+   * non-refundable *because the app can be run free before buying* — so they are deliberately KEPT when
+   * the author leaves: `publishedListingErase.ts` de-identifies and unlists the listing instead of
+   * deleting it, and `unlisted` still serves (only `removed` 404s). They are bounded per listing, not
+   * by time: one app's files, one baked page per version, at most a handful of screenshots.
+   */
+  'src/server/lib/navStoreWeb.ts › files': { kind: 'bounded', why: "the published app's own bytes, one doc per file of one listing; kept when the author leaves because a buyer paid for it (Q-766), and deleted with the listing when it was never public" },
+  'src/server/lib/navStoreWeb.ts › baked': { kind: 'bounded', why: 'one pre-rendered page per published version of one listing, capped at BAKED_MAX_GZ_BYTES; same reasoning as `files` (Q-766)' },
+  'src/server/lib/navStoreWeb.ts › screenshots': { kind: 'bounded', why: 'the handful of images the creator uploaded for one listing (`sanitizeScreenshots` caps the count); same reasoning as `files` (Q-766)' },
+  /**
+   * The ONE sub here that does not belong to the author at all: it holds the REPORTER's uid. So it
+   * survives the author's departure — an abuse record an author can erase by closing their account is
+   * not a record (the `safety_flags` precedent) — and is bounded by a clock instead, at the 180 days
+   * Privacy §9 publishes for every other report-and-review record.
+   */
+  'src/server/lib/navStoreWeb.ts › reports': { kind: 'bounded', why: "what a viewer reported about a published app, holding the REPORTER's uid rather than the author's", clock: true, parent: 'nav_store_web_apps' },
   /**
    * Q-682's recommendation (5) — the 180-day retention policy, not deletion on erase: a support ticket
    * is a record a person must be able to review, like `app_mart_comment_reports`. Shipped in Q-767,
@@ -109,6 +129,10 @@ const MECHANISM = new Set([
   // Joined 2026-10-09: the third reachability shape (a derived doc id). Like the two above it names
   // the subcollection through a variable, so it is the mechanism, not a store that owns one.
   'src/server/lib/derivedIdErase.ts',
+  // Joined 2026-10-09 for the same reason (Q-766): it deletes a never-public listing's `files`,
+  // `baked` and `screenshots` through `policy.subs`, so the only name the scan can see there is the
+  // loop variable. It owns no subcollection of its own.
+  'src/server/lib/publishedListingErase.ts',
 ]);
 
 function found(): string[] {

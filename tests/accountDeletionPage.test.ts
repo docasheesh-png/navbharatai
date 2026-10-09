@@ -45,6 +45,24 @@ describe('the page satisfies what Play actually asks for', () => {
     expect(ACCOUNT_DELETION).toMatch(/does \*\*not\*\* delete anything in your own GitHub account/);
   });
 
+  it('🔴 is honest about a PUBLISHED app: the person goes, the app stays (Q-766)', () => {
+    /**
+     * The page used to say "we do not remove a published app unless you ask", which this change makes
+     * FALSE — deletion now unlists every listing automatically and strips the author out of it. The
+     * three facts a reader needs are all consequences they cannot undo, so all three are stated:
+     * the identity goes, the app is kept for whoever bought it, and a paid app stops being sellable
+     * because there would be nobody to pay.
+     */
+    expect(ACCOUNT_DELETION).toMatch(/Your name, email address and\s*\n?\s*account link are removed from every listing you published/);
+    expect(ACCOUNT_DELETION).toMatch(/\*\*The app itself is kept\*\*/);
+    expect(ACCOUNT_DELETION).toMatch(/anyone who already\s*\n?\s*bought it can still open and run it/);
+    expect(ACCOUNT_DELETION).toMatch(/can no longer be bought once your account is gone/);
+    // And what was never public is deleted, which is the other half of the decision.
+    expect(ACCOUNT_DELETION).toMatch(/never published \(waiting for review, or refused\) are \*\*deleted outright\*\*/);
+    // The old, now-false promise must be gone, not merely contradicted somewhere further down.
+    expect(ACCOUNT_DELETION).not.toMatch(/we do not remove a published app unless you ask/);
+  });
+
   it('states the token-balance consequence instead of letting someone find out afterwards', () => {
     expect(ACCOUNT_DELETION).toMatch(/not refundable on deletion/i);
   });

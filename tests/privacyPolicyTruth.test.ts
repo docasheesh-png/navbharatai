@@ -197,6 +197,26 @@ describe('Privacy Policy — it discloses the visitor analytics on published app
     expect(inventory.slice(0, inventory.indexOf('];'))).toContain(`'${SITE_ANALYTICS_COLLECTION}'`);
   });
 
+  it('🔴 §9 discloses that a published app is anonymised, not deleted (Q-766)', async () => {
+    /**
+     * The policy's general sentence — "deleted or irreversibly anonymised" — already covered this, and
+     * a general sentence is not a disclosure when the specific outcome is one a reader would not guess:
+     * the app they published SURVIVES their account deletion. It survives for a reason the reader can
+     * check (a buyer's purchase is not refundable), and the code that does it is `LISTING_POLICIES`.
+     */
+    const { LISTING_POLICIES } = await import('../src/server/lib/publishedListingErase');
+    expect(PRIVACY_POLICY).toMatch(/These are anonymised rather than deleted/);
+    expect(PRIVACY_POLICY).toMatch(/\*\*the app itself is kept\*\*/);
+    expect(PRIVACY_POLICY).toMatch(/can no longer be bought, since there would be nobody to pay/);
+    expect(PRIVACY_POLICY).toMatch(/Submissions that were never published are deleted outright/);
+    // The prose is tied to the registry: three stores are de-identified, and the one that is never
+    // deleted is the purchasable one, which is exactly what the paragraph tells the reader.
+    expect(LISTING_POLICIES).toHaveLength(3);
+    expect(LISTING_POLICIES.find((p) => p.collection === 'nav_store_web_apps')!.deleteWhenStatusIn).toEqual([]);
+    expect(LISTING_POLICIES.filter((p) => p.deleteWhenStatusIn.length > 0).map((p) => p.collection))
+      .toEqual(['gallery_apps', 'nav_store_apps']);
+  });
+
   it('🔒 the beacon keeps those promises in code, not only in prose', async () => {
     const { beaconHtml } = await import('../src/server/lib/siteAnalytics');
     const html = beaconHtml('nbai-0123456789abcdef0123', 'https://navbharatai.com');

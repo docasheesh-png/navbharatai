@@ -92628,6 +92628,24 @@ and your last built app that we keep so they follow you from one device to anoth
 
 ---
 
+## 2026-10-09 — Build reliability series (`fix/build-reliability`, admin-approved)
+
+Implements the solutions doc for root causes 2–5 of the ~30% failed-build audit (root cause #1 — Claude on
+weak — dropped by the admin: **weak tier never uses Claude**). Every change is behind its own flag, **all
+default OFF** — see `docs/claude/ENV_REGISTRY.md` → "Build reliability flags". Code lives in
+`src/server/AgentV3/reliability/` with colocated tests.
+
+- P1 benchmark: `scripts/fixtures/reliability-bench-prompts.json` (50 prompts, 15 smoke),
+  `npm run bench:reliability` (dry run unless `BENCH_CONFIRM=yes`), `npm run bench:compare`. **Not run yet** —
+  the paid baseline/candidate runs are the next step and decide which flags go on.
+- P4 sticky rung + quality escalation + reasoning passback + handoff note.
+- P3 token-budget compaction + working set.
+- P2 stream no-clamp + append_file resume (partials never persisted) + 200-line rule.
+- P5 modular prompt + read_guide, banned-package guard, 16 core tools + load_tools.
+- P6 fast lane v2 (contract, topo waves, full deps code, >12 files → agent loop).
+
+Open: measure with the benchmark before enabling anything in prod; AppKnowledgeBase not updated (no
+user-facing change while the flags are off).
 ## 2026-10-09 — Q-780: a version history anyone could read, "protected" by a timestamp
 
 **Found while investigating Q-764**, which is only about erasing `build_history`. Reading the store to

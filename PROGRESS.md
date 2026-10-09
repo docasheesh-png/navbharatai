@@ -92626,6 +92626,99 @@ reads-the-file test fails · the call removed from the route → the same test f
 The deletion page now names it too: *"your **cross-device workspace** — the copy of your chat sessions
 and your last built app that we keep so they follow you from one device to another"*.
 
+---
+
+## 2026-10-09 — Q-780: a version history anyone could read, "protected" by a timestamp
+
+**Found while investigating Q-764**, which is only about erasing `build_history`. Reading the store to
+answer that question turned up something sharper: **three routes with no authorization at all.**
+
+```
+GET  /api/build-history/:sessionId              → the list of versions
+GET  /api/build-history/:sessionId/:versionId   → the app's whole `files` map — the source code
+POST /api/build-history/:sessionId/checkpoint   → writes a version into that history
+```
+
+The stated security model, written in `routes/build.ts` and again in `CodeVersioning.tsx`, was that
+*"the sessionId is the unguessable capability"*. `App.tsx:693`:
+
+```js
+const id = `pro-${Date.now()}`;
+```
+
+A millisecond timestamp, then kept in localStorage for ever. **The chain was verified end to end, not
+assumed:** that id goes to the build → the workspace is `agentv3-{uid}-{sessionId}` → `restorePointKey`
+strips the prefix back off → the history document id is the bare `pro-<ts>`. App Check was no help:
+it covers six POST routes, none of these, and it attests the app rather than the user.
+
+So: guess the timestamp and you could read a stranger's source code, or write a version into their
+Time Machine. The ids cluster by when people started using the product, which makes a targeted window
+small.
+
+⚠️ **And the same file already carried the lesson.** The route immediately below these three has the
+comment *"SECURITY (audit IDOR): scope to the verified token uid — this exposes a user's build count
+and AI spend; without the check any uid could be read."* This exact class was audited **in this file**
+and these three were missed — the audit fixed the instances it was looking at, not the class.
+
+### The fix, and the part that is actually load-bearing
+
+`src/server/lib/buildHistoryAccess.ts` — all three routes now require that the caller **owns a
+workspace with that session id**, probed with `countWorkspaceFiles` (one metadata document, never
+throws, injected so the rule is unit-testable).
+
+🔒 **`ownedByVerifiedUid` alone would have been security theatre here.** The workspace id is DERIVED by
+prefixing the caller's own uid, so that check is true for any string they send. Only the existence
+probe — *does this person really have an app with that session id?* — refuses a guessed
+`pro-<timestamp>`. The reversion proof is exactly this: remove the probe and the "a signed-in stranger
+guesses the timestamp" test fails while everything else still passes.
+
+**The refusal is deliberately uninformative.** "Not found" and "not yours" return the same status and
+the same sentence, because a refusal that distinguishes them is an oracle for enumerating session ids.
+
+### 🔒 What was deliberately left alone, and why that took checking
+
+`agentv3-anon-…` histories keep the capability model **unchanged**. `workspaceIdentity.ts` says such a
+workspace has *"no real owner to protect — they are scoped only by their unguessable random sessionId
+(a capability, like a secret URL)"*, and a signed-out person has no token to present. Demanding one
+would have deleted a working feature for them — the first absolute rule.
+
+That required proving a signed-out build really does land under that prefix rather than under
+`pro-<ts>`: `deriveWorkspaceId` falls back to the literal uid `'anon'` when the real one is unusable,
+giving `agentv3-anon-{session}`, and `restorePointKey` leaves an anon id whole because there is no user
+prefix to strip. So the anon branch matches the key those histories are actually stored under. Checked,
+not assumed.
+
+Residue recorded honestly: for anon histories the "unguessable" claim now rests entirely on **their**
+generator being random. That is a different question from this one and is not answered here.
+
+### Both ends had to move
+
+Four client calls reach these routes and **one** of the four sent a token: the list call in
+`CodeVersioning.tsx`. The version fetch, the checkpoint POST, and both helpers in `buildService.ts`
+(used by `FilesPanel.tsx`) sent none — so without fixing the client, the fix would have turned every
+owner's own history into a silent empty list. A test now walks every `fetch(\`/api/build-history/…\`)`
+in both files and fails on any that does not carry `authedHeaders()`.
+
+**A correction to my own first reading:** I said those two `buildService` helpers were dead code. They
+are not — `FilesPanel.tsx` imports both. My first grep searched for the wrong names. It cost nothing
+because the re-check happened before the change, but the lesson is the repo's own: a search that finds
+nothing has usually guessed the wrong word.
+
+### The ID collided, and the guard caught it
+
+I numbered this Q-769 and `tests/theQueueIdsAreUnique.test.ts` failed: another live session already
+holds Q-769 (split from Q-621). Renumbered to **Q-780**, and only my own files' references were
+rewritten — `VertexProvider.ts` and `anAbandonedStreamStopsCosting.test.ts` carry the other session's
+Q-769 and were left untouched. This is the queue header's own prescription ("the session whose PR is
+not yet merged renumbers its own rows") working exactly as written.
+
+### Verification
+
+`tests/aBuildHistoryIsNotPublic.test.ts` — 16 tests, led by the attack itself: a signed-in stranger
+who knows the timestamp is refused. **Reversion-proven three ways:** the existence probe removed → the
+stranger-guesses test fails · one route's guard removed → the per-handler count AND the
+"guarded before it reads the files" order test fail · the client token removed → the
+no-unauthenticated-call test fails.
 ## 2026-10-09 — Q-770 closed (#3607 merged), and the admin lifted the merge hold for this session
 
 **Q-770 ✅ RESOLVED.** #3607 merged as `4117ae4`, so the row left the open table and `Q-770` was
@@ -92711,3 +92804,45 @@ this class keeps producing.
 **Reversion-proven three ways:** either writer's `userId` removed → the reads-the-source test and the
 self-heal test fail · the three registry entries removed → the registry test and the two-user cascade
 fail.
+## 2026-10-09 — Q-600 batch two (#3609, Q-771): the same sweep, two opposite verdicts
+
+Batch one (#3607) proved the unused-locals backlog is not cosmetic. Batch two proves the harder
+half: **what a found local deserves is a judgement, and the two answers go opposite ways.** A count
+cannot tell you which; only the call sites can.
+
+**SHOWN — `GitPanel.tsx`.** `activeStep` and `currentBuildTime` were both maintained by the real
+deploy paths and rendered nowhere. Every path sets the step — the GitHub push
+(`executeRealGitHubPush`), the static ZIP export, the managed Render deploy and the
+config-injection path — 1 on validate/prepare, 2 on build/package, 3 on done. And a `useEffect`
+ran a 100 ms ticker into `currentBuildTime` for as long as the deploy was validating or building,
+correctly cleaned up on unmount. So the component knew exactly which step a deploy was on and how
+many seconds it had taken, and the user watching it saw one pulsing word ("Building..."). The
+ticker's state updates were re-rendering the panel ten times a second to display nothing.
+
+Fixed by rendering what was already there: a three-step strip (Validate / Build / Done) in the
+console header, the current step amber and pulsing, completed steps green, the failed step red when
+a deploy errors or comes back unavailable, and the elapsed seconds beside the status word. No new
+state, no new machinery — the missing piece was only ever the display.
+
+**DELETED — `BotBuilder.tsx`.** The webhook modal's snippet was
+`POST https://your-server.com/webhook` with an `<exported_json>` placeholder: an illustration of an
+endpoint that does not exist. Nothing rendered it any more, because the real Go Live flow replaced
+it — a Telegram bot token that connects the bot for real, and WhatsApp's actual callback URL and
+verify token to paste into Meta, both copied by the live `copyField`. Wiring a copy button to a
+placeholder URL would have shipped exactly the fake feature the second absolute rule forbids, so
+`showWebhookModal`, `copied`, `webhookSnippet` and `copyWebhook` all went, with a comment at the
+site recording why, so nobody re-derives the old design from the leftover.
+
+Also dropped `changesCount` and `changes` in `GitPanel` — a changed-files list rendered nowhere. The
+`files` object the live commit-message heuristic reads is untouched.
+
+**Locked:** `tests/aDeployStepTheCodeSetsIsAStepTheUserSees.test.ts` holds both halves. No
+`setActiveStep` call may name a step with no label — a 4th step would render as nothing, which is
+the class returning in a new shape — the strip and the elapsed time must stay rendered, the removed
+webhook pieces must not come back, and no placeholder host may appear outside a comment.
+Reversion-proven both ways: emptying the step strip fails, and `setActiveStep(4)` fails with
+*"a deploy path sets step 4, but only 3 labels exist, so that step would render as nothing"*.
+
+**Baseline 86 → 78**, both files out of `unusedLocalsBaseline.json` (18 files → 16). **Q-600 stays
+OPEN** — 78 locals in 16 files, of which `App.tsx` (46) and `AgentV3Panel.tsx` (11) are 57 and are
+left alone while other sessions may be editing them. The remaining small files are the next batch.

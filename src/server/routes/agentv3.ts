@@ -373,6 +373,7 @@ import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '..
 // `safeRelPath` centralisation). Five files carry a private copy of this string; the probe takes the
 // shared one so it can never search a root the actuator is not using.
 import { SANDBOX_WORKSPACE_ROOT } from '../lib/workspacePath';
+import { isSecretEnvPath } from '../lib/workspacePath';
 import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
@@ -15300,6 +15301,7 @@ async function noteBuildOutcome(
        */
       let inBuildWriteTick = 0;
       const onFileWrite = (path: string, content: string) => {
+        if (isSecretEnvPath(path)) return; // TD-1: a live vault .env is never a durable project file
         inBuildWriteTick++;
         // Security gate: scan AI-generated JS/TS files for malicious patterns before
         // they are persisted. Critical findings emit a security warning event so the

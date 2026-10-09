@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import {
   prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, summarizeProdBuildFailure,
   judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS,
@@ -138,5 +139,38 @@ describe('configuration', () => {
 
   it('captures stderr, where bundlers put the useful part', () => {
     expect(prodBuildCommand()).toContain('2>&1');
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('the exit code is npm’s, not tail’s (BLD-1)', () => {
+  it('a failing inner command keeps its status, and the tail still prints', () => {
+    const r = spawnSync('sh', ['-c', prodBuildCommand('echo boom >&2; exit 3')], { encoding: 'utf8' });
+    expect(r.status).toBe(3);
+    expect(r.stdout).toContain('boom');
+  });
+
+  it('the tail is 120 lines and ends with the last line of a long build', () => {
+    const r = spawnSync('sh', ['-c', prodBuildCommand('seq 1 300')], { encoding: 'utf8' });
+    const lines = r.stdout.split('\n').filter((l) => l.length > 0);
+    expect(r.status).toBe(0);
+    expect(lines).toHaveLength(120);
+    expect(lines[lines.length - 1]).toBe('300');
+  });
+
+  it('a successful inner command exits 0', () => {
+    const r = spawnSync('sh', ['-c', prodBuildCommand('true')], { encoding: 'utf8' });
+    expect(r.status).toBe(0);
+  });
+
+  it('exit 0 plus ELIFECYCLE is still a failed production build', () => {
+    const j = judgeProdBuild({ ran: true, exitCode: 0, output: 'npm ERR! code ELIFECYCLE' });
+    expect(j.code).toBe('PROD_BUILD_FAILED');
+    expect(j.ok).toBe(false);
+    expect(j.message).toContain('the command reported success, but its output shows the build failed');
+    expect(j.message).toContain('ELIFECYCLE');
+  });
+
+  it('a clean "built in" line with exit 0 stays OK', () => {
+    expect(judgeProdBuild({ ran: true, exitCode: 0, output: 'built in 3s' }).code).toBe('PROD_BUILD_OK');
   });
 });

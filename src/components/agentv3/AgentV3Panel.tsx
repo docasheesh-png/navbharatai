@@ -7001,6 +7001,16 @@ function BuildFeedback({ workspaceId }: { workspaceId: string }) {
  * need nahi hai — simple aur short karo"). Every detail stays available in the Report.
  */
 function BuildHealthCard({ health }: { health: BuildHealth }) {
+  if (health.unassessed) {
+    return (
+      <div className="mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] border-amber-800/60 bg-amber-500/10">
+        <div className="flex items-center gap-1.5 font-semibold">
+          <AlertCircle className="w-3.5 h-3.5 text-warn shrink-0" />
+          <span className="text-warn">Build health: Not checked — the readiness check timed out</span>
+        </div>
+      </div>
+    );
+  }
   const ready = health.ready;
   const blockers = simplifyHealthLines(health.blockers, 3);
   const warnings = simplifyHealthLines(health.warnings, 2);

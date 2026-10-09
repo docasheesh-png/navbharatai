@@ -17,6 +17,8 @@
  * the moment it records, so nothing is reported twice.
  */
 
+import { isSecretEnvPath, SANDBOX_WORKSPACE_ROOT, toWorkspaceRelPath } from '../lib/workspacePath';
+
 export interface WritablePort {
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
 }
@@ -33,7 +35,7 @@ export function recordingActuator<T extends WritablePort>(
 ): T {
   const writeFile = async (ws: string, filePath: string, content: string): Promise<void> => {
     await inner.writeFile(ws, filePath, content);
-    if (ws === workspaceId) {
+    if (ws === workspaceId && !isDurableSecretEnv(filePath)) {
       try { onWritten(filePath, content); } catch { /* recording must never fail a write */ }
     }
   };
@@ -44,4 +46,13 @@ export function recordingActuator<T extends WritablePort>(
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
+}
+
+/** A vault env file stays in the sandbox. It must not be noted for the durable save. */
+function isDurableSecretEnv(filePath: string): boolean {
+  try {
+    return isSecretEnvPath(toWorkspaceRelPath(filePath, SANDBOX_WORKSPACE_ROOT));
+  } catch {
+    return isSecretEnvPath(String(filePath ?? ''));
+  }
 }

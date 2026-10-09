@@ -188,7 +188,7 @@ import { nextBuildRepairHint, nextMiddlewareCorrectPath } from './frameworkBuild
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
-import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
+import { assessReadiness, readinessTimeoutMs, readinessVerdict, unassessedReadinessReport, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
 import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE, entryFirstWriteNote } from './earlyPreview';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
@@ -426,6 +426,7 @@ import { containsSymbol } from './codemodScope';
 import { codemodTruncationNote } from './codemodTruncation';
 import { getEmbeddingStore } from './EmbeddingSearch';
 import { redactSecrets, redactDeep } from './SecretRedactor';
+import { isSecretFilePath, maskSecretFile, SECRET_MASK, secretPlaceholderWriteMessage } from './secretFileView';
 // Where the sandbox browser may go: its own preview, or the real public web — never an internal
 // infrastructure address. Handing a model a browser with an unrestricted address bar is an SSRF
 // primitive; see lib/browseTarget.ts.
@@ -1316,7 +1317,6 @@ export class ToolDispatcher {
       try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
       const merged = mergeDotEnv(existing, this.userSecretsEnv);
       await this.actuator.writeFile(this.workspaceId, '.env', merged);
-      try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
       // Keep .env out of git — always, even if the app already had one.
       try {
         let gi = '';
@@ -1457,7 +1457,6 @@ export class ToolDispatcher {
         try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
         const merged = mergeDotEnv(existing, lines);
         await this.actuator.writeFile(this.workspaceId, '.env', merged);
-        try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
         // Keep .env out of git.
         try {
           let gi = '';
@@ -1587,7 +1586,6 @@ export class ToolDispatcher {
       // Written LAST, so it wins over the sandbox-local URL merged moments earlier.
       const merged = mergeDotEnv(existing, env);
       await this.actuator.writeFile(this.workspaceId, '.env', merged);
-      try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
       try {
         let gi = '';
         try { gi = await withTimeout(this.actuator.readFile(this.workspaceId, '.gitignore'), 5_000, 'gi-read'); } catch { gi = ''; }
@@ -1647,17 +1645,17 @@ export class ToolDispatcher {
    * Run the real `evaluate` scan and return its structured readiness verdict (R2 §1.1).
    * Used by AgentRunner to make the quality gate MANDATORY: a build cannot be reported as a
    * clean success while `ready` is false (a build-breaker, secret leak, fake code, or an app
-   * that cannot run). Best-effort: if the scan throws, returns a permissive READY so the gate
-   * never wrongly fails a real build on an internal error.
+   * that cannot run). If the scan times out or throws, the report is UNASSESSED — not a perfect
+   * score. Slowness is not evidence the app is finished, and it is not evidence it failed (TD-2).
    */
   async assessBuildReadiness(): Promise<ReadinessReport> {
-    const permissive: ReadinessReport = { score: 100, ready: true, blockers: [], warnings: [], tier: 'enterprise' };
+    // A stale verdict from an earlier evaluate must not be returned when this scan does not finish.
+    this.lastReadiness = null;
     try {
       // OVERALL TIMEOUT (audit P0-C): the readiness gate runs AFTER the last agent turn, so the
       // build's wall-clock deadline can no longer interrupt it. Without this bound a single stalled
       // file read here hangs a build whose app is ALREADY built, until the 12-min cap kills it as a
-      // "failure". On timeout we return a PERMISSIVE verdict — the gate is best-effort and must never
-      // fail a real build on its own slowness.
+      // "failure". On timeout we return UNASSESSED — never a 100/100 the health card would call READY.
       return await withTimeout((async () => {
         // CRITICAL — seed the project graph from the REAL workspace before judging it.
         // The in-memory graph is otherwise populated ONLY by the indexing write-tools
@@ -1670,7 +1668,8 @@ export class ToolDispatcher {
         // (The seed now runs inside `evaluate` itself, so the model's own call is judged on the same
         // fresh graph — autopsy 4d538ca3.)
         await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
-        const report = this.lastReadiness ?? permissive;
+        const report = this.lastReadiness;
+        if (!report) return unassessedReadinessReport();
         // AN UNTOUCHED SCAFFOLD IS NOT A FINISHED APP (autopsy 31dc61fd). Readiness measures CODE
         // HEALTH, and a pristine starter template is perfectly healthy — so this gate scored 100/100
         // on `<h1>Hello World</h1>` and the done signal told the model to stop and hand it over. The
@@ -1680,9 +1679,9 @@ export class ToolDispatcher {
         // one, so the done signal, the weak checkpoint and every other reader inherit this at once
         // instead of each learning it separately. See stillTheStarterApp.ts.
         return await this._blockIfStillTheStarterApp(report);
-      })(), 45_000, 'assessBuildReadiness');
+      })(), readinessTimeoutMs(), 'assessBuildReadiness');
     } catch {
-      return permissive;
+      return unassessedReadinessReport();
     }
   }
 
@@ -1748,7 +1747,7 @@ export class ToolDispatcher {
         return lintGateVerdict(outcomes);
       })(), 45_000, 'assessLintGate');
     } catch {
-      return permissive;
+      return { blocked: false, errorCount: 0, blockers: [], summary: 'Lint gate: not assessed (the check timed out or failed).', unassessed: true };
     }
   }
 
@@ -4214,6 +4213,9 @@ export class ToolDispatcher {
           // real path(s) appended — the agent gets to correct itself on the FIRST miss instead of looping.
           throw new Error(`${base}${hint}`.trim());
         }
+        if (isSecretFilePath(reqPath)) {
+          full = maskSecretFile(reqPath, full, new Set(Object.keys(this.userSecretsEnv)));
+        }
         // RANGED READ (Fix 36b — HMS report 2026-07-07): a big file's tool result gets its middle
         // trimmed by the transcript ceiling, and a plain re-read returns the SAME trimmed view — the
         // model concluded the FILE was "truncated at exactly N lines" and destructively 'repaired' a
@@ -4341,6 +4343,9 @@ export class ToolDispatcher {
         // A rewrite of the global stylesheet keeps the design-kit rules it dropped (autopsy e725e002).
         const kitKeep = kind === 'modify' ? this.keepDesignKit(path, content, existingContent) : { content, note: '' };
         content = kitKeep.content;
+        if (isSecretFilePath(path) && content.includes(SECRET_MASK)) {
+          throw new Error(secretPlaceholderWriteMessage(path));
+        }
         // Self-destruct guard (StudySync autopsy 2026-07-16): refuse to BLANK a populated source file.
         // Overwriting src/App.tsx with "" deletes its code and breaks every importer — the same
         // catastrophe as `rm`, but via the tool path (bypasses the shell guard). Checked BEFORE writing
@@ -4613,6 +4618,9 @@ export class ToolDispatcher {
         const editKit = this.keepDesignKit(path, deduped, existing);
         const updated = editKit.content;
         const editKitNote = editKit.note;
+        if (isSecretFilePath(path) && updated.includes(SECRET_MASK)) {
+          throw new Error(secretPlaceholderWriteMessage(path));
+        }
         // Self-destruct guard: an edit that reduces a populated source file to empty/whitespace blanks it
         // — same catastrophe as deletion. Refuse before writing so the file survives (StudySync autopsy).
         if (isDestructiveEmptyOverwrite(path, existing, updated)) {
@@ -6497,8 +6505,8 @@ export class ToolDispatcher {
             ? 'This was a FILTERED run. Run run_tests with no filter before calling the build done.\n'
             : '') +
           (outcome.failingTests.length ? `failing:\n  ${outcome.failingTests.slice(0, 20).join('\n  ')}\n` : '') +
-          `\n[stdout tail]\n${stdout.slice(-1500)}` +
-          (stderr ? `\n[stderr tail]\n${stderr.slice(-800)}` : '');
+          `\n[stdout tail]\n${redactSecrets(stdout.slice(-1500))}` +
+          (stderr ? `\n[stderr tail]\n${redactSecrets(stderr.slice(-800))}` : '');
         this.state?.appendTerminal(detail);
         return detail;
       }
@@ -8401,7 +8409,6 @@ export class ToolDispatcher {
           try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'secrets-env-read'); } catch { existing = ''; }
           const merged = mergeDotEnv(existing, saved);
           await this.actuator.writeFile(this.workspaceId, '.env', merged);
-          try { this.onFileWrite?.('.env', merged); } catch { /* durable record is best-effort */ }
           // The user's real keys must never reach their git repo.
           try {
             let gi = '';
@@ -8909,7 +8916,8 @@ export class ToolDispatcher {
             allOk = allOk && ok;
             planOk = planOk && ok;
             exitCodes.push(r.exitCode);
-            out.push(`${ok ? '✓' : '✗'} [${plan.tool}] ${cmd} → exit ${r.exitCode}${ok ? '' : `\n${(r.stderr || r.stdout || '').slice(-600)}`}`);
+            const tail = redactSecrets((r.stderr || r.stdout || '').slice(-600));
+            out.push(`${ok ? '✓' : '✗'} [${plan.tool}] ${cmd} → exit ${r.exitCode}${ok ? '' : `\n${tail}`}`);
             if (!ok) break; // a failed step blocks the rest of this tool's chain — report honestly, don't push on
           }
           // GA-6 — persist THIS plan's run (tool, commands, outcome, exit codes) so a later build remembers it.
@@ -10505,7 +10513,7 @@ export class ToolDispatcher {
                 'preview-managed-dev-start',
               );
               const healOut = `${heal.stdout || ''}\n${heal.stderr || ''}`;
-              const tail = healOut.trim().slice(-200);
+              const tail = redactSecrets(healOut.trim().slice(-200));
               healNote = ` A managed dev-server start was attempted${tail ? ` (${tail})` : ''}.`;
               // AUTHORITATIVE VERDICT: the managed launcher runs the SAME port check (buildPortWaitCommand)
               // that pollPort re-runs, then prints its result. When it confirms the port UP, TRUST it — a

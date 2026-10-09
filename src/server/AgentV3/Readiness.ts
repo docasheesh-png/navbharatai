@@ -24,6 +24,11 @@ export interface ReadinessReport {
   warnings: string[];
   /** Maturity tier derived from the score + gate (prototype → hackathon → production → enterprise). */
   tier: MaturityTier;
+  /**
+   * The check did not finish (timeout or throw). This is NOT a score: `ready: false` here means
+   * "we did not look", not "we looked and the app failed". Never render it as verified READY.
+   */
+  unassessed?: boolean;
 }
 
 /**
@@ -58,6 +63,30 @@ export interface ExtraFinding {
 // 100-point defect budget must remain; a genuinely clean build sits far above it, so this never
 // false-blocks a real, working app.
 export const MIN_READY_SCORE = 50;
+
+/** Default bound for the readiness gate. Override with `AGENTV3_READINESS_TIMEOUT_MS` (TD-2). */
+export const READINESS_TIMEOUT_MS = 45_000;
+
+/** The timeout the gate actually uses. A non-positive or unreadable env value keeps the default. */
+export function readinessTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.AGENTV3_READINESS_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : READINESS_TIMEOUT_MS;
+}
+
+/**
+ * Returned when the readiness scan times out or throws. Score 0 is a placeholder, not a measurement —
+ * `unassessed` is what callers must branch on. Lowest tier so the value stays inside `MaturityTier`.
+ */
+export function unassessedReadinessReport(): ReadinessReport {
+  return {
+    score: 0,
+    ready: false,
+    blockers: [],
+    warnings: ['Readiness could not be assessed (the check timed out or failed) — NOT verified.'],
+    tier: 'prototype',
+    unassessed: true,
+  };
+}
 
 /**
  * Map a readiness result to a maturity tier the user understands. A not-ready build (a hard blocker or a

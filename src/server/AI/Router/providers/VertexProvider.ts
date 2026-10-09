@@ -82,7 +82,24 @@ export class VertexProvider implements AIProvider {
         return new Error(`Vertex AI Error: ${error.message}`);
     }
 
-    async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, modelName?: string): Promise<string> {
+    /**
+     * ⚠️ THE ONE PROVIDER WHOSE REQUEST CANNOT BE ABORTED, SAID PLAINLY RATHER THAN HIDDEN (Q-621).
+     *
+     * Every other provider here hands `signal` to its SDK, which tears the socket down so an
+     * abandoned turn stops being generated AND stops being billed. `@google-cloud/vertexai` offers
+     * no such hook: `generateContentStream(request)` takes no per-call options at all, and the
+     * `RequestOptions` accepted by `getGenerativeModel` carries only `timeout`, `apiClient` and
+     * `customHeaders` (checked against the installed typings, not assumed).
+     *
+     * So this is the honest mitigation, not the fix: we stop CONSUMING the stream the moment the
+     * client is gone, which ends the turn and releases the rung immediately, and the generation
+     * upstream finishes on its own. It is recorded as an OPEN root cause in `BUILD_REPORT_QUEUE.md`
+     * (Q-769) rather than counted as resolved — under the fourth absolute rule, rule 6: when the
+     * real root is out of reach, say so instead of shipping a cosmetic patch as if it were the fix.
+     *
+     * The `timeout` on the model is NOT a substitute: it bounds a hung call, not an abandoned one.
+     */
+    async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, modelName?: string, signal?: AbortSignal): Promise<string> {
         if (!this.vertexAI) throw new Error('Vertex AI not configured');
         const modelConfig: any = { model: modelName || this.modelPro };
         if (systemPrompt) modelConfig.systemInstruction = { role: 'system', parts: [{ text: systemPrompt }] };
@@ -92,6 +109,7 @@ export class VertexProvider implements AIProvider {
         });
         let full = '';
         for await (const chunk of result.stream) {
+            if (signal?.aborted) break;
             const text = chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
             if (text) { full += text; onChunk(text); }
         }

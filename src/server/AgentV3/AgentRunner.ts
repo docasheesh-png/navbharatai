@@ -12,7 +12,7 @@ import { billedAmountUsd } from './pricing';
 import type { UsageSink } from './UsageSink';
 import { withTimeout } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
-import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReadyMark, type ReadyMark } from './doneSignal';
+import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReadyMark, unassessedFailsBuild, type ReadyMark } from './doneSignal';
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
 import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { writerTaskSiblings, SIBLING_TASKS_INPUT_KEY } from './parallelSiblings';
@@ -1052,7 +1052,7 @@ export class AgentRunner {
           // with an honest summary of the blockers. The work is preserved (files/preview still
           // exist) — we simply refuse to claim success that wasn't earned ("Preview is EARNED").
           // When escalation is active, this ok:false is exactly what triggers a stronger retry.
-          let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string } | undefined;
+          let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string; unassessed?: boolean } | undefined;
           if (ok && readinessGate && expectsArtifacts && totalToolUses > 0) {
             try {
               // HEAL-THEN-JUDGE (CLAUDE.md 50/50 law): make orphaned pages reachable BEFORE the gate
@@ -1065,7 +1065,7 @@ export class AgentRunner {
               try { const c = await dispatcher.healCredentialLogs(); if (c) events.emit({ type: 'narration', agent: 'architect', text: c, ts: Date.now() }); } catch { /* heal is best-effort — never fails a build */ }
               const readiness = await dispatcher.assessBuildReadiness();
               // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
-              buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
+              buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier, ...(readiness.unassessed ? { unassessed: true } : {}) };
               // The end-of-turn gate judged the app, so it records when it was first finished (Q-310).
               try {
                 readyMark = endOfTurnReadyMark({
@@ -1092,7 +1092,14 @@ export class AgentRunner {
                   continue;
                 }
               }
-              if (!readiness.ready) {
+              if (readiness.unassessed) {
+                // TD-2 / D-6: a timeout is not a verdict. Do not claim READY, and do not flip ok
+                // unless the owner asked an unassessed check to fail the build.
+                if (unassessedFailsBuild()) {
+                  ok = false;
+                  summary = 'The readiness check did not finish in time, so this app is NOT verified yet. Your files are saved.';
+                }
+              } else if (!readiness.ready) {
                 // A MODEL THAT STOPPED IN PROSE WHILE THE APP IS STILL UNBUILT GETS THE GATE'S FINDINGS
                 // AND ANOTHER TURN (autopsy 121c2431 — the build ended FAILED with 1,418 s of budget
                 // unspent). Never after a refusal or a question to the user; at most twice. See
@@ -1519,12 +1526,16 @@ export class AgentRunner {
         let summary = ok
           ? `Step limit reached (${stepCap}) — stopping here. Your files are saved; send another message to continue.`
           : `Step limit reached (${stepCap}). Stopped without completing.`;
-        let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string } | undefined;
+        let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string; unassessed?: boolean } | undefined;
         if (ok && readinessGate) {
           try {
             const readiness = await dispatcher.assessBuildReadiness();
-            buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
-            if (readiness.ready) {
+            buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier, ...(readiness.unassessed ? { unassessed: true } : {}) };
+            if (readiness.unassessed) {
+              // TD-2 / D-6: not verified. ok stays unchanged unless AGENTV3_UNASSESSED_FAILS=on.
+              summary = `Step limit reached (${stepCap}) — your files are saved. The readiness check did not finish in time, so this app is NOT verified yet; send another message to continue.`;
+              if (unassessedFailsBuild()) ok = false;
+            } else if (readiness.ready) {
               summary = `Step limit reached (${stepCap}) — but the app itself is verified READY (score ${readiness.score}/100). Files are saved; send another message to keep improving it.`;
             } else {
               ok = false;
@@ -1548,8 +1559,10 @@ export class AgentRunner {
                   }), 150_000, 'endgame-repair');
                   if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {
                     const after = await dispatcher.assessBuildReadiness();
-                    buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings, tier: after.tier };
-                    if (after.ready) {
+                    buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings, tier: after.tier, ...(after.unassessed ? { unassessed: true } : {}) };
+                    if (after.unassessed) {
+                      summary = `Step limit reached (${stepCap}) — endgame repair cut the compile errors ${verdict.errorsBefore} → ${verdict.errorsAfter}, but the readiness check did not finish, so this app is NOT verified yet.`;
+                    } else if (after.ready) {
                       ok = true;
                       summary = `Step limit reached (${stepCap}) — endgame repair then fixed the remaining ${verdict.errorsBefore} compile error(s) (${verdict.deterministicFixes.length} mechanically, ${verdict.llmFilesWritten} file(s) via one batch pass) and the app is verified READY (score ${after.score}/100).`;
                     } else {

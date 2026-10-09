@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { buildScriptTypecheckVerdict, typecheckEvidenceFromCommands } from '../src/server/AgentV3/TscGate';
+import { prodBuildCommand } from '../src/server/AgentV3/prodBuildGate';
 
 // Verbatim from the report's commands log.
 const REPORT_BUILD = {
@@ -23,6 +24,10 @@ describe('the report\'s own build', () => {
   });
   it('the platform\'s own piped production build reads the same', () => {
     expect(buildScriptTypecheckVerdict({ ...REPORT_BUILD, command: 'npm run build 2>&1 | tail -120', exitCode: null })).toBe('passed');
+  });
+  it('the unpiped production command trusts a real non-zero exit (BLD-1)', () => {
+    expect(buildScriptTypecheckVerdict({ ...REPORT_BUILD, command: prodBuildCommand(), exitCode: 0 })).toBe('passed');
+    expect(buildScriptTypecheckVerdict({ ...REPORT_BUILD, command: prodBuildCommand(), exitCode: 2 })).not.toBe('passed');
   });
 });
 

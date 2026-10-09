@@ -251,6 +251,8 @@ export interface BuildHealth {
    * problems, so a build whose app never started scored the same 100/100 as one proven to work.
    */
   provenRunning?: boolean;
+  /** The readiness check timed out. The card must not show a score or say READY. */
+  unassessed?: boolean;
 }
 
 export type AgentEventType = AgentEvent['type'];

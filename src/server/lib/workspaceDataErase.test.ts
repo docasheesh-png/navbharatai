@@ -75,7 +75,15 @@ describe('the registry of collections that hold a built app', () => {
   it('every entry names a real collection and no duplicates', () => {
     const names = WORKSPACE_SCOPED_COLLECTIONS.map((c) => c.collection);
     expect(new Set(names).size).toBe(names.length);
-    for (const c of WORKSPACE_SCOPED_COLLECTIONS) expect(c.collection).toMatch(/^[a-z][a-z0-9_]+$/);
+    /**
+     * A SHAPE check against a typo or an empty string — NOT a naming policy, and the pattern used to
+     * read as one. It was `/^[a-z][a-z0-9_]+$/`, which quietly asserted that every collection in this
+     * repo is snake_case. Several are not: `buildTraces`, `incrementalCache` and `migrationHistory`
+     * are the real, live names in Firestore, alongside `adrDecisions`, `techDebt`, `abuseLedger`,
+     * `userPrefs`, `promptAudits`, `teamInvites` and `deviceTokens` elsewhere. Renaming a live
+     * collection is a data migration, not a tidy-up, so the test is what gives — the names stay.
+     */
+    for (const c of WORKSPACE_SCOPED_COLLECTIONS) expect(c.collection).toMatch(/^[a-zA-Z][a-zA-Z0-9_]*$/);
   });
 
   it('does NOT touch the seven collections deleteUserData already owns', () => {

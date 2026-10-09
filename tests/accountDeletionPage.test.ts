@@ -92,6 +92,51 @@ describe('the page and the deletion code do not drift apart', () => {
       // Added 2026-10-06 (Q-700): the Supabase grant was in no erase path at all.
       supabase_connections: /connection to Supabase/i,
       supabase_pause_notices: /sleeping-database reminders/i,
+      /**
+       * Added 2026-10-08 (Q-760) — the four stores that held a WORKING CREDENTIAL and were in no erase
+       * path at all. The page's existing "API keys and credentials you stored in the secrets vault"
+       * line already covered the vault; the other three were described to nobody, which is why this
+       * test failed the moment the registry grew. That is the direction it is meant to fail in.
+       */
+      user_secrets: /API keys and credentials\*\* you stored in the secrets vault/i,
+      /**
+       * Added 2026-10-08 (Q-701) — the personal data the REGISTRY never saw. Every one of these was
+       * keyed to one person and in no erase path, because the census could only see EXPORTED
+       * `*_COLLECTION` constants and each of these names is a private constant or an inline literal.
+       * They are grouped on the page on purpose: twenty-one separate bullets would be a wall nobody
+       * reads, and the point of this page is that somebody actually reads it.
+       */
+      conversation_memory_v1: /chat and voice memory/i,
+      professional_user_memory: /what a professional assistant had noted about you/i,
+      sonic_voice_memory: /the voice-chat turns/i,
+      agentv3_conversations: /build conversation you had with the builder/i,
+      userPrefs: /builder settings and the record of what the builder learned/i,
+      user_brain_v3: /the lessons it kept/i,
+      user_mistakes_v3: /the mistakes ledger/i,
+      user_diagnostics_v3: /diagnostics report of your own last build/i,
+      terminal_daily_usage: /terminal seconds/i,
+      tool_daily_usage: /tool and picture calls/i,
+      ai_usage_logs: /the AI usage rows behind/i,
+      agentv3_onboarding_credits: /your free-build credit/i,
+      wallet_balance_alerts: /the balance warnings we had already sent you/i,
+      professional_passes: /professional pass/i,
+      user_notification_reads: /which admin notices you had already read/i,
+      zip_uploads: /\.zip archives/i,
+      agentv3_sheet_files: /spreadsheets you gave to a build/i,
+      shares: /share links/i,
+      pwa_apps: /instantly-hosted apps/i,
+      user_referrals: /referral record/i,
+      /** Said with its limit, because half of this one is not ours to do. */
+      custom_domains: /connected domains.*not\*\* change anything at your/is,
+      /**
+       * Added 2026-10-09 (Q-701 PR B). All three were ALREADY classified `workspace` before Q-701 and
+       * were in no erase path, because that kind carried no obligation. `site_uptime` turned out not to
+       * be workspace-keyed at all — its doc id is the domain — so it is a user entry now.
+       */
+      site_uptime: /the uptime history we kept for it/i,
+      api_keys: /NavBharatAI API keys/i,
+      bots: /chat bots/i,
+      webhooks: /addresses NavBharatAI posted your build events to/i,
     };
     for (const { collection } of USER_SCOPED_COLLECTIONS) {
       const phrase = described[collection];
@@ -131,6 +176,27 @@ describe('the built-app eraser and the page do not drift apart', () => {
       // Q-134 (2026-10-05): two stores the erase now reaches, each named on the page.
       workspace_user_actions_v1: /the list of things the builder asked you to do/i,
       code_reviews: /the review comments left on them/i,
+      /**
+       * Added 2026-10-08 (Q-701) — twelve stores keyed by the workspace id that the eraser's range
+       * already reaches but the registry never listed, so none of them was erased. Two more were
+       * found and deliberately left OUT rather than registered on a guess: `app_ai_apps` (doc id is
+       * the APP id) and `build_history` (doc id is a bare sessionId) — neither is inside the
+       * `agentv3-{uid}-` range, and both are recorded in `BUILD_REPORT_QUEUE.md`.
+       */
+      agentv3_attachment_memory: /everything the builder kept about each app/i,
+      agentv3_build_outcome: /its build state/i,
+      buildTraces: /decisions it took/i,
+      build_queues_v3: /its build state/i,
+      incrementalCache: /the caches it reused between builds/i,
+      agentv3_provider_state: /its build state/i,
+      workspace_traceability: /everything the builder kept about each app/i,
+      migrationHistory: /everything the builder kept about each app/i,
+      mega_roadmaps_v3: /its plan and roadmap/i,
+      sboms: /the software bill of materials/i,
+      site_configs: /the app's own site settings/i,
+      agentv3_mcp_servers: /the outside services it was wired to talk to/i,
+      agentv3_deployments: /our record of where it/i,
+      agentv3_sandboxes: /the sandbox it ran in/i,
     };
     for (const { collection } of WORKSPACE_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

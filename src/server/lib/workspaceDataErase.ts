@@ -65,6 +65,53 @@ export const WORKSPACE_SCOPED_COLLECTIONS: readonly WorkspaceScopedCollection[] 
   { collection: 'project_plans_v3' },
   { collection: 'app_engineering_memory_v1' },
   { collection: 'app_ai_settings' },
+  /**
+   * ── 🔴 THE APP DATA THE WORKSPACE ERASER NEVER LISTED (Q-701, 2026-10-08) ─────────────────────────
+   * Each doc id below was read at its own store. The eraser works by an id RANGE over
+   * `agentv3-{uid}-…`, so a store keyed by the WORKSPACE id is reached; two that are keyed by
+   * something else are deliberately NOT here and are recorded in `BUILD_REPORT_QUEUE.md` instead of
+   * being registered on a guess (`app_ai_apps`, whose doc id is the APP id, and `build_history`,
+   * whose doc id is a bare sessionId that the `agentv3-{uid}-` range cannot match).
+   */
+  /** The app's attachment memory (`attachmentMemory.ts:115/130`). */
+  { collection: 'agentv3_attachment_memory' },
+  /** Whether the app's last build came out green (`BuildOutcomeStore.ts:74`). */
+  { collection: 'agentv3_build_outcome' },
+  /** The app's deployment record and URL (`DeploymentStore.ts:146`). */
+  { collection: 'agentv3_deployments' },
+  /** Per-provider build state; the id is `${workspaceId}__${provider}`, so it is inside the range
+   *  (`ProviderStateStore.ts:37/45`). */
+  { collection: 'agentv3_provider_state' },
+  /** The app's sandbox and its last snapshot (`SandboxStore.ts:104/181`). */
+  { collection: 'agentv3_sandboxes' },
+  /** Every decision the builder took for the app (`DecisionTraceManager.ts:78`). */
+  { collection: 'buildTraces' },
+  /** The app's pending command queue (`BuildQueueStore.ts:48`). */
+  { collection: 'build_queues_v3' },
+  /** File hashes from the app's last build (`IncrementalBuildCache.ts:190`). */
+  { collection: 'incrementalCache' },
+  /** The app's long roadmap (`MegaRoadmapStore.ts:94`). */
+  { collection: 'mega_roadmaps_v3' },
+  /** The app's requirement-to-code matrix (`TraceabilityStore.ts:30`). */
+  { collection: 'workspace_traceability' },
+  /** The app's migration runs. Its parameter is called `projectId`, which is why this was checked
+   *  rather than assumed: both callers pass `this.workspaceId` (`ToolDispatcher.ts:8896`, `:8916`). */
+  { collection: 'migrationHistory' },
+  /** The app's SBOMs — `sboms/{workspaceId}/builds/{buildId}` (`routes/sbom.ts:52`). */
+  { collection: 'sboms', sub: 'builds' },
+  /**
+   * ── 🔴 THREE MORE, AND THESE WERE NOT NEWLY DISCOVERED (Q-701 PR B, 2026-10-09) ──────────────────
+   * `site_configs`, `agentv3_mcp_servers` and `site_uptime` were ALREADY classified `workspace` in
+   * `tests/everyCollectionIsClassified.test.ts` — since before Q-701 — and were in no erase path at
+   * all. Nothing caught it because `workspace` carried no obligation: the label alone read as
+   * coverage. Adding that obligation found them on its first run. Two belong here; the third did not
+   * (see below), which is why each was read rather than registered as a batch.
+   */
+  /** The app's own site config — doc id is the workspaceId (`siteConfigStore.ts:37/50`). */
+  { collection: 'site_configs' },
+  /** The app's MCP wiring: the servers it may call and the keys for them — doc id is the workspaceId
+   *  (`McpServerStore.ts:82/92/154`). Credential-adjacent, and it was being kept for ever. */
+  { collection: 'agentv3_mcp_servers' },
 ];
 
 export type EraseRefusal = 'unusable-uid' | 'ambiguous-uid';

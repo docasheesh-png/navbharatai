@@ -92646,6 +92646,97 @@ default OFF** — see `docs/claude/ENV_REGISTRY.md` → "Build reliability flags
 
 Open: measure with the benchmark before enabling anything in prod; AppKnowledgeBase not updated (no
 user-facing change while the flags are off).
+## 2026-10-09 — Q-780: a version history anyone could read, "protected" by a timestamp
+
+**Found while investigating Q-764**, which is only about erasing `build_history`. Reading the store to
+answer that question turned up something sharper: **three routes with no authorization at all.**
+
+```
+GET  /api/build-history/:sessionId              → the list of versions
+GET  /api/build-history/:sessionId/:versionId   → the app's whole `files` map — the source code
+POST /api/build-history/:sessionId/checkpoint   → writes a version into that history
+```
+
+The stated security model, written in `routes/build.ts` and again in `CodeVersioning.tsx`, was that
+*"the sessionId is the unguessable capability"*. `App.tsx:693`:
+
+```js
+const id = `pro-${Date.now()}`;
+```
+
+A millisecond timestamp, then kept in localStorage for ever. **The chain was verified end to end, not
+assumed:** that id goes to the build → the workspace is `agentv3-{uid}-{sessionId}` → `restorePointKey`
+strips the prefix back off → the history document id is the bare `pro-<ts>`. App Check was no help:
+it covers six POST routes, none of these, and it attests the app rather than the user.
+
+So: guess the timestamp and you could read a stranger's source code, or write a version into their
+Time Machine. The ids cluster by when people started using the product, which makes a targeted window
+small.
+
+⚠️ **And the same file already carried the lesson.** The route immediately below these three has the
+comment *"SECURITY (audit IDOR): scope to the verified token uid — this exposes a user's build count
+and AI spend; without the check any uid could be read."* This exact class was audited **in this file**
+and these three were missed — the audit fixed the instances it was looking at, not the class.
+
+### The fix, and the part that is actually load-bearing
+
+`src/server/lib/buildHistoryAccess.ts` — all three routes now require that the caller **owns a
+workspace with that session id**, probed with `countWorkspaceFiles` (one metadata document, never
+throws, injected so the rule is unit-testable).
+
+🔒 **`ownedByVerifiedUid` alone would have been security theatre here.** The workspace id is DERIVED by
+prefixing the caller's own uid, so that check is true for any string they send. Only the existence
+probe — *does this person really have an app with that session id?* — refuses a guessed
+`pro-<timestamp>`. The reversion proof is exactly this: remove the probe and the "a signed-in stranger
+guesses the timestamp" test fails while everything else still passes.
+
+**The refusal is deliberately uninformative.** "Not found" and "not yours" return the same status and
+the same sentence, because a refusal that distinguishes them is an oracle for enumerating session ids.
+
+### 🔒 What was deliberately left alone, and why that took checking
+
+`agentv3-anon-…` histories keep the capability model **unchanged**. `workspaceIdentity.ts` says such a
+workspace has *"no real owner to protect — they are scoped only by their unguessable random sessionId
+(a capability, like a secret URL)"*, and a signed-out person has no token to present. Demanding one
+would have deleted a working feature for them — the first absolute rule.
+
+That required proving a signed-out build really does land under that prefix rather than under
+`pro-<ts>`: `deriveWorkspaceId` falls back to the literal uid `'anon'` when the real one is unusable,
+giving `agentv3-anon-{session}`, and `restorePointKey` leaves an anon id whole because there is no user
+prefix to strip. So the anon branch matches the key those histories are actually stored under. Checked,
+not assumed.
+
+Residue recorded honestly: for anon histories the "unguessable" claim now rests entirely on **their**
+generator being random. That is a different question from this one and is not answered here.
+
+### Both ends had to move
+
+Four client calls reach these routes and **one** of the four sent a token: the list call in
+`CodeVersioning.tsx`. The version fetch, the checkpoint POST, and both helpers in `buildService.ts`
+(used by `FilesPanel.tsx`) sent none — so without fixing the client, the fix would have turned every
+owner's own history into a silent empty list. A test now walks every `fetch(\`/api/build-history/…\`)`
+in both files and fails on any that does not carry `authedHeaders()`.
+
+**A correction to my own first reading:** I said those two `buildService` helpers were dead code. They
+are not — `FilesPanel.tsx` imports both. My first grep searched for the wrong names. It cost nothing
+because the re-check happened before the change, but the lesson is the repo's own: a search that finds
+nothing has usually guessed the wrong word.
+
+### The ID collided, and the guard caught it
+
+I numbered this Q-769 and `tests/theQueueIdsAreUnique.test.ts` failed: another live session already
+holds Q-769 (split from Q-621). Renumbered to **Q-780**, and only my own files' references were
+rewritten — `VertexProvider.ts` and `anAbandonedStreamStopsCosting.test.ts` carry the other session's
+Q-769 and were left untouched. This is the queue header's own prescription ("the session whose PR is
+not yet merged renumbers its own rows") working exactly as written.
+
+### Verification
+
+`tests/aBuildHistoryIsNotPublic.test.ts` — 16 tests, led by the attack itself: a signed-in stranger
+who knows the timestamp is refused. **Reversion-proven three ways:** the existence probe removed → the
+stranger-guesses test fails · one route's guard removed → the per-handler count AND the
+"guarded before it reads the files" order test fail · the client token removed → the
+no-unauthenticated-call test fails.
 ## 2026-10-09 — Q-770 closed (#3607 merged), and the admin lifted the merge hold for this session
 
 **Q-770 ✅ RESOLVED.** #3607 merged as `4117ae4`, so the row left the open table and `Q-770` was

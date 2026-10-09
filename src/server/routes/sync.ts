@@ -1,7 +1,9 @@
 import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes user_workspaces (server-only).
 import { doc, getDoc, setDoc, deleteDoc, getServerDb as getDb } from '../lib/serverDb';
-import { encodeWorkspace, decodeWorkspace } from '../project/WorkspaceStore';
+import {
+  encodeWorkspace, decodeWorkspace, chunkDocId, MAX_WORKSPACE_BYTES,
+} from '../project/WorkspaceStore';
 import { mergeWorkspaceState, type WorkspacePayload } from '../project/SyncMerge';
 import { requireUserMatch } from '../lib/authMiddleware';
 import { sendSafeError } from '../lib/httpError';
@@ -19,10 +21,11 @@ import { routeParam, routeParams } from '../lib/expressCompat';
  * Legacy v1 single-doc workspaces are still read transparently (backward compat).
  */
 
-// Hard safety ceiling to avoid unbounded writes; generous (≈ many MB of code).
-const MAX_WORKSPACE_BYTES = 8_000_000;
-
-const chunkDocId = (userId: string, i: number) => `${userId}__c${i}`;
+// The size ceiling and the chunk id now live with the CODEC (`WorkspaceStore`), not here. They were
+// defined privately in this file, which is how the only written description of the layout — the one in
+// `WorkspaceStore`'s header — came to say `{userId}_chunk_{i}` while every real document was
+// `{userId}__c{i}`, with nothing able to notice. The eraser (`syncWorkspaceErase.ts`) now deletes
+// through the same builder this route writes through (Q-763).
 
 export function registerSyncRoutes(app: Express): void {
   // SECURITY (audit): require the verified Firebase token uid to match :userId — without this any

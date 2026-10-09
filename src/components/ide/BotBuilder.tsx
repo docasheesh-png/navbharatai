@@ -114,7 +114,6 @@ export const BotBuilder: React.FC = () => {
   const [edges, setEdges] = useState<BotEdge[]>(defaultEdges);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [platform, setPlatform] = useState<Platform>('whatsapp');
-  const [showWebhookModal, setShowWebhookModal] = useState(false);
   // Go-Live (real Telegram/WhatsApp connect) state.
   const [showConnect, setShowConnect] = useState(false);
   const [connPlatform, setConnPlatform] = useState<'telegram' | 'whatsapp'>('telegram');
@@ -132,7 +131,6 @@ export const BotBuilder: React.FC = () => {
   const [copiedField, setCopiedField] = useState('');
   const [helpMode, setHelpMode] = useState<HelpMode>('closed');
   const [showSimulator, setShowSimulator] = useState(false);
-  const [copied, setCopied] = useState(false);
   // Node-connection state (mobile autopsy 2026-07-23): the designer could ADD nodes but there was NO way
   // to WIRE them — tap a node's link handle to start a connection, then tap the target node to finish it.
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
@@ -282,21 +280,13 @@ export const BotBuilder: React.FC = () => {
     URL.revokeObjectURL(url);
   }
 
-  // ——— Webhook modal copy ———
-  const webhookSnippet = `POST https://your-server.com/webhook
-Content-Type: application/json
-
-{
-  "platform": "${platform}",
-  "flow": <exported_json>
-}`;
-
-  function copyWebhook() {
-    navigator.clipboard.writeText(webhookSnippet).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
+  // The old webhook-modal snippet was REMOVED on 2026-10-09 (Q-600's sweep). It printed a
+  // `POST https://your-server.com/webhook` example with a `<exported_json>` placeholder — an
+  // illustration of an endpoint that does not exist — and nothing rendered it any more, because the
+  // real Go Live flow replaced it: a Telegram bot token connects the bot for real, and WhatsApp gets
+  // the actual callback URL and verify token to paste into Meta (both below, around `connResult`).
+  // Reviving a copy button for a placeholder URL would have shipped exactly the kind of fake feature
+  // the second absolute rule forbids, so the honest move was to delete it rather than wire it up.
 
   function copyField(field: string, value: string) {
     navigator.clipboard.writeText(value).then(() => {

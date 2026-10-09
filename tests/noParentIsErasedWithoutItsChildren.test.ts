@@ -104,15 +104,23 @@ describe('Q-784 — no eraser deletes a parent and leaves its children unreachab
   it('🔒 every child of an ERASED parent is declared, so it dies with its parent', () => {
     const userEntry = new Map(USER_SCOPED_COLLECTIONS.map((c) => [c.collection, c]));
     const userSubs = new Set(USER_SCOPED_SUBCOLLECTIONS.map((s) => `${s.parent}/${s.sub}`));
-    const workspaceEntry = new Map(WORKSPACE_SCOPED_COLLECTIONS.map((c) => [c.collection, c]));
+    // One collection can register two subcollections as two rows (nbai_app_data has `records` and
+    // `ops`). A Map of the row itself keeps only the last row, which would call the first child
+    // undeclared even though subcollectionsToErase deletes every one of them before the parent.
+    const workspaceSubs = new Map<string, string[]>();
+    for (const c of WORKSPACE_SCOPED_COLLECTIONS) {
+      const list = workspaceSubs.get(c.collection) ?? [];
+      if (c.sub && !list.includes(c.sub)) list.push(c.sub);
+      workspaceSubs.set(c.collection, list);
+    }
     const policy = new Map(RETENTION_POLICIES.map((p) => [p.collection, p]));
 
     const orphaning: string[] = [];
     for (const { parent, child, file } of pairs) {
       const u = userEntry.get(parent);
-      const w = workspaceEntry.get(parent);
+      const wSubs = workspaceSubs.get(parent);
       const r = policy.get(parent);
-      if (!u && !w && !r) {
+      if (!u && !wSubs && !r) {
         // Nothing deletes this parent. It must say so deliberately, not by omission.
         if (!PARENT_IS_NEVER_DELETED[parent]) {
           orphaning.push(`${parent}/${child} (${file}) — parent is in no erase path and no recorded reason`);
@@ -122,7 +130,7 @@ describe('Q-784 — no eraser deletes a parent and leaves its children unreachab
       const declared =
         (u?.subs ?? []).includes(child)
         || userSubs.has(`${parent}/${child}`)
-        || w?.sub === child
+        || (wSubs ?? []).includes(child)
         || (r?.subs ?? []).includes(child);
       if (!declared) {
         orphaning.push(`${parent}/${child} (${file}) — the parent is deleted but this child is not`);

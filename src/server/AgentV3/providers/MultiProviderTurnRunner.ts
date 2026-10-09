@@ -10,9 +10,12 @@
 // Per-turn selection is by ERROR only (a thrown provider error → try the next). Quality-
 // based fallback (a cheap model returns a valid-but-poor turn) is intentionally NOT done
 // here — it needs live measurement and would risk false fallbacks; the agent loop's own
-// validation + the Claude backstop cover hard failures. PURE control flow; the runners are
+// validation + the Claude backstop cover hard failures. (fix/build-reliability: an OPT-IN sticky
+// start — `opts.sticky`, flags AGENTV3_STICKY_RUNG / AGENTV3_QUALITY_ESCALATE — lets the agent loop
+// move a build UP the ladder on quality signals; off by default.) PURE control flow; the runners are
 // injected, so this is fully unit-testable without any provider key.
 
+import { createStickyState, recordStickySuccess, stickyStartIndex, type StickyState } from '../reliability/stickyRung';
 import { crawlBenchWindowMs, mayAbandonCrawl, crawlBenchUntil } from '../crawlBench';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { modelAlwaysReasons } from './glmThinking';
@@ -125,6 +128,13 @@ export interface MultiProviderOptions {
    * and is deliberately NOT offered here.
    */
   deadRungs?: Map<string, string>;
+  /**
+   * P4 (fix/build-reliability) — STICKY RUNG. Omitted ⇒ every turn opens at rung 0, exactly as before.
+   * Set ⇒ a turn opens at the rung the build's own escalations / successes have reached (see
+   * reliability/stickyRung.ts). `remember: true` also moves the start UP to whichever rung answered;
+   * `remember: false` honours only explicit quality escalations. The state lives on `bench`.
+   */
+  sticky?: { remember: boolean };
 }
 
 /**
@@ -579,6 +589,11 @@ export interface BuildBenchRegistry {
   slowBenchUntil: Map<string, number>;
   /** Rungs whose crawl bench expired and which are being tried once more. */
   crawlReprobed: Set<string>;
+  /**
+   * P4 sticky-rung memory (AGENTV3_STICKY_RUNG / AGENTV3_QUALITY_ESCALATE). Created lazily by the
+   * first sticky runner, so a registry built before this field existed stays exactly the same shape.
+   */
+  sticky?: StickyState;
 }
 
 export function createBuildBenchRegistry(): BuildBenchRegistry {
@@ -747,7 +762,9 @@ export function makeMultiProviderTurnRunner(
       const fellBackFrom: string[] = [];
       let lastError: unknown;
       let alive = 0;
-      for (let i = 0; i < chain.length; i++) {
+      // P4 — a sticky runner opens where this build's escalations / successes left it (never below).
+      const stickyStart = opts.sticky ? stickyStartIndex(bench.sticky ??= createStickyState(), chain) : 0;
+      for (let i = stickyStart; i < chain.length; i++) {
         // A stopped build asks no further rung. Checked per rung, not once: a stop that lands while one
         // rung is failing must not walk the rest of the ladder.
         throwIfStopped(params.signal);
@@ -870,6 +887,9 @@ export function makeMultiProviderTurnRunner(
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
           if (isPoolMember(chain[i])) cooldowns.clear(`pool:${reportName}`); // …and the POOL cooldown (service recovered)
           opts.onProviderUsed?.(reportName, [...fellBackFrom]);
+          if (opts.sticky) {
+            try { recordStickySuccess(bench.sticky ??= createStickyState(), chain, i, opts.sticky.remember); } catch { /* bookkeeping only */ }
+          }
           // Billing Phase 3 — attribute this turn's real tokens to the provider that answered.
           // Best-effort + observational: a throw here must never break a delivered turn.
           try {

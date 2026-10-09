@@ -35,7 +35,7 @@ type Kind =
   | { kind: 'open'; row: string; why: string };
 
 /** "file › sub" → what it is. `clock` adds the second obligation: a SUBCOLLECTION_RETENTION_POLICIES entry. */
-const CLASSIFICATION: Record<string, Kind & { clock?: true }> = {
+const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string }> = {
   'src/server/AgentV3/WorkspaceFileStore.ts › files': { kind: 'workspace', parent: 'workspace_files_v3' },
   'src/server/AgentV3/WorkspaceAssetStore.ts › assets': { kind: 'workspace', parent: 'workspace_assets_v3' },
   'src/server/AgentV3/CheckpointStore.ts › items': { kind: 'workspace', parent: 'workspace_checkpoints_v3' },
@@ -48,7 +48,19 @@ const CLASSIFICATION: Record<string, Kind & { clock?: true }> = {
   'src/server/lib/MentionNotificationStore.ts › notifications': { kind: 'user', parent: 'users' },
   'src/server/AgentV3/PromptAuditStore.ts › entries': { kind: 'user', parent: 'promptAudits', clock: true },
 
-  'src/server/project/BuildHistoryStore.ts › versions': { kind: 'bounded', why: 'MAX_SAVED_VERSIONS per session; the oldest is deleted on every save' },
+  /**
+   * 🔴 `bounded` WAS TRUE AND WAS NOT ENOUGH (Q-764, 2026-10-09). This subcollection cannot GROW —
+   * `MAX_SAVED_VERSIONS` per session, oldest dropped on every save — and that is the only thing this
+   * kind ever claimed. It said nothing about account deletion, and `build_history/{sessionId}` sat
+   * outside both erasers (a bare sessionId, no uid field), so every saved version of every app
+   * survived for ever. `erasedBy` is the obligation that was missing: a subcollection may be bounded
+   * AND still owe an erasure, and the test now reads the named module rather than trusting this line.
+   */
+  'src/server/project/BuildHistoryStore.ts › versions': {
+    kind: 'bounded',
+    why: 'MAX_SAVED_VERSIONS per session; the oldest is deleted on every save',
+    erasedBy: 'src/server/lib/derivedIdErase.ts',
+  },
   'src/server/lib/navStoreWebData.ts › dataSub': { kind: 'bounded', why: 'NavData rows: MAX_ROWS_PER_APP per app, the quota that IS the admin authorization' },
 
   'src/server/lib/ShareStore.ts › feedback': { kind: 'open', row: 'Q-682', why: 'feedback on a share link; shares are keyed by token with an ownerId field and are in no erase path' },
@@ -62,7 +74,13 @@ const CLASSIFICATION: Record<string, Kind & { clock?: true }> = {
 };
 
 /** The generic erasers name subcollections through a variable; they are the mechanism, not a store. */
-const MECHANISM = new Set(['src/server/lib/DataRetentionManager.ts', 'src/server/lib/workspaceDataErase.ts']);
+const MECHANISM = new Set([
+  'src/server/lib/DataRetentionManager.ts',
+  'src/server/lib/workspaceDataErase.ts',
+  // Joined 2026-10-09: the third reachability shape (a derived doc id). Like the two above it names
+  // the subcollection through a variable, so it is the mechanism, not a store that owns one.
+  'src/server/lib/derivedIdErase.ts',
+]);
 
 function found(): string[] {
   const out = new Set<string>();
@@ -96,6 +114,21 @@ describe('every subcollection is classified', () => {
 
   it('has no unclassified subcollection', () => {
     expect(all.filter((k) => !(k in CLASSIFICATION))).toEqual([]);
+  });
+
+  /**
+   * A subcollection that names a dedicated eraser must really be named in it. Reading the module is the
+   * whole point: Q-764's defect was a label that read as coverage while nothing erased the data, and a
+   * map entry asserting its own correctness would reproduce exactly that.
+   */
+  it('🔒 every subcollection that names a dedicated eraser is actually swept by it', () => {
+    const named = Object.entries(CLASSIFICATION).filter(([, v]) => v.erasedBy);
+    expect(named.length).toBeGreaterThanOrEqual(1);
+    for (const [key, v] of named) {
+      const sub = key.split('›')[1].trim();
+      const src = readFileSync(join(root, v.erasedBy!), 'utf8');
+      expect(src, `${v.erasedBy} does not mention '${sub}', so it cannot be erasing it`).toContain(`'${sub}'`);
+    }
   });
 
   it('keeps no stale entry', () => {

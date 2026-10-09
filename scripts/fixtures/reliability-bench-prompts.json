@@ -1,0 +1,356 @@
+{
+  "_comment": "Build-reliability benchmark (fix/build-reliability). 50 real-world prompts in Hindi, Hinglish and English across simple/medium/complex; `smoke: true` marks the 15-prompt smoke set. Run with scripts/agentv3-reliability-bench.ts — it calls a LIVE server and costs real provider money, so it refuses to run without BENCH_CONFIRM=yes.",
+  "version": 1,
+  "prompts": [
+    {
+      "id": "todo-hinglish",
+      "lang": "hinglish",
+      "complexity": "simple",
+      "smoke": true,
+      "prompt": "ek todo app banao jisme task add, complete aur delete kar sakein, localStorage me save ho"
+    },
+    {
+      "id": "calculator-hi",
+      "lang": "hindi",
+      "complexity": "simple",
+      "smoke": true,
+      "prompt": "एक कैलकुलेटर ऐप बनाओ जिसमें जोड़, घटाना, गुणा, भाग और क्लियर बटन हो"
+    },
+    {
+      "id": "notes-en",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": true,
+      "prompt": "Build a notes app: create, edit, search and delete notes, saved in localStorage, with a sidebar list and an editor."
+    },
+    {
+      "id": "bmi-hinglish",
+      "lang": "hinglish",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "BMI calculator banao, height cm me aur weight kg me, result ke saath category bhi dikhao"
+    },
+    {
+      "id": "stopwatch-en",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "Make a stopwatch with start, pause, reset and lap times."
+    },
+    {
+      "id": "quotes-hi",
+      "lang": "hindi",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "रोज़ एक नया प्रेरणादायक सुविचार दिखाने वाला ऐप बनाओ, 'अगला' बटन और कॉपी बटन के साथ"
+    },
+    {
+      "id": "tip-split-en",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "Build a restaurant tip and bill splitter: bill amount, tip %, number of people, amount per person."
+    },
+    {
+      "id": "unit-converter-hinglish",
+      "lang": "hinglish",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "unit converter app chahiye - length, weight, temperature convert kare"
+    },
+    {
+      "id": "pomodoro-en",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "Create a Pomodoro timer with 25/5 minute cycles, a counter of completed sessions and a sound when time is up."
+    },
+    {
+      "id": "password-gen-hinglish",
+      "lang": "hinglish",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "strong password generator banao - length slider, numbers/symbols toggle, copy button"
+    },
+    {
+      "id": "landing-chai-hinglish",
+      "lang": "hinglish",
+      "complexity": "simple",
+      "smoke": true,
+      "prompt": "mere chai cafe 'Chai Point' ke liye ek sundar landing page banao - menu, timings, location aur contact form"
+    },
+    {
+      "id": "portfolio-en",
+      "lang": "english",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "Make a personal portfolio site for a frontend developer with projects grid, skills and a contact section."
+    },
+    {
+      "id": "expense-hinglish",
+      "lang": "hinglish",
+      "complexity": "medium",
+      "smoke": true,
+      "prompt": "expense tracker banao - income/expense add karo category ke saath, balance aur category-wise chart dikhao"
+    },
+    {
+      "id": "kanban-en",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": true,
+      "prompt": "Build a kanban board with To Do / Doing / Done columns, add cards and move them between columns, saved in localStorage."
+    },
+    {
+      "id": "weather-ui-en",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "Build a weather dashboard UI with a city search, a current-weather card and a 5-day forecast row using clearly-labelled sample data."
+    },
+    {
+      "id": "quiz-hi",
+      "lang": "hindi",
+      "complexity": "medium",
+      "smoke": true,
+      "prompt": "सामान्य ज्ञान का क्विज़ ऐप बनाओ - 10 सवाल, चार विकल्प, स्कोर और अंत में परिणाम"
+    },
+    {
+      "id": "habit-hinglish",
+      "lang": "hinglish",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "habit tracker banao - roz ki habits tick karo, streak dikhao, weekly view ho"
+    },
+    {
+      "id": "recipe-en",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "Create a recipe book app: add recipes with ingredients and steps, search by ingredient, favourite recipes."
+    },
+    {
+      "id": "flashcards-hinglish",
+      "lang": "hinglish",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "English vocabulary ke flashcards app banao - card flip ho, 'yaad hai'/'nahi yaad' mark karo"
+    },
+    {
+      "id": "invoice-en",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": true,
+      "prompt": "Build an invoice generator: client details, line items with qty and price, GST 18%, total, and a print button."
+    },
+    {
+      "id": "kirana-hinglish",
+      "lang": "hinglish",
+      "complexity": "medium",
+      "smoke": true,
+      "prompt": "kirana dukaan ke liye billing app banao - items add karo, quantity, total aur udhaar khata"
+    },
+    {
+      "id": "attendance-hi",
+      "lang": "hindi",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "स्कूल की कक्षा के लिए हाज़िरी ऐप बनाओ - छात्रों की सूची, रोज़ की हाज़िरी और महीने की रिपोर्ट"
+    },
+    {
+      "id": "budget-family-en",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "Make a monthly family budget planner with categories, planned vs actual amounts and a summary bar chart."
+    },
+    {
+      "id": "markdown-en",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "Build a markdown editor with live preview, a word count and download-as-.md."
+    },
+    {
+      "id": "chat-ui-hinglish",
+      "lang": "hinglish",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "WhatsApp jaisa chat UI banao - contacts list, chat window, message bhejo (local data, clearly sample)"
+    },
+    {
+      "id": "snake-hinglish",
+      "lang": "hinglish",
+      "complexity": "medium",
+      "smoke": true,
+      "prompt": "snake game banao keyboard arrows se, score aur high score ke saath"
+    },
+    {
+      "id": "tictactoe-hi",
+      "lang": "hindi",
+      "complexity": "simple",
+      "smoke": false,
+      "prompt": "टिक टैक टो गेम बनाओ - दो खिलाड़ी, विजेता दिखाओ और फिर से खेलो बटन"
+    },
+    {
+      "id": "memory-game-en",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "Create a memory card-matching game with 16 cards, a move counter and a timer."
+    },
+    {
+      "id": "typing-test-hinglish",
+      "lang": "hinglish",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "typing speed test app banao - WPM aur accuracy dikhao, 60 second ka timer"
+    },
+    {
+      "id": "instagram-hinglish",
+      "lang": "hinglish",
+      "complexity": "complex",
+      "smoke": true,
+      "prompt": "ek instagram jaisa app banao - feed, post like/comment, profile page, aur photo upload"
+    },
+    {
+      "id": "ecommerce-en",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": true,
+      "prompt": "Build an e-commerce store front: product grid with filters, product page, cart, and a checkout form."
+    },
+    {
+      "id": "school-erp-hinglish",
+      "lang": "hinglish",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "school management app banao - students, teachers, classes, fees record aur dashboard"
+    },
+    {
+      "id": "hospital-hi",
+      "lang": "hindi",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "क्लिनिक के लिए अपॉइंटमेंट बुकिंग ऐप बनाओ - डॉक्टर सूची, स्लॉट चुनो, मरीज़ की जानकारी और बुकिंग की सूची"
+    },
+    {
+      "id": "crm-en",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": true,
+      "prompt": "Build a small CRM: contacts, companies, deals pipeline with stages, and activity notes, with a mock login."
+    },
+    {
+      "id": "food-delivery-hinglish",
+      "lang": "hinglish",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "Zomato jaisa food delivery app banao - restaurants list, menu, cart, order tracking screen"
+    },
+    {
+      "id": "blog-fullstack-en",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": true,
+      "prompt": "Build a full-stack blog with an Express API and React frontend: list posts, read a post, create/edit/delete posts."
+    },
+    {
+      "id": "auth-todo-fullstack-hinglish",
+      "lang": "hinglish",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "login/signup wala todo app banao backend ke saath - har user ke apne todos"
+    },
+    {
+      "id": "library-en",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "Create a library management app: books catalogue, members, issue/return with due dates and overdue list."
+    },
+    {
+      "id": "gym-hinglish",
+      "lang": "hinglish",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "gym ke liye membership app banao - members, plans, payment due dates, attendance"
+    },
+    {
+      "id": "real-estate-en",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "Build a real-estate listing app with filters (city, price, BHK), a listing detail page and a contact-agent form."
+    },
+    {
+      "id": "job-board-hi",
+      "lang": "hindi",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "नौकरी खोजने वाला ऐप बनाओ - नौकरियों की सूची, फ़िल्टर, नौकरी का विवरण और आवेदन फ़ॉर्म"
+    },
+    {
+      "id": "event-booking-en",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "Make an event ticket booking app: events list, seat selection, booking summary and my-bookings page."
+    },
+    {
+      "id": "inventory-hinglish",
+      "lang": "hinglish",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "godown inventory app banao - products, stock in/out, low stock alert, reports"
+    },
+    {
+      "id": "ai-chat-hinglish",
+      "lang": "hinglish",
+      "complexity": "complex",
+      "smoke": true,
+      "prompt": "ek AI chatbot app banao jo meri padhai me help kare - chat history aur subject choose karne ka option"
+    },
+    {
+      "id": "music-player-en",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "Build a music player UI with a playlist, play/pause/next/previous, a seek bar and a volume slider using sample tracks."
+    },
+    {
+      "id": "matrimony-hinglish",
+      "lang": "hinglish",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "matrimony profile app banao - profile create karo, search filters, shortlist (sab data clearly sample)"
+    },
+    {
+      "id": "expense-split-en",
+      "lang": "english",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "Create a Splitwise-like group expense splitter: groups, add expenses, who owes whom."
+    },
+    {
+      "id": "panchang-hi",
+      "lang": "hindi",
+      "complexity": "medium",
+      "smoke": false,
+      "prompt": "आज की तारीख, वार और त्योहारों की सूची दिखाने वाला कैलेंडर ऐप बनाओ (त्योहार डेटा उदाहरण के रूप में चिह्नित हो)"
+    },
+    {
+      "id": "dashboard-admin-en",
+      "lang": "english",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "Build an admin analytics dashboard with KPI cards, a line chart, a bar chart and a sortable, paginated table."
+    },
+    {
+      "id": "edu-courses-hinglish",
+      "lang": "hinglish",
+      "complexity": "complex",
+      "smoke": false,
+      "prompt": "online courses app banao - course list, course detail with lessons, progress track karo"
+    }
+  ]
+}

@@ -61,6 +61,14 @@ When your deletion request is completed, we remove:
 - your **notifications and devices** — the mentions sent to you inside NavBharatAI, and the push-notification address of each phone you signed in on;
 - your **wallet, token balance and usage records**;
 - any **API keys and credentials** you stored in the secrets vault;
+- your **NavBharatAI API keys** — every developer key you made at Home → Other AI → Developer Tools, and
+  the daily usage counted against each one. A key that was still in use stops working the moment it is
+  deleted, and the same key can never be used again;
+- your **chat bots** — every bot you connected, together with the token and app secret NavBharatAI held
+  for it, so the bot stops answering. (This removes NavBharatAI's copy of those credentials. The bot's
+  own account on the messaging platform stays yours, and you can delete it there.)
+- the **addresses NavBharatAI posted your build events to** — the webhook URLs you added, so nothing is
+  ever sent to them again;
 - your **App Lock PIN** — the 4-digit PIN that locks parts of NavBharatAI, including that vault;
 - your **saved connected services** — the MCP services you saved on your account to reuse across apps
   (this removes NavBharatAI's saved copy of the address and key; it does **not** touch anything in the

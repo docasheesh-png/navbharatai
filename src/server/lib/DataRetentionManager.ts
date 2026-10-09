@@ -122,6 +122,42 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'supabase_connections', key: 'docId' },
   /** What each owner was last told about a sleeping database (supabasePauseWatch.ts) — `userId` field. */
   { collection: 'supabase_pause_notices', key: { field: 'userId' } },
+
+  /**
+   * ── 🔴 CREDENTIALS AND SECRETS, which must die with the account (Q-708, 2026-10-08) ──────────────
+   *
+   * Four stores held something the account could still be USED with after it was deleted. `supabase_connections`
+   * above was the first of this shape to be caught (2026-10-06, "encrypted tokens that could still act inside
+   * the person's own Supabase account"); these are its siblings, and they were never hunted — found while
+   * widening the collection census for Q-701, because every one of them is named by a PRIVATE constant or an
+   * inline literal that `tests/everyCollectionIsClassified.test.ts` cannot see.
+   *
+   * `DELETE /api/profile` removes the Firebase Auth record, so the person can no longer sign in. It did not
+   * remove any of these, so the credential outlived the identity it belonged to:
+   *
+   *  · `user_secrets`  — the user's own saved third-party keys and database passwords, ENCRYPTED but intact.
+   *    Rows are only ever SOFT-deleted elsewhere ("the vault has never destroyed a user's stored key",
+   *    supabaseProvisionFlow.ts), so a retired row keeps its ciphertext too — a `user_id` query takes both.
+   *    Verified: every write sets `user_id` (routes/secrets.ts:128, supabaseProvisionFlow.ts:105) and every
+   *    read queries `where('user_id', '==', userId)` (secrets.ts:227, routes/secrets.ts:62/101/217/323).
+   *  · `api_keys`      — a live NavBharatAI API key. `findByHash` (ApiKeyStore.ts:112) resolves ANY
+   *    non-revoked key to its owner and never asks whether that owner still exists, so a key issued before
+   *    deletion kept authenticating — and the free daily images on that path are drawn at OUR cost.
+   *    Deleting the row IS the fix: `findByHash` then finds nothing.
+   *    Verified: `userId` field, queried at ApiKeyStore.ts:77.
+   *  · `bots`          — a chat bot's `token` AND `appSecret`, which are credentials for a third-party
+   *    messaging platform. Verified: `ownerUid` field, queried at BotStore.ts:178.
+   *  · `webhooks`      — the outbound URLs NavBharatAI posts the person's build events to. Verified: the
+   *    doc id IS the uid (WebhookManager.ts:63 read, :90 and :106 writes).
+   *
+   * ⚠️ `bot_sessions` is NOT here and cannot be: its doc id is `${botId}_${chatId}` (BotStore.ts:283), which
+   * is reachable from the bot, not from the uid. It holds no credential — per-chat conversation state — and it
+   * is recorded as an open sibling in `BUILD_REPORT_QUEUE.md`, not silently dropped.
+   */
+  { collection: 'user_secrets', key: { field: 'user_id' } },
+  { collection: 'api_keys', key: { field: 'userId' } },
+  { collection: 'bots', key: { field: 'ownerUid' } },
+  { collection: 'webhooks', key: 'docId' },
   /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *

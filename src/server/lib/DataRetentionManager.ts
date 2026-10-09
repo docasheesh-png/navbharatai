@@ -21,8 +21,16 @@ import { getServerDb } from './serverDb';
 export interface RetentionDocRef {
   get(): Promise<{ exists: boolean }>;
   delete(): Promise<unknown>;
-  /** A subcollection under this document (USER_SCOPED_SUBCOLLECTIONS). Optional so older fakes still fit. */
-  collection?(name: string): { limit(n: number): { get(): Promise<{ docs: Array<{ ref: { delete(): Promise<unknown> } }> }> } };
+  /**
+   * A subcollection under this document (USER_SCOPED_SUBCOLLECTIONS). Optional so older fakes still fit.
+   *
+   * `doc(id)` was added for FOREIGN_PARENT_USER_DOCS (Q-682), which addresses ONE document under each
+   * parent — `teams/{someoneElse}/members/{uid}` — rather than paging the whole subcollection.
+   */
+  collection?(name: string): {
+    limit(n: number): { get(): Promise<{ docs: Array<{ ref: { delete(): Promise<unknown> } }> }> };
+    doc?(id: string): { get(): Promise<{ exists: boolean }>; delete(): Promise<unknown> };
+  };
 }
 /** A document a query returned. `collection` is optional so an older fake without it still fits. */
 export interface RetentionQueryDoc {
@@ -44,6 +52,14 @@ export interface RetentionQuery {
 export interface RetentionCollection {
   doc(id: string): RetentionDocRef;
   where(field: string, op: '==' | '<', value: unknown): RetentionQuery;
+  /**
+   * Every document REFERENCE in this collection (Q-682, FOREIGN_PARENT_USER_DOCS).
+   *
+   * References only — it reads no document bodies, which is the same economy
+   * `adminSubcollectionSource.parentIds` uses. Optional so an older fake without it still fits, but an
+   * entry that NEEDS it and does not get it throws rather than reporting a deletion that did not happen.
+   */
+  listDocuments?(): Promise<RetentionDocRef[]>;
 }
 export interface RetentionFirestore {
   collection(name: string): RetentionCollection;
@@ -313,6 +329,24 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    */
   { collection: 'analytics_events', key: { field: 'userId' } },
   /**
+   * The team this person OWNS, with its member list and its shared library (Q-682).
+   *
+   * 🔴 `teams` WAS CLASSIFIED `platform` ON A HALF-TRUTH: "a team outlives any one member". A team does
+   * outlive a MEMBER — but `teamId === owner uid`, stated in `TeamStore.ts:14` and enforced by
+   * `requireTeamManager` (`uid === teamId` is the owner short-circuit). So the document id IS this
+   * person's uid, and the record is theirs, not the platform's. Nothing in the repository ever deletes
+   * a team, so an owner's team, its `members` list — which holds OTHER PEOPLE's uid and EMAIL — and its
+   * `library` all survived their account for ever.
+   *
+   * 🔒 WHY THE TEAM GOES WITH ITS OWNER, rather than being left for the remaining members. Ownership is
+   * the doc id, so once the account is gone NO ONE can own it: `canManageTeam` admits the owner by
+   * `requesterUid === teamId`, and an active member can manage only what an owner still anchors. The
+   * alternative is an unmanageable team holding third parties' email addresses for ever, which is worse
+   * for those third parties than deleting it. That is Q-682's recommendation (3) — "keep while the team
+   * exists; erase with the team" — with the fact that the team cannot outlive its owner filled in.
+   */
+  { collection: 'teams', key: 'docId', subs: ['members', 'library'] },
+  /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *
    * It looks like it belongs here — it carries a uid — and adding it would feel like completing the
@@ -337,6 +371,30 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
  *  - users/{uid}/notifications  — MentionNotificationStore.ts:88
  *  - promptAudits/{uid}/entries — PromptAuditStore.ts (one doc per build)
  */
+/**
+ * MY OWN DOCUMENT, UNDER SOMEBODY ELSE'S PARENT — the fifth reachability shape (Q-682, 2026-10-09).
+ *
+ * 🔴 WHAT NO REGISTRY COULD SAY. `USER_SCOPED_SUBCOLLECTIONS` covers `parent/{uid}/sub` — a parent the
+ * person owns. `teams/{ownerUid}/members/{uid}` is the mirror image: the document is MINE (its id is my
+ * uid, and it holds my email), and the parent is SOMEBODY ELSE'S. No key the eraser holds points at that
+ * parent, so there was nothing to query and nothing to express — and a departing member's uid and email
+ * stayed in every team they had ever joined. `removeMember` does not help either: it writes
+ * `status: 'removed'` and leaves the record, deliberately, so the team can show who left.
+ *
+ * ⚠️ IT IS A SCAN, AND THAT IS THE COST OF THE SHAPE. Every parent document is listed and one `.doc(uid)`
+ * delete is attempted under each — there is no index that answers "which teams is this person in"
+ * without a collection-group query, which this project does not deploy indexes for. It is bounded by
+ * `MAX_ERASE_PAGES`, runs once per account deletion, and reads references only.
+ */
+export const FOREIGN_PARENT_USER_DOCS: readonly { parent: string; sub: string; why: string }[] = [
+  {
+    parent: 'teams',
+    sub: 'members',
+    why: "a member record's id IS the member's uid and it holds their email (TeamStore.ts:207); the "
+      + 'parent team belongs to someone else, so no key this eraser holds can find it',
+  },
+];
+
 export const USER_SCOPED_SUBCOLLECTIONS: readonly { parent: string; sub: string }[] = [
   { parent: 'users', sub: 'deviceTokens' },
   { parent: 'users', sub: 'notifications' },
@@ -908,8 +966,34 @@ export async function deleteUserData(db: RetentionFirestore, uid: string): Promi
     try {
       if (entry.key === 'docId') {
         const ref = db.collection(entry.collection).doc(uid);
+        /**
+         * 🔴 CHILDREN FIRST HERE TOO (Q-682). This branch used to delete the document and nothing else,
+         * so a `docId` entry declaring `subs` would have had them SILENTLY IGNORED — the registry would
+         * say the children were handled and no code would read it. It was latent only because every
+         * entry with `subs` happened to be a `{field}` one; `teams` is the first `docId` entry that owns
+         * children, and `teams/{uid}/members` holds other people's email addresses.
+         *
+         * That makes this the THIRD place in this repository where "delete the parent, forget the
+         * children" had to be fixed — `deleteUserData`'s field branch (Q-701), `purgeExpired` (Q-767),
+         * and now this. The sweep in `tests/noParentIsErasedWithoutItsChildren.test.ts` is why there is
+         * not a fourth: it reads the writes rather than the registries' good intentions.
+         *
+         * The subcollections are swept whether or not the parent exists, because Firestore keeps a
+         * subcollection under a missing parent perfectly happily — which is exactly how Q-134 lost data.
+         */
+        for (const sub of entry.subs ?? []) {
+          if (typeof ref.collection !== 'function') {
+            throw new Error(`${entry.collection}: this database handle cannot reach the '${sub}' subcollection`);
+          }
+          for (let page = 0; page < MAX_ERASE_PAGES; page++) {
+            const kids = await ref.collection(sub).limit(ERASE_PAGE).get();
+            if (kids.docs.length === 0) break;
+            for (const kd of kids.docs) { await kd.ref.delete(); deleted++; }
+            if (kids.docs.length < ERASE_PAGE) break;
+          }
+        }
         const snap = await ref.get();
-        if (snap.exists) { await ref.delete(); deleted = 1; }
+        if (snap.exists) { await ref.delete(); deleted++; }
       } else {
         const q = await db.collection(entry.collection).where(entry.key.field, '==', uid).get();
         for (const d of q.docs) {
@@ -954,6 +1038,39 @@ export async function deleteUserData(db: RetentionFirestore, uid: string): Promi
       collections.push({ collection: name, deleted, error: e instanceof Error ? e.message : String(e) });
     }
   }
+  /**
+   * My own document under every parent of a collection (Q-682 — see FOREIGN_PARENT_USER_DOCS).
+   *
+   * A SCAN, deliberately: there is no index that answers "which teams is this person in" without a
+   * collection-group query, and this project deploys none. References only, bounded per run, and the
+   * cost is paid once when an account is deleted.
+   */
+  for (const entry of FOREIGN_PARENT_USER_DOCS) {
+    const name = `${entry.parent}/*/${entry.sub}/{uid}`;
+    let deleted = 0;
+    try {
+      const parents = db.collection(entry.parent);
+      if (typeof parents.listDocuments !== 'function') {
+        throw new Error(`${entry.parent}: this database handle cannot list parent documents`);
+      }
+      for (const parent of await parents.listDocuments()) {
+        if (typeof parent.collection !== 'function') {
+          throw new Error(`${entry.parent}: this database handle cannot reach the '${entry.sub}' subcollection`);
+        }
+        const kids = parent.collection(entry.sub);
+        if (typeof kids.doc !== 'function') {
+          throw new Error(`${entry.parent}: this database handle cannot address one document of '${entry.sub}'`);
+        }
+        const mine = kids.doc(uid);
+        const snap = await mine.get();
+        if (snap.exists) { await mine.delete(); deleted++; }
+      }
+      collections.push({ collection: name, deleted });
+    } catch (e) {
+      collections.push({ collection: name, deleted, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
   return { uid, collections, totalDeleted: collections.reduce((s, r) => s + r.deleted, 0) };
 }
 

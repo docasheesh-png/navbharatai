@@ -92819,3 +92819,40 @@ ways — build the UI where the backend was already real and documented, delete 
 been superseded and the leftover pointed at a placeholder endpoint. **So the remaining 21 small-file
 locals should be read as possible features, not as lint.** The count is the symptom; the call sites
 are the evidence.
+
+## 2026-10-09 — Q-763 and Q-780 closed: the last two rows whose owner PRs had already merged
+
+Both rows read `IN PROGRESS` on `main` with their owner PRs merged — Q-763 (#3604, the synced
+workspace eraser) and Q-780 (#3608, the three unauthenticated build-history routes). Under the
+sixth absolute rule a merged owner means the row is ✅ and must leave the open table with its ID
+appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit. Four rows were caught in
+that same false state today (Q-699, Q-621, then these two), which is worth noticing: **the gap is
+structural, not careless.** A session closes its own row in the turn after its merge, and if that
+turn never comes — the session ends, or is working on something else — the row simply stays wrong,
+and only a later audit finds it.
+
+**Neither row's text was taken on trust; both were read in full on a fresh `main` first.** Each
+self-reports a complete fix with reversion-proof, and the two are good examples of why that check
+matters rather than a formality:
+- **Q-763** fixed it in its own module (`syncWorkspaceErase.ts`) rather than the retention registry,
+  deleting chunks first and the manifest last and sweeping to the format's ceiling instead of
+  trusting `chunkCount`. It also records a second defect found on the way: `WorkspaceStore.ts`'s
+  header documented the layout as `{userId}_chunk_{i}` while every real document has always been
+  `{userId}__c{i}` — the only written description disagreed with the only implementation, and an
+  eraser trusting the comment would have built ids matching nothing and reported success.
+- **Q-780** required ownership on all three routes, and its row names the load-bearing part
+  honestly: `ownedByVerifiedUid` alone proves nothing there, because the workspace id is built by
+  prefixing the caller's own uid, so an existence probe is what actually closes it.
+
+**These were another session's rows, and that needed care rather than a rule.** Closing another
+session's row went wrong earlier today: Q-699 was marked ✅ on the reasoning that no device could
+check it, and the session that WROTE that fix knew it was unprovable without one — #3600 corrected
+it and this session closed its own #3598. The difference here is that nothing is being claimed.
+That session is no longer in the project, both PRs are merged, each row carries its own proof, and
+asheesh's instruction was explicit about scope — *"apka kaam ya kisi aur agent ka kaam"*. Moving a
+row whose owner PR is merged is bookkeeping the rule already decides; asserting that somebody
+else's fix works is not, and still is not.
+
+**Queue: 80 rows, and nothing is left in a self-reported-false state** — 8 OPEN (Q-600, Q-381,
+Q-706, Q-761, Q-762, Q-764, Q-765, Q-767), the rest 🟡 BLOCKED on the admin, money, a vendor or a
+real device. No row now reads `IN PROGRESS` against a merged PR.

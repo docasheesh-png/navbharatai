@@ -50,6 +50,12 @@ interface PlatformOption {
   defaultBuildDir: string;
 }
 
+// The three steps every real deploy path walks, in order. `setActiveStep` is called with 1 on
+// validate/prepare, 2 on build/package and 3 on done by each of them (GitHub push, static ZIP
+// export, the managed Render deploy, and the config-injection path), so these labels describe
+// what the code already does rather than a new concept.
+const DEPLOY_STEP_LABELS = ['Validate', 'Build', 'Done'] as const;
+
 const DEPLOY_PLATFORMS: PlatformOption[] = [
   { id: 'github', name: 'GitHub Sync & Pages', icon: Github, color: 'text-ink', bgHover: 'hover:bg-raised', desc: 'Push commits directly to public/private remote repos.', defaultBuildDir: 'dist' },
   { id: 'firebase', name: 'Firebase Hosting', icon: Cloud, color: 'text-warn', bgHover: 'hover:bg-amber-500/10', desc: 'Deploy high-performance static sites & Cloud Functions.', defaultBuildDir: 'public' },
@@ -811,13 +817,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({
         return;
     }
   };
-
-  const changesCount = Object.keys(files).length;
-  const changes = Object.keys(files).map(f => ({
-    file: f,
-    status: 'M',
-    color: 'text-warn'
-  }));
 
   const filteredPlatforms = DEPLOY_PLATFORMS.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -1619,8 +1618,48 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     {deployStatus === 'deployed' && <span className="text-success font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Ready</span>}
                     {deployStatus === 'error' && <span className="text-danger font-bold">Error</span>}
                     {deployStatus === 'unavailable' && <span className="text-warn font-bold flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Not available yet</span>}
+                    {(deployStatus === 'validating' || deployStatus === 'building') && (
+                      <span className="font-mono text-muted tabular-nums">{currentBuildTime.toFixed(1)}s</span>
+                    )}
                   </div>
                 </div>
+
+                {/* Which step this deploy is on, and for how long (Q-600, 2026-10-09).
+                    `activeStep` and `currentBuildTime` were both already maintained by the real
+                    deploy paths — step 1 on validate/prepare, 2 on build/package, 3 on done, and a
+                    100 ms ticker for the elapsed seconds — and NEITHER was rendered anywhere. So a
+                    user watching a deploy saw one pulsing word while the component knew exactly
+                    which step it was on and how long it had taken. The ticker's state updates were
+                    re-rendering this panel ten times a second to show nothing. */}
+                {deployStatus !== 'idle' && (
+                  <div className="flex items-center gap-1.5 shrink-0" aria-label={`Deploy step ${activeStep} of 3`}>
+                    {DEPLOY_STEP_LABELS.map((label, i) => {
+                      const step = i + 1;
+                      const done = deployStatus === 'deployed' ? true : step < activeStep;
+                      const current = deployStatus !== 'deployed' && step === activeStep;
+                      const failed = (deployStatus === 'error' || deployStatus === 'unavailable') && step === activeStep;
+                      return (
+                        <div key={label} className="flex items-center gap-1.5">
+                          <span
+                            className={cn(
+                              'flex items-center gap-1 text-[8px] font-bold uppercase tracking-wider',
+                              failed ? 'text-danger' : done ? 'text-success' : current ? 'text-warn' : 'text-faint',
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                'w-1.5 h-1.5 rounded-full',
+                                failed ? 'bg-red-500' : done ? 'bg-emerald-500' : current ? 'bg-amber-500 animate-pulse' : 'bg-raised',
+                              )}
+                            />
+                            {label}
+                          </span>
+                          {step < DEPLOY_STEP_LABELS.length && <span className="w-2 h-px bg-raised" />}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Console Log Screen */}
                 <div className="flex-1 overflow-y-auto font-mono text-[9.5px] text-[#4af626] space-y-1 select-text scrollbar-thin scrollbar-thumb-white/5 pr-1">

@@ -13,6 +13,7 @@
 // Side-effects (model call, file writes, preview) are INJECTED so the manifest/parse/prompt logic is
 // fully unit-testable without a sandbox.
 
+import { MANIFEST_V2_RULES, cleanPurpose, fastLaneDepsChars, fastLaneMaxFiles, fastLaneV2Enabled, fullDepsContext, parseManifestContract, topoWaves, validateManifestContract, type ValidatedContract } from './reliability/fastLaneV2';
 import { dropShadowingEntries } from './entryShadow';
 import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE } from './noEvalRule';
 import { posix } from 'node:path';
@@ -441,6 +442,8 @@ export function manifestSystemPrompt(framework: string, scaffoldPaths?: readonly
     // The persuasion half of the boilerplate fix; SimpleBuilder drops these from the parsed plan
     // regardless, so a model that ignores this line still cannot overwrite them.
     ...(provided.length ? [`- These files are PROVIDED and already correct — do NOT list them, do not rewrite them: ${provided.join(', ')}.`] : []),
+    // P6 (AGENTV3_FAST_LANE_V2, default OFF) — each line also states the file's export/import contract.
+    ...(fastLaneV2Enabled() ? [MANIFEST_V2_RULES] : []),
   ].join('\n');
 }
 
@@ -1845,10 +1848,26 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       if (injectedEntry) {
         deps.log?.(`The plan did not include the app's root component — adding ${injectedEntry} so the parts are actually shown.`);
       }
+      // P6 (AGENTV3_FAST_LANE_V2) — read the planner's export/import contract off the manifest lines.
+      let v2Contract: ValidatedContract | null = null;
+      if (fastLaneV2Enabled()) {
+        const raw = parseManifestContract(manifestText);
+        for (const m of manifest) {
+          const c = raw.get(m.path);
+          m.purpose = cleanPurpose(m.purpose);
+          if (c?.exports.length) m.purpose = `${m.purpose} (must export: ${c.exports.join(', ')})`;
+        }
+        v2Contract = validateManifestContract(manifest.map((m) => m.path), raw);
+        if (v2Contract.dropped.length) deps.log?.(`Ignoring ${v2Contract.dropped.length} planned import(s) of files not in the plan: ${v2Contract.dropped.slice(0, 6).join('; ')}.`);
+      }
       plannedFiles = manifest.length;
       plannedPaths = manifest.map((f) => f.path);
       try { deps.onPlanned?.(manifest.length); } catch { /* an ETA hook must never affect a build */ }
       if (manifest.length < minFiles) throw new Error('manifest_too_small');
+      // P6 — a plan this large is past what isolated per-file calls do well; the agent loop builds it.
+      if (v2Contract && manifest.length > fastLaneMaxFiles()) {
+        throw new Error(`manifest_too_large: ${manifest.length} files planned (fast lane v2 limit ${fastLaneMaxFiles()}) — handing to the full builder`);
+      }
       // LENS A — design the SHARED CONTRACT once, up front, so the isolated per-file calls agree on
       // names/shapes by construction (best-effort + bounded: a failure/timeout here just leaves `contract`
       // empty, so a storming contract call can't eat the budget either).
@@ -2028,7 +2047,10 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             ? ''
             : isStylesheetPath(spec.path) && !/\.module\./i.test(spec.path) && stylesheetClassContext(produced, deps.framework)
               ? stylesheetClassContext(produced, deps.framework)
-              : (signatureContextEnabled() ? signatureDependencyContext(produced) : dependencyContext(produced));
+              : v2Contract
+                // P6 — the FULL code of what this file imports (transitively, capped), signatures for the rest.
+                ? fullDepsContext(spec.path, produced, v2Contract.imports, fastLaneDepsChars(), (rest) => signatureDependencyContext(rest))
+                : (signatureContextEnabled() ? signatureDependencyContext(produced) : dependencyContext(produced));
           // 🔴 THE SAME INVERSION THE PLAN CALL ALREADY CLOSED (line ~697), MISSED HERE — this is the
           // highest-volume call site in the whole lane and the one a real report caught running away
           // (build 782da7b7, 2026-09-16): a file's OWN truncation-continuation loop (fastGenerate's
@@ -2094,9 +2116,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const generatedCount = () => written.length - (contractFile ? 1 : 0) - (aiClient ? 1 : 0);
       const generateStartedAt = Date.now();
       clock.generateStartedAt = generateStartedAt; // read by phasesNow while this loop is still running
-      for (let ti = 0; ti < tiers.length; ti++) {
-        const tier = tiers[ti];
-        const specs = depOrder ? manifest.filter((s) => generationTier(s.path) === tier) : manifest;
+      // P6 — topological waves from the planner's imports (stylesheets last); off ⇒ the path-regex tiers.
+      const v2Waves = v2Contract
+        ? topoWaves(manifest.map((m) => m.path), v2Contract.imports, { last: (p) => isStylesheetPath(p) && !/\.module\./i.test(p), fallbackTier: generationTier, declared: v2Contract.declared })
+        : null;
+      const stages: number[] = v2Waves ? v2Waves.map((_, i) => i) : tiers;
+      for (let ti = 0; ti < stages.length; ti++) {
+        const tier = stages[ti];
+        const specs = v2Waves
+          ? manifest.filter((s) => v2Waves[ti].includes(s.path))
+          : depOrder ? manifest.filter((s) => generationTier(s.path) === tier) : manifest;
         if (specs.length === 0) continue;
         const producedSoFar = [...written]; // real source of all earlier tiers (snapshot for this tier)
         const tierStartedAt = Date.now();
@@ -2111,7 +2140,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // produce 4 of 14 files — work the full builder then had to continue anyway. Bailing the moment the
         // arithmetic says we cannot finish hands off sooner and without a tier being killed mid-flight;
         // the catch below salvages exactly the same finished files. Never fires without a real measurement.
-        const tiersRemaining = tiers.length - 1 - ti;
+        const tiersRemaining = stages.length - 1 - ti;
         const progress = { tiersRemaining, lastTierMs: Date.now() - tierStartedAt, elapsedMs: Date.now() - laneStartedAt, overallMs };
         if (!canFinishRemainingTiers(progress)) {
           // 🔴 "ENOUGH FILES" IS NOT "AN APP" (autopsy 3ab93068). The shell tier — the root component

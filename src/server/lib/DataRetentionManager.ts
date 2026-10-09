@@ -257,6 +257,35 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    * registry reaches it exactly, which is where a domain-keyed record of one person's domain belongs.
    */
   { collection: 'site_uptime', key: { field: 'userId' } },
+
+  /**
+   * ── THE COMPOSITE-ID THREE (Q-762, Q-765 — 2026-10-09) ───────────────────────────────────────────
+   *
+   * These were `blocked` in the census, not forgotten: each has a document id that NOTHING could
+   * search by, so registering them was impossible until the writers stored a field.
+   *
+   *  · `adrDecisions` / `techDebt` — doc id `${userId}__${projectId}`, and the body carried no uid at
+   *    all. Both writers now store `userId` (`adrMemory.ts`, `TechnicalDebtTracker.ts`). A doc-id
+   *    prefix range was considered and REFUSED: `workspaceDataErase.ts` documents why — a uid
+   *    containing the separator makes `a__b` ambiguous with `a` + `b__…`, and getting that wrong
+   *    deletes a different person's data.
+   *  · `app_ai_apps` — doc id is the APP id, so the workspace eraser's `agentv3-{uid}-` range can
+   *    never reach it; the body has always carried `userId` (`AppAiRegistryStore.ts:91`).
+   *
+   * ⚠️ WHAT THESE ENTRIES DO NOT REACH, stated rather than implied. A row written BEFORE this change
+   * has no `userId`, so this query does not find it. It is not a permanent hole for a live project:
+   * both writers rewrite the SAME document on the next build (`adrDecisions` with `merge: false`,
+   * `techDebt` with `merge: true`), so an active project's row gains the field the next time it is
+   * touched. Only an abandoned project's row stays unreachable, and that residue is recorded in
+   * `PROGRESS.md` rather than called fixed.
+   *
+   * And `app_ai_apps` mints `userId: userId || ''` (`DeploymentStore.ts:626`), so a publish with no
+   * signed-in owner stores an empty string. Those rows hold no person either: such an app's
+   * workspace is `agentv3-anon-…`, the shared anon bucket `deriveWorkspaceId` falls back to.
+   */
+  { collection: 'adrDecisions', key: { field: 'userId' } },
+  { collection: 'techDebt', key: { field: 'userId' } },
+  { collection: 'app_ai_apps', key: { field: 'userId' } },
   /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *

@@ -92650,3 +92650,64 @@ also clean. GitHub's mergeability cache had gone stale after three PRs landed in
 The honest reading: a 405 from the merge endpoint is not proof of a conflict — check it against a
 local three-way merge before believing it, and a `main` merge plus a push is what makes GitHub
 recompute.
+
+---
+
+## 2026-10-09 — Q-762 and Q-765: a document id nothing could search by
+
+Three stores were `blocked` in the census — **not forgotten, and not quietly mislabelled.** Each had a
+document id no query could reach:
+
+- `adrDecisions` and `techDebt` key on `${userId}__${projectId}`, and the body carried **no uid at
+  all**. So the person's own architecture decisions and the tech-debt list the builder kept for them
+  outlived their account with no way to find them.
+- `app_ai_apps` keys on the **app** id, so the workspace eraser's `agentv3-{uid}-` range can never
+  reach it.
+
+### The fix is to store the field, not to loosen the rule
+
+Both writers now persist `userId` — `adrMemory.ts` (`tx.set(ref, { userId, records, updatedAt },
+{ merge: false })`) and `TechnicalDebtTracker.ts` (`setDoc(ref, { userId, items, updatedAt },
+{ merge: true })`) — and all three collections are registered as `{ field: 'userId' }`.
+`app_ai_apps` needed no writer change: it has always carried the field (`AppAiRegistryStore.ts:91`).
+
+🔒 **The doc-id prefix range stays refused, and that is the whole reason this took a writer change
+rather than one line of registry.** `workspaceDataErase.ts` documents the ambiguity in its own words:
+a uid that contains the separator makes `a__b` ambiguous with `a` + `b__…`. A compliance gap is
+recoverable; deleting a different person's data is not. Pinned by a test that fails if `startAt(`/
+`endAt(` ever appears in `DataRetentionManager.ts`.
+
+### 🟡 The residue is asserted, not claimed away
+
+A row written **before** this change has no `userId` and is **not** reached — and there is a test that
+proves exactly that, rather than a comment hoping nobody checks. It would have been easy to write
+"fixed" here; the honest claim is narrower.
+
+It also self-heals for a **live** project: both writers rewrite the same document on the next build
+(`merge: false` replaces it, `merge: true` merges into it), so an active project's row gains the field
+the next time that project is touched. Only an abandoned project's row stays unreachable. That claim is
+pinned too — the test asserts the merge modes those writers use, so "it self-heals" cannot quietly stop
+being true.
+
+And `app_ai_apps` mints `userId: userId || ''` (`DeploymentStore.ts:626`), so a publish with no
+signed-in owner stores an empty string and is not reached. Those rows hold no person either: such an
+app's workspace is `agentv3-anon-…`, the shared anon bucket `deriveWorkspaceId` falls back to. Stated
+because "every row is covered" would have been false.
+
+### The page had to grow again, and the guard said so first
+
+`tests/accountDeletionPage.test.ts` failed the moment the three became `user`-kind — by design, because
+Play requires that page to say what is deleted. It now names *"the engineering notes the builder kept
+for you — the design decisions it recorded for each project and the list of rough edges it was tracking
+in your code"* and *"the AI identity of each app you published"*.
+
+### Verification
+
+`tests/theCompositeIdStoresCarryTheirOwner.test.ts` — 6 tests, including the two-user cascade and the
+residue. One of them **reads the writers' source** rather than trusting the registry: an entry that
+queries a field no document has would report a confident `deleted: 0` for ever, which is the failure
+this class keeps producing.
+
+**Reversion-proven three ways:** either writer's `userId` removed → the reads-the-source test and the
+self-heal test fail · the three registry entries removed → the registry test and the two-user cascade
+fail.

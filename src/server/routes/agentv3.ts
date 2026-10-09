@@ -372,7 +372,8 @@ import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '..
 // The sandbox's workspace root, from the module CLAUDE.md names as this class's one home (the
 // `safeRelPath` centralisation). Five files carry a private copy of this string; the probe takes the
 // shared one so it can never search a root the actuator is not using.
-import { SANDBOX_WORKSPACE_ROOT, isSecretEnvPath } from '../lib/workspacePath';
+import { SANDBOX_WORKSPACE_ROOT } from '../lib/workspacePath';
+import { isSecretEnvPath } from '../lib/workspacePath';
 import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';

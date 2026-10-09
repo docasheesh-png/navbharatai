@@ -92426,6 +92426,52 @@ Gates on the merged states: #3593 **35,821 passed**, #3594 **35,827 passed**, #3
 plus `tsc` ×2, `noUnusedImports`, `native:guard`, `build`, `test:bundle`, `boot:check` and
 `deps:server-gate` on each.
 
+## 2026-10-09 — Q-600 batch one: a finished feature no screen could reach (Q-770, #3607)
+
+**What the sweep was for.** Q-600 is `tsc --noUnusedLocals`' backlog: 95 client locals in 19 files that
+nothing reads, ratcheted in CI by `scripts/noUnusedImports.mjs` against `scripts/unusedLocalsBaseline.json`
+so it can only shrink. Its own row warned the class is "state or a handler nothing reads" — the kind that
+hid a `saveError` message until #3531. This batch took the largest non-App file: `LiveCollaboration.tsx`, 9.
+
+**What was actually there — recorded as Q-770.** All nine were ONE feature. P-DESIGN.7's shared code editor
+and line-anchored comments were complete and real: the Firestore `content/shared` doc with its debounced
+last-write-wins sync, the throttled presence/caret writes, the `comments` subcollection with its
+`onSnapshot`, `handleCodeChange` / `handleCaret` / `addComment` / `resolveComment` / `jumpToLine` /
+`relativeTime`, and the pure, separately unit-tested helpers in `src/lib/collabAnnotations.ts`. The only
+missing piece was the JSX: the `RoomTab` union was `'free' | 'pro' | 'professional' | 'team'`, with no
+`'code'`, so nothing rendered any of it. `git log -S"roomTab === 'code'"` across all branches returns
+nothing — the tab was never built, not removed.
+
+Meanwhile `AppKnowledgeBase.ts`'s `live_collaboration` entry — the single source of truth every AI in
+NavBharatAI reads to answer "where is X?" — told users: *"the Code tab for the shared editor + line
+comments"*, and *"Use the AI tab"*. Neither tab existed. So the app was confidently directing users to a
+screen that was not there, and the `comments` listener was paying for Firestore reads nobody could see.
+
+**Why it was built rather than deleted.** The second absolute rule allows exactly two states, and the
+backend half was already in state (a). Deleting a complete, tested, Firestore-wired subsystem to satisfy a
+lint — and then correcting the knowledge base downward — would have removed a real capability to tidy a
+count. Building the ~80 lines of JSX puts a documented feature into the product instead.
+
+**Shipped:** a Code tab (shared editor with the caret line and character count, everyone else's cursor
+lines beneath it, a comments pane that pins to the caret's line with jump-to-line and resolve), the
+knowledge-base entry corrected on all three counts (the tab list now names Free / Pro v5 / Professional /
+Code / Team, the Code tab's behaviour is described, the non-existent "AI tab" is gone) with new keywords,
+and the dead `bootedMsg` state removed — it held the same string as `errorMsg`, which is what the idle
+screen actually renders, so nothing was hidden by it. `createRoom` and `joinRoom` now clear `errorMsg`
+where they used to clear `bootedMsg`, which is a real (small) fix: a stale error no longer survives the
+next attempt.
+
+**Locked at the class, not the instance.** `tests/aRoomTabTheKnowledgeBaseNamesExists.test.ts` asserts
+every `RoomTab` member has a header button AND a render branch, that no branch renders an undeclared tab,
+that every shared-editor handler is referenced from the JSX, and that every rendered tab label appears in
+the knowledge-base entry (with the stale "the AI tab" phrasing asserted gone). Reversion-proven in both
+directions: removing the Code button fails with *"RoomTab declares 'code' but no header button lets a user
+tap it"*; restoring the old `howToUse` fails on the missing labels and on "the AI tab".
+
+**Baseline: 95 → 86**, and `LiveCollaboration.tsx` is out of `unusedLocalsBaseline.json` entirely.
+Q-600 stays OPEN — 86 locals in 18 files remain. The next files worth reading for this same class are
+`GitPanel.tsx` (4) and `BotBuilder.tsx` (4, where a `copyWebhook` sits beside a `showWebhookModal` that
+nothing opens).
 ---
 
 ## 2026-10-09 — Q-763: the synced workspace, and the registry entry that would have made it worse

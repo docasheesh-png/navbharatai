@@ -13,10 +13,11 @@
 // HTML to a tiny host page (`/preview-sandbox.html`) on that origin via postMessage; the host writes
 // it into its own document, so the app runs entirely in the isolated origin.
 //
-// ENV-GATED + OFF BY DEFAULT: with `VITE_PREVIEW_ORIGIN` unset (today), the preview keeps its exact
-// current same-origin srcDoc behaviour (zero change) — safe because the allowlist keeps the app to
-// trusted admins. The admin enables real isolation by pointing a subdomain at the app and setting the
-// env var. This module is the single source of truth for whether/where cross-origin preview is on.
+// ENV-GATED + OFF BY DEFAULT: with `VITE_PREVIEW_ORIGIN` unset, this returns null.
+// The caller must NOT then render untrusted HTML with allow-same-origin on the
+// app origin (UI-1). Production shows a security fallback until the owner sets
+// the preview domain (docs/ops/preview-origin.md). Local DEV may still use a
+// same-origin srcDoc so the vendored React modules load.
 
 /** Normalize a configured preview origin to a bare `scheme://host[:port]` (no trailing slash/path). */
 export function normalizePreviewOrigin(raw: string | undefined | null): string | null {
@@ -33,10 +34,10 @@ export function normalizePreviewOrigin(raw: string | undefined | null): string |
 
 /**
  * Build the cross-origin sandbox-host URL the in-browser preview iframe loads, or null when
- * cross-origin preview is not configured (→ caller keeps the same-origin srcDoc path). The host page
- * is told the platform's origin via `?parent=` so it accepts the built-HTML message ONLY from us.
- * Pure + unit-tested. Returns null if the preview origin equals the parent origin (that would defeat
- * the whole isolation — never fall back to same-origin silently).
+ * cross-origin preview is not configured. The host page is told the platform's origin via `?parent=`
+ * so it accepts the built-HTML message ONLY from us. Pure + unit-tested. Returns null if the preview
+ * origin equals the parent origin (that would defeat the whole isolation — never fall back to
+ * same-origin silently).
  */
 export function buildPreviewSandboxUrl(previewOriginRaw: string | undefined | null, parentOrigin: string): string | null {
   const origin = normalizePreviewOrigin(previewOriginRaw);

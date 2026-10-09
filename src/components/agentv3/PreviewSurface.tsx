@@ -23,6 +23,8 @@ import { shouldBootImportedProject } from './importedProjectBoot';
 import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
 import { shouldFailoverToLive, liveFailoverNotice, noLiveRescueNotice, rescueActionForPreviewError } from './previewLiveFailover';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
+import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
+import { frameUrlSharesPageOrigin, isFromOurPreviewFrame, previewPostMessageTarget } from '../../lib/previewMessages';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { type PreviewViewport, type PreviewZoom, DEVICE_DIMS, resolveZoomScale, nextZoom, zoomLabel } from './previewViewport';
 import { frameworkRunsInBrowser } from '../../lib/frameworkDetect';
@@ -1080,8 +1082,26 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
    */
   const lastHmrAtRef = useRef<number | null>(null);
   const lastActivityAtRef = useRef<number | null>(null);
+  // Declared before the message listeners. Those effects close over the refs; a
+  // const later in the function is a TS "used before declaration" error. Both
+  // useRefs stay unconditional, so hook order does not depend on a branch.
+  const liveIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const inBrowserIframeRef = useRef<HTMLIFrameElement | null>(null);
+  // Null when VITE_PREVIEW_ORIGIN is unset. Production then refuses the
+  // same-origin srcDoc (UI-1). DEV keeps it so vendored React can load locally.
+  const previewSandboxUrl = (() => {
+    try { return configuredPreviewSandboxUrl(window.location.origin); } catch { return null; }
+  })();
+  const targetFor = (kind: 'live' | 'inbrowser', frame: HTMLIFrameElement | null): string => previewPostMessageTarget({
+    kind,
+    frameSrc: frame?.src ?? null,
+    previewSandboxUrl,
+    pageOrigin: typeof window !== 'undefined' ? window.location.origin : '',
+    devSameOriginSrcDoc: import.meta.env.DEV === true && !previewSandboxUrl,
+  });
   useEffect(() => {
     const onSignal = (e: MessageEvent) => {
+      if (!isFromOurPreviewFrame(e, [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow])) return;
       const d = e.data as { __nbaiPreviewHmr?: boolean; __nbaiPreviewActivity?: boolean } | null;
       if (!d) return;
       if (d.__nbaiPreviewHmr === true) lastHmrAtRef.current = Date.now();
@@ -1102,9 +1122,9 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
    */
   const [routePath, setRoutePath] = useState('');
   const [routeDraft, setRouteDraft] = useState('');
-  const liveIframeRef = useRef<HTMLIFrameElement | null>(null);
   useEffect(() => {
     const onRoute = (e: MessageEvent) => {
+      if (!isFromOurPreviewFrame(e, [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow])) return;
       const d = e.data as { __nbaiPreviewRoute?: boolean; path?: string } | null;
       if (!d || d.__nbaiPreviewRoute !== true || typeof d.path !== 'string') return;
       setRoutePath(d.path);
@@ -1126,6 +1146,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   const [previewIsDark, setPreviewIsDark] = useState(false);
   useEffect(() => {
     const onTheme = (e: MessageEvent) => {
+      if (!isFromOurPreviewFrame(e, [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow])) return;
       const d = e.data as { __nbaiPreviewTheme?: boolean; canToggle?: boolean; isDark?: boolean } | null;
       if (!d || d.__nbaiPreviewTheme !== true) return;
       setThemeToggleAvailable(d.canToggle === true);
@@ -1145,6 +1166,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   const [picking, setPicking] = useState(false);
   useEffect(() => {
     const onPicked = (e: MessageEvent) => {
+      if (!isFromOurPreviewFrame(e, [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow])) return;
       const d = e.data as { __nbaiPreviewPicked?: boolean; element?: PickedElement } | null;
       if (!d || d.__nbaiPreviewPicked !== true) return;
       setPicking(false);
@@ -1162,16 +1184,19 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   // Nothing is handed to the app's page except the answer itself.
   useEffect(() => {
     const onAiAsk = (e: MessageEvent) => {
+      if (!isFromOurPreviewFrame(e, [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow])) return;
       const ask = readPreviewAiAsk(e.data);
       const pic = ask ? null : readPreviewAiImageAsk(e.data);
       if (!ask && !pic) return;
-      const frames = [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow];
-      if (!e.source || !frames.includes(e.source as Window)) return;
       const reply = e.source as Window;
+      const liveWin = liveIframeRef.current?.contentWindow;
+      const kind = reply === liveWin ? 'live' : 'inbrowser';
+      const frameEl = kind === 'live' ? liveIframeRef.current : inBrowserIframeRef.current;
+      const replyTarget = targetFor(kind, frameEl);
       // A picture is the same relay: the owner's login asks, the page receives only the result.
       const pending = ask ? answerPreviewAiAsk(ask, workspaceId) : answerPreviewAiImage(pic!, workspaceId);
       void pending.then((answer) => {
-        try { reply.postMessage(answer, '*'); } catch { /* the frame went away */ }
+        try { reply.postMessage(answer, replyTarget); } catch { /* the frame went away */ }
       });
     };
     window.addEventListener('message', onAiAsk);
@@ -1180,8 +1205,9 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   /** Post to whichever preview is actually on screen — they are different frames. */
   const postToPreview = useCallback((msg: Record<string, unknown>) => {
     const frame = mode === 'live' ? liveIframeRef.current : inBrowserIframeRef.current;
-    try { frame?.contentWindow?.postMessage(msg, '*'); } catch { /* best-effort */ }
-  }, [mode]);
+    const target = targetFor(mode === 'live' ? 'live' : 'inbrowser', frame);
+    try { frame?.contentWindow?.postMessage(msg, target); } catch { /* best-effort */ }
+  }, [mode, previewSandboxUrl]);
   // LEAVING LIVE MUST DISARM THE PICKER. Without this the app is left with a crosshair cursor and a
   // swallowed first click — so the next thing the user tapped would do nothing, with no way to guess
   // why. A control that can be left armed invisibly is worse than no control.
@@ -1196,6 +1222,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   const visibleConsoleEntries = filterConsoleEntries(consoleEntries, consoleFilter, consoleQuery);
   useEffect(() => {
     const onBridgeReady = (e: MessageEvent) => {
+      if (!isFromOurPreviewFrame(e, [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow])) return;
       const d = e.data as { __nbaiPreviewBridgeReady?: boolean; source?: string } | null;
       if (d && d.__nbaiPreviewBridgeReady === true && d.source === 'live') setLiveBridgeReady(true);
     };
@@ -1204,6 +1231,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   }, []);
   useEffect(() => {
     const onConsoleMsg = (e: MessageEvent) => {
+      if (!isFromOurPreviewFrame(e, [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow])) return;
       const d = e.data as { __nbaiPreviewConsole?: boolean; level?: string; text?: string } | null;
       if (!d || d.__nbaiPreviewConsole !== true || typeof d.text !== 'string') return;
       // Rules live in previewConsole.ts — the ring buffer, and the repeat-collapsing that stops a
@@ -1219,6 +1247,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   // error in the downloadable report — no separate screenshot needed. Best-effort, fire-and-forget.
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
+      if (!isFromOurPreviewFrame(e, [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow])) return;
       const d = e.data as { __nbaiPreviewError?: boolean; source?: string; message?: string } | null;
       if (!d || d.__nbaiPreviewError !== true || !workspaceId || typeof d.message !== 'string') return;
       // RESCUE FIRST, then record. Before this, a broken in-browser preview was only ever WRITTEN DOWN
@@ -1270,12 +1299,16 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           }
         })();
       }
-      fetch('/api/agentv3/preview-error', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId, userId, email, source, message: d.message.slice(0, 4000) }),
-        keepalive: true,
-      }).catch(() => { /* best-effort — capturing the error must never disrupt the preview */ });
+      void (async () => {
+        try {
+          await fetch('/api/agentv3/preview-error', {
+            method: 'POST',
+            headers: await authJsonHeaders(),
+            body: JSON.stringify({ workspaceId, userId, email, source, message: d.message.slice(0, 4000) }),
+            keepalive: true,
+          });
+        } catch { /* best-effort — capturing the error must never disrupt the preview */ }
+      })();
       // Q-148: after the build has ended, ask whether this crash is one the platform repairs by itself
       // (paid build, first time, reproduced in its own browser — the server decides). Asked once per
       // preview mount, so a burst of errors is one question; the server also records it once per build.
@@ -1310,14 +1343,6 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   // saved source so the edit is confirmed against what actually compiled, and notifies the parent
   // (onFileEdited) so Files/Code Studio/Git pick up the change immediately too — same as any other
   // v5.0 file write.
-  const inBrowserIframeRef = useRef<HTMLIFrameElement | null>(null);
-  // SECURITY Phase 4 — when a separate preview origin is configured (VITE_PREVIEW_ORIGIN), the
-  // in-browser preview loads a tiny host page on THAT origin and receives the built HTML via
-  // postMessage, so the untrusted app runs in an isolated origin (can't read the platform's Firebase
-  // token). Null → keep the exact current same-origin srcDoc path (unchanged, safe under the allowlist).
-  const previewSandboxUrl = (() => {
-    try { return configuredPreviewSandboxUrl(window.location.origin); } catch { return null; }
-  })();
   // Cross-origin path only: re-post the built HTML to the isolated host whenever it changes (a static
   // `src` iframe doesn't auto-reload the way `srcDoc` does). The onLoad handler covers the first mount.
   useEffect(() => {
@@ -1338,8 +1363,9 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   };
   const [selection, setSelection] = useState<VisualSelection | null>(null);
   const postToIframe = useCallback((msg: Record<string, unknown>) => {
-    try { inBrowserIframeRef.current?.contentWindow?.postMessage(msg, '*'); } catch { /* best-effort */ }
-  }, []);
+    const frame = inBrowserIframeRef.current;
+    try { frame?.contentWindow?.postMessage(msg, targetFor('inbrowser', frame)); } catch { /* best-effort */ }
+  }, [previewSandboxUrl]);
   const setIframeEditMode = useCallback((on: boolean) => {
     postToIframe({ __nbaiSetEditMode: on });
     if (!on) setSelection(null);
@@ -1424,6 +1450,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   }, [postToIframe, persistStyle, persistStyleBatch]);
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
+      if (!isFromOurPreviewFrame(e, [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow])) return;
       const d = e.data as { __nbaiSelect?: boolean; __nbaiVisualEditCommit?: boolean; __nbaiStyleCommit?: boolean; file?: string; line?: number; column?: number; newText?: string; tag?: string; styles?: Record<string, string>; styleUpdates?: Record<string, string>; targets?: VisualTarget[] } | null;
       if (!d || typeof d !== 'object') return;
       // The iframe reports which element the user picked (+ its current styles) → show the toolbar.
@@ -1733,7 +1760,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
           src={versionUrl}
           className="w-full flex-1 bg-white border-0"
           allow={PREVIEW_IFRAME_ALLOW}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          sandbox={frameUrlSharesPageOrigin(versionUrl, window.location.origin) ? UNTRUSTED_PREVIEW_SANDBOX : 'allow-scripts allow-same-origin allow-forms allow-popups'}
         />
       </div>
     );
@@ -1967,7 +1994,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
                 address, so a dead sandbox resolves to our own reconnecting page instead of a vendor
                 error, and a moved app resolves to wherever it now lives. A remount (reload button,
                 watchdog) re-resolves. effectiveUrl stays as the fallback for an older server. */}
-            <iframe key={liveReloadKey} ref={liveIframeRef} title="Live preview" src={idleSnapshotUrl || (doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl)} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; }} className="w-full h-full bg-white border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+            <iframe key={liveReloadKey} ref={liveIframeRef} title="Live preview" src={idleSnapshotUrl || (doorUrl ? resolveApiHref(doorUrl, window as never) : effectiveUrl)} onLoad={() => { setLiveLoading(false); everRenderedRef.current = true; }} className="w-full h-full bg-white border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={(idleSnapshotUrl && frameUrlSharesPageOrigin(idleSnapshotUrl, window.location.origin)) ? UNTRUSTED_PREVIEW_SANDBOX : 'allow-scripts allow-same-origin allow-forms allow-popups'} />
           </ResponsiveFrame>
         )}
       </div>
@@ -2201,7 +2228,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             src={idleSnapshotUrl}
             onLoad={() => { everRendered.current = true; }}
             className="w-full h-full bg-white border-0"
-            allow={PREVIEW_IFRAME_ALLOW} sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            allow={PREVIEW_IFRAME_ALLOW} sandbox={frameUrlSharesPageOrigin(idleSnapshotUrl, window.location.origin) ? UNTRUSTED_PREVIEW_SANDBOX : 'allow-scripts allow-same-origin allow-forms allow-popups'}
           />
         </ResponsiveFrame>
       ) : refusal.refuse ? (
@@ -2322,19 +2349,37 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
             allow={PREVIEW_IFRAME_ALLOW} sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
         </ResponsiveFrame>
+      ) : html && !import.meta.env.DEV ? (
+        // UI-1, D-2 unanswered so fail-closed. Vendored React and Babel load from
+        // this origin (`/vendor/react18`, `/vendor/babel.min.js`). An opaque srcDoc
+        // cannot import those modules ("Missing dependency react"), and
+        // allow-same-origin would share the Firebase session. Until a preview
+        // domain is configured, production does not render the srcDoc at all.
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
+          <p className="text-sm text-body font-medium max-w-sm">
+            In-browser preview is turned off for your security until a preview domain is configured. Use Live preview.
+          </p>
+          <button
+            type="button"
+            onClick={() => setChoice('live')}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-on-accent text-xs font-semibold"
+          >
+            Live preview
+          </button>
+        </div>
       ) : html ? (
-        // DEFAULT (no separate preview origin configured) — same-origin srcDoc. allow-same-origin is
-        // REQUIRED here: without it the srcDoc has an opaque origin and the dynamic ES-module import()
-        // (how the preview loads React from the CDN) is blocked → "Missing dependency react". Safe under
-        // the allowlist (trusted admins only); Phase 4 cross-origin isolation activates once
-        // VITE_PREVIEW_ORIGIN is set. The live-server iframe above already sets allow-same-origin.
+        // DEV only — reached when import.meta.env.DEV is true and no preview origin
+        // is set. Production takes the branch above. The sandbox expression still
+        // names UNTRUSTED_PREVIEW_SANDBOX so this tag is opaque if it ever renders
+        // outside DEV.
         <ResponsiveFrame viewport={viewport} zoom={zoom}>
           <iframe
             ref={inBrowserIframeRef}
             title="In-browser preview"
             srcDoc={html}
             className="w-full h-full bg-white border-0"
-            allow={PREVIEW_IFRAME_ALLOW} sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            allow={PREVIEW_IFRAME_ALLOW}
+            sandbox={import.meta.env.DEV ? 'allow-scripts allow-same-origin allow-forms allow-popups' : UNTRUSTED_PREVIEW_SANDBOX}
           />
         </ResponsiveFrame>
       ) : (

@@ -1,4 +1,9 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { FILE_SIZE_RULE, READ_GUIDE_TOOL, fileSizeRuleEnabled, moduleText, modularizePrompt, modularPromptEnabled } from '../AgentV3/reliability/modularPrompt';
+import { APPEND_FILE_TOOL, resumeTruncatedEnabled } from '../AgentV3/reliability/resumeWrite';
+import { CORE_TOOL_NAMES, DynamicToolset, coreToolsetEnabled } from '../AgentV3/reliability/coreToolset';
+import { reliabilityFlag } from '../AgentV3/reliability/flags';
+import { createStickyState, escalateSticky } from '../AgentV3/reliability/stickyRung';
 import { onStreamClosed } from '../lib/clientDisconnect';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
@@ -3717,6 +3722,8 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
   /** The BUILD's bench memory, shared by every runner the build constructs — see
    *  MultiProviderOptions.bench. Omitted ⇒ this runner benches for itself alone, as before. */
   bench?: BuildBenchRegistry;
+  /** P4 (fix/build-reliability) — sticky start; see MultiProviderOptions.sticky. Omitted ⇒ unchanged. */
+  sticky?: { remember: boolean };
 }): TurnRunner {
   const level = toPowerLevel(opts.tier as PowerLevel | boolean | string | undefined | null);
   const parsed = tierLadder(level);
@@ -3769,6 +3776,7 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
     ...(opts.onAttemptWasted ? { onAttemptWasted: opts.onAttemptWasted } : {}),
     ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
     ...(opts.bench ? { bench: opts.bench } : {}),
+    ...(opts.sticky ? { sticky: opts.sticky } : {}),
   });
 }
 
@@ -13980,6 +13988,12 @@ async function noteBuildOutcome(
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         complex: buildIsComplex, // a complex app opens on KIMI, not the flash rung — see makeFastTextRunner
         bench: buildBench,
+        // P4 (fix/build-reliability) — sticky start, default OFF. STICKY_RUNG remembers the rung that
+        // answered; QUALITY_ESCALATE alone only honours explicit upward escalations. Never below rung 0's
+        // guarded chain, so the weak no-Claude guard above still decides what can be reached.
+        ...((reliabilityFlag('STICKY_RUNG') || reliabilityFlag('QUALITY_ESCALATE'))
+          ? { sticky: { remember: reliabilityFlag('STICKY_RUNG') } }
+          : {}),
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
@@ -15878,6 +15892,19 @@ async function noteBuildOutcome(
       // Best-effort: a listFiles failure falls back to the edit prefix without a
       // tree, and a non-edit turn uses the normal architect prompt unchanged.
       let architectSystem = architectSystemPrompt(framework, { parallelBuild });
+      // P5a (AGENTV3_MODULAR_PROMPT, default OFF) — slim core prompt: domain modules the request does not
+      // need move out and stay reachable through read_guide. P2c (AGENTV3_FILE_SIZE_RULE) — the ~200-line rule.
+      const fullArchitectPromptForGuides = architectSystem;
+      let modularDeferred: string[] = [];
+      if (modularPromptEnabled()) {
+        try {
+          const mp = modularizePrompt(architectSystem, prompt, isEditMode ? ['fullstack'] : []);
+          architectSystem = mp.prompt;
+          modularDeferred = mp.deferred;
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'MODULAR_PROMPT', message: `Architect prompt ${mp.charsBefore} → ${mp.charsAfter} chars; on demand: ${mp.deferred.join(', ') || 'none'}`, autoResolved: true });
+        } catch { /* a modularisation failure keeps the full prompt */ }
+      }
+      if (fileSizeRuleEnabled()) architectSystem = `${architectSystem}\n\n${FILE_SIZE_RULE}`;
       // Capture the pure static body BEFORE any per-request context block is prepended below, so the
       // cache-prefix optimization (AGENTV3_CACHE_PREFIX, applied before the runner is built) can split
       // the volatile prefix back out and keep this large static body as a stable Anthropic cache prefix.
@@ -16355,6 +16382,26 @@ async function noteBuildOutcome(
         architectSystem = split.system;
         cachePrefixPreamble = split.preamble;
       }
+      // Built-in tools FIRST, connected services after (locked by mcpClient.test.ts); the reliability
+      // extras (append_file / read_guide) exist only when their flags are on.
+      const architectExtraTools = [
+        ...(resumeTruncatedEnabled() ? [APPEND_FILE_TOOL] : []),
+        ...(modularDeferred.length ? [READ_GUIDE_TOOL] : []),
+      ];
+      const architectToolset = coreToolsetEnabled()
+        ? new DynamicToolset([...catalogForTools(roleConfig('architect').tools), ...architectExtraTools], externalToolDefs(mcpTools), [...CORE_TOOL_NAMES, 'append_file', 'read_guide'])
+        : null;
+      const architectToolsForBuild = architectToolset
+        ? architectToolset.tools
+        : [...catalogForTools(roleConfig('architect').tools), ...externalToolDefs(mcpTools), ...architectExtraTools];
+      try {
+        dispatcher.setReliabilityHooks({
+          ...(architectToolset ? { loadTools: (names: unknown) => architectToolset.load(names) } : {}),
+          ...(modularDeferred.length
+            ? { readGuide: (name: string) => moduleText(fullArchitectPromptForGuides, String(name ?? '').trim().toLowerCase()) || `No guide called "${name}". Available: ${modularDeferred.join(', ')}.` }
+            : {}),
+        });
+      } catch { /* hooks are optional — a dispatcher without them just refuses the meta tools */ }
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -16392,7 +16439,9 @@ async function noteBuildOutcome(
         system: architectSystem,
         // Built-in tools PLUS anything the user connected. Concatenated with ours FIRST so a
         // connected service can never displace a platform tool in the list the model reads.
-        tools: [...catalogForTools(roleConfig('architect').tools), ...externalToolDefs(mcpTools)],
+        // fix/build-reliability — append_file (P2b), read_guide (P5a) and the 16-core + load_tools set
+        // (P5c) are each added only when their flag is on; all off ⇒ exactly the list above as before.
+        tools: architectToolsForBuild,
         onlyOpus,
         powerLevel: powerLevelReqEffective,
         // Slice 2 — weak-tier mid-build checkpoint scope. Same signal Slice 1 uses: a weak/cheap-only
@@ -16446,6 +16495,20 @@ async function noteBuildOutcome(
         ...baseRunnerOpts,
         client,
         model,
+        // P4b (fix/build-reliability, AGENTV3_QUALITY_ESCALATE, default OFF) — quality signals move the
+        // build UP one model on the sticky chain. `noClaude` forbids a Claude target outright, so a weak
+        // build can never be escalated onto Claude (user rule 2026-10-09).
+        ...(reliabilityFlag('QUALITY_ESCALATE')
+          ? {
+              onQualityEscalate: (reason: string) => {
+                const out = escalateSticky(buildBench.sticky ??= createStickyState(), { noClaude: noClaudeBuild });
+                try {
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'QUALITY_ESCALATE', message: out.escalated ? `Escalated ${out.fromModel ?? '?'} → ${out.toModel ?? '?'}: ${reason}` : `Escalation refused (${out.reason ?? 'n/a'}): ${reason}`, autoResolved: true });
+                } catch { /* diagnostics are best-effort */ }
+                return out;
+              },
+            }
+          : {}),
         // ── THE CORRECTION RESERVE, ENFORCED ─────────────────────────────────────────────────────
         // Generation stops at the reserve line instead of at the wall, so the verify → repair →
         // re-verify stage below has a budget of its own rather than whatever generation happened to

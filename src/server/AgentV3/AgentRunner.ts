@@ -1,4 +1,7 @@
 import { NOT_READY_HEADLINE, NOT_READY_HEADLINE_CONTINUE } from './notReadyHeadline';
+import { PARTIAL_CONTENT_KEY, resumeTruncatedEnabled } from './reliability/resumeWrite';
+import { compactForBudget, recentlyTouchedPaths, tokenCompactEnabled, withWorkingSet, workingSetBlock, workingSetConfig, workingSetEnabled } from './reliability/contextBudget';
+import { QualityMonitor, handoffNote } from './reliability/qualityEscalation';
 import type { AgentEventStream } from './AgentEventStream';
 import { isStarterBlocker, starterSummary } from './stillTheStarterApp';
 import type { WorkspaceState } from './WorkspaceState';
@@ -55,6 +58,13 @@ import { resolveToolAlias, toolAliasNote } from './toolAlias';
  */
 export interface AgentRunnerOptions {
   client: TurnRunner;
+  /**
+   * P4b (fix/build-reliability, AGENTV3_QUALITY_ESCALATE) — called when the quality monitor sees the
+   * build struggling (truncation ×2, edit fail ×3, tsc not dropping). The route moves the build UP one
+   * model on its sticky chain and answers what happened; on an escalation the runner adds a handoff note
+   * to the next turn. Omitted ⇒ no monitoring at all (the default).
+   */
+  onQualityEscalate?: (reason: string) => { escalated: boolean; fromModel?: string; toModel?: string };
   dispatcher: ToolDispatcher;
   state: WorkspaceState;
   events: AgentEventStream;
@@ -472,6 +482,9 @@ export class AgentRunner {
    * file, which by definition happens on a later turn. Paths only — a bounded handful per build.
    */
   private readonly _truncationSteered = new Set<string>();
+  /** P4b — quality monitor + the files this run touched (for the handoff note). Inert unless onQualityEscalate is set. */
+  private readonly _quality = new QualityMonitor();
+  private readonly _touched: string[] = [];
   /** The ETA line the user was last shown, or null; never throws (see `liveUserMessageTurn`). */
   private shownEta(): string | null {
     try { return this.opts.currentEta?.() ?? null; } catch { return null; }
@@ -820,9 +833,27 @@ export class AgentRunner {
           // payload — the fix for the 233KB prompt that timed out the cheap floor. No-op on a small
           // build. Disabled by setting transcriptKeepRecent to 0 turns is not offered; instead
           // AGENTV3_MODEL_COMPACT=off bypasses entirely for a clean A/B if ever needed.
-          const modelMessages = envKillSwitch('AGENTV3_MODEL_COMPACT')
+          let modelMessages = envKillSwitch('AGENTV3_MODEL_COMPACT')
             ? messages
-            : compactTranscriptForModel(messages, { keepRecentMessages: modelKeepRecent, maxOldToolResultChars: modelMaxOldToolResultChars });
+            : tokenCompactEnabled()
+              // P3a (AGENTV3_TOKEN_COMPACT) — verbatim until ~50% of the window, then gentle, then tight.
+              ? compactForBudget(messages, (system ?? '').length, compactTranscriptForModel).messages
+              : compactTranscriptForModel(messages, { keepRecentMessages: modelKeepRecent, maxOldToolResultChars: modelMaxOldToolResultChars });
+          // P3b (AGENTV3_WORKING_SET) — the fresh on-disk content of recently touched files, appended last.
+          if (workingSetEnabled() && typeof dispatcher.readForWorkingSet === 'function') {
+            try {
+              const wsCfg = workingSetConfig();
+              const paths = recentlyTouchedPaths(messages, wsCfg.files);
+              if (paths.length) {
+                const files: Array<{ path: string; content: string }> = [];
+                for (const p of paths) {
+                  const c = await dispatcher.readForWorkingSet(p);
+                  if (typeof c === 'string') files.push({ path: p, content: c });
+                }
+                modelMessages = withWorkingSet(modelMessages, workingSetBlock(files, wsCfg));
+              }
+            } catch { /* the working set is advisory — never blocks a turn */ }
+          }
           const turnCall = client.runTurn({
             model,
             system,
@@ -1346,7 +1377,9 @@ export class AgentRunner {
               if (tu.name === 'write_file') {
                 const inp = tu.input as { path?: unknown; content?: unknown };
                 if (typeof inp?.path === 'string' && typeof inp?.content === 'string') written[inp.path] = inp.content;
-                else if (typeof inp?.path === 'string' && inp?.content === undefined) truncatedToolPaths.push(inp.path);
+                // P2b — a buffered cut-off write is resumed with append_file (the tool result says so);
+                // asking for a whole rewrite here would contradict it.
+                else if (typeof inp?.path === 'string' && inp?.content === undefined && !(resumeTruncatedEnabled() && typeof (tu.input as Record<string, unknown>)?.[PARTIAL_CONTENT_KEY] === 'string')) truncatedToolPaths.push(inp.path);
               } else if (tu.name === 'write_files_batch') {
                 const b = tu.input as { files?: unknown };
                 if (Array.isArray(b?.files)) {
@@ -1453,7 +1486,37 @@ export class AgentRunner {
             }
           }
         } catch { /* the done check is advisory — it must never break a build */ }
-        const steer = [truncationSteer, loopSteer, budgetText, doneText].filter(Boolean).join('\n\n') || null;
+        // P4b — QUALITY ESCALATION (opt-in). Observes this turn's truncation / edit failures / tsc trend;
+        // when the monitor trips, the route moves the build up one model and the next model gets a note.
+        let handoffText: string | null = null;
+        if (this.opts.onQualityEscalate) {
+          try {
+            let editFailures = 0;
+            let editSuccesses = 0;
+            turn.toolUses.forEach((tu, idx) => {
+              const p = (tu.input as { path?: unknown })?.path;
+              if (typeof p === 'string' && /^(write_file|edit_file|append_file)$/.test(tu.name)) {
+                const at = this._touched.indexOf(p);
+                if (at >= 0) this._touched.splice(at, 1);
+                this._touched.push(p);
+              }
+              if (tu.name !== 'edit_file') return;
+              if ((resultBlocks[idx] as { is_error?: boolean } | undefined)?.is_error === true) editFailures += 1;
+              else editSuccesses += 1;
+            });
+            const tscErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;
+            const decision = this._quality.observe({ truncated: Boolean(turn.truncated || turn.stopReason === 'max_tokens'), editFailures, editSuccesses, tscErrors });
+            if (decision.escalate && decision.reason) {
+              const out = this.opts.onQualityEscalate(decision.reason);
+              this._quality.acknowledge(out.escalated);
+              if (out.escalated) {
+                handoffText = handoffNote({ fromModel: out.fromModel, toModel: out.toModel, reason: decision.reason, touchedFiles: this._touched, tscErrors });
+                events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: `🔁 Switching to a stronger engine${out.toModel ? ` (${out.toModel})` : ''}: ${decision.reason}.` });
+              }
+            }
+          } catch { /* quality escalation is best-effort — it must never break a build */ }
+        }
+        const steer = [truncationSteer, loopSteer, budgetText, doneText].filter(Boolean).concat(handoffText ? [handoffText] : []).join('\n\n') || null;
         messages.push({ role: 'user', content: steer ? [...resultBlocks, { type: 'text', text: steer }] : resultBlocks });
         messageTs.push(Date.now());
         if (steer) platformMsgIdx.add(messages.length - 1);

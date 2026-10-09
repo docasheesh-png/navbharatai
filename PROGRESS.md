@@ -92625,3 +92625,28 @@ reads-the-file test fails · the call removed from the route → the same test f
 
 The deletion page now names it too: *"your **cross-device workspace** — the copy of your chat sessions
 and your last built app that we keep so they follow you from one device to another"*.
+
+## 2026-10-09 — Q-770 closed (#3607 merged), and the admin lifted the merge hold for this session
+
+**Q-770 ✅ RESOLVED.** #3607 merged as `4117ae4`, so the row left the open table and `Q-770` was
+appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main` — the
+#3543 rule. The room's Code tab is live: the shared editor, every member's caret line, and
+line-pinned comments with jump and resolve. `tests/aRoomTabTheKnowledgeBaseNamesExists.test.ts`
+keeps the component and `AppKnowledgeBase` from drifting apart again.
+
+**Q-600 stays OPEN** — 86 unused locals in 18 files. **Q-769 stays OPEN** (Vertex has no abort hook).
+**Q-381 stays OPEN** — 47 unclassified finding codes.
+
+**On the merge hold.** CLAUDE.md's 2026-09-13 correction says a session merges only when the admin
+names the PR in that session's own conversation, and that assuming it is the rule it removes. The
+admin said it on 2026-10-09: *"ap marge karo! aur apko bacha hua kam complete kar ke unko pr bhi
+marge karo"* — merge these, and merge the remaining work's PRs too once they are green. CI green
+before every merge is unchanged; that gate is not what was lifted.
+
+**One thing worth recording about GitHub rather than the code:** #3601 was reported by the API as
+having merge conflicts (`405 Pull Request has merge conflicts`) while `git merge-tree --write-tree`
+against the same `main` merged it clean, and the subsequent real merge of `main` into the branch was
+also clean. GitHub's mergeability cache had gone stale after three PRs landed in quick succession.
+The honest reading: a 405 from the merge endpoint is not proof of a conflict — check it against a
+local three-way merge before believing it, and a `main` merge plus a push is what makes GitHub
+recompute.

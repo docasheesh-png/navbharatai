@@ -63,6 +63,8 @@ const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string; f
   'src/server/AgentV3/DiagnosticsStore.ts › history': { kind: 'workspace', parent: 'workspace_diagnostics_v3', clock: true },
   'src/server/AgentV3/UserActionStore.ts › items': { kind: 'workspace', parent: 'workspace_user_actions_v1' },
   'src/server/lib/CodeReviewStore.ts › comments': { kind: 'workspace', parent: 'code_reviews' },
+  'src/server/lib/sharedDataStore.ts › records': { kind: 'workspace', parent: 'nbai_app_data' },
+  'src/server/lib/sharedDataStore.ts › ops': { kind: 'workspace', parent: 'nbai_app_data' },
 
   'src/server/lib/DeviceTokenStore.ts › deviceTokens': { kind: 'user', parent: 'users' },
   'src/server/lib/MentionNotificationStore.ts › notifications': { kind: 'user', parent: 'users' },

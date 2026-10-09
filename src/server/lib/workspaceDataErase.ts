@@ -127,6 +127,14 @@ export const WORKSPACE_SCOPED_COLLECTIONS: readonly WorkspaceScopedCollection[] 
   /** The app's MCP wiring: the servers it may call and the keys for them — doc id is the workspaceId
    *  (`McpServerStore.ts:82/92/154`). Credential-adjacent, and it was being kept for ever. */
   { collection: 'agentv3_mcp_servers' },
+  /**
+   * The small database an app starts from Publish (`sharedDataStore.ts`). Doc id is the workspaceId.
+   * Two subcollections, and Firestore does not cascade: `records` is the app's data, `ops` is the
+   * operation counters (eight shards). One `sub` field cannot name both. Two rows, and the eraser
+   * deletes every sub of a collection before the parent — otherwise the second sub is orphaned.
+   */
+  { collection: 'nbai_app_data', sub: 'records' },
+  { collection: 'nbai_app_data', sub: 'ops' },
 ];
 
 export type EraseRefusal = 'unusable-uid' | 'ambiguous-uid';
@@ -209,6 +217,33 @@ function db(): admin.firestore.Firestore | null {
   }
 }
 
+/** Every subcollection this registry names under `collection`, in listed order. A collection may
+ *  have two (the shared database has `records` and `ops`). PURE. */
+export function subcollectionsToErase(collection: string): string[] {
+  const subs: string[] = [];
+  for (const entry of WORKSPACE_SCOPED_COLLECTIONS) {
+    if (entry.collection !== collection || !entry.sub) continue;
+    if (!subs.includes(entry.sub)) subs.push(entry.sub);
+  }
+  return subs;
+}
+
+/**
+ * One pass per collection. Two registry rows for the same collection (two subcollections) must not
+ * become two passes: the first would delete the parent and the second would never see it, leaving
+ * the other subcollection behind. Firestore does not cascade.
+ */
+function collectionsToErase(): Array<{ collection: string; subs: string[] }> {
+  const out: Array<{ collection: string; subs: string[] }> = [];
+  const seen = new Set<string>();
+  for (const entry of WORKSPACE_SCOPED_COLLECTIONS) {
+    if (seen.has(entry.collection)) continue;
+    seen.add(entry.collection);
+    out.push({ collection: entry.collection, subs: subcollectionsToErase(entry.collection) });
+  }
+  return out;
+}
+
 /**
  * Erase every built app belonging to `uid`.
  *
@@ -229,7 +264,7 @@ export async function deleteUserWorkspaceData(uid: string): Promise<WorkspaceEra
   const byId = admin.firestore.FieldPath.documentId();
   const collections: WorkspaceEraseResult[] = [];
 
-  for (const entry of WORKSPACE_SCOPED_COLLECTIONS) {
+  for (const entry of collectionsToErase()) {
     let workspaces = 0;
     let documents = 0;
     try {
@@ -244,7 +279,7 @@ export async function deleteUserWorkspaceData(uid: string): Promise<WorkspaceEra
           // The range should already guarantee this; the platform's own ownership policy is asked
           // anyway, because "should" is not a safety property when the action is irreversible.
           if (!eraseableWorkspaceId(uid, doc.id)) continue;
-          if (entry.sub) documents += await deleteSubcollection(doc.ref, entry.sub);
+          for (const sub of entry.subs) documents += await deleteSubcollection(doc.ref, sub);
           await doc.ref.delete();
           workspaces++;
           progressed = true;

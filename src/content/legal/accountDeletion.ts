@@ -113,6 +113,7 @@ When your deletion request is completed, we remove:
   and the outside services it was wired to talk to together with the keys we held for them;
 - the **live preview and deployment of each app** — the sandbox it ran in and our record of where it
   was deployed;
+- the records your app stored in the NavBharatAI database — the small database started from Publish, including its records and the operation counters kept beside them;
 - your **team, if you made one** — a team belongs to the account that created it, so it goes with
   yours: the list of its members (their names and email addresses are removed with it) and the shared
   library it held. Your own member record is also removed from every other team you had joined;

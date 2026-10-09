@@ -134,6 +134,7 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   site_uptime:         { kind: 'user', why: "the uptime record of one person's connected domain — doc id is the DOMAIN, reached by its `userId` field" },
   app_engineering_memory_v1: { kind: 'workspace', why: "the app's requirement ledger, issues and change log — doc id is the workspaceId, erased with the workspace (changeEngine)" },
   app_ai_settings:     { kind: 'workspace', why: "the owner's switch for NavBharatAI AI inside their app — doc id is the workspaceId, erased with the workspace" },
+  nbai_app_data:       { kind: 'workspace', why: "the app's shared database — doc id is the workspaceId; records and ops sit underneath and are erased with it (sharedDataStore.ts)" },
 
   hosted_deploy_leases: { kind: 'platform', why: 'one doc per workspace while a server deploy runs (hostedDeployments.ts), deleted when it ends and stale after the longest possible deploy — a lock, not a record' },
   hosted_deploy_attempts: { kind: 'retained', why: "one doc per server deploy attempt: its states, a failure category and the owner's uid (hostedDeployments.ts); purged at 180 days" },

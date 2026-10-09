@@ -117,6 +117,8 @@ const REVIEWED_SMALL: Record<string, string> = {
   '/api/zip-upload/begin': 'file name and size — the bytes go to /api/zip-upload/chunk as octet-stream',
   '/api/zip-upload/abort': 'an upload id',
   '/api/mobile-ship/trigger': '`workflow` is a workflow file name; `inputs` are build options',
+  '/api/v1/data/:workspaceId/:collection': 'one record; sanitizeRecord (sharedData.ts) rejects it above 8 KB (SHARED_DATA_MAX_BYTES) before anything is stored',
+  '/api/v1/data/:workspaceId/:collection/:id': 'PATCH replaces one record, same 8 KB cap as the create. DELETE does not use the body — the shared handler is what the census sees',
 };
 
 // ── The scanner ─────────────────────────────────────────────────────────────────────────────────────

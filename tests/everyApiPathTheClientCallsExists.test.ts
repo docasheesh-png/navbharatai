@@ -65,6 +65,7 @@ function served(p: string, routes: string[]): boolean {
 /** Paths that are not calls, each with the reason. A new entry needs one as good. */
 const NOT_A_CALL: Record<string, string> = {
   '/api/github': 'githubService.ts: a base the calls append a sub-path to (all served under /api/github/…)',
+  '/api/v1/data': 'nbaiDataClient.ts: the prefix written into a published app. The app appends /:collection and /:collection/:id; the server serves /api/v1/data/:workspaceId/:collection',
   '/api/order-status/:orderId': 'paymentSetup.ts: server code it GENERATES for the user\'s own app, not a call to us',
   '/api/order-status/:sessionId': 'paymentSetup.ts: generated server code for the user\'s app',
   '/api/verify-payment': 'paymentSetup.ts: generated code for the user\'s app',

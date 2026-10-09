@@ -1,8 +1,9 @@
 // Resell routes — a server or a database from NavBharatAI, charged only after it is real.
 //
-// The Billing "Add" button cannot sell these. This is the only door, and it refuses before any
-// Cloud Build minute or Supabase project when the account cannot pay. Own hosting and the user's
-// own Supabase are not touched here; those paths stay ₹0.
+// The Billing "Add" button cannot sell these. This is the only door. The database that starts is
+// the small one: a namespace on the Firestore we already run, plus the data API on this server.
+// A private Supabase project stays a second door, and only when that org is configured. An extra
+// Cloud Run server stays the door it already was. Own hosting and the user's own Supabase stay ₹0.
 
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
@@ -18,12 +19,14 @@ import {
   chargeDeliveredHostingAddon, previewDeliveredCharge, readHostingAddons, removeHostingAddon,
 } from '../lib/hostingAddonLedger';
 import { addonAgreementTerms, addonById } from '../../lib/hostingAddons';
-import { loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { createPlatformDatabase, platformSupabaseConfig } from '../lib/platformDatabase';
 import { deleteProject } from '../lib/supabaseProvision';
 import { saveUserSecrets } from '../lib/supabaseProvisionFlow';
 import { executeDatabaseResell, executeServerResell, type ChargeResult } from '../lib/resellExecute';
 import { quoteDatabaseResell, quoteServerResell, projectRefFromDatabaseProof, stableResellRef, workspaceIdFromServerProof } from '../lib/resellQuote';
+import { dataClientSource } from '../lib/sharedData';
+import { createSharedDatabase, destroySharedDatabase, markSharedReady, type SharedDb } from '../lib/sharedDataStore';
 import type { ServerPublishInput, ServerPublishResult } from '../AgentV3/serverPublish';
 
 export interface ResellRouteDeps {
@@ -45,7 +48,7 @@ async function caller(req: Request): Promise<{ uid: string; isAdmin: boolean } |
 
 async function asCharge(
   uid: string,
-  addonId: 'server' | 'dedicated_db',
+  addonId: 'server' | 'dedicated_db' | 'shared_db',
   clientRef: string,
   proof: string,
 ): Promise<ChargeResult> {
@@ -68,8 +71,9 @@ export function registerResellHostingRoutes(app: Express, deps: ResellRouteDeps)
       return noCharge(res, 403, 'This app is not on your account. Nothing was charged.');
     }
     const now = Date.now();
-    const [serverPay, dbPay, plan, live, tier] = await Promise.all([
+    const [serverPay, sharedPay, dedicatedPay, plan, live, tier] = await Promise.all([
       previewDeliveredCharge(getServerDb(), who.uid, 'server', stableResellRef('server', workspaceId, now)),
+      previewDeliveredCharge(getServerDb(), who.uid, 'shared_db', stableResellRef('shared', workspaceId, now)),
       previewDeliveredCharge(getServerDb(), who.uid, 'dedicated_db', stableResellRef('database', workspaceId, now)),
       probeHostingPlan(who.uid).catch(() => ({ active: false, known: false as const })),
       deps.liveServerWorkspaces(who.uid),
@@ -98,21 +102,31 @@ export function registerResellHostingRoutes(app: Express, deps: ResellRouteDeps)
       active: serverPay.active,
       canPay: serverPay.canPay,
     });
-    const configured = platformSupabaseConfig() !== null;
     const database = quoteDatabaseResell({
+      product: 'shared',
       plansOn,
-      configured,
+      configured: getServerDb() !== null,
       workspaceId,
-      active: dbPay.active,
-      canPay: dbPay.canPay,
+      active: sharedPay.active,
+      canPay: sharedPay.canPay,
+    });
+    const dedicated = quoteDatabaseResell({
+      product: 'dedicated',
+      plansOn,
+      configured: platformSupabaseConfig() !== null,
+      workspaceId,
+      active: dedicatedPay.active,
+      canPay: dedicatedPay.canPay,
     });
     const serverSpec = addonById('server');
+    const sharedSpec = addonById('shared_db');
     const dbSpec = addonById('dedicated_db');
     return res.json({
       ok: true,
       charged: false,
       server: { ...server, terms: serverSpec ? addonAgreementTerms(serverSpec) : [] },
-      database: { ...database, terms: dbSpec ? addonAgreementTerms(dbSpec) : [] },
+      database: { ...database, terms: sharedSpec ? addonAgreementTerms(sharedSpec) : [] },
+      dedicated: { ...dedicated, terms: dbSpec ? addonAgreementTerms(dbSpec) : [] },
       own: {
         hosting: 'Hosting it yourself stays free from us.',
         database: 'Connecting your own Supabase stays free from us.',
@@ -207,7 +221,90 @@ export function registerResellHostingRoutes(app: Express, deps: ResellRouteDeps)
     return res.json({ ok: true, charged: false, creditedInr: removed.creditedInr });
   });
 
+function dataOrigin(req: Request): string {
+  const env = (process.env.PUBLIC_BASE_URL || process.env.APP_ORIGIN || '').trim().replace(/\/+$/, '');
+  if (/^https:\/\/[A-Za-z0-9._:-]+$/.test(env) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(env)) return env;
+  const host = req.get('host') || '';
+  if (/^[A-Za-z0-9._:-]+$/.test(host)) {
+    const proto = req.get('x-forwarded-proto') === 'http' ? 'http' : 'https';
+    return `${proto}://${host}`;
+  }
+  return 'https://navbharatai.com';
+}
+
   app.post('/api/agentv3/resell/database', async (req: Request, res: Response) => {
+    const who = await caller(req);
+    if (!who) return noCharge(res, 401, 'Please sign in. Nothing was charged.');
+    const blocked = await appLockBlocks(req, who.uid, 'hosting-addon-purchase');
+    if (blocked) return res.status(blocked.status).json({ ...blocked.body, charged: false });
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!ownedByVerifiedUid(who.uid, workspaceId)) {
+      return noCharge(res, 403, 'This app is not on your account. No database was created and nothing was charged.');
+    }
+    const now = Date.now();
+    const pay = await previewDeliveredCharge(getServerDb(), who.uid, 'shared_db', stableResellRef('shared', workspaceId, now));
+    const days = addonById('shared_db')?.days ?? 30;
+    const outcome = await executeDatabaseResell({
+      agreedToTerms: req.body?.agreedToTerms === true,
+      workspaceId,
+    }, {
+      nowMs: now,
+      quoteInput: {
+        product: 'shared',
+        plansOn: hostingPlansEnabled(),
+        configured: getServerDb() !== null,
+        workspaceId,
+        active: pay.active,
+        canPay: pay.canPay,
+      },
+      create: async () => {
+        const db = getServerDb();
+        if (!db) return { ok: false, message: 'A database from NavBharatAI is not switched on yet. Nothing was charged.', cleaned: true };
+        const made = await createSharedDatabase(db as unknown as SharedDb, {
+          workspaceId,
+          ownerUid: who.uid,
+          expiresAtMs: now + days * 24 * 60 * 60 * 1000,
+          nowMs: now,
+        });
+        if (!made.ok) return { ok: false, message: made.message, cleaned: made.cleaned };
+        const url = `${dataOrigin(req)}/api/v1/data/${workspaceId}`;
+        return {
+          ok: true,
+          projectRef: made.publicRef,
+          url,
+          env: {
+            VITE_NBAI_DATA_URL: url,
+            VITE_NBAI_DATA_KEY: made.key,
+            NBAI_DATA_KEY: made.key,
+          },
+        };
+      },
+      save: async (env) => {
+        const db = getServerDb();
+        if (!db) return false;
+        const file = await mergeWorkspaceFiles(workspaceId, { 'src/nbai-data.js': dataClientSource() });
+        if (file.status !== 'saved') return false;
+        const secretsOk = await saveUserSecrets(who.uid, env, workspaceId);
+        if (!secretsOk) return false;
+        return markSharedReady(db as unknown as SharedDb, workspaceId, now);
+      },
+      charge: (clientRef, proof) => asCharge(who.uid, 'shared_db', clientRef, proof),
+      destroy: async () => {
+        const db = getServerDb();
+        if (!db) return { ok: false };
+        return destroySharedDatabase(db as unknown as SharedDb, workspaceId);
+      },
+      refund: async (clientRef) => {
+        const removed = await removeHostingAddon(getServerDb(), who.uid, clientRef, 0, 0);
+        return { ok: removed.ok };
+      },
+    });
+    const body = { ...outcome.body };
+    delete (body as { env?: unknown }).env;
+    return res.status(outcome.status).json(body);
+  });
+
+  app.post('/api/agentv3/resell/database/dedicated', async (req: Request, res: Response) => {
     const who = await caller(req);
     if (!who) return noCharge(res, 401, 'Please sign in. Nothing was charged.');
     const blocked = await appLockBlocks(req, who.uid, 'hosting-addon-purchase');
@@ -225,6 +322,7 @@ export function registerResellHostingRoutes(app: Express, deps: ResellRouteDeps)
     }, {
       nowMs: now,
       quoteInput: {
+        product: 'dedicated',
         plansOn: hostingPlansEnabled(),
         configured: cfg !== null,
         workspaceId,
@@ -267,17 +365,26 @@ export function registerResellHostingRoutes(app: Express, deps: ResellRouteDeps)
     if (!ownedByVerifiedUid(who.uid, workspaceId)) {
       return noCharge(res, 403, 'This app is not on your account. Nothing was refunded.');
     }
-    const cfg = platformSupabaseConfig();
-    if (!cfg) return noCharge(res, 503, 'The database could not be reached, so it was left in place and nothing was refunded.');
     const menu = await readHostingAddons(getServerDb(), who.uid);
-    const row = menu.active.find((a) => a.ref === ref && a.addonId === 'dedicated_db');
-    const projectRef = projectRefFromDatabaseProof(row?.proof);
-    if (!row || !projectRef || !String(row.proof).startsWith(`db:${workspaceId}:`)) {
+    const row = menu.active.find((a) => a.ref === ref && (a.addonId === 'shared_db' || a.addonId === 'dedicated_db'));
+    if (!row || !String(row.proof || '').startsWith(`db:${workspaceId}:`)) {
       return noCharge(res, 404, 'That database was not found on this app. Nothing was refunded.');
     }
-    const gone = await deleteProject(cfg.token, projectRef);
-    if (!gone.ok) {
-      return res.status(409).json({ ok: false, charged: false, error: 'The database could not be confirmed deleted, so nothing was refunded. It is still yours.' });
+    if (row.addonId === 'shared_db') {
+      const db = getServerDb();
+      if (!db) return noCharge(res, 503, 'The database could not be reached, so it was left in place and nothing was refunded.');
+      const gone = await destroySharedDatabase(db as unknown as SharedDb, workspaceId);
+      if (!gone.ok) {
+        return res.status(409).json({ ok: false, charged: false, error: 'The database could not be confirmed deleted, so nothing was refunded. It is still yours.' });
+      }
+    } else {
+      const cfg = platformSupabaseConfig();
+      const projectRef = projectRefFromDatabaseProof(row.proof);
+      if (!cfg || !projectRef) return noCharge(res, 503, 'The database could not be reached, so it was left in place and nothing was refunded.');
+      const gone = await deleteProject(cfg.token, projectRef);
+      if (!gone.ok) {
+        return res.status(409).json({ ok: false, charged: false, error: 'The database could not be confirmed deleted, so nothing was refunded. It is still yours.' });
+      }
     }
     const removed = await removeHostingAddon(getServerDb(), who.uid, ref, 0, 0);
     if (!removed.ok) {

@@ -319,7 +319,9 @@ describe('the bill itself', () => {
 
   it('the billing Remove route refuses a server or a database before it can refund', () => {
     const walletSrc = readFileSync(join(__dirname, '../src/server/routes/wallet.ts'), 'utf8');
-    const gate = walletSrc.indexOf("row.addonId === 'server' || row.addonId === 'dedicated_db'");
+    // Before: row.addonId === 'server' || row.addonId === 'dedicated_db'
+    // After: shared_db is included, so Billing Remove cannot refund a shared database that is still stored.
+    const gate = walletSrc.indexOf("row.addonId === 'server' || row.addonId === 'dedicated_db' || row.addonId === 'shared_db'");
     const refund = walletSrc.indexOf('await removeHostingAddon(');
     expect(gate).toBeGreaterThan(-1);
     expect(refund).toBeGreaterThan(gate);

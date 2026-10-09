@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   planWorkspaceErase, eraseableWorkspaceId, WORKSPACE_SCOPED_COLLECTIONS, deleteUserWorkspaceData,
+  subcollectionsToErase,
 } from './workspaceDataErase';
 
 /**
@@ -72,9 +73,17 @@ describe('the registry of collections that hold a built app', () => {
     expect(byName['workspace_embeddings_v3']).toBe('files');
   });
 
-  it('every entry names a real collection and no duplicates', () => {
-    const names = WORKSPACE_SCOPED_COLLECTIONS.map((c) => c.collection);
-    expect(new Set(names).size).toBe(names.length);
+  it('every entry names a real collection, and a repeated name is a second subcollection', () => {
+    const pairs = WORKSPACE_SCOPED_COLLECTIONS.map((c) => `${c.collection}\0${c.sub ?? ''}`);
+    expect(new Set(pairs).size).toBe(pairs.length);
+    /**
+     * Was: collection names are unique (`new Set(names).size === names.length`).
+     * Now: the pair (collection, sub) is unique. `nbai_app_data` is listed twice — `records` and
+     * `ops` — because the registry has one `sub` field and Firestore does not cascade. A second row
+     * with the same sub, or a bare duplicate, still fails.
+     */
+    expect(subcollectionsToErase('nbai_app_data')).toEqual(['records', 'ops']);
+    expect(subcollectionsToErase('workspace_files_v3')).toEqual(['files']);
     /**
      * A SHAPE check against a typo or an empty string — NOT a naming policy, and the pattern used to
      * read as one. It was `/^[a-z][a-z0-9_]+$/`, which quietly asserted that every collection in this

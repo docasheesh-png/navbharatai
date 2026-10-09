@@ -322,6 +322,8 @@ import { recordHostedDeployment } from '../AgentV3/hostedDeploymentRecord';
 import { firestoreDeployStore } from '../AgentV3/hostedDeployments';
 import { runServerPublish, type ServerPublishDeps } from '../AgentV3/serverPublish';
 import { registerResellHostingRoutes } from './resellHosting';
+import { registerAppDataRoutes } from './appData';
+import { registerBrandApplyRoutes } from './brandApply';
 import { removeHostedServers } from '../AgentV3/hostedAppLifecycle';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
 import { repoAvailableForDeploy, resolveDeployRepo, ownRepoMemoryPatch, renameStorageRepoPatch } from '../AgentV3/deployRepoMemory';
@@ -4121,6 +4123,9 @@ const serverPublishDeps: ServerPublishDeps = {
 };
 
 export function registerAgentV3Routes(app: Express): void {
+  // The data API is the cheap backend. It is on for every app that has a key. It does not charge.
+  registerAppDataRoutes(app);
+  registerBrandApplyRoutes(app);
   // Extra server / database. Charge happens inside these handlers, only after delivery.
   // The normal Publish path is unchanged and does not add ₹149 on top of a plan.
   registerResellHostingRoutes(app, {

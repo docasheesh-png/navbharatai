@@ -3,9 +3,9 @@
  *
  * THE PRODUCT, in one line: free hosting carries the "Made with NavBharatAI" badge; the Custom
  * Domain plan (₹99/30 days, paid from the ONE wallet) removes the badge and unlocks connecting
- * the user's own domain. DB stays free forever (it runs on the user's own account — standing rule),
- * and coding stays pay-per-use — so the wallet now honestly carries all three: hosting plan,
- * DB (₹0), coding usage.
+ * the user's own domain. A database on the user's own account stays ₹0. A small database and API
+ * from NavBharatAI is a separate add-on, charged only after it exists, and is not part of this plan.
+ * Coding stays pay-per-use — so the wallet carries the plan, that add-on, and coding usage.
  *
  * WHY THE PLAN LIVES ON THE WALLET DOC (`user_token_wallets/{uid}.hostingPlan`) and not in its own
  * collection: the purchase must debit the wallet and grant the plan ATOMICALLY — one Firestore

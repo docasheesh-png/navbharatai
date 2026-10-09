@@ -91983,3 +91983,54 @@ file in the report.
 found while hunting siblings, but each feeds a different decision with a different failure mode, and
 widening detection in all of them in one PR would change behaviour nobody has measured. Q-707's own
 scope was deployPlan + the sibling it named; the rest is recorded here as a known, bounded follow-up.
+
+## 2026-10-09 — Q-381 batch one: nine findings about OUR run stop being charged to the user's app (56 → 47)
+
+**Report:** Q-381, from the 2026-10-04 census (`tests/aProblemTheUserIsShownCanBeActedOn.test.ts`). That
+census measured something nobody had counted: **82 codes recorded at warning or error severity were in
+none of the three registries**, so `isAppFinding` answered YES to every one. Each landed in the user's
+build-health card as a problem with THEIR app and took 6 points off their app's health score — with no
+button to press. 26 were classified then; 56 were left as a ratcheted backlog that may only shrink.
+
+**What this change does, and why it needed no decision from the admin.** It classifies the nine codes
+whose OWN recording site already answers the question. Every one is quoted from that site rather than
+judged now, which is the whole reason this batch could be shipped without an admin call:
+
+| Code | Its own words at the recording site |
+|---|---|
+| `RELEASE_GATE_UNPROVEN` | *"not evidence the app is broken — it is the absence of evidence that it works, and the two must never be reported as the same thing"* |
+| `LAST_CHANCE_PROOF_UNAVAILABLE` | *"an infrastructure limit here, never evidence about the app itself"* |
+| `SANDBOX_UNAVAILABLE` | *"Infrastructure condition, not an app error."* |
+| `RUNTIME_UNCHECKED` | our console capture failed; `PROCESS_ONLY_CODES` already calls `VERIFY_DID_NOT_RUN` *"the class of RUNTIME_UNCHECKED"* |
+| `CLAIM_UNSUPPORTED` | OUR closing summary over-claimed and is corrected in place — the class of `SUMMARY_OFF_TOPIC`, already process-only |
+| `TIMELINE_TRUNCATED` | our diagnostics timeline hit its own entry cap |
+| `PREVIEW_REVIVAL_RECIPE` | our storage could not keep the wake-up recipe; the preview itself rendered |
+| `GUARD_REPEAT` | our mistake guard did not hold — *"needs an upstream/architectural fix, not a better reminder"* |
+| `UPSELL_SUPPRESSED` | whether WE asked for credits; its own comment calls the warning cases *"a real fault of ours"* |
+
+`RELEASE_GATE_UNPROVEN` is the sharpest of the nine: its own detail forbids reporting "unproven" as
+"broken", and showing it in the user's build-health card as a problem with their app was doing exactly
+that. The honesty fix was already written at the recording site; only the registry entry was missing.
+
+🔒 **Why this moves no money, on the same argument the existing block in `BuildDiagnostics.ts` makes.**
+A RED gate flips a build to free only on `shippingIssueCount('error')`, and all nine are recorded at
+WARNING or INFO severity, so the error count cannot change. What changes is the caveat count, which is
+the point. **`PLATFORM_SOURCE_WORKSPACE` is deliberately left out** — it is the one unclassified code
+recorded at ERROR severity, so reclassifying it is money-adjacent and gets its own look. That exclusion
+is asserted as a test, not just written in a comment, because "left out on purpose" and "forgotten" look
+identical in a diff.
+
+**Not in this batch, deliberately:** the codes that genuinely need a decision about what a user should
+be told — `TOOL_ERROR`, `STUCK_TOOL`, the `OUTCOME_*` roll-ups, `FEATURE_COVERAGE`,
+`SIMULATED_DATA_SHIPPED`. Classifying those from a guess is how 82 unclassified codes happened in the
+first place.
+
+**Locked by 12 new assertions** in the census file, which test the thing that mattered to a user rather
+than the presence of a name in a list: `isAppFinding` now answers NO for each of the nine, in both the
+`readiness` and `build` phases (the phases they are recorded in, and ones `isAppFinding` does not exclude
+outright). Plus the fixture is asserted not to list them, so the ratchet cannot be satisfied by listing
+a code twice, and the new backlog size (47) is pinned. Reversion-proven: commenting one code back out of
+`PROCESS_ONLY_CODES` fails both the ratchet and that code's own assertion.
+
+**The row stays OPEN — 47 remain.** Under the sixth absolute rule a row leaves the table only when it is
+finished, and this is batch one of a shrinking backlog, not the end of it.

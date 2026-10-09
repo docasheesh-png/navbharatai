@@ -92650,3 +92650,46 @@ also clean. GitHub's mergeability cache had gone stale after three PRs landed in
 The honest reading: a 405 from the merge endpoint is not proof of a conflict — check it against a
 local three-way merge before believing it, and a `main` merge plus a push is what makes GitHub
 recompute.
+
+## 2026-10-09 — Q-600 batch two (#3609, Q-771): the same sweep, two opposite verdicts
+
+Batch one (#3607) proved the unused-locals backlog is not cosmetic. Batch two proves the harder
+half: **what a found local deserves is a judgement, and the two answers go opposite ways.** A count
+cannot tell you which; only the call sites can.
+
+**SHOWN — `GitPanel.tsx`.** `activeStep` and `currentBuildTime` were both maintained by the real
+deploy paths and rendered nowhere. Every path sets the step — the GitHub push
+(`executeRealGitHubPush`), the static ZIP export, the managed Render deploy and the
+config-injection path — 1 on validate/prepare, 2 on build/package, 3 on done. And a `useEffect`
+ran a 100 ms ticker into `currentBuildTime` for as long as the deploy was validating or building,
+correctly cleaned up on unmount. So the component knew exactly which step a deploy was on and how
+many seconds it had taken, and the user watching it saw one pulsing word ("Building..."). The
+ticker's state updates were re-rendering the panel ten times a second to display nothing.
+
+Fixed by rendering what was already there: a three-step strip (Validate / Build / Done) in the
+console header, the current step amber and pulsing, completed steps green, the failed step red when
+a deploy errors or comes back unavailable, and the elapsed seconds beside the status word. No new
+state, no new machinery — the missing piece was only ever the display.
+
+**DELETED — `BotBuilder.tsx`.** The webhook modal's snippet was
+`POST https://your-server.com/webhook` with an `<exported_json>` placeholder: an illustration of an
+endpoint that does not exist. Nothing rendered it any more, because the real Go Live flow replaced
+it — a Telegram bot token that connects the bot for real, and WhatsApp's actual callback URL and
+verify token to paste into Meta, both copied by the live `copyField`. Wiring a copy button to a
+placeholder URL would have shipped exactly the fake feature the second absolute rule forbids, so
+`showWebhookModal`, `copied`, `webhookSnippet` and `copyWebhook` all went, with a comment at the
+site recording why, so nobody re-derives the old design from the leftover.
+
+Also dropped `changesCount` and `changes` in `GitPanel` — a changed-files list rendered nowhere. The
+`files` object the live commit-message heuristic reads is untouched.
+
+**Locked:** `tests/aDeployStepTheCodeSetsIsAStepTheUserSees.test.ts` holds both halves. No
+`setActiveStep` call may name a step with no label — a 4th step would render as nothing, which is
+the class returning in a new shape — the strip and the elapsed time must stay rendered, the removed
+webhook pieces must not come back, and no placeholder host may appear outside a comment.
+Reversion-proven both ways: emptying the step strip fails, and `setActiveStep(4)` fails with
+*"a deploy path sets step 4, but only 3 labels exist, so that step would render as nothing"*.
+
+**Baseline 86 → 78**, both files out of `unusedLocalsBaseline.json` (18 files → 16). **Q-600 stays
+OPEN** — 78 locals in 16 files, of which `App.tsx` (46) and `AgentV3Panel.tsx` (11) are 57 and are
+left alone while other sessions may be editing them. The remaining small files are the next batch.

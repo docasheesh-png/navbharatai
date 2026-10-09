@@ -188,7 +188,7 @@ import { nextBuildRepairHint, nextMiddlewareCorrectPath } from './frameworkBuild
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
-import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
+import { assessReadiness, readinessTimeoutMs, readinessVerdict, unassessedReadinessReport, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
 import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE, entryFirstWriteNote } from './earlyPreview';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
@@ -1647,17 +1647,17 @@ export class ToolDispatcher {
    * Run the real `evaluate` scan and return its structured readiness verdict (R2 §1.1).
    * Used by AgentRunner to make the quality gate MANDATORY: a build cannot be reported as a
    * clean success while `ready` is false (a build-breaker, secret leak, fake code, or an app
-   * that cannot run). Best-effort: if the scan throws, returns a permissive READY so the gate
-   * never wrongly fails a real build on an internal error.
+   * that cannot run). If the scan times out or throws, the report is UNASSESSED — not a perfect
+   * score. Slowness is not evidence the app is finished, and it is not evidence it failed (TD-2).
    */
   async assessBuildReadiness(): Promise<ReadinessReport> {
-    const permissive: ReadinessReport = { score: 100, ready: true, blockers: [], warnings: [], tier: 'enterprise' };
+    // A stale verdict from an earlier evaluate must not be returned when this scan does not finish.
+    this.lastReadiness = null;
     try {
       // OVERALL TIMEOUT (audit P0-C): the readiness gate runs AFTER the last agent turn, so the
       // build's wall-clock deadline can no longer interrupt it. Without this bound a single stalled
       // file read here hangs a build whose app is ALREADY built, until the 12-min cap kills it as a
-      // "failure". On timeout we return a PERMISSIVE verdict — the gate is best-effort and must never
-      // fail a real build on its own slowness.
+      // "failure". On timeout we return UNASSESSED — never a 100/100 the health card would call READY.
       return await withTimeout((async () => {
         // CRITICAL — seed the project graph from the REAL workspace before judging it.
         // The in-memory graph is otherwise populated ONLY by the indexing write-tools
@@ -1670,7 +1670,8 @@ export class ToolDispatcher {
         // (The seed now runs inside `evaluate` itself, so the model's own call is judged on the same
         // fresh graph — autopsy 4d538ca3.)
         await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
-        const report = this.lastReadiness ?? permissive;
+        const report = this.lastReadiness;
+        if (!report) return unassessedReadinessReport();
         // AN UNTOUCHED SCAFFOLD IS NOT A FINISHED APP (autopsy 31dc61fd). Readiness measures CODE
         // HEALTH, and a pristine starter template is perfectly healthy — so this gate scored 100/100
         // on `<h1>Hello World</h1>` and the done signal told the model to stop and hand it over. The
@@ -1680,9 +1681,9 @@ export class ToolDispatcher {
         // one, so the done signal, the weak checkpoint and every other reader inherit this at once
         // instead of each learning it separately. See stillTheStarterApp.ts.
         return await this._blockIfStillTheStarterApp(report);
-      })(), 45_000, 'assessBuildReadiness');
+      })(), readinessTimeoutMs(), 'assessBuildReadiness');
     } catch {
-      return permissive;
+      return unassessedReadinessReport();
     }
   }
 
@@ -1748,7 +1749,7 @@ export class ToolDispatcher {
         return lintGateVerdict(outcomes);
       })(), 45_000, 'assessLintGate');
     } catch {
-      return permissive;
+      return { blocked: false, errorCount: 0, blockers: [], summary: 'Lint gate: not assessed (the check timed out or failed).', unassessed: true };
     }
   }
 

@@ -60,9 +60,16 @@ export function buildScriptFrom(packageJsonRaw: string | null | undefined): stri
   }
 }
 
-/** The command to run. `2>&1` because bundlers put the useful part on stderr. */
-export function prodBuildCommand(): string {
-  return 'npm run build 2>&1 | tail -120';
+/** The command to run. `2>&1` because bundlers put the useful part on stderr.
+ *
+ * npm's OWN exit status, not tail's (BLD-1). A pipeline's status is the last command's, and `tail`
+ * exits 0 whenever it can read, so a broken `npm run build` used to be recorded as a success.
+ * POSIX `sh` — no `pipefail` / `PIPESTATUS`. The inner command runs in its own subshell so a
+ * multi-command inner (and `exit`) cannot skip the tail, and the redirect covers every command
+ * of the inner, not only the last one.
+ */
+export function prodBuildCommand(inner = 'npm run build'): string {
+  return `(L=/tmp/nbai-prodbuild-$$.log; (${inner}) > "$L" 2>&1; ec=$?; tail -n 120 "$L"; rm -f "$L"; exit $ec)`;
 }
 
 export interface ProdBuildResult {
@@ -108,6 +115,15 @@ export function judgeProdBuild(input: {
     };
   }
   if (input.exitCode === 0) {
+    // A pipe used to hide npm's status inside tail's 0. If that ever happens again, the log still
+    // names the failure — do not record it as success (BLD-1).
+    const failedLine = /npm ERR! code ELIFECYCLE|^\s*error during build:|Build failed with \d+ errors?/m.exec(String(input.output ?? ''));
+    if (failedLine) {
+      return {
+        ok: false, ran: true, code: 'PROD_BUILD_FAILED',
+        message: `The app runs, but its PRODUCTION build fails (the command reported success, but its output shows the build failed): ${failedLine[0]}`,
+      };
+    }
     return {
       ok: true, ran: true, code: 'PROD_BUILD_OK',
       message: 'The production build succeeded — this app is ready to publish and to package.',

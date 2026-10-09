@@ -337,6 +337,8 @@ export interface BuildHealth {
    * "no problems were found" and "nothing was ever checked" both produce zero problems.
    */
   provenRunning?: boolean;
+  /** The readiness check timed out. The card must not show a score or say READY. */
+  unassessed?: boolean;
 }
 
 export function initialAgentV3State(): AgentV3ClientState {

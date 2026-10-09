@@ -92501,3 +92501,127 @@ the route to the SDK, which is done and proven; the one SDK that has no hook is 
 rather than an asterisk on a closed row.
 
 Open table after this change: 81 rows.
+## 2026-10-09 — Q-600 batch one: a finished feature no screen could reach (Q-770, #3607)
+
+**What the sweep was for.** Q-600 is `tsc --noUnusedLocals`' backlog: 95 client locals in 19 files that
+nothing reads, ratcheted in CI by `scripts/noUnusedImports.mjs` against `scripts/unusedLocalsBaseline.json`
+so it can only shrink. Its own row warned the class is "state or a handler nothing reads" — the kind that
+hid a `saveError` message until #3531. This batch took the largest non-App file: `LiveCollaboration.tsx`, 9.
+
+**What was actually there — recorded as Q-770.** All nine were ONE feature. P-DESIGN.7's shared code editor
+and line-anchored comments were complete and real: the Firestore `content/shared` doc with its debounced
+last-write-wins sync, the throttled presence/caret writes, the `comments` subcollection with its
+`onSnapshot`, `handleCodeChange` / `handleCaret` / `addComment` / `resolveComment` / `jumpToLine` /
+`relativeTime`, and the pure, separately unit-tested helpers in `src/lib/collabAnnotations.ts`. The only
+missing piece was the JSX: the `RoomTab` union was `'free' | 'pro' | 'professional' | 'team'`, with no
+`'code'`, so nothing rendered any of it. `git log -S"roomTab === 'code'"` across all branches returns
+nothing — the tab was never built, not removed.
+
+Meanwhile `AppKnowledgeBase.ts`'s `live_collaboration` entry — the single source of truth every AI in
+NavBharatAI reads to answer "where is X?" — told users: *"the Code tab for the shared editor + line
+comments"*, and *"Use the AI tab"*. Neither tab existed. So the app was confidently directing users to a
+screen that was not there, and the `comments` listener was paying for Firestore reads nobody could see.
+
+**Why it was built rather than deleted.** The second absolute rule allows exactly two states, and the
+backend half was already in state (a). Deleting a complete, tested, Firestore-wired subsystem to satisfy a
+lint — and then correcting the knowledge base downward — would have removed a real capability to tidy a
+count. Building the ~80 lines of JSX puts a documented feature into the product instead.
+
+**Shipped:** a Code tab (shared editor with the caret line and character count, everyone else's cursor
+lines beneath it, a comments pane that pins to the caret's line with jump-to-line and resolve), the
+knowledge-base entry corrected on all three counts (the tab list now names Free / Pro v5 / Professional /
+Code / Team, the Code tab's behaviour is described, the non-existent "AI tab" is gone) with new keywords,
+and the dead `bootedMsg` state removed — it held the same string as `errorMsg`, which is what the idle
+screen actually renders, so nothing was hidden by it. `createRoom` and `joinRoom` now clear `errorMsg`
+where they used to clear `bootedMsg`, which is a real (small) fix: a stale error no longer survives the
+next attempt.
+
+**Locked at the class, not the instance.** `tests/aRoomTabTheKnowledgeBaseNamesExists.test.ts` asserts
+every `RoomTab` member has a header button AND a render branch, that no branch renders an undeclared tab,
+that every shared-editor handler is referenced from the JSX, and that every rendered tab label appears in
+the knowledge-base entry (with the stale "the AI tab" phrasing asserted gone). Reversion-proven in both
+directions: removing the Code button fails with *"RoomTab declares 'code' but no header button lets a user
+tap it"*; restoring the old `howToUse` fails on the missing labels and on "the AI tab".
+
+**Baseline: 95 → 86**, and `LiveCollaboration.tsx` is out of `unusedLocalsBaseline.json` entirely.
+Q-600 stays OPEN — 86 locals in 18 files remain. The next files worth reading for this same class are
+`GitPanel.tsx` (4) and `BotBuilder.tsx` (4, where a `copyWebhook` sits beside a `showWebhookModal` that
+nothing opens).
+---
+
+## 2026-10-09 — Q-763: the synced workspace, and the registry entry that would have made it worse
+
+**`user_workspaces/{uid}` is the most obvious `'docId'` entry in this repo. Adding it would have been a
+false fix, and a worse state than before.** The document whose id is the uid is only a MANIFEST —
+`{ version, chunkCount, totalBytes, updatedAt }` — while the person's whole cross-device workspace
+(every chat session and their last built app) lives in separate documents at `user_workspaces/{uid}__c{i}`.
+
+Registering it with the retention manager would have deleted the **index** and kept the **data**: an
+erase that reports success, satisfies every test, and leaves the workspace in our database for ever,
+now unreachable because the manifest that counted its chunks is gone.
+
+That is the third appearance of one shape in four days — Q-134 (a subcollection left behind by a
+parent-only delete), Q-701 PR A (`agentv3_conversations`, caught before it shipped), and this one. The
+tell is always the same: **the thing that points at the data is not the data.**
+
+### The fix, and why it is its own module
+
+`src/server/lib/syncWorkspaceErase.ts`, called from `DELETE /api/profile` beside
+`deleteUserWorkspaceData`, reported on its own `synced` line.
+
+- **Chunks first, manifest last.** The manifest is the only thing that says how many chunks exist.
+  Delete it first and a failure one step later strands them with nothing pointing at them — findable
+  only by a prefix query, which `workspaceDataErase.ts` documents as dangerous here (a uid containing
+  the separator makes the range ambiguous, and getting it wrong deletes a different person's data). In
+  this order a partial failure leaves the manifest, so running it again finishes the job.
+- **It does not trust `chunkCount`.** A save writes the chunks first and the manifest last, and when a
+  workspace SHRINKS the route deletes the now-surplus chunks — either step can be interrupted, leaving
+  chunk documents the manifest does not count. The sweep therefore goes to `max(chunkCount, ceiling)`,
+  where the ceiling is computed from the format's own two constants (`MAX_WORKSPACE_BYTES /
+  DEFAULT_CHUNK_SIZE`, doubled, so a historically smaller chunk size is still covered). Every id is
+  exact; deleting a document that is not there is a no-op.
+- **An empty uid is refused, not attempted** — `__c0` is a real, constructible document name belonging
+  to nobody, so deleting it is not harmless.
+- **Not a `KeyStrategy`.** `DataRetentionManager`'s header is explicit that it is exact-match only and
+  that nothing goes in on a guess. A manifest-and-chunks layout is a shape it does not have, and
+  contorting it would weaken the one property that makes that registry safe.
+
+### 🔴 A second defect, found because the first one needed the id
+
+`WorkspaceStore.ts`'s header documented the layout as `user_workspaces/{userId}_chunk_{i}`.
+**No such document has ever existed.** The real id has always been `{userId}__c{i}`, built by a private
+helper inside `routes/sync.ts` — so the only written DESCRIPTION of the layout disagreed with the only
+IMPLEMENTATION of it, and nothing could notice.
+
+This is not a typo to shrug at: an eraser or a migration that trusted the comment would have built ids
+matching nothing, deleted nothing, and **reported success**. I only caught it because writing the
+eraser forced me to ask which of the two was true.
+
+So the id builder, the size cap and the sweep ceiling now live in `WorkspaceStore.ts` next to the codec
+that defines the format, `sync.ts` imports them, and the header says what the builder produces. Two
+tests hold it: `sync.ts` must import `chunkDocId` and must not define one, and the comment is parsed and
+compared against `chunkDocId()`'s actual output.
+
+### The census now checks the DUTY, not one mechanism
+
+`user_workspaces` was `blocked` naming this row; it is now `kind: 'user'`. But it is not in
+`USER_SCOPED_COLLECTIONS` and must not be, so the census's `user ⇒ in that registry` rule would have
+failed — and the honest conclusion is that the rule named a mechanism where it meant an obligation.
+
+`user`-kind is now satisfied by the registry **or** by a named entry in `USER_ERASED_BY_MODULE`, which
+records the file, how `DELETE /api/profile` calls it, and why the registry could not hold it. A second
+test **reads those files** rather than trusting the map — otherwise it would be a new way to say
+"classified" with nothing behind it, which is exactly the failure `workspace` had before Q-701 gave it
+a consequence.
+
+### Verification
+
+`tests/theSyncedWorkspaceIsErased.test.ts` (12 tests) + the two new census tests.
+**Reversion-proven seven ways:** manifest deleted first → the ORDER test fails · the ceiling replaced
+by `chunkCount` → the orphan-sweep test fails · the empty-uid refusal removed → that test fails · the
+old wrong layout comment restored → the layout test fails · a private `chunkDocId` put back in
+`sync.ts` → the one-definition test fails · the module map pointed at the wrong file → the
+reads-the-file test fails · the call removed from the route → the same test fails.
+
+The deletion page now names it too: *"your **cross-device workspace** — the copy of your chat sessions
+and your last built app that we keep so they follow you from one device to another"*.

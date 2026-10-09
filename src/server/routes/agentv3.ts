@@ -1,4 +1,7 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { FILE_SIZE_RULE, READ_GUIDE_TOOL, fileSizeRuleEnabled, moduleText, modularizePrompt, modularPromptEnabled } from '../AgentV3/reliability/modularPrompt';
+import { APPEND_FILE_TOOL, resumeTruncatedEnabled } from '../AgentV3/reliability/resumeWrite';
+import { CORE_TOOL_NAMES, DynamicToolset, coreToolsetEnabled } from '../AgentV3/reliability/coreToolset';
 import { reliabilityFlag } from '../AgentV3/reliability/flags';
 import { createStickyState, escalateSticky } from '../AgentV3/reliability/stickyRung';
 import { onStreamClosed } from '../lib/clientDisconnect';
@@ -15889,6 +15892,19 @@ async function noteBuildOutcome(
       // Best-effort: a listFiles failure falls back to the edit prefix without a
       // tree, and a non-edit turn uses the normal architect prompt unchanged.
       let architectSystem = architectSystemPrompt(framework, { parallelBuild });
+      // P5a (AGENTV3_MODULAR_PROMPT, default OFF) — slim core prompt: domain modules the request does not
+      // need move out and stay reachable through read_guide. P2c (AGENTV3_FILE_SIZE_RULE) — the ~200-line rule.
+      const fullArchitectPromptForGuides = architectSystem;
+      let modularDeferred: string[] = [];
+      if (modularPromptEnabled()) {
+        try {
+          const mp = modularizePrompt(architectSystem, prompt, isEditMode ? ['fullstack'] : []);
+          architectSystem = mp.prompt;
+          modularDeferred = mp.deferred;
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'MODULAR_PROMPT', message: `Architect prompt ${mp.charsBefore} → ${mp.charsAfter} chars; on demand: ${mp.deferred.join(', ') || 'none'}`, autoResolved: true });
+        } catch { /* a modularisation failure keeps the full prompt */ }
+      }
+      if (fileSizeRuleEnabled()) architectSystem = `${architectSystem}\n\n${FILE_SIZE_RULE}`;
       // Capture the pure static body BEFORE any per-request context block is prepended below, so the
       // cache-prefix optimization (AGENTV3_CACHE_PREFIX, applied before the runner is built) can split
       // the volatile prefix back out and keep this large static body as a stable Anthropic cache prefix.
@@ -16366,6 +16382,23 @@ async function noteBuildOutcome(
         architectSystem = split.system;
         cachePrefixPreamble = split.preamble;
       }
+      const architectFullTools = [
+        ...catalogForTools(roleConfig('architect').tools),
+        ...(resumeTruncatedEnabled() ? [APPEND_FILE_TOOL] : []),
+        ...(modularDeferred.length ? [READ_GUIDE_TOOL] : []),
+      ];
+      const architectToolset = coreToolsetEnabled()
+        ? new DynamicToolset(architectFullTools, externalToolDefs(mcpTools), [...CORE_TOOL_NAMES, 'append_file', 'read_guide'])
+        : null;
+      const architectToolsForBuild = architectToolset ? architectToolset.tools : [...architectFullTools, ...externalToolDefs(mcpTools)];
+      try {
+        dispatcher.setReliabilityHooks({
+          ...(architectToolset ? { loadTools: (names: unknown) => architectToolset.load(names) } : {}),
+          ...(modularDeferred.length
+            ? { readGuide: (name: string) => moduleText(fullArchitectPromptForGuides, String(name ?? '').trim().toLowerCase()) || `No guide called "${name}". Available: ${modularDeferred.join(', ')}.` }
+            : {}),
+        });
+      } catch { /* hooks are optional — a dispatcher without them just refuses the meta tools */ }
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -16403,7 +16436,9 @@ async function noteBuildOutcome(
         system: architectSystem,
         // Built-in tools PLUS anything the user connected. Concatenated with ours FIRST so a
         // connected service can never displace a platform tool in the list the model reads.
-        tools: [...catalogForTools(roleConfig('architect').tools), ...externalToolDefs(mcpTools)],
+        // fix/build-reliability — append_file (P2b), read_guide (P5a) and the 16-core + load_tools set
+        // (P5c) are each added only when their flag is on; all off ⇒ exactly the list above as before.
+        tools: architectToolsForBuild,
         onlyOpus,
         powerLevel: powerLevelReqEffective,
         // Slice 2 — weak-tier mid-build checkpoint scope. Same signal Slice 1 uses: a weak/cheap-only

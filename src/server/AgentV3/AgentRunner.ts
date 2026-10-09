@@ -1,4 +1,5 @@
 import { NOT_READY_HEADLINE, NOT_READY_HEADLINE_CONTINUE } from './notReadyHeadline';
+import { PARTIAL_CONTENT_KEY, resumeTruncatedEnabled } from './reliability/resumeWrite';
 import { compactForBudget, recentlyTouchedPaths, tokenCompactEnabled, withWorkingSet, workingSetBlock, workingSetConfig, workingSetEnabled } from './reliability/contextBudget';
 import { QualityMonitor, handoffNote } from './reliability/qualityEscalation';
 import type { AgentEventStream } from './AgentEventStream';
@@ -1376,7 +1377,9 @@ export class AgentRunner {
               if (tu.name === 'write_file') {
                 const inp = tu.input as { path?: unknown; content?: unknown };
                 if (typeof inp?.path === 'string' && typeof inp?.content === 'string') written[inp.path] = inp.content;
-                else if (typeof inp?.path === 'string' && inp?.content === undefined) truncatedToolPaths.push(inp.path);
+                // P2b — a buffered cut-off write is resumed with append_file (the tool result says so);
+                // asking for a whole rewrite here would contradict it.
+                else if (typeof inp?.path === 'string' && inp?.content === undefined && !(resumeTruncatedEnabled() && typeof (tu.input as Record<string, unknown>)?.[PARTIAL_CONTENT_KEY] === 'string')) truncatedToolPaths.push(inp.path);
               } else if (tu.name === 'write_files_batch') {
                 const b = tu.input as { files?: unknown };
                 if (Array.isArray(b?.files)) {

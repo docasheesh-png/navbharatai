@@ -11,6 +11,7 @@
 // network call or key. Errors are NOT swallowed — they propagate so the multi-provider
 // orchestrator can fall through to the next (ultimately Claude) provider.
 
+import { streamingBudget, streamNoClampEnabled } from '../reliability/streamBudget';
 import { modelAcceptsReasoningPassback, reasoningPassbackEnabled } from '../reliability/reasoningPassback';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { turnDeadline, firstAnswerBoundMs, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE, isSlowStreamAbandon } from '../turnDeadline';
@@ -409,13 +410,18 @@ export class OpenAiToolRunner implements TurnRunner {
     // faster rate constant was measured and rejected, and why unclamping cannot make the worst case
     // worse. The capability question is asked of the module that owns it; `modelAlwaysReasons` is a
     // POSITIVE test, so a vendor we have not measured keeps today's clamp exactly.
-    const budget = reconcileFloorBudget(
+    const clampedBudget = reconcileFloorBudget(
       params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000,
       timeoutMs,
       process.env,
       // Known in advance (GLM 5.3+), or LEARNED from this model's own first clamped starvation.
       { alwaysReasons: modelAlwaysReasons(thinkingModel) || modelStarvedWhileClamped(thinkingModel) },
     );
+    // P2a (AGENTV3_STREAM_NO_CLAMP, default OFF) — a STREAMED call is guarded by its idle timer, so the
+    // clock-derived clamp only truncates files; ask for what the caller asked, up to the model's ceiling.
+    const budget = streaming && streamNoClampEnabled()
+      ? streamingBudget(params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000, thinkingModel, clampedBudget)
+      : clampedBudget;
     const request = {
         // The OpenAI-compatible provider has its own model ids, so an explicit option
         // model wins over the Anthropic model id the loop passes for Claude.

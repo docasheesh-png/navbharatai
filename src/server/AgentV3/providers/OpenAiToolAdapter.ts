@@ -13,6 +13,7 @@
 // translation — the intricate, breakage-prone part — is fully unit-testable without
 // any live key. The runner that actually calls a provider wraps these functions.
 
+import { PARTIAL_CONTENT_KEY, resumeTruncatedEnabled, salvageTruncatedContent } from '../reliability/resumeWrite';
 import { recalledReasoning, rememberReasoning, reasoningPassbackEnabled } from '../reliability/reasoningPassback';
 import type { ClaudeToolDef, ToolUse, TurnResult, TurnUsage } from '../ClaudeClient';
 
@@ -226,7 +227,15 @@ function parseArgs(args: string | undefined, salvage = false): Record<string, un
   } catch {
     if (salvage) {
       const path = salvageTruncatedPath(args);
-      if (path) return { path };
+      if (path) {
+        // P2b (AGENTV3_RESUME_TRUNCATED) — also carry the partial content, under a key write_file does
+        // NOT read as `content`, so the dispatcher buffers it (never persists it) and asks for the rest.
+        if (resumeTruncatedEnabled()) {
+          const partial = salvageTruncatedContent(args);
+          if (partial) return { path, [PARTIAL_CONTENT_KEY]: partial };
+        }
+        return { path };
+      }
     }
     return {};
   }

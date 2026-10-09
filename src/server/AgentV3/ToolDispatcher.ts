@@ -1,4 +1,6 @@
 import { entryShadowNote } from './entryShadow';
+import { bannedInstallRefusal, bannedPackageGuardEnabled, stripBannedDeps, strippedDepsNote } from './reliability/bannedPackages';
+import { PARTIAL_CONTENT_KEY, PendingWrites, resumeTruncatedEnabled, truncatedWriteNotice } from './reliability/resumeWrite';
 import { recordingActuator } from './recordedWrites';
 import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
 import { repeatedEditNotice } from './repeatedEdits';
@@ -3031,7 +3033,16 @@ export class ToolDispatcher {
    * after being told to stop. The readiness scan reads code, not the compiler, so the compiler's own
    * last word is asked too.
    */
-  lastKnownTypeErrors(): number | null {
+  /** P5a/P5c — hooks the route sets when AGENTV3_MODULAR_PROMPT / AGENTV3_CORE_TOOLSET are on. */
+  private _reliabilityHooks: { loadTools?: (names: unknown) => string; readGuide?: (name: string) => string } = {};
+  setReliabilityHooks(hooks: { loadTools?: (names: unknown) => string; readGuide?: (name: string) => string }): void {
+    this._reliabilityHooks = { ...this._reliabilityHooks, ...hooks };
+  }
+
+  /** P2b — cut-off writes waiting for append_file (never on disk). */
+  private readonly _pendingWrites = new PendingWrites();
+
+    lastKnownTypeErrors(): number | null {
     return this._lastTypeErrors;
   }
 
@@ -4305,7 +4316,50 @@ export class ToolDispatcher {
         return `${notice}[lines ${from + 1}-${Math.min(to, lines.length)} of ${lines.length} — the file is complete on disk]\n${slice}`;
       }
 
+      case 'load_tools': {
+        // P5c (AGENTV3_CORE_TOOLSET) — the route hands the dispatcher its build's DynamicToolset.
+        if (!this._reliabilityHooks.loadTools) throw new Error('load_tools is not enabled for this build — every tool is already offered.');
+        return this._reliabilityHooks.loadTools((input as { names?: unknown })?.names);
+      }
+      case 'read_guide': {
+        // P5a (AGENTV3_MODULAR_PROMPT) — an on-demand prompt module.
+        if (!this._reliabilityHooks.readGuide) throw new Error('read_guide is not enabled for this build — every guide is already in your instructions.');
+        return this._reliabilityHooks.readGuide(reqStr(input, 'name'));
+      }
+      case 'append_file': {
+        // P2b (AGENTV3_RESUME_TRUNCATED) — finish a cut-off write (buffered, never persisted until done)
+        // or append to a file on disk. Every real write goes through write_file, so its guards still run.
+        const path = reqStr(input, 'path');
+        const more = reqStr(input, 'content');
+        const done = (input as { done?: unknown })?.done === true;
+        if (this._pendingWrites.has(path)) {
+          const full = this._pendingWrites.append(path, more);
+          if (!done) return `Buffered ${more.length} more chars for ${path} (${full.length} so far, not saved yet). Continue with append_file; pass done:true on the last part.`;
+          this._pendingWrites.take(path);
+          const res = await this.run({ ...call, name: 'write_file', input: { path, content: full } }, agent);
+          return `Completed the cut-off write of ${path} (${full.split('\n').length} lines).\n${res}`;
+        }
+        let existing = '';
+        try { existing = await this.actuator.readFile(this.workspaceId, path); } catch { existing = ''; }
+        return this.run({ ...call, name: 'write_file', input: { path, content: existing + more } }, agent);
+      }
       case 'write_file': {
+        // P2b — a write cut off at the output limit carries only `_partial_content`: buffer it, never write it.
+        const partialIn = (input as Record<string, unknown> | undefined)?.[PARTIAL_CONTENT_KEY];
+        if (resumeTruncatedEnabled() && typeof partialIn === 'string' && (input as { content?: unknown })?.content === undefined) {
+          const p = reqStr(input, 'path');
+          this._pendingWrites.start(p, partialIn);
+          return truncatedWriteNotice(p, partialIn);
+        }
+        if (typeof (input as { path?: unknown })?.path === 'string') this._pendingWrites.drop((input as { path: string }).path);
+        // P5b (AGENTV3_BANNED_PACKAGE_GUARD) — a package.json write never carries a banned dependency.
+        if (bannedPackageGuardEnabled() && /(^|\/)package\.json$/.test(String((input as { path?: unknown })?.path ?? '')) && typeof (input as { content?: unknown })?.content === 'string') {
+          const stripped = stripBannedDeps((input as { content: string }).content);
+          if (stripped.removed.length) {
+            const res = await this.run({ ...call, input: { ...(input as Record<string, unknown>), content: stripped.content } }, agent);
+            return `${res}\n${strippedDepsNote(stripped.removed)}`;
+          }
+        }
         let path = reqStr(input, 'path');
         this._editsPerFile.delete(path); // a whole-file write is exactly what the edit-loop note asks for
         // NEXT.JS MIDDLEWARE LOCATION FIX (CargoPilot autopsy 2026-07-19): Next.js runs middleware ONLY
@@ -4694,6 +4748,11 @@ export class ToolDispatcher {
         // model read that as "done" and moved on, until the loop guard stepped in. A tool that reports
         // success for work it never did is the fake-success class — so it says what was wrong instead.
         if (!rawCommand.trim()) throw new Error(emptyCommandMessage(input));
+        // P5b (AGENTV3_BANNED_PACKAGE_GUARD) — refuse an install of a banned package BEFORE it runs.
+        if (bannedPackageGuardEnabled()) {
+          const refusal = bannedInstallRefusal(rawCommand);
+          if (refusal) throw new Error(refusal);
+        }
         const typoFix = fixNodeModulesTypo(rawCommand);
         const command = typoFix.command;
         // Scaffold guard: create-* generators (`npm create vite`, `npx create-*`,

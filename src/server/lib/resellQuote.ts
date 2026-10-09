@@ -5,10 +5,13 @@
 // permission to try, never a bill.
 //
 // Included servers (the ones a Starter or Growth plan already paid for) are not billed again.
-// An extra server is ₹149 only after it is live. A private database is ₹1,499 only after it is
-// ready. Hosting it yourself, and your own Supabase, are not in this quote — they stay free from us.
+// An extra server is ₹149 only after it is live. The small database and its API are ₹49 only after
+// both exist — that is the cheap product, because it runs on servers we already pay for. A private
+// database is ₹1,499 only after it is ready, and only when that option is switched on. Hosting it
+// yourself, and your own Supabase, are not in this quote — they stay free from us.
 
 import { addonById } from '../../lib/hostingAddons';
+import { SHARED_DATA_OPS_CAP } from './sharedData';
 
 export interface ResellAddonRow {
   ref: string;
@@ -65,7 +68,7 @@ export function projectRefFromDatabaseProof(proof: string | null | undefined): s
 }
 
 /** One stable purchase id per app per 30-day window, so a double-click cannot buy two. */
-export function stableResellRef(kind: 'server' | 'database', workspaceId: string, nowMs: number): string {
+export function stableResellRef(kind: 'server' | 'database' | 'shared', workspaceId: string, nowMs: number): string {
   const bucket = Math.floor(nowMs / (30 * 24 * 60 * 60 * 1000));
   // FNV-1a, 32-bit, hex — no node:crypto, so the browser can show the same id if it ever needs to.
   const raw = `${kind}:${workspaceId}:${bucket}`;
@@ -75,7 +78,7 @@ export function stableResellRef(kind: 'server' | 'database', workspaceId: string
     h = Math.imul(h, 0x01000193);
   }
   const hex = (h >>> 0).toString(16).padStart(8, '0');
-  const prefix = kind === 'server' ? 'srv' : 'dbs';
+  const prefix = kind === 'server' ? 'srv' : kind === 'shared' ? 'shr' : 'dbs';
   return `${prefix}${hex}${bucket.toString(36)}`.slice(0, 64);
 }
 
@@ -175,11 +178,21 @@ export function quoteDatabaseResell(input: {
   workspaceId: string;
   active: readonly ResellAddonRow[] | null;
   canPay: boolean | null;
+  /**
+   * shared — database and API on the servers we already run (the one that starts by default).
+   * dedicated — a private Supabase project. Omitted means dedicated, which is what the first
+   * version of this quote was.
+   */
+  product?: 'shared' | 'dedicated';
 }): ResellOption {
-  const spec = addonById('dedicated_db');
+  const product = input.product === 'shared' ? 'shared' : 'dedicated';
+  const spec = addonById(product === 'shared' ? 'shared_db' : 'dedicated_db');
   const price = spec?.priceInr ?? 0;
   const max = spec?.max ?? 0;
   const own = ' Connecting your own Supabase stays free from us.';
+  const offer = product === 'shared'
+    ? `This database and its API are ₹${price} for 30 days, taken only after both exist and the key is saved into the app. If that does not happen, they are removed and nothing is charged. ${SHARED_DATA_OPS_CAP.toLocaleString('en-IN')} operations are included; after that the API pauses and nothing extra is charged. This is not a separate machine.`
+    : `A private database is ₹${price} for 30 days, taken only after it is ready.`;
   if (!input.plansOn) return unavailable(price, 'Database add-ons are not available right now. Nothing was charged.' + own);
   if (!input.configured) {
     return unavailable(price, 'A database from NavBharatAI is not switched on yet. Nothing was charged.' + own);
@@ -198,14 +211,16 @@ export function quoteDatabaseResell(input: {
       canStart: false,
       stopRef: paid.ref,
       status: 200,
-      reason: 'This app already has a NavBharatAI database. Nothing extra is charged. Remove it here to delete the database first — unused days come back only after it is gone.' + own,
+      reason: product === 'shared'
+        ? 'This app already has a NavBharatAI database and API. Nothing extra is charged. Remove it here to delete the data first — unused days come back only after it is gone.' + own
+        : 'This app already has a NavBharatAI database. Nothing extra is charged. Remove it here to delete the database first — unused days come back only after it is gone.' + own,
     };
   }
   if (input.active.length >= max || max <= 0) {
     return unavailable(price, `You already have the maximum of ${max} database${max === 1 ? '' : 's'} from us. Remove one, or connect your own. Nothing was charged.`);
   }
   if (!input.canPay) {
-    return unavailable(price, `A private database is ₹${price} for 30 days, taken only after it is ready. Your balance is not enough, so nothing was created. Your welcome gift cannot buy it.${own}`, 402);
+    return unavailable(price, `${offer} Your balance is not enough, so nothing was created. Your welcome gift cannot buy it.${own}`, 402);
   }
   return {
     mode: 'addon',
@@ -213,6 +228,8 @@ export function quoteDatabaseResell(input: {
     canStart: true,
     stopRef: null,
     status: 200,
-    reason: `₹${price} is taken only after the database is ready and its keys are saved into this app. If that does not happen, the database is deleted and nothing is charged.${own}`,
+    reason: product === 'shared'
+      ? `${offer}${own}`
+      : `₹${price} is taken only after the database is ready and its keys are saved into this app. If that does not happen, the database is deleted and nothing is charged.${own}`,
   };
 }

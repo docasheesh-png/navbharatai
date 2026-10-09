@@ -210,9 +210,9 @@ export function registerWalletRoutes(app: Express): void {
       const row = menu.active.find((a) => a.ref === ref);
       if (!row) return res.status(404).json({ ok: false, error: 'That add-on was not found. Nothing was changed.' });
       // A server or a database is not a slot. Refunding here would return the money while the
-      // Cloud Run service or the Supabase project kept running. Stop it from Publish, which
-      // deletes it first and only then returns unused days.
-      if (row.addonId === 'server' || row.addonId === 'dedicated_db') {
+      // Cloud Run service, the Supabase project, or the shared database kept running. Stop it
+      // from Publish, which deletes it first and only then returns unused days.
+      if (row.addonId === 'server' || row.addonId === 'dedicated_db' || row.addonId === 'shared_db') {
         return res.status(409).json({
           ok: false,
           reason: 'still_in_use',

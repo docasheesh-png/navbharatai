@@ -131,6 +131,9 @@ export async function executeDatabaseResell(
       ? 'The database was ready but its keys could not be saved, so it was deleted and the charge was returned.'
       : 'The database was deleted because its keys could not be saved. The charge could not be returned automatically — it is not still running. Try Remove again.');
   }
+  const sharedNote = deps.quoteInput.product === 'shared'
+    ? ' Publish the app again so it can call the API. The key is saved in this app\'s secrets, not in the source.'
+    : '';
   return {
     status: 200,
     body: {
@@ -138,8 +141,8 @@ export async function executeDatabaseResell(
       charged: charged.charged === true,
       url: created.url,
       message: charged.charged
-        ? `Your database is ready and wired into this app. ₹${quote.priceInr} was taken from your wallet for 30 days.`
-        : 'Your database is ready. This one was already paid for, so nothing extra was charged.',
+        ? `Your database is ready and wired into this app. ₹${quote.priceInr} was taken from your wallet for 30 days.${sharedNote}`
+        : `Your database is ready. This one was already paid for, so nothing extra was charged.${sharedNote}`,
     },
   };
 }

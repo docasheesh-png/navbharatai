@@ -21,6 +21,7 @@ interface ResellSide {
 interface ResellOptions {
   server: ResellSide;
   database: ResellSide;
+  dedicated?: ResellSide;
   own?: { hosting?: string; database?: string };
 }
 
@@ -32,14 +33,15 @@ export interface ResellHostingChoiceProps {
 }
 
 const SERVER_PRICE = addonById('server')?.priceInr ?? 0;
-const DB_PRICE = addonById('dedicated_db')?.priceInr ?? 0;
+const DB_PRICE = addonById('shared_db')?.priceInr ?? 0;
 
 export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSettings, busy }: ResellHostingChoiceProps) {
   const [options, setOptions] = useState<ResellOptions | null>(null);
   const [serverAgreed, setServerAgreed] = useState(false);
   const [dbAgreed, setDbAgreed] = useState(false);
+  const [dedicatedAgreed, setDedicatedAgreed] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const [working, setWorking] = useState<'server' | 'database' | null>(null);
+  const [working, setWorking] = useState<'server' | 'database' | 'dedicated' | null>(null);
 
   useEffect(() => {
     if (!authedFetch || !workspaceId) return;
@@ -51,12 +53,16 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
     return () => { live = false; };
   }, [authedFetch, workspaceId]);
 
-  const run = async (kind: 'server' | 'database') => {
+  const run = async (kind: 'server' | 'database' | 'dedicated') => {
     if (!authedFetch || !workspaceId) return;
-    const agreed = kind === 'server' ? serverAgreed : dbAgreed;
+    const agreed = kind === 'server' ? serverAgreed : kind === 'dedicated' ? dedicatedAgreed : dbAgreed;
     if (!agreed) { setNote('Tick the terms first. Nothing was started.'); return; }
     setWorking(kind); setNote(null);
-    const path = kind === 'server' ? '/api/agentv3/resell/server' : '/api/agentv3/resell/database';
+    const path = kind === 'server'
+      ? '/api/agentv3/resell/server'
+      : kind === 'dedicated'
+        ? '/api/agentv3/resell/database/dedicated'
+        : '/api/agentv3/resell/database';
     const timeout = kind === 'server' ? 10 * 60_000 : LONG_REQUEST_TIMEOUT_MS.provisionDatabase;
     try {
       const res = await authedFetch(path, {
@@ -83,7 +89,7 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
     }
   };
 
-  const stop = async (kind: 'server' | 'database', ref: string) => {
+  const stop = async (kind: 'server' | 'database' | 'dedicated', ref: string) => {
     if (!authedFetch || !workspaceId) return;
     setWorking(kind); setNote(null);
     const path = kind === 'server' ? '/api/agentv3/resell/server/stop' : '/api/agentv3/resell/database/stop';
@@ -117,9 +123,10 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
         <span className="text-[13px] font-bold text-ink">Server and database</span>
       </div>
       <p className="text-[11.5px] text-muted leading-relaxed">
-        You can host it yourself, and you can connect your own database. Both stay free from us, the same as today.
-        A server from NavBharatAI is ₹{SERVER_PRICE} for 30 days and a private database is ₹{DB_PRICE} for 30 days —
-        taken only after it is actually running, never from the add-on list.
+        You can host it yourself, and you can connect your own database. Both stay free from us.
+        A database and API from NavBharatAI is ₹{DB_PRICE} for 30 days — both together, on the servers we already run, not a new machine.
+        A custom server, once your plan's servers are full, is ₹{SERVER_PRICE}, taken only after it is live.
+        Neither is sold from the add-on list.
       </p>
       {options?.server && (
         <p className="text-[11.5px] text-body leading-relaxed">{options.server.reason}</p>
@@ -167,7 +174,7 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
           className="self-start py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-on-accent text-[11.5px] font-bold flex items-center gap-2"
         >
           <Database className="w-3.5 h-3.5" />
-          {working === 'database' ? 'Creating the database…' : 'Create the database on NavBharatAI'}
+          {working === 'database' ? 'Starting…' : 'Start the database and API'}
         </button>
       )}
       {options?.database.stopRef && (
@@ -178,6 +185,35 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
           className="self-start py-2 px-3 rounded-lg border border-line text-[11.5px] font-semibold text-body"
         >
           {working === 'database' ? 'Removing…' : 'Delete this database and return unused days'}
+        </button>
+      )}
+      {(options?.dedicated?.canStart || options?.dedicated?.stopRef) && (
+        <p className="text-[11.5px] text-body leading-relaxed">{options.dedicated.reason}</p>
+      )}
+      {options?.dedicated?.canStart && (
+        <label className="flex items-start gap-2 text-[11.5px] text-muted leading-relaxed">
+          <input type="checkbox" checked={dedicatedAgreed} onChange={(e) => setDedicatedAgreed(e.target.checked)} className="mt-0.5" />
+          <span>{options.dedicated.terms?.[0] || `₹${options.dedicated.priceInr} from the money I added, only after the private database is ready.`}</span>
+        </label>
+      )}
+      {options?.dedicated?.canStart && (
+        <button
+          type="button"
+          disabled={!!busy || working !== null || !dedicatedAgreed}
+          onClick={() => void run('dedicated')}
+          className="self-start py-2 px-3 rounded-lg border border-line text-[11.5px] font-semibold text-body"
+        >
+          {working === 'dedicated' ? 'Creating…' : `Create a private database — ₹${options.dedicated.priceInr}`}
+        </button>
+      )}
+      {options?.dedicated?.stopRef && (
+        <button
+          type="button"
+          disabled={!!busy || working !== null}
+          onClick={() => void stop('dedicated', options.dedicated.stopRef as string)}
+          className="self-start py-2 px-3 rounded-lg border border-line text-[11.5px] font-semibold text-body"
+        >
+          {working === 'dedicated' ? 'Removing…' : 'Delete this private database and return unused days'}
         </button>
       )}
       {onOpenDatabaseSettings && (

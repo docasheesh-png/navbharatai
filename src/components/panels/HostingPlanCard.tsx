@@ -8,7 +8,8 @@
  *     ⚠️ NEITHER BUNDLES WALLET CREDIT any more (admin: "no free credit") — Growth's ₹150/month is
  *     gone, and `bundledCreditInr` is 0 on both. Every figure this card RENDERS comes from
  *     `HOSTING_TIERS`, so it followed the re-price on its own; only this comment had to be told.
- *   • Database — Free, always (runs on the user's own account — the standing rule).
+ *   • Database — your own database stays free. A small database and API from us is a separate
+ *     Publish purchase, charged only after it exists. It is not included in the plan price.
  *   • Coding — pay-per-use from the wallet (already live; shown here so the full account story
  *     reads in one place).
  *
@@ -348,7 +349,7 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
         <Database className="w-4 h-4 text-success shrink-0 mt-0.5" />
         <div>
           <p className="text-[12px] font-bold text-ink">Database — Free</p>
-          <p className="text-[11px] text-muted mt-0.5">Your apps' databases run on your own account, so there is nothing to charge. Always ₹0.</p>
+          <p className="text-[11px] text-muted mt-0.5">Your own database stays free. A small database and API from NavBharatAI is separate, on Publish, and is charged only after it exists.</p>
         </div>
       </div>
 

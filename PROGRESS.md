@@ -91983,3 +91983,54 @@ file in the report.
 found while hunting siblings, but each feeds a different decision with a different failure mode, and
 widening detection in all of them in one PR would change behaviour nobody has measured. Q-707's own
 scope was deployPlan + the sibling it named; the rest is recorded here as a known, bounded follow-up.
+
+## 2026-10-09 — Q-621 second half: a client that left now stops COSTING, not just stops being shown
+
+**Report:** Q-621, the forensic audit of 2026-10-04. #3551 merged the first half — `clientDisconnect.ts`,
+which made the server genuinely notice a streaming client going away (on `res` 'close', because after
+`express.json()` has read a POST's body its `req` 'close' has already fired, so a listener attached later
+never ran at all). The row's own words for what was left: *"thread the signal into `executeStream`."*
+
+**The root cause, stated exactly.** `chat.ts` created an `AbortController` and aborted it on
+`onClientGone` — and the signal had nowhere to go. `AIRouter.routeStream` read `signal.aborted` in two
+places only: between rungs, and inside its own chunk callback. `ProviderTypes.executeStream` took no
+signal at all. So the HTTP request already in flight to the provider **ran to completion and was billed
+in full**: a user who closed the tab after one word still paid for the whole answer, and on a universe
+that races two providers, paid for it twice. Reading a flag stops the OUTPUT; only handing the signal to
+the SDK stops the BILL. The first half made the disconnect VISIBLE; this half makes it FREE.
+
+**The class, not the instance.** The fix is a parameter on the interface, not a patch at one call site:
+- `ProviderTypes.executeStream` takes `signal?: AbortSignal`, documented with why it exists.
+- `AIRouterManager.slot()` forwards it. This is the hop that would have silently disabled the whole
+  feature: most of the free ladder is slotted rungs, and a wrapper that drops an argument is exactly how
+  the model pin was lost on the streaming path before (same file, same shape, recorded there).
+- Both `AIRouter` stream paths pass it — the sequential ladder (watchdog on and off) and the race.
+- All six providers hand it to their SDK: `{ signal }` for Anthropic and the three OpenAI-shaped ones
+  (GLM, Grok, OpenAiChat), `config.abortSignal` for `@google/genai`. Each also breaks its read loop on
+  `signal.aborted`, as the belt to that braces.
+
+**Locked by `tests/anAbandonedStreamStopsCosting.test.ts`** — 26 tests in three layers, so the CLASS
+cannot return: a **census** that every file under `providers/` defining `async executeStream` declares
+the parameter and forwards it (a provider added later fails this test rather than joining a list
+silently); **wiring guards** on each hop between the route and the provider, including the slot wrapper
+and the race; and a **behavioural** test through the real `AIRouter` where the client leaves after the
+first chunk — the in-flight call ends, `reason: 'aborted'` comes back, nothing further is written, and
+**the second rung is never started** (falling through to it would bill a second provider for an answer
+nobody will read). Reversion-proven three ways: dropping the signal from the sequential ladder, from the
+race, and from one provider's SDK call each fail it.
+
+⚠️ **One provider cannot be aborted at all, and it is recorded rather than papered over (Q-769).**
+`@google-cloud/vertexai` exposes no abort hook: `generateContentStream(request)` takes no per-call
+options, and the `RequestOptions` given to `getGenerativeModel` carries only `timeout`, `apiClient` and
+`customHeaders` — checked against the installed typings, not assumed. `VertexProvider.executeStream`
+therefore stops CONSUMING the stream the moment the signal aborts, which ends our turn and releases the
+rung immediately, while the generation upstream finishes on its own. That is an honest mitigation, not
+the fix (fourth absolute rule, rule 6), so it is an OPEN root cause with its three real options and a
+recommendation: move the Vertex rungs onto `@google/genai` with `vertexai: true`, which does accept
+`config.abortSignal`. That is a provider swap touching auth and model ids, so it is the admin's call and
+a bounded PR of its own — not a silent refactor smuggled into this one. The census lists Vertex by name
+with its reason, so the gap is a declared exception and a NEW forgetful provider still fails.
+
+**Not changed, deliberately:** `timeout` on the Vertex model is not a substitute (it bounds a hung call,
+not an abandoned one), and the AgentV3 build routes already thread their own `abort.signal` deeply, so
+they were read and left alone — this row was always about the chat streaming path.

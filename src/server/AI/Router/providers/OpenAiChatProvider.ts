@@ -123,7 +123,7 @@ export class OpenAiChatProvider implements AIProvider {
     }
   }
 
-  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string): Promise<string> {
+  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string> {
     // THE MODEL MUST RIDE THE STREAM. Chat streams, so a rung that ignores its pinned model streams
     // on the provider default — the exact bug that made every Vertex rung run gemini-2.5-pro.
     const pinned = OpenAiChatProvider.model(model);
@@ -131,14 +131,19 @@ export class OpenAiChatProvider implements AIProvider {
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: prompt });
     try {
+      // `{ signal }` aborts the request, which is what makes a client disconnect free (Q-621).
       const stream = await this.client.chat.completions.create({
         model: pinned,
         messages,
         max_tokens: 8000,
         stream: true,
-      });
+      }, signal ? { signal } : undefined);
       let full = '';
       for await (const chunk of stream) {
+        // The client left: stop consuming AND stop paying. The SDK abort above tears the socket down,
+        // so this loop normally ends by throwing; the check is the belt to that braces, for an SDK
+        // version that resolves the stream instead of rejecting it (Q-621).
+        if (signal?.aborted) break;
         const text = chunk.choices[0]?.delta?.content || '';
         if (text) { full += text; onChunk(text); }
       }

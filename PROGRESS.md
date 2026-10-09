@@ -93207,3 +93207,75 @@ built. The window and the erase entry are needed either way and are done; whethe
 that holds a uid and answers no question is a product decision. Recommendation in the row: stop writing
 it (the funnel reads the day rollup and loses nothing), but not taken here, because deleting a writer on
 our own initiative removes a capability its author intended.
+
+## 2026-10-09 — Q-784: a store can hide behind its constant's NAME, and three did
+
+Found while finishing Q-767, which is the whole point: Q-767's own sibling hunt asked whether any
+other store had the shapes it had just fixed, and the answer exposed the thing that was supposed to
+make those shapes impossible to miss.
+
+**The census's blind spot.** `tests/everyCollectionIsClassified.test.ts` scanned for
+`const *COLLECTION* = 'x'`, the two web-SDK literal forms, and `<handle>.collection('literal')`.
+`navStoreRemixPurchase.ts` calls its constants `PURCHASES` and `PENDING_CREDITS`; `navStoreWeb.ts`
+calls one `REMIX_ORIGINS`. So three real top-level collections were invisible to all four forms, and
+the census passed while asserting that every collection in the repository was accounted for:
+
+| store | what it is | answer |
+|---|---|---|
+| `nav_store_purchases` | one doc per (app, buyer): `{appId, buyerUid, creatorUid, priceInr, creatorInr, at}` — a sale, and the buyer's own proof of purchase | `RETAINED_INDEFINITELY`: money, Privacy §9's first exception |
+| `nav_store_pending_credits` | money **owed** to a creator whose credit failed to land, written for manual reconciliation | `RETAINED_INDEFINITELY`: a debt an account closure erases is a debt nobody can pay |
+| `nav_store_remix_origins` | which App Mart app a workspace was remixed from — **doc id IS the workspaceId** | `WORKSPACE_SCOPED_COLLECTIONS`: the id range always could reach it, it was never listed |
+
+**Form 4** resolves `<db>.collection(IDENT)` through the file's own string constants — keyed on the
+VALUE rather than on a naming convention. That is safeguard #6's lesson mechanized: *"my search found
+nothing" almost always means the wrong word was guessed*, and a scan keyed on a convention inherits
+every convention nobody followed. It surfaced exactly those three and nothing else.
+
+🔴 **And narrowing form 4 back to `*COLLECTION*` left the file GREEN on the first reversion attempt** —
+because every obligation in that census is checked against what the scan FOUND, so a scan that finds
+less simply has less to object to, and the three stores sat in `CLASSIFICATION` quietly unexamined.
+Form 4 now carries three named witnesses, the same fix the other three forms needed in Q-701 PR B.
+A census is only ever as honest as its witnesses.
+
+**Q-134's class, third instance — and now a mechanical hunt.** `shares` was erased by
+`{field:'ownerId'}` with no `subs`, so every `shares/{token}/feedback/{autoId}` a visitor left on a
+shared app survived the owner's account, intact and unreachable. The registry has had the `subs`
+capability since Q-701; this entry simply never used it, which is the worst version of the defect —
+nothing was missing except somebody noticing. So the hunt is no longer a thing to remember:
+`tests/noParentIsErasedWithoutItsChildren.test.ts` reads every
+`<db>.collection(A).doc(…).collection(B)` write in `src/server`, resolving both names through the
+file's own constants, and fails when an ERASED parent has an undeclared child. Eighteen parent/child
+pairs found; `teams`, `nav_store_web_apps`, `promptAudits` and `build_history` are excused with
+written reasons, and a parent that gains an eraser must leave that list.
+
+**The fourth reachability shape.** `build_events` is appended with `.add()`, so its id is random, and
+its only link to a person is a `workspaceId` FIELD holding `agentv3-{uid}-…`. Account deletion had
+three queries and none of them could match it: `'docId'` wants the id to BE the uid; `{field}` wants a
+field to EQUAL the uid (this one holds a workspace id, of which a person has many); the workspace
+eraser sweeps a range over the DOCUMENT ID, which here says nothing about anybody. So every build
+event of every app a person ever built outlived their account.
+
+`planWorkspaceFieldErase` sweeps a RANGE over that field — Firestore serves it from the single-field
+index it maintains automatically. It refuses a uid containing `-` outright (`agentv3-a-b-` is
+ambiguous between uid `a-b` and uid `a` with a suffix starting `b-`), which is the reasoning #3611
+recorded and this reuses: a compliance gap is recoverable, deleting a different person's data is not.
+Each matched document is then verified with the workspace eraser's own `eraseableWorkspaceId`, because
+"the range should already guarantee this" is not a safety property when the action is irreversible.
+A test asserts the two planners refuse *exactly* the same uids, so the erasers can never disagree
+about whose data a workspace id names.
+
+It keeps BOTH obligations, and neither replaces the other: 90 days for everyone (Q-767, the
+technical-log ceiling §9 publishes) and erasure for a person who left — because §9 publishes **thirty**
+days for personal data after a deletion, so the window alone could not keep that promise.
+
+**Proof.** 14 new tests across `tests/noParentIsErasedWithoutItsChildren.test.ts` (4) and
+`tests/aBuildEventDiesWithTheAccount.test.ts` (10), plus form 4's witnesses. Six reversions, each
+failing the guard that owns it: `shares`' subs removed, `user_reports`' subs removed, form 4 narrowed
+(the one that first passed), the dash refusal dropped, the per-document verifier dropped, the progress
+guard dropped.
+
+**One thing worth saying plainly.** Q-767 and Q-784 were found by the same method and neither came from
+a report: the sibling hunt the fourth absolute rule requires. Q-767 fixed the Load board's hand-typed
+inventory so a growing store cannot hide; Q-784 fixed the census's name-keyed scan so a store cannot
+hide behind what its constant was called. Both were instruments that read as coverage while being
+blind — which is the single most expensive shape in this repository's history.

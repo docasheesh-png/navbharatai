@@ -91,6 +91,8 @@ When your deletion request is completed, we remove:
   diagnostics report of your own last build;
 - your **daily usage counters** — terminal seconds, tool and picture calls, the AI usage rows behind
   your spend, your free-build credit, and the balance warnings we had already sent you;
+- the **record of which screens and actions you used** — the product-usage rows we keep to see where
+  people get stuck. They are deleted after 30 days anyway; closing your account removes yours now;
 - your **professional pass**, if you had one, and which admin notices you had already read;
 - the **files you uploaded** — .zip archives and spreadsheets you gave to a build;
 - your **share links** — a page you shared stops opening;

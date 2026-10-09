@@ -4106,5 +4106,5 @@ behind `AGENTV3_TOKEN_COMPACT`).
 
 **How to verify (before turning any flag on in prod):** run the reliability benchmark on a staging server
 (`scripts/agentv3-reliability-bench.ts`, 15-prompt smoke set first, `BENCH_CONFIRM=yes` required — it spends
-real money) once with all flags off (baseline) and once with the flag(s) on, then `npm run bench:compare`.
+real money; `BENCH_POWER_LEVEL` = tier sent as `powerLevel`, default `weak`, compare refuses mixed tiers) once with all flags off (baseline) and once with the flag(s) on, then `npm run bench:compare`.
 Turn flags on one or two at a time so a regression has one owner.

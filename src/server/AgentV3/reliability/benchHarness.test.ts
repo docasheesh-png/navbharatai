@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { buildSucceeded, compareBench, selectBenchPrompts, validateBenchFixture, wilson, type BenchResultFile, type BenchRun } from './benchHarness';
+import { benchPowerLevel, benchRequestBody, buildSucceeded, compareBench, selectBenchPrompts, validateBenchFixture, wilson, type BenchResultFile, type BenchRun } from './benchHarness';
 import type { BuildMetrics } from '../BakeoffMetrics';
 
 const fixture = validateBenchFixture(JSON.parse(readFileSync(join(__dirname, '../../../../scripts/fixtures/reliability-bench-prompts.json'), 'utf8')));
@@ -49,5 +49,19 @@ describe('success + comparison', () => {
     expect(cmp.fixed).toEqual(['a']);
     expect(cmp.broke).toEqual(['b']);
     expect(cmp.verdict).toMatch(/Not distinguishable/);
+  });
+});
+
+describe('BENCH_POWER_LEVEL', () => {
+  it('defaults to weak and is sent as powerLevel', () => {
+    expect(benchPowerLevel({})).toBe('weak');
+    expect(benchPowerLevel({ BENCH_POWER_LEVEL: ' MINI ' })).toBe('mini');
+    expect(() => benchPowerLevel({ BENCH_POWER_LEVEL: 'turbo' })).toThrow(/must be one of/);
+    expect(benchRequestBody('p', { sessionId: 's', powerLevel: 'weak' })).toMatchObject({ prompt: 'p', powerLevel: 'weak', planFirst: false });
+  });
+
+  it('compare refuses runs on different tiers', () => {
+    const f = (powerLevel: 'weak' | 'off'): BenchResultFile => ({ label: powerLevel, powerLevel, set: 'smoke', baseUrl: '', startedAt: '', flags: [], runs: [] });
+    expect(() => compareBench(f('weak'), f('off'))).toThrow(/different tiers/);
   });
 });

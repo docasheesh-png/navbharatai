@@ -18,13 +18,14 @@
  * Env: BENCH_BASE_URL (default http://localhost:8080), BENCH_LABEL, BENCH_SET (smoke|full, default smoke),
  *      BENCH_USER_ID / BENCH_EMAIL (a v3-enabled test account on the tier under test),
  *      BENCH_RUNS (attempts per prompt, default 1), BENCH_ONLY (comma ids), BENCH_FLAGS (comma, recorded only),
- *      BENCH_TIMEOUT_S (per build, default 1800), BENCH_CONFIRM=yes (actually run).
+ *      BENCH_TIMEOUT_S (per build, default 1800), BENCH_CONFIRM=yes (actually run),
+ *      BENCH_POWER_LEVEL (weak|off|mini|medium|max, default weak — sent as `powerLevel`; compare refuses mixed tiers).
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { parseNdjson, metricsFromEvents, type BuildMetrics } from '../src/server/AgentV3/BakeoffMetrics';
-import { breakdown, buildSucceeded, selectBenchPrompts, successRate, validateBenchFixture, type BenchResultFile, type BenchRun } from '../src/server/AgentV3/reliability/benchHarness';
+import { benchPowerLevel, benchRequestBody, breakdown, buildSucceeded, selectBenchPrompts, successRate, validateBenchFixture, type BenchResultFile, type BenchRun } from '../src/server/AgentV3/reliability/benchHarness';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const env = process.env;
@@ -36,6 +37,7 @@ const ONLY = (env.BENCH_ONLY || '').split(',').map((s) => s.trim()).filter(Boole
 const FLAGS = (env.BENCH_FLAGS || '').split(',').map((s) => s.trim()).filter(Boolean);
 const TIMEOUT_MS = Math.max(60, parseInt(env.BENCH_TIMEOUT_S || '1800', 10) || 1800) * 1000;
 const CONFIRMED = env.BENCH_CONFIRM === 'yes';
+const POWER_LEVEL = benchPowerLevel(env); // default 'weak' — sent as powerLevel on every build
 
 const FAILED: BuildMetrics = { filesCreated: 0, ok: false, readinessScore: null, billedUsd: null, toolCalls: 0, toolErrors: 0, providerFallbacks: 0, geminiTrap: false, errored: true };
 
@@ -47,13 +49,12 @@ async function runOneBuild(prompt: string): Promise<BuildMetrics> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: ctrl.signal,
-      body: JSON.stringify({
-        prompt,
-        userId: env.BENCH_USER_ID || undefined,
-        email: env.BENCH_EMAIL || undefined,
+      body: JSON.stringify(benchRequestBody(prompt, {
+        userId: env.BENCH_USER_ID,
+        email: env.BENCH_EMAIL,
         sessionId: `relbench-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-        planFirst: false,
-      }),
+        powerLevel: POWER_LEVEL,
+      })),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`);
     return metricsFromEvents(parseNdjson(await res.text()));
@@ -66,7 +67,7 @@ async function main(): Promise<void> {
   const fx = validateBenchFixture(JSON.parse(readFileSync(join(HERE, 'fixtures/reliability-bench-prompts.json'), 'utf8')));
   const prompts = selectBenchPrompts(fx, SET, ONLY);
   if (!prompts.length) { console.error('No prompts selected (check BENCH_ONLY).'); process.exit(1); }
-  console.log(`Reliability bench "${LABEL}" — ${SET} set, ${prompts.length} prompts × ${RUNS} → ${BASE_URL}`);
+  console.log(`Reliability bench "${LABEL}" — ${SET} set, ${prompts.length} prompts × ${RUNS}, tier ${POWER_LEVEL} → ${BASE_URL}`);
   if (!CONFIRMED) {
     console.log('\nDRY RUN (no build started). These would be sent:');
     for (const p of prompts) console.log(`  - [${p.lang}/${p.complexity}] ${p.id}: ${p.prompt}`);
@@ -92,7 +93,7 @@ async function main(): Promise<void> {
   console.log(`\nSuccess: ${total.successes}/${total.n} = ${(total.rate * 100).toFixed(1)}% (95% CI ${(total.low * 100).toFixed(1)}–${(total.high * 100).toFixed(1)}%)`);
   console.log('By complexity:', JSON.stringify(breakdown(runs, 'complexity')));
   console.log('By language:', JSON.stringify(breakdown(runs, 'lang')));
-  const out: BenchResultFile = { label: LABEL, set: SET, baseUrl: BASE_URL, startedAt, flags: FLAGS, runs };
+  const out: BenchResultFile = { label: LABEL, powerLevel: POWER_LEVEL, set: SET, baseUrl: BASE_URL, startedAt, flags: FLAGS, runs };
   const dir = join(HERE, 'bench-results');
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${LABEL}-${SET}-${Date.now()}.json`);

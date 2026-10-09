@@ -65,8 +65,30 @@ export interface BenchRun {
   success: boolean;
 }
 
+export const BENCH_POWER_LEVELS = ['weak', 'off', 'mini', 'medium', 'max'] as const;
+export type BenchPowerLevel = typeof BENCH_POWER_LEVELS[number];
+
+/**
+ * The tier every bench build asks for (sent as `powerLevel`, which the chat route reads). Default
+ * `weak` — the tier the reliability work targets (never Claude as primary). An unknown value throws
+ * rather than silently benchmarking a different tier.
+ */
+export function benchPowerLevel(env: NodeJS.ProcessEnv = process.env): BenchPowerLevel {
+  const raw = String(env.BENCH_POWER_LEVEL ?? '').trim().toLowerCase();
+  if (!raw) return 'weak';
+  if ((BENCH_POWER_LEVELS as readonly string[]).includes(raw)) return raw as BenchPowerLevel;
+  throw new Error(`BENCH_POWER_LEVEL must be one of ${BENCH_POWER_LEVELS.join(', ')} (got "${raw}")`);
+}
+
+/** The JSON body of one bench build request. */
+export function benchRequestBody(prompt: string, opts: { userId?: string; email?: string; sessionId: string; powerLevel: BenchPowerLevel }): Record<string, unknown> {
+  return { prompt, userId: opts.userId || undefined, email: opts.email || undefined, sessionId: opts.sessionId, planFirst: false, powerLevel: opts.powerLevel };
+}
+
 export interface BenchResultFile {
   label: string;
+  /** Tier the builds asked for (BENCH_POWER_LEVEL). */
+  powerLevel?: BenchPowerLevel;
   set: 'smoke' | 'full';
   baseUrl: string;
   startedAt: string;
@@ -121,6 +143,9 @@ function perPrompt(runs: readonly BenchRun[]): Map<string, boolean> {
 }
 
 export function compareBench(baseline: BenchResultFile, candidate: BenchResultFile): BenchComparison {
+  if (baseline.powerLevel && candidate.powerLevel && baseline.powerLevel !== candidate.powerLevel) {
+    throw new Error(`Cannot compare a ${baseline.powerLevel} run with a ${candidate.powerLevel} run — different tiers.`);
+  }
   const b = successRate(baseline.runs);
   const c = successRate(candidate.runs);
   const pb = perPrompt(baseline.runs);

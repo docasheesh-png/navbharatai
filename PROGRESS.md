@@ -92313,6 +92313,56 @@ found while hunting siblings, but each feeds a different decision with a differe
 widening detection in all of them in one PR would change behaviour nobody has measured. Q-707's own
 scope was deployPlan + the sibling it named; the rest is recorded here as a known, bounded follow-up.
 
+## 2026-10-09 — Q-381 batch one: nine findings about OUR run stop being charged to the user's app (56 → 47)
+
+**Report:** Q-381, from the 2026-10-04 census (`tests/aProblemTheUserIsShownCanBeActedOn.test.ts`). That
+census measured something nobody had counted: **82 codes recorded at warning or error severity were in
+none of the three registries**, so `isAppFinding` answered YES to every one. Each landed in the user's
+build-health card as a problem with THEIR app and took 6 points off their app's health score — with no
+button to press. 26 were classified then; 56 were left as a ratcheted backlog that may only shrink.
+
+**What this change does, and why it needed no decision from the admin.** It classifies the nine codes
+whose OWN recording site already answers the question. Every one is quoted from that site rather than
+judged now, which is the whole reason this batch could be shipped without an admin call:
+
+| Code | Its own words at the recording site |
+|---|---|
+| `RELEASE_GATE_UNPROVEN` | *"not evidence the app is broken — it is the absence of evidence that it works, and the two must never be reported as the same thing"* |
+| `LAST_CHANCE_PROOF_UNAVAILABLE` | *"an infrastructure limit here, never evidence about the app itself"* |
+| `SANDBOX_UNAVAILABLE` | *"Infrastructure condition, not an app error."* |
+| `RUNTIME_UNCHECKED` | our console capture failed; `PROCESS_ONLY_CODES` already calls `VERIFY_DID_NOT_RUN` *"the class of RUNTIME_UNCHECKED"* |
+| `CLAIM_UNSUPPORTED` | OUR closing summary over-claimed and is corrected in place — the class of `SUMMARY_OFF_TOPIC`, already process-only |
+| `TIMELINE_TRUNCATED` | our diagnostics timeline hit its own entry cap |
+| `PREVIEW_REVIVAL_RECIPE` | our storage could not keep the wake-up recipe; the preview itself rendered |
+| `GUARD_REPEAT` | our mistake guard did not hold — *"needs an upstream/architectural fix, not a better reminder"* |
+| `UPSELL_SUPPRESSED` | whether WE asked for credits; its own comment calls the warning cases *"a real fault of ours"* |
+
+`RELEASE_GATE_UNPROVEN` is the sharpest of the nine: its own detail forbids reporting "unproven" as
+"broken", and showing it in the user's build-health card as a problem with their app was doing exactly
+that. The honesty fix was already written at the recording site; only the registry entry was missing.
+
+🔒 **Why this moves no money, on the same argument the existing block in `BuildDiagnostics.ts` makes.**
+A RED gate flips a build to free only on `shippingIssueCount('error')`, and all nine are recorded at
+WARNING or INFO severity, so the error count cannot change. What changes is the caveat count, which is
+the point. **`PLATFORM_SOURCE_WORKSPACE` is deliberately left out** — it is the one unclassified code
+recorded at ERROR severity, so reclassifying it is money-adjacent and gets its own look. That exclusion
+is asserted as a test, not just written in a comment, because "left out on purpose" and "forgotten" look
+identical in a diff.
+
+**Not in this batch, deliberately:** the codes that genuinely need a decision about what a user should
+be told — `TOOL_ERROR`, `STUCK_TOOL`, the `OUTCOME_*` roll-ups, `FEATURE_COVERAGE`,
+`SIMULATED_DATA_SHIPPED`. Classifying those from a guess is how 82 unclassified codes happened in the
+first place.
+
+**Locked by 12 new assertions** in the census file, which test the thing that mattered to a user rather
+than the presence of a name in a list: `isAppFinding` now answers NO for each of the nine, in both the
+`readiness` and `build` phases (the phases they are recorded in, and ones `isAppFinding` does not exclude
+outright). Plus the fixture is asserted not to list them, so the ratchet cannot be satisfied by listing
+a code twice, and the new backlog size (47) is pinned. Reversion-proven: commenting one code back out of
+`PROCESS_ONLY_CODES` fails both the ratchet and that code's own assertion.
+
+**The row stays OPEN — 47 remain.** Under the sixth absolute rule a row leaves the table only when it is
+finished, and this is batch one of a shrinking backlog, not the end of it.
 ## 2026-10-09 — Q-621 second half: a client that left now stops COSTING, not just stops being shown
 
 **Report:** Q-621, the forensic audit of 2026-10-04. #3551 merged the first half — `clientDisconnect.ts`,
@@ -92426,6 +92476,31 @@ Gates on the merged states: #3593 **35,821 passed**, #3594 **35,827 passed**, #3
 plus `tsc` ×2, `noUnusedImports`, `native:guard`, `build`, `test:bundle`, `boot:check` and
 `deps:server-gate` on each.
 
+## 2026-10-09 — queue closure: Q-621 (#3599 merged)
+
+Sixth absolute rule, point 3: the row leaves the open table when the PR that resolves it is MERGED, and
+its ID is appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main`.
+
+**Q-621 ✅** — a disconnecting chat client never stopped the provider call, so an abandoned stream ran to
+completion and was billed in full. Both halves are now on `main`: the listener half in **#3551**
+(`clientDisconnect.ts`, on `res` 'close') and the signal half in **#3599** (merged, `cbd478e`) — the abort
+threaded through `ProviderTypes.executeStream`, `AIRouterManager.slot()`, both `AIRouter` stream paths, and
+every provider's own SDK call, locked by `tests/anAbandonedStreamStopsCosting.test.ts`.
+
+⚠️ **What to watch for on the next real build:** the behaviour is covered by tests through the real
+`AIRouter`, but no session can observe a live provider socket closing. The signal that this works in
+production is the per-build cost of turns the user abandoned — if an abandoned stream still bills a full
+reply, reopen with that build's cost lines.
+
+**Not closed by this:** **Q-769** stays OPEN — `@google-cloud/vertexai` exposes no abort hook at all, so a
+Vertex rung still cannot be cancelled. #3599 shipped the honest mitigation (stop consuming, release the
+rung) and recorded the real fix as that row's own decision for the admin: move the Vertex rungs onto
+`@google/genai` with `vertexai: true`, which does accept `config.abortSignal`. Closing Q-621 while Q-769
+is open is deliberate and is the point of splitting them — Q-621's own scope was the signal's path from
+the route to the SDK, which is done and proven; the one SDK that has no hook is a separate, named gap
+rather than an asterisk on a closed row.
+
+Open table after this change: 81 rows.
 ## 2026-10-09 — Q-600 batch one: a finished feature no screen could reach (Q-770, #3607)
 
 **What the sweep was for.** Q-600 is `tsc --noUnusedLocals`' backlog: 95 client locals in 19 files that
@@ -92571,3 +92646,70 @@ default OFF** — see `docs/claude/ENV_REGISTRY.md` → "Build reliability flags
 
 Open: measure with the benchmark before enabling anything in prod; AppKnowledgeBase not updated (no
 user-facing change while the flags are off).
+## 2026-10-09 — Q-770 closed (#3607 merged), and the admin lifted the merge hold for this session
+
+**Q-770 ✅ RESOLVED.** #3607 merged as `4117ae4`, so the row left the open table and `Q-770` was
+appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main` — the
+#3543 rule. The room's Code tab is live: the shared editor, every member's caret line, and
+line-pinned comments with jump and resolve. `tests/aRoomTabTheKnowledgeBaseNamesExists.test.ts`
+keeps the component and `AppKnowledgeBase` from drifting apart again.
+
+**Q-600 stays OPEN** — 86 unused locals in 18 files. **Q-769 stays OPEN** (Vertex has no abort hook).
+**Q-381 stays OPEN** — 47 unclassified finding codes.
+
+**On the merge hold.** CLAUDE.md's 2026-09-13 correction says a session merges only when the admin
+names the PR in that session's own conversation, and that assuming it is the rule it removes. The
+admin said it on 2026-10-09: *"ap marge karo! aur apko bacha hua kam complete kar ke unko pr bhi
+marge karo"* — merge these, and merge the remaining work's PRs too once they are green. CI green
+before every merge is unchanged; that gate is not what was lifted.
+
+**One thing worth recording about GitHub rather than the code:** #3601 was reported by the API as
+having merge conflicts (`405 Pull Request has merge conflicts`) while `git merge-tree --write-tree`
+against the same `main` merged it clean, and the subsequent real merge of `main` into the branch was
+also clean. GitHub's mergeability cache had gone stale after three PRs landed in quick succession.
+The honest reading: a 405 from the merge endpoint is not proof of a conflict — check it against a
+local three-way merge before believing it, and a `main` merge plus a push is what makes GitHub
+recompute.
+
+## 2026-10-09 — Q-600 batch two (#3609, Q-771): the same sweep, two opposite verdicts
+
+Batch one (#3607) proved the unused-locals backlog is not cosmetic. Batch two proves the harder
+half: **what a found local deserves is a judgement, and the two answers go opposite ways.** A count
+cannot tell you which; only the call sites can.
+
+**SHOWN — `GitPanel.tsx`.** `activeStep` and `currentBuildTime` were both maintained by the real
+deploy paths and rendered nowhere. Every path sets the step — the GitHub push
+(`executeRealGitHubPush`), the static ZIP export, the managed Render deploy and the
+config-injection path — 1 on validate/prepare, 2 on build/package, 3 on done. And a `useEffect`
+ran a 100 ms ticker into `currentBuildTime` for as long as the deploy was validating or building,
+correctly cleaned up on unmount. So the component knew exactly which step a deploy was on and how
+many seconds it had taken, and the user watching it saw one pulsing word ("Building..."). The
+ticker's state updates were re-rendering the panel ten times a second to display nothing.
+
+Fixed by rendering what was already there: a three-step strip (Validate / Build / Done) in the
+console header, the current step amber and pulsing, completed steps green, the failed step red when
+a deploy errors or comes back unavailable, and the elapsed seconds beside the status word. No new
+state, no new machinery — the missing piece was only ever the display.
+
+**DELETED — `BotBuilder.tsx`.** The webhook modal's snippet was
+`POST https://your-server.com/webhook` with an `<exported_json>` placeholder: an illustration of an
+endpoint that does not exist. Nothing rendered it any more, because the real Go Live flow replaced
+it — a Telegram bot token that connects the bot for real, and WhatsApp's actual callback URL and
+verify token to paste into Meta, both copied by the live `copyField`. Wiring a copy button to a
+placeholder URL would have shipped exactly the fake feature the second absolute rule forbids, so
+`showWebhookModal`, `copied`, `webhookSnippet` and `copyWebhook` all went, with a comment at the
+site recording why, so nobody re-derives the old design from the leftover.
+
+Also dropped `changesCount` and `changes` in `GitPanel` — a changed-files list rendered nowhere. The
+`files` object the live commit-message heuristic reads is untouched.
+
+**Locked:** `tests/aDeployStepTheCodeSetsIsAStepTheUserSees.test.ts` holds both halves. No
+`setActiveStep` call may name a step with no label — a 4th step would render as nothing, which is
+the class returning in a new shape — the strip and the elapsed time must stay rendered, the removed
+webhook pieces must not come back, and no placeholder host may appear outside a comment.
+Reversion-proven both ways: emptying the step strip fails, and `setActiveStep(4)` fails with
+*"a deploy path sets step 4, but only 3 labels exist, so that step would render as nothing"*.
+
+**Baseline 86 → 78**, both files out of `unusedLocalsBaseline.json` (18 files → 16). **Q-600 stays
+OPEN** — 78 locals in 16 files, of which `App.tsx` (46) and `AgentV3Panel.tsx` (11) are 57 and are
+left alone while other sessions may be editing them. The remaining small files are the next batch.

@@ -4189,6 +4189,25 @@ export class ToolDispatcher {
     // "npm enoent package.json → builder hand-writes a drifted scaffold" class on fallback builds.
     await this.ensureScaffoldOnce();
     const input = call.input;
+    // fix/build-reliability (P2b resume + P5b banned deps) — write_file pre-checks, each behind its own flag.
+    if (call.name === 'write_file') {
+      // P2b — a write cut off at the output limit carries only `_partial_content`: buffer it, never write it.
+      const partialIn = (input as Record<string, unknown> | undefined)?.[PARTIAL_CONTENT_KEY];
+      if (resumeTruncatedEnabled() && typeof partialIn === 'string' && (input as { content?: unknown })?.content === undefined) {
+        const p = reqStr(input, 'path');
+        this._pendingWrites.start(p, partialIn);
+        return truncatedWriteNotice(p, partialIn);
+      }
+      if (typeof (input as { path?: unknown })?.path === 'string') this._pendingWrites.drop((input as { path: string }).path);
+      // P5b (AGENTV3_BANNED_PACKAGE_GUARD) — a package.json write never carries a banned dependency.
+      if (bannedPackageGuardEnabled() && /(^|\/)package\.json$/.test(String((input as { path?: unknown })?.path ?? '')) && typeof (input as { content?: unknown })?.content === 'string') {
+        const stripped = stripBannedDeps((input as { content: string }).content);
+        if (stripped.removed.length) {
+          const res = await this.run({ ...call, input: { ...(input as Record<string, unknown>), content: stripped.content } }, agent);
+          return `${res}\n${strippedDepsNote(stripped.removed)}`;
+        }
+      }
+    }
     switch (call.name) {
       case 'run_recipe': {
         // ONE entry point for the RECIPE_TOOLS (ToolCatalog.ts). The recipe runs through its OWN case
@@ -4344,22 +4363,6 @@ export class ToolDispatcher {
         return this.run({ ...call, name: 'write_file', input: { path, content: existing + more } }, agent);
       }
       case 'write_file': {
-        // P2b — a write cut off at the output limit carries only `_partial_content`: buffer it, never write it.
-        const partialIn = (input as Record<string, unknown> | undefined)?.[PARTIAL_CONTENT_KEY];
-        if (resumeTruncatedEnabled() && typeof partialIn === 'string' && (input as { content?: unknown })?.content === undefined) {
-          const p = reqStr(input, 'path');
-          this._pendingWrites.start(p, partialIn);
-          return truncatedWriteNotice(p, partialIn);
-        }
-        if (typeof (input as { path?: unknown })?.path === 'string') this._pendingWrites.drop((input as { path: string }).path);
-        // P5b (AGENTV3_BANNED_PACKAGE_GUARD) — a package.json write never carries a banned dependency.
-        if (bannedPackageGuardEnabled() && /(^|\/)package\.json$/.test(String((input as { path?: unknown })?.path ?? '')) && typeof (input as { content?: unknown })?.content === 'string') {
-          const stripped = stripBannedDeps((input as { content: string }).content);
-          if (stripped.removed.length) {
-            const res = await this.run({ ...call, input: { ...(input as Record<string, unknown>), content: stripped.content } }, agent);
-            return `${res}\n${strippedDepsNote(stripped.removed)}`;
-          }
-        }
         let path = reqStr(input, 'path');
         this._editsPerFile.delete(path); // a whole-file write is exactly what the edit-loop note asks for
         // NEXT.JS MIDDLEWARE LOCATION FIX (CargoPilot autopsy 2026-07-19): Next.js runs middleware ONLY

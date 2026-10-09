@@ -410,7 +410,7 @@ export class OpenAiToolRunner implements TurnRunner {
     // faster rate constant was measured and rejected, and why unclamping cannot make the worst case
     // worse. The capability question is asked of the module that owns it; `modelAlwaysReasons` is a
     // POSITIVE test, so a vendor we have not measured keeps today's clamp exactly.
-    const clampedBudget = reconcileFloorBudget(
+    const budget = reconcileFloorBudget(
       params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000,
       timeoutMs,
       process.env,
@@ -419,9 +419,9 @@ export class OpenAiToolRunner implements TurnRunner {
     );
     // P2a (AGENTV3_STREAM_NO_CLAMP, default OFF) — a STREAMED call is guarded by its idle timer, so the
     // clock-derived clamp only truncates files; ask for what the caller asked, up to the model's ceiling.
-    const budget = streaming && streamNoClampEnabled()
-      ? streamingBudget(params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000, thinkingModel, clampedBudget)
-      : clampedBudget;
+    if (streaming && streamNoClampEnabled()) {
+      Object.assign(budget, streamingBudget(params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000, thinkingModel, budget));
+    }
     const request = {
         // The OpenAI-compatible provider has its own model ids, so an explicit option
         // model wins over the Anthropic model id the loop passes for Claude.

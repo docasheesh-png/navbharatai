@@ -2120,9 +2120,10 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const v2Waves = v2Contract
         ? topoWaves(manifest.map((m) => m.path), v2Contract.imports, { last: (p) => isStylesheetPath(p) && !/\.module\./i.test(p), fallbackTier: generationTier, declared: v2Contract.declared })
         : null;
-      const stages: number[] = v2Waves ? v2Waves.map((_, i) => i) : tiers;
-      for (let ti = 0; ti < stages.length; ti++) {
-        const tier = stages[ti];
+      // With v2 the stages ARE the waves (index i ⇒ v2Waves[i]); the projection above already ran.
+      if (v2Waves) tiers.splice(0, tiers.length, ...v2Waves.map((_, i) => i));
+      for (let ti = 0; ti < tiers.length; ti++) {
+        const tier = tiers[ti];
         const specs = v2Waves
           ? manifest.filter((s) => v2Waves[ti].includes(s.path))
           : depOrder ? manifest.filter((s) => generationTier(s.path) === tier) : manifest;
@@ -2140,7 +2141,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // produce 4 of 14 files — work the full builder then had to continue anyway. Bailing the moment the
         // arithmetic says we cannot finish hands off sooner and without a tier being killed mid-flight;
         // the catch below salvages exactly the same finished files. Never fires without a real measurement.
-        const tiersRemaining = stages.length - 1 - ti;
+        const tiersRemaining = tiers.length - 1 - ti;
         const progress = { tiersRemaining, lastTierMs: Date.now() - tierStartedAt, elapsedMs: Date.now() - laneStartedAt, overallMs };
         if (!canFinishRemainingTiers(progress)) {
           // 🔴 "ENOUGH FILES" IS NOT "AN APP" (autopsy 3ab93068). The shell tier — the root component

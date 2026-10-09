@@ -1516,7 +1516,7 @@ export class AgentRunner {
             }
           } catch { /* quality escalation is best-effort — it must never break a build */ }
         }
-        const steer = [truncationSteer, loopSteer, budgetText, doneText, handoffText].filter(Boolean).join('\n\n') || null;
+        const steer = [truncationSteer, loopSteer, budgetText, doneText].filter(Boolean).concat(handoffText ? [handoffText] : []).join('\n\n') || null;
         messages.push({ role: 'user', content: steer ? [...resultBlocks, { type: 'text', text: steer }] : resultBlocks });
         messageTs.push(Date.now());
         if (steer) platformMsgIdx.add(messages.length - 1);

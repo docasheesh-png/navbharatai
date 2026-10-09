@@ -16382,15 +16382,18 @@ async function noteBuildOutcome(
         architectSystem = split.system;
         cachePrefixPreamble = split.preamble;
       }
-      const architectFullTools = [
-        ...catalogForTools(roleConfig('architect').tools),
+      // Built-in tools FIRST, connected services after (locked by mcpClient.test.ts); the reliability
+      // extras (append_file / read_guide) exist only when their flags are on.
+      const architectExtraTools = [
         ...(resumeTruncatedEnabled() ? [APPEND_FILE_TOOL] : []),
         ...(modularDeferred.length ? [READ_GUIDE_TOOL] : []),
       ];
       const architectToolset = coreToolsetEnabled()
-        ? new DynamicToolset(architectFullTools, externalToolDefs(mcpTools), [...CORE_TOOL_NAMES, 'append_file', 'read_guide'])
+        ? new DynamicToolset([...catalogForTools(roleConfig('architect').tools), ...architectExtraTools], externalToolDefs(mcpTools), [...CORE_TOOL_NAMES, 'append_file', 'read_guide'])
         : null;
-      const architectToolsForBuild = architectToolset ? architectToolset.tools : [...architectFullTools, ...externalToolDefs(mcpTools)];
+      const architectToolsForBuild = architectToolset
+        ? architectToolset.tools
+        : [...catalogForTools(roleConfig('architect').tools), ...externalToolDefs(mcpTools), ...architectExtraTools];
       try {
         dispatcher.setReliabilityHooks({
           ...(architectToolset ? { loadTools: (names: unknown) => architectToolset.load(names) } : {}),

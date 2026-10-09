@@ -115,8 +115,9 @@ describe('9 / 10 — existing verdicts are untouched', () => {
   it('an already-proven build is unchanged — the attempt cannot fire on it', () => {
     expect(releaseGate(evidence({ preview: 'passed', journeys: 'passed' }), clean).state).not.toBe('unknown');
   });
-  it('the pre-existing RED correction still stands exactly as it was', () => {
-    expect(route).toContain("if (gate.state === 'red' && gateBlockers > 0 && settled && settled.ok) {");
+  it('the pre-existing RED correction still stands — GT-3 added runtimeRed beside the blocker count', () => {
+    // before: if (gate.state === 'red' && gateBlockers > 0 && settled && settled.ok) {
+    expect(route).toContain("if (gate.state === 'red' && (gateBlockers > 0 || runtimeRed) && settled && settled.ok) {");
     expect(route).toContain('OUTCOME_RELEASE_GATE_RED');
   });
   it('the P0 UNKNOWN honesty notice still stands', () => {

@@ -10995,13 +10995,23 @@ export class ToolDispatcher {
         }
         const result = computeMove(contents, from, to);
         if (!result.ok) return `codemod_move_file failed: ${result.error}`;
+        // TD-3: a failed write must not be followed by `rm`. Swallowing the error used to delete
+        // the only copy of the file.
+        const failed: string[] = [];
         for (const { path, after } of result.changes) {
           try {
             await this.actuator.writeFile(this.workspaceId, path, after);
             getWorkspaceMemory(this.workspaceId).indexFile(path, after);
-          } catch { /* best-effort per file */ }
+          } catch { failed.push(path); }
         }
-        this.state?.recordFileChange({ path: to, kind: 'create' }, agent);
+        const destContent = result.changes.find((c) => c.path === to)?.after;
+        const destOk = !failed.includes(to) && destContent !== undefined &&
+          (await this.actuator.readFile(this.workspaceId, to).then((c) => c === destContent, () => false));
+        if (!destOk || failed.length > 0) {
+          throw new Error(`codemod_move_file did not complete: ${failed.length ? `could not write ${failed.join(', ')}` : `${to} could not be verified`}. ` +
+            `${from} was NOT deleted, so nothing was lost. Fix the cause and retry, or move the file with write_file + bash rm.`);
+        }
+        this.state?.recordFileChange({ path: to, kind: 'create' }, agent);   // only after success
         // Complete the move: remove the old path. Guard against shell metacharacters; report honestly on failure.
         let removed = false;
         if (/^[A-Za-z0-9._/-]+$/.test(from) && !from.split('/').includes('..')) {

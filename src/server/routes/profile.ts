@@ -14,6 +14,7 @@ import { doc, getDoc, getServerDb as getDb } from '../lib/serverDb';
 import { verifyFirebaseToken, verifyFirebaseIdentity, deleteAuthAccount, rateLimiter } from '../lib/authMiddleware';
 import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
 import { deleteUserWorkspaceData } from '../lib/workspaceDataErase';
+import { eraseSyncedWorkspace, type SyncEraseFirestore } from '../lib/syncWorkspaceErase';
 import { sendSafeError } from '../lib/httpError';
 import { userProfileStore } from '../lib/UserProfileStore';
 import { userBuildHistoryStore, type BuildHistoryQuery } from '../lib/UserBuildHistoryStore';
@@ -275,6 +276,17 @@ export function registerProfileRoutes(app: Express): void {
       // Deleting the documents is not deleting the ACCOUNT: without this the Auth record survives and
       // the person who asked to be deleted can sign back in to a blank account. That is not what the
       // button says, and not what Play's deletion requirement means.
+      // …AND THE SYNCED WORKSPACE (Q-763). `user_workspaces/{uid}` is only a MANIFEST; the person's
+      // chat sessions and last built app live in `user_workspaces/{uid}__c{i}`. It was in no erase
+      // path at all, and registering it with the retention manager would have deleted the manifest
+      // and kept the chunks — an erase that reports success and leaves the data unreachable. Its own
+      // module deletes the chunks FIRST and the manifest LAST, so a partial failure can be retried.
+      // Best-effort like the two above: reported, never thrown, so it cannot block the deletion.
+      const syncDb = getDb() as unknown as SyncEraseFirestore | null;
+      const synced = syncDb
+        ? await eraseSyncedWorkspace(syncDb, identity.uid)
+          .catch((e) => ({ uid: identity.uid, chunks: 0, manifestDeleted: false, probed: 0, error: e instanceof Error ? e.message : String(e) }))
+        : { uid: identity.uid, chunks: 0, manifestDeleted: false, probed: 0, error: 'data store unavailable' };
       const account = await deleteAuthAccount(identity.uid);
       const accountDeleted = account === 'deleted' || account === 'not-found';
       return res.json({
@@ -292,6 +304,10 @@ export function registerProfileRoutes(app: Express): void {
         // on its own. `refusal` appears only in the one case the eraser declines to guess at (see
         // planWorkspaceErase) — surfaced, never swallowed.
         apps,
+        // Likewise its own line: the cross-device workspace, which is neither a platform record nor a
+        // built app. `probed` says how many chunk ids were swept, so the number is checkable rather
+        // than a bare claim.
+        synced,
       });
     } catch (err: any) {
       return sendSafeError(res, 500, 'Deletion failed. Please try again.', err, 'account deletion');

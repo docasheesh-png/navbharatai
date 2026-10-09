@@ -141,9 +141,10 @@ describe('7 / 8 — an exhausted budget produces an HONEST state, never a manufa
   });
 
   it('🔒 a broken app is never downgraded to UNKNOWN because the budget ran out', () => {
-    // previewVerifiedFailed feeds gateEvidence.preview = 'failed', which is RED. The UNKNOWN branch
-    // is reached only when nothing was ever proven either way.
-    expect(route).toContain("gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewVerifiedFailed ? 'failed' : 'not-run';");
+    // previewRenderFailed (GT-11: a real failed render, NOT an infrastructure outage) feeds
+    // gateEvidence.preview = 'failed', which is RED. The UNKNOWN branch is reached only when nothing
+    // was ever proven either way.
+    expect(route).toContain("gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewRenderFailed ? 'failed' : 'not-run';");
   });
 
   it('an inconclusive read is still not treated as a failure — unproven stays unproven', () => {

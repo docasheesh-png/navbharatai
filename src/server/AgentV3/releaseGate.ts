@@ -27,6 +27,9 @@
 // THE APP RAN.** Static cleanliness can never earn it, no matter how clean.
 //
 // PURE. No I/O, no clock. Never throws.
+// `runtimeRedFlipEnabled` is the one exception: it reads an env flag at call time.
+
+import { envFlag } from '../lib/envFlag';
 
 /** How a single check came out. `not-run` is a first-class outcome, never folded into a pass. */
 export type CheckOutcome = 'passed' | 'failed' | 'not-run';
@@ -67,6 +70,12 @@ export interface RuntimeEvidence {
    * an omitted value keeps the original wording.
    */
   previewUrlPublished?: boolean;
+  /**
+   * The dev server would not stay up. Infrastructure, not a judgement of the app.
+   * Only changes the wording of an unproven preview (`not-run`). Never a verdict
+   * by itself — a preview that was seen NOT to render stays `failed`.
+   */
+  previewServerDown?: boolean;
   /**
    * Does this project HAVE a test suite, even though it was not run here?
    *
@@ -221,7 +230,7 @@ export interface GateVerdict {
 // ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
 // silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
 // how `stoppedByUser` was caught the moment it was added.
-export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy' | 'journeyReloaded'>;
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'previewServerDown' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy' | 'journeyReloaded'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -295,6 +304,10 @@ const WHY_MISSING: Record<CheckKey, string> = {
  */
 export function whyMissing(key: CheckKey, ev: RuntimeEvidence): string {
   const e = ev ?? ({} as RuntimeEvidence);
+  // GT-11. An outage is not evidence the app failed to render.
+  if (key === 'preview' && e.previewServerDown) {
+    return 'The preview server would not stay running (infrastructure) — the app itself was not judged.';
+  }
   // A preview DID come up — we simply never confirmed it rendered. Say that, rather than the
   // stronger and false claim that nothing was ever there. See previewUrlPublished for why.
   if (key === 'preview' && e.previewUrlPublished) {
@@ -506,4 +519,14 @@ export function runtimeProven(ev: RuntimeEvidence): 'passed' | 'failed' | 'unkno
   if (!ev) return 'unknown';
   if (RUNTIME_PROOF.some((k) => ev[k] === 'failed')) return 'failed';
   return RUNTIME_PROOF.some((k) => ev[k] === 'passed') ? 'passed' : 'unknown';
+}
+
+/**
+ * GT-3 verdict flip. Default OFF (D-1 unanswered). When on, a RED gate caused by
+ * a failed preview, page or journey can set ok:false even with no error-severity
+ * diagnostic. The existing `!result.ok` guard is what would make that build free;
+ * this function does not touch a bill.
+ */
+export function runtimeRedFlipEnabled(): boolean {
+  return envFlag('AGENTV3_RUNTIME_RED_FLIP', false);
 }

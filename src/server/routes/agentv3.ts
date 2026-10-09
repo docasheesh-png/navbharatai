@@ -203,7 +203,7 @@ import {
 import { withoutPlatformCheckTools } from '../AgentV3/repairScope';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
-import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
+import { releaseGate, releaseGateSummary, runtimeProven, runtimeRedFlipEnabled, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary, admittedInertControls } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
 import { visibleAppError, appShowsErrorNote, APP_SHOWS_ERROR_CODE } from '../AgentV3/visibleAppError';
@@ -20689,6 +20689,10 @@ async function noteBuildOutcome(
         } catch { /* diagnostics are best-effort — never blocks a build */ }
       }
       let previewVerifiedFailed = false;
+      // GT-11. Billing still reads previewVerifiedFailed. The gate does not:
+      // a server that will not stay up is not "the app did not render".
+      let previewRenderFailed = false;
+      let previewServerDown = false;
       // ── A RUN-PROVEN APP IS NEVER FLIPPED TO "NOT BUILT" BY A VERDICT THAT ONLY READ THE CODE ──
       // (runProvenApp.ts — autopsy e706e068, and the admin's standing 4efab9d7 rule). Two facts only
       // a RUN can establish, kept here so every late flip below asks the same question of the same
@@ -21791,6 +21795,7 @@ async function noteBuildOutcome(
                 autoResolved: false,
               });
               previewVerifiedFailed = true;
+              previewServerDown = true;
               break;
             }
             serverRevivals += 1;
@@ -21834,6 +21839,7 @@ async function noteBuildOutcome(
           // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
           if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
             previewVerifiedFailed = true; // the eyes saw it NOT render, and the heal budget is spent — billing zeroes below
+            previewRenderFailed = true;
             // RUNTIME HONESTY (deep-test 2026-07-18 — "onLinkClick is not a function"): the live preview
             // genuinely did NOT render / crashed at RUNTIME and the heal budget is spent. Record it as an
             // UNRESOLVED ERROR so buildHealthFromDiagnostics marks the build NOT READY — a crashing app must
@@ -22693,7 +22699,10 @@ async function noteBuildOutcome(
       // GREEN CANNOT BE EARNED BY STATIC CLEANLINESS. That is the whole rule.
       try {
         gateEvidence.buildOk = result.ok;
-        gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewVerifiedFailed ? 'failed' : 'not-run';
+        gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewRenderFailed ? 'failed' : 'not-run';
+        // GT-11: infrastructure is not a failed render. Wording only — the bill
+        // still keys off previewVerifiedFailed, which this line does not touch.
+        gateEvidence.previewServerDown = previewServerDown && !previewRenderFailed;
         // Only changes the WORDING of an unproven preview, never the verdict — see previewUrlPublished.
         gateEvidence.previewUrlPublished = Boolean(lastPreviewUrl);
         // THE SAME FALLBACK THE TYPECHECK ALREADY HAS, FOR THE SIBLING IT LEFT BEHIND (autopsy
@@ -22933,9 +22942,13 @@ async function noteBuildOutcome(
         //     an ambiguity of OUR OWN sandbox is exactly the #2267 mistake, in the other direction.
         //   • Flipping ok:false also makes the build FREE (the standing "working app or free" guard
         //     keys on !result.ok) — so this fix hands money back as well as telling the truth.
+        //   • GT-3 adds `runtimeRed` (a failed preview, page or journey) but only when
+        //     AGENTV3_RUNTIME_RED_FLIP is on. D-1 was not answered, so the default is off.
+        //     Off, this block behaves exactly as before. It does not change a price.
         const gateBlockers = buildDiag.shippingIssueCount('error');
+        const runtimeRed = runtimeRedFlipEnabled() && runtimeProven(gateEvidence) === 'failed';
         const settled = result; // captured once — `result` is reassigned in the heal loop above
-        if (gate.state === 'red' && gateBlockers > 0 && settled && settled.ok) {
+        if (gate.state === 'red' && (gateBlockers > 0 || runtimeRed) && settled && settled.ok) {
           // …UNLESS THE APP HAS ALREADY BEEN PROVEN TO RUN (runProvenApp.ts, autopsy e706e068). A RED
           // built from STATIC findings — a placeholder in a stray file, a forecast about the bundle —
           // cannot outrank a real browser that rendered the app and a production build that compiled
@@ -23115,6 +23128,7 @@ async function noteBuildOutcome(
                 detail: `signals: ${signals} · ${devServerLastWordsDetail(lastWords)}`,
                 autoResolved: false,
               });
+              previewServerDown = true;
               break;
             }
             runtimeServerRestarted = true;

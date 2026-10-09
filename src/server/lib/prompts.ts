@@ -404,7 +404,6 @@ If the user is building an app and there is a need for API keys, secret keys, or
    - OpenRouter: [OpenRouter Key Generation](https://openrouter.ai/keys)
    - Stripe: [Stripe Dashboard API Keys](https://dashboard.stripe.com/apikeys)
    - Firebase: [Firebase Console](https://console.firebase.google.com/)
-4. SETTINGS DISCOVERY: Direct them to complete the process: "After copying this key, paste it in Settings → Secrets & API Keys panel."
-5. INTERACTIVE TRIGGER: ALWAYS append the exact string "[ACTION_SECRET_HELPER:provider_name]" at the very beginning or end of your message (where provider_name is one of: 'gemini', 'openai', 'groq', 'deepseek', 'openrouter', 'claude', 'stripe', 'firebase', or 'custom'). This immediately triggers our high-tech inline Direct-Fill Assistant in their chat window, letting them paste and save it instantly if they find the settings too hard to navigate!
+4. SETTINGS DISCOVERY: Direct them to the vault, naming a door that really exists: "After copying this key, paste it in Settings → App Settings → Secrets & API Keys" — and, if they are inside a build, "⋮ More → Keys & Secrets" opens the same vault without losing their place. Never promise them any other way to save a key.
 ==================================================`;
   };

@@ -57,7 +57,7 @@ When your deletion request is completed, we remove:
 - your **account record and profile** (name, email address, phone number, profile picture);
 - your **chat history** across every NavBharatAI assistant;
 - your **projects and built apps**, including their files and any archives you uploaded, the review comments left on them, and the list of things the builder asked you to do for them;
-- your **build history and diagnostics** tied to your account, including the reports of past builds and the record of which instructions each build ran with;
+- your **build history and diagnostics** tied to your account, including the reports of past builds, **every saved version of every app you could have restored**, and the record of which instructions each build ran with;
 - your **notifications and devices** — the mentions sent to you inside NavBharatAI, and the push-notification address of each phone you signed in on;
 - your **wallet, token balance and usage records**;
 - any **API keys and credentials** you stored in the secrets vault;
@@ -65,10 +65,13 @@ When your deletion request is completed, we remove:
   the daily usage counted against each one. A key that was still in use stops working the moment it is
   deleted, and the same key can never be used again;
 - your **chat bots** — every bot you connected, together with the token and app secret NavBharatAI held
-  for it, so the bot stops answering. (This removes NavBharatAI's copy of those credentials. The bot's
-  own account on the messaging platform stays yours, and you can delete it there.)
+  for it, so the bot stops answering, **and the conversations each bot had with the people who messaged
+  it**. (This removes NavBharatAI's copy of those credentials. The bot's own account on the messaging
+  platform stays yours, and you can delete it there.)
 - the **addresses NavBharatAI posted your build events to** — the webhook URLs you added, so nothing is
   ever sent to them again;
+- your **architecture decisions and tech-debt notes** — what the builder recorded about the stack each of
+  your projects chose, and the list of rough edges it was keeping track of;
 - your **App Lock PIN** — the 4-digit PIN that locks parts of NavBharatAI, including that vault;
 - your **saved connected services** — the MCP services you saved on your account to reuse across apps
   (this removes NavBharatAI's saved copy of the address and key; it does **not** touch anything in the

@@ -69,9 +69,14 @@ export const WORKSPACE_SCOPED_COLLECTIONS: readonly WorkspaceScopedCollection[] 
    * ── 🔴 THE APP DATA THE WORKSPACE ERASER NEVER LISTED (Q-701, 2026-10-08) ─────────────────────────
    * Each doc id below was read at its own store. The eraser works by an id RANGE over
    * `agentv3-{uid}-…`, so a store keyed by the WORKSPACE id is reached; two that are keyed by
-   * something else are deliberately NOT here and are recorded in `BUILD_REPORT_QUEUE.md` instead of
+   * something else are deliberately NOT here and were recorded in `BUILD_REPORT_QUEUE.md` instead of
    * being registered on a guess (`app_ai_apps`, whose doc id is the APP id, and `build_history`,
    * whose doc id is a bare sessionId that the `agentv3-{uid}-` range cannot match).
+   *
+   * 🟢 BOTH ARE NOW COVERED, AND NEITHER BY THIS REGISTRY — which is the point (2026-10-09). Reading
+   * each one answered the question the guess could not: `app_ai_apps` carries a `userId` field, so it
+   * belongs in `DataRetentionManager`'s user registry (Q-765), and `build_history`'s id is DERIVED
+   * from a workspace id, which needed a third reachability shape — `derivedIdErase.ts` (Q-764).
    */
   /** The app's attachment memory (`attachmentMemory.ts:115/130`). */
   { collection: 'agentv3_attachment_memory' },

@@ -4077,3 +4077,34 @@ the flag entries above promise.
 - **NOT changed, deliberately:** `NAVBHARAT_CLOUD_PUBLIC` stays unset (admin-only hosting). The platform account's broad
   project roles (`run.admin`, `storage.admin`, `artifactregistry.writer`, `cloudbuild.builds.editor`, project-level
   `iam.serviceAccountUser`) stay until the isolation probe reads ISOLATED and a real app deploys.
+
+
+### 2026-10-09 — Build reliability flags (`fix/build-reliability`) — ALL DEFAULT OFF, NONE SET IN CLOUD RUN
+
+Admin-approved series that targets the ~30% failed-build rate (audit + solutions docs of 2026-10-09). **Every flag
+below is default OFF; with none set, every build is byte-identical to before.** They are read through
+`src/server/AgentV3/reliability/flags.ts` (`parseEnvFlag`, so `on` / `true` / `1` all enable). **Weak tier never
+uses Claude:** quality escalation refuses a Claude target on a `noClaude` build, and the sticky chain is the
+already-guarded chain (`enforceNoClaude`). No existing default was changed (the old
+`AGENTV3_MODEL_COMPACT_KEEP_RECENT` / `_MAX_CHARS` defaults 6 / 2,000 are untouched; the higher thresholds live
+behind `AGENTV3_TOKEN_COMPACT`).
+
+| Flag | What it does | Tunables (default) | Code |
+|---|---|---|---|
+| `AGENTV3_STICKY_RUNG` | The architect's chain keeps the rung (model) that last answered instead of re-opening every turn at rung 0. Upward only; a key pool stays a pool. | — | `reliability/stickyRung.ts`, `MultiProviderTurnRunner` `opts.sticky` |
+| `AGENTV3_QUALITY_ESCALATE` | Truncation ×2, edit_file fail ×3 (in a row), or tsc errors not dropping move the build UP one distinct model, with a handoff note to the next model. Never onto Claude on a weak build. | `AGENTV3_ESCALATE_TRUNCATIONS` (2), `AGENTV3_ESCALATE_EDIT_FAILS` (3), `AGENTV3_ESCALATE_TSC_STALLS` (3), `AGENTV3_ESCALATE_MAX` (2 per build) | `reliability/qualityEscalation.ts`, `AgentRunner` `onQualityEscalate` |
+| `AGENTV3_REASONING_PASSBACK` | Kimi/GLM `reasoning_content` is kept (bounded side table, keyed by tool_call id) and sent back on historical assistant messages — only to models matching `kimi|moonshot|glm`. The Anthropic-shaped transcript is unchanged. | — | `reliability/reasoningPassback.ts` |
+| `AGENTV3_TOKEN_COMPACT` | Model transcript goes out verbatim until ~50% of the window; then gentle compaction (keep 12 / 6,000 chars), then the old tight one (6 / 2,000). | `AGENTV3_COMPACT_WINDOW_TOKENS` (128,000 = GLM, the smallest weak-ladder window), `AGENTV3_COMPACT_TRIGGER_PCT` (50), `AGENTV3_TOKEN_COMPACT_KEEP_RECENT` (12), `AGENTV3_TOKEN_COMPACT_MAX_CHARS` (6,000) | `reliability/contextBudget.ts` |
+| `AGENTV3_WORKING_SET` | Appends the CURRENT on-disk content of the most recently written/edited files as the last block the model reads. | `AGENTV3_WORKING_SET_FILES` (4), `_FILE_CHARS` (12,000), `_TOTAL_CHARS` (32,000) | `reliability/contextBudget.ts`, `ToolDispatcher.readForWorkingSet` |
+| `AGENTV3_STREAM_NO_CLAMP` | When streaming (`AGENTV3_STREAM_BUILD_CALLS=on`), max_tokens is NOT clamped to the clock (was ~9,833 at 300 s / ~4,833 at 150 s); capped by the model's own ceiling instead. Idle/hard-cap stream timers still apply. | `AGENTV3_STREAM_MAX_OUTPUT_DEFAULT` (16,000; per-model table — values marked *estimate* in code) | `reliability/streamBudget.ts` |
+| `AGENTV3_RESUME_TRUNCATED` | A write_file cut at the output limit is buffered (NEVER written to disk) and finished with the new `append_file` tool (`done:true` writes the whole file through write_file and all its guards). | — | `reliability/resumeWrite.ts`, `ToolDispatcher` `append_file` |
+| `AGENTV3_FILE_SIZE_RULE` | Adds the "keep every file under ~200 lines" rule to the architect prompt. | — | `reliability/modularPrompt.ts` |
+| `AGENTV3_MODULAR_PROMPT` | Slim core prompt: domain modules (games, fullstack, python, ai-in-app, secrets, android, finishing) the request does not need are moved out and listed; `read_guide` loads one. Measured: todo app 91,252 → ~65,400 chars. | — | `reliability/modularPrompt.ts` |
+| `AGENTV3_BANNED_PACKAGE_GUARD` | The `packageChoiceRule` list (xlsx, uuid, @types/uuid) is enforced: a bash install naming one is refused before it runs; a package.json write has them removed. | — | `reliability/bannedPackages.ts` |
+| `AGENTV3_CORE_TOOLSET` | The architect is offered 16 core tools + `load_tools` (+ append_file/read_guide when on, + connected MCP tools) instead of ~56; every tool still dispatches. | — | `reliability/coreToolset.ts` |
+| `AGENTV3_FAST_LANE_V2` | Fast lane: export/import contract on each manifest line, topological generation waves (stylesheets last), FULL code of a file's imports (capped) + signatures for the rest, and a plan of more than N files goes to the agent loop. | `AGENTV3_FAST_LANE_MAX_FILES` (12), `AGENTV3_FAST_LANE_DEPS_CHARS` (12,000) | `reliability/fastLaneV2.ts`, `SimpleBuilder` |
+
+**How to verify (before turning any flag on in prod):** run the reliability benchmark on a staging server
+(`scripts/agentv3-reliability-bench.ts`, 15-prompt smoke set first, `BENCH_CONFIRM=yes` required — it spends
+real money) once with all flags off (baseline) and once with the flag(s) on, then `npm run bench:compare`.
+Turn flags on one or two at a time so a regression has one owner.

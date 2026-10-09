@@ -92628,6 +92628,24 @@ and your last built app that we keep so they follow you from one device to anoth
 
 ---
 
+## 2026-10-09 — Build reliability series (`fix/build-reliability`, admin-approved)
+
+Implements the solutions doc for root causes 2–5 of the ~30% failed-build audit (root cause #1 — Claude on
+weak — dropped by the admin: **weak tier never uses Claude**). Every change is behind its own flag, **all
+default OFF** — see `docs/claude/ENV_REGISTRY.md` → "Build reliability flags". Code lives in
+`src/server/AgentV3/reliability/` with colocated tests.
+
+- P1 benchmark: `scripts/fixtures/reliability-bench-prompts.json` (50 prompts, 15 smoke),
+  `npm run bench:reliability` (dry run unless `BENCH_CONFIRM=yes`), `npm run bench:compare`. **Not run yet** —
+  the paid baseline/candidate runs are the next step and decide which flags go on.
+- P4 sticky rung + quality escalation + reasoning passback + handoff note.
+- P3 token-budget compaction + working set.
+- P2 stream no-clamp + append_file resume (partials never persisted) + 200-line rule.
+- P5 modular prompt + read_guide, banned-package guard, 16 core tools + load_tools.
+- P6 fast lane v2 (contract, topo waves, full deps code, >12 files → agent loop).
+
+Open: measure with the benchmark before enabling anything in prod; AppKnowledgeBase not updated (no
+user-facing change while the flags are off).
 ## 2026-10-09 — Q-780: a version history anyone could read, "protected" by a timestamp
 
 **Found while investigating Q-764**, which is only about erasing `build_history`. Reading the store to
@@ -92846,3 +92864,255 @@ Reversion-proven both ways: emptying the step strip fails, and `setActiveStep(4)
 **Baseline 86 → 78**, both files out of `unusedLocalsBaseline.json` (18 files → 16). **Q-600 stays
 OPEN** — 78 locals in 16 files, of which `App.tsx` (46) and `AgentV3Panel.tsx` (11) are 57 and are
 left alone while other sessions may be editing them. The remaining small files are the next batch.
+
+## 2026-10-09 — Q-771 closed (#3609 merged). Where the session's work stands.
+
+**Q-771 ✅ RESOLVED.** #3609 merged as `555a3e6`, so the row left the open table and `Q-771` was
+appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main`.
+
+**Four items shipped today, in merge order:** Q-621 (#3599, the other session's), Q-770 (#3607),
+Q-381 batch one (#3601), Q-771 (#3609).
+
+**What is left on the rows this session touched, stated plainly rather than as "done":**
+
+- **Q-600 — OPEN.** 78 unused locals in 16 files, down from 95 in 19. **57 of the 78 are `App.tsx`
+  (46) and `AgentV3Panel.tsx` (11)**, which the row itself says to leave alone while other sessions
+  may be editing them — and on a day when `main` took eight merges in seven hours, that condition
+  held the whole time. The remaining 21 are in small files and are the next batch.
+- **Q-381 — OPEN.** 47 finding codes still in no registry. The ones left are not like batch one's:
+  each needs a decision about what a user should be told (`TOOL_ERROR`, `STUCK_TOOL`, the `OUTCOME_*`
+  roll-ups, `FEATURE_COVERAGE`, `SIMULATED_DATA_SHIPPED`), and `PLATFORM_SOURCE_WORKSPACE` is the
+  one at ERROR severity, so it is money-adjacent.
+- **Q-769 — OPEN.** `@google-cloud/vertexai` exposes no abort hook, so a Vertex rung's request
+  cannot be cancelled when the client leaves. Mitigated (consumption stops), not fixed. Recorded
+  with two options and a recommendation.
+
+**The pattern worth carrying forward, because it is what both Q-600 batches found.** Twice in one
+day an unused local turned out to be a finished feature or a maintained value that no screen read —
+P-DESIGN.7's shared editor and line comments, then the deploy panel's step and elapsed timer. The
+class is *real state the code maintains on every run that nothing renders*, and nothing in the
+toolchain can catch it: an unrendered value passes `tsc`, passes every test, and costs real work at
+runtime (a Firestore listener, a 10 Hz ticker) to display nothing. The two verdicts went opposite
+ways — build the UI where the backend was already real and documented, delete where the design had
+been superseded and the leftover pointed at a placeholder endpoint. **So the remaining 21 small-file
+locals should be read as possible features, not as lint.** The count is the symptom; the call sites
+are the evidence.
+
+## 2026-10-09 — Q-763 and Q-780 closed: the last two rows whose owner PRs had already merged
+
+Both rows read `IN PROGRESS` on `main` with their owner PRs merged — Q-763 (#3604, the synced
+workspace eraser) and Q-780 (#3608, the three unauthenticated build-history routes). Under the
+sixth absolute rule a merged owner means the row is ✅ and must leave the open table with its ID
+appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit. Four rows were caught in
+that same false state today (Q-699, Q-621, then these two), which is worth noticing: **the gap is
+structural, not careless.** A session closes its own row in the turn after its merge, and if that
+turn never comes — the session ends, or is working on something else — the row simply stays wrong,
+and only a later audit finds it.
+
+**Neither row's text was taken on trust; both were read in full on a fresh `main` first.** Each
+self-reports a complete fix with reversion-proof, and the two are good examples of why that check
+matters rather than a formality:
+- **Q-763** fixed it in its own module (`syncWorkspaceErase.ts`) rather than the retention registry,
+  deleting chunks first and the manifest last and sweeping to the format's ceiling instead of
+  trusting `chunkCount`. It also records a second defect found on the way: `WorkspaceStore.ts`'s
+  header documented the layout as `{userId}_chunk_{i}` while every real document has always been
+  `{userId}__c{i}` — the only written description disagreed with the only implementation, and an
+  eraser trusting the comment would have built ids matching nothing and reported success.
+- **Q-780** required ownership on all three routes, and its row names the load-bearing part
+  honestly: `ownedByVerifiedUid` alone proves nothing there, because the workspace id is built by
+  prefixing the caller's own uid, so an existence probe is what actually closes it.
+
+**These were another session's rows, and that needed care rather than a rule.** Closing another
+session's row went wrong earlier today: Q-699 was marked ✅ on the reasoning that no device could
+check it, and the session that WROTE that fix knew it was unprovable without one — #3600 corrected
+it and this session closed its own #3598. The difference here is that nothing is being claimed.
+That session is no longer in the project, both PRs are merged, each row carries its own proof, and
+asheesh's instruction was explicit about scope — *"apka kaam ya kisi aur agent ka kaam"*. Moving a
+row whose owner PR is merged is bookkeeping the rule already decides; asserting that somebody
+else's fix works is not, and still is not.
+
+**Queue: 80 rows, and nothing is left in a self-reported-false state** — 8 OPEN (Q-600, Q-381,
+Q-706, Q-761, Q-762, Q-764, Q-765, Q-767), the rest 🟡 BLOCKED on the admin, money, a vendor or a
+real device. No row now reads `IN PROGRESS` against a merged PR.
+
+---
+
+## 2026-10-09 — Q-761 · Q-762 · Q-764 · Q-765: four queue rows were ONE missing reachability shape
+
+**The class, named plainly: a Firestore document whose id is DERIVED.** Account deletion had exactly
+two ways to find a document — the doc id IS the uid (or a verified field equals it,
+`DataRetentionManager`), or the doc id is a workspace id inside the `agentv3-{uid}-` range
+(`workspaceDataErase`). A store whose id is *built* out of a key the eraser holds, but not equal to it
+and not carried in the body, is reachable by neither. There is nothing to query.
+
+Every session that met one of these did the right thing and got the same result. It read the store,
+correctly judged the document unreachable, and correctly refused to register it on a guess — which
+left a queue row. Four rows accumulated that way:
+
+| Row | Store | Why no key reached it |
+|---|---|---|
+| Q-762 | `adrDecisions`, `techDebt` | id `${uid}__${projectId}`, body `{records\|items, updatedAt}` — no uid field at all |
+| Q-764 | `build_history` + `versions` | a BARE sessionId; the `agentv3-{uid}-` range cannot match it |
+| Q-761 | `bot_sessions` | id `${botId}_${chatId}` — reachable from the BOT, never from the uid |
+| Q-765 | `app_ai_apps` | id is the public APP id, so the workspace range cannot reach it |
+
+**The 50/50 half that mattered.** Fixing four stores is the first half. The other half is why a
+correct judgement kept producing a permanent gap: *"I cannot express this key"* had no answer except
+a queue row. So `src/server/lib/derivedIdErase.ts` is that answer — a third reachability shape that
+resolves the key first and then deletes the exact id:
+
+- the uid itself → the `${uid}__` prefix range (Q-762);
+- the user's `bots` (`ownerUid`) → an id range per `${botId}_` (Q-761);
+- `user_build_history.sessionId` **and** the workspace id range with the prefix stripped, unioned
+  because neither source is provably complete alone → `build_history/{key}`, `versions` first (Q-764).
+
+**And Q-765 turned out not to need it.** Reading the store answered what the guess could not: `mint`
+is the only writer of `app_ai_apps` in the repo and always sets `userId`, so the existing user
+registry reaches it exactly. It is a plain `{field: 'userId'}` entry — which is the point of reading
+the store rather than inventing a mechanism for it.
+
+**Ordering is load-bearing, and it is why the route changed.** Every key above is derived from a
+parent the *other two* erasers delete. Run second, this would resolve no keys, delete nothing, and
+report success — the "an erase that LOOKS complete and is not" failure `workspaceDataErase` was
+written to prevent. So `DELETE /api/profile` calls it FIRST, and a partial failure therefore leaves
+every parent findable, so running it again finishes the job.
+
+**The class is locked where the class lives.** `tests/everyCollectionIsClassified.test.ts` already
+refuses to let a `user`-kind collection exist without an erase path, and it reads the named module
+rather than trusting the map — so all four stores are now `user` kind pointing at `derivedIdErase`,
+and the four `blocked` entries are gone. Proven by reversion: removing `bot_sessions` from the
+eraser map fails two assertions, one of them *"user-keyed but never erased: bot_sessions"*. The scan
+also widened — `store` joined `DB_HANDLES`, so collection literals on that handle are now counted.
+
+**Writing the key tests found a real gap in my own code.** `buildHistoryKeysFor` split a workspace id
+on the `agentv3-{uid}-` prefix without applying the hyphenated-uid refusal `planWorkspaceErase` makes
+for exactly that reason: `agentv3-abc-d-pro-1` is both `abc-d`'s workspace `pro-1` and `abc`'s
+workspace `d-pro-1`, so the split could have handed the eraser a key belonging to a different person.
+The pure guard is now in the function that performs the split, and both refusals are reversion-proven
+in `tests/aDerivedDocumentIdIsReachable.test.ts` (14 assertions).
+
+**Honesty fixed too (fifth rule, step 5).** `AppKnowledgeBase`'s delete-account entry already promised
+"build history" was erased, and until this change that was false. It is true now, and the entry also
+names the two things a user would not have guessed: their bots' conversations, and their recorded
+architecture decisions and tech-debt notes.
+
+**Queue: 76 rows, 4 OPEN** (Q-600, Q-381, Q-706, Q-767). Q-767 still lists `bot_sessions` and that is
+correct: account deletion reaching it is a different duty from a retention window for the sessions of
+bots whose owner is still here.
+
+**And the gate found two more things the change implied, which is the whole argument for running it
+last on the final state.** Neither was in any report:
+
+- `tests/accountDeletionPage.test.ts` refuses to let the eraser wipe data the public deletion page
+  does not describe in plain words. Registering `app_ai_apps` failed it immediately. The page now
+  names three more things, in the terms a user would notice rather than ours: every saved version of
+  every app they could have restored, the conversations each bot had with the people who messaged it,
+  and the assistant inside any app they published — *"it stops answering, which is the point: it was
+  answering as you."*
+- `tests/everySubcollectionIsClassified.test.ts` flagged `build_history/{id}/versions`, and the
+  classification it already carried is the interesting part. It was `bounded`, which was TRUE —
+  `MAX_SAVED_VERSIONS` per session, oldest dropped on every save — and that kind only ever claimed the
+  data cannot GROW. It said nothing about erasure, so the label read as coverage while every saved
+  version survived account deletion for ever. That is Q-134's defect wearing a different word. The
+  kind now takes an `erasedBy` obligation, and the test reads the named module rather than trusting
+  the map — reversion-proven by renaming the string: *"derivedIdErase.ts does not mention 'versions',
+  so it cannot be erasing it."*
+
+---
+
+## 2026-10-09 — #3614 narrowed to Q-761 and Q-764, because #3611 got there first
+
+Correcting the entry above rather than erasing it. `#3614` was built for four rows; **#3611** (another
+session, opened 12:12, CI green) already owned two of them, and I did not list the open PRs immediately
+before starting. Safeguard #6 exists for exactly that, and the cost was two of four rows done twice.
+
+So the overlap is withdrawn from my side, not argued:
+
+- `adrDecisions` and `techDebt` (**Q-762**) — the `UID_PREFIXED_COLLECTIONS` registry and
+  `planUidPrefixErase` are removed from `derivedIdErase.ts`. #3611 fixes them by making the writers
+  store `userId`.
+- `app_ai_apps` (**Q-765**) — the `{field: 'userId'}` entry, its deletion-page bullet and that bullet's
+  guard entry are reverted. #3611 registers it.
+- Both rows are back in `BUILD_REPORT_QUEUE.md`, both IDs removed from the closed register, and each row
+  now names **#3611** as its owner so no third session takes it again. Their census entries go back to
+  `blocked` naming that PR.
+
+**What stays is what was only mine:** `bot_sessions` (Q-761) and `build_history` + `versions` (Q-764),
+the derived-key resolution for both, the `erasedBy` obligation on subcollections, and the class guard.
+
+**And one real difference is recorded rather than settled.** #3611 refuses a doc-id prefix range on the
+grounds that a uid containing the separator makes `a__b` ambiguous with `a` + `b__…` — *"a compliance
+gap is recoverable; deleting a different person's data is not"*. That is sound. It also means their fix
+cannot reach a row written **before** it, which they state plainly: a live project self-heals on its
+next build, an abandoned one does not. A uid prefix range would reach those, and the ambiguity they
+refuse becomes impossible once any uid outside `[A-Za-z0-9]` is refused outright. Put to the admin, in
+the row and in the thread. Not taken by overwriting somebody else's in-flight change.
+## 2026-10-09 — a control string the user was reading, and the contract that had no holder (Q-600 batch three, Q-781)
+
+**What a user actually saw.** Whenever the chat AI talked about an API key, the message bubble contained
+`[ACTION_SECRET_HELPER:gemini]`. The server prompt told the model it "MUST proactively" append that
+string, and that doing so *"immediately triggers our high-tech inline Direct-Fill Assistant in their
+chat window, letting them paste and save it instantly"*. No such assistant existed anywhere in the
+repository. The only code that could even remove the string was `parseMessageAndTriggers`, a local in
+`AIChat.tsx` that nothing called — which is how Q-600's sweep found it.
+
+Two defects from one cause: a control string leaked into content a person reads, and a feature was
+promised to them that was never built.
+
+**⛔ And the fix was NOT to build it.** `SecretManager.tsx` says it in its own words — *"This component
+is the vault's UI, and it is deliberately the ONLY one… there is no second store to keep in step,
+because there is no second implementation"* — and `tests/secretsOneVault.test.ts` fails CI if a change
+forks that. An inline key form in a chat bubble would have been a THIRD implementation of saving a
+secret, built to make a sentence in a prompt true. So the sentence went instead: the prompt now names
+the two doors that really exist (Settings → App Settings → Secrets & API Keys, and ⋮ More → Keys &
+Secrets) and promises nothing else. The marker is still stripped, and that is not belt-and-braces —
+chat history is stored, so every message already written with it is still rendered on every scroll
+back.
+
+**The class: a contract between the prompt and the renderer with nothing holding it.** The prompt could
+ask for any control string and nothing checked that the other end had kept up. `src/lib/chatMarkers.ts`
+is the holder, and `tests/everyPromptMarkerHasARenderer.test.ts` is what makes it one.
+
+**🔴 And writing that test found the contract broken the OTHER way, which nothing had ever looked for.**
+Its first assertion is a guard on the guard — "the scan finds markers in the prompt" — and it FAILED:
+`prompts.ts` names no `__MARKER__` at all. A whole-repo search (every extension, `server.ts` at the
+root included, the stale `dist/` bundle excluded) finds `__SWITCH_TO_BUILD__`, `__URGENT_BUILD__`,
+`__VIEW_PREVIEW__`, `__DEPLOY_ACTIONS__` and `__AUTO_PLAN__` in exactly one file: the renderer that
+branches on them. **Nothing emits any of them**, so five user-facing buttons can never appear.
+
+The `__VIEW_PREVIEW__` button carries the history in its own comment: *"previously the flag was parsed
+but never used, so a successful build offered no way to open the preview"*. A session found a
+parsed-and-unused flag, correctly built the missing button, and never asked whether anything produced
+the flag. **The instance fixed, the class left alive** — the a38c6fef pattern, in a different file.
+Recorded as **Q-781** and held in `NO_EMITTER_YET` against that row, because deciding the chat AI
+should start emitting five CTAs is a product change, not a sweep. The list may only shrink: the test
+fails if a new unreachable branch appears, and fails again if one of these gains an emitter and is not
+removed.
+
+**The third verdict in this sweep, and a new one.** Batch one SHOWED a finished feature (the room's
+Code tab); batch two did both — showed the deploy step strip, deleted BotBuilder's placeholder webhook.
+Here `intentUI` looked like the first kind: a seven-persona badge ("Architect Mode", "Security
+Auditor") computed on every render and shown nowhere. It is not. `activeIntent` is
+`useState<string>('social')` in App.tsx and **nothing in the repository ever calls `setActiveIntent`**,
+so the value is frozen and not one of the seven cases — the badge would have rendered the default,
+"Navbharat AI", on every message for ever. A status indicator that does not reflect state is what the
+second absolute rule forbids outright, so showing it would have shipped a fake. Deleted. The dead
+`activeIntent` prop chain (App.tsx → ViewPanels → NBIChatPanel → AIChat) is left for its own row: it
+crosses App.tsx, which Q-600 says to leave while other sessions may be editing it.
+
+`AIChat.tsx` leaves the baseline entirely (6 → 0, and four lucide icons with it). **78 → 72.**
+
+### ⚠️ And I duplicated another session's work, which is worth recording plainly
+
+`#3614` (this session, Q-761/762/764/765) overlaps **#3611** (another session, opened 12:12, green),
+which fixes Q-762 and Q-765 by making the writers store `userId`. I did not list the open PRs
+immediately before starting — safeguard #6 exists for exactly this, and the cost is two of four rows
+done twice. Q-761 and Q-764 are mine alone.
+
+The two approaches genuinely differ and both are sound: #3611 refuses a doc-id prefix range outright
+(*"a compliance gap is recoverable; deleting a different person's data is not"*) and states its residue
+honestly — rows written before it have no `userId` and are not reached. Mine uses the prefix range with
+a refusal for any uid outside `[A-Za-z0-9]`, which makes that ambiguity impossible and does reach the
+already-written rows. That is a real advantage, and it is still not mine to take by racing their file:
+the row is theirs, the operation is irreversible, and safeguard #3 says ask. Put to the admin rather
+than resolved unilaterally.

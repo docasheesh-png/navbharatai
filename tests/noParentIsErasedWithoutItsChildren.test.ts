@@ -75,8 +75,11 @@ function scanPairs(): Pair[] {
  * the whole test was written to remove.
  */
 const PARENT_IS_NEVER_DELETED: Record<string, string> = {
-  teams: 'classified `platform`: a team outlives any one member, and removing a member is a status '
-    + 'change in its `members` sub, never a delete of the team (Q-682)',
+  // 🔴 `teams` WAS LISTED HERE AND HAD TO LEAVE, which is this list's own rule working (Q-682, hours
+  // after Q-784 wrote it). The excuse read "a team outlives any one member, and removing a member is a
+  // status change, never a delete" — true about a MEMBER, and irrelevant: `teamId === owner uid`, so the
+  // document is one person's own and account deletion now erases it with both its children. An excuse
+  // list that cannot go stale is the only kind worth having.
   nav_store_web_apps: 'a public App Mart listing, `blocked` on Q-766 (what happens to a purchasable '
     + "listing when its author leaves is the admin's decision) with its subcollections owned by Q-682",
   promptAudits: 'the parent document is never written — only `promptAudits/{uid}/entries` exists, which '

@@ -108,13 +108,13 @@ import { checkpointDisplayName } from '../../lib/checkpointLabel';
 import { useAppServices } from '../../hooks/useAppServices';
 import { activeMentionQuery, rankMentionSuggestions, applyMentionSuggestion } from '../../lib/fileMentionPicker';
 import { runtimeLogEmptyMessage } from '../../lib/runtimeLogBuffer';
-import { db } from '../../lib/firebase';
+import { auth, db } from '../../lib/firebase';
 import { sanitizeFirestoreData } from '../../lib/firestoreUtils';
 /** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
  *  Returns {} for the synthetic admin / anonymous users (no Firebase user) — the server falls back
  *  to its claimed-id + random-sessionId check for those. */
 import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { authJsonHeaders } from '../../lib/authHeaders';
+import { authJsonHeaders, authedHeaders } from '../../lib/authHeaders';
 import { beginGithubOauthAttempt, browserStorage, GITHUB_WEB_NONCE_KEY } from '../../lib/githubOauthNonce';
 
 /**
@@ -2382,9 +2382,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       const qs = new URLSearchParams();
       if (userId) qs.set('userId', userId);
       if (email) qs.set('email', email);
-      const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}?${qs.toString()}`, {
+      let res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}?${qs.toString()}`, {
         headers: await authJsonHeaders(),
       });
+      if (res.status === 401 || res.status === 403) {
+        try { await auth.currentUser?.getIdToken(true); } catch { /* retry with the next header build */ }
+        res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}?${qs.toString()}`, {
+          headers: await authedHeaders(),
+        });
+      }
       if (!res.ok) return;
       const data = await res.json().catch(() => null);
       const rec = data?.conversation;

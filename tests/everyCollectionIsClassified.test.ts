@@ -58,8 +58,6 @@ type Kind = 'user' | 'workspace' | 'platform' | 'retained' | 'blocked';
  */
 const DERIVED_ERASER = 'src/server/lib/derivedIdErase.ts';
 const DERIVED_CALL = 'deleteUserDerivedIdData\\(';
-const COMPOSITE_WHY = 'the doc id is `${userId}__${projectId}` and the body has NO uid field, so neither key '
-  + 'strategy can reach it; the uid PREFIX range does, exactly (Q-762)';
 const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; why: string }> = {
   user_workspaces: {
     file: 'src/server/lib/syncWorkspaceErase.ts',
@@ -76,8 +74,6 @@ const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; wh
    * the exact id, which also means it fixes documents ALREADY written, where adding a uid field to the
    * writer would not have.
    */
-  adrDecisions: { file: DERIVED_ERASER, calledAs: DERIVED_CALL, why: COMPOSITE_WHY },
-  techDebt: { file: DERIVED_ERASER, calledAs: DERIVED_CALL, why: COMPOSITE_WHY },
   bot_sessions: {
     file: DERIVED_ERASER,
     calledAs: DERIVED_CALL,
@@ -253,8 +249,8 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   gallery_apps: { kind: 'blocked', why: 'Q-766 — a `uid` field, and it survives deletion today. It is a PUBLIC listing that can have been bought, so erasing it because the AUTHOR left would destroy a stranger\'s purchase (the `gift_codes` reasoning). The admin decides: erase, or unlist and de-identify' },
   nav_store_apps: { kind: 'blocked', why: 'Q-766 — same shape as `gallery_apps`: a `uid` field, a public App Mart listing, purchasable' },
   nav_store_web_apps: { kind: 'blocked', why: 'Q-766 — same as above, plus `files`/`baked`/`screenshots` subcollections that Q-682 owns' },
-  adrDecisions: { kind: 'user', why: "the person's own architecture decisions — doc id `${userId}__${projectId}`, erased by `derivedIdErase.ts` as a uid prefix range (Q-762)" },
-  techDebt:     { kind: 'user', why: "the person's own tech-debt list — the same composite-id shape, erased the same way (Q-762)" },
+  adrDecisions: { kind: 'blocked', why: "Q-762 — doc id is `${userId}__${projectId}` and the body has NO uid field, so neither key strategy reaches it. Owned by PR #3611, which makes the writer store the uid" },
+  techDebt:     { kind: 'blocked', why: 'Q-762 — the same composite-id shape, the same missing field; same owner' },
   /**
    * ✅ Q-763, 2026-10-09. The document whose id is the uid is only a MANIFEST; the payload is in
    * `{uid}__c{i}`. It is erased by `syncWorkspaceErase.ts` — chunks first, manifest last — and NOT by
@@ -262,7 +258,7 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
    */
   user_workspaces: { kind: 'user', why: "the person's cross-device workspace: a manifest plus `{uid}__c{i}` chunks, erased by `syncWorkspaceErase.ts`" },
   build_history: { kind: 'user', why: "every build's version metadata for every app — keyed by a BARE sessionId, which `derivedIdErase.ts` resolves from `user_build_history` and the workspace id range, `versions` subcollection first (Q-764)" },
-  app_ai_apps:   { kind: 'user', why: "which published app may call NavBharatAI's AI, and as whom — doc id is the APP id, but `mint` (its only writer) always sets `userId`, so the user registry reaches it exactly (Q-765)" },
+  app_ai_apps:   { kind: 'blocked', why: 'Q-765 — doc id is the APP id, so the workspace range cannot reach it; it holds `userId`, so the user registry is the likely home once the key is decided. Owned by PR #3611' },
   analytics_daily:  { kind: 'blocked', why: 'Q-767 — a day rollup that grows for ever with no retention window chosen' },
   analytics_events: { kind: 'blocked', why: 'Q-767 — an event stream, appended with `.add()`, that grows for ever with no window' },
   build_events:     { kind: 'blocked', why: 'Q-767 — the build event bus, appended with `.add()`, no window' },

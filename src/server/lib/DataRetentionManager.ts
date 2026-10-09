@@ -261,24 +261,6 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    */
   { collection: 'site_uptime', key: { field: 'userId' } },
   /**
-   * The app's AI-registry row — which published app may call NavBharatAI's AI, and as whom
-   * (`AppAiRegistryStore.ts:61/83`). Q-765, 2026-10-09.
-   *
-   * 🔴 IT WAS IN NO ERASE PATH, AND THE REASON IT WAS LEFT OUT WAS SOUND. Its doc id is the public APP
-   * id, so the workspace eraser's `agentv3-{uid}-` range cannot reach it, and Q-701 recorded it as an
-   * open row rather than registering it on a guess. Reading it settles the question the guess could
-   * not: `mint` is the ONLY writer in the repo (`DeploymentStore.ts:626` is its one caller) and it
-   * always sets `userId` in the body, so the uid FIELD reaches it exactly — this registry's existing
-   * strategy, once the body had actually been read.
-   *
-   * The row carries a live nonce, so deleting it is also what stops a published page's assistant token
-   * resolving after its owner is gone (`appAiGateway` resolves through `get(appId)`).
-   *
-   * ⚠️ `userId` is written as `userId || ''`, which is empty for an `agentv3-anon-…` publish. That is
-   * not a gap here: an anonymous publish has no account, so there is no account deletion to reach it.
-   */
-  { collection: 'app_ai_apps', key: { field: 'userId' } },
-  /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *
    * It looks like it belongs here — it carries a uid — and adding it would feel like completing the

@@ -70,8 +70,6 @@ When your deletion request is completed, we remove:
   platform stays yours, and you can delete it there.)
 - the **addresses NavBharatAI posted your build events to** — the webhook URLs you added, so nothing is
   ever sent to them again;
-- the **assistant inside any app you published** — the registry row that let that app call NavBharatAI's
-  AI, and as whom. The assistant stops answering, which is the point: it was answering as you;
 - your **architecture decisions and tech-debt notes** — what the builder recorded about the stack each of
   your projects chose, and the list of rough edges it was keeping track of;
 - your **App Lock PIN** — the 4-digit PIN that locks parts of NavBharatAI, including that vault;

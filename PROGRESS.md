@@ -92939,3 +92939,33 @@ last on the final state.** Neither was in any report:
   kind now takes an `erasedBy` obligation, and the test reads the named module rather than trusting
   the map — reversion-proven by renaming the string: *"derivedIdErase.ts does not mention 'versions',
   so it cannot be erasing it."*
+
+---
+
+## 2026-10-09 — #3614 narrowed to Q-761 and Q-764, because #3611 got there first
+
+Correcting the entry above rather than erasing it. `#3614` was built for four rows; **#3611** (another
+session, opened 12:12, CI green) already owned two of them, and I did not list the open PRs immediately
+before starting. Safeguard #6 exists for exactly that, and the cost was two of four rows done twice.
+
+So the overlap is withdrawn from my side, not argued:
+
+- `adrDecisions` and `techDebt` (**Q-762**) — the `UID_PREFIXED_COLLECTIONS` registry and
+  `planUidPrefixErase` are removed from `derivedIdErase.ts`. #3611 fixes them by making the writers
+  store `userId`.
+- `app_ai_apps` (**Q-765**) — the `{field: 'userId'}` entry, its deletion-page bullet and that bullet's
+  guard entry are reverted. #3611 registers it.
+- Both rows are back in `BUILD_REPORT_QUEUE.md`, both IDs removed from the closed register, and each row
+  now names **#3611** as its owner so no third session takes it again. Their census entries go back to
+  `blocked` naming that PR.
+
+**What stays is what was only mine:** `bot_sessions` (Q-761) and `build_history` + `versions` (Q-764),
+the derived-key resolution for both, the `erasedBy` obligation on subcollections, and the class guard.
+
+**And one real difference is recorded rather than settled.** #3611 refuses a doc-id prefix range on the
+grounds that a uid containing the separator makes `a__b` ambiguous with `a` + `b__…` — *"a compliance
+gap is recoverable; deleting a different person's data is not"*. That is sound. It also means their fix
+cannot reach a row written **before** it, which they state plainly: a live project self-heals on its
+next build, an abandoned one does not. A uid prefix range would reach those, and the ambiguity they
+refuse becomes impossible once any uid outside `[A-Za-z0-9]` is refused outright. Put to the admin, in
+the row and in the thread. Not taken by overwriting somebody else's in-flight change.

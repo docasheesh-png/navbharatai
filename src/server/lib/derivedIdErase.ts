@@ -1,6 +1,6 @@
 // ERASING A DOCUMENT WHOSE ID IS DERIVED — the third reachability shape, which neither eraser had.
 //
-// 🔴 THE CLASS, named plainly (Q-761, Q-762, Q-764 — one root cause, three stores).
+// 🔴 THE CLASS, named plainly (Q-761, Q-764 — one root cause, two stores here, and see the scope note).
 // Account deletion had exactly TWO ways to find a document:
 //
 //   1. `DataRetentionManager.deleteUserData`  — the doc id IS the uid, or a verified field equals it.
@@ -10,15 +10,26 @@
 // A store whose doc id is DERIVED — built out of a key the eraser already holds, but not equal to it
 // and not carried in the body — is reachable by neither. There is nothing to query. So each one was
 // found, read, correctly judged unreachable, and recorded in `BUILD_REPORT_QUEUE.md` as an open row
-// rather than registered on a guess. Three separate rows accumulated that way:
+// rather than registered on a guess:
 //
-//   · Q-762  `adrDecisions/{uid}__{projectId}` and `techDebt/{uid}__{projectId}` — the person's own
-//            architecture decisions and tech-debt list. Body is `{records|items, updatedAt}`: no uid
-//            field at all (`adrMemory.ts:163/203`, `TechnicalDebtTracker.ts:98`).
 //   · Q-764  `build_history/{sessionId}` + its `versions` subcollection — every build's version
 //            metadata for every app. A BARE sessionId, which the `agentv3-{uid}-` range cannot match.
 //   · Q-761  `bot_sessions/{botId}_{chatId}` (`BotStore.ts:283/296`) — per-chat conversation state for
 //            a bot whose owner is gone. Reachable from the BOT, never from the uid.
+//
+// ⚠️ SCOPE, AND WHY IT IS NARROWER THAN THE CLASS (2026-10-09). `adrDecisions` and `techDebt`
+// (`{uid}__{projectId}`, body `{records|items, updatedAt}`) are the same class and are NOT here. PR
+// #3611, from another session and opened before this module existed, fixes them a different way: it
+// makes the WRITERS store `userId` and registers the plain field. It also refuses a doc-id prefix
+// range outright, on the grounds that a uid containing the separator makes `a__b` ambiguous with `a` +
+// `b__…` — "a compliance gap is recoverable; deleting a different person's data is not".
+//
+// That reasoning is sound, their row, and theirs first, so this module stays off those two stores
+// rather than racing them to the same file. One difference is worth recording because it is real and
+// not settled here: their fix cannot reach a row written BEFORE it (they say so themselves — a live
+// project self-heals on its next build, an abandoned one does not), while a uid prefix range would,
+// and the ambiguity they refuse is impossible once any uid outside [A-Za-z0-9] is refused. That is a
+// question for the admin, not something to take by overwriting somebody else's in-flight change.
 //
 // ⚠️ THE ROWS WERE THE SYMPTOM. The defect is that "I cannot express this key" had no answer except a
 // queue row, so the same correct judgement produced a new permanent gap every time a store of this
@@ -35,8 +46,8 @@
 //
 // 🔒 AND NOTHING HERE IS A GUESS. Every collection, doc id and subcollection below was read at its own
 // store before being listed. A prefix range is the one construct in this file that could over-delete,
-// so each one is refused outright when the key could be a prefix of another key (see the two
-// refusals) rather than being made to work in a case that cannot arise with real data.
+// so it is refused outright when the key could be a prefix of another key, rather than being made to
+// work in a case that cannot arise with real data.
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
@@ -45,62 +56,9 @@ import { workspacePrefixFor } from './workspaceIdentity';
 /** U+F8FF is a very high code point, so [prefix, prefix+U+F8FF] is exactly the prefix range. */
 const RANGE_END_CHAR = String.fromCharCode(0xf8ff);
 
-/** The separator both composite-id stores use between the uid and the project id. */
-export const UID_COMPOSITE_SEPARATOR = '__';
-
-/** A store whose doc id is `${uid}${UID_COMPOSITE_SEPARATOR}${somethingElse}`. */
-export interface UidPrefixedCollection {
-  collection: string;
-  /** The subcollection holding the payload, when the content lives one level down. Neither has one. */
-  sub?: string;
-}
-
-/**
- * VERIFIED — each read at its own store, never inferred from its name.
- *
- *   adrDecisions  .doc(`${userId}__${projectId}`)  body {records, updatedAt}  (adrMemory.ts:163/203)
- *   techDebt      .doc(`${userId}__${projectId}`)  body {items, updatedAt}    (TechnicalDebtTracker.ts:98)
- *
- * Both bodies are flat and neither store writes a subcollection, so there is nothing one level down to
- * orphan. That was checked rather than assumed: Q-134 was exactly the bug where it had not been.
- */
-export const UID_PREFIXED_COLLECTIONS: readonly UidPrefixedCollection[] = [
-  { collection: 'adrDecisions' },
-  { collection: 'techDebt' },
-];
-
-export type DerivedEraseRefusal = 'unusable-uid' | 'ambiguous-uid';
+export type DerivedEraseRefusal = 'unusable-uid';
 
 export interface PrefixRange { startAt: string; endAt: string }
-export interface UidPrefixPlan {
-  range: PrefixRange | null;
-  refusal?: DerivedEraseRefusal;
-}
-
-/**
- * The id range that contains exactly this user's composite-id documents — or a REFUSAL, which is a
- * real answer and not a failure.
- *
- * 🔴 THE AMBIGUITY THIS REFUSES, because getting it wrong deletes a different person's work. The
- * prefix is `${uid}__`. For a uid ending in `_` — say `abc_` — that prefix is `abc___`, which also
- * begins the prefix of the uid `abc`. Worse, a uid CONTAINING `__` makes the separator itself
- * ambiguous: `a__b` with project `c` gives the same id as `a` with project `b__c`.
- *
- * Firebase Auth uids are 28 characters of [A-Za-z0-9] and contain no underscore, so this cannot arise
- * with a real account. That is a reason to be confident, NOT a reason to skip the check — the whole
- * point of a prefix range is that a wrong bound is irreversible. So anything outside [A-Za-z0-9] is
- * REFUSED and reported honestly: the caller says these records could not be erased automatically,
- * which a human can then finish. This is `planWorkspaceErase`'s discipline, applied to a tighter key.
- *
- * PURE.
- */
-export function planUidPrefixErase(uid: string | null | undefined): UidPrefixPlan {
-  const id = String(uid ?? '').trim();
-  if (!id) return { range: null, refusal: 'unusable-uid' };
-  if (!/^[A-Za-z0-9]+$/.test(id)) return { range: null, refusal: 'ambiguous-uid' };
-  const prefix = `${id}${UID_COMPOSITE_SEPARATOR}`;
-  return { range: { startAt: prefix, endAt: `${prefix}${RANGE_END_CHAR}` } };
-}
 
 /**
  * The `bot_sessions` id range for one bot — or null when the bot id could be a prefix of another.
@@ -300,22 +258,6 @@ export async function deleteUserDerivedIdData(uid: string): Promise<DerivedErase
   if (!store) return empty;
 
   const collections: DerivedEraseResult[] = [];
-  const plan = planUidPrefixErase(uid);
-
-  // ── The composite-id stores: `${uid}__${projectId}` ──────────────────────────────────────────────
-  for (const entry of UID_PREFIXED_COLLECTIONS) {
-    if (!plan.range) {
-      // Reported, not skipped silently: the caller surfaces the refusal so a human can finish it.
-      collections.push({ collection: entry.collection, documents: 0, children: 0, error: `refused: ${plan.refusal}` });
-      continue;
-    }
-    try {
-      const n = await deleteIdRange(store, entry.collection, plan.range, entry.sub);
-      collections.push({ collection: entry.collection, ...n });
-    } catch (e) {
-      collections.push({ collection: entry.collection, documents: 0, children: 0, error: e instanceof Error ? e.message : String(e) });
-    }
-  }
 
   // ── `bot_sessions/{botId}_{chatId}`, resolved from the bots this user owns ───────────────────────
   let botIds: string[] = [];
@@ -364,6 +306,5 @@ export async function deleteUserDerivedIdData(uid: string): Promise<DerivedErase
     collections,
     totalDeleted: collections.reduce((s, c) => s + c.documents + c.children, 0),
     keys: { bots: botIds.length, historySessions: historyKeys.length },
-    ...(plan.range ? {} : { refusal: plan.refusal }),
   };
 }

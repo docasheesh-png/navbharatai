@@ -1,13 +1,16 @@
 /**
- * Q-761 · Q-762 · Q-764 — ONE class: a Firestore document whose id is DERIVED from a key the eraser
- * holds, rather than equal to it or carried in the body.
+ * Q-761 · Q-764 — ONE class: a Firestore document whose id is DERIVED from a key the eraser holds,
+ * rather than equal to it or carried in the body.
  *
  * 🔴 THE FAILURE THESE ENCODE. Account deletion had two ways to find a document: the doc id IS the uid
  * (or a field equals it), or the doc id is a workspace id inside the `agentv3-{uid}-` range. Three
  * stores are neither, so each was read, correctly judged unreachable, and recorded as a queue row —
- * and the recording was all that ever happened. `adrDecisions`/`techDebt` (`${uid}__{projectId}`,
- * body `{records|items, updatedAt}`), `build_history/{bare sessionId}` and
- * `bot_sessions/{botId}_{chatId}` all survived account deletion for ever.
+ * and the recording was all that ever happened. `build_history/{bare sessionId}` and
+ * `bot_sessions/{botId}_{chatId}` both survived account deletion for ever.
+ *
+ * ⚠️ `adrDecisions`/`techDebt` are the same class and are deliberately NOT tested here: PR #3611, from
+ * another session and opened first, owns those two and fixes them by making the writers store `userId`.
+ * See `derivedIdErase.ts`'s scope note.
  *
  * `tests/everyCollectionIsClassified.test.ts` locks the CLASS — a new store of this shape cannot be
  * labelled `user` without naming the module that erases it. This file locks the KEY RESOLUTION, which
@@ -16,79 +19,14 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  planUidPrefixErase,
   planBotSessionErase,
   buildHistoryKeysFor,
-  UID_PREFIXED_COLLECTIONS,
-  UID_COMPOSITE_SEPARATOR,
 } from '../src/server/lib/derivedIdErase';
 
 /** U+F8FF — the high sentinel that makes [p, p+sentinel] exactly the prefix range. */
 const HIGH = String(String.fromCharCode(0xf8ff));
 /** A real-shaped Firebase Auth uid: 28 characters of [A-Za-z0-9]. */
 const UID = 'aB3dEfGhIjKlMnOpQrStUvWxYz01';
-
-describe('planUidPrefixErase — the composite-id range (Q-762)', () => {
-  it('is exactly the `${uid}__` prefix, and nothing wider', () => {
-    const plan = planUidPrefixErase(UID);
-    expect(plan.refusal).toBeUndefined();
-    expect(plan.range).toEqual({ startAt: `${UID}__`, endAt: `${UID}__${HIGH}` });
-  });
-
-  it('cannot reach the document of a uid that merely STARTS with this one', () => {
-    // THE WHOLE DANGER OF A PREFIX RANGE, and the invariant that removes it: the separator `_` is not
-    // in [A-Za-z0-9], so a LONGER uid differs from ours exactly where ours has `_` — and its character
-    // is either below `_` (a digit) or above it (a letter), never equal. Either way its document id
-    // falls strictly OUTSIDE our bound. Both sides are asserted, because a one-sided check would have
-    // passed while the other side was reachable.
-    const { startAt, endAt } = planUidPrefixErase(UID).range!;
-    for (const longer of [`${UID}2`, `${UID}9`, `${UID}a`, `${UID}Z`, `${UID}xy`]) {
-      const id = `${longer}__project`;
-      expect(id < startAt || id > endAt, id).toBe(true);
-    }
-    // …while OUR own documents are inside the bound, whatever the project id.
-    for (const projectId of ['a', 'zzz', 'project-with-dashes', '9', 'A']) {
-      const id = `${UID}__${projectId}`;
-      expect(id >= startAt && id <= endAt, id).toBe(true);
-    }
-  });
-
-  it("does not reach the uid's OWN plain-keyed document, which another eraser owns", () => {
-    // `users/{uid}` and friends are the user registry's; this range starts after the separator.
-    const plan = planUidPrefixErase(UID);
-    expect(UID < plan.range!.startAt).toBe(true);
-  });
-
-  it('REFUSES a uid that could make the separator ambiguous, rather than guessing a bound', () => {
-    // `a__b` + project `c` and `a` + project `b__c` produce the same document id, so a uid containing
-    // the separator makes the prefix meaningless. A uid ending in `_` makes the bound overlap a
-    // shorter uid's. Both are refused — a real answer, not a failure.
-    for (const bad of ['a__b', 'abc_', '_abc', 'has space', 'has-dash', 'has.dot', 'has/slash']) {
-      const plan = planUidPrefixErase(bad);
-      expect(plan.range, bad).toBeNull();
-      expect(plan.refusal, bad).toBe('ambiguous-uid');
-    }
-  });
-
-  it('refuses an absent uid as unusable, never as an empty prefix', () => {
-    // An empty prefix would be the range [`__`, `__`] — every user's records at once.
-    for (const bad of ['', '   ', null, undefined]) {
-      const plan = planUidPrefixErase(bad as string);
-      expect(plan.range).toBeNull();
-      expect(plan.refusal).toBe('unusable-uid');
-    }
-  });
-
-  it('registers both stores of this shape, and only stores with no subcollection', () => {
-    const names = UID_PREFIXED_COLLECTIONS.map((c) => c.collection);
-    expect(names).toContain('adrDecisions');
-    expect(names).toContain('techDebt');
-    // Neither writer creates a subcollection — checked at the store, because Q-134 was exactly the bug
-    // where a parent was deleted and its children were left behind, unreachable and kept.
-    for (const entry of UID_PREFIXED_COLLECTIONS) expect(entry.sub).toBeUndefined();
-    expect(UID_COMPOSITE_SEPARATOR).toBe('__');
-  });
-});
 
 describe('planBotSessionErase — the per-bot range (Q-761)', () => {
   it('is exactly `${botId}_`, matching BotStore`s `${botId}_${chatId}`', () => {

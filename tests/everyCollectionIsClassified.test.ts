@@ -50,6 +50,21 @@ const root = resolve(__dirname, '..');
  * is the right division: this test proves the store is ACCOUNTED FOR, not that the work is done.
  */
 type Kind = 'user' | 'workspace' | 'platform' | 'retained' | 'blocked';
+/**
+ * `user`-kind collections erased by a DEDICATED MODULE rather than by `USER_SCOPED_COLLECTIONS`.
+ *
+ * Each entry says where the erasure lives, how `DELETE /api/profile` calls it, and why the registry
+ * could not hold it. The test above reads those files rather than taking this map's word for it.
+ */
+const USER_ERASED_BY_MODULE: Record<string, { file: string; calledAs: string; why: string }> = {
+  user_workspaces: {
+    file: 'src/server/lib/syncWorkspaceErase.ts',
+    calledAs: 'eraseSyncedWorkspace\\(',
+    why: 'the document whose id is the uid is only a MANIFEST; the payload is in `{uid}__c{i}` chunks, '
+      + 'so a `docId` entry would have deleted the index and kept the data (Q-763)',
+  },
+};
+
 const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   user_vault_pin:      { kind: 'user', why: "the user's App Lock PIN record — doc id IS the uid" },
   agentv3_mcp_library: { kind: 'user', why: "the user's saved MCP servers — doc id IS the uid" },
@@ -212,7 +227,12 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   nav_store_web_apps: { kind: 'blocked', why: 'Q-766 — same as above, plus `files`/`baked`/`screenshots` subcollections that Q-682 owns' },
   adrDecisions: { kind: 'blocked', why: "Q-762 — doc id is `${userId}__${projectId}` and the body has NO uid field, so neither key strategy reaches it. The writer must store the uid first" },
   techDebt:     { kind: 'blocked', why: 'Q-762 — the same composite-id shape, the same missing field' },
-  user_workspaces: { kind: 'blocked', why: "Q-763 — the base doc is only a MANIFEST; the payload is in `${uid}__c{i}` chunks, so registering it as `docId` would delete the manifest and keep the data. Needs a chunk-aware eraser" },
+  /**
+   * ✅ Q-763, 2026-10-09. The document whose id is the uid is only a MANIFEST; the payload is in
+   * `{uid}__c{i}`. It is erased by `syncWorkspaceErase.ts` — chunks first, manifest last — and NOT by
+   * the registry, which is exact-match only and would have deleted the index and kept the data.
+   */
+  user_workspaces: { kind: 'user', why: "the person's cross-device workspace: a manifest plus `{uid}__c{i}` chunks, erased by `syncWorkspaceErase.ts`" },
   build_history: { kind: 'blocked', why: 'Q-764 — keyed by a BARE sessionId, so the `agentv3-{uid}-` range cannot match it and there is no uid field either: outside BOTH erasers' },
   app_ai_apps:   { kind: 'blocked', why: 'Q-765 — doc id is the APP id, so the workspace range cannot reach it; it holds `userId`, so the user registry is the likely home once the key is decided' },
   analytics_daily:  { kind: 'blocked', why: 'Q-767 — a day rollup that grows for ever with no retention window chosen' },
@@ -376,12 +396,33 @@ describe('every declared collection is classified', () => {
   it('🔒 every `user`-kind collection is erased on account deletion', () => {
     // Section 9 of the Privacy Policy: personal data is deleted or anonymised within 30 days, with four
     // exceptions — none of which is a PIN record or a saved server list.
+    //
+    // 🔒 THE OBLIGATION IS "ERASED", NOT "IN THAT ONE REGISTRY" (widened 2026-10-09, Q-763). The
+    // registry is exact-match only by design — `docId` or a field — and some layouts are not that
+    // shape. `user_workspaces` is the case that forced the distinction: its document id IS the uid, so
+    // it looks like the most obvious `'docId'` entry in the repo, but that document is only a MANIFEST
+    // and the payload lives in `{uid}__c{i}`. Registering it would have deleted the index and kept the
+    // data. So a `user` collection may instead be erased by a NAMED module below, and the test checks
+    // the duty rather than the mechanism. What it will not accept is a `user` collection erased by
+    // nothing at all.
     const erased = new Set(USER_SCOPED_COLLECTIONS.map((c) => c.collection));
     const missing = Object.entries(CLASSIFICATION)
       .filter(([, v]) => v.kind === 'user')
       .map(([name]) => name)
-      .filter((name) => !erased.has(name));
+      .filter((name) => !erased.has(name) && !USER_ERASED_BY_MODULE[name]);
     expect(missing, `user-keyed but never erased: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('🔒 a collection erased by a module really is erased there — the file is read, not trusted', () => {
+    // Otherwise this map is just a second way to say "classified" with nothing behind it, which is the
+    // exact failure the `workspace` kind had before Q-701 gave it an obligation.
+    for (const [name, where] of Object.entries(USER_ERASED_BY_MODULE)) {
+      const src = readFileSync(join(root, where.file), 'utf8');
+      expect(src, `${where.file} does not mention ${name}, so it cannot be erasing it`).toContain(name);
+      const route = readFileSync(join(root, 'src/server/routes/profile.ts'), 'utf8');
+      expect(route, `${where.file}'s eraser is never called from DELETE /api/profile`)
+        .toMatch(new RegExp(where.calledAs));
+    }
   });
 
   it('🔒 the scan declares every receiver it could not read — a silent skip is how it went blind', () => {

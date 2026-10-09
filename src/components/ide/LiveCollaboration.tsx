@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Users, Share2, Plus, Trash2, X, Check, Copy, Clock, RefreshCw, Sparkles, Bot, Send, Briefcase, ChevronDown, Zap } from 'lucide-react';
+import { Users, Share2, Plus, Trash2, X, Check, Copy, Clock, RefreshCw, Sparkles, Bot, Send, Briefcase, ChevronDown, Zap, Code2, MessageSquare, CornerDownLeft } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import { doc, setDoc, getDoc, deleteDoc, onSnapshot, collection, addDoc, query, orderBy, limit } from 'firebase/firestore';
 import { lineOfOffset, offsetRangeOfLine, buildAnnotation, sortAnnotations, type CommentAnnotation } from '../../lib/collabAnnotations';
@@ -24,7 +24,17 @@ interface AiMessage {
 //  - 'pro'          → NavBharatAI Pro real in-room build (coming soon)
 //  - 'professional' → a Professional the OWNER selects from a dropdown (coming soon)
 //  - 'team'         → members / approvals / chat (kept)
-type RoomTab = 'free' | 'pro' | 'professional' | 'team';
+//  - 'code'         → the shared editor + line-anchored comments (P-DESIGN.7)
+//
+// 🔴 'code' was MISSING from this union until 2026-10-09 (Q-600's sweep found it). Every piece of
+// the feature existed and was real — the Firestore content doc, the presence/caret writes, the
+// comments subcollection with its onSnapshot, `addComment` / `resolveComment` / `jumpToLine` /
+// `handleCodeChange`, and the pure, unit-tested helpers in `lib/collabAnnotations.ts` — but no tab
+// ever rendered any of it, so the whole subsystem was unreachable while `AppKnowledgeBase` told
+// every AI in the app to send users to "the Code tab for the shared editor + line comments".
+// That is the second absolute rule's forbidden third state: built, but not really working.
+// `tests/aRoomTabTheKnowledgeBaseNamesExists.test.ts` now fails if the two ever drift apart again.
+type RoomTab = 'free' | 'pro' | 'professional' | 'team' | 'code';
 
 // Professionals the room owner can pick for the Professional tab.
 const ROOM_PROFESSIONALS_ALL: { id: string; label: string }[] = [
@@ -97,7 +107,6 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
   const [activeRoom, setActiveRoom] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [roomOwner, setRoomOwner] = useState('');      // createdBy uid of the active/pending room
-  const [bootedMsg, setBootedMsg] = useState('');      // set when the owner rejects or kicks you
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   // A room is a CLEAN shared scratchpad (admin-decided 2026-07-28): it starts EMPTY — it never
@@ -285,7 +294,8 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
   const handleBooted = (msg: string) => {
     teardown();
     setStatus('error');
-    setBootedMsg(msg);
+    // One message, one place it is read: `errorMsg` is what the idle screen renders. A second
+    // `bootedMsg` state held the same string and nothing read it (Q-600, 2026-10-09).
     setErrorMsg(msg);
   };
 
@@ -359,7 +369,7 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
     if (!signedIn) { setStatus('error'); setErrorMsg('Please sign in to create a collaboration room.'); return; }
     const id = shortId();
     setStatus('connecting');
-    setBootedMsg('');
+    setErrorMsg('');
     try {
       // Room metadata only (the shared CODE lives in the approval-gated content doc, not here).
       await setDoc(doc(db, 'collab_rooms', id), { createdAt: Date.now(), createdBy: myId, ownerName: myName });
@@ -377,7 +387,7 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
   const joinRoom = async (id: string) => {
     if (!signedIn) { setStatus('error'); setErrorMsg('Please sign in to join a collaboration room.'); return; }
     setStatus('connecting');
-    setBootedMsg('');
+    setErrorMsg('');
     try {
       const roomSnap = await getDoc(doc(db, 'collab_rooms', id));
       if (!roomSnap.exists()) { setStatus('error'); setErrorMsg('Room not found. Check the ID.'); return; }
@@ -579,7 +589,7 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
           {/* Tab bar — AI switcher: Free / Pro v5 / Professional / Team (scrolls on small phones) */}
           <div className="flex items-center gap-1 px-2 py-1.5 border-b border-line bg-card">
             <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-              {([{ key: 'free', label: 'Free', icon: Sparkles }, { key: 'pro', label: 'Pro v5', icon: Zap }, { key: 'professional', label: 'Professional', icon: Briefcase }, { key: 'team', label: 'Team', icon: Users }] as { key: RoomTab; label: string; icon: any }[]).map(t => {
+              {([{ key: 'free', label: 'Free', icon: Sparkles }, { key: 'pro', label: 'Pro v5', icon: Zap }, { key: 'professional', label: 'Professional', icon: Briefcase }, { key: 'code', label: 'Code', icon: Code2 }, { key: 'team', label: 'Team', icon: Users }] as { key: RoomTab; label: string; icon: any }[]).map(t => {
                 const Icon = t.icon; const active = roomTab === t.key; const online = onlineCount;
                 return (
                   <button key={t.key} onClick={() => setRoomTab(t.key)} className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${active ? 'bg-blue-600 text-on-accent' : 'text-muted hover:text-ink hover:bg-raised'}`}>
@@ -684,6 +694,91 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
                 <button onClick={sendAiPrompt} disabled={!aiInput.trim() || aiBusy} className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded-xl transition-all text-on-accent">
                   <Send className="w-3.5 h-3.5" />
                 </button>
+              </div>
+            </div>
+          </div>
+          )}
+
+          {/* ── Code tab — the shared editor + line-anchored comments (P-DESIGN.7) ──
+              Everything here was already real and wired to Firestore; until 2026-10-09 no tab
+              rendered it, so none of it could be reached. See the note on `RoomTab` above. */}
+          {roomTab === 'code' && (
+          <div className="flex-1 flex flex-col sm:flex-row overflow-hidden bg-card">
+            {/* Editor */}
+            <div className="flex-1 flex flex-col overflow-hidden min-h-[40%]">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
+                <Code2 className="w-3.5 h-3.5 text-info" />
+                <span className="text-xs text-muted">Shared editor</span>
+                <span className="text-[9px] text-faint ml-auto">
+                  {isEditing ? 'Saving…' : `Line ${caretLine} · ${sharedCode.length} chars`}
+                </span>
+              </div>
+              <textarea
+                ref={textareaRef}
+                value={sharedCode}
+                onChange={e => { handleCodeChange(e.target.value); handleCaret(); }}
+                onKeyUp={handleCaret}
+                onClick={handleCaret}
+                spellCheck={false}
+                placeholder="This room starts empty. Type or paste code — everyone in the room sees it live."
+                className="flex-1 w-full resize-none bg-surface px-3 py-2 font-mono text-[11px] leading-5 text-ink placeholder-faint focus:outline-none"
+              />
+              {/* Where everyone else's caret is right now */}
+              {presence.filter(p => p.id !== myId).length > 0 && (
+                <div className="flex items-center gap-2 px-3 py-1.5 border-t border-line overflow-x-auto">
+                  {presence.filter(p => p.id !== myId).map(p => (
+                    <span key={p.id} className="shrink-0 flex items-center gap-1 text-[9px] text-faint">
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color }} />
+                      {p.name} · line {p.caretLine}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Comments anchored to lines */}
+            <div className="flex flex-col overflow-hidden border-t sm:border-t-0 sm:border-l border-line sm:w-64 shrink-0">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
+                <MessageSquare className="w-3.5 h-3.5 text-info" />
+                <span className="text-xs text-muted">Comments</span>
+                <span className="text-[9px] text-faint ml-auto">{comments.filter(c => !c.resolved).length} open</span>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                {comments.length === 0 ? (
+                  <p className="text-[10px] text-faint text-center py-4 px-2">
+                    Put your caret on a line and leave a comment — it stays pinned to that line for everyone.
+                  </p>
+                ) : comments.map(c => (
+                  <div key={c.id} className={`rounded-lg border px-2 py-1.5 ${c.resolved ? 'border-line opacity-50' : 'border-line bg-surface'}`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
+                      <span className="text-[9px] text-faint truncate flex-1">{c.authorName} · {relativeTime(c.timestamp)}</span>
+                      {!c.resolved && (
+                        <button onClick={() => resolveComment(c.id)} title="Mark resolved" className="p-0.5 rounded text-faint hover:text-success transition-colors">
+                          <Check className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                    <button onClick={() => jumpToLine(c.line)} title="Jump to this line" className="mt-0.5 text-[9px] text-info hover:underline">
+                      line {c.line}
+                    </button>
+                    <p className={`text-[10px] text-ink whitespace-pre-wrap break-words ${c.resolved ? 'line-through' : ''}`}>{c.text}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="p-2 border-t border-line">
+                <div className="flex gap-1.5">
+                  <input
+                    className="flex-1 bg-surface border border-line rounded-lg px-2 py-1.5 text-[10px] text-ink placeholder-faint focus:outline-none focus:border-blue-500/40"
+                    placeholder={`Comment on line ${caretLine}…`}
+                    value={commentInput}
+                    onChange={e => setCommentInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') addComment(); }}
+                  />
+                  <button onClick={addComment} disabled={!commentInput.trim()} className="px-2 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded-lg transition-all text-on-accent">
+                    <CornerDownLeft className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>

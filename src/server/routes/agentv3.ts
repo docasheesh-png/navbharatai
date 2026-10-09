@@ -4240,7 +4240,8 @@ export function registerAgentV3Routes(app: Express): void {
 
   // D7 — load one persisted build (full transcript) for resume. Owner-only.
   app.get('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // SECURITY (C1 follow-up): verified token, not query.userId
+    const verified = await verifiedIdentity(req); // BLD-2: a claimed ?userId= is not an identity
+    const userId = verified?.uid ?? null; const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
@@ -4295,7 +4296,8 @@ export function registerAgentV3Routes(app: Express): void {
   // conversationAccess() ownership check as the GET-one route above. The underlying store's
   // remove() is a no-op if the id doesn't exist, so this is safe to call twice (double-click).
   app.delete('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // SECURITY (C1 follow-up): verified token, not query.userId
+    const verified = await verifiedIdentity(req); // BLD-2: claimed ?userId= cannot delete someone else's app
+    const userId = verified?.uid ?? null; const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
@@ -4352,7 +4354,8 @@ export function registerAgentV3Routes(app: Express): void {
   // pinned-only patch that PRESERVES the record's updatedAt (pinning is not "activity"), so a pinned
   // build keeps its real last-worked time and only its list POSITION changes (pinned float to top).
   app.post('/api/agentv3/conversations/:id/pin', async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // verified token, not query.userId
+    const verified = await verifiedIdentity(req); // BLD-2: claimed ?userId= cannot pin someone else's app
+    const userId = verified?.uid ?? null; const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
@@ -24593,6 +24596,7 @@ async function noteBuildOutcome(
                 });
                 const rm = buildRemoveCommand(plan.remove);
                 if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'green-guard-remove'); } catch { /* best-effort */ } }
+                reconcileCapturedWrites(writtenFiles, plan); // GT-4: a later deadline/advisory save must not resurrect the broken files
                 await saveWorkspaceFiles(workspaceId, snapshot);
                 saved = true;
                 persisted = snapshot;

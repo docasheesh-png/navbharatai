@@ -112,7 +112,7 @@ export function computeAddonPurchase(
 }
 
 /** Add-ons that may be billed only after something real was handed over. Not the Billing "Add" button. */
-const DELIVERED_ADDONS = new Set<HostingAddonId>(['server', 'dedicated_db']);
+const DELIVERED_ADDONS = new Set<HostingAddonId>(['server', 'dedicated_db', 'shared_db']);
 
 /**
  * Same debit as a slot, but ONLY for a server or a database, and ONLY with proof that it exists.
@@ -346,7 +346,7 @@ export async function purchaseHostingAddon(
 export async function previewDeliveredCharge(
   db: any,
   userId: string,
-  addonId: 'server' | 'dedicated_db',
+  addonId: 'server' | 'dedicated_db' | 'shared_db',
   clientRef: string,
 ): Promise<{ active: Array<{ ref: string; proof?: string }> | null; canPay: boolean | null }> {
   if (!db || !userId) return { active: null, canPay: null };
@@ -374,7 +374,7 @@ export async function previewDeliveredCharge(
 export async function chargeDeliveredHostingAddon(
   db: any,
   userId: string,
-  addonId: 'server' | 'dedicated_db',
+  addonId: 'server' | 'dedicated_db' | 'shared_db',
   opts: { agreedToTerms?: boolean; clientRef?: unknown; proof?: unknown },
   nowIso?: string,
 ): Promise<AddonPurchaseResult> {

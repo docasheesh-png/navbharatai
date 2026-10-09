@@ -78,12 +78,12 @@ export const HOSTING_ADDONS: readonly HostingAddon[] = [
   {
     id: 'shared_db',
     name: 'Small database',
-    priceInr: 149,
+    priceInr: 49,
     days: 30,
     max: 5,
     sellable: false,
-    unavailableReason: 'A shared database is not on sale yet. We will not take money for one until it is really created for your app.',
-    summary: 'A small shared database. Not sold until it can be handed over.',
+    unavailableReason: 'Not sold from this list. On Publish, start the NavBharatAI database and API — ₹49 is taken only after both exist. Or connect your own Supabase, which stays free from us.',
+    summary: 'A small database and the API your app calls, on the servers NavBharatAI already runs. 20,000 operations included. Not a separate machine.',
   },
   {
     id: 'dedicated_db',

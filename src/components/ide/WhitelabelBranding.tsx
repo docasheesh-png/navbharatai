@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Paintbrush, Download, Check, Copy, RefreshCw, Image as ImageIcon, Monitor, Smartphone, Sun, Moon } from 'lucide-react';
+import { authedFetch } from '../../lib/authedFetch';
 
 interface BrandConfig {
   appName: string;
@@ -47,7 +48,7 @@ const COLOR_PRESETS = [
 
 const STORAGE_KEY = 'navbharat_brand_config';
 
-export function WhitelabelBranding() {
+export function WhitelabelBranding({ workspaceId }: { workspaceId?: string } = {}) {
   const [config, setConfig] = useState<BrandConfig>(() => {
     try { return { ...DEFAULT_CONFIG, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') }; } catch { return DEFAULT_CONFIG; }
   });
@@ -55,6 +56,8 @@ export function WhitelabelBranding() {
   const [previewMode, setPreviewMode] = useState<'desktop' | 'mobile'>('desktop');
   const [copied, setCopied] = useState('');
   const [darkPreview, setDarkPreview] = useState(true);
+  const [applying, setApplying] = useState(false);
+  const [applyNote, setApplyNote] = useState('');
 
   const update = (patch: Partial<BrandConfig>) => {
     const next = { ...config, ...patch };
@@ -147,6 +150,37 @@ module.exports = {
     URL.revokeObjectURL(url);
   };
 
+  const applyToApp = () => {
+    if (!workspaceId) {
+      setApplyNote('Open an app first. Nothing was written and nothing was charged.');
+      return;
+    }
+    setApplying(true);
+    setApplyNote('');
+    void authedFetch('/api/agentv3/brand/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId,
+        appName: config.appName,
+        tagline: config.tagline,
+        primaryColor: config.primaryColor,
+        secondaryColor: config.secondaryColor,
+        accentColor: config.accentColor,
+        bgColor: config.bgColor,
+        textColor: config.textColor,
+        fontFamily: config.fontFamily,
+        borderRadius: config.borderRadius,
+        footerText: config.footerText,
+      }),
+    }).then(async (res) => {
+      const data = await res.json().catch(() => null);
+      setApplyNote(data?.message || data?.error || 'That did not finish. Nothing was charged.');
+    }).catch(() => {
+      setApplyNote('That did not finish. Nothing was charged.');
+    }).finally(() => setApplying(false));
+  };
+
   const css = generateCSS();
   const metaTags = generateMetaTags();
   const tailwindCfg = generateTailwindConfig();
@@ -167,11 +201,11 @@ module.exports = {
           <Paintbrush className="w-5 h-5 text-accent-text" />
         </div>
         <div>
-          {/* Honest name (admin autopsy 2026-07-21): this generates a brand kit (CSS variables, meta
-              tags, Tailwind config) to EXPORT and paste into your app — it does not auto-apply to the
-              built app. Renamed so it no longer implies one-click white-labeling. */}
-          <h2 className="font-semibold text-ink text-base">Brand Kit Generator</h2>
-          <p className="text-xs text-faint">Define name, logo, colors &amp; fonts → export a brand kit (CSS, meta tags, Tailwind config) to drop into your app</p>
+          {/* Apply writes name and colours into this app. It does not remove the Made with
+              NavBharatAI badge. That badge is injected at publish. A hosting plan stops it.
+              Nothing is charged. Export still downloads a kit you can paste by hand. */}
+          <h2 className="font-semibold text-ink text-base">Brand Kit</h2>
+          <p className="text-xs text-faint">Name, colours and fonts. Export a kit, or apply it into this app. Applying does not remove the Made with NavBharatAI badge, and nothing is charged.</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={resetToDefault} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-surface border border-line rounded-lg text-faint hover:text-ink transition-all">
@@ -180,8 +214,12 @@ module.exports = {
           <button onClick={downloadAll} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-pink-600 hover:bg-pink-500 rounded-lg text-on-accent font-medium transition-all">
             <Download className="w-3.5 h-3.5" /> Export Brand Kit
           </button>
+          <button type="button" onClick={applyToApp} disabled={applying} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-on-accent font-medium transition-all">
+            {applying ? 'Applying…' : 'Apply to this app'}
+          </button>
         </div>
       </div>
+      {applyNote ? <p className="px-6 py-2 text-[11.5px] text-warn leading-relaxed border-b border-line">{applyNote}</p> : null}
 
       {/* Tabs */}
       <div className="flex border-b border-line bg-card overflow-x-auto">

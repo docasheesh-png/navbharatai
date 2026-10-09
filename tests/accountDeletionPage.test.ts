@@ -220,6 +220,7 @@ describe('the built-app eraser and the page do not drift apart', () => {
       agentv3_mcp_servers: /the outside services it was wired to talk to/i,
       agentv3_deployments: /our record of where it/i,
       agentv3_sandboxes: /the sandbox it ran in/i,
+      nbai_app_data: /the records your app stored in the NavBharatAI database/i,
     };
     for (const { collection } of WORKSPACE_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

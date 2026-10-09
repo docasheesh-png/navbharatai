@@ -113,6 +113,7 @@ When your deletion request is completed, we remove:
   the keys we held for them;
 - the **live preview and deployment of each app** — the sandbox it ran in and our record of where it
   was deployed;
+- the records your app stored in the NavBharatAI database — the small database started from Publish, including its records and the operation counters kept beside them;
 - your **saved sessions and preferences**;
 - your **connection to GitHub**, if you had connected one. (This removes NavBharatAI's access. It does **not** delete anything in your own GitHub account — that stays yours.)
 - your **connection to Supabase**, if you had connected one, and our record of which sleeping-database reminders we already sent you. (This removes NavBharatAI's copy of the access. It does **not** delete your Supabase projects or anything in them — they stay in your own Supabase account; to revoke the access fully, also remove the NavBharatAI app in your Supabase account settings.)

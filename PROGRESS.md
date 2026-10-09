@@ -92856,3 +92856,75 @@ else's fix works is not, and still is not.
 **Queue: 80 rows, and nothing is left in a self-reported-false state** — 8 OPEN (Q-600, Q-381,
 Q-706, Q-761, Q-762, Q-764, Q-765, Q-767), the rest 🟡 BLOCKED on the admin, money, a vendor or a
 real device. No row now reads `IN PROGRESS` against a merged PR.
+
+---
+
+## 2026-10-09 — a control string the user was reading, and the contract that had no holder (Q-600 batch three, Q-781)
+
+**What a user actually saw.** Whenever the chat AI talked about an API key, the message bubble contained
+`[ACTION_SECRET_HELPER:gemini]`. The server prompt told the model it "MUST proactively" append that
+string, and that doing so *"immediately triggers our high-tech inline Direct-Fill Assistant in their
+chat window, letting them paste and save it instantly"*. No such assistant existed anywhere in the
+repository. The only code that could even remove the string was `parseMessageAndTriggers`, a local in
+`AIChat.tsx` that nothing called — which is how Q-600's sweep found it.
+
+Two defects from one cause: a control string leaked into content a person reads, and a feature was
+promised to them that was never built.
+
+**⛔ And the fix was NOT to build it.** `SecretManager.tsx` says it in its own words — *"This component
+is the vault's UI, and it is deliberately the ONLY one… there is no second store to keep in step,
+because there is no second implementation"* — and `tests/secretsOneVault.test.ts` fails CI if a change
+forks that. An inline key form in a chat bubble would have been a THIRD implementation of saving a
+secret, built to make a sentence in a prompt true. So the sentence went instead: the prompt now names
+the two doors that really exist (Settings → App Settings → Secrets & API Keys, and ⋮ More → Keys &
+Secrets) and promises nothing else. The marker is still stripped, and that is not belt-and-braces —
+chat history is stored, so every message already written with it is still rendered on every scroll
+back.
+
+**The class: a contract between the prompt and the renderer with nothing holding it.** The prompt could
+ask for any control string and nothing checked that the other end had kept up. `src/lib/chatMarkers.ts`
+is the holder, and `tests/everyPromptMarkerHasARenderer.test.ts` is what makes it one.
+
+**🔴 And writing that test found the contract broken the OTHER way, which nothing had ever looked for.**
+Its first assertion is a guard on the guard — "the scan finds markers in the prompt" — and it FAILED:
+`prompts.ts` names no `__MARKER__` at all. A whole-repo search (every extension, `server.ts` at the
+root included, the stale `dist/` bundle excluded) finds `__SWITCH_TO_BUILD__`, `__URGENT_BUILD__`,
+`__VIEW_PREVIEW__`, `__DEPLOY_ACTIONS__` and `__AUTO_PLAN__` in exactly one file: the renderer that
+branches on them. **Nothing emits any of them**, so five user-facing buttons can never appear.
+
+The `__VIEW_PREVIEW__` button carries the history in its own comment: *"previously the flag was parsed
+but never used, so a successful build offered no way to open the preview"*. A session found a
+parsed-and-unused flag, correctly built the missing button, and never asked whether anything produced
+the flag. **The instance fixed, the class left alive** — the a38c6fef pattern, in a different file.
+Recorded as **Q-781** and held in `NO_EMITTER_YET` against that row, because deciding the chat AI
+should start emitting five CTAs is a product change, not a sweep. The list may only shrink: the test
+fails if a new unreachable branch appears, and fails again if one of these gains an emitter and is not
+removed.
+
+**The third verdict in this sweep, and a new one.** Batch one SHOWED a finished feature (the room's
+Code tab); batch two did both — showed the deploy step strip, deleted BotBuilder's placeholder webhook.
+Here `intentUI` looked like the first kind: a seven-persona badge ("Architect Mode", "Security
+Auditor") computed on every render and shown nowhere. It is not. `activeIntent` is
+`useState<string>('social')` in App.tsx and **nothing in the repository ever calls `setActiveIntent`**,
+so the value is frozen and not one of the seven cases — the badge would have rendered the default,
+"Navbharat AI", on every message for ever. A status indicator that does not reflect state is what the
+second absolute rule forbids outright, so showing it would have shipped a fake. Deleted. The dead
+`activeIntent` prop chain (App.tsx → ViewPanels → NBIChatPanel → AIChat) is left for its own row: it
+crosses App.tsx, which Q-600 says to leave while other sessions may be editing it.
+
+`AIChat.tsx` leaves the baseline entirely (6 → 0, and four lucide icons with it). **78 → 72.**
+
+### ⚠️ And I duplicated another session's work, which is worth recording plainly
+
+`#3614` (this session, Q-761/762/764/765) overlaps **#3611** (another session, opened 12:12, green),
+which fixes Q-762 and Q-765 by making the writers store `userId`. I did not list the open PRs
+immediately before starting — safeguard #6 exists for exactly this, and the cost is two of four rows
+done twice. Q-761 and Q-764 are mine alone.
+
+The two approaches genuinely differ and both are sound: #3611 refuses a doc-id prefix range outright
+(*"a compliance gap is recoverable; deleting a different person's data is not"*) and states its residue
+honestly — rows written before it have no `userId` and are not reached. Mine uses the prefix range with
+a refusal for any uid outside `[A-Za-z0-9]`, which makes that ambiguity impossible and does reach the
+already-written rows. That is a real advantage, and it is still not mine to take by racing their file:
+the row is theirs, the operation is irreversible, and safeguard #3 says ask. Put to the admin rather
+than resolved unilaterally.

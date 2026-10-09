@@ -78,6 +78,28 @@ When your deletion request is completed, we remove:
   to redeem, and a payment record is one of the things we are required to keep — see below.);
 - your **App Mart likes, dislikes and comments** — every 👍 and 👎 you gave, every comment and reply you wrote, your App Mart notifications, the list of people you blocked, the creators you follow and the people who follow you, the profile photo you uploaded, and the link between your public creator code and your account (so your App Mart profile stops opening). Other people's replies to your comments are not theirs to lose, but they can no longer be reached once your comment is gone;
 - your **rating of NavBharatAI** — the stars and the note you gave after one of your apps went live, and any "Not now" pause on that question;
+- your **chat and voice memory** — what each NavBharatAI assistant remembered about you to keep a
+  conversation going, the voice-chat turns, what a professional assistant had noted about you, and every
+  build conversation you had with the builder;
+- your **builder settings and the record of what the builder learned from you** — your saved
+  preferences, the lessons it kept, the mistakes ledger it used so it would not repeat itself, and the
+  diagnostics report of your own last build;
+- your **daily usage counters** — terminal seconds, tool and picture calls, the AI usage rows behind
+  your spend, your free-build credit, and the balance warnings we had already sent you;
+- your **professional pass**, if you had one, and which admin notices you had already read;
+- the **files you uploaded** — .zip archives and spreadsheets you gave to a build;
+- your **share links** — a page you shared stops opening;
+- your **instantly-hosted apps** — an app you published with instant hosting stops being served;
+- your **referral record** — your own code and the claims against it. (A payout already recorded under
+  somebody else's referral is their record, and is kept — see below.);
+- your **connected domains** — NavBharatAI's record of a domain you pointed at one of your apps. (This
+  removes OUR record. It does **not** change anything at your domain registrar or your own host, which
+  are not ours to touch — remove the DNS records there if you want the name completely free.)
+- **everything the builder kept about each app** — its plan and roadmap, its build state, the trail of
+  decisions it took, the caches it reused between builds, and the software bill of materials for each
+  build;
+- the **live preview and deployment of each app** — the sandbox it ran in and our record of where it
+  was deployed;
 - your **saved sessions and preferences**;
 - your **connection to GitHub**, if you had connected one. (This removes NavBharatAI's access. It does **not** delete anything in your own GitHub account — that stays yours.)
 - your **connection to Supabase**, if you had connected one, and our record of which sleeping-database reminders we already sent you. (This removes NavBharatAI's copy of the access. It does **not** delete your Supabase projects or anything in them — they stay in your own Supabase account; to revoke the access fully, also remove the NavBharatAI app in your Supabase account settings.)

@@ -65,6 +65,40 @@ export const WORKSPACE_SCOPED_COLLECTIONS: readonly WorkspaceScopedCollection[] 
   { collection: 'project_plans_v3' },
   { collection: 'app_engineering_memory_v1' },
   { collection: 'app_ai_settings' },
+  /**
+   * ── 🔴 THE APP DATA THE WORKSPACE ERASER NEVER LISTED (Q-701, 2026-10-08) ─────────────────────────
+   * Each doc id below was read at its own store. The eraser works by an id RANGE over
+   * `agentv3-{uid}-…`, so a store keyed by the WORKSPACE id is reached; two that are keyed by
+   * something else are deliberately NOT here and are recorded in `BUILD_REPORT_QUEUE.md` instead of
+   * being registered on a guess (`app_ai_apps`, whose doc id is the APP id, and `build_history`,
+   * whose doc id is a bare sessionId that the `agentv3-{uid}-` range cannot match).
+   */
+  /** The app's attachment memory (`attachmentMemory.ts:115/130`). */
+  { collection: 'agentv3_attachment_memory' },
+  /** Whether the app's last build came out green (`BuildOutcomeStore.ts:74`). */
+  { collection: 'agentv3_build_outcome' },
+  /** The app's deployment record and URL (`DeploymentStore.ts:146`). */
+  { collection: 'agentv3_deployments' },
+  /** Per-provider build state; the id is `${workspaceId}__${provider}`, so it is inside the range
+   *  (`ProviderStateStore.ts:37/45`). */
+  { collection: 'agentv3_provider_state' },
+  /** The app's sandbox and its last snapshot (`SandboxStore.ts:104/181`). */
+  { collection: 'agentv3_sandboxes' },
+  /** Every decision the builder took for the app (`DecisionTraceManager.ts:78`). */
+  { collection: 'buildTraces' },
+  /** The app's pending command queue (`BuildQueueStore.ts:48`). */
+  { collection: 'build_queues_v3' },
+  /** File hashes from the app's last build (`IncrementalBuildCache.ts:190`). */
+  { collection: 'incrementalCache' },
+  /** The app's long roadmap (`MegaRoadmapStore.ts:94`). */
+  { collection: 'mega_roadmaps_v3' },
+  /** The app's requirement-to-code matrix (`TraceabilityStore.ts:30`). */
+  { collection: 'workspace_traceability' },
+  /** The app's migration runs. Its parameter is called `projectId`, which is why this was checked
+   *  rather than assumed: both callers pass `this.workspaceId` (`ToolDispatcher.ts:8896`, `:8916`). */
+  { collection: 'migrationHistory' },
+  /** The app's SBOMs — `sboms/{workspaceId}/builds/{buildId}` (`routes/sbom.ts:52`). */
+  { collection: 'sboms', sub: 'builds' },
 ];
 
 export type EraseRefusal = 'unusable-uid' | 'ambiguous-uid';

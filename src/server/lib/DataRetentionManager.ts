@@ -24,8 +24,16 @@ export interface RetentionDocRef {
   /** A subcollection under this document (USER_SCOPED_SUBCOLLECTIONS). Optional so older fakes still fit. */
   collection?(name: string): { limit(n: number): { get(): Promise<{ docs: Array<{ ref: { delete(): Promise<unknown> } }> }> } };
 }
+/** A document a query returned. `collection` is optional so an older fake without it still fits. */
+export interface RetentionQueryDoc {
+  ref: {
+    delete(): Promise<unknown>;
+    /** A subcollection under this matched document (`UserScopedCollection.subs`). */
+    collection?(name: string): { limit(n: number): { get(): Promise<{ docs: Array<{ ref: { delete(): Promise<unknown> } }> }> } };
+  };
+}
 export interface RetentionQuery {
-  get(): Promise<{ docs: Array<{ ref: { delete(): Promise<unknown> } }> }>;
+  get(): Promise<{ docs: RetentionQueryDoc[] }>;
   /**
    * Bound one purge run. Optional so an existing caller or mock without it still works, but the purge
    * always ASKS — see `maxPerRun`: the first run against a collection with months of backlog would
@@ -44,7 +52,23 @@ export interface RetentionFirestore {
 // ── The verified registry of user-scoped collections ─────────────────────────────────────────────
 /** How a collection is keyed to a user: the doc-id IS the uid, or a field equals the uid. */
 export type KeyStrategy = 'docId' | { field: string };
-export interface UserScopedCollection { collection: string; key: KeyStrategy; }
+export interface UserScopedCollection {
+  collection: string;
+  key: KeyStrategy;
+  /**
+   * Subcollections under EACH MATCHED document, page-deleted before the document itself.
+   *
+   * 🔴 WHY THIS EXISTS (Q-701, 2026-10-08). Firestore does not cascade, and that has already produced
+   * one real defect: Q-134 found an account erase deleting each workspace's latest diagnostics report
+   * and leaving its whole `history` subcollection behind, unreachable and kept. `USER_SCOPED_SUBCOLLECTIONS`
+   * below only covers the `parent/{uid}/sub` shape — a document whose own id IS the uid. It cannot
+   * express `agentv3_conversations/{conversationId}/turns`, where the document is found by a `userId`
+   * FIELD and the messages live one level under it. Registering such a collection without this would
+   * delete the conversation's header and orphan every message in it: the fix would LOOK done while the
+   * personal data stayed, which is the exact shape of failure this registry exists to prevent.
+   */
+  subs?: readonly string[];
+}
 
 /**
  * Every collection here was verified against its read/write path:
@@ -158,6 +182,73 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'api_keys', key: { field: 'userId' } },
   { collection: 'bots', key: { field: 'ownerUid' } },
   { collection: 'webhooks', key: 'docId' },
+
+  /**
+   * ── 🔴 THE PERSONAL DATA THE REGISTRY NEVER SAW (Q-701, 2026-10-08) ──────────────────────────────
+   * Each of these is keyed to one person and was in NO erase path, for the one reason this whole row
+   * exists: the census that is supposed to make an unclassified store fail CI could only see EXPORTED
+   * `*_COLLECTION` constants, and every name here is a private constant or an inline literal.
+   */
+  /** The semantic memory of the person's chats, per scope (`ConversationMemoryStore.ts:70` writes `userId`). */
+  { collection: 'conversation_memory_v1', key: { field: 'userId' } },
+  /** What a professional assistant remembers about the person (`ClientProfileStore.ts`, ProfileDoc.userId). */
+  { collection: 'professional_user_memory', key: { field: 'userId' } },
+  /** The person's voice-chat turns (`VoiceMemoryStore.ts`, MemoryDoc.userId). */
+  { collection: 'sonic_voice_memory', key: { field: 'userId' } },
+  /**
+   * Every build conversation (`FirestoreConversationStore.ts:291` lists by `userId`) — AND the messages
+   * themselves, which live one level down in `turns` and `timeline` (`:142`, `:146`).
+   *
+   * 🔴 Without `subs` this entry would have been a FALSE FIX: deleting the conversation header and
+   * orphaning every message in it, while the page promises "every build conversation you had with the
+   * builder". That is Q-134's defect in a new place, so the cascade now deletes the children first.
+   */
+  { collection: 'agentv3_conversations', key: { field: 'userId' }, subs: ['turns', 'timeline'] },
+  /** The person's own diagnostics report (`DiagnosticsStore.ts:472` — doc id IS the uid). */
+  { collection: 'user_diagnostics_v3', key: 'docId' },
+  /** Which admin notices they have read (`AdminNotificationStore.ts:159/194` — doc id IS the uid). */
+  { collection: 'user_notification_reads', key: 'docId' },
+  /** Their builder preferences (`UserPreferenceStore.ts:277/310` — doc id IS the uid). */
+  { collection: 'userPrefs', key: 'docId' },
+  /** What the engine learned about them (`UserLessonBrain.ts:205` — doc id IS the uid). */
+  { collection: 'user_brain_v3', key: 'docId' },
+  /** Their recorded mistakes ledger (`MistakeLedger.ts:256/314` — doc id IS the uid). */
+  { collection: 'user_mistakes_v3', key: 'docId' },
+  /** Terminal seconds used today (`TerminalUsageStore.ts:49/70` — doc id IS the uid). */
+  { collection: 'terminal_daily_usage', key: 'docId' },
+  /** Tool/image calls used today (`ToolUsageStore.ts` — id is `${uid}__${bucket}`, body carries `userId`). */
+  { collection: 'tool_daily_usage', key: { field: 'userId' } },
+  /** Their professional pass (`ProfessionalPassStore.ts:70/86` — doc id IS the uid). */
+  { collection: 'professional_passes', key: 'docId' },
+  /* 🔒 `promptAudits` is DELIBERATELY NOT an entry here, and it looks like it should be.
+   *  `promptAudits/{uid}/entries` is already in USER_SCOPED_SUBCOLLECTIONS, and nothing anywhere writes
+   *  the PARENT document (`PromptAuditStore.ts:71` writes only the subcollection), so the parent is a
+   *  virtual ancestor with no fields. An entry for it would delete nothing and report `deleted: 0` for
+   *  ever — a row that reads as coverage while covering nothing. Verified by searching for any write to
+   *  the parent path: there is none. */
+  /** What they were last warned about their balance (`balanceAlertStore.ts:66/91` — doc id IS the uid). */
+  { collection: 'wallet_balance_alerts', key: 'docId' },
+  /** Their free-build credit (`OnboardingCreditStore.ts:67/85` — doc id IS the uid). */
+  { collection: 'agentv3_onboarding_credits', key: 'docId' },
+  /** A .zip they uploaded (`zipUploadStore.ts:78`, SharedUploadRecord.uid). */
+  { collection: 'zip_uploads', key: { field: 'uid' } },
+  /** A spreadsheet they uploaded (`spreadsheetFileStore.ts:47` writes `uid`). */
+  { collection: 'agentv3_sheet_files', key: { field: 'uid' } },
+  /** A share link of their app (`ShareStore.ts`, ShareRecord.ownerId). */
+  { collection: 'shares', key: { field: 'ownerId' } },
+  /** A domain they connected (`firebaseDomainLink.ts:38` writes `userId`, `:63` queries it; the doc id is
+   *  the DOMAIN). Note what this does and does not do: it removes NavBharatAI's record of the link —
+   *  there is no other delete path in that module, suspension is only a field — and it does NOT unbind
+   *  the domain at the registrar or the host, which is not ours to touch. The page says so. */
+  { collection: 'custom_domains', key: { field: 'userId' } },
+  /** An instantly-hosted PWA of theirs (`routes/pwa.ts:109` writes `userId`). No buyer exists for one
+   *  of these, so unlike an App Mart listing it is a plain erase. */
+  { collection: 'pwa_apps', key: { field: 'userId' } },
+  /** Their chat AI usage rows (`routes/reports.ts:514` queries `userId`). */
+  { collection: 'ai_usage_logs', key: { field: 'userId' } },
+  /** Their referral record (`routes/referral.ts:94/117` — doc id IS the uid). The `referrerUserId`
+   *  written inside OTHER people's rows is not erased: that is somebody else's payout record. */
+  { collection: 'user_referrals', key: 'docId' },
   /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *
@@ -581,7 +672,25 @@ export async function deleteUserData(db: RetentionFirestore, uid: string): Promi
         if (snap.exists) { await ref.delete(); deleted = 1; }
       } else {
         const q = await db.collection(entry.collection).where(entry.key.field, '==', uid).get();
-        for (const d of q.docs) { await d.ref.delete(); deleted++; }
+        for (const d of q.docs) {
+          // SUBCOLLECTIONS FIRST, then the document — Firestore does not cascade, so deleting the
+          // parent first would leave the children unreachable (Q-134's exact defect). A handle that
+          // cannot reach subcollections is a REAL failure for an entry that declares them, not a
+          // thing to shrug at: it would report a deletion that did not happen.
+          for (const sub of entry.subs ?? []) {
+            if (typeof d.ref.collection !== 'function') {
+              throw new Error(`${entry.collection}: this database handle cannot reach the '${sub}' subcollection`);
+            }
+            for (let page = 0; page < MAX_ERASE_PAGES; page++) {
+              const snap = await d.ref.collection(sub).limit(ERASE_PAGE).get();
+              if (snap.docs.length === 0) break;
+              for (const sd of snap.docs) { await sd.ref.delete(); deleted++; }
+              if (snap.docs.length < ERASE_PAGE) break;
+            }
+          }
+          await d.ref.delete();
+          deleted++;
+        }
       }
       collections.push({ collection: entry.collection, deleted });
     } catch (e) {

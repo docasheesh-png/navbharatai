@@ -92032,6 +92032,114 @@ guard's map carries each with the reason. Reversion-proven: the webhook bullet r
 suite at the END, on the final state, caught something a targeted run could not: the tests I chose to run
 (retention, census, queue, the new credential test — 60 passing) all passed, and the one that mattered was
 in a file I had no reason to think about. Safeguard #5's "at the end, on the final state" is not ceremony.
+
+---
+
+## 2026-10-08 — Q-701 PR A: the personal data the registry could not see (33 stores registered)
+
+**The premise, restated because it is the whole point.** `tests/everyCollectionIsClassified.test.ts`
+makes an unclassified Firestore store fail CI — and it could only see **exported** `*_COLLECTION`
+constants. A private `const COLLECTION = '…'` or an inline `db.collection('x')` was invisible to it.
+That is how `supabase_connections` escaped account deletion (its own registry comment says so), how the
+four credentials in Q-760 escaped, and how the 33 stores below escaped.
+
+**The widened scan, now written and proven, finds 144 top-level collections. The census saw 46.**
+
+### What PR A registers
+
+**21 user-keyed stores into `USER_SCOPED_COLLECTIONS`**, each key strategy read at its own store:
+`conversation_memory_v1`, `professional_user_memory`, `sonic_voice_memory`, `agentv3_conversations`,
+`user_diagnostics_v3`, `user_notification_reads`, `userPrefs`, `user_brain_v3`, `user_mistakes_v3`,
+`terminal_daily_usage`, `tool_daily_usage`, `professional_passes`, `wallet_balance_alerts`,
+`agentv3_onboarding_credits`, `zip_uploads`, `agentv3_sheet_files`, `shares`, `custom_domains`,
+`pwa_apps`, `ai_usage_logs`, `user_referrals`.
+
+**12 workspace-keyed stores into `WORKSPACE_SCOPED_COLLECTIONS`**: `agentv3_attachment_memory`,
+`agentv3_build_outcome`, `agentv3_deployments`, `agentv3_provider_state`, `agentv3_sandboxes`,
+`buildTraces`, `build_queues_v3`, `incrementalCache`, `mega_roadmaps_v3`, `workspace_traceability`,
+`migrationHistory`, `sboms` (+ its `builds` sub).
+
+### 🔴 The part that would have been a FALSE fix
+
+`agentv3_conversations` is matched by a `userId` FIELD and its messages live one level down in `turns`
+and `timeline` (`FirestoreConversationStore.ts:142/146`). Firestore does not cascade.
+`USER_SCOPED_SUBCOLLECTIONS` only covers the other shape — `parent/{uid}/sub`, a document whose own id
+IS the uid — so it cannot express this one. **Registering the collection without its children would
+have deleted each conversation's header and orphaned every message in it**, while the deletion page
+promises "every build conversation you had with the builder". That is Q-134's defect in a new place.
+
+So `UserScopedCollection` gained `subs?: readonly string[]`: for each matched document, the named
+subcollections are page-deleted FIRST, then the document. A handle that cannot reach subcollections
+**throws** rather than reporting a deletion that did not happen — and the parent is then left alone,
+because deleting it would orphan the messages for ever.
+
+`tests/theErasureReachesEveryChild.test.ts` (6 tests) holds: the subs are declared; the messages die;
+**children before parent** (asserted on the recorded delete ORDER); another person's conversation is
+untouched; the reported count includes the children; and the unreachable-handle case reports its error
+and deletes nothing. Reversion-proven twice: `subs` dropped → **5 fail**; the parent moved before its
+children → **2 fail**.
+
+### Three places my own first answer was wrong, caught by reading rather than assuming
+
+- **`promptAudits` is deliberately NOT registered.** `promptAudits/{uid}/entries` is already a
+  subcollection entry, and I was about to add the parent — but **nothing anywhere writes the parent
+  document** (`PromptAuditStore.ts:71` writes only the subcollection), so it is a virtual ancestor with
+  no fields. An entry would delete nothing and report `deleted: 0` for ever: a row that reads as
+  coverage while covering nothing.
+- **`migrationHistory`'s parameter is called `projectId`**, which is exactly why it was checked: both
+  callers pass `this.workspaceId` (`ToolDispatcher.ts:8896`, `:8916`), so the doc id IS the workspace id
+  and the eraser's range reaches it.
+- **`app_ai_apps` was left OUT** (Q-765): its doc id is the APP id, so the `agentv3-{uid}-` range cannot
+  match it. Registering it would have been a guess, and the registry's SAFETY note forbids guesses
+  because a wrong strategy either misses data or deletes the wrong person's.
+
+### The page had to grow with the registry, and the repo enforces that
+
+`tests/accountDeletionPage.test.ts` requires a plain-words description of every registered collection,
+because Google Play requires that page to say what is deleted. It failed on the first run with 33
+missing descriptions — by design. The page now names all of them, grouped (21 separate bullets would be
+a wall nobody reads, and the point of that page is that somebody reads it). `custom_domains` is written
+**with its limit**: our record goes, and nothing changes at the person's registrar or host, which are
+not ours to touch.
+
+### Recorded, not dropped — six new rows
+
+- **Q-762** the composite-id class: `adrDecisions` and `techDebt` use `${userId}__${projectId}` with no
+  uid in the body, so nothing can find them by uid. Fix the writers, then register; older rows stay a
+  stated residue. A prefix range was considered and REJECTED for the ambiguity `workspaceDataErase`
+  already documents.
+- **Q-763** `user_workspaces`: the base doc is only a manifest; the payload is in `${uid}__c{i}` chunks.
+  Registering it as `'docId'` would have been the same false fix as above. A dedicated eraser reads
+  `chunkCount` and deletes exact ids.
+- **Q-764** `build_history` is keyed by a bare sessionId — outside both erasers.
+- **Q-765** `app_ai_apps`, above.
+- **Q-766** 🟡 the admin's decision: a published App Mart listing can have been BOUGHT, so erasing it
+  because the AUTHOR left would destroy a stranger's purchase — the `gift_codes` reasoning. Options and
+  a recommendation (unlist + de-identify) are in the row.
+- **Q-767** twelve stores that grow with no retention window, plus `payment_transactions` which belongs
+  in `RETAINED_INDEFINITELY`.
+
+**PR B is the class fix** and is why this row stays open: the widened scan (comments stripped,
+`*SUBCOLLECTION*` constants excluded, a receiver allowlist whose unknown-receiver report must stay
+empty) plus the per-kind obligation — a `workspace` kind must be in the workspace eraser, a `retained`
+kind must have a policy. Shipping B first would have meant a check failing on ~30 known violations:
+either a red CI or a disabled check, both worse than this order.
+
+**A second guard fired on PR A, and it was pointing at its own assumption.**
+`src/server/lib/workspaceDataErase.test.ts` asserted every registered collection matches
+`/^[a-z][a-z0-9_]+$/`, so registering `buildTraces` failed it. The pattern was written as a shape check
+against a typo or an empty string, but it quietly encoded a NAMING POLICY the repo does not follow:
+`buildTraces`, `incrementalCache` and `migrationHistory` are the real, live Firestore names, and
+`adrDecisions`, `techDebt`, `abuseLedger`, `userPrefs`, `promptAudits`, `teamInvites` and `deviceTokens`
+are camelCase elsewhere. Renaming a live collection is a data migration, not a tidy-up — and it would
+orphan every document already written under the old name — so **the test is what gives**. It now accepts
+either convention and says why, and it still rejects a malformed name: proven by adding
+`{ collection: 'bad-name' }` and watching it fail.
+
+This is worth recording because the first instinct was the wrong one: a failing assertion is not
+automatically a failing change. Here the change was right and the assertion was carrying a belief
+nobody had checked against the data. The repo having two naming conventions is a real (small)
+inconsistency, but it is not one a test may fix on a live database.
 ## 2026-10-08 — Q-707: a plain `node:http` server was published as a static site, silently
 
 **Report:** Q-707, found by the C-1 hosting re-audit and deliberately left unfixed there (that PR

@@ -92426,7 +92426,7 @@ Gates on the merged states: #3593 **35,821 passed**, #3594 **35,827 passed**, #3
 plus `tsc` ×2, `noUnusedImports`, `native:guard`, `build`, `test:bundle`, `boot:check` and
 `deps:server-gate` on each.
 
-## 2026-10-09 — Q-600 batch one: a finished feature no screen could reach (Q-770)
+## 2026-10-09 — Q-600 batch one: a finished feature no screen could reach (Q-770, #3607)
 
 **What the sweep was for.** Q-600 is `tsc --noUnusedLocals`' backlog: 95 client locals in 19 files that
 nothing reads, ratcheted in CI by `scripts/noUnusedImports.mjs` against `scripts/unusedLocalsBaseline.json`

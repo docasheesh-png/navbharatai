@@ -250,6 +250,14 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    *  written inside OTHER people's rows is not erased: that is somebody else's payout record. */
   { collection: 'user_referrals', key: 'docId' },
   /**
+   * The uptime record of a domain they connected (`siteUptimeStore.ts:37/58`). Its doc id is the
+   * DOMAIN, so the workspace eraser's `agentv3-{uid}-` range cannot reach it — and it had been
+   * classified `workspace` since before Q-701, with a reason that said in its own words "one record
+   * per connected domain, not per user". The body carries `userId` (`siteUptime.ts:81`), so the user
+   * registry reaches it exactly, which is where a domain-keyed record of one person's domain belongs.
+   */
+  { collection: 'site_uptime', key: { field: 'userId' } },
+  /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *
    * It looks like it belongs here — it carries a uid — and adding it would feel like completing the
@@ -511,6 +519,13 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
   { collection: 'app_builds', reason: "the user's own build record" },
   { collection: 'user_build_history', reason: "the user's own history; removed with their account, not with age" },
   { collection: 'user_costs', reason: 'money. A billing record deleted on a timer cannot be reconciled or disputed' },
+  /**
+   * Money. Privacy §9's FIRST stated exception to erasure, and Indian tax and accounting law requires
+   * keeping records of money received. It was in NO registry at all until Q-701, which did not make
+   * it less safe — nothing deletes it — but it did make the census silent about the one collection
+   * whose retention is a legal duty rather than a choice. Saying so out loud is the point.
+   */
+  { collection: 'payment_transactions', reason: 'a record of money received; tax and accounting law requires it, and Privacy §9 names it as an exception to erasure' },
   { collection: 'hosting_usage', reason: 'per-user metering that the bill is derived from' },
 ];
 

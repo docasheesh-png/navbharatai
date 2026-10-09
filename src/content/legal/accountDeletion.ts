@@ -92,12 +92,14 @@ When your deletion request is completed, we remove:
 - your **instantly-hosted apps** — an app you published with instant hosting stops being served;
 - your **referral record** — your own code and the claims against it. (A payout already recorded under
   somebody else's referral is their record, and is kept — see below.);
-- your **connected domains** — NavBharatAI's record of a domain you pointed at one of your apps. (This
-  removes OUR record. It does **not** change anything at your domain registrar or your own host, which
-  are not ours to touch — remove the DNS records there if you want the name completely free.)
+- your **connected domains** — NavBharatAI's record of a domain you pointed at one of your apps, and
+  the uptime history we kept for it. (This removes OUR record. It does **not** change anything at your
+  domain registrar or your own host, which are not ours to touch — remove the DNS records there if you
+  want the name completely free.)
 - **everything the builder kept about each app** — its plan and roadmap, its build state, the trail of
-  decisions it took, the caches it reused between builds, and the software bill of materials for each
-  build;
+  decisions it took, the caches it reused between builds, the software bill of materials for each
+  build, the app's own site settings, and the outside services it was wired to talk to together with
+  the keys we held for them;
 - the **live preview and deployment of each app** — the sandbox it ran in and our record of where it
   was deployed;
 - your **saved sessions and preferences**;

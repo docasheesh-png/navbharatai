@@ -92313,6 +92313,56 @@ found while hunting siblings, but each feeds a different decision with a differe
 widening detection in all of them in one PR would change behaviour nobody has measured. Q-707's own
 scope was deployPlan + the sibling it named; the rest is recorded here as a known, bounded follow-up.
 
+## 2026-10-09 — Q-381 batch one: nine findings about OUR run stop being charged to the user's app (56 → 47)
+
+**Report:** Q-381, from the 2026-10-04 census (`tests/aProblemTheUserIsShownCanBeActedOn.test.ts`). That
+census measured something nobody had counted: **82 codes recorded at warning or error severity were in
+none of the three registries**, so `isAppFinding` answered YES to every one. Each landed in the user's
+build-health card as a problem with THEIR app and took 6 points off their app's health score — with no
+button to press. 26 were classified then; 56 were left as a ratcheted backlog that may only shrink.
+
+**What this change does, and why it needed no decision from the admin.** It classifies the nine codes
+whose OWN recording site already answers the question. Every one is quoted from that site rather than
+judged now, which is the whole reason this batch could be shipped without an admin call:
+
+| Code | Its own words at the recording site |
+|---|---|
+| `RELEASE_GATE_UNPROVEN` | *"not evidence the app is broken — it is the absence of evidence that it works, and the two must never be reported as the same thing"* |
+| `LAST_CHANCE_PROOF_UNAVAILABLE` | *"an infrastructure limit here, never evidence about the app itself"* |
+| `SANDBOX_UNAVAILABLE` | *"Infrastructure condition, not an app error."* |
+| `RUNTIME_UNCHECKED` | our console capture failed; `PROCESS_ONLY_CODES` already calls `VERIFY_DID_NOT_RUN` *"the class of RUNTIME_UNCHECKED"* |
+| `CLAIM_UNSUPPORTED` | OUR closing summary over-claimed and is corrected in place — the class of `SUMMARY_OFF_TOPIC`, already process-only |
+| `TIMELINE_TRUNCATED` | our diagnostics timeline hit its own entry cap |
+| `PREVIEW_REVIVAL_RECIPE` | our storage could not keep the wake-up recipe; the preview itself rendered |
+| `GUARD_REPEAT` | our mistake guard did not hold — *"needs an upstream/architectural fix, not a better reminder"* |
+| `UPSELL_SUPPRESSED` | whether WE asked for credits; its own comment calls the warning cases *"a real fault of ours"* |
+
+`RELEASE_GATE_UNPROVEN` is the sharpest of the nine: its own detail forbids reporting "unproven" as
+"broken", and showing it in the user's build-health card as a problem with their app was doing exactly
+that. The honesty fix was already written at the recording site; only the registry entry was missing.
+
+🔒 **Why this moves no money, on the same argument the existing block in `BuildDiagnostics.ts` makes.**
+A RED gate flips a build to free only on `shippingIssueCount('error')`, and all nine are recorded at
+WARNING or INFO severity, so the error count cannot change. What changes is the caveat count, which is
+the point. **`PLATFORM_SOURCE_WORKSPACE` is deliberately left out** — it is the one unclassified code
+recorded at ERROR severity, so reclassifying it is money-adjacent and gets its own look. That exclusion
+is asserted as a test, not just written in a comment, because "left out on purpose" and "forgotten" look
+identical in a diff.
+
+**Not in this batch, deliberately:** the codes that genuinely need a decision about what a user should
+be told — `TOOL_ERROR`, `STUCK_TOOL`, the `OUTCOME_*` roll-ups, `FEATURE_COVERAGE`,
+`SIMULATED_DATA_SHIPPED`. Classifying those from a guess is how 82 unclassified codes happened in the
+first place.
+
+**Locked by 12 new assertions** in the census file, which test the thing that mattered to a user rather
+than the presence of a name in a list: `isAppFinding` now answers NO for each of the nine, in both the
+`readiness` and `build` phases (the phases they are recorded in, and ones `isAppFinding` does not exclude
+outright). Plus the fixture is asserted not to list them, so the ratchet cannot be satisfied by listing
+a code twice, and the new backlog size (47) is pinned. Reversion-proven: commenting one code back out of
+`PROCESS_ONLY_CODES` fails both the ratchet and that code's own assertion.
+
+**The row stays OPEN — 47 remain.** Under the sixth absolute rule a row leaves the table only when it is
+finished, and this is batch one of a shrinking backlog, not the end of it.
 ## 2026-10-09 — Q-621 second half: a client that left now stops COSTING, not just stops being shown
 
 **Report:** Q-621, the forensic audit of 2026-10-04. #3551 merged the first half — `clientDisconnect.ts`,
@@ -92426,6 +92476,77 @@ Gates on the merged states: #3593 **35,821 passed**, #3594 **35,827 passed**, #3
 plus `tsc` ×2, `noUnusedImports`, `native:guard`, `build`, `test:bundle`, `boot:check` and
 `deps:server-gate` on each.
 
+## 2026-10-09 — queue closure: Q-621 (#3599 merged)
+
+Sixth absolute rule, point 3: the row leaves the open table when the PR that resolves it is MERGED, and
+its ID is appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main`.
+
+**Q-621 ✅** — a disconnecting chat client never stopped the provider call, so an abandoned stream ran to
+completion and was billed in full. Both halves are now on `main`: the listener half in **#3551**
+(`clientDisconnect.ts`, on `res` 'close') and the signal half in **#3599** (merged, `cbd478e`) — the abort
+threaded through `ProviderTypes.executeStream`, `AIRouterManager.slot()`, both `AIRouter` stream paths, and
+every provider's own SDK call, locked by `tests/anAbandonedStreamStopsCosting.test.ts`.
+
+⚠️ **What to watch for on the next real build:** the behaviour is covered by tests through the real
+`AIRouter`, but no session can observe a live provider socket closing. The signal that this works in
+production is the per-build cost of turns the user abandoned — if an abandoned stream still bills a full
+reply, reopen with that build's cost lines.
+
+**Not closed by this:** **Q-769** stays OPEN — `@google-cloud/vertexai` exposes no abort hook at all, so a
+Vertex rung still cannot be cancelled. #3599 shipped the honest mitigation (stop consuming, release the
+rung) and recorded the real fix as that row's own decision for the admin: move the Vertex rungs onto
+`@google/genai` with `vertexai: true`, which does accept `config.abortSignal`. Closing Q-621 while Q-769
+is open is deliberate and is the point of splitting them — Q-621's own scope was the signal's path from
+the route to the SDK, which is done and proven; the one SDK that has no hook is a separate, named gap
+rather than an asterisk on a closed row.
+
+Open table after this change: 81 rows.
+## 2026-10-09 — Q-600 batch one: a finished feature no screen could reach (Q-770, #3607)
+
+**What the sweep was for.** Q-600 is `tsc --noUnusedLocals`' backlog: 95 client locals in 19 files that
+nothing reads, ratcheted in CI by `scripts/noUnusedImports.mjs` against `scripts/unusedLocalsBaseline.json`
+so it can only shrink. Its own row warned the class is "state or a handler nothing reads" — the kind that
+hid a `saveError` message until #3531. This batch took the largest non-App file: `LiveCollaboration.tsx`, 9.
+
+**What was actually there — recorded as Q-770.** All nine were ONE feature. P-DESIGN.7's shared code editor
+and line-anchored comments were complete and real: the Firestore `content/shared` doc with its debounced
+last-write-wins sync, the throttled presence/caret writes, the `comments` subcollection with its
+`onSnapshot`, `handleCodeChange` / `handleCaret` / `addComment` / `resolveComment` / `jumpToLine` /
+`relativeTime`, and the pure, separately unit-tested helpers in `src/lib/collabAnnotations.ts`. The only
+missing piece was the JSX: the `RoomTab` union was `'free' | 'pro' | 'professional' | 'team'`, with no
+`'code'`, so nothing rendered any of it. `git log -S"roomTab === 'code'"` across all branches returns
+nothing — the tab was never built, not removed.
+
+Meanwhile `AppKnowledgeBase.ts`'s `live_collaboration` entry — the single source of truth every AI in
+NavBharatAI reads to answer "where is X?" — told users: *"the Code tab for the shared editor + line
+comments"*, and *"Use the AI tab"*. Neither tab existed. So the app was confidently directing users to a
+screen that was not there, and the `comments` listener was paying for Firestore reads nobody could see.
+
+**Why it was built rather than deleted.** The second absolute rule allows exactly two states, and the
+backend half was already in state (a). Deleting a complete, tested, Firestore-wired subsystem to satisfy a
+lint — and then correcting the knowledge base downward — would have removed a real capability to tidy a
+count. Building the ~80 lines of JSX puts a documented feature into the product instead.
+
+**Shipped:** a Code tab (shared editor with the caret line and character count, everyone else's cursor
+lines beneath it, a comments pane that pins to the caret's line with jump-to-line and resolve), the
+knowledge-base entry corrected on all three counts (the tab list now names Free / Pro v5 / Professional /
+Code / Team, the Code tab's behaviour is described, the non-existent "AI tab" is gone) with new keywords,
+and the dead `bootedMsg` state removed — it held the same string as `errorMsg`, which is what the idle
+screen actually renders, so nothing was hidden by it. `createRoom` and `joinRoom` now clear `errorMsg`
+where they used to clear `bootedMsg`, which is a real (small) fix: a stale error no longer survives the
+next attempt.
+
+**Locked at the class, not the instance.** `tests/aRoomTabTheKnowledgeBaseNamesExists.test.ts` asserts
+every `RoomTab` member has a header button AND a render branch, that no branch renders an undeclared tab,
+that every shared-editor handler is referenced from the JSX, and that every rendered tab label appears in
+the knowledge-base entry (with the stale "the AI tab" phrasing asserted gone). Reversion-proven in both
+directions: removing the Code button fails with *"RoomTab declares 'code' but no header button lets a user
+tap it"*; restoring the old `howToUse` fails on the missing labels and on "the AI tab".
+
+**Baseline: 95 → 86**, and `LiveCollaboration.tsx` is out of `unusedLocalsBaseline.json` entirely.
+Q-600 stays OPEN — 86 locals in 18 files remain. The next files worth reading for this same class are
+`GitPanel.tsx` (4) and `BotBuilder.tsx` (4, where a `copyWebhook` sits beside a `showWebhookModal` that
+nothing opens).
 ---
 
 ## 2026-10-09 — Q-763: the synced workspace, and the registry entry that would have made it worse
@@ -92598,3 +92719,27 @@ who knows the timestamp is refused. **Reversion-proven three ways:** the existen
 stranger-guesses test fails · one route's guard removed → the per-handler count AND the
 "guarded before it reads the files" order test fail · the client token removed → the
 no-unauthenticated-call test fails.
+## 2026-10-09 — Q-770 closed (#3607 merged), and the admin lifted the merge hold for this session
+
+**Q-770 ✅ RESOLVED.** #3607 merged as `4117ae4`, so the row left the open table and `Q-770` was
+appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main` — the
+#3543 rule. The room's Code tab is live: the shared editor, every member's caret line, and
+line-pinned comments with jump and resolve. `tests/aRoomTabTheKnowledgeBaseNamesExists.test.ts`
+keeps the component and `AppKnowledgeBase` from drifting apart again.
+
+**Q-600 stays OPEN** — 86 unused locals in 18 files. **Q-769 stays OPEN** (Vertex has no abort hook).
+**Q-381 stays OPEN** — 47 unclassified finding codes.
+
+**On the merge hold.** CLAUDE.md's 2026-09-13 correction says a session merges only when the admin
+names the PR in that session's own conversation, and that assuming it is the rule it removes. The
+admin said it on 2026-10-09: *"ap marge karo! aur apko bacha hua kam complete kar ke unko pr bhi
+marge karo"* — merge these, and merge the remaining work's PRs too once they are green. CI green
+before every merge is unchanged; that gate is not what was lifted.
+
+**One thing worth recording about GitHub rather than the code:** #3601 was reported by the API as
+having merge conflicts (`405 Pull Request has merge conflicts`) while `git merge-tree --write-tree`
+against the same `main` merged it clean, and the subsequent real merge of `main` into the branch was
+also clean. GitHub's mergeability cache had gone stale after three PRs landed in quick succession.
+The honest reading: a 405 from the merge endpoint is not proof of a conflict — check it against a
+local three-way merge before believing it, and a `main` merge plus a push is what makes GitHub
+recompute.

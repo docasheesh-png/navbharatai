@@ -92651,7 +92651,7 @@ The honest reading: a 405 from the merge endpoint is not proof of a conflict —
 local three-way merge before believing it, and a `main` merge plus a push is what makes GitHub
 recompute.
 
-## 2026-10-09 — Q-600 batch two (#3608, Q-771): the same sweep, two opposite verdicts
+## 2026-10-09 — Q-600 batch two (#3609, Q-771): the same sweep, two opposite verdicts
 
 Batch one (#3607) proved the unused-locals backlog is not cosmetic. Batch two proves the harder
 half: **what a found local deserves is a judgement, and the two answers go opposite ways.** A count

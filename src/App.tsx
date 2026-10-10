@@ -89,6 +89,7 @@ import { Browser } from '@capacitor/browser';
 // depending, put the WRONG cross-origin authDomain on the default app — silently breaking the first
 // Google sign-in). Re-exported here so every existing `import { auth, db } from './App'` still works.
 import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib/firebase';
+import { API_READ_CACHE, shouldClearApiReadCache } from './lib/swCaches';
 import { readRedirectMarker, clearRedirectMarker, redirectReturnVerdict, redirectLostMessage } from './lib/redirectSignInMarker';
 import { isNewAccount, decideSignupReport, SIGNUP_REPORTED_KEY } from './lib/signupSignal';
 import { authedHeaders } from './lib/authHeaders';
@@ -1377,7 +1378,19 @@ export default function App() {
           if (message) addToast(message, 'error');
         });
     }
+    // UI-5 — the offline API cache is not partitioned by account. Track the uid this
+    // listener has already seen and drop the bucket when that account is replaced,
+    // including by null. Every sign-out path ends here; signOutEverywhere also deletes
+    // ahead of the reload so the wipe is not lost on the way out.
+    let previousUid: string | null = null;
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      const nextUid = currentUser?.uid ?? null;
+      if (shouldClearApiReadCache(previousUid, nextUid)) {
+        void (async () => {
+          if ('caches' in window) await caches.delete(API_READ_CACHE);
+        })().catch(() => { /* a failed wipe must not break the auth listener */ });
+      }
+      previousUid = nextUid;
       setUser(currentUser);
       setLoadingUser(false);
       // Crash reports name the user only by a one-way hash of the uid, and forget it on sign-out. Every

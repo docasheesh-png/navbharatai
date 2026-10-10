@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { COPY } from '../../lib/copy';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { GitBranch, History, RefreshCcw, Search, Loader2, Rocket, Cloud, Terminal, CheckCircle2, AlertCircle, Settings, Key, Globe, Layout, Layers, Play, Server, Cpu, Download, Copy, AlertTriangle, ChevronDown, Sparkles, Clock, Lock } from 'lucide-react';
@@ -541,7 +542,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
       timeoutRefs.current.push(tid);
     };
 
-    addLogLine('Preparing project files…', 100);
+    addLogLine(COPY.git.preparing, 100);
     addLogLine('⏳ Detecting active workspace session details...', 300);
 
     const currentGithubConfig = configs.github;
@@ -550,8 +551,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     if (!rawRepoPath.includes('/')) {
       const tid = setTimeout(() => {
         setDeployStatus('error');
-        addLogLine('❌ Validation failed.');
-        addLogLine('⚠️ Repository must be in the form "owner/repo".');
+        addLogLine(COPY.git.validationFailed);
+        addLogLine(COPY.git.repoFormat);
         setValidationErrors(['Repository format must be "username/repository-name" (e.g. DocAsheesh/my-super-app)']);
         triggerErrorDisplay({
           provider: 'GitHub Sync & Pages',
@@ -569,7 +570,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     if (!owner || !repo) {
       const tid = setTimeout(() => {
         setDeployStatus('error');
-        addLogLine('❌ Validation failed.');
+        addLogLine(COPY.git.validationFailed);
         addLogLine('⚠️ Ensure both repository owner and repository name are filled out.');
         setValidationErrors(['Invalid repository owner or repository name!']);
         triggerErrorDisplay({
@@ -589,7 +590,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     const tidPush = setTimeout(async () => {
       setDeployStatus('building');
       setActiveStep(2);
-      addLogLine('Starting git…', 200);
+      addLogLine(COPY.git.startingGit, 200);
       addLogLine(`🐋 Creating and pushing commits to remote heads/${currentGithubConfig.branch || 'main'}...`, 600);
 
       try {
@@ -618,7 +619,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
         setDeployStatus('deployed');
         setActiveStep(3);
         setDeployedUrl(data.repoUrl);
-        addLogLine(`✅ Pushed to GitHub: ${data.repoUrl}`);
+        addLogLine(COPY.git.pushed(data.repoUrl));
         addLogLine(`🔒 Version commit hash tracked: ${data.sha.substring(0, 7)}`);
 
         // Record deployment success in history lists
@@ -640,8 +641,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
       } catch (err: any) {
         setDeployStatus('error');
-        addLogLine(`❌ Push failed: ${err.message}`);
-        addLogLine('⚠️ Check your network and token scopes, then retry.');
+        addLogLine(COPY.git.pushFailed(err.message));
+        addLogLine(COPY.git.checkNetwork);
         triggerErrorDisplay({
           provider: 'GitHub Sync & Pages',
           errorType: err.message.toLowerCase().includes('authority') || err.message.toLowerCase().includes('token') ? 'Authentication Failed' : 'Git Push Rejected',
@@ -759,7 +760,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
       return;
     }
     setManagedDeploying(true);
-    addLines(['Asking Render to deploy your backend…']);
+    addLines([COPY.git.askingRender]);
     try {
       // authedFetch, not a hand-rolled header: the repo has already paid for duplicated auth helpers
       // once ("works in Settings, 401s everywhere else"). A Render deploy can take a while to answer,

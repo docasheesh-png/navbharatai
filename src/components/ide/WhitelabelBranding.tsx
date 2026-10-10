@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { COPY } from '../../lib/copy';
 import { Paintbrush, Download, Check, Copy, RefreshCw, Image as ImageIcon, Monitor, Smartphone, Sun, Moon } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
 
@@ -23,7 +24,7 @@ interface BrandConfig {
 }
 
 const DEFAULT_CONFIG: BrandConfig = {
-  appName: 'NavBharat AI', tagline: 'AI app builder', logoUrl: '', faviconUrl: '',
+  appName: 'NavBharat AI', tagline: COPY.branding.defaultTagline, logoUrl: '', faviconUrl: '',
   primaryColor: '#6366f1', secondaryColor: '#10b981', accentColor: '#f59e0b',
   // ⚠️ THE USER'S BRANDING, not ours — exported into their app and their assets, so these stay
   // literal colours. Deliberately outside the 2026-08-16 theme-variable sweep.

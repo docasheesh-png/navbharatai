@@ -269,7 +269,11 @@ describe('5 — the route wires the signal where no call site can forget it', ()
   it('the agentic loop passes its signal to the model call it waits on', () => {
     const runner = read('src/server/AgentV3/AgentRunner.ts');
     const call = runner.slice(runner.indexOf('const turnCall = client.runTurn({'));
-    expect(call.slice(0, 800)).toMatch(/signal: this\.opts\.signal/);
+    // A per-turn timeout is combined with the build signal. The fallback is still this.opts.signal,
+    // and the any() arm includes it, so Stop cancels the in-flight model call either way.
+    const head = call.slice(0, 900);
+    expect(head).toMatch(/AbortSignal\.any\(\[\.\.\.\(this\.opts\.signal \? \[this\.opts\.signal\] : \[\]\), AbortSignal\.timeout\(turnTimeoutMs\)\]\)/);
+    expect(head).toMatch(/: this\.opts\.signal/);
     expect(runner).toMatch(/if \(this\.opts\.signal\?\.aborted && isBuildStoppedError\(err\)\) return endAborted\(\);/);
   });
 });

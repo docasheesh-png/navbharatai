@@ -22421,7 +22421,7 @@ async function noteBuildOutcome(
             let exitCode: number | null = null;
             let output = '';
             try {
-              const r = await withTimeout(actuator.runCommand(workspaceId, prodBuildCommand()), PROD_BUILD_TIMEOUT_MS, 'prod-build-gate');
+              const r = await withTimeout(actuator.runCommand(workspaceId, prodBuildCommand('$(command -v timeout >/dev/null 2>&1 && echo "timeout -k 5 170") npm run build')), PROD_BUILD_TIMEOUT_MS, 'prod-build-gate');
               ran = true;
               exitCode = typeof r.exitCode === 'number' ? r.exitCode : null;
               output = `${r.stdout || ''}\n${r.stderr || ''}`;
@@ -22432,7 +22432,7 @@ async function noteBuildOutcome(
             // build`) — so it is typecheck evidence too, read from its own echoed script line (autopsy
             // 0c2a987a: "the typecheck did not run" beside PROD_BUILD_OK). Fills a gap only.
             if (gateEvidence.typecheck === 'not-run') {
-              const fromBuild = buildScriptTypecheckVerdict({ command: prodBuildCommand(), stdout: output, exitCode });
+              const fromBuild = buildScriptTypecheckVerdict({ command: prodBuildCommand('$(command -v timeout >/dev/null 2>&1 && echo "timeout -k 5 170") npm run build'), stdout: output, exitCode });
               if (fromBuild) gateEvidence.typecheck = fromBuild;
             }
             buildDiag.record({
@@ -22525,7 +22525,7 @@ async function noteBuildOutcome(
                 // The copy is the output of `npm run build`, so a changed source needs a new build first;
                 // a build that does not pass leaves the earlier copy exactly as it was.
                 try {
-                  const r = await withTimeout(actuator.runCommand(workspaceId, prodBuildCommand()), PROD_BUILD_TIMEOUT_MS, 'snapshot-rebuild');
+                  const r = await withTimeout(actuator.runCommand(workspaceId, prodBuildCommand('$(command -v timeout >/dev/null 2>&1 && echo "timeout -k 5 170") npm run build')), PROD_BUILD_TIMEOUT_MS, 'snapshot-rebuild');
                   const rebuilt = judgeProdBuild({ ran: true, exitCode: typeof r.exitCode === 'number' ? r.exitCode : null, output: `${r.stdout || ''}\n${r.stderr || ''}` });
                   if (!rebuilt.ok) return false;
                 } catch { return false; }

@@ -390,6 +390,8 @@ export interface EndgameIo {
    */
   installedExports?(names: string[]): Promise<Record<string, string[]>>;
   log?(msg: string): void;
+  /** When aborted, no further write or rollback write is performed (BLD-3). */
+  signal?: AbortSignal;
 }
 
 export interface EndgameVerdict {
@@ -413,6 +415,8 @@ export interface EndgameVerdict {
    * written (autopsy e706e068; see `resolveRepairTarget`). Omitted when there were none.
    */
   llmFilesRejected?: number;
+  /** The deadline fired. Writes after that point, including rollback, were not performed. */
+  lapsed?: boolean;
 }
 
 const NO_ATTEMPT: EndgameVerdict = {
@@ -525,7 +529,9 @@ async function rollbackTouched(
   snapshot: Map<string, string | undefined>,
   files: Record<string, string>,
 ): Promise<void> {
+  if (io.signal?.aborted) return;
   for (const [p, prev] of snapshot) {
+    if (io.signal?.aborted) return;
     if (typeof prev === 'string') {
       try {
         await io.writeFile(p, prev);
@@ -554,12 +560,17 @@ function unverifiedVerdict(errorsBefore: number, deterministicFixes: string[] = 
   };
 }
 
+function lapsedVerdict(errorsBefore = 0): EndgameVerdict {
+  return { ...unverifiedVerdict(errorsBefore), lapsed: true };
+}
+
 /**
  * Run the two-layer endgame over injected I/O. Never throws — any I/O failure returns the honest
  * partial verdict (the caller's NOT-ready outcome then stands unchanged).
  */
 export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
   try {
+    if (io.signal?.aborted) return lapsedVerdict();
     const out1 = await io.runTsc();
     // A compiler that never ran (missing, a help page, a torn install — autopsy 120eb52f) is not
     // "already clean": nothing was checked, so nothing is claimed.
@@ -577,6 +588,7 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
     // puts these bytes back. A failed write is not a success and is not in the snapshot.
     const preDet = new Map<string, string | undefined>();
     const detWritten: string[] = [];
+    if (io.signal?.aborted) return lapsedVerdict(errors1.length);
     for (const p of det.changedPaths) {
       if (!preDet.has(p)) preDet.set(p, files[p]);
       try {
@@ -612,6 +624,7 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
       const preRepair = new Map<string, string | undefined>();
       const referenced = referencedMissingModules(errors2);
       const rejected: string[] = [];
+      if (io.signal?.aborted) return lapsedVerdict(errors1.length);
       for (const f of fixed) {
         if (!f?.path || typeof f.content !== 'string') continue;
         const where = resolveRepairTarget(f.path, files, referenced);

@@ -618,6 +618,33 @@ export function readLedgerPath(key: string): string {
 export const SMALL_FILE_WHOLE_LINES = 300;
 export const SMALL_FILE_WHOLE_BYTES = 16_000;
 
+/** Per-build counts for the paid tools. One object, shared by parent and child dispatchers. */
+export interface BuildToolBudget {
+  consensus: number;
+  secondOpinion: number;
+}
+
+export function emptyBuildToolBudget(): BuildToolBudget {
+  return { consensus: 0, secondOpinion: 0 };
+}
+
+/** `AGENTV3_WEB_SEARCH_MAX_LIMIT`, default 10. Invalid or blank env falls back to 10. */
+export function webSearchMaxLimit(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.AGENTV3_WEB_SEARCH_MAX_LIMIT;
+  if (raw == null || String(raw).trim() === '') return 10;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return 10;
+  return Math.floor(n);
+}
+
+function paidToolCap(name: string, fallback: number, env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env[name];
+  if (raw == null || String(raw).trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.floor(n);
+}
+
 export class ToolDispatcher {
   /**
    * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
@@ -625,6 +652,12 @@ export class ToolDispatcher {
    * and a 15th optional boolean is exactly the kind of thing a later call site gets wrong by silence.
    */
   private _publishConsent = false;
+
+  /**
+   * Paid-tool counts for THIS build. Defaults to a fresh object; a child dispatcher is given the
+   * parent's object (same reference) so the cap is per build, not per dispatcher.
+   */
+  toolBudget: BuildToolBudget;
 
   /** Grant permission to publish for this dispatcher's lifetime (one turn). */
   setPublishConsent(granted: boolean): void { this._publishConsent = granted === true; }
@@ -669,11 +702,34 @@ export class ToolDispatcher {
      * full — the single highest-value "why won't the app run" signal. Best-effort; never blocks.
      */
     private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number; timing?: CommandTiming }) => void,
+    /** Per-build paid-tool budget. Omit it and this dispatcher keeps a fresh zeroed object. */
+    toolBudget?: BuildToolBudget,
   ) {
+    this.toolBudget = toolBudget ?? emptyBuildToolBudget();
     this._rawActuator = actuatorRaw;
     this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); }, (p) => {
       if (!this.internalWriteDepth && process.env.AGENTV3_GUARDED_WRITE_DOOR !== 'off') this.assertWritable(p);
     });
+  }
+
+  /** Replace this dispatcher's budget with the parent's object (not a copy). */
+  shareToolBudget(budget: BuildToolBudget | null | undefined): void {
+    if (budget) this.toolBudget = budget;
+  }
+
+  /**
+   * Allow one paid call or refuse. The counter moves when the call is allowed, before it runs,
+   * so the Nth call is the last and a retry inside the tool does not count twice.
+   */
+  private chargePaidTool(tool: 'consensus' | 'second_opinion', envName: string, fallback: number): void {
+    if (!this.toolBudget) this.toolBudget = emptyBuildToolBudget();
+    const cap = paidToolCap(envName, fallback);
+    const key = tool === 'consensus' ? 'consensus' : 'secondOpinion';
+    const used = this.toolBudget[key] || 0;
+    if (used >= cap) {
+      refuse(`This build has used its ${cap} ${tool} calls — continue without it.`);
+    }
+    this.toolBudget[key] = used + 1;
   }
 
   /**
@@ -10907,6 +10963,7 @@ export class ToolDispatcher {
         if (!this.secondOpinion) {
           return 'Second opinion is not available in this context.';
         }
+        this.chargePaidTool('second_opinion', 'AGENTV3_MAX_SECOND_OPINION_PER_BUILD', 5);
         const review = await this.secondOpinion(prompt);
         return review;
       }
@@ -10916,6 +10973,7 @@ export class ToolDispatcher {
         if (!this.consensus) {
           return 'Consensus is not available in this context.';
         }
+        this.chargePaidTool('consensus', 'AGENTV3_MAX_CONSENSUS_PER_BUILD', 3);
         return await this.consensus(question);
       }
 
@@ -10924,7 +10982,8 @@ export class ToolDispatcher {
         if (!this.webSearch) {
           return 'Web search is not available in this context.';
         }
-        const limit = typeof input.limit === 'number' ? input.limit : 5;
+        const MAX_WEB_SEARCH_LIMIT = webSearchMaxLimit();
+        const limit = Math.max(1, Math.min(MAX_WEB_SEARCH_LIMIT, Math.floor(Number(input.limit) || 5)));
         return await this.webSearch(query, limit);
       }
 

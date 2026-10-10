@@ -36,3 +36,40 @@ export function sanitizeProxyRequestHeaders(h: HeaderBag | null | undefined): He
 export function sanitizeProxyResponseHeaders(h: HeaderBag | null | undefined): HeaderBag {
   return withoutKeys(h, (key) => key === 'set-cookie');
 }
+
+/**
+ * The upgrade handler speaks raw bytes, not an HTTP response object. Strip Set-Cookie from the
+ * status+header block (no trailing blank line) and return the block to write back.
+ */
+export function sanitizeUpgradeResponseHeaders(headerBlock: string): string {
+  const lines = headerBlock.split('\r\n');
+  const status = lines[0] ?? '';
+  const bag: HeaderBag = {};
+  const order: string[] = [];
+  for (const line of lines.slice(1)) {
+    if (!line) continue;
+    const colon = line.indexOf(':');
+    if (colon <= 0) continue;
+    const key = line.slice(0, colon).trim();
+    const value = line.slice(colon + 1).trim();
+    const lower = key.toLowerCase();
+    if (lower === 'set-cookie') {
+      const prev = bag[key];
+      const arr = Array.isArray(prev) ? prev.slice() : prev ? [prev] : [];
+      arr.push(value);
+      bag[key] = arr;
+    } else if (bag[key] === undefined) {
+      bag[key] = value;
+      order.push(key);
+    }
+  }
+  const clean = sanitizeProxyResponseHeaders(bag);
+  const out = [status];
+  for (const key of order) {
+    const value = clean[key];
+    if (value === undefined) continue;
+    if (Array.isArray(value)) { for (const item of value) out.push(`${key}: ${item}`); }
+    else out.push(`${key}: ${value}`);
+  }
+  return out.join('\r\n');
+}

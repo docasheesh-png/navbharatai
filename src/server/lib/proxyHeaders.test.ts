@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { sanitizeProxyRequestHeaders, sanitizeProxyResponseHeaders } from './proxyHeaders';
+import { sanitizeProxyRequestHeaders, sanitizeProxyResponseHeaders, sanitizeUpgradeResponseHeaders } from './proxyHeaders';
 
 describe('sanitizeProxyRequestHeaders', () => {
   it('drops credential and identity headers in any letter case and does not mutate the input', () => {
@@ -70,9 +70,24 @@ describe('the preview proxy and the upgrade handler both use the sanitizers', ()
     expect(preview).toContain("key.toLowerCase() !== 'transfer-encoding'");
   });
 
+  it('the upgrade response block drops set-cookie and keeps the 101 status', () => {
+    const raw = [
+      'HTTP/1.1 101 Switching Protocols',
+      'Upgrade: websocket',
+      'Connection: Upgrade',
+      'Set-Cookie: session=stolen',
+      'Sec-WebSocket-Accept: abc',
+    ].join('\r\n');
+    const out = sanitizeUpgradeResponseHeaders(raw);
+    expect(out.startsWith('HTTP/1.1 101 Switching Protocols')).toBe(true);
+    expect(out.toLowerCase()).not.toContain('set-cookie');
+    expect(out).toContain('Sec-WebSocket-Accept: abc');
+  });
+
   it('the upgrade forwards only sanitized headers, times out, and still requires a known session', () => {
     const server = readFileSync('server.ts', 'utf8');
     expect(server).toContain('sanitizeProxyRequestHeaders(req.headers)');
+    expect(server).toContain('sanitizeUpgradeResponseHeaders(raw)');
     expect(server).toContain('getPreviewService().serverTarget(m[1])');
     expect(server).toContain('upstream.setTimeout(10_000, () => { upstream.destroy(); clientSocket.destroy(); })');
     expect(server).toContain('if (!target) { clientSocket.destroy(); return; }');

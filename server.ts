@@ -110,7 +110,7 @@ import { registerEsmMirrorRoutes } from './src/server/routes/esmMirror';
 import { registerBuildRoutes } from './src/server/routes/build';
 import { getPreviewService } from './src/server/runtime/PreviewService';
 import { previewSandboxGate } from './src/server/lib/previewHost';
-import { sanitizeProxyRequestHeaders } from './src/server/lib/proxyHeaders';
+import { sanitizeProxyRequestHeaders, sanitizeUpgradeResponseHeaders } from './src/server/lib/proxyHeaders';
 import { handleSonicUpgrade } from './src/server/sonic/sonicWs';
 import { registerSonicRoutes } from './src/server/sonic/sonicRoute';
 import { serverStats } from './src/server/lib/serverStats';
@@ -1215,7 +1215,24 @@ setInterval(() => {
         }
         upstream.write(lines.join('\r\n') + '\r\n\r\n');
         if (head && head.length) upstream.write(head);
-        upstream.pipe(clientSocket);
+        // The 101 response can carry Set-Cookie. Buffer only the header block, strip it, then
+        // forward frames. Do not pipe the raw upstream — that would put the cookie back.
+        let pending = Buffer.alloc(0);
+        let headersSent = false;
+        upstream.on('data', (chunk: Buffer) => {
+          if (headersSent) { clientSocket.write(chunk); return; }
+          pending = Buffer.concat([pending, chunk]);
+          const end = pending.indexOf('\r\n\r\n');
+          if (end < 0) {
+            if (pending.length > 65_536) { upstream.destroy(); clientSocket.destroy(); }
+            return;
+          }
+          headersSent = true;
+          const raw = pending.slice(0, end).toString('latin1');
+          const rest = pending.slice(end + 4);
+          clientSocket.write(sanitizeUpgradeResponseHeaders(raw) + '\r\n\r\n');
+          if (rest.length) clientSocket.write(rest);
+        });
         clientSocket.pipe(upstream);
       });
       upstream.setTimeout(10_000, () => { upstream.destroy(); clientSocket.destroy(); });

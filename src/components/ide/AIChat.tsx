@@ -467,12 +467,12 @@ export const AIChat: React.FC<AIChatProps> = ({
   );
   
   useEffect(() => {
-    console.log('[AIChat] Received buildSteps:', buildSteps.length, buildSteps);
+    if (import.meta.env.DEV) console.log('[AIChat] Received buildSteps:', buildSteps.length, buildSteps);
   }, [buildSteps]);
   const scrollRef = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
-    console.log(`[AIChat] isLoading changed to: ${isLoading}`);
+    if (import.meta.env.DEV) console.log(`[AIChat] isLoading changed to: ${isLoading}`);
   }, [isLoading]);
 
   // `showModeDropdown` was state nothing set and nothing read. The Free chat's mode picker is a

@@ -17,7 +17,7 @@ import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { validateSiteConfig, DEFAULT_SITE_CONFIG, MAX_REDIRECTS } from '../AgentV3/siteConfig';
 import { siteConfigStore } from '../AgentV3/siteConfigStore';
-import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX, requireVerifiedForMoney } from '../lib/identityPolicy';
+import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX, requireVerifiedForMoney, terminalRequiresVerified } from '../lib/identityPolicy';
 import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
 import { recordPlatformBuild } from '../lib/platformBuildMetrics';
 import { isAdminEmail } from '../lib/adminEmails';
@@ -7539,8 +7539,13 @@ async function noteBuildOutcome(
   // no runaway processes. available:false when the sandbox isn't warm (honest, never faked output).
   // Ownership-checked + rate-limited.
   app.post('/api/agentv3/exec', workspaceRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    if (terminalRequiresVerified() && !verified) {
+      res.status(401).json({ error: 'Sign in to use the terminal.' });
+      return;
+    }
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -7839,8 +7844,13 @@ async function noteBuildOutcome(
 
   /** Open a shell. Honest available:false (with the dormant/not_started reason) when no warm sandbox. */
   app.post('/api/agentv3/shell/open', workspaceRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    if (terminalRequiresVerified() && !verified) {
+      res.status(401).json({ error: 'Sign in to use the terminal.' });
+      return;
+    }
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -7948,8 +7958,13 @@ async function noteBuildOutcome(
    * (the exact keystroke-limiter lesson, again).
    */
   app.get('/api/agentv3/shell/wake', shellInputRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
-    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    if (terminalRequiresVerified() && !verified) {
+      res.status(401).json({ error: 'Sign in to use the terminal.' });
+      return;
+    }
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -7982,8 +7997,9 @@ async function noteBuildOutcome(
    * no gap and no duplicated output.
    */
   app.get('/api/agentv3/shell/stream', async (req: Request, res: Response) => {
-    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
-    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -8034,7 +8050,7 @@ async function noteBuildOutcome(
     // bypassable by simply shutting the tab, which is what most people do. When the allowance runs out
     // the stream is ended with an honest event rather than going quiet: a terminal that stops
     // responding for no stated reason is indistinguishable from a broken one.
-    const quotaUid = (await verifiedIdentity(req).catch(() => null))?.uid ?? null;
+    const quotaUid = verified?.uid ?? null;
     // Join this user's shared stretch. A second terminal does NOT start a second bill.
     if (quotaUid) attachStream(terminalMeters, quotaUid, shellId, Date.now());
     const meter = setInterval(() => {
@@ -8078,8 +8094,9 @@ async function noteBuildOutcome(
 
   /** Keystrokes → the TTY. Ctrl+C is just the real \x03 byte arriving here; there is no special case. */
   app.post('/api/agentv3/shell/input', shellInputRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -8101,8 +8118,9 @@ async function noteBuildOutcome(
 
   /** New window size → the TTY, so column-drawn output (top, vim, progress bars) wraps correctly. */
   app.post('/api/agentv3/shell/resize', shellInputRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -8123,8 +8141,9 @@ async function noteBuildOutcome(
 
   /** Kill the shell. Idempotent — closing an already-closed terminal is a success, not an error. */
   app.post('/api/agentv3/shell/close', workspaceRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;

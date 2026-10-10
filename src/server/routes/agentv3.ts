@@ -252,7 +252,7 @@ import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
-import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
+import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage, chooseRestoreBase, greenRestoreTurnStartEnabled, attemptIsHonoured } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -14869,16 +14869,23 @@ async function noteBuildOutcome(
         // restores a broken tree over a working one, and neither is worth a probabilistic win rate.
         if (greenGuardEnabled() && wantsAttemptBack(prompt)) {
           try {
-            const attempt = await loadWorkspaceFiles(attemptWorkspaceKey(workspaceId)).catch(() => ({} as Record<string, string>));
+            const loaded = await loadWorkspaceFilesWithStatus(attemptWorkspaceKey(workspaceId)).catch(() => ({ files: {} as Record<string, string>, status: 'unreadable' as const, savedAt: null as number | null }));
+            const attempt = loaded.files;
             const count = Object.keys(attempt).length;
             if (count > 0) {
-              await saveWorkspaceFiles(workspaceId, attempt);
-              events.emit({ type: 'narration', agent: 'architect', text: attemptRestoredMessage(count), ts: Date.now() });
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'GREEN_GUARD_ATTEMPT_RESTORED',
-                message: `The user asked for the rolled-back attempt back; ${count} file(s) restored from the preserved attempt before this turn's work began.`,
-                autoResolved: true,
-              });
+              const previous = await loadDiagnostics(workspaceId).catch(() => null);
+              if (!attemptIsHonoured(loaded.savedAt, Date.now(), previous?.endedAt ?? null)) {
+                events.emit({ type: 'narration', agent: 'architect', text: 'That earlier attempt has expired.', ts: Date.now() });
+              } else {
+                await saveWorkspaceFiles(workspaceId, attempt);
+                await removeWorkspaceFiles(attemptWorkspaceKey(workspaceId), Object.keys(attempt)).catch(() => {});
+                events.emit({ type: 'narration', agent: 'architect', text: attemptRestoredMessage(count), ts: Date.now() });
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'GREEN_GUARD_ATTEMPT_RESTORED',
+                  message: `The user asked for the rolled-back attempt back; ${count} file(s) restored from the preserved attempt before this turn's work began.`,
+                  autoResolved: true,
+                });
+              }
             } else {
               // Honest rather than silent: the phrase was understood, there was simply nothing kept.
               events.emit({ type: 'narration', agent: 'architect', text: 'There is no earlier version of yours saved to bring back — nothing was rolled back recently. Tell me what you would like to change and we will go from what is here now.', ts: Date.now() });
@@ -15451,9 +15458,13 @@ async function noteBuildOutcome(
           });
           // Collect BEFORE judging the race, so a write during the collection is caught too.
           let files: Record<string, string> = {};
+          let scanOk = false;
           if (isProvenGreenRender(shot, verdict)) {
-            try { files = { ...(await collectWorkspaceFiles(actuator, workspaceId)).files }; } catch { /* captured writes below are the reliable source */ }
-            for (const [pth, c] of writtenFiles) files[pth] = c;
+            try {
+              files = { ...(await collectWorkspaceFiles(actuator, workspaceId)).files };
+              scanOk = true;
+            } catch { /* a failed scan is not a snapshot — do not save a partial tree */ }
+            if (scanOk) for (const [pth, c] of writtenFiles) files[pth] = c;
           }
           const judged = attemptOutcome({ shot, verdict, writesBefore, writesAfter: inBuildWriteTick });
           // ⚠️ PROVEN AND NOTHING TO SAVE IS ITS OWN OUTCOME, NOT A MISSING BRANCH. This used to read
@@ -15476,10 +15487,29 @@ async function noteBuildOutcome(
             try { buildDiag.recordTimeToFirstRender(elapsedMs); } catch { /* best-effort */ }
           }
           if (outcome.kind === 'proven') {
-            // The same key the end-of-build GreenGuard reads — no second store, no second rule.
-            await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files);
-            inBuildGreenAt = Date.now();
-            events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
+            if (!scanOk) {
+              try {
+                buildDiag.record({
+                  phase: 'preview', severity: 'warning', code: 'IN_BUILD_GREEN_SKIPPED_PARTIAL_SCAN',
+                  message: 'The working version was not saved as a restore point because the project could not be fully read.',
+                  autoResolved: false,
+                });
+              } catch { /* best-effort */ }
+            } else {
+              const st = await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files, { mode: 'replace' });
+              if (st === 'saved') {
+                inBuildGreenAt = Date.now();
+                events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
+              } else {
+                try {
+                  buildDiag.record({
+                    phase: 'preview', severity: 'warning', code: 'IN_BUILD_GREEN_NOT_SAVED',
+                    message: `The working version could not be saved as a restore point (${st}).`,
+                    autoResolved: false,
+                  });
+                } catch { /* best-effort */ }
+              }
+            }
           }
           try { buildDiag.record({ phase: 'preview', ...inBuildGreenNote(outcome, { elapsedMs, fileCount: Object.keys(files).length }) }); } catch { /* best-effort */ }
         } catch (err) {
@@ -24639,8 +24669,9 @@ async function noteBuildOutcome(
           if (greenGuardEnabled()) {
             try {
               const greenKey = greenWorkspaceKey(workspaceId);
-              const snapshot = await loadWorkspaceFiles(greenKey).catch(() => ({} as Record<string, string>));
-              const hasSnapshot = Object.keys(snapshot).length > 0;
+              const greenFiles = await loadWorkspaceFiles(greenKey).catch(() => ({} as Record<string, string>));
+              let snapshot = greenFiles;
+              const hasSnapshot = Object.keys(greenFiles).length > 0;
               const decision = decideGreenGuard({
                 // `at` is set only when THIS build recorded the snapshot (inBuildGreen.ts); with
                 // `turnStartedAt` the guard can then say "earlier in this build" instead of "before this
@@ -24669,13 +24700,37 @@ async function noteBuildOutcome(
                 message: decision.reason, autoResolved: true,
               });
               if (decision.action === 'save') {
-                await saveWorkspaceFiles(workspaceId, toSave);
-                saved = true;
-                // The new last known good. Written AFTER the project save so a failure here can never
-                // cost the user their actual files.
-                await saveWorkspaceFiles(greenKey, toSave).catch(() => {});
+                const projectSt = await saveWorkspaceFiles(workspaceId, toSave);
+                saved = projectSt === 'saved' || projectSt === 'merged';
+                // The new last known good. A replace, never a shrink-guard hybrid. A failed save
+                // must not be described as protection.
+                const greenSt = await saveWorkspaceFiles(greenKey, toSave, { mode: 'replace' });
+                if (greenSt !== 'saved' && greenSt !== 'merged') {
+                  buildDiag.record({
+                    phase: 'build', severity: 'warning', code: 'GREEN_SNAPSHOT_NOT_SAVED', autoResolved: false,
+                    message: `The working version could not be saved as a restore point (${greenSt}).`,
+                  });
+                }
+                const keptAttempt = await loadWorkspaceFiles(attemptWorkspaceKey(workspaceId)).catch(() => ({} as Record<string, string>));
+                const attemptPaths = Object.keys(keptAttempt);
+                if (attemptPaths.length > 0) await removeWorkspaceFiles(attemptWorkspaceKey(workspaceId), attemptPaths).catch(() => {});
               } else if (decision.action === 'restore') {
-                const plan = restorePlan(snapshot, toSave);
+                const fromThisBuild = snapshotIsFromThisBuild(inBuildGreenAt > 0 ? inBuildGreenAt : undefined, buildStartedAt);
+                const chosen = greenRestoreTurnStartEnabled()
+                  ? chooseRestoreBase({ snapshot: greenFiles, turnStart: projectFilesAtTurnStart, snapshotFromThisBuild: fromThisBuild })
+                  : { base: greenFiles, kind: 'green-snapshot' as const };
+                if (!chosen) {
+                  if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {
+                    events.emit({ type: 'narration', agent: 'architect', text: greenGuardUnverifiedMessage(), ts: Date.now() });
+                    buildDiag.record({
+                      phase: 'build', severity: 'warning', code: 'GREEN_GUARD_UNVERIFIED',
+                      message: 'The app could not be opened to check this turn, so the user\u2019s changes were KEPT rather than rolled back. The last known good snapshot is unchanged and still available.',
+                      autoResolved: false,
+                    });
+                  }
+                } else {
+                snapshot = chosen.base;
+                const plan = restorePlan(snapshot, toSave, new Set(Object.keys(projectFilesAtTurnStart ?? {})));
                 // Keep the broken attempt before undoing it — nothing the user paid for is thrown away.
                 await saveWorkspaceFiles(attemptWorkspaceKey(workspaceId), toSave).catch(() => {});
                 await runInPass('green-guard-restore', async () => {
@@ -24690,7 +24745,7 @@ async function noteBuildOutcome(
                 saved = true;
                 persisted = snapshot;
                 if (plan.remove.length > 0) await removeWorkspaceFiles(workspaceId, plan.remove).catch(() => {});
-                events.emit({ type: 'narration', agent: 'architect', text: greenGuardMessage(plan), ts: Date.now() });
+                events.emit({ type: 'narration', agent: 'architect', text: greenGuardMessage(plan, chosen.kind), ts: Date.now() });
                 buildDiag.record({
                   phase: 'build', severity: 'warning', code: 'GREEN_GUARD_RESTORED',
                   message: `Restored the last verified-working version: ${Object.keys(plan.write).length} file(s) put back, ${plan.remove.length} added by the failed attempt removed, ${plan.unchanged} already correct. The attempt itself is kept and was not discarded.`,
@@ -24704,8 +24759,9 @@ async function noteBuildOutcome(
                 greenGuardRestoreFacts = {
                   restored: Object.keys(plan.write).length,
                   removed: plan.remove.length,
-                  fromThisBuild: snapshotIsFromThisBuild(inBuildGreenAt > 0 ? inBuildGreenAt : undefined, buildStartedAt),
+                  fromThisBuild: chosen.kind === 'green-snapshot' && fromThisBuild,
                 };
+                }
               } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {
                 // KEPT, BUT UNCHECKED — and the user hears so. This is the branch that used to be a
                 // silent rollback. Saying nothing here would replace one dishonest outcome with a

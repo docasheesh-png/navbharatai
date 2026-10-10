@@ -29,6 +29,8 @@
 //     the platform stealing from its own sellers.
 
 import * as admin from 'firebase-admin';
+// Q-766: a de-identified listing's uid is a tombstone, and a tombstone has no wallet to credit.
+import { creatorHasLeft } from './publishedListingErase';
 import { getServerDb } from './serverDb';
 import { listEqNewestFirst } from './firestoreIndexSafe';
 import { TOKENS_PER_RUPEE, inrToDebitTokens } from './payments';
@@ -197,6 +199,23 @@ export async function settleRemixPurchase(input: {
   const d = db();
   if (!d) return { charged: false, creatorCredited: false, note: 'wallet unavailable — delivered free' };
   const { appId, appName, buyerUid, creatorUid, priceInr } = input;
+  /**
+   * 🔴 THE CREATOR HAS DELETED THEIR ACCOUNT — CHARGE NOBODY, DELIVER ANYWAY (Q-766).
+   *
+   * When an author leaves, their listings are de-identified rather than erased, because a buyer's
+   * purchase must survive the seller (Terms §4: non-refundable, *because the app can be run free
+   * before buying*). That leaves a paid listing with no payee: the credit below would go to a
+   * tombstone uid whose wallet no longer exists, so NavBharatAI would be taking a stranger's money
+   * for a person who cannot be paid.
+   *
+   * Delivered free is the answer this function already gives whenever it cannot charge properly —
+   * "wallet unavailable", "purchase record failed" — and the same reasoning HostingBillingStore states
+   * as "when in doubt, we eat it". Refusing instead would punish the buyer for somebody else's
+   * departure; charging would be worse than either.
+   */
+  if (creatorHasLeft(creatorUid)) {
+    return { charged: false, creatorCredited: false, note: 'the creator has left NavBharatAI — delivered free' };
+  }
   const { creatorInr } = splitRemixPrice(priceInr);
   const ref = `store_remix_${purchaseDocId(appId, buyerUid)}`;
 

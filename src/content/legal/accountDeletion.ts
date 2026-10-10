@@ -129,7 +129,14 @@ When your deletion request is completed, we remove:
 
 - **Payment, invoice and tax records.** Indian tax and accounting law requires businesses to keep records of money received. We keep the order identifier, the amount, the date and the payment status — not your card number, UPI PIN or banking credentials, which we never receive. These are retained for the period required by applicable law and are not used for anything else.
 - **Anonymous, non-identifying records.** Technical logs and the platform's error-pattern learning contain no account identifier and cannot be traced back to you, so there is nothing personal in them to delete.
-- **Apps you published to the Nav App Store.** If you published an app publicly and want it taken down as well, say so in your email and we will remove the listing and its files. Tell us explicitly — we do not remove a published app unless you ask, in case other people depend on it.
+- **Apps you published to the Nav App Store — the app stays, you do not.** Your name, email address and
+  account link are removed from every listing you published, and the listing is taken out of the public
+  store so it no longer appears to new visitors. **The app itself is kept**, and anyone who already
+  bought it can still open and run it: a purchase is not refundable, so taking the app away would leave
+  somebody paying for nothing. A paid app of yours can no longer be bought once your account is gone —
+  there would be nobody to pay — so anyone who opens it from then on gets it free. Submissions that were
+  never published (waiting for review, or refused) are **deleted outright**, because nobody ever saw them.
+  If you want a published app removed completely as well, say so in your email and we will take it down.
 
 ---
 

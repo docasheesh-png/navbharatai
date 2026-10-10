@@ -27,6 +27,8 @@ import {
   RETENTION_POLICIES, RETAINED_INDEFINITELY, USER_SCOPED_COLLECTIONS,
 } from '../src/server/lib/DataRetentionManager';
 import { WORKSPACE_SCOPED_COLLECTIONS } from '../src/server/lib/workspaceDataErase';
+// Q-766: the obligation behind the `de-identified` kind — which identity fields a kept listing loses.
+import { LISTING_POLICIES } from '../src/server/lib/publishedListingErase';
 
 const root = resolve(__dirname, '..');
 
@@ -38,6 +40,8 @@ const root = resolve(__dirname, '..');
  *  · `platform`  — ours: a lease, a counter, a bucket, a day rollup. No user owns it.
  *  · `retained`  — grows and is purged on a clock. MUST have a `RETENTION_POLICIES` entry.
  *  · `forever`   — grows and is kept DELIBERATELY. MUST have a `RETAINED_INDEFINITELY` entry (with its reason).
+ *  · `de-identified` — a PUBLIC listing kept on account deletion with the person stripped out of it.
+ *      MUST have a `LISTING_POLICIES` entry naming the identity fields it clears.
  *  · `blocked`   — its obligation is NOT met, and a queue row owns the reason. MUST name a `Q-###`.
  *
  * 🔴 `workspace` CARRIED NO OBLIGATION UNTIL Q-701 (2026-10-08), and that is how twelve stores of the
@@ -57,7 +61,7 @@ const root = resolve(__dirname, '..');
  * row that is closed while the store is still here will fail the queue's own guards, not this one, which
  * is the right division: this test proves the store is ACCOUNTED FOR, not that the work is done.
  */
-type Kind = 'user' | 'workspace' | 'platform' | 'retained' | 'forever' | 'blocked';
+type Kind = 'user' | 'workspace' | 'platform' | 'retained' | 'forever' | 'de-identified' | 'blocked';
 /**
  * `user`-kind collections erased by a DEDICATED MODULE rather than by `USER_SCOPED_COLLECTIONS`.
  *
@@ -276,8 +280,14 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   app_ai_visitors:   { kind: 'retained', why: "one doc per (app, visitor, day); purged on its own window" },
 
   // ── 🟡 Accounted for, obligation NOT met: each names the row that owns it ─────────────────────
-  gallery_apps: { kind: 'blocked', why: 'Q-766 — a `uid` field, and it survives deletion today. It is a PUBLIC listing that can have been bought, so erasing it because the AUTHOR left would destroy a stranger\'s purchase (the `gift_codes` reasoning). The admin decides: erase, or unlist and de-identify' },
-  nav_store_apps: { kind: 'blocked', why: 'Q-766 — same shape as `gallery_apps`: a `uid` field, a public App Mart listing, purchasable' },
+  gallery_apps: { kind: 'de-identified', why: "a code-gallery listing (`uid`, `authorEmail`, `authorName`). NOT purchasable — this store has no `priceInr` at all — and only an `approved` one is served, so a pending or rejected submission was never public and is deleted outright; a published one is de-identified and unlisted (Q-766)" },
+  /**
+   * CORRECTED 2026-10-09: the old reason called this "purchasable". It is not — `priceInr` exists only
+   * in `nav_store_web_apps`; nothing in this store or in `gallery_apps` can be bought. The money
+   * argument that made Q-766 a decision applies to the web store ALONE, which is why these two can be
+   * deleted outright when they were never public.
+   */
+  nav_store_apps: { kind: 'de-identified', why: "an APK submission, carrying a whole `developer` block — name, EMAIL, phone, website. Not purchasable; only an `approved` one is served. Pending/rejected is deleted, published is de-identified and unlisted (Q-766)" },
   /**
    * ── The three stores form 4 found (Q-784, 2026-10-09) ──────────────────────────────────────────────
    * Invisible to forms 1–3 only because their constants are not named `*COLLECTION*`. Each was read at
@@ -286,7 +296,7 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   nav_store_purchases: { kind: 'forever', why: "one doc per (app, buyer): `{appId, buyerUid, creatorUid, priceInr, creatorInr, at}` — a record of a SALE, and the buyer's own proof of purchase (`listPurchases` reads it by `buyerUid`). Money, so it outlives the account like `payment_transactions` (Privacy §9's first exception)" },
   nav_store_pending_credits: { kind: 'forever', why: "money OWED to a creator whose credit failed to land (`navStoreRemixPurchase.ts:267`): `{appId, creatorUid, creatorInr, ref, at}`, written so the sale can be reconciled by hand. A debt a timer or an account closure erases is a debt nobody can pay — the `hosting_period_usage` / `owedInr` argument exactly" },
   nav_store_remix_origins: { kind: 'workspace', why: "which store app a workspace was born as a remix of (`navStoreWeb.ts:722`) — the doc id IS the workspaceId, so the eraser's id range reaches it the moment it is registered, which until Q-784 it was not" },
-  nav_store_web_apps: { kind: 'blocked', why: 'Q-766 — same as above, plus `files`/`baked`/`screenshots` subcollections that Q-682 owns' },
+  nav_store_web_apps: { kind: 'de-identified', why: "THE purchasable store (`priceInr`). Never deleted by an account erase: a buyer's purchase must survive the seller (Terms §4), and `unlisted` still serves while `removed` 404s — so it is de-identified (`uid` to a tombstone, `workspaceId` cleared because it contains the uid) and moved out of the catalogue, with the remix purchase path refusing to credit a tombstone (Q-766)" },
   /** ✅ Q-762, 2026-10-09: `adrMemory.ts` now stores `userId`, so the field query reaches it. */
   adrDecisions: { kind: 'user', why: "the person's own architecture decisions — doc id is `${userId}__${projectId}`, reached by the `userId` the writer now stores" },
   /** ✅ Q-762, 2026-10-09: `TechnicalDebtTracker.ts` now stores `userId` too. */
@@ -607,6 +617,30 @@ describe('every declared collection is classified', () => {
       .filter(([name, v]) => erased.has(name) && v.kind !== 'user')
       .map(([name, v]) => `${name} (labelled ${v.kind}, but account deletion erases it)`);
     expect(mislabelled, mislabelled.join('\n')).toEqual([]);
+  });
+
+  it('🔒 every `de-identified` collection has a real LISTING_POLICIES entry naming what it clears', () => {
+    /**
+     * Q-766. "De-identified" is the one classification whose correctness cannot be seen by looking for a
+     * deletion — the record is still there on purpose. So the obligation is the policy that says WHICH
+     * fields stop being there, and each store carries more identity than a uid: `gallery_apps` has
+     * `authorEmail` and `authorName`, `nav_store_apps` a whole `developer` block with an email and a
+     * phone number, and `nav_store_web_apps` a `workspaceId` that CONTAINS the uid.
+     */
+    const policies = new Map(LISTING_POLICIES.map((p) => [p.collection, p]));
+    const missing = Object.entries(CLASSIFICATION)
+      .filter(([, v]) => v.kind === 'de-identified')
+      .map(([name]) => name)
+      .filter((name) => !policies.has(name));
+    expect(missing, `called de-identified but in no LISTING_POLICIES entry: ${missing.join(', ')}`).toEqual([]);
+    for (const [name, v] of Object.entries(CLASSIFICATION)) {
+      if (v.kind !== 'de-identified') continue;
+      const policy = policies.get(name)!;
+      expect(policy.personalFields.length, `${name} clears no identity fields`).toBeGreaterThan(0);
+      expect(policy.why.length, `${name} has no reason recorded`).toBeGreaterThan(20);
+      // A de-identified listing is NOT also plain-erased — that would delete what a buyer paid for.
+      expect(USER_SCOPED_COLLECTIONS.some((c) => c.collection === name)).toBe(false);
+    }
   });
 
   it('🔒 every `forever`-kind collection is really on RETAINED_INDEFINITELY, with a reason', () => {

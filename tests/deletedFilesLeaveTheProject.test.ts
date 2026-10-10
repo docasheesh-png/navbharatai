@@ -224,7 +224,7 @@ describe('a file the build deletes leaves the project map', () => {
     mem.indexFile('src/App.tsx', "import Counter from './components/Counter';\nexport default function App() { return <Counter/>; }");
 
     const { d, deleted } = harness(act, ws);
-    const out = await d.run(bash('rm src/components/Counter.tsx'), 'architect');
+    const out = await d.run(bash('rm src/components/Counter.tsx'), 'architect').catch((e: unknown) => e instanceof Error ? e.message : String(e));
 
     expect(String(out)).toContain('GOVERNANCE BLOCKED');
     expect(deleted).toEqual([]);

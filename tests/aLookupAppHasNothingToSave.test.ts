@@ -221,7 +221,8 @@ describe('6 · the first write-time typecheck reads a warm cache, not a cold com
     async listFiles() { return [...this.files.keys()]; }
     async runCommand(_w: string, cmd: string) {
       this.commands.push(cmd);
-      if (cmd === writeTypecheckWarmupCommand()) {
+      // The warm-up now names this dispatcher's own cache (TD-18), not the shared default.
+      if (/--tsBuildInfoFile \/tmp\/agentv3-[A-Za-z0-9]+\.tsbuildinfo >\/dev\/null 2>&1; echo NBAI_WARMUP_COMPILED/.test(cmd)) {
         await new Promise<void>((r) => { this.releaseWarmup = r; });
         // The marker the warm-up prints only when it really compiled (autopsy 8257ca59).
         return { exitCode: 0, stdout: `${WARMUP_COMPILED_MARKER}\n`, stderr: '' };
@@ -240,7 +241,12 @@ describe('6 · the first write-time typecheck reads a warm cache, not a cold com
       (c) => { recorded.push(c.command); });
     d.warmTypecheckCache();
     d.warmTypecheckCache(); // a second call is a no-op
-    expect(act.commands.filter((c) => c === writeTypecheckWarmupCommand())).toHaveLength(1);
+    // Old: the warm-up was the shared default `writeTypecheckWarmupCommand()`.
+    // New: it is that command with this dispatcher's own cache id, still exactly once.
+    const warmups = act.commands.filter((c) =>
+      /--tsBuildInfoFile \/tmp\/agentv3-[A-Za-z0-9]+\.tsbuildinfo >\/dev\/null 2>&1; echo NBAI_WARMUP_COMPILED/.test(c));
+    expect(warmups).toHaveLength(1);
+    expect(warmups[0]).not.toContain('--tsBuildInfoFile ' + '/tmp/agentv3' + '.tsbuildinfo');
 
     const write = d.dispatch({ id: 'w1', name: 'write_file', input: { path: 'src/a.ts', content: 'export const a: number = "x";' } }, 'architect');
     await new Promise((r) => setTimeout(r, 20));
@@ -251,7 +257,7 @@ describe('6 · the first write-time typecheck reads a warm cache, not a cold com
     expect(s.warmupStarted).toBe(true);
     expect(s.warmupMs).not.toBeNull();
     expect(s.runs).toBe(1);                                 // the warm-up is not a run
-    expect(recorded.some((c) => c === writeTypecheckWarmupCommand())).toBe(false); // nor typecheck evidence
+    expect(recorded.some((c) => warmups.includes(c))).toBe(false); // nor typecheck evidence
   });
 
   it('a warm-up alone never makes the stats "touched", and the summary says the cache was warmed', () => {

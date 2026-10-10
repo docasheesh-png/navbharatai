@@ -102,7 +102,7 @@ const PRODUCT_CARDS = [
     features: ['Chat in Hindi, English & Hinglish', 'Instant answers, research & learning', 'Creative writing, summaries & translation'],
     featureIcon: CheckCircle2,
     featureColor: 'text-warn',
-    btnClass: 'bg-gradient-to-r from-orange-500 to-amber-400 hover:from-orange-400 hover:to-amber-300 text-on-accent',
+    btnClass: 'bg-accent hover:brightness-110 text-on-accent',
     btnLabel: 'Start Free Chat',
     btnLabelShort: 'Free Chat',
     btnIcon: MessageSquare,
@@ -124,7 +124,7 @@ const PRODUCT_CARDS = [
     features: ['Full-stack app generation in minutes', 'Live preview + one-click deploy', "NavBharatAI's most powerful AI engine"],
     featureIcon: Zap,
     featureColor: 'text-accent-text',
-    btnClass: 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-on-accent',
+    btnClass: 'bg-accent hover:brightness-110 text-on-accent',
     btnLabel: 'Open Pro Builder',
     btnLabelShort: 'Pro Builder',
     btnIcon: Rocket,
@@ -146,7 +146,7 @@ const PRODUCT_CARDS = [
     features: ['Design, develop, test & minify', 'Publish, deploy & custom domain', 'Monetize, analytics & team'],
     featureIcon: CheckCircle2,
     featureColor: 'text-accent-text',
-    btnClass: 'bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:from-fuchsia-500 hover:to-pink-500 text-on-accent',
+    btnClass: 'bg-accent hover:brightness-110 text-on-accent',
     btnLabel: 'Open Tools',
     btnLabelShort: 'Tools',
     btnIcon: LayoutGrid,
@@ -174,7 +174,7 @@ const PRODUCT_CARDS = [
     features: ['Play instantly — no account needed', 'Install Android apps (.apk) — sign in to download', 'Remix any app into your own — with a plan'],
     featureIcon: CheckCircle2,
     featureColor: 'text-success',
-    btnClass: 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-on-accent',
+    btnClass: 'bg-accent hover:brightness-110 text-on-accent',
     phoneTagline: 'Games & apps by other creators — free to play',
     btnLabel: 'Open App Mart',
     btnLabelShort: 'Open App Mart',
@@ -286,7 +286,7 @@ export const HomeView = ({
           </h1>
 
           <p className="text-muted font-medium leading-relaxed text-sm sm:text-base max-w-lg">
-            {data?.heroSubtitle || 'The most advanced AI workspace built for the next billion developers and creators from Bharat.'}
+            {data?.heroSubtitle || 'Describe an app in Hindi, English or Hinglish. NavBharatAI plans, codes, previews and deploys it.'}
           </p>
         </motion.div>
 

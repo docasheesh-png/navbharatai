@@ -77,6 +77,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'FUTILITY_BREAKER',         // our own loop breaker stopped the build
   'VERIFY_DID_NOT_RUN',       // our fast-lane typecheck could not execute — the class of RUNTIME_UNCHECKED
   'GREEN_GUARD_UNVERIFIED',   // "could not be opened to check this turn" — the class of PREVIEW_UNVERIFIED
+  // A restore point OUR save did not keep (GT-6). The app rendered; the miss is the store, not the app.
+  'IN_BUILD_GREEN_SKIPPED_PARTIAL_SCAN', 'IN_BUILD_GREEN_NOT_SAVED', 'GREEN_SNAPSHOT_NOT_SAVED',
   'HEAL_NOT_DURABLE',         // our repair wrote twice to one file; the user never sees repair passes
   'IMPORT_NOT_DURABLE',       // our store did not confirm saving an import (autopsy d0b2fcd6, Q-735) — their app is unchanged
   'SUMMARY_OFF_TOPIC',        // about OUR closing summary's wording, and already said above the summary

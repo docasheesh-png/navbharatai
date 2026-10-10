@@ -81,7 +81,9 @@ describe('and it is wired where the summary still reaches the user', () => {
     const facts = route.slice(at, at + 400);
     expect(facts).toContain('restored: Object.keys(plan.write).length');
     expect(facts).toContain('removed: plan.remove.length');
-    expect(facts).toContain('fromThisBuild: snapshotIsFromThisBuild(');
+    // Old: `fromThisBuild: snapshotIsFromThisBuild(`. The origin is still that function's result,
+    // and it is recorded only when the base that was restored is the green snapshot.
+    expect(facts).toContain("fromThisBuild: chosen.kind === 'green-snapshot' && fromThisBuild");
   });
 
   it('and the correction is applied at the late mutation point, before the charge line', () => {

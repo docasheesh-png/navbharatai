@@ -20,3 +20,14 @@ This is DNS and Cloud Build. CI does not do it. Do not put the hostname in `clou
 5. Rebuild and deploy. The in-browser iframe then loads that host. `allow-same-origin` on that frame is the preview origin's empty storage, not the app's Firebase session.
 
 If the preview origin equals the app origin, the app ignores it. Isolation only exists when the two hosts differ.
+
+## Sandbox host page (fail-closed)
+
+`/preview-sandbox.html` is the page the app iframes on the preview origin. It is not a page of the app.
+
+Until `PREVIEW_ORIGIN` or `VITE_PREVIEW_ORIGIN` is set (owner decision D-2), `GET /preview-sandbox.html` returns 404. That is fail-closed, the same as leaving the preview origin unset. Set `PREVIEW_ORIGIN` to the preview origin (for example `https://preview.<your-domain>`). The server uses the hostname only, and a request whose Host is the app (navbharatai.com) stays 404 even after it is set.
+
+The page only accepts preview HTML from `ALLOWED_PARENTS` in `public/preview-sandbox.html`. The same list is `APP_ORIGINS` in `src/server/lib/previewHost.ts` (`frame-ancestors` on that response). If the owner uses a different app domain, both lists must be updated.
+
+`capacitor://localhost` is on the list because `capacitor.config.ts` sets no `server.url`, so the native WebView origin is `capacitor://localhost`. `https://localhost` is listed as well.
+

@@ -153,7 +153,7 @@ describe('🔒 the dispatcher asks after EVERY write path, and the route reports
     expect(dispatcher).toContain('const steeringNotes = await this.writeSteeringNotes({ [path]: content });');
     expect(dispatcher).toContain('const batchSteeringNotes = await this.writeSteeringNotes(writtenRecord);');
     expect(dispatcher).toContain('const editSteeringNotes = await this.writeSteeringNotes({ [path]: updated });');
-    expect(dispatcher).toContain('const symbolSteeringNotes = await this.writeSteeringNotes({ [path]: result.content });');
+    expect(dispatcher).toContain('const symbolSteeringNotes = await this.writeSteeringNotes({ [path]: wrote.content });');
     for (const v of ['steeringNotes', 'batchSteeringNotes', 'editSteeringNotes', 'symbolSteeringNotes']) {
       // Each note variable is used in a return, not only computed.
       expect(dispatcher).toMatch(new RegExp(`(?:return [^;]*|\\+ )\\b${v}\\b`));

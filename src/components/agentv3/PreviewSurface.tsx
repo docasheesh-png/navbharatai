@@ -1772,8 +1772,6 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         <div className={TOOLBAR_ROW}>
           {switcher}
           {viewportSwitcher}
-        {zoomButton}
-        {themeButton}
           {zoomButton}
           {themeButton}
           {/* THE MACHINE'S ADDRESS USED TO BE PRINTED HERE, VERBATIM (gap analysis 2026-09-10).

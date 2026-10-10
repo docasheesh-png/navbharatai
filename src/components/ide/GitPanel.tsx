@@ -1588,7 +1588,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   }
                 }}
                 disabled={deployStatus === 'validating' || deployStatus === 'building'}
-                className="w-full h-11 bg-gradient-to-r from-indigo-600 via-orange-600 to-[#10b981] disabled:opacity-40 text-on-accent rounded-xl text-[10.5px] font-black uppercase tracking-[0.18em] flex items-center justify-center gap-2 shadow-2xl hover:scale-[1.01] active:scale-[0.98] transition-all cursor-pointer shadow-indigo-500/15"
+                className="w-full h-11 bg-accent hover:brightness-110 disabled:opacity-40 text-on-accent rounded-xl text-[10.5px] font-black uppercase tracking-[0.18em] flex items-center justify-center gap-2 shadow-2xl hover:scale-[1.01] active:scale-[0.98] transition-all cursor-pointer shadow-indigo-500/15"
               >
                 {deployStatus === 'validating' || deployStatus === 'building' ? (
                   <>
@@ -2236,7 +2236,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     setShowConfirmModal(false);
                     triggerPushAndDeploy();
                   }}
-                  className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-emerald-600 hover:scale-[1.02] active:scale-95 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
+                  className="flex-1 py-3 bg-accent hover:brightness-110 hover:scale-[1.02] active:scale-95 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
                 >
                   Confirm & Push
                 </button>

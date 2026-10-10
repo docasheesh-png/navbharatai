@@ -4691,7 +4691,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                         onClick={openScreenshotGallery}
                         disabled={screenshotBusy || running}
                         title="Pick a website/app screenshot from your gallery — NavBharatAI Pro builds it"
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-on-accent bg-gradient-to-r from-indigo-500 to-violet-500 ring-1 ring-indigo-300/40 shadow-[0_0_18px_rgba(99,102,241,0.6)] hover:shadow-[0_0_26px_rgba(99,102,241,0.9)] transition-shadow disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-on-accent bg-accent hover:brightness-110 transition disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         {screenshotBusy ? <TirangaLoader className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
                         {screenshotBusy ? 'Reading screenshot…' : 'Screenshot → App'}
@@ -5795,7 +5795,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-danger hover:text-on-accent hover:bg-red-600/80`}>
                       <Square className="w-4 h-4" />
                     </button>
-                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-on-accent shadow-[0_0_12px_rgba(129,80,255,0.45)]`}>
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-40 rounded-lg text-on-accent shadow-[0_0_12px_rgba(129,80,255,0.45)]`}>
                       <Send className="w-4 h-4" />
                     </button>
                   </>
@@ -7099,11 +7099,11 @@ function TeamHqCard({ agents, todos, elapsedMs }: { agents: Record<string, Agent
   const m = teamHqModel(agents, todos);
   const squares = m.progress.total > 0 ? todos.slice(0, 24) : [];
   return (
-    <div className="mx-2 mt-2 rounded-xl p-[1px] bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-amber-400 shadow-[0_0_18px_rgba(129,80,255,0.25)] text-on-accent">
+    <div className="mx-2 mt-2 rounded-xl p-[1px] bg-line">
       <div className="rounded-[11px] bg-surface px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-[11px] font-bold tracking-wide">
-            <span className="bg-gradient-to-r from-indigo-400 via-fuchsia-400 to-amber-300 bg-clip-text text-transparent">FULL TEAM</span>
+            <span className="text-accent-text">FULL TEAM</span>
             <span className="text-faint font-normal">
               {m.roster.length > 0 ? `${m.roster.length} agent${m.roster.length > 1 ? 's' : ''}` : 'assembling…'}
               {m.activeCount > 0 && ` · ${m.activeCount} working`}

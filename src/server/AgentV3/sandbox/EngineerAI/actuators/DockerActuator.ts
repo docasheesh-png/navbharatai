@@ -3,13 +3,13 @@ import { PassThrough } from 'stream';
 import { promises as fsPromises, createWriteStream } from 'fs';
 import path from 'path';
 import os from 'os';
-import { exec as execCb } from 'child_process';
+import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
 import { LIST_PRUNE_DIRS } from '../../../../lib/generatedDirs';
 
-const exec = promisify(execCb);
+const execFile = promisify(execFileCb);
 
 const WORKSPACE_DIR = '/workspace';
 
@@ -39,6 +39,17 @@ const CMD_TIMEOUT_MS = 120_000;
 const BUILD_TIMEOUT_MS = 5 * 60_000;
 const CKPT_DIR_INSIDE = '/workspace/.e-checkpoints';
 const MAX_LIST_FILES = 500;
+
+/**
+ * `timeout -k 5 <seconds>` then argv. Seconds are the caller's existing timeoutMs
+ * (ceil, at least 1) so a timed-out exec is killed inside the container, not only
+ * abandoned by the Node timer. Shell commands pass `sh -c <cmd>`; path helpers pass
+ * argv (`mkdir`/`cat`) and never interpolate the path into a shell string.
+ */
+export function withContainerTimeout(argv: readonly string[], timeoutMs: number): string[] {
+  const seconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+  return `timeout -k 5 ${seconds}`.split(' ').concat(argv);
+}
 
 // The same list every actuator uses — see lib/generatedDirs.ts (autopsy e1c21ad8).
 const IGNORED_DIRS: readonly string[] = LIST_PRUNE_DIRS;
@@ -94,26 +105,46 @@ export class DockerActuator implements IEngineerActuator {
       Image: IMAGE,
       Cmd: ['sleep', 'infinity'],
       WorkingDir: WORKSPACE_DIR,
-      HostConfig: { NetworkMode: 'host' },
+      HostConfig: { NetworkMode: process.env.DOCKER_SANDBOX_NETWORK || 'bridge' },
     });
     await container.start();
-    await this.execInContainer(container, `mkdir -p "${WORKSPACE_DIR}" "${CKPT_DIR_INSIDE}"`);
+    await this.execArgv(container, ['mkdir', '-p', '--', WORKSPACE_DIR, CKPT_DIR_INSIDE]);
     this.containers.set(workspaceId, container);
     return container;
   }
 
-  /** Run a bash command inside the container and return exit code + output. */
+  /** Run a shell string. The agent's own bash stays a shell string by design (`sh -c`). */
   private execInContainer(
     container: Docker.Container,
     command: string,
     timeoutMs = CMD_TIMEOUT_MS,
   ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    return this.runExec(container, withContainerTimeout(['sh', '-c', command], timeoutMs), timeoutMs);
+  }
+
+  /** Run argv. Paths are arguments (`['cat', '--', path]`), never concatenated into a shell string. */
+  private execArgv(
+    container: Docker.Container,
+    argv: string[],
+    timeoutMs = CMD_TIMEOUT_MS,
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    return this.runExec(container, withContainerTimeout(argv, timeoutMs), timeoutMs);
+  }
+
+  /** Run a bash command inside the container and return exit code + output. */
+  private runExec(
+    container: Docker.Container,
+    argv: string[],
+    timeoutMs: number,
+    stdin?: Buffer,
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     return new Promise((resolve) => {
       container
         .exec({
-          Cmd: ['bash', '-c', command],
+          Cmd: argv,
           AttachStdout: true,
           AttachStderr: true,
+          AttachStdin: stdin != null,
           WorkingDir: WORKSPACE_DIR,
         })
         .then((dockerExec) => {
@@ -122,7 +153,7 @@ export class DockerActuator implements IEngineerActuator {
             timeoutMs,
           );
 
-          dockerExec.start({ hijack: true, stdin: false }, (startErr, stream) => {
+          dockerExec.start({ hijack: true, stdin: stdin != null }, (startErr, stream) => {
             if (startErr || !stream) {
               clearTimeout(timer);
               resolve({ exitCode: 1, stdout: '', stderr: startErr?.message ?? 'exec start failed' });
@@ -136,6 +167,11 @@ export class DockerActuator implements IEngineerActuator {
             outStream.on('data', (c: Buffer) => outChunks.push(c));
             errStream.on('data', (c: Buffer) => errChunks.push(c));
             container.modem.demuxStream(stream, outStream, errStream);
+
+            if (stdin) {
+              stream.write(stdin);
+              stream.end();
+            }
 
             stream.on('end', async () => {
               clearTimeout(timer);
@@ -157,52 +193,28 @@ export class DockerActuator implements IEngineerActuator {
     });
   }
 
-  /** Write a file into the container by piping content through cat via stdin. */
-  private writeViaStdin(
+  /**
+   * Write a file into the container. mkdir/cat take the path as argv (`$1`), not string concatenation.
+   */
+  private async writeViaStdin(
     container: Docker.Container,
     destPath: string,
     content: Buffer,
   ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const dir = path.posix.dirname(destPath);
-      container
-        .exec({
-          Cmd: ['bash', '-c', `mkdir -p "${dir}" && cat > "${destPath}"`],
-          AttachStdin: true,
-          AttachStdout: false,
-          AttachStderr: true,
-        })
-        .then((dockerExec) => {
-          dockerExec.start({ hijack: true, stdin: true }, (startErr, stream) => {
-            if (startErr || !stream) {
-              reject(startErr ?? new Error('exec start failed'));
-              return;
-            }
-
-            const errChunks: Buffer[] = [];
-            const outStream = new PassThrough();
-            const errStream = new PassThrough();
-            errStream.on('data', (c: Buffer) => errChunks.push(c));
-            container.modem.demuxStream(stream, outStream, errStream);
-
-            stream.write(content);
-            stream.end();
-
-            stream.on('end', async () => {
-              const info = await dockerExec.inspect().catch(() => ({ ExitCode: 0 }));
-              const code = (info as Docker.ExecInspectInfo).ExitCode ?? 0;
-              if (code !== 0) {
-                reject(new Error(`writeFile failed (exit ${code}): ${Buffer.concat(errChunks).toString()}`));
-              } else {
-                resolve();
-              }
-            });
-
-            stream.on('error', reject);
-          });
-        })
-        .catch(reject);
-    });
+    const dir = path.posix.dirname(destPath);
+    const mk = await this.execArgv(container, ['mkdir', '-p', '--', dir]);
+    if (mk.exitCode !== 0) {
+      throw new Error(`writeFile failed (exit ${mk.exitCode}): ${mk.stderr}`);
+    }
+    const wr = await this.runExec(
+      container,
+      withContainerTimeout(['sh', '-c', 'cat > "$1"', 'sh', destPath], CMD_TIMEOUT_MS),
+      CMD_TIMEOUT_MS,
+      content,
+    );
+    if (wr.exitCode !== 0) {
+      throw new Error(`writeFile failed (exit ${wr.exitCode}): ${wr.stderr}`);
+    }
   }
 
   // ── IEngineerActuator ──────────────────────────────────────────────────────
@@ -223,7 +235,7 @@ export class DockerActuator implements IEngineerActuator {
 
   async readFile(workspaceId: string, filePath: string): Promise<string> {
     const container = await this.getOrStartContainer(workspaceId);
-    const result = await this.execInContainer(container, `cat "${WORKSPACE_DIR}/${safeRelPath(filePath)}"`);
+    const result = await this.execArgv(container, ['cat', '--', `${WORKSPACE_DIR}/${safeRelPath(filePath)}`]);
     if (result.exitCode !== 0) {
       throw new Error(`readFile failed: ${result.stderr || 'file not found'}`);
     }
@@ -360,9 +372,10 @@ export class DockerActuator implements IEngineerActuator {
   async checkpoint(workspaceId: string, _triggeredBy = 'manual'): Promise<string> {
     const container = await this.getOrStartContainer(workspaceId);
     const id = `ckpt_${Date.now()}`;
+    await this.execArgv(container, ['mkdir', '-p', '--', CKPT_DIR_INSIDE]);
     await this.execInContainer(
       container,
-      `mkdir -p "${CKPT_DIR_INSIDE}" && tar --exclude=./node_modules --exclude=./dist --exclude=./.git --exclude=./.next --exclude=./.e-checkpoints -czf "${CKPT_DIR_INSIDE}/${id}.tar.gz" -C "${WORKSPACE_DIR}" . 2>/dev/null || true`,
+      `tar --exclude=./node_modules --exclude=./dist --exclude=./.git --exclude=./.next --exclude=./.e-checkpoints -czf "${CKPT_DIR_INSIDE}/${id}.tar.gz" -C "${WORKSPACE_DIR}" . 2>/dev/null || true`,
       30_000,
     );
     return id;
@@ -398,7 +411,7 @@ export class DockerActuator implements IEngineerActuator {
         ws.on('error', reject);
       });
 
-      await exec(`tar -xf "${tarPath}" -C "${extractDir}"`);
+      await execFile('tar', ['-xf', tarPath, '-C', extractDir]);
 
       const files = new Map<string, Buffer>();
       const distExtracted = path.join(extractDir, 'dist');

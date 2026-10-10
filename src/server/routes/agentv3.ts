@@ -15281,6 +15281,9 @@ async function noteBuildOutcome(
         // And its file READS — so the repeated-read finding covers the reviewer and every other
         // sub-agent, not just the architect (autopsy f97eb0ec).
         readLedger: () => dispatcherForSubAgents?.sharedReadLedger(),
+        // TD-16 — one paid-tool budget for the whole build. The thunk reads the parent after it
+        // exists; makeSubAgentSpawn hands that same object (this.toolBudget) to every child.
+        toolBudget: () => dispatcherForSubAgents?.toolBudget,
         readLoopStops: () => dispatcherForSubAgents?.sharedReadLoopStops(),
         serverlessPayment: () => dispatcherForSubAgents?.serverlessPaymentHandler(),
         // And its stylesheet rewrites that had design-kit rules kept (autopsy e725e002).
@@ -17249,7 +17252,7 @@ async function noteBuildOutcome(
           client: planGrok ?? client,
           // C2 — the plan runner has tool access too, so it gets the same guard. A planner that
           // "helpfully" edits a protected file would be the same breach by a quieter route.
-          dispatcher: (() => { const d = new ToolDispatcher(actuator, workspaceId, state, events); d.setIgnoreRules(ignoreRulesForBuild); return d; })(),
+          dispatcher: (() => { const d = new ToolDispatcher(actuator, workspaceId, state, events); d.shareToolBudget(dispatcher.toolBudget); d.setIgnoreRules(ignoreRulesForBuild); return d; })(),
           state,
           events,
           usageSink: buildUsage, // billing accounting fix — the plan step's tokens are billed too

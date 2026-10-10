@@ -157,10 +157,13 @@ describe('the wiring itself', () => {
 
   it('it is checked BEFORE the command is run', () => {
     const guardAt = dispatcher.indexOf('shouldRefuseClone({');
-    const runAt = dispatcher.indexOf('await this.actuator.runCommand(this.workspaceId, withAppEnvFile(background.command))');
+    // The shell runs through runShellLikeBash, which is the only thing that calls runCommand
+    // for this path. The guard must sit above that call in the bash case.
+    const runAt = dispatcher.indexOf('await this.runShellLikeBash(command, agent');
     expect(guardAt).toBeGreaterThan(-1);
     expect(runAt).toBeGreaterThan(-1);
     expect(guardAt).toBeLessThan(runAt);
+    expect(dispatcher).toContain('this.actuator.runCommand(this.workspaceId, withAppEnvFile(prepared))');
   });
 
   it('it has a kill switch, like every guard beside it', () => {

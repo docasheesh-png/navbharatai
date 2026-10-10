@@ -109,6 +109,8 @@ import { registerPreviewRoutes } from './src/server/routes/preview';
 import { registerEsmMirrorRoutes } from './src/server/routes/esmMirror';
 import { registerBuildRoutes } from './src/server/routes/build';
 import { getPreviewService } from './src/server/runtime/PreviewService';
+import { previewSandboxGate } from './src/server/lib/previewHost';
+import { sanitizeProxyRequestHeaders, sanitizeUpgradeResponseHeaders } from './src/server/lib/proxyHeaders';
 import { handleSonicUpgrade } from './src/server/sonic/sonicWs';
 import { registerSonicRoutes } from './src/server/sonic/sonicRoute';
 import { serverStats } from './src/server/lib/serverStats';
@@ -557,6 +559,10 @@ setInterval(() => {
   registerSonicRoutes(app);
 
   async function initializeServer() {
+    // UI-S1 — /preview-sandbox.html is inert on the app origin. Helmet (above) has already written
+    // the app CSP; previewSandboxGate 404s unless Host is the preview hostname and replaces only that
+    // CSP. Registered BEFORE vite.middlewares / express.static so the file cannot be served first.
+    app.get('/preview-sandbox.html', previewSandboxGate);
 
     // Vite integration.
     //
@@ -1192,6 +1198,8 @@ setInterval(() => {
       if (handleSonicUpgrade(req, clientSocket, head)) return;
       const m = url.match(/^\/preview-app\/([^/?]+)(\/[^?]*)?(\?.*)?$/);
       if (!m) { clientSocket.destroy(); return; }
+      // Same registry as the HTTP proxy. Production never registers a server-container target
+      // (host exec is refused before start), so an unknown session — including that refusal — dies here.
       const target = getPreviewService().serverTarget(m[1]);
       if (!target) { clientSocket.destroy(); return; }
 
@@ -1199,16 +1207,35 @@ setInterval(() => {
       const upstream = net.connect(target.port, target.host, () => {
         // Replay the upgrade handshake to the dev server with the
         // /preview-app/:sessionId prefix stripped, then pipe both ways.
+        // Credential headers are stripped; host is still forwarded (the dev server is local).
         const lines = [`${req.method} ${rest} HTTP/1.1`];
-        for (const [key, val] of Object.entries(req.headers)) {
+        for (const [key, val] of Object.entries(sanitizeProxyRequestHeaders(req.headers))) {
           if (Array.isArray(val)) for (const v of val) lines.push(`${key}: ${v}`);
           else if (val !== undefined) lines.push(`${key}: ${val}`);
         }
         upstream.write(lines.join('\r\n') + '\r\n\r\n');
         if (head && head.length) upstream.write(head);
-        upstream.pipe(clientSocket);
+        // The 101 response can carry Set-Cookie. Buffer only the header block, strip it, then
+        // forward frames. Do not pipe the raw upstream — that would put the cookie back.
+        let pending = Buffer.alloc(0);
+        let headersSent = false;
+        upstream.on('data', (chunk: Buffer) => {
+          if (headersSent) { clientSocket.write(chunk); return; }
+          pending = Buffer.concat([pending, chunk]);
+          const end = pending.indexOf('\r\n\r\n');
+          if (end < 0) {
+            if (pending.length > 65_536) { upstream.destroy(); clientSocket.destroy(); }
+            return;
+          }
+          headersSent = true;
+          const raw = pending.slice(0, end).toString('latin1');
+          const rest = pending.slice(end + 4);
+          clientSocket.write(sanitizeUpgradeResponseHeaders(raw) + '\r\n\r\n');
+          if (rest.length) clientSocket.write(rest);
+        });
         clientSocket.pipe(upstream);
       });
+      upstream.setTimeout(10_000, () => { upstream.destroy(); clientSocket.destroy(); });
       upstream.on('error', () => clientSocket.destroy());
       clientSocket.on('error', () => upstream.destroy());
     });

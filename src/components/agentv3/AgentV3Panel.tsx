@@ -3975,7 +3975,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     setAgentHistory((prev) => [...prev, {
       role: 'agent',
       agent: 'architect',
-      text: `🎉 **${h.appName}** is yours now — all ${count} files are in this chat and ready to edit. I've opened the preview so you can see it running. Tell me what you'd like to change, in your own words.`,
+      text: `**${h.appName}** is yours now — all ${count} files are in this chat and ready to edit. I've opened the preview so you can see it running. Tell me what you'd like to change, in your own words.`,
       ts: Date.now(),
     }]);
     openSurfaceFromFooter('preview');
@@ -4663,7 +4663,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                               {starterLocked.length > 0 && (
                                 <div className="mt-4">
                                   <div className="text-[11px] uppercase tracking-wide text-accent-text mb-2 flex items-center justify-center gap-1">
-                                    <span aria-hidden>⚡</span> Unlock with Pro
+                                    Unlock with Pro
                                   </div>
                                   <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
                                     {starterLocked.map((t) => (
@@ -5703,7 +5703,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       : chatMode === 'advisor'
                       ? '🔍 Advise mode (read-only) — ask for an audit / bug scan / comparison; nothing is built…'
                       : canSteerMidBuild(running, powerLevel, chatMode)
-                      ? '⚡ Message the team while they build — they will act on it at the next step…'
+                      ? 'Message the team while they build — they will act on it at the next step…'
                       : 'Type…'
                   }
                   value={prompt}
@@ -7103,7 +7103,7 @@ function TeamHqCard({ agents, todos, elapsedMs }: { agents: Record<string, Agent
       <div className="rounded-[11px] bg-surface px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-[11px] font-bold tracking-wide">
-            <span className="bg-gradient-to-r from-indigo-400 via-fuchsia-400 to-amber-300 bg-clip-text text-transparent">⚡ FULL TEAM</span>
+            <span className="bg-gradient-to-r from-indigo-400 via-fuchsia-400 to-amber-300 bg-clip-text text-transparent">FULL TEAM</span>
             <span className="text-faint font-normal">
               {m.roster.length > 0 ? `${m.roster.length} agent${m.roster.length > 1 ? 's' : ''}` : 'assembling…'}
               {m.activeCount > 0 && ` · ${m.activeCount} working`}

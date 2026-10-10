@@ -28,7 +28,7 @@ export interface HomeData {
 
 export const DEFAULT_HOME_DATA: HomeData = {
   heroTitle: 'navBharatAI Architect',
-  heroSubtitle: 'Enterprise-grade ecosystem for building complex, scalable, and production-ready applications with Bharat-first precision.',
+  heroSubtitle: 'Describe an app in Hindi, English or Hinglish. NavBharatAI plans, codes, previews and deploys it.',
   welcomeText: 'Enterprise Architect Mode Active',
   ctaText: 'Assemble System Architecture',
   features: [

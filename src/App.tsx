@@ -1,5 +1,6 @@
 import UpdateBanner from './components/UpdateBanner';
 import { platformFixRequestPrompt } from './lib/platformFixRequest';
+import { EMPTY_PREVIEW_HTML } from './lib/workspaceSource';
 import { setUserContext, clearUserContext, setCrashKey, setFeatureContext, featureAreaForView, recordNonFatal } from './lib/observability';
 import React, { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
@@ -1140,7 +1141,7 @@ export default function App() {
       const saved = localStorage.getItem('navbharat_last_app');
       if (saved && saved.length > 200) return saved;
     } catch {}
-    return '<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>';
+    return EMPTY_PREVIEW_HTML;
   })();
 
   // 9.1 — undo/redo for generated code (Ctrl+Z / Ctrl+Y)
@@ -1938,7 +1939,7 @@ export default function App() {
         clearWorkspace().catch(() => {});
         setBuildVersionStack([]);
         setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
-        setGeneratedCode('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
+        setGeneratedCode(EMPTY_PREVIEW_HTML);
         setHasGeneratedCode(false);
         setIsAppBuilt(false);
       } else if (v === 'sda_chat') {

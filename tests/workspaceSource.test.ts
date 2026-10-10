@@ -67,3 +67,11 @@ describe('hasAnalysableApp / appSourceGuidance', () => {
     expect(appSourceGuidance('preview')).toBe('');
   });
 });
+
+describe('empty-preview page (2026-10 copy)', () => {
+  it('the new built-in page is recognised as "no app yet" by its marker, not its copy', async () => {
+    const m = await import('../src/lib/workspaceSource');
+    expect(m.isPlaceholderHtml(m.EMPTY_PREVIEW_HTML)).toBe(true);
+    expect(m.EMPTY_PREVIEW_HTML).not.toMatch(/magic/i);
+  });
+});

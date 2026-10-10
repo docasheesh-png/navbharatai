@@ -24,8 +24,18 @@ export interface ResolvedAppSource {
 export function isPlaceholderHtml(html: string | undefined | null): boolean {
   const s = String(html ?? '').trim();
   if (!s) return true;
+  if (s.includes(EMPTY_PREVIEW_MARKER)) return true;
+  // LEGACY copy ("Waiting for magic…" / "Ask Navbharat…"): projects saved before the 2026-10 copy
+  // change can still hold it in localStorage (`navbharat_last_app`), so it must stay "no app yet".
   return /Waiting for magic/i.test(s) && /Ask Navbharat/i.test(s);
 }
+
+/** Marker attribute carried by the built-in empty-preview page, so detection never depends on copy. */
+export const EMPTY_PREVIEW_MARKER = 'data-nb-empty-preview';
+
+/** The built-in "no app yet" preview page (one copy, used by App.tsx boot and reset). */
+export const EMPTY_PREVIEW_HTML =
+  '<!DOCTYPE html><html><body ' + EMPTY_PREVIEW_MARKER + ' style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui,-apple-system,\'Segoe UI\',Roboto,sans-serif;margin:0"><div style="text-align:center"><h2 style="color:#e6edf3;font-weight:600;font-size:18px;margin:0 0 8px">No preview yet</h2><p style="margin:0;font-size:14px">Describe your app in the chat to start a build.</p></div></body></html>';
 
 /** True when the workspace file set holds at least one file with real (non-empty) content. Pure. */
 export function filesHaveRealContent(files: Record<string, string> | undefined | null): boolean {

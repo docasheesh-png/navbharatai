@@ -4579,6 +4579,11 @@ export class ToolDispatcher {
           // real path(s) appended — the agent gets to correct itself on the FIRST miss instead of looping.
           throw new Error(`${base}${hint}`.trim());
         }
+        // A NUL in the first 8 KB means this is not text. Stub it before secret masking and before
+        // slicing, so the bytes never reach the transcript. A text file with no NUL is unchanged.
+        if (full.slice(0, 8 * 1024).includes('\0')) {
+          return `[binary file, ${Buffer.byteLength(full, 'utf8')} bytes — not shown]`;
+        }
         if (isSecretFilePath(reqPath)) {
           full = maskSecretFile(reqPath, full, new Set(Object.keys(this.userSecretsEnv)));
         }
@@ -4747,7 +4752,7 @@ export class ToolDispatcher {
         const steeringNotes = await this.writeSteeringNotes({ [path]: content });
         // Replacing our own untouched starter file is the job, not a risk (starterFragment.ts).
         if (kind === 'modify' && isOurStarterFile(path, existingContent, starterTemplates())) {
-          return `Replaced the starter ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes + kitKeep.note + twinNote;
+          return `Replaced the starter ${path} (${Buffer.byteLength(content, 'utf8')} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes + kitKeep.note + twinNote;
         }
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For anything except a
@@ -4764,12 +4769,12 @@ export class ToolDispatcher {
           // is the classic "model regenerated from memory and dropped code" signature — say so honestly.
           const risk = assessFullRewrite(existingContent, content);
           return (
-            `Updated ${path} (${content.length} bytes).\n` +
+            `Updated ${path} (${Buffer.byteLength(content, 'utf8')} bytes).\n` +
             `${risk.message} The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
             reviewNote + cascadeNote + testHint + steeringNotes + kitKeep.note + twinNote
           );
         }
-        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes + twinNote;
+        return `Created ${path} (${Buffer.byteLength(content, 'utf8')} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes + twinNote;
       }
 
       case 'write_files_batch': {
@@ -6367,7 +6372,7 @@ export class ToolDispatcher {
         this.state?.recordFileChange({ path, kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} from the project graph (${content.length} bytes).`;
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} from the project graph (${Buffer.byteLength(content, 'utf8')} bytes).`;
       }
 
       case 'generate_architecture_docs': {
@@ -6387,7 +6392,7 @@ export class ToolDispatcher {
         this.state?.recordFileChange({ path, kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — the real module dependency map + structural notes (${content.length} bytes).`;
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — the real module dependency map + structural notes (${Buffer.byteLength(content, 'utf8')} bytes).`;
       }
 
       case 'generate_dev_guide': {
@@ -11441,10 +11446,8 @@ function summarize(content: string): string {
   return oneLine.length > MAX_SUMMARY ? oneLine.slice(0, MAX_SUMMARY) + '…' : oneLine;
 }
 
-function miniDiff(oldStr: string, newStr: string): string {
-  const minus = oldStr.split('\n').map((l) => `- ${l}`).join('\n');
-  const plus = newStr.split('\n').map((l) => `+ ${l}`).join('\n');
-  return `${minus}\n${plus}`;
+export function miniDiff(oldStr: string, newStr: string): string {
+  return boundedWholeFileDiff(oldStr, newStr);
 }
 
 /**
@@ -11630,6 +11633,15 @@ export function ambiguousEditRegions(existing: string, offsets: Iterable<number>
     + 'To ADD content at the end of the file instead, call edit_file with an EMPTY old_string — it appends, no anchor needed.';
 }
 
+/**
+ * Keep text spliced into a file in that file's newline convention. A CRLF file stays CRLF-only
+ * (no bare `\n`). An LF file is not rewritten as CRLF.
+ */
+function withFileNewlines(existing: string, inserted: string): string {
+  if (!existing.includes('\r\n')) return inserted;
+  return inserted.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+}
+
 export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {
   // APPEND MODE (Connectly Edit #1 autopsy 2026-07-21): the model wanted to ADD styles to Navbar.css and
   // called edit_file with an EMPTY old_string. An empty string "matches" at every character position, so
@@ -11638,7 +11650,8 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
   // Deterministic + SAFE: an empty old_string previously only ERRORED, so no working behaviour changes.
   if (oldStr === '') {
     const sep = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
-    return { updated: existing + sep + newStr, matchedOld: '', note: 'empty old_string → appended new_string to the end of the file' };
+    const inserted = withFileNewlines(existing, sep + newStr);
+    return { updated: existing + inserted, matchedOld: '', note: 'empty old_string → appended new_string to the end of the file' };
   }
   const exact = existing.split(oldStr).length - 1;
   if (exact === 1) {
@@ -11649,7 +11662,8 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
     // new_string contained a `$` (the "editing gadbad kar deta hai" bug). Mirrors the whitespace-
     // flexible path below, which already concatenates safely.
     const idx = existing.indexOf(oldStr);
-    return { updated: existing.slice(0, idx) + newStr + existing.slice(idx + oldStr.length), matchedOld: oldStr, note: '' };
+    const inserted = withFileNewlines(existing, newStr);
+    return { updated: existing.slice(0, idx) + inserted + existing.slice(idx + oldStr.length), matchedOld: oldStr, note: '' };
   }
   if (exact > 1) {
     throw new Error(
@@ -11683,7 +11697,8 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
   const m = matches[0];
   const start = m.index ?? 0;
   const matchedOld = m[0];
-  const updated = existing.slice(0, start) + newStr + existing.slice(start + matchedOld.length);
+  const inserted = withFileNewlines(existing, newStr);
+  const updated = existing.slice(0, start) + inserted + existing.slice(start + matchedOld.length);
   return { updated, matchedOld, note: ' (matched ignoring whitespace differences)' };
 }
 
@@ -11710,9 +11725,15 @@ export function globToRegExp(glob: string): RegExp {
       re += '|';
     } else if (c === '*') {
       if (glob[i + 1] === '*') {
-        re += '.*';
-        i++;
-        if (glob[i + 1] === '/') i++;
+        // `**/` is an optional directory prefix — NOT `.*`, which also matches a suffix inside a
+        // filename (`**/test.ts` must not match `src/latest.ts`). A bare `**` stays `.*`.
+        if (glob[i + 2] === '/') {
+          re += '(?:.*/)?';
+          i += 2;
+        } else {
+          re += '.*';
+          i++;
+        }
       } else {
         re += '[^/]*';
       }

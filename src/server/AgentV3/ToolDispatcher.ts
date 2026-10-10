@@ -1535,6 +1535,96 @@ export class ToolDispatcher {
    * degrades honestly (the migrate then reports its real DB-unreachable error via Slice 1's DB_UNREACHABLE).
    * Kill switch: AGENTV3_SANDBOX_POSTGRES=off. A sandbox without provisionBackend (LocalActuator) is a no-op.
    */
+  /**
+   * TD-12 / TD-15 — the bash execution pipeline, shared with `run_migrations`.
+   *
+   * Pin bare installs, quote route-group paths, detach background jobs, provision Postgres,
+   * write the vault `.env`, then run. Governance refusals stay in the bash case: this run is
+   * governance-free. Bash passes `record: false` and calls `onCommand` itself AFTER its
+   * self-heals, so diagnostics see the healed result. Migrations record here, redacted.
+   * `forceSecrets` writes the vault `.env` even when the command is `npx prisma …` (that
+   * string does not match the install/run gate).
+   */
+  private async runShellLikeBash(
+    command: string,
+    _agent: AgentRole,
+    opts?: { forceSecrets?: boolean; record?: boolean },
+  ): Promise<{
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+    display: string;
+    prepared: string;
+    effectiveCommand: string;
+    detached: number;
+    timing?: CommandTiming;
+  }> {
+    const started = Date.now();
+    const pinPkg = /(?:^|[\s/])(?:@vitest\/|vitest\b|@react-three\/|@capacitor(?:-[\w-]+)?\/)/.test(command)
+      ? await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined)
+      : undefined;
+    const pinCtx = pinPkg !== undefined
+      ? { viteRange: viteRangeOf(pinPkg), reactRange: reactRangeOf(pinPkg), capacitorRange: capacitorRangeOf(pinPkg) }
+      : undefined;
+    const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command, pinCtx));
+    await this.ensureSandboxPostgres(effectiveCommand);
+    if (opts?.forceSecrets) await this.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    await this.ensureUserSecretsEnvFile(effectiveCommand);
+    if (shouldPreflightPostgres({
+      provisioned: this.postgresProvisioned,
+      confirmedDead: this.postgresConfirmedDead,
+      needsLiveDb: commandNeedsLiveDatabase(effectiveCommand),
+      provisionedAtMs: this.postgresProvisionedAt,
+      nowMs: Date.now(),
+    })) {
+      try {
+        const probe = await this.actuator.runCommand(this.workspaceId, postgresPreflightProbeCommand());
+        if (/\bPG_DOWN\b/.test(probe.stdout) && canAttemptPostgresRevival(this.postgresReprovisionAttempts) && typeof this.actuator.provisionBackend === 'function') {
+          this.postgresReprovisionAttempts += 1;
+          this.narrate('db.asleepRestarting', {});
+          await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-preflight-revive');
+          this.postgresProvisionedAt = Date.now();
+        }
+      } catch { /* best-effort — the reactive DB-unreachable net below still catches a dead DB honestly */ }
+    }
+    const background = isLongRunningCommand(effectiveCommand)
+      ? { command: effectiveCommand, detached: 0 }
+      : detachBackgroundJobs(effectiveCommand);
+    const prepared = background.command;
+    const runStartedAt = Date.now();
+    const ran = await this.actuator.runCommand(this.workspaceId, withAppEnvFile(prepared));
+    const stdout = ran.stdout ?? '';
+    const stderr = ran.stderr ?? '';
+    const timing: CommandTiming | undefined = ran.timing
+      ? { setupMs: runStartedAt - started, sandboxMs: ran.timing.sandboxMs, runMs: ran.timing.runMs }
+      : undefined;
+    const redactedOut = redactSecrets(stdout);
+    const redactedErr = redactSecrets(stderr);
+    const display = `exit=${ran.exitCode}\n${redactedOut}` + (redactedErr ? `\n[stderr]\n${redactedErr}` : '');
+    if (opts?.record !== false) {
+      try {
+        this.onCommand?.({
+          command: redactSecrets(prepared),
+          exitCode: ran.exitCode,
+          stdout: redactedOut,
+          stderr: redactedErr,
+          durationMs: Date.now() - started,
+          timing,
+        });
+      } catch { /* diagnostics capture is best-effort */ }
+    }
+    return {
+      exitCode: ran.exitCode,
+      stdout,
+      stderr,
+      display,
+      prepared,
+      effectiveCommand,
+      detached: background.detached,
+      timing,
+    };
+  }
+
   private async ensureSandboxPostgres(command: string): Promise<void> {
     if (this.postgresProvisioned) return;
     if (!sandboxPostgresEnabled()) return;
@@ -5070,71 +5160,16 @@ export class ToolDispatcher {
           refuse(blockMsg);
         }
         const cmdStartedAt = Date.now();
-        // Pin bare installs of known-volatile packages to their known-good range BEFORE running
-        // (EventHive/MelodyBox autopsies): a bare `npm install prisma @prisma/client` otherwise pulls the
-        // LATEST — Prisma 7's breaking config/seed (or vue-router 5's Vite-7 peer) then bricks the build.
-        // Only bare package tokens in an install sub-command are pinned; `npx prisma generate` and
-        // explicit versions are untouched. This is the ONLY choke point that catches the agent's own install.
-        // Quote Next.js route-group paths (`mkdir -p src/app/(auth)/login`) BEFORE running — unquoted
-        // parens are a bash subshell → exit 2 syntax error, so the dirs are never made (PulseBoard autopsy).
-        // The vitest family's major follows the PROJECT's Vite, so read it — only when the command names
-        // vitest, so no other command pays for the read (autopsy 7d79254b, DependencyAutoFix.ts).
-        // The React Three Fiber family follows the project's React the same way (autopsy a5b661c8).
-        // …and a Capacitor plugin follows the project's Capacitor major (autopsy a9f8d186).
-        const pinPkg = /(?:^|[\s/])(?:@vitest\/|vitest\b|@react-three\/|@capacitor(?:-[\w-]+)?\/)/.test(command)
-          ? await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined)
-          : undefined;
-        const pinCtx = pinPkg !== undefined
-          ? { viteRange: viteRangeOf(pinPkg), reactRange: reactRangeOf(pinPkg), capacitorRange: capacitorRangeOf(pinPkg) }
-          : undefined;
-        const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command, pinCtx));
-        // Inject the user's own vault secrets (Settings → Secrets & API Keys) into the app's .env the first
-        // time it installs/builds/runs — so the app runs with real keys the user never pasted in chat.
-        await this.ensureUserSecretsEnvFile(effectiveCommand);
-        // Provision a real local Postgres BEFORE a migrate/seed if the app targets postgres (MediConnect
-        // autopsy): without this the from-scratch build hit P1001 at localhost:5432 and downgraded to a
-        // broken SQLite schema. Best-effort + once-per-build; a failure degrades to an honest DB error.
-        await this.ensureSandboxPostgres(effectiveCommand);
-        // PREFLIGHT (last-5-reports class fix, 2026-07-20): a provisioned Postgres is routinely reaped by
-        // the sandbox between touchpoints — five consecutive reports hit some flavour of this. Instead of
-        // letting the command FAIL with P1001 and reviving reactively (a full failed-command cycle plus
-        // the LLM turns spent reading the error), probe liveness for a millisecond BEFORE a live-DB
-        // command and revive first, so the command runs ONCE against a live DB. Shares the bounded
-        // revival budget with the reactive net below; entirely best-effort — a probe/revive failure just
-        // leaves today's reactive behaviour.
-        if (shouldPreflightPostgres({
-          provisioned: this.postgresProvisioned,
-          confirmedDead: this.postgresConfirmedDead,
-          needsLiveDb: commandNeedsLiveDatabase(effectiveCommand),
-          provisionedAtMs: this.postgresProvisionedAt,
-          nowMs: Date.now(),
-        })) {
-          try {
-            const probe = await this.actuator.runCommand(this.workspaceId, postgresPreflightProbeCommand());
-            if (/\bPG_DOWN\b/.test(probe.stdout) && canAttemptPostgresRevival(this.postgresReprovisionAttempts) && typeof this.actuator.provisionBackend === 'function') {
-              this.postgresReprovisionAttempts += 1;
-              this.narrate('db.asleepRestarting', {});
-              await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-preflight-revive');
-              this.postgresProvisionedAt = Date.now();
-            }
-          } catch { /* best-effort — the reactive DB-unreachable net below still catches a dead DB honestly */ }
-        }
-        // A BACKGROUNDED JOB NEVER HOLDS THE COMMAND'S PIPE (autopsy 241215d1): `python server.py &` then a
-        // `curl` waited out the whole 300 s timeout because the server kept stdout open. A dev-server
-        // launch is left to the managed boot, which strips its `&` itself (stripDevServerBackgrounding).
-        const background = isLongRunningCommand(effectiveCommand)
-          ? { command: effectiveCommand, detached: 0 }
-          : detachBackgroundJobs(effectiveCommand);
-        const runStartedAt = Date.now();
-        // Q-153 — `node <file>` running the app's own script reads the app's `.env` (appEnvFileForCommand.ts).
-        const ran = await this.actuator.runCommand(this.workspaceId, withAppEnvFile(background.command));
-        let { exitCode, stdout, stderr } = ran;
-        // Q-273 — the report splits a slow command into our setup, reaching the machine and the command.
-        const timing: CommandTiming | undefined = ran.timing
-          ? { setupMs: runStartedAt - cmdStartedAt, sandboxMs: ran.timing.sandboxMs, runMs: ran.timing.runMs }
-          : undefined;
-        if (background.detached > 0) {
-          stdout = `${stdout ?? ''}\n[note] ${background.detached === 1 ? 'The background job was' : `${background.detached} background jobs were`} started detached so this command could finish; its output goes to ${BACKGROUND_JOB_LOG} (read it with \`tail ${BACKGROUND_JOB_LOG}\`).`;
+        // TD-12 — pin, quote, detach, vault .env and Postgres live in runShellLikeBash (also used by
+        // run_migrations, TD-15). Every retry below runs `prepared`, the same string as this first run.
+        const shell = await this.runShellLikeBash(command, agent, { record: false });
+        const effectiveCommand = shell.effectiveCommand;
+        const prepared = shell.prepared;
+        const runPrepared = () => this.actuator.runCommand(this.workspaceId, withAppEnvFile(prepared));
+        let { exitCode, stdout, stderr } = shell;
+        const timing = shell.timing;
+        if (shell.detached > 0) {
+          stdout = `${stdout ?? ''}\n[note] ${shell.detached === 1 ? 'The background job was' : `${shell.detached} background jobs were`} started detached so this command could finish; its output goes to ${BACKGROUND_JOB_LOG} (read it with \`tail ${BACKGROUND_JOB_LOG}\`).`;
         }
         // WHAT npm WROTE IS WHAT GETS SAVED (2026-09-27). A shell install edits package.json behind the
         // captured writes, and a package.json the model wrote earlier would otherwise win at the final
@@ -5172,7 +5207,7 @@ export class ToolDispatcher {
             const fmtCmd = `${dirMatch ? `cd ${dirMatch[1]} && ` : ''}npx --no-install prisma format`;
             const fmt = await this.actuator.runCommand(this.workspaceId, fmtCmd);
             if (fmt.exitCode === 0) {
-              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              const retry = await runPrepared();
               if (retry.exitCode === 0) {
                 ({ exitCode, stdout, stderr } = retry);
                 this.narrate('fix.prismaRelation', {});
@@ -5210,7 +5245,7 @@ export class ToolDispatcher {
             const installCmd = pinKnownDepsInInstallCommand(`${cd}npm install -D prisma @prisma/client`);
             const inst = await this.actuator.runCommand(this.workspaceId, installCmd);
             if (inst.exitCode === 0) {
-              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              const retry = await runPrepared();
               if (retry.exitCode === 0) {
                 ({ exitCode, stdout, stderr } = retry);
                 this.narrate('fix.toolkitInstalled', {});
@@ -5238,7 +5273,7 @@ export class ToolDispatcher {
             const genCmd = `${dirMatch ? `cd ${dirMatch[1]} && ` : ''}npx prisma generate`;
             const gen = await this.actuator.runCommand(this.workspaceId, genCmd);
             if (gen.exitCode === 0) {
-              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              const retry = await runPrepared();
               if (retry.exitCode === 0) {
                 ({ exitCode, stdout, stderr } = retry);
                 this.narrate('fix.clientGenerated', {});
@@ -5271,7 +5306,7 @@ export class ToolDispatcher {
                 }
               }
               if (fixedAny) {
-                const retry = await this.actuator.runCommand(this.workspaceId, command);
+                const retry = await runPrepared();
                 if (retry.exitCode === 0) {
                   ({ exitCode, stdout, stderr } = retry);
                   this.narrate('fix.enumOnSqlite', { enums: missingEnums.join(', ') });
@@ -5303,7 +5338,7 @@ export class ToolDispatcher {
                   await this.actuator.writeFile(this.workspaceId, '.env', mergeDotEnv(existingEnv.text, lines)).catch(() => {});
                 }
               }
-              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              const retry = await runPrepared();
               if (!looksLikeDbUnreachable(`${retry.stdout}\n${retry.stderr}`)) {
                 ({ exitCode, stdout, stderr } = retry);
                 this.postgresProvisionedAt = Date.now(); // revival verified — reset the preflight gate
@@ -9102,14 +9137,17 @@ export class ToolDispatcher {
           const exitCodes: number[] = [];
           let planOk = true;
           for (const cmd of plan.commands) {
-            let r: { exitCode: number; stdout: string; stderr: string };
-            try { r = await this.actuator.runCommand(this.workspaceId, cmd); }
-            catch (e) { r = { exitCode: 1, stdout: '', stderr: e instanceof Error ? e.message : String(e) }; }
+            let r: { exitCode: number; stdout: string; stderr: string; display: string };
+            try { r = await this.runShellLikeBash(cmd, agent, { forceSecrets: true }); }
+            catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              r = { exitCode: 1, stdout: '', stderr: msg, display: redactSecrets(msg) };
+            }
             const ok = r.exitCode === 0;
             allOk = allOk && ok;
             planOk = planOk && ok;
             exitCodes.push(r.exitCode);
-            const tail = redactSecrets((r.stderr || r.stdout || '').slice(-600));
+            const tail = r.display.slice(-600);
             out.push(`${ok ? '✓' : '✗'} [${plan.tool}] ${cmd} → exit ${r.exitCode}${ok ? '' : `\n${tail}`}`);
             if (!ok) break; // a failed step blocks the rest of this tool's chain — report honestly, don't push on
           }

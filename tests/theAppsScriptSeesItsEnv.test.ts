@@ -43,7 +43,10 @@ describe('which commands get the app\'s .env', () => {
 
   it('the bash tool runs every command through it', () => {
     const src = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
-    expect(src).toContain('this.actuator.runCommand(this.workspaceId, withAppEnvFile(background.command))');
+    // Bash and migrations share runShellLikeBash. `prepared` is `background.command`
+    // (the pinned, quoted, detached string) — still wrapped in withAppEnvFile.
+    expect(src).toContain('const prepared = background.command');
+    expect(src).toContain('this.actuator.runCommand(this.workspaceId, withAppEnvFile(prepared))');
   });
 });
 

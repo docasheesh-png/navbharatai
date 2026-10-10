@@ -83,6 +83,7 @@ import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSumm
 import { generateSchemaTypes } from './schemaTypeGen';
 import { analyzeCiWorkflow, ciWorkflowSummary, repairCiWorkflow, ciPlatform } from './ciWorkflowAnalysis';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
+import { runWithToolSignal } from './toolDeadline';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc, orphanComponentFile } from './ArchitectureAnalysis';
 import { securitySummary, securityWriteNote } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
@@ -3616,7 +3617,8 @@ export class ToolDispatcher {
     }
   }
 
-  async dispatch(call: ToolUse, agent: AgentRole = 'architect'): Promise<ToolResult> {
+  async dispatch(call: ToolUse, agent: AgentRole = 'architect', opts?: { signal?: AbortSignal }): Promise<ToolResult> {
+    if (opts?.signal) return runWithToolSignal(opts.signal, () => this.dispatch(call, agent));
     // Secret redaction (R1.1, roadmap §3.2): tool_call input and tool_result summaries are
     // streamed to the user's screen, so a command/output that inlines an API key, a .env value
     // or a connection-string password must be masked BEFORE it is shown. We redact ONLY the

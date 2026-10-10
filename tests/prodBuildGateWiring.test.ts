@@ -24,7 +24,7 @@ describe('the detector runs, and only where it is safe to', () => {
   });
 
   it('is bounded — a hung bundler cannot eat the window', () => {
-    const i = route.indexOf('prodBuildCommand()');
+    const i = route.indexOf('prodBuildCommand(');
     expect(i).toBeGreaterThan(-1);
     expect(route.slice(i - 200, i + 200)).toContain('PROD_BUILD_TIMEOUT_MS');
   });

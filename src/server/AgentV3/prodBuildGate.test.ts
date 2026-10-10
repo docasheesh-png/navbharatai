@@ -68,6 +68,11 @@ describe('judgeProdBuild — three outcomes, not two', () => {
     }
   });
 
+  it('a self-limited build (exit 124) is UNVERIFIED, not a failed app', () => {
+    expect(judgeProdBuild({ ran: true, exitCode: 124, output: '' }).code).toBe('PROD_BUILD_UNVERIFIED');
+    expect(judgeProdBuild({ ran: true, exitCode: 137, output: '' }).code).toBe('PROD_BUILD_UNVERIFIED');
+  });
+
   it('a non-zero exit is a real failure and carries the cause', () => {
     const j = judgeProdBuild({ ran: true, exitCode: 1, output: 'src/App.tsx(1,1): error TS2307: Cannot find module' });
     expect(j.ok).toBe(false);

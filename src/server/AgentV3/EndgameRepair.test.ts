@@ -385,4 +385,19 @@ describe('the endgame asks the installed packages about names the compiler could
     expect(verdict.errorsAfter).toBe(0);
     expect(verdict.llmFilesWritten).toBe(0);
   });
+
+  it('an already-aborted signal writes nothing and reports lapsed', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const writes: string[] = [];
+    const verdict = await runEndgameRepair({
+      signal: ac.signal,
+      runTsc: async () => "src/a.ts(1,1): error TS2304: Cannot find name 'Clock'.",
+      readFiles: async () => ({ 'src/a.ts': 'export const a = 1;\n' }),
+      writeFile: async (p) => { writes.push(p); },
+    });
+    expect(verdict.lapsed).toBe(true);
+    expect(verdict.attempted).toBe(true);
+    expect(writes).toEqual([]);
+  });
 });

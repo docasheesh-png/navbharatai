@@ -129,6 +129,12 @@ export function judgeProdBuild(input: {
       message: 'The production build succeeded — this app is ready to publish and to package.',
     };
   }
+  if (input.exitCode === 124 || input.exitCode === 137) {
+    return {
+      ok: false, ran: true, code: 'PROD_BUILD_UNVERIFIED',
+      message: 'The production build timed out, so whether this app packages cleanly is unknown. This is not a fault in your app.',
+    };
+  }
   const detail = summarizeProdBuildFailure(input.output);
   return {
     ok: false, ran: true, code: 'PROD_BUILD_FAILED',

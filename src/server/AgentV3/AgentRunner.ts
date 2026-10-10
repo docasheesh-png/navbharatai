@@ -13,7 +13,7 @@ import type { ConversationStore, ConversationStatus } from './ConversationStore'
 import { compactMessagesForPersist, compactTranscriptForModel } from './SessionTimeline';
 import { billedAmountUsd } from './pricing';
 import type { UsageSink } from './UsageSink';
-import { withTimeout } from './asyncUtils';
+import { withTimeout, withDeadline } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
 import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReadyMark, unassessedFailsBuild, type ReadyMark } from './doneSignal';
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
@@ -864,7 +864,9 @@ export class AgentRunner {
             effort,
             // A Stop cancels THIS call, not only the next one (stopSignal.ts). Before this the loop
             // noticed a stop only between turns, after paying for the call already in flight.
-            signal: this.opts.signal,
+            signal: turnTimeoutMs > 0 && typeof AbortSignal.any === 'function' && typeof AbortSignal.timeout === 'function'
+              ? AbortSignal.any([...(this.opts.signal ? [this.opts.signal] : []), AbortSignal.timeout(turnTimeoutMs)])
+              : this.opts.signal,
             onText: (delta) =>
               events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'text', delta, ts: Date.now() }),
             // The reasoning channel reaches the user's chat ONLY when it is switched on — default off
@@ -1313,7 +1315,7 @@ export class AgentRunner {
           }
           if (toolTimeoutMs <= 0 || tu.name === 'task') return dispatcher.dispatch(tu, agentRole);
           try {
-            return await withTimeout(dispatcher.dispatch(tu, agentRole), toolTimeoutMs, `tool ${tu.name}`);
+            return await withDeadline((signal) => dispatcher.dispatch(tu, agentRole, { signal }), toolTimeoutMs, `tool ${tu.name}`);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             const timedOut = /timed out after/.test(msg);
@@ -1321,7 +1323,7 @@ export class AgentRunner {
             return {
               tool_use_id: tu.id,
               content: timedOut
-                ? `Tool "${tu.name}" did not finish within about ${minutes} min and was skipped so the build could keep moving. Try a smaller step or a different approach.`
+                ? `Tool "${tu.name}" did not finish within about ${minutes} min and was stopped. Anything it had not written yet was discarded; files it had already written stay.`
                 : `Tool "${tu.name}" failed: ${msg}`,
               is_error: true,
             };
@@ -1564,8 +1566,8 @@ export class AgentRunner {
             if (shouldTriggerMidBuildRepair(trendCounts)) {
               trendFired = true; // once per run — the step-cap endgame remains the final net
               events.emit({ type: 'narration', agent: agentRole, text: '🔎 Checkpoint: compile errors are not going down — fixing them all in one pass…', ts: Date.now() });
-              const verdict = await withTimeout(
-                runEndgameRepair({ ...io, llmRepair: endgameBatchRepair, log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }) }),
+              const verdict = await withDeadline(
+                (signal) => runEndgameRepair({ ...io, signal, llmRepair: endgameBatchRepair, log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }) }),
                 150_000, 'errtrend-repair',
               );
               if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore && !verdict.tscUnverified) {
@@ -1615,8 +1617,9 @@ export class AgentRunner {
               if (endgameRepairEnabled()) {
                 try {
                   const io = dispatcher.endgameIo();
-                  const verdict = await withTimeout(runEndgameRepair({
+                  const verdict = await withDeadline((signal) => runEndgameRepair({
                     ...io,
+                    signal,
                     llmRepair: endgameBatchRepair,
                     log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }),
                   }), 150_000, 'endgame-repair');

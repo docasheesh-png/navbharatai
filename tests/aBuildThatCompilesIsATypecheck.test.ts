@@ -55,6 +55,10 @@ describe('what it is not', () => {
 describe('both producers feed the gate', () => {
   const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
   it('the platform\'s production build fills a not-run typecheck', () => {
-    expect(route).toContain('const fromBuild = buildScriptTypecheckVerdict({ command: prodBuildCommand(), stdout: output, exitCode });');
+    // The production build is wrapped in `timeout` (BLD-3). The gate still reads THAT command's
+    // own output as typecheck evidence — the argument changed, the feed did not.
+    expect(route).toContain(
+      'const fromBuild = buildScriptTypecheckVerdict({ command: prodBuildCommand(\'$(command -v timeout >/dev/null 2>&1 && echo "timeout -k 5 170") npm run build\'), stdout: output, exitCode });',
+    );
   });
 });

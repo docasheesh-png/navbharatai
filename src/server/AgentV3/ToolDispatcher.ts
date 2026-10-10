@@ -1948,9 +1948,11 @@ export class ToolDispatcher {
           this.state?.appendTerminal(pruneRefusedMessage());
         }
       } catch { /* reconciliation is best-effort — a failure leaves today's stale-but-safe graph */ }
-      const targets = tree
-        .filter((p) => indexable(p) && !known.has(p))
-        .slice(0, 500);
+      const allNew = tree.filter((p) => indexable(p) && !known.has(p));
+      // Resolution only needs the PATH. Every listed source is a node, including ones past the read
+      // cap and ones whose read timed out — otherwise an import of file 501+ is a false "unresolved".
+      for (const p of allNew) mem.ensureGraphNode(p);
+      const targets = allNew.slice(0, 500);
       // PARALLEL + per-file timeout (audit P0-C): reading up to 500 files one-at-a-time over the
       // sandbox cost 50-160s and could hang on a single stalled read. Read in bounded-concurrency
       // batches, each call capped at 5s, then index sequentially (graph mutation is synchronous).
@@ -1959,6 +1961,8 @@ export class ToolDispatcher {
         content: await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'readFile').catch(() => ''),
       }));
       for (const { p, content } of reads) {
+        // A timed-out or empty read stays a node (ensureGraphNode above). Content is indexed only
+        // when we actually got it.
         if (typeof content === 'string' && content && content.length <= 250_000) mem.indexFile(p, content);
       }
     } catch { /* best-effort pre-seed — never blocks the gate */ }
@@ -2041,6 +2045,7 @@ export class ToolDispatcher {
     runTsc: () => Promise<string>;
     readFiles: () => Promise<Record<string, string>>;
     writeFile: (path: string, content: string) => Promise<void>;
+    removeFile: (path: string) => Promise<void>;
     installedExports: (names: string[]) => Promise<Record<string, string[]>>;
   } {
     return {
@@ -2069,6 +2074,19 @@ export class ToolDispatcher {
         await this.actuator.writeFile(this.workspaceId, path, content);
         try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
         try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
+      },
+      removeFile: async (path: string) => {
+        const p = String(path || '').replace(/\\/g, '/');
+        if (!/^[A-Za-z0-9._/-]+$/.test(p) || p.split('/').includes('..')) {
+          throw new Error(`refusing to remove ${path}`);
+        }
+        const rm = await this.actuator
+          .runCommand(this.workspaceId, `rm -f -- '${p}'`)
+          .catch(() => ({ exitCode: -1, stdout: '', stderr: '' }));
+        if (rm.exitCode === 0) {
+          try { this.state?.recordFileChange({ path: p, kind: 'delete' }, 'architect'); } catch { /* UI count is best-effort */ }
+          await this.reconcileDeletions([p]);
+        }
       },
     };
   }
@@ -6600,8 +6618,11 @@ export class ToolDispatcher {
         // every unparseable frontend file — surface it FIRST so the model fixes the precise location in one
         // step instead of flailing. Best-effort (bounded to 20 frontend files); never breaks typecheck.
         let syntaxHeader = '';
+        const feAll = files.filter((f) => /\.(mjs|cjs|jsx?|tsx?)$/i.test(f) && !/\.d\.ts$/i.test(f));
+        const feChecked = Math.min(20, feAll.length);
+        const feTotal = feAll.length;
         try {
-          const jsFiles = files.filter((f) => /\.(mjs|cjs|jsx?|tsx?)$/i.test(f) && !/\.d\.ts$/i.test(f)).slice(0, 20);
+          const jsFiles = feAll.slice(0, 20);
           const fileMap: Record<string, string> = {};
           for (const p of jsFiles) { try { fileMap[p] = await this.actuator.readFile(this.workspaceId, p); } catch { /* skip unreadable */ } }
           const se = await findSyntaxErrors(fileMap);
@@ -6639,7 +6660,7 @@ export class ToolDispatcher {
         // break is fixed FIRST (tsc on unparseable code just echoes parse noise). Honest: a tsc that can't
         // run is silently skipped (the esbuild note still stands) — never a fake pass.
         let tscHeader = '';
-        let tscRanClean = false;
+        let tscStatus: 'clean' | 'errors' | 'did-not-complete' = 'did-not-complete';
         const isTsProject = files.includes('tsconfig.json')
           && files.some((f) => /\.tsx?$/i.test(f) && !/\.d\.ts$/i.test(f));
         if (isTsProject && !syntaxHeader) {
@@ -6683,8 +6704,11 @@ export class ToolDispatcher {
             // app held 15 errors. Zero parsed errors is not a verdict; the ONE reader decides.
             const verdict = tscVerdict(combined);
             if (verdict === 'not-run' || verdict === 'unknown') {
+              tscStatus = 'did-not-complete';
+              this._lastTypeErrors = null;
               tscHeader = `TYPECHECK DID NOT RUN — the TypeScript compiler could not start, so the types were NOT checked (this is not a verdict about your code). Its output:\n${combined.split('\n').slice(0, 8).join('\n')}\n\n`;
             } else if (tscErrs.length > 0 || verdict === 'failed') {
+              tscStatus = 'errors';
               // `failed` with nothing parsed is a project-level error (`error TS5023: Unknown compiler
               // option`) that names no file — still a failure, never "clean".
               getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${Math.max(tscErrs.length, countTscErrors(combined))} TypeScript error(s).`);
@@ -6694,17 +6718,23 @@ export class ToolDispatcher {
               // to rewrite the file, which is the loop that had to break.
               tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`;
             } else {
-              tscRanClean = true;
+              tscStatus = 'clean';
               this.noteCompileOutput(combined);
             }
-          } catch { /* real-tsc pass is best-effort — a toolchain miss must never fake a pass */ }
+          } catch {
+            tscStatus = 'did-not-complete';
+            this._lastTypeErrors = null;
+          }
         }
         if (syntaxHeader || tscHeader) {
           return `${syntaxHeader}${tscHeader}${crossLang || 'No Python/Java/Go sources to check.'}`.trim();
         }
-        const feHeadline = tscRanClean
-          ? 'frontend parses clean (esbuild) AND type-checks clean (tsc --noEmit)'
-          : 'frontend parses clean (esbuild)';
+        const checkedNote = `checked ${feChecked} of ${feTotal} files`;
+        const feHeadline = tscStatus === 'clean'
+          ? `frontend parses (esbuild, ${checkedNote}) AND type-checks clean (tsc --noEmit)`
+          : tscStatus === 'did-not-complete' && isTsProject
+            ? `frontend parses (esbuild, ${checkedNote}) — ⚠ tsc did NOT complete (timeout/crash): types are NOT verified`
+            : 'frontend parses clean (esbuild)';
         return crossLang || `typecheck: ${feHeadline}; no Python, Java, or Go sources detected.`;
       }
 

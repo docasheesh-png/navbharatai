@@ -1568,7 +1568,7 @@ export class AgentRunner {
                 runEndgameRepair({ ...io, llmRepair: endgameBatchRepair, log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }) }),
                 150_000, 'errtrend-repair',
               );
-              if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {
+              if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore && !verdict.tscUnverified) {
                 // Tell the model the grind is over so it spends the remaining steps on FEATURES.
                 pushPlatformTurn(`[BUILD CHECKPOINT] ${verdict.errorsBefore - verdict.errorsAfter} compile error(s) were just auto-fixed for you (${verdict.errorsAfter} remain). Do NOT re-fix them one by one — run tsc once to confirm, then continue completing the app's remaining FEATURES.`);
               }
@@ -1620,7 +1620,7 @@ export class AgentRunner {
                     llmRepair: endgameBatchRepair,
                     log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }),
                   }), 150_000, 'endgame-repair');
-                  if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {
+                  if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore && !verdict.tscUnverified) {
                     const after = await dispatcher.assessBuildReadiness();
                     buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings, tier: after.tier, ...(after.unassessed ? { unassessed: true } : {}) };
                     if (after.unassessed) {

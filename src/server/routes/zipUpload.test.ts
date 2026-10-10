@@ -1,16 +1,17 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync, existsSync, statSync, WriteStream } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import type { Server } from 'node:http';
-import { validChunkMeta, uploadOwnedBy, ZIP_CHUNK_BYTES, MAX_ARCHIVE_BYTES, registerZipUploadRoutes } from './zipUpload';
+import { validChunkMeta, uploadOwnedBy, ZIP_CHUNK_BYTES, MAX_ARCHIVE_BYTES, registerZipUploadRoutes, _setChunkCapForTests } from './zipUpload';
 import { setDb } from '../lib/db';
+import { sharedAssemblyAllowed } from '../lib/zipUploadStore';
 import { WORKSPACE_BUILD_LEASE_COLLECTION, BUILD_RUNNING_ELSEWHERE_CODE } from '../AgentV3/workspaceBuildLease';
 
-const zipWrites = vi.hoisted(() => ({ paths: [] as string[] }));
+const zipWrites = vi.hoisted(() => ({ paths: [] as string[], contents: [] as string[] }));
 
 vi.mock('../lib/authMiddleware', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/authMiddleware')>();
@@ -24,7 +25,10 @@ vi.mock('../lib/authMiddleware', async (importOriginal) => {
 vi.mock('./actuatorFactory', () => ({
   buildActuator: () => ({
     ensureWorkspace: async () => {},
-    writeFile: async (_ws: string, path: string) => { zipWrites.paths.push(path); },
+    writeFile: async (_ws: string, path: string, content?: string) => {
+      zipWrites.paths.push(path);
+      if (typeof content === 'string') zipWrites.contents.push(`${path}\n${content}`);
+    },
     listFiles: async () => [] as string[],
     readFile: async () => { throw new Error('ENOENT'); },
     runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
@@ -47,7 +51,7 @@ describe('validChunkMeta', () => {
 });
 
 describe('uploadOwnedBy', () => {
-  const u = { uid: 'user-1', filePath: '/tmp/x', bytes: 0, createdAt: 0, fileName: 'a.zip' };
+  const u = { uid: 'user-1', filePath: '/tmp/x', uploadDir: '/tmp/x-dir', partBytes: {}, bytes: 0, createdAt: 0, fileName: 'a.zip' };
   it('only the uploading user may append or commit', () => {
     expect(uploadOwnedBy(u, 'user-1')).toBe(true);
     expect(uploadOwnedBy(u, 'user-2')).toBe(false);
@@ -106,7 +110,11 @@ describe('zip-upload route contract', () => {
 
   it('the size ceiling is enforced mid-stream, not after the disk is already full', () => {
     expect(SRC).toContain("req.on('data'");
-    expect(SRC).toContain('req.destroy()');
+    // Was `req.destroy()` with no error — that left the chunk promise waiting on `end`, which destroy
+    // never emits. The cap now destroys WITH an error (shared) and the local path pipelines through a
+    // transform that errors at the byte cap. Both still stop the body before the disk fills.
+    expect(SRC).toContain("req.destroy(new Error('chunk too large'))");
+    expect(SRC).toContain('pipeline(req, capTransform, ws)');
   });
 });
 
@@ -165,6 +173,7 @@ describe('zip commit takes the build lease', () => {
     else process.env.AGENTV3_WORKSPACE_LEASE = prevLease;
     setDb(null);
     zipWrites.paths.length = 0;
+    zipWrites.contents.length = 0;
     if (server) { server.close(); server = null; }
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
     dirs = [];
@@ -222,5 +231,166 @@ describe('zip commit takes the build lease', () => {
     const body = await commit.json() as { code?: string };
     expect(body.code).toBe(BUILD_RUNNING_ELSEWHERE_CODE);
     expect(zipWrites.paths).toEqual([]);
+  });
+});
+
+describe('BLD-4 — chunks settle, are index-addressed, and the 5 GB ceiling is real at assembly', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./zipUpload.ts', import.meta.url)), 'utf8');
+  const STORE = readFileSync(fileURLToPath(new URL('../lib/zipUploadStore.ts', import.meta.url)), 'utf8');
+  const prevPhone = process.env.AGENTV3_IMPORT_REQUIRES_PHONE;
+  let server: Server | null = null;
+  let dirs: string[] = [];
+
+  afterEach(() => {
+    process.env.AGENTV3_IMPORT_REQUIRES_PHONE = prevPhone;
+    _setChunkCapForTests(null);
+    setDb(null);
+    zipWrites.paths.length = 0;
+    zipWrites.contents.length = 0;
+    if (server) { server.close(); server = null; }
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    dirs = [];
+  });
+
+  it('the shared cap destroys with an error and always settles (close + aborted)', () => {
+    expect(SRC).toContain("req.destroy(new Error('chunk too large'))");
+    expect(SRC).toContain("req.on('close'");
+    expect(SRC).toContain("req.on('aborted'");
+  });
+
+  it('local chunks go through stream.pipeline and a per-index part file', () => {
+    expect(SRC).toContain('pipeline(req, capTransform, ws)');
+    expect(SRC).toContain('part-${index}');
+    expect(SRC).toContain("{ flags: 'w' }"); // retry overwrites; never an append
+    expect(SRC).toContain('ws.destroy()');
+  });
+
+  it('assembly sums actual part sizes and clamps the part count', () => {
+    expect(STORE).toContain('sharedAssemblyAllowed(totalChunks, sizes, maxBytes, chunkBytes)');
+    expect(STORE).toContain('Math.ceil(maxBytes / chunkBytes)');
+    expect(STORE).toContain('getMetadata()');
+    expect(sharedAssemblyAllowed(3, [10, 10, 10], 30, 10).ok).toBe(true);
+    // ceil(30/10) = 3, so a 4th part is over the part-count ceiling even when each part is tiny.
+    expect(sharedAssemblyAllowed(4, [1, 1, 1, 1], 30, 10)).toEqual({ ok: false, reason: 'too many parts' });
+    expect(sharedAssemblyAllowed(2, [20, 20], 30, 10)).toEqual({ ok: false, reason: 'too big' });
+    const maxParts = Math.ceil(MAX_ARCHIVE_BYTES / ZIP_CHUNK_BYTES);
+    expect(sharedAssemblyAllowed(maxParts, [], MAX_ARCHIVE_BYTES, ZIP_CHUNK_BYTES).ok).toBe(true);
+    expect(sharedAssemblyAllowed(maxParts + 1, [], MAX_ARCHIVE_BYTES, ZIP_CHUNK_BYTES).ok).toBe(false);
+  });
+
+  async function listen(): Promise<string> {
+    process.env.AGENTV3_IMPORT_REQUIRES_PHONE = 'off';
+    const app = express();
+    app.use(express.json());
+    registerZipUploadRoutes(app);
+    const port = await new Promise<number>((resolve) => {
+      const s = app.listen(0, '127.0.0.1', () => {
+        server = s;
+        resolve((s.address() as { port: number }).port);
+      });
+    });
+    return `http://127.0.0.1:${port}`;
+  }
+
+  it('an oversize chunk gets a 413 within 1s and does not leave a growing part', async () => {
+    _setChunkCapForTests(32);
+    const base = await listen();
+    const begin = await fetch(`${base}/api/zip-upload/begin`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer test' },
+      body: JSON.stringify({ fileName: 'project.zip', fileSize: 64 }),
+    });
+    expect(begin.status).toBe(200);
+    const { uploadId } = await begin.json() as { uploadId: string };
+    const destroy = vi.spyOn(WriteStream.prototype, 'destroy');
+    const started = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const hung = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('chunk request hung')), 1000);
+    });
+    let status = 0;
+    let destroyCalls = 0;
+    try {
+      const res = await Promise.race([
+        fetch(`${base}/api/zip-upload/chunk`, {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer test',
+            'content-type': 'application/octet-stream',
+            'x-upload-id': uploadId,
+            'x-chunk-index': '0',
+            'x-total-chunks': '1',
+          },
+          body: Buffer.alloc(4096, 1),
+        }),
+        hung,
+      ]);
+      status = res.status;
+      destroyCalls = destroy.mock.calls.length;
+    } finally {
+      if (timer) clearTimeout(timer);
+      destroy.mockRestore();
+    }
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(status).toBe(413);
+    expect(destroyCalls).toBeGreaterThan(0);
+    const part = join(tmpdir(), `nbai-zip-${uploadId}`, 'part-0');
+    // Overwrite-not-append, and the partial is removed — nothing left open and growing.
+    if (existsSync(part)) expect(statSync(part).size).toBeLessThanOrEqual(32);
+  });
+
+  it('chunks sent as 2, 0, 1 assemble into the original bytes, and a retry does not duplicate', async () => {
+    _setChunkCapForTests(null);
+    const base = await listen();
+    const srcDir = mkdtempSync(join(tmpdir(), 'nbai-zip-src-'));
+    dirs.push(srcDir);
+    const marker = 'export const marker = "PR19-ORDER-OK";\n';
+    writeFileSync(join(srcDir, 'App.tsx'), marker);
+    const archive = join(srcDir, 'in.zip');
+    execFileSync('python3', ['-c', 'import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],"w"); z.write(sys.argv[2],"src/App.tsx"); z.close()', archive, join(srcDir, 'App.tsx')]);
+    const original = readFileSync(archive);
+    const cut = Math.floor(original.length / 3);
+    const slices = [original.subarray(0, cut), original.subarray(cut, cut * 2), original.subarray(cut * 2)];
+
+    const begin = await fetch(`${base}/api/zip-upload/begin`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer test' },
+      body: JSON.stringify({ fileName: 'project.zip', fileSize: original.length }),
+    });
+    expect(begin.status).toBe(200);
+    const { uploadId } = await begin.json() as { uploadId: string };
+    const post = async (index: number, body: Buffer) => {
+      const res = await fetch(`${base}/api/zip-upload/chunk`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer test',
+          'content-type': 'application/octet-stream',
+          'x-upload-id': uploadId,
+          'x-chunk-index': String(index),
+          'x-total-chunks': '3',
+        },
+        body,
+      });
+      expect(res.status, `chunk ${index}`).toBe(200);
+      return res.json() as Promise<{ received: number }>;
+    };
+    // Wrong bytes first, then the real part 0 — the retry must overwrite, not append.
+    await post(0, Buffer.alloc(slices[0].length, 0x58));
+    await post(2, Buffer.from(slices[2]));
+    await post(0, Buffer.from(slices[0]));
+    await post(1, Buffer.from(slices[1]));
+    const part0 = readFileSync(join(tmpdir(), `nbai-zip-${uploadId}`, 'part-0'));
+    expect(Buffer.compare(part0, Buffer.from(slices[0]))).toBe(0);
+    expect(part0.length).toBe(slices[0].length);
+
+    setDb(null);
+    const workspaceId = 'agentv3-user1-sessionpr19zip';
+    const commit = await fetch(`${base}/api/zip-upload/commit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer test' },
+      body: JSON.stringify({ uploadId, workspaceId }),
+    });
+    expect(commit.status).toBe(200);
+    expect(zipWrites.contents.some((c) => c.includes('PR19-ORDER-OK'))).toBe(true);
   });
 });

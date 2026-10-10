@@ -707,6 +707,7 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 // importer keeps working AND there is still exactly one actuator per process — two would silently hand a
 // session's second message a cold, empty sandbox.
 import { buildActuator } from './actuatorFactory';
+import { bindSessionReconnectForTests } from '../AgentV3/WorkspaceRegistry';
 import { envFlag } from '../lib/envFlag';
 import {
   workspaceOwnershipOk as sharedWorkspaceOwnershipOk,
@@ -4124,6 +4125,19 @@ const serverPublishDeps: ServerPublishDeps = {
 };
 
 export function registerAgentV3Routes(app: Express): void {
+  // BLD-8 — when /exec misses the in-memory registry (another instance, or this one recycled),
+  // re-register against the durable sandbox IF it belongs to this caller. The actuator's own
+  // runCommand is the existing Sandbox.connect path; we do not create a session the caller does
+  // not own, and a missing record stays today's offline result. A PTY never uses this hook.
+  // Cloud Run session affinity would reduce cross-instance misses further; that hosting setting
+  // is out of scope.
+  bindSessionReconnectForTests(async (workspaceId, userId) => {
+    if (!workspaceId || !userId) return null;
+    const rec = await sandboxStore.getRecord(workspaceId).catch(() => null);
+    if (!rec?.sandboxId) return null;
+    if (rec.userId && rec.userId !== 'anon' && rec.userId !== userId) return null;
+    return buildActuator();
+  });
   // The data API is the cheap backend. It is on for every app that has a key. It does not charge.
   registerAppDataRoutes(app);
   registerBrandApplyRoutes(app);
@@ -8017,7 +8031,13 @@ async function noteBuildOutcome(
     const from = Number(req.query.cursor);
     const backlog = readShell(shellId, Number.isFinite(from) ? from : 0, workspaceId);
     if (!backlog) {
-      res.status(404).json({ error: 'This terminal is no longer open.' });
+      // The shell id is real to the client but this process has never heard of it — a different
+      // Cloud Run instance opened the TTY. 404 would tell the UI the terminal is gone; 409 tells
+      // it to open a new one HERE, once. A brand-new /shell/open does not use this code.
+      res.status(409).json({
+        code: 'SHELL_NOT_ON_THIS_INSTANCE',
+        error: 'This terminal was opened on another server — reopening…',
+      });
       return;
     }
 
@@ -8043,17 +8063,44 @@ async function noteBuildOutcome(
     );
     if (!unsubscribe) { res.end(); return; }
 
+    // GT-16 — register cleanup IMMEDIATELY after subscribe, BEFORE any timer. PR-15 already
+    // awaited verifiedIdentity at the top of this handler, so there is no await between subscribe
+    // and here. Moving that await back under the subscribe would re-open the leak: a client that
+    // leaves during the await would never have a listener, and the intervals below would run
+    // (and keep charging quota) until the process noticed on its own. The invariant is "cleanup
+    // is registered immediately after subscribe, before any timer" — not "before verifiedIdentity".
+    const quotaUid = verified?.uid ?? null;
+    let closed = false;
+    let beat: NodeJS.Timeout | undefined;
+    let meter: NodeJS.Timeout | undefined;
+    let watch: NodeJS.Timeout | undefined;
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (beat) clearInterval(beat);
+      if (watch) clearInterval(watch);
+      if (meter) clearInterval(meter);
+      // Leave the shared stretch, charging the seconds since the last tick so closing a tab never
+      // forgives time. Terminals still open keep the same mark and carry on. detachStream is a
+      // no-op when this stream was never attached (the client was already gone).
+      if (quotaUid) void chargeTerminalSeconds(quotaUid, detachStream(terminalMeters, quotaUid, shellId, Date.now()));
+      unsubscribe();
+    };
+    onStreamClosed(res, cleanup);
+    // A client that already went away must not start intervals. No await sits between the
+    // registration above and this check; it still matters when `close` fired synchronously.
+    if (closed || res.destroyed || res.writableEnded) { cleanup(); return; }
+
     // Heartbeat: keeps intermediaries from closing an idle stream, and lets the client notice a dead
     // connection while a long build produces nothing for minutes.
-    const beat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* client gone */ } }, 20_000);
+    beat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* client gone */ } }, 20_000);
     // A2 — accrue the daily allowance WHILE the terminal is attached. Metering only on close would be
     // bypassable by simply shutting the tab, which is what most people do. When the allowance runs out
     // the stream is ended with an honest event rather than going quiet: a terminal that stops
     // responding for no stated reason is indistinguishable from a broken one.
-    const quotaUid = verified?.uid ?? null;
     // Join this user's shared stretch. A second terminal does NOT start a second bill.
     if (quotaUid) attachStream(terminalMeters, quotaUid, shellId, Date.now());
-    const meter = setInterval(() => {
+    meter = setInterval(() => {
       void (async () => {
         const now = Date.now();
         if (quotaUid) await chargeTerminalSeconds(quotaUid, accrueFor(terminalMeters, quotaUid, now));
@@ -8072,24 +8119,10 @@ async function noteBuildOutcome(
       })();
     }, 30_000);
     // Poll for exit so the UI can show "[process exited]" instead of a shell that just stops responding.
-    const watch = setInterval(() => {
+    watch = setInterval(() => {
       const s = getShell(shellId, workspaceId);
       if (!s || !s.alive) { send('exit', { exitCode: s?.exitCode ?? null }); cleanup(); res.end(); }
     }, 1000);
-
-    let done = false;
-    const cleanup = () => {
-      if (done) return;
-      done = true;
-      clearInterval(beat);
-      clearInterval(watch);
-      clearInterval(meter);
-      // Leave the shared stretch, charging the seconds since the last tick so closing a tab never
-      // forgives time. Terminals still open keep the same mark and carry on.
-      if (quotaUid) void chargeTerminalSeconds(quotaUid, detachStream(terminalMeters, quotaUid, shellId, Date.now()));
-      unsubscribe();
-    };
-    onStreamClosed(res, cleanup);
   });
 
   /** Keystrokes → the TTY. Ctrl+C is just the real \x03 byte arriving here; there is no special case. */
@@ -8110,6 +8143,13 @@ async function noteBuildOutcome(
     }
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    if (!getShell(shellId, workspaceId)) {
+      res.status(409).json({
+        code: 'SHELL_NOT_ON_THIS_INSTANCE',
+        error: 'This terminal was opened on another server — reopening…',
+      });
       return;
     }
     const ok = await writeShell(shellId, data, workspaceId);
@@ -8133,6 +8173,13 @@ async function noteBuildOutcome(
     }
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    if (!getShell(shellId, workspaceId)) {
+      res.status(409).json({
+        code: 'SHELL_NOT_ON_THIS_INSTANCE',
+        error: 'This terminal was opened on another server — reopening…',
+      });
       return;
     }
     const ok = await resizeShell(shellId, Number(req.body?.cols), Number(req.body?.rows), workspaceId);

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   openShell,
   readShell,
@@ -538,5 +539,35 @@ describe('the sandbox idle clock — a watched terminal must never be paused mid
     // The sandbox sweep's floor is 5 minutes. A note slower than that would fix nothing.
     expect(ACTIVITY_NOTE_MS).toBeGreaterThan(0);
     expect(ACTIVITY_NOTE_MS).toBeLessThan(5 * 60_000);
+  });
+});
+
+describe('GT-16 shell stream cleanup is registered before any timer', () => {
+  // PR-15 already `await verifiedIdentity` at the TOP of GET /shell/stream, before subscribeShell.
+  // The spec's older "register onStreamClosed before await verifiedIdentity" order would move that
+  // await back into the window between subscribe and the close listener — the leak GT-16 is about.
+  // The invariant we lock is: cleanup is registered immediately after subscribe, before any timer.
+  const src = readFileSync(new URL('../routes/agentv3.ts', import.meta.url), 'utf8');
+  const start = src.indexOf("app.get('/api/agentv3/shell/stream'");
+  const end = src.indexOf("app.post('/api/agentv3/shell/input'");
+  const handler = src.slice(start, end);
+
+  it('onStreamClosed sits after subscribeShell and before the first setInterval', () => {
+    const subscribeAt = handler.indexOf('subscribeShell(');
+    const closedAt = handler.indexOf('onStreamClosed(res');
+    const intervalAt = handler.indexOf('setInterval');
+    expect(subscribeAt).toBeGreaterThan(-1);
+    expect(closedAt).toBeGreaterThan(subscribeAt);
+    expect(intervalAt).toBeGreaterThan(closedAt);
+    // Identity is still awaited BEFORE subscribe (PR-15). We do not require the listener above it.
+    expect(handler.indexOf('await verifiedIdentity')).toBeGreaterThan(-1);
+    expect(handler.indexOf('await verifiedIdentity')).toBeLessThan(subscribeAt);
+  });
+
+  it('cleanup is idempotent and tolerates intervals that do not exist yet', () => {
+    expect(handler).toContain('let closed = false');
+    expect(handler).toContain('if (closed) return');
+    expect(handler).toContain('if (beat) clearInterval(beat)');
+    expect(handler).toContain('if (closed || res.destroyed || res.writableEnded)');
   });
 });

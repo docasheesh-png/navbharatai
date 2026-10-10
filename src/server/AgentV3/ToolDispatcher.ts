@@ -425,7 +425,7 @@ import type { DeployFn } from './Deployment';
 import { reviewEdit, formatReviewResult } from './PostEditReviewer';
 import { renameSymbol, addComponentProp } from './CodemodeExecutor';
 import type { CodemodeFile } from './CodemodeExecutor';
-import { containsSymbol } from './codemodScope';
+import { containsSymbol, CODEMOD_SKIP } from './codemodScope';
 import { codemodTruncationNote } from './codemodTruncation';
 import { getEmbeddingStore } from './EmbeddingSearch';
 import { redactSecrets, redactDeep } from './SecretRedactor';
@@ -438,6 +438,8 @@ import { formatUiFindings, type ScannedElement } from './UiElementFinder';
 import { envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
+import { isNotFoundError } from './fsErrors';
+import { SANDBOX_WORKSPACE_ROOT, toWorkspaceRelPath } from '../lib/workspacePath';
 import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
 import { turnAskedTheUser } from './nudgeToBuild';
@@ -634,6 +636,8 @@ export class ToolDispatcher {
   private readonly _rawActuator: ActuatorPort;
   /** Writes made through `actuator` that no call site has recorded yet (path → content). */
   private readonly _unrecorded = new Map<string, string>();
+  /** Platform writes (vault `.env` merge) that must not be refused by the ignore-file door. */
+  private internalWriteDepth = 0;
 
   constructor(
     actuatorRaw: ActuatorPort,
@@ -664,7 +668,9 @@ export class ToolDispatcher {
     private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number; timing?: CommandTiming }) => void,
   ) {
     this._rawActuator = actuatorRaw;
-    this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); });
+    this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); }, (p) => {
+      if (!this.internalWriteDepth && process.env.AGENTV3_GUARDED_WRITE_DOOR !== 'off') this.assertWritable(p);
+    });
   }
 
   /**
@@ -1031,10 +1037,100 @@ export class ToolDispatcher {
 
   private assertWritable(path: string): void {
     if (this.ignoreRules.length === 0) return;
-    const rule = matchingIgnoreRule(path, this.ignoreRules);
+    let normalized = path;
+    try { normalized = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT); }
+    catch { normalized = path; }
+    const rule = matchingIgnoreRule(normalized, this.ignoreRules);
     if (!rule) return;
-    try { getWorkspaceMemory(this.workspaceId).recordAudit(`[PROTECTED] refused write to ${path} (${rule.source})`); } catch { /* audit best-effort */ }
-    throw new Error(protectedWriteMessage(path, rule));
+    try { getWorkspaceMemory(this.workspaceId).recordAudit(`[PROTECTED] refused write to ${normalized} (${rule.source})`); } catch { /* audit best-effort */ }
+    throw new Error(protectedWriteMessage(normalized, rule));
+  }
+
+  private async internalWrite<T>(fn: () => Promise<T>): Promise<T> {
+    this.internalWriteDepth += 1;
+    try { return await fn(); }
+    finally { this.internalWriteDepth -= 1; }
+  }
+
+  /**
+   * The one write door for tool content: path guards, config pins, a not-found-only probe,
+   * then the destructive / parse / duplicate checks. `AGENTV3_GUARDED_WRITE_DOOR=off` does NOT
+   * skip these — that flag only disables the actuator `beforeWrite` backstop.
+   */
+  private async guardedWrite(path: string, content: string, opts: { agent: AgentRole; source: string; allowOverwrite?: boolean }): Promise<{ kind: 'create' | 'modify'; content: string; existingContent: string; kitNote: string }> {
+    const rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT);
+    this.assertWritable(rel);
+    this.assertTextWritable(rel);
+    content = guardConfigContent(rel, this.applyPostgresProviderLock(rel, content));
+    content = withoutPreviewBridge(rel, content);
+    let kind: 'create' | 'modify' = 'create';
+    let existingContent = '';
+    try {
+      existingContent = await this.actuator.readFile(this.workspaceId, rel);
+      kind = 'modify';
+    } catch (err) {
+      if (!isNotFoundError(err)) {
+        refuse(`Could not read the existing ${rel} safely (transient sandbox error) — not overwriting it. Retry in a moment.`);
+      }
+      kind = 'create';
+      existingContent = '';
+    }
+    content = this.pinPackageJsonContent(rel, content, existingContent);
+    content = this.dedupeImportsForSource(rel, content, opts.agent);
+    const kitKeep = kind === 'modify' ? this.keepDesignKit(rel, content, existingContent) : { content, note: '' };
+    content = kitKeep.content;
+    const kitNote = kitKeep.note;
+    if (opts.allowOverwrite === false && kind === 'modify') {
+      if (content !== existingContent) {
+        refuse(`${rel} already exists — ${opts.source} will not replace it wholesale. Use edit_file, or pass overwrite: true if you really mean to replace it.`);
+      }
+      return { kind, content, existingContent, kitNote };
+    }
+    if (isSecretFilePath(rel) && content.includes(SECRET_MASK)) {
+      refuse(secretPlaceholderWriteMessage(rel));
+    }
+    if (isDestructiveEmptyOverwrite(rel, existingContent, content)) {
+      getWorkspaceMemory(this.workspaceId).recordAudit(
+        `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file: ${rel}`,
+      );
+      refuse(emptyOverwriteMessage(rel));
+    }
+    const erasedKeys = wouldEraseUserSecrets(rel, existingContent, content);
+    if (erasedKeys.length > 0) {
+      getWorkspaceMemory(this.workspaceId).recordAudit(
+        `[BLOCKED-DESTRUCTIVE] refused to erase ${erasedKeys.length} user secret(s) in ${rel}`,
+      );
+      refuse(eraseUserSecretsMessage(rel, erasedKeys));
+    }
+    if (kind === 'create') {
+      const dup = this.duplicateModuleRefusal(rel);
+      if (dup) refuse(dup);
+    }
+    const writeParseReject = await this.parseGuardRejection(rel, existingContent, content);
+    if (writeParseReject) refuse(writeParseReject);
+    await this.actuator.writeFile(this.workspaceId, rel, content);
+    this.onFileWrite?.(rel, content);
+    if (kind === 'modify') this.noteDroppedImports(rel, existingContent, content);
+    return { kind, content, existingContent, kitNote };
+  }
+
+  /** Write each codemod result through the guarded door. One failure refuses the tool and names both sides. */
+  private async commitCodemodWrites(changes: { path: string; after: string }[], agent: AgentRole, source: string): Promise<void> {
+    const written: string[] = [];
+    const failed: string[] = [];
+    for (const { path, after } of changes) {
+      try {
+        const wrote = await this.guardedWrite(path, after, { agent, source, allowOverwrite: true });
+        getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+        written.push(path);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        failed.push(`${path} — ${reason}`);
+      }
+    }
+    if (failed.length > 0) {
+      refuse(`${source} did not finish every file.\nWritten (do not rewrite these): ${written.join(', ') || '(none)'}\nNot written: ${failed.join('; ')}`);
+    }
   }
 
 
@@ -1055,18 +1151,18 @@ export class ToolDispatcher {
    * that report's saved copy no longer matched the snapshot. Nothing after a refused write may pretend.
    */
   private async landHealWrite(file: string, content: string, before: string | undefined): Promise<boolean> {
+    let wrote: { content: string };
     try {
       // NAMED, so a refusal says who asked (autopsy e725e002: the reviewer's evaluate tried to add a
       // dependency to a green app's package.json, and the report could only say "a later write").
       // `evaluate-heal` is on no allowlist, so a green app is still left untouched — only the record changes.
-      const write = () => this.actuator.writeFile(this.workspaceId, file, content);
-      await (currentPass() ? write() : runInPass('evaluate-heal', write));
+      const go = () => this.guardedWrite(file, content, { agent: 'architect', source: 'evaluate-heal', allowOverwrite: true });
+      wrote = await (currentPass() ? go() : runInPass('evaluate-heal', go));
     } catch {
       return false; // refused (freeze) or failed — nothing is recorded, indexed or announced
     }
-    try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
-    try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
-    try { noteHeal(this.workspaceId, file, content, before); } catch { /* best-effort */ }
+    try { getWorkspaceMemory(this.workspaceId).indexFile(file, wrote.content); } catch { /* best-effort */ }
+    try { noteHeal(this.workspaceId, file, wrote.content, before); } catch { /* best-effort */ }
     return true;
   }
 
@@ -1305,6 +1401,22 @@ export class ToolDispatcher {
     } catch { /* the app boots as it would have — this can only ever help */ }
   }
 
+  /**
+   * Read `.env` in order to merge into it. Not-found is an empty file. Any other error must NOT
+   * be treated as empty — the caller skips the write so a transient failure cannot blank the file.
+   */
+  private async readDotEnvForMerge(label: string): Promise<{ ok: true; text: string } | { ok: false }> {
+    try {
+      const text = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, label);
+      return { ok: true, text: typeof text === 'string' ? text : '' };
+    } catch (err) {
+      if (isNotFoundError(err)) return { ok: true, text: '' };
+      const message = err instanceof Error ? err.message : String(err ?? '');
+      try { getWorkspaceMemory(this.workspaceId).recordAudit(`ENV_MERGE_SKIPPED: ${label}: ${message}`); } catch { /* audit best-effort */ }
+      return { ok: false };
+    }
+  }
+
   async ensureUserSecretsEnvFile(command: string): Promise<void> {
     if (this.secretsEnvWritten) return;
     const names = Object.keys(this.userSecretsEnv);
@@ -1314,12 +1426,15 @@ export class ToolDispatcher {
     // dev server is about to start WITHOUT any run_command having gone through this gate.
     if (command !== ALWAYS_WRITE_SECRETS
       && !/\b(?:npm|pnpm|yarn|bun|vite|next|node|nodemon|tsx|ts-node|deno|python|pip|uvicorn|gunicorn|flask)\b/i.test(command)) return;
-    this.secretsEnvWritten = true; // attempt once regardless of outcome — never rewrite on every command
+    // internalWrite: vault .env merge
     try {
-      let existing = '';
-      try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
-      const merged = mergeDotEnv(existing, this.userSecretsEnv);
-      await this.actuator.writeFile(this.workspaceId, '.env', merged);
+      const existingEnv = await this.readDotEnvForMerge('env-read');
+      if (!existingEnv.ok) return; // transient read — do not blank .env; secretsEnvWritten stays false so the next call retries
+      const merged = mergeDotEnv(existingEnv.text, this.userSecretsEnv);
+      await this.internalWrite(async () => {
+        await this.actuator.writeFile(this.workspaceId, '.env', merged);
+      });
+      this.secretsEnvWritten = true;
       // Keep .env out of git — always, even if the app already had one.
       try {
         let gi = '';
@@ -1439,7 +1554,9 @@ export class ToolDispatcher {
     // copy: only the composition root calls setUserSecrets, while every dispatcher and sub-agent in the
     // build shares the same file, so the file is the one source of truth all of them agree on.
     let envNow = '';
-    try { envNow = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { envNow = ''; }
+    const envNowRead = await this.readDotEnvForMerge('env-read');
+    if (!envNowRead.ok) return; // transient — do not provision over a .env we could not read
+    envNow = envNowRead.text;
     const connectedUrl = dotEnvValue(envNow, 'DATABASE_URL') ?? this.userSecretsEnv?.DATABASE_URL ?? '';
     if (isUserOwnedDatabaseUrl(connectedUrl)) {
       this.postgresProvisioned = true; // decided — never reconsider mid-build
@@ -1456,9 +1573,9 @@ export class ToolDispatcher {
       const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-provision');
       const lines = postgresEnvLines(prov?.envVars?.DATABASE_URL ?? prov?.dbUrl);
       if (Object.keys(lines).length > 0) {
-        let existing = '';
-        try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
-        const merged = mergeDotEnv(existing, lines);
+        const existingEnv = await this.readDotEnvForMerge('env-read');
+        if (existingEnv.ok) {
+        const merged = mergeDotEnv(existingEnv.text, lines);
         await this.actuator.writeFile(this.workspaceId, '.env', merged);
         // Keep .env out of git.
         try {
@@ -1467,6 +1584,7 @@ export class ToolDispatcher {
           const nextGi = gitignoreWithEnv(gi);
           if (nextGi !== gi) { await this.actuator.writeFile(this.workspaceId, '.gitignore', nextGi); try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ } }
         } catch { /* gitignore hardening is best-effort */ }
+        }
         // "✅ ready" is EARNED, not inferred from a URL existing (admin task 1, 2026-08-05 — the
         // Mitrify false-success class): provisionBackend returns a fallback URL even when Postgres
         // never came up, so this line used to promise a database the very next migrate could not
@@ -1584,10 +1702,10 @@ export class ToolDispatcher {
     // nearly-true report this whole path exists to avoid.
     if (!env || !env.DATABASE_URL) return false;
     try {
-      let existing = '';
-      try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
+      const existingEnv = await this.readDotEnvForMerge('env-read');
+      if (!existingEnv.ok) return false;
       // Written LAST, so it wins over the sandbox-local URL merged moments earlier.
-      const merged = mergeDotEnv(existing, env);
+      const merged = mergeDotEnv(existingEnv.text, env);
       await this.actuator.writeFile(this.workspaceId, '.env', merged);
       try {
         let gi = '';
@@ -1848,8 +1966,7 @@ export class ToolDispatcher {
         if (result.wired.length === 0) return '';
         for (const [path, content] of Object.entries(result.files)) {
           if (files[path] === content) continue; // only the one router file actually changed
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
+          await this.guardedWrite(path, content, { agent: 'architect', source: 'heal-orphan-pages', allowOverwrite: true });
           try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
         }
         try { getWorkspaceMemory(this.workspaceId).recordAudit(`orphan-page wiring: routed ${result.wired.join(', ')}.`); } catch { /* audit best-effort */ }
@@ -1878,8 +1995,7 @@ export class ToolDispatcher {
         if (result.redactions.length === 0) return '';
         for (const [path, content] of Object.entries(result.files)) {
           if (files[path] === content) continue; // only the files that actually changed
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
+          await this.guardedWrite(path, content, { agent: 'architect', source: 'heal-credential-logs', allowOverwrite: true });
           try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
         }
         const changed = [...new Set(result.redactions.map((r) => r.file))];
@@ -1897,8 +2013,7 @@ export class ToolDispatcher {
         const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
         const result = injectObservabilityFixes(files);
         if (!result) return '';
-        await this.actuator.writeFile(this.workspaceId, result.path, result.newContent);
-        try { this.onFileWrite?.(result.path, result.newContent); } catch { /* durable mirror is best-effort */ }
+        await this.guardedWrite(result.path, result.newContent, { agent: 'architect', source: 'inject-observability', allowOverwrite: true });
         try { this.state?.recordFileChange({ path: result.path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
         const labels: Record<'request-logger' | 'health' | 'error-handler', string> = {
           'request-logger': 'a request logger',
@@ -1986,8 +2101,8 @@ export class ToolDispatcher {
     try {
       await this.actuator.readFile(this.workspaceId, entryFile);
       return; // root already scaffolded — nothing to do
-    } catch {
-      /* missing — write the starter below */
+    } catch (err) {
+      if (!isNotFoundError(err)) return; // transient read — do not treat the scaffold as missing
     }
     try {
       const registry = new TemplateRegistry();
@@ -1998,8 +2113,12 @@ export class ToolDispatcher {
       // Q-008: a workspace in the strict-mode trial gets the strict tsconfig (strictTrial.ts).
       const files = applyStrictTrial(provider.getFiles([]), this.workspaceId);
       for (const [path, content] of Object.entries(files)) {
-        const exists = await this.actuator.readFile(this.workspaceId, path).then(() => true).catch(() => false);
-        if (exists) continue; // never clobber real (e.g. salvaged) work with the starter
+        try {
+          await this.actuator.readFile(this.workspaceId, path);
+          continue; // never clobber real (e.g. salvaged) work with the starter
+        } catch (err) {
+          if (!isNotFoundError(err)) continue; // transient — do not overwrite
+        }
         // The platform's starter, not the model's work: written UNRECORDED on purpose, exactly as before
         // recordedWrites.ts, so the authorship gates never judge our template as the build's code.
         await this._rawActuator.writeFile(this.workspaceId, path, content).catch(() => {});
@@ -2818,11 +2937,17 @@ export class ToolDispatcher {
       tree.add(path);
       const twins = shadowingTwins(path, tree, new Set(authoredGetter())).filter(removablePath);
       if (twins.length === 0) return '';
+      const deletable: string[] = [];
+      for (const twin of twins) {
+        try { this.assertWritable(twin); deletable.push(twin); }
+        catch { /* protected — do not delete */ }
+      }
+      if (deletable.length === 0) return '';
       await this.actuator
-        .runCommand(this.workspaceId, `rm -f ${twins.map((t) => `'${t}'`).join(' ')}`)
+        .runCommand(this.workspaceId, `rm -f ${deletable.map((t) => `'${t}'`).join(' ')}`)
         .catch(() => null);
       const gone: string[] = [];
-      for (const twin of twins) {
+      for (const twin of deletable) {
         let stillThere = false;
         try { await this.actuator.readFile(this.workspaceId, twin); stillThere = true; } catch { stillThere = false; }
         if (stillThere) continue;
@@ -3089,12 +3214,23 @@ export class ToolDispatcher {
     const lines: string[] = [];
     for (const [path, content] of Object.entries(files)) {
       let existing: string | null = null;
-      try { existing = await this.actuator.readFile(this.workspaceId, path); } catch { existing = null; }
-      if (existing === content) { lines.push(`Unchanged ${path} (already exactly what this recipe writes)`); continue; }
-      await this.actuator.writeFile(this.workspaceId, path, content);
-      this.state?.recordFileChange({ path, kind: existing === null ? 'create' : 'modify' }, agent);
-      getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-      lines.push(`${existing === null ? 'Created' : 'Updated'} ${path}`);
+      let missing = false;
+      try { existing = await this.actuator.readFile(this.workspaceId, path); }
+      catch (err) {
+        if (!isNotFoundError(err)) {
+          lines.push(`skipped existing ${path}`);
+          continue;
+        }
+        missing = true;
+        existing = null;
+      }
+      if (!missing && existing === content) { lines.push(`Unchanged ${path} (already exactly what this recipe writes)`); continue; }
+      // New files only. No recipe in this tree intentionally patches an existing router or App.tsx.
+      if (!missing) { lines.push(`skipped existing ${path}`); continue; }
+      const wrote = await this.guardedWrite(path, content, { agent, source: 'writeRecipeFiles', allowOverwrite: false });
+      this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
+      getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+      lines.push(`${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path}`);
     }
     return lines;
   }
@@ -4414,83 +4550,14 @@ export class ToolDispatcher {
             path = corrected;
           }
         }
-        // Deterministic backstop: a Vite config must always allow the E2B preview host, or the
-        // preview shows "Blocked request … is not allowed" instead of the app. No-op for non-configs
-        // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
-        this.assertWritable(path); // C2 — checked AFTER any relocation, so the REAL destination is judged
-        this.assertTextWritable(path);
-        let content = guardConfigContent(path, this.applyPostgresProviderLock(path, reqStr(input, 'content')));
-        // THE OTHER END OF THE SAME GUARD (see read_file above). The model is not supposed to be able
-        // to see the preview bridge at all — but "cannot see it" and "cannot store it" are different
-        // guarantees, and only the second one is a guarantee. A write that carries the marker anyway
-        // (a model reproducing an older document from memory, a paste, a future read path that
-        // forgets to strip) has it removed before it reaches durable storage, so the bridge can never
-        // be published inside a user's app. Both ends, deliberately: unlikely is not impossible.
-        content = withoutPreviewBridge(path, content);
-        // Read the CURRENT on-disk content before any pinning — pinPackageJsonContent needs it to tell
-        // a genuinely dropped dependency (restore it) from one the new content never had in the first
-        // place (a brand-new file, nothing to compare against). Moved ahead of the pin call itself
-        // (EduTube autopsy 2026-09-14) — it used to be read only afterwards, purely for the self-destruct
-        // guard below, which is why the pin guard had no way to see what a rewrite had just dropped.
-        let kind: 'create' | 'modify' = 'create';
-        let existingContent = '';
-        try {
-          existingContent = await this.actuator.readFile(this.workspaceId, path);
-          kind = 'modify';
-        } catch {
-          kind = 'create';
-        }
-        // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
-        // to their known-good major IN the written package.json, so a later plain `npm install` (which
-        // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking
-        // version. This is the sibling choke point to the install-command pin (#1526).
-        content = this.pinPackageJsonContent(path, content, existingContent);
-        content = this.dedupeImportsForSource(path, content, agent);
-        // A rewrite of the global stylesheet keeps the design-kit rules it dropped (autopsy e725e002).
-        const kitKeep = kind === 'modify' ? this.keepDesignKit(path, content, existingContent) : { content, note: '' };
-        content = kitKeep.content;
-        if (isSecretFilePath(path) && content.includes(SECRET_MASK)) {
-          refuse(secretPlaceholderWriteMessage(path));
-        }
-        // Self-destruct guard (StudySync autopsy 2026-07-16): refuse to BLANK a populated source file.
-        // Overwriting src/App.tsx with "" deletes its code and breaks every importer — the same
-        // catastrophe as `rm`, but via the tool path (bypasses the shell guard). Checked BEFORE writing
-        // so the file survives; a legitimate full-content rewrite (non-empty) is never blocked.
-        if (isDestructiveEmptyOverwrite(path, existingContent, content)) {
-          const blockMsg = emptyOverwriteMessage(path);
-          getWorkspaceMemory(this.workspaceId).recordAudit(
-            `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file: ${path}`,
-          );
-          refuse(blockMsg);
-        }
-        // THE USER'S OWN KEYS ARE NOT OURS TO DELETE (admin build transcript 2026-08-12). The platform
-        // writes .env from the user's saved secrets; twenty-five seconds later the builder "fixed" the
-        // hardcoded secrets it found there, and the app's database and payments were dead — reported as
-        // "your source files are untouched". A prompt asking the model not to would be one more
-        // instruction to forget; this makes the write impossible.
-        const erasedKeys = wouldEraseUserSecrets(path, existingContent, content);
-        if (erasedKeys.length > 0) {
-          const blockMsg = eraseUserSecretsMessage(path, erasedKeys);
-          getWorkspaceMemory(this.workspaceId).recordAudit(
-            `[BLOCKED-DESTRUCTIVE] refused to erase ${erasedKeys.length} user secret(s) in ${path}`,
-          );
-          refuse(blockMsg);
-        }
-        // DUPLICATE-MODULE guard (TaskForge autopsy 2026-07-18): the ORIGIN of the 2-hour failure was the
-        // builder CREATING the same component under two convention roots (app/ AND src/), whose interfaces
-        // then drift and break the build. Refuse to create a parallel copy of a module that already exists
-        // under a different root — the duplicate is never born, so it can never drift. Only on a fresh
-        // create (an edit-in-place is always allowed); kill switch AGENTV3_DUP_MODULE_GUARD=off.
-        if (kind === 'create') {
-          const dup = this.duplicateModuleRefusal(path);
-          if (dup) refuse(dup);
-        }
-        // Parse guard: refuse a write that would break a clean file (duplicate declaration / broken JSX).
-        const writeParseReject = await this.parseGuardRejection(path, existingContent, content);
-        if (writeParseReject) refuse(writeParseReject);
-        await this.actuator.writeFile(this.workspaceId, path, content);
-        this.onFileWrite?.(path, content);
-        if (kind === 'modify') this.noteDroppedImports(path, existingContent, content);
+        // Middleware relocation (above) can change the path. guardedWrite applies the config pin,
+        // preview-bridge strip, probe, package pin, import dedupe and design-kit keep — once.
+        const wrote = await this.guardedWrite(path, reqStr(input, 'content'), { agent, source: 'write_file', allowOverwrite: true });
+        path = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT);
+        const content = wrote.content;
+        const kind = wrote.kind;
+        const existingContent = wrote.existingContent;
+        const kitKeep = { content, note: wrote.kitNote };
         this.state?.recordFileChange({ path, kind }, agent);
         // A stale copy of this module under an earlier-resolving extension would run INSTEAD of it.
         const twinNote = await this.removeShadowTwins(path, agent);
@@ -4565,8 +4632,9 @@ export class ToolDispatcher {
           const p = reqStr(obj, 'path');
           this.assertWritable(p); // C2 — one protected entry fails the whole batch, never half-applies
           this.assertTextWritable(p);
-          // Same Vite-preview-host backstop as write_file, applied per batched file.
-          return { path: p, content: guardConfigContent(p, this.applyPostgresProviderLock(p, reqStr(obj, 'content'))) };
+          // Transforms (vite host, postgres lock, pins) run inside guardedWrite so the diff and the
+          // memory index see the content that actually landed.
+          return { path: p, content: reqStr(obj, 'content') };
         });
         // Collapse duplicate paths within one batch to their LAST entry (last write wins — the same
         // final state the old serial loop produced), so the parallel writers below never race two
@@ -4608,68 +4676,59 @@ export class ToolDispatcher {
         // summary arrays below stay in topo order. JS is single-threaded, so the in-worker hooks never
         // interleave mid-statement.
         const perFile = await mapWithConcurrency(toWrite, 6, async (file) => {
-          // Detect create-vs-modify like write_file does, so the recorded change + the UI diff are
-          // honest and an accidental wholesale overwrite of an existing file is not silently a "create".
           let kind: 'create' | 'modify' = 'create';
           let priorContent = '';
-          try { priorContent = await this.actuator.readFile(this.workspaceId, file.path); kind = 'modify'; } catch { kind = 'create'; }
-          // Self-destruct guard (parity with write_file): refuse to BLANK a populated source file — the
-          // same catastrophe as deleting it, via the tool path. Skip this one file's write; the rest of
-          // the batch proceeds. A legitimate full-content rewrite is never blocked (only empty content is).
+          try {
+            priorContent = await this.actuator.readFile(this.workspaceId, file.path);
+            kind = 'modify';
+          } catch (err) {
+            if (!isNotFoundError(err)) {
+              return {
+                path: file.path, kind, shrink: false, blocked: false,
+                failed: `Could not read the existing ${file.path} safely (transient sandbox error) — not overwriting it. Retry in a moment.`,
+              };
+            }
+            kind = 'create';
+          }
           if (isDestructiveEmptyOverwrite(file.path, priorContent, file.content)) {
             getWorkspaceMemory(this.workspaceId).recordAudit(
               `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file (batch): ${file.path}`,
             );
-            return { path: file.path, kind, shrink: false, blocked: true };
+            return { path: file.path, kind, shrink: false, blocked: true, failed: emptyOverwriteMessage(file.path) };
           }
-          // Secrets guard PARITY — a guard that only covers write_file is one tool call from bypassed.
           const batchErased = wouldEraseUserSecrets(file.path, priorContent, file.content);
           if (batchErased.length > 0) {
             getWorkspaceMemory(this.workspaceId).recordAudit(
               `[BLOCKED-DESTRUCTIVE] refused to erase ${batchErased.length} user secret(s) in ${file.path} (batch)`,
             );
-            return { path: file.path, kind, shrink: false, blocked: true };
+            return { path: file.path, kind, shrink: false, blocked: true, failed: eraseUserSecretsMessage(file.path, batchErased) };
           }
-          // DUPLICATE-MODULE guard PARITY (admin 2026-08-02: "duplicate file bane hi na"). write_file has
-          // refused a parallel copy under a second convention root (app/ vs src/) since the TaskForge
-          // autopsy — but write_files_batch never did, so the whole guard was one tool call away from being
-          // bypassed and a batch could quietly create the drifting second copy. Same decision, same refusal:
-          // block just this file and let the rest of the batch through.
           if (kind === 'create' && this.duplicateModuleRefusal(file.path)) {
             return { path: file.path, kind, shrink: false, blocked: true };
           }
-          // Forensic edit-discipline (parity with write_file): a batched wholesale rewrite that is
-          // materially smaller than the file it replaced likely DROPPED code — flag it honestly below.
-          const shrink = kind === 'modify' && assessFullRewrite(priorContent, file.content).level === 'shrink';
-          // PACKAGE.JSON DEP PIN (parity with write_file, LearnLoop autopsy 2026-07-18): force known-
-          // breaking deps to their known-good major so a later plain `npm install` can't pull a breaker.
-          // `priorContent` (read above for the create-vs-modify verdict) also lets the ADD-ONLY dropped-
-          // dep guard (EduTube autopsy 2026-09-14) see what this batch is about to drop — this batch
-          // path is the one a full-file-dump rescue call actually writes through.
-          const pinnedContent = this.dedupeImportsForSource(file.path, this.pinPackageJsonContent(file.path, file.content, priorContent), agent);
-          // Parity with write_file: a batched rewrite of the stylesheet keeps the kit rules it dropped.
-          const batchKit = kind === 'modify' ? this.keepDesignKit(file.path, pinnedContent, priorContent) : { content: pinnedContent, note: '' };
-          const writtenContent = batchKit.content;
-          await this.actuator.writeFile(this.workspaceId, file.path, writtenContent);
-          // Consistency with write_file: run the per-write hook (security scan / durable tracking) —
-          // batch-written files were previously skipping it entirely. Best-effort + '?.'-guarded.
-          this.onFileWrite?.(file.path, writtenContent);
-          this.state?.recordFileChange({ path: file.path, kind }, agent);
-          // E7 — stream each batched write to the Diff tab too (reusing the probe content we already
-          // read for the create-vs-modify verdict, so no extra round-trip). Bounded per file.
-          this.events?.emit({
-            type: 'diff', agent,
-            diff: { path: file.path, patch: boundedWholeFileDiff(kind === 'modify' ? priorContent : '', file.content) },
-            ts: Date.now(),
-          });
-          batchMem.indexFile(file.path, file.content);
-          getEmbeddingStore(this.workspaceId).addFile(file.path, file.content).catch(() => {});
-          return { path: file.path, kind, shrink, kitNote: batchKit.note };
+          try {
+            const wrote = await this.guardedWrite(file.path, file.content, { agent, source: 'write_files_batch', allowOverwrite: true });
+            const shrink = wrote.kind === 'modify' && assessFullRewrite(wrote.existingContent, wrote.content).level === 'shrink';
+            this.state?.recordFileChange({ path: file.path, kind: wrote.kind }, agent);
+            this.events?.emit({
+              type: 'diff', agent,
+              diff: { path: file.path, patch: boundedWholeFileDiff(wrote.kind === 'modify' ? wrote.existingContent : '', wrote.content) },
+              ts: Date.now(),
+            });
+            batchMem.indexFile(file.path, wrote.content);
+            getEmbeddingStore(this.workspaceId).addFile(file.path, wrote.content).catch(() => {});
+            return { path: file.path, kind: wrote.kind, shrink, kitNote: wrote.kitNote, content: wrote.content };
+          } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            return { path: file.path, kind, shrink: false, blocked: false, failed: reason };
+          }
         });
-        const blocked: string[] = perFile.filter((r) => (r as { blocked?: boolean }).blocked).map((r) => r.path); // empty-overwrite refusals — NOT written
-        const written: string[] = perFile.filter((r) => !(r as { blocked?: boolean }).blocked).map((r) => r.path);
-        const overwritten: string[] = perFile.filter((r) => r.kind === 'modify' && !(r as { blocked?: boolean }).blocked).map((r) => r.path); // existing files this batch REPLACED wholesale
-        const shrunk: string[] = perFile.filter((r) => r.shrink).map((r) => r.path); // rewrites that likely DROPPED code
+        const blocked: string[] = perFile.filter((r) => (r as { blocked?: boolean }).blocked).map((r) => r.path);
+        const notWritten = perFile.filter((r): r is typeof r & { failed: string } => typeof (r as { failed?: string }).failed === 'string');
+        const writtenRows = perFile.filter((r) => !(r as { blocked?: boolean }).blocked && !(r as { failed?: string }).failed);
+        const written: string[] = writtenRows.map((r) => r.path);
+        const overwritten: string[] = writtenRows.filter((r) => r.kind === 'modify').map((r) => r.path);
+        const shrunk: string[] = writtenRows.filter((r) => r.shrink).map((r) => r.path);
         // Checkpoint ONCE for the whole batch — NOT once per file. A git commit per file made an
         // N-file batch cost N commits (with `git add -A` each ~45s pre-gitignore), which is exactly
         // what pushed builds past the wall-clock cap. One commit per batch is both correct (the batch
@@ -4696,14 +4755,22 @@ export class ToolDispatcher {
         // all written files at once (cross-file context); the note names each violating file.
         const writtenSet = new Set(written);
         const writtenRecord: Record<string, string> = {};
-        for (const f of parsedFiles) if (writtenSet.has(f.path)) writtenRecord[f.path] = f.content;
+        for (const r of writtenRows) {
+          const body = (r as { content?: string }).content;
+          if (writtenSet.has(r.path) && typeof body === 'string') writtenRecord[r.path] = body;
+        }
         // ONE compile for the whole batch (the queue coalesces anyway); each note names its own file.
         const batchSteeringNotes = await this.writeSteeringNotes(writtenRecord);
         const kitKeepNotes = perFile.map((r) => (r as { kitNote?: string }).kitNote ?? '').join('');
         // Sequential on purpose: the first call lists the sandbox once and the rest reuse it.
         let twinNotes = '';
         for (const p of written) twinNotes += await this.removeShadowTwins(p, agent);
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}${twinNotes}${batchSizeNote(dedupedByPath.size)}`;
+        const notWrittenLine = notWritten.length
+          ? `\nWritten (do not rewrite these): ${written.join(', ')}\nNot written: ${notWritten.map((r) => `${r.path} — ${r.failed}`).join('; ')}`
+          : '';
+        const summary = `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}${twinNotes}${batchSizeNote(dedupedByPath.size)}${notWrittenLine}`;
+        if (notWritten.length > 0) refuse(summary);
+        return summary;
       }
 
       case 'edit_file': {
@@ -5231,9 +5298,10 @@ export class ToolDispatcher {
               const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-reprovision');
               const lines = postgresEnvLines(prov?.envVars?.DATABASE_URL ?? prov?.dbUrl);
               if (Object.keys(lines).length > 0) {
-                let existing = '';
-                try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
-                await this.actuator.writeFile(this.workspaceId, '.env', mergeDotEnv(existing, lines)).catch(() => {});
+                const existingEnv = await this.readDotEnvForMerge('env-read');
+                if (existingEnv.ok) {
+                  await this.actuator.writeFile(this.workspaceId, '.env', mergeDotEnv(existingEnv.text, lines)).catch(() => {});
+                }
               }
               const retry = await this.actuator.runCommand(this.workspaceId, command);
               if (!looksLikeDbUnreachable(`${retry.stdout}\n${retry.stderr}`)) {
@@ -7474,9 +7542,9 @@ export class ToolDispatcher {
         const mdResult = mdAction === 'remove' ? removeOneDependency(mdPkg, mdName) : addDependency(mdPkg, mdName, mdVersion);
         if (!mdResult.ok) return `manage_dependency: ${mdResult.message}`;
         if (mdResult.changed) {
-          await this.actuator.writeFile(this.workspaceId, 'package.json', mdResult.text);
+          const wrote = await this.guardedWrite('package.json', mdResult.text, { agent, source: 'manage_dependency', allowOverwrite: true });
           this.state?.recordFileChange({ path: 'package.json', kind: 'modify' }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile('package.json', mdResult.text);
+          getWorkspaceMemory(this.workspaceId).indexFile('package.json', wrote.content);
           this.scheduleCheckpoint(`${mdAction} dependency ${mdName}`);
         }
         return mdResult.note;
@@ -8528,9 +8596,10 @@ export class ToolDispatcher {
         // exactly the gap `rescueDatabase` was written to close for the database.
         let wrote = false;
         try {
-          let existing = '';
-          try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'secrets-env-read'); } catch { existing = ''; }
-          const merged = mergeDotEnv(existing, saved);
+          const existingEnv = await this.readDotEnvForMerge('secrets-env-read');
+          if (!existingEnv.ok) { wrote = false; }
+          else {
+          const merged = mergeDotEnv(existingEnv.text, saved);
           await this.actuator.writeFile(this.workspaceId, '.env', merged);
           // The user's real keys must never reach their git repo.
           try {
@@ -8540,6 +8609,7 @@ export class ToolDispatcher {
             if (nextGi !== gi) { await this.actuator.writeFile(this.workspaceId, '.gitignore', nextGi); try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ } }
           } catch { /* gitignore hardening is best-effort */ }
           wrote = true;
+          }
         } catch { wrote = false; }
 
         // Keep the in-memory set current so a later ask in the SAME build does not re-request these.
@@ -10461,6 +10531,12 @@ export class ToolDispatcher {
       case 'generate_types': {
         // GA-10 — generate TypeScript interfaces from the DB schema (.prisma models / SQL tables) so the
         // frontend + backend share one typed shape. Pure logic in schemaTypeGen.ts.
+        // Path is judged BEFORE any schema read so a secret or junk destination is refused even with no schema.
+        // `.tsx` is accepted so `src/App.tsx` hits the overwrite door (the spec's `.ts` suffix would reject it first).
+        const outPath = optStr(input, 'outPath') || 'src/types/db.ts';
+        if (!/^(src|app|lib|types)\/[A-Za-z0-9._/-]+\.tsx?$/.test(outPath)) {
+          refuse(`generate_types: refusing "${outPath}" — outPath must be a .ts file under src/, app/, lib/, or types/.`);
+        }
         let gtFiles: string[] = [];
         try { gtFiles = await this.actuator.listFiles(this.workspaceId); } catch { return 'generate_types: could not list workspace files.'; }
         const gtPaths = gtFiles.filter((p) => /\.(prisma|sql)$/i.test(p) && !/(^|[\\/])node_modules([\\/]|$)/.test(p)).slice(0, 30);
@@ -10471,14 +10547,11 @@ export class ToolDispatcher {
         }
         const gen = generateSchemaTypes(gtSources);
         if (!gen) return 'generate_types: no models/tables were parseable from the schema — nothing to generate.';
-        const outPath = optStr(input, 'outPath') || 'src/types/db.ts';
-        let kind: 'create' | 'modify' = 'create';
-        try { await this.actuator.readFile(this.workspaceId, outPath); kind = 'modify'; } catch { kind = 'create'; }
-        await this.actuator.writeFile(this.workspaceId, outPath, gen.fileContent);
-        this.state?.recordFileChange({ path: outPath, kind }, agent);
-        getWorkspaceMemory(this.workspaceId).indexFile(outPath, gen.fileContent);
+        const wrote = await this.guardedWrite(outPath, gen.fileContent, { agent, source: 'generate_types', allowOverwrite: false });
+        this.state?.recordFileChange({ path: outPath, kind: wrote.kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(outPath, wrote.content);
         this.scheduleCheckpoint('schema types');
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${outPath} — ${gen.types.length} type(s) from your ${gen.source} schema (${gen.types.map((t) => t.name).slice(0, 12).join(', ')}${gen.types.length > 12 ? '…' : ''}). Import them in the frontend + backend for one shared typed shape.`;
+        return `${wrote.kind === 'create' ? 'Created' : 'Updated'} ${outPath} — ${gen.types.length} type(s) from your ${gen.source} schema (${gen.types.map((t) => t.name).slice(0, 12).join(', ')}${gen.types.length > 12 ? '…' : ''}). Import them in the frontend + backend for one shared typed shape.`;
       }
 
       case 'replace_symbol': {
@@ -10501,11 +10574,11 @@ export class ToolDispatcher {
         if (result.content === current) {
           return `replace_symbol: no change — the new code for "${symbol}" is identical.`;
         }
-        await this.actuator.writeFile(this.workspaceId, path, result.content);
+        const wrote = await this.guardedWrite(path, result.content, { agent, source: 'replace_symbol', allowOverwrite: true });
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);
-        getWorkspaceMemory(this.workspaceId).indexFile(path, result.content);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
         this.scheduleCheckpoint(`replace ${symbol} in ${path}`);
-        const symbolSteeringNotes = await this.writeSteeringNotes({ [path]: result.content });
+        const symbolSteeringNotes = await this.writeSteeringNotes({ [path]: wrote.content });
         return `Replaced top-level symbol "${symbol}" in ${path} (AST-safe — surrounding code untouched).` + symbolSteeringNotes;
       }
 
@@ -10559,18 +10632,14 @@ export class ToolDispatcher {
           { version: optStr(input, 'version'), date: new Date().toISOString().slice(0, 10) },
         );
         const path = optStr(input, 'path') || 'RELEASE_NOTES.md';
-        let kind: 'create' | 'modify' = 'create';
-        try {
-          await this.actuator.readFile(this.workspaceId, path);
-          kind = 'modify';
-        } catch {
-          kind = 'create';
+        if (!/\.(?:md|txt)$/i.test(path) || isSecretFilePath(path)) {
+          refuse(`generate_release_notes: refusing "${path}" — release notes must be a .md or .txt file and not a secret.`);
         }
-        await this.actuator.writeFile(this.workspaceId, path, note.markdown);
-        this.state?.recordFileChange({ path, kind }, agent);
-        getWorkspaceMemory(this.workspaceId).indexFile(path, note.markdown);
-        this.scheduleCheckpoint(`${kind} ${path}`);
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — ${note.version}: ${note.summary}`;
+        const wrote = await this.guardedWrite(path, note.markdown, { agent, source: 'generate_release_notes', allowOverwrite: false });
+        this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+        this.scheduleCheckpoint(`${wrote.kind} ${path}`);
+        return `${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path} — ${note.version}: ${note.summary}`;
       }
 
       case 'update_preview': {
@@ -11004,8 +11073,7 @@ export class ToolDispatcher {
         // at 50 (which left files 51…N with the OLD name → a broken build reported as success). Kill
         // switch AGENTV3_CODEMOD_SCOPED=off restores the exact legacy 50-file behaviour.
         const CODE = /\.(t|j)sx?$/;
-        const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
-        const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
+        const codeFilesAll = files.filter((f) => CODE.test(f) && !CODEMOD_SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
         let renameSkipped = 0;
         if (envKillSwitch('AGENTV3_CODEMOD_SCOPED')) {
@@ -11024,13 +11092,7 @@ export class ToolDispatcher {
         }
         const result = await renameSymbol(fileContents, oldName, newName);
         if (!result.ok) return `codemod_rename failed: ${result.error}`;
-        // Write back changed files.
-        for (const { path, after } of result.changes) {
-          try {
-            await this.actuator.writeFile(this.workspaceId, path, after);
-            getWorkspaceMemory(this.workspaceId).indexFile(path, after);
-          } catch { /* best-effort */ }
-        }
+        await this.commitCodemodWrites(result.changes, agent, 'codemod_rename');
         this.scheduleCheckpoint(`codemod rename ${oldName} → ${newName}`);
         const renameBase = result.summary || `Renamed "${oldName}" → "${newName}" in ${result.changes.length} file(s).`;
         const renameNote = codemodTruncationNote('codemod_rename', renameSkipped);
@@ -11052,8 +11114,7 @@ export class ToolDispatcher {
         // prop reaches every definition + call site across a large repo, not a blind first-50. Kill switch
         // AGENTV3_CODEMOD_SCOPED=off restores the exact legacy 50-file behaviour.
         const CODE = /\.(t|j)sx?$/;
-        const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
-        const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
+        const codeFilesAll = files.filter((f) => CODE.test(f) && !CODEMOD_SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
         let addPropSkipped = 0;
         if (envKillSwitch('AGENTV3_CODEMOD_SCOPED')) {
@@ -11072,12 +11133,7 @@ export class ToolDispatcher {
         }
         const result = await addComponentProp(fileContents, componentName, propName, propType, defaultValue);
         if (!result.ok) return `codemod_add_prop failed: ${result.error}`;
-        for (const { path, after } of result.changes) {
-          try {
-            await this.actuator.writeFile(this.workspaceId, path, after);
-            getWorkspaceMemory(this.workspaceId).indexFile(path, after);
-          } catch { /* best-effort */ }
-        }
+        await this.commitCodemodWrites(result.changes, agent, 'codemod_add_prop');
         this.scheduleCheckpoint(`codemod add prop ${propName} to ${componentName}`);
         const addPropBase = result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
         const addPropNote = codemodTruncationNote('codemod_add_prop', addPropSkipped);
@@ -11105,9 +11161,8 @@ export class ToolDispatcher {
         if (needed.size <= 1) {
           try {
             const CODE = /\.(t|j)sx?$/;
-            const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
             for (const f of await this.actuator.listFiles(this.workspaceId)) {
-              if (CODE.test(f) && !SKIP.test(f)) needed.add(f);
+              if (CODE.test(f) && !CODEMOD_SKIP.test(f)) needed.add(f);
             }
           } catch { /* fall through with what we have */ }
         }
@@ -11123,8 +11178,8 @@ export class ToolDispatcher {
         const failed: string[] = [];
         for (const { path, after } of result.changes) {
           try {
-            await this.actuator.writeFile(this.workspaceId, path, after);
-            getWorkspaceMemory(this.workspaceId).indexFile(path, after);
+            const wrote = await this.guardedWrite(path, after, { agent, source: 'codemod_move_file', allowOverwrite: true });
+            getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
           } catch { failed.push(path); }
         }
         const destContent = result.changes.find((c) => c.path === to)?.after;
@@ -11138,6 +11193,10 @@ export class ToolDispatcher {
         // Complete the move: remove the old path. Guard against shell metacharacters; report honestly on failure.
         let removed = false;
         if (/^[A-Za-z0-9._/-]+$/.test(from) && !from.split('/').includes('..')) {
+          try { this.assertWritable(from); }
+          catch {
+            return result.summary + `\nNOTE: could not delete the old file ${from} — remove it manually (its importers already point to ${to}).`;
+          }
           const rm = await this.actuator
             .runCommand(this.workspaceId, `rm -f '${from}'`)
             .catch(() => ({ exitCode: -1, stdout: '', stderr: '' }));

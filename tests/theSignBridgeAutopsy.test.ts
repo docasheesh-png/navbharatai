@@ -199,7 +199,12 @@ describe('6 · a refused heal write is never recorded, saved or announced', () =
     const body = td.slice(td.indexOf('private async landHealWrite('), td.indexOf('private narrate<'));
     const refused = body.indexOf('return false;');
     expect(refused).toBeGreaterThan(-1);
-    expect(refused).toBeLessThan(body.indexOf('this.onFileWrite?.('));
+    // Old lock: refused < body.indexOf('this.onFileWrite?.(')
+    // onFileWrite moved into guardedWrite, which only runs it after writeFile succeeds.
+    // A refusal throws, this catch returns, and nothing below is recorded.
+    expect(body.indexOf('indexFile')).toBeGreaterThan(refused);
+    expect(body.indexOf('noteHeal')).toBeGreaterThan(refused);
+    expect(body).not.toContain('this.onFileWrite?.(');
   });
 });
 

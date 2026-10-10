@@ -7,6 +7,7 @@
 
 import type { IncomingMessage, RequestOptions } from 'node:http';
 import type { ClientRequest } from 'node:http';
+import type { RequestHandler } from 'express';
 import { rewriteProxyHeaders } from './authProxyCookies';
 import { withoutOpenerPolicy } from './securityHeaders';
 
@@ -25,9 +26,12 @@ export interface AuthProxyDeps {
   timeoutMs?: number;
 }
 
-export function createAuthProxy(deps: AuthProxyDeps) {
+export function createAuthProxy(deps: AuthProxyDeps): RequestHandler {
   const hostname = deps.hostname ?? FIREBASE_AUTH_HOST;
   const timeoutMs = deps.timeoutMs ?? AUTH_PROXY_TIMEOUT_MS;
+  // The parameters stay structural so authProxy.test.ts can pass a fake (no socket, no Express).
+  // That shape is not Express's RequestHandler and not a Node writable, which is why strict
+  // `tsc -p tsconfig.server.json` rejected `app.use` and `pres.pipe`. Both casts are types only.
   return function proxyFirebaseAuth(req: {
     originalUrl?: string;
     url?: string;
@@ -58,7 +62,7 @@ export function createAuthProxy(deps: AuthProxyDeps) {
         // this page answers the window that opened it (Q-732).
         const host = String(req.headers?.host || '').split(':')[0];
         res.writeHead(pres.statusCode || 502, withoutOpenerPolicy(rewriteProxyHeaders(pres.headers as Record<string, unknown>, host)));
-        pres.pipe(res, { end: true });
+        pres.pipe(res as unknown as NodeJS.WritableStream, { end: true });
         // The body can fail AFTER headers. Leaving `res` open hangs the popup.
         pres.on('error', () => { res.destroy(); });
       },
@@ -70,5 +74,5 @@ export function createAuthProxy(deps: AuthProxyDeps) {
       else res.destroy();
     });
     req.pipe(upstream, { end: true });
-  };
+  } as RequestHandler;
 }

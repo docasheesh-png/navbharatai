@@ -470,7 +470,7 @@ export type DurableReadStatus = 'ok' | 'empty' | 'unreadable' | 'no-store';
 
 export async function loadWorkspaceFilesWithStatus(
   workspaceId: string,
-): Promise<{ files: Record<string, string>; status: DurableReadStatus; error?: string }> {
+): Promise<{ files: Record<string, string>; status: DurableReadStatus; savedAt: number | null; error?: string }> {
   const db = getDb();
   if (!db) return { files: {}, status: 'no-store', savedAt: null };
   try {

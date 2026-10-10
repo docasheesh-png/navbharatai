@@ -606,8 +606,9 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
     if (errors2.length > 0 && io.llmRepair) {
       io.log?.(`🔧 ${errors2.length} error(s) need real fixes — one batch repair pass…`);
       const subset = offendingFileSubset(files, errors2);
+      const out2 = checked2.out;
       const causes = tscCauseNote(tscErrorCauses(errors2, files));
-      const fixed = (await io.llmRepair(out2Text(checked2.out, causes), subset).catch(() => [])) || [];
+      const fixed = (await io.llmRepair(out2 + causes, subset).catch(() => [])) || [];
       const preRepair = new Map<string, string | undefined>();
       const referenced = referencedMissingModules(errors2);
       const rejected: string[] = [];
@@ -663,11 +664,6 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
   } catch {
     return NO_ATTEMPT; // endgame is best-effort — it must never worsen or hang a build
   }
-}
-
-/** The error text handed to the batch repair: the compiler output, then the cause note (may be ''). */
-function out2Text(out: string, causes: string): string {
-  return out + causes;
 }
 
 // === SLICE 2 — MID-BUILD ERROR-TREND CHECKPOINT (admin-mandated 2026-07-17) =======================

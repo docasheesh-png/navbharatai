@@ -43,10 +43,14 @@ import { UniversalAIRouter } from './src/server/AI/UniversalAIRouter';
 import { auditEnv } from './src/server/audit_env';
 import { BuildJobManager } from './src/server/AppMakerLab/jobs/BuildJobManager';
 import { buildApp as buildAppEngine } from './src/server/AppMakerLab/AppEngine';
+import productRoutes from './src/server/routes/products';
 
 auditEnv();
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
+import { applicationDefault, getApps as getAdminApps, initializeApp as initializeAdminApp } from 'firebase-admin/app';
+import { getAuth as getAdminAuth } from 'firebase-admin/auth';
+import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 // Fallback: Populate process.env from .env.example any missing vars to prevent crashes
 try { // start
   const examplePath = path.join(process.cwd(), '.env.example');
@@ -94,6 +98,72 @@ try {
 let firebaseApp: any;
 let db: any;
 let firebaseApiKey: string | undefined = undefined;
+let adminAuth: ReturnType<typeof getAdminAuth> | undefined;
+let adminDb: ReturnType<typeof getAdminFirestore> | undefined;
+
+/**
+ * Authenticates browser requests with a Firebase ID token.  Do not trust a
+ * userId supplied in the path or request body: it is only an identifier, not
+ * proof of identity.
+ */
+async function requireAuthenticatedUser(req: express.Request, res: express.Response): Promise<string | null> {
+  const authorization = req.get('authorization');
+  const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+
+  if (!token) {
+    res.status(401).json({ error: 'Authentication required' });
+    return null;
+  }
+
+  if (!adminAuth) {
+    res.status(503).json({ error: 'Identity verification is not configured' });
+    return null;
+  }
+
+  try {
+    return (await adminAuth.verifyIdToken(token, true)).uid;
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired authentication token' });
+    return null;
+  }
+}
+
+async function requireAdminUser(req: express.Request, res: express.Response): Promise<string | null> {
+  const authorization = req.get('authorization');
+  const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  if (!token || !adminAuth) {
+    res.status(token ? 503 : 401).json({ error: token ? 'Identity verification is not configured' : 'Authentication required' });
+    return null;
+  }
+  try {
+    const decoded = await adminAuth.verifyIdToken(token, true);
+    if ((decoded as any).admin === true) return decoded.uid;
+    res.status(403).json({ error: 'Administrator access required' });
+    return null;
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired authentication token' });
+    return null;
+  }
+}
+
+function requireResourceOwner(authenticatedUid: string, requestedUid: string, res: express.Response): boolean {
+  if (authenticatedUid === requestedUid) return true;
+  res.status(403).json({ error: 'You do not have access to this resource' });
+  return false;
+}
+
+try {
+  if (getAdminApps().length === 0) {
+    initializeAdminApp({ credential: applicationDefault() });
+  }
+  adminAuth = getAdminAuth();
+  adminDb = getAdminFirestore();
+  console.log('Firebase Admin identity verification initialized');
+} catch (error) {
+  // Local development may intentionally run without application credentials.
+  // Protected routes fail closed until credentials are supplied.
+  console.warn('Firebase Admin identity verification is unavailable:', error);
+}
 
 try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -142,15 +212,13 @@ async function getSecretValue(userId: string, secretName: string): Promise<strin
   if (process.env[secretName]) {
     return process.env[secretName];
   }
-  if (!db) return null;
+  if (!adminDb) return null;
   try {
-    const q = query(
-      collection(db, 'user_secrets'),
-      where('user_id', '==', userId),
-      where('secret_name', '==', secretName)
-    );
-    const snap = await getDocs(q);
-    const docData = snap.docs.find(d => !d.data()?.deleted);
+    const snap = await adminDb.collection('user_secrets')
+      .where('user_id', '==', userId)
+      .where('secret_name', '==', secretName)
+      .get();
+    const docData = snap.docs.find(secretDoc => !secretDoc.data()?.deleted);
     if (docData) {
       const encryptedValue = docData.data().encrypted_secret_value;
       return decrypt(encryptedValue);
@@ -358,10 +426,12 @@ function estimateTokens(text: string): number {
   const PORT = Number(process.env.PORT || 8080);
   const aiRouter = new UniversalAIRouter();
 
-  // Trust proxy for correct req.protocol and req.get('host') behind reverse proxies
-  app.set('trust proxy', true);
+  // Only trust the immediately preceding managed proxy. Trusting arbitrary
+  // forwarded headers lets clients spoof IP-based abuse controls.
+  app.set('trust proxy', 1);
 
     app.use(express.json());
+    app.use('/api/products', productRoutes);
 
 
   // Cashfree Configuration
@@ -390,8 +460,6 @@ function estimateTokens(text: string): number {
     
    }
   
-  await initializeServer();
-
   // Secure Server-Side OTP Cooldown Protection & Anti-Spam Rates State Maps
   interface OtpRequestRecord {
     lastRequestedAt: number;
@@ -484,6 +552,33 @@ function estimateTokens(text: string): number {
   // Health check endpoint
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', uptime: process.uptime(), port: PORT });
+  });
+
+  app.get('/api/test-vertex', async (req, res) => {
+    if (!await requireAdminUser(req, res)) return;
+    try {
+      const reply = await aiRouter.route('Reply with exactly: HEALTHY', [], 'navbharat', req.traceContext);
+      res.json({ reply });
+    } catch {
+      res.status(503).json({ error: 'AI runtime health check failed' });
+    }
+  });
+
+  app.post('/api/payment/validate-mode-promo', async (req, res) => {
+    const { couponCode, mode, userId } = req.body;
+    const authenticatedUid = await requireAuthenticatedUser(req, res);
+    if (!authenticatedUid || !requireResourceOwner(authenticatedUid, userId, res)) return;
+
+    const validPromos: Record<string, 'basic' | 'pro' | 'vip'> = {
+      VK_BASIC_1: 'basic',
+      VK_PRO_1: 'pro',
+      VK_VIP_1: 'vip'
+    };
+    const code = typeof couponCode === 'string' ? couponCode.trim().toUpperCase() : '';
+    if (!validPromos[code] || validPromos[code] !== mode) {
+      return res.status(400).json({ error: 'Invalid promo code for the selected mode' });
+    }
+    res.json({ success: true, mode, checkoutAmount: 1 });
   });
 
   // AppMaker Execution Telemetry Endpoints
@@ -3758,7 +3853,7 @@ Analyze the target for any vulnerabilities, configuration issues, or exposed sec
     }
   };
 
-  app.post('/api/chat/navbharat', (req, res) => chatHandler(req, res, 'navbharat'));
+  app.post(['/api/chat/navbharat', '/api/chat/navbharatai'], (req, res) => chatHandler(req, res, 'navbharat'));
   app.post('/api/chat/vishwakarma-basic', (req, res) => chatHandler(req, res, 'vishwakarma-basic'));
   app.post('/api/chat/vishwakarma-pro', (req, res) => chatHandler(req, res, 'vishwakarma-pro'));
   app.post('/api/chat/vip', (req, res) => chatHandler(req, res, 'vip'));
@@ -3995,6 +4090,8 @@ Hinglish mein baat karo — friendly aur professional.`;
 
   app.get('/api/wallet/:userId', async (req, res) => {
     const { userId } = req.params;
+    const authenticatedUid = await requireAuthenticatedUser(req, res);
+    if (!authenticatedUid || !requireResourceOwner(authenticatedUid, userId, res)) return;
     const email = req.query.email as string || '';
     const name = req.query.name as string || '';
 
@@ -4068,6 +4165,8 @@ Hinglish mein baat karo — friendly aur professional.`;
 
   app.get('/api/wallet/:userId/logs', async (req, res) => {
     const { userId } = req.params;
+    const authenticatedUid = await requireAuthenticatedUser(req, res);
+    if (!authenticatedUid || !requireResourceOwner(authenticatedUid, userId, res)) return;
     try {
       const logsRef = collection(db, 'ai_usage_logs');
       const q = query(logsRef, where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(50));
@@ -4090,6 +4189,8 @@ Hinglish mein baat karo — friendly aur professional.`;
 
   app.get('/api/wallet/:userId/transactions', async (req, res) => {
     const { userId } = req.params;
+    const authenticatedUid = await requireAuthenticatedUser(req, res);
+    if (!authenticatedUid || !requireResourceOwner(authenticatedUid, userId, res)) return;
     try {
       const txRef = collection(db, 'payment_transactions');
       const q = query(txRef, where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(50));
@@ -4113,9 +4214,18 @@ Hinglish mein baat karo — friendly aur professional.`;
   app.post('/api/payment/create-order', async (req, res) => {
     const { amount, userId, userEmail, userName, userPhone, isVishwakarmaOrder, buyPass, tokenAmount } = req.body;
     if (!userId) return res.status(400).json({ error: 'User is not authenticated' });
+    const authenticatedUid = await requireAuthenticatedUser(req, res);
+    if (!authenticatedUid || !requireResourceOwner(authenticatedUid, userId, res)) return;
     const orderAmount = parseFloat(amount);
-    if (isNaN(orderAmount) || orderAmount <= 0) {
+    if (!Number.isFinite(orderAmount) || orderAmount <= 0 || orderAmount > 100000 || Math.round(orderAmount * 100) !== orderAmount * 100) {
       return res.status(400).json({ error: 'Invalid order amount' });
+    }
+    if (isVishwakarmaOrder) {
+      const validatedTokenAmount = Number(tokenAmount);
+      const expectedAmount = (buyPass ? 100 : 0) + validatedTokenAmount;
+      if (!Number.isInteger(validatedTokenAmount) || validatedTokenAmount < 0 || validatedTokenAmount > 100000 || expectedAmount !== orderAmount) {
+        return res.status(400).json({ error: 'Invalid Vishwakarma purchase configuration' });
+      }
     }
 
     const orderId = `ord_nb_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -4282,6 +4392,11 @@ Hinglish mein baat karo — friendly aur professional.`;
     const { orderId } = req.body;
     if (!orderId) return res.status(400).json({ error: 'Order ID is required' });
 
+    const authenticatedUid = await requireAuthenticatedUser(req, res);
+    if (!authenticatedUid) return;
+    const transaction = await getDoc(doc(db, 'payment_transactions', orderId));
+    if (!transaction.exists() || !requireResourceOwner(authenticatedUid, transaction.data().userId, res)) return;
+
     const result = await verifyPaymentInternal(orderId);
     if (result.success) {
       return res.json(result.data);
@@ -4367,6 +4482,8 @@ Hinglish mein baat karo — friendly aur professional.`;
   app.post('/api/payment/redeem-coupon', async (req, res) => {
     const { couponCode, userId, userEmail, userName } = req.body;
     if (!userId) return res.status(400).json({ error: 'User is not authenticated' });
+    const authenticatedUid = await requireAuthenticatedUser(req, res);
+    if (!authenticatedUid || !requireResourceOwner(authenticatedUid, userId, res)) return;
     if (!couponCode || typeof couponCode !== 'string') {
       return res.status(400).json({ error: 'Promo coupon code is required' });
     }
@@ -4388,6 +4505,37 @@ Hinglish mein baat karo — friendly aur professional.`;
     const redemptionId = `coupon_${code}_${userId}`;
 
     try {
+      if (!adminDb) return res.status(503).json({ error: 'Secure billing storage is not configured' });
+      const result = await adminDb.runTransaction(async (transaction) => {
+        const txRef = adminDb!.collection('payment_transactions').doc(redemptionId);
+        const walletRef = adminDb!.collection('user_token_wallets').doc(userId);
+        const txSnap = await transaction.get(txRef);
+        if (txSnap.exists) throw new Error('ALREADY_REDEEMED');
+
+        const walletSnap = await transaction.get(walletRef);
+        const wallet = walletSnap.exists ? walletSnap.data()! : {};
+        const currentBalance = Number(wallet.remaining_balance || 0);
+        const newBalance = currentBalance + value;
+        transaction.set(txRef, {
+          transactionId: redemptionId, userId, amountPaid: 0, balanceAdded: value,
+          paymentProvider: 'COUPON_REDEEM', paymentStatus: 'SUCCESS',
+          paymentReference: `REDEMPTION_${code}`, createdAt: new Date().toISOString()
+        });
+        transaction.set(walletRef, walletSnap.exists ? {
+          remaining_balance: newBalance,
+          total_balance: Number(wallet.total_balance || 0) + value,
+          updatedAt: new Date().toISOString()
+        } : {
+          userId, userEmail: userEmail || '', userName: userName || '', total_balance: value,
+          remaining_balance: value, total_output_tokens_used: 0, total_money_spent: 0,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        return { newBalance };
+      });
+      return res.json({ success: true, balanceAdded: value, currentBalance: result.newBalance });
+
+      /* Legacy non-transactional implementation retained below temporarily
+         for source history; execution cannot reach it. */
       // Check if user already redeemed this specific coupon
       const txRef = doc(db, 'payment_transactions', redemptionId);
       const txSnap = await getDoc(txRef);
@@ -4435,12 +4583,16 @@ Hinglish mein baat karo — friendly aur professional.`;
 
       return res.json({ success: true, balanceAdded: value, currentBalance: newBalance });
     } catch (err: any) {
+      if (err?.message === 'ALREADY_REDEEMED') {
+        return res.status(400).json({ error: 'You have already redeemed this promo coupon code!' });
+      }
       console.error('[COUPON] Redemption failed:', err.message);
       return res.status(500).json({ error: err.message });
     }
   });
 
   app.get('/api/admin/analytics', async (req, res) => {
+    if (!await requireAdminUser(req, res)) return;
     try {
       const walletsRef = collection(db, 'user_token_wallets');
       const walletSnap = await getDocs(walletsRef);
@@ -4531,9 +4683,17 @@ Hinglish mein baat karo — friendly aur professional.`;
     console.log('[DEBUG] GET /api/secrets/:userId called for:', req.params.userId);
     try {
       const { userId } = req.params;
-      const secretsSnapshot = await getDocs(query(collection(db, 'user_secrets'), where('user_id', '==', userId)));
-      const secrets = secretsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as { deleted?: boolean }[];
-      console.log('[DEBUG] Secrets found:', secrets);
+      const authenticatedUid = await requireAuthenticatedUser(req, res);
+      if (!authenticatedUid || !requireResourceOwner(authenticatedUid, userId, res)) return;
+      if (!adminDb) return res.status(503).json({ error: 'Secure secret storage is not configured' });
+      const secretsSnapshot = await adminDb.collection('user_secrets').where('user_id', '==', userId).get();
+      // Never return encrypted material to the browser. The UI only needs
+      // identifiers and names to manage entries.
+      const secrets = secretsSnapshot.docs.map(secretDoc => {
+        const data = secretDoc.data();
+        return { id: secretDoc.id, secret_name: data.secret_name, created_at: data.created_at, deleted: data.deleted };
+      }) as { deleted?: boolean }[];
+      console.log('[DEBUG] Secret metadata count:', secrets.length);
       res.json(secrets.filter(s => !s.deleted));
     } catch (err) {
       console.error('[DEBUG] Error fetching secrets:', err);
@@ -4585,9 +4745,15 @@ Hinglish mein baat karo — friendly aur professional.`;
   app.post('/api/secrets/:userId', async (req, res) => {
     try {
       const { userId } = req.params;
+      const authenticatedUid = await requireAuthenticatedUser(req, res);
+      if (!authenticatedUid || !requireResourceOwner(authenticatedUid, userId, res)) return;
+      if (!adminDb) return res.status(503).json({ error: 'Secure secret storage is not configured' });
       const { secret_name, secret_value } = req.body;
+      if (typeof secret_name !== 'string' || !/^[A-Z0-9_]{1,128}$/.test(secret_name) || typeof secret_value !== 'string' || !secret_value.trim()) {
+        return res.status(400).json({ error: 'Invalid secret payload' });
+      }
       const encryptedValue = encrypt(secret_value);
-      await addDoc(collection(db, 'user_secrets'), {
+      await adminDb.collection('user_secrets').add({
         user_id: userId,
         secret_name,
         encrypted_secret_value: encryptedValue,
@@ -4601,8 +4767,16 @@ Hinglish mein baat karo — friendly aur professional.`;
 
   app.delete('/api/secrets/:userId/:secretId', async (req, res) => {
       try {
-        const { secretId } = req.params;
-        await updateDoc(doc(db, 'user_secrets', secretId), { deleted: true }); // Soft delete
+        const { userId, secretId } = req.params;
+        const authenticatedUid = await requireAuthenticatedUser(req, res);
+        if (!authenticatedUid || !requireResourceOwner(authenticatedUid, userId, res)) return;
+        if (!adminDb) return res.status(503).json({ error: 'Secure secret storage is not configured' });
+        const secretRef = adminDb.collection('user_secrets').doc(secretId);
+        const secretSnap = await secretRef.get();
+        if (!secretSnap.exists || secretSnap.data()?.user_id !== userId) {
+          return res.status(404).json({ error: 'Secret not found' });
+        }
+        await secretRef.update({ deleted: true }); // Soft delete
         res.json({ success: true });
       } catch (err) {
         res.status(500).json({ error: 'Failed to delete secret' });
@@ -4613,6 +4787,9 @@ Hinglish mein baat karo — friendly aur professional.`;
   // Final diagnostic and server start
 
   try {
+    // Register the SPA fallback only after every API route.  Otherwise its
+    // wildcard GET handler returns index.html for API requests in production.
+    await initializeServer();
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
     });

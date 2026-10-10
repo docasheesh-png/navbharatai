@@ -90,10 +90,6 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    match /{document=**} {
-      allow read, write: if true;
-    }
-
     // Billing, Wallets and SRE Logs
     match /user_token_wallets/{userId} {
       allow read, write: if true;
@@ -112,7 +108,9 @@ service cloud.firestore {
     }
 
     match /user_secrets/{document=**} {
-      allow read, write: if true;
+      // Secret values are server-only.  The API validates the caller's ID
+      // token and accesses this collection through the Admin SDK.
+      allow read, write: if false;
     }
 
     // UCI Universal Chat Continuation System Rules

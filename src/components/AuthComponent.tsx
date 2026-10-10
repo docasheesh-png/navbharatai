@@ -11,7 +11,7 @@ import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser: any, onClose: () => void }) => {
+export const AuthComponent = ({ auth, onClose, setUser: _setUser }: { auth: Auth, setUser?: unknown, onClose: () => void }) => {
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -117,38 +117,10 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       addTerminalLine(`[AUTH] Verification code sent to ${phone}`, 'info');
     } catch (err: any) {
       console.error('[OTP SEND ERROR]', err);
-      const isNetworkOrIframeError = err.message?.includes('network-request-failed') || 
-                                     err.message?.includes('recaptcha') || 
-                                     err.message?.includes('captcha') || 
-                                     err.message?.includes('App Verification') ||
-                                     err.message?.includes('app-verification-disabled') ||
-                                     err.message?.includes('auth/operation-not-allowed') ||
-                                     err.message?.includes('restricted');
-                                     
-      if (isNetworkOrIframeError || true) { // Gracefully fallback under sandbox restriction or console disabled state
-         console.warn(`[AUTH] Triggering local Sandbox Simulation to bypass iframe cross-origin restriction.`);
-         addTerminalLine(`[AUTH] Firebase SMS gateway/network boundary detected. Activating Secure Sandbox Bypass...`, 'warn');
-         
-         const dummyConfirmation = {
-            confirm: async (verificationCode: string) => {
-               if (verificationCode === '123456') {
-                  return { user: { phoneNumber: phone } };
-               } else {
-                  throw new Error('Invalid verification code. Enter 123456 for Sandbox Bypass.');
-               }
-            }
-         };
-         
-         setConfirmationResult(dummyConfirmation as any);
-         setIsOtpSent(true);
-         setOtpCooldown(30);
-         setSuccessMessage('Sandbox Bypass Active: OTP generated safely. Use code 123456 to verify!');
-         addTerminalLine(`[AUTH] Sandbox Mode Active. Enter code 123456 to complete phone login.`, 'success');
-         setOtpSending(false);
-         return;
-      }
-      
-      setError(err.message || 'Failed to send OTP. Ensure phone auth is enabled in console.');
+      // Never synthesize a successful verification. A simulated confirmation
+      // result does not create an authenticated Firebase session and turns a
+      // transient provider failure into a misleading login state.
+      setError(err.message || 'Failed to send OTP. Please retry after verifying phone authentication configuration.');
       if (recaptchaVerifier.current) {
         recaptchaVerifier.current.clear();
         recaptchaVerifier.current = null;

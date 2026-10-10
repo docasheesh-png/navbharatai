@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Lock, Eye, EyeOff, Save, Trash2, Plus, Copy } from 'lucide-react';
-import { getFirestore, collection, query, where, onSnapshot } from 'firebase/firestore';
 
 interface Secret {
   id: string;
@@ -26,22 +25,16 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
   const [useCustomDomain, setUseCustomDomain] = useState(true);
   const [customDomain, setCustomDomain] = useState('https://navbharatai.com');
 
-  useEffect(() => {
-    const db = getFirestore();
-    const q = query(
-      collection(db, 'user_secrets'),
-      where('user_id', '==', userId)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const secretsData = snapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() } as Secret))
-        .filter((s) => !s.deleted);
-      setSecrets(secretsData);
-    });
-
-    return () => unsubscribe();
+  const loadSecrets = useCallback(async () => {
+    try {
+      const { data } = await axios.get<Secret[]>(`/api/secrets/${userId}`);
+      setSecrets(data);
+    } catch (error) {
+      console.error('Failed to load secrets:', error);
+    }
   }, [userId]);
+
+  useEffect(() => { void loadSecrets(); }, [loadSecrets]);
 
   const addSecret = async () => {
     if (!name || !value) return;
@@ -50,6 +43,7 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
       await axios.post(`/api/secrets/${userId}`, { secret_name: name.trim(), secret_value: value.trim() });
       setName('');
       setValue('');
+      await loadSecrets();
     } catch (err) {
       console.error('Failed to add secret:', err);
     } finally {
@@ -66,6 +60,7 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
         secret_value: cfSecretValue.trim()
       });
       setCfSecretValue('');
+      await loadSecrets();
       alert('✅ Cashfree Webhook Secret securely updated!');
     } catch (err) {
       console.error('Failed to save Cashfree webhook secret:', err);
@@ -78,6 +73,7 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
   const deleteSecret = async (id: string) => {
     try {
       await axios.delete(`/api/secrets/${userId}/${id}`);
+      await loadSecrets();
     } catch (err) {
       console.error('Failed to delete secret:', err);
     }

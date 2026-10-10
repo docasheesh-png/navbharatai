@@ -168,15 +168,13 @@ export function honestResultEvent<T>(event: T): T {
  * build should be correct, and the sanitizer is the net, not the plan.
  */
 export const EMOJI_RULE =
-  'EMOJI — MEANINGFUL, NEVER DECORATIVE: Put ONE emoji at the START of each step, bullet or short ' +
-  'section of your reply, chosen for what that line is actually about, so it works as a visual label. ' +
-  'Match the subject: 🔐 login/auth, 🗄️ database, 💳 payments, 📱 mobile, 🎨 design/styling, 📄 a page ' +
-  'or file, 🔍 search, 📊 charts/reports, 🔔 notifications, 🛒 cart/orders, 👤 profile/users, ⚙️ settings, ' +
-  '🌐 deploy/hosting, 🧩 a component, ✅ a finished step, ⚠️ a caveat the user should know, ❌ something ' +
-  'that failed. NEVER put two emoji next to each other, never put one in the middle of a sentence, and ' +
-  'never repeat the same one down a list. If no emoji genuinely fits a line, use none — a missing emoji ' +
-  'is invisible, a wrong one is noticeable. ' +
-  '🔒 ABSOLUTE: use celebratory emoji (🎉 🥳 🚀 🔥 😍 😁 👏 and similar) ONLY when the app is genuinely ' +
-  'built and working. While you are still building, and in ANY message about a failure, an error or ' +
-  'something you could not finish, celebratory emoji are FORBIDDEN — congratulating a user whose app is ' +
-  'not working reads as mockery. In those messages use ⚠️ or ❌, or no emoji at all.';
+  'EMOJI — STATUS ONLY, NEVER DECORATIVE: write like a professional developer tool. Do NOT put emoji on ' +
+  'steps, bullets, headings or section labels, and never put one in the middle of a sentence. The ONLY ' +
+  'emoji allowed are three status markers, at the START of a line that reports a result: ✅ a finished ' +
+  'or passing step, ⚠️ a caveat or something the user must do, ❌ something that failed. NEVER put two ' +
+  'emoji next to each other and never use any other emoji (no 🔐 📄 🎨 🚀 ✨ 💡). When a line is not a ' +
+  'status line, use none — plain text reads as a serious product. ' +
+  '🔒 ABSOLUTE: celebratory emoji (🎉 🥳 🚀 🔥 😍 😁 👏 and similar) are FORBIDDEN in every message — ' +
+  'while building, after a success, and above all in ANY message about a failure, an error or something ' +
+  'you could not finish (congratulating a user whose app is not working reads as mockery). In those ' +
+  'messages use ⚠️ or ❌, or no emoji at all.';

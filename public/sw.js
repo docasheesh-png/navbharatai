@@ -14,13 +14,15 @@ const APP_SHELL = [
 // cached, using NETWORK-FIRST (online users always get fresh data; the cache is a
 // fallback served only when the network fails / device is offline). Auth/realtime/write
 // endpoints are never cached.
-const API_READ_CACHE = 'navbharat-api-v1';
+// v2: exact pathname allowlist (a prefix match cached /conversations/<id> too) and a new
+// bucket name so activate purges anything v1 stored for a previous account.
+const API_READ_CACHE = 'navbharat-api-v2';
 const API_CACHEABLE_GETS = [
   '/api/agentv3/conversations',
   '/api/agentv3/status',
 ];
 function isCacheableApiGet(url) {
-  return API_CACHEABLE_GETS.some((p) => url.pathname === p || url.pathname.startsWith(p));
+  return API_CACHEABLE_GETS.includes(url.pathname.replace(/\/$/, ''));
 }
 
 self.addEventListener('install', (e) => {
@@ -65,11 +67,10 @@ self.addEventListener('fetch', (e) => {
   // JS/CSS/module chunks: ALWAYS network — never cache (content-hashed, CDN handles it)
   if (/\.(js|mjs|css|ts)(\?|$)/.test(url.pathname)) return;
 
-  // HTML navigation: network-first, hard reload on failure (no stale HTML)
+  // HTML navigation: network-first. `/` is intentionally NOT in APP_SHELL — a cached
+  // document would be stale HTML — so a miss must hit the network a second time.
   if (request.mode === 'navigate') {
-    e.respondWith(
-      fetch(request, { cache: 'no-cache' }).catch(() => caches.match('/') ?? fetch(request))
-    );
+    e.respondWith(fetch(request, { cache: 'no-cache' }).catch(async () => (await caches.match('/')) || fetch(request)));
     return;
   }
 

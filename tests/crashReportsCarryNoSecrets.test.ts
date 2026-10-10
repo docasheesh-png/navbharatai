@@ -211,7 +211,9 @@ describe('§4 the user is a one-way hash, and forgotten on sign-out', () => {
   it('the auth observer is the one place user context is set and cleared', () => {
     const app = read('src/App.tsx');
     const at = app.indexOf('onAuthStateChanged(auth, (currentUser) => {');
-    const near = app.slice(at, at + 600);
+    // Old: the next 600 characters. The listener now drops the API read cache before the
+    // crash lines, so the same two calls sit a little further down. They are still this observer.
+    const near = app.slice(at, at + 900);
     expect(near).toContain('setUserContext(currentUser.uid)');
     expect(near).toContain('clearUserContext()');
     expect(app).not.toMatch(/setUserContext\([^)]*email/);

@@ -1,4 +1,5 @@
 import React from 'react';
+import { COPY } from '../../lib/copy';
 import { motion } from 'motion/react';
 import {
   Sparkles, Shield, MessageSquare, Bot, Zap, Rocket,
@@ -286,7 +287,7 @@ export const HomeView = ({
           </h1>
 
           <p className="text-muted font-medium leading-relaxed text-sm sm:text-base max-w-lg">
-            {data?.heroSubtitle || 'Describe an app in Hindi, English or Hinglish. NavBharatAI plans, codes, previews and deploys it.'}
+            {data?.heroSubtitle || COPY.home.heroSubtitle}
           </p>
         </motion.div>
 

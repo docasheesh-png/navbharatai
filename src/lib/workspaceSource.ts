@@ -1,3 +1,4 @@
+import { COPY } from './copy';
 // Shared "what is the user's REAL app right now?" resolver for the Developer Tools (admin autopsy
 // 2026-07-21). Root cause the whole tool group shared: they read the retired v2.0 `generatedCode`
 // string, which sits at the "Waiting for magic…" placeholder in the v5.0 sandbox architecture — so
@@ -35,7 +36,7 @@ export const EMPTY_PREVIEW_MARKER = 'data-nb-empty-preview';
 
 /** The built-in "no app yet" preview page (one copy, used by App.tsx boot and reset). */
 export const EMPTY_PREVIEW_HTML =
-  '<!DOCTYPE html><html><body ' + EMPTY_PREVIEW_MARKER + ' style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui,-apple-system,\'Segoe UI\',Roboto,sans-serif;margin:0"><div style="text-align:center"><h2 style="color:#e6edf3;font-weight:600;font-size:18px;margin:0 0 8px">No preview yet</h2><p style="margin:0;font-size:14px">Describe your app in the chat to start a build.</p></div></body></html>';
+  '<!DOCTYPE html><html><body ' + EMPTY_PREVIEW_MARKER + ' style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui,-apple-system,\'Segoe UI\',Roboto,sans-serif;margin:0"><div style="text-align:center"><h2 style="color:#e6edf3;font-weight:600;font-size:18px;margin:0 0 8px">' + COPY.preview.emptyTitle + '</h2><p style="margin:0;font-size:14px">' + COPY.preview.emptyBody + '</p></div></body></html>';
 
 /** True when the workspace file set holds at least one file with real (non-empty) content. Pure. */
 export function filesHaveRealContent(files: Record<string, string> | undefined | null): boolean {

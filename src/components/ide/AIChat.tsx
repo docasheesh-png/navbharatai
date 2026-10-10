@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { COPY } from '../../lib/copy';
 import { ImageLightbox } from '../chat/ImageLightbox';
 import { ComposerShell, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS } from '../chat/ComposerShell';
 import { playTapTone } from '../../lib/tapTone';
@@ -774,7 +775,7 @@ export const AIChat: React.FC<AIChatProps> = ({
         {/* Deploy Actions — shown after successful build */}
         {hasDeployActions && deployFiles && onDownloadZip && (
           <div className="mt-3 pt-3 border-t border-line">
-            <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">Deploy your app</p>
+            <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">{COPY.chat.deployHeading}</p>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => onDownloadZip(deployFiles, deployAppName || 'NavBharatAI-App')}
@@ -811,7 +812,7 @@ export const AIChat: React.FC<AIChatProps> = ({
         {/* Smart Follow-Up Suggestions */}
         {suggestions && suggestions.length > 0 && onSendSuggestion && (
           <div className="mt-3 pt-3 border-t border-line">
-            <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">What to build next</p>
+            <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">{COPY.chat.nextHeading}</p>
             <div className="flex overflow-x-auto no-scrollbar gap-2 pb-1">
               {suggestions.map((s, i) => (
                 <button

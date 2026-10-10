@@ -21,7 +21,7 @@ import { registerShareRoutes } from './src/server/routes/share';
 import { audit } from './src/server/lib/audit';
 import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
 import { appCheckGuard } from './src/server/lib/appCheck';
-import { securityHeadersConfig, permissionsPolicyMiddleware, popupReturnOpenerPolicyMiddleware, withoutOpenerPolicy } from './src/server/lib/securityHeaders';
+import { securityHeadersConfig, permissionsPolicyMiddleware, popupReturnOpenerPolicyMiddleware } from './src/server/lib/securityHeaders';
 import { responseCompression } from './src/server/lib/responseCompression';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { envFlag } from './src/server/lib/envFlag';
@@ -192,7 +192,7 @@ import https from 'https';
 import fs from 'fs';
 import { appleDomainAssociation, APPLE_DOMAIN_ASSOCIATION_PATH } from './src/server/lib/appleDomainAssociation';
 import { assetLinksJson, malformedFingerprints, ASSET_LINKS_PATH } from './src/server/lib/assetLinks';
-import { rewriteProxyHeaders } from './src/server/lib/authProxyCookies';
+import { createAuthProxy, FIREBASE_AUTH_HOST, AUTH_PROXY_TIMEOUT_MS } from './src/server/lib/authProxy';
 import { canonicalHostRedirect, canonicalHostFromEnv } from './src/server/lib/canonicalHost';
 import { auditEnv } from './src/server/audit_env';
 import { assertProductionConfig } from './src/server/lib/productionConfigContract';
@@ -476,43 +476,20 @@ setInterval(() => {
   // requests to the project's Firebase host, which serves the real handler/iframe.
   // Registered before the SPA catch-all so it isn't swallowed and returned as
   // index.html. Streams the request/response untouched (any method).
-  const FIREBASE_AUTH_HOST = 'gen-lang-client-0866594388.firebaseapp.com';
   // Keep-alive agent: the sign-in handler pulls several sub-resources back-to-back; reusing one warm
   // TLS connection removes a fresh handshake per request (a big chunk of the perceived login latency).
-  const firebaseAuthAgent = new https.Agent({ keepAlive: true, maxSockets: 64, timeout: 15000 });
+  const firebaseAuthAgent = new https.Agent({ keepAlive: true, maxSockets: 64, timeout: AUTH_PROXY_TIMEOUT_MS });
   // A stalled upstream must FAIL FAST, never hang. Node's https.request has NO default timeout, so a
   // stuck socket could leave the login popup waiting minutes (the exact "Google login takes 5–7 min"
   // symptom). Cap it at 15s → the browser retries a fresh request instead of hanging on a dead one.
-  const AUTH_PROXY_TIMEOUT_MS = 15000;
-  const proxyFirebaseAuth = (req: any, res: any) => {
-    const upstream = https.request(
-      {
-        hostname: FIREBASE_AUTH_HOST,
-        port: 443,
-        path: req.originalUrl,
-        method: req.method,
-        headers: { ...req.headers, host: FIREBASE_AUTH_HOST },
-        agent: firebaseAuthAgent,
-        timeout: AUTH_PROXY_TIMEOUT_MS,
-      },
-      (pres) => {
-        // 🔒 COOKIES MUST BIND TO *OUR* HOST (admin 2026-08-22 — the Apple redirect login loop).
-        // The upstream sets its cookies for `*.firebaseapp.com`; arriving from navbharatai.com the
-        // browser MUST reject those, so the handler believed it stored its state, the browser dropped
-        // it, the return leg found nothing, and the app loaded logged out — with no error anywhere,
-        // because nothing actually failed. Google was unaffected: the popup flow hands its result back
-        // by postMessage and never needs a cookie to survive a cross-site return. See authProxyCookies.
-        const host = String(req.headers?.host || '').split(':')[0];
-        // …and never an opener policy of its own: this page answers the window that opened it (Q-732).
-        res.writeHead(pres.statusCode || 502, withoutOpenerPolicy(rewriteProxyHeaders(pres.headers as Record<string, unknown>, host)));
-        pres.pipe(res, { end: true });
-      },
-    );
-    // timeout fires on an idle socket (connect or response stall) — abort so the client fails fast.
-    upstream.on('timeout', () => { upstream.destroy(new Error('auth proxy upstream timeout')); });
-    upstream.on('error', () => { if (!res.headersSent) res.status(504).end('Auth proxy timeout'); });
-    req.pipe(upstream, { end: true });
-  };
+  // The handler itself lives in lib/authProxy.ts so the post-headers destroy path is unit-tested
+  // without booting this file. Cookie rewrite and opener-policy stripping stay inside that handler.
+  const proxyFirebaseAuth = createAuthProxy({
+    request: (options, callback) => https.request(options, callback),
+    agent: firebaseAuthAgent,
+    hostname: FIREBASE_AUTH_HOST,
+    timeoutMs: AUTH_PROXY_TIMEOUT_MS,
+  });
   // APPLE DOMAIN VERIFICATION (admin 2026-08-21) — mounted BEFORE the static handler, whose `dotfiles`
   // default is 'ignore' and would skip a `.well-known` directory even if the file were on disk. See
   // lib/appleDomainAssociation.ts for why Apple's own authorize endpoint 403s without this.

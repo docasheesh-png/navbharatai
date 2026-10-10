@@ -206,3 +206,15 @@ export function shouldMarkPausedAfterFailure(failedAttempts: number): boolean {
   if (!Number.isFinite(n)) return false; // unknown → keep trying; the cheap side of the trade
   return n >= PAUSE_ATTEMPTS_BEFORE_GIVING_UP;
 }
+
+/**
+ * What to do once a pause has failed `failedAttempts` times.
+ *
+ * `'kill'` only when we have given up retrying AND the sandbox is not busy (no build, no in-flight
+ * op, not a machine this process is still holding). A busy sandbox stays on `'retry'` — killing it
+ * would stop a build that is actually running. Pure.
+ */
+export function actionAfterPauseFailure(failedAttempts: number, busy: boolean): 'retry' | 'kill' {
+  if (busy) return 'retry';
+  return shouldMarkPausedAfterFailure(failedAttempts) ? 'kill' : 'retry';
+}

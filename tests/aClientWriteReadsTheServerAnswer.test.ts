@@ -26,7 +26,8 @@ const BEST_EFFORT: Record<string, Record<string, string>> = {
   'src/components/ide/MentionInbox.tsx': { '/api/mentions/read': 'mark-read; a lost mark reappears on the next load' },
   'src/components/ide/ShellTerminal.tsx': {
     '/api/agentv3/shell/close': "closing a terminal; the server's idle reaper ends it anyway",
-    '/api/agentv3/shell/resize': 'terminal size; corrected by the next resize',
+    // Old entry: '/api/agentv3/shell/resize': 'terminal size; corrected by the next resize'
+    // The resize POST now reads the response (409 SHELL_NOT_ON_THIS_INSTANCE reopens once).
   },
   'src/components/ide/StoreBuildPanel.tsx': { '/api/mobile-ship/cancel': "an abandoned store build; the workflow's own timeout stops it" },
   'src/components/agentv3/PreviewSurface.tsx': { '/api/agentv3/preview-error': 'error telemetry for the platform; nothing is shown or promised to the user' },

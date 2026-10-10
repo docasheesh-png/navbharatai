@@ -21,6 +21,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { verifyFirebaseToken, verifyFirebaseIdentity, workspaceRateLimiter, zipChunkRateLimiter } from '../lib/authMiddleware';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
@@ -59,12 +61,26 @@ const UPLOAD_TTL_MS = 30 * 60 * 1000;
 interface PendingUpload {
   uid: string;
   filePath: string;
+  /** Directory of index-addressed chunk files (`part-<index>`). Retries overwrite the same part. */
+  uploadDir: string;
   bytes: number;
+  /** Bytes stored for each chunk index. A retry replaces the entry; it does not add. */
+  partBytes: Record<number, number>;
   createdAt: number;
   fileName: string;
 }
 
 const pending = new Map<string, PendingUpload>();
+
+/**
+ * Test-only ceiling for ONE chunk. Production leaves this null and the cap is the archive room
+ * left under MAX_ARCHIVE_BYTES (the mid-stream ceiling). Tests set a few dozen bytes so a 413
+ * can be observed without uploading 5 GB.
+ */
+let chunkCapOverride: number | null = null;
+export function _setChunkCapForTests(bytes: number | null): void {
+  chunkCapOverride = bytes != null && Number.isFinite(bytes) ? bytes : null;
+}
 
 /** An upload id is ours, well-formed, and owned by this caller. PURE (given the map). */
 export function uploadOwnedBy(u: PendingUpload | undefined, uid: string | null): u is PendingUpload {
@@ -81,6 +97,7 @@ function sweepExpired(now: number): void {
   for (const [id, u] of pending) {
     if (now - u.createdAt > UPLOAD_TTL_MS) {
       try { fs.unlinkSync(u.filePath); } catch { /* already gone */ }
+      try { if (u.uploadDir) fs.rmSync(u.uploadDir, { recursive: true, force: true }); } catch { /* already gone */ }
       pending.delete(id);
     }
   }
@@ -90,7 +107,33 @@ function discard(id: string): void {
   const u = pending.get(id);
   if (!u) return;
   try { fs.unlinkSync(u.filePath); } catch { /* already gone */ }
+  try { if (u.uploadDir) fs.rmSync(u.uploadDir, { recursive: true, force: true }); } catch { /* already gone */ }
   pending.delete(id);
+}
+
+/** Concatenate `part-<index>` files in index order into the archive. No parts → leave the file alone. */
+export async function assembleLocalParts(u: { uploadDir?: string; filePath: string }): Promise<void> {
+  if (!u.uploadDir || !fs.existsSync(u.uploadDir)) return;
+  const names = fs.readdirSync(u.uploadDir).filter((n) => /^part-\d+$/.test(n));
+  if (names.length === 0) return;
+  names.sort((a, b) => Number(a.slice(5)) - Number(b.slice(5)));
+  const ws = fs.createWriteStream(u.filePath, { flags: 'w' });
+  let settled = false;
+  const done = new Promise<void>((resolve, reject) => {
+    ws.on('finish', () => { if (!settled) { settled = true; resolve(); } });
+    ws.on('error', (e) => { if (!settled) { settled = true; reject(e); } });
+  });
+  try {
+    for (const name of names) {
+      await pipeline(fs.createReadStream(path.join(u.uploadDir, name)), ws, { end: false });
+    }
+    ws.end();
+    await done;
+  } catch (err) {
+    settled = true; // destroy() emits 'error'; that must not become an unhandled rejection
+    ws.destroy();
+    throw err;
+  }
 }
 
 /**
@@ -108,6 +151,26 @@ function discard(id: string): void {
 export function claimUpload(uploadId: string, uid: string | null): { filePath: string; fileName: string; bytes: number } | null {
   const u = pending.get(uploadId);
   if (!uploadOwnedBy(u, uid)) return null;
+  // The caller wants the RAW archive. Parts are index-addressed; concatenate before handing the path over.
+  try {
+    const names = u.uploadDir && fs.existsSync(u.uploadDir)
+      ? fs.readdirSync(u.uploadDir).filter((n) => /^part-\d+$/.test(n))
+      : [];
+    if (names.length) {
+      names.sort((a, b) => Number(a.slice(5)) - Number(b.slice(5)));
+      const fd = fs.openSync(u.filePath, 'w');
+      try {
+        const buf = Buffer.alloc(1024 * 1024);
+        for (const name of names) {
+          const rs = fs.openSync(path.join(u.uploadDir, name), 'r');
+          try {
+            let n = 0;
+            while ((n = fs.readSync(rs, buf, 0, buf.length, null)) > 0) fs.writeSync(fd, buf, 0, n);
+          } finally { fs.closeSync(rs); }
+        }
+      } finally { fs.closeSync(fd); }
+    }
+  } catch { /* the caller still owns the path; a missing part surfaces as a bad zip */ }
   pending.delete(uploadId); // ownership transfers to the caller (which deletes it)
   return { filePath: u.filePath, fileName: u.fileName, bytes: u.bytes };
 }
@@ -154,14 +217,18 @@ export function registerZipUploadRoutes(app: Express): void {
       }
     }
     const uploadId = randomUUID();
+    const uploadDir = path.join(os.tmpdir(), `nbai-zip-${uploadId}`);
+    // The archive path stays `nbai-zip-<id>.zip` — commit and the direct-file test both read it.
+    // Chunks land in the sibling directory as `part-<index>`, concatenated into this file at commit.
     const filePath = path.join(os.tmpdir(), `nbai-zip-${uploadId}.zip`);
     try {
+      fs.mkdirSync(uploadDir, { recursive: true });
       fs.writeFileSync(filePath, Buffer.alloc(0));
     } catch {
       res.status(503).json({ error: 'Could not start the upload. Please try again.' });
       return;
     }
-    pending.set(uploadId, { uid, filePath, bytes: 0, createdAt: Date.now(), fileName });
+    pending.set(uploadId, { uid, filePath, uploadDir, bytes: 0, partBytes: {}, createdAt: Date.now(), fileName });
     // ALSO record it where every instance can see it. Cloud Run routes each of the ~21 chunk requests
     // of a 161 MB upload independently, so the in-memory map above is only ever a fast local cache —
     // it is this record that makes a chunk landing on another instance work instead of 403-ing.
@@ -199,16 +266,35 @@ export function registerZipUploadRoutes(app: Express): void {
         let received = 0;
         let tooBig = false;
         await new Promise<void>((resolve, reject) => {
+          let settled = false;
+          const finish = (err?: Error) => {
+            if (settled) return;
+            settled = true;
+            // A size-cap destroy must SETTLE the promise (resolve) so the handler can answer 413.
+            // A real socket error still rejects. `close` and `aborted` are the events destroy()
+            // actually emits when `end` never comes — listening only for end/error can hang forever.
+            if (err && !tooBig) reject(err);
+            else resolve();
+          };
           req.on('data', (d: Buffer) => {
             received += d.length;
             // One chunk is bounded by the client's slice size; this only guards a malformed caller.
-            if (!tooBig && received > ZIP_CHUNK_BYTES * 4) { tooBig = true; req.destroy(); return; }
-            parts.push(d);
+            if (!tooBig && received > ZIP_CHUNK_BYTES * 4) {
+              tooBig = true;
+              req.destroy(new Error('chunk too large'));
+              return;
+            }
+            if (!tooBig) parts.push(d);
           });
-          req.on('end', resolve);
-          req.on('error', reject);
+          req.on('end', () => finish());
+          req.on('error', (err: Error) => finish(err));
+          req.on('close', () => finish());
+          req.on('aborted', () => finish());
         });
-        if (tooBig) { res.status(413).json({ error: 'That chunk is larger than the upload protocol allows.' }); return; }
+        if (tooBig) {
+          if (!res.headersSent) res.status(413).json({ error: 'That chunk is larger than the upload protocol allows.' });
+          return;
+        }
         const soFar = (rec.bytes ?? 0) + received;
         if (soFar > MAX_ARCHIVE_BYTES) {
           await deleteSharedUpload(uploadId);
@@ -228,32 +314,59 @@ export function registerZipUploadRoutes(app: Express): void {
 
     const u = pending.get(uploadId);
     if (!uploadOwnedBy(u, uid)) { res.status(403).json({ error: 'Unknown or expired upload.' }); return; }
+    const partPath = path.join(u.uploadDir, `part-${index}`);
+    const ws = fs.createWriteStream(partPath, { flags: 'w' }); // retry of this index overwrites; never appends
+    let received = 0;
+    let overCap = false;
+    const otherBytes = Object.entries(u.partBytes).reduce((sum, [k, n]) => sum + (Number(k) === index ? 0 : n), 0);
+    const archiveRoom = Math.max(0, MAX_ARCHIVE_BYTES - otherBytes);
+    const limit = Math.min(chunkCapOverride ?? Number.POSITIVE_INFINITY, archiveRoom);
+    const capTransform = new Transform({
+      transform(chunk, _enc, cb) {
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        received += buf.length;
+        if (received > limit) {
+          overCap = true;
+          // Answer before pipeline destroys the request socket, or the 413 never leaves.
+          if (!res.headersSent) {
+            const blewArchive = otherBytes + received > MAX_ARCHIVE_BYTES;
+            res.status(413).json({
+              error: blewArchive
+                ? `This project is larger than the ${Math.round(MAX_ARCHIVE_BYTES / (1024 ** 3))} GB import limit.`
+                : 'That chunk is larger than the upload protocol allows.',
+            });
+          }
+          cb(new Error('chunk too large'));
+          return;
+        }
+        cb(null, buf);
+      },
+    });
     try {
-      const ws = fs.createWriteStream(u.filePath, { flags: 'a' });
-      let received = 0;
-      let aborted = false;
-      await new Promise<void>((resolve, reject) => {
-        req.on('data', (d: Buffer) => {
-          received += d.length;
-          // Enforce the ceiling MID-STREAM so a runaway upload can't fill the disk first.
-          if (!aborted && u.bytes + received > MAX_ARCHIVE_BYTES) { aborted = true; req.destroy(); }
-        });
-        req.pipe(ws);
-        ws.on('finish', resolve);
-        ws.on('error', reject);
-        req.on('error', reject);
-      });
-      if (aborted) {
+      await pipeline(req, capTransform, ws);
+    } catch (err) {
+      ws.destroy();
+      const tooBig = overCap || (err instanceof Error && err.message === 'chunk too large');
+      if (!tooBig) {
         discard(uploadId);
-        res.status(413).json({ error: `This project is larger than the ${Math.round(MAX_ARCHIVE_BYTES / (1024 ** 3))} GB import limit.` });
+        if (!res.headersSent) res.status(500).json({ error: 'Chunk upload failed. Please try the import again.' });
         return;
       }
-      u.bytes += received;
-      res.json({ ok: true, received: u.bytes });
-    } catch {
-      discard(uploadId);
-      res.status(500).json({ error: 'Chunk upload failed. Please try the import again.' });
+      const blewArchive = otherBytes + received > MAX_ARCHIVE_BYTES;
+      if (blewArchive) discard(uploadId);
+      else { try { fs.unlinkSync(partPath); } catch { /* partial part must not linger or grow */ } }
+      if (!res.headersSent) {
+        res.status(413).json({
+          error: blewArchive
+            ? `This project is larger than the ${Math.round(MAX_ARCHIVE_BYTES / (1024 ** 3))} GB import limit.`
+            : 'That chunk is larger than the upload protocol allows.',
+        });
+      }
+      return;
     }
+    u.partBytes[index] = received;
+    u.bytes = Object.values(u.partBytes).reduce((a, b) => a + b, 0);
+    res.json({ ok: true, received: u.bytes });
   });
 
   // ── 3. Commit: extract + land into the workspace (the proven import pipeline) ──────────────
@@ -292,12 +405,25 @@ export function registerZipUploadRoutes(app: Express): void {
       }
       archivePath = path.join(os.tmpdir(), `nbai-zip-${uploadId}.zip`);
       try {
-        await assembleSharedUpload(uploadId, totalChunks, archivePath);
+        await assembleSharedUpload(uploadId, totalChunks, archivePath, {
+          maxBytes: MAX_ARCHIVE_BYTES,
+          chunkBytes: ZIP_CHUNK_BYTES,
+        });
       } catch (err) {
         await deleteSharedUpload(uploadId);
         discard(uploadId);
         try { fs.unlinkSync(archivePath); } catch { /* best-effort */ }
         res.status(422).json({ error: err instanceof Error ? err.message : 'The upload could not be assembled. Please try again.' });
+        return;
+      }
+    } else if (u) {
+      // Local parts are index-addressed and may have arrived out of order. Concatenate into the
+      // archive before extract. No parts (the file was written directly) leaves the archive as-is.
+      try {
+        await assembleLocalParts(u);
+      } catch {
+        discard(uploadId);
+        res.status(422).json({ error: 'The upload could not be assembled. Please try again.' });
         return;
       }
     }

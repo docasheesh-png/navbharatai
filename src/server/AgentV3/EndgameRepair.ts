@@ -375,6 +375,11 @@ export interface EndgameIo {
   /** Persist one repaired file (sandbox + any mirrors the caller maintains). */
   writeFile(path: string, content: string): Promise<void>;
   /**
+   * Delete a file the repair CREATED (there was no previous content to restore). Absent → the created
+   * file is left in place and named in the log; a repair must not pretend it can delete what it cannot.
+   */
+  removeFile?(path: string): Promise<void>;
+  /**
    * ONE bounded batch repair call: all remaining error text + the offending files, returns corrected
    * files (fast-lane repair shape). Absent → deterministic-only endgame.
    */
@@ -396,6 +401,11 @@ export interface EndgameVerdict {
   deterministicFixes: string[];
   llmFilesWritten: number;
   clean: boolean;
+  /**
+   * The compiler did not finish a later run (timeout, crash, help page, missing binary). The counts
+   * above are the last VERIFIED ones — never "0 errors" read off a run that did not happen.
+   */
+  tscUnverified?: boolean;
   /** True when the batch LLM repair INCREASED the error count and was rolled back (CrewHub 59→67). */
   llmReverted?: boolean;
   /**
@@ -496,6 +506,54 @@ export function resolveRepairTarget(
   return { target: null, how: 'rejected' };
 }
 
+/** A later `tsc` either produced a real result or it did not. A throw is "did not", not "0 errors". */
+async function tscChecked(io: EndgameIo): Promise<{ out: string; ran: boolean }> {
+  try {
+    const out = await io.runTsc();
+    return { out: String(out ?? ''), ran: !tscNeverRan(out) };
+  } catch {
+    return { out: '', ran: false };
+  }
+}
+
+/**
+ * Put every touched path back. A string `prev` is the old file; `undefined` means the repair created
+ * it, so it is removed (or logged, when the caller has no `removeFile`).
+ */
+async function rollbackTouched(
+  io: EndgameIo,
+  snapshot: Map<string, string | undefined>,
+  files: Record<string, string>,
+): Promise<void> {
+  for (const [p, prev] of snapshot) {
+    if (typeof prev === 'string') {
+      try {
+        await io.writeFile(p, prev);
+        files[p] = prev;
+      } catch { /* a failed restore is logged by the caller staying unverified */ }
+    } else if (io.removeFile) {
+      try { await io.removeFile(p); } catch { /* best-effort */ }
+      delete files[p];
+    } else {
+      io.log?.(`cannot remove created file ${p} — removeFile is not available`);
+      delete files[p];
+    }
+  }
+}
+
+function unverifiedVerdict(errorsBefore: number, deterministicFixes: string[] = []): EndgameVerdict {
+  return {
+    attempted: true,
+    errorsBefore,
+    errorsAfterDeterministic: errorsBefore,
+    errorsAfter: errorsBefore,
+    deterministicFixes,
+    llmFilesWritten: 0,
+    clean: false,
+    tscUnverified: true,
+  };
+}
+
 /**
  * Run the two-layer endgame over injected I/O. Never throws — any I/O failure returns the honest
  * partial verdict (the caller's NOT-ready outcome then stands unchanged).
@@ -515,10 +573,32 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
       ? await io.installedExports(missing).catch(() => undefined)
       : undefined;
     const det = await endgameDeterministicPass(files, errors1, installed);
-    for (const p of det.changedPaths) await io.writeFile(p, det.files[p]).catch(() => {});
-    files = det.files;
-    const out2 = det.changedPaths.length > 0 ? await io.runTsc() : out1;
-    const errors2 = parseTscErrors(out2);
+    // Snapshot BEFORE the writes. A later tsc that did not run, or a pass that increased the count,
+    // puts these bytes back. A failed write is not a success and is not in the snapshot.
+    const preDet = new Map<string, string | undefined>();
+    const detWritten: string[] = [];
+    for (const p of det.changedPaths) {
+      if (!preDet.has(p)) preDet.set(p, files[p]);
+      try {
+        await io.writeFile(p, det.files[p]);
+        files[p] = det.files[p];
+        detWritten.push(p);
+      } catch { /* a failed deterministic write is not counted and not rolled forward */ }
+    }
+    let deterministicFixes = detWritten.length > 0 ? det.fixes : [];
+    const checked2 = detWritten.length > 0 ? await tscChecked(io) : { out: out1, ran: true };
+    if (!checked2.ran) {
+      await rollbackTouched(io, preDet, files);
+      io.log?.('tsc did not complete after the deterministic pass — reverted those writes; types are NOT verified');
+      return unverifiedVerdict(errors1.length);
+    }
+    let errors2 = parseTscErrors(checked2.out);
+    if (detWritten.length > 0 && errors2.length > errors1.length) {
+      await rollbackTouched(io, preDet, files);
+      io.log?.('deterministic fixes made things worse — reverted');
+      errors2 = errors1;
+      deterministicFixes = [];
+    }
     let llmFilesWritten = 0;
     let llmReverted = false;
     let llmFilesRejected = 0;
@@ -526,34 +606,25 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
     if (errors2.length > 0 && io.llmRepair) {
       io.log?.(`🔧 ${errors2.length} error(s) need real fixes — one batch repair pass…`);
       const subset = offendingFileSubset(files, errors2);
-      // WHAT THE ERRORS MEAN, handed to the repair with the errors themselves (autopsy baa0b3c7).
-      // This is the pass that ground six times over `Property 'setState' does not exist on type
-      // 'ErrorBoundary'` on a project whose React types were simply absent — a cause no amount of
-      // reading the file can reveal, because the compiler reports it where the symbol is USED. The
-      // analysis rides the error text rather than a new parameter deliberately: every implementor of
-      // `llmRepair`, present and future, passes that string to the model, and an optional argument an
-      // implementor forgot to read would be decoration. `tscCauseNote` heads it unmistakably so our
-      // words are never mistaken for the compiler's, and returns '' for every other kind of error.
       const causes = tscCauseNote(tscErrorCauses(errors2, files));
-      const fixed = (await io.llmRepair(out2 + causes, subset).catch(() => [])) || [];
-      // CONVERGENCE GUARD (CrewHub autopsy 2026-07-20: repair went 59 → 67 and the WORSE files stayed):
-      // snapshot every file BEFORE the repair overwrites it, so a repair that increases the error count
-      // can be rolled back. The pass is then monotone by construction — it helps or does nothing, never harms.
+      const fixed = (await io.llmRepair(out2Text(checked2.out, causes), subset).catch(() => [])) || [];
       const preRepair = new Map<string, string | undefined>();
       const referenced = referencedMissingModules(errors2);
       const rejected: string[] = [];
       for (const f of fixed) {
         if (!f?.path || typeof f.content !== 'string') continue;
-        // A repair may fix files; it may not add stray ones (block header above).
         const where = resolveRepairTarget(f.path, files, referenced);
         if (!where.target) { rejected.push(f.path); continue; }
         const path = where.target;
         if (where.how === 'remapped') io.log?.(`↪️ The repair returned '${f.path}' — written to the file it was repairing, '${path}'.`);
-        // Blank-overwrite guard: a repair that returns an empty/husk file must not destroy real work.
         const existing = files[path];
         if (typeof existing === 'string' && existing.trim().length > 80 && f.content.trim().length < 10) continue;
+        try {
+          await io.writeFile(path, f.content);
+        } catch {
+          continue; // a rejected write is not a written file
+        }
         if (!preRepair.has(path)) preRepair.set(path, existing);
-        await io.writeFile(path, f.content).catch(() => {});
         files[path] = f.content;
         llmFilesWritten++;
       }
@@ -562,18 +633,18 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
         io.log?.(`⚠️ The repair proposed ${rejected.length} file(s) at path(s) this project does not have and nothing imports (${rejected.slice(0, 3).join(', ')}${rejected.length > 3 ? ', …' : ''}) — not written: a repair may fix files, not add stray ones.`);
       }
       if (llmFilesWritten > 0) {
-        finalErrors = parseTscErrors(await io.runTsc());
+        const checkedFinal = await tscChecked(io);
+        if (!checkedFinal.ran) {
+          await rollbackTouched(io, preRepair, files);
+          io.log?.('tsc did not complete after the batch repair — reverted those writes; types are NOT verified');
+          return unverifiedVerdict(errors1.length, deterministicFixes);
+        }
+        finalErrors = parseTscErrors(checkedFinal.out);
         if (finalErrors.length > errors2.length) {
-          // The repair made it WORSE — restore every touched file to its pre-repair content and keep the
-          // better (pre-repair) state as the honest outcome.
-          for (const [p, prev] of preRepair) {
-            if (typeof prev !== 'string') continue;
-            await io.writeFile(p, prev).catch(() => {});
-            files[p] = prev;
-          }
+          await rollbackTouched(io, preRepair, files);
           io.log?.(`↩️ The batch repair increased the error count (${errors2.length} → ${finalErrors.length}) — reverted those files and kept the better state.`);
           finalErrors = errors2;
-          llmFilesWritten = 0; // honest: the repair delivered net-zero files
+          llmFilesWritten = 0;
           llmReverted = true;
         }
       }
@@ -583,7 +654,7 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
       errorsBefore: errors1.length,
       errorsAfterDeterministic: errors2.length,
       errorsAfter: finalErrors.length,
-      deterministicFixes: det.fixes,
+      deterministicFixes,
       llmFilesWritten,
       clean: finalErrors.length === 0,
       ...(llmReverted ? { llmReverted } : {}),
@@ -592,6 +663,11 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
   } catch {
     return NO_ATTEMPT; // endgame is best-effort — it must never worsen or hang a build
   }
+}
+
+/** The error text handed to the batch repair: the compiler output, then the cause note (may be ''). */
+function out2Text(out: string, causes: string): string {
+  return out + causes;
 }
 
 // === SLICE 2 — MID-BUILD ERROR-TREND CHECKPOINT (admin-mandated 2026-07-17) =======================

@@ -236,6 +236,96 @@ describe('runEndgameRepair — the two-layer orchestration', () => {
     expect(v.clean).toBe(false);
     expect(v.errorsAfter).toBe(1);
   });
+
+  // '' is a REAL clean tsc (tsc prints nothing on success). "Never ran" is a missing binary, a help
+  // page, a torn install, or a throw — see tscNeverRan. These cases use that, not ''.
+  const NEVER_RAN = 'NBAI_TSC_UNAVAILABLE: compiler missing\n';
+
+  it('(a) a later tsc that never ran is not "clean", and the deterministic writes are reverted', async () => {
+    const disk: Record<string, string> = { ...filesWithUnused };
+    let n = 0;
+    const v = await runEndgameRepair({
+      runTsc: async () => (++n === 1
+        ? `src/a.tsx(1,20): error TS6133: 'FormEvent' is declared but its value is never read.`
+        : NEVER_RAN),
+      readFiles: async () => ({ ...filesWithUnused }),
+      writeFile: async (p, c) => { disk[p] = c; },
+    });
+    expect(v.clean).toBe(false);
+    expect(v.tscUnverified).toBe(true);
+    expect(v.errorsAfter).toBe(v.errorsBefore);
+    expect(v.errorsBefore).toBe(1);
+    expect(disk['src/a.tsx']).toBe(filesWithUnused['src/a.tsx']);
+  });
+
+  it('(b) a later tsc that throws is the same unverified verdict, with the writes reverted', async () => {
+    const disk: Record<string, string> = { ...filesWithUnused };
+    let n = 0;
+    const v = await runEndgameRepair({
+      runTsc: async () => {
+        if (++n === 1) return `src/a.tsx(1,20): error TS6133: 'FormEvent' is declared but its value is never read.`;
+        throw new Error('tsc timed out');
+      },
+      readFiles: async () => ({ ...filesWithUnused }),
+      writeFile: async (p, c) => { disk[p] = c; },
+    });
+    expect(v.clean).toBe(false);
+    expect(v.tscUnverified).toBe(true);
+    expect(v.errorsAfter).toBe(v.errorsBefore);
+    expect(disk['src/a.tsx']).toBe(filesWithUnused['src/a.tsx']);
+  });
+
+  it('(c) a file the repair created is removed when the final run is worse', async () => {
+    const outputs = [
+      `src/App.tsx(1,1): error TS2307: Cannot find module './missing'.`,
+      `src/App.tsx(1,1): error TS2307: Cannot find module './missing'.\nsrc/missing.ts(1,1): error TS2345: new error.`,
+    ];
+    const removed: string[] = [];
+    const v = await runEndgameRepair({
+      runTsc: async () => outputs.shift() ?? '',
+      readFiles: async () => ({ 'src/App.tsx': "import './missing';\nexport const App = 1;" }),
+      writeFile: async () => {},
+      removeFile: async (p) => { removed.push(p); },
+      llmRepair: async () => [{ path: 'src/missing.ts', content: 'export const missing = 1;\n' }],
+    });
+    expect(removed).toEqual(['src/missing.ts']);
+    expect(v.llmReverted).toBe(true);
+    expect(v.llmFilesWritten).toBe(0);
+  });
+
+  it('(d) a writeFile rejection is not counted as a written file', async () => {
+    const v = await runEndgameRepair({
+      runTsc: async () => `src/a.ts(1,1): error TS2345: e1.`,
+      readFiles: async () => ({ 'src/a.ts': 'export const x = 1;', 'src/b.ts': 'export const y = 2;' }),
+      writeFile: async (p) => { if (p === 'src/b.ts') throw new Error('disk full'); },
+      llmRepair: async () => [
+        { path: 'src/a.ts', content: 'export const x = 2;' },
+        { path: 'src/b.ts', content: 'export const y = 3;' },
+      ],
+    });
+    expect(v.llmFilesWritten).toBe(1);
+  });
+
+  it('(e) deterministic fixes that increase the error count are reverted', async () => {
+    const original = filesWithUnused['src/a.tsx'];
+    const disk: Record<string, string> = { 'src/a.tsx': original };
+    const outputs = [
+      `src/a.tsx(1,20): error TS6133: 'FormEvent' is declared but its value is never read.`,
+      `src/a.tsx(1,1): error TS2345: e1.\nsrc/a.tsx(2,1): error TS2345: e2.`,
+    ];
+    const logs: string[] = [];
+    const v = await runEndgameRepair({
+      runTsc: async () => outputs.shift() ?? '',
+      readFiles: async () => ({ 'src/a.tsx': original }),
+      writeFile: async (p, c) => { disk[p] = c; },
+      log: (m) => logs.push(m),
+    });
+    expect(disk['src/a.tsx']).toBe(original);
+    expect(logs.some((m) => m.includes('deterministic fixes made things worse'))).toBe(true);
+    expect(v.deterministicFixes).toEqual([]);
+    expect(v.tscUnverified).toBeUndefined();
+    expect(v.errorsAfter).toBe(v.errorsBefore);
+  });
 });
 
 describe('Slice 2 — error-trend checkpoint (grind detection)', () => {

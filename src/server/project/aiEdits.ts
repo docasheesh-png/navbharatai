@@ -70,10 +70,11 @@ const ENGINEERING_RULES = `Rules for production-quality output:
 - Keep JSON valid: escape newlines/quotes inside "content". Output the FULL content of every file you write.`;
 
 /** Visual design directive — make generated UIs genuinely beautiful, not plain. */
-const DESIGN_RULES = `VISUAL DESIGN (make it genuinely beautiful — never plain/unstyled):
-- Premium, modern look: a cohesive palette with an accent color, generous spacing, rounded corners, subtle shadows, clear visual hierarchy. Default to a polished dark theme unless asked otherwise.
+const DESIGN_RULES = `VISUAL DESIGN (clean, restrained and consistent — like a professionally engineered product, never plain/unstyled):
+- One cohesive palette: neutral surfaces plus ONE accent colour used sparingly for primary actions, links and the active state. Consistent spacing scale, modest radius, subtle borders/shadows, clear hierarchy. Follow the system light/dark preference (prefers-color-scheme) unless the user asks for a specific theme.
 - Use CSS variables for colors/spacing/radius (a small design system) and STYLE EVERY element — no bare browser defaults.
-- Buttons: padded, rounded, accent/gradient background, white text, hover + active states, pointer cursor, smooth transition. Never ship unstyled <button>.
+- No decorative gradients, glow, glassmorphism or emoji in headings/labels unless the user asks for them. Real, specific copy — no hype ("revolutionary", "next-gen") and no invented stats or testimonials.
+- Buttons: padded, rounded, solid accent background with accessible contrast text, hover + active + focus-visible states, pointer cursor. Never ship unstyled <button>.
 - Cards/sections: padding, border or soft shadow, rounded. Inputs: styled with focus states. Readable typography (system-ui), strong contrast.
 - Responsive layout (mobile + desktop), tasteful header/nav, and nice empty/loading states. Aim for a UI a designer would approve.`;
 

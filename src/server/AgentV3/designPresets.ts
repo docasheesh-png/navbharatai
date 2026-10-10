@@ -20,7 +20,7 @@ export interface DesignPalette {
   accentSoft: string;
 }
 
-/** Six professional, contrast-checked palettes. accentFg is white everywhere (all accents are dark enough). */
+/** Seven professional, contrast-checked palettes. accentFg is white everywhere (all accents are dark enough). */
 export const DESIGN_PALETTES: readonly DesignPalette[] = [
   { name: 'Indigo',  accent: '#4f46e5', accentHover: '#4338ca', accentFg: '#ffffff', accentSoft: '#eef0ff' },
   { name: 'Teal',    accent: '#0d9488', accentHover: '#0f766e', accentFg: '#ffffff', accentSoft: '#e6fffb' },
@@ -28,14 +28,15 @@ export const DESIGN_PALETTES: readonly DesignPalette[] = [
   { name: 'Violet',  accent: '#7c3aed', accentHover: '#6d28d9', accentFg: '#ffffff', accentSoft: '#f3ecff' },
   { name: 'Amber',   accent: '#d97706', accentHover: '#b45309', accentFg: '#ffffff', accentSoft: '#fff3e0' },
   { name: 'Sky',     accent: '#0284c7', accentHover: '#0369a1', accentFg: '#ffffff', accentSoft: '#e6f4ff' },
+  { name: 'Blue',    accent: '#2563eb', accentHover: '#1d4ed8', accentFg: '#ffffff', accentSoft: '#eaf1ff' },
 ] as const;
 
 const byName = (n: string): DesignPalette => DESIGN_PALETTES.find((p) => p.name === n) ?? DESIGN_PALETTES[0];
 
 /**
  * Domain → palette. Each entry is a keyword list (matched case-insensitively against the prompt) mapped
- * to the palette a designer would reach for in that domain. First match wins; no match → Indigo (a safe,
- * universally-professional default). Ordered most-specific first so e.g. "food" beats a generic match.
+ * to the palette a designer would reach for in that domain. First match wins; no match → Blue (a neutral,
+ * universally-professional default; was Indigo until 2026-10, the colour most associated with AI-template apps). Ordered most-specific first so e.g. "food" beats a generic match.
  */
 const DOMAIN_RULES: ReadonlyArray<{ keywords: RegExp; palette: string }> = [
   { keywords: /\b(hospital|clinic|health|medical|doctor|patient|pharma|dental|wellness|therapy)\b/i, palette: 'Teal' },
@@ -43,15 +44,15 @@ const DOMAIN_RULES: ReadonlyArray<{ keywords: RegExp; palette: string }> = [
   { keywords: /\b(restaurant|food|cafe|menu|kitchen|recipe|dining|bakery|delivery|grocery)\b/i, palette: 'Amber' },
   { keywords: /\b(school|college|course|learn|education|study|student|teacher|exam|tutor|quiz)\b/i, palette: 'Sky' },
   { keywords: /\b(shop|store|ecommerce|e-commerce|cart|product|retail|marketplace|fashion|boutique)\b/i, palette: 'Violet' },
-  { keywords: /\b(social|chat|community|feed|post|message|forum|network|dating)\b/i, palette: 'Indigo' },
+  { keywords: /\b(social|chat|community|feed|post|message|forum|network|dating)\b/i, palette: 'Blue' },
   { keywords: /\b(travel|hotel|booking|flight|trip|tour|holiday)\b/i, palette: 'Sky' },
 ];
 
-/** Pick the palette that best fits the app described by `prompt`. Pure; Indigo default on no match. */
+/** Pick the palette that best fits the app described by `prompt`. Pure; Blue default on no match. */
 export function pickPaletteForPrompt(prompt: string | undefined | null): DesignPalette {
   const text = String(prompt ?? '');
   for (const rule of DOMAIN_RULES) if (rule.keywords.test(text)) return byName(rule.palette);
-  return byName('Indigo');
+  return byName('Blue');
 }
 
 /**
@@ -61,7 +62,7 @@ export function pickPaletteForPrompt(prompt: string | undefined | null): DesignP
  */
 export function palettePromptBlock(palette: DesignPalette): string {
   return [
-    `🎨 SUGGESTED PALETTE for this app — "${palette.name}" (professional, WCAG-AA contrast). Use these`,
+    `SUGGESTED PALETTE for this app — "${palette.name}" (professional, WCAG-AA contrast). Use these`,
     `accent variables in :root (keep the scaffold's neutral --bg/--fg/--card/--border), or design your own`,
     `with equal contrast — but the accent MUST be a real saturated hue, never grey:`,
     `  --accent: ${palette.accent}; --accent-hover: ${palette.accentHover}; --accent-fg: ${palette.accentFg}; --accent-soft: ${palette.accentSoft};`,

@@ -25,11 +25,11 @@ describe('pickPaletteForPrompt — domain → fitting palette', () => {
     expect(pickPaletteForPrompt('an online course / education platform').name).toBe('Sky');
     expect(pickPaletteForPrompt('an ecommerce store with a cart').name).toBe('Violet');
   });
-  it('defaults to Indigo for a generic or empty prompt', () => {
-    expect(pickPaletteForPrompt('a simple app').name).toBe('Indigo');
-    expect(pickPaletteForPrompt('').name).toBe('Indigo');
-    expect(pickPaletteForPrompt(undefined).name).toBe('Indigo');
-    expect(pickPaletteForPrompt(null).name).toBe('Indigo');
+  it('defaults to Blue for a generic or empty prompt', () => {
+    expect(pickPaletteForPrompt('a simple app').name).toBe('Blue');
+    expect(pickPaletteForPrompt('').name).toBe('Blue');
+    expect(pickPaletteForPrompt(undefined).name).toBe('Blue');
+    expect(pickPaletteForPrompt(null).name).toBe('Blue');
   });
 });
 

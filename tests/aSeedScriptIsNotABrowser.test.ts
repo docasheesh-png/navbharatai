@@ -232,7 +232,9 @@ describe('🔒 both layers are wired, in the shape the other five guards use', (
     expect(at).toBeGreaterThan(-1);
     const block = DISPATCH.slice(at, at + 1200);
     expect(block).toMatch(/shouldRefuseBrowserOnlyRun\(runTarget, runSource\)/);
-    expect(block).toMatch(/return bmsg;/);
+    // TD-10: a refusal is an error (refuse throws), not a returned string the model can read as done.
+    // It still happens before the shell runs.
+    expect(block).toMatch(/refuse\(bmsg\)/);
     // Audited like every other guard, so a refusal is never invisible.
     expect(block).toMatch(/recordAudit\(/);
     // The read happens only inside the `if (runTarget)`, so an ordinary command pays nothing.

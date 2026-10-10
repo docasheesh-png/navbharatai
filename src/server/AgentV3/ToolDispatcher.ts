@@ -146,6 +146,7 @@ import type { SafeMcpTool } from './mcpClient';
 import type { McpServerConfig } from './mcpTransport';
 import { featureFileGuardEnabled, protectedFeatureFileDeletion, protectedFeatureFileMessage } from './featureFileGuard';
 import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, runtimeManifestDeletionTarget, runtimeManifestDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
+import { ToolRefusal, refuse } from './toolRefusal';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { cloneDestination, shouldRefuseClone, cloneGuardMessage } from './gitCloneGuard';
 import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
@@ -3434,6 +3435,17 @@ export class ToolDispatcher {
       });
       return { tool_use_id: call.id, content, is_error: false, image: visual?.image };
     } catch (err) {
+      if (err instanceof ToolRefusal) {
+        this.events?.emit({
+          type: 'tool_result',
+          agent,
+          callId: call.id,
+          ok: false,
+          summary: redactSecrets(summarize(err.message)),
+          ts: Date.now(),
+        });
+        return { tool_use_id: call.id, content: err.message, is_error: true };
+      }
       const message = err instanceof Error ? err.message : String(err);
       this.events?.emit({
         type: 'tool_result',
@@ -4221,8 +4233,13 @@ export class ToolDispatcher {
       if (bannedPackageGuardEnabled() && /(^|\/)package\.json$/.test(String((input as { path?: unknown })?.path ?? '')) && typeof (input as { content?: unknown })?.content === 'string') {
         const stripped = stripBannedDeps((input as { content: string }).content);
         if (stripped.removed.length) {
-          const res = await this.run({ ...call, input: { ...(input as Record<string, unknown>), content: stripped.content } }, agent);
-          return `${res}\n${strippedDepsNote(stripped.removed)}`;
+          try {
+            const res = await this.run({ ...call, input: { ...(input as Record<string, unknown>), content: stripped.content } }, agent);
+            return `${res}\n${strippedDepsNote(stripped.removed)}`;
+          } catch (err) {
+            if (err instanceof ToolRefusal) refuse(`${err.message}\n${strippedDepsNote(stripped.removed)}`);
+            throw err;
+          }
         }
       }
     }
@@ -4433,7 +4450,7 @@ export class ToolDispatcher {
         const kitKeep = kind === 'modify' ? this.keepDesignKit(path, content, existingContent) : { content, note: '' };
         content = kitKeep.content;
         if (isSecretFilePath(path) && content.includes(SECRET_MASK)) {
-          throw new Error(secretPlaceholderWriteMessage(path));
+          refuse(secretPlaceholderWriteMessage(path));
         }
         // Self-destruct guard (StudySync autopsy 2026-07-16): refuse to BLANK a populated source file.
         // Overwriting src/App.tsx with "" deletes its code and breaks every importer — the same
@@ -4444,7 +4461,7 @@ export class ToolDispatcher {
           getWorkspaceMemory(this.workspaceId).recordAudit(
             `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file: ${path}`,
           );
-          return blockMsg;
+          refuse(blockMsg);
         }
         // THE USER'S OWN KEYS ARE NOT OURS TO DELETE (admin build transcript 2026-08-12). The platform
         // writes .env from the user's saved secrets; twenty-five seconds later the builder "fixed" the
@@ -4457,7 +4474,7 @@ export class ToolDispatcher {
           getWorkspaceMemory(this.workspaceId).recordAudit(
             `[BLOCKED-DESTRUCTIVE] refused to erase ${erasedKeys.length} user secret(s) in ${path}`,
           );
-          return blockMsg;
+          refuse(blockMsg);
         }
         // DUPLICATE-MODULE guard (TaskForge autopsy 2026-07-18): the ORIGIN of the 2-hour failure was the
         // builder CREATING the same component under two convention roots (app/ AND src/), whose interfaces
@@ -4466,11 +4483,11 @@ export class ToolDispatcher {
         // create (an edit-in-place is always allowed); kill switch AGENTV3_DUP_MODULE_GUARD=off.
         if (kind === 'create') {
           const dup = this.duplicateModuleRefusal(path);
-          if (dup) return dup;
+          if (dup) refuse(dup);
         }
         // Parse guard: refuse a write that would break a clean file (duplicate declaration / broken JSX).
         const writeParseReject = await this.parseGuardRejection(path, existingContent, content);
-        if (writeParseReject) return writeParseReject;
+        if (writeParseReject) refuse(writeParseReject);
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.onFileWrite?.(path, content);
         if (kind === 'modify') this.noteDroppedImports(path, existingContent, content);
@@ -4708,7 +4725,7 @@ export class ToolDispatcher {
         const updated = editKit.content;
         const editKitNote = editKit.note;
         if (isSecretFilePath(path) && updated.includes(SECRET_MASK)) {
-          throw new Error(secretPlaceholderWriteMessage(path));
+          refuse(secretPlaceholderWriteMessage(path));
         }
         // Self-destruct guard: an edit that reduces a populated source file to empty/whitespace blanks it
         // — same catastrophe as deletion. Refuse before writing so the file survives (StudySync autopsy).
@@ -4716,12 +4733,12 @@ export class ToolDispatcher {
           getWorkspaceMemory(this.workspaceId).recordAudit(
             `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file (edit): ${path}`,
           );
-          return emptyOverwriteMessage(path);
+          refuse(emptyOverwriteMessage(path));
         }
         // Parse guard: refuse an edit that would break a clean file (duplicate declaration / broken JSX),
         // so a syntactically-broken version is never saved — the model gets the exact spot + a fix hint.
         const editParseReject = await this.parseGuardRejection(path, existing, updated);
-        if (editParseReject) return editParseReject;
+        if (editParseReject) refuse(editParseReject);
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.onFileWrite?.(path, updated);
         this.noteDroppedImports(path, existing, updated);
@@ -4791,7 +4808,7 @@ export class ToolDispatcher {
             `scaffold-guard blocked create-* generator: ${command.slice(0, 160)}`,
           );
           this.state?.appendTerminal(msg);
-          return msg;
+          refuse(msg);
         }
         // CLONING THE PROJECT INTO THE PROJECT — REFUSED (autopsy c5fd6ad1 + bff0bf23, 2026-09-21).
         // A survey turn whose prompt said "Do not change any files yet" ran
@@ -4819,7 +4836,7 @@ export class ToolDispatcher {
               );
             } catch { /* audit best-effort */ }
             this.state?.appendTerminal(cmsg);
-            return cmsg;
+            refuse(cmsg);
           }
         }
         // BROWSER-ONLY CODE IS NOT RUN IN NODE (queue row Q-146). A browser-oriented localStorage seed
@@ -4842,7 +4859,7 @@ export class ToolDispatcher {
               );
             } catch { /* audit best-effort */ }
             this.state?.appendTerminal(bmsg);
-            return bmsg;
+            refuse(bmsg);
           }
         }
         // THE SHELL IS NOT A WAY AROUND THE GREEN FREEZE (autopsy 8e124182). The freeze lives in the
@@ -4867,7 +4884,7 @@ export class ToolDispatcher {
             `preview-guard redirected manual preview command: ${command.slice(0, 160)}`,
           );
           this.state?.appendTerminal(pmsg);
-          return pmsg;
+          refuse(pmsg);
         }
         // Governance (Layer 58): classify the command's risk BEFORE execution.
         // DESTRUCTIVE SOURCE-DIR DELETION — BLOCKED (deep-test "PaisaTrack", 2026-07-15). The builder
@@ -4883,7 +4900,7 @@ export class ToolDispatcher {
             `[BLOCKED-DESTRUCTIVE] refused source-dir delete: ${command.slice(0, 200)}`,
           );
           this.state?.appendTerminal(blockMsg);
-          return blockMsg;
+          refuse(blockMsg);
         }
         // RUNTIME MANIFEST DELETION — BLOCKED (autopsy 042e472f): package.json / index.html / tsconfig.json
         // removed one by one slipped past every source guard, and the project could no longer run at all.
@@ -4892,7 +4909,7 @@ export class ToolDispatcher {
           const blockMsg = runtimeManifestDeletionMessage(manifestTarget);
           try { getWorkspaceMemory(this.workspaceId).recordAudit(`[BLOCKED-DESTRUCTIVE] refused runtime-manifest delete: ${command.slice(0, 200)}`); } catch { /* audit best-effort */ }
           this.state?.appendTerminal(blockMsg);
-          return blockMsg;
+          refuse(blockMsg);
         }
         // STILL-IMPORTED FILE DELETION — BLOCKED (admin 2026-08-02: "galat tarah se file delete ho hi na").
         // The bulk guard above deliberately allows deleting ONE stale file by name — right for genuinely
@@ -4917,7 +4934,7 @@ export class ToolDispatcher {
             } catch { /* audit best-effort */ }
             try { this.userFileRefusalSink?.(unasked); } catch { /* the report line is best-effort */ }
             this.state?.appendTerminal(blockMsg);
-            return blockMsg;
+            refuse(blockMsg);
           }
         }
         const deleteTargets = singleSourceDeleteTargets(command);
@@ -4933,7 +4950,7 @@ export class ToolDispatcher {
                 );
               } catch { /* audit best-effort */ }
               this.state?.appendTerminal(blockMsg);
-              return blockMsg;
+              refuse(blockMsg);
             }
           }
           // Q-118: nothing imports it, but its name says it builds a feature the user asked for, and no
@@ -4954,7 +4971,7 @@ export class ToolDispatcher {
                 getWorkspaceMemory(this.workspaceId).recordAudit(`[BLOCKED-FEATURE-FILE] refused delete of ${target} (builds requested "${hit.word}")`);
               } catch { /* audit best-effort */ }
               this.state?.appendTerminal(blockMsg);
-              return blockMsg;
+              refuse(blockMsg);
             }
           }
         }
@@ -4972,7 +4989,7 @@ export class ToolDispatcher {
             `[BLOCKED-DEPMUTATION:${depMutation.kind}] refused: ${command.slice(0, 200)}`,
           );
           this.state?.appendTerminal(blockMsg);
-          return blockMsg;
+          refuse(blockMsg);
         }
         // HIGH-risk commands are BLOCKED outright — they are irreversible, exfiltrate
         // secrets, or execute remote code. MEDIUM commands run but carry a warning.
@@ -4983,7 +5000,7 @@ export class ToolDispatcher {
             `[BLOCKED-HIGH] refused: ${command.slice(0, 200)} — ${risk.reasons.join('; ')}`,
           );
           this.state?.appendTerminal(blockMsg);
-          return blockMsg;
+          refuse(blockMsg);
         }
         const cmdStartedAt = Date.now();
         // Pin bare installs of known-volatile packages to their known-good range BEFORE running
@@ -10573,7 +10590,7 @@ export class ToolDispatcher {
         // re-ran update_preview / npm run dev until the step cap (~10 min burned, build reported
         // failed even though the code was finished).
         if (this.previewGaveUp) {
-          return 'FINAL: the live preview could not be brought up in this sandbox (a managed dev-server start was already attempted). Do NOT call update_preview or restart the dev server again. Finish the build now and tell the user honestly: the files are complete and saved, but the live preview is unavailable in this environment.';
+          refuse('FINAL: the live preview could not be brought up in this sandbox (a managed dev-server start was already attempted). Do NOT call update_preview or restart the dev server again. Finish the build now and tell the user honestly: the files are complete and saved, but the live preview is unavailable in this environment.');
         }
         // Verify the port is actually listening before publishing. Bounded TWO ways so this tool can
         // NEVER hang the whole build (the real freeze we saw: a single sandbox runCommand stalled and
@@ -10644,7 +10661,7 @@ export class ToolDispatcher {
         try {
           rawUrl = await withTimeout(this.actuator.getPortUrl(this.workspaceId, port), 10_000, 'preview-get-url');
         } catch {
-          return `WARNING: could not resolve the preview URL for port ${port} (the sandbox did not respond in time) — preview NOT published. Make sure the dev server is up, then call update_preview again.`;
+          refuse(`WARNING: could not resolve the preview URL for port ${port} (the sandbox did not respond in time) — preview NOT published. Make sure the dev server is up, then call update_preview again.`);
         }
         const url = applyPreviewDomain(rawUrl);
         if (!portReady) {
@@ -10653,9 +10670,9 @@ export class ToolDispatcher {
           this.previewFails++;
           if (this.previewFails >= 2) {
             this.previewGaveUp = true;
-            return `WARNING: port ${port} is still not responding even after a managed dev-server start.${healNote} Preview NOT published. Do NOT retry update_preview or the dev server — finish the build now and tell the user honestly that the live preview is unavailable; their files are complete and saved.`;
+            refuse(`WARNING: port ${port} is still not responding even after a managed dev-server start.${healNote} Preview NOT published. Do NOT retry update_preview or the dev server — finish the build now and tell the user honestly that the live preview is unavailable; their files are complete and saved.`);
           }
-          return `WARNING: port ${port} did not respond.${healNote} Preview NOT published. If dependencies were still installing, you may call update_preview ONE more time; do not retry beyond that.`;
+          refuse(`WARNING: port ${port} did not respond.${healNote} Preview NOT published. If dependencies were still installing, you may call update_preview ONE more time; do not retry beyond that.`);
         }
         this.previewFails = 0;
         /**
@@ -11100,7 +11117,7 @@ export class ToolDispatcher {
           catch { /* skip unreadable/nonexistent */ }
         }
         const result = computeMove(contents, from, to);
-        if (!result.ok) return `codemod_move_file failed: ${result.error}`;
+        if (!result.ok) refuse(`codemod_move_file failed: ${result.error}`);
         // TD-3: a failed write must not be followed by `rm`. Swallowing the error used to delete
         // the only copy of the file.
         const failed: string[] = [];
@@ -11114,7 +11131,7 @@ export class ToolDispatcher {
         const destOk = !failed.includes(to) && destContent !== undefined &&
           (await this.actuator.readFile(this.workspaceId, to).then((c) => c === destContent, () => false));
         if (!destOk || failed.length > 0) {
-          throw new Error(`codemod_move_file did not complete: ${failed.length ? `could not write ${failed.join(', ')}` : `${to} could not be verified`}. ` +
+          refuse(`codemod_move_file did not complete: ${failed.length ? `could not write ${failed.join(', ')}` : `${to} could not be verified`}. ` +
             `${from} was NOT deleted, so nothing was lost. Fix the cause and retry, or move the file with write_file + bash rm.`);
         }
         this.state?.recordFileChange({ path: to, kind: 'create' }, agent);   // only after success

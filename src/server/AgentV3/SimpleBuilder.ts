@@ -519,7 +519,7 @@ export const DESIGN_KIT_VOCABULARY: string[] = [
   '- Surfaces: `.card` (items of a list as `.card` rows); `.nb-table-wrap` > `table.nb-table`; `.nb-stats` > `.nb-stat` (+ `-label` / `-value`); `.nb-hero`, `.nb-auth-card`, `.nb-modal`.',
   '- Controls: `button.btn-primary` for the main action; a plain <button> is already a tinted secondary; `.btn-ghost`; a filter or view switch is `.nb-tabs` > `button.nb-tab` with aria-selected="true" on the chosen one; each field in `.field` with a <label>.',
   '- States: `.nb-empty` (+ `-icon` / `-title` / `-text`) for anything that can be empty; `.nb-skeleton` while loading; `.nb-toast` for "Saved"/"Copied".',
-  '- Motion: `.nb-rise` on a panel that appears; `.nb-stagger` on a list so its items arrive one by one.',
+  '- Motion (only when the user asks for animation): `.nb-rise` on a panel that appears; `.nb-stagger` on a list so its items arrive one by one.',
   '- SHOP / menu / catalogue: `.nb-header` with `.nb-brand`, an `input.nb-search` and `.nb-header-actions`; categories as `.nb-chips` > `button.nb-chip` (`.active` on the chosen one); products in `.nb-grid` > `.nb-product` (`.nb-product-img`, `h3.nb-product-title`, `.nb-price-row` > `.nb-price` + `.nb-mrp` (struck through) + `.nb-discount`, then `button.btn-primary.nb-product-cta`); `.nb-qty` for − 1 +; `.nb-cart-bar` fixed at the bottom; `.nb-footer`.',
   '- A link that acts as a button (`<a class="btn-primary">`) gets the full button shape — no need to restyle it.',
   '- Chat: `.nb-chat` holding `.nb-msg nb-msg-user` / `.nb-msg nb-msg-bot`, with `.nb-composer` at the bottom.',

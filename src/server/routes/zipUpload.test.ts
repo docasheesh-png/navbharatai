@@ -1,7 +1,35 @@
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validChunkMeta, uploadOwnedBy, ZIP_CHUNK_BYTES, MAX_ARCHIVE_BYTES } from './zipUpload';
+import express from 'express';
+import type { Server } from 'node:http';
+import { validChunkMeta, uploadOwnedBy, ZIP_CHUNK_BYTES, MAX_ARCHIVE_BYTES, registerZipUploadRoutes } from './zipUpload';
+import { setDb } from '../lib/db';
+import { WORKSPACE_BUILD_LEASE_COLLECTION, BUILD_RUNNING_ELSEWHERE_CODE } from '../AgentV3/workspaceBuildLease';
+
+const zipWrites = vi.hoisted(() => ({ paths: [] as string[] }));
+
+vi.mock('../lib/authMiddleware', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/authMiddleware')>();
+  return {
+    ...actual,
+    verifyFirebaseToken: async () => 'user1',
+    verifyFirebaseIdentity: async () => ({ uid: 'user1', email: 'user1@example.com', emailVerified: true }),
+  };
+});
+
+vi.mock('./actuatorFactory', () => ({
+  buildActuator: () => ({
+    ensureWorkspace: async () => {},
+    writeFile: async (_ws: string, path: string) => { zipWrites.paths.push(path); },
+    listFiles: async () => [] as string[],
+    readFile: async () => { throw new Error('ENOENT'); },
+    runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+  }),
+}));
 
 describe('validChunkMeta', () => {
   it('accepts a real chunk sequence', () => {
@@ -122,5 +150,77 @@ describe('the 5 GB import (admin 2026-08-04) — real, because commit STREAMS fr
     expect(SRC).toContain('declaredBytes > MAX_ARCHIVE_BYTES');
     expect(SRC).toContain('hasSpaceForUpload(free, declaredBytes)');
     expect(SRC).toContain('507');
+  });
+});
+
+describe('zip commit takes the build lease', () => {
+  const prevPhone = process.env.AGENTV3_IMPORT_REQUIRES_PHONE;
+  const prevLease = process.env.AGENTV3_WORKSPACE_LEASE;
+  let server: Server | null = null;
+  let dirs: string[] = [];
+
+  afterEach(() => {
+    process.env.AGENTV3_IMPORT_REQUIRES_PHONE = prevPhone;
+    if (prevLease === undefined) delete process.env.AGENTV3_WORKSPACE_LEASE;
+    else process.env.AGENTV3_WORKSPACE_LEASE = prevLease;
+    setDb(null);
+    zipWrites.paths.length = 0;
+    if (server) { server.close(); server = null; }
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    dirs = [];
+  });
+
+  it('a busy lease returns 409 and the actuator receives no writes', async () => {
+    process.env.AGENTV3_IMPORT_REQUIRES_PHONE = 'off';
+    delete process.env.AGENTV3_WORKSPACE_LEASE;
+    const app = express();
+    app.use(express.json());
+    registerZipUploadRoutes(app);
+    const port = await new Promise<number>((resolve) => {
+      const s = app.listen(0, '127.0.0.1', () => {
+        server = s;
+        resolve((s.address() as { port: number }).port);
+      });
+    });
+    const base = `http://127.0.0.1:${port}`;
+    const begin = await fetch(`${base}/api/zip-upload/begin`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer test' },
+      body: JSON.stringify({ fileName: 'project.zip', fileSize: 128 }),
+    });
+    expect(begin.status).toBe(200);
+    const { uploadId } = await begin.json() as { uploadId: string };
+    const srcDir = mkdtempSync(join(tmpdir(), 'nbai-zip-src-'));
+    dirs.push(srcDir);
+    writeFileSync(join(srcDir, 'App.tsx'), 'export const a = 1;\n');
+    const archive = join(tmpdir(), `nbai-zip-${uploadId}.zip`);
+    execFileSync('python3', ['-c', 'import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],"w"); z.write(sys.argv[2],"src/App.tsx"); z.close()', archive, join(srcDir, 'App.tsx')]);
+
+    const workspaceId = 'agentv3-user1-sessionpr12';
+    const key = `${WORKSPACE_BUILD_LEASE_COLLECTION}/${workspaceId}`;
+    const docs = new Map<string, Record<string, unknown>>();
+    docs.set(key, { token: 'held-by-other', owner: 'other-instance', heartbeatAt: Date.now(), userId: 'user1' });
+    setDb({
+      collection: (name: string) => ({ doc: (id: string) => `${name}/${id}` }),
+      runTransaction: async (fn: (tx: {
+        get(ref: unknown): Promise<{ exists: boolean; data(): Record<string, unknown> | undefined }>;
+        set(ref: unknown, value: Record<string, unknown>): void;
+        delete(ref: unknown): void;
+      }) => Promise<unknown>) => fn({
+        get: async (ref) => ({ exists: docs.has(ref as string), data: () => docs.get(ref as string) }),
+        set: (ref, v) => { docs.set(ref as string, v); },
+        delete: (ref) => { docs.delete(ref as string); },
+      }),
+    } as never);
+
+    const commit = await fetch(`${base}/api/zip-upload/commit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer test' },
+      body: JSON.stringify({ uploadId, workspaceId }),
+    });
+    expect(commit.status).toBe(409);
+    const body = await commit.json() as { code?: string };
+    expect(body.code).toBe(BUILD_RUNNING_ELSEWHERE_CODE);
+    expect(zipWrites.paths).toEqual([]);
   });
 });

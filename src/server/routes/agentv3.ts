@@ -565,7 +565,8 @@ import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
-import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt } from '../AgentV3/previewAutoRepair';
+import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt, claimAutoRepair } from '../AgentV3/previewAutoRepair';
+import { clearPreviewGaveUp } from '../AgentV3/previewGiveUp';
 import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
 import { frameworkMismatchFromListing, messageNamesAFramework, answersFrameworkQuestion, frameworkQuestionMarker, frameworkQuestionSteer, frameworkAnswerNote } from '../AgentV3/frameworkQuestion';
 import type { FrameworkCoherence } from '../AgentV3/ProjectImport';
@@ -5747,9 +5748,14 @@ async function noteBuildOutcome(
     const message = typeof req.body?.message === 'string' ? req.body.message.slice(0, 4000) : '';
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId || !message) { res.status(400).json({ error: 'workspaceId and message are required.' }); return; }
+    if (!previewAutoRepairEnabled()) { res.json({ ok: true, run: false, reason: 'Automatic repair is switched off.' }); return; }
+    // BLD-11: claim synchronously, before any await, so two crash reports cannot both start a repair.
+    if (!claimAutoRepair(workspaceId)) {
+      res.json({ ok: true, run: false, reason: 'This build was already repaired automatically once — the Fix with AI button is next.' });
+      return;
+    }
     // VERIFIED owner only: this route can start a paid repair, so a claimed uid is never enough (aClaimedUidReadsNoOnesSource).
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
-    if (!previewAutoRepairEnabled()) { res.json({ ok: true, run: false, reason: 'Automatic repair is switched off.' }); return; }
     const report = await loadDiagnostics(workspaceId).catch(() => null);
     const facts = {
       buildEnded: !!report && typeof report.endedAt === 'number',
@@ -5759,6 +5765,10 @@ async function noteBuildOutcome(
     };
     const pre = autoRepairPrecheck(facts);
     if (pre) { res.json({ ok: true, ...pre }); return; }
+    // Claim durably BEFORE the long reproduce, so a second instance sees the marker while the first is still looking.
+    if (report) {
+      await saveDiagnostics(workspaceId, { ...report, previewAutoRepairAt: Date.now() }).catch(() => {});
+    }
     // REPRODUCE — on a sandbox that is ALREADY awake, never one started just to check.
     let reproduced: boolean | null = null;
     let seen: string[] = [];
@@ -5779,10 +5789,6 @@ async function noteBuildOutcome(
       }
     } catch { reproduced = null; /* could not look — the decision says so, and the button stays */ }
     const decision = autoRepairDecision({ ...facts, reproduced });
-    if (decision.run && report) {
-      // Claimed BEFORE the client sends the repair, so a second report of the same crash cannot start a second one.
-      await saveDiagnostics(workspaceId, { ...report, previewAutoRepairAt: Date.now() }).catch(() => {});
-    }
     res.json({ ok: true, ...decision, ...(decision.run ? { prompt: autoRepairPrompt(message, seen) } : {}) });
   });
 
@@ -15509,6 +15515,7 @@ async function noteBuildOutcome(
         if (inBuildGreenAt > 0 && postGreenWrites.length < 2000) postGreenWrites.push({ path, pass, at: Date.now() });
       }, workspaceId);
 
+      clearPreviewGaveUp(workspaceId);
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
         // ⚠️ AND COUNT IT (autopsy a2b9c802): this hook only recorded, so the futility breaker never saw

@@ -53,8 +53,8 @@ export function commandTimingText(timing: Partial<CommandTiming> | null | undefi
   return ` — our setup ${secs(setupMs)} · sandbox ${secs(sandboxMs)} · command ${secs(runMs)} · our checks after ${secs(afterMs)}`;
 }
 
-/** The incremental-build file every typecheck NavBharatAI runs writes to (`WRITE_TYPECHECK_TSBUILDINFO`). */
-export const OUR_TSBUILDINFO = '/tmp/agentv3.tsbuildinfo';
+/** Matches every per-dispatcher incremental cache (`/tmp/agentv3-<id>.tsbuildinfo`). */
+export const OUR_TSBUILDINFO_RE = /\/tmp\/agentv3-[A-Za-z0-9]+\.tsbuildinfo/;
 
 /**
  * A readable name for a command the PLATFORM ran, or null for anyone else's (autopsy c70bcbb4). Our typecheck
@@ -63,6 +63,6 @@ export const OUR_TSBUILDINFO = '/tmp/agentv3.tsbuildinfo';
  */
 export function ourCommandLabel(command: string): string | null {
   const c = String(command ?? '');
-  if (c.includes(OUR_TSBUILDINFO) && /\btsc\b[^\n]*--noEmit/.test(c)) return 'typecheck (tsc --noEmit, run by NavBharatAI)';
+  if (OUR_TSBUILDINFO_RE.test(c) && /\btsc\b[^\n]*--noEmit/.test(c)) return 'typecheck (tsc --noEmit, run by NavBharatAI)';
   return null;
 }

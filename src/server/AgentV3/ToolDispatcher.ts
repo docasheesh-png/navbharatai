@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { entryShadowNote } from './entryShadow';
 import { bannedInstallRefusal, bannedPackageGuardEnabled, stripBannedDeps, strippedDepsNote } from './reliability/bannedPackages';
 import { PARTIAL_CONTENT_KEY, PendingWrites, resumeTruncatedEnabled, truncatedWriteNotice } from './reliability/resumeWrite';
 import { recordingActuator } from './recordedWrites';
+import { markPreviewGaveUp, previewGaveUp } from './previewGiveUp';
 import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
 import { repeatedEditNotice } from './repeatedEdits';
 import { missingMembers, declaredMembers, relativeImports, resolveCandidates, memberListNote, RECIPE_LIBRARY_PATH, type MissingMember } from './typeMembers';
@@ -838,7 +840,8 @@ export class ToolDispatcher {
   // re-ran update_preview + npm run dev in a loop until the step cap — ~10 min burned on an
   // unreachable preview). Counted per dispatcher (= per build for the Architect).
   private previewFails = 0;
-  private previewGaveUp = false;
+  /** Per-dispatcher incremental cache, so two builds never share one tsbuildinfo (TD-18). */
+  private readonly tsBuildInfoId = randomUUID().slice(0, 8);
 
   /**
    * "made by NavBharatAI" app-signature toggle (admin 2026-07-16). Default ON (the viral-growth
@@ -2276,7 +2279,7 @@ export class ToolDispatcher {
           this.workspaceId,
           // Robust tsc — the LOCAL binary (never `npx tsc`, which can hit the `tsc@2.0.4` squatter's
           // help page and never typecheck; build report 2026-07-21). See tscCommand.ts.
-          robustTscCommand('--noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo', '2>&1 | head -80'),
+          robustTscCommand(`--noEmit --incremental --tsBuildInfoFile /tmp/agentv3-${this.tsBuildInfoId}.tsbuildinfo`, '2>&1 | head -80'),
         );
         return `${r.stdout || ''}\n${r.stderr || ''}`.trim();
       },
@@ -3183,7 +3186,7 @@ export class ToolDispatcher {
       const startedAt = Date.now();
       void this._writeTypecheckQueue.run(async () => {
         try {
-          const r = await withTimeout(this.actuator.runCommand(this.workspaceId, writeTypecheckWarmupCommand()), WRITE_TYPECHECK_TIMEOUT_MS, 'write-typecheck-warmup');
+          const r = await withTimeout(this.actuator.runCommand(this.workspaceId, writeTypecheckWarmupCommand(this.tsBuildInfoId)), WRITE_TYPECHECK_TIMEOUT_MS, 'write-typecheck-warmup');
           // Only a warm-up that really compiled warmed anything (autopsy 8257ca59).
           if (String(r?.stdout ?? '').includes(WARMUP_COMPILED_MARKER)) s.warmupMs = Date.now() - startedAt;
           else s.warmupSkipped = true;
@@ -3507,7 +3510,7 @@ export class ToolDispatcher {
       let neverRan = false; // the compiler did not look at the project — neither clean nor failed
       let notReady = false; // the compiler was not ready (an install running) — the check stood down at once
       let errors = await this._writeTypecheckQueue.run(async () => {
-        const command = writeTypecheckCommand();
+        const command = writeTypecheckCommand(this.tsBuildInfoId);
         const startedAt = Date.now();
         let r: { stdout: string; stderr: string };
         try {
@@ -6787,7 +6790,7 @@ export class ToolDispatcher {
           && files.some((f) => /\.tsx?$/i.test(f) && !/\.d\.ts$/i.test(f));
         if (isTsProject && !syntaxHeader) {
           try {
-            const tscCommand = robustTscCommand('--noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo', '2>&1 | head -60');
+            const tscCommand = robustTscCommand(`--noEmit --incremental --tsBuildInfoFile /tmp/agentv3-${this.tsBuildInfoId}.tsbuildinfo`, '2>&1 | head -60');
             const tscStartedAt = Date.now();
             const r = await withTimeout(
               this.actuator.runCommand(this.workspaceId, tscCommand),
@@ -10684,6 +10687,9 @@ export class ToolDispatcher {
 
       case 'update_preview': {
         const port = reqNum(input, 'port');
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+          refuse('port must be an integer 1–65535');
+        }
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
@@ -10698,7 +10704,7 @@ export class ToolDispatcher {
         // including a managed dev-server start — stop the retry loop cold. Without this the model
         // re-ran update_preview / npm run dev until the step cap (~10 min burned, build reported
         // failed even though the code was finished).
-        if (this.previewGaveUp) {
+        if (previewGaveUp(this.workspaceId)) {
           refuse('FINAL: the live preview could not be brought up in this sandbox (a managed dev-server start was already attempted). Do NOT call update_preview or restart the dev server again. Finish the build now and tell the user honestly: the files are complete and saved, but the live preview is unavailable in this environment.');
         }
         // Verify the port is actually listening before publishing. Bounded TWO ways so this tool can
@@ -10778,7 +10784,7 @@ export class ToolDispatcher {
           // "preview is EARNED" rule.
           this.previewFails++;
           if (this.previewFails >= 2) {
-            this.previewGaveUp = true;
+            markPreviewGaveUp(this.workspaceId);
             refuse(`WARNING: port ${port} is still not responding even after a managed dev-server start.${healNote} Preview NOT published. Do NOT retry update_preview or the dev server — finish the build now and tell the user honestly that the live preview is unavailable; their files are complete and saved.`);
           }
           refuse(`WARNING: port ${port} did not respond.${healNote} Preview NOT published. If dependencies were still installing, you may call update_preview ONE more time; do not retry beyond that.`);

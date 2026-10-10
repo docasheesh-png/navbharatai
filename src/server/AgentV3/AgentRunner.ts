@@ -275,7 +275,7 @@ const PROMPT_PREVIEW_HEAD = 4000;
 const SEPARATOR = PROMPT_PREVIEW_SEPARATOR;
 
 const PARALLEL_SAFE_TOOLS = new Set<string>([
-  'read_file', 'grep', 'glob', 'recall', 'evaluate', 'second_opinion', 'consensus',
+  'read_file', 'grep', 'glob', 'recall', 'second_opinion', 'consensus',
 ]);
 // Sub-agent (task) roles that only READ and REPORT (no write_file/edit) — safe to run in
 // parallel. Builder/fixer roles (frontend, debugger, tester, …) WRITE, so they stay serial to

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Terminal } from 'xterm';
 import type { FitAddon } from 'xterm-addon-fit';
-import { authJsonHeaders as authHeaders } from '../../lib/authHeaders';
+import { authedHeaders } from '../../lib/authHeaders';
 import { softKeyboardWouldOpen } from '../../lib/dismissKeyboard';
 
 /**
@@ -71,7 +71,7 @@ export async function closeShellSession(
   try {
     await fetch('/api/agentv3/shell/close', {
       method: 'POST',
-      headers: await authHeaders(),
+      headers: await authedHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ workspaceId, userId, email: email || '', shellId }),
     });
   } catch { /* the server's idle reaper is the backstop */ }
@@ -301,7 +301,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       // pollWake below, judged by PROGRESS, never by a clock.
       const res = await fetch('/api/agentv3/shell/open', {
         method: 'POST',
-        headers: await authHeaders(),
+        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ workspaceId, userId, email: email || '', cols, rows }),
         signal: AbortSignal.timeout(25_000),
       });
@@ -312,7 +312,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
         // Say WHICH failure this is. A bare "couldn't open" sends the user (and whoever debugs it)
         // hunting, when the status code already names the cause.
         const message = j?.error || (
-          res.status === 401 || res.status === 403 ? 'Your session expired — reload the page and sign in again to use the terminal.'
+          res.status === 401 || res.status === 403 ? 'Sign in to use the terminal. Your session expired — reload the page and sign in again.'
           : res.status === 429 ? 'Too many terminals opened just now. Wait a few seconds and try again.'
           : res.status === 404 ? 'The terminal service is not enabled on this server.'
           : res.status >= 500 ? `The terminal service failed (${res.status}). Try again in a moment.`
@@ -427,9 +427,13 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       try {
         const params = new URLSearchParams({ workspaceId: workspaceId || '', userId: userId || '', email: email || '' });
         const res = await fetch(`/api/agentv3/shell/wake?${params.toString()}`, {
-          headers: await authHeaders(),
+          headers: await authedHeaders({ 'Content-Type': 'application/json' }),
           signal: AbortSignal.timeout(10_000),
         });
+        if (res.status === 401) {
+          fail('Sign in to use the terminal. Your session expired — reload the page and sign in again.');
+          return;
+        }
         j = await res.json().catch(() => null);
       } catch { /* one missed poll is not a verdict — the no-progress guard is */ }
       const w = j?.wake;
@@ -479,7 +483,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
           cursor: String(cursorRef.current),
         });
         const res = await fetch(`/api/agentv3/shell/stream?${params.toString()}`, {
-          headers: await authHeaders(),
+          headers: await authedHeaders({ 'Content-Type': 'application/json' }),
           signal: controller.signal,
         });
         if (res.status === 404) {
@@ -580,7 +584,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
     try {
       const res = await fetch('/api/agentv3/shell/input', {
         method: 'POST',
-        headers: await authHeaders(),
+        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ workspaceId, userId, email: email || '', shellId: shellIdRef.current, data: batch }),
       });
       return res.ok;
@@ -641,7 +645,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
         try {
           await fetch('/api/agentv3/shell/resize', {
             method: 'POST',
-            headers: await authHeaders(),
+            headers: await authedHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ workspaceId, userId, email: email || '', shellId, cols, rows }),
           });
         } catch { /* cosmetic until the next resize */ }

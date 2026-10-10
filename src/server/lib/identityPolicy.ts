@@ -66,6 +66,14 @@ export async function verifiedIdentity(req: Request): Promise<VerifiedIdentity |
   return verifyFirebaseIdentity(req);
 }
 
+/**
+ * The terminal and exec open a machine. Default ON (D-4): an unverified caller, including an
+ * anon workspace, gets 401. `AGENTV3_TERMINAL_REQUIRE_VERIFIED=off` restores the previous door.
+ */
+export function terminalRequiresVerified(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.AGENTV3_TERMINAL_REQUIRE_VERIFIED ?? 'on').trim().toLowerCase() !== 'off';
+}
+
 export type MoneyGateResult =
   | { ok: true; uid: string; email: string | null; emailVerified?: boolean }
   | { ok: false; status: 401; error: string };

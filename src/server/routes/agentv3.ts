@@ -4649,7 +4649,7 @@ async function noteBuildOutcome(
 ): Promise<void> {
   if (!buildOutcomeTrackingEnabled() || !workspaceId) return;
   try {
-    const rec = await buildOutcomeStore.note(workspaceId, patch);
+    const rec = await buildOutcomeStore.note(workspaceId, patch, (await buildOutcomeStore.get(workspaceId).catch(() => null))?.buildId);
     // No record means no build has finished for this workspace — there is nothing to judge, and
     // inventing one here would be inventing a build that never happened.
     if (!rec || !rec.buildId) return;
@@ -12606,6 +12606,36 @@ async function noteBuildOutcome(
       buildObs.telemetryRecorded = true;
       recordPlatformBuild(rec);
     };
+    // ONE failed build counts ONCE, including the one the watchdog ends. The settle and
+    // finalizeOnDeadline can both reach this; the flag is the same idea as telemetry above.
+    let failureLedgerRecorded = false;
+    const recordFailureLedgerOnce = (entry: Parameters<typeof failureLedgerStore.record>[0]) => {
+      if (failureLedgerRecorded) return;
+      failureLedgerRecorded = true;
+      void failureLedgerStore.record(entry);
+    };
+    // The cost expression lives HERE so the settle and the watchdog cannot drift. It is the
+    // expression the settle already used: real provider cost of the ledger plus the VM.
+    // Nothing in this helper changes what the user is billed.
+    const ledgerEntryFor = (i: {
+      entries: Parameters<typeof realProviderCostUsd>[0];
+      remainder: { inputTokens: number; outputTokens: number };
+      sandboxUsd: number;
+      summary: string;
+      rootCause: string;
+      issues: ReadonlyArray<{ code: string }> | null | undefined;
+      inputTokens: number;
+      outputTokens: number;
+      startedAt: number;
+    }) => ({
+      category: classifyFailure(i.rootCause || i.summary || '', outcomeCodeOf(i.issues)).category,
+      framework,
+      realUsd: realProviderCostUsd(i.entries, i.remainder) + Math.max(0, i.sandboxUsd || 0),
+      inputTokens: i.inputTokens || 0,
+      outputTokens: i.outputTokens || 0,
+      ms: Math.max(0, Date.now() - i.startedAt),
+      sample: i.rootCause || '',
+    });
     // Force-finalize a build that overran its wall-clock cap — or, once the build has already SUCCEEDED,
     // its much shorter ADVISORY cap (see armAdvisoryCap). Extracted so the initial arm and the re-arm
     // share one implementation. Guarded by rb.ended so it can never double-emit after a clean finish.
@@ -12900,6 +12930,29 @@ async function noteBuildOutcome(
         // (never rendered as a bubble on the resumable path). RC-4's honest-wording lives in the client
         // stopMessage now, so nothing here can claim "almost done".
         const pauseMsg = pauseMsgForReport;
+        // A build the watchdog ended never reached the settle, so the failure ledger would
+        // not see it. Same entry, same cost expression, and the once-flag so a race records it once.
+        try {
+          const sink = buildUsage.total();
+          const ledger = billingCtx.providerLedger;
+          const sandboxUsd = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt).usd;
+          const entries = ledger ? ledger.entries() : [];
+          const remainder = ledger
+            ? decideBuildBilledUsd(ledger, sink, powerLevelReqEffective, userId ?? undefined, email, sandboxUsd, barrenPhases).realCostRemainder
+            : { inputTokens: Math.max(0, sink.inputTokens || 0), outputTokens: Math.max(0, sink.outputTokens || 0) };
+          const failDiag = dl;
+          recordFailureLedgerOnce(ledgerEntryFor({
+            entries,
+            remainder,
+            sandboxUsd,
+            summary: pauseMsg.summary || '',
+            rootCause: failDiag?.rootCause || '',
+            issues: failDiag?.issues,
+            inputTokens: sink.inputTokens || 0,
+            outputTokens: sink.outputTokens || 0,
+            startedAt: billingCtx.buildStartedAt ?? Date.now(),
+          }));
+        } catch { /* the ledger must never change how a deadline ends */ }
         // A pause that waits for the user (free chain spent) is NOT resumable, so the client renders its
         // `summary` as the build's closing line — which is why freePauseMessage's summary is the full
         // sentence. No separate narration: it would say the same thing twice.
@@ -25025,25 +25078,19 @@ async function noteBuildOutcome(
        */
       if (result.ok !== true) {
         try {
-          const failCost = realProviderCostUsd(providerLedger.entries(), realCostRemainderForFailure)
-            + Math.max(0, livePreviewCharge.usd || 0);
           const sink = buildUsage.total();
-          // The build's OWN verdict code decides the category; the summary is only the fallback for a
-          // run that never recorded one. See OUTCOME_TO_CATEGORY — classifying v5's real failures from
-          // their prose would have put nearly all of them in `unknown`.
           const failDiag = buildDiag.report();
-          void failureLedgerStore.record({
-            category: classifyFailure(failDiag.rootCause || result.summary || '', outcomeCodeOf(failDiag.issues)).category,
-            framework,
-            realUsd: failCost,
+          recordFailureLedgerOnce(ledgerEntryFor({
+            entries: providerLedger.entries(),
+            remainder: realCostRemainderForFailure,
+            sandboxUsd: livePreviewCharge.usd,
+            summary: result.summary || '',
+            rootCause: failDiag.rootCause || '',
+            issues: failDiag.issues,
             inputTokens: sink.inputTokens || 0,
             outputTokens: sink.outputTokens || 0,
-            ms: Math.max(0, Date.now() - buildStartedAt),
-            // ONE real example per cause, so "preview: 12 builds" becomes something to act on rather
-            // than something to go and look up twelve times. The rootCause is evidence-derived and
-            // admin-only; the ledger truncates it.
-            sample: failDiag.rootCause || '',
-          });
+            startedAt: buildStartedAt,
+          }));
         } catch { /* the ledger must never be why a failed build fails differently */ }
       }
       let effectiveBilledUsd: number = decidedBilledUsd;

@@ -17,7 +17,7 @@ vi.mock('firebase/auth', () => ({
   setPersistence: () => Promise.resolve(),
   browserLocalPersistence: 'LOCAL',
   indexedDBLocalPersistence: 'IDB',
-  signOut: (...args: unknown[]) => h.signOut(...args),
+  signOut: () => h.signOut(),
 }));
 
 describe('API_READ_CACHE matches the service worker', () => {

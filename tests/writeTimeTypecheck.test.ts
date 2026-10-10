@@ -40,16 +40,20 @@ describe('the switch and the scope', () => {
     expect(shouldTypecheckWrite('package.json')).toBe(false);
   });
 
-  it('🔒 runs the robust LOCAL binary on the ONE shared incremental cache — never npx, never a second cache', () => {
+  it('🔒 runs the robust LOCAL binary on one incremental cache per dispatcher — never npx, never the shared path', () => {
     const cmd = writeTypecheckCommand();
     expect(cmd).toContain('node_modules/.bin/tsc --noEmit --incremental');
     expect(cmd).toContain(`--tsBuildInfoFile ${WRITE_TYPECHECK_TSBUILDINFO}`);
     expect(cmd).not.toMatch(/npx\s+tsc/);
-    // The endgame and the `typecheck` tool use this exact cache path; a different one would make every
-    // write-time run a cold compile.
+    // The no-arg form is the salvage helper's own cache. A dispatcher passes its id so the write-time
+    // check, the warm-up and endgame tsc share THAT build's cache and never another build's.
+    expect(WRITE_TYPECHECK_TSBUILDINFO).toBe('/tmp/agentv3-writecheck.tsbuildinfo');
+    expect(writeTypecheckCommand('abc12def')).toContain('--tsBuildInfoFile /tmp/agentv3-abc12def.tsbuildinfo');
     const dispatcher = readFileSync(resolve(__dirname, '../src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
-    expect(dispatcher).toContain("--tsBuildInfoFile /tmp/agentv3.tsbuildinfo");
-    expect(WRITE_TYPECHECK_TSBUILDINFO).toBe('/tmp/agentv3.tsbuildinfo');
+    expect(dispatcher).toContain('writeTypecheckCommand(this.tsBuildInfoId)');
+    expect(dispatcher).toContain('writeTypecheckWarmupCommand(this.tsBuildInfoId)');
+    expect(dispatcher).toContain('--tsBuildInfoFile /tmp/agentv3-${this.tsBuildInfoId}.tsbuildinfo');
+    expect(dispatcher).not.toContain('/tmp/agentv3.tsbuildinfo');
   });
 });
 

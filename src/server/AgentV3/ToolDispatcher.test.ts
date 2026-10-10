@@ -7,6 +7,7 @@ import type { ToolUse } from './ClaudeClient';
 import type { AgentEvent } from './types';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { parseIgnoreFile } from './ignoreRules';
+import { clearPreviewGaveUp } from './previewGiveUp';
 
 /** An in-memory fake sandbox implementing just the ActuatorPort slice. */
 class FakeActuator implements ActuatorPort {
@@ -64,6 +65,7 @@ describe('ToolDispatcher', () => {
     events = [];
     stream.subscribe((e) => events.push(e), false);
     state = new WorkspaceState(stream);
+    clearPreviewGaveUp('ws-1');
     d = new ToolDispatcher(act, 'ws-1', state, stream);
   });
 
@@ -1509,6 +1511,7 @@ describe('ToolDispatcher — secret redaction on the user-visible event surface 
     events = [];
     stream.subscribe((e) => events.push(e), false);
     state = new WorkspaceState(stream);
+    clearPreviewGaveUp('ws-1');
     d = new ToolDispatcher(act, 'ws-1', state, stream);
   });
 
@@ -1687,7 +1690,8 @@ describe('ToolDispatcher.endgameIo — incremental tsc', () => {
     await d.endgameIo().runTsc();
     expect(commands).toHaveLength(1);
     expect(commands[0]).toContain('--incremental');
-    expect(commands[0]).toContain('--tsBuildInfoFile /tmp/agentv3.tsbuildinfo');
+    expect(commands[0]).toMatch(/--tsBuildInfoFile \/tmp\/agentv3-[A-Za-z0-9]+\.tsbuildinfo/);
+    expect(commands[0]).not.toContain('--tsBuildInfoFile ' + '/tmp/agentv3' + '.tsbuildinfo');
     expect(commands[0]).toContain('--noEmit');
   });
 });

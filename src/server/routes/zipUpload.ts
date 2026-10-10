@@ -31,6 +31,8 @@ import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { extractZipProjectFromDisk, freeDiskBytes, hasSpaceForUpload } from '../AgentV3/ProjectImportStream';
 import { writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { claimWorkspaceBuild, releaseWorkspaceBuild, BUILD_RUNNING_ELSEWHERE_CODE, BUILD_RUNNING_ELSEWHERE_MESSAGE, type BuildLeaseStore } from '../AgentV3/workspaceBuildLease';
+import { processOwnerId } from '../lib/jobLease';
 
 import { importDropSummary } from '../../lib/importDropReport';
 // CROSS-INSTANCE upload state — the fix for "Unknown or expired upload" on a big archive.
@@ -293,11 +295,13 @@ export function registerZipUploadRoutes(app: Express): void {
         await assembleSharedUpload(uploadId, totalChunks, archivePath);
       } catch (err) {
         await deleteSharedUpload(uploadId);
+        discard(uploadId);
         try { fs.unlinkSync(archivePath); } catch { /* best-effort */ }
         res.status(422).json({ error: err instanceof Error ? err.message : 'The upload could not be assembled. Please try again.' });
         return;
       }
     }
+    let releaseLease: (() => Promise<void>) | null = null;
     try {
       // From DISK, streaming — never readFileSync: buffering the archive is what made big imports
       // impossible regardless of the advertised cap (see the module comment on ProjectImportStream).
@@ -318,7 +322,22 @@ export function registerZipUploadRoutes(app: Express): void {
       const { buildActuator } = await import('./actuatorFactory');
       const actuator = buildActuator();
       // 'import' type starts the sandbox EMPTY so the user's app never gets scaffold files mixed in.
-      try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
+      try { await actuator.ensureWorkspace(workspaceId, 'import'); }
+      catch {
+        res.status(503).json({ error: 'The workspace could not be started. Please retry the import in a moment.' });
+        return;
+      }
+      if ((process.env.AGENTV3_WORKSPACE_LEASE ?? '').trim().toLowerCase() !== 'off') {
+        const { getDb } = await import('../lib/db');
+        const store = getDb() as unknown as BuildLeaseStore | null;
+        const token = randomUUID();
+        const claim = await claimWorkspaceBuild(store, { workspaceId, token, owner: processOwnerId(), userId: uid });
+        if (!claim.ok) {
+          res.status(409).json({ code: BUILD_RUNNING_ELSEWHERE_CODE, error: BUILD_RUNNING_ELSEWHERE_MESSAGE });
+          return;
+        }
+        releaseLease = () => releaseWorkspaceBuild(store, { workspaceId, token });
+      }
       const { written, skipped } = await writeWorkspaceFiles(actuator, workspaceId, files);
       // Durable persist — without this the import lives only in an ephemeral sandbox and vanishes.
       // Durable outcome travels in the response (Q-735) — a save that did not happen is not reported as one.
@@ -345,6 +364,7 @@ export function registerZipUploadRoutes(app: Express): void {
     } catch (err: any) {
       res.status(422).json({ error: err?.message || 'That file could not be read as a zip archive.' });
     } finally {
+      if (typeof releaseLease === 'function') await releaseLease().catch(() => {});
       discard(uploadId); // the temp archive is never kept past a commit attempt
       if (ownsShared) {
         // The chunk objects have done their job. Best-effort: a cleanup failure must never fail an

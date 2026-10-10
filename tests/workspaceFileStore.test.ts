@@ -57,6 +57,9 @@ describe('mergeWorkspaceFiles (best-effort, no Firestore in tests)', () => {
     await expect(mergeWorkspaceFiles('ws-1', {})).resolves.toMatchObject({ status: 'no-store' });
   });
   it('saveWorkspaceFiles also stays a safe no-op under VITEST', async () => {
-    await expect(saveWorkspaceFiles('ws-1', { 'a.ts': 'x' })).resolves.toBeUndefined();
+    // Old: resolves.toBeUndefined() — the function returned void and a missing store looked like success.
+    // New: 'no-store' for a real map, 'nothing' for an empty one, so a caller cannot claim a restore point.
+    await expect(saveWorkspaceFiles('ws-1', { 'a.ts': 'x' })).resolves.toBe('no-store');
+    await expect(saveWorkspaceFiles('ws-1', {})).resolves.toBe('nothing');
   });
 });

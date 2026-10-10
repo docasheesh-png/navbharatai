@@ -5,6 +5,7 @@ import {
   decideGreenGuard, restorePlan, greenGuardMessage, greenGuardUnverifiedMessage,
   greenWorkspaceKey, isGreenSnapshotKey, greenGuardEnabled, buildRemoveCommand,
   wantsAttemptBack, attemptWorkspaceKey, attemptRestoredMessage, KEEP_CHANGES_PHRASE,
+  chooseRestoreBase, attemptIsHonoured, greenRestoreTurnStartEnabled, ATTEMPT_TTL_MS,
 } from '../src/server/AgentV3/GreenGuard';
 import { isAppWorkspaceKey } from '../src/server/lib/workspaceIdentity';
 
@@ -327,8 +328,13 @@ describe('"KEEP MY CHANGES" — the escape hatch, because a net you cannot leave
 
   it('honours the Hinglish a real user of this app actually types', () => {
     expect(wantsAttemptBack('mere changes rakho')).toBe(true);
-    expect(wantsAttemptBack('wo wapas do')).toBe(true);
-    expect(wantsAttemptBack('purana wala wapas chahiye')).toBe(true);
+    // D-8: these two were too loose (a request to undo a colour matched them).
+    // Old: wantsAttemptBack('wo wapas do') === true
+    // Old: wantsAttemptBack('purana wala wapas chahiye') === true
+    expect(wantsAttemptBack('header ka color wo wapas do')).toBe(false);
+    expect(wantsAttemptBack('purana wala wapas lao')).toBe(false);
+    expect(wantsAttemptBack('wo wapas do')).toBe(false);
+    expect(wantsAttemptBack('purana wala wapas chahiye')).toBe(false);
   });
 
   it('is NOT a classifier — a merely similar request must not restore a broken tree', () => {
@@ -375,3 +381,42 @@ describe('"KEEP MY CHANGES" — the escape hatch, because a net you cannot leave
     expect(seg).toContain('There is no earlier version of yours saved to bring back');
   });
 });
+
+describe('restore only what it should (GT-6, GT-7)', () => {
+  it('never deletes a file that existed when the turn started', () => {
+    const plan = restorePlan(
+      { 'src/a.ts': 'old' },
+      { 'src/a.ts': 'new', 'src/kept.ts': 'stay', 'src/added.ts': 'extra' },
+      new Set(['src/kept.ts']),
+    );
+    expect(plan.remove).not.toContain('src/kept.ts');
+    expect(plan.remove).toContain('src/added.ts');
+    expect(plan.write['src/a.ts']).toBe('old');
+  });
+
+  it('chooseRestoreBase covers this build, a later turn, an identical tree, and no turn start', () => {
+    const snap = { 'a.ts': 'green' };
+    const turn = { 'a.ts': 'green', 'b.ts': 't2' };
+    expect(chooseRestoreBase({ snapshot: snap, turnStart: turn, snapshotFromThisBuild: true })).toEqual({ base: snap, kind: 'green-snapshot' });
+    expect(chooseRestoreBase({ snapshot: snap, turnStart: turn, snapshotFromThisBuild: false })).toEqual({ base: turn, kind: 'turn-start' });
+    expect(chooseRestoreBase({ snapshot: snap, turnStart: { 'a.ts': 'green' }, snapshotFromThisBuild: false })).toEqual({ base: snap, kind: 'green-snapshot' });
+    expect(chooseRestoreBase({ snapshot: snap, turnStart: null, snapshotFromThisBuild: false })).toBeNull();
+  });
+
+  it('an attempt is honoured for 24h or when it is still the previous build', () => {
+    const now = 1_700_000_000_000;
+    expect(attemptIsHonoured(now - 1000, now, null)).toBe(true);
+    expect(attemptIsHonoured(now - ATTEMPT_TTL_MS - 1, now, null)).toBe(false);
+    expect(attemptIsHonoured(now - ATTEMPT_TTL_MS - 5_000, now, now - ATTEMPT_TTL_MS - 5_000)).toBe(true);
+    expect(attemptIsHonoured(null, now, now)).toBe(false);
+    expect(greenRestoreTurnStartEnabled({} as NodeJS.ProcessEnv)).toBe(true);
+    expect(greenRestoreTurnStartEnabled({ AGENTV3_GREEN_RESTORE_TURN_START: 'off' } as NodeJS.ProcessEnv)).toBe(false);
+  });
+
+  it('the turn-start sentence is the only one that says before this request', () => {
+    const plan = restorePlan({ 'a.ts': 'g' }, { 'a.ts': 'b' });
+    expect(greenGuardMessage(plan, 'turn-start')).toContain('exactly as it was before this request');
+    expect(greenGuardMessage(plan)).not.toContain('before this request');
+  });
+});
+

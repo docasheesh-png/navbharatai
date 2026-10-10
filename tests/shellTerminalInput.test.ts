@@ -235,7 +235,12 @@ describe('ShellTerminal input pipeline', () => {
 
   it('a failed batch retries once, then tells the user — a keystroke must never vanish silently', () => {
     const pump = code.slice(code.indexOf('async function pumpInput'));
-    expect(pump).toContain('await postInputBatch(batch)) && !(await postInputBatch(batch))');
+    // Old assertion: await postInputBatch(batch)) && !(await postInputBatch(batch))
+    // postInputBatch now returns 'ok' | 'elsewhere' | 'fail'. A fail still retries once.
+    // 'elsewhere' reopens the shell once instead of dropping the keys; both dead ends
+    // still write the same sentence.
+    expect(pump).toContain('let result = await postInputBatch(batch);');
+    expect(pump).toContain("if (result === 'fail') result = await postInputBatch(batch);");
     expect(pump).toContain('input did not reach the terminal');
   });
 

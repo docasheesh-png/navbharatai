@@ -219,7 +219,7 @@ describe('ToolDispatcher', () => {
     act.files.set('src/Existing.tsx', 'old content');
     const res = await d.dispatch(
       call('write_files_batch', { files: [
-        { path: 'src/New.tsx', content: 'brand new' },
+        { path: 'src/New.tsx', content: 'export const brand = 1;\n' },
         { path: 'src/Existing.tsx', content: 'REPLACED' },
       ] }),
       'frontend',

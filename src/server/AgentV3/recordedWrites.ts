@@ -32,8 +32,10 @@ export function recordingActuator<T extends WritablePort>(
   inner: T,
   workspaceId: string,
   onWritten: (path: string, content: string) => void,
+  beforeWrite?: (path: string) => void,
 ): T {
   const writeFile = async (ws: string, filePath: string, content: string): Promise<void> => {
+    if (beforeWrite) beforeWrite(filePath);
     await inner.writeFile(ws, filePath, content);
     if (ws === workspaceId && !isDurableSecretEnv(filePath)) {
       try { onWritten(filePath, content); } catch { /* recording must never fail a write */ }

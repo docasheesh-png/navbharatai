@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { resolveAppSource } from '../../lib/workspaceSource';
 import { authedHeaders } from '../../lib/authHeaders';
+import { deliverFile } from '../../lib/downloadFile';
 // Code Minifier & Optimizer (admin 2026-07-26).
 //
 // WHAT CHANGED AND WHY. This screen used to be a bare textarea: the user had to find their own code,
@@ -289,12 +290,7 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files
     if (!outputCode) return;
     const name = selectedPath ? splitPath(selectedPath).name : PASTE_FILENAME[pasteLanguage];
     const blob = new Blob([outputCode], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name.replace(/(\.\w+)$/, '.min$1');
-    a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile(name.replace(/(\.\w+)$/, '.min$1'), blob);
   }, [outputCode, selectedPath, pasteLanguage]);
 
   const handleUseInPreview = useCallback(() => {

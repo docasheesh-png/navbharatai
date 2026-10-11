@@ -93509,3 +93509,135 @@ restricted list. Q-698 therefore waits only on an older bundle still active in a
 The rows were removed from the open queue and their IDs appended to the closed register. Live proof:
 - **Q-750 and Q-752:** image-scan run #108 on `main` (`50894a524`) is green. 0 CRITICAL, the image boots and serves, and the cache step ran with no "Failed to save" warning, so the cache saves for the first time. The nightly scan had been red since 2026-10-05.
 - **Q-751** is proven by the next `.aab` run: it must log no "`track` is deprecated" warning.
+
+## 2026-10-11 — The admin: "sabhi open Q ko complete karna hai". Analysis of all 77 open rows; Q-790 fixed; Q-791 opened
+
+**Analysis (given to the admin in chat):**
+- 4 OPEN rows the session takes now: Q-790, Q-789, Q-381, Q-600.
+- 8 not-defect rows wait on a yes.
+- 13 rows are already fixed by later work, or are instances whose data is gone; the class now self-reports, and closing them was proposed.
+- 26 decisions, each with a recommendation.
+- 26 admin-only console, key or device steps.
+- Stale facts corrected in the analysis:
+  - Q-142 is fixed in code (`firestore.rules` is owner-only); only the rules deploy, which is Q-610, remains.
+  - Q-705's step 7 is not needed (the default compute account holds no roles).
+  - Q-109's key was still empty on 2026-09-27.
+
+**Q-790:** about 20 client files saved files with a raw `<a download>`, which iOS ignores.
+- **Fix:** one `deliverFile` helper (text or binary). It uses the share sheet when it can take a file; otherwise an attached anchor whose URL is revoked only after the click.
+- All 24 sites in 20 files go through it. Sites that show a note now say what really happened.
+- **Sibling found:** neither Capacitor shell handles a download, and the Android WebView has no share sheet, so the Android app never saved any generated file. Inside the app the helper now writes to Documents/NavBharatAI. The device proof is **Q-791** (BLOCKED, device check).
+- **Lock:** `tests/everyDownloadGoesThroughOneHelper.test.ts`. A census of every client file, plus each platform's behaviour. 4 reversions, 4 failures.
+- **KB:** `saving_files_on_phone`.
+
+**Q-789 (same day, same PR):** Dark Mode Generator.
+- **Bug 1:** the override table was read only by Manual.
+- **Bug 2:** Manual set `color` and `background-color` to one value, so text went invisible.
+- **Fix:** the builder moved to `src/lib/darkModeCss.ts`. Each colour is swapped only on its own property, and an override becomes a real rule in every strategy.
+- Without overrides, the output is byte-identical to before (proven against a copy of the old builder).
+- **Lock:** `tests/aDarkModeMappingDoesWhatItsTableSays.test.ts`. 3 reversions, 3 failures.
+
+**Q-381 batch two (same day):** 47 → 37.
+- Ten WARNING/INFO codes whose recording site says they are about our run joined `PROCESS_ONLY_CODES`: our fast lane, our import mechanics, our sandbox database, our review budget, our repair rollback, and a model's tool call.
+- Left out and pinned by a test: `STUCK_TOOL` (ERROR) and `REVIEWER_AUTOFIX_INCOMPLETE` (about the app).
+- Locked in `aProblemTheUserIsShownCanBeActedOn` (batch-two describe; reversion proven).
+
+**Q-600 batch four (same day):** AgentV3Panel.tsx 11 → 0 (the baseline is now App.tsx 46 only).
+- Removed the dormant report download/copy/history helpers, as the 2026-07-29 admin-only decision's comment said to do in a dedicated cleanup.
+- **Defects found and fixed:**
+  - The local report cache kept writing admin-only reports, provider names included, to user devices with no reader. It is removed, and the stored copy is cleared on open.
+  - The Files tab hid its loading and error state behind "No files shown.". The empty state now says which.
+- **Lock:** `tests/theFilesTabSaysWhyItIsEmpty.test.ts` (reversion proven).
+
+### 2026-10-11 — Q-789 and Q-790 closed (#3656 merged by the admin)
+
+#3656 merged at 11:43 UTC. Its two rows are deleted from `BUILD_REPORT_QUEUE.md` and appended to
+`docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`, on a fresh `main`. Q-791 (the Android device check of the
+Documents/NavBharatAI save) stays open as 🟡 BLOCKED on a real phone with the next `.aab`, and now has
+its own line in the queue's summary table.
+
+### 2026-10-11 — Q-600 batch five: App.tsx 46 → 0, the backlog reaches zero, and `noUnusedLocals` is on (#3657)
+
+Every one of App.tsx's 46 unused locals was DECIDED, not deleted blind. The baseline is now `{}` and
+`noUnusedLocals: true` is set in tsconfig.json, so a value nothing reads now fails `npm run typecheck`
+(and shows in every editor) rather than waiting for CI's ratchet. The script stays, because CI and
+CLAUDE.md's gate name it.
+
+**Three real defects it found (one row each, all fixed in #3657):**
+- **Q-792: a zip import nobody could see.** The Files panel's Upload button imports a whole project, up
+  to 5 GB through the chunked uploader. Its progress went to `proBuildProgress` and its outcome to the
+  Pro chat's message list, and no screen read either. A big import showed nothing for minutes; a failed
+  one changed nothing at all. Now the panel draws a progress bar (in both of its mounts), and the outcome
+  is a toast (files in, files dropped, or the reason it failed). `aZipImportIsSeen` drives the real hook.
+- **Q-793: a fake status file polled every two seconds, for ever.** `public/build_status.json` said
+  "building" permanently, so App re-fetched it every 2 s for the life of the app and re-rendered itself
+  each time, on every browser and phone. It fed an IDE panel that could never show. All of it is gone;
+  `nothingPollsAFakeBuildStatus` is a census against any client polling a status file again.
+- **Q-794: failures written to a log no screen draws.** `addLog` lands in `useDevLogs`, which reaches
+  no component. A failed "Confirm & Push to GitHub" was silent, and so were five siblings in the same
+  file (GitHub connect, sign-in ticket, refused sign-in link, repo import failed or empty); each is now a
+  toast. A FIREBASE_AUTH_ERROR handler that nothing sends, and which had no origin check, could put a
+  full-screen dialog in a foreign page's words in front of the user; it is removed. `aGithubFailureIsShown`
+  is a census of every error/warn log line in App.tsx.
+
+**A wire-up:** the top-up button now says "Opening secure checkout…" while the order is created (the hook
+had kept a jargon status string that no screen showed).
+
+**Dead code that LIED, removed:**
+- an "App is Live!" deploy view whose URL nothing set (view, panel, ViewType member — `deadViewBranches`);
+- `runCode`'s "dry-run" that logged "Exited with code 0" for a file it never ran;
+- two full-screen overlays nothing could open;
+- a Hinglish setting with no screen;
+- a regex flag that guessed "searching the web" from words like "now" (showing it would have been a fake
+  status);
+- the reverted landing rule's two leftover inputs (`noAutoReopen` now names them);
+- a GitPanel `onPush` prop chain that nothing invoked.
+
+Every lock was proven by reversion. KB: the Files entry now describes the zip progress and outcome.
+
+### 2026-10-11 — The admin answered the open-Q triage: 28 rows closed, 22 decided and queued to build, Q-119/Q-167 split
+
+The admin replied to the 2026-10-09 analysis of every open row, one line per section:
+*"1) aap karo 2) han 3) ok band karo 4) apki salah ke anusar bana do!"*
+
+**Closed: 28 rows (deleted from the queue, appended to `BUILD_REPORT_QUEUE_CLOSED.txt`).**
+
+| Row(s) | Problem | State | Why |
+|---|---|---|---|
+| Q-176 Q-258 Q-314 Q-334 Q-341 | Items argued NOT defects in earlier autopsies | ✅ RESOLVED (not a defect) | The admin agreed ("han") with the evidence already in each row. |
+| Q-746 Q-747 Q-748 | Dependency advisories needing majors; two self-recovered path guesses; a truncated command list | ✅ RESOLVED (not a defect) | Same: the admin agreed ("han"). |
+| Q-414 | `package.json` 0 bytes in the sandbox | ✅ RESOLVED (fixed since) | Root cause: two npm installs racing; fixed by Q-739. |
+| Q-010 Q-017 | Builds read an EMPTY durable store | ✅ RESOLVED (fixed since) | Root cause: saves that failed silently; fixed by Q-735 and Q-740. |
+| Q-142 | `firestore.rules` let any signed-in user read any `/users/{id}` | ✅ RESOLVED in code | It becomes live with Q-610's first rules deploy, and Q-610's row now says so. |
+| Q-013 | Which guard answered App Mart with an `{ error }` body | ✅ RESOLVED (fixed since) | The crash is fixed, and the guard now records its reason itself. |
+| Q-007 Q-020 Q-193 Q-221 Q-249 Q-252 Q-364 Q-365 Q-366 Q-397 Q-462 Q-463 Q-161 | Questions whose only evidence was a truncated or partial report | ✅ RESOLVED by the admin ("ok band karo") | That evidence is gone for good. The system now records each missing fact, so a recurrence arrives with full evidence and becomes a NEW row. |
+| Q-380 | The engine's own crash counts as the app's blocker (so the build is free) | ✅ RESOLVED by decision | "(a) leave it": a crashed build stays free and NavBharatAI absorbs the cost. |
+| Q-149 | Infra-blocked capability ideas | ✅ Moved to `ROADMAP.md` | "roadmap me daalo". Photoreal 3D (from Q-119) went with them. |
+
+**Decided — 22 rows now OPEN to build, each carrying the decision in its row:**
+Q-733 (a complete-project import opens a NEW chat), Q-745 (a failed build goes to `wip/`), Q-703 (true
+words now, plus the restore status), Q-783 (stop writing `analytics_events`), Q-781 (the platform offers
+View preview / Deploy after a successful build; the other three branches are deleted), Q-343 (real Claude
+cache pricing), Q-114 (one margin), Q-248 (size claims only when measured), Q-769 (Vertex onto
+`@google/genai`), Q-117 (dhaba → restaurant by headline specificity), Q-123 (no website top-up taught on
+iOS), Q-124 (a wallet spend asks for the PIN again), Q-128 (one timeline), Q-138 (APP_SCOPE wins), Q-157
+(re-review after an applied fix), Q-166 (truncated output not billed), Q-165 (APK charged only on success),
+Q-706 (hosting stays admin-only; this session designs the credential-less build step), plus the split rows
+Q-795 (account deletion erases workspace configs and snapshots), Q-796 (per-owner moderation view), Q-797
+(owner AI-spend screen) and Q-806 (durable deploy record).
+
+**Still blocked, with the decision recorded:**
+- Q-008: read after 2026-10-15 against the rule "strict if equal or better".
+- Q-120: device checks now in `NATIVE_DEVICE_TESTING.md`. Its WebAuthn item needs no check any more, because
+  no client code uses WebAuthn.
+- Q-256: the ₹6.34 refund is one admin press, +634 tokens through the audited admin adjustment route; no
+  code credits a wallet.
+- Q-798: licence terms, for the admin.
+- Q-799…Q-805: Q-167 split one item per row, each naming its single admin, vendor or native step.
+
+**Correction to my own 2026-10-09 message, recorded so it is not lost:**
+- Q-256's queue row recommended NO refund, but my message to the admin said refund. The admin approved the
+  message, so the refund is the decision.
+- Q-161 ("a workspace wiped mid-build is noticed only at the next turn") is a real gap rather than lost
+  evidence. The admin closed it with group 3; if it recurs, the next report opens a new row with full
+  evidence.

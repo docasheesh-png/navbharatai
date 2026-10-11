@@ -5,6 +5,7 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import type { ChatSession } from '../../types';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { guestLimitReached } from '../../lib/guestId';
+import { deliverFile } from '../../lib/downloadFile';
 
 type Severity = 'critical' | 'warning' | 'info' | 'suggestion';
 type Category = 'bugs' | 'performance' | 'security' | 'bestpractice' | 'accessibility';
@@ -532,10 +533,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
       ),
     ];
     const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'code-review.md'; a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile('code-review.md', blob);
   };
 
   // Prefer the real 0-100 score from the AI reviewer (connected review); fall back to the

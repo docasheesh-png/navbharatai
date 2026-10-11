@@ -24,6 +24,9 @@
     "strict": false,
     "noImplicitAny": false,
     "strictNullChecks": false,
+    // On since 2026-10-11 (Q-600): the unused-locals backlog reached zero, so a value nothing reads now
+    // fails `npm run typecheck` (and shows in every editor) instead of waiting for the CI ratchet.
+    "noUnusedLocals": true,
     "paths": {
       "@/*": [
         "./*"

@@ -65,7 +65,6 @@ interface CodeStudioProps {
   isGHSyncing: boolean;
   onGHConnect: () => void;
   onGHDisconnect: () => void;
-  onGHPush: (msg: string) => void;
   // Firebase Props
   firebaseToken?: string | null;
   firebaseUser?: any;
@@ -118,7 +117,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   isGHSyncing,
   onGHConnect,
   onGHDisconnect,
-  onGHPush,
   firebaseToken = null,
   firebaseUser = null,
   onFirebaseConnect = () => {},
@@ -1042,7 +1040,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             isPushing={isGHPushing || false}
             onConnect={onGHConnect}
             onDisconnect={onGHDisconnect}
-            onPush={onGHPush}
             files={files}
             firebaseToken={firebaseToken}
             firebaseUser={firebaseUser}

@@ -322,8 +322,42 @@ describe('Q-381 batch one: nine findings about our own run are no longer charged
     expect(PROCESS_ONLY_CODES.has('PLATFORM_SOURCE_WORKSPACE')).toBe(false);
   });
 
-  it('the batch really shrank the backlog — 56 before, 47 after', () => {
+  it('the batch really shrank the backlog — 56 before, 47 after (and it only shrinks from there)', () => {
     const baseline: string[] = JSON.parse(readFileSync(join(__dirname, 'fixtures/findingClassificationBaseline.json'), 'utf8'));
-    expect(baseline.length).toBe(47);
+    expect(baseline.length).toBeLessThanOrEqual(47);
+  });
+});
+
+describe('Q-381 batch two: ten more findings about our own run (2026-10-11)', () => {
+  // Each one's own recording site says it is about OUR run — our fast lane's output limit, our import
+  // mechanics, the database WE set up in the sandbox, our review's time budget, our repair and its rollback,
+  // a tool call the model made. All WARNING/INFO: the error count a RED gate reads cannot change, so no bill
+  // moves. Left out on purpose and stated here: STUCK_TOOL (recorded at ERROR) and REVIEWER_AUTOFIX_INCOMPLETE
+  // (its message says the defect "may still be present in the app", so it is about the app).
+  const OURS = [
+    'FASTLANE_CONTINUATION_FAILED', 'FASTLANE_TRUNCATED_FILE_DROPPED', 'IMPORT_DIAGNOSTIC', 'IMPORT_DB_PROVISION_FAILED',
+    'IMPORT_DB_MIGRATIONS_SKIPPED', 'REVIEW_PARTIAL', 'FIX_REVERT_FAILED', 'EXPLORE_REPAIR_UNDONE',
+    'REVIEW_FUNCTIONAL_REPAIR_UNDONE', 'TOOL_ERROR',
+  ];
+
+  for (const code of OURS) {
+    it(`${code} is our own run, not a mark against the user's app`, () => {
+      expect(PROCESS_ONLY_CODES.has(code)).toBe(true);
+      for (const phase of ['build', 'preview', 'readiness', 'tool']) expect(isAppFinding({ phase, code })).toBe(false);
+    });
+  }
+
+  it('the two left out are still unclassified, on purpose', () => {
+    const baseline: string[] = JSON.parse(readFileSync(join(__dirname, 'fixtures/findingClassificationBaseline.json'), 'utf8'));
+    for (const code of ['STUCK_TOOL', 'REVIEWER_AUTOFIX_INCOMPLETE']) {
+      expect(baseline).toContain(code);
+      expect(PROCESS_ONLY_CODES.has(code)).toBe(false);
+    }
+  });
+
+  it('the backlog went from 47 to 37', () => {
+    const baseline: string[] = JSON.parse(readFileSync(join(__dirname, 'fixtures/findingClassificationBaseline.json'), 'utf8'));
+    for (const code of OURS) expect(baseline).not.toContain(code);
+    expect(baseline.length).toBe(37);
   });
 });

@@ -62,6 +62,7 @@ import { ReportShot } from './ReportShot';
 import { compressForReport } from '../lib/reportImage';
 import { writeFailure, readAnswer, isRecord } from '../lib/serverAnswer';
 import { playRefundCheckText } from '../lib/playRefundCheckText';
+import { deliverFile, deliveryMessage } from '../lib/downloadFile';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -1128,17 +1129,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   /** Save a JSON string as a file. One implementation — every Download button funnels through it. */
   const saveJsonFile = (json: string, filename: string) => {
-    try {
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e) { console.error(e); toast('Download failed.'); }
+    void deliverFile(filename, json, 'application/json').then((delivered) => {
+      if (delivered === 'failed') toast(deliveryMessage(delivered, filename));
+    });
   };
 
   /** Copy a JSON string, and say honestly whether it worked (a browser can refuse the clipboard). */

@@ -61,38 +61,10 @@ describe('github push — safe (non-force) branch ref update', () => {
     expect(res.body.error).toMatch(/newer commits/i);
   });
 
-  it('legacy /api/github/push also updates the ref without force', async () => {
-    ax.get.mockResolvedValue({ data: { object: { sha: 'base1' } } });
-    ax.post.mockImplementation((url: string) => {
-      if (url.includes('/git/trees')) return Promise.resolve({ data: { sha: 'tree1' } });
-      if (url.includes('/git/commits')) return Promise.resolve({ data: { sha: 'commit1' } });
-      return Promise.resolve({ data: {} });
-    });
-    ax.patch.mockResolvedValue({ data: {} });
-
+  it('the legacy POST /api/github/push is gone — push-enhanced is the one push (Q-600 batch five)', async () => {
     const routes = await getRoutes();
-    const res = mockRes();
-    await routes.get('POST /api/github/push')!(req({ owner: 'acme', repo: 'app', files, branch: 'main' }), res);
-
-    expect(res.statusCode).toBe(200);
-    expect(ax.patch.mock.calls[0][1].force).toBe(false);
-  });
-
-  it('legacy /api/github/push: non-fast-forward → 409', async () => {
-    ax.get.mockResolvedValue({ data: { object: { sha: 'base1' } } });
-    ax.post.mockImplementation((url: string) => {
-      if (url.includes('/git/trees')) return Promise.resolve({ data: { sha: 'tree1' } });
-      if (url.includes('/git/commits')) return Promise.resolve({ data: { sha: 'commit1' } });
-      return Promise.resolve({ data: {} });
-    });
-    ax.patch.mockRejectedValue({ response: { status: 422, data: { message: 'not a fast forward' } } });
-
-    const routes = await getRoutes();
-    const res = mockRes();
-    await routes.get('POST /api/github/push')!(req({ owner: 'acme', repo: 'app', files, branch: 'main' }), res);
-
-    expect(res.statusCode).toBe(409);
-    expect(res.body.nonFastForward).toBe(true);
+    expect(routes.has('POST /api/github/push')).toBe(false);
+    expect(routes.has('POST /api/github/push-enhanced')).toBe(true);
   });
 
   it('push-enhanced error path does NOT leak the raw GitHub response body', async () => {

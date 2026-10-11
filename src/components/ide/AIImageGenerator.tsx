@@ -24,6 +24,7 @@ import { ReportAiContent } from '../chat/ReportAiContent';
 import { TextOverlayEditor } from './TextOverlayEditor';
 import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPrompt';
 import { IMAGE_PROMPT_MAX, imagePromptLimit, imagePromptLimitNote } from '../../lib/imagePromptLimit';
+import { deliverFile, deliveryMessage } from '../../lib/downloadFile';
 
 type GeneratedImage = ImageHistoryItem;
 
@@ -602,15 +603,10 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
         }
       }
 
-      // Web (and native final fallback): trigger a real file download from a blob URL.
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      // Web (and native final fallback): the one save helper — the share sheet where it can take a file
+      // (iPhone Safari), else a real download; inside the app, Documents/NavBharatAI (Q-790).
+      const delivered = await deliverFile(filename, blob);
+      if (delivered === 'saved' || delivered === 'failed') flashNote(deliveryMessage(delivered, filename));
     } catch {
       flashNote('Could not save the image automatically — long-press the image to save it.');
     }

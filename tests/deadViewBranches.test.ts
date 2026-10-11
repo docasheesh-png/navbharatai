@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
 const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
@@ -54,6 +54,24 @@ describe('🔒 unreachable view branches stay removed', () => {
 
   it('Home has no cloudeploy tile either — that is why the branch was unreachable', () => {
     expect(homeTools).not.toContain("id: 'cloudeploy'");
+  });
+});
+
+describe('🔒 the "App is Live!" deploy view stays removed (Q-600 batch five, 2026-10-11)', () => {
+  // `activeView === 'deploy'` rendered DeploySuccessPanel — "App is Live! Your application has been
+  // deployed to the edge network." — with `deployUrl`, a state nothing ever set, so the link it offered
+  // was always empty. Nothing navigated to 'deploy', which is the only reason this fake success screen
+  // never showed. Found because `setDeployUrl` and `isDeployed` were read by nothing. Branch, panel,
+  // state and the ViewType member go together, for the reason the cloudeploy case above gives.
+  const app = codeOnly(read('src/App.tsx'));
+  it('App renders no deploy view, and the panel and its empty URL are gone', () => {
+    expect(app).not.toContain("activeView === 'deploy'");
+    expect(app).not.toMatch(/DeploySuccessPanel|deployUrl|setIsDeployed/);
+    expect(existsSync(join(__dirname, '..', 'src/components/panels/DeploySuccessPanel.tsx'))).toBe(false);
+  });
+  it('ViewType no longer carries deploy', () => {
+    const viewType = types.slice(types.indexOf('ViewType'), types.indexOf('SettingsScreen'));
+    expect(viewType).not.toContain("'deploy'");
   });
 });
 

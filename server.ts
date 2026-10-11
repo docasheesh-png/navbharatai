@@ -171,7 +171,13 @@ const traceMiddleware = (req: any, res: any, next: any) => {
   const span = tracer.startSpan(`HTTP ${req.method} ${req.path}`, {
     traceId: cloudCtx?.traceId,
     parentSpanId: cloudCtx?.parentSpanId,
-    attributes: { 'http.method': req.method, 'http.path': req.path, requestId },
+    // The client's session and conversation ids ride on the span (one structured line, correlated into Cloud
+    // Trace) instead of a second console line per request (audit 2026-10-11, F13). Header values are the
+    // client's own, so they are cut to a bounded length.
+    attributes: {
+      'http.method': req.method, 'http.path': req.path, requestId,
+      sessionId: String(sessionId).slice(0, 128), conversationId: String(conversationId).slice(0, 128),
+    },
   });
   req.traceContext.traceId = span.data.traceId;
   res.on('finish', () => {
@@ -180,7 +186,6 @@ const traceMiddleware = (req: any, res: any, next: any) => {
     span.end();
   });
 
-  console.log(`[TRACE][API ENTRY] RID:${requestId} SID:${sessionId} CID:${conversationId} TID:${span.data.traceId} Path:${req.path}`);
   // Keep the span's context active for everything awaited downstream (so the AI provider
   // call attaches a child span to THIS request's trace).
   tracer.runInSpan(span, () => next());

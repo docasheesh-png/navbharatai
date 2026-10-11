@@ -71,8 +71,14 @@ export function isCanvasGameProject(files: Record<string, string>): boolean {
   let loop = false;
   for (const [path, content] of Object.entries(files || {})) {
     if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof content !== 'string') continue;
-    if (/(^|\/)src\/game\//.test(path)) return true;
-    if (!surface && GAME_SIGNAL.test(content.replace(/requestAnimationFrame/g, ''))) surface = true;
+    // 🔴 THE KIT'S OWN ENGINE FILES ARE NOT A SURFACE (build 46e2d74b's fixes, 2026-10-11). Since the platform
+    // lays the game kit down for every new game (gameKitSeed.ts), `src/game/` is on disk for a sudoku drawn
+    // in the DOM too — and this used to answer "canvas game" for any file under it, so a DOM game was sent
+    // to the canvas playtest and, finding no canvas, reported as a game that was "never played". The loop,
+    // input, sound and music layers (`src/game/core`, `src/game/fx`, `src/audio`) never draw anything; the
+    // surface has to come from the game's own code or from the kit's 3D layer / shell, which do.
+    const kitEngineOnly = /(^|\/)src\/(?:game\/(?:core|fx)|audio)\//.test(path);
+    if (!surface && !kitEngineOnly && GAME_SIGNAL.test(content.replace(/requestAnimationFrame/g, ''))) surface = true;
     if (!loop && /requestAnimationFrame|GameLoop|setAnimationLoop/.test(content)) loop = true;
     if (surface && loop) return true;
   }
@@ -143,6 +149,26 @@ export function startLabelRank(label: unknown, known: readonly string[] = []): n
   if (NOT_A_START.test(t)) return 0;
   if (START_LABEL_LEADING.test(t)) return 2;
   return START_LABEL.test(t) ? 1 : 0;
+}
+
+/**
+ * The start labels the CLICK EXPLORER has already seen work, handed to the playtest (admin 2026-10-11, build
+ * 46e2d74b — item L-18). The explorer pressed "Start Race" and the game came up; the playtest then opened its
+ * own browser and had to find Start again by its own matcher. Only a first-screen press (no `via`) that
+ * responded cleanly and changed the page, and whose label is start-SHAPED by the playtest's own rule, is
+ * passed — so "Settings" or "Back" can never be vouched into a start press. PURE.
+ */
+export function startLabelsFromExplore(presses: ReadonlyArray<{ label?: unknown; verdict?: unknown; changed?: unknown; kind?: unknown; via?: unknown }> | null | undefined): string[] {
+  const out: string[] = [];
+  for (const p of presses ?? []) {
+    if (!p || p.verdict !== 'ok' || p.changed !== true || p.via) continue;
+    if (p.kind !== undefined && p.kind !== 'press') continue;
+    const label = String(p.label ?? '').trim().replace(/\s+/g, ' ');
+    if (!label || startLabelRank(label) === 0) continue;
+    if (!out.some((l) => l.toLowerCase() === label.toLowerCase())) out.push(label);
+    if (out.length >= 5) break;
+  }
+  return out;
 }
 
 /**

@@ -638,7 +638,7 @@ import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
-import { gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestOutcome, isCanvasGameProject, replayFromCode, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
+import { gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration, userOwnedFiles } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
 import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
@@ -22807,12 +22807,11 @@ async function noteBuildOutcome(
       // explorer's repair, which may change files, still comes after the game is played, exactly as before.
       // The repair's time headroom is unchanged (both runs still precede it). It runs ONCE: inside the
       // explorer block when the explorer ran, otherwise right after it.
-      // ⚠️ THE ORDER ALONE CHANGES NO OUTCOME, AND THIS SAYS SO (verification, same day). The playtest opens its
-      // OWN fresh browser and still finds Start by its own matcher; nothing the explorer pressed is handed to
-      // it yet — `gamePlaytestScript` has no parameter for it on this branch. L-18 stays OPEN until the
-      // explorer's start label (in `exploreRun`) is passed at the call inside the explorer block.
+      // The explorer's record is HANDED OVER, not only ordered before: the start labels it saw work
+      // (`startLabelsFromExplore`) reach the playtest's own browser as known starts, so the control that
+      // started the game for the explorer is the one the playtest presses first.
       let gamePlaytestDone = false;
-      const runGamePlaytest = async (): Promise<void> => {
+      const runGamePlaytest = async (startLabels: readonly string[] = []): Promise<void> => {
         if (gamePlaytestDone) return;
         gamePlaytestDone = true;
         const playtestFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
@@ -22823,13 +22822,16 @@ async function noteBuildOutcome(
           && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
         ) {
           try {
-            const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState() })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
+            const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
             const verdict = playtestVerdict(parsePlaytest(out.stdout), replayFromCode(playtestFiles));
             buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
             gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
           } catch (err) {
+            // A playtest that timed out or crashed is a check that could not look — the same open warning
+            // the runner's own "never played" answer gives, never an info line that reads as a pass.
             try {
-              buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_PLAYTEST_NOT_RUN', autoResolved: true, message: `The game was not played: ${String((err as { message?: string })?.message ?? err).slice(0, 160)}.` });
+              const notRun = playtestNotRunVerdict(`the playtest browser stopped: ${String((err as { message?: string })?.message ?? err).slice(0, 160)}`);
+              buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
             } catch { /* best-effort */ }
           }
         }
@@ -22872,8 +22874,9 @@ async function noteBuildOutcome(
           gateEvidence.explore = explored.outcome;
           gateEvidence.explorePresses = explored.pressed;
 
-          // 🎮 The game is played HERE — after every control was pressed, before any repair (see runGamePlaytest).
-          await runGamePlaytest();
+          // 🎮 The game is played HERE — after every control was pressed, before any repair (see runGamePlaytest),
+          // with the start labels the explorer saw work.
+          await runGamePlaytest(startLabelsFromExplore(exploreRun.presses));
 
           // A BROKEN BUTTON GETS ONE VERIFIED REPAIR (admin 2026-09-28: "han dono ho jaye … world class
           // banao" — explorerRepair.ts). The explorer's evidence is the strongest this platform has: a

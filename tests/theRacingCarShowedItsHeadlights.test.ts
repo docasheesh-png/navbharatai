@@ -20,6 +20,7 @@
  *  4. THE ETA PRICES A GAME AS A GAME, AND THE WRITER FILES IT UNDER THE KEY THE READER USES (L-12).
  *  5. THE GAME IS PLAYED AFTER THE EXPLORER HAS PRESSED THE APP (L-18).
  */
+import { startLabelsFromExplore } from '../src/server/AgentV3/gamePlaytest';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -599,9 +600,9 @@ describe('4 · L-12: the ETA key is decided before the estimate, and one helper 
 
 describe('5 · L-18: press-run → playtest → the explorer\'s repair', () => {
   it('the playtest runs once, right after the explorer recorded its presses and before any repair', () => {
-    const def = ROUTE.indexOf('const runGamePlaytest = async (): Promise<void> => {');
+    const def = ROUTE.indexOf('const runGamePlaytest = async (startLabels: readonly string[] = []): Promise<void> => {');
     const pressed = ROUTE.indexOf('gateEvidence.explorePresses = explored.pressed;');
-    const played = ROUTE.indexOf('await runGamePlaytest();', pressed);
+    const played = ROUTE.indexOf('await runGamePlaytest(startLabelsFromExplore(exploreRun.presses));', pressed);
     const repair = ROUTE.indexOf("const targets = explored.outcome === 'failed' && explorerRepairEnabled()", pressed);
     expect(def).toBeGreaterThan(-1);
     expect(pressed).toBeGreaterThan(def);
@@ -610,11 +611,40 @@ describe('5 · L-18: press-run → playtest → the explorer\'s repair', () => {
   });
 
   it('when the explorer does not run, the game is still played — and never twice', () => {
-    const calls = [...ROUTE.matchAll(/await runGamePlaytest\(\);/g)];
+    const calls = [...ROUTE.matchAll(/await runGamePlaytest\((?:startLabelsFromExplore\(exploreRun\.presses\))?\);/g)];
     expect(calls).toHaveLength(2);
     expect(ROUTE).toContain('if (gamePlaytestDone) return;');
     // The script is started from inside the closure only.
     expect([...ROUTE.matchAll(/gamePlaytestScript\(/g)]).toHaveLength(1);
     expect(ROUTE.indexOf('gamePlaytestScript(')).toBeGreaterThan(ROUTE.indexOf('const runGamePlaytest = async'));
+  });
+
+  it('the explorer\'s working start label is HANDED to the playtest, and a crashed playtest is an open warning', () => {
+    expect(ROUTE).toContain('gamePlaytestScript(lastPreviewUrl, { storageState: signedInState(), startLabels })');
+    expect(ROUTE).toContain('const notRun = playtestNotRunVerdict(');
+    expect(ROUTE).not.toMatch(/severity: 'info', code: 'GAME_PLAYTEST_NOT_RUN', autoResolved: true/);
+    // The real 46e2d74b presses: "Start Race" worked; "Settings" and "Back" must never be vouched into a start.
+    expect(startLabelsFromExplore([
+      { label: 'Start Race', verdict: 'ok', changed: true },
+      { label: 'Settings', verdict: 'ok', changed: true },
+      { label: 'Back', verdict: 'ok', changed: true, via: 'Settings' },
+    ])).toEqual(['Start Race']);
+    expect(startLabelsFromExplore([{ label: 'Start Race', verdict: 'crashed', changed: true }])).toEqual([]);
+    expect(startLabelsFromExplore([{ label: 'Play', verdict: 'ok', changed: false }])).toEqual([]);
+  });
+});
+
+describe('6 · the seeded kit does not turn a DOM game into a canvas game', () => {
+  it('a sudoku on the seeded 2D kit (loop, sound, music) is not sent to the canvas playtest; a 3D kit game is', async () => {
+    const { recipeFilePool } = await import('../src/server/lib/gameRecipeLayers');
+    const { isCanvasGameProject } = await import('../src/server/AgentV3/gamePlaytest');
+    const all: Record<string, string> = {};
+    for (const [p, f] of recipeFilePool()) all[p] = f.content;
+    const pick = (re: RegExp) => Object.fromEntries(Object.entries(all).filter(([p]) => re.test(p)));
+    const sudoku = { ...pick(/src\/game\/(?:core|fx)\/|src\/audio\//), 'src/App.tsx': 'export default function App() { return <div className="grid">sudoku</div>; }' };
+    expect(isCanvasGameProject(sudoku)).toBe(false);
+    expect(isCanvasGameProject(all)).toBe(true);
+    // A hand-written canvas game outside the kit is still a canvas game.
+    expect(isCanvasGameProject({ 'src/game.ts': 'const ctx = c.getContext("2d"); function f(){ requestAnimationFrame(f); }' })).toBe(true);
   });
 });

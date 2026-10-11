@@ -3,6 +3,7 @@ import { modelSupportsAdaptiveThinking } from './models';
 import { claudeBlockedInZone, NoClaudeInWeakBuildError } from './noClaudeZone';
 import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE } from './turnDeadline';
 import { BuildStoppedError, throwIfStopped } from './stopSignal';
+import { anthropicCacheShares, anthropicTotalInput } from '../lib/anthropicUsage';
 
 /**
  * ClaudeClient — the v5.0 engine's wrapper over the Anthropic SDK for native
@@ -53,7 +54,16 @@ export interface ToolUse {
   input: Record<string, unknown>;
 }
 
-/** Token usage for one turn (drives CostGuard + D5 billing). */
+/**
+ * Token usage for one turn (drives CostGuard + D5 billing).
+ *
+ * 🔒 `inputTokens` IS THE TOTAL INPUT, and the two cache counts are SHARES of it (Q-343). That is how the
+ * OpenAI-compatible providers report it (`prompt_tokens` includes `cached_tokens`). Anthropic does NOT:
+ * its `input_tokens` is only the uncached part, with cache reads and writes reported beside it. One type
+ * carried both meanings, so every Claude cache READ was dropped by the real-cost formula's clamp and every
+ * cache WRITE was never priced at all. `parseMessage` now adds Claude's cache back into `inputTokens`, so
+ * the type has ONE meaning and every bill prices the shares at their own rates (`tokenCostUsd`).
+ */
 export interface TurnUsage {
   inputTokens: number;
   outputTokens: number;
@@ -598,16 +608,18 @@ export function parseMessage(resp: AnthropicMessageLike): TurnResult {
   }
 
   const u = resp.usage ?? {};
+  const cache = anthropicCacheShares(u);
   return {
     text,
     toolUses,
     stopReason: resp.stop_reason ?? null,
     ...(resp.stop_reason === 'max_tokens' ? { truncated: true } : {}),
     usage: {
-      inputTokens: u.input_tokens ?? 0,
+      // TOTAL input: Anthropic's `input_tokens` is the uncached part only (see TurnUsage).
+      inputTokens: anthropicTotalInput(u),
       outputTokens: u.output_tokens ?? 0,
-      cacheCreationInputTokens: u.cache_creation_input_tokens ?? 0,
-      cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
+      cacheCreationInputTokens: cache.cacheCreationInputTokens,
+      cacheReadInputTokens: cache.cacheReadInputTokens,
     },
     rawContent: content,
     ...(typeof resp.model === 'string' && resp.model ? { model: resp.model } : {}),

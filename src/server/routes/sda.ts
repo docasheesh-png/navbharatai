@@ -9,6 +9,7 @@ import { retrieveClinicalKnowledge, formatKnowledgeForPrompt } from '../lib/clin
 import { detectRedFlagsAcross } from '../lib/clinical/redFlags';
 import { isAuditReplyClean } from '../lib/clinical/auditGate';
 import { AIRouterManager } from '../AI/AIRouterManager';
+import { anthropicTotalInput } from '../lib/anthropicUsage';
 import { verifyFirebaseIdentity, rateLimiter } from '../lib/authMiddleware';
 import { gateProfessionalTurn, burnFreeMessage, type ProfessionalTier } from '../professionals/passGate';
 import { identityGrantEmail } from '../AgentV3/featureFlag';
@@ -653,7 +654,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
             });
             reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
             if (reply) {
-              sdaSpend = { provider: 'CLAUDE', model: claudeVisionAnswerModel(), inputTokens: r.usage?.input_tokens, outputTokens: r.usage?.output_tokens };
+              sdaSpend = { provider: 'CLAUDE', model: claudeVisionAnswerModel(), inputTokens: r.usage ? anthropicTotalInput(r.usage) : undefined, outputTokens: r.usage?.output_tokens };
               console.log('[SDA] Claude direct succeeded');
             }
           } catch (e: any) { console.warn('[SDA] Claude err:', e.message); }

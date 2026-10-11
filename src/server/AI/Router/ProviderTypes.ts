@@ -1,3 +1,5 @@
+import { anthropicTotalInput, type AnthropicUsageLike } from '../../lib/anthropicUsage';
+
 /**
  * Tokens a provider REPORTED for one call. Absent when the provider did not report any.
  *
@@ -42,7 +44,10 @@ export function readProviderUsage(raw: unknown): ProviderUsage | undefined {
     }
     return undefined;
   };
-  const inputTokens = num('prompt_tokens', 'input_tokens', 'promptTokenCount', 'inputTokens');
+  // Anthropic's own field is only the UNCACHED part of the prompt (Q-343) — read through the one helper
+  // that adds its cache shares back, so this count means the total input for every provider.
+  const inputTokens = num('prompt_tokens') ?? (num('input_tokens') !== undefined ? anthropicTotalInput(u as AnthropicUsageLike) : undefined)
+    ?? num('promptTokenCount', 'inputTokens');
   const outputTokens = num('completion_tokens', 'output_tokens', 'candidatesTokenCount', 'outputTokens');
   if (inputTokens === undefined && outputTokens === undefined) return undefined;
   return { inputTokens: inputTokens ?? 0, outputTokens: outputTokens ?? 0 };

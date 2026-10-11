@@ -14,6 +14,9 @@
 export interface UsageDelta {
   inputTokens: number;
   outputTokens: number;
+  /** Shares of `inputTokens` served from / written to a prompt cache (Q-343) — never additional. */
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
 }
 
 export interface UsageSink {
@@ -26,14 +29,26 @@ export interface UsageSink {
 export function createUsageSink(): UsageSink {
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheReadInputTokens = 0;
+  let cacheCreationInputTokens = 0;
   return {
     add(u) {
       if (!u) return;
       if (Number.isFinite(u.inputTokens) && u.inputTokens > 0) inputTokens += u.inputTokens;
       if (Number.isFinite(u.outputTokens) && u.outputTokens > 0) outputTokens += u.outputTokens;
+      const r = u.cacheReadInputTokens ?? 0;
+      if (Number.isFinite(r) && r > 0) cacheReadInputTokens += r;
+      const w = u.cacheCreationInputTokens ?? 0;
+      if (Number.isFinite(w) && w > 0) cacheCreationInputTokens += w;
     },
     total() {
-      return { inputTokens, outputTokens };
+      // The cache shares appear only when there are some, so a build with no cache reports exactly as before.
+      return {
+        inputTokens,
+        outputTokens,
+        ...(cacheReadInputTokens > 0 ? { cacheReadInputTokens } : {}),
+        ...(cacheCreationInputTokens > 0 ? { cacheCreationInputTokens } : {}),
+      };
     },
   };
 }

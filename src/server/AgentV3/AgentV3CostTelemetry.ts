@@ -107,7 +107,7 @@ export interface CostTelemetryEntry {
    * `glm-4.7-flashx` is $0.07/MTok and `glm-5.3` is $1.40, a 20x spread under the single key 'GLM';
    * `kimi-k2.7-code` $0.95 against `kimi-k3` $3.00 under 'KIMI'. Absent on lanes that do not attribute.
    */
-  modelUsage?: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number }>;
+  modelUsage?: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number }>;
 }
 
 /** Rolled-up counters for one slice (a task type or a start tier). */
@@ -181,7 +181,7 @@ export interface DailyCostTelemetryDoc {
    */
   lossRealCostUsd?: number;
   /** Per-(provider, model) token totals across the day — the source of the report's per-model rows. */
-  byModelUsage?: Record<string, ProviderUsageBreakdown & { cacheReadInputTokens?: number }>;
+  byModelUsage?: Record<string, ProviderUsageBreakdown & { cacheReadInputTokens?: number; cacheCreationInputTokens?: number }>;
   /** What today's builds REALLY cost in provider tokens (USD), summed over builds that reported it. */
   totalRealCostUsd?: number;
   /** What today's builds really cost in E2B VM time (USD), over the same builds. */
@@ -321,6 +321,10 @@ export function foldCostTelemetry(
       outputTokens: slot.outputTokens + (Number.isFinite(u.outputTokens) ? u.outputTokens : 0),
       cacheReadInputTokens: (slot.cacheReadInputTokens ?? 0)
         + (Number.isFinite(u.cacheReadInputTokens) ? (u.cacheReadInputTokens as number) : 0),
+      // Q-343 — cache writes, only once some exist, so a day doc without any keeps its old shape.
+      ...(((slot.cacheCreationInputTokens ?? 0) + (Number.isFinite(u.cacheCreationInputTokens) ? (u.cacheCreationInputTokens as number) : 0)) > 0
+        ? { cacheCreationInputTokens: (slot.cacheCreationInputTokens ?? 0) + (Number.isFinite(u.cacheCreationInputTokens) ? (u.cacheCreationInputTokens as number) : 0) }
+        : {}),
     };
   }
 
@@ -536,7 +540,7 @@ export function buildUsageReport(
   let marginBilledUsd = 0;
   let marginSpendUsd = 0;
   let lossMeasuredBuilds = 0;
-  const perModelTokens = new Map<string, { builds: number; inputTokens: number; outputTokens: number; cacheReadInputTokens: number }>();
+  const perModelTokens = new Map<string, { builds: number; inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }>();
   const byLadderDepth: Record<string, number> = {};
   const dates = docs.map(d => d.date).filter(Boolean).sort();
   for (const doc of docs) {
@@ -560,11 +564,12 @@ export function buildUsageReport(
     }
     lossMeasuredBuilds += measuredLossBuilds(doc);
     for (const [key, u] of Object.entries(doc.byModelUsage ?? {})) {
-      const slot = perModelTokens.get(key) ?? { builds: 0, inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 };
+      const slot = perModelTokens.get(key) ?? { builds: 0, inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 };
       slot.builds += u.builds || 0;
       slot.inputTokens += u.inputTokens || 0;
       slot.outputTokens += u.outputTokens || 0;
       slot.cacheReadInputTokens += u.cacheReadInputTokens ?? 0;
+      slot.cacheCreationInputTokens += u.cacheCreationInputTokens ?? 0;
       perModelTokens.set(key, slot);
     }
     for (const [depth, b] of Object.entries(doc.byLadderDepth ?? {})) {

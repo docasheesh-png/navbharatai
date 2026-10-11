@@ -19,7 +19,8 @@ describe('parseMessage', () => {
     expect(result.toolUses[0]).toEqual({ id: 'tu_1', name: 'write_file', input: { path: 'a.ts', content: 'x' } });
     expect(result.toolUses[1].name).toBe('bash');
     expect(result.stopReason).toBe('tool_use');
-    expect(result.usage.inputTokens).toBe(100);
+    // TOTAL input (Q-343): Anthropic's input_tokens (100) excludes the cache read (10), so it is added back.
+    expect(result.usage.inputTokens).toBe(110);
     expect(result.usage.outputTokens).toBe(40);
     expect(result.usage.cacheReadInputTokens).toBe(10);
     expect(result.usage.cacheCreationInputTokens).toBe(0);

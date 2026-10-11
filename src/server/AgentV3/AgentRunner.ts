@@ -617,8 +617,8 @@ export class AgentRunner {
       cacheReadInputTokens: 0,
     };
 
-    const billed = (): number =>
-      billedAmountUsd({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }, billingPower);
+    // The cache shares ride along so the budget guard prices them at their real rates (Q-343).
+    const billed = (): number => billedAmountUsd(usage, billingPower);
 
     // ── Durable persistence (D7), all best-effort — a store error never breaks the build. ──
     const persistence = this.opts.persistence;
@@ -967,7 +967,12 @@ export class AgentRunner {
         usage.cacheReadInputTokens += turn.usage.cacheReadInputTokens;
         // Billing accounting fix: feed the shared build-level sink so this turn's tokens are billed
         // even when this runner is a sub-agent or a heal/fix run whose `result` is later discarded.
-        this.opts.usageSink?.add({ inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens });
+        this.opts.usageSink?.add({
+          inputTokens: turn.usage.inputTokens,
+          outputTokens: turn.usage.outputTokens,
+          cacheReadInputTokens: turn.usage.cacheReadInputTokens,
+          cacheCreationInputTokens: turn.usage.cacheCreationInputTokens,
+        });
 
         if (turn.text.trim()) {
           // A repair pass that changed nothing may not tell the user it changed something (autopsy 6cd698cc —

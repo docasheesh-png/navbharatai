@@ -43,6 +43,8 @@ export interface UnbilledTokens {
   outputTokens: number;
   /** The cache-hit share of `inputTokens` (already INCLUDED in it, never additional). */
   cacheReadInputTokens?: number;
+  /** The cache-write share of `inputTokens` (Q-343; already INCLUDED in it, never additional). */
+  cacheCreationInputTokens?: number;
 }
 
 /**
@@ -54,7 +56,7 @@ export interface UnbilledTokens {
  * cost ceiling keep pricing the whole thing, and only the code that builds the USER's bill subtracts.
  */
 export interface UnbilledAwareEntry extends ProviderCostEntry {
-  usage: ProviderCostEntry['usage'] & { cacheReadInputTokens?: number };
+  usage: ProviderCostEntry['usage'] & { cacheReadInputTokens?: number; cacheCreationInputTokens?: number };
   unbilled?: UnbilledTokens;
   /** Which part of the build spent this slice — see `billingPhase.ts`. */
   phase?: string;
@@ -72,6 +74,8 @@ export function addUnbilled(into: UnbilledTokens, add: UnbilledTokens): void {
   into.outputTokens += clean(add.outputTokens);
   const cache = clean(add.cacheReadInputTokens);
   if (cache > 0) into.cacheReadInputTokens = clean(into.cacheReadInputTokens) + cache;
+  const write = clean(add.cacheCreationInputTokens);
+  if (write > 0) into.cacheCreationInputTokens = clean(into.cacheCreationInputTokens) + write;
 }
 
 /**
@@ -101,12 +105,19 @@ export function billableEntries(
     const inputTokens = Math.max(0, clean(e.usage.inputTokens) - clean(u.inputTokens));
     const outputTokens = Math.max(0, clean(e.usage.outputTokens) - clean(u.outputTokens));
     const cacheRead = Math.max(0, clean(e.usage.cacheReadInputTokens) - clean(u.cacheReadInputTokens));
+    const cacheWrite = Math.max(0, clean(e.usage.cacheCreationInputTokens) - clean(u.cacheCreationInputTokens));
+    const read = Math.min(inputTokens, cacheRead);
     return {
       provider: e.provider,
       ...(e.model ? { model: e.model } : {}),
-      // The cache share can never exceed the input it is a share OF — `usageCostUsd` clamps this
+      // The cache shares can never exceed the input they are shares OF — `tokenCostUsd` clamps this
       // too, but a slice that leaves here already coherent cannot be misread by a future caller.
-      usage: { inputTokens, outputTokens, ...(cacheRead > 0 ? { cacheReadInputTokens: Math.min(inputTokens, cacheRead) } : {}) },
+      usage: {
+        inputTokens,
+        outputTokens,
+        ...(read > 0 ? { cacheReadInputTokens: read } : {}),
+        ...(Math.min(inputTokens - read, cacheWrite) > 0 ? { cacheCreationInputTokens: Math.min(inputTokens - read, cacheWrite) } : {}),
+      },
     };
   });
 }
@@ -167,6 +178,7 @@ export function markAbandonedTurn<E>(err: E, usage: UnbilledTokens | null | unde
     inputTokens: clean(usage.inputTokens),
     outputTokens: clean(usage.outputTokens),
     ...(clean(usage.cacheReadInputTokens) > 0 ? { cacheReadInputTokens: clean(usage.cacheReadInputTokens) } : {}),
+    ...(clean(usage.cacheCreationInputTokens) > 0 ? { cacheCreationInputTokens: clean(usage.cacheCreationInputTokens) } : {}),
   };
   if (carried.inputTokens === 0 && carried.outputTokens === 0) return err;
   try {

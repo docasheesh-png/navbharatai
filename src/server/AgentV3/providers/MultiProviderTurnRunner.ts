@@ -100,6 +100,8 @@ export interface MultiProviderOptions {
     usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean },
     model?: string,
     cacheReadInputTokens?: number,
+    /** Q-343 — the share of input written to a prompt cache (priced at the provider's write rate). */
+    cacheCreationInputTokens?: number,
   ) => void;
   /**
    * Shared 429-cooldown registry (StudySync autopsy 2026-07-16) — the cross-instance memory of which
@@ -906,7 +908,7 @@ export function makeMultiProviderTurnRunner(
               // and no tool call arrives here as a plain success and used to be billed at the full
               // markup. We still pay for it; the user does not. See unbilledTurns.ts.
               ...(turnStarvedItsBudget(result) ? { producedNothing: true as const } : {}),
-            }, result.model, result.usage?.cacheReadInputTokens ?? 0);
+            }, result.model, result.usage?.cacheReadInputTokens ?? 0, result.usage?.cacheCreationInputTokens ?? 0);
           } catch { /* telemetry attribution must never disturb the build */ }
           // 🔴 THE SUCCESS PATH IS WHERE THE SLOW-RUNG VERDICT HAS TO LIVE (autopsy dd1f5f60). This
           // turn succeeded — so if it was also ruinously slow, this is the ONLY place that can ever
@@ -952,7 +954,7 @@ export function makeMultiProviderTurnRunner(
                   inputTokens: abandoned.usage.inputTokens,
                   outputTokens: abandoned.usage.outputTokens,
                   producedNothing: true,
-                }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0);
+                }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0, abandoned.usage.cacheCreationInputTokens ?? 0);
               }
             } catch { /* cost attribution must never replace the stop */ }
             throw new BuildStoppedError();
@@ -974,7 +976,7 @@ export function makeMultiProviderTurnRunner(
                 inputTokens: abandoned.usage.inputTokens,
                 outputTokens: abandoned.usage.outputTokens,
                 producedNothing: true,
-              }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0);
+              }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0, abandoned.usage.cacheCreationInputTokens ?? 0);
             }
           } catch { /* cost attribution must never replace the provider error below */ }
           // 🔴 OUR CLOCK ENDED, NOT THEIR SERVICE — abort the whole chain, do not walk it.

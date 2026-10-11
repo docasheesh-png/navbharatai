@@ -13854,7 +13854,7 @@ async function noteBuildOutcome(
           () => { liveCostDiscountPct = 0; }, // unreadable ⇒ 0% — the ordinary price, as at settle
         );
       }
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number): void => {
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
         // exact misreading autopsy f04421ef already paid for once, arriving here through a different
@@ -13886,6 +13886,8 @@ async function noteBuildOutcome(
         // provider's cheaper cache-read rate (usageCostUsd). Margin-safe: providers without a cache
         // line in the rate card price it at the full input rate (identical to before).
         const cacheRead = Number.isFinite(cacheReadInputTokens) && (cacheReadInputTokens ?? 0) > 0 ? (cacheReadInputTokens ?? 0) : 0;
+        // Q-343 — the cache-WRITE share rides the same way (Anthropic bills it at 1.25× input).
+        const cacheWrite = Number.isFinite(cacheCreationInputTokens) && (cacheCreationInputTokens ?? 0) > 0 ? (cacheCreationInputTokens ?? 0) : 0;
         // Both facts travel as the ledger's OPTIONS argument, not inside `usage` — the tokens are
         // added in FULL either way (we paid them). `producedNothing` records the same counts a second
         // time in the slice's `unbilled` subset; `phase` says which part of the build spent them, so a
@@ -13896,9 +13898,13 @@ async function noteBuildOutcome(
         // makes it correct for an ABANDONED pass: `raceTimeout` walks away from the reviewer, the
         // reviewer keeps spending, and those late turns are still inside its zone.
         const phase = currentBillingPhase() ?? undefined;
+        const cacheShares = {
+          ...(cacheRead > 0 ? { cacheReadInputTokens: cacheRead } : {}),
+          ...(cacheWrite > 0 ? { cacheCreationInputTokens: cacheWrite } : {}),
+        };
         providerLedger.add(
           used,
-          cacheRead > 0 ? { ...usage, cacheReadInputTokens: cacheRead } : usage,
+          cacheRead > 0 || cacheWrite > 0 ? { ...usage, ...cacheShares } : usage,
           model,
           { producedNothing: usage.producedNothing === true, ...(phase ? { phase } : {}) },
         );
@@ -14297,7 +14303,7 @@ async function noteBuildOutcome(
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += rmT.usage.inputTokens;
             blueprintUsage.outputTokens += rmT.usage.outputTokens;
-            buildUsage.add({ inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens });
+            buildUsage.add({ inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, cacheReadInputTokens: rmT.usage.cacheReadInputTokens, cacheCreationInputTokens: rmT.usage.cacheCreationInputTokens });
             // 🔴 A CALL WHOSE PROVIDER IS KNOWN IS NEVER PRICED AS "UNKNOWN" (autopsy Study-Racer,
             // 2026-09-25). This planner ran on glm-4.7-flashx ($0.40/MTok out) and its 3,543 output
             // tokens reached the bill through the unattributed remainder — priced at Sonnet ($15/MTok)
@@ -14305,7 +14311,7 @@ async function noteBuildOutcome(
             // bill for a call we knew the vendor of. `recordLlmCall` two lines up already names it. The
             // heal runners were fixed for this exact shape in 2026-08-10 (see healRunnerOpts); the three
             // planner calls were the siblings never hunted. Same ledger the fast lane feeds.
-            captureTurnUsage(rmProvider, { inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0);
+            captureTurnUsage(rmProvider, { inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0, rmT.usage.cacheCreationInputTokens ?? 0);
 
             const rmParsed = parseMegaRoadmap(rmT.text, scope.famousApp);
             const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp);
@@ -16291,10 +16297,10 @@ async function noteBuildOutcome(
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
-            buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
+            buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, cacheReadInputTokens: t.usage.cacheReadInputTokens, cacheCreationInputTokens: t.usage.cacheCreationInputTokens });
             // Attributed to the vendor that answered, never swept into the Sonnet-priced remainder —
             // see the roadmap planner above (autopsy Study-Racer, 2026-09-25).
-            captureTurnUsage(bpProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);
+            captureTurnUsage(bpProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
             return t.text;
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
@@ -17452,10 +17458,10 @@ async function noteBuildOutcome(
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
-            buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
+            buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, cacheReadInputTokens: t.usage.cacheReadInputTokens, cacheCreationInputTokens: t.usage.cacheCreationInputTokens });
             // Attributed to the vendor that answered, never swept into the Sonnet-priced remainder —
             // see the roadmap planner above (autopsy Study-Racer, 2026-09-25).
-            captureTurnUsage(ppProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);
+            captureTurnUsage(ppProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
             ppLast.stopReason = t.stopReason ?? null;
             ppLast.chars = t.text.length;
             ppLast.latencyMs = Date.now() - startedAt;
@@ -17899,11 +17905,11 @@ async function noteBuildOutcome(
           osUsage.cacheReadInputTokens += t.usage.cacheReadInputTokens ?? 0;
           // Billing accounting fix: the fast lane does not use AgentRunner, so feed the build-level
           // sink directly here (mirrors AgentRunner's own sink write).
-          buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
+          buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, cacheReadInputTokens: t.usage.cacheReadInputTokens, cacheCreationInputTokens: t.usage.cacheCreationInputTokens });
           // REAL-cost billing (Fix 65): attribute this fast-lane call to the provider/model that ACTUALLY
           // delivered, so a cheap GLM/Kimi fast-lane build is priced at the cheap rate — not swept into
           // the Sonnet-rate "unattributed remainder". Mirrors the agentic chain's onTurnComplete.
-          captureTurnUsage(usedProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);
+          captureTurnUsage(usedProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
           return { text: t.text, stopReason: t.stopReason ?? null };
         };
         // TRUNCATION CONTINUATION (admin report 858f6d7b). Every fast-lane generation now runs to
@@ -18254,7 +18260,7 @@ async function noteBuildOutcome(
         };
         const fastLog = (msg: string) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() });
         const fastResult = (summary: string, steps: number, typecheckRan = true) => {
-          result = { ok: true, summary, steps, usage: osUsage, billedUsd: billedAmountUsd({ inputTokens: osUsage.inputTokens, outputTokens: osUsage.outputTokens }, powerLevelReqEffective) };
+          result = { ok: true, summary, steps, usage: osUsage, billedUsd: billedAmountUsd(osUsage, powerLevelReqEffective) };
           deliveredTier = analysis?.startTier ?? 'haiku';
           // Skip the agentic readiness gate ONLY when the fast lane genuinely type-checked. If the
           // sandbox check could not run (typecheckRan=false), the downstream gate stays ON so the app

@@ -113,7 +113,7 @@ import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemo
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames } from './tscErrorCause';
-import { WRITE_TYPECHECK_NOT_READY_MARKER,
+import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
@@ -3565,6 +3565,7 @@ export class ToolDispatcher {
       let silentRun = false; // tsc printed nothing at all — the only output that means "clean"
       let neverRan = false; // the compiler did not look at the project — neither clean nor failed
       let notReady = false; // the compiler was not ready (an install running) — the check stood down at once
+      let notReadyWhy: ReturnType<typeof writeTypecheckNotReadyReason> = null; // WHICH condition (build 46e2d74b)
       let errors = await this._writeTypecheckQueue.run(async () => {
         const command = writeTypecheckCommand(this.tsBuildInfoId);
         const startedAt = Date.now();
@@ -3582,7 +3583,7 @@ export class ToolDispatcher {
           return null;
         }
         const durationMs = Date.now() - startedAt;
-        if (String(r.stdout ?? '').includes(WRITE_TYPECHECK_NOT_READY_MARKER)) { notReady = true; return null; }
+        if (String(r.stdout ?? '').includes(WRITE_TYPECHECK_NOT_READY_MARKER)) { notReady = true; notReadyWhy = writeTypecheckNotReadyReason(r.stdout); return null; }
         s.runs += 1;
         s.elapsedMs += durationMs;
         s.timeouts = 0; // a run that finished resets the consecutive-timeout count
@@ -3601,7 +3602,14 @@ export class ToolDispatcher {
         return parseTscErrors(combined);
       });
       if (errors === null) {
-        if (notReady) { s.skipped += tsPaths.length; s.skippedNotReady = (s.skippedNotReady ?? 0) + tsPaths.length; }
+        if (notReady) {
+          s.skipped += tsPaths.length;
+          s.skippedNotReady = (s.skippedNotReady ?? 0) + tsPaths.length;
+          // Counted by the condition that fired, so the report names it (build 46e2d74b: fourteen writes
+          // reported as "still being installed" when the tree had only looked stale).
+          const why = notReadyWhy ?? 'unknown';
+          s.notReadyReasons = { ...(s.notReadyReasons ?? {}), [why]: (s.notReadyReasons?.[why] ?? 0) + tsPaths.length };
+        }
         return '';
       }
       if (neverRan) {

@@ -93450,3 +93450,9 @@ delete on `unlisted`, and the page's false promise put back.
 - **Fix:** an `always()` step after the scans gives the cache back to the runner user (`sudo chown -R`).
 - **Class lock:** every runner HOME path a workflow mounts into a container must be chowned back by a later `always()` step. Proven by 2 reversions.
 - **Siblings:** none. No other workflow mounts a HOME path into a container.
+
+## 2026-10-11: Q-750, Q-751, Q-752 closed (#3652 merged)
+
+The rows were removed from the open queue and their IDs appended to the closed register. Live proof:
+- **Q-750 and Q-752:** image-scan run #108 on `main` (`50894a524`) is green. 0 CRITICAL, the image boots and serves, and the cache step ran with no "Failed to save" warning, so the cache saves for the first time. The nightly scan had been red since 2026-10-05.
+- **Q-751** is proven by the next `.aab` run: it must log no "`track` is deprecated" warning.

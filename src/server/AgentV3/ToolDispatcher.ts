@@ -4081,7 +4081,7 @@ export class ToolDispatcher {
     for (const p of paths) {
       try { browserScript += browserOnlyWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
-    return hooks + storeLoop + imports + installed + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch + vehicle + browserScript;
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch + vehicle + installed + browserScript;
   }
 
   /**

@@ -137,6 +137,6 @@ describe('the note the builder reads, and where the dispatcher says it', () => {
     const src = readFileSync(join(__dirname, '../src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
     expect(src).toContain('this._vehicleShapeIndex.set(p, vehicleShapeHalves(p, files[p]))');
     expect(src).toMatch(/vehicle = handWrittenVehicleNote\(found\); this\._vehicleShapeNoted = true;/);
-    expect(src).toMatch(/\+ touch \+ vehicle \+ browserScript;/);
+    expect(src).toMatch(/\+ touch \+ vehicle \+ installed \+ browserScript;/);
   });
 });

@@ -45,6 +45,12 @@ export interface UnbilledTokens {
   cacheReadInputTokens?: number;
   /** The cache-write share of `inputTokens` (Q-343; already INCLUDED in it, never additional). */
   cacheCreationInputTokens?: number;
+  /**
+   * The part of `outputTokens` that was a reply CUT OFF at the output limit and THROWN AWAY (Q-166) —
+   * already INCLUDED in `outputTokens`, never additional. Kept apart only so the report can say which
+   * rule left those tokens out of the bill; the subtraction itself reads `outputTokens`.
+   */
+  discardedOutputTokens?: number;
 }
 
 /**
@@ -76,6 +82,8 @@ export function addUnbilled(into: UnbilledTokens, add: UnbilledTokens): void {
   if (cache > 0) into.cacheReadInputTokens = clean(into.cacheReadInputTokens) + cache;
   const write = clean(add.cacheCreationInputTokens);
   if (write > 0) into.cacheCreationInputTokens = clean(into.cacheCreationInputTokens) + write;
+  const discarded = clean(add.discardedOutputTokens);
+  if (discarded > 0) into.discardedOutputTokens = clean(into.discardedOutputTokens) + discarded;
 }
 
 /**
@@ -218,14 +226,21 @@ export function absorbedWorkDetail(
 ): string {
   const phases = new Set<string>();
   let starved = false;
+  let discarded = false;
   for (const e of Array.isArray(entries) ? entries : []) {
     const spent = clean(e.usage?.inputTokens) + clean(e.usage?.outputTokens);
     if (e.phase && barrenPhases.has(e.phase)) { if (spent > 0) phases.add(e.phase); continue; }
-    if (e.unbilled && clean(e.unbilled.inputTokens) + clean(e.unbilled.outputTokens) > 0) starved = true;
+    if (!e.unbilled) continue;
+    // The two turn rules are told apart by the discarded share they record (Q-166): a starved turn
+    // produced nothing, a discarded one produced a reply that was cut off and thrown away.
+    const cut = clean(e.unbilled.discardedOutputTokens);
+    if (cut > 0) discarded = true;
+    if (clean(e.unbilled.inputTokens) + clean(e.unbilled.outputTokens) - cut > 0) starved = true;
   }
   const causes: string[] = [];
   for (const p of [...phases].sort()) causes.push(PHASE_WORDS[p] ?? `the "${p}" pass delivered nothing the build kept`);
   if (starved) causes.push('one or more model turns produced no text and no tool call (a starved or abandoned turn)');
+  if (discarded) causes.push('a reply was cut off at the output limit and thrown away, so its output was not billed');
   return causes.length ? causes.join('; ') : 'no cause could be attributed from the ledger';
 }
 

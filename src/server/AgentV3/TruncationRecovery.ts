@@ -13,6 +13,7 @@
 
 import { parseFileBlocks } from './OneShotBuilder';
 import type { SyntaxErrorInfo } from './SyntaxCheck';
+import { PARTIAL_CONTENT_KEY, resumeTruncatedEnabled } from './reliability/resumeWrite';
 
 /**
  * The file paths a TRUNCATED turn tried to emit as `<<<FILE …>>>` TEXT markers. These never became
@@ -23,6 +24,75 @@ import type { SyntaxErrorInfo } from './SyntaxCheck';
 export function textMarkerFilePaths(turnText: string | undefined | null): string[] {
   if (!turnText || !turnText.includes('<<<FILE')) return [];
   return parseFileBlocks(turnText).map((f) => f.path);
+}
+
+/** The part of a turn this module reads — a subset of TurnResult, so the predicates stay pure. */
+export interface TruncatableTurn {
+  text?: string;
+  toolUses?: ReadonlyArray<{ name: string; input: unknown }>;
+  truncated?: boolean;
+  stopReason?: string | null;
+}
+
+/**
+ * What a CUT-OFF turn produced, sorted into what was kept and what was THROWN AWAY. PURE.
+ *
+ * - `written` — files a write_file / write_files_batch call carried whole; the loop writes them.
+ * - `truncatedToolPaths` — a write sliced mid-`content` at the token limit: the adapter salvaged the path
+ *   but there is no content, so nothing was written. When resuming is on and the partial was buffered,
+ *   it is NOT lost (append_file carries on from it), so it is not listed.
+ * - `textMarkerPaths` — files emitted as `<<<FILE …>>>` TEXT, which the main loop never writes.
+ *
+ * ONE implementation, read by the truncation guard (which asks for the lost files again) AND by the bill
+ * (Q-166 — the output of a turn whose cut-off part was thrown away is not billed), so what the user is
+ * told was lost and what they are not charged for can never disagree.
+ */
+export function lostTruncatedOutput(turn: TruncatableTurn, resumeEnabled: boolean): {
+  written: Record<string, string>;
+  truncatedToolPaths: string[];
+  textMarkerPaths: string[];
+} {
+  const written: Record<string, string> = {};
+  const truncatedToolPaths: string[] = [];
+  for (const tu of turn.toolUses ?? []) {
+    // Cover write_file AND write_files_batch — a batch write is just as truncatable.
+    if (tu.name === 'write_file') {
+      const inp = tu.input as { path?: unknown; content?: unknown } | null | undefined;
+      if (typeof inp?.path === 'string' && typeof inp?.content === 'string') written[inp.path] = inp.content;
+      // P2b — a buffered cut-off write is resumed with append_file, so it is not lost.
+      else if (typeof inp?.path === 'string' && inp?.content === undefined && !(resumeEnabled && typeof (tu.input as Record<string, unknown>)?.[PARTIAL_CONTENT_KEY] === 'string')) truncatedToolPaths.push(inp.path);
+    } else if (tu.name === 'write_files_batch') {
+      const b = tu.input as { files?: unknown } | null | undefined;
+      if (Array.isArray(b?.files)) {
+        for (const f of b.files) {
+          const ff = f as { path?: unknown; content?: unknown };
+          if (typeof ff?.path === 'string' && typeof ff?.content === 'string') written[ff.path] = ff.content;
+          else if (typeof ff?.path === 'string' && ff?.content === undefined) truncatedToolPaths.push(ff.path);
+        }
+      }
+    }
+  }
+  // A path also written whole is not lost.
+  const writtenPaths = new Set(Object.keys(written));
+  return {
+    written,
+    truncatedToolPaths: truncatedToolPaths.filter((p) => !writtenPaths.has(p)),
+    textMarkerPaths: textMarkerFilePaths(turn.text).filter((p) => !writtenPaths.has(p)),
+  };
+}
+
+/**
+ * Did this turn end at the output limit AND have its cut-off part thrown away? PURE.
+ *
+ * True only when the platform DISCARDED something — a write with no content, or a text-marker file. A
+ * cut-off write that was written (and may be repaired) or buffered for resuming is not discarded. Its
+ * OUTPUT is then left out of the user's bill (Q-166, admin 2026-10-11): the whole turn's output, because a
+ * provider reports one output count per call and any split of it by characters would be a guess.
+ */
+export function turnDiscardedTruncatedOutput(turn: TruncatableTurn | null | undefined, resumeEnabled: boolean = resumeTruncatedEnabled()): boolean {
+  if (!turn || !(turn.truncated || turn.stopReason === 'max_tokens')) return false;
+  const lost = lostTruncatedOutput(turn, resumeEnabled);
+  return lost.truncatedToolPaths.length + lost.textMarkerPaths.length > 0;
 }
 
 /**

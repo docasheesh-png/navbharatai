@@ -13854,7 +13854,7 @@ async function noteBuildOutcome(
           () => { liveCostDiscountPct = 0; }, // unreadable ⇒ 0% — the ordinary price, as at settle
         );
       }
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
         // exact misreading autopsy f04421ef already paid for once, arriving here through a different
@@ -13906,7 +13906,7 @@ async function noteBuildOutcome(
           used,
           cacheRead > 0 || cacheWrite > 0 ? { ...usage, ...cacheShares } : usage,
           model,
-          { producedNothing: usage.producedNothing === true, ...(phase ? { phase } : {}) },
+          { producedNothing: usage.producedNothing === true, ...(usage.discardedOutput === true ? { discardedOutput: true } : {}), ...(phase ? { phase } : {}) },
         );
         // …and accumulate the build total for the diagnostics report's cache-hit rate line.
         if (cacheRead > 0) {
@@ -13971,6 +13971,14 @@ async function noteBuildOutcome(
             } catch { /* a live figure we could not price is simply not shown */ }
           }
         }
+      };
+      // OUTPUT THAT IS THROWN AWAY IS NOT BILLED (Q-166, admin 2026-10-11) — for the lanes that learn it
+      // only after the call was captured: the fast lane drops a half-written file once its continuations
+      // run out, and a planner throws away a plan that was cut off. Same ledger, same slice, same phase
+      // zone as the `captureTurnUsage` that added the tokens; the input stays billed.
+      const discardTurnOutput = (used: string, model: string | undefined, outputTokens: number): void => {
+        try { providerLedger.discardOutput(used, model, outputTokens, { phase: currentBillingPhase() ?? undefined }); }
+        catch { /* billing attribution must never disturb a build */ }
       };
       // The cheap floor (GLM/Kimi) leads a build's FIRST attempt for simple/medium apps for allowlisted
       // users — OR is forced ON+cheap-ONLY for a not-yet-paying free-tier user. Computed ONCE here and
@@ -14317,7 +14325,11 @@ async function noteBuildOutcome(
             const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp);
             // "no parseable roadmap" never said WHY (autopsy 6a4a799f: 120 s of a planner, then that
             // sentence alone). A cut-off reply and a malformed one need different fixes.
-            if (!rmParsed) rejected.push(roadmapUnparseableDetail({ stopReason: rmT.stopReason, text: rmT.text }));
+            if (!rmParsed) {
+              rejected.push(roadmapUnparseableDetail({ stopReason: rmT.stopReason, text: rmT.text }));
+              // A reply cut off at the limit and thrown away is not billed for its output (Q-166).
+              if (isTruncatedStop(rmT.stopReason)) discardTurnOutput(rmProvider, rmT.model, rmT.usage.outputTokens);
+            }
             if (roadmap) {
               buildDiag.record({
                 phase: 'plan',
@@ -17429,7 +17441,7 @@ async function noteBuildOutcome(
           const ppTimeoutMs = projectPlannerTimeoutMs();
           // The last answer's stop reason and length — so an answer that came back UNUSABLE (cut off,
           // unreadable) is recorded as the planner failure it is (autopsy 6a4a799f, unusablePlanCause).
-          const ppLast = { stopReason: null as string | null, chars: 0, latencyMs: 0 };
+          const ppLast = { stopReason: null as string | null, chars: 0, latencyMs: 0, provider: '', model: undefined as string | undefined, outputTokens: 0 };
           const ppGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
             let ppProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
@@ -17465,6 +17477,9 @@ async function noteBuildOutcome(
             ppLast.stopReason = t.stopReason ?? null;
             ppLast.chars = t.text.length;
             ppLast.latencyMs = Date.now() - startedAt;
+            ppLast.provider = ppProvider;
+            ppLast.model = t.model;
+            ppLast.outputTokens = t.usage.outputTokens;
             return t.text;
           };
           if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && detectMegaProject(planning.sizing)) {
@@ -17488,6 +17503,8 @@ async function noteBuildOutcome(
               // planner, not a small project, and it is said as one — to the admin with the seconds it
               // cost, and to the user, who was just promised a module plan (autopsy 6a4a799f).
               const cause = unusablePlanCause({ modules: modules.length, stopReason: ppLast.stopReason, responseChars: ppLast.chars });
+              // A plan that was cut off is thrown away — its output is not billed (Q-166).
+              if (cause === 'cut-off') discardTurnOutput(ppLast.provider, ppLast.model, ppLast.outputTokens);
               try {
                 buildDiag.record({
                   phase: 'plan', severity: cause === 'too-small' ? 'info' : 'warning',
@@ -17819,7 +17836,7 @@ async function noteBuildOutcome(
         // The model that served the lane's LAST call reasons before every answer — the lane stops at
         // the next boundary and hands off (SimpleBuildDeps.stopLane; autopsy Study-Racer, 2026-09-25).
         let fastLaneReasoningRung: string | null = null;
-        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number): Promise<{ text: string; stopReason: string | null }> => {
+        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
           // blind spot — a truncated (max_tokens) per-file generation is exactly what produces broken
@@ -17910,7 +17927,7 @@ async function noteBuildOutcome(
           // delivered, so a cheap GLM/Kimi fast-lane build is priced at the cheap rate — not swept into
           // the Sonnet-rate "unattributed remainder". Mirrors the agentic chain's onTurnComplete.
           captureTurnUsage(usedProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
-          return { text: t.text, stopReason: t.stopReason ?? null };
+          return { text: t.text, stopReason: t.stopReason ?? null, billedAs: { provider: usedProvider, model: t.model, outputTokens: t.usage.outputTokens } };
         };
         // TRUNCATION CONTINUATION (admin report 858f6d7b). Every fast-lane generation now runs to
         // COMPLETION instead of silently stopping at the provider's output ceiling. Previously a
@@ -17924,13 +17941,15 @@ async function noteBuildOutcome(
           const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt);
           let text = first.text;
           let stopReason = first.stopReason;
+          // The call whose reply ends the text — the one a dropped half-written file came from (Q-166).
+          let lastBilledAs = first.billedAs;
           let attempts = 0;
           // The THIRD argument is what stops a reasoning-only response being "continued" three times
           // into the same nothing — see shouldContinue's docblock (report 58fe8254).
           while (shouldContinue(stopReason, attempts, text)) {
             attempts += 1;
             events.emit({ type: 'narration', agent: 'architect', text: `✍️ That file list was longer than one response allows — continuing it (${attempts}/${MAX_CONTINUATIONS}) so nothing is left half-written…`, ts: Date.now() });
-            let next: { text: string; stopReason: string | null };
+            let next: { text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } };
             try {
               // A CONTINUATION FACES THE SAME DEADLINE AS THE CALL IT CONTINUES. It is a fresh provider
               // call, so without this the budget would bound only the first one and the continuation
@@ -17951,6 +17970,7 @@ async function noteBuildOutcome(
             }
             text = joinContinuation(text, next.text);
             stopReason = next.stopReason;
+            lastBilledAs = next.billedAs;
           }
           if (attempts > 0) {
             buildDiag.record({ phase: 'build', severity: 'info', code: 'FASTLANE_CONTINUED', message: `A generation hit the output-token ceiling and was continued ${attempts} time(s) so no file was left half-written.`, autoResolved: true, detail: `finalStopReason=${stopReason ?? 'unknown'}` });
@@ -17963,6 +17983,8 @@ async function noteBuildOutcome(
           if (halfWritten) {
             const cut = text.lastIndexOf('<<<FILE');
             if (cut > 0) text = text.slice(0, cut);
+            // The reply that carried it was cut off and its tail thrown away — its output is not billed.
+            discardTurnOutput(lastBilledAs.provider, lastBilledAs.model, lastBilledAs.outputTokens);
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_TRUNCATED_FILE_DROPPED', message: `${halfWritten} was still being written when the output limit was reached after ${MAX_CONTINUATIONS} continuations — it was DISCARDED rather than saved half-finished.`, autoResolved: false });
             events.emit({ type: 'narration', agent: 'architect', text: `⚠️ ${halfWritten} was cut off mid-write, so I discarded the partial file rather than saving a broken one — I'll rebuild it.`, ts: Date.now() });
           }

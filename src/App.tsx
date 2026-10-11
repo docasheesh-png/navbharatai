@@ -184,6 +184,7 @@ import { aboutContent, type AboutContent, type AboutOverrides } from './content/
 import { decideBackAction, HARDWARE_BACK_EVENT } from './lib/androidBack';
 import { loadNativeShellContext, exitNativeApp, syncStatusBarToTheme } from './lib/nativeShell';
 import { ExitConfirmDialog } from './components/ExitConfirmDialog';
+import { deliverFile, deliveryMessage } from './lib/downloadFile';
 // AgentMode → re-exported from ./types
 
 // Large keys that can be evicted when localStorage is nearly full.
@@ -2565,15 +2566,11 @@ export default function App() {
       });
       if (!response.ok) throw new Error('Download failed');
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${appName.replace(/[^a-zA-Z0-9-_]/g, '-')}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      addToast('App downloaded as ZIP ✓', 'success');
+      const zipName = `${appName.replace(/[^a-zA-Z0-9-_]/g, '-')}.zip`;
+      const delivered = await deliverFile(zipName, blob, 'application/zip');
+      if (delivered === 'failed') addToast(deliveryMessage(delivered, zipName), 'error');
+      else if (delivered === 'downloaded') addToast('App downloaded as ZIP ✓', 'success');
+      else if (delivered !== 'cancelled') addToast(deliveryMessage(delivered, zipName), 'success');
     } catch {
       addToast('Download failed — try again', 'error');
     }

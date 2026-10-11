@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Circle,
 } from 'lucide-react';
+import { deliverFile } from '../../lib/downloadFile';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -351,12 +352,7 @@ export const CostEstimator: React.FC = () => {
       `Best Option: ${cheapest.name} — ${fmt(cheapest.total, annual).inr}/month`,
     ];
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'cloud-cost-report.txt';
-    a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile('cloud-cost-report.txt', blob);
   };
 
   const toggle = (field: keyof AppProfile) =>

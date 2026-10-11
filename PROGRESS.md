@@ -93509,3 +93509,30 @@ restricted list. Q-698 therefore waits only on an older bundle still active in a
 The rows were removed from the open queue and their IDs appended to the closed register. Live proof:
 - **Q-750 and Q-752:** image-scan run #108 on `main` (`50894a524`) is green. 0 CRITICAL, the image boots and serves, and the cache step ran with no "Failed to save" warning, so the cache saves for the first time. The nightly scan had been red since 2026-10-05.
 - **Q-751** is proven by the next `.aab` run: it must log no "`track` is deprecated" warning.
+
+## 2026-10-11 — The admin: "sabhi open Q ko complete karna hai". Analysis of all 77 open rows; Q-790 fixed; Q-791 opened
+
+**Analysis (given to the admin in chat):**
+- 4 OPEN rows the session takes now: Q-790, Q-789, Q-381, Q-600.
+- 8 not-defect rows wait on a yes.
+- 13 rows are already fixed by later work, or are instances whose data is gone; the class now self-reports, and closing them was proposed.
+- 26 decisions, each with a recommendation.
+- 26 admin-only console, key or device steps.
+- Stale facts corrected in the analysis:
+  - Q-142 is fixed in code (`firestore.rules` is owner-only); only the rules deploy, which is Q-610, remains.
+  - Q-705's step 7 is not needed (the default compute account holds no roles).
+  - Q-109's key was still empty on 2026-09-27.
+
+**Q-790:** about 20 client files saved files with a raw `<a download>`, which iOS ignores.
+- **Fix:** one `deliverFile` helper (text or binary). It uses the share sheet when it can take a file; otherwise an attached anchor whose URL is revoked only after the click.
+- All 24 sites in 20 files go through it. Sites that show a note now say what really happened.
+- **Sibling found:** neither Capacitor shell handles a download, and the Android WebView has no share sheet, so the Android app never saved any generated file. Inside the app the helper now writes to Documents/NavBharatAI. The device proof is **Q-791** (BLOCKED, device check).
+- **Lock:** `tests/everyDownloadGoesThroughOneHelper.test.ts`. A census of every client file, plus each platform's behaviour. 4 reversions, 4 failures.
+- **KB:** `saving_files_on_phone`.
+
+**Q-789 (same day, same PR):** Dark Mode Generator.
+- **Bug 1:** the override table was read only by Manual.
+- **Bug 2:** Manual set `color` and `background-color` to one value, so text went invisible.
+- **Fix:** the builder moved to `src/lib/darkModeCss.ts`. Each colour is swapped only on its own property, and an override becomes a real rule in every strategy.
+- Without overrides, the output is byte-identical to before (proven against a copy of the old builder).
+- **Lock:** `tests/aDarkModeMappingDoesWhatItsTableSays.test.ts`. 3 reversions, 3 failures.

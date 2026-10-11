@@ -597,6 +597,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'saving_files_on_phone',
+    name: 'Where a downloaded or exported file goes (desktop, iPhone, Android app)',
+    path: 'Any Download / Save / Export button (reports, ZIP export, CSV/JSON exports, generated code, images, APK/AAB files)',
+    description: 'Every Download, Save and Export button in NavBharatAI saves through one path, so it works the same everywhere. On a computer the file downloads normally. On an iPhone (Safari or the app) the share sheet opens — choose "Save to Files" (or Save Image for a picture) to keep it. In the Android app the file is written straight to the phone, in the Documents/NavBharatAI folder, and a note says so. If the device refuses the file, the button says "Could not save" instead of pretending it downloaded; closing the share sheet saves nothing and says so.',
+    howToUse: 'Tap the Download/Save/Export button. Computer: find the file in your Downloads. iPhone: in the share sheet tap "Save to Files" and pick a folder. Android app: open your Files app → Documents → NavBharatAI.',
+    relatedFeatures: ['agentv3_export'],
+    keywords: ['download', 'download kahan gaya', 'file kahan gayi', 'save nahi hua', 'download nahi hua', 'downloaded file', 'where is my file', 'save to files', 'iphone download', 'android download', 'documents folder', 'export', 'csv', 'zip download', 'report download', 'share sheet', 'file save'],
+  },
+  {
     id: 'agentv3_zip_import',
     name: 'Import an existing app (.zip) into NavBharatAI Pro',
     path: 'NavBharatAI Pro → chat composer → 📎 attach menu → "Import project (.zip)" → pick your app\'s .zip (it imports immediately — no send needed)',

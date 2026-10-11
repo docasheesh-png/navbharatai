@@ -12,6 +12,7 @@ import { deployCapability, sanitizeZipName, unavailableDeployMessage, isV5Deploy
 import { isBackendDeployHost, buildBackendConfigInjection, canOfferManagedDeploy, managedDeployRequest, managedDeployOutcome, renderConnectSteps } from '../../lib/backendDeployWiring';
 import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { authedFetch } from '../../lib/authedFetch';
+import { deliverFile, deliveryMessage } from '../../lib/downloadFile';
 
 interface GitPanelProps {
   token: string | null;
@@ -683,15 +684,14 @@ export const GitPanel: React.FC<GitPanelProps> = ({
       // tool reads; level 6 is the usual speed/size balance.
       const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
       const fileName = sanitizeZipName(configs.static?.zipName);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-      addLog('✅ Exported ' + entries.length + ' file(s) → ' + fileName + '. Check your browser downloads.');
+      const delivered = await deliverFile(fileName, blob, 'application/zip');
+      if (delivered === 'failed') throw new Error(deliveryMessage(delivered, fileName));
+      if (delivered === 'cancelled') {
+        addLog('⏹ ' + deliveryMessage(delivered, fileName));
+        setDeployStatus('idle');
+        return;
+      }
+      addLog('✅ Exported ' + entries.length + ' file(s) → ' + fileName + '. ' + deliveryMessage(delivered, fileName));
       setActiveStep(3);
       setDeployStatus('deployed');
     } catch (err) {

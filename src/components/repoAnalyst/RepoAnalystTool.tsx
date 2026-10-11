@@ -3,6 +3,7 @@ import { GitBranch, Search, Send, Sparkles, Copy, Download } from 'lucide-react'
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { guestLimitReached } from '../../lib/guestId';
+import { deliverFile } from '../../lib/downloadFile';
 
 /**
  * Dedicated "GitHub Repo Analyst & Improver" tool UI.
@@ -132,11 +133,7 @@ export function RepoAnalystTool({ userId }: { userId?: string }) {
   const downloadFile = (f: GenFile) => {
     try {
       const blob = new Blob([f.content], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = f.path.split('/').pop() || 'file.txt';
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      void deliverFile(f.path.split('/').pop() || 'file.txt', blob);
     } catch { /* ignore */ }
   };
 

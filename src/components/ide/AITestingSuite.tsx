@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { TestTube, Check, AlertCircle, Download, Copy, Zap, FileCode, ChevronRight } from 'lucide-react';
 import { sampleInputValue } from '../../server/QualityEvaluationEngine/TestDataManager';
+import { deliverFile } from '../../lib/downloadFile';
 
 type TestStatus = 'pending' | 'pass' | 'fail' | 'skip';
 
@@ -200,10 +201,7 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
       `// ${CATEGORY_LABELS[t.category]} — ${t.name}\n// ${t.description}\n\n${t.code}\n`
     ).join('\n\n' + '='.repeat(60) + '\n\n');
     const blob = new Blob([content], { type: 'text/javascript' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'app.test.js'; a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile('app.test.js', blob);
   };
 
   const filtered = tests.filter(t => selectedCategory === 'all' || t.category === selectedCategory);

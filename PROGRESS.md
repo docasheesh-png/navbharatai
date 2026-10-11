@@ -93548,3 +93548,10 @@ The rows were removed from the open queue and their IDs appended to the closed r
   - The local report cache kept writing admin-only reports, provider names included, to user devices with no reader. It is removed, and the stored copy is cleared on open.
   - The Files tab hid its loading and error state behind "No files shown.". The empty state now says which.
 - **Lock:** `tests/theFilesTabSaysWhyItIsEmpty.test.ts` (reversion proven).
+
+### 2026-10-11 — Q-789 and Q-790 closed (#3656 merged by the admin)
+
+#3656 merged at 11:43 UTC. Its two rows are deleted from `BUILD_REPORT_QUEUE.md` and appended to
+`docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`, on a fresh `main`. Q-791 (the Android device check of the
+Documents/NavBharatAI save) stays open as 🟡 BLOCKED on a real phone with the next `.aab`, and now has
+its own line in the queue's summary table.

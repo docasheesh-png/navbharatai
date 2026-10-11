@@ -217,6 +217,7 @@ import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis
 import { analyzeRequirementCoverage, requirementCoverageSummary, currentRequestForCoverage } from './RequirementCoverage';
 import { binaryTextWriteRefusal } from './binaryTextWrite';
 import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './touchPlayableGame';
+import { vehicleShapeHalves, vehicleShapeFindings, handWrittenVehicleNote, type VehicleShapeHalves } from './handWrittenVehicleScan';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
@@ -960,6 +961,14 @@ export class ToolDispatcher {
   private coverageRequest: string | null = null;
   /** The keyboard-only-game note is said once per build (touchPlayableGame.ts). */
   private _touchGameNoted = false;
+  /**
+   * A hand-written vehicle's halves, per written file (handWrittenVehicleScan.ts — admin 2026-10-11, build
+   * 46e2d74b): the camera in one file and the motion in another still meet. Said once per build.
+   */
+  private _vehicleShapeIndex = new Map<string, VehicleShapeHalves>();
+  private _vehicleShapeNoted = false;
+  /** Recipe-known packages a hand-written import already had its one install attempt for (see below). */
+  private _importInstallTried = new Set<string>();
   /** Once per build: an upload read into text, with nowhere proper to keep it (Q-542 — `browserFileStore.ts`). */
   private _uploadStorageNoted = false;
   /** The entry-first hand-back is said once per build (earlyPreview.ts, autopsy 39e982bd). */
@@ -3975,6 +3984,9 @@ export class ToolDispatcher {
     for (const p of paths) {
       imports += await importCheckNote(p, files[p], { readFile: (f: string) => this.actuator.readFile(this.workspaceId, f) });
     }
+    // 📦 Installed BEFORE the typecheck below, so the compile after a hand-written `import * as THREE from
+    // 'three'` sees the package instead of quoting "Cannot find module" (build 46e2d74b, L-07).
+    const installed = await this.importedRecipeDependencyNote(files);
     const typecheck = await this.writeTypecheckNote(files);
     let quality = '';
     for (const p of paths) {
@@ -4042,6 +4054,16 @@ export class ToolDispatcher {
         } catch { /* a note is best-effort */ }
       }
     }
+    // 🏎️ A hand-written vehicle that will look or drive backwards (admin 2026-10-11, build 46e2d74b: "car ulti
+    // chal rahi hai") — read by code shape, once per build, pointing at the kit that does it right.
+    let vehicle = '';
+    if (!this._vehicleShapeNoted) {
+      try {
+        for (const p of paths) this._vehicleShapeIndex.set(p, vehicleShapeHalves(p, files[p]));
+        const found = vehicleShapeFindings(this._vehicleShapeIndex);
+        if (found.length > 0) { vehicle = handWrittenVehicleNote(found); this._vehicleShapeNoted = true; }
+      } catch { /* a note is best-effort */ }
+    }
     const style = await this.styleWriteNotes(files);
     // Screens written while the entry is still the starter (autopsy 68f0a486) — the user sees none of them.
     // Carried on `shadow` (the "what the preview will not show" notes) so the guarded sum keeps its shape.
@@ -4059,7 +4081,39 @@ export class ToolDispatcher {
     for (const p of paths) {
       try { browserScript += browserOnlyWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
-    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch + browserScript;
+    return hooks + storeLoop + imports + installed + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch + vehicle + browserScript;
+  }
+
+  /**
+   * 📦 A PACKAGE A HAND-WRITTEN FILE IMPORTS IS INSTALLED THE WAY A RECIPE'S IS (admin 2026-10-11, build
+   * 46e2d74b — L-07).
+   *
+   * 🔴 The racing game hand-wrote `import * as THREE from 'three'`. `three` is a package the game recipes
+   * DECLARE (at a version the kit is built against), and since candy report 7da1cdca a recipe's packages are
+   * installed by us, under the install lock — but only when a RECIPE wrote the import
+   * (`installRecipeDependencies` was reachable from the recipe cases alone). A model-authored import of the
+   * very same package got nothing: the model ran `npm install three @types/three` itself, after fourteen
+   * writes. The class is "dependency sync tied to which tool wrote the import"; this ties it to the import.
+   *
+   * 🔒 Only a package a recipe DECLARES (`recipeDependenciesNeeded` never guesses at an unknown import), only
+   * when package.json does not list it yet, through the same lock-aware install the recipes use, and ONE
+   * attempt per package per build — a busy lock or a failed install is said once in words (the install's own
+   * note), never retried on every write. Best-effort: anything unreadable adds nothing.
+   */
+  private async importedRecipeDependencyNote(files: Record<string, string>): Promise<string> {
+    try {
+      const sources: Record<string, string> = {};
+      for (const [p, c] of Object.entries(files ?? {})) {
+        if (typeof c === 'string' && /\.(?:[cm]?[jt]sx?|vue|svelte)$/i.test(p) && !/(^|\/)node_modules\//.test(p)) sources[p] = c;
+      }
+      // Pure first: a write that imports no recipe-known package costs no read at all.
+      const known = recipeDependenciesNeeded(sources, '{}').filter((d) => !this._importInstallTried.has(d.name));
+      if (known.length === 0) return '';
+      for (const d of known) this._importInstallTried.add(d.name);
+      return await this.installRecipeDependencies(sources);
+    } catch {
+      return '';
+    }
   }
 
   /**

@@ -93536,3 +93536,8 @@ The rows were removed from the open queue and their IDs appended to the closed r
 - **Fix:** the builder moved to `src/lib/darkModeCss.ts`. Each colour is swapped only on its own property, and an override becomes a real rule in every strategy.
 - Without overrides, the output is byte-identical to before (proven against a copy of the old builder).
 - **Lock:** `tests/aDarkModeMappingDoesWhatItsTableSays.test.ts`. 3 reversions, 3 failures.
+
+**Q-381 batch two (same day):** 47 → 37.
+- Ten WARNING/INFO codes whose recording site says they are about our run joined `PROCESS_ONLY_CODES`: our fast lane, our import mechanics, our sandbox database, our review budget, our repair rollback, and a model's tool call.
+- Left out and pinned by a test: `STUCK_TOOL` (ERROR) and `REVIEWER_AUTOFIX_INCOMPLETE` (about the app).
+- Locked in `aProblemTheUserIsShownCanBeActedOn` (batch-two describe; reversion proven).

@@ -93555,3 +93555,42 @@ The rows were removed from the open queue and their IDs appended to the closed r
 `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`, on a fresh `main`. Q-791 (the Android device check of the
 Documents/NavBharatAI save) stays open as 🟡 BLOCKED on a real phone with the next `.aab`, and now has
 its own line in the queue's summary table.
+
+### 2026-10-11 — Q-600 batch five: App.tsx 46 → 0, the backlog reaches zero, and `noUnusedLocals` is on (#3657)
+
+Every one of App.tsx's 46 unused locals was DECIDED, not deleted blind. The baseline is now `{}` and
+`noUnusedLocals: true` is set in tsconfig.json, so a value nothing reads now fails `npm run typecheck`
+(and shows in every editor) rather than waiting for CI's ratchet. The script stays, because CI and
+CLAUDE.md's gate name it.
+
+**Three real defects it found (one row each, all fixed in #3657):**
+- **Q-792: a zip import nobody could see.** The Files panel's Upload button imports a whole project, up
+  to 5 GB through the chunked uploader. Its progress went to `proBuildProgress` and its outcome to the
+  Pro chat's message list, and no screen read either. A big import showed nothing for minutes; a failed
+  one changed nothing at all. Now the panel draws a progress bar (in both of its mounts), and the outcome
+  is a toast (files in, files dropped, or the reason it failed). `aZipImportIsSeen` drives the real hook.
+- **Q-793: a fake status file polled every two seconds, for ever.** `public/build_status.json` said
+  "building" permanently, so App re-fetched it every 2 s for the life of the app and re-rendered itself
+  each time, on every browser and phone. It fed an IDE panel that could never show. All of it is gone;
+  `nothingPollsAFakeBuildStatus` is a census against any client polling a status file again.
+- **Q-794: failures written to a log no screen draws.** `addLog` lands in `useDevLogs`, which reaches
+  no component. A failed "Confirm & Push to GitHub" was silent, and so were five siblings in the same
+  file (GitHub connect, sign-in ticket, refused sign-in link, repo import failed or empty); each is now a
+  toast. A FIREBASE_AUTH_ERROR handler that nothing sends, and which had no origin check, could put a
+  full-screen dialog in a foreign page's words in front of the user; it is removed. `aGithubFailureIsShown`
+  is a census of every error/warn log line in App.tsx.
+
+**A wire-up:** the top-up button now says "Opening secure checkout…" while the order is created (the hook
+had kept a jargon status string that no screen showed).
+
+**Dead code that LIED, removed:**
+- an "App is Live!" deploy view whose URL nothing set (view, panel, ViewType member — `deadViewBranches`);
+- `runCode`'s "dry-run" that logged "Exited with code 0" for a file it never ran;
+- two full-screen overlays nothing could open;
+- a Hinglish setting with no screen;
+- a regex flag that guessed "searching the web" from words like "now" (showing it would have been a fake
+  status);
+- the reverted landing rule's two leftover inputs (`noAutoReopen` now names them);
+- a GitPanel `onPush` prop chain that nothing invoked.
+
+Every lock was proven by reversion. KB: the Files entry now describes the zip progress and outcome.

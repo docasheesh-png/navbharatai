@@ -230,7 +230,9 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.navbharat.ai
           releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
-          track: internal
+          # `tracks`, not the deprecated `track`: the pinned action reads both into ["internal"], refuses both
+          # together, and warned on every run that `track` will be removed (run #151, 2026-10-08).
+          tracks: internal
           status: completed
           # 🔴 GOOGLE FLIPS THIS REQUIREMENT, AND BOTH VALUES HAVE ALREADY BROKEN A BUILD.
           #

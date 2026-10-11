@@ -443,6 +443,10 @@ export const HEAL_RESOLVES: Readonly<Record<string, readonly string[]>> = {
   EXPLORE_REPAIRED: ['EXPLORE_FAILED'],
   // Change engine slice 2: a feature an edit removed, restored by the feature heal.
   FEATURE_REGRESSION_HEALED: ['FEATURE_REGRESSED'],
+  // An imported app's migrations that ran clean — on the second attempt, after the boot installed the
+  // dependencies — answer the first attempt's failure and the boot log's missing tables (Q-381 batch four).
+  // Both were left open before, so a fixed database kept its "fix the database setup" button.
+  IMPORT_DB_MIGRATIONS_APPLIED: ['IMPORT_DB_MIGRATIONS_FAILED', 'DB_SCHEMA_MISSING'],
   REVIEW_FUNCTIONAL_REPAIRED: [],
   HOOKS_RULES_HEALED: [],
   INCOMPLETE_CODE_HEALED: [],

@@ -20112,6 +20112,15 @@ async function noteBuildOutcome(
           ? 'import'
           : (builderWroteCount() === 0 ? 'no-writes' : null);
         const obs = (message: string) => findingAboutUntouchedCode(untouchedReason, message);
+        // THE FRAMEWORK NOTE IS RE-CHECKED AGAINST WHAT WAS DELIVERED (Q-381 batch four). FRAMEWORK_SOURCE_MISMATCH
+        // is recorded at plan time, from the workspace as it was, and handed to the builder to reconcile. It now
+        // carries a button, so it must not outlive the mismatch: when the whole project this build leaves is
+        // coherent, it is answered. Never on an import turn — the map here is not the imported project.
+        try {
+          if (!isImportTurn && typeof integrityFiles['package.json'] === 'string' && checkFrameworkCoherence(integrityFiles).ok) {
+            buildDiag.resolveOnRecheck('FRAMEWORK_SOURCE_MISMATCH');
+          }
+        } catch { /* a re-check must never break a build */ }
         // MISSING SPA FALLBACK (ROADMAP #1 Phase 4.1) — the "Cannot GET /customer/home" class. Until now
         // this was only ever noticed AFTER the fact, by the preview verifier, as a symptom with no named
         // cause; the report said the preview did not render and the autopsy had to guess why. This names

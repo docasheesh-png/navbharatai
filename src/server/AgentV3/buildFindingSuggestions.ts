@@ -216,10 +216,13 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     // The reviewer looked AGAIN after its critical findings were repaired, and some are still there
     // (postFixReview.ts, Q-157). Real defects in the user's app, so they get a button — and the findings
     // themselves travel with it, so the next pass works on exactly what the second look saw.
+    // Since Q-381 batch four the settle lines that carry the same findings (REVIEW_CRITICAL_UNVERIFIED,
+    // OUTCOME_REVIEW_CRITICAL) are offered through this one, including when no second look ran — so the
+    // words say "not confirmed fixed", which is true in every one of those cases.
     code: 'REVIEW_RECHECK_CRITICALS_REMAIN',
     title: 'Fix what the review still found',
-    detail: 'NavBharatAI repaired the serious problems its review found, checked again, and some are still there.',
-    prompt: 'A review of this app found serious problems, a repair was made, and a second review found that some of them are still there. Fix each one listed below at its real cause, keep everything that already works, and confirm the app still builds and runs.',
+    detail: 'NavBharatAI\'s review found serious problems in your app that are not confirmed fixed yet.',
+    prompt: 'A review of this app found serious problems that are not confirmed fixed — a repair was tried, or there was no time for one. Fix each one listed below at its real cause, keep everything that already works, and confirm the app still builds and runs.',
     withEvidence: true,
   },
   {
@@ -348,6 +351,16 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'The project has screens but no working build setup, so they cannot be run or published. Add the build configuration and entry file the project needs, install what is missing, and confirm the app builds and opens.',
   },
   {
+    // Source written for one framework, packages set up for another (checkFrameworkCoherence). Recorded at
+    // plan time; since Q-381 batch four the route re-checks the project the build leaves and answers it when
+    // the two agree, so this button is only ever about a mismatch that is still there.
+    code: 'FRAMEWORK_SOURCE_MISMATCH',
+    title: 'Settle your project on one framework',
+    detail: 'Your project\'s files are written for one framework but set up to build with another, so it cannot build cleanly.',
+    prompt: 'This project\'s source files are written for one framework while its package setup builds a different one, so it cannot build cleanly. Keep the framework the source files actually use, make the packages, build scripts and configuration match it (or convert the few files that do not), and confirm the app builds and opens.',
+    withEvidence: true,
+  },
+  {
     code: 'DEPENDENCY_VULNERABILITIES',
     title: 'Update the unsafe libraries',
     detail: 'The app uses libraries with known security problems.',
@@ -429,6 +442,15 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'The database setup steps in the project I imported did not run. Find out why each one failed, fix the real cause, and confirm the database is set up and the app can read and write it.',
   },
   {
+    // The boot log proved a table missing (Q-381 batch four). Answered when the migration retried after the
+    // boot runs clean — HEAL_RESOLVES.IMPORT_DB_MIGRATIONS_APPLIED — which is what its own message says
+    // the pages are waiting for. What is left open is a missing table nothing created.
+    code: 'DB_SCHEMA_MISSING',
+    title: 'Create the tables your app reads',
+    detail: 'Your app\'s database is missing tables its pages read, so those pages will fail.',
+    prompt: 'The app\'s database is missing tables that its pages read, so those pages fail even where the preview renders. Add (or fix) the project\'s migration so it creates every table the app uses, run it against the app\'s database, and confirm the pages can read and write their data.',
+  },
+  {
     // The user pasted their own one-file HTML app and it was kept as one file (pastedAppFormat.ts, admin
     // 2026-10-01). Not a defect — the one-tap way to a full project, for when they do want one. Last in
     // the table: anything actually wrong with the app comes first.
@@ -486,6 +508,13 @@ export const OFFERED_THROUGH: Readonly<Record<string, string>> = {
   OUTCOME_MISSING_FILES: 'MISSING_FILES_DETECTED',
   OUTCOME_MISSING_EXPORT: 'MISSING_EXPORT_DETECTED',
   BOOT_KILLING_ENV_GUARD_UNRESOLVED: 'BOOT_KILLING_ENV_GUARD',
+  // Q-381 batch four. The platform tried to start the app itself and nothing served: the app never came up,
+  // and nothing later in the build can give it a preview (no preview is set after that proof).
+  PLATFORM_PREVIEW_NOT_UP: 'PREVIEW_NEVER_CAME_UP',
+  // The settle lines for review findings not confirmed fixed — on a rendered app, and on one that is not. They
+  // carry the same findings the second look left (`reviewCriticalsUnresolved`), so they share its button.
+  REVIEW_CRITICAL_UNVERIFIED: 'REVIEW_RECHECK_CRITICALS_REMAIN',
+  OUTCOME_REVIEW_CRITICAL: 'REVIEW_RECHECK_CRITICALS_REMAIN',
 };
 
 /** Codes that must never become a suggestion — see the header for why each is excluded. */

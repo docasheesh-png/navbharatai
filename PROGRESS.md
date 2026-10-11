@@ -93529,3 +93529,10 @@ The rows were removed from the open queue and their IDs appended to the closed r
 - **Sibling found:** neither Capacitor shell handles a download, and the Android WebView has no share sheet, so the Android app never saved any generated file. Inside the app the helper now writes to Documents/NavBharatAI. The device proof is **Q-791** (BLOCKED, device check).
 - **Lock:** `tests/everyDownloadGoesThroughOneHelper.test.ts`. A census of every client file, plus each platform's behaviour. 4 reversions, 4 failures.
 - **KB:** `saving_files_on_phone`.
+
+**Q-789 (same day, same PR):** Dark Mode Generator.
+- **Bug 1:** the override table was read only by Manual.
+- **Bug 2:** Manual set `color` and `background-color` to one value, so text went invisible.
+- **Fix:** the builder moved to `src/lib/darkModeCss.ts`. Each colour is swapped only on its own property, and an override becomes a real rule in every strategy.
+- Without overrides, the output is byte-identical to before (proven against a copy of the old builder).
+- **Lock:** `tests/aDarkModeMappingDoesWhatItsTableSays.test.ts`. 3 reversions, 3 failures.

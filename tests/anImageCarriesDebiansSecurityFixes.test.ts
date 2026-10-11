@@ -9,6 +9,7 @@
 // Dockerfile NavBharatAI generates for a user's Cloud Run backend).
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import yaml from 'js-yaml';
 import { backendDeployConfig } from '../src/lib/backendDeployConfig';
@@ -82,5 +83,33 @@ describe('a red image scan says why', () => {
     expect(lines).toEqual(['::error title=CRITICAL CVE-2026-13221::perl-base 5.36.0-7+deb12u3, fixed in 5.36.0-7+deb12u4 (navbharatai:scan (debian 12.15)): perl: Incorrect regular expression processing']);
     expect(spawnSync('jq', [count!], { input: report, encoding: 'utf8' }).stdout.trim()).toBe('1');
     expect(spawnSync('jq', [count!], { input: JSON.stringify({ Results: [] }), encoding: 'utf8' }).stdout.trim()).toBe('0');
+  });
+});
+
+describe('a cache a root container writes into can still be saved (Q-752)', () => {
+  // Every green image scan logged "Failed to save: /usr/bin/tar failed with exit code 2": Trivy runs as root in
+  // its container, so ~/.cache/trivy came back root-owned and the cache never saved once. THE CLASS: a step that
+  // mounts a runner HOME path into a container. Each such path must be handed back to the runner user by a later
+  // step that runs even when a scan fails.
+  type Step = { name?: string; if?: string; run?: string };
+  const workflows = readdirSync('.github/workflows').filter((f) => /\.ya?ml$/.test(f));
+
+  it('🔒 every runner HOME path mounted into a container is chowned back afterwards, always()', () => {
+    const missing: string[] = [];
+    for (const f of workflows) {
+      const doc = yaml.load(readFileSync(join('.github/workflows', f), 'utf8')) as { jobs?: Record<string, { steps?: Step[] }> };
+      for (const [job, def] of Object.entries(doc?.jobs ?? {})) {
+        const steps = def.steps ?? [];
+        steps.forEach((step, i) => {
+          for (const m of (step.run ?? '').matchAll(/docker run[\s\S]*?-v\s+"\$HOME\/([^:"]+):/g)) {
+            const path = m[1];
+            const handedBack = steps.slice(i + 1).some((later) => /always\(\)/.test(later.if ?? '')
+              && new RegExp(`chown -R [^\\n]*\\$HOME/${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(later.run ?? ''));
+            if (!handedBack) missing.push(`${f} › ${job} › ${step.name}: $HOME/${path}`);
+          }
+        });
+      }
+    }
+    expect(missing).toEqual([]);
   });
 });

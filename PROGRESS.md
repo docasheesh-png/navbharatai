@@ -93438,3 +93438,15 @@ their account is not a record (the `safety_flags` precedent). So Q-682 is now 8/
 **five reversions**, each failing the guard that owns it: `unlistTo` set to `removed` (which would 404
 every buyer), the `developer` block left in place, the purchase guard removed, the web store made to
 delete on `unlisted`, and the page's false promise put back.
+
+## 2026-10-11 — Q-750 proven on the branch; Q-752 (the Trivy cache never saved)
+
+**Live proof for Q-750:** image-scan run #107 was dispatched on the #3652 branch.
+- The image built, and the boot smoke test passed: the image starts and serves.
+- The CRITICAL scan is **green**, with 0 findings. Debian's security fixes now land in the image.
+
+**Q-752:** the same run warned "Failed to save: /usr/bin/tar failed with exit code 2". Every past green scan had the same warning.
+- Trivy runs as root inside its container, so `~/.cache/trivy` came back root-owned. The cache never saved once, and every run downloaded the DB again, despite the comment promising rate-limit protection.
+- **Fix:** an `always()` step after the scans gives the cache back to the runner user (`sudo chown -R`).
+- **Class lock:** every runner HOME path a workflow mounts into a container must be chowned back by a later `always()` step. Proven by 2 reversions.
+- **Siblings:** none. No other workflow mounts a HOME path into a container.

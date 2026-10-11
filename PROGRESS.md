@@ -93988,3 +93988,6 @@ leaves the mechanism to the code that has a router.
 ambiguous (Home → Studio has no back), Android's hardware back is already handled by
 `installBackButtonHandler`, and a swipe-back that guesses wrong subtracts from native feel instead of adding
 to it. Recorded as a deliberate non-item, not an omission.
+- **Q-818 (my own Q-600 leftovers, found by the merging session):**
+  - The dead "Confirm & Push to GitHub" chain is removed whole, including `githubService.ts`, which posted to a deleted route.
+  - The route census now sees callers that build their path from a base constant (`expandBaseConstants`).

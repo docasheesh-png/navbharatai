@@ -2651,6 +2651,19 @@ the flag entries above promise.
   judgement (`inputMode`/`enterKeyHint` per field, 44px targets, safe-area padding on the app's own fixed bars) and
   is asserted NOT to repeat what the CSS guarantees. Test-locked in `tests/aBuiltAppFeelsNative.test.ts`,
   reversion-proven six ways.
+- **🧊 `_RELEASE_GATE_URL` — a CLOUD BUILD TRIGGER SUBSTITUTION, not a Cloud Run env key. ✅ SET BY THE ADMIN
+  2026-10-11 to `https://navbharatai.com/api/release/gate`.**
+  Recorded here because `CLAUDE.md` says a key the admin sets is written down in the same session, and because the
+  next session will otherwise read `cloudbuild.yaml`'s empty default (`_RELEASE_GATE_URL: ''`) and conclude the gate
+  is still inert — **the default in the file is NOT the value on the trigger.** With it set, Step 0 of
+  `cloudbuild.yaml` asks the gate before anything is built, so a release freeze now holds the path that ships every
+  merge (queue row Q-141). 🔒 Fail-open by construction: not configured, unreachable, a timeout, a 500, an empty or
+  malformed body all exit 0 and continue the deploy — **the only non-zero exit is an explicit `"allowed":false`**,
+  proven by running the step against a real server in all five cases. ⚠️ Its bash variables are escaped `$$URL` /
+  `$$BODY`: an unescaped `$URL` is read by Cloud Build as a substitution and fails the build at config parse (another
+  session caught that, `df7aef5e2`, after the first version would have broken every deploy). Pinned by
+  `tests/aFreezeThatStopsNothing.test.ts`. The step identifies itself with `X-Release-Gate-Caller: cloudbuild` so the
+  admin board can state the pipeline asked as a fact rather than an inference (Q-808).
 - **🌐 `AGENTV3_BROWSER_ONLY_GUARD` — BROWSER-ONLY CODE IS NOT RUN IN NODE (queue row Q-146, 2026-10-05).
   ⚠️ NOT set; default ON; `off` removes both the write note and the run refusal.**
   `BrowserOnlyInNode.ts`. A report recorded the cost: the agent ran a browser-oriented localStorage seed with

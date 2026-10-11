@@ -197,11 +197,24 @@ export function stepMotor(
   return { state: s, jumped, landed };
 }
 
-/** Rotate an input vector into CAMERA space, so "forward" means "away from the camera". */
+/**
+ * Rotate an input vector into CAMERA space, so "forward" means "away from the camera" and "right" means
+ * the right of the SCREEN.
+ *
+ * The rig's yaw means one thing in every mode (camera.ts): the camera looks along (−sin yaw, 0, −cos yaw)
+ * and its right is (cos yaw, 0, −sin yaw). Input arrives with forward as moveZ = −1 (W) and right as
+ * moveX = +1 (D), so the world move is moveX·right − moveZ·forward.
+ *
+ * 🔴 THIS USED TO ROTATE THE OTHER WAY (moveX·cos − moveZ·sin, moveX·sin + moveZ·cos). The two agree only
+ * at yaw 0 and π — exactly where a game starts — so it looked right until the camera turned: at a quarter
+ * turn W walked TOWARD the camera and D went screen-left (measured 2026-10-11 while working the admin's
+ * "left dabane par right" report, build 46e2d74b; tests/theCarIsSeenFromBehind.test.ts). The same
+ * "controls feel reversed" class as the car camera that sat in front of the car.
+ */
 export function cameraRelative(moveX: number, moveZ: number, cameraYaw: number): { x: number; z: number } {
   const sin = Math.sin(cameraYaw);
   const cos = Math.cos(cameraYaw);
-  return { x: moveX * cos - moveZ * sin, z: moveX * sin + moveZ * cos };
+  return { x: moveX * cos + moveZ * sin, z: -moveX * sin + moveZ * cos };
 }
 `;
 
@@ -414,16 +427,31 @@ export function generateGameController(include?: string[]): GameControllerResult
   return {
     files,
     dependencies: [], // motor is pure; character uses the `three` the 3D layer already declares
+    // 🔒 COMPILED IN CI (tests/aRecipeExampleCompiles.test.ts) — keep it a whole module with real imports.
+    // It used to name terrain, buildings, input and cameraYaw without making any of them.
     instructions:
       `Added the character controller (${Object.keys(files).length} files under src/game/play).\n` +
       '```ts\n' +
-      "const player = new CharacterController({ config: { maxSpeed: 7 } });\n" +
-      'player.setColliders([terrain, ...buildings]);\n' +
+      "import * as THREE from 'three';\n" +
+      "import { CharacterController } from './game/play/character';\n" +
+      "import { CameraRig } from './game/three/camera';\n" +
+      "import { createTerrain } from './game/three/world';\n" +
+      "import { Input } from './game/core/input';\n" +
+      '\n' +
+      'const scene = new THREE.Scene();\n' +
+      'const terrain = createTerrain({ size: 200 });\n' +
+      'scene.add(terrain);\n' +
+      "const input = new Input(document.querySelector('canvas')!);\n" +
+      "const rig = new CameraRig({ kind: 'third-person', collidables: [terrain] });\n" +
+      'const player = new CharacterController({ config: { maxSpeed: 7 } });\n' +
+      'player.setColliders([terrain]);\n' +
       'scene.add(player.object);\n' +
-      '// inside the FIXED update:\n' +
-      'const a = input.axis();\n' +
-      "player.update(dt, { moveX: a.x, moveZ: a.y, sprint: input.isDown('sprint'),\n" +
-      "  jumpPressed: input.wasPressed('jump'), jumpHeld: input.isDown('jump') }, cameraYaw);\n" +
+      '\n' +
+      'export function fixedUpdate(dt: number): void {   // inside the FIXED update\n' +
+      '  const a = input.axis();\n' +
+      "  player.update(dt, { moveX: a.x, moveZ: a.y, sprint: input.isDown('sprint'),\n" +
+      "    jumpPressed: input.wasPressed('jump'), jumpHeld: input.isDown('jump') }, rig.yaw);   // W = away from the camera\n" +
+      '}\n' +
       '```\n' +
       'WHY IT FEELS RIGHT (do not "simplify" these away — each one is deliberate):\n' +
       '- COYOTE TIME: jump still works ~100ms after walking off a ledge. Without it players who press a\n' +

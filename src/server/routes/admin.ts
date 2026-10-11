@@ -37,7 +37,7 @@ import {
 } from '../lib/adminWelcomeGift';
 import { audit } from '../lib/audit';
 import { readAdminReason, readTokenDelta, broadcastScopeConfirmed } from '../../lib/adminActionReason';
-import { isRestorableStatus } from '../../lib/adminAppModeration';
+import { isRestorableStatus, restoredStatusFor } from '../../lib/adminAppModeration';
 import { readAdminAuditPage } from '../lib/adminAuditLog';
 import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } from '../lib/buildDiscount';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
@@ -3435,8 +3435,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     }
   });
 
-  // Restore a held/taken-down app (reverses an over-eager takedown or an automatic hold). It does NOT
-  // re-publish — the site stays offline and the OWNER publishes again; this only lifts the block.
+  // Restore a held/taken-down app (reverses an over-eager takedown or an automatic hold). It never
+  // re-publishes: a BAN deleted the site, so it stays offline until the OWNER publishes again; a HOLD took
+  // nothing offline, so an app that was live when held simply stays live (`restoredStatusFor`, Q-703).
   //
   // Admin panel audit, PR 3: this route existed with no button, so a mistaken ban could not be undone
   // from the app at all. Now that the screen offers it, it carries the same discipline as the ban it
@@ -3455,10 +3456,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       if (!current || !isRestorableStatus(before)) {
         return res.status(409).json({ error: 'Only a banned or held app can be restored.', status: before });
       }
-      const ok = await deploymentStore.setStatus(workspaceId, 'unpublished');
-      audit('ADMIN_APP_RESTORED', { admin: adminUsername(), workspaceId, before, after: 'unpublished', reason, result: ok ? 'ok' : 'not-saved', ip: req.ip });
+      const after = restoredStatusFor(current);
+      const ok = await deploymentStore.setStatus(workspaceId, after);
+      audit('ADMIN_APP_RESTORED', { admin: adminUsername(), workspaceId, before, after, reason, result: ok ? 'ok' : 'not-saved', ip: req.ip });
       if (!ok) return res.status(500).json({ error: 'The restore was not saved.' });
-      res.json({ ok: true, workspaceId, status: 'unpublished' });
+      res.json({ ok: true, workspaceId, status: after });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 

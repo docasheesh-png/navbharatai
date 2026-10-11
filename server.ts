@@ -971,7 +971,8 @@ setInterval(() => {
                       // HELD, not taken down: reversible by the admin, because a machine acting on a
                       // third party's list should never give the irreversible verdict.
                       hold: async (workspaceId, note) => {
-                        await deploymentStore.setStatus(workspaceId, 'held');
+                        // The sweep lists ACTIVE apps only, so a held one is still serving (Q-703).
+                        await deploymentStore.setStatus(workspaceId, 'held', { heldFrom: 'active' });
                         await deploymentStore.setOutboundVerdict(workspaceId, { outboundNote: note, flagged: true });
                       },
                     });

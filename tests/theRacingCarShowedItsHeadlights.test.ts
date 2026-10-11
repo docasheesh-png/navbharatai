@@ -475,7 +475,10 @@ describe('3b · P-1: the CAMERA half of the +Z rule, in plain three.js', () => {
     for (const line of VEHICLE_CAMERA_RULE_LINES) expect(games, line).toContain(line);
     // The kit half is kept, and named by path.
     expect(games).toContain('ctx.follow(vehicle) in the game shell');
-    expect(games).toContain('NEVER rig.update(vehicle.position)');
+    // The kit's 'chase' rig now follows a vehicle from behind (fix/racing-kit), so the advice names it rather
+    // than warning off rig.update — and still forbids a hand-placed camera in front.
+    expect(games).toContain("new CameraRig({ kind: 'chase' }) with rig.update(vehicle, dt)");
+    expect(games).toContain('NEVER place a camera by hand in front of a vehicle');
     expect(games).toContain('src/game/three/objects.ts');
   });
 
@@ -646,5 +649,17 @@ describe('6 · the seeded kit does not turn a DOM game into a canvas game', () =
     expect(isCanvasGameProject(all)).toBe(true);
     // A hand-written canvas game outside the kit is still a canvas game.
     expect(isCanvasGameProject({ 'src/game.ts': 'const ctx = c.getContext("2d"); function f(){ requestAnimationFrame(f); }' })).toBe(true);
+  });
+});
+
+describe('7 · the route and the seed agree about 3D', () => {
+  it('a racing game gets the 3D object tier; rock paper scissors (a game the seed keeps 2D) does not; a non-game is unchanged', async () => {
+    const { wantsSceneDetail, gameKitWants3D } = await import('../src/server/AgentV3/gameKitSeed');
+    const { wantsSceneObjects } = await import('../src/server/lib/heroObjectSpec');
+    expect(wantsSceneDetail('Create an racing game for Nokia c 2-01')).toBe(true);
+    expect(gameKitWants3D('rock paper scissors game')).toBe(false);
+    expect(wantsSceneDetail('rock paper scissors game')).toBe(false);
+    for (const p of ['a 3d model viewer website', 'a todo app']) expect(wantsSceneDetail(p)).toBe(wantsSceneObjects(p));
+    expect(ROUTE).toContain('if (wantsSceneDetail(prompt)) {');
   });
 });

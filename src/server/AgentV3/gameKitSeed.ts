@@ -120,6 +120,19 @@ export function gameKitWants3D(prompt: string | null | undefined): boolean {
 }
 
 /**
+ * Does this request get the route's 3D OBJECT DETAIL TIER and hero-object contract? ONE answer for the route
+ * and the seed (build 46e2d74b's fixes, 2026-10-11): for a game it is the seed's own reading
+ * (`gameKitWants3D`), so "rock paper scissors" is not told to build every object with the 3D layer while the
+ * seed lays down a 2D kit; for anything else it is `wantsSceneObjects`, exactly as before. PURE.
+ */
+export function wantsSceneDetail(prompt: string | null | undefined): boolean {
+  const text = String(prompt ?? '');
+  let domain = '';
+  try { domain = analyzeRequirementGaps(text).domain; } catch { domain = ''; }
+  return domain === 'game' ? gameKitWants3D(text) : wantsSceneObjects(text);
+}
+
+/**
  * The input the seed passes to one recipe of `plan`, or undefined for the recipe's defaults. PURE.
  *
  * The effects layer's particle system imports `three`, and `run_recipe` installs every package a recipe's

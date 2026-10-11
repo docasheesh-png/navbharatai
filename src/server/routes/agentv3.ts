@@ -373,7 +373,7 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
-import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult } from '../AgentV3/gameKitSeed';
+import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -17297,8 +17297,9 @@ async function noteBuildOutcome(
          * Only ever added to a prompt that is actually about 3D: a to-do app must not carry a
          * paragraph about dune slip faces.
          */
-        // A FLAT game (cards, a board, a grid, a quiz) is not a scene — see wantsSceneObjects.
-        if (wantsSceneObjects(prompt)) {
+        // A FLAT game (cards, a board, a grid, a quiz) is not a scene — see wantsSceneObjects. A game is read
+        // the same way the game-kit seed reads it (`wantsSceneDetail`), so the two never disagree about 3D.
+        if (wantsSceneDetail(prompt)) {
           const realism = realismIntent(prompt);
           // 🔴 NAMED BY PATH AND RECIPE, NEVER AS PRESENT (admin 2026-10-11, build 46e2d74b). This line said
           // "build every object with objects.ts" as if the file were in the project; it exists only after

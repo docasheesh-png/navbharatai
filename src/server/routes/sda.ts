@@ -6,6 +6,7 @@ import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { clientPlatform } from '../AppContext/iosPurchaseGuard';
 import { extractDocumentText } from '../lib/attachmentText';
 import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels, vertexVisionModels } from '../lib/visionModels';
+import { vertexGenAI } from '../lib/vertexGenAI';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
 import { retrieveClinicalKnowledge, formatKnowledgeForPrompt } from '../lib/clinical/knowledgeBase';
@@ -83,7 +84,7 @@ async function auditSdaReply(
         model: 'gemini-2.5-flash',
         contents: buildAuditContents(auditPrompt, reportFile),
         config: { thinkingConfig: { thinkingBudget: 0 } },
-      } as any),
+      }),
       // A little more headroom than the text audit's 12s — the auditor now reads an image too.
       new Promise((_, rej) => setTimeout(() => rej(new Error('audit timeout')), reportFile?.fileData ? 18000 : 12000)),
     ]);
@@ -530,7 +531,10 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         const contents = buildGeminiContents();
         for (const m of geminiVisionModels()) {
           try {
-            const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM_FINAL, contents, config: { thinkingConfig: { thinkingBudget: 0 } } } as any);
+            // 🔴 The system prompt goes in `config` (Q-769 sibling): passed at the top level, cast `as any`, it was
+            // silently dropped — Doctor AI answered on this rung WITHOUT its own instructions. And the race's
+            // signal now reaches the request instead of only the catch below.
+            const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, contents, config: { systemInstruction: SDA_SYSTEM_FINAL, thinkingConfig: { thinkingBudget: 0 }, abortSignal: signal } });
             const t = r.text || '';
             if (t.trim()) return { text: t, spend: { provider: 'GEMINI', model: m, inputTokens: r.usageMetadata?.promptTokenCount, outputTokens: r.usageMetadata?.candidatesTokenCount } };
           } catch (e: any) { if (signal.aborted) throw e; console.warn(`[SDA] Gemini ${m}: ${e.message}`); }
@@ -589,18 +593,16 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // ── Sequential fallback: Vertex → Claude (multimodal-capable safety net) ──
       if (!reply) {
         try {
-          const sdaProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
-          if (!sdaProjectId) throw new Error('No Vertex project ID');
-          const { VertexAI } = await import('@google-cloud/vertexai');
-          const vertexAI = new VertexAI({ project: sdaProjectId, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
+          // The one Vertex client (lib/vertexGenAI.ts, Q-769) — the old SDK is past its end-of-life date.
+          const vertexAI = vertexGenAI();
+          if (!vertexAI) throw new Error('No Vertex project ID');
           const contents = buildGeminiContents();
           for (const modelName of vertexVisionModels()) {
             try {
-              const model = vertexAI.getGenerativeModel({ model: modelName, systemInstruction: { role: 'system', parts: [{ text: SDA_SYSTEM_FINAL }] } });
-              const result = await model.generateContent({ contents });
-              reply = result.response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+              const result = await vertexAI.models.generateContent({ model: modelName, contents, config: { systemInstruction: SDA_SYSTEM_FINAL } });
+              reply = result.text || '';
               if (reply) {
-                const um = result.response?.usageMetadata;
+                const um = result.usageMetadata;
                 sdaSpend = { provider: 'VERTEX', model: modelName, inputTokens: um?.promptTokenCount, outputTokens: um?.candidatesTokenCount };
                 console.log(`[SDA] Vertex ${modelName} succeeded`); break;
               }
@@ -621,7 +623,8 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           const contents = buildGeminiContents();
           for (const m of geminiVisionModels()) {
             try {
-              const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM_FINAL, contents, config: { thinkingConfig: { thinkingBudget: 0 } } } as any);
+              // The system prompt in `config`, where the SDK reads it (see the race above — it was dropped here too).
+              const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, contents, config: { systemInstruction: SDA_SYSTEM_FINAL, thinkingConfig: { thinkingBudget: 0 } } });
               const t = r.text || '';
               if (t.trim()) {
                 reply = t;

@@ -94023,3 +94023,11 @@ to it. Recorded as a deliberate non-item, not an omission.
   - Q-162, decided because `routes/build.ts` was touched: the 410 tombstones `POST /api/build` and `POST /api/build-stream` are deleted. Nothing called them, and their last client was gone before any Play production release.
   - Not a third timeline: `project/VersionStore.ts` is never constructed by live code.
   - Test: `tests/oneVersionTimeline.test.ts`, with four guards reverted and seen to fail. One of those guards first passed when reverted, because no test case put a bad uid's prefix in the workspace id; that case was added.
+- **Q-769 (admin decision 2026-10-11: move the Vertex rungs onto `@google/genai` with `vertexai: true`):**
+  - Built: the router's Vertex rung, the vision chain and Doctor AI's Vertex fallback share one client, `lib/vertexGenAI.ts`. It passes an explicit project and region, so the service-account auth is unchanged and an env API key is ignored (checked in the SDK constructor).
+  - `@google-cloud/vertexai` is uninstalled with npm; the lockfile only lost packages. Its README said "deprecated as of June 24, 2025 and will be removed on June 24, 2026".
+  - The stream forwards `config.abortSignal`, and the 30 s timeout now aborts the request instead of racing a timer.
+  - 🔴 **Correction of my own earlier recommendation.** I recommended the swap because it would stop Google billing an abandoned answer. `@google/genai`'s typings say the abort "will not cancel the request in the service. You will still be charged usage". The swap still had to happen, because the old SDK is end-of-life, but its billing benefit was false. The same false claim was corrected in GeminiProvider's comment and in `anAbandonedStreamStopsCosting`'s header. The external limit is now 🟡 Q-819.
+  - Sibling bug found by the swap: Doctor AI's two direct-Gemini calls passed `systemInstruction` at the top level, cast `as any`. The SDK ignored it, so Doctor AI answered on that rung without its own instructions. Fixed; the race call also forwards its signal now. The audit call's unneeded cast was removed too.
+  - Class lock: a census that parses every `models.generateContent(Stream)` call in `src/` and fails on a cast parameter object or a top-level `systemInstruction`.
+  - Test: `tests/oneGoogleSdkForVertex.test.ts`, reverted twice and seen to fail.

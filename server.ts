@@ -1212,9 +1212,14 @@ const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200,
         // them AFTER the drain (a drained build records its own telemetry as it ends) and BEFORE exit,
         // or the builds of the last minute vanish with the instance (admin Monitor capture 2026-09-27:
         // AI cost beside "0 builds"). Bounded at 2.5s so grace (≤6s) + flush stays inside the 9s backstop.
-        const flushTelemetry = (): Promise<void> => import('./src/server/lib/metricsTimeline')
-          .then(({ metricsTimeline }) => metricsTimeline.flushNow(2500))
-          .catch(() => { /* telemetry never blocks shutdown */ });
+        // The product-analytics buffer (`AnalyticsPipeline`, audit 2026-10-11 D8) is the same shape: up to 10s of
+        // events held in memory, so it is written in the same bounded window.
+        const flushTelemetry = (): Promise<void> => Promise.all([
+          import('./src/server/lib/metricsTimeline').then(({ metricsTimeline }) => metricsTimeline.flushNow(2500)),
+          import('./src/server/lib/AnalyticsPipeline').then(({ flushAnalytics }) => Promise.race([
+            flushAnalytics(), new Promise<void>((r) => setTimeout(r, 2500).unref()),
+          ])),
+        ].map((p) => p.catch(() => { /* telemetry never blocks shutdown */ }))).then(() => undefined);
         const exitNow = () => { try { server.close(); } catch { /* already closing */ } process.exit(0); };
         void import('./src/server/routes/agentv3')
           .then(({ drainRunningBuilds, shutdownGraceMs }) => {

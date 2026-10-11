@@ -33,6 +33,38 @@ const clientErrorLimiter = rateLimit({
 });
 
 /**
+ * Page views, web vitals and product events from one address (audit 2026-10-11, D8). A real session sends a
+ * handful a minute; 120 is far above that and far below a flood. Over it: a quiet 204, like the error sink —
+ * the browser ignores the answer either way, and a 429 would only teach a script where the limit is.
+ */
+const analyticsLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: false,
+  legacyHeaders: false,
+  handler: (_req, res) => { res.status(204).end(); },
+});
+
+export const ANALYTICS_LOG_MAX = 2_000;
+
+/** The one log line per analytics event, bounded in size whatever the body holds. PURE. */
+export function analyticsLogLine(b: { event?: unknown; props?: unknown; userId?: unknown; sessionId?: unknown; ts?: unknown }): string {
+  let line: string;
+  try {
+    line = JSON.stringify({
+      event: sanitizeText(b.event, 80),
+      props: b.props,
+      userId: typeof b.userId === 'string' && b.userId ? b.userId.slice(0, 128) : 'anon',
+      sessionId: typeof b.sessionId === 'string' ? b.sessionId.slice(0, 128) : undefined,
+      ts: typeof b.ts === 'number' ? b.ts : Date.now(),
+    }) ?? '';
+  } catch {
+    line = JSON.stringify({ event: sanitizeText(b.event, 80), props: '[unserializable]' });
+  }
+  return line.length > ANALYTICS_LOG_MAX ? `${line.slice(0, ANALYTICS_LOG_MAX)}…[truncated]` : line;
+}
+
+/**
  * Registers self-contained telemetry/analysis routes extracted from the
  * server.ts monolith (Phase 1). These have no closure dependencies — they only
  * use globals (fetch, process.env, console) — so behavior is unchanged.
@@ -101,11 +133,15 @@ export function registerTelemetryRoutes(app: Express): void {
   });
 
   // User analytics event ingestion endpoint
-  app.post('/api/analytics/event', (req: Request, res: Response) => {
+  //
+  // 🔒 Unauthenticated and called on every page view, so it is limited per address (`analyticsLimiter`, a quiet
+  // 204 over it) and its log line is bounded: `props` is untrusted and is the only place web vitals and the
+  // cold-start sample land (`main.tsx`), so it is kept — but cut to `ANALYTICS_LOG_MAX` characters.
+  app.post('/api/analytics/event', analyticsLimiter, (req: Request, res: Response) => {
     try {
       const { event, props, userId, sessionId, ts } = req.body || {};
       if (!event) return res.status(400).json({ error: 'event required' });
-      console.log('[ANALYTICS]', JSON.stringify({ event, props, userId: userId || 'anon', sessionId, ts: ts || Date.now() }));
+      console.log('[ANALYTICS]', analyticsLogLine({ event, props, userId, sessionId, ts }));
       // P-MON.1 — server-side aggregation: fold into the daily rollup + activation funnel. Best-effort.
       recordAnalyticsEvent({ event, userId, sessionId, props, ts }).catch(() => {});
       res.status(204).end();

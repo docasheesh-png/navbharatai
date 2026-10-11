@@ -168,6 +168,34 @@ body {
     -webkit-overflow-scrolling: touch;
   }
 }
+/* A LOADING SCREEN HAS A SHAPE. A spinner in an empty rectangle says nothing about what is coming and
+   makes the same wait feel longer; a block where the content will be makes it feel shorter, which is why
+   every native list does it. NavBharatAI's own client has had this since P-UX.2
+   ("src/components/ui/Skeleton.tsx") — a BUILT app had nothing, so the build rule could ask for "the
+   shape of what is coming" and hand the model nothing to use with it. Now there is ".nb-skeleton".
+
+   🎨 AND IT STILL CHOOSES NO COLOUR. "currentColor" is the app's OWN text colour, so the placeholder is
+   right in light mode, in dark mode, and in a theme this file has never seen; a hex here would have been
+   wrong in at least one of them. The app sizes the block; this supplies only the fill-from-your-own-
+   colour and the motion.
+   WARNING: no backticks anywhere in this block — it lives inside a TS template literal, and one
+   backtick ends the string. This file broke on exactly that the first time it was written. */
+.nb-skeleton {
+  background-color: currentColor;
+  opacity: 0.11;
+  border-radius: 0.5rem;
+  animation: nb-skeleton-pulse 1.6s ease-in-out infinite;
+  /* A placeholder is decoration — it must never swallow a tap meant for what loads underneath it. */
+  pointer-events: none;
+}
+@keyframes nb-skeleton-pulse {
+  0%, 100% { opacity: 0.11; }
+  50% { opacity: 0.2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nb-skeleton { animation: none; }
+}
+
 /* A press that moves must still feel instant, and must not animate for someone who asked it not to. */
 a, button, [role="button"] { transition: transform 90ms ease-out; }
 @media (prefers-reduced-motion: reduce) {
@@ -208,7 +236,13 @@ export function nativeFeelBuildRule(env: NodeJS.ProcessEnv = process.env): strin
     '      – A fixed header pads with `env(safe-area-inset-top)` / `var(--safe-top)`; a bottom bar or FAB pads',
     '        with `var(--safe-bottom)`. Without it the notch covers your header and the home bar covers your nav.',
     '      – Never a hover-only affordance: anything a mouse reveals on hover must be visible or tappable.',
-    '      – Loading shows the SHAPE of what is coming (a skeleton block), not a spinner in an empty screen.',
+    '      – Loading shows the SHAPE of what is coming: `<div className="nb-skeleton" style={{height:"1rem"}} />`',
+    '        blocks laid out like the real rows or cards, never a spinner alone in an empty screen. The',
+    '        class is already defined for you and takes your own text colour, so it is right in any theme.',
+    '      – SCROLL LIKE AN APP, and only you know this app\'s router: opening a NEW screen starts at the',
+    '        TOP, and going BACK returns the list to the exact position it was at. A screen that opens',
+    '        half-way down, or a list that forgets where you were, is the clearest "this is a web page"',
+    '        signal left once the rest of this list is handled.',
     '      – Lists scroll; they do not paginate with tiny numbered links.',
   ];
 }

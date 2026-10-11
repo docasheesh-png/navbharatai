@@ -22,6 +22,7 @@ import { rememberGithubOwner } from '../lib/githubTokenStore';
 import { parseVialTeaching } from '../lib/neonatalDosing';
 import { loadVials, saveVial } from '../lib/vialMemory';
 import { chatBuildMeta } from '../lib/chatBuildMeta';
+import { platformHeader } from '../lib/platformHeader';
 export interface ChatEngineDeps {
   // values read
   input: string;
@@ -436,7 +437,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
       const performStreamingBackendCall = async (): Promise<{ reply: string; model?: string }> => {
         addLog('Falling back to background AI processing...', 'info');
         // The account token (or, signed out, this device's guest id) — see the axios path above.
-        const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(await authHeader()) };
+        // …and its platform, so the iPhone app's assistant never teaches a way to pay (Q-123).
+        const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(await authHeader()), ...platformHeader() };
         if (keys.gemini) headers['x-gemini-key'] = keys.gemini;
         if (keys.groq) headers['x-groq-key'] = keys.groq;
         if (keys.deepseek) headers['x-deepseek-key'] = keys.deepseek;

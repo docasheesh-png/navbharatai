@@ -6,6 +6,7 @@ import { collection, addDoc, getServerDb as getDb } from '../lib/serverDb';
 import { aiRouter } from '../lib/aiRouter';
 import { directDoseReply, sanitizeVials, parseVialTeaching, vialRememberedMessage, unknownNewbornDoseReply } from '../../lib/neonatalDosing';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
+import { clientPlatform } from '../AppContext/iosPurchaseGuard';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
@@ -393,7 +394,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     // Teaches every chat tier to answer "where is X?" and "how do I Y?" correctly.
     if (!hasCanvas && !isBuildIntent) {
       const chatSurface = isFree ? 'nbi_chat' : 'pro_chat';
-      const appCtx = AppContextInjector.getRelevantContext(message, chatSurface);
+      // The iPhone app never teaches a way to pay (Q-123): the client names its platform in X-NBAI-Platform.
+      const appCtx = AppContextInjector.getRelevantContext(message, chatSurface, clientPlatform(req.headers['x-nbai-platform']));
       if (appCtx) systemPrompt = `${systemPrompt}\n\n${appCtx}`;
     }
 

@@ -3,6 +3,7 @@ import { Check, X, GraduationCap, ArrowRight, SkipForward, RotateCcw, Sparkles, 
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { useDialogOpen } from '../../hooks/useDialogOpen';
 import { auth } from '../../lib/firebase';
+import { platformHeader } from '../../lib/platformHeader';
 import {
   EXAM_COUNT_PRESETS, EXAM_LEVELS, EXAM_MAX_QUESTIONS, EXAM_MIN_QUESTIONS, EXAM_DEFAULT_QUESTIONS,
   EXAM_TARGETS, EXAM_TARGET_OTHER, EXAM_LANGUAGES, examTarget, examTargetLabel,
@@ -128,7 +129,7 @@ export function ExamMode({ professionalId, onAskTeacher, onClose, freeQuestionsL
       const token = await auth.currentUser?.getIdToken().catch(() => null);
       const res = await fetch(`/api/professional/${professionalId}/exam`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...platformHeader() },
         body: JSON.stringify({ subject, topic, level, count, targetExam, targetExamOther, language: settings.language }),
       });
       const data = await res.json().catch(() => ({}));

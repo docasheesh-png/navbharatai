@@ -3,6 +3,7 @@ import { BoundedCache } from '../lib/boundedCache';
 import { sdaStoreKey } from '../lib/clinical/sdaStoreKey';
 import type { Express } from 'express';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
+import { clientPlatform } from '../AppContext/iosPurchaseGuard';
 import { extractDocumentText } from '../lib/attachmentText';
 import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels, vertexVisionModels } from '../lib/visionModels';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
@@ -399,7 +400,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // Phase 21 — app self-awareness: append NavBharatAI navigation context ONLY when
       // the doctor asks about the app itself (e.g. "where is history?"). For any clinical
       // message this is empty, so the clinical prompt and behavior are unchanged.
-      const sdaAppCtx = AppContextInjector.getRelevantContext(message, 'sda_chat');
+      const sdaAppCtx = AppContextInjector.getRelevantContext(message, 'sda_chat', clientPlatform(req.headers['x-nbai-platform']));
       // C — ground the answer in curated safety guidance relevant to THIS case
       // (the message + any recorded complaint/red flags). Patient-safety & junior-
       // doctor focused; the model is told to use and cite these.

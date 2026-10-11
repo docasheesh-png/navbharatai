@@ -32,7 +32,9 @@ describe('the game shell draws touch controls and wires them in', () => {
   it('ships the controls, and Game builds them unless a game opts out', () => {
     expect(TOUCH).toContain('export class TouchControls');
     const game = shell['src/game/Game.ts'];
-    expect(game).toContain("import { TouchControls, type TouchControlsOptions } from './ui/touchControls';");
+    // DEFAULT_TOUCH_BUTTONS too since 2026-10-11: the shell watches which action buttons the GAME reads,
+    // so a game that reads Use (to get out of a car) keeps it on a phone.
+    expect(game).toContain("import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions } from './ui/touchControls';");
     // The shell keeps the controls (this.touch) since 2026-10-11, so a game that drives a vehicle can be
     // switched to the Left/Right + Brake/Gas layout (tests/theCarIsSeenFromBehind.test.ts runs it).
     expect(game).toContain('const touchOptions = options.touchControls || {};');

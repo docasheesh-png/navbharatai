@@ -401,14 +401,31 @@ describe('🔴 the GAME SHELL frames a driven car from behind, on every option a
     game.dispose();
   });
 
-  it("'chase' on foot (no vehicle at all) chases the hero's body, which turns to face where it walks", () => {
-    const game = new SHELL.Game({ container: new FakeEl('div'), camera: 'chase' });
-    game.loop.step(120);
-    // At rest the hero faces +Z, so the chase camera sits at −Z of it — behind, not in front.
-    const hero = game.hero.root.getWorldPosition(new THREE.Vector3());
-    expect(game.rig.camera.position.z).toBeLessThan(hero.z - 3);
-    game.dispose();
-  });
+  // 🔒 'chase' ON FOOT WALKS STRAIGHT (verifier, 2026-10-11). The first version of this fix chased the
+  // walking hero's own heading on foot. Walking is camera-relative, so every step turned the camera and the
+  // camera turned the next step: holding S spun the hero on the spot (0.39 m in 3 s, heading −63 rad) and
+  // D walked it in circles (1.18 m). On foot a 'chase' game frames the player like 'third-person'.
+  for (const [what, hold] of [
+    ['S (back)', (g: any) => key(g, 'keydown', 'KeyS')],
+    ['D (right)', (g: any) => key(g, 'keydown', 'KeyD')],
+    ['a joystick held a little off-centre', (g: any) => { g.input.setAnalogueMove(0.17, -0.98); }],
+  ] as const) {
+    it(`'chase' on foot (no vehicle at all): holding ${what} walks in a straight line, it does not spin`, () => {
+      const game = new SHELL.Game({ container: new FakeEl('div'), camera: 'chase' });
+      game.loop.step(30);
+      const p0 = game.player.object.position.clone();
+      hold(game);
+      game.loop.step(60);
+      const p1 = game.player.object.position.clone();
+      game.loop.step(120);
+      const p2 = game.player.object.position.clone();
+      const first = p1.clone().sub(p0).setY(0);
+      const rest = p2.clone().sub(p1).setY(0);
+      expect(p2.clone().sub(p0).setY(0).length(), 'it got somewhere').toBeGreaterThan(10);
+      expect(first.normalize().dot(rest.normalize()), 'the second and third seconds go the way the first did').toBeGreaterThan(0.95);
+      game.dispose();
+    });
+  }
 });
 
 // ── The phone: a car gets pedals, and LEFT on the screen is LEFT on the keyboard ──────────────────────
@@ -481,6 +498,46 @@ describe('🔴 a driving game on a phone gets Left / Right / Brake / Gas, on the
     expect(game.input.axis().x).toBe(-1);
     game.touch.setLayout('move');
     expect(game.input.axis().x).toBe(0);
+    game.dispose();
+  });
+});
+
+describe('🔒 a game that reads Attack / Jump / Use / Run keeps them on a phone, in the car too (verifier, 2026-10-11)', () => {
+  // An open-world game: walk to the car, Use (E) to get in, drive with the player's own axis, Use to get
+  // out. The first version of the 'drive' layout hid the action buttons the moment the car was driven, so
+  // a phone had no Use button and the player could never leave the car.
+  it('the joystick and the Use button stay up while the player drives, and Use gets them out again', () => {
+    const container = new FakeEl('div');
+    let car!: THREE.Group; let drive: any; let inCar = false;
+    const game = new SHELL.Game({
+      container,
+      setup: (ctx: any) => { car = O.createCar({ detail: 'lite' }); car.position.set(0, 0, 5); ctx.scene.add(car); return []; },
+      update: (ctx: any, dt: number) => {
+        if (ctx.input.wasPressed('interact')) { inCar = !inCar; if (inCar) { drive = O.createVehicleState(car); ctx.follow(car); } else ctx.follow(null); }
+        if (inCar) drive = O.driveVehicle(car, drive, ctx.input.axis(), dt);
+      },
+    });
+    const root = container.all('nbg-tc')[0];
+    game.loop.step(10);
+    key(game, 'keydown', 'KeyE'); game.loop.step(1); key(game, 'keyup', 'KeyE'); game.loop.step(30);
+    expect(inCar).toBe(true);
+    expect(game.rig.camera.position.distanceTo(car.position), 'the car is chased').toBeLessThan(12);
+    expect(game.touch.layout, 'the joystick + Use layout stays').toBe('move');
+    expect(root.classList.contains('drive'), 'the .drive class hides the action buttons').toBe(false);
+    const use = container.all('nbg-tc-btn').find((b) => b.textContent === 'Use')!;
+    use.fire('pointerdown', { pointerId: 9, clientX: 0, clientY: 0, pointerType: 'touch', preventDefault: () => {} });
+    game.loop.step(1);
+    use.fire('pointerup', { pointerId: 9, clientX: 0, clientY: 0, pointerType: 'touch', preventDefault: () => {} });
+    game.loop.step(2);
+    expect(inCar, 'the on-screen Use button got the player out').toBe(false);
+    game.dispose();
+  });
+
+  it("the shell's own reads (Run, Jump for the walker) do not count — a plain racing game still gets the pedals", () => {
+    const { game, race } = racingGame();
+    race.go = true;
+    game.loop.step(5);
+    expect(game.touch.layout).toBe('drive');
     game.dispose();
   });
 });

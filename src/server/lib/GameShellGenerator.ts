@@ -49,7 +49,7 @@ import { createHumanoid, type Humanoid } from './three/humanoid';
 import { ParticleSystem } from './fx/particles';
 import { audio } from './fx/audio';
 import { bindGameFeedback } from './fx/feedback';
-import { TouchControls, type TouchControlsOptions } from './ui/touchControls';
+import { TouchControls, DEFAULT_TOUCH_BUTTONS, type TouchControlsOptions } from './ui/touchControls';
 
 /**
  * THE COMPOSITION ROOT. Everything the other five layers expose is wired together here, in the one
@@ -68,8 +68,9 @@ export interface GameOptions {
   lighting?: LightingPresetName;
   /**
    * 'third-person' (default) for a character on foot; 'chase' for anything driven or ridden — then the
-   * first vehicle given createVehicleState() is chased from BEHIND from the first frame. Whatever this
-   * says, the vehicle the player drives with driveVehicle(…, ctx.input.axis(), …) is chased from behind.
+   * first vehicle given createVehicleState() is chased from BEHIND from the first frame (on foot it
+   * frames the player exactly like 'third-person'). Whatever this says, the vehicle the player drives
+   * with driveVehicle(…, ctx.input.axis(), …) is chased from behind.
    */
   camera?: CameraKind;
   shadows?: boolean;
@@ -158,11 +159,17 @@ export class Game {
   private setupDone = false;
   /** The default body (createHumanoid), when the game did not bring its own. */
   private hero: Humanoid | null = null;
-  /** What a 'chase' camera chases on foot: the body that turns to face where it walks. */
-  private readonly body: THREE.Object3D;
   private touch: TouchControls | null = null;
   /** The game left the touch layout to us (no buttons, no layout of its own) — so a car gets pedals. */
   private readonly touchLayoutIsOurs: boolean;
+  /** True while the GAME's own setup()/update() runs — so a button read by the shell itself does not count. */
+  private inGameCode = false;
+  /**
+   * The game's own code reads one of the action buttons (Attack / Jump / Use / Run). Then the pedals never
+   * replace them: an open-world game reads Use to get OUT of the car, and with the 'drive' layout up a
+   * phone had no Use button at all — the player was stuck in the car (verifier, 2026-10-11).
+   */
+  private gameReadsButtons = false;
 
   constructor(options: GameOptions) {
     this.options = options;
@@ -176,7 +183,11 @@ export class Game {
     options.container.appendChild(this.canvas);
 
     this.renderer = createRenderer({ canvas: this.canvas, shadows: options.shadows !== false });
-    this.rig = new CameraRig({ kind: options.camera ?? 'third-person' });
+    // camera: 'chase' is the SHELL's job (see \`chased\`): it chases the vehicle from behind. On foot the
+    // rig stays third-person — a camera that chases the walker's own heading turns with every step the
+    // walker takes relative to it, so S spun the hero on the spot and a joystick held a little off-centre
+    // walked it in circles (verifier, 2026-10-11).
+    this.rig = new CameraRig({ kind: options.camera === 'chase' ? 'third-person' : (options.camera ?? 'third-person') });
     this.lights = applyLighting(this.scene, this.renderer, options.lighting ?? 'day');
     this.player = new CharacterController();
     this.scene.add(this.player.object);
@@ -190,7 +201,6 @@ export class Game {
       this.hero = createHumanoid({ height: 1.75, shirt: options.playerColor ?? 0x2e5a87 });
       this.player.object.add(this.hero.root);
     }
-    this.body = this.hero?.root ?? (options.playerBody || this.player.object);
     // BOTH blend layers. Adding one is how half the effects end up invisible.
     this.particles.addTo(this.scene);
 
@@ -210,6 +220,15 @@ export class Game {
     // the PLAYER's car (see playerVehicle). Same values, same object — only now it is recognisable.
     const readAxis = this.input.axis.bind(this.input);
     this.input.axis = () => { const a = readAxis(); this.playerAxes.add(a); return a; };
+    // And which action buttons the GAME reads (see gameReadsButtons). Same answers as before.
+    const buttonActions = new Set(DEFAULT_TOUCH_BUTTONS.map((b) => b.action));
+    for (const m of ['isDown', 'wasPressed', 'wasReleased'] as const) {
+      const read = this.input[m].bind(this.input);
+      this.input[m] = (action: string) => {
+        if (this.inGameCode && buttonActions.has(action) && !this.gameReadsButtons) { this.gameReadsButtons = true; this.syncTouchLayout(); }
+        return read(action);
+      };
+    }
     // Most players hold a phone. Without these, a game built for WASD + mouse renders and cannot be played.
     const touchOptions = options.touchControls || {};
     this.touchLayoutIsOurs = !touchOptions.buttons && !touchOptions.layout;
@@ -253,7 +272,7 @@ export class Game {
     // Once, here — not in whichever gameplay file remembers. Browsers suspend audio until a gesture.
     audio.unlock();
 
-    const colliders = watchVehicles((v, axis) => this.noteVehicle(v, axis), () => options.setup?.(this.context)) || [];
+    const colliders = this.asGame(() => options.setup?.(this.context)) || [];
     this.setupDone = true;
     this.syncTouchLayout();
     if (Array.isArray(colliders)) {
@@ -279,6 +298,12 @@ export class Game {
       lights: this.lights,
       follow: (object) => { this.followTarget = object; this.followChosen = true; this.syncTouchLayout(); },
     };
+  }
+
+  /** Run the game's own code, listening for the vehicles it drives and the buttons it reads. */
+  private asGame<T>(fn: () => T): T {
+    this.inGameCode = true;
+    try { return watchVehicles((v, axis) => this.noteVehicle(v, axis), fn); } finally { this.inGameCode = false; }
   }
 
   /** createVehicleState()/driveVehicle() was handed this vehicle inside setup() or update(). */
@@ -312,11 +337,13 @@ export class Game {
   /**
    * A phone in a car gets Left/Right and Brake/Gas instead of a joystick and Attack/Jump/Use/Run — the
    * buttons feed the SAME actions as the arrow keys, so LEFT on the screen is LEFT on the keyboard.
+   * Not when the game reads one of those buttons itself: then the joystick (which steers the car just as
+   * well) and the buttons stay, because hiding Use would leave the player no way out of the car.
    */
   private syncTouchLayout(): void {
     if (!this.touch || !this.touchLayoutIsOurs) return;
     const chased = this.chased;
-    this.touch.setLayout(chased && isVehicle(chased) ? 'drive' : 'move');
+    this.touch.setLayout(chased && isVehicle(chased) && !this.gameReadsButtons ? 'drive' : 'move');
   }
 
   /** FIXED 60Hz. Everything that affects the simulation lives here and nowhere else. */
@@ -359,7 +386,7 @@ export class Game {
         this.hero.root.visible = !this.chased;
       }
       // The shell listens while the game runs, so a vehicle it drives is known without being declared.
-      watchVehicles((v, axis) => this.noteVehicle(v, axis), () => this.options.update?.(this.context, delta));
+      this.asGame(() => this.options.update?.(this.context, delta));
       this.syncTouchLayout();   // back to the joystick if the car has left the scene
       this.particles.update(delta);
     }
@@ -369,12 +396,12 @@ export class Game {
   /** Display rate. Camera and drawing only — never gameplay. */
   private render(_alpha: number, frameDelta: number): void {
     // Driving or riding: the camera sits behind the VEHICLE's own front, whatever its heading — the one
-    // the game named with ctx.follow(), or the one it drives. On foot, a 'chase' camera chases the body
-    // (which turns to face where it walks); every other kind frames the player as it always has.
+    // the game named with ctx.follow(), or the one it drives. On foot the player is framed as it always
+    // has been (a 'chase' game too: its rig is third-person on foot, see the constructor).
     const chased = this.chased;
     const p = chased ? chased.position : this.player.object.position;
     if (chased) this.rig.follow(chased, frameDelta);
-    else this.rig.update(this.options.camera === 'chase' ? this.body : p, frameDelta);
+    else this.rig.update(p, frameDelta);
     // Defaults, NOT small 3D-looking numbers: applyShake already scales the offset into world units
     // (×0.02). Passing 0.35 here would produce a 0.007-unit shake — mathematically present, invisible.
     this.rig.applyShake(this.feel.shake());
@@ -644,7 +671,8 @@ const TOUCH_CONTROLS = `import type { Input } from '../core/input';
  *     the same time works — the one thing a single-touch implementation always gets wrong.
  *   • A CAR GETS PEDALS ('drive' layout, 2026-10-11): Left/Right under the left thumb, Brake/Gas under
  *     the right, on the same actions as the arrow keys. The game shell switches to it by itself when
- *     the game drives a vehicle.
+ *     the game drives a vehicle — unless the game reads Attack/Jump/Use/Run itself (Use to get out of
+ *     the car), when the joystick and those buttons stay.
  *
  * Shown only where it belongs: a device whose PRIMARY pointer is coarse (a phone, a tablet), or the
  * moment a touch lands on a laptop with a touch screen. A desktop with a mouse never sees it.
@@ -660,7 +688,7 @@ export interface TouchButton {
  * 'move': a joystick under the left thumb, camera drag on the right, action buttons bottom-right.
  * 'drive': Left / Right bottom-left and Brake / Gas bottom-right — no joystick, no camera drag (the
  * camera chases the vehicle). The game shell switches to 'drive' by itself the moment the game drives a
- * vehicle, unless the game chose its own buttons or layout.
+ * vehicle, unless the game chose its own buttons or layout, or reads one of the action buttons itself.
  */
 export type TouchLayout = 'move' | 'drive';
 
@@ -1076,8 +1104,9 @@ export function generateGameShell(include?: string[]): GameShellResult {
       "- A CAR THE PLAYER DRIVES with driveVehicle(car, state, ctx.input.axis(), dt) is recognised by the\n" +
       "  shell: the camera chases it from BEHIND even if you forget ctx.follow (with camera: 'chase', from\n" +
       '  the first frame), and a phone gets Left/Right bottom-left and Brake/Gas bottom-right, wired to the\n' +
-      '  same actions as the arrow keys. Never write your own steering pad or chase camera — a hand-written\n' +
-      '  one is how LEFT ends up turning RIGHT.\n' +
+      '  same actions as the arrow keys (a game that reads Attack/Jump/Use/Run itself — Use to get out of\n' +
+      '  the car — keeps the joystick and those buttons instead). Never write your own steering pad or chase\n' +
+      '  camera — a hand-written one is how LEFT ends up turning RIGHT.\n' +
       '- No WebGL on the device gives an honest message, never a blank screen.',
   };
 }

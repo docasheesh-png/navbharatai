@@ -4552,7 +4552,10 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '- Give scatter an accept() so props stay off roads and out of the play space.\n' +
       '- Move the camera once per DISPLAY frame with that frame\'s delta (the game shell does it in render();\n' +
       '  a camera stepped at the fixed 60Hz stutters on any other display), then rig.applyShake(feel.shake()).\n' +
-      '  rig.update(player.object.position, dt) frames a character ON FOOT; a vehicle gets the chase above.\n' +
+      "  A character ON FOOT is framed by a 'third-person' rig: rig.update(player.object.position, dt), with\n" +
+      "  player.update(…, rig.yaw) (handed a car that driveVehicle drives, that same rig chases it from\n" +
+      "  behind). Never walk a character under a 'chase' rig — it turns with every step the walker takes\n" +
+      '  relative to it, so a joystick held a little off-centre walks in circles.\n' +
       '- Call followShadow(key, playerPos) on a large map, or shadows blur out as the player walks away.\n' +
       '- Keep bloom subtle if you add post-processing. Heavy bloom is the classic first-WebGL-project tell.',
   };

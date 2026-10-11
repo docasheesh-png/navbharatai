@@ -38,6 +38,9 @@ describe('the build-report queue never un-resolves an item', () => {
       expect(openIds).not.toContain(id);
     }
     for (const id of ['Q-111', 'Q-114', 'Q-126']) {
+      // A record may also END the right way: fixed, merged, and its ID appended to the closed file in the same
+      // commit (Q-114 closed when #3668 merged, 2026-10-11). What the incident did was the other thing — erase.
+      if (closedIds.includes(id)) { expect(openIds, id).not.toContain(id); continue; }
       const row = queue.split('\n').find((l) => l.startsWith(`| ${id} |`)) ?? '';
       // The incident ERASED these records. What must hold is that the record is there — its four-field
       // body — and that its state moved only by a recorded decision: Q-114 left BLOCKED on 2026-10-11 when

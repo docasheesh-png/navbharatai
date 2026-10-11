@@ -94048,3 +94048,7 @@ to it. Recorded as a deliberate non-item, not an omission.
     - A single Ban returns the person's other live-app count, and the list opens on that person.
   - Design note: the first draft centralised the three steps into one helper. Three existing censuses pin each single route doing them visibly, and that pinning is deliberate. So the single routes are untouched, and a new census pins the owner route's steps and their order to the same ones.
   - Test: `tests/onePersonsAppsOneAction.test.ts`, with two guards reverted and seen to fail. KB entry `admin-built-apps` updated.
+
+### 2026-10-11 — #3668 merged; its 15 rows closed
+
+The admin merged #3668. Closed, IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main`: Q-114 Q-123 Q-124 Q-128 Q-138 Q-157 Q-165 Q-166 Q-248 Q-343 Q-733 Q-745 Q-769 Q-781 Q-818. Their ledgers stay above. Q-706 stays 🟡 (its build merged, off by default; it waits on the admin's Cloud Shell run). Q-819 (🟡, external) and Q-820 (gap b) stay open. `tests/aClosedQueueRowStaysClosed.test.ts` hard-coded Q-114 as a row that had to exist (an old merge erased it). It now also accepts the right end of a record: the ID in the closed file and the row gone from the open table. The follow-up work (Q-796, Q-797, Q-806) continues on the same branch, restarted from the merged `main`, in a new PR.

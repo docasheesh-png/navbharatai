@@ -55,11 +55,11 @@ export const chunkDocId = (userId: string, i: number): string => `${userId}__c${
 /**
  * The most chunk documents a workspace can possibly have, from the two constants above — 9 today.
  *
- * Why an eraser needs this and cannot just trust the manifest's `chunkCount`: a save writes the chunks
- * FIRST and the manifest LAST (`sync.ts`, "so a partial write is never read as complete"), and when a
- * workspace SHRINKS the route deletes the now-surplus chunks. Either step can be interrupted, which
- * leaves chunk documents the manifest does not count. Sweeping to this ceiling takes them too, and
- * every id is exact — a deletion of a document that does not exist is a no-op in Firestore.
+ * Why an eraser needs this and cannot just trust the manifest's `chunkCount`: saves made before 2026-10-11 wrote
+ * the chunks FIRST and the manifest LAST as separate writes, and deleted surplus chunks when a workspace
+ * SHRANK — either step could be interrupted, leaving chunk documents the manifest does not count. Saves are now
+ * ONE transaction (`syncTransaction.ts`), but those older leftovers may still exist. Sweeping to this ceiling
+ * takes them too, and every id is exact — a deletion of a document that does not exist is a no-op in Firestore.
  *
  * The margin covers a historically SMALLER chunk size: at 450_000 characters the same cap would need
  * 18 chunks, so the sweep goes to twice the computed ceiling rather than exactly to it.

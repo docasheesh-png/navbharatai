@@ -176,8 +176,10 @@ class BuildHistoryStore {
       // retention is housekeeping. Folding the two together would report a saved version as unsaved
       // because an unrelated delete failed — the opposite lie from the one above, and just as bad.
       try {
-        // Enforce MAX_VERSIONS_PER_WORKSPACE: drop the oldest if needed.
-        const all = await col.orderBy('createdAt', 'asc').get();
+        // Enforce MAX_VERSIONS_PER_WORKSPACE: drop the oldest if needed. References only (`select()`): this
+        // used to download every saved version WITH its whole file set on every save, just to count and
+        // delete (audit 2026-10-11, D10).
+        const all = await col.orderBy('createdAt', 'asc').select().get();
         if (all.size > MAX_VERSIONS_PER_WORKSPACE) {
           const toDelete = all.docs.slice(0, all.size - MAX_VERSIONS_PER_WORKSPACE);
           const batch = db.batch();

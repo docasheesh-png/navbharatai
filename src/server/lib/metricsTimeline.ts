@@ -27,6 +27,7 @@
  * Buckets older than `MONITOR_RETENTION_DAYS` (default 7) are deleted opportunistically.
  */
 import * as admin from 'firebase-admin';
+import { deleteInChunks } from './batchChunks';
 import { getServerDb } from './serverDb';
 import { setMetricsSink } from './metrics';
 import { metricsStore } from './metricsStore';
@@ -499,9 +500,9 @@ class MetricsTimeline {
         .limit(Math.min(2000, 200 * shardCount()))
         .get();
       if (stale.empty) return;
-      const batch = db.batch();
-      stale.docs.forEach((d) => batch.delete(d.ref));
-      await batch.commit();
+      // In chunks: at the default 8 shards this reads up to 1,600 documents, and ONE batch of them was refused
+      // by Firestore (500-write limit) — silently, so retention stopped for good (audit 2026-10-11).
+      await deleteInChunks(db, stale.docs.map((d) => d.ref));
     } catch { /* housekeeping only — never surfaced, never fatal */ }
   }
 

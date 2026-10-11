@@ -30,7 +30,7 @@ import {
   decideGiftPurchase, decideGiftRedemption, isGiftCode as looksLikeGiftCode, normalizeGiftCode,
   MIN_GIFT_INR, MAX_GIFT_INR, GIFT_CODE_COLLECTION,
 } from '../lib/giftCodes';
-import { readGiftDaily, giftDay, claimGiftCode } from '../lib/giftCodeStore';
+import { readGiftDaily, giftDay, redeemGiftCode } from '../lib/giftCodeStore';
 import { appLockBlocks } from '../lib/appLockEnforce';
 import { classifyCashfreeWebhook, cashfreeWebhookOrderId } from '../lib/paymentReversal';
 import { settleCashfreeReversal } from '../lib/paymentReversalStore';
@@ -562,7 +562,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
      * 🔴 THE CLAIM IS ON THE **CODE**, NOT ON `(code, user)`. The marketing claim id below is
      * `coupon_<CODE>_<uid>` — one redemption per USER, which is right for a code on a poster and
      * catastrophic for a gift: ten friends could each redeem the same ₹500. A purchased code is a
-     * bearer instrument, so `claimGiftCode` flips the code's own document and the second redeemer
+     * bearer instrument, so `redeemGiftCode` flips the code's own document and the second redeemer
      * finds it spent.
      *
      * 🔴 AND THE CREDIT IS 'paid', NOT 'gift'. `walletMirror` makes every credit declare whose money
@@ -580,58 +580,19 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     if (looksLikeGiftCode(code)) {
       const giftCode = normalizeGiftCode(code);
       try {
-        const { claimed, record } = await claimGiftCode(db, giftCode, userId, Date.now());
-        if (!claimed) {
-          const verdict = decideGiftRedemption(record, userId);
+        // Claim + credit + history row in ONE transaction (audit 2026-10-11, F8): a failure between the claim
+        // and the credit used to leave the code spent and the money never delivered.
+        const outcome = await redeemGiftCode(db, giftCode, { uid: userId, email: userEmail || '', name: userName || '' }, Date.now());
+        if (!outcome.claimed) {
+          const verdict = decideGiftRedemption(outcome.record, userId);
           const message = verdict.ok
-            // Unreachable in practice: `claimed` is false only when the record is missing, already
-            // spent, or the buyer's own. Stated rather than assumed, so a future branch cannot make
-            // a refusal silently succeed.
+            // Unreachable in practice: the claim is refused only when this same decision says no. Stated
+            // rather than assumed, so a future branch cannot make a refusal silently succeed.
             ? 'That gift code could not be redeemed. Please try again.'
             : verdict.message;
           return res.status(400).json({ error: message });
         }
-        const faceInr = Number(record?.faceInr) || 0;
-        // The visible history row, written with its own id so a retry cannot duplicate it. It uses
-        // the same shape the coupon path writes, so the Promocode capsule and the statement below
-        // need no second notion of what a redemption looks like.
-        try {
-          await setDoc(doc(db, 'payment_transactions', `gift_${giftCode}`), {
-            transactionId: `gift_${giftCode}`,
-            userId,
-            amountPaid: 0,
-            balanceAdded: faceInr,
-            paymentProvider: 'GIFT_REDEEM',
-            paymentStatus: 'SUCCESS',
-            paymentReference: `GIFT_${giftCode}`,
-            createdAt: new Date().toISOString(),
-          });
-        } catch (e) {
-          // The code is already claimed and the credit follows — a missing history row must never
-          // cost somebody their money.
-          console.error('[GIFT] redemption history row failed to write:', e);
-        }
-        const walletRef = doc(db, 'user_token_wallets', userId);
-        const newBalance = await runTransaction(db, async (tx: any) => {
-          const fresh = await tx.get(walletRef);
-          const w = fresh.exists() ? fresh.data() : null;
-          const patch = mirroredCreditPatch(w, rupeesToTokens(faceInr), 'paid');
-          if (w) {
-            tx.update(walletRef, { ...patch, updatedAt: new Date().toISOString() });
-          } else {
-            tx.set(walletRef, {
-              userId,
-              userEmail: userEmail || '',
-              userName: userName || '',
-              ...patch,
-              total_output_tokens_used: 0,
-              total_money_spent: 0,
-              updatedAt: new Date().toISOString(),
-            });
-          }
-          return patch.remaining_balance;
-        });
-        return res.json({ success: true, balanceAdded: faceInr, currentBalance: newBalance, gift: true });
+        return res.json({ success: true, balanceAdded: outcome.faceInr, currentBalance: outcome.newBalanceInr, gift: true });
       } catch (err: any) {
         console.error('[GIFT] Redemption failed:', err?.message);
         return sendSafeError(res, 500, 'That gift code could not be redeemed right now. Please try again.', err, 'gift redeem');
@@ -675,11 +636,20 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       // SECURITY (H1): ATOMICALLY claim this one-time redemption. The old getDoc→setDoc check was a
       // TOCTOU — concurrent requests for the same code could both pass the "already redeemed?" check
       // and each credit `value`. The transaction creates the redemption doc only if it doesn't exist;
-      // if it already exists, exactly one caller loses and we reject. Only the winner credits below.
+      // if it already exists, exactly one caller loses and we reject.
+      //
+      // 🔴 MONEY AUDIT 2026-09-12 fixed the credit (transactional, both wallet views via walletMirror).
+      // 🔴 AUDIT 2026-10-11 (F8's sibling): the claim and the credit were still TWO transactions, so a
+      // failure between them burned the one redemption this person gets with nothing credited. Claim and
+      // credit are now ONE transaction — both happen or neither does.
       const txRef = doc(db, 'payment_transactions', redemptionId);
-      const claimed = await runTransaction(db, async (tx: any) => {
+      const walletRef = doc(db, 'user_token_wallets', userId);
+      const newBalance = await runTransaction(db, async (tx: any): Promise<number | null> => {
+        // Every read before any write — a Firestore transaction requires it.
         const snap = await tx.get(txRef);
-        if (snap.exists()) return false;
+        const fresh = await tx.get(walletRef);
+        if (snap.exists()) return null;
+        const nowIso = new Date().toISOString();
         tx.set(txRef, {
           transactionId: redemptionId,
           userId,
@@ -688,34 +658,12 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
           paymentProvider: 'COUPON_REDEEM',
           paymentStatus: 'SUCCESS',
           paymentReference: `REDEMPTION_${code}`,
-          createdAt: new Date().toISOString(),
+          createdAt: nowIso,
         });
-        return true;
-      });
-      if (!claimed) {
-        return res.status(400).json({ error: 'You have already redeemed this promo coupon code!' });
-      }
-
-      // 🔴 MONEY AUDIT 2026-09-12 — TWO BUGS FIXED HERE.
-      //
-      // (1) NOT TRANSACTIONAL. The redemption CLAIM above is atomic (so a code cannot be redeemed
-      //     twice), but the CREDIT was a read-modify-write outside any transaction — the one credit
-      //     path in the repo that was not. A build settling between the read and the write had its
-      //     debit erased by a balance computed before it landed: free spend, timed rather than hacked.
-      //     `computeCreditedWallet` carries a comment explaining exactly why the purchase path is
-      //     transactional; this path simply never got the same treatment.
-      //
-      // (2) IT CREDITED THE ₹ VIEW ONLY. `tokenBalance` never saw the money, so a coupon-funded wallet
-      //     drifted permanently from the token view the spend path debits — and that drift is what the
-      //     admin adjustment's old `remaining_balance = tokenBalance / RATE` assignment then turned
-      //     into a real, silent loss. One writer moving one view is how the other bug became possible.
-      const walletRef = doc(db, 'user_token_wallets', userId);
-      const newBalance = await runTransaction(db, async (tx: any) => {
-        const fresh = await tx.get(walletRef);
         const w = fresh.exists() ? fresh.data() : null;
         const patch = mirroredCreditPatch(w, rupeesToTokens(value), 'gift');
         if (w) {
-          tx.update(walletRef, { ...patch, updatedAt: new Date().toISOString() });
+          tx.update(walletRef, { ...patch, updatedAt: nowIso });
         } else {
           tx.set(walletRef, {
             userId,
@@ -724,11 +672,14 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
             ...patch,
             total_output_tokens_used: 0,
             total_money_spent: 0,
-            updatedAt: new Date().toISOString(),
+            updatedAt: nowIso,
           });
         }
         return patch.remaining_balance;
       });
+      if (newBalance === null) {
+        return res.status(400).json({ error: 'You have already redeemed this promo coupon code!' });
+      }
 
       return res.json({ success: true, balanceAdded: value, currentBalance: newBalance });
     } catch (err: any) {

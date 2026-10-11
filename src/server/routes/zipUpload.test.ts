@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import type { Server } from 'node:http';
 import { validChunkMeta, uploadOwnedBy, ZIP_CHUNK_BYTES, MAX_ARCHIVE_BYTES, registerZipUploadRoutes, _setChunkCapForTests } from './zipUpload';
-import { setDb } from '../lib/db';
+import { setServerDb } from '../lib/serverDb';
+
+const setDb = (db: unknown): void => setServerDb(db as never);
 import { sharedAssemblyAllowed } from '../lib/zipUploadStore';
 import { WORKSPACE_BUILD_LEASE_COLLECTION, BUILD_RUNNING_ELSEWHERE_CODE } from '../AgentV3/workspaceBuildLease';
 

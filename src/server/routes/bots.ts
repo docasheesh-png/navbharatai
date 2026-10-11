@@ -14,6 +14,7 @@
 // GET /api/admin/bots lists every user's bots with the owner, the platform and whether a WhatsApp bot is
 // signed. Admin-gated by the shared `requireAdmin` (lib/adminAuth.ts); never a token or a secret.
 
+import { BoundedCache } from '../lib/boundedCache';
 import type { Express, Request, Response } from 'express';
 import crypto from 'crypto';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
@@ -54,13 +55,14 @@ const APP_SECRET_HELP = 'Paste the App Secret from your Meta app (App settings â
  * of resolution is enough for both the owner's notice and the admin ledger. The map is bounded.
  */
 const STAMP_EVERY_MS = 10 * 60 * 1000;
-const lastStamp = new Map<string, number>();
+// A stamp is only needed while its throttle window lasts, so it expires with it; LRU past the bound (a clear-all
+// at the bound used to release every bot's throttle at once â€” audit 2026-10-11).
+const lastStamp = new BoundedCache<string, number>({ maxEntries: 20_000, ttlMs: STAMP_EVERY_MS });
 function stampThrottled(botId: string, kind: keyof BotStamp, now: number): void {
   const key = `${kind}:${botId}`;
-  const prev = lastStamp.get(key) ?? 0;
+  const prev = lastStamp.get(key, now) ?? 0;
   if (now - prev < STAMP_EVERY_MS) return;
-  if (lastStamp.size > 20_000) lastStamp.clear();
-  lastStamp.set(key, now);
+  lastStamp.set(key, now, now);
   void botStore.stamp(botId, { [kind]: now });
 }
 

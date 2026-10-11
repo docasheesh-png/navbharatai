@@ -15,7 +15,8 @@
 // to the rupee — and refusing AFTER a payment has succeeded would be far worse than a small overshoot.
 
 import { doc, getDoc, runTransaction } from './serverDb';
-import { GIFT_CODE_COLLECTION, mintGiftCode, type GiftCodeRecord } from './giftCodes';
+import { GIFT_CODE_COLLECTION, mintGiftCode, decideGiftRedemption, type GiftCodeRecord } from './giftCodes';
+import { mirroredCreditPatch, rupeesToTokens } from './walletMirror';
 
 export const GIFT_DAILY_COLLECTION = 'gift_code_daily';
 
@@ -128,32 +129,70 @@ export async function mintCodeForOrder(
   });
 }
 
+export type GiftRedeemResult =
+  | { claimed: false; record: GiftCodeRecord | null }
+  | { claimed: true; record: GiftCodeRecord; faceInr: number; newBalanceInr: number };
+
 /**
- * Claim a code for a redeemer, atomically. Returns the face value, or null if the claim was lost.
+ * Redeem a gift code: claim it, credit the redeemer's wallet and write the history row — in ONE transaction
+ * (audit 2026-10-11, F8).
  *
- * 🔴 THE CLAIM IS ON THE **CODE**, which is the whole difference from the marketing-coupon path. That
- * one claims `coupon_<CODE>_<uid>` — one redemption per USER, correct for a code on a poster and
- * catastrophic here, because ten friends could each redeem the same ₹500. A purchased code is a
- * bearer instrument: the first redeemer takes it and the document says so for ever after.
+ * 🔴 WHY ONE. The route used to claim the code in one transaction, write the history row, and credit the
+ * wallet in a SECOND transaction. A crash, a timeout or a deploy between the first and the last left the code
+ * spent and the money never arrived — a bought ₹500 gift burned with nothing to show for it, and nothing that
+ * would ever retry it. Now either all three happen or none does. The claim decision is `decideGiftRedemption`
+ * itself (the same function that words the refusal), so a record with a broken face value is refused rather
+ * than burned for ₹0, as it used to be.
+ *
+ * The credit is 'paid' (somebody paid real rupees for the code) and goes through `mirroredCreditPatch`, the one
+ * wallet-credit writer (`walletMirror.ts`).
  */
-export async function claimGiftCode(
+export async function redeemGiftCode(
   db: any,
   code: string,
-  redeemerUid: string,
+  redeemer: { uid: string; email: string; name: string },
   nowMs: number,
-): Promise<{ claimed: boolean; record: GiftCodeRecord | null }> {
-  const ref = doc(db, GIFT_CODE_COLLECTION, code);
+): Promise<GiftRedeemResult> {
+  const codeRef = doc(db, GIFT_CODE_COLLECTION, code);
+  const walletRef = doc(db, 'user_token_wallets', redeemer.uid);
+  const historyRef = doc(db, 'payment_transactions', `gift_${code}`);
   return runTransaction(db, async (tx: any) => {
-    const snap = await tx.get(ref);
-    if (!snap.exists()) return { claimed: false, record: null };
-    const record = snap.data() as GiftCodeRecord;
-    if (record.status !== 'unused') return { claimed: false, record };
-    if (record.buyerUid && record.buyerUid === redeemerUid) return { claimed: false, record };
-    tx.update(ref, {
-      status: 'redeemed',
-      redeemedBy: redeemerUid,
-      redeemedAt: new Date(nowMs).toISOString(),
+    // Every read before any write — a Firestore transaction requires it.
+    const codeSnap = await tx.get(codeRef);
+    const walletSnap = await tx.get(walletRef);
+    const record = codeSnap.exists() ? (codeSnap.data() as GiftCodeRecord) : null;
+    const verdict = decideGiftRedemption(record, redeemer.uid);
+    if (!record || !verdict.ok) return { claimed: false as const, record };
+    const faceInr = verdict.faceInr;
+    const iso = new Date(nowMs).toISOString();
+    const wallet = walletSnap.exists() ? walletSnap.data() : null;
+    const patch = mirroredCreditPatch(wallet, rupeesToTokens(faceInr), 'paid');
+    tx.update(codeRef, { status: 'redeemed', redeemedBy: redeemer.uid, redeemedAt: iso });
+    if (wallet) {
+      tx.update(walletRef, { ...patch, updatedAt: iso });
+    } else {
+      tx.set(walletRef, {
+        userId: redeemer.uid,
+        userEmail: redeemer.email || '',
+        userName: redeemer.name || '',
+        ...patch,
+        total_output_tokens_used: 0,
+        total_money_spent: 0,
+        updatedAt: iso,
+      });
+    }
+    // The visible history row, with its own id so it can never be written twice. Same shape as the coupon
+    // path, so the Promocode capsule and the statement need no second notion of a redemption.
+    tx.set(historyRef, {
+      transactionId: `gift_${code}`,
+      userId: redeemer.uid,
+      amountPaid: 0,
+      balanceAdded: faceInr,
+      paymentProvider: 'GIFT_REDEEM',
+      paymentStatus: 'SUCCESS',
+      paymentReference: `GIFT_${code}`,
+      createdAt: iso,
     });
-    return { claimed: true, record };
+    return { claimed: true as const, record, faceInr, newBalanceInr: patch.remaining_balance };
   });
 }

@@ -28,7 +28,7 @@
 // locking visitors out of a free chat. The per-minute and per-hour limiters stay in force regardless.
 
 import type { Request, Response, NextFunction } from 'express';
-import { clientAddress } from './clientAddress';
+import { clientAddress, addressRateKey } from './clientAddress';
 import { createHash } from 'crypto';
 import { doc, getServerDb, runTransaction } from './serverDb';
 import { verifyFirebaseIdentity } from './authMiddleware';
@@ -201,7 +201,9 @@ export function guestDailyQuota(
       decision = await store.consume(
         day,
         guestId ? hashed('dev', guestId) : null,
-        hashed('ip', requestAddress(req)),
+        // The shared address key: the real address, IPv6 grouped by /56 — one IPv6 host could otherwise use a
+        // fresh address per message and never meet the per-address backstop (audit 2026-10-11).
+        hashed('ip', addressRateKey(req)),
         (state) => decideGuestMessage(state, limit, ipCap),
       );
     } catch {

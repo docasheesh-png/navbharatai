@@ -35,7 +35,15 @@ function expired(s: WorkspaceSession, now = Date.now()): boolean {
   return now - s.lastUsedAt > TTL_MS;
 }
 
+/**
+ * Drop expired sessions — at most once a minute (audit 2026-10-11). A lookup already treats an expired session as
+ * a miss, so sweeping on EVERY registration only paid a walk over every live session for nothing. These are live
+ * sandboxes, so they are never evicted by size: they leave when they expire or are unregistered.
+ */
+let lastPruneAt = 0;
 function prune(now = Date.now()): void {
+  if (now - lastPruneAt < 60_000 && now >= lastPruneAt) return;
+  lastPruneAt = now;
   for (const [id, s] of sessions) {
     if (expired(s, now)) sessions.delete(id);
   }
@@ -264,4 +272,5 @@ export function sessionCount(): number {
 /** Test-only: clear the registry. */
 export function _clearSessions(): void {
   sessions.clear();
+  lastPruneAt = 0;
 }

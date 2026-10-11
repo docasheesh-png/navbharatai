@@ -5,6 +5,8 @@
 // collection to browsers; this route is the only door, and it stops at the operation cap so one
 // app cannot run the bill. Nothing here charges a wallet.
 
+import { BoundedCache } from '../lib/boundedCache';
+import { addressRateKey } from '../lib/clientAddress';
 import type { Express, Request, Response } from 'express';
 import { getServerDb } from '../lib/serverDb';
 import { sanitizeRecord, type SharedScalar } from '../lib/sharedData';
@@ -12,14 +14,14 @@ import { runSharedData, type SharedDb } from '../lib/sharedDataStore';
 import { routeParam } from '../lib/expressCompat';
 
 const WS_RE = /^agentv3-[A-Za-z0-9_-]{4,80}$/;
-const hits = new Map<string, { n: number; reset: number }>();
+// Bounded (audit 2026-10-11): the old Map was CLEARED at 5,000 keys, which reset every caller's limit.
+const hits = new BoundedCache<string, { n: number; reset: number }>({ maxEntries: 20_000, ttlMs: 60_000 });
 
 function tooFast(ip: string, workspaceId: string, now: number): boolean {
   const key = `${ip}|${workspaceId}`;
-  const row = hits.get(key);
+  const row = hits.get(key, now);
   if (!row || now > row.reset) {
-    if (hits.size > 5000) hits.clear();
-    hits.set(key, { n: 1, reset: now + 60_000 });
+    hits.set(key, { n: 1, reset: now + 60_000 }, now);
     return false;
   }
   row.n += 1;
@@ -48,7 +50,7 @@ async function handle(req: Request, res: Response, op: 'list' | 'get' | 'create'
     res.status(400).json({ ok: false, error: 'That app id is not allowed. Nothing was changed.' });
     return;
   }
-  if (tooFast(req.ip || 'unknown', workspaceId, Date.now())) {
+  if (tooFast(addressRateKey(req), workspaceId, Date.now())) {
     res.status(429).json({ ok: false, error: 'Too many requests. Nothing extra was charged.' });
     return;
   }

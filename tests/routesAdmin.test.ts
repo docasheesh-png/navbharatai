@@ -108,36 +108,13 @@ describe('Admin routes — announcement endpoint', () => {
   });
 });
 
-describe('Admin routes — settings GET/POST', () => {
-  it('GET /api/admin/settings returns current server stats fields', async () => {
+describe('Admin routes — the settings and feature-flag controls are gone (audit 2026-10-11, F16)', () => {
+  it('🔒 none of the four routes is registered — each stored a value nothing enforced', async () => {
     const register = await importAdminRoutes();
     const routes = captureRoutes(register, fakeLimiter);
-    const handler = routes.get('GET /api/admin/settings');
-    expect(handler).toBeDefined();
-
-    const req = mockReq({});
-    const res = mockRes();
-    await handler!(req, res);
-    expect(res.statusCode).toBe(200);
-    // Must include all 4 settings fields
-    expect('maintenanceMode' in res.body).toBe(true);
-    expect('featureFlags' in res.body).toBe(true);
-    expect('pricingConfig' in res.body).toBe(true);
-    expect('providerEnabled' in res.body).toBe(true);
-  });
-
-  it('POST /api/admin/settings updates maintenanceMode and returns ok', async () => {
-    const register = await importAdminRoutes();
-    const routes = captureRoutes(register, fakeLimiter);
-    const postHandler = routes.get('POST /api/admin/settings');
-    expect(postHandler).toBeDefined();
-
-    const req = mockReq({ body: { maintenanceMode: true } });
-    const res = mockRes();
-    await postHandler!(req, res);
-    expect(res.statusCode).toBe(200);
-    expect(res.body?.ok).toBe(true);
-    expect(res.body?.settings?.maintenanceMode).toBe(true);
+    for (const r of ['GET /api/admin/settings', 'POST /api/admin/settings', 'GET /api/admin/feature-flags', 'POST /api/admin/feature-flags']) {
+      expect(routes.get(r), r).toBeUndefined();
+    }
   });
 });
 

@@ -124,3 +124,30 @@ describe('serverLoad sampler', () => {
     expect(serverLoad.snapshot().inFlightRequests).toBe(1);
   });
 });
+
+describe('reading the load never changes what the next reader sees (audit 2026-10-11, F15)', () => {
+  it('🔒 snapshot() does not reset the lag window — only the timed rotate() does', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./serverLoad.ts', import.meta.url), 'utf8');
+    const snap = src.slice(src.indexOf('  snapshot(): ServerLoadSnapshot {'));
+    expect(snap).not.toMatch(/\.reset\(\)/);
+    const rotate = src.slice(src.indexOf('  rotate(): void {'), src.indexOf('  snapshot(): ServerLoadSnapshot {'));
+    expect(rotate).toMatch(/this\.histogram\.reset\(\)/);
+  });
+
+  it('lagOverWindows reports the worse of the current and previous window', async () => {
+    const { lagOverWindows } = await import('./serverLoad');
+    expect(lagOverWindows(null, null)).toBeNull();
+    expect(lagOverWindows({ p50: 1, p99: 2 }, null)).toEqual({ p50: 1, p99: 2 });
+    expect(lagOverWindows(null, { p50: 3, p99: 400 })).toEqual({ p50: 3, p99: 400 });
+    expect(lagOverWindows({ p50: 5, p99: 20 }, { p50: 3, p99: 400 })).toEqual({ p50: 5, p99: 400 });
+  });
+
+  it('🔒 the admin Monitor reads the load once per response', async () => {
+    const { readFileSync } = await import('node:fs');
+    const admin = readFileSync(new URL('../routes/admin.ts', import.meta.url), 'utf8');
+    const start = admin.indexOf("app.get('/api/admin/monitor'");
+    const route = admin.slice(start, admin.indexOf('app.get(', start + 10));
+    expect(route.match(/serverLoad\.snapshot\(\)/g) ?? []).toHaveLength(1);
+  });
+});

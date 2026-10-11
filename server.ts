@@ -10,7 +10,8 @@ import { TRUSTED_PROXY_HOPS } from './src/server/lib/clientAddress';
 import { denyServerOnlyArtifacts } from './src/server/lib/serverOnlyArtifacts';
 // Side-effect import: every axios error in this process loses its credential headers (P1, 2026-10-04).
 import './src/server/lib/axiosCredentialRedaction';
-import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
+import { registerPwaRoutes, type PwaStore, type PwaEntry } from './src/server/routes/pwa';
+import { BoundedCache } from './src/server/lib/boundedCache';
 import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
 import { noteWebsiteVisit } from './src/server/lib/ownAudience';
 // The rate-limit keys (forensic audit 2026-10-04): an address string, or a verified uid — never a request.
@@ -23,7 +24,6 @@ import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
 import { appCheckGuard } from './src/server/lib/appCheck';
 import { securityHeadersConfig, permissionsPolicyMiddleware, popupReturnOpenerPolicyMiddleware } from './src/server/lib/securityHeaders';
 import { responseCompression } from './src/server/lib/responseCompression';
-import { setDb as setSharedDb } from './src/server/lib/db';
 import { envFlag } from './src/server/lib/envFlag';
 import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerReferralRoutes } from './src/server/routes/referral';
@@ -171,7 +171,13 @@ const traceMiddleware = (req: any, res: any, next: any) => {
   const span = tracer.startSpan(`HTTP ${req.method} ${req.path}`, {
     traceId: cloudCtx?.traceId,
     parentSpanId: cloudCtx?.parentSpanId,
-    attributes: { 'http.method': req.method, 'http.path': req.path, requestId },
+    // The client's session and conversation ids ride on the span (one structured line, correlated into Cloud
+    // Trace) instead of a second console line per request (audit 2026-10-11, F13). Header values are the
+    // client's own, so they are cut to a bounded length.
+    attributes: {
+      'http.method': req.method, 'http.path': req.path, requestId,
+      sessionId: String(sessionId).slice(0, 128), conversationId: String(conversationId).slice(0, 128),
+    },
   });
   req.traceContext.traceId = span.data.traceId;
   res.on('finish', () => {
@@ -180,7 +186,6 @@ const traceMiddleware = (req: any, res: any, next: any) => {
     span.end();
   });
 
-  console.log(`[TRACE][API ENTRY] RID:${requestId} SID:${sessionId} CID:${conversationId} TID:${span.data.traceId} Path:${req.path}`);
   // Keep the span's context active for everything awaited downstream (so the AI provider
   // call attaches a child span to THIS request's trace).
   tracer.runInSpan(span, () => next());
@@ -204,8 +209,6 @@ assertProductionConfig();
 // ── In-memory server stats ─────────────────────────────────────────────────
 // serverStats singleton — extracted to src/server/lib/serverStats.ts (Phase 1).
 
-import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
 // Fallback: load a local .env file (skip placeholder values).
 //
 // 🔒 FORENSIC AUDIT 2026-10-04 — two things were removed from this block, on purpose:
@@ -242,26 +245,23 @@ const loadEnvFile = (filePath: string) => {
 
 loadEnvFile(path.join(process.cwd(), '.env'));
 
-// Initialize Firebase SDK for Node process (Backend Database Sync)
-let firebaseApp: any;
-let db: any;
+// Read the Firebase web config for its api key (used by the token-exchange fallbacks below).
+//
+// 🔒 AUDIT 2026-10-11 (F9): this block also started the CLIENT Firestore SDK and shared its handle with route
+// modules through `lib/db.ts`. On a server that handle has no signed-in user, so every read and write through it
+// ran as an anonymous browser against the security rules — and it is not the admin API at all: the workspace
+// build lease called `.collection()` / `.runTransaction()` on it, threw, and its fail-open path let a zip import
+// overwrite a workspace another instance was building. Every server read and write goes through
+// `getServerDb()` (the admin SDK); the client handle and `lib/db.ts` are gone, and
+// `tests/theServerNeverUsesTheClientFirestoreSdk.test.ts` keeps them gone.
 let firebaseApiKey: string | undefined = undefined;
 
 try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
   if (fs.existsSync(configPath)) {
     const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    firebaseApp = initializeApp(firebaseConfig);
-    db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
-    setSharedDb(db); // share the handle with extracted route modules (Phase 1)
     firebaseApiKey = firebaseConfig.apiKey;
-    console.log('✅ Firebase initialized successfully. Resolved fallback ApiKey:', firebaseApiKey ? 'present' : 'absent');
-    // P-PME.8 — hydrate persisted feature flags into the in-memory cache so admin toggles survive
-    // restarts. Best-effort + non-blocking: a load failure leaves the hardcoded defaults in place.
-    import('./src/server/FeatureFlagManager')
-      .then(({ loadFlagConfig }) => loadFlagConfig())
-      .then((cfg) => { if (cfg?.flags) Object.assign(serverStats.featureFlags, cfg.flags); })
-      .catch(() => { /* feature-flag hydration is best-effort */ });
+    console.log('✅ Firebase config loaded. Resolved fallback ApiKey:', firebaseApiKey ? 'present' : 'absent');
   } else {
     console.warn('⚠️ firebase-applet-config.json not found. Firebase features will be disabled.');
   }
@@ -273,34 +273,12 @@ try {
 
 
 // Token counter helpers
-// ══ PWA App Store (in-memory, 24h TTL) ══
-const pwaStore: PwaStore = new Map();
-setInterval(() => {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  for (const [id, entry] of pwaStore.entries()) {
-    if (entry.createdAt < cutoff) pwaStore.delete(id);
-  }
-}, 60 * 60 * 1000);
+// ══ PWA App Store: per-instance read-through cache of `pwa_apps` (24h TTL) ══
+// Bounded (audit 2026-10-11): an entry is up to 900 KB of HTML, and an hourly sweep by age alone let a busy
+// instance hold every app visited in a day. 200 entries bound it to ~180 MB in the worst case; a miss is one
+// Firestore read.
+const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200, ttlMs: 24 * 60 * 60 * 1000 });
 
-// ══ SDA Clinical Store (in-memory, 24h TTL) ══
-interface SdaClinicalEntry {
-  patientData: Record<string, any>;
-  redFlags: string[];
-  stage: string;
-  createdAt: number;
-  updatedAt: number;
-}
-const sdaClinicalStore = new Map<string, SdaClinicalEntry>();
-const sdaRecentMessages = new Map<string, Array<{ role: 'user' | 'assistant'; content: string; ts: number }>>();
-setInterval(() => {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  for (const [id, entry] of sdaClinicalStore.entries()) {
-    if (entry.updatedAt < cutoff) sdaClinicalStore.delete(id);
-  }
-  for (const [id, msgs] of sdaRecentMessages.entries()) {
-    if (!sdaClinicalStore.has(id)) sdaRecentMessages.delete(id);
-  }
-}, 60 * 60 * 1000);
 
 (async () => {
   // P2.2 — install process-level error handlers ASAP so nothing goes unreported
@@ -417,7 +395,9 @@ setInterval(() => {
   // Behavioural layer in FRONT of the static per-IP limiters below: bot-UA + burst
   // fingerprinting with an escalating slow-down, then a short hard block for repeat
   // offenders. Scoped to the /api/ surface (the expensive, abuse-prone endpoints).
-  app.use(adaptiveGuard());
+  // A signed-in person behind a busy shared address (carrier NAT, office, college) is judged on their own
+  // VERIFIED account once that address is hot, instead of being blocked with strangers (audit 2026-10-11, F3).
+  app.use(adaptiveGuard({ verifyUid: verifyFirebaseTokenForIntegrations }));
 
   // App Check — "is this the real NavBharatAI app?" on the routes that spend money (build, chat, image,
   // Professionals, OTP). Default MONITOR: it verifies and counts, and refuses nothing. See appCheck.ts
@@ -1232,9 +1212,14 @@ setInterval(() => {
         // them AFTER the drain (a drained build records its own telemetry as it ends) and BEFORE exit,
         // or the builds of the last minute vanish with the instance (admin Monitor capture 2026-09-27:
         // AI cost beside "0 builds"). Bounded at 2.5s so grace (≤6s) + flush stays inside the 9s backstop.
-        const flushTelemetry = (): Promise<void> => import('./src/server/lib/metricsTimeline')
-          .then(({ metricsTimeline }) => metricsTimeline.flushNow(2500))
-          .catch(() => { /* telemetry never blocks shutdown */ });
+        // The product-analytics buffer (`AnalyticsPipeline`, audit 2026-10-11 D8) is the same shape: up to 10s of
+        // events held in memory, so it is written in the same bounded window.
+        const flushTelemetry = (): Promise<void> => Promise.all([
+          import('./src/server/lib/metricsTimeline').then(({ metricsTimeline }) => metricsTimeline.flushNow(2500)),
+          import('./src/server/lib/AnalyticsPipeline').then(({ flushAnalytics }) => Promise.race([
+            flushAnalytics(), new Promise<void>((r) => setTimeout(r, 2500).unref()),
+          ])),
+        ].map((p) => p.catch(() => { /* telemetry never blocks shutdown */ }))).then(() => undefined);
         const exitNow = () => { try { server.close(); } catch { /* already closing */ } process.exit(0); };
         void import('./src/server/routes/agentv3')
           .then(({ drainRunningBuilds, shutdownGraceMs }) => {

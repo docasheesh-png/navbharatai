@@ -13,6 +13,7 @@
 // write; another instance sees it within CACHE_MS).
 
 import * as admin from 'firebase-admin';
+import { BoundedCache } from './boundedCache';
 import { getServerDb } from './serverDb';
 
 export const APP_AI_SETTINGS_COLLECTION = 'app_ai_settings';
@@ -24,7 +25,8 @@ export interface AppAiSettings {
   updatedAt: number;
 }
 
-const cache = new Map<string, { s: AppAiSettings; at: number }>();
+// Bounded (audit 2026-10-11): one entry per app ever asked used to stay for the life of the instance.
+const cache = new BoundedCache<string, { s: AppAiSettings; at: number }>({ maxEntries: 20_000, ttlMs: CACHE_MS });
 /** Test seam: under VITEST there is no Firestore, so the cache IS the store. */
 const memory = new Map<string, AppAiSettings>();
 

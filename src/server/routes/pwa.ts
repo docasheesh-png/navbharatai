@@ -17,7 +17,14 @@ export interface PwaEntry {
   userId?: string;
 }
 
-export type PwaStore = Map<string, PwaEntry>;
+/**
+ * The per-instance read-through cache in front of `pwa_apps`. Structural so a plain Map (tests) and the server's
+ * BoundedCache both fit: an entry carries up to 900 KB of HTML, so the server's copy MUST be size-bounded.
+ */
+export interface PwaStore {
+  get(id: string): PwaEntry | undefined;
+  set(id: string, entry: PwaEntry): unknown;
+}
 
 /**
  * NavBharat instant hosting ("NavBharat Hosting" in Cloudeploy) — save a generated app and serve it

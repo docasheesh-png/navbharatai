@@ -4,13 +4,16 @@
  * Real, runnable capacity baseline for NavBharatAI Pro. Run with:
  *   k6 run -e BASE_URL=https://your-staging-url loadtest/build-stream.k6.js
  *
- * IMPORTANT — what this does and does NOT hit:
- *   • It load-tests the LIGHTWEIGHT read/ingest endpoints (health, analytics,
- *     pagespeed-less paths) to establish HTTP/Cloud Run concurrency capacity
- *     (p50/p95 latency, error rate) WITHOUT spending real AI credits.
+ * IMPORTANT — what this does and does NOT hit (rewritten 2026-10-11, performance audit F18):
+ *   • READ-ONLY endpoints only: the liveness probe, the deep health probe and the app shell. Nothing
+ *     here writes to Firestore, spends AI credit, or leaves a record anyone has to clean up.
+ *   • It used to POST /api/analytics/event and /api/logs/error. Those WRITE: every analytics event
+ *     lands in the product funnel, and every error post is a real entry in Cloud Error Reporting — a
+ *     load test against production filled the admin's error view with "loadtest" and skewed the
+ *     funnel. Both are also limited per address now (a quiet 204 past it), so from one machine they
+ *     would measure the limiter, not the server.
  *   • It never runs a build: each build is a real AI + sandbox run that costs money.
- *     (The optional /api/build smoke step was removed on 2026-09-25 with the
- *     legacy build engine; that endpoint now answers 410.)
+ *   • Point it at STAGING. Even read-only, 300 virtual users against production is real traffic.
  *
  * Stages model: ramp to 100 VUs, hold, ramp to peak, cool down.
  */
@@ -35,21 +38,17 @@ export const options = {
 };
 
 export default function () {
-  // 1. Analytics ingest — represents the steady-state write load.
-  const analytics = http.post(
-    `${BASE_URL}/api/analytics/event`,
-    JSON.stringify({ event: 'loadtest_ping', ts: Date.now() }),
-    { headers: { 'Content-Type': 'application/json' } },
-  );
-  check(analytics, { 'analytics 204': (r) => r.status === 204 });
+  // 1. Liveness — the cheapest route the server has; measures the HTTP path itself.
+  const live = http.get(`${BASE_URL}/api/live`);
+  check(live, { 'live 200': (r) => r.status === 200 });
 
-  // 2. Error-log ingest — best-effort 204 path.
-  const logs = http.post(
-    `${BASE_URL}/api/logs/error`,
-    JSON.stringify({ message: 'loadtest', ts: Date.now() }),
-    { headers: { 'Content-Type': 'application/json' } },
-  );
-  check(logs, { 'logs 204': (r) => r.status === 204 });
+  // 2. Deep health — reads process state and the dependency checks; still no database write.
+  const health = http.get(`${BASE_URL}/api/health`);
+  check(health, { 'health 200': (r) => r.status === 200 });
+
+  // 3. The app shell — the static path every visitor hits first.
+  const shell = http.get(`${BASE_URL}/`);
+  check(shell, { 'shell 200': (r) => r.status === 200 });
 
   sleep(1);
 }

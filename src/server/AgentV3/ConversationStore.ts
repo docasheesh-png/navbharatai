@@ -165,6 +165,13 @@ export interface ConversationStore {
    * read conversations far more often than anything renders the timeline, and it can be large.
    */
   get(id: string, opts?: { includeTimeline?: boolean }): Promise<ConversationRecord | null>;
+  /**
+   * The record WITHOUT its transcript or timeline — one document read. For callers that need to know a
+   * conversation exists and when it was last touched (performance audit 2026-10-11: every build turn listed up
+   * to 200 conversations twice just to find its own). Optional so a test double may omit it (callers fall back
+   * to `get`).
+   */
+  getMeta?(id: string): Promise<ConversationRecord | null>;
   /** Append transcript turns and apply a patch (usage/status/billing). Throws if id is unknown. */
   appendMessages(id: string, messages: unknown[], patch: ConversationPatch): Promise<void>;
   /** Apply a patch without appending messages (e.g. finalize status). Throws if id is unknown. */
@@ -265,6 +272,11 @@ export class InMemoryConversationStore implements ConversationStore {
     const clone = cloneRecord(rec);
     if (!opts?.includeTimeline) delete clone.timeline; // mirror the Firestore store's read shape
     return clone;
+  }
+
+  async getMeta(id: string): Promise<ConversationRecord | null> {
+    const rec = await this.get(id);
+    return rec ? { ...rec, messages: [] } : null;
   }
 
   async appendMessages(id: string, messages: unknown[], patch: ConversationPatch): Promise<void> {

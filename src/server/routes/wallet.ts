@@ -1,8 +1,9 @@
 import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Reads/writes user_token_wallets,
 // which navbharat-prod's rules restrict to the owner (server is unauthenticated → was denied).
-import { doc, getDoc, setDoc, runTransaction, collection, query, where, orderBy, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
-import { buildEmptyWallet } from '../lib/newWallet';
+import { doc, getDoc, runTransaction, getServerDb as getDb } from '../lib/serverDb';
+import { buildEmptyWallet, missingWalletFields } from '../lib/newWallet';
+import { listEqNewestFirst, INDEX_SAFE_FETCH_CAP, epochMillis } from '../lib/firestoreIndexSafe';
 import { requireUserMatch } from '../lib/authMiddleware';
 import { appLockBlocks } from '../lib/appLockEnforce';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
@@ -59,16 +60,18 @@ export function registerWalletRoutes(app: Express): void {
       const walletRef = doc(db, 'user_token_wallets', userId);
       const snap = await getDoc(walletRef);
       if (snap.exists()) {
-        const data = snap.data();
-        let updated = false;
-
-        if (data.tokenBalance === undefined) { data.tokenBalance = 0; updated = true; }
-        if (data.totalTokensPurchased === undefined) { data.totalTokensPurchased = 0; updated = true; }
-        if (data.totalTokensUsed === undefined) { data.totalTokensUsed = 0; updated = true; }
-        if (data.walletLedger === undefined) { data.walletLedger = []; updated = true; }
-
-        if (updated) {
-          await setDoc(walletRef, data, { merge: true });
+        let data = snap.data();
+        // An older wallet lacking a field gets ONLY that field, in a transaction against a fresh read. This
+        // used to write the whole stale snapshot back (balance and ledger) outside a transaction, which undid
+        // any debit or payment that committed in between (audit 2026-10-11, F4).
+        if (Object.keys(missingWalletFields(data)).length > 0) {
+          data = await runTransaction(db, async (tx) => {
+            const fresh = await tx.get(walletRef);
+            const current = (fresh.exists() ? fresh.data() : {}) as Record<string, unknown>;
+            const patch = missingWalletFields(current);
+            if (Object.keys(patch).length > 0) tx.set(walletRef, patch, { merge: true });
+            return { ...current, ...patch };
+          });
         }
 
         // Billing Phase 2 — the ₹↔token rate travels WITH the wallet (single source of truth:
@@ -278,34 +281,27 @@ export function registerWalletRoutes(app: Express): void {
     }
   });
 
+  // 🔴 AUDIT 2026-10-11 (D2): both routes below ran `where userId == … orderBy createdAt desc` first. That needs a
+  // composite index this project has never deployed (see firestoreIndexSafe.ts), so it threw on every call and
+  // fell back to an UNORDERED `limit(100)`: two round trips per wallet load, and past 100 rows the "latest"
+  // payments were simply the first 100 by document id. Both now use the one index-free helper, which stays
+  // correct past its page size.
   app.get('/api/wallet/:userId/logs', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     const { userId } = routeParams(req.params);
     try {
-      const logsRef = collection(db, 'ai_usage_logs');
-      const q = query(logsRef, where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(50));
-      const snap = await getDocs(q);
       // WHITE-LABEL LAW, AT THE ROUTE (2026-09-14). These documents carry `providerName` and
       // `modelName`, and this handler used to spread the WHOLE document into the response — so a
       // user's own browser received the vendor and model id of every call, whatever the UI chose to
       // render. "No admin-only diagnostic may ever be surfaced to an end user" is about what LEAVES
       // the server, not about what a component happens to paint.
-      const logs = snap.docs.map(d => userSafeUsageLog(d.id, d.data()));
-      return res.json(logs);
+      const rows = await listEqNewestFirst(
+        db.collection('ai_usage_logs'), [['userId', userId]], '_at', 50, INDEX_SAFE_FETCH_CAP,
+        (id, data) => ({ log: userSafeUsageLog(id, data), _at: epochMillis(data.createdAt) }),
+      );
+      return res.json(rows.map((r) => r.log));
     } catch (err: any) {
-      try {
-        const logsRef = collection(db, 'ai_usage_logs');
-        const q = query(logsRef, where('userId', '==', userId), limit(100));
-        const snap = await getDocs(q);
-        // The SAME redaction on the index-missing fallback. A guard applied to only one of two paths
-        // is a guard that leaks on exactly the day the primary query fails, which is the day nobody
-        // is looking at the shape of the response.
-        const logs = snap.docs.map(d => userSafeUsageLog(d.id, d.data()));
-        logs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        return res.json(logs);
-      } catch (fallbackErr: any) {
-        return sendSafeError(res, 500, 'Unable to load your usage logs right now. Please try again.', fallbackErr, 'wallet logs');
-      }
+      return sendSafeError(res, 500, 'Unable to load your usage logs right now. Please try again.', err, 'wallet logs');
     }
   });
 
@@ -313,22 +309,13 @@ export function registerWalletRoutes(app: Express): void {
     const db = getDb() as any;
     const { userId } = routeParams(req.params);
     try {
-      const txRef = collection(db, 'payment_transactions');
-      const q = query(txRef, where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(50));
-      const snap = await getDocs(q);
-      const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      return res.json(txs);
+      const rows = await listEqNewestFirst(
+        db.collection('payment_transactions'), [['userId', userId]], '_at', 50, 100,
+        (id, data) => ({ tx: { id, ...data }, _at: epochMillis(data.createdAt) }),
+      );
+      return res.json(rows.map((r) => r.tx));
     } catch (err: any) {
-      try {
-        const txRef = collection(db, 'payment_transactions');
-        const q = query(txRef, where('userId', '==', userId), limit(100));
-        const snap = await getDocs(q);
-        const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        txs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        return res.json(txs);
-      } catch (fallbackErr: any) {
-        return sendSafeError(res, 500, 'Unable to load your transactions right now. Please try again.', fallbackErr, 'wallet transactions');
-      }
+      return sendSafeError(res, 500, 'Unable to load your transactions right now. Please try again.', err, 'wallet transactions');
     }
   });
 }

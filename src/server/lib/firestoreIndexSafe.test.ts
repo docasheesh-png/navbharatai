@@ -61,6 +61,19 @@ const CHAIN = /\.where\(\s*['"]([\w.]+)['"]\s*,\s*['"]==['"][^)]*\)\s*\n?\s*\.or
 const NAME_DESC = /\.orderBy\(\s*(?:[\w.]*FieldPath\.)?documentId\(\)\s*,\s*['"]desc['"]|\.orderBy\(\s*['"]__name__['"]\s*,\s*['"]desc['"]/g;
 
 /**
+ * The THIRD and FOURTH shapes — found by the performance audit, 2026-10-11.
+ *
+ * The scan above matches only an ADJACENT chain, so two spellings of the same query walked past it:
+ *   • the client-style shim, `query(ref, where('userId', '==', u), orderBy('createdAt', 'desc'), …)`
+ *     (`routes/wallet.ts` — both wallet history routes threw on every load and fell back to an unordered
+ *     `limit(100)`);
+ *   • a query built in steps, `q = q.where('workspaceId', '==', …)` … `q = q.orderBy('ts', 'desc')`
+ *     (`lib/eventStore.ts` — a filtered event search threw and quietly answered from one instance's memory).
+ */
+const SHIM = /query\([^;]*?\bwhere\(\s*['"]([\w.]+)['"]\s*,\s*['"]==['"][^;]*?\borderBy\(\s*['"]([\w.]+)['"]/g;
+const SPLIT = /(\w+)\s*=\s*\1\.where\(\s*['"]([\w.]+)['"]\s*,\s*['"]==['"][\s\S]{0,400}?\1\s*=\s*\1\.orderBy\(\s*['"]([\w.]+)['"]/g;
+
+/**
  * Strip comments before scanning.
  *
  * Every file that fixed this bug DESCRIBES the broken shape in a comment so the next reader knows
@@ -89,6 +102,19 @@ describe('composite-index queries cannot be reintroduced', () => {
       `instead — it filters in Firestore and sorts in memory, and takes no orderBy parameter.\n\n` +
       offenders.join('\n'),
     ).toEqual([]);
+  });
+
+  it('nor through the query() shim, nor built in steps (the shapes the adjacent-chain scan missed)', () => {
+    const offenders: string[] = [];
+    for (const file of tsFiles(SERVER_ROOT)) {
+      const src = codeOnly(readFileSync(file, 'utf8'));
+      for (const m of src.matchAll(SHIM)) if (m[1] !== m[2]) offenders.push(`${file.replace(SERVER_ROOT, 'src/server')}: query(where(${m[1]}), orderBy(${m[2]}))`);
+      for (const m of src.matchAll(SPLIT)) if (m[2] !== m[3]) offenders.push(`${file.replace(SERVER_ROOT, 'src/server')}: ${m[1]}.where(${m[2]}) … ${m[1]}.orderBy(${m[3]})`);
+    }
+    expect(offenders).toEqual([]);
+    // The shapes really match what they name (so the scan cannot rot into a no-op).
+    expect([..."query(ref, where('userId', '==', u), orderBy('createdAt', 'desc'), limit(50))".matchAll(SHIM)]).toHaveLength(1);
+    expect([..."q = q.where('workspaceId', '==', w);\n q = q.orderBy('ts', 'desc');".matchAll(SPLIT)]).toHaveLength(1);
   });
 
   it('no server file sorts by document id DESCENDING — the shape that broke the build history', () => {
@@ -219,5 +245,54 @@ describe('listEqNewestFirst', () => {
     const { q, calls } = fakeCollection([{ at: 1 }]);
     await listEqNewestFirst(q as never, [], 'at', 5, 42);
     expect(calls.limit).toBe(42);
+  });
+});
+
+describe('listEqNewestFirst past its fetch cap (audit 2026-10-11, D3)', () => {
+  /** A query double that honours limit, document-id order and startAfter, like Firestore. */
+  function pagedCollection(docs: Array<{ id: string; at: number; uid: string }>) {
+    const calls = { pages: 0, ordered: 0 };
+    const make = (state: { where: Array<[string, unknown]>; limit: number; ordered: boolean; after?: string }) => {
+      const q = {
+        where(f: string, _op: string, v: unknown) { return make({ ...state, where: [...state.where, [f, v]] }); },
+        orderBy() { calls.ordered++; return make({ ...state, ordered: true }); },
+        limit(n: number) { return make({ ...state, limit: n }); },
+        startAfter(snap: { id: string }) { return make({ ...state, after: snap.id }); },
+        async get() {
+          calls.pages++;
+          let rows = docs.filter((d) => state.where.every(([f, v]) => (d as Record<string, unknown>)[f] === v));
+          // Unordered reads come back in an order unrelated to `at` (insertion order here).
+          if (state.ordered) rows = [...rows].sort((a, b) => a.id.localeCompare(b.id));
+          if (state.after) rows = rows.filter((d) => d.id > state.after!);
+          rows = rows.slice(0, state.limit);
+          return { docs: rows.map((d) => ({ id: d.id, data: () => d })) };
+        },
+      };
+      return q;
+    };
+    return { q: make({ where: [], limit: Infinity, ordered: false }), calls };
+  }
+
+  it('the newest rows are returned even when more match than one page holds', async () => {
+    // 1,200 matching docs whose ids are unrelated to recency; the 10 newest sit late in id order.
+    const docs = Array.from({ length: 1_200 }, (_, i) => ({ id: `d${String((i * 7919) % 1200).padStart(5, '0')}`, at: i, uid: 'u' }));
+    const { q, calls } = pagedCollection(docs);
+    const rows = await listEqNewestFirst<{ at: number }>(q as never, [['uid', 'u']], 'at', 10, 500);
+    expect(rows.map((r) => r.at)).toEqual([1199, 1198, 1197, 1196, 1195, 1194, 1193, 1192, 1191, 1190]);
+    expect(calls.ordered).toBeGreaterThan(0); // document-id order, never the sort field
+  });
+
+  it('under the cap: one read, no ordering, exactly as before', async () => {
+    const docs = Array.from({ length: 30 }, (_, i) => ({ id: `d${i}`, at: i, uid: 'u' }));
+    const { q, calls } = pagedCollection(docs);
+    const rows = await listEqNewestFirst<{ at: number }>(q as never, [['uid', 'u']], 'at', 3, 500);
+    expect(rows.map((r) => r.at)).toEqual([29, 28, 27]);
+    expect(calls.pages).toBe(1);
+    expect(calls.ordered).toBe(0);
+  });
+
+  it('the history store no longer claims what the old code did not do', () => {
+    const src = readFileSync('src/server/lib/UserBuildHistoryStore.ts', 'utf8');
+    expect(src).toMatch(/CORRECTED 2026-10-11/);
   });
 });

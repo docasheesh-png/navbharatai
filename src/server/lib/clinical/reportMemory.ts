@@ -77,6 +77,13 @@ export function asksForComparison(message: string): boolean {
 const REPORT_TTL_MS = 24 * 60 * 60 * 1000;
 /** Most-recent files kept per session — a case discussion rarely juggles more at once. */
 const MAX_FILES_PER_SESSION = 3;
+/**
+ * Memory budget for ALL sessions together (audit 2026-10-11). A report is a base64 image or PDF, often
+ * megabytes, and the store had no total bound: enough doctors in a day could fill a 2 GiB instance. Past the
+ * budget the least recently used session is dropped — the client then re-sends its file (`reportResendNeeded`).
+ */
+export const MAX_REPORT_STORE_BYTES = 150 * 1024 * 1024;
+export const MAX_REPORT_SESSIONS = 1_000;
 
 /**
  * The per-session report file store. In-memory with a TTL, exactly like the SDA clinical store beside
@@ -84,14 +91,47 @@ const MAX_FILES_PER_SESSION = 3;
  * session rather than accumulate.
  */
 export class SessionReportStore {
+  /** Insertion order is recency order: `remember` re-inserts its session, so the first key is the oldest. */
   private files = new Map<string, StoredEntry[]>();
+  private bytes = 0;
+
+  constructor(
+    private readonly maxBytes: number = MAX_REPORT_STORE_BYTES,
+    private readonly maxSessions: number = MAX_REPORT_SESSIONS,
+  ) {}
+
+  /** Bytes currently held (tests and the admin monitor). */
+  get totalBytes(): number {
+    return this.bytes;
+  }
+
+  private static sizeOf(list: StoredEntry[]): number {
+    let n = 0;
+    for (const f of list) n += f.fileData.length;
+    return n;
+  }
+
+  private drop(sessionId: string): void {
+    const list = this.files.get(sessionId);
+    if (!list) return;
+    this.bytes -= SessionReportStore.sizeOf(list);
+    this.files.delete(sessionId);
+  }
 
   remember(sessionId: string, file: StoredReportFile, now: number): void {
     if (!sessionId || !file?.fileData || !isVisionReportType(file.fileType)) return;
     const list = this.files.get(sessionId) || [];
+    this.drop(sessionId);
     list.push({ fileData: file.fileData, fileType: file.fileType, fileName: file.fileName || 'report', ts: now });
     while (list.length > MAX_FILES_PER_SESSION) list.shift();
     this.files.set(sessionId, list);
+    this.bytes += SessionReportStore.sizeOf(list);
+    // Evict the least recently used OTHER sessions until both bounds hold; the newest file always stays.
+    while ((this.bytes > this.maxBytes || this.files.size > this.maxSessions) && this.files.size > 1) {
+      const oldest = this.files.keys().next().value as string;
+      if (oldest === sessionId) break;
+      this.drop(oldest);
+    }
   }
 
   /** The most recently sent, still-fresh report file for this session — or null. */
@@ -100,7 +140,7 @@ export class SessionReportStore {
     if (!list?.length) return null;
     const fresh = list[list.length - 1];
     if (now - fresh.ts > REPORT_TTL_MS) {
-      this.files.delete(sessionId);
+      this.drop(sessionId);
       return null;
     }
     return { fileData: fresh.fileData, fileType: fresh.fileType, fileName: fresh.fileName };
@@ -115,7 +155,7 @@ export class SessionReportStore {
     if (!list?.length) return [];
     const fresh = list.filter((f) => now - f.ts <= REPORT_TTL_MS);
     if (!fresh.length) {
-      this.files.delete(sessionId);
+      this.drop(sessionId);
       return [];
     }
     return fresh.map((f) => ({ fileData: f.fileData, fileType: f.fileType, fileName: f.fileName }));
@@ -125,7 +165,7 @@ export class SessionReportStore {
   sweep(now: number): void {
     for (const [id, list] of this.files.entries()) {
       const newest = list[list.length - 1];
-      if (!newest || now - newest.ts > REPORT_TTL_MS) this.files.delete(id);
+      if (!newest || now - newest.ts > REPORT_TTL_MS) this.drop(id);
     }
   }
 }

@@ -18,6 +18,7 @@
 // Firebase, and keeps a short per-process cache because the Browse list asks about up to 60 apps and
 // most of them share a handful of creators.
 
+import { BoundedCache } from './boundedCache';
 import { createHash } from 'node:crypto';
 import * as admin from 'firebase-admin';
 import { userProfileStore } from './UserProfileStore';
@@ -69,7 +70,8 @@ export interface CreatorLookupDeps {
 }
 
 const CACHE_MS = 10 * 60_000;
-const cache = new Map<string, { info: CreatorInfo; at: number }>();
+// Bounded (audit 2026-10-11): every creator ever shown used to stay for the life of the instance.
+const cache = new BoundedCache<string, { info: CreatorInfo; at: number }>({ maxEntries: 20_000, ttlMs: CACHE_MS });
 
 /** Drop one creator's cached name — after they edit their profile. */
 export function forgetCreator(uid: string): void {

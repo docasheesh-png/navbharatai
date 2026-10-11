@@ -19,6 +19,7 @@
 import type { GrantEmail } from '../AgentV3/featureFlag';
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { SharedReadCache } from '../lib/boundedCache';
 import { inspectApk, MAX_APK_BYTES, publishableApkLimitBytes } from '../lib/apkInspect';
 import axios from 'axios';
 import { fetchBuildArtifact, type ArtifactFetcher } from '../lib/buildArtifact';
@@ -112,6 +113,15 @@ export const STORE_CATEGORIES = [
 ] as const;
 
 /** Who may review. Read from the same admin list the rest of the platform uses. */
+
+/**
+ * The two public listings, read at most once a minute per instance (audit 2026-10-11). Public and the same for
+ * every viewer; the viewer's own 18+ setting is applied after the read. An admin review on this instance clears
+ * them so the reviewer sees the change at once; other instances catch up within the TTL.
+ */
+const publicListings = new SharedReadCache<Array<ReturnType<typeof toPublicWebApp>>>({ maxEntries: 4, ttlMs: 60_000 });
+const publicApprovedApps = new SharedReadCache<StoreApp[]>({ maxEntries: 4, ttlMs: 60_000 });
+
 export function isStoreAdmin(email: GrantEmail | null): boolean { // a verified email only (Q-624)
   if (!email) return false;
   const list = (process.env.NAV_STORE_ADMINS || process.env.AGENTV3_FREE_LIST || '')
@@ -430,7 +440,8 @@ export function registerNavStoreRoutes(app: Express): void {
   app.get('/api/nav-store/apps', async (req: Request, res: Response) => {
     try {
       const category = String(req.query.category || '');
-      const apps = await listApps('approved', 100);
+      const apps = await publicApprovedApps.get('approved', () => listApps('approved', 100));
+      res.setHeader('Cache-Control', 'public, max-age=60');
       const filtered = category ? apps.filter((a) => a.category === category) : apps;
       res.json({ apps: filtered.map(toPublic) });
     } catch {
@@ -577,6 +588,7 @@ export function registerNavStoreRoutes(app: Express): void {
   app.post('/api/nav-store/admin/review', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
     if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
+    publicApprovedApps.forget(); // only an admin's review clears the shared listing
 
     const { id, decision } = (req.body || {}) as Record<string, unknown>;
     const appId = String(id || '');
@@ -1012,10 +1024,16 @@ export function registerNavStoreRoutes(app: Express): void {
         .then((uid) => (uid ? userProfileStore.get(uid) : null))
         .then((p) => adultPreferenceFrom({ optedIn: p?.adultOptIn, optedInAt: p?.adultOptInAt }))
         .catch(() => adultPreferenceFrom(null));
-      const rows = await listListedWebApps();
-      // Who made each app (admin 2026-09-27). A lookup failure costs the creator line, never the list.
-      const creators = await resolveCreators(rows.map((a) => a.uid), realCreatorLookupDeps).catch(() => new Map());
-      const listed = rows.map((a) => toPublicWebApp(a, creators.get(a.uid)));
+      // The shared part — the same for every viewer — read at most once a minute per instance (audit 2026-10-11:
+      // it was up to 500 documents plus a profile read per creator on EVERY page view). The viewer's own 18+
+      // setting is applied below, after the shared read, never baked into it.
+      const listed = await publicListings.get('web-apps', async () => {
+        const rows = await listListedWebApps();
+        // Who made each app (admin 2026-09-27). A lookup failure costs the creator line, never the list.
+        const creators = await resolveCreators(rows.map((a) => a.uid), realCreatorLookupDeps).catch(() => new Map());
+        return rows.map((a) => toPublicWebApp(a, creators.get(a.uid)));
+      });
+      res.setHeader('Cache-Control', 'private, max-age=30');
       res.json({
         apps: listed.filter((a) => !hiddenFromBrowse({ contentClass: a.contentClass }, {
           optedIn: viewer.optedIn,
@@ -1396,6 +1414,7 @@ export function registerNavStoreRoutes(app: Express): void {
   app.post('/api/nav-store/web/admin/review', async (req: Request, res: Response) => {
     const me = await verifyFirebaseIdentity(req);
     if (!isStoreAdmin(identityGrantEmail(me))) return res.status(403).json({ error: 'Not allowed.' });
+    publicListings.forget(); // only an admin's review clears the shared listing
     const id = String(req.body?.id || '');
     const decision = String(req.body?.decision || '');
     if (!id || !['listed', 'removed'].includes(decision)) {

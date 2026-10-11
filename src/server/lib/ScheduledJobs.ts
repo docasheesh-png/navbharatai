@@ -181,6 +181,26 @@ export class Scheduler {
   async tick(nowMs: number = Date.now()): Promise<void> {
     for (const st of this.jobs.values()) {
       if (!(st.job.enabled ?? true) || st.nextRun > nowMs) continue;
+      /**
+       * 🔒 AN EXCLUSIVE JOB ASKS THE DURABLE RECORD FIRST (audit 2026-10-11, F14). Each instance computes
+       * `nextRun` from its own boot time, so for an `everyMs` job the instances' ticks are staggered across the
+       * interval — and the claim's lease (10 min) is shorter than a 15-minute job's interval, so an instance
+       * whose turn came after the lease lapsed ran the job AGAIN. With twenty instances a 15-minute uptime sweep
+       * could run several times per cycle. Now, when any instance ran it within the schedule, this one does not
+       * claim at all: it moves its own `nextRun` onto the shared cadence, so every instance becomes due at the
+       * same moment and the claim picks one. An unreadable record falls back to the claim, as before.
+       */
+      if (st.job.exclusive && this.runLog) {
+        const last = await this.runLog.lastRun(st.job.id).catch(() => undefined);
+        if (typeof last === 'number' && Number.isFinite(last)) {
+          const durableNext = computeNextRun(st.job.schedule, last);
+          if (durableNext > nowMs) {
+            st.nextRun = durableNext;
+            st.skipped = (st.skipped ?? 0) + 1;
+            continue;
+          }
+        }
+      }
       await this.runOnce(st, nowMs);
       /**
        * 🔒 RESCHEDULED WHETHER OR NOT THIS INSTANCE WON THE CLAIM — and the order matters. A losing

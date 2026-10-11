@@ -57,7 +57,9 @@ describe('the three routes the audit found', () => {
   it('sbom writes only into a workspace the caller owns', () => {
     const src = read('sbom.ts');
     expect(src).toContain('ownedByVerifiedUid(await verifyFirebaseToken(req), workspaceId)');
-    expect(src).toContain("await setDoc(doc(db, 'sboms', ownedWorkspaceId,");
+    // The write goes through the admin SDK since audit 2026-10-11 (F9) — still ONLY into the owned workspace id.
+    expect(src).toContain("await db.collection('sboms').doc(ownedWorkspaceId).collection('builds')");
+    expect(src).not.toMatch(/collection\('sboms'\)\.doc\((?!ownedWorkspaceId)/);
   });
 
   it('the COMPUTATION stays open — only stored data is gated', () => {

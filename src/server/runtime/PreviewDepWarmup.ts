@@ -25,6 +25,7 @@
  */
 
 import { fetchMirroredModule } from '../routes/esmMirror';
+import { BoundedCache } from '../lib/boundedCache';
 
 /** Hard caps — a pathological dependency graph must never turn the server into a crawler farm. */
 export const WARMUP_MAX_MODULES = 96;
@@ -86,7 +87,8 @@ export async function crawlDepGraph(entryUrls: string[]): Promise<string[]> {
 }
 
 interface MemoEntry { urls: string[]; at: number }
-const memo = new Map<string, MemoEntry>();
+// Bounded (audit 2026-10-11): keyed by an app's dependency set, so every distinct app ever previewed stayed.
+const memo = new BoundedCache<string, MemoEntry>({ maxEntries: 500 });
 const inFlight = new Map<string, Promise<void>>();
 
 /** Stable identity for one dependency set (order-independent). */

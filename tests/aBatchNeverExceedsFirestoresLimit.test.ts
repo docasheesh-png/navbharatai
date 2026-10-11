@@ -65,6 +65,7 @@ describe('census: every batch is bounded', () => {
     'src/server/lib/sharedDataStore.ts': [2, 'loop of limit(200) pages'],
     'src/server/lib/workspaceDataErase.ts': [1, 'pages of a bounded size'],
     'src/server/lib/navStoreWeb.ts': [5, 'slices of BATCH, or a fixed handful of documents'],
+    'src/server/lib/AnalyticsPipeline.ts': [1, 'one write per UTC day in the buffer; a client clock is clamped to within a day, so at most 3 (audit D8)'],
   };
 
   it('no unreviewed batch, and the reviewed ones did not grow', () => {

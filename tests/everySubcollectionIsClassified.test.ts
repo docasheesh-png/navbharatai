@@ -57,6 +57,8 @@ type Kind =
 /** "file › sub" → what it is. `clock` adds the second obligation: a SUBCOLLECTION_RETENTION_POLICIES entry. */
 const CLASSIFICATION: Record<string, Kind & { clock?: true; erasedBy?: string; foreignParent?: true }> = {
   'src/server/AgentV3/WorkspaceFileStore.ts › files': { kind: 'workspace', parent: 'workspace_files_v3' },
+  // Written through the client SDK's path form until 2026-10-11 (audit F9), which this census could not see.
+  'src/server/routes/sbom.ts › builds': { kind: 'workspace', parent: 'sboms' },
   'src/server/AgentV3/WorkspaceAssetStore.ts › assets': { kind: 'workspace', parent: 'workspace_assets_v3' },
   'src/server/AgentV3/CheckpointStore.ts › items': { kind: 'workspace', parent: 'workspace_checkpoints_v3' },
   'src/server/AgentV3/EmbeddingStore.ts › files': { kind: 'workspace', parent: 'workspace_embeddings_v3' },

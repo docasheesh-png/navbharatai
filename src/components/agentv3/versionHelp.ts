@@ -31,9 +31,12 @@ export const TIME_MACHINE_PATH = 'Other AI → AI Tools → Versioning';
  * compare them), and the versions you can actually go back to — from any device, however long
  * afterwards — are kept in the Time Machine.
  */
+//
+// 🔒 SINCE 2026-10-11 (Q-128, "one timeline") the History tab SHOWS the Time Machine's versions above this
+// note — the same component, the same Restore — and the session's git steps sit below it, folded away.
 export const HISTORY_TAB_NOTE =
-  `These are the steps inside this session — open one to look at it, or compare two. To go back to an earlier version of your app, use Time Machine (${TIME_MACHINE_PATH}): every build is saved there permanently and restores from any device.`;
+  `Above are your app's saved versions — the same list as Time Machine (${TIME_MACHINE_PATH}). Every build is saved there permanently and restores from any device, and Restore saves your app as it is first. Below are the steps inside this session — open one to look at it, or compare two.`;
 
 /** The one-line answer to "I made a mistake — how do I get my app back?" */
 export const HOW_TO_GO_BACK =
-  `Open Time Machine (${TIME_MACHINE_PATH}), pick the version from before the change, and tap Restore. Nothing is deleted — you can come forward again.`;
+  `Open Time Machine (${TIME_MACHINE_PATH}) or the builder's History tab, pick the version from before the change, and tap Restore. Nothing is deleted — your app as it is now is saved first, so you can come forward again.`;

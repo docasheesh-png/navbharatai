@@ -3,14 +3,17 @@ import { BoundedCache } from '../lib/boundedCache';
 import { sdaStoreKey } from '../lib/clinical/sdaStoreKey';
 import type { Express } from 'express';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
+import { clientPlatform } from '../AppContext/iosPurchaseGuard';
 import { extractDocumentText } from '../lib/attachmentText';
 import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels, vertexVisionModels } from '../lib/visionModels';
+import { vertexGenAI } from '../lib/vertexGenAI';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
 import { retrieveClinicalKnowledge, formatKnowledgeForPrompt } from '../lib/clinical/knowledgeBase';
 import { detectRedFlagsAcross } from '../lib/clinical/redFlags';
 import { isAuditReplyClean } from '../lib/clinical/auditGate';
 import { AIRouterManager } from '../AI/AIRouterManager';
+import { anthropicTotalInput } from '../lib/anthropicUsage';
 import { verifyFirebaseIdentity, rateLimiter } from '../lib/authMiddleware';
 import { gateProfessionalTurn, burnFreeMessage, type ProfessionalTier } from '../professionals/passGate';
 import { identityGrantEmail } from '../AgentV3/featureFlag';
@@ -81,7 +84,7 @@ async function auditSdaReply(
         model: 'gemini-2.5-flash',
         contents: buildAuditContents(auditPrompt, reportFile),
         config: { thinkingConfig: { thinkingBudget: 0 } },
-      } as any),
+      }),
       // A little more headroom than the text audit's 12s — the auditor now reads an image too.
       new Promise((_, rej) => setTimeout(() => rej(new Error('audit timeout')), reportFile?.fileData ? 18000 : 12000)),
     ]);
@@ -398,7 +401,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // Phase 21 — app self-awareness: append NavBharatAI navigation context ONLY when
       // the doctor asks about the app itself (e.g. "where is history?"). For any clinical
       // message this is empty, so the clinical prompt and behavior are unchanged.
-      const sdaAppCtx = AppContextInjector.getRelevantContext(message, 'sda_chat');
+      const sdaAppCtx = AppContextInjector.getRelevantContext(message, 'sda_chat', clientPlatform(req.headers['x-nbai-platform']));
       // C — ground the answer in curated safety guidance relevant to THIS case
       // (the message + any recorded complaint/red flags). Patient-safety & junior-
       // doctor focused; the model is told to use and cite these.
@@ -528,7 +531,10 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         const contents = buildGeminiContents();
         for (const m of geminiVisionModels()) {
           try {
-            const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM_FINAL, contents, config: { thinkingConfig: { thinkingBudget: 0 } } } as any);
+            // 🔴 The system prompt goes in `config` (Q-769 sibling): passed at the top level, cast `as any`, it was
+            // silently dropped — Doctor AI answered on this rung WITHOUT its own instructions. And the race's
+            // signal now reaches the request instead of only the catch below.
+            const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, contents, config: { systemInstruction: SDA_SYSTEM_FINAL, thinkingConfig: { thinkingBudget: 0 }, abortSignal: signal } });
             const t = r.text || '';
             if (t.trim()) return { text: t, spend: { provider: 'GEMINI', model: m, inputTokens: r.usageMetadata?.promptTokenCount, outputTokens: r.usageMetadata?.candidatesTokenCount } };
           } catch (e: any) { if (signal.aborted) throw e; console.warn(`[SDA] Gemini ${m}: ${e.message}`); }
@@ -587,18 +593,16 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       // ── Sequential fallback: Vertex → Claude (multimodal-capable safety net) ──
       if (!reply) {
         try {
-          const sdaProjectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
-          if (!sdaProjectId) throw new Error('No Vertex project ID');
-          const { VertexAI } = await import('@google-cloud/vertexai');
-          const vertexAI = new VertexAI({ project: sdaProjectId, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
+          // The one Vertex client (lib/vertexGenAI.ts, Q-769) — the old SDK is past its end-of-life date.
+          const vertexAI = vertexGenAI();
+          if (!vertexAI) throw new Error('No Vertex project ID');
           const contents = buildGeminiContents();
           for (const modelName of vertexVisionModels()) {
             try {
-              const model = vertexAI.getGenerativeModel({ model: modelName, systemInstruction: { role: 'system', parts: [{ text: SDA_SYSTEM_FINAL }] } });
-              const result = await model.generateContent({ contents });
-              reply = result.response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+              const result = await vertexAI.models.generateContent({ model: modelName, contents, config: { systemInstruction: SDA_SYSTEM_FINAL } });
+              reply = result.text || '';
               if (reply) {
-                const um = result.response?.usageMetadata;
+                const um = result.usageMetadata;
                 sdaSpend = { provider: 'VERTEX', model: modelName, inputTokens: um?.promptTokenCount, outputTokens: um?.candidatesTokenCount };
                 console.log(`[SDA] Vertex ${modelName} succeeded`); break;
               }
@@ -619,7 +623,8 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           const contents = buildGeminiContents();
           for (const m of geminiVisionModels()) {
             try {
-              const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM_FINAL, contents, config: { thinkingConfig: { thinkingBudget: 0 } } } as any);
+              // The system prompt in `config`, where the SDK reads it (see the race above — it was dropped here too).
+              const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, contents, config: { systemInstruction: SDA_SYSTEM_FINAL, thinkingConfig: { thinkingBudget: 0 } } });
               const t = r.text || '';
               if (t.trim()) {
                 reply = t;
@@ -653,7 +658,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
             });
             reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';
             if (reply) {
-              sdaSpend = { provider: 'CLAUDE', model: claudeVisionAnswerModel(), inputTokens: r.usage?.input_tokens, outputTokens: r.usage?.output_tokens };
+              sdaSpend = { provider: 'CLAUDE', model: claudeVisionAnswerModel(), inputTokens: r.usage ? anthropicTotalInput(r.usage) : undefined, outputTokens: r.usage?.output_tokens };
               console.log('[SDA] Claude direct succeeded');
             }
           } catch (e: any) { console.warn('[SDA] Claude err:', e.message); }

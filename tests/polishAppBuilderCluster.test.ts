@@ -129,7 +129,8 @@ describe('Software Project Mode (mega builds)', () => {
   it('is a real, flag-gated (AGENTV3_PROJECT_MODE) module-decomposition path', () => {
     const routes = read('src/server/routes/agentv3.ts');
     expect(routes).toContain('projectModeEnabled');
-    expect(routes).toContain('detectMegaProject');
+    // Project mode reads the one scope verdict (Q-138) — the decomposition gate is `appScope.projectMode`.
+    expect(routes).toContain('appScope.projectMode');
     const plan = read('src/server/AgentV3/ProjectPlan.ts');
     expect(plan).toContain('AGENTV3_PROJECT_MODE');
   });

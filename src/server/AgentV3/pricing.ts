@@ -44,34 +44,72 @@ export interface TokenRate {
    *  absent, cache-read tokens are priced at the FULL inputPerMTok (i.e. no discount), so an unknown
    *  provider can never be under-billed. Only the Fix-66 real-cost path reads this field. */
   cacheReadPerMTok?: number;
+  /** USD per 1M CACHE-WRITE input tokens — Anthropic bills writing a prompt-cache entry at 1.25× input
+   *  (Q-343). OPTIONAL and margin-safe the same way: absent ⇒ priced at the full inputPerMTok. */
+  cacheWritePerMTok?: number;
+}
+
+/**
+ * Anthropic's prompt-cache prices, as multiples of the input rate: a cache READ is 0.1× and a cache WRITE
+ * is 1.25× (Q-343, admin 2026-10-11: price Claude's cache tokens at their real cost). Applied to every
+ * Claude rate below, so one place says what Anthropic charges.
+ */
+export const CLAUDE_CACHE_READ_FACTOR = 0.1;
+export const CLAUDE_CACHE_WRITE_FACTOR = 1.25;
+
+/** A Claude rate with its prompt-cache lines derived from the input rate. */
+export function withClaudeCacheLines(inputPerMTok: number, outputPerMTok: number): TokenRate {
+  return {
+    inputPerMTok,
+    outputPerMTok,
+    // divided rather than multiplied, so $3 reads as $0.30 and not 0.30000000000000004
+    cacheReadPerMTok: inputPerMTok / (1 / CLAUDE_CACHE_READ_FACTOR),
+    cacheWritePerMTok: inputPerMTok * CLAUDE_CACHE_WRITE_FACTOR,
+  };
 }
 
 /** Claude Opus token rates, USD per 1,000,000 tokens. Override via env. */
 export function opusRate(): TokenRate {
-  return {
-    inputPerMTok: envRate('OPUS_INPUT_PER_MTOK', 15),
-    outputPerMTok: envRate('OPUS_OUTPUT_PER_MTOK', 75),
-  };
+  return withClaudeCacheLines(envRate('OPUS_INPUT_PER_MTOK', 15), envRate('OPUS_OUTPUT_PER_MTOK', 75));
 }
 
 /** Claude Sonnet token rates, USD per 1,000,000 tokens. Override via env. */
 export function sonnetRate(): TokenRate {
-  return {
-    inputPerMTok: envRate('SONNET_INPUT_PER_MTOK', 3),
-    outputPerMTok: envRate('SONNET_OUTPUT_PER_MTOK', 15),
-  };
+  return withClaudeCacheLines(envRate('SONNET_INPUT_PER_MTOK', 3), envRate('SONNET_OUTPUT_PER_MTOK', 15));
 }
 
+/**
+ * Tokens to bill. `inputTokens` is the TOTAL input, and the two cache counts are SHARES of it — never
+ * additional. That is the one meaning every provider adapter now reports (Q-343: Claude's raw
+ * `input_tokens` excludes its cache, so `ClaudeClient.parseMessage` adds the cache back in).
+ */
 export interface BilledUsage {
   inputTokens: number;
   outputTokens: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+}
+
+/**
+ * THE ONE TOKEN-COST FORMULA (Q-343). Both the per-tier bill (`costUsd` below) and the real-cost bill
+ * (`usageCostUsd` in providerRates.ts) price through this, so they cannot drift apart. The cache shares
+ * are clamped to the input they belong to (a provider never cache-serves more than it received), and a
+ * rate without a cache line prices that share at the full input rate — identical to the old formula.
+ */
+export function tokenCostUsd(usage: BilledUsage, rate: TokenRate): number {
+  const input = Math.max(0, usage.inputTokens || 0);
+  const read = Math.min(input, Math.max(0, usage.cacheReadInputTokens ?? 0));
+  const write = Math.min(input - read, Math.max(0, usage.cacheCreationInputTokens ?? 0));
+  return (
+    ((input - read - write) / 1_000_000) * rate.inputPerMTok +
+    (read / 1_000_000) * (rate.cacheReadPerMTok ?? rate.inputPerMTok) +
+    (write / 1_000_000) * (rate.cacheWritePerMTok ?? rate.inputPerMTok) +
+    (Math.max(0, usage.outputTokens || 0) / 1_000_000) * rate.outputPerMTok
+  );
 }
 
 function costUsd(usage: BilledUsage, rate: TokenRate): number {
-  return (
-    (Math.max(0, usage.inputTokens) / 1_000_000) * rate.inputPerMTok +
-    (Math.max(0, usage.outputTokens) / 1_000_000) * rate.outputPerMTok
-  );
+  return tokenCostUsd(usage, rate);
 }
 
 /** Real Opus 4.8 cost (USD) for the usage — the POWER-mode billing base. */

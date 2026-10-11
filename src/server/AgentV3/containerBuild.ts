@@ -18,6 +18,8 @@
 //
 // Pure builders + injectable `fetch`, in the same shape as cloudRunHosting.ts and renderDeploy.ts.
 
+import { parseEnvFlag } from '../lib/envFlag';
+
 export const BUILD_API = 'https://cloudbuild.googleapis.com/v1';
 export const GCS_UPLOAD_API = 'https://storage.googleapis.com/upload/storage/v1';
 
@@ -101,6 +103,107 @@ export interface CreateBuildInput {
    * default account.
    */
   serviceAccount: string;
+  /** Run the build credential-less (Q-706 gap a) — only once the admin has verified it; see below. */
+  credentialless?: boolean;
+}
+
+/**
+ * 🔒 THE CREDENTIAL-LESS BUILD (Q-706 gap (a), admin 2026-10-11: "hosting stays admin-only until both gaps are
+ * closed; this session designs the credential-less build step, the admin verifies it on real Cloud Build").
+ *
+ * THE GAP. Every build runs the app's own install scripts (`npm install` runs `postinstall`) as the ONE shared
+ * build identity. A hostile script can ask the metadata server for that identity's token and use it to pull
+ * other apps' images or read other apps' staged sources. It cannot overwrite them (immutable tags + digest
+ * deploys), but reading is already a leak between tenants.
+ *
+ * THE DESIGN — the untrusted part runs with NO way to a token, the trusted part alone holds the push right:
+ *   1. a privileged step drops every connection from build containers to the metadata server
+ *      (169.254.169.254) in Docker's DOCKER-USER chain — the hook Docker provides for exactly this;
+ *   2. `pack build` WITHOUT `--publish`, and with `--trust-builder=false`: pack then runs the five lifecycle
+ *      phases in separate containers, and the phase that runs the app's scripts never gets the Docker socket
+ *      (a TRUSTED builder runs everything in one container that has the socket — an escape to the whole VM);
+ *   3. Cloud Build itself pushes the result (`images:`), after the untrusted step has exited, with the build
+ *      identity — the only step that ever holds a credential is one that runs no user code.
+ * The app still reaches the package registries (only the metadata address is dropped), so installs work.
+ *
+ * ⚠️ NOT CLAIMED UNTIL VERIFIED. Whether Cloud Build's workers honour the DOCKER-USER rule for pack's build
+ * containers, and whether a privileged step may install it, can only be answered on real Cloud Build — this
+ * session has no gcloud. So the mode is OFF by default (`NAVBHARAT_APPS_CREDENTIALLESS_BUILD`), and
+ * `scripts/verifyCredentiallessBuild.sh` builds the isolation probe this way and checks, from INSIDE the
+ * build, that no identity was reachable — the admin runs it in Cloud Shell and only then turns the mode on.
+ */
+export function credentiallessBuildEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return parseEnvFlag(env.NAVBHARAT_APPS_CREDENTIALLESS_BUILD) === true;
+}
+
+/** The metadata server's address — the one route a build container must not have. */
+export const METADATA_ADDRESS = '169.254.169.254';
+
+/** The pinned image the block runs in (an `iptables` that can write the host's chain). */
+export const NETFILTER_IMAGE = 'alpine:3.20';
+
+/**
+ * Installs the block. Both iptables backends are tried, because the worker's Docker may use either, and the
+ * step FAILS when neither took the rule — a build that could not close the route must not go on to run user
+ * code as if it had. PURE.
+ */
+export function metadataBlockScript(): string {
+  const rule = `-I DOCKER-USER -d ${METADATA_ADDRESS} -j DROP`;
+  return [
+    'set -e',
+    'apk add --no-cache iptables iptables-legacy >/dev/null',
+    `ok=0`,
+    `iptables-legacy -L DOCKER-USER >/dev/null 2>&1 && iptables-legacy ${rule} && ok=1 || true`,
+    `iptables -L DOCKER-USER >/dev/null 2>&1 && iptables ${rule} && ok=1 || true`,
+    `[ "$ok" = 1 ] || { echo "NBAI: could not block the metadata route — refusing to run user code"; exit 1; }`,
+    `echo "NBAI: metadata route blocked for build containers"`,
+  ].join('\n');
+}
+
+/** The steps of a credential-less build. PURE. */
+export function credentiallessBuildSteps(image: string): Array<Record<string, unknown>> {
+  return [
+    {
+      id: 'block-metadata',
+      name: 'gcr.io/cloud-builders/docker',
+      entrypoint: 'docker',
+      args: ['run', '--rm', '--privileged', '--net=host', '--entrypoint', 'sh', NETFILTER_IMAGE, '-c', metadataBlockScript()],
+    },
+    {
+      id: 'build-untrusted',
+      name: PACK_IMAGE,
+      entrypoint: 'pack',
+      args: ['build', image, `--builder=${BUILDPACKS_BUILDER}`, '--path=.', '--trust-builder=false', '--network=bridge'],
+    },
+  ];
+}
+
+/**
+ * The Cloud Build job WITHOUT its source — the part `gcloud builds submit --config` reads too, so the
+ * Cloud Shell check (scripts/verifyCredentiallessBuild.sh) runs exactly what the server sends. PURE.
+ */
+export function buildJobConfig(input: Pick<CreateBuildInput, 'image' | 'serviceAccount' | 'credentialless'>): Record<string, unknown> {
+  return {
+    steps: input.credentialless
+      ? credentiallessBuildSteps(input.image)
+      : [{
+          name: PACK_IMAGE,
+          entrypoint: 'pack',
+          args: ['build', input.image, `--builder=${BUILDPACKS_BUILDER}`, '--path=.', '--publish'],
+        }],
+    // A credential-less build pushes AFTER the untrusted step has exited, as Cloud Build itself.
+    ...(input.credentialless ? { images: [input.image] } : {}),
+    timeout: `${BUILD_TIMEOUT_SECONDS}s`,
+    // 🔒 Never the default account (appsIdentity.ts). A user-specified build account REQUIRES a logging
+    // choice; Cloud Logging only means no shared logs bucket either.
+    serviceAccount: input.serviceAccount,
+    options: { logging: 'CLOUD_LOGGING_ONLY' },
+  };
+}
+
+/** The credential-less job, for the Cloud Shell check. PURE. */
+export function credentiallessBuildConfig(image: string, serviceAccount: string): Record<string, unknown> {
+  return buildJobConfig({ image, serviceAccount, credentialless: true });
 }
 
 /**
@@ -116,16 +219,7 @@ export function buildCreateBuildRequest(token: string, projectId: string, region
     headers: { Authorization: `Bearer ${token.trim()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       source: { storageSource: { bucket: input.bucket, object: input.object } },
-      steps: [{
-        name: PACK_IMAGE,
-        entrypoint: 'pack',
-        args: ['build', input.image, `--builder=${BUILDPACKS_BUILDER}`, '--path=.', '--publish'],
-      }],
-      timeout: `${BUILD_TIMEOUT_SECONDS}s`,
-      // 🔒 Never the default account (appsIdentity.ts). A user-specified build account REQUIRES a logging
-      // choice; Cloud Logging only means no shared logs bucket either.
-      serviceAccount: input.serviceAccount,
-      options: { logging: 'CLOUD_LOGGING_ONLY' },
+      ...buildJobConfig(input),
     }),
   };
 }
@@ -270,6 +364,7 @@ export async function buildAppContainer(
     const create = buildCreateBuildRequest(opts.token, opts.projectId, opts.region, {
       bucket: opts.bucket, object, image,
       serviceAccount: `projects/${opts.projectId}/serviceAccounts/${opts.buildServiceAccount}`,
+      credentialless: credentiallessBuildEnabled(),
     });
     const createRes = await fetchImpl(create.url, { method: create.method, headers: create.headers, body: create.body as any });
     if (!createRes.ok) {

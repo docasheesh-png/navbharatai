@@ -177,7 +177,8 @@ describe('the client', () => {
 
   it('🔴 free chat sends the account token now — without it every signed-in user would be counted as a guest', () => {
     const engine = read('src/hooks/useChatEngine.ts');
-    expect(engine).toMatch(/const headers: Record<string, string> = \{ 'Content-Type': 'application\/json', \.\.\.\(await authHeader\(\)\) \};/);
+    // (the platform header rides along since Q-123 — the account token is what is guarded)
+    expect(engine).toMatch(/const headers: Record<string, string> = \{ 'Content-Type': 'application\/json', \.\.\.\(await authHeader\(\)\), \.\.\.platformHeader\(\) \};/);
     expect(engine.match(/\.\.\.\(await authHeader\(\)\)/g)?.length).toBe(2);
   });
 

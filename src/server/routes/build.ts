@@ -4,7 +4,7 @@ import { requireUserMatch, verifyFirebaseToken } from '../lib/authMiddleware';
 import { APP_KNOWLEDGE_BASE } from '../AppContext/AppKnowledgeBase';
 import { proBuildSessionStore } from '../pro/ProBuildSession';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
-import { listUserWorkspaceApps, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { listUserWorkspaceApps, countWorkspaceFiles, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { mayTouchBuildHistory, refusalStatus, refusalMessage } from '../lib/buildHistoryAccess';
 import { userCostStore } from '../lib/UserCostStore';
 import { workspacePrefixFor } from '../lib/workspaceIdentity';
@@ -55,13 +55,10 @@ export function registerBuildRoutes(app: Express): void {
   // Play production release. Every build runs in NavBharatAI Pro (AgentV3). A reachable endpoint that
   // spends our money for a feature nobody uses is a cost surface, not a feature, so the engine is gone.
   //
-  // Kept as an honest 410 rather than a bare 404, for the same reason as the guider routes above: it
-  // says what happened to anybody — an old script, a stale bookmark — who still calls it.
-  const retiredBuild = (_req: Request, res: Response) => {
-    res.status(410).json({ error: 'This build endpoint has been retired. Apps are built in NavBharatAI Pro.' });
-  };
-  app.post('/api/build', retiredBuild);
-  app.post('/api/build-stream', retiredBuild);
+  // 🔒 DELETED 2026-10-11 (Q-162, decided when this file was next touched — by Q-128). They were kept as a
+  // 410 for "an old script, a stale bookmark", but nothing named such a caller, and no bundled phone app can
+  // hold one: the last client call was gone before the first Play production release. A route with no
+  // caller is decided, not kept: so they are gone, and an unknown route answers like any other.
 
   // G1.2 — Refresh-safe build recovery. Client calls this on mount to restore
   // the last completed build for a sessionId without re-running the build.
@@ -123,18 +120,25 @@ export function registerBuildRoutes(app: Express): void {
   app.post('/api/build-history/:sessionId/checkpoint', async (req: Request, res: Response) => {
     try {
       const { sessionId } = routeParams(req.params);
-      const body = req.body as { name?: unknown; files?: unknown };
+      const body = req.body as { name?: unknown; files?: unknown; fromWorkspace?: unknown };
       if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
       // 🔒 Q-780: unauthenticated, this let anyone who guessed a session id WRITE a version into
       // somebody else's Time Machine.
       const access = await mayTouchBuildHistory(await verifyFirebaseToken(req), sessionId, countWorkspaceFiles);
       if (!access.allowed) return res.status(refusalStatus(access.reason)).json({ error: refusalMessage(access.reason) });
-      if (!body?.files || typeof body.files !== 'object' || Array.isArray(body.files)) {
+      // 🔒 THE APP'S OWN SAVED FILES, NOT A SCREEN'S COPY (Q-128). `fromWorkspace` saves the files the app
+      // really holds — what the next build reads. A screen's copy can be stale or belong to the app the user
+      // was on before switching, and a version named "this app" must be this app. `files` stays for callers
+      // that send their own (an older bundled phone app).
+      const source = body?.fromWorkspace === true
+        ? await loadWorkspaceFiles(access.workspaceId).catch(() => ({} as Record<string, string>))
+        : body?.files;
+      if (!source || typeof source !== 'object' || Array.isArray(source)) {
         return res.status(400).json({ error: 'files map required' });
       }
       const files: Record<string, string> = {};
       let bytes = 0;
-      for (const [k, v] of Object.entries(body.files as Record<string, unknown>)) {
+      for (const [k, v] of Object.entries(source as Record<string, unknown>)) {
         if (typeof k !== 'string' || typeof v !== 'string') continue;
         bytes += k.length + v.length;
         if (bytes > 5 * 1024 * 1024) break; // hard cap; the store caps again to the Firestore 1MB doc limit

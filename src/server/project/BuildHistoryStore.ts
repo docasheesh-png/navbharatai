@@ -18,6 +18,7 @@ import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { MAX_SAVED_VERSIONS } from '../../lib/versionRetention';
 import { fitFilesPacked, unpackJson, utf8Bytes, compactStorageEnabled, MAX_PACKED_BYTES, type PackedEncoding } from '../lib/compactStore';
+import { MAX_OMITTED_PATHS_REMEMBERED } from './versionRestore';
 
 export interface VersionEntry {
   id: string;
@@ -37,6 +38,11 @@ export interface VersionEntry {
   storedFileCount?: number;
   /** Files that did not fit even compressed. 0 means the version is the whole app. */
   omittedFileCount?: number;
+  /**
+   * WHICH files did not fit (bounded), so a restore keeps today's copy of exactly those instead of deleting
+   * them (Q-128, versionRestore.ts). Absent on versions written before 2026-10-11.
+   */
+  omittedPaths?: string[];
 }
 
 export type VersionMeta = Omit<VersionEntry, 'files'>;
@@ -162,6 +168,7 @@ class BuildHistoryStore {
         // A caller may already have left files out before handing them over (a raw-size bound), so the
         // honest count is whichever is larger: what we dropped, or what we were told existed but never got.
         omittedFileCount: Math.max(plan.omitted.length, entry.fileCount - Object.keys(plan.files).length, 0),
+        ...(plan.omitted.length > 0 ? { omittedPaths: plan.omitted.slice(0, MAX_OMITTED_PATHS_REMEMBERED) } : {}),
         ...(plan.mode === 'packed'
           ? { filesEnc: plan.packed.enc, filesPacked: plan.packed.data }
           : { files: plan.files }),

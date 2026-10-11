@@ -62,13 +62,9 @@ const HANDLED_ELSEWHERE: Record<string, string> = {};
  * only shrink, and the assertion below fails if a marker leaves it while still unreachable, or if a NEW
  * unreachable branch appears.
  */
-const NO_EMITTER_YET: Record<string, string> = {
-  __SWITCH_TO_BUILD__: 'Q-781',
-  __URGENT_BUILD__: 'Q-781',
-  __VIEW_PREVIEW__: 'Q-781',
-  __DEPLOY_ACTIONS__: 'Q-781',
-  __AUTO_PLAN__: 'Q-781',
-};
+// Empty since Q-781 (admin 2026-10-11): View preview and deploy are offered by the platform after a build
+// it really made (chatBuildMeta.ts), and the other three branches were deleted with their buttons.
+const NO_EMITTER_YET: Record<string, string> = {};
 
 /** Every file that could legitimately tell the model to emit a marker, or emit one itself. */
 const EMITTER_SOURCES = ['src/server/lib/prompts.ts'];
@@ -124,6 +120,9 @@ describe('every marker the prompt asks for has a renderer', () => {
     // quietly outlive the problem it describes.
     const stale = Object.keys(NO_EMITTER_YET).filter((m) => emitted.has(m));
     expect(stale, `these now have an emitter and must leave NO_EMITTER_YET: ${stale.join(', ')}`).toEqual([]);
+    // …and a record whose branch is gone must leave too — it no longer describes anything.
+    const orphaned = Object.keys(NO_EMITTER_YET).filter((m) => !branched.includes(m));
+    expect(orphaned, `these are no longer branched on and must leave NO_EMITTER_YET: ${orphaned.join(', ')}`).toEqual([]);
   });
 
   it('🔒 names no marker that `chatMarkers.ts` does not know', () => {

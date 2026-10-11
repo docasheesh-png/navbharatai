@@ -9,6 +9,7 @@
  */
 import type { Request } from 'express';
 import { verifyUnlockTicket, unlockSecret, type UnlockMethod } from './vaultTicket';
+import type { TicketArea } from '../../lib/appLockAreas';
 
 /** The ticket header. A header rather than a body field so GET-shaped calls could use it too. */
 export const UNLOCK_TICKET_HEADER = 'x-vault-unlock';
@@ -19,7 +20,7 @@ export const UNLOCK_TICKET_HEADER = 'x-vault-unlock';
  * Returns null on anything that is not a live ticket, and callers answer 401 — never a partial result.
  * A vault that returns SOME keys without proof is an open vault with extra steps.
  */
-export function ticketFor(req: Request, userId: string, now = Date.now()): { method: UnlockMethod } | null {
+export function ticketFor(req: Request, userId: string, now = Date.now()): { method: UnlockMethod; area: TicketArea } | null {
   const raw = req.header(UNLOCK_TICKET_HEADER) ?? (typeof req.body?.ticket === 'string' ? req.body.ticket : '');
   if (!raw) return null;
   return verifyUnlockTicket(String(raw), userId, now, unlockSecret());

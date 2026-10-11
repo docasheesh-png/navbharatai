@@ -39,10 +39,11 @@ export class GeminiProvider implements AIProvider {
     const streamModel = model || 'gemini-2.5-flash';
     const config: any = {};
     if (systemPrompt) config.systemInstruction = systemPrompt;
-    // `abortSignal` is this SDK's own spelling of the same thing the others call `signal`: it aborts
-    // the request, so an abandoned turn stops being generated rather than merely stopping being
-    // shown (Q-621). It goes INSIDE `config`, which is why the emptiness check below now also
-    // accounts for it — with a signal, `config` is never empty.
+    // `abortSignal` is this SDK's own spelling of the same thing the others call `signal`: it closes the
+    // request, so an abandoned turn ends at once (Q-621). ⚠️ CORRECTED 2026-10-11 (Q-769): this comment said
+    // the turn "stops being generated". Google documents the abort as client-only — "will not cancel the
+    // request in the service. You will still be charged usage" — so it ends OUR turn, not Google's bill.
+    // It goes INSIDE `config`, which is why the emptiness check below also accounts for it.
     if (signal) config.abortSignal = signal;
     const stream = await ai.models.generateContentStream({
       model: streamModel,
@@ -51,7 +52,7 @@ export class GeminiProvider implements AIProvider {
     });
     let full = '';
     for await (const chunk of stream) {
-      // The client left: stop consuming AND stop paying. The SDK abort above tears the socket down,
+      // The client left: stop consuming. The SDK abort above closes the connection (Google may still bill what it generated),
       // so this loop normally ends by throwing; the check is the belt to that braces, for an SDK
       // version that resolves the stream instead of rejecting it (Q-621).
       if (signal?.aborted) break;

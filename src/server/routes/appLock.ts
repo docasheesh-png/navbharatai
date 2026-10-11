@@ -33,7 +33,7 @@ import {
   otpDelivery, otpEmailMessage, otpEmailSubject, isFreshSignIn, OTP_RESEND_COOLDOWN_MS,
   MAX_PIN_ATTEMPTS, type OtpPurpose, type VaultPinRecord,
 } from '../lib/vaultPin';
-import { normaliseLockedAreas, effectiveLockedAreas } from '../../lib/appLockAreas';
+import { normaliseLockedAreas, effectiveLockedAreas, ticketAreaFrom } from '../../lib/appLockAreas';
 import { resolveEmailConfig, sendAlertEmail } from '../lib/alertEmail';
 import { routeParam, routeParams } from '../lib/expressCompat';
 
@@ -185,7 +185,7 @@ export function registerAppLockRoutes(app: Express): void {
       const next = afterCorrectPin({ ...record, pinHash: hashPin(pin, salt), pinSalt: salt });
       await saveLockRecord(userId, next);
       auditVault(userId, hasPin(record) ? 'pin-reset' : 'pin-created', {});
-      res.json({ success: true, ticket: mintUnlockTicket(userId, now, unlockSecret()), method: 'pin', expiresInMs: TICKET_TTL_MS });
+      res.json({ success: true, ticket: mintUnlockTicket(userId, now, unlockSecret(), 'pin', ticketAreaFrom(req.body?.area)), method: 'pin', expiresInMs: TICKET_TTL_MS });
     } catch (err) {
       console.error('[app-lock] set failed', err instanceof Error ? err.message : err);
       res.status(500).json({ error: 'Could not save your PIN just now. Please try again.' });
@@ -235,7 +235,7 @@ export function registerAppLockRoutes(app: Express): void {
 
       await saveLockRecord(userId, afterCorrectPin(record));
       auditVault(userId, 'unlock', { unlock_method: 'pin' });
-      res.json({ ticket: mintUnlockTicket(userId, now, unlockSecret()), method: 'pin', expiresInMs: TICKET_TTL_MS });
+      res.json({ ticket: mintUnlockTicket(userId, now, unlockSecret(), 'pin', ticketAreaFrom(req.body?.area)), method: 'pin', expiresInMs: TICKET_TTL_MS });
     } catch (err) {
       console.error('[app-lock] unlock failed', err instanceof Error ? err.message : err);
       res.status(500).json({ error: UNLOCK_REFUSED_MESSAGE });
@@ -312,7 +312,7 @@ export function registerAppLockRoutes(app: Express): void {
       await saveLockRecord(userId, afterCorrectPin({ ...record, pinHash: hashPin(newPin, salt), pinSalt: salt }));
       auditVault(userId, 'pin-changed', { unlock_method: unlock.method });
       // A fresh ticket, so the screen the user is standing on stays open on the PIN they just chose.
-      res.json({ success: true, ticket: mintUnlockTicket(userId, now, unlockSecret()), method: 'pin', expiresInMs: TICKET_TTL_MS });
+      res.json({ success: true, ticket: mintUnlockTicket(userId, now, unlockSecret(), 'pin', ticketAreaFrom(req.body?.area)), method: 'pin', expiresInMs: TICKET_TTL_MS });
     } catch (err) {
       console.error('[app-lock] change failed', err instanceof Error ? err.message : err);
       res.status(500).json({ error: 'Could not change your PIN just now. Please try again.' });

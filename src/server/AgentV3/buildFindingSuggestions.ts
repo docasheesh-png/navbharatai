@@ -137,6 +137,16 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'When the app runs it reports errors in the browser console. Find the cause of each one and fix it properly, then confirm the app runs clean.',
   },
   {
+    // The reviewer looked AGAIN after its critical findings were repaired, and some are still there
+    // (postFixReview.ts, Q-157). Real defects in the user's app, so they get a button — and the findings
+    // themselves travel with it, so the next pass works on exactly what the second look saw.
+    code: 'REVIEW_RECHECK_CRITICALS_REMAIN',
+    title: 'Fix what the review still found',
+    detail: 'NavBharatAI repaired the serious problems its review found, checked again, and some are still there.',
+    prompt: 'A review of this app found serious problems, a repair was made, and a second review found that some of them are still there. Fix each one listed below at its real cause, keep everything that already works, and confirm the app still builds and runs.',
+    withEvidence: true,
+  },
+  {
     code: 'JOURNEY_FAILED',
     title: 'Make saving actually work',
     detail: 'Something added in the app did not survive a reload.',

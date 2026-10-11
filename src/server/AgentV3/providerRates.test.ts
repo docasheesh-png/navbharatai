@@ -49,8 +49,9 @@ describe('realRateFor — resolves the exact rate by model id, then provider lab
   it('falls back to the provider label when the model id is unknown/absent', () => {
     expect(realRateFor('GLM')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.2, cacheReadPerMTok: 0.11 });
     expect(realRateFor('KIMI')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.5, cacheReadPerMTok: 0.15 });
-    expect(realRateFor('CLAUDE_HAIKU')).toEqual({ inputPerMTok: 1, outputPerMTok: 5 });
-    expect(realRateFor('CLAUDE')).toEqual({ inputPerMTok: 3, outputPerMTok: 15 }); // Sonnet
+    // Claude rows carry Anthropic's cache lines: read 0.1×, write 1.25× of input (Q-343)
+    expect(realRateFor('CLAUDE_HAIKU')).toEqual({ inputPerMTok: 1, outputPerMTok: 5, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1.25 });
+    expect(realRateFor('CLAUDE')).toEqual({ inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3, cacheWritePerMTok: 3.75 }); // Sonnet
     expect(realRateFor('GROK')).toEqual({ inputPerMTok: 3, outputPerMTok: 15 });
   });
 
@@ -60,7 +61,7 @@ describe('realRateFor — resolves the exact rate by model id, then provider lab
   });
 
   it('model id wins over provider label (a CLAUDE label carrying a haiku model prices as haiku)', () => {
-    expect(realRateFor('CLAUDE', 'claude-haiku-4-5')).toEqual({ inputPerMTok: 1, outputPerMTok: 5 });
+    expect(realRateFor('CLAUDE', 'claude-haiku-4-5')).toEqual({ inputPerMTok: 1, outputPerMTok: 5, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1.25 });
     expect(realRateFor('VERTEX', 'gemini-2.5-flash')).toEqual({ inputPerMTok: 0.3, outputPerMTok: 2.5 });
   });
 });

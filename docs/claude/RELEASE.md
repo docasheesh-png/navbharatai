@@ -116,6 +116,11 @@ admin's word is the ONLY trigger.
   there is a dead control, and listing another platform's app packages invites a Guideline 2.5.2 / 4.7
   question). The full table, with the reasoning and the App Review Notes line that covers all four, is
   `MOBILE_PUBLISHING.md` **§6.3**.
+  🍎 **A FIFTH, ON THE WORDS RATHER THAN A SCREEN (2026-10-11, Q-123):** the AIs inside the iPhone app never
+  teach a way to pay. Every chat client sends `X-NBAI-Platform` (`src/lib/platformHeader.ts`), and on `ios` the
+  knowledge every AI is handed passes `iosPurchaseGuard.ts`: each sentence that teaches buying is removed and
+  the model is told money cannot be added in this app. Same rule as `purchaseRail()` → `'none'`, applied to
+  the assistant's answers. Locked by `tests/theIphoneAppNeverTeachesAWayToPay.test.ts`.
   🔴 **TWO OF THE FOUR WERE FOUND BY READING THE CODE WHILE WRITING SUBMISSION GUIDANCE — six days
   apart (2026-09-20 and 2026-09-26) — not by a test and not by a review.** Both were the same shape: a
   screen that is correct on Android, shipped unchanged to a platform where half of it cannot work.

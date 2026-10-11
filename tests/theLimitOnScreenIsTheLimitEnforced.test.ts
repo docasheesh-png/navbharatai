@@ -27,7 +27,8 @@ describe('one number, two readers', () => {
   });
 
   it('the panel prints the sentence rather than hardcoding a number', () => {
-    const panel = read('src/components/ide/CodeVersioning.tsx');
+    // The list moved into the one timeline Time Machine and the History tab both render (Q-128).
+    const panel = read('src/components/versions/VersionTimeline.tsx');
     expect(panel).toMatch(/import \{ retentionNote \} from '\.\.\/\.\.\/lib\/versionRetention'/);
     expect(panel).toMatch(/retentionNote\(points\.length\)/);
   });

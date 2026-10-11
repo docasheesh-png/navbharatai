@@ -131,5 +131,9 @@ describe('🔒 every test file in the repo', () => {
       return why ? `${relative(ROOT, f)} — ${why}` : null;
     }).filter(Boolean);
     expect(leaks).toEqual([]);
-  });
+    // A WHOLE-REPO SCAN GETS A WHOLE-REPO TIMEOUT. It reads every test file (2,500+ and growing with each
+    // one added), which takes ~6 s alone and passed the 20 s default in CI — and exceeded it in the full
+    // coverage run on a loaded machine (2026-10-11), failing on time with no leak found. Same convention as
+    // the other census tests here.
+  }, 60_000);
 });

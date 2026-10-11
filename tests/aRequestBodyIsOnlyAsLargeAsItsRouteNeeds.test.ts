@@ -82,8 +82,6 @@ const REVIEWED_SMALL: Record<string, string> = {
   '/api/bots/telegram/webhook/:botId': 'a Telegram update — media arrive as file ids, never bytes',
   '/api/bots/whatsapp/webhook/:botId': 'a Meta webhook event — media arrive as ids, never bytes (on RAW_BODY_ROUTES for its signature)',
   '/api/bots/disconnect': 'a bot id',
-  '/api/build': 'retired: answers 410 without reading the body',
-  '/api/build-stream': 'retired: answers 410 without reading the body',
   '/api/build-estimate': 'build history cut to 500 entries; no client in this repo posts to it',
   '/api/retrospective/warnings': 'history cut to 1,000 entries; no client in this repo posts to it',
   '/api/techdebt/:userId/:projectId': 'findings validated by recordSchema; no client in this repo posts to it',

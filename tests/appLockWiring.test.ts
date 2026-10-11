@@ -187,7 +187,7 @@ describe('the settings screen that turns it all on', () => {
     expect(lockSection).toContain('Change PIN');
     expect(lockSection).toContain('The two new PINs do not match.');
     const client = read('src/lib/appLock.ts');
-    expect(client).toContain("jsonBody('POST', { currentPin, newPin }, unlock.ticket)");
+    expect(client).toContain("jsonBody('POST', { currentPin, newPin, area: 'settings' }, unlock.ticket)");
   });
 
   it('does NOT save on tap — the rest of this screen does, and here that would be wrong', () => {

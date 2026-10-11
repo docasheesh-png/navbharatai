@@ -1,29 +1,22 @@
 import 'dotenv/config';
-import { VertexAI } from '@google-cloud/vertexai';
 import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
+import { vertexGenAI, vertexProjectId, vertexLocation } from '../../../lib/vertexGenAI';
+
+/** How long one Vertex answer may take before the request is aborted (was a race that left it running). */
+export const VERTEX_TIMEOUT_MS = 30_000;
 
 export class VertexProvider implements AIProvider {
     name: 'VERTEX' = 'VERTEX';
     priority = 1;
     private isConfigured: boolean = false;
-    private vertexAI: VertexAI | null = null;
     private modelPro = 'gemini-2.5-pro';
     private modelFlash = 'gemini-2.5-flash';
 
     constructor() {
-        const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID;
-        const location = process.env.GOOGLE_CLOUD_REGION || 'us-central1';
-
-        console.log(`[VERTEX] GOOGLE_CLOUD_PROJECT=${process.env.GOOGLE_CLOUD_PROJECT}`);
-        console.log(`[VERTEX] GOOGLE_CLOUD_PROJECT_ID=${process.env.GOOGLE_CLOUD_PROJECT_ID}`);
+        const projectId = vertexProjectId();
         console.log(`[VERTEX] FINAL_PROJECT_ID=${projectId}`);
-        console.log(`[VERTEX] LOCATION=${location}`);
-
+        console.log(`[VERTEX] LOCATION=${vertexLocation()}`);
         if (projectId) {
-            this.vertexAI = new VertexAI({
-                project: projectId,
-                location: location
-            });
             this.isConfigured = true;
         } else {
             console.warn("GOOGLE_CLOUD_PROJECT/GOOGLE_CLOUD_PROJECT_ID not set, VertexProvider disabled");
@@ -31,96 +24,87 @@ export class VertexProvider implements AIProvider {
     }
 
     async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string): Promise<AIProviderResponse> {
-        if (!this.vertexAI) {
+        const ai = vertexGenAI();
+        if (!ai) {
             throw new Error("Vertex AI not configured");
         }
         const startTime = Date.now();
         const modelName = modelOverride || this.modelPro;
-        const modelConfig: any = { model: modelName };
-        if (systemPrompt) {
-            modelConfig.systemInstruction = { role: 'system', parts: [{ text: systemPrompt }] };
-        }
-        const model = this.vertexAI.getGenerativeModel(modelConfig);
 
         let retries = 0;
         const maxRetries = 2;
 
         while (true) {
+            // The timeout ABORTS the request (Q-769). It used to race a timer against the call, so a slow
+            // answer was abandoned by us while the connection stayed open behind it.
+            const timer = new AbortController();
+            const t = setTimeout(() => timer.abort(), VERTEX_TIMEOUT_MS);
             try {
-                const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Vertex AI Timeout')), 30000)
-                );
-
-                const result = await Promise.race([
-                    model.generateContent({
-                        contents: [{ role: 'user', parts: [{ text: prompt }] }]
-                    }),
-                    timeoutPromise
-                ]) as any;
-
+                const config: Record<string, unknown> = { abortSignal: timer.signal };
+                if (systemPrompt) config.systemInstruction = systemPrompt;
+                const result = await ai.models.generateContent({
+                    model: modelName,
+                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                    config,
+                });
                 return {
-                    content: result.response.candidates[0].content.parts[0].text || '',
+                    content: result.text || '',
                     latencyMs: Date.now() - startTime,
                     provider: 'VERTEX',
                     model: modelName,
-                    usage: readProviderUsage(result.response?.usageMetadata),
+                    usage: readProviderUsage(result.usageMetadata),
                 };
             } catch (error: any) {
+                const err = timer.signal.aborted ? new Error('Vertex AI Timeout') : error;
                 retries++;
-                if (retries > maxRetries || (error.status !== 429 && !error.message.includes('429'))) {
-                    throw this.normalizeError(error);
+                if (retries > maxRetries || !isRateLimited(err)) {
+                    throw this.normalizeError(err);
                 }
                 await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retries)));
+            } finally {
+                clearTimeout(t);
             }
         }
     }
 
     private normalizeError(error: any): Error {
-        if (error.status === 429 || error.message?.includes('429')) {
+        if (isRateLimited(error)) {
             return new Error('Vertex AI Rate Limited (429)');
         }
-        return new Error(`Vertex AI Error: ${error.message}`);
+        return new Error(`Vertex AI Error: ${error?.message}`);
     }
 
     /**
-     * ⚠️ THE ONE PROVIDER WHOSE REQUEST CANNOT BE ABORTED, SAID PLAINLY RATHER THAN HIDDEN (Q-621).
+     * The client left: the request is aborted and no more is read (Q-621, Q-769).
      *
-     * Every other provider here hands `signal` to its SDK, which tears the socket down so an
-     * abandoned turn stops being generated AND stops being billed. `@google-cloud/vertexai` offers
-     * no such hook: `generateContentStream(request)` takes no per-call options at all, and the
-     * `RequestOptions` accepted by `getGenerativeModel` carries only `timeout`, `apiClient` and
-     * `customHeaders` (checked against the installed typings, not assumed).
-     *
-     * So this is the honest mitigation, not the fix: we stop CONSUMING the stream the moment the
-     * client is gone, which ends the turn and releases the rung immediately, and the generation
-     * upstream finishes on its own. It is recorded as an OPEN root cause in `BUILD_REPORT_QUEUE.md`
-     * (Q-769) rather than counted as resolved — under the fourth absolute rule, rule 6: when the
-     * real root is out of reach, say so instead of shipping a cosmetic patch as if it were the fix.
-     *
-     * The `timeout` on the model is NOT a substitute: it bounds a hung call, not an abandoned one.
+     * Since 2026-10-11 this rung runs on `@google/genai`, which takes `config.abortSignal` — the old
+     * `@google-cloud/vertexai` took no signal at all, so all we could do was stop reading. ⚠️ Said exactly:
+     * Google documents the abort as client-only ("will not cancel the request in the service. You will
+     * still be charged usage"), so what it buys is the connection closed and the turn ended at once — not
+     * a refund of what Google already generated. See `lib/vertexGenAI.ts`.
      */
     async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, modelName?: string, signal?: AbortSignal): Promise<string> {
-        if (!this.vertexAI) throw new Error('Vertex AI not configured');
-        const modelConfig: any = { model: modelName || this.modelPro };
-        if (systemPrompt) modelConfig.systemInstruction = { role: 'system', parts: [{ text: systemPrompt }] };
-        const model = this.vertexAI.getGenerativeModel(modelConfig);
-        const result = await model.generateContentStream({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        });
+        const ai = vertexGenAI();
+        if (!ai) throw new Error('Vertex AI not configured');
+        const request = { model: modelName || this.modelPro, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: {} as Record<string, unknown> };
+        if (systemPrompt) request.config.systemInstruction = systemPrompt;
+        if (signal) request.config.abortSignal = signal;
+        const stream = await ai.models.generateContentStream(request);
         let full = '';
-        for await (const chunk of result.stream) {
+        for await (const chunk of stream) {
             if (signal?.aborted) break;
-            const text = chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const text = chunk.text || '';
             if (text) { full += text; onChunk(text); }
         }
         return full;
     }
 
     async healthCheck(): Promise<boolean> {
-        if (!this.vertexAI) {
-            return false;
-        }
-        // Basic check if configured
-        return this.isConfigured;
+        return this.isConfigured && !!vertexGenAI();
     }
+}
+
+/** A rate-limit answer, in either SDK's spelling. */
+function isRateLimited(error: any): boolean {
+    return error?.status === 429 || String(error?.message ?? '').includes('429');
 }

@@ -152,7 +152,7 @@ describe('"Save and sync" does something real', () => {
 describe('🔴 the door is a PIN, and NOTHING else survives in it', () => {
   it('collects a 4-digit PIN and sends it to the server to be checked', () => {
     expect(gate).toContain("from '../lib/appLock'");
-    expect(gate).toContain('unlockWithPin(userId, pin)');
+    expect(gate).toContain('unlockWithPin(userId, pin, area)'); // the area the PIN was typed at (Q-124)
     expect(gate).toContain('maxLength={4}');
   });
 
@@ -181,7 +181,7 @@ describe('🔴 the door is a PIN, and NOTHING else survives in it', () => {
   it('offers "Forgot PIN" and resets it through an emailed code', () => {
     expect(gate).toContain('Forgot PIN?');
     expect(gate).toContain("sendPinCode(userId, status?.hasPin ? 'reset' : 'create')");
-    expect(gate).toContain('setPin(userId, newPin, code.trim())');
+    expect(gate).toContain('setPin(userId, newPin, code.trim(), area)');
   });
 
   it('asks for the new PIN twice, because a typo here locks the owner out of their own keys', () => {

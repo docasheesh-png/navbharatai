@@ -11,6 +11,7 @@
  */
 import { isDoseQuestion, answerDoseQuestion } from '../../lib/neonatalDosing';
 import { APP_KNOWLEDGE_BASE, AppFeature, getFeatureById } from './AppKnowledgeBase';
+import { withoutPurchaseTeaching, IOS_NO_PURCHASE_NOTE, type ClientPlatform } from './iosPurchaseGuard';
 
 // Signals that the user is asking about the app itself (navigation / features / how-to).
 const APP_QUESTION_SIGNALS = [
@@ -128,7 +129,15 @@ export class AppContextInjector {
    * or an empty string when the message isn't about the app. `surface` biases
    * results toward the AI the user is currently talking to.
    */
-  static getRelevantContext(userMessage: string, surface?: string): string {
+  static getRelevantContext(userMessage: string, surface?: string, platform: ClientPlatform = 'web'): string {
+    // On the iPhone app no AI may teach a way to pay (Q-123, iosPurchaseGuard.ts) — applied to the WHOLE
+    // block every branch below returns, so no path can skip it.
+    const ctx = this.relevantContext(userMessage, surface);
+    if (platform !== 'ios') return ctx;
+    return [withoutPurchaseTeaching(ctx), IOS_NO_PURCHASE_NOTE].filter((part) => part.trim() !== '').join('\n\n');
+  }
+
+  private static relevantContext(userMessage: string, surface?: string): string {
     const msg = normalize(userMessage);
     // Support offer is computed for EVERY message (independent of app-navigation matching) and appended
     // to whatever feature context we return, so every AI that calls this offers our help email when the

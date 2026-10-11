@@ -24,6 +24,7 @@ import type { TodoItem, TodoStatus } from './types';
 import { parseEnvFlag } from '../lib/envFlag';
 import { countEnumeratedFeatures, sectionedSpecSize, BIG_SOFTWARE_NOUN, SPEC_FEATURE_COUNT } from './enumeratedFeatures';
 import { withEnglishReading } from '../lib/devanagariTechTerms';
+import { withoutMachineText } from '../lib/machineText';
 import { STARTER_ENTRY_PATHS } from './stillTheStarterApp';
 
 export type ModuleStatus = 'pending' | 'in_progress' | 'done' | 'failed';
@@ -174,8 +175,7 @@ export function megaProjectSignals(prompt: string): MegaProjectSignals {
   // Predicates read the Hindi request in English too ("स्कूल मैनेजमेंट सिस्टम", "50 पेज" — Q-104,
   // `devanagariTechTerms.ts`); the feature COUNT below reads the prompt itself, never the doubled form.
   const text = withEnglishReading(prompt || '').toLowerCase();
-  const scaleMatch = text.match(/(\d{2,6})\s*\+?\s*(?:files?|pages?|screens?|modules?)/);
-  const scale = scaleMatch ? Number(scaleMatch[1]) : 0;
+  const scale = statedScale(text);
   // A spec in numbered sections is sized by its sections, not by each section's bullets (autopsy Sur
   // Taal, 2026-10-04: a music player's buttons counted as 40 features and became 23 modules).
   const sections = sectionedSpecSize(prompt || '');
@@ -185,6 +185,26 @@ export function megaProjectSignals(prompt: string): MegaProjectSignals {
     || (bigNoun && features >= MEGA_BULLETS_WITH_NOUN)
     || features >= MEGA_BULLETS_ALONE;
   return { scale, features, bigNoun, fires, sections };
+}
+
+/**
+ * The first "N files/pages/screens/modules" figure a request STATES, or 0.
+ *
+ * 🔴 AN ERROR PAGE IS NOT 404 PAGES (found measuring Q-138, 2026-10-11). The old read took the first number
+ * before any of those words, so "a portfolio site with a custom 404 page" stated a scale of 404 — over
+ * MEGA_SCALE_MIN, so Project Mode would split a portfolio into modules. THE CLASS: a number beside a size
+ * word read as a size, whatever the number is. An HTTP status code before the SINGULAR word ("404 page",
+ * "500 error page") names a page, never a count; machine text (links, pasted code, stack frames) is not
+ * the request. PURE.
+ */
+const HTTP_STATUS_PAGE = /^(?:4\d\d|5\d\d)\s*(?:error\s+|not\s+found\s+)?page\b(?!s)/;
+export function statedScale(text: string): number {
+  const words = withoutMachineText(String(text ?? ''));
+  for (const m of words.matchAll(/(\d{2,6})\s*\+?\s*(?:files?|pages?|screens?|modules?)/gi)) {
+    if (HTTP_STATUS_PAGE.test(words.slice(m.index ?? 0).toLowerCase())) continue;
+    return Number(m[1]);
+  }
+  return 0;
 }
 
 /** See `megaProjectSignals` — this is its `fires` field, kept as the call sites' short name. PURE. */
@@ -218,7 +238,9 @@ export type ProjectModeSkipReason =
   | 'account-not-on-allowlist'
   | 'pre-empted'
   | 'not-a-new-build'
-  | 'below-threshold';
+  | 'below-threshold'
+  /** Shaped like a project spec, but the one scope verdict (APP_SCOPE) reads it as one app (Q-138). */
+  | 'scope-says-one-app';
 
 export interface ProjectModeDiagnosis {
   code: 'PROJECT_MODE';
@@ -274,7 +296,13 @@ export function projectModeDiagnosis(args: {
   preEmptedBy?: 'mega-roadmap' | 'plan-first' | null;
   isNewBuild?: boolean;
   isEditMode?: boolean;
+  /** The text the gate sized — the route passes `planning.sizing`, the same text the gate read. */
   prompt?: string;
+  /**
+   * The one scope verdict (`scopeVerdict` in lib/appScopeAnalyzer.ts — Q-138). Project Mode reads its size
+   * answer and never sizes on its own; when it is absent the spec shape alone is reported (unit callers).
+   */
+  scope?: { large: boolean; signals: string[] } | null;
 }): ProjectModeDiagnosis {
   const flagRaw = String(args.flagRaw ?? '').trim();
   const identity = args.identity ?? {};
@@ -345,6 +373,15 @@ export function projectModeDiagnosis(args: {
       'Software Project Mode is ON for this account, but this prompt is not a mega-project — normal path.',
       `${signals} The threshold is deliberately high: a false positive costs an ordinary app an extra `
         + 'planner call and slower rounds, while a false negative simply builds exactly as it does today.',
+    );
+  }
+
+  if (args.scope && !args.scope.large) {
+    return say(
+      'scope-says-one-app',
+      'Software Project Mode is ON and this prompt is shaped like a project spec, but the scope analyser reads it as one app — normal path.',
+      `${signals} Scope: ${args.scope.signals.join('; ') || 'ordinary one-shot app'}. One scope verdict decides the size of a `
+        + 'build (APP_SCOPE, admin 2026-10-11); project mode splits only a request that verdict calls large.',
     );
   }
 

@@ -18,7 +18,7 @@
  * does.**
  */
 import type { Request } from 'express';
-import { effectiveLockedAreas, type AppLockArea } from '../../lib/appLockAreas';
+import { effectiveLockedAreas, ticketOpensArea, type AppLockArea } from '../../lib/appLockAreas';
 import { loadLockRecord } from './appLockStore';
 import { hasPin } from './vaultPin';
 import { ticketFor } from './vaultTicketHttp';
@@ -114,5 +114,8 @@ export async function appLockBlocks(req: Request, userId: string, action: MoneyA
   if (!hasPin(record)) return null;
   if (!effectiveLockedAreas(record.lockedAreas).includes(area)) return null;
 
-  return ticketFor(req, userId) ? null : lockedRefusal(action);
+  // 🔒 The ticket must have been opened FOR this money area (Q-124): a PIN typed at Settings no longer
+  // authorises a recharge. An older app's unscoped ticket still does, so nobody is stranded mid-update.
+  const ticket = ticketFor(req, userId);
+  return ticket && ticketOpensArea(ticket.area, area) ? null : lockedRefusal(action);
 }

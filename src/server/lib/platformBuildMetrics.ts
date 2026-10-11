@@ -123,10 +123,12 @@ export function priceProviderUsage(
       inputTokens,
       Math.max(0, Math.round(Number(e?.usage?.cacheReadInputTokens) || 0)),
     );
+    // …and the cache-WRITE share, at the provider's cache-write rate (Anthropic: 1.25× input — Q-343).
+    const cacheCreationInputTokens = Math.max(0, Math.round(Number(e?.usage?.cacheCreationInputTokens) || 0));
     const at = attributed.get(provider) ?? { inputTokens: 0, outputTokens: 0, costUsd: 0 };
     at.inputTokens += inputTokens;
     at.outputTokens += outputTokens;
-    at.costUsd += usageCostUsd({ inputTokens, outputTokens, cacheReadInputTokens }, realRateFor(provider, e?.model));
+    at.costUsd += usageCostUsd({ inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens }, realRateFor(provider, e?.model));
     attributed.set(provider, at);
   }
 

@@ -58,6 +58,13 @@ export const PHASE_POST_BUILD_REVIEW = 'post-build-review';
  */
 export const PHASE_EXPLORER_REPAIR = 'explorer-repair';
 
+/**
+ * The one review after an applied C9 repair (Q-157, postFixReview.ts). Its own phase, so a re-review that
+ * gives no verdict (no room, timed out, threw) is left out of the bill ON ITS OWN — marking the first
+ * review's phase barren would hand back a review that did deliver.
+ */
+export const PHASE_POST_FIX_REVIEW = 'post-fix-review';
+
 const storage = new AsyncLocalStorage<{ name: string }>();
 
 /**

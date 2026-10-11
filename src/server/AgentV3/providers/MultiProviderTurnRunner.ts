@@ -25,6 +25,7 @@ import { isModelUnavailableError } from '../providerErrorClass';
 import { isBudgetEndedError, isSlowStreamAbandon, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
 import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
 import { abandonedTurnUsage } from '../unbilledTurns';
+import { turnDiscardedTruncatedOutput } from '../TruncationRecovery';
 import { reasoningAwareAsk } from '../reasoningAsk';
 import { BuildStoppedError, isBuildStoppedError, raceStop, throwIfStopped } from '../stopSignal';
 import {
@@ -97,9 +98,11 @@ export interface MultiProviderOptions {
    */
   onTurnComplete?: (
     used: string,
-    usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean },
+    usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean },
     model?: string,
     cacheReadInputTokens?: number,
+    /** Q-343 — the share of input written to a prompt cache (priced at the provider's write rate). */
+    cacheCreationInputTokens?: number,
   ) => void;
   /**
    * Shared 429-cooldown registry (StudySync autopsy 2026-07-16) — the cross-instance memory of which
@@ -906,7 +909,12 @@ export function makeMultiProviderTurnRunner(
               // and no tool call arrives here as a plain success and used to be billed at the full
               // markup. We still pay for it; the user does not. See unbilledTurns.ts.
               ...(turnStarvedItsBudget(result) ? { producedNothing: true as const } : {}),
-            }, result.model, result.usage?.cacheReadInputTokens ?? 0);
+              // OUTPUT THAT IS THROWN AWAY IS NOT BILLED (Q-166, admin 2026-10-11). A turn cut off at the
+              // output limit whose write had no content, or whose files came as text the loop never
+              // writes, is asked for again — the user would otherwise pay for the same file twice. The
+              // predicate is the truncation guard's own, so the bill and the steer cannot disagree.
+              ...(turnDiscardedTruncatedOutput(result) ? { discardedOutput: true as const } : {}),
+            }, result.model, result.usage?.cacheReadInputTokens ?? 0, result.usage?.cacheCreationInputTokens ?? 0);
           } catch { /* telemetry attribution must never disturb the build */ }
           // 🔴 THE SUCCESS PATH IS WHERE THE SLOW-RUNG VERDICT HAS TO LIVE (autopsy dd1f5f60). This
           // turn succeeded — so if it was also ruinously slow, this is the ONLY place that can ever
@@ -952,7 +960,7 @@ export function makeMultiProviderTurnRunner(
                   inputTokens: abandoned.usage.inputTokens,
                   outputTokens: abandoned.usage.outputTokens,
                   producedNothing: true,
-                }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0);
+                }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0, abandoned.usage.cacheCreationInputTokens ?? 0);
               }
             } catch { /* cost attribution must never replace the stop */ }
             throw new BuildStoppedError();
@@ -974,7 +982,7 @@ export function makeMultiProviderTurnRunner(
                 inputTokens: abandoned.usage.inputTokens,
                 outputTokens: abandoned.usage.outputTokens,
                 producedNothing: true,
-              }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0);
+              }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0, abandoned.usage.cacheCreationInputTokens ?? 0);
             }
           } catch { /* cost attribution must never replace the provider error below */ }
           // 🔴 OUR CLOCK ENDED, NOT THEIR SERVICE — abort the whole chain, do not walk it.

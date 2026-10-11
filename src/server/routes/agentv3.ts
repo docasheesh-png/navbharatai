@@ -228,6 +228,7 @@ import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
 import { inlineLinkedStylesheet } from '../AgentV3/singleFileKit';
 import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
 import { appFileCount, IMPORT_NOT_MERGED_MESSAGE, IMPORT_NOT_CHECKED_MESSAGE } from '../../lib/projectImportTarget';
+import { gitPushTarget, wipPushNote } from '../AgentV3/gitPushTarget';
 import { StaticProvider } from '../AgentV3/sandbox/AppMakerLab/generator/templates/StaticProvider';
 import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration, depsAddedByBuild, unusedDependencyLine, hasBuildScript } from '../AgentV3/unusedDepPrune';
 import { pruneDeadSalvageEnabled, deadSalvagedFiles, removeDeadSalvage } from '../AgentV3/deadSalvage';
@@ -15547,7 +15548,8 @@ async function noteBuildOutcome(
       // within 3 s of each write. If the client connection drops mid-build (tab close,
       // network hiccup), the files already written are safely on the server. The final
       // save at build-end (below) is still the authoritative snapshot; this is the
-      // mid-build safety net. GitHub push still happens only after 100% completion.
+      // mid-build safety net. The user's GitHub branch receives a build only when it worked; a build that
+      // did not is kept on its own `wip/` branch (Q-745, gitPushTarget.ts).
       let _progressPersistTimer: ReturnType<typeof setTimeout> | null = null;
       // AUTOPSY 2026-07-06 ("yeh app nahi bani"): the sandbox + Cloud Run instance are EPHEMERAL — a
       // rotation/hard-kill mid-build loses everything not yet durably saved. The old code used a
@@ -25138,15 +25140,25 @@ async function noteBuildOutcome(
       // GIT-NATIVE PUSH: when storage is active, commit + push the sandbox back to the project's
       // GitHub repo so it is the durable source of truth for next session. Best-effort and only
       // when files were actually produced — never blocks or fails the build.
+      //
+      // 🔒 THE USER'S BRANCH ONLY RECEIVES WORK THAT RAN (Q-745, admin 2026-10-11). This was gated on files
+      // having been written, never on the build having worked, so a failed turn's half-done edits went onto
+      // the user's own branch. A build that did not work is now pushed to its own `wip/` branch — nothing is
+      // lost — and the user's branch, the pull request and the merge are left alone (gitPushTarget.ts).
       if (repoSync && repoAuthedUrl && writtenFiles.size > 0) {
         try {
           const msg = `NavBharatAI build: ${deriveTitle(prompt)}`;
-          // OWN-REPO WORKING BRANCH (admin model 2026-07-05): the user imported a repo they own — push
-          // edits to the `navbharatai/work` branch (force is safe: single-writer branch, NEVER `main`)
-          // and keep ONE work→base PR open. We do NOT auto-merge: `main` changes only when the USER
-          // merges the PR (an in-app "Ship to main" + "Revert" lands in the next slice). So there is
-          // structurally nothing that can break `main` here.
-          if (ownRepoTarget && prClient) {
+          const userBranch = ownRepoTarget ? ownRepoTarget.workBranch : repoBranch;
+          const pushTarget = gitPushTarget({ buildOk: result.ok === true, successBranch: userBranch, nowMs: Date.now() });
+          if (pushTarget.wip) {
+            const pushed = await repoSync.pushAll(repoAuthedUrl, pushTarget.branch, `${msg} (did not finish — kept on ${pushTarget.branch})`);
+            if (pushed.pushed) events.emit({ type: 'narration', agent: 'architect', text: wipPushNote(pushTarget.branch, userBranch), ts: Date.now() });
+          } else if (ownRepoTarget && prClient) {
+            // OWN-REPO WORKING BRANCH (admin model 2026-07-05): the user imported a repo they own — push
+            // edits to the `navbharatai/work` branch (force is safe: single-writer branch, NEVER `main`)
+            // and keep ONE work→base PR open. We do NOT auto-merge: `main` changes only when the USER
+            // merges the PR (an in-app "Ship to main" + "Revert" lands in the next slice). So there is
+            // structurally nothing that can break `main` here.
             const pushed = await repoSync.pushAll(repoAuthedUrl, ownRepoTarget.workBranch, msg);
             if (pushed.pushed) {
               let prNote = `Saved your edits to the ‘${ownRepoTarget.workBranch}’ branch (your ‘${ownRepoTarget.baseBranch}’ is untouched).`;

@@ -94095,3 +94095,4 @@ The admin merged #3668. Closed, IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt` 
 - **Tests:**
   - `tests/aDefectTheUserIsShownHasAButton.test.ts`, plus the census now counting a roll-up as offered only through a real offer.
   - Reverted three ways and seen to fail each time: one offer removed, the alias loop removed, and the starter answer removed.
+- **#3673 merged (2026-10-11):** Q-796, Q-797 and Q-806 are closed. Their rows were deleted from `BUILD_REPORT_QUEUE.md` and their IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`, on the merged `main`. Q-381 batch three (above) and Q-821 were rebuilt on that `main` for the next PR from this branch.

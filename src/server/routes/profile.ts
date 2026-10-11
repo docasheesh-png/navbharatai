@@ -13,7 +13,10 @@ import type { Express, Request, Response } from 'express';
 import { doc, getDoc, getServerDb as getDb } from '../lib/serverDb';
 import { verifyFirebaseToken, verifyFirebaseIdentity, deleteAuthAccount, rateLimiter } from '../lib/authMiddleware';
 import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
+import { deleteUserDerivedIdData } from '../lib/derivedIdErase';
 import { deleteUserWorkspaceData } from '../lib/workspaceDataErase';
+import { eraseSyncedWorkspace, type SyncEraseFirestore } from '../lib/syncWorkspaceErase';
+import { deIdentifyPublishedListings, getListingDb } from '../lib/publishedListingErase';
 import { sendSafeError } from '../lib/httpError';
 import { userProfileStore } from '../lib/UserProfileStore';
 import { userBuildHistoryStore, type BuildHistoryQuery } from '../lib/UserBuildHistoryStore';
@@ -262,6 +265,16 @@ export function registerProfileRoutes(app: Express): void {
     const db = getRetentionDb();
     if (!db) return res.status(503).json({ error: 'Data store unavailable — please try again shortly.' });
     try {
+      // DERIVED IDS FIRST OF ALL — BEFORE ANYTHING THAT DELETES THE KEYS THEY ARE DERIVED FROM.
+      // `derivedIdErase` reaches documents whose id is BUILT from a key rather than equal to one:
+      // `bot_sessions/{botId}_{chatId}` (from the user's `bots`) and `build_history/{sessionId}` (from
+      // `user_build_history` and the workspace id range). The two erasers below delete exactly those
+      // parents, so running this second would resolve no keys, delete nothing, and report success —
+      // the "an erase that LOOKS complete and is not" failure the apps eraser was written to prevent.
+      // Best-effort like the rest: reported, never thrown, so it can never block the deletion the user
+      // actually asked for.
+      const derived = await deleteUserDerivedIdData(identity.uid)
+        .catch((e) => ({ uid: identity.uid, collections: [], totalDeleted: 0, keys: { bots: 0, historySessions: 0 }, error: e instanceof Error ? e.message : String(e) }));
       // DATA FIRST, THEN THE CREDENTIAL. Erasing the sign-in first would strand any data whose
       // deletion then failed, with the owner unable to sign in and retry.
       const report = await deleteUserData(db, identity.uid);
@@ -275,6 +288,34 @@ export function registerProfileRoutes(app: Express): void {
       // Deleting the documents is not deleting the ACCOUNT: without this the Auth record survives and
       // the person who asked to be deleted can sign back in to a blank account. That is not what the
       // button says, and not what Play's deletion requirement means.
+      // …AND THE SYNCED WORKSPACE (Q-763). `user_workspaces/{uid}` is only a MANIFEST; the person's
+      // chat sessions and last built app live in `user_workspaces/{uid}__c{i}`. It was in no erase
+      // path at all, and registering it with the retention manager would have deleted the manifest
+      // and kept the chunks — an erase that reports success and leaves the data unreachable. Its own
+      // module deletes the chunks FIRST and the manifest LAST, so a partial failure can be retried.
+      // Best-effort like the two above: reported, never thrown, so it cannot block the deletion.
+      const syncDb = getDb() as unknown as SyncEraseFirestore | null;
+      const synced = syncDb
+        ? await eraseSyncedWorkspace(syncDb, identity.uid)
+          .catch((e) => ({ uid: identity.uid, chunks: 0, manifestDeleted: false, probed: 0, error: e instanceof Error ? e.message : String(e) }))
+        : { uid: identity.uid, chunks: 0, manifestDeleted: false, probed: 0, error: 'data store unavailable' };
+      /**
+       * …AND THE APPS THEY PUBLISHED, WHICH ARE NOT ONLY THEIRS (Q-766, Q-682 items 6–8).
+       *
+       * This is the one eraser that mostly does NOT delete. A published listing can have been BOUGHT,
+       * and Terms §4 makes such a purchase non-refundable *because the app can be run free before
+       * buying* — so erasing a listing on its author's departure would take away something a stranger
+       * paid for and cannot get back. The admin chose recommendation (b): erase what was never public,
+       * de-identify and unlist what was. Three stores, three different identity fields, and the money
+       * path closes with it (`creatorHasLeft` refuses a purchase that could only credit a tombstone).
+       *
+       * Best-effort like every eraser above: reported, never thrown, so it cannot block the deletion.
+       */
+      const listingDb = getListingDb();
+      const listings = listingDb
+        ? await deIdentifyPublishedListings(listingDb, identity.uid)
+          .catch((e) => ({ uid: identity.uid, collections: [], totalDeleted: 0, totalDeIdentified: 0, error: e instanceof Error ? e.message : String(e) }))
+        : { uid: identity.uid, collections: [], totalDeleted: 0, totalDeIdentified: 0, error: 'data store unavailable' };
       const account = await deleteAuthAccount(identity.uid);
       const accountDeleted = account === 'deleted' || account === 'not-found';
       return res.json({
@@ -292,6 +333,23 @@ export function registerProfileRoutes(app: Express): void {
         // on its own. `refusal` appears only in the one case the eraser declines to guess at (see
         // planWorkspaceErase) — surfaced, never swallowed.
         apps,
+        // Likewise its own line: the cross-device workspace, which is neither a platform record nor a
+        // built app. `probed` says how many chunk ids were swept, so the number is checkable rather
+        // than a bare claim.
+        synced,
+        // Its own line too, for the same reason as `apps` and `synced`: these are documents no key
+        // could previously reach, so someone checking whether their data is really gone should be able
+        // to see that they were swept. `keys` says how many derived ids were resolved, so the counts
+        // are checkable rather than a bare claim.
+        derived,
+        /**
+         * Its own line, and the one line here that is NOT a deletion count. `totalDeIdentified` is how
+         * many published listings were kept and stripped of their author; `totalDeleted`, how many were
+         * never public and so went entirely. Someone checking what happened to the apps they put on the
+         * store deserves to see that the app survived and the person did not — folding it into a
+         * deletion total would say the opposite of what happened.
+         */
+        listings,
       });
     } catch (err: any) {
       return sendSafeError(res, 500, 'Deletion failed. Please try again.', err, 'account deletion');

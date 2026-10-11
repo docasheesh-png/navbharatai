@@ -28,6 +28,8 @@
     "license:gate": "node scripts/licenseGate.mjs",
     "sbom": "node scripts/genSbom.mjs",
     "bakeoff": "tsx scripts/agentv3-bakeoff.ts",
+    "bench:reliability": "tsx scripts/agentv3-reliability-bench.ts",
+    "bench:compare": "tsx scripts/agentv3-reliability-compare.ts",
     "mobile:sync": "npm run build && npx cap sync",
     "mobile:android": "npm run build && npx cap sync android && npx cap open android",
     "mobile:ios": "npm run build && npx cap add ios && npx cap sync ios && npx cap open ios",

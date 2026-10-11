@@ -101,6 +101,7 @@ export const OUTCOME_REASONS: Readonly<Record<string, FailureReason>> = {
   OUTCOME_MISSING_FILES: { key: 'missing-files', label: 'Files were imported but never created' },
   OUTCOME_MISSING_EXPORT: { key: 'missing-export', label: 'A file was imported for something it does not export' },
   OUTCOME_BUILD_PARTIAL: { key: 'partial', label: 'The build shipped less than it planned' },
+  OUTCOME_BUILD_UNVERIFIED: { key: 'unverified', label: 'Files were written but nothing was verified' },
   OUTCOME_PREVIEW_FAILED: { key: 'preview-failed', label: 'The app was produced but never rendered' },
   OUTCOME_PREVIEW_COMPILE: { key: 'preview-compile', label: 'The preview does not compile — the app would not load' },
   OUTCOME_REVIEW_CRITICAL: { key: 'review-critical', label: 'The reviewer found something critical that was not repaired' },

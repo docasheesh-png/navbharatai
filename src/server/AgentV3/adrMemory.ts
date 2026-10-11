@@ -210,7 +210,13 @@ class AdrStore {
         // Skip a duplicate ADR when the stack did not change from the last decision.
         if (!stackChanged(records[records.length - 1] ?? null, rec)) return null;
         const nextRecords = foldAdr(records, rec);
-        tx.set(ref, { records: nextRecords, updatedAt: nowIso }, { merge: false });
+        // 🔒 `userId` IS STORED, and it is not decoration (Q-762). The doc id is
+        // `${userId}__${projectId}`, which NOTHING can search by: the erase registry is exact-match
+        // only — `docId` or a field — and a doc-id prefix range is refused outright, because a uid
+        // that contains the separator makes `a__b` ambiguous with `a` + `b__…` and getting it wrong
+        // deletes a different person's data. Without this field the person's own architecture
+        // decisions survived account deletion with no way to find them.
+        tx.set(ref, { userId, records: nextRecords, updatedAt: nowIso }, { merge: false });
         return rec;
       });
     } catch (err) {

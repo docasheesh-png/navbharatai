@@ -40,3 +40,23 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
     );
   });
 }
+
+/**
+ * Run `fn` with an AbortSignal that fires after `ms`, or when `parent` aborts.
+ * Unlike `withTimeout`, the work is told to stop — a late write can see the signal and refuse.
+ */
+export async function withDeadline<T>(fn: (signal: AbortSignal) => Promise<T>, ms: number, label: string, parent?: AbortSignal): Promise<T> {
+  const ac = new AbortController();
+  const onParent = () => ac.abort(parent!.reason);
+  parent?.addEventListener('abort', onParent, { once: true });
+  const timer = setTimeout(() => ac.abort(new Error(`${label} timed out after ${ms}ms`)), ms);
+  try {
+    return await Promise.race([
+      fn(ac.signal),
+      new Promise<never>((_, rej) => ac.signal.addEventListener('abort', () => rej(ac.signal.reason), { once: true })),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    parent?.removeEventListener('abort', onParent);
+  }
+}

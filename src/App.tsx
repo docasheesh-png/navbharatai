@@ -1,5 +1,6 @@
 import UpdateBanner from './components/UpdateBanner';
 import { platformFixRequestPrompt } from './lib/platformFixRequest';
+import { EMPTY_PREVIEW_HTML } from './lib/workspaceSource';
 import { setUserContext, clearUserContext, setCrashKey, setFeatureContext, featureAreaForView, recordNonFatal } from './lib/observability';
 import React, { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
@@ -89,6 +90,7 @@ import { Browser } from '@capacitor/browser';
 // depending, put the WRONG cross-origin authDomain on the default app — silently breaking the first
 // Google sign-in). Re-exported here so every existing `import { auth, db } from './App'` still works.
 import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib/firebase';
+import { API_READ_CACHE, shouldClearApiReadCache } from './lib/swCaches';
 import { readRedirectMarker, clearRedirectMarker, redirectReturnVerdict, redirectLostMessage } from './lib/redirectSignInMarker';
 import { isNewAccount, decideSignupReport, SIGNUP_REPORTED_KEY } from './lib/signupSignal';
 import { authedHeaders } from './lib/authHeaders';
@@ -1139,7 +1141,7 @@ export default function App() {
       const saved = localStorage.getItem('navbharat_last_app');
       if (saved && saved.length > 200) return saved;
     } catch {}
-    return '<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>';
+    return EMPTY_PREVIEW_HTML;
   })();
 
   // 9.1 — undo/redo for generated code (Ctrl+Z / Ctrl+Y)
@@ -1377,7 +1379,19 @@ export default function App() {
           if (message) addToast(message, 'error');
         });
     }
+    // UI-5 — the offline API cache is not partitioned by account. Track the uid this
+    // listener has already seen and drop the bucket when that account is replaced,
+    // including by null. Every sign-out path ends here; signOutEverywhere also deletes
+    // ahead of the reload so the wipe is not lost on the way out.
+    let previousUid: string | null = null;
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      const nextUid = currentUser?.uid ?? null;
+      if (shouldClearApiReadCache(previousUid, nextUid)) {
+        void (async () => {
+          if ('caches' in window) await caches.delete(API_READ_CACHE);
+        })().catch(() => { /* a failed wipe must not break the auth listener */ });
+      }
+      previousUid = nextUid;
       setUser(currentUser);
       setLoadingUser(false);
       // Crash reports name the user only by a one-way hash of the uid, and forget it on sign-out. Every
@@ -1925,7 +1939,7 @@ export default function App() {
         clearWorkspace().catch(() => {});
         setBuildVersionStack([]);
         setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
-        setGeneratedCode('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
+        setGeneratedCode(EMPTY_PREVIEW_HTML);
         setHasGeneratedCode(false);
         setIsAppBuilt(false);
       } else if (v === 'sda_chat') {

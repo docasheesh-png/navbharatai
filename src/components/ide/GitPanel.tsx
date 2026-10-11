@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { COPY } from '../../lib/copy';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { GitBranch, History, RefreshCcw, Search, Loader2, Rocket, Cloud, Terminal, CheckCircle2, AlertCircle, Settings, Key, Globe, Layout, Layers, Play, Server, Cpu, Download, Copy, AlertTriangle, ChevronDown, Sparkles, Clock, Lock } from 'lucide-react';
@@ -49,6 +50,12 @@ interface PlatformOption {
   desc: string;
   defaultBuildDir: string;
 }
+
+// The three steps every real deploy path walks, in order. `setActiveStep` is called with 1 on
+// validate/prepare, 2 on build/package and 3 on done by each of them (GitHub push, static ZIP
+// export, the managed Render deploy, and the config-injection path), so these labels describe
+// what the code already does rather than a new concept.
+const DEPLOY_STEP_LABELS = ['Validate', 'Build', 'Done'] as const;
 
 const DEPLOY_PLATFORMS: PlatformOption[] = [
   { id: 'github', name: 'GitHub Sync & Pages', icon: Github, color: 'text-ink', bgHover: 'hover:bg-raised', desc: 'Push commits directly to public/private remote repos.', defaultBuildDir: 'dist' },
@@ -535,7 +542,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
       timeoutRefs.current.push(tid);
     };
 
-    addLogLine('🚀 Preparing project files for secure deployment...', 100);
+    addLogLine(COPY.git.preparing, 100);
     addLogLine('⏳ Detecting active workspace session details...', 300);
 
     const currentGithubConfig = configs.github;
@@ -544,8 +551,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     if (!rawRepoPath.includes('/')) {
       const tid = setTimeout(() => {
         setDeployStatus('error');
-        addLogLine('❌ VALIDATION PIPELINE FAILED.');
-        addLogLine('⚠️ Invalid repository format! Format must be "username/repository-name".');
+        addLogLine(COPY.git.validationFailed);
+        addLogLine(COPY.git.repoFormat);
         setValidationErrors(['Repository format must be "username/repository-name" (e.g. DocAsheesh/my-super-app)']);
         triggerErrorDisplay({
           provider: 'GitHub Sync & Pages',
@@ -563,7 +570,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     if (!owner || !repo) {
       const tid = setTimeout(() => {
         setDeployStatus('error');
-        addLogLine('❌ VALIDATION PIPELINE FAILED.');
+        addLogLine(COPY.git.validationFailed);
         addLogLine('⚠️ Ensure both repository owner and repository name are filled out.');
         setValidationErrors(['Invalid repository owner or repository name!']);
         triggerErrorDisplay({
@@ -583,7 +590,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     const tidPush = setTimeout(async () => {
       setDeployStatus('building');
       setActiveStep(2);
-      addLogLine('⚡ Instantiating git engine process...', 200);
+      addLogLine(COPY.git.startingGit, 200);
       addLogLine(`🐋 Creating and pushing commits to remote heads/${currentGithubConfig.branch || 'main'}...`, 600);
 
       try {
@@ -612,7 +619,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
         setDeployStatus('deployed');
         setActiveStep(3);
         setDeployedUrl(data.repoUrl);
-        addLogLine(`🎉 GITHUB PUSH SUCCESSFUL! Live Repository: ${data.repoUrl}`);
+        addLogLine(COPY.git.pushed(data.repoUrl));
         addLogLine(`🔒 Version commit hash tracked: ${data.sha.substring(0, 7)}`);
 
         // Record deployment success in history lists
@@ -634,8 +641,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
 
       } catch (err: any) {
         setDeployStatus('error');
-        addLogLine(`❌ PIPELINE CRITICAL RUNTIME ERROR: ${err.message}`);
-        addLogLine('⚠️ Double check your network, authorization scopes, and retry.');
+        addLogLine(COPY.git.pushFailed(err.message));
+        addLogLine(COPY.git.checkNetwork);
         triggerErrorDisplay({
           provider: 'GitHub Sync & Pages',
           errorType: err.message.toLowerCase().includes('authority') || err.message.toLowerCase().includes('token') ? 'Authentication Failed' : 'Git Push Rejected',
@@ -660,7 +667,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     setActiveStep(2);
     setDeployStatus('building');
     const addLog = (line) => setDeployLogs(prev => [...prev, '[' + new Date().toLocaleTimeString() + '] ' + line]);
-    setDeployLogs(['[' + new Date().toLocaleTimeString() + '] 📦 Packaging your workspace into a ZIP…']);
+    setDeployLogs(['[' + new Date().toLocaleTimeString() + '] Packaging your workspace into a ZIP…']);
     const entries = Object.entries(files || {});
     if (entries.length === 0) {
       setDeployStatus('error');
@@ -753,7 +760,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
       return;
     }
     setManagedDeploying(true);
-    addLines(['🚀 Asking Render to deploy your backend…']);
+    addLines([COPY.git.askingRender]);
     try {
       // authedFetch, not a hand-rolled header: the repo has already paid for duplicated auth helpers
       // once ("works in Settings, 401s everywhere else"). A Render deploy can take a while to answer,
@@ -803,7 +810,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
         if (isV5DeployProvider(selectedPlatform) && onDeployViaV5) {
           const name = DEPLOY_PLATFORMS.find(p => p.id === selectedPlatform)?.name || selectedPlatform;
           setDeployStatus('idle');
-          setDeployLogs([`[${new Date().toLocaleTimeString()}] 🚀 Handing off to NavBharatAI Pro to build and deploy to ${name} — watch the live progress there.`]);
+          setDeployLogs([`[${new Date().toLocaleTimeString()}] Handing off to NavBharatAI Pro to build and deploy to ${name} — watch the live progress there.`]);
           onDeployViaV5(selectedPlatform);
           return;
         }
@@ -811,13 +818,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({
         return;
     }
   };
-
-  const changesCount = Object.keys(files).length;
-  const changes = Object.keys(files).map(f => ({
-    file: f,
-    status: 'M',
-    color: 'text-warn'
-  }));
 
   const filteredPlatforms = DEPLOY_PLATFORMS.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -856,7 +856,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
           )}
         >
           <Cloud className="w-3.5 h-3.5" />
-          🔥 Cloud Sync
+          Cloud Sync
         </button>
       </div>
 
@@ -1549,7 +1549,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ⚠️ Commit message required for sync.`]);
                       return;
                     }
-                    setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ⬆️ Pushing local commits to the remote…`]);
+                    setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] Pushing local commits to the remote…`]);
                     setShowConfirmModal(true);
                   }}
                   disabled={deployStatus === 'validating' || deployStatus === 'building'}
@@ -1588,7 +1588,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   }
                 }}
                 disabled={deployStatus === 'validating' || deployStatus === 'building'}
-                className="w-full h-11 bg-gradient-to-r from-indigo-600 via-orange-600 to-[#10b981] disabled:opacity-40 text-on-accent rounded-xl text-[10.5px] font-black uppercase tracking-[0.18em] flex items-center justify-center gap-2 shadow-2xl hover:scale-[1.01] active:scale-[0.98] transition-all cursor-pointer shadow-indigo-500/15"
+                className="w-full h-11 bg-accent hover:brightness-110 disabled:opacity-40 text-on-accent rounded-xl text-[10.5px] font-black uppercase tracking-[0.18em] flex items-center justify-center gap-2 shadow-2xl hover:scale-[1.01] active:scale-[0.98] transition-all cursor-pointer shadow-indigo-500/15"
               >
                 {deployStatus === 'validating' || deployStatus === 'building' ? (
                   <>
@@ -1598,7 +1598,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                 ) : (
                   <>
                     {selectedPlatform === 'github' ? <Github className="w-4 h-4 text-ink" /> : <Rocket className="w-4 h-4 text-ink" />}
-                    {selectedPlatform === 'github' ? '🚀 Push to GitHub' : '🚀 Push / Deploy'}
+                    {selectedPlatform === 'github' ? 'Push to GitHub' : 'Push / Deploy'}
                   </>
                 )}
               </button>
@@ -1619,14 +1619,54 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     {deployStatus === 'deployed' && <span className="text-success font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Ready</span>}
                     {deployStatus === 'error' && <span className="text-danger font-bold">Error</span>}
                     {deployStatus === 'unavailable' && <span className="text-warn font-bold flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Not available yet</span>}
+                    {(deployStatus === 'validating' || deployStatus === 'building') && (
+                      <span className="font-mono text-muted tabular-nums">{currentBuildTime.toFixed(1)}s</span>
+                    )}
                   </div>
                 </div>
+
+                {/* Which step this deploy is on, and for how long (Q-600, 2026-10-09).
+                    `activeStep` and `currentBuildTime` were both already maintained by the real
+                    deploy paths — step 1 on validate/prepare, 2 on build/package, 3 on done, and a
+                    100 ms ticker for the elapsed seconds — and NEITHER was rendered anywhere. So a
+                    user watching a deploy saw one pulsing word while the component knew exactly
+                    which step it was on and how long it had taken. The ticker's state updates were
+                    re-rendering this panel ten times a second to show nothing. */}
+                {deployStatus !== 'idle' && (
+                  <div className="flex items-center gap-1.5 shrink-0" aria-label={`Deploy step ${activeStep} of 3`}>
+                    {DEPLOY_STEP_LABELS.map((label, i) => {
+                      const step = i + 1;
+                      const done = deployStatus === 'deployed' ? true : step < activeStep;
+                      const current = deployStatus !== 'deployed' && step === activeStep;
+                      const failed = (deployStatus === 'error' || deployStatus === 'unavailable') && step === activeStep;
+                      return (
+                        <div key={label} className="flex items-center gap-1.5">
+                          <span
+                            className={cn(
+                              'flex items-center gap-1 text-[8px] font-bold uppercase tracking-wider',
+                              failed ? 'text-danger' : done ? 'text-success' : current ? 'text-warn' : 'text-faint',
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                'w-1.5 h-1.5 rounded-full',
+                                failed ? 'bg-red-500' : done ? 'bg-emerald-500' : current ? 'bg-amber-500 animate-pulse' : 'bg-raised',
+                              )}
+                            />
+                            {label}
+                          </span>
+                          {step < DEPLOY_STEP_LABELS.length && <span className="w-2 h-px bg-raised" />}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Console Log Screen */}
                 <div className="flex-1 overflow-y-auto font-mono text-[9.5px] text-[#4af626] space-y-1 select-text scrollbar-thin scrollbar-thumb-white/5 pr-1">
                   {pagedDeployLogs.visible.map((log, index) => {
                     const isErr = log.includes('❌') || log.includes('FAILED') || log.includes('halted');
-                    const isSuccess = log.includes('🎉') || log.includes('✅') || log.includes('SUCCESSFUL');
+                    const isSuccess = log.includes('✅') || log.includes('SUCCESSFUL');
                     return (
                       <div 
                         key={index} 
@@ -1798,7 +1838,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-500/5 rounded-full blur-xl"></div>
               <div className="flex items-center gap-1.5 text-[9px] font-black uppercase text-accent-text tracking-wider">
                 <Cloud className="w-3.5 h-3.5 animate-pulse" />
-                🔥 Cloud Sync Network
+                Cloud Sync Network
               </div>
               <p className="text-[10px] text-muted leading-snug font-medium mt-1">
                 Link repository structures and sync active files into Code Studio.
@@ -2067,7 +2107,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     className="flex items-center justify-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-on-accent font-black uppercase text-[9px] tracking-wider py-1.5 rounded-lg shadow-lg transition-all active:scale-95 cursor-pointer border border-indigo-500"
                   >
                     <Sparkles className="w-3 h-3" />
-                    🔥 AI Workspace
+                    AI Workspace
                   </button>
                   <button
                     onClick={() => {
@@ -2078,7 +2118,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     className="flex items-center justify-center gap-1  bg-card hover:bg-raised text-ink font-black uppercase text-[9px] tracking-wider py-1.5 rounded-lg border border-line hover:border-line transition-all active:scale-95 cursor-pointer"
                   >
                     <Globe className="w-3 h-3 text-accent-text" />
-                    👁️ Preview
+                    Preview
                   </button>
                 </div>
               </div>
@@ -2196,9 +2236,9 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                     setShowConfirmModal(false);
                     triggerPushAndDeploy();
                   }}
-                  className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-emerald-600 hover:scale-[1.02] active:scale-95 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
+                  className="flex-1 py-3 bg-accent hover:brightness-110 hover:scale-[1.02] active:scale-95 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
                 >
-                  Confirm & Push 🚀
+                  Confirm & Push
                 </button>
               </div>
             </motion.div>

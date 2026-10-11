@@ -165,6 +165,7 @@ describe('🔒 every path that takes money now names itself', () => {
       ['src/server/routes/mobileShip.ts', "feature: 'mobile-build'"],
       ['src/server/lib/navStoreRemixPurchase.ts', "feature: 'remix'"],
       ['src/server/lib/hostingPlan.ts', "feature: 'hosting-plan'"],
+      ['src/server/lib/hostingAddonLedger.ts', "feature: 'hosting-addon'"],
       ['src/server/AgentV3/hostingBillingSweep.ts', "feature: 'hosting'"],
       ['src/server/sonic/sonicWs.ts', "feature: 'voice'"],
       ['src/server/routes/sda.ts', "feature: 'doctor'"],

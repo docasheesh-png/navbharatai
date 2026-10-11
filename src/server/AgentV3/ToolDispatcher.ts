@@ -1,5 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { entryShadowNote } from './entryShadow';
+import { bannedInstallRefusal, bannedPackageGuardEnabled, stripBannedDeps, strippedDepsNote } from './reliability/bannedPackages';
+import { PARTIAL_CONTENT_KEY, PendingWrites, resumeTruncatedEnabled, truncatedWriteNotice } from './reliability/resumeWrite';
 import { recordingActuator } from './recordedWrites';
+import { markPreviewGaveUp, previewGaveUp } from './previewGiveUp';
 import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
 import { repeatedEditNotice } from './repeatedEdits';
 import { missingMembers, declaredMembers, relativeImports, resolveCandidates, memberListNote, RECIPE_LIBRARY_PATH, type MissingMember } from './typeMembers';
@@ -81,6 +85,7 @@ import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSumm
 import { generateSchemaTypes } from './schemaTypeGen';
 import { analyzeCiWorkflow, ciWorkflowSummary, repairCiWorkflow, ciPlatform } from './ciWorkflowAnalysis';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
+import { runWithToolSignal } from './toolDeadline';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc, orphanComponentFile } from './ArchitectureAnalysis';
 import { securitySummary, securityWriteNote } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
@@ -144,6 +149,7 @@ import type { SafeMcpTool } from './mcpClient';
 import type { McpServerConfig } from './mcpTransport';
 import { featureFileGuardEnabled, protectedFeatureFileDeletion, protectedFeatureFileMessage } from './featureFileGuard';
 import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, runtimeManifestDeletionTarget, runtimeManifestDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
+import { ToolRefusal, refuse } from './toolRefusal';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { cloneDestination, shouldRefuseClone, cloneGuardMessage } from './gitCloneGuard';
 import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
@@ -188,7 +194,7 @@ import { nextBuildRepairHint, nextMiddlewareCorrectPath } from './frameworkBuild
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
-import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
+import { assessReadiness, readinessTimeoutMs, readinessVerdict, unassessedReadinessReport, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
 import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE, entryFirstWriteNote } from './earlyPreview';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
@@ -422,10 +428,11 @@ import type { DeployFn } from './Deployment';
 import { reviewEdit, formatReviewResult } from './PostEditReviewer';
 import { renameSymbol, addComponentProp } from './CodemodeExecutor';
 import type { CodemodeFile } from './CodemodeExecutor';
-import { containsSymbol } from './codemodScope';
+import { containsSymbol, CODEMOD_SKIP } from './codemodScope';
 import { codemodTruncationNote } from './codemodTruncation';
 import { getEmbeddingStore } from './EmbeddingSearch';
 import { redactSecrets, redactDeep } from './SecretRedactor';
+import { isSecretFilePath, maskSecretFile, SECRET_MASK, secretPlaceholderWriteMessage } from './secretFileView';
 // Where the sandbox browser may go: its own preview, or the real public web — never an internal
 // infrastructure address. Handing a model a browser with an unrestricted address bar is an SSRF
 // primitive; see lib/browseTarget.ts.
@@ -434,6 +441,8 @@ import { formatUiFindings, type ScannedElement } from './UiElementFinder';
 import { envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
+import { isNotFoundError } from './fsErrors';
+import { SANDBOX_WORKSPACE_ROOT, toWorkspaceRelPath } from '../lib/workspacePath';
 import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
 import { turnAskedTheUser } from './nudgeToBuild';
@@ -609,6 +618,33 @@ export function readLedgerPath(key: string): string {
 export const SMALL_FILE_WHOLE_LINES = 300;
 export const SMALL_FILE_WHOLE_BYTES = 16_000;
 
+/** Per-build counts for the paid tools. One object, shared by parent and child dispatchers. */
+export interface BuildToolBudget {
+  consensus: number;
+  secondOpinion: number;
+}
+
+export function emptyBuildToolBudget(): BuildToolBudget {
+  return { consensus: 0, secondOpinion: 0 };
+}
+
+/** `AGENTV3_WEB_SEARCH_MAX_LIMIT`, default 10. Invalid or blank env falls back to 10. */
+export function webSearchMaxLimit(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.AGENTV3_WEB_SEARCH_MAX_LIMIT;
+  if (raw == null || String(raw).trim() === '') return 10;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return 10;
+  return Math.floor(n);
+}
+
+function paidToolCap(name: string, fallback: number, env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env[name];
+  if (raw == null || String(raw).trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.floor(n);
+}
+
 export class ToolDispatcher {
   /**
    * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
@@ -616,6 +652,12 @@ export class ToolDispatcher {
    * and a 15th optional boolean is exactly the kind of thing a later call site gets wrong by silence.
    */
   private _publishConsent = false;
+
+  /**
+   * Paid-tool counts for THIS build. Defaults to a fresh object; a child dispatcher is given the
+   * parent's object (same reference) so the cap is per build, not per dispatcher.
+   */
+  toolBudget: BuildToolBudget;
 
   /** Grant permission to publish for this dispatcher's lifetime (one turn). */
   setPublishConsent(granted: boolean): void { this._publishConsent = granted === true; }
@@ -630,6 +672,8 @@ export class ToolDispatcher {
   private readonly _rawActuator: ActuatorPort;
   /** Writes made through `actuator` that no call site has recorded yet (path → content). */
   private readonly _unrecorded = new Map<string, string>();
+  /** Platform writes (vault `.env` merge) that must not be refused by the ignore-file door. */
+  private internalWriteDepth = 0;
 
   constructor(
     actuatorRaw: ActuatorPort,
@@ -658,9 +702,34 @@ export class ToolDispatcher {
      * full — the single highest-value "why won't the app run" signal. Best-effort; never blocks.
      */
     private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number; timing?: CommandTiming }) => void,
+    /** Per-build paid-tool budget. Omit it and this dispatcher keeps a fresh zeroed object. */
+    toolBudget?: BuildToolBudget,
   ) {
+    this.toolBudget = toolBudget ?? emptyBuildToolBudget();
     this._rawActuator = actuatorRaw;
-    this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); });
+    this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); }, (p) => {
+      if (!this.internalWriteDepth && process.env.AGENTV3_GUARDED_WRITE_DOOR !== 'off') this.assertWritable(p);
+    });
+  }
+
+  /** Replace this dispatcher's budget with the parent's object (not a copy). */
+  shareToolBudget(budget: BuildToolBudget | null | undefined): void {
+    if (budget) this.toolBudget = budget;
+  }
+
+  /**
+   * Allow one paid call or refuse. The counter moves when the call is allowed, before it runs,
+   * so the Nth call is the last and a retry inside the tool does not count twice.
+   */
+  private chargePaidTool(tool: 'consensus' | 'second_opinion', envName: string, fallback: number): void {
+    if (!this.toolBudget) this.toolBudget = emptyBuildToolBudget();
+    const cap = paidToolCap(envName, fallback);
+    const key = tool === 'consensus' ? 'consensus' : 'secondOpinion';
+    const used = this.toolBudget[key] || 0;
+    if (used >= cap) {
+      refuse(`This build has used its ${cap} ${tool} calls — continue without it.`);
+    }
+    this.toolBudget[key] = used + 1;
   }
 
   /**
@@ -827,7 +896,8 @@ export class ToolDispatcher {
   // re-ran update_preview + npm run dev in a loop until the step cap — ~10 min burned on an
   // unreachable preview). Counted per dispatcher (= per build for the Architect).
   private previewFails = 0;
-  private previewGaveUp = false;
+  /** Per-dispatcher incremental cache, so two builds never share one tsbuildinfo (TD-18). */
+  private readonly tsBuildInfoId = randomUUID().slice(0, 8);
 
   /**
    * "made by NavBharatAI" app-signature toggle (admin 2026-07-16). Default ON (the viral-growth
@@ -1027,10 +1097,100 @@ export class ToolDispatcher {
 
   private assertWritable(path: string): void {
     if (this.ignoreRules.length === 0) return;
-    const rule = matchingIgnoreRule(path, this.ignoreRules);
+    let normalized = path;
+    try { normalized = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT); }
+    catch { normalized = path; }
+    const rule = matchingIgnoreRule(normalized, this.ignoreRules);
     if (!rule) return;
-    try { getWorkspaceMemory(this.workspaceId).recordAudit(`[PROTECTED] refused write to ${path} (${rule.source})`); } catch { /* audit best-effort */ }
-    throw new Error(protectedWriteMessage(path, rule));
+    try { getWorkspaceMemory(this.workspaceId).recordAudit(`[PROTECTED] refused write to ${normalized} (${rule.source})`); } catch { /* audit best-effort */ }
+    throw new Error(protectedWriteMessage(normalized, rule));
+  }
+
+  private async internalWrite<T>(fn: () => Promise<T>): Promise<T> {
+    this.internalWriteDepth += 1;
+    try { return await fn(); }
+    finally { this.internalWriteDepth -= 1; }
+  }
+
+  /**
+   * The one write door for tool content: path guards, config pins, a not-found-only probe,
+   * then the destructive / parse / duplicate checks. `AGENTV3_GUARDED_WRITE_DOOR=off` does NOT
+   * skip these — that flag only disables the actuator `beforeWrite` backstop.
+   */
+  private async guardedWrite(path: string, content: string, opts: { agent: AgentRole; source: string; allowOverwrite?: boolean }): Promise<{ kind: 'create' | 'modify'; content: string; existingContent: string; kitNote: string }> {
+    const rel = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT);
+    this.assertWritable(rel);
+    this.assertTextWritable(rel);
+    content = guardConfigContent(rel, this.applyPostgresProviderLock(rel, content));
+    content = withoutPreviewBridge(rel, content);
+    let kind: 'create' | 'modify' = 'create';
+    let existingContent = '';
+    try {
+      existingContent = await this.actuator.readFile(this.workspaceId, rel);
+      kind = 'modify';
+    } catch (err) {
+      if (!isNotFoundError(err)) {
+        refuse(`Could not read the existing ${rel} safely (transient sandbox error) — not overwriting it. Retry in a moment.`);
+      }
+      kind = 'create';
+      existingContent = '';
+    }
+    content = this.pinPackageJsonContent(rel, content, existingContent);
+    content = this.dedupeImportsForSource(rel, content, opts.agent);
+    const kitKeep = kind === 'modify' ? this.keepDesignKit(rel, content, existingContent) : { content, note: '' };
+    content = kitKeep.content;
+    const kitNote = kitKeep.note;
+    if (opts.allowOverwrite === false && kind === 'modify') {
+      if (content !== existingContent) {
+        refuse(`${rel} already exists — ${opts.source} will not replace it wholesale. Use edit_file, or pass overwrite: true if you really mean to replace it.`);
+      }
+      return { kind, content, existingContent, kitNote };
+    }
+    if (isSecretFilePath(rel) && content.includes(SECRET_MASK)) {
+      refuse(secretPlaceholderWriteMessage(rel));
+    }
+    if (isDestructiveEmptyOverwrite(rel, existingContent, content)) {
+      getWorkspaceMemory(this.workspaceId).recordAudit(
+        `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file: ${rel}`,
+      );
+      refuse(emptyOverwriteMessage(rel));
+    }
+    const erasedKeys = wouldEraseUserSecrets(rel, existingContent, content);
+    if (erasedKeys.length > 0) {
+      getWorkspaceMemory(this.workspaceId).recordAudit(
+        `[BLOCKED-DESTRUCTIVE] refused to erase ${erasedKeys.length} user secret(s) in ${rel}`,
+      );
+      refuse(eraseUserSecretsMessage(rel, erasedKeys));
+    }
+    if (kind === 'create') {
+      const dup = this.duplicateModuleRefusal(rel);
+      if (dup) refuse(dup);
+    }
+    const writeParseReject = await this.parseGuardRejection(rel, existingContent, content);
+    if (writeParseReject) refuse(writeParseReject);
+    await this.actuator.writeFile(this.workspaceId, rel, content);
+    this.onFileWrite?.(rel, content);
+    if (kind === 'modify') this.noteDroppedImports(rel, existingContent, content);
+    return { kind, content, existingContent, kitNote };
+  }
+
+  /** Write each codemod result through the guarded door. One failure refuses the tool and names both sides. */
+  private async commitCodemodWrites(changes: { path: string; after: string }[], agent: AgentRole, source: string): Promise<void> {
+    const written: string[] = [];
+    const failed: string[] = [];
+    for (const { path, after } of changes) {
+      try {
+        const wrote = await this.guardedWrite(path, after, { agent, source, allowOverwrite: true });
+        getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+        written.push(path);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        failed.push(`${path} — ${reason}`);
+      }
+    }
+    if (failed.length > 0) {
+      refuse(`${source} did not finish every file.\nWritten (do not rewrite these): ${written.join(', ') || '(none)'}\nNot written: ${failed.join('; ')}`);
+    }
   }
 
 
@@ -1051,18 +1211,18 @@ export class ToolDispatcher {
    * that report's saved copy no longer matched the snapshot. Nothing after a refused write may pretend.
    */
   private async landHealWrite(file: string, content: string, before: string | undefined): Promise<boolean> {
+    let wrote: { content: string };
     try {
       // NAMED, so a refusal says who asked (autopsy e725e002: the reviewer's evaluate tried to add a
       // dependency to a green app's package.json, and the report could only say "a later write").
       // `evaluate-heal` is on no allowlist, so a green app is still left untouched — only the record changes.
-      const write = () => this.actuator.writeFile(this.workspaceId, file, content);
-      await (currentPass() ? write() : runInPass('evaluate-heal', write));
+      const go = () => this.guardedWrite(file, content, { agent: 'architect', source: 'evaluate-heal', allowOverwrite: true });
+      wrote = await (currentPass() ? go() : runInPass('evaluate-heal', go));
     } catch {
       return false; // refused (freeze) or failed — nothing is recorded, indexed or announced
     }
-    try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
-    try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
-    try { noteHeal(this.workspaceId, file, content, before); } catch { /* best-effort */ }
+    try { getWorkspaceMemory(this.workspaceId).indexFile(file, wrote.content); } catch { /* best-effort */ }
+    try { noteHeal(this.workspaceId, file, wrote.content, before); } catch { /* best-effort */ }
     return true;
   }
 
@@ -1301,6 +1461,22 @@ export class ToolDispatcher {
     } catch { /* the app boots as it would have — this can only ever help */ }
   }
 
+  /**
+   * Read `.env` in order to merge into it. Not-found is an empty file. Any other error must NOT
+   * be treated as empty — the caller skips the write so a transient failure cannot blank the file.
+   */
+  private async readDotEnvForMerge(label: string): Promise<{ ok: true; text: string } | { ok: false }> {
+    try {
+      const text = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, label);
+      return { ok: true, text: typeof text === 'string' ? text : '' };
+    } catch (err) {
+      if (isNotFoundError(err)) return { ok: true, text: '' };
+      const message = err instanceof Error ? err.message : String(err ?? '');
+      try { getWorkspaceMemory(this.workspaceId).recordAudit(`ENV_MERGE_SKIPPED: ${label}: ${message}`); } catch { /* audit best-effort */ }
+      return { ok: false };
+    }
+  }
+
   async ensureUserSecretsEnvFile(command: string): Promise<void> {
     if (this.secretsEnvWritten) return;
     const names = Object.keys(this.userSecretsEnv);
@@ -1310,13 +1486,15 @@ export class ToolDispatcher {
     // dev server is about to start WITHOUT any run_command having gone through this gate.
     if (command !== ALWAYS_WRITE_SECRETS
       && !/\b(?:npm|pnpm|yarn|bun|vite|next|node|nodemon|tsx|ts-node|deno|python|pip|uvicorn|gunicorn|flask)\b/i.test(command)) return;
-    this.secretsEnvWritten = true; // attempt once regardless of outcome — never rewrite on every command
+    // internalWrite: vault .env merge
     try {
-      let existing = '';
-      try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
-      const merged = mergeDotEnv(existing, this.userSecretsEnv);
-      await this.actuator.writeFile(this.workspaceId, '.env', merged);
-      try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
+      const existingEnv = await this.readDotEnvForMerge('env-read');
+      if (!existingEnv.ok) return; // transient read — do not blank .env; secretsEnvWritten stays false so the next call retries
+      const merged = mergeDotEnv(existingEnv.text, this.userSecretsEnv);
+      await this.internalWrite(async () => {
+        await this.actuator.writeFile(this.workspaceId, '.env', merged);
+      });
+      this.secretsEnvWritten = true;
       // Keep .env out of git — always, even if the app already had one.
       try {
         let gi = '';
@@ -1417,6 +1595,96 @@ export class ToolDispatcher {
    * degrades honestly (the migrate then reports its real DB-unreachable error via Slice 1's DB_UNREACHABLE).
    * Kill switch: AGENTV3_SANDBOX_POSTGRES=off. A sandbox without provisionBackend (LocalActuator) is a no-op.
    */
+  /**
+   * TD-12 / TD-15 — the bash execution pipeline, shared with `run_migrations`.
+   *
+   * Pin bare installs, quote route-group paths, detach background jobs, provision Postgres,
+   * write the vault `.env`, then run. Governance refusals stay in the bash case: this run is
+   * governance-free. Bash passes `record: false` and calls `onCommand` itself AFTER its
+   * self-heals, so diagnostics see the healed result. Migrations record here, redacted.
+   * `forceSecrets` writes the vault `.env` even when the command is `npx prisma …` (that
+   * string does not match the install/run gate).
+   */
+  private async runShellLikeBash(
+    command: string,
+    _agent: AgentRole,
+    opts?: { forceSecrets?: boolean; record?: boolean },
+  ): Promise<{
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+    display: string;
+    prepared: string;
+    effectiveCommand: string;
+    detached: number;
+    timing?: CommandTiming;
+  }> {
+    const started = Date.now();
+    const pinPkg = /(?:^|[\s/])(?:@vitest\/|vitest\b|@react-three\/|@capacitor(?:-[\w-]+)?\/)/.test(command)
+      ? await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined)
+      : undefined;
+    const pinCtx = pinPkg !== undefined
+      ? { viteRange: viteRangeOf(pinPkg), reactRange: reactRangeOf(pinPkg), capacitorRange: capacitorRangeOf(pinPkg) }
+      : undefined;
+    const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command, pinCtx));
+    await this.ensureSandboxPostgres(effectiveCommand);
+    if (opts?.forceSecrets) await this.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS);
+    await this.ensureUserSecretsEnvFile(effectiveCommand);
+    if (shouldPreflightPostgres({
+      provisioned: this.postgresProvisioned,
+      confirmedDead: this.postgresConfirmedDead,
+      needsLiveDb: commandNeedsLiveDatabase(effectiveCommand),
+      provisionedAtMs: this.postgresProvisionedAt,
+      nowMs: Date.now(),
+    })) {
+      try {
+        const probe = await this.actuator.runCommand(this.workspaceId, postgresPreflightProbeCommand());
+        if (/\bPG_DOWN\b/.test(probe.stdout) && canAttemptPostgresRevival(this.postgresReprovisionAttempts) && typeof this.actuator.provisionBackend === 'function') {
+          this.postgresReprovisionAttempts += 1;
+          this.narrate('db.asleepRestarting', {});
+          await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-preflight-revive');
+          this.postgresProvisionedAt = Date.now();
+        }
+      } catch { /* best-effort — the reactive DB-unreachable net below still catches a dead DB honestly */ }
+    }
+    const background = isLongRunningCommand(effectiveCommand)
+      ? { command: effectiveCommand, detached: 0 }
+      : detachBackgroundJobs(effectiveCommand);
+    const prepared = background.command;
+    const runStartedAt = Date.now();
+    const ran = await this.actuator.runCommand(this.workspaceId, withAppEnvFile(prepared));
+    const stdout = ran.stdout ?? '';
+    const stderr = ran.stderr ?? '';
+    const timing: CommandTiming | undefined = ran.timing
+      ? { setupMs: runStartedAt - started, sandboxMs: ran.timing.sandboxMs, runMs: ran.timing.runMs }
+      : undefined;
+    const redactedOut = redactSecrets(stdout);
+    const redactedErr = redactSecrets(stderr);
+    const display = `exit=${ran.exitCode}\n${redactedOut}` + (redactedErr ? `\n[stderr]\n${redactedErr}` : '');
+    if (opts?.record !== false) {
+      try {
+        this.onCommand?.({
+          command: redactSecrets(prepared),
+          exitCode: ran.exitCode,
+          stdout: redactedOut,
+          stderr: redactedErr,
+          durationMs: Date.now() - started,
+          timing,
+        });
+      } catch { /* diagnostics capture is best-effort */ }
+    }
+    return {
+      exitCode: ran.exitCode,
+      stdout,
+      stderr,
+      display,
+      prepared,
+      effectiveCommand,
+      detached: background.detached,
+      timing,
+    };
+  }
+
   private async ensureSandboxPostgres(command: string): Promise<void> {
     if (this.postgresProvisioned) return;
     if (!sandboxPostgresEnabled()) return;
@@ -1436,7 +1704,9 @@ export class ToolDispatcher {
     // copy: only the composition root calls setUserSecrets, while every dispatcher and sub-agent in the
     // build shares the same file, so the file is the one source of truth all of them agree on.
     let envNow = '';
-    try { envNow = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { envNow = ''; }
+    const envNowRead = await this.readDotEnvForMerge('env-read');
+    if (!envNowRead.ok) return; // transient — do not provision over a .env we could not read
+    envNow = envNowRead.text;
     const connectedUrl = dotEnvValue(envNow, 'DATABASE_URL') ?? this.userSecretsEnv?.DATABASE_URL ?? '';
     if (isUserOwnedDatabaseUrl(connectedUrl)) {
       this.postgresProvisioned = true; // decided — never reconsider mid-build
@@ -1453,11 +1723,10 @@ export class ToolDispatcher {
       const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-provision');
       const lines = postgresEnvLines(prov?.envVars?.DATABASE_URL ?? prov?.dbUrl);
       if (Object.keys(lines).length > 0) {
-        let existing = '';
-        try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
-        const merged = mergeDotEnv(existing, lines);
+        const existingEnv = await this.readDotEnvForMerge('env-read');
+        if (existingEnv.ok) {
+        const merged = mergeDotEnv(existingEnv.text, lines);
         await this.actuator.writeFile(this.workspaceId, '.env', merged);
-        try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
         // Keep .env out of git.
         try {
           let gi = '';
@@ -1465,6 +1734,7 @@ export class ToolDispatcher {
           const nextGi = gitignoreWithEnv(gi);
           if (nextGi !== gi) { await this.actuator.writeFile(this.workspaceId, '.gitignore', nextGi); try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ } }
         } catch { /* gitignore hardening is best-effort */ }
+        }
         // "✅ ready" is EARNED, not inferred from a URL existing (admin task 1, 2026-08-05 — the
         // Mitrify false-success class): provisionBackend returns a fallback URL even when Postgres
         // never came up, so this line used to promise a database the very next migrate could not
@@ -1582,12 +1852,11 @@ export class ToolDispatcher {
     // nearly-true report this whole path exists to avoid.
     if (!env || !env.DATABASE_URL) return false;
     try {
-      let existing = '';
-      try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
+      const existingEnv = await this.readDotEnvForMerge('env-read');
+      if (!existingEnv.ok) return false;
       // Written LAST, so it wins over the sandbox-local URL merged moments earlier.
-      const merged = mergeDotEnv(existing, env);
+      const merged = mergeDotEnv(existingEnv.text, env);
       await this.actuator.writeFile(this.workspaceId, '.env', merged);
-      try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
       try {
         let gi = '';
         try { gi = await withTimeout(this.actuator.readFile(this.workspaceId, '.gitignore'), 5_000, 'gi-read'); } catch { gi = ''; }
@@ -1647,17 +1916,17 @@ export class ToolDispatcher {
    * Run the real `evaluate` scan and return its structured readiness verdict (R2 §1.1).
    * Used by AgentRunner to make the quality gate MANDATORY: a build cannot be reported as a
    * clean success while `ready` is false (a build-breaker, secret leak, fake code, or an app
-   * that cannot run). Best-effort: if the scan throws, returns a permissive READY so the gate
-   * never wrongly fails a real build on an internal error.
+   * that cannot run). If the scan times out or throws, the report is UNASSESSED — not a perfect
+   * score. Slowness is not evidence the app is finished, and it is not evidence it failed (TD-2).
    */
   async assessBuildReadiness(): Promise<ReadinessReport> {
-    const permissive: ReadinessReport = { score: 100, ready: true, blockers: [], warnings: [], tier: 'enterprise' };
+    // A stale verdict from an earlier evaluate must not be returned when this scan does not finish.
+    this.lastReadiness = null;
     try {
       // OVERALL TIMEOUT (audit P0-C): the readiness gate runs AFTER the last agent turn, so the
       // build's wall-clock deadline can no longer interrupt it. Without this bound a single stalled
       // file read here hangs a build whose app is ALREADY built, until the 12-min cap kills it as a
-      // "failure". On timeout we return a PERMISSIVE verdict — the gate is best-effort and must never
-      // fail a real build on its own slowness.
+      // "failure". On timeout we return UNASSESSED — never a 100/100 the health card would call READY.
       return await withTimeout((async () => {
         // CRITICAL — seed the project graph from the REAL workspace before judging it.
         // The in-memory graph is otherwise populated ONLY by the indexing write-tools
@@ -1670,7 +1939,8 @@ export class ToolDispatcher {
         // (The seed now runs inside `evaluate` itself, so the model's own call is judged on the same
         // fresh graph — autopsy 4d538ca3.)
         await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
-        const report = this.lastReadiness ?? permissive;
+        const report = this.lastReadiness;
+        if (!report) return unassessedReadinessReport();
         // AN UNTOUCHED SCAFFOLD IS NOT A FINISHED APP (autopsy 31dc61fd). Readiness measures CODE
         // HEALTH, and a pristine starter template is perfectly healthy — so this gate scored 100/100
         // on `<h1>Hello World</h1>` and the done signal told the model to stop and hand it over. The
@@ -1680,9 +1950,9 @@ export class ToolDispatcher {
         // one, so the done signal, the weak checkpoint and every other reader inherit this at once
         // instead of each learning it separately. See stillTheStarterApp.ts.
         return await this._blockIfStillTheStarterApp(report);
-      })(), 45_000, 'assessBuildReadiness');
+      })(), readinessTimeoutMs(), 'assessBuildReadiness');
     } catch {
-      return permissive;
+      return unassessedReadinessReport();
     }
   }
 
@@ -1748,7 +2018,7 @@ export class ToolDispatcher {
         return lintGateVerdict(outcomes);
       })(), 45_000, 'assessLintGate');
     } catch {
-      return permissive;
+      return { blocked: false, errorCount: 0, blockers: [], summary: 'Lint gate: not assessed (the check timed out or failed).', unassessed: true };
     }
   }
 
@@ -1846,8 +2116,7 @@ export class ToolDispatcher {
         if (result.wired.length === 0) return '';
         for (const [path, content] of Object.entries(result.files)) {
           if (files[path] === content) continue; // only the one router file actually changed
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
+          await this.guardedWrite(path, content, { agent: 'architect', source: 'heal-orphan-pages', allowOverwrite: true });
           try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
         }
         try { getWorkspaceMemory(this.workspaceId).recordAudit(`orphan-page wiring: routed ${result.wired.join(', ')}.`); } catch { /* audit best-effort */ }
@@ -1876,8 +2145,7 @@ export class ToolDispatcher {
         if (result.redactions.length === 0) return '';
         for (const [path, content] of Object.entries(result.files)) {
           if (files[path] === content) continue; // only the files that actually changed
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
+          await this.guardedWrite(path, content, { agent: 'architect', source: 'heal-credential-logs', allowOverwrite: true });
           try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
         }
         const changed = [...new Set(result.redactions.map((r) => r.file))];
@@ -1895,8 +2163,7 @@ export class ToolDispatcher {
         const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
         const result = injectObservabilityFixes(files);
         if (!result) return '';
-        await this.actuator.writeFile(this.workspaceId, result.path, result.newContent);
-        try { this.onFileWrite?.(result.path, result.newContent); } catch { /* durable mirror is best-effort */ }
+        await this.guardedWrite(result.path, result.newContent, { agent: 'architect', source: 'inject-observability', allowOverwrite: true });
         try { this.state?.recordFileChange({ path: result.path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
         const labels: Record<'request-logger' | 'health' | 'error-handler', string> = {
           'request-logger': 'a request logger',
@@ -1947,9 +2214,11 @@ export class ToolDispatcher {
           this.state?.appendTerminal(pruneRefusedMessage());
         }
       } catch { /* reconciliation is best-effort — a failure leaves today's stale-but-safe graph */ }
-      const targets = tree
-        .filter((p) => indexable(p) && !known.has(p))
-        .slice(0, 500);
+      const allNew = tree.filter((p) => indexable(p) && !known.has(p));
+      // Resolution only needs the PATH. Every listed source is a node, including ones past the read
+      // cap and ones whose read timed out — otherwise an import of file 501+ is a false "unresolved".
+      for (const p of allNew) mem.ensureGraphNode(p);
+      const targets = allNew.slice(0, 500);
       // PARALLEL + per-file timeout (audit P0-C): reading up to 500 files one-at-a-time over the
       // sandbox cost 50-160s and could hang on a single stalled read. Read in bounded-concurrency
       // batches, each call capped at 5s, then index sequentially (graph mutation is synchronous).
@@ -1958,6 +2227,8 @@ export class ToolDispatcher {
         content: await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'readFile').catch(() => ''),
       }));
       for (const { p, content } of reads) {
+        // A timed-out or empty read stays a node (ensureGraphNode above). Content is indexed only
+        // when we actually got it.
         if (typeof content === 'string' && content && content.length <= 250_000) mem.indexFile(p, content);
       }
     } catch { /* best-effort pre-seed — never blocks the gate */ }
@@ -1980,8 +2251,8 @@ export class ToolDispatcher {
     try {
       await this.actuator.readFile(this.workspaceId, entryFile);
       return; // root already scaffolded — nothing to do
-    } catch {
-      /* missing — write the starter below */
+    } catch (err) {
+      if (!isNotFoundError(err)) return; // transient read — do not treat the scaffold as missing
     }
     try {
       const registry = new TemplateRegistry();
@@ -1992,8 +2263,12 @@ export class ToolDispatcher {
       // Q-008: a workspace in the strict-mode trial gets the strict tsconfig (strictTrial.ts).
       const files = applyStrictTrial(provider.getFiles([]), this.workspaceId);
       for (const [path, content] of Object.entries(files)) {
-        const exists = await this.actuator.readFile(this.workspaceId, path).then(() => true).catch(() => false);
-        if (exists) continue; // never clobber real (e.g. salvaged) work with the starter
+        try {
+          await this.actuator.readFile(this.workspaceId, path);
+          continue; // never clobber real (e.g. salvaged) work with the starter
+        } catch (err) {
+          if (!isNotFoundError(err)) continue; // transient — do not overwrite
+        }
         // The platform's starter, not the model's work: written UNRECORDED on purpose, exactly as before
         // recordedWrites.ts, so the authorship gates never judge our template as the build's code.
         await this._rawActuator.writeFile(this.workspaceId, path, content).catch(() => {});
@@ -2040,6 +2315,7 @@ export class ToolDispatcher {
     runTsc: () => Promise<string>;
     readFiles: () => Promise<Record<string, string>>;
     writeFile: (path: string, content: string) => Promise<void>;
+    removeFile: (path: string) => Promise<void>;
     installedExports: (names: string[]) => Promise<Record<string, string[]>>;
   } {
     return {
@@ -2059,7 +2335,7 @@ export class ToolDispatcher {
           this.workspaceId,
           // Robust tsc — the LOCAL binary (never `npx tsc`, which can hit the `tsc@2.0.4` squatter's
           // help page and never typecheck; build report 2026-07-21). See tscCommand.ts.
-          robustTscCommand('--noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo', '2>&1 | head -80'),
+          robustTscCommand(`--noEmit --incremental --tsBuildInfoFile /tmp/agentv3-${this.tsBuildInfoId}.tsbuildinfo`, '2>&1 | head -80'),
         );
         return `${r.stdout || ''}\n${r.stderr || ''}`.trim();
       },
@@ -2068,6 +2344,19 @@ export class ToolDispatcher {
         await this.actuator.writeFile(this.workspaceId, path, content);
         try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
         try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
+      },
+      removeFile: async (path: string) => {
+        const p = String(path || '').replace(/\\/g, '/');
+        if (!/^[A-Za-z0-9._/-]+$/.test(p) || p.split('/').includes('..')) {
+          throw new Error(`refusing to remove ${path}`);
+        }
+        const rm = await this.actuator
+          .runCommand(this.workspaceId, `rm -f -- '${p}'`)
+          .catch(() => ({ exitCode: -1, stdout: '', stderr: '' }));
+        if (rm.exitCode === 0) {
+          try { this.state?.recordFileChange({ path: p, kind: 'delete' }, 'architect'); } catch { /* UI count is best-effort */ }
+          await this.reconcileDeletions([p]);
+        }
       },
     };
   }
@@ -2798,11 +3087,17 @@ export class ToolDispatcher {
       tree.add(path);
       const twins = shadowingTwins(path, tree, new Set(authoredGetter())).filter(removablePath);
       if (twins.length === 0) return '';
+      const deletable: string[] = [];
+      for (const twin of twins) {
+        try { this.assertWritable(twin); deletable.push(twin); }
+        catch { /* protected — do not delete */ }
+      }
+      if (deletable.length === 0) return '';
       await this.actuator
-        .runCommand(this.workspaceId, `rm -f ${twins.map((t) => `'${t}'`).join(' ')}`)
+        .runCommand(this.workspaceId, `rm -f ${deletable.map((t) => `'${t}'`).join(' ')}`)
         .catch(() => null);
       const gone: string[] = [];
-      for (const twin of twins) {
+      for (const twin of deletable) {
         let stillThere = false;
         try { await this.actuator.readFile(this.workspaceId, twin); stillThere = true; } catch { stillThere = false; }
         if (stillThere) continue;
@@ -2947,7 +3242,7 @@ export class ToolDispatcher {
       const startedAt = Date.now();
       void this._writeTypecheckQueue.run(async () => {
         try {
-          const r = await withTimeout(this.actuator.runCommand(this.workspaceId, writeTypecheckWarmupCommand()), WRITE_TYPECHECK_TIMEOUT_MS, 'write-typecheck-warmup');
+          const r = await withTimeout(this.actuator.runCommand(this.workspaceId, writeTypecheckWarmupCommand(this.tsBuildInfoId)), WRITE_TYPECHECK_TIMEOUT_MS, 'write-typecheck-warmup');
           // Only a warm-up that really compiled warmed anything (autopsy 8257ca59).
           if (String(r?.stdout ?? '').includes(WARMUP_COMPILED_MARKER)) s.warmupMs = Date.now() - startedAt;
           else s.warmupSkipped = true;
@@ -3032,8 +3327,31 @@ export class ToolDispatcher {
    * after being told to stop. The readiness scan reads code, not the compiler, so the compiler's own
    * last word is asked too.
    */
-  lastKnownTypeErrors(): number | null {
+  /** P5a/P5c — hooks the route sets when AGENTV3_MODULAR_PROMPT / AGENTV3_CORE_TOOLSET are on. */
+  private _reliabilityHooks: { loadTools?: (names: unknown) => string; readGuide?: (name: string) => string } = {};
+  setReliabilityHooks(hooks: { loadTools?: (names: unknown) => string; readGuide?: (name: string) => string }): void {
+    this._reliabilityHooks = { ...this._reliabilityHooks, ...hooks };
+  }
+
+  /** P2b — cut-off writes waiting for append_file (never on disk). */
+  private readonly _pendingWrites = new PendingWrites();
+
+    lastKnownTypeErrors(): number | null {
     return this._lastTypeErrors;
+  }
+
+  /**
+   * P3b (AGENTV3_WORKING_SET) — the CURRENT content of a workspace file, for the working-set block the
+   * runner appends to the model's view. Read-only, bounded by a short timeout; null on any failure so a
+   * slow or missing file simply drops out of the block.
+   */
+  async readForWorkingSet(path: string): Promise<string | null> {
+    try {
+      const content = await withTimeout(this.actuator.readFile(this.workspaceId, path), 3_000, 'working-set-read');
+      return typeof content === 'string' ? content : null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -3046,12 +3364,23 @@ export class ToolDispatcher {
     const lines: string[] = [];
     for (const [path, content] of Object.entries(files)) {
       let existing: string | null = null;
-      try { existing = await this.actuator.readFile(this.workspaceId, path); } catch { existing = null; }
-      if (existing === content) { lines.push(`Unchanged ${path} (already exactly what this recipe writes)`); continue; }
-      await this.actuator.writeFile(this.workspaceId, path, content);
-      this.state?.recordFileChange({ path, kind: existing === null ? 'create' : 'modify' }, agent);
-      getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-      lines.push(`${existing === null ? 'Created' : 'Updated'} ${path}`);
+      let missing = false;
+      try { existing = await this.actuator.readFile(this.workspaceId, path); }
+      catch (err) {
+        if (!isNotFoundError(err)) {
+          lines.push(`skipped existing ${path}`);
+          continue;
+        }
+        missing = true;
+        existing = null;
+      }
+      if (!missing && existing === content) { lines.push(`Unchanged ${path} (already exactly what this recipe writes)`); continue; }
+      // New files only. No recipe in this tree intentionally patches an existing router or App.tsx.
+      if (!missing) { lines.push(`skipped existing ${path}`); continue; }
+      const wrote = await this.guardedWrite(path, content, { agent, source: 'writeRecipeFiles', allowOverwrite: false });
+      this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
+      getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+      lines.push(`${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path}`);
     }
     return lines;
   }
@@ -3237,7 +3566,7 @@ export class ToolDispatcher {
       let neverRan = false; // the compiler did not look at the project — neither clean nor failed
       let notReady = false; // the compiler was not ready (an install running) — the check stood down at once
       let errors = await this._writeTypecheckQueue.run(async () => {
-        const command = writeTypecheckCommand();
+        const command = writeTypecheckCommand(this.tsBuildInfoId);
         const startedAt = Date.now();
         let r: { stdout: string; stderr: string };
         try {
@@ -3347,7 +3676,8 @@ export class ToolDispatcher {
     }
   }
 
-  async dispatch(call: ToolUse, agent: AgentRole = 'architect'): Promise<ToolResult> {
+  async dispatch(call: ToolUse, agent: AgentRole = 'architect', opts?: { signal?: AbortSignal }): Promise<ToolResult> {
+    if (opts?.signal) return runWithToolSignal(opts.signal, () => this.dispatch(call, agent));
     // Secret redaction (R1.1, roadmap §3.2): tool_call input and tool_result summaries are
     // streamed to the user's screen, so a command/output that inlines an API key, a .env value
     // or a connection-string password must be masked BEFORE it is shown. We redact ONLY the
@@ -3392,6 +3722,17 @@ export class ToolDispatcher {
       });
       return { tool_use_id: call.id, content, is_error: false, image: visual?.image };
     } catch (err) {
+      if (err instanceof ToolRefusal) {
+        this.events?.emit({
+          type: 'tool_result',
+          agent,
+          callId: call.id,
+          ok: false,
+          summary: redactSecrets(summarize(err.message)),
+          ts: Date.now(),
+        });
+        return { tool_use_id: call.id, content: err.message, is_error: true };
+      }
       const message = err instanceof Error ? err.message : String(err);
       this.events?.emit({
         type: 'tool_result',
@@ -4165,6 +4506,30 @@ export class ToolDispatcher {
     // "npm enoent package.json → builder hand-writes a drifted scaffold" class on fallback builds.
     await this.ensureScaffoldOnce();
     const input = call.input;
+    // fix/build-reliability (P2b resume + P5b banned deps) — write_file pre-checks, each behind its own flag.
+    if (call.name === 'write_file') {
+      // P2b — a write cut off at the output limit carries only `_partial_content`: buffer it, never write it.
+      const partialIn = (input as Record<string, unknown> | undefined)?.[PARTIAL_CONTENT_KEY];
+      if (resumeTruncatedEnabled() && typeof partialIn === 'string' && (input as { content?: unknown })?.content === undefined) {
+        const p = reqStr(input, 'path');
+        this._pendingWrites.start(p, partialIn);
+        return truncatedWriteNotice(p, partialIn);
+      }
+      if (typeof (input as { path?: unknown })?.path === 'string') this._pendingWrites.drop((input as { path: string }).path);
+      // P5b (AGENTV3_BANNED_PACKAGE_GUARD) — a package.json write never carries a banned dependency.
+      if (bannedPackageGuardEnabled() && /(^|\/)package\.json$/.test(String((input as { path?: unknown })?.path ?? '')) && typeof (input as { content?: unknown })?.content === 'string') {
+        const stripped = stripBannedDeps((input as { content: string }).content);
+        if (stripped.removed.length) {
+          try {
+            const res = await this.run({ ...call, input: { ...(input as Record<string, unknown>), content: stripped.content } }, agent);
+            return `${res}\n${strippedDepsNote(stripped.removed)}`;
+          } catch (err) {
+            if (err instanceof ToolRefusal) refuse(`${err.message}\n${strippedDepsNote(stripped.removed)}`);
+            throw err;
+          }
+        }
+      }
+    }
     switch (call.name) {
       case 'run_recipe': {
         // ONE entry point for the RECIPE_TOOLS (ToolCatalog.ts). The recipe runs through its OWN case
@@ -4213,6 +4578,14 @@ export class ToolDispatcher {
           // Re-throw so the miss stays an honest is_error result (the outer catch formats it), but with the
           // real path(s) appended — the agent gets to correct itself on the FIRST miss instead of looping.
           throw new Error(`${base}${hint}`.trim());
+        }
+        // A NUL in the first 8 KB means this is not text. Stub it before secret masking and before
+        // slicing, so the bytes never reach the transcript. A text file with no NUL is unchanged.
+        if (full.slice(0, 8 * 1024).includes('\0')) {
+          return `[binary file, ${Buffer.byteLength(full, 'utf8')} bytes — not shown]`;
+        }
+        if (isSecretFilePath(reqPath)) {
+          full = maskSecretFile(reqPath, full, new Set(Object.keys(this.userSecretsEnv)));
         }
         // RANGED READ (Fix 36b — HMS report 2026-07-07): a big file's tool result gets its middle
         // trimmed by the transcript ceiling, and a plain re-read returns the SAME trimmed view — the
@@ -4289,6 +4662,33 @@ export class ToolDispatcher {
         return `${notice}[lines ${from + 1}-${Math.min(to, lines.length)} of ${lines.length} — the file is complete on disk]\n${slice}`;
       }
 
+      case 'load_tools': {
+        // P5c (AGENTV3_CORE_TOOLSET) — the route hands the dispatcher its build's DynamicToolset.
+        if (!this._reliabilityHooks.loadTools) throw new Error('load_tools is not enabled for this build — every tool is already offered.');
+        return this._reliabilityHooks.loadTools((input as { names?: unknown })?.names);
+      }
+      case 'read_guide': {
+        // P5a (AGENTV3_MODULAR_PROMPT) — an on-demand prompt module.
+        if (!this._reliabilityHooks.readGuide) throw new Error('read_guide is not enabled for this build — every guide is already in your instructions.');
+        return this._reliabilityHooks.readGuide(reqStr(input, 'name'));
+      }
+      case 'append_file': {
+        // P2b (AGENTV3_RESUME_TRUNCATED) — finish a cut-off write (buffered, never persisted until done)
+        // or append to a file on disk. Every real write goes through write_file, so its guards still run.
+        const path = reqStr(input, 'path');
+        const more = reqStr(input, 'content');
+        const done = (input as { done?: unknown })?.done === true;
+        if (this._pendingWrites.has(path)) {
+          const full = this._pendingWrites.append(path, more);
+          if (!done) return `Buffered ${more.length} more chars for ${path} (${full.length} so far, not saved yet). Continue with append_file; pass done:true on the last part.`;
+          this._pendingWrites.take(path);
+          const res = await this.run({ ...call, name: 'write_file', input: { path, content: full } }, agent);
+          return `Completed the cut-off write of ${path} (${full.split('\n').length} lines).\n${res}`;
+        }
+        let existing = '';
+        try { existing = await this.actuator.readFile(this.workspaceId, path); } catch { existing = ''; }
+        return this.run({ ...call, name: 'write_file', input: { path, content: existing + more } }, agent);
+      }
       case 'write_file': {
         let path = reqStr(input, 'path');
         this._editsPerFile.delete(path); // a whole-file write is exactly what the edit-loop note asks for
@@ -4306,80 +4706,14 @@ export class ToolDispatcher {
             path = corrected;
           }
         }
-        // Deterministic backstop: a Vite config must always allow the E2B preview host, or the
-        // preview shows "Blocked request … is not allowed" instead of the app. No-op for non-configs
-        // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
-        this.assertWritable(path); // C2 — checked AFTER any relocation, so the REAL destination is judged
-        this.assertTextWritable(path);
-        let content = guardConfigContent(path, this.applyPostgresProviderLock(path, reqStr(input, 'content')));
-        // THE OTHER END OF THE SAME GUARD (see read_file above). The model is not supposed to be able
-        // to see the preview bridge at all — but "cannot see it" and "cannot store it" are different
-        // guarantees, and only the second one is a guarantee. A write that carries the marker anyway
-        // (a model reproducing an older document from memory, a paste, a future read path that
-        // forgets to strip) has it removed before it reaches durable storage, so the bridge can never
-        // be published inside a user's app. Both ends, deliberately: unlikely is not impossible.
-        content = withoutPreviewBridge(path, content);
-        // Read the CURRENT on-disk content before any pinning — pinPackageJsonContent needs it to tell
-        // a genuinely dropped dependency (restore it) from one the new content never had in the first
-        // place (a brand-new file, nothing to compare against). Moved ahead of the pin call itself
-        // (EduTube autopsy 2026-09-14) — it used to be read only afterwards, purely for the self-destruct
-        // guard below, which is why the pin guard had no way to see what a rewrite had just dropped.
-        let kind: 'create' | 'modify' = 'create';
-        let existingContent = '';
-        try {
-          existingContent = await this.actuator.readFile(this.workspaceId, path);
-          kind = 'modify';
-        } catch {
-          kind = 'create';
-        }
-        // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
-        // to their known-good major IN the written package.json, so a later plain `npm install` (which
-        // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking
-        // version. This is the sibling choke point to the install-command pin (#1526).
-        content = this.pinPackageJsonContent(path, content, existingContent);
-        content = this.dedupeImportsForSource(path, content, agent);
-        // A rewrite of the global stylesheet keeps the design-kit rules it dropped (autopsy e725e002).
-        const kitKeep = kind === 'modify' ? this.keepDesignKit(path, content, existingContent) : { content, note: '' };
-        content = kitKeep.content;
-        // Self-destruct guard (StudySync autopsy 2026-07-16): refuse to BLANK a populated source file.
-        // Overwriting src/App.tsx with "" deletes its code and breaks every importer — the same
-        // catastrophe as `rm`, but via the tool path (bypasses the shell guard). Checked BEFORE writing
-        // so the file survives; a legitimate full-content rewrite (non-empty) is never blocked.
-        if (isDestructiveEmptyOverwrite(path, existingContent, content)) {
-          const blockMsg = emptyOverwriteMessage(path);
-          getWorkspaceMemory(this.workspaceId).recordAudit(
-            `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file: ${path}`,
-          );
-          return blockMsg;
-        }
-        // THE USER'S OWN KEYS ARE NOT OURS TO DELETE (admin build transcript 2026-08-12). The platform
-        // writes .env from the user's saved secrets; twenty-five seconds later the builder "fixed" the
-        // hardcoded secrets it found there, and the app's database and payments were dead — reported as
-        // "your source files are untouched". A prompt asking the model not to would be one more
-        // instruction to forget; this makes the write impossible.
-        const erasedKeys = wouldEraseUserSecrets(path, existingContent, content);
-        if (erasedKeys.length > 0) {
-          const blockMsg = eraseUserSecretsMessage(path, erasedKeys);
-          getWorkspaceMemory(this.workspaceId).recordAudit(
-            `[BLOCKED-DESTRUCTIVE] refused to erase ${erasedKeys.length} user secret(s) in ${path}`,
-          );
-          return blockMsg;
-        }
-        // DUPLICATE-MODULE guard (TaskForge autopsy 2026-07-18): the ORIGIN of the 2-hour failure was the
-        // builder CREATING the same component under two convention roots (app/ AND src/), whose interfaces
-        // then drift and break the build. Refuse to create a parallel copy of a module that already exists
-        // under a different root — the duplicate is never born, so it can never drift. Only on a fresh
-        // create (an edit-in-place is always allowed); kill switch AGENTV3_DUP_MODULE_GUARD=off.
-        if (kind === 'create') {
-          const dup = this.duplicateModuleRefusal(path);
-          if (dup) return dup;
-        }
-        // Parse guard: refuse a write that would break a clean file (duplicate declaration / broken JSX).
-        const writeParseReject = await this.parseGuardRejection(path, existingContent, content);
-        if (writeParseReject) return writeParseReject;
-        await this.actuator.writeFile(this.workspaceId, path, content);
-        this.onFileWrite?.(path, content);
-        if (kind === 'modify') this.noteDroppedImports(path, existingContent, content);
+        // Middleware relocation (above) can change the path. guardedWrite applies the config pin,
+        // preview-bridge strip, probe, package pin, import dedupe and design-kit keep — once.
+        const wrote = await this.guardedWrite(path, reqStr(input, 'content'), { agent, source: 'write_file', allowOverwrite: true });
+        path = toWorkspaceRelPath(path, SANDBOX_WORKSPACE_ROOT);
+        const content = wrote.content;
+        const kind = wrote.kind;
+        const existingContent = wrote.existingContent;
+        const kitKeep = { content, note: wrote.kitNote };
         this.state?.recordFileChange({ path, kind }, agent);
         // A stale copy of this module under an earlier-resolving extension would run INSTEAD of it.
         const twinNote = await this.removeShadowTwins(path, agent);
@@ -4418,7 +4752,7 @@ export class ToolDispatcher {
         const steeringNotes = await this.writeSteeringNotes({ [path]: content });
         // Replacing our own untouched starter file is the job, not a risk (starterFragment.ts).
         if (kind === 'modify' && isOurStarterFile(path, existingContent, starterTemplates())) {
-          return `Replaced the starter ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes + kitKeep.note + twinNote;
+          return `Replaced the starter ${path} (${Buffer.byteLength(content, 'utf8')} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes + kitKeep.note + twinNote;
         }
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For anything except a
@@ -4435,12 +4769,12 @@ export class ToolDispatcher {
           // is the classic "model regenerated from memory and dropped code" signature — say so honestly.
           const risk = assessFullRewrite(existingContent, content);
           return (
-            `Updated ${path} (${content.length} bytes).\n` +
+            `Updated ${path} (${Buffer.byteLength(content, 'utf8')} bytes).\n` +
             `${risk.message} The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
             reviewNote + cascadeNote + testHint + steeringNotes + kitKeep.note + twinNote
           );
         }
-        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes + twinNote;
+        return `Created ${path} (${Buffer.byteLength(content, 'utf8')} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes + twinNote;
       }
 
       case 'write_files_batch': {
@@ -4454,8 +4788,9 @@ export class ToolDispatcher {
           const p = reqStr(obj, 'path');
           this.assertWritable(p); // C2 — one protected entry fails the whole batch, never half-applies
           this.assertTextWritable(p);
-          // Same Vite-preview-host backstop as write_file, applied per batched file.
-          return { path: p, content: guardConfigContent(p, this.applyPostgresProviderLock(p, reqStr(obj, 'content'))) };
+          // Transforms (vite host, postgres lock, pins) run inside guardedWrite so the diff and the
+          // memory index see the content that actually landed.
+          return { path: p, content: reqStr(obj, 'content') };
         });
         // Collapse duplicate paths within one batch to their LAST entry (last write wins — the same
         // final state the old serial loop produced), so the parallel writers below never race two
@@ -4497,68 +4832,59 @@ export class ToolDispatcher {
         // summary arrays below stay in topo order. JS is single-threaded, so the in-worker hooks never
         // interleave mid-statement.
         const perFile = await mapWithConcurrency(toWrite, 6, async (file) => {
-          // Detect create-vs-modify like write_file does, so the recorded change + the UI diff are
-          // honest and an accidental wholesale overwrite of an existing file is not silently a "create".
           let kind: 'create' | 'modify' = 'create';
           let priorContent = '';
-          try { priorContent = await this.actuator.readFile(this.workspaceId, file.path); kind = 'modify'; } catch { kind = 'create'; }
-          // Self-destruct guard (parity with write_file): refuse to BLANK a populated source file — the
-          // same catastrophe as deleting it, via the tool path. Skip this one file's write; the rest of
-          // the batch proceeds. A legitimate full-content rewrite is never blocked (only empty content is).
+          try {
+            priorContent = await this.actuator.readFile(this.workspaceId, file.path);
+            kind = 'modify';
+          } catch (err) {
+            if (!isNotFoundError(err)) {
+              return {
+                path: file.path, kind, shrink: false, blocked: false,
+                failed: `Could not read the existing ${file.path} safely (transient sandbox error) — not overwriting it. Retry in a moment.`,
+              };
+            }
+            kind = 'create';
+          }
           if (isDestructiveEmptyOverwrite(file.path, priorContent, file.content)) {
             getWorkspaceMemory(this.workspaceId).recordAudit(
               `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file (batch): ${file.path}`,
             );
-            return { path: file.path, kind, shrink: false, blocked: true };
+            return { path: file.path, kind, shrink: false, blocked: true, failed: emptyOverwriteMessage(file.path) };
           }
-          // Secrets guard PARITY — a guard that only covers write_file is one tool call from bypassed.
           const batchErased = wouldEraseUserSecrets(file.path, priorContent, file.content);
           if (batchErased.length > 0) {
             getWorkspaceMemory(this.workspaceId).recordAudit(
               `[BLOCKED-DESTRUCTIVE] refused to erase ${batchErased.length} user secret(s) in ${file.path} (batch)`,
             );
-            return { path: file.path, kind, shrink: false, blocked: true };
+            return { path: file.path, kind, shrink: false, blocked: true, failed: eraseUserSecretsMessage(file.path, batchErased) };
           }
-          // DUPLICATE-MODULE guard PARITY (admin 2026-08-02: "duplicate file bane hi na"). write_file has
-          // refused a parallel copy under a second convention root (app/ vs src/) since the TaskForge
-          // autopsy — but write_files_batch never did, so the whole guard was one tool call away from being
-          // bypassed and a batch could quietly create the drifting second copy. Same decision, same refusal:
-          // block just this file and let the rest of the batch through.
           if (kind === 'create' && this.duplicateModuleRefusal(file.path)) {
             return { path: file.path, kind, shrink: false, blocked: true };
           }
-          // Forensic edit-discipline (parity with write_file): a batched wholesale rewrite that is
-          // materially smaller than the file it replaced likely DROPPED code — flag it honestly below.
-          const shrink = kind === 'modify' && assessFullRewrite(priorContent, file.content).level === 'shrink';
-          // PACKAGE.JSON DEP PIN (parity with write_file, LearnLoop autopsy 2026-07-18): force known-
-          // breaking deps to their known-good major so a later plain `npm install` can't pull a breaker.
-          // `priorContent` (read above for the create-vs-modify verdict) also lets the ADD-ONLY dropped-
-          // dep guard (EduTube autopsy 2026-09-14) see what this batch is about to drop — this batch
-          // path is the one a full-file-dump rescue call actually writes through.
-          const pinnedContent = this.dedupeImportsForSource(file.path, this.pinPackageJsonContent(file.path, file.content, priorContent), agent);
-          // Parity with write_file: a batched rewrite of the stylesheet keeps the kit rules it dropped.
-          const batchKit = kind === 'modify' ? this.keepDesignKit(file.path, pinnedContent, priorContent) : { content: pinnedContent, note: '' };
-          const writtenContent = batchKit.content;
-          await this.actuator.writeFile(this.workspaceId, file.path, writtenContent);
-          // Consistency with write_file: run the per-write hook (security scan / durable tracking) —
-          // batch-written files were previously skipping it entirely. Best-effort + '?.'-guarded.
-          this.onFileWrite?.(file.path, writtenContent);
-          this.state?.recordFileChange({ path: file.path, kind }, agent);
-          // E7 — stream each batched write to the Diff tab too (reusing the probe content we already
-          // read for the create-vs-modify verdict, so no extra round-trip). Bounded per file.
-          this.events?.emit({
-            type: 'diff', agent,
-            diff: { path: file.path, patch: boundedWholeFileDiff(kind === 'modify' ? priorContent : '', file.content) },
-            ts: Date.now(),
-          });
-          batchMem.indexFile(file.path, file.content);
-          getEmbeddingStore(this.workspaceId).addFile(file.path, file.content).catch(() => {});
-          return { path: file.path, kind, shrink, kitNote: batchKit.note };
+          try {
+            const wrote = await this.guardedWrite(file.path, file.content, { agent, source: 'write_files_batch', allowOverwrite: true });
+            const shrink = wrote.kind === 'modify' && assessFullRewrite(wrote.existingContent, wrote.content).level === 'shrink';
+            this.state?.recordFileChange({ path: file.path, kind: wrote.kind }, agent);
+            this.events?.emit({
+              type: 'diff', agent,
+              diff: { path: file.path, patch: boundedWholeFileDiff(wrote.kind === 'modify' ? wrote.existingContent : '', wrote.content) },
+              ts: Date.now(),
+            });
+            batchMem.indexFile(file.path, wrote.content);
+            getEmbeddingStore(this.workspaceId).addFile(file.path, wrote.content).catch(() => {});
+            return { path: file.path, kind: wrote.kind, shrink, kitNote: wrote.kitNote, content: wrote.content };
+          } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            return { path: file.path, kind, shrink: false, blocked: false, failed: reason };
+          }
         });
-        const blocked: string[] = perFile.filter((r) => (r as { blocked?: boolean }).blocked).map((r) => r.path); // empty-overwrite refusals — NOT written
-        const written: string[] = perFile.filter((r) => !(r as { blocked?: boolean }).blocked).map((r) => r.path);
-        const overwritten: string[] = perFile.filter((r) => r.kind === 'modify' && !(r as { blocked?: boolean }).blocked).map((r) => r.path); // existing files this batch REPLACED wholesale
-        const shrunk: string[] = perFile.filter((r) => r.shrink).map((r) => r.path); // rewrites that likely DROPPED code
+        const blocked: string[] = perFile.filter((r) => (r as { blocked?: boolean }).blocked).map((r) => r.path);
+        const notWritten = perFile.filter((r): r is typeof r & { failed: string } => typeof (r as { failed?: string }).failed === 'string');
+        const writtenRows = perFile.filter((r) => !(r as { blocked?: boolean }).blocked && !(r as { failed?: string }).failed);
+        const written: string[] = writtenRows.map((r) => r.path);
+        const overwritten: string[] = writtenRows.filter((r) => r.kind === 'modify').map((r) => r.path);
+        const shrunk: string[] = writtenRows.filter((r) => r.shrink).map((r) => r.path);
         // Checkpoint ONCE for the whole batch — NOT once per file. A git commit per file made an
         // N-file batch cost N commits (with `git add -A` each ~45s pre-gitignore), which is exactly
         // what pushed builds past the wall-clock cap. One commit per batch is both correct (the batch
@@ -4585,14 +4911,22 @@ export class ToolDispatcher {
         // all written files at once (cross-file context); the note names each violating file.
         const writtenSet = new Set(written);
         const writtenRecord: Record<string, string> = {};
-        for (const f of parsedFiles) if (writtenSet.has(f.path)) writtenRecord[f.path] = f.content;
+        for (const r of writtenRows) {
+          const body = (r as { content?: string }).content;
+          if (writtenSet.has(r.path) && typeof body === 'string') writtenRecord[r.path] = body;
+        }
         // ONE compile for the whole batch (the queue coalesces anyway); each note names its own file.
         const batchSteeringNotes = await this.writeSteeringNotes(writtenRecord);
         const kitKeepNotes = perFile.map((r) => (r as { kitNote?: string }).kitNote ?? '').join('');
         // Sequential on purpose: the first call lists the sandbox once and the rest reuse it.
         let twinNotes = '';
         for (const p of written) twinNotes += await this.removeShadowTwins(p, agent);
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}${twinNotes}${batchSizeNote(dedupedByPath.size)}`;
+        const notWrittenLine = notWritten.length
+          ? `\nWritten (do not rewrite these): ${written.join(', ')}\nNot written: ${notWritten.map((r) => `${r.path} — ${r.failed}`).join('; ')}`
+          : '';
+        const summary = `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}${twinNotes}${batchSizeNote(dedupedByPath.size)}${notWrittenLine}`;
+        if (notWritten.length > 0) refuse(summary);
+        return summary;
       }
 
       case 'edit_file': {
@@ -4613,18 +4947,21 @@ export class ToolDispatcher {
         const editKit = this.keepDesignKit(path, deduped, existing);
         const updated = editKit.content;
         const editKitNote = editKit.note;
+        if (isSecretFilePath(path) && updated.includes(SECRET_MASK)) {
+          refuse(secretPlaceholderWriteMessage(path));
+        }
         // Self-destruct guard: an edit that reduces a populated source file to empty/whitespace blanks it
         // — same catastrophe as deletion. Refuse before writing so the file survives (StudySync autopsy).
         if (isDestructiveEmptyOverwrite(path, existing, updated)) {
           getWorkspaceMemory(this.workspaceId).recordAudit(
             `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file (edit): ${path}`,
           );
-          return emptyOverwriteMessage(path);
+          refuse(emptyOverwriteMessage(path));
         }
         // Parse guard: refuse an edit that would break a clean file (duplicate declaration / broken JSX),
         // so a syntactically-broken version is never saved — the model gets the exact spot + a fix hint.
         const editParseReject = await this.parseGuardRejection(path, existing, updated);
-        if (editParseReject) return editParseReject;
+        if (editParseReject) refuse(editParseReject);
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.onFileWrite?.(path, updated);
         this.noteDroppedImports(path, existing, updated);
@@ -4672,6 +5009,11 @@ export class ToolDispatcher {
         // model read that as "done" and moved on, until the loop guard stepped in. A tool that reports
         // success for work it never did is the fake-success class — so it says what was wrong instead.
         if (!rawCommand.trim()) throw new Error(emptyCommandMessage(input));
+        // P5b (AGENTV3_BANNED_PACKAGE_GUARD) — refuse an install of a banned package BEFORE it runs.
+        if (bannedPackageGuardEnabled()) {
+          const refusal = bannedInstallRefusal(rawCommand);
+          if (refusal) throw new Error(refusal);
+        }
         const typoFix = fixNodeModulesTypo(rawCommand);
         const command = typoFix.command;
         // Scaffold guard: create-* generators (`npm create vite`, `npx create-*`,
@@ -4689,7 +5031,7 @@ export class ToolDispatcher {
             `scaffold-guard blocked create-* generator: ${command.slice(0, 160)}`,
           );
           this.state?.appendTerminal(msg);
-          return msg;
+          refuse(msg);
         }
         // CLONING THE PROJECT INTO THE PROJECT — REFUSED (autopsy c5fd6ad1 + bff0bf23, 2026-09-21).
         // A survey turn whose prompt said "Do not change any files yet" ran
@@ -4717,7 +5059,7 @@ export class ToolDispatcher {
               );
             } catch { /* audit best-effort */ }
             this.state?.appendTerminal(cmsg);
-            return cmsg;
+            refuse(cmsg);
           }
         }
         // BROWSER-ONLY CODE IS NOT RUN IN NODE (queue row Q-146). A browser-oriented localStorage seed
@@ -4740,7 +5082,7 @@ export class ToolDispatcher {
               );
             } catch { /* audit best-effort */ }
             this.state?.appendTerminal(bmsg);
-            return bmsg;
+            refuse(bmsg);
           }
         }
         // THE SHELL IS NOT A WAY AROUND THE GREEN FREEZE (autopsy 8e124182). The freeze lives in the
@@ -4765,7 +5107,7 @@ export class ToolDispatcher {
             `preview-guard redirected manual preview command: ${command.slice(0, 160)}`,
           );
           this.state?.appendTerminal(pmsg);
-          return pmsg;
+          refuse(pmsg);
         }
         // Governance (Layer 58): classify the command's risk BEFORE execution.
         // DESTRUCTIVE SOURCE-DIR DELETION — BLOCKED (deep-test "PaisaTrack", 2026-07-15). The builder
@@ -4781,7 +5123,7 @@ export class ToolDispatcher {
             `[BLOCKED-DESTRUCTIVE] refused source-dir delete: ${command.slice(0, 200)}`,
           );
           this.state?.appendTerminal(blockMsg);
-          return blockMsg;
+          refuse(blockMsg);
         }
         // RUNTIME MANIFEST DELETION — BLOCKED (autopsy 042e472f): package.json / index.html / tsconfig.json
         // removed one by one slipped past every source guard, and the project could no longer run at all.
@@ -4790,7 +5132,7 @@ export class ToolDispatcher {
           const blockMsg = runtimeManifestDeletionMessage(manifestTarget);
           try { getWorkspaceMemory(this.workspaceId).recordAudit(`[BLOCKED-DESTRUCTIVE] refused runtime-manifest delete: ${command.slice(0, 200)}`); } catch { /* audit best-effort */ }
           this.state?.appendTerminal(blockMsg);
-          return blockMsg;
+          refuse(blockMsg);
         }
         // STILL-IMPORTED FILE DELETION — BLOCKED (admin 2026-08-02: "galat tarah se file delete ho hi na").
         // The bulk guard above deliberately allows deleting ONE stale file by name — right for genuinely
@@ -4815,7 +5157,7 @@ export class ToolDispatcher {
             } catch { /* audit best-effort */ }
             try { this.userFileRefusalSink?.(unasked); } catch { /* the report line is best-effort */ }
             this.state?.appendTerminal(blockMsg);
-            return blockMsg;
+            refuse(blockMsg);
           }
         }
         const deleteTargets = singleSourceDeleteTargets(command);
@@ -4831,7 +5173,7 @@ export class ToolDispatcher {
                 );
               } catch { /* audit best-effort */ }
               this.state?.appendTerminal(blockMsg);
-              return blockMsg;
+              refuse(blockMsg);
             }
           }
           // Q-118: nothing imports it, but its name says it builds a feature the user asked for, and no
@@ -4852,7 +5194,7 @@ export class ToolDispatcher {
                 getWorkspaceMemory(this.workspaceId).recordAudit(`[BLOCKED-FEATURE-FILE] refused delete of ${target} (builds requested "${hit.word}")`);
               } catch { /* audit best-effort */ }
               this.state?.appendTerminal(blockMsg);
-              return blockMsg;
+              refuse(blockMsg);
             }
           }
         }
@@ -4870,7 +5212,7 @@ export class ToolDispatcher {
             `[BLOCKED-DEPMUTATION:${depMutation.kind}] refused: ${command.slice(0, 200)}`,
           );
           this.state?.appendTerminal(blockMsg);
-          return blockMsg;
+          refuse(blockMsg);
         }
         // HIGH-risk commands are BLOCKED outright — they are irreversible, exfiltrate
         // secrets, or execute remote code. MEDIUM commands run but carry a warning.
@@ -4881,74 +5223,19 @@ export class ToolDispatcher {
             `[BLOCKED-HIGH] refused: ${command.slice(0, 200)} — ${risk.reasons.join('; ')}`,
           );
           this.state?.appendTerminal(blockMsg);
-          return blockMsg;
+          refuse(blockMsg);
         }
         const cmdStartedAt = Date.now();
-        // Pin bare installs of known-volatile packages to their known-good range BEFORE running
-        // (EventHive/MelodyBox autopsies): a bare `npm install prisma @prisma/client` otherwise pulls the
-        // LATEST — Prisma 7's breaking config/seed (or vue-router 5's Vite-7 peer) then bricks the build.
-        // Only bare package tokens in an install sub-command are pinned; `npx prisma generate` and
-        // explicit versions are untouched. This is the ONLY choke point that catches the agent's own install.
-        // Quote Next.js route-group paths (`mkdir -p src/app/(auth)/login`) BEFORE running — unquoted
-        // parens are a bash subshell → exit 2 syntax error, so the dirs are never made (PulseBoard autopsy).
-        // The vitest family's major follows the PROJECT's Vite, so read it — only when the command names
-        // vitest, so no other command pays for the read (autopsy 7d79254b, DependencyAutoFix.ts).
-        // The React Three Fiber family follows the project's React the same way (autopsy a5b661c8).
-        // …and a Capacitor plugin follows the project's Capacitor major (autopsy a9f8d186).
-        const pinPkg = /(?:^|[\s/])(?:@vitest\/|vitest\b|@react-three\/|@capacitor(?:-[\w-]+)?\/)/.test(command)
-          ? await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined)
-          : undefined;
-        const pinCtx = pinPkg !== undefined
-          ? { viteRange: viteRangeOf(pinPkg), reactRange: reactRangeOf(pinPkg), capacitorRange: capacitorRangeOf(pinPkg) }
-          : undefined;
-        const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command, pinCtx));
-        // Inject the user's own vault secrets (Settings → Secrets & API Keys) into the app's .env the first
-        // time it installs/builds/runs — so the app runs with real keys the user never pasted in chat.
-        await this.ensureUserSecretsEnvFile(effectiveCommand);
-        // Provision a real local Postgres BEFORE a migrate/seed if the app targets postgres (MediConnect
-        // autopsy): without this the from-scratch build hit P1001 at localhost:5432 and downgraded to a
-        // broken SQLite schema. Best-effort + once-per-build; a failure degrades to an honest DB error.
-        await this.ensureSandboxPostgres(effectiveCommand);
-        // PREFLIGHT (last-5-reports class fix, 2026-07-20): a provisioned Postgres is routinely reaped by
-        // the sandbox between touchpoints — five consecutive reports hit some flavour of this. Instead of
-        // letting the command FAIL with P1001 and reviving reactively (a full failed-command cycle plus
-        // the LLM turns spent reading the error), probe liveness for a millisecond BEFORE a live-DB
-        // command and revive first, so the command runs ONCE against a live DB. Shares the bounded
-        // revival budget with the reactive net below; entirely best-effort — a probe/revive failure just
-        // leaves today's reactive behaviour.
-        if (shouldPreflightPostgres({
-          provisioned: this.postgresProvisioned,
-          confirmedDead: this.postgresConfirmedDead,
-          needsLiveDb: commandNeedsLiveDatabase(effectiveCommand),
-          provisionedAtMs: this.postgresProvisionedAt,
-          nowMs: Date.now(),
-        })) {
-          try {
-            const probe = await this.actuator.runCommand(this.workspaceId, postgresPreflightProbeCommand());
-            if (/\bPG_DOWN\b/.test(probe.stdout) && canAttemptPostgresRevival(this.postgresReprovisionAttempts) && typeof this.actuator.provisionBackend === 'function') {
-              this.postgresReprovisionAttempts += 1;
-              this.narrate('db.asleepRestarting', {});
-              await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-preflight-revive');
-              this.postgresProvisionedAt = Date.now();
-            }
-          } catch { /* best-effort — the reactive DB-unreachable net below still catches a dead DB honestly */ }
-        }
-        // A BACKGROUNDED JOB NEVER HOLDS THE COMMAND'S PIPE (autopsy 241215d1): `python server.py &` then a
-        // `curl` waited out the whole 300 s timeout because the server kept stdout open. A dev-server
-        // launch is left to the managed boot, which strips its `&` itself (stripDevServerBackgrounding).
-        const background = isLongRunningCommand(effectiveCommand)
-          ? { command: effectiveCommand, detached: 0 }
-          : detachBackgroundJobs(effectiveCommand);
-        const runStartedAt = Date.now();
-        // Q-153 — `node <file>` running the app's own script reads the app's `.env` (appEnvFileForCommand.ts).
-        const ran = await this.actuator.runCommand(this.workspaceId, withAppEnvFile(background.command));
-        let { exitCode, stdout, stderr } = ran;
-        // Q-273 — the report splits a slow command into our setup, reaching the machine and the command.
-        const timing: CommandTiming | undefined = ran.timing
-          ? { setupMs: runStartedAt - cmdStartedAt, sandboxMs: ran.timing.sandboxMs, runMs: ran.timing.runMs }
-          : undefined;
-        if (background.detached > 0) {
-          stdout = `${stdout ?? ''}\n[note] ${background.detached === 1 ? 'The background job was' : `${background.detached} background jobs were`} started detached so this command could finish; its output goes to ${BACKGROUND_JOB_LOG} (read it with \`tail ${BACKGROUND_JOB_LOG}\`).`;
+        // TD-12 — pin, quote, detach, vault .env and Postgres live in runShellLikeBash (also used by
+        // run_migrations, TD-15). Every retry below runs `prepared`, the same string as this first run.
+        const shell = await this.runShellLikeBash(command, agent, { record: false });
+        const effectiveCommand = shell.effectiveCommand;
+        const prepared = shell.prepared;
+        const runPrepared = () => this.actuator.runCommand(this.workspaceId, withAppEnvFile(prepared));
+        let { exitCode, stdout, stderr } = shell;
+        const timing = shell.timing;
+        if (shell.detached > 0) {
+          stdout = `${stdout ?? ''}\n[note] ${shell.detached === 1 ? 'The background job was' : `${shell.detached} background jobs were`} started detached so this command could finish; its output goes to ${BACKGROUND_JOB_LOG} (read it with \`tail ${BACKGROUND_JOB_LOG}\`).`;
         }
         // WHAT npm WROTE IS WHAT GETS SAVED (2026-09-27). A shell install edits package.json behind the
         // captured writes, and a package.json the model wrote earlier would otherwise win at the final
@@ -4986,7 +5273,7 @@ export class ToolDispatcher {
             const fmtCmd = `${dirMatch ? `cd ${dirMatch[1]} && ` : ''}npx --no-install prisma format`;
             const fmt = await this.actuator.runCommand(this.workspaceId, fmtCmd);
             if (fmt.exitCode === 0) {
-              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              const retry = await runPrepared();
               if (retry.exitCode === 0) {
                 ({ exitCode, stdout, stderr } = retry);
                 this.narrate('fix.prismaRelation', {});
@@ -5024,7 +5311,7 @@ export class ToolDispatcher {
             const installCmd = pinKnownDepsInInstallCommand(`${cd}npm install -D prisma @prisma/client`);
             const inst = await this.actuator.runCommand(this.workspaceId, installCmd);
             if (inst.exitCode === 0) {
-              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              const retry = await runPrepared();
               if (retry.exitCode === 0) {
                 ({ exitCode, stdout, stderr } = retry);
                 this.narrate('fix.toolkitInstalled', {});
@@ -5052,7 +5339,7 @@ export class ToolDispatcher {
             const genCmd = `${dirMatch ? `cd ${dirMatch[1]} && ` : ''}npx prisma generate`;
             const gen = await this.actuator.runCommand(this.workspaceId, genCmd);
             if (gen.exitCode === 0) {
-              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              const retry = await runPrepared();
               if (retry.exitCode === 0) {
                 ({ exitCode, stdout, stderr } = retry);
                 this.narrate('fix.clientGenerated', {});
@@ -5085,7 +5372,7 @@ export class ToolDispatcher {
                 }
               }
               if (fixedAny) {
-                const retry = await this.actuator.runCommand(this.workspaceId, command);
+                const retry = await runPrepared();
                 if (retry.exitCode === 0) {
                   ({ exitCode, stdout, stderr } = retry);
                   this.narrate('fix.enumOnSqlite', { enums: missingEnums.join(', ') });
@@ -5112,11 +5399,12 @@ export class ToolDispatcher {
               const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-reprovision');
               const lines = postgresEnvLines(prov?.envVars?.DATABASE_URL ?? prov?.dbUrl);
               if (Object.keys(lines).length > 0) {
-                let existing = '';
-                try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
-                await this.actuator.writeFile(this.workspaceId, '.env', mergeDotEnv(existing, lines)).catch(() => {});
+                const existingEnv = await this.readDotEnvForMerge('env-read');
+                if (existingEnv.ok) {
+                  await this.actuator.writeFile(this.workspaceId, '.env', mergeDotEnv(existingEnv.text, lines)).catch(() => {});
+                }
               }
-              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              const retry = await runPrepared();
               if (!looksLikeDbUnreachable(`${retry.stdout}\n${retry.stderr}`)) {
                 ({ exitCode, stdout, stderr } = retry);
                 this.postgresProvisionedAt = Date.now(); // revival verified — reset the preflight gate
@@ -6084,7 +6372,7 @@ export class ToolDispatcher {
         this.state?.recordFileChange({ path, kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} from the project graph (${content.length} bytes).`;
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} from the project graph (${Buffer.byteLength(content, 'utf8')} bytes).`;
       }
 
       case 'generate_architecture_docs': {
@@ -6104,7 +6392,7 @@ export class ToolDispatcher {
         this.state?.recordFileChange({ path, kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — the real module dependency map + structural notes (${content.length} bytes).`;
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — the real module dependency map + structural notes (${Buffer.byteLength(content, 'utf8')} bytes).`;
       }
 
       case 'generate_dev_guide': {
@@ -6497,8 +6785,8 @@ export class ToolDispatcher {
             ? 'This was a FILTERED run. Run run_tests with no filter before calling the build done.\n'
             : '') +
           (outcome.failingTests.length ? `failing:\n  ${outcome.failingTests.slice(0, 20).join('\n  ')}\n` : '') +
-          `\n[stdout tail]\n${stdout.slice(-1500)}` +
-          (stderr ? `\n[stderr tail]\n${stderr.slice(-800)}` : '');
+          `\n[stdout tail]\n${redactSecrets(stdout.slice(-1500))}` +
+          (stderr ? `\n[stderr tail]\n${redactSecrets(stderr.slice(-800))}` : '');
         this.state?.appendTerminal(detail);
         return detail;
       }
@@ -6516,8 +6804,11 @@ export class ToolDispatcher {
         // every unparseable frontend file — surface it FIRST so the model fixes the precise location in one
         // step instead of flailing. Best-effort (bounded to 20 frontend files); never breaks typecheck.
         let syntaxHeader = '';
+        const feAll = files.filter((f) => /\.(mjs|cjs|jsx?|tsx?)$/i.test(f) && !/\.d\.ts$/i.test(f));
+        const feChecked = Math.min(20, feAll.length);
+        const feTotal = feAll.length;
         try {
-          const jsFiles = files.filter((f) => /\.(mjs|cjs|jsx?|tsx?)$/i.test(f) && !/\.d\.ts$/i.test(f)).slice(0, 20);
+          const jsFiles = feAll.slice(0, 20);
           const fileMap: Record<string, string> = {};
           for (const p of jsFiles) { try { fileMap[p] = await this.actuator.readFile(this.workspaceId, p); } catch { /* skip unreadable */ } }
           const se = await findSyntaxErrors(fileMap);
@@ -6555,12 +6846,12 @@ export class ToolDispatcher {
         // break is fixed FIRST (tsc on unparseable code just echoes parse noise). Honest: a tsc that can't
         // run is silently skipped (the esbuild note still stands) — never a fake pass.
         let tscHeader = '';
-        let tscRanClean = false;
+        let tscStatus: 'clean' | 'errors' | 'did-not-complete' = 'did-not-complete';
         const isTsProject = files.includes('tsconfig.json')
           && files.some((f) => /\.tsx?$/i.test(f) && !/\.d\.ts$/i.test(f));
         if (isTsProject && !syntaxHeader) {
           try {
-            const tscCommand = robustTscCommand('--noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo', '2>&1 | head -60');
+            const tscCommand = robustTscCommand(`--noEmit --incremental --tsBuildInfoFile /tmp/agentv3-${this.tsBuildInfoId}.tsbuildinfo`, '2>&1 | head -60');
             const tscStartedAt = Date.now();
             const r = await withTimeout(
               this.actuator.runCommand(this.workspaceId, tscCommand),
@@ -6599,8 +6890,11 @@ export class ToolDispatcher {
             // app held 15 errors. Zero parsed errors is not a verdict; the ONE reader decides.
             const verdict = tscVerdict(combined);
             if (verdict === 'not-run' || verdict === 'unknown') {
+              tscStatus = 'did-not-complete';
+              this._lastTypeErrors = null;
               tscHeader = `TYPECHECK DID NOT RUN — the TypeScript compiler could not start, so the types were NOT checked (this is not a verdict about your code). Its output:\n${combined.split('\n').slice(0, 8).join('\n')}\n\n`;
             } else if (tscErrs.length > 0 || verdict === 'failed') {
+              tscStatus = 'errors';
               // `failed` with nothing parsed is a project-level error (`error TS5023: Unknown compiler
               // option`) that names no file — still a failure, never "clean".
               getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${Math.max(tscErrs.length, countTscErrors(combined))} TypeScript error(s).`);
@@ -6610,17 +6904,23 @@ export class ToolDispatcher {
               // to rewrite the file, which is the loop that had to break.
               tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`;
             } else {
-              tscRanClean = true;
+              tscStatus = 'clean';
               this.noteCompileOutput(combined);
             }
-          } catch { /* real-tsc pass is best-effort — a toolchain miss must never fake a pass */ }
+          } catch {
+            tscStatus = 'did-not-complete';
+            this._lastTypeErrors = null;
+          }
         }
         if (syntaxHeader || tscHeader) {
           return `${syntaxHeader}${tscHeader}${crossLang || 'No Python/Java/Go sources to check.'}`.trim();
         }
-        const feHeadline = tscRanClean
-          ? 'frontend parses clean (esbuild) AND type-checks clean (tsc --noEmit)'
-          : 'frontend parses clean (esbuild)';
+        const checkedNote = `checked ${feChecked} of ${feTotal} files`;
+        const feHeadline = tscStatus === 'clean'
+          ? `frontend parses (esbuild, ${checkedNote}) AND type-checks clean (tsc --noEmit)`
+          : tscStatus === 'did-not-complete' && isTsProject
+            ? `frontend parses (esbuild, ${checkedNote}) — ⚠ tsc did NOT complete (timeout/crash): types are NOT verified`
+            : 'frontend parses clean (esbuild)';
         return crossLang || `typecheck: ${feHeadline}; no Python, Java, or Go sources detected.`;
       }
 
@@ -7343,9 +7643,9 @@ export class ToolDispatcher {
         const mdResult = mdAction === 'remove' ? removeOneDependency(mdPkg, mdName) : addDependency(mdPkg, mdName, mdVersion);
         if (!mdResult.ok) return `manage_dependency: ${mdResult.message}`;
         if (mdResult.changed) {
-          await this.actuator.writeFile(this.workspaceId, 'package.json', mdResult.text);
+          const wrote = await this.guardedWrite('package.json', mdResult.text, { agent, source: 'manage_dependency', allowOverwrite: true });
           this.state?.recordFileChange({ path: 'package.json', kind: 'modify' }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile('package.json', mdResult.text);
+          getWorkspaceMemory(this.workspaceId).indexFile('package.json', wrote.content);
           this.scheduleCheckpoint(`${mdAction} dependency ${mdName}`);
         }
         return mdResult.note;
@@ -8397,11 +8697,11 @@ export class ToolDispatcher {
         // exactly the gap `rescueDatabase` was written to close for the database.
         let wrote = false;
         try {
-          let existing = '';
-          try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'secrets-env-read'); } catch { existing = ''; }
-          const merged = mergeDotEnv(existing, saved);
+          const existingEnv = await this.readDotEnvForMerge('secrets-env-read');
+          if (!existingEnv.ok) { wrote = false; }
+          else {
+          const merged = mergeDotEnv(existingEnv.text, saved);
           await this.actuator.writeFile(this.workspaceId, '.env', merged);
-          try { this.onFileWrite?.('.env', merged); } catch { /* durable record is best-effort */ }
           // The user's real keys must never reach their git repo.
           try {
             let gi = '';
@@ -8410,6 +8710,7 @@ export class ToolDispatcher {
             if (nextGi !== gi) { await this.actuator.writeFile(this.workspaceId, '.gitignore', nextGi); try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ } }
           } catch { /* gitignore hardening is best-effort */ }
           wrote = true;
+          }
         } catch { wrote = false; }
 
         // Keep the in-memory set current so a later ask in the SAME build does not re-request these.
@@ -8902,14 +9203,18 @@ export class ToolDispatcher {
           const exitCodes: number[] = [];
           let planOk = true;
           for (const cmd of plan.commands) {
-            let r: { exitCode: number; stdout: string; stderr: string };
-            try { r = await this.actuator.runCommand(this.workspaceId, cmd); }
-            catch (e) { r = { exitCode: 1, stdout: '', stderr: e instanceof Error ? e.message : String(e) }; }
+            let r: { exitCode: number; stdout: string; stderr: string; display: string };
+            try { r = await this.runShellLikeBash(cmd, agent, { forceSecrets: true }); }
+            catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              r = { exitCode: 1, stdout: '', stderr: msg, display: redactSecrets(msg) };
+            }
             const ok = r.exitCode === 0;
             allOk = allOk && ok;
             planOk = planOk && ok;
             exitCodes.push(r.exitCode);
-            out.push(`${ok ? '✓' : '✗'} [${plan.tool}] ${cmd} → exit ${r.exitCode}${ok ? '' : `\n${(r.stderr || r.stdout || '').slice(-600)}`}`);
+            const tail = r.display.slice(-600);
+            out.push(`${ok ? '✓' : '✗'} [${plan.tool}] ${cmd} → exit ${r.exitCode}${ok ? '' : `\n${tail}`}`);
             if (!ok) break; // a failed step blocks the rest of this tool's chain — report honestly, don't push on
           }
           // GA-6 — persist THIS plan's run (tool, commands, outcome, exit codes) so a later build remembers it.
@@ -10330,6 +10635,12 @@ export class ToolDispatcher {
       case 'generate_types': {
         // GA-10 — generate TypeScript interfaces from the DB schema (.prisma models / SQL tables) so the
         // frontend + backend share one typed shape. Pure logic in schemaTypeGen.ts.
+        // Path is judged BEFORE any schema read so a secret or junk destination is refused even with no schema.
+        // `.tsx` is accepted so `src/App.tsx` hits the overwrite door (the spec's `.ts` suffix would reject it first).
+        const outPath = optStr(input, 'outPath') || 'src/types/db.ts';
+        if (!/^(src|app|lib|types)\/[A-Za-z0-9._/-]+\.tsx?$/.test(outPath)) {
+          refuse(`generate_types: refusing "${outPath}" — outPath must be a .ts file under src/, app/, lib/, or types/.`);
+        }
         let gtFiles: string[] = [];
         try { gtFiles = await this.actuator.listFiles(this.workspaceId); } catch { return 'generate_types: could not list workspace files.'; }
         const gtPaths = gtFiles.filter((p) => /\.(prisma|sql)$/i.test(p) && !/(^|[\\/])node_modules([\\/]|$)/.test(p)).slice(0, 30);
@@ -10340,14 +10651,11 @@ export class ToolDispatcher {
         }
         const gen = generateSchemaTypes(gtSources);
         if (!gen) return 'generate_types: no models/tables were parseable from the schema — nothing to generate.';
-        const outPath = optStr(input, 'outPath') || 'src/types/db.ts';
-        let kind: 'create' | 'modify' = 'create';
-        try { await this.actuator.readFile(this.workspaceId, outPath); kind = 'modify'; } catch { kind = 'create'; }
-        await this.actuator.writeFile(this.workspaceId, outPath, gen.fileContent);
-        this.state?.recordFileChange({ path: outPath, kind }, agent);
-        getWorkspaceMemory(this.workspaceId).indexFile(outPath, gen.fileContent);
+        const wrote = await this.guardedWrite(outPath, gen.fileContent, { agent, source: 'generate_types', allowOverwrite: false });
+        this.state?.recordFileChange({ path: outPath, kind: wrote.kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(outPath, wrote.content);
         this.scheduleCheckpoint('schema types');
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${outPath} — ${gen.types.length} type(s) from your ${gen.source} schema (${gen.types.map((t) => t.name).slice(0, 12).join(', ')}${gen.types.length > 12 ? '…' : ''}). Import them in the frontend + backend for one shared typed shape.`;
+        return `${wrote.kind === 'create' ? 'Created' : 'Updated'} ${outPath} — ${gen.types.length} type(s) from your ${gen.source} schema (${gen.types.map((t) => t.name).slice(0, 12).join(', ')}${gen.types.length > 12 ? '…' : ''}). Import them in the frontend + backend for one shared typed shape.`;
       }
 
       case 'replace_symbol': {
@@ -10370,11 +10678,11 @@ export class ToolDispatcher {
         if (result.content === current) {
           return `replace_symbol: no change — the new code for "${symbol}" is identical.`;
         }
-        await this.actuator.writeFile(this.workspaceId, path, result.content);
+        const wrote = await this.guardedWrite(path, result.content, { agent, source: 'replace_symbol', allowOverwrite: true });
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);
-        getWorkspaceMemory(this.workspaceId).indexFile(path, result.content);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
         this.scheduleCheckpoint(`replace ${symbol} in ${path}`);
-        const symbolSteeringNotes = await this.writeSteeringNotes({ [path]: result.content });
+        const symbolSteeringNotes = await this.writeSteeringNotes({ [path]: wrote.content });
         return `Replaced top-level symbol "${symbol}" in ${path} (AST-safe — surrounding code untouched).` + symbolSteeringNotes;
       }
 
@@ -10428,22 +10736,21 @@ export class ToolDispatcher {
           { version: optStr(input, 'version'), date: new Date().toISOString().slice(0, 10) },
         );
         const path = optStr(input, 'path') || 'RELEASE_NOTES.md';
-        let kind: 'create' | 'modify' = 'create';
-        try {
-          await this.actuator.readFile(this.workspaceId, path);
-          kind = 'modify';
-        } catch {
-          kind = 'create';
+        if (!/\.(?:md|txt)$/i.test(path) || isSecretFilePath(path)) {
+          refuse(`generate_release_notes: refusing "${path}" — release notes must be a .md or .txt file and not a secret.`);
         }
-        await this.actuator.writeFile(this.workspaceId, path, note.markdown);
-        this.state?.recordFileChange({ path, kind }, agent);
-        getWorkspaceMemory(this.workspaceId).indexFile(path, note.markdown);
-        this.scheduleCheckpoint(`${kind} ${path}`);
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — ${note.version}: ${note.summary}`;
+        const wrote = await this.guardedWrite(path, note.markdown, { agent, source: 'generate_release_notes', allowOverwrite: false });
+        this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+        this.scheduleCheckpoint(`${wrote.kind} ${path}`);
+        return `${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path} — ${note.version}: ${note.summary}`;
       }
 
       case 'update_preview': {
         const port = reqNum(input, 'port');
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+          refuse('port must be an integer 1–65535');
+        }
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
@@ -10458,8 +10765,8 @@ export class ToolDispatcher {
         // including a managed dev-server start — stop the retry loop cold. Without this the model
         // re-ran update_preview / npm run dev until the step cap (~10 min burned, build reported
         // failed even though the code was finished).
-        if (this.previewGaveUp) {
-          return 'FINAL: the live preview could not be brought up in this sandbox (a managed dev-server start was already attempted). Do NOT call update_preview or restart the dev server again. Finish the build now and tell the user honestly: the files are complete and saved, but the live preview is unavailable in this environment.';
+        if (previewGaveUp(this.workspaceId)) {
+          refuse('FINAL: the live preview could not be brought up in this sandbox (a managed dev-server start was already attempted). Do NOT call update_preview or restart the dev server again. Finish the build now and tell the user honestly: the files are complete and saved, but the live preview is unavailable in this environment.');
         }
         // Verify the port is actually listening before publishing. Bounded TWO ways so this tool can
         // NEVER hang the whole build (the real freeze we saw: a single sandbox runCommand stalled and
@@ -10505,7 +10812,7 @@ export class ToolDispatcher {
                 'preview-managed-dev-start',
               );
               const healOut = `${heal.stdout || ''}\n${heal.stderr || ''}`;
-              const tail = healOut.trim().slice(-200);
+              const tail = redactSecrets(healOut.trim().slice(-200));
               healNote = ` A managed dev-server start was attempted${tail ? ` (${tail})` : ''}.`;
               // AUTHORITATIVE VERDICT: the managed launcher runs the SAME port check (buildPortWaitCommand)
               // that pollPort re-runs, then prints its result. When it confirms the port UP, TRUST it — a
@@ -10530,7 +10837,7 @@ export class ToolDispatcher {
         try {
           rawUrl = await withTimeout(this.actuator.getPortUrl(this.workspaceId, port), 10_000, 'preview-get-url');
         } catch {
-          return `WARNING: could not resolve the preview URL for port ${port} (the sandbox did not respond in time) — preview NOT published. Make sure the dev server is up, then call update_preview again.`;
+          refuse(`WARNING: could not resolve the preview URL for port ${port} (the sandbox did not respond in time) — preview NOT published. Make sure the dev server is up, then call update_preview again.`);
         }
         const url = applyPreviewDomain(rawUrl);
         if (!portReady) {
@@ -10538,10 +10845,10 @@ export class ToolDispatcher {
           // "preview is EARNED" rule.
           this.previewFails++;
           if (this.previewFails >= 2) {
-            this.previewGaveUp = true;
-            return `WARNING: port ${port} is still not responding even after a managed dev-server start.${healNote} Preview NOT published. Do NOT retry update_preview or the dev server — finish the build now and tell the user honestly that the live preview is unavailable; their files are complete and saved.`;
+            markPreviewGaveUp(this.workspaceId);
+            refuse(`WARNING: port ${port} is still not responding even after a managed dev-server start.${healNote} Preview NOT published. Do NOT retry update_preview or the dev server — finish the build now and tell the user honestly that the live preview is unavailable; their files are complete and saved.`);
           }
-          return `WARNING: port ${port} did not respond.${healNote} Preview NOT published. If dependencies were still installing, you may call update_preview ONE more time; do not retry beyond that.`;
+          refuse(`WARNING: port ${port} did not respond.${healNote} Preview NOT published. If dependencies were still installing, you may call update_preview ONE more time; do not retry beyond that.`);
         }
         this.previewFails = 0;
         /**
@@ -10661,6 +10968,7 @@ export class ToolDispatcher {
         if (!this.secondOpinion) {
           return 'Second opinion is not available in this context.';
         }
+        this.chargePaidTool('second_opinion', 'AGENTV3_MAX_SECOND_OPINION_PER_BUILD', 5);
         const review = await this.secondOpinion(prompt);
         return review;
       }
@@ -10670,6 +10978,7 @@ export class ToolDispatcher {
         if (!this.consensus) {
           return 'Consensus is not available in this context.';
         }
+        this.chargePaidTool('consensus', 'AGENTV3_MAX_CONSENSUS_PER_BUILD', 3);
         return await this.consensus(question);
       }
 
@@ -10678,7 +10987,8 @@ export class ToolDispatcher {
         if (!this.webSearch) {
           return 'Web search is not available in this context.';
         }
-        const limit = typeof input.limit === 'number' ? input.limit : 5;
+        const MAX_WEB_SEARCH_LIMIT = webSearchMaxLimit();
+        const limit = Math.max(1, Math.min(MAX_WEB_SEARCH_LIMIT, Math.floor(Number(input.limit) || 5)));
         return await this.webSearch(query, limit);
       }
 
@@ -10873,8 +11183,7 @@ export class ToolDispatcher {
         // at 50 (which left files 51…N with the OLD name → a broken build reported as success). Kill
         // switch AGENTV3_CODEMOD_SCOPED=off restores the exact legacy 50-file behaviour.
         const CODE = /\.(t|j)sx?$/;
-        const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
-        const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
+        const codeFilesAll = files.filter((f) => CODE.test(f) && !CODEMOD_SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
         let renameSkipped = 0;
         if (envKillSwitch('AGENTV3_CODEMOD_SCOPED')) {
@@ -10893,13 +11202,7 @@ export class ToolDispatcher {
         }
         const result = await renameSymbol(fileContents, oldName, newName);
         if (!result.ok) return `codemod_rename failed: ${result.error}`;
-        // Write back changed files.
-        for (const { path, after } of result.changes) {
-          try {
-            await this.actuator.writeFile(this.workspaceId, path, after);
-            getWorkspaceMemory(this.workspaceId).indexFile(path, after);
-          } catch { /* best-effort */ }
-        }
+        await this.commitCodemodWrites(result.changes, agent, 'codemod_rename');
         this.scheduleCheckpoint(`codemod rename ${oldName} → ${newName}`);
         const renameBase = result.summary || `Renamed "${oldName}" → "${newName}" in ${result.changes.length} file(s).`;
         const renameNote = codemodTruncationNote('codemod_rename', renameSkipped);
@@ -10921,8 +11224,7 @@ export class ToolDispatcher {
         // prop reaches every definition + call site across a large repo, not a blind first-50. Kill switch
         // AGENTV3_CODEMOD_SCOPED=off restores the exact legacy 50-file behaviour.
         const CODE = /\.(t|j)sx?$/;
-        const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
-        const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
+        const codeFilesAll = files.filter((f) => CODE.test(f) && !CODEMOD_SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
         let addPropSkipped = 0;
         if (envKillSwitch('AGENTV3_CODEMOD_SCOPED')) {
@@ -10941,12 +11243,7 @@ export class ToolDispatcher {
         }
         const result = await addComponentProp(fileContents, componentName, propName, propType, defaultValue);
         if (!result.ok) return `codemod_add_prop failed: ${result.error}`;
-        for (const { path, after } of result.changes) {
-          try {
-            await this.actuator.writeFile(this.workspaceId, path, after);
-            getWorkspaceMemory(this.workspaceId).indexFile(path, after);
-          } catch { /* best-effort */ }
-        }
+        await this.commitCodemodWrites(result.changes, agent, 'codemod_add_prop');
         this.scheduleCheckpoint(`codemod add prop ${propName} to ${componentName}`);
         const addPropBase = result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
         const addPropNote = codemodTruncationNote('codemod_add_prop', addPropSkipped);
@@ -10974,9 +11271,8 @@ export class ToolDispatcher {
         if (needed.size <= 1) {
           try {
             const CODE = /\.(t|j)sx?$/;
-            const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
             for (const f of await this.actuator.listFiles(this.workspaceId)) {
-              if (CODE.test(f) && !SKIP.test(f)) needed.add(f);
+              if (CODE.test(f) && !CODEMOD_SKIP.test(f)) needed.add(f);
             }
           } catch { /* fall through with what we have */ }
         }
@@ -10986,17 +11282,31 @@ export class ToolDispatcher {
           catch { /* skip unreadable/nonexistent */ }
         }
         const result = computeMove(contents, from, to);
-        if (!result.ok) return `codemod_move_file failed: ${result.error}`;
+        if (!result.ok) refuse(`codemod_move_file failed: ${result.error}`);
+        // TD-3: a failed write must not be followed by `rm`. Swallowing the error used to delete
+        // the only copy of the file.
+        const failed: string[] = [];
         for (const { path, after } of result.changes) {
           try {
-            await this.actuator.writeFile(this.workspaceId, path, after);
-            getWorkspaceMemory(this.workspaceId).indexFile(path, after);
-          } catch { /* best-effort per file */ }
+            const wrote = await this.guardedWrite(path, after, { agent, source: 'codemod_move_file', allowOverwrite: true });
+            getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+          } catch { failed.push(path); }
         }
-        this.state?.recordFileChange({ path: to, kind: 'create' }, agent);
+        const destContent = result.changes.find((c) => c.path === to)?.after;
+        const destOk = !failed.includes(to) && destContent !== undefined &&
+          (await this.actuator.readFile(this.workspaceId, to).then((c) => c === destContent, () => false));
+        if (!destOk || failed.length > 0) {
+          refuse(`codemod_move_file did not complete: ${failed.length ? `could not write ${failed.join(', ')}` : `${to} could not be verified`}. ` +
+            `${from} was NOT deleted, so nothing was lost. Fix the cause and retry, or move the file with write_file + bash rm.`);
+        }
+        this.state?.recordFileChange({ path: to, kind: 'create' }, agent);   // only after success
         // Complete the move: remove the old path. Guard against shell metacharacters; report honestly on failure.
         let removed = false;
         if (/^[A-Za-z0-9._/-]+$/.test(from) && !from.split('/').includes('..')) {
+          try { this.assertWritable(from); }
+          catch {
+            return result.summary + `\nNOTE: could not delete the old file ${from} — remove it manually (its importers already point to ${to}).`;
+          }
           const rm = await this.actuator
             .runCommand(this.workspaceId, `rm -f '${from}'`)
             .catch(() => ({ exitCode: -1, stdout: '', stderr: '' }));
@@ -11136,10 +11446,8 @@ function summarize(content: string): string {
   return oneLine.length > MAX_SUMMARY ? oneLine.slice(0, MAX_SUMMARY) + '…' : oneLine;
 }
 
-function miniDiff(oldStr: string, newStr: string): string {
-  const minus = oldStr.split('\n').map((l) => `- ${l}`).join('\n');
-  const plus = newStr.split('\n').map((l) => `+ ${l}`).join('\n');
-  return `${minus}\n${plus}`;
+export function miniDiff(oldStr: string, newStr: string): string {
+  return boundedWholeFileDiff(oldStr, newStr);
 }
 
 /**
@@ -11325,6 +11633,15 @@ export function ambiguousEditRegions(existing: string, offsets: Iterable<number>
     + 'To ADD content at the end of the file instead, call edit_file with an EMPTY old_string — it appends, no anchor needed.';
 }
 
+/**
+ * Keep text spliced into a file in that file's newline convention. A CRLF file stays CRLF-only
+ * (no bare `\n`). An LF file is not rewritten as CRLF.
+ */
+function withFileNewlines(existing: string, inserted: string): string {
+  if (!existing.includes('\r\n')) return inserted;
+  return inserted.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+}
+
 export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {
   // APPEND MODE (Connectly Edit #1 autopsy 2026-07-21): the model wanted to ADD styles to Navbar.css and
   // called edit_file with an EMPTY old_string. An empty string "matches" at every character position, so
@@ -11333,7 +11650,8 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
   // Deterministic + SAFE: an empty old_string previously only ERRORED, so no working behaviour changes.
   if (oldStr === '') {
     const sep = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
-    return { updated: existing + sep + newStr, matchedOld: '', note: 'empty old_string → appended new_string to the end of the file' };
+    const inserted = withFileNewlines(existing, sep + newStr);
+    return { updated: existing + inserted, matchedOld: '', note: 'empty old_string → appended new_string to the end of the file' };
   }
   const exact = existing.split(oldStr).length - 1;
   if (exact === 1) {
@@ -11344,7 +11662,8 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
     // new_string contained a `$` (the "editing gadbad kar deta hai" bug). Mirrors the whitespace-
     // flexible path below, which already concatenates safely.
     const idx = existing.indexOf(oldStr);
-    return { updated: existing.slice(0, idx) + newStr + existing.slice(idx + oldStr.length), matchedOld: oldStr, note: '' };
+    const inserted = withFileNewlines(existing, newStr);
+    return { updated: existing.slice(0, idx) + inserted + existing.slice(idx + oldStr.length), matchedOld: oldStr, note: '' };
   }
   if (exact > 1) {
     throw new Error(
@@ -11378,7 +11697,8 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
   const m = matches[0];
   const start = m.index ?? 0;
   const matchedOld = m[0];
-  const updated = existing.slice(0, start) + newStr + existing.slice(start + matchedOld.length);
+  const inserted = withFileNewlines(existing, newStr);
+  const updated = existing.slice(0, start) + inserted + existing.slice(start + matchedOld.length);
   return { updated, matchedOld, note: ' (matched ignoring whitespace differences)' };
 }
 
@@ -11405,9 +11725,15 @@ export function globToRegExp(glob: string): RegExp {
       re += '|';
     } else if (c === '*') {
       if (glob[i + 1] === '*') {
-        re += '.*';
-        i++;
-        if (glob[i + 1] === '/') i++;
+        // `**/` is an optional directory prefix — NOT `.*`, which also matches a suffix inside a
+        // filename (`**/test.ts` must not match `src/latest.ts`). A bare `**` stays `.*`.
+        if (glob[i + 2] === '/') {
+          re += '(?:.*/)?';
+          i += 2;
+        } else {
+          re += '.*';
+          i++;
+        }
       } else {
         re += '[^/]*';
       }

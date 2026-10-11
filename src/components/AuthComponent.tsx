@@ -307,7 +307,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         recaptchaVerifier.current = new RecaptchaVerifier(auth, recaptchaRef.current, {
           'size': 'invisible',
           'callback': () => {
-            console.log('Recaptcha solved');
+            if (import.meta.env.DEV) console.log('Recaptcha solved');
           }
         });
       }
@@ -612,7 +612,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
 
   // Helper for IDE logs integration if needed
   const addTerminalLine = (text: string, type: 'info' | 'error' | 'success' | 'warn' = 'info') => {
-      console.log(`[IDE LOG] ${type}: ${text}`);
+      if (import.meta.env.DEV) console.log(`[IDE LOG] ${type}: ${text}`);
   };
 
   // ── Social sign-in (Google + GitHub) — popup-first, redirect fallback ─────────

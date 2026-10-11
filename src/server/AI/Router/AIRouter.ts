@@ -313,12 +313,17 @@ export class AIRouter {
         // never spoke stalled the turn for ever — and chat.ts's 20-second keepalive ping held the dead
         // turn open. The bound is SILENCE, not duration (see streamWatchdog.ts), so a slow provider
         // that is still emitting is never cut off. `CHAT_STREAM_WATCHDOG=off` restores this exact line.
+        //
+        // 🔴 AND `signal` IS WHAT MAKES THE DISCONNECT COST NOTHING (Q-621, second half). Until it
+        // was threaded through here, this method only checked `signal.aborted` BETWEEN rungs: the
+        // request already in flight ran to completion and was billed in full, so a user who closed
+        // the tab after one word still paid for the whole answer.
         const limits = watchdogLimits();
         if (!limits) {
-          await p.executeStream(prompt, systemPrompt, onChunk);
+          await p.executeStream(prompt, systemPrompt, onChunk, undefined, signal);
         } else {
           const watched = await runWatchedStream(
-            (cb) => p.executeStream!(prompt, systemPrompt, cb),
+            (cb) => p.executeStream!(prompt, systemPrompt, cb, undefined, signal),
             onChunk,
             limits,
           );
@@ -411,6 +416,8 @@ export class AIRouter {
     const runStream = (p: typeof p1, index: number): Promise<void> => {
       if (!this.acquire(p.name)) return Promise.resolve();
       const t = Date.now();
+      // `signal` rides the call itself, not only the chunk guard below (Q-621): dropping a chunk the
+      // user will never see still pays for the tokens that produced it, and a RACE pays twice.
       return p.executeStream!(prompt, systemPrompt, (chunk) => {
         if (signal?.aborted) return;
         lastChunkAt = Date.now(); // the moving target the idle bound below watches
@@ -420,7 +427,7 @@ export class AIRouter {
           commitResolve();
         }
         if (committed === p.name) onChunk(chunk);
-      }).then(() => {
+      }, undefined, signal).then(() => {
         recordProviderLatency(p.name, Date.now() - t, false);
       }).catch((err: any) => {
         noteProviderFailure(p.name, err);

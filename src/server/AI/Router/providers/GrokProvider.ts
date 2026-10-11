@@ -62,18 +62,24 @@ export class GrokProvider implements AIProvider {
     };
   }
 
-  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string): Promise<string> {
+  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string> {
     const messages: any[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
     messages.push({ role: 'user', content: prompt });
+    // `{ signal }` aborts the request itself when the client goes, so the tokens an abandoned
+    // turn would have produced are never generated or billed (Q-621).
     const stream = await this.client.chat.completions.create({
       model: model || 'grok-3-fast',
       messages,
       max_tokens: 8000,
       stream: true,
-    });
+    }, signal ? { signal } : undefined);
     let full = '';
     for await (const chunk of stream) {
+      // The client left: stop consuming AND stop paying. The SDK abort above tears the socket down,
+      // so this loop normally ends by throwing; the check is the belt to that braces, for an SDK
+      // version that resolves the stream instead of rejecting it (Q-621).
+      if (signal?.aborted) break;
       const text = chunk.choices[0]?.delta?.content || '';
       if (text) { full += text; onChunk(text); }
     }

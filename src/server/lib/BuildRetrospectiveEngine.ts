@@ -52,6 +52,7 @@ export const OUTCOME_TO_CATEGORY: Readonly<Record<string, { category: FailureCat
   OUTCOME_MISSING_FILES: { category: 'incomplete', hint: 'Modules were imported and never created — the plan and the writes disagreed.' },
   OUTCOME_MISSING_EXPORT: { category: 'incomplete', hint: 'A file was imported for an export it does not have — the contract between two files drifted.' },
   OUTCOME_BUILD_PARTIAL: { category: 'incomplete', hint: 'The build stopped part-way and shipped less than it planned.' },
+  OUTCOME_BUILD_UNVERIFIED: { category: 'incomplete', hint: 'Files were written, but no compile or preview check ran — this is not a claim that the app compiles.' },
   OUTCOME_STOPPED: { category: 'incomplete', hint: 'The run ended before it finished — cancelled, out of budget, or stopped by a gate.' },
   OUTCOME_PREVIEW_FAILED: { category: 'preview', hint: 'The app was produced but never rendered — "preview is EARNED", so this is a failure.' },
   OUTCOME_PREVIEW_COMPILE: { category: 'preview', hint: 'The in-browser preview does not compile — the app would not load for the user.' },

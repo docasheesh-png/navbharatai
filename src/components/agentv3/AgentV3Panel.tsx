@@ -84,6 +84,7 @@ import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
 import { buildChatBlocks } from './activityTimeline';
 import { ChatToolbar } from '../chat/ChatToolbar';
+import { USER_BUBBLE_TONE, ASSISTANT_BUBBLE_TONE } from '../chat/bubbleTone';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 import { ActionGroupRow } from './ActivityTimelineRow';
@@ -108,13 +109,13 @@ import { checkpointDisplayName } from '../../lib/checkpointLabel';
 import { useAppServices } from '../../hooks/useAppServices';
 import { activeMentionQuery, rankMentionSuggestions, applyMentionSuggestion } from '../../lib/fileMentionPicker';
 import { runtimeLogEmptyMessage } from '../../lib/runtimeLogBuffer';
-import { db } from '../../lib/firebase';
+import { auth, db } from '../../lib/firebase';
 import { sanitizeFirestoreData } from '../../lib/firestoreUtils';
 /** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
  *  Returns {} for the synthetic admin / anonymous users (no Firebase user) — the server falls back
  *  to its claimed-id + random-sessionId check for those. */
 import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { authJsonHeaders } from '../../lib/authHeaders';
+import { authJsonHeaders, authedHeaders } from '../../lib/authHeaders';
 import { beginGithubOauthAttempt, browserStorage, GITHUB_WEB_NONCE_KEY } from '../../lib/githubOauthNonce';
 
 /**
@@ -2382,9 +2383,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       const qs = new URLSearchParams();
       if (userId) qs.set('userId', userId);
       if (email) qs.set('email', email);
-      const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}?${qs.toString()}`, {
+      let res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}?${qs.toString()}`, {
         headers: await authJsonHeaders(),
       });
+      if (res.status === 401 || res.status === 403) {
+        try { await auth.currentUser?.getIdToken(true); } catch { /* retry with the next header build */ }
+        res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}?${qs.toString()}`, {
+          headers: await authedHeaders(),
+        });
+      }
       if (!res.ok) return;
       const data = await res.json().catch(() => null);
       const rec = data?.conversation;
@@ -3969,7 +3976,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     setAgentHistory((prev) => [...prev, {
       role: 'agent',
       agent: 'architect',
-      text: `🎉 **${h.appName}** is yours now — all ${count} files are in this chat and ready to edit. I've opened the preview so you can see it running. Tell me what you'd like to change, in your own words.`,
+      text: `**${h.appName}** is yours now — all ${count} files are in this chat and ready to edit. I've opened the preview so you can see it running. Tell me what you'd like to change, in your own words.`,
       ts: Date.now(),
     }]);
     openSurfaceFromFooter('preview');
@@ -4657,7 +4664,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                               {starterLocked.length > 0 && (
                                 <div className="mt-4">
                                   <div className="text-[11px] uppercase tracking-wide text-accent-text mb-2 flex items-center justify-center gap-1">
-                                    <span aria-hidden>⚡</span> Unlock with Pro
+                                    Unlock with Pro
                                   </div>
                                   <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
                                     {starterLocked.map((t) => (
@@ -4685,7 +4692,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                         onClick={openScreenshotGallery}
                         disabled={screenshotBusy || running}
                         title="Pick a website/app screenshot from your gallery — NavBharatAI Pro builds it"
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-on-accent bg-gradient-to-r from-indigo-500 to-violet-500 ring-1 ring-indigo-300/40 shadow-[0_0_18px_rgba(99,102,241,0.6)] hover:shadow-[0_0_26px_rgba(99,102,241,0.9)] transition-shadow disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-on-accent bg-accent hover:brightness-110 transition disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         {screenshotBusy ? <TirangaLoader className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
                         {screenshotBusy ? 'Reading screenshot…' : 'Screenshot → App'}
@@ -5697,7 +5704,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       : chatMode === 'advisor'
                       ? '🔍 Advise mode (read-only) — ask for an audit / bug scan / comparison; nothing is built…'
                       : canSteerMidBuild(running, powerLevel, chatMode)
-                      ? '⚡ Message the team while they build — they will act on it at the next step…'
+                      ? 'Message the team while they build — they will act on it at the next step…'
                       : 'Type…'
                   }
                   value={prompt}
@@ -5789,7 +5796,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-danger hover:text-on-accent hover:bg-red-600/80`}>
                       <Square className="w-4 h-4" />
                     </button>
-                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-on-accent shadow-[0_0_12px_rgba(129,80,255,0.45)]`}>
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-40 rounded-lg text-on-accent shadow-[0_0_12px_rgba(129,80,255,0.45)]`}>
                       <Send className="w-4 h-4" />
                     </button>
                   </>
@@ -6906,7 +6913,7 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
   if (msg.role === 'user') {
     return (
       <div className="group flex flex-col items-end">
-        <div className="max-w-[85%] bg-indigo-600 text-on-accent rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words">
+        <div className={`max-w-[85%] ${USER_BUBBLE_TONE} rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words`}>
           <FoldableMessage text={msg.text} className="whitespace-pre-wrap nb-selectable" />
         </div>
         {/* Copy / fold on every user message; Edit + Unsend attach ONLY to the LAST user message (slice 2). */}
@@ -6928,7 +6935,7 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
           className={
             isThinking
               ? 'text-faint italic text-xs px-3 py-2 whitespace-pre-wrap break-words'
-              : 'bg-card text-body rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words'
+              : `${ASSISTANT_BUBBLE_TONE} rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words`
           }
         >
           {/* A finished AI reply folds when long + gets a copy action; while streaming it just types out. */}
@@ -7001,6 +7008,16 @@ function BuildFeedback({ workspaceId }: { workspaceId: string }) {
  * need nahi hai — simple aur short karo"). Every detail stays available in the Report.
  */
 function BuildHealthCard({ health }: { health: BuildHealth }) {
+  if (health.unassessed) {
+    return (
+      <div className="mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] border-amber-800/60 bg-amber-500/10">
+        <div className="flex items-center gap-1.5 font-semibold">
+          <AlertCircle className="w-3.5 h-3.5 text-warn shrink-0" />
+          <span className="text-warn">Build health: Not checked — the readiness check timed out</span>
+        </div>
+      </div>
+    );
+  }
   const ready = health.ready;
   const blockers = simplifyHealthLines(health.blockers, 3);
   const warnings = simplifyHealthLines(health.warnings, 2);
@@ -7083,11 +7100,11 @@ function TeamHqCard({ agents, todos, elapsedMs }: { agents: Record<string, Agent
   const m = teamHqModel(agents, todos);
   const squares = m.progress.total > 0 ? todos.slice(0, 24) : [];
   return (
-    <div className="mx-2 mt-2 rounded-xl p-[1px] bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-amber-400 shadow-[0_0_18px_rgba(129,80,255,0.25)] text-on-accent">
+    <div className="mx-2 mt-2 rounded-xl p-[1px] bg-line">
       <div className="rounded-[11px] bg-surface px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-[11px] font-bold tracking-wide">
-            <span className="bg-gradient-to-r from-indigo-400 via-fuchsia-400 to-amber-300 bg-clip-text text-transparent">⚡ FULL TEAM</span>
+            <span className="text-accent-text">FULL TEAM</span>
             <span className="text-faint font-normal">
               {m.roster.length > 0 ? `${m.roster.length} agent${m.roster.length > 1 ? 's' : ''}` : 'assembling…'}
               {m.activeCount > 0 && ` · ${m.activeCount} working`}

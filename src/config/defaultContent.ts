@@ -1,3 +1,4 @@
+import { COPY } from '../lib/copy';
 /**
  * Default editable content for the Home panel.
  * Extracted from App.tsx. These are the seed values used when nothing is
@@ -28,7 +29,7 @@ export interface HomeData {
 
 export const DEFAULT_HOME_DATA: HomeData = {
   heroTitle: 'navBharatAI Architect',
-  heroSubtitle: 'Enterprise-grade ecosystem for building complex, scalable, and production-ready applications with Bharat-first precision.',
+  heroSubtitle: COPY.home.heroSubtitle,
   welcomeText: 'Enterprise Architect Mode Active',
   ctaText: 'Assemble System Architecture',
   features: [

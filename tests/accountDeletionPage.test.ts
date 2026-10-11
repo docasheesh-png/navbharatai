@@ -45,6 +45,24 @@ describe('the page satisfies what Play actually asks for', () => {
     expect(ACCOUNT_DELETION).toMatch(/does \*\*not\*\* delete anything in your own GitHub account/);
   });
 
+  it('🔴 is honest about a PUBLISHED app: the person goes, the app stays (Q-766)', () => {
+    /**
+     * The page used to say "we do not remove a published app unless you ask", which this change makes
+     * FALSE — deletion now unlists every listing automatically and strips the author out of it. The
+     * three facts a reader needs are all consequences they cannot undo, so all three are stated:
+     * the identity goes, the app is kept for whoever bought it, and a paid app stops being sellable
+     * because there would be nobody to pay.
+     */
+    expect(ACCOUNT_DELETION).toMatch(/Your name, email address and\s*\n?\s*account link are removed from every listing you published/);
+    expect(ACCOUNT_DELETION).toMatch(/\*\*The app itself is kept\*\*/);
+    expect(ACCOUNT_DELETION).toMatch(/anyone who already\s*\n?\s*bought it can still open and run it/);
+    expect(ACCOUNT_DELETION).toMatch(/can no longer be bought once your account is gone/);
+    // And what was never public is deleted, which is the other half of the decision.
+    expect(ACCOUNT_DELETION).toMatch(/never published \(waiting for review, or refused\) are \*\*deleted outright\*\*/);
+    // The old, now-false promise must be gone, not merely contradicted somewhere further down.
+    expect(ACCOUNT_DELETION).not.toMatch(/we do not remove a published app unless you ask/);
+  });
+
   it('states the token-balance consequence instead of letting someone find out afterwards', () => {
     expect(ACCOUNT_DELETION).toMatch(/not refundable on deletion/i);
   });
@@ -92,6 +110,71 @@ describe('the page and the deletion code do not drift apart', () => {
       // Added 2026-10-06 (Q-700): the Supabase grant was in no erase path at all.
       supabase_connections: /connection to Supabase/i,
       supabase_pause_notices: /sleeping-database reminders/i,
+      /**
+       * Added 2026-10-08 (Q-760) — the four stores that held a WORKING CREDENTIAL and were in no erase
+       * path at all. The page's existing "API keys and credentials you stored in the secrets vault"
+       * line already covered the vault; the other three were described to nobody, which is why this
+       * test failed the moment the registry grew. That is the direction it is meant to fail in.
+       */
+      user_secrets: /API keys and credentials\*\* you stored in the secrets vault/i,
+      /**
+       * Added 2026-10-08 (Q-701) — the personal data the REGISTRY never saw. Every one of these was
+       * keyed to one person and in no erase path, because the census could only see EXPORTED
+       * `*_COLLECTION` constants and each of these names is a private constant or an inline literal.
+       * They are grouped on the page on purpose: twenty-one separate bullets would be a wall nobody
+       * reads, and the point of this page is that somebody actually reads it.
+       */
+      conversation_memory_v1: /chat and voice memory/i,
+      professional_user_memory: /what a professional assistant had noted about you/i,
+      sonic_voice_memory: /the voice-chat turns/i,
+      agentv3_conversations: /build conversation you had with the builder/i,
+      userPrefs: /builder settings and the record of what the builder learned/i,
+      user_brain_v3: /the lessons it kept/i,
+      user_mistakes_v3: /the mistakes ledger/i,
+      user_diagnostics_v3: /diagnostics report of your own last build/i,
+      terminal_daily_usage: /terminal seconds/i,
+      tool_daily_usage: /tool and picture calls/i,
+      ai_usage_logs: /the AI usage rows behind/i,
+      agentv3_onboarding_credits: /your free-build credit/i,
+      wallet_balance_alerts: /the balance warnings we had already sent you/i,
+      professional_passes: /professional pass/i,
+      user_notification_reads: /which admin notices you had already read/i,
+      zip_uploads: /\.zip archives/i,
+      agentv3_sheet_files: /spreadsheets you gave to a build/i,
+      shares: /share links/i,
+      pwa_apps: /instantly-hosted apps/i,
+      user_referrals: /referral record/i,
+      /** Said with its limit, because half of this one is not ours to do. */
+      custom_domains: /connected domains.*not\*\* change anything at your/is,
+      /**
+       * Added 2026-10-09 (Q-701 PR B). All three were ALREADY classified `workspace` before Q-701 and
+       * were in no erase path, because that kind carried no obligation. `site_uptime` turned out not to
+       * be workspace-keyed at all — its doc id is the domain — so it is a user entry now.
+       */
+      site_uptime: /the uptime history we kept for it/i,
+      /**
+       * Added 2026-10-09 (Q-762, Q-765). All three were `blocked` in the census — not forgotten —
+       * because their document ids could not be searched by. Two writers now store `userId`; the
+       * third always did.
+       */
+      adrDecisions: /the design decisions it recorded for each\s*\n?\s*project/i,
+      techDebt: /the list of rough edges it was tracking in your code/i,
+      app_ai_apps: /AI identity of each app you published/i,
+      api_keys: /NavBharatAI API keys/i,
+      bots: /chat bots/i,
+      webhooks: /addresses NavBharatAI posted your build events to/i,
+      /**
+       * Added 2026-10-09 (Q-767). Q-767 came to `analytics_events` for its missing retention window and
+       * found it was in no erase path either — one row per event carrying the real uid, surviving the
+       * account. The page says the 30-day window too, so a reader is not left thinking this is the only
+       * thing that ever removes them.
+       */
+      analytics_events: /record of which screens and actions you used/i,
+      /**
+       * Q-682. `teams` was classified `platform` on a half-truth — a team outlives a MEMBER, but
+       * `teamId === owner uid`, so the document is the owner's own and nothing ever deleted it.
+       */
+      teams: /a team belongs to the account that created it/i,
     };
     for (const { collection } of USER_SCOPED_COLLECTIONS) {
       const phrase = described[collection];
@@ -131,6 +214,31 @@ describe('the built-app eraser and the page do not drift apart', () => {
       // Q-134 (2026-10-05): two stores the erase now reaches, each named on the page.
       workspace_user_actions_v1: /the list of things the builder asked you to do/i,
       code_reviews: /the review comments left on them/i,
+      /**
+       * Added 2026-10-08 (Q-701) — twelve stores keyed by the workspace id that the eraser's range
+       * already reaches but the registry never listed, so none of them was erased. Two more were
+       * found and deliberately left OUT rather than registered on a guess: `app_ai_apps` (doc id is
+       * the APP id) and `build_history` (doc id is a bare sessionId) — neither is inside the
+       * `agentv3-{uid}-` range, and both are recorded in `BUILD_REPORT_QUEUE.md`.
+       */
+      agentv3_attachment_memory: /everything the builder kept about each app/i,
+      agentv3_build_outcome: /its build state/i,
+      buildTraces: /decisions it took/i,
+      build_queues_v3: /its build state/i,
+      incrementalCache: /the caches it reused between builds/i,
+      agentv3_provider_state: /its build state/i,
+      workspace_traceability: /everything the builder kept about each app/i,
+      migrationHistory: /everything the builder kept about each app/i,
+      mega_roadmaps_v3: /its plan and roadmap/i,
+      sboms: /the software bill of materials/i,
+      // Q-784: hidden from the collection census by its constant's name (`REMIX_ORIGINS`), so it sat in
+      // no erase path while the census reported every store accounted for.
+      nav_store_remix_origins: /which App Mart app it was remixed from/i,
+      site_configs: /the app's own site settings/i,
+      agentv3_mcp_servers: /the outside services it was wired to talk to/i,
+      agentv3_deployments: /our record of where it/i,
+      agentv3_sandboxes: /the sandbox it ran in/i,
+      nbai_app_data: /the records your app stored in the NavBharatAI database/i,
     };
     for (const { collection } of WORKSPACE_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

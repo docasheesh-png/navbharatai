@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig, loadEnv} from 'vite';
+import {defineConfig} from 'vite';
 import {isAutolinkLiteralModule, patchAutolinkEmail} from './src/lib/autolinkEmailPatch';
 
 /**
@@ -23,12 +23,10 @@ function noLookbehindAutolink() {
   };
 }
 
-export default defineConfig(({mode}) => {
-  const env = loadEnv(mode, '.', '');
+export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss(), noLookbehindAutolink()],
     define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       // Build-time stamp so a deployed version is verifiable at a glance (shown in
       // the v3.0 header). If it doesn't change after a deploy, the browser is serving
       // cached code, not a code problem.

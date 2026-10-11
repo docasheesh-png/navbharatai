@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  releaseGate, releaseGateSummary, runtimeProven,
+  releaseGate, releaseGateSummary, runtimeProven, runtimeRedFlipEnabled,
   type RuntimeEvidence, type StaticFindings,
 } from './releaseGate';
 import { computeBuildConfidence, type BuildConfidenceInput } from './BuildConfidence';
@@ -215,6 +215,23 @@ describe('runtimeProven is one answer, shared', () => {
 
   it('a typecheck is not runtime proof', () => {
     expect(runtimeProven(ev({ typecheck: 'passed', tests: 'passed' }))).toBe('unknown');
+  });
+
+  it('a dead preview server is infrastructure, not a failed render', () => {
+    const v = releaseGate(ev({ preview: 'not-run', previewServerDown: true }), clean);
+    expect(v.state).not.toBe('red');
+    expect(releaseGateSummary(v)).toContain('infrastructure');
+    expect(releaseGateSummary(v)).toContain('The preview server would not stay running (infrastructure) — the app itself was not judged.');
+  });
+
+  it('the runtime RED flip is off unless AGENTV3_RUNTIME_RED_FLIP is on', () => {
+    const prev = process.env.AGENTV3_RUNTIME_RED_FLIP;
+    delete process.env.AGENTV3_RUNTIME_RED_FLIP;
+    expect(runtimeRedFlipEnabled()).toBe(false);
+    process.env.AGENTV3_RUNTIME_RED_FLIP = 'on';
+    expect(runtimeRedFlipEnabled()).toBe(true);
+    if (prev === undefined) delete process.env.AGENTV3_RUNTIME_RED_FLIP;
+    else process.env.AGENTV3_RUNTIME_RED_FLIP = prev;
   });
 });
 

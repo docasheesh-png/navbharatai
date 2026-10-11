@@ -224,7 +224,7 @@ describe('end to end — the page stays, and the score never asked for it to go'
     const act = new WorkspaceActuator();
     const { d, refused } = harness(act, ws);
     d.setUserOwnedFiles([USER_PAGE], REPORT_PROMPT);
-    const out = await d.run(bash(`rm "${USER_PAGE}"`), 'architect');
+    const out = await d.run(bash(`rm "${USER_PAGE}"`), 'architect').catch((e: unknown) => e instanceof Error ? e.message : String(e));
     expect(String(out)).toContain('GOVERNANCE BLOCKED');
     expect(act.files.has(USER_PAGE)).toBe(true);
     expect(act.ran).toEqual([]);

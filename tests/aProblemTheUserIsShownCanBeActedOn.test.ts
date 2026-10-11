@@ -56,7 +56,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PROCESS_ONLY_CODES } from '../src/server/AgentV3/BuildDiagnostics';
+import { PROCESS_ONLY_CODES, isAppFinding } from '../src/server/AgentV3/BuildDiagnostics';
 import { FINDING_SUGGESTIONS, APP_FINDINGS_WITHOUT_AN_OFFER, buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
 
 /** Phases `isAppFinding` excludes outright — our infrastructure and our provider calls. */
@@ -278,5 +278,52 @@ describe('a problem the user is shown can be acted on — the census', () => {
   it('a database with no row-level security outranks the look of the app', () => {
     const out = buildFindingSuggestions([{ code: 'DESIGN_CONSISTENCY' }, { code: 'DATABASE_RLS' }]);
     expect(out[0].id).toBe('found-database-rls');
+  });
+});
+
+// ── Q-381, FIRST BATCH (2026-10-09): the nine whose own recording site answered the question ────────
+//
+// The census above is a ratchet — it stops the backlog GROWING. This block is what keeps the nine codes
+// taken OUT of it from drifting back in, and it asserts the thing that actually mattered to a user: not
+// that a name appears in a list, but that `isAppFinding` now says NO, so the code no longer lands in
+// their build-health card as a problem with their app or costs their app 6 health points.
+//
+// Each was classified from a quote at its own recording site, not from a judgement made that day:
+// "not evidence the app is broken", "an infrastructure limit here, never evidence about the app
+// itself", "Infrastructure condition, not an app error", and so on. The codes that genuinely need a
+// decision about what the user should be told are deliberately NOT here.
+describe('Q-381 batch one: nine findings about our own run are no longer charged to the app', () => {
+  const OURS = [
+    'RELEASE_GATE_UNPROVEN', 'LAST_CHANCE_PROOF_UNAVAILABLE', 'SANDBOX_UNAVAILABLE', 'RUNTIME_UNCHECKED',
+    'CLAIM_UNSUPPORTED', 'TIMELINE_TRUNCATED', 'PREVIEW_REVIVAL_RECIPE', 'GUARD_REPEAT', 'UPSELL_SUPPRESSED',
+  ];
+
+  for (const code of OURS) {
+    it(`${code} is our own run, not a mark against the user's app`, () => {
+      // `readiness` and `build` are the phases these are recorded in — phases `isAppFinding` does NOT
+      // exclude outright, which is exactly why each needed a registry entry to stop being charged.
+      expect(isAppFinding({ phase: 'readiness', code })).toBe(false);
+      expect(isAppFinding({ phase: 'build', code })).toBe(false);
+    });
+  }
+
+  it('they are out of the backlog fixture too, so the ratchet cannot be satisfied by listing them twice', () => {
+    const baseline: string[] = JSON.parse(readFileSync(join(__dirname, 'fixtures/findingClassificationBaseline.json'), 'utf8'));
+    for (const code of OURS) expect(baseline).not.toContain(code);
+  });
+
+  it('PLATFORM_SOURCE_WORKSPACE is deliberately still unclassified — it is the ERROR-severity one', () => {
+    // Stated as a test rather than only as a comment, because "left out on purpose" and "forgotten" look
+    // identical in a diff. Every code in the batch above is a WARNING or INFO, so the error count a RED
+    // gate reads cannot change and no build's bill moves. This one is recorded at ERROR severity, so
+    // reclassifying it is money-adjacent and gets its own look.
+    const baseline: string[] = JSON.parse(readFileSync(join(__dirname, 'fixtures/findingClassificationBaseline.json'), 'utf8'));
+    expect(baseline).toContain('PLATFORM_SOURCE_WORKSPACE');
+    expect(PROCESS_ONLY_CODES.has('PLATFORM_SOURCE_WORKSPACE')).toBe(false);
+  });
+
+  it('the batch really shrank the backlog — 56 before, 47 after', () => {
+    const baseline: string[] = JSON.parse(readFileSync(join(__dirname, 'fixtures/findingClassificationBaseline.json'), 'utf8'));
+    expect(baseline.length).toBe(47);
   });
 });

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { listRemoteTools, callRemoteTool, MCP_TIMEOUT_MS, MCP_MAX_RESPONSE_BYTES } from './mcpTransport';
+import { listRemoteTools, callRemoteTool, MCP_TIMEOUT_MS, MCP_MAX_RESPONSE_BYTES, readBodyCapped } from './mcpTransport';
 import { toSafeTools } from './mcpClient';
 
 const src = readFileSync(resolve(__dirname, 'mcpTransport.ts'), 'utf8');
@@ -74,21 +74,41 @@ describe('every call is bounded — a stranger must not be able to hang or flood
   });
 
   it('🔒 caps the response BEFORE parsing it', () => {
-    // resp.json() on a hostile stream can exhaust memory; a size limit applied after parsing is
-    // applied too late to help.
+    // A hostile stream must be capped while it is read, not after resp.text() has buffered it.
     // Compare positions INSIDE rpc(), not in the file: indexOf on the bare name finds the
     // `export const` declaration near the top and would pass or fail for the wrong reason.
     const rpcStart = src.indexOf('async function rpc(');
     const rpcBody = src.slice(rpcStart, src.indexOf('function rpcResult('));
-    const readAt = rpcBody.indexOf('await resp.text()');
-    const capAt = rpcBody.indexOf('raw.length > MCP_MAX_RESPONSE_BYTES');
-    expect(readAt).toBeGreaterThan(-1);
-    expect(capAt).toBeGreaterThan(readAt);
+    expect(rpcBody).toContain('readBodyCapped(resp, MCP_MAX_RESPONSE_BYTES)');
+    expect(rpcBody).not.toContain('resp.text()');
     // Assert on CODE, not on prose: the comment above the read names resp.json() to explain why it
     // is avoided, and a raw substring check would fail on the explanation itself.
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
     expect(code).not.toContain('resp.json()');
+    expect(code).not.toContain('resp.text()');
     expect(MCP_MAX_RESPONSE_BYTES).toBeGreaterThan(0);
+  });
+
+  it('readBodyCapped cancels a stream of 1 KB chunks once the cap is exceeded', async () => {
+    const cap = 4096;
+    let chunks = 0;
+    let cancelled = false;
+    const body = {
+      getReader() {
+        return {
+          async read() {
+            chunks += 1;
+            return { done: false, value: new Uint8Array(1024) };
+          },
+          async cancel() { cancelled = true; },
+        };
+      },
+    };
+    const resp = { body } as unknown as Response;
+    await expect(readBodyCapped(resp, cap)).rejects.toThrow(`MCP response exceeded ${cap} bytes`);
+    expect(cancelled).toBe(true);
+    expect(chunks).toBeLessThanOrEqual(cap / 1024 + 1);
+    expect(chunks).toBe(cap / 1024 + 1);
   });
 
   it('returns a result object instead of throwing, on every path', async () => {

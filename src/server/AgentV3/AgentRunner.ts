@@ -1,4 +1,7 @@
 import { NOT_READY_HEADLINE, NOT_READY_HEADLINE_CONTINUE } from './notReadyHeadline';
+import { PARTIAL_CONTENT_KEY, resumeTruncatedEnabled } from './reliability/resumeWrite';
+import { compactForBudget, recentlyTouchedPaths, tokenCompactEnabled, withWorkingSet, workingSetBlock, workingSetConfig, workingSetEnabled } from './reliability/contextBudget';
+import { QualityMonitor, handoffNote } from './reliability/qualityEscalation';
 import type { AgentEventStream } from './AgentEventStream';
 import { isStarterBlocker, starterSummary } from './stillTheStarterApp';
 import type { WorkspaceState } from './WorkspaceState';
@@ -10,9 +13,9 @@ import type { ConversationStore, ConversationStatus } from './ConversationStore'
 import { compactMessagesForPersist, compactTranscriptForModel } from './SessionTimeline';
 import { billedAmountUsd } from './pricing';
 import type { UsageSink } from './UsageSink';
-import { withTimeout } from './asyncUtils';
+import { withTimeout, withDeadline } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
-import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReadyMark, type ReadyMark } from './doneSignal';
+import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReadyMark, unassessedFailsBuild, type ReadyMark } from './doneSignal';
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
 import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { writerTaskSiblings, SIBLING_TASKS_INPUT_KEY } from './parallelSiblings';
@@ -55,6 +58,13 @@ import { resolveToolAlias, toolAliasNote } from './toolAlias';
  */
 export interface AgentRunnerOptions {
   client: TurnRunner;
+  /**
+   * P4b (fix/build-reliability, AGENTV3_QUALITY_ESCALATE) — called when the quality monitor sees the
+   * build struggling (truncation ×2, edit fail ×3, tsc not dropping). The route moves the build UP one
+   * model on its sticky chain and answers what happened; on an escalation the runner adds a handoff note
+   * to the next turn. Omitted ⇒ no monitoring at all (the default).
+   */
+  onQualityEscalate?: (reason: string) => { escalated: boolean; fromModel?: string; toModel?: string };
   dispatcher: ToolDispatcher;
   state: WorkspaceState;
   events: AgentEventStream;
@@ -265,7 +275,7 @@ const PROMPT_PREVIEW_HEAD = 4000;
 const SEPARATOR = PROMPT_PREVIEW_SEPARATOR;
 
 const PARALLEL_SAFE_TOOLS = new Set<string>([
-  'read_file', 'grep', 'glob', 'recall', 'evaluate', 'second_opinion', 'consensus',
+  'read_file', 'grep', 'glob', 'recall', 'second_opinion', 'consensus',
 ]);
 // Sub-agent (task) roles that only READ and REPORT (no write_file/edit) — safe to run in
 // parallel. Builder/fixer roles (frontend, debugger, tester, …) WRITE, so they stay serial to
@@ -472,6 +482,9 @@ export class AgentRunner {
    * file, which by definition happens on a later turn. Paths only — a bounded handful per build.
    */
   private readonly _truncationSteered = new Set<string>();
+  /** P4b — quality monitor + the files this run touched (for the handoff note). Inert unless onQualityEscalate is set. */
+  private readonly _quality = new QualityMonitor();
+  private readonly _touched: string[] = [];
   /** The ETA line the user was last shown, or null; never throws (see `liveUserMessageTurn`). */
   private shownEta(): string | null {
     try { return this.opts.currentEta?.() ?? null; } catch { return null; }
@@ -820,9 +833,27 @@ export class AgentRunner {
           // payload — the fix for the 233KB prompt that timed out the cheap floor. No-op on a small
           // build. Disabled by setting transcriptKeepRecent to 0 turns is not offered; instead
           // AGENTV3_MODEL_COMPACT=off bypasses entirely for a clean A/B if ever needed.
-          const modelMessages = envKillSwitch('AGENTV3_MODEL_COMPACT')
+          let modelMessages = envKillSwitch('AGENTV3_MODEL_COMPACT')
             ? messages
-            : compactTranscriptForModel(messages, { keepRecentMessages: modelKeepRecent, maxOldToolResultChars: modelMaxOldToolResultChars });
+            : tokenCompactEnabled()
+              // P3a (AGENTV3_TOKEN_COMPACT) — verbatim until ~50% of the window, then gentle, then tight.
+              ? compactForBudget(messages, (system ?? '').length, compactTranscriptForModel).messages
+              : compactTranscriptForModel(messages, { keepRecentMessages: modelKeepRecent, maxOldToolResultChars: modelMaxOldToolResultChars });
+          // P3b (AGENTV3_WORKING_SET) — the fresh on-disk content of recently touched files, appended last.
+          if (workingSetEnabled() && typeof dispatcher.readForWorkingSet === 'function') {
+            try {
+              const wsCfg = workingSetConfig();
+              const paths = recentlyTouchedPaths(messages, wsCfg.files);
+              if (paths.length) {
+                const files: Array<{ path: string; content: string }> = [];
+                for (const p of paths) {
+                  const c = await dispatcher.readForWorkingSet(p);
+                  if (typeof c === 'string') files.push({ path: p, content: c });
+                }
+                modelMessages = withWorkingSet(modelMessages, workingSetBlock(files, wsCfg));
+              }
+            } catch { /* the working set is advisory — never blocks a turn */ }
+          }
           const turnCall = client.runTurn({
             model,
             system,
@@ -833,7 +864,9 @@ export class AgentRunner {
             effort,
             // A Stop cancels THIS call, not only the next one (stopSignal.ts). Before this the loop
             // noticed a stop only between turns, after paying for the call already in flight.
-            signal: this.opts.signal,
+            signal: turnTimeoutMs > 0 && typeof AbortSignal.any === 'function' && typeof AbortSignal.timeout === 'function'
+              ? AbortSignal.any([...(this.opts.signal ? [this.opts.signal] : []), AbortSignal.timeout(turnTimeoutMs)])
+              : this.opts.signal,
             onText: (delta) =>
               events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'text', delta, ts: Date.now() }),
             // The reasoning channel reaches the user's chat ONLY when it is switched on — default off
@@ -1052,7 +1085,7 @@ export class AgentRunner {
           // with an honest summary of the blockers. The work is preserved (files/preview still
           // exist) — we simply refuse to claim success that wasn't earned ("Preview is EARNED").
           // When escalation is active, this ok:false is exactly what triggers a stronger retry.
-          let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string } | undefined;
+          let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string; unassessed?: boolean } | undefined;
           if (ok && readinessGate && expectsArtifacts && totalToolUses > 0) {
             try {
               // HEAL-THEN-JUDGE (CLAUDE.md 50/50 law): make orphaned pages reachable BEFORE the gate
@@ -1065,7 +1098,7 @@ export class AgentRunner {
               try { const c = await dispatcher.healCredentialLogs(); if (c) events.emit({ type: 'narration', agent: 'architect', text: c, ts: Date.now() }); } catch { /* heal is best-effort — never fails a build */ }
               const readiness = await dispatcher.assessBuildReadiness();
               // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
-              buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
+              buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier, ...(readiness.unassessed ? { unassessed: true } : {}) };
               // The end-of-turn gate judged the app, so it records when it was first finished (Q-310).
               try {
                 readyMark = endOfTurnReadyMark({
@@ -1092,7 +1125,14 @@ export class AgentRunner {
                   continue;
                 }
               }
-              if (!readiness.ready) {
+              if (readiness.unassessed) {
+                // TD-2 / D-6: a timeout is not a verdict. Do not claim READY, and do not flip ok
+                // unless the owner asked an unassessed check to fail the build.
+                if (unassessedFailsBuild()) {
+                  ok = false;
+                  summary = 'The readiness check did not finish in time, so this app is NOT verified yet. Your files are saved.';
+                }
+              } else if (!readiness.ready) {
                 // A MODEL THAT STOPPED IN PROSE WHILE THE APP IS STILL UNBUILT GETS THE GATE'S FINDINGS
                 // AND ANOTHER TURN (autopsy 121c2431 — the build ended FAILED with 1,418 s of budget
                 // unspent). Never after a refusal or a question to the user; at most twice. See
@@ -1275,7 +1315,7 @@ export class AgentRunner {
           }
           if (toolTimeoutMs <= 0 || tu.name === 'task') return dispatcher.dispatch(tu, agentRole);
           try {
-            return await withTimeout(dispatcher.dispatch(tu, agentRole), toolTimeoutMs, `tool ${tu.name}`);
+            return await withDeadline((signal) => dispatcher.dispatch(tu, agentRole, { signal }), toolTimeoutMs, `tool ${tu.name}`);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             const timedOut = /timed out after/.test(msg);
@@ -1283,7 +1323,7 @@ export class AgentRunner {
             return {
               tool_use_id: tu.id,
               content: timedOut
-                ? `Tool "${tu.name}" did not finish within about ${minutes} min and was skipped so the build could keep moving. Try a smaller step or a different approach.`
+                ? `Tool "${tu.name}" did not finish within about ${minutes} min and was stopped. Anything it had not written yet was discarded; files it had already written stay.`
                 : `Tool "${tu.name}" failed: ${msg}`,
               is_error: true,
             };
@@ -1339,7 +1379,9 @@ export class AgentRunner {
               if (tu.name === 'write_file') {
                 const inp = tu.input as { path?: unknown; content?: unknown };
                 if (typeof inp?.path === 'string' && typeof inp?.content === 'string') written[inp.path] = inp.content;
-                else if (typeof inp?.path === 'string' && inp?.content === undefined) truncatedToolPaths.push(inp.path);
+                // P2b — a buffered cut-off write is resumed with append_file (the tool result says so);
+                // asking for a whole rewrite here would contradict it.
+                else if (typeof inp?.path === 'string' && inp?.content === undefined && !(resumeTruncatedEnabled() && typeof (tu.input as Record<string, unknown>)?.[PARTIAL_CONTENT_KEY] === 'string')) truncatedToolPaths.push(inp.path);
               } else if (tu.name === 'write_files_batch') {
                 const b = tu.input as { files?: unknown };
                 if (Array.isArray(b?.files)) {
@@ -1446,7 +1488,37 @@ export class AgentRunner {
             }
           }
         } catch { /* the done check is advisory — it must never break a build */ }
-        const steer = [truncationSteer, loopSteer, budgetText, doneText].filter(Boolean).join('\n\n') || null;
+        // P4b — QUALITY ESCALATION (opt-in). Observes this turn's truncation / edit failures / tsc trend;
+        // when the monitor trips, the route moves the build up one model and the next model gets a note.
+        let handoffText: string | null = null;
+        if (this.opts.onQualityEscalate) {
+          try {
+            let editFailures = 0;
+            let editSuccesses = 0;
+            turn.toolUses.forEach((tu, idx) => {
+              const p = (tu.input as { path?: unknown })?.path;
+              if (typeof p === 'string' && /^(write_file|edit_file|append_file)$/.test(tu.name)) {
+                const at = this._touched.indexOf(p);
+                if (at >= 0) this._touched.splice(at, 1);
+                this._touched.push(p);
+              }
+              if (tu.name !== 'edit_file') return;
+              if ((resultBlocks[idx] as { is_error?: boolean } | undefined)?.is_error === true) editFailures += 1;
+              else editSuccesses += 1;
+            });
+            const tscErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;
+            const decision = this._quality.observe({ truncated: Boolean(turn.truncated || turn.stopReason === 'max_tokens'), editFailures, editSuccesses, tscErrors });
+            if (decision.escalate && decision.reason) {
+              const out = this.opts.onQualityEscalate(decision.reason);
+              this._quality.acknowledge(out.escalated);
+              if (out.escalated) {
+                handoffText = handoffNote({ fromModel: out.fromModel, toModel: out.toModel, reason: decision.reason, touchedFiles: this._touched, tscErrors });
+                events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: `🔁 Switching to a stronger engine${out.toModel ? ` (${out.toModel})` : ''}: ${decision.reason}.` });
+              }
+            }
+          } catch { /* quality escalation is best-effort — it must never break a build */ }
+        }
+        const steer = [truncationSteer, loopSteer, budgetText, doneText].filter(Boolean).concat(handoffText ? [handoffText] : []).join('\n\n') || null;
         messages.push({ role: 'user', content: steer ? [...resultBlocks, { type: 'text', text: steer }] : resultBlocks });
         messageTs.push(Date.now());
         if (steer) platformMsgIdx.add(messages.length - 1);
@@ -1494,11 +1566,11 @@ export class AgentRunner {
             if (shouldTriggerMidBuildRepair(trendCounts)) {
               trendFired = true; // once per run — the step-cap endgame remains the final net
               events.emit({ type: 'narration', agent: agentRole, text: '🔎 Checkpoint: compile errors are not going down — fixing them all in one pass…', ts: Date.now() });
-              const verdict = await withTimeout(
-                runEndgameRepair({ ...io, llmRepair: endgameBatchRepair, log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }) }),
+              const verdict = await withDeadline(
+                (signal) => runEndgameRepair({ ...io, signal, llmRepair: endgameBatchRepair, log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }) }),
                 150_000, 'errtrend-repair',
               );
-              if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {
+              if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore && !verdict.tscUnverified) {
                 // Tell the model the grind is over so it spends the remaining steps on FEATURES.
                 pushPlatformTurn(`[BUILD CHECKPOINT] ${verdict.errorsBefore - verdict.errorsAfter} compile error(s) were just auto-fixed for you (${verdict.errorsAfter} remain). Do NOT re-fix them one by one — run tsc once to confirm, then continue completing the app's remaining FEATURES.`);
               }
@@ -1519,12 +1591,16 @@ export class AgentRunner {
         let summary = ok
           ? `Step limit reached (${stepCap}) — stopping here. Your files are saved; send another message to continue.`
           : `Step limit reached (${stepCap}). Stopped without completing.`;
-        let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string } | undefined;
+        let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string; unassessed?: boolean } | undefined;
         if (ok && readinessGate) {
           try {
             const readiness = await dispatcher.assessBuildReadiness();
-            buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
-            if (readiness.ready) {
+            buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier, ...(readiness.unassessed ? { unassessed: true } : {}) };
+            if (readiness.unassessed) {
+              // TD-2 / D-6: not verified. ok stays unchanged unless AGENTV3_UNASSESSED_FAILS=on.
+              summary = `Step limit reached (${stepCap}) — your files are saved. The readiness check did not finish in time, so this app is NOT verified yet; send another message to continue.`;
+              if (unassessedFailsBuild()) ok = false;
+            } else if (readiness.ready) {
               summary = `Step limit reached (${stepCap}) — but the app itself is verified READY (score ${readiness.score}/100). Files are saved; send another message to keep improving it.`;
             } else {
               ok = false;
@@ -1541,15 +1617,18 @@ export class AgentRunner {
               if (endgameRepairEnabled()) {
                 try {
                   const io = dispatcher.endgameIo();
-                  const verdict = await withTimeout(runEndgameRepair({
+                  const verdict = await withDeadline((signal) => runEndgameRepair({
                     ...io,
+                    signal,
                     llmRepair: endgameBatchRepair,
                     log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }),
                   }), 150_000, 'endgame-repair');
-                  if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {
+                  if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore && !verdict.tscUnverified) {
                     const after = await dispatcher.assessBuildReadiness();
-                    buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings, tier: after.tier };
-                    if (after.ready) {
+                    buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings, tier: after.tier, ...(after.unassessed ? { unassessed: true } : {}) };
+                    if (after.unassessed) {
+                      summary = `Step limit reached (${stepCap}) — endgame repair cut the compile errors ${verdict.errorsBefore} → ${verdict.errorsAfter}, but the readiness check did not finish, so this app is NOT verified yet.`;
+                    } else if (after.ready) {
                       ok = true;
                       summary = `Step limit reached (${stepCap}) — endgame repair then fixed the remaining ${verdict.errorsBefore} compile error(s) (${verdict.deterministicFixes.length} mechanically, ${verdict.llmFilesWritten} file(s) via one batch pass) and the app is verified READY (score ${after.score}/100).`;
                     } else {

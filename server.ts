@@ -21,7 +21,7 @@ import { registerShareRoutes } from './src/server/routes/share';
 import { audit } from './src/server/lib/audit';
 import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
 import { appCheckGuard } from './src/server/lib/appCheck';
-import { securityHeadersConfig, permissionsPolicyMiddleware, popupReturnOpenerPolicyMiddleware, withoutOpenerPolicy } from './src/server/lib/securityHeaders';
+import { securityHeadersConfig, permissionsPolicyMiddleware, popupReturnOpenerPolicyMiddleware } from './src/server/lib/securityHeaders';
 import { responseCompression } from './src/server/lib/responseCompression';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { envFlag } from './src/server/lib/envFlag';
@@ -109,6 +109,8 @@ import { registerPreviewRoutes } from './src/server/routes/preview';
 import { registerEsmMirrorRoutes } from './src/server/routes/esmMirror';
 import { registerBuildRoutes } from './src/server/routes/build';
 import { getPreviewService } from './src/server/runtime/PreviewService';
+import { previewSandboxGate } from './src/server/lib/previewHost';
+import { sanitizeProxyRequestHeaders, sanitizeUpgradeResponseHeaders } from './src/server/lib/proxyHeaders';
 import { handleSonicUpgrade } from './src/server/sonic/sonicWs';
 import { registerSonicRoutes } from './src/server/sonic/sonicRoute';
 import { serverStats } from './src/server/lib/serverStats';
@@ -190,7 +192,7 @@ import https from 'https';
 import fs from 'fs';
 import { appleDomainAssociation, APPLE_DOMAIN_ASSOCIATION_PATH } from './src/server/lib/appleDomainAssociation';
 import { assetLinksJson, malformedFingerprints, ASSET_LINKS_PATH } from './src/server/lib/assetLinks';
-import { rewriteProxyHeaders } from './src/server/lib/authProxyCookies';
+import { createAuthProxy, FIREBASE_AUTH_HOST, AUTH_PROXY_TIMEOUT_MS } from './src/server/lib/authProxy';
 import { canonicalHostRedirect, canonicalHostFromEnv } from './src/server/lib/canonicalHost';
 import { auditEnv } from './src/server/audit_env';
 import { assertProductionConfig } from './src/server/lib/productionConfigContract';
@@ -474,43 +476,20 @@ setInterval(() => {
   // requests to the project's Firebase host, which serves the real handler/iframe.
   // Registered before the SPA catch-all so it isn't swallowed and returned as
   // index.html. Streams the request/response untouched (any method).
-  const FIREBASE_AUTH_HOST = 'gen-lang-client-0866594388.firebaseapp.com';
   // Keep-alive agent: the sign-in handler pulls several sub-resources back-to-back; reusing one warm
   // TLS connection removes a fresh handshake per request (a big chunk of the perceived login latency).
-  const firebaseAuthAgent = new https.Agent({ keepAlive: true, maxSockets: 64, timeout: 15000 });
+  const firebaseAuthAgent = new https.Agent({ keepAlive: true, maxSockets: 64, timeout: AUTH_PROXY_TIMEOUT_MS });
   // A stalled upstream must FAIL FAST, never hang. Node's https.request has NO default timeout, so a
   // stuck socket could leave the login popup waiting minutes (the exact "Google login takes 5–7 min"
   // symptom). Cap it at 15s → the browser retries a fresh request instead of hanging on a dead one.
-  const AUTH_PROXY_TIMEOUT_MS = 15000;
-  const proxyFirebaseAuth = (req: any, res: any) => {
-    const upstream = https.request(
-      {
-        hostname: FIREBASE_AUTH_HOST,
-        port: 443,
-        path: req.originalUrl,
-        method: req.method,
-        headers: { ...req.headers, host: FIREBASE_AUTH_HOST },
-        agent: firebaseAuthAgent,
-        timeout: AUTH_PROXY_TIMEOUT_MS,
-      },
-      (pres) => {
-        // 🔒 COOKIES MUST BIND TO *OUR* HOST (admin 2026-08-22 — the Apple redirect login loop).
-        // The upstream sets its cookies for `*.firebaseapp.com`; arriving from navbharatai.com the
-        // browser MUST reject those, so the handler believed it stored its state, the browser dropped
-        // it, the return leg found nothing, and the app loaded logged out — with no error anywhere,
-        // because nothing actually failed. Google was unaffected: the popup flow hands its result back
-        // by postMessage and never needs a cookie to survive a cross-site return. See authProxyCookies.
-        const host = String(req.headers?.host || '').split(':')[0];
-        // …and never an opener policy of its own: this page answers the window that opened it (Q-732).
-        res.writeHead(pres.statusCode || 502, withoutOpenerPolicy(rewriteProxyHeaders(pres.headers as Record<string, unknown>, host)));
-        pres.pipe(res, { end: true });
-      },
-    );
-    // timeout fires on an idle socket (connect or response stall) — abort so the client fails fast.
-    upstream.on('timeout', () => { upstream.destroy(new Error('auth proxy upstream timeout')); });
-    upstream.on('error', () => { if (!res.headersSent) res.status(504).end('Auth proxy timeout'); });
-    req.pipe(upstream, { end: true });
-  };
+  // The handler itself lives in lib/authProxy.ts so the post-headers destroy path is unit-tested
+  // without booting this file. Cookie rewrite and opener-policy stripping stay inside that handler.
+  const proxyFirebaseAuth = createAuthProxy({
+    request: (options, callback) => https.request(options, callback),
+    agent: firebaseAuthAgent,
+    hostname: FIREBASE_AUTH_HOST,
+    timeoutMs: AUTH_PROXY_TIMEOUT_MS,
+  });
   // APPLE DOMAIN VERIFICATION (admin 2026-08-21) — mounted BEFORE the static handler, whose `dotfiles`
   // default is 'ignore' and would skip a `.well-known` directory even if the file were on disk. See
   // lib/appleDomainAssociation.ts for why Apple's own authorize endpoint 403s without this.
@@ -557,6 +536,10 @@ setInterval(() => {
   registerSonicRoutes(app);
 
   async function initializeServer() {
+    // UI-S1 — /preview-sandbox.html is inert on the app origin. Helmet (above) has already written
+    // the app CSP; previewSandboxGate 404s unless Host is the preview hostname and replaces only that
+    // CSP. Registered BEFORE vite.middlewares / express.static so the file cannot be served first.
+    app.get('/preview-sandbox.html', previewSandboxGate);
 
     // Vite integration.
     //
@@ -902,15 +885,36 @@ setInterval(() => {
           // sweep's guard walks, because `server.ts` sits at the repo ROOT and not under `src/`.
           if (envFlag('DATA_RETENTION_PURGE_ENABLED')) {
             const runPurge = () => import('./src/server/lib/DataRetentionManager')
-              .then(async ({ getRetentionDb, purgeExpired, getSubcollectionRetentionSource, purgeExpiredSubcollections }) => {
+              .then(async ({ getRetentionDb, purgeExpired, getSubcollectionRetentionSource, purgeExpiredSubcollections, cappedCollections }) => {
                 const db = getRetentionDb();
                 const top = db ? await purgeExpired(db, Date.now()) : null;
                 // Q-134: subcollections under every parent (past build reports), purged parent by parent.
                 const sub = getSubcollectionRetentionSource();
                 const nested = sub ? await purgeExpiredSubcollections(sub, Date.now()) : null;
-                return (top?.totalDeleted ?? 0) + (nested?.totalDeleted ?? 0);
+                /**
+                 * 🔴 Q-767 — WHICH STORES RAN OUT OF ALLOWANCE, said out loud.
+                 *
+                 * Each policy may delete at most `maxPerRun` (500 by default) documents per night. For a
+                 * store whose daily ARRIVAL rate is higher than that, the cap is not a slow drain: the
+                 * collection grows for ever while every registry in the repo says it is on a clock, and the
+                 * old log line — a single total — reported that as a successful purge. Nothing in a session
+                 * can measure the real arrival rate, so this does not guess a bigger number; it makes the
+                 * condition visible. One capped night is a backlog draining. Capped EVERY night means that
+                 * collection's `maxPerRun` is below its write rate and the window is not really being kept.
+                 */
+                const capped = [...cappedCollections(top ?? { collections: [], totalDeleted: 0 }),
+                                ...cappedCollections(nested ?? { collections: [], totalDeleted: 0 })];
+                return { n: (top?.totalDeleted ?? 0) + (nested?.totalDeleted ?? 0), capped };
               })
-              .then((n) => { if (n) console.log(`[P-DATA.4] retention purge removed ${n} expired record(s)`); })
+              .then(({ n, capped }) => {
+                if (n) console.log(`[P-DATA.4] retention purge removed ${n} expired record(s)`);
+                if (capped.length) {
+                  console.warn(
+                    `[P-DATA.4] hit the per-run cap on: ${capped.join(', ')} — more had expired than one run may `
+                    + 'remove. Normal while a backlog drains; every night means maxPerRun is below the write rate.',
+                  );
+                }
+              })
               .catch(() => { /* best-effort — purge must never affect the server */ });
             // `exclusive`: this DELETES, and every instance runs its own tick loop. The deletes are
             // idempotent, so N instances would not destroy anything they should not — they would
@@ -1171,6 +1175,8 @@ setInterval(() => {
       if (handleSonicUpgrade(req, clientSocket, head)) return;
       const m = url.match(/^\/preview-app\/([^/?]+)(\/[^?]*)?(\?.*)?$/);
       if (!m) { clientSocket.destroy(); return; }
+      // Same registry as the HTTP proxy. Production never registers a server-container target
+      // (host exec is refused before start), so an unknown session — including that refusal — dies here.
       const target = getPreviewService().serverTarget(m[1]);
       if (!target) { clientSocket.destroy(); return; }
 
@@ -1178,16 +1184,35 @@ setInterval(() => {
       const upstream = net.connect(target.port, target.host, () => {
         // Replay the upgrade handshake to the dev server with the
         // /preview-app/:sessionId prefix stripped, then pipe both ways.
+        // Credential headers are stripped; host is still forwarded (the dev server is local).
         const lines = [`${req.method} ${rest} HTTP/1.1`];
-        for (const [key, val] of Object.entries(req.headers)) {
+        for (const [key, val] of Object.entries(sanitizeProxyRequestHeaders(req.headers))) {
           if (Array.isArray(val)) for (const v of val) lines.push(`${key}: ${v}`);
           else if (val !== undefined) lines.push(`${key}: ${val}`);
         }
         upstream.write(lines.join('\r\n') + '\r\n\r\n');
         if (head && head.length) upstream.write(head);
-        upstream.pipe(clientSocket);
+        // The 101 response can carry Set-Cookie. Buffer only the header block, strip it, then
+        // forward frames. Do not pipe the raw upstream — that would put the cookie back.
+        let pending = Buffer.alloc(0);
+        let headersSent = false;
+        upstream.on('data', (chunk: Buffer) => {
+          if (headersSent) { clientSocket.write(chunk); return; }
+          pending = Buffer.concat([pending, chunk]);
+          const end = pending.indexOf('\r\n\r\n');
+          if (end < 0) {
+            if (pending.length > 65_536) { upstream.destroy(); clientSocket.destroy(); }
+            return;
+          }
+          headersSent = true;
+          const raw = pending.slice(0, end).toString('latin1');
+          const rest = pending.slice(end + 4);
+          clientSocket.write(sanitizeUpgradeResponseHeaders(raw) + '\r\n\r\n');
+          if (rest.length) clientSocket.write(rest);
+        });
         clientSocket.pipe(upstream);
       });
+      upstream.setTimeout(10_000, () => { upstream.destroy(); clientSocket.destroy(); });
       upstream.on('error', () => clientSocket.destroy());
       clientSocket.on('error', () => upstream.destroy());
     });

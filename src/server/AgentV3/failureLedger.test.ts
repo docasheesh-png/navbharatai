@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { foldFailure, rankFailures, frameworkKey, MAX_FRAMEWORK_KEYS, SAMPLE_CHARS, type FailureDay, type FailureEntry } from './failureLedger';
+import { dayKey, cutoffDayKey } from './FailureLedgerStore';
 
 /**
  * WHY DO BUILDS FAIL? (admin: "mera paisa kam kharch ho").
@@ -174,9 +175,10 @@ describe('the wiring', () => {
   it('🔒 records at the SETTLE, where the cost exists — not at the retrospective, where it does not', () => {
     // The retrospective classifies the failure but runs before the provider ledger is reconciled, so
     // it has no idea what the build cost — and a cause with no money against it cannot be ranked.
+    // The once-helper is declared above the finalizer; the SETTLE call is the one after the cost exists.
     const route = codeOf(read('src/server/routes/agentv3.ts'));
     const decide = route.indexOf('realCostRemainder: realCostRemainderForFailure');
-    const record = route.indexOf('failureLedgerStore.record({');
+    const record = route.indexOf('recordFailureLedgerOnce(', decide);
     expect(decide).toBeGreaterThan(-1);
     expect(record).toBeGreaterThan(decide);
     expect(route).toContain('if (result.ok !== true) {');
@@ -184,15 +186,22 @@ describe('the wiring', () => {
 
   it('🔒 prices the failure with the SAME call that decides the bill', () => {
     // Two pricings would eventually disagree about what one build cost, and only the admin's dashboard
-    // would show it.
+    // would show it. The expression moved into ledgerEntryFor; the settle still feeds it the remainder
+    // from decideBuildBilledUsd and the same sandbox figure the bill used.
     const route = codeOf(read('src/server/routes/agentv3.ts'));
-    expect(route).toContain('realProviderCostUsd(providerLedger.entries(), realCostRemainderForFailure)');
+    expect(route).toContain('realProviderCostUsd(i.entries, i.remainder) + Math.max(0, i.sandboxUsd || 0)');
+    expect(route).toContain('remainder: realCostRemainderForFailure');
+    expect(route).toContain('sandboxUsd: livePreviewCharge.usd');
+    expect(route).toContain('entries: providerLedger.entries()');
   });
 
   it('records only FAILED builds, and never awaits the write', () => {
     const route = codeOf(read('src/server/routes/agentv3.ts'));
-    expect(route).toContain('void failureLedgerStore.record({');
+    // Old: `void failureLedgerStore.record({`. The object now lives in ledgerEntryFor; the write is
+    // still fire-and-forget, and it still happens only from the once-helper.
+    expect(route).toContain('void failureLedgerStore.record(entry)');
     expect(route).not.toContain('await failureLedgerStore.record(');
+    expect(route).toContain('if (result.ok !== true)');
   });
 
   it('🔒 the store returns an honest "we could not tell you" on a read failure', () => {
@@ -219,12 +228,32 @@ describe('the wiring', () => {
 
   it('the build records its evidence-derived rootCause as the example', () => {
     const route = codeOf(read('src/server/routes/agentv3.ts'));
-    expect(route).toContain("sample: failDiag.rootCause || ''");
+    // Old: `sample: failDiag.rootCause || ''` at the settle call. The field is now set inside
+    // ledgerEntryFor; both exits still pass the report's rootCause in.
+    expect(route).toContain("sample: i.rootCause || ''");
+    expect(route).toContain("rootCause: failDiag.rootCause || ''");
   });
 
   it('🔒 an unreadable ledger is shown as a gap, never as a clean week', () => {
     const ui = read('src/components/AdminDashboard.tsx');
     expect(ui).toContain('failureReport.causesComplete === false');
     expect(ui).toContain('this is not a clean record');
+  });
+});
+
+describe('the day is IST, and the window is calendar days', () => {
+  it('20:00 UTC on the 8th is the 9th in Kolkata', () => {
+    expect(dayKey(Date.parse('2026-10-08T20:00:00Z'))).toBe('2026-10-09');
+  });
+
+  it('a 7-day window ending 11:30 IST on the 9th starts on the 3rd', () => {
+    expect(cutoffDayKey(Date.parse('2026-10-09T06:00:00Z'), 7)).toBe('2026-10-03');
+  });
+
+  it('ranking asks for a date window and does not cap the read at N documents', () => {
+    const store = codeOf(readFileSync(join(process.cwd(), 'src/server/AgentV3/FailureLedgerStore.ts'), 'utf8'));
+    expect(store).toContain('cutoffDayKey(Date.now(), n)');
+    expect(store).toContain("where('date', '>=', fromDay)");
+    expect(store).not.toContain('.limit(n)');
   });
 });

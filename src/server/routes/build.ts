@@ -4,7 +4,8 @@ import { requireUserMatch, verifyFirebaseToken } from '../lib/authMiddleware';
 import { APP_KNOWLEDGE_BASE } from '../AppContext/AppKnowledgeBase';
 import { proBuildSessionStore } from '../pro/ProBuildSession';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
-import { listUserWorkspaceApps } from '../AgentV3/WorkspaceFileStore';
+import { listUserWorkspaceApps, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { mayTouchBuildHistory, refusalStatus, refusalMessage } from '../lib/buildHistoryAccess';
 import { userCostStore } from '../lib/UserCostStore';
 import { workspacePrefixFor } from '../lib/workspaceIdentity';
 import { routeParams } from '../lib/expressCompat';
@@ -82,6 +83,11 @@ export function registerBuildRoutes(app: Express): void {
     try {
       const { sessionId } = routeParams(req.params);
       if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
+      // 🔒 Q-780: this was open to anyone who could name a session id, and for a signed-in web user
+      // that id is `pro-${Date.now()}`. See buildHistoryAccess.ts for the whole rule, including why
+      // `agentv3-anon-…` keeps its documented capability model.
+      const access = await mayTouchBuildHistory(await verifyFirebaseToken(req), sessionId, countWorkspaceFiles);
+      if (!access.allowed) return res.status(refusalStatus(access.reason)).json({ error: refusalMessage(access.reason) });
       const versions = await buildHistoryStore.list(sessionId);
       return res.json({ versions });
     } catch {
@@ -94,6 +100,10 @@ export function registerBuildRoutes(app: Express): void {
     try {
       const { sessionId, versionId } = routeParams(req.params);
       if (!sessionId || !versionId) return res.status(400).json({ error: 'sessionId and versionId required' });
+      // 🔒 Q-780 — and this is the route that matters most: it returns the app's whole `files` map,
+      // i.e. the user's source code.
+      const access = await mayTouchBuildHistory(await verifyFirebaseToken(req), sessionId, countWorkspaceFiles);
+      if (!access.allowed) return res.status(refusalStatus(access.reason)).json({ error: refusalMessage(access.reason) });
       const version = await buildHistoryStore.get(sessionId, versionId);
       if (!version) return res.status(404).json({ error: 'version not found' });
       return res.json(version);
@@ -105,13 +115,20 @@ export function registerBuildRoutes(app: Express): void {
   // Code Versioning — save a MANUAL named restore-point (checkpoint) to the SAME durable, cross-device
   // build-history store (admin 2026-07-24). This makes the Versioning tool genuinely strong: alongside
   // the automatic per-build checkpoints, a user can snapshot "this is good" before a risky change and
-  // Restore to it later from any device. Bounded + best-effort; the sessionId is the unguessable
-  // capability, mirroring the GET routes above.
+  // Restore to it later from any device. Bounded + best-effort.
+  //
+  // 🔴 THIS COMMENT USED TO SAY "the sessionId is the unguessable capability, mirroring the GET routes
+  // above" (corrected Q-780). It is not unguessable: `App.tsx` mints it as `pro-${Date.now()}`. All
+  // three routes now check ownership — see buildHistoryAccess.ts.
   app.post('/api/build-history/:sessionId/checkpoint', async (req: Request, res: Response) => {
     try {
       const { sessionId } = routeParams(req.params);
       const body = req.body as { name?: unknown; files?: unknown };
       if (!sessionId || typeof sessionId !== 'string') return res.status(400).json({ error: 'sessionId required' });
+      // 🔒 Q-780: unauthenticated, this let anyone who guessed a session id WRITE a version into
+      // somebody else's Time Machine.
+      const access = await mayTouchBuildHistory(await verifyFirebaseToken(req), sessionId, countWorkspaceFiles);
+      if (!access.allowed) return res.status(refusalStatus(access.reason)).json({ error: refusalMessage(access.reason) });
       if (!body?.files || typeof body.files !== 'object' || Array.isArray(body.files)) {
         return res.status(400).json({ error: 'files map required' });
       }

@@ -9,7 +9,7 @@ import { refersToConversation } from '../src/server/AgentV3/conversationReferenc
 import { PER_FILE_VIOLATIONS, WHOLE_APP_VIOLATIONS, qualityNote } from '../src/server/AgentV3/writeTimeQualityCheck';
 import { lintBuiltApp, a11yHandBack } from '../src/server/AgentV3/buildQualityLint';
 import { dataEntryEvidence } from '../src/server/AgentV3/journeyDerivation';
-import { ourCommandLabel, OUR_TSBUILDINFO } from '../src/server/AgentV3/commandTiming';
+import { ourCommandLabel, OUR_TSBUILDINFO_RE } from '../src/server/AgentV3/commandTiming';
 import { WRITE_TYPECHECK_TSBUILDINFO, writeTypecheckCommand } from '../src/server/AgentV3/writeTimeTypecheck';
 import { ToolDispatcher, SMALL_FILE_WHOLE_LINES, SMALL_FILE_WHOLE_BYTES, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
@@ -104,7 +104,7 @@ describe('4 · a search box is not data the user wants saved', () => {
 
 describe('5 · our own typecheck is named in the report, not printed as its preamble', () => {
   it('the label reads the marker every platform typecheck carries', () => {
-    expect(OUR_TSBUILDINFO).toBe(WRITE_TYPECHECK_TSBUILDINFO);
+    expect(OUR_TSBUILDINFO_RE.test(WRITE_TYPECHECK_TSBUILDINFO)).toBe(true);
     expect(ourCommandLabel(writeTypecheckCommand())).toBe('typecheck (tsc --noEmit, run by NavBharatAI)');
     expect(ourCommandLabel('npx tsc --noEmit')).toBeNull();
     expect(ourCommandLabel('npm run dev')).toBeNull();

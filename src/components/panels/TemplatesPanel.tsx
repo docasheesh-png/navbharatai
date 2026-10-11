@@ -52,18 +52,18 @@ export interface TemplatesPanelProps {
 // ─── Curated template list ────────────────────────────────────────────────────
 
 export const CURATED_TEMPLATES: TemplateDefinition[] = [
-  { id: 'intro', name: 'Introduction', icon: Sparkles, prompt: 'hey 👋 , tell me about yourself!' },
+  { id: 'intro', name: 'Introduction', icon: Sparkles, prompt: 'What can you build for me? Give me a short overview with a few example apps.' },
   {
     id: 'analytics', name: 'Smart Analytics', icon: Activity,
-    prompt: 'Create a high-performance Data Analytics Dashboard for a modern business. I want real-time visualization of key performance indicators (KPIs) including monthly revenue, user growth, and churn rate. Use a sophisticated dark-glassmorphism theme with SVG charts and interactive data tables. Ensure the UI is fully responsive and supports dynamic data filtering.',
+    prompt: 'Build an analytics dashboard for a small business: KPI tiles for monthly revenue, user growth and churn, a line chart and a bar chart (SVG), and a sortable, filterable data table. Include a date-range filter, loading and empty states, and a layout that works on phone and desktop. Use clearly labelled sample data.',
   },
   {
     id: 'calc', name: 'Simple Calculator', icon: Cpu,
-    prompt: 'I want you to act as a World-Class Software Architect. Build a Professional High-Precision Scientific Calculator. \n\n### MANDATORY FUNCTIONAL REQUIREMENTS:\n1. **Core Logic**: You MUST implement a robust JavaScript evaluation engine in `script.js`. It should handle click events for all buttons, manage a screen buffer, and accurately calculate results for basic (+, -, *, /) and scientific (sqrt, sin, cos, tan, log) operations. Ensure the calculator works perfectly upon loading.\n2. **UI Architecture**: In `style.css`, create a premium "Space-Age Glass" design with deep shadows and tactile hover animations. Use a responsive grid layout.\n3. **History System**: Implement a history list that records the last 5 operations.\n4. **Checklist**: All button IDs in `index.html` must match the selectors used in `script.js`. Ensure NO empty functions.',
+    prompt: 'Build a scientific calculator in plain HTML, CSS and JavaScript (index.html, style.css, script.js). Support + − × ÷, %, parentheses, sqrt, sin, cos, tan and log, keyboard input, a clear/backspace key, and a history of the last 5 calculations. Handle errors such as division by zero without crashing. Clean, readable button grid that works on phone and desktop.',
   },
   {
     id: 'clock', name: 'Simple Clock', icon: Clock,
-    prompt: 'Create a fully functional, production-grade analog clock/watch application for Android + Web (responsive mobile-first UI).\n\n### PRIMARY GOAL\nBuild an ultra-realistic, smooth, accurate analog watch application with professional mechanics, synchronized with the device time down to the millisecond. It must look and behave like a real luxury wristwatch.\n\n### CRITICAL FUNCTIONAL REQUIREMENTS\n1. **REAL TIME SYNC**: Automatically sync with device local time, hours, minutes, and seconds. The clock MUST NOT freeze or use hardcoded angles. Use `requestAnimationFrame` for continuous updates.\n2. **SMOOTH MOVEMENT**: Second hand must move smoothly every frame (not teleport). Minute and Hour hands must move proportionally as seconds progress.\n3. **HAND ALIGNMENT**: All hands MUST originate from EXACTLY the same center pivot point (0,0 center). No misaligned axes.\n4. **DESIGN**: Premium luxury watch face with metallic frame, realistic dial texture, and inner shadows. Include 12 hour markers and minute ticks.\n5. **GEOMETRY**: Perfectly circular (1:1 aspect ratio) and centered on all screens (Android/Desktop).\n6. **FORMULAS**:\n   - Seconds: `seconds * 6` degrees\n   - Minutes: `(minutes * 6) + (seconds * 0.1)` degrees\n   - Hours: `(hours % 12 * 30) + (minutes * 0.5)` degrees\n7. **TECHNICAL**: Use HTML/CSS/JS with SVG or Canvas for real-time rendering. Provide separate code for index.html, style.css, and script.js with NO placeholders.',
+    prompt: 'Build an analog clock in HTML, CSS and JavaScript (index.html, style.css, script.js) that shows the device\'s local time. Draw the face with SVG or Canvas: 12 hour markers, minute ticks, and hour, minute and second hands from one centre point. Update with requestAnimationFrame so the second hand moves smoothly (seconds × 6°, minutes × 6° + seconds × 0.1°, (hours % 12) × 30° + minutes × 0.5°). Keep the face circular and centred on every screen size, and show the digital time underneath.',
   },
   {
     // WAS "React Native App", and it promised something this platform cannot do (verified 2026-08-08):
@@ -80,19 +80,19 @@ export const CURATED_TEMPLATES: TemplateDefinition[] = [
     // signed .apk/.aab for the Play Store. So the template now builds the mobile-first app that path
     // needs, and its name says what the user will genuinely end up holding.
     id: 'rn_app', name: 'Mobile App (installable)', icon: Smartphone, isPro: true,
-    prompt: 'Build a MOBILE-FIRST app designed to be installed on a phone. Requirements:\n1. Phone-sized layout first (single column, 360-430px), scaling up gracefully on tablet/desktop\n2. Bottom tab navigation between a Home screen and a Detail screen (real routing, not a mock)\n3. Touch-sized targets (min 44x44px), no hover-only interactions, safe-area padding for notches\n4. Local persistence so state survives a reload\n5. Works offline for already-loaded screens\n\nApp theme: dark mode with indigo accent. Include sample data and list rendering.\nAfter it is built, tell me I can turn this into a real installable Android app from More → Your App → Download APK.',
+    prompt: 'Build a MOBILE-FIRST app designed to be installed on a phone. Requirements:\n1. Phone-sized layout first (single column, 360-430px), scaling up gracefully on tablet/desktop\n2. Bottom tab navigation between a Home screen and a Detail screen (real routing, not a mock)\n3. Touch-sized targets (min 44x44px), no hover-only interactions, safe-area padding for notches\n4. Local persistence so state survives a reload\n5. Works offline for already-loaded screens\n\nFollow the system light/dark theme. Include sample data and list rendering.\nAfter it is built, tell me I can turn this into a real installable Android app from More → Your App → Download APK.',
   },
   {
     id: 'portfolio', name: 'Portfolio Site', icon: Globe,
-    prompt: 'Build a stunning personal portfolio website with: hero section with animated gradient, about me, skills grid, projects showcase (3 cards), contact form with validation. Dark theme with glassmorphism cards, smooth scroll animations, mobile-first responsive. HTML/CSS/JS only.',
+    prompt: 'Build a personal portfolio website in HTML, CSS and JavaScript: a header with navigation, an about section, a skills list, three project cards with links, and a contact form with validation and a clear success message. Responsive, accessible (labels, focus states, alt text), and following the system light/dark theme.',
   },
   {
     id: 'ecommerce', name: 'E-Commerce UI', icon: ShieldCheck, isPro: true,
-    prompt: 'Build a modern e-commerce product listing page: navbar with cart counter, hero banner, product grid (8 items with images, prices, add-to-cart), cart sidebar with total calculation. Tailwind CSS style with indigo/white palette. Full JavaScript interactions.',
+    prompt: 'Build an e-commerce product listing page: a header with search and a cart count, category filters, a product grid of 8 items (image, name, price, add-to-cart), and a cart drawer with quantities and a running total. Persist the cart in localStorage, and include empty and loading states.',
   },
   {
     id: 'dashboard', name: 'Admin Dashboard', icon: LayoutDashboard, isPro: true,
-    prompt: 'Build a professional admin dashboard: sidebar navigation, header with user info, metric cards (4 KPIs), recent activity table (10 rows), line chart using Chart.js CDN. Dark theme, responsive. All data should be realistic sample data.',
+    prompt: 'Build an admin dashboard: sidebar navigation, a header with the signed-in user, 4 metric cards, a recent-activity table (10 rows), and a line chart. Responsive, with loading and empty states, and clearly labelled sample data.',
   },
   // ── Bharat-First templates (Phase 6.1) ──────────────────────────────────────
   {

@@ -14,6 +14,8 @@ export interface LintGateVerdict {
   /** Up to a few concrete "file:line rule — message" lines, for an honest, actionable summary. */
   blockers: string[];
   summary: string;
+  /** The lint check timed out or threw. `blocked: false` here means "we did not look", not "clean". */
+  unassessed?: boolean;
 }
 
 /**

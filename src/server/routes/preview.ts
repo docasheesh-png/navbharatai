@@ -11,6 +11,7 @@ import { promises as fsp } from 'fs';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { getPreviewService } from '../runtime/PreviewService';
 import { buildProxyUrl } from '../runtime/proxyUrl';
+import { sanitizeProxyRequestHeaders, sanitizeProxyResponseHeaders } from '../lib/proxyHeaders';
 import { buildVuePreview } from '../runtime/VuePreview';
 import { sendSafeError } from '../lib/httpError';
 import { splatPath, routeParam } from '../lib/expressCompat';
@@ -373,7 +374,7 @@ export function registerPreviewRoutes(app: Express, limiter: RequestHandler = pr
       const rest = splatPath(req.params);
       const url = buildProxyUrl(target.origin, rest, req.originalUrl);
       const headers: Record<string, string> = {};
-      for (const [k, v] of Object.entries(req.headers)) {
+      for (const [k, v] of Object.entries(sanitizeProxyRequestHeaders(req.headers))) {
         if (typeof v === 'string' && k.toLowerCase() !== 'host') headers[k] = v;
       }
       const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
@@ -393,9 +394,13 @@ export function registerPreviewRoutes(app: Express, limiter: RequestHandler = pr
         redirect: 'manual',
       });
       res.status(upstream.status);
+      const upstreamHeaders: Record<string, string> = {};
       upstream.headers.forEach((value, key) => {
-        if (key.toLowerCase() !== 'content-encoding' && key.toLowerCase() !== 'transfer-encoding') res.setHeader(key, value);
+        if (key.toLowerCase() !== 'content-encoding' && key.toLowerCase() !== 'transfer-encoding') upstreamHeaders[key] = value;
       });
+      for (const [key, value] of Object.entries(sanitizeProxyResponseHeaders(upstreamHeaders))) {
+        if (value !== undefined) res.setHeader(key, value);
+      }
       const buf = Buffer.from(await upstream.arrayBuffer());
       res.send(buf);
     } catch (err: any) {

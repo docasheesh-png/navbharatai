@@ -48,6 +48,35 @@ export type McpCallResult =
   | { ok: false; error: string };
 
 /**
+ * Read a response body up to `cap` bytes. A stream that runs past the cap is cancelled and rejected
+ * so the bytes are never buffered past the limit.
+ */
+export async function readBodyCapped(resp: globalThis.Response, cap: number): Promise<string> {
+  const reader = resp.body?.getReader();
+  if (!reader) return '';
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > cap) {
+      try { await reader.cancel(); } catch { /* the cap still stands */ }
+      throw new Error(`MCP response exceeded ${cap} bytes`);
+    }
+    chunks.push(value);
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
+/**
  * One guarded JSON-RPC round trip. Never throws.
  *
  * The SSRF check runs on EVERY call, not once at connect time. A host that resolved to a public
@@ -85,13 +114,14 @@ async function rpc(cfg: McpServerConfig, method: string, params: unknown): Promi
 
     // Read with a hard cap rather than resp.json(): a hostile or broken server can otherwise stream
     // until we run out of memory, and a size limit applied after parsing is applied too late.
-    const raw = await resp.text();
-    if (raw.length > MCP_MAX_RESPONSE_BYTES) {
-      return { ok: false, error: 'That service sent back more data than NavBharatAI can accept.' };
-    }
+    const raw = await readBodyCapped(resp, MCP_MAX_RESPONSE_BYTES);
     return { ok: true, text: raw };
   } catch (e) {
     const aborted = (e as Error)?.name === 'AbortError';
+    const message = e instanceof Error ? e.message : '';
+    if (message.startsWith('MCP response exceeded')) {
+      return { ok: false, error: 'That service sent back more data than NavBharatAI can accept.' };
+    }
     return { ok: false, error: aborted ? 'That service took too long to reply.' : 'Could not reach that service.' };
   } finally {
     clearTimeout(timer);

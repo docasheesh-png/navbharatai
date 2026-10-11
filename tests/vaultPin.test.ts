@@ -61,8 +61,32 @@ describe('the PIN is stored as a hash, and nothing else', () => {
     const b = hashPin('8274', saltB);
     // The salt is what stops one precomputed table from opening every account with the same PIN.
     expect(a).not.toBe(b);
-    expect(a).not.toContain('8274');
+    expect(a).not.toBe('8274');
     expect(a).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  /**
+   * 🔴 THIS TEST USED TO BE FLAKY, AND THE FLAKE WAS IN THE ASSERTION, NOT THE CODE (2026-10-09).
+   *
+   * The case above asserted `expect(a).not.toContain('8274')` on a hash derived from a RANDOM salt.
+   * A 64-character hex digest has 61 four-character windows, each matching a given hex sequence with
+   * probability 16⁻⁴, so the odds of any one run containing the PIN's digits are about 1 in 1,100.
+   * It duly failed on 2026-10-09 with `…ab7e90ef8274edfd…`, in a gate run for a change that touched
+   * nothing near it — the most expensive kind of red, because the first instinct is to go looking at
+   * the change.
+   *
+   * It was also not testing anything: a hash that happens to contain the PIN's four digits somewhere
+   * in sixty-four is not a leak, and nobody could use it. So the substring claim is made HERE, where
+   * the salt is fixed and the digest is therefore the same on every machine and every run. What the
+   * random-salt case keeps is the property that actually matters, that two salts give two hashes.
+   */
+  it('a fixed salt gives a fixed digest, which neither is nor contains the PIN', () => {
+    const digest = hashPin('8274', 'fixed-salt-for-this-assertion');
+    expect(digest).toMatch(/^[0-9a-f]{64}$/);
+    expect(digest).not.toBe('8274');
+    expect(digest).not.toContain('8274');
+    // Deterministic: the same input must give the same stored value, or no login would ever verify.
+    expect(hashPin('8274', 'fixed-salt-for-this-assertion')).toBe(digest);
   });
 
   it('matches the right PIN and rejects every other one', () => {
@@ -159,7 +183,29 @@ describe('the code that authorises creating or resetting a PIN', () => {
 
   it('stores only the hash — the record never contains the code', () => {
     const r = afterOtpSent(emptyPinRecord(), '427391', 'create', NOW);
-    expect(JSON.stringify(writePinRecord(r))).not.toContain('427391');
+    const stored = writePinRecord(r);
+
+    /**
+     * 🔴 THIS WAS `expect(JSON.stringify(stored)).not.toContain('427391')`, AND IT WAS THE SAME
+     * UNSOUND SHAPE as the hash case above — the sibling, found by hunting it rather than waiting for
+     * it. `afterOtpSent` draws a RANDOM salt (`vaultPin.ts:311`), so that JSON carries ~128 hex
+     * characters of randomness and the six hex digits of a numeric OTP appear in it by chance about
+     * once in 136,000 runs. Rarer than the 1-in-1,063 above, and therefore worse: it would fire years
+     * from now, in somebody else's unrelated PR.
+     *
+     * The leak this test exists for is a FIELD that holds the code, so that is what is asserted — on
+     * the fields themselves, deterministically, which is also a stricter statement than scanning a
+     * blob. The two random fields are checked for shape instead, because "a 64-hex digest" is the
+     * real claim about them.
+     */
+    for (const [key, value] of Object.entries(stored)) {
+      expect(String(value), `${key} holds the OTP itself`).not.toBe('427391');
+      if (key === 'otp_hash' || key === 'otp_salt' || key === 'pin_hash' || key === 'pin_salt') continue;
+      expect(String(value ?? ''), `${key} contains the OTP`).not.toContain('427391');
+    }
+    expect(stored.otp_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(stored.otp_salt).toMatch(/^[0-9a-f]+$/);
+
     expect(r.otpExpiresAtMs).toBe(NOW + OTP_TTL_MS);
     expect(r.otpPurpose).toBe('create');
   });

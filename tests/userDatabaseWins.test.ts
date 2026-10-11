@@ -46,10 +46,15 @@ describe('A connected database is never replaced by the sandbox one', () => {
     // the workspace but not that field. The file is the one source of truth all of them agree on.
     const at = dispatcher.indexOf('private async ensureSandboxPostgres');
     const fn = dispatcher.slice(at, at + 3000);
-    const fileRead = fn.indexOf("readFile(this.workspaceId, '.env')");
+    const fileRead = fn.indexOf("this.readDotEnvForMerge('env-read')");
     const decision = fn.indexOf('isUserOwnedDatabaseUrl');
     expect(fileRead).toBeGreaterThan(-1);
     expect(fileRead).toBeLessThan(decision); // read first, then decide
+    // The bytes still come from the file. Old lock (before the guarded door):
+    //   fn.indexOf("readFile(this.workspaceId, '.env')")
+    // The read moved into readDotEnvForMerge so a transient error is not treated as an empty file.
+    const helperAt = dispatcher.indexOf('private async readDotEnvForMerge');
+    expect(dispatcher.slice(helperAt, helperAt + 800)).toContain("readFile(this.workspaceId, '.env')");
   });
 
   it('it returns BEFORE provisioning, and says so instead of going quiet', () => {
@@ -195,7 +200,7 @@ describe('An accepted database reaches the build that is still running', () => {
     const at = dispatcher.indexOf('private async rescueDatabase');
     expect(at).toBeGreaterThan(-1);
     const fn = dispatcher.slice(at, at + 2000);
-    expect(fn).toContain('mergeDotEnv(existing, env)');
+    expect(fn).toContain('mergeDotEnv(existingEnv.text, env)');
     expect(fn).toContain("writeFile(this.workspaceId, '.env', merged)");
     expect(fn).toContain('gitignoreWithEnv'); // real keys must never reach the user's git repo
   });

@@ -82,6 +82,7 @@ export function midBuildActionableBlockers(readiness: ReadinessReport): string[]
 
 /** The ONE corrective steer message to inject, or null when nothing actionable was found. */
 export function weakCheckpointSteer(readiness: ReadinessReport): string | null {
+  if (readiness.unassessed) return null;
   const actionable = midBuildActionableBlockers(readiness);
   if (actionable.length === 0) return null;
   return [

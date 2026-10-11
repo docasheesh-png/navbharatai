@@ -8,6 +8,7 @@ import { conversationToEvents, conversationToUserMessages, isUnfinishedBuild, ty
 import { shouldSurfaceStreamError, reconnectOutcome, type ReconnectOutcome } from './agentV3StreamError';
 import { nextLivePollDelayMs, resumeSinceSeq, LIVE_POLL_FAST_MS } from './livePollPolicy';
 import { auth } from '../lib/firebase';
+import { authedHeaders } from '../lib/authHeaders';
 import { writeFailure } from '../lib/serverAnswer';
 // FILE-REVEAL PACING (admin 2026-07-23 — "one by one user ko dikhe … har 2 file ke bich ~5–10 sec"):
 // reveal generated files ONE BY ONE with a ~6s gap so the user watches files land while the backend keeps
@@ -699,7 +700,12 @@ export function useAgentV3Build(): UseAgentV3Build {
         convoId = recent?.id ? String(recent.id) : undefined;
       }
       if (!convoId) { lastLoadDiagRef.current = 'no conversation id to load (history was empty)'; return null; }
-      const oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(convoId)}?${params.toString()}`, { headers: authHeaders });
+      let oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(convoId)}?${params.toString()}`, { headers: authHeaders });
+      // BLD-2: a flaky token used to be papered over by trusting ?userId=. Retry once with a forced refresh.
+      if (oneRes.status === 401 || oneRes.status === 403) {
+        try { await auth.currentUser?.getIdToken(true); } catch { /* rebuild headers with whatever token is cached */ }
+        oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(convoId)}?${params.toString()}`, { headers: await authedHeaders() });
+      }
       if (!oneRes.ok) {
         // THE key signal: 404 = no server transcript stored for this session's candidate ids;
         // 403 = the record exists but the verified/claimed identity does not own it; 400 = missing id.

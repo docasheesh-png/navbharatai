@@ -11,6 +11,8 @@
 // network call or key. Errors are NOT swallowed — they propagate so the multi-provider
 // orchestrator can fall through to the next (ultimately Claude) provider.
 
+import { streamingBudget, streamNoClampEnabled } from '../reliability/streamBudget';
+import { modelAcceptsReasoningPassback, reasoningPassbackEnabled } from '../reliability/reasoningPassback';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { turnDeadline, firstAnswerBoundMs, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE, isSlowStreamAbandon } from '../turnDeadline';
 import { glmThinkingParam, isThinkingParamRejection, modelAlwaysReasons, type GlmThinkingLevel } from './glmThinking';
@@ -347,7 +349,11 @@ export class OpenAiToolRunner implements TurnRunner {
 
   async runTurn(params: RunTurnParams): Promise<TurnResult> {
     const tools = toolDefsToOpenAI(params.tools);
-    const messages = transcriptToOpenAI(params.messages, params.system);
+    // P4c (AGENTV3_REASONING_PASSBACK, default OFF) — hand Kimi/GLM their own earlier reasoning back.
+    const passbackModel = this.opts.model || params.model;
+    const messages = transcriptToOpenAI(params.messages, params.system, {
+      reasoningPassback: reasoningPassbackEnabled() && modelAcceptsReasoningPassback(passbackModel),
+    });
 
     // GLM rung only: forward the user's thinking toggle to GLM's reasoning switch, so
     // the one app-level thinking setting controls this module too — not just Claude.
@@ -411,6 +417,11 @@ export class OpenAiToolRunner implements TurnRunner {
       // Known in advance (GLM 5.3+), or LEARNED from this model's own first clamped starvation.
       { alwaysReasons: modelAlwaysReasons(thinkingModel) || modelStarvedWhileClamped(thinkingModel) },
     );
+    // P2a (AGENTV3_STREAM_NO_CLAMP, default OFF) — a STREAMED call is guarded by its idle timer, so the
+    // clock-derived clamp only truncates files; ask for what the caller asked, up to the model's ceiling.
+    if (streaming && streamNoClampEnabled()) {
+      Object.assign(budget, streamingBudget(params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000, thinkingModel, budget));
+    }
     const request = {
         // The OpenAI-compatible provider has its own model ids, so an explicit option
         // model wins over the Anthropic model id the loop passes for Claude.

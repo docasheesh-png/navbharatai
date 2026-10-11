@@ -185,7 +185,10 @@ describe('the wiring in routes/agentv3.ts', () => {
   });
   it('it saves to the SAME key the end-of-build GreenGuard reads — one store, one rule', () => {
     const body = src.slice(attempt, loopEnd);
-    expect(body).toMatch(/saveWorkspaceFiles\(greenWorkspaceKey\(workspaceId\), files\)/);
+    // Old: `saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files)` stamped the proof immediately.
+    // New: replace-mode save, and the proof is stamped only when that save actually landed.
+    expect(body).toMatch(/saveWorkspaceFiles\(greenWorkspaceKey\(workspaceId\), files, \{ mode: 'replace' \}\)/);
+    expect(body).toMatch(/if \(st === 'saved'\) \{\s*inBuildGreenAt = Date\.now\(\)/);
   });
   it('🔒 the write race is checked with the counter every captured write bumps', () => {
     const body = src.slice(attempt, loopEnd);
@@ -201,6 +204,9 @@ describe('the wiring in routes/agentv3.ts', () => {
   });
   it('the end-of-build guard is told when this build began, and the honesty facts carry the origin', () => {
     expect(src).toMatch(/before: \{ green: hasSnapshot, at: inBuildGreenAt > 0 \? inBuildGreenAt : undefined \},\s*turnStartedAt: buildStartedAt,/);
-    expect(src).toMatch(/fromThisBuild: snapshotIsFromThisBuild\(/);
+    // Old: `fromThisBuild: snapshotIsFromThisBuild(`.
+    // New: the same function still decides the origin; the facts record it only for a green-snapshot restore.
+    expect(src).toMatch(/const fromThisBuild = snapshotIsFromThisBuild\(inBuildGreenAt > 0 \? inBuildGreenAt : undefined, buildStartedAt\)/);
+    expect(src).toMatch(/fromThisBuild: chosen\.kind === 'green-snapshot' && fromThisBuild/);
   });
 });

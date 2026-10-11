@@ -25,7 +25,7 @@ import { sandboxStore, sandboxResumeEnabled } from '../../../SandboxStore';
 import { resumeSandboxChoice } from '../../../sandboxResumeChoice';
 import { sandboxLifecycle } from '../../../previewWake';
 import { countRunningSandboxes, type LiveSandboxCount } from '../../../liveSandboxCount';
-import { reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, shouldMarkPausedAfterFailure } from '../../../sandboxReaper';
+import { reapAfterMs, buildFlagExpiryMs, sandboxesToReap, shouldTouchDurable, shouldMarkPausedAfterFailure, actionAfterPauseFailure } from '../../../sandboxReaper';
 import { sandboxLifetimeMs, heartbeatIntervalMs, shouldExtendLifetime, heartbeatTargets, idleLimitFor } from '../../../sandboxLifetime';
 import { currentSandboxReason } from '../../../sandboxSessionZone';
 import type { SandboxSession } from '../../../sandboxSessions';
@@ -1414,8 +1414,25 @@ export class E2BActuator implements IEngineerActuator {
         this._lastDurableTouch.delete(rec.workspaceId);
         this._sandboxStartedAt.delete(rec.workspaceId);
         this._fileCache.delete(rec.workspaceId);
-      } else if (shouldMarkPausedAfterFailure(this._notePauseFailure(rec.workspaceId))) {
-        await sandboxStore.markPaused(rec.workspaceId, 'orphan-sweep').catch(() => {});
+      } else {
+        const attempts = this._notePauseFailure(rec.workspaceId);
+        // Give up only after the same threshold as `shouldMarkPausedAfterFailure`. The FIRST and
+        // SECOND failures stay a retry — the record is left live so the next sweep can still see
+        // the machine. The idle sweep drops its handle in `pauseSandbox`'s finally, so it never
+        // walks the same sandbox up to 3; this orphan pass is the one that reaches the threshold.
+        // Busy (in this process's map, a build flag, or an op in flight) is never killed and is
+        // not marked paused — marking would hide it from the only sweep that can still stop it.
+        // `sandboxesToReap` already dropped anything touched inside the orphan window.
+        const busy = this.sandboxes.has(rec.workspaceId)
+          || this._buildInFlight(rec.workspaceId, Date.now())
+          || this._opInFlight(rec.workspaceId);
+        if (shouldMarkPausedAfterFailure(attempts) && actionAfterPauseFailure(attempts, busy) === 'kill') {
+          try {
+            await this.killSandbox(rec.sandboxId);
+          } catch { /* a cost sweep must never throw */ }
+          console.warn(`SANDBOX_PAUSE_FAILED_KILLED ${rec.sandboxId}`);
+          await sandboxStore.markPaused(rec.workspaceId, 'orphan-sweep').catch(() => {});
+        }
       }
     }
   }
@@ -3276,6 +3293,25 @@ ${paintWaitJs('p')}
       // likeliest case) the object is a paused machine that answers nothing; if the sandbox is gone,
       // it is a dead pointer; if it is alive and merely unpausable, `getSandbox` reconnects to it by
       // its durable id, which resumes it and works. Keeping it was the only outcome with no recovery.
+      for (const [wid, sb] of [...this.sandboxes]) {
+        if (sb.sandboxId === sandboxId) this._dropSandbox(wid);
+      }
+    }
+  }
+
+  /**
+   * Kill a sandbox by id when pause has been given up on (BLD-16).
+   *
+   * Same shape as `pauseSandbox`: static cloud call, 10s bound, never throws. Called only from the
+   * orphan sweep once `actionAfterPauseFailure` says `'kill'` — not on the first or second failure,
+   * and not for a sandbox this process is still using.
+   */
+  async killSandbox(sandboxId: string): Promise<boolean> {
+    try {
+      return await withTimeout(Sandbox.kill(sandboxId), 10_000, 'Sandbox.kill');
+    } catch {
+      return false;
+    } finally {
       for (const [wid, sb] of [...this.sandboxes]) {
         if (sb.sandboxId === sandboxId) this._dropSandbox(wid);
       }

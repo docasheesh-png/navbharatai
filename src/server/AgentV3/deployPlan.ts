@@ -30,6 +30,8 @@
 // PURE and deterministic: files in, plan out. No network, no env, no I/O — so every rule is testable,
 // and the same app always yields the same plan.
 
+import { createsCoreHttpServer } from './coreHttpServer';
+
 export type AppShape = 'static' | 'spa' | 'node-server' | 'python-server' | 'fullstack' | 'unknown';
 
 export interface FrontendPart {
@@ -142,8 +144,17 @@ function importsNodeServer(files: Record<string, string>): [string, string] | nu
 function nodeServer(pkg: Pkg | null, files: Record<string, string>): BackendPart | null {
   const prod = new Set(Object.keys(pkg?.dependencies ?? {}));
   const hit = NODE_SERVER_DEPS.find(([d]) => prod.has(d)) ?? importsNodeServer(files);
-  if (!hit) return null;
-  return { runtime: 'node', startCommand: script(pkg, 'start') || '', framework: hit[1] };
+  if (hit) return { runtime: 'node', startCommand: script(pkg, 'start') || '', framework: hit[1] };
+
+  // 🔒 A SERVER NO FRAMEWORK LIST WOULD NAME (Q-707). Everything above recognises a server by its
+  // framework, so an app whose server is plain `node:http` was `shape: 'unknown'` →
+  // `staticHostingSufficient: true` → PUBLISHED AS A STATIC SITE, with its API dead and the user told
+  // it worked. That is the silent half of this detector's job, and it is the one that was missing.
+  // Shared with BackendPresence rather than re-listed here — one detector, one definition.
+  if (createsCoreHttpServer(files)) {
+    return { runtime: 'node', startCommand: script(pkg, 'start') || '', framework: 'Node HTTP' };
+  }
+  return null;
 }
 
 /**

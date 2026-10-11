@@ -14,8 +14,14 @@
   token, and `allow-same-origin` on the embedding iframe is now safe. The app's own harness posts
   errors/edits to window.parent (the platform) directly, so no relay is needed.
 
-  It accepts the HTML ONLY from the exact parent origin passed via `?parent=` — a page from any other
-  origin is ignored.
+  It accepts the HTML ONLY from the embedding parent (e.source === window.parent), and ONLY when that
+  parent's origin is the `?parent=` value AND is on ALLOWED_PARENTS. A same-origin parent
+  (allowedParent === location.origin) is refused: that is no isolation.
+
+  capacitor://localhost is on ALLOWED_PARENTS because capacitor.config.ts sets no server.url, so the
+  real native WebView origin is capacitor://localhost. https://localhost is listed as well (the
+  https-scheme shell). If the owner uses a different app domain, update ALLOWED_PARENTS here and
+  APP_ORIGINS in src/server/lib/previewHost.ts (docs/ops/preview-origin.md).
 -->
 <style>html,body{margin:0;height:100%;background:#fff}</style>
 </head>
@@ -26,10 +32,25 @@
   var allowedParent = '';
   try { allowedParent = new URLSearchParams(location.search).get('parent') || ''; } catch (e) {}
 
+  // Inline allow-list. capacitor://localhost: no server.url, so the WebView origin is capacitor://localhost.
+  var ALLOWED_PARENTS = [
+    'https://navbharatai.com',
+    'https://www.navbharatai.com',
+    'https://localhost',
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'capacitor://localhost'
+  ];
+
   var rendered = false;
   window.addEventListener('message', function (e) {
+    // Only the embedding frame itself — a nested or sibling window cannot inject HTML.
+    if (e.source !== window.parent) return;
     // Only the exact embedding platform origin may inject preview HTML.
     if (!allowedParent || e.origin !== allowedParent) return;
+    // Same origin as this page is no isolation (the app's session would be readable).
+    if (allowedParent === location.origin) return;
+    if (ALLOWED_PARENTS.indexOf(allowedParent) === -1) return;
     var data = e.data || {};
     var html = data && data.__nbaiPreviewHtml;
     if (typeof html !== 'string') return;
@@ -45,6 +66,7 @@
   }, false);
 
   // Tell the platform we are ready to receive HTML (it may also just post on iframe load).
+  // Targeted at allowedParent — never '*'.
   try { if (window.parent && allowedParent) window.parent.postMessage({ __nbaiPreviewSandboxReady: true }, allowedParent); } catch (e) {}
 })();
 </script>

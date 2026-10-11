@@ -86,5 +86,24 @@ export interface AIProvider {
    * indistinguishable — which is why telemetry could never say WHICH Gemini actually answered.
    */
   pinnedModel?: string;
-  executeStream?(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string): Promise<string>;
+  /**
+   * 🔴 `signal` IS WHAT STOPS PAYING FOR AN ANSWER NOBODY WILL READ (Q-621, second half).
+   *
+   * #3551 fixed the first half: the server now really does learn that a streaming client has gone
+   * (`clientDisconnect.ts` — on `res`, because a POST's `req` 'close' fires as soon as
+   * `express.json()` has read the body). But the signal that `chat.ts` aborts on that event had
+   * nowhere to go: `routeStream` only checked it BETWEEN rungs and inside its own chunk callback,
+   * so the HTTP request already in flight to the provider ran to completion and was billed in full.
+   * A user who closes the tab after one word still paid for the whole reply.
+   *
+   * Every implementation must therefore hand this signal to its SDK so the socket is actually torn
+   * down, not merely stop reading from it. Where an SDK offers no abort (Vertex — its
+   * `RequestOptions` carries only `timeout`, `apiClient` and `customHeaders`), the implementation
+   * says so in a comment and at minimum stops consuming the stream; that is an honest mitigation,
+   * not a fix, and it is recorded as such rather than being papered over.
+   *
+   * `tests/anAbandonedStreamStopsCosting.test.ts` is the census that keeps this true for every
+   * provider, including ones added later.
+   */
+  executeStream?(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string>;
 }

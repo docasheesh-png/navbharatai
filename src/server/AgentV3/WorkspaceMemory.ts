@@ -370,6 +370,15 @@ export class WorkspaceMemory {
   isHydrationConfirmed(): boolean { return this._hydrationConfirmed; }
   markHydrationConfirmed(): void { this._hydrationConfirmed = true; }
 
+  /** A path that EXISTS, even when its bytes were not read. Resolution only needs the node. */
+  ensureGraphNode(rawFile: string): void {
+    const file = graphKey(rawFile);
+    if (!file || this.fileFacts.has(file)) return;
+    this.fileFacts.set(file, {
+      symbols: [], components: [], routes: [], imports: [], dependencies: [], references: [], security: [],
+    });
+  }
+
   /** Index (or re-index) a file's content into the project graph. */
   indexFile(rawFile: string, content: string): void {
     // ONE KEY SHAPE FOR THE GRAPH, ENFORCED AT THE DOOR (autopsy ce115e1f). `codemod_rename` handed

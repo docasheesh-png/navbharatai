@@ -44,8 +44,20 @@ export interface BuildOutcomeRecord {
 
 class BuildOutcomeStore {
   private db: admin.firestore.Firestore | null = null;
+  /** Set only by tests. `undefined` means "use the real rules" (VITEST skips Firestore). */
+  private dbForTests: admin.firestore.Firestore | null | undefined;
+
+  /** Tests only. A fake transactional db so `note` can be proven without Firestore. */
+  bindDbForTests(db: admin.firestore.Firestore | null): void {
+    this.dbForTests = db;
+  }
+
+  unbindDbForTests(): void {
+    this.dbForTests = undefined;
+  }
 
   private getDb(): admin.firestore.Firestore | null {
+    if (this.dbForTests !== undefined) return this.dbForTests;
     if (process.env.VITEST || process.env.NODE_ENV === 'test') return null;
     try {
       if (!this.db) {
@@ -93,17 +105,28 @@ class BuildOutcomeStore {
    *
    * Returns null when there is no record — that means no build has finished for this workspace, so
    * there is nothing to judge. Creating one here would invent a build that never happened.
+   *
+   * The write is ONLY the patch. Spreading the snapshot back (`{ ...snap.data(), ...patch }`) is how
+   * a note that read build A, lost the race to `startBuild('B')`, and then wrote, resurrected A's
+   * fields onto B. A transaction plus a buildId precondition: if this note names a build and the
+   * stored one is different, the note is about a build that is already gone, so it aborts.
+   * `expectBuildId` is that name when the caller does not put `buildId` on the patch itself.
    */
-  async note(workspaceId: string, patch: Partial<BuildOutcomeRecord>): Promise<BuildOutcomeRecord | null> {
+  async note(workspaceId: string, patch: Partial<BuildOutcomeRecord>, expectBuildId?: string): Promise<BuildOutcomeRecord | null> {
     const db = this.getDb();
     if (!db || !workspaceId) return null;
     try {
       const ref = db.collection(COLLECTION).doc(workspaceId);
-      const snap = await ref.get();
-      if (!snap.exists) return null;
-      const merged = { ...(snap.data() as BuildOutcomeRecord), ...patch, updatedAt: Date.now() };
-      await ref.set(merged, { merge: true });
-      return merged;
+      return await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) return null;
+        const rec = snap.data() as BuildOutcomeRecord;
+        const named = typeof patch.buildId === 'string' && patch.buildId ? patch.buildId : expectBuildId;
+        if (named && rec.buildId !== named) return null;
+        const writePatch = { ...patch, updatedAt: Date.now() };
+        tx.set(ref, writePatch, { merge: true });
+        return { ...rec, ...writePatch };
+      });
     } catch {
       return null;
     }
@@ -140,6 +163,14 @@ class BuildOutcomeStore {
 }
 
 export const buildOutcomeStore = new BuildOutcomeStore();
+
+export function bindBuildOutcomeDbForTests(db: admin.firestore.Firestore | null): void {
+  buildOutcomeStore.bindDbForTests(db);
+}
+
+export function unbindBuildOutcomeDbForTests(): void {
+  buildOutcomeStore.unbindDbForTests();
+}
 
 /** Kill switch. Default ON. `off` stops all recording and all automatic reports. */
 export function buildOutcomeTrackingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

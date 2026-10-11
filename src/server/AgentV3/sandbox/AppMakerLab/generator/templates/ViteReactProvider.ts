@@ -1,5 +1,6 @@
 import { VITE_ENV_DTS_PATH, VITE_ENV_DTS_CONTENT } from '../../../../viteEnvTypes';
 import { packageJson, viteConfig, tsconfig, tsconfigBuild, tsconfigNode, indexHtml, mainTsx, appTsx, errorBoundaryTsx, indexCss } from './ViteReactProviderContents';
+import { projectKitEnabled, projectKitFiles } from './projectKit';
 
 export interface ITemplateProvider {
   getFiles(features: string[]): Record<string, string>;
@@ -7,7 +8,7 @@ export interface ITemplateProvider {
 
 export class ViteReactProvider implements ITemplateProvider {
   getFiles(features: string[]): Record<string, string> {
-    return {
+    const files: Record<string, string> = {
       'package.json': packageJson,
       'vite.config.ts': viteConfig,
       'tsconfig.json': tsconfig,
@@ -37,5 +38,7 @@ export class ViteReactProvider implements ITemplateProvider {
       // (autopsy a7aa447c: the first Razorpay file). See viteEnvTypes.ts.
       [VITE_ENV_DTS_PATH]: VITE_ENV_DTS_CONTENT,
     };
+    // Owner decision D-7: README, .env.example, env helper + test, folder layout. Flag, default OFF.
+    return projectKitEnabled() ? { ...files, ...projectKitFiles(packageJson) } : files;
   }
 }

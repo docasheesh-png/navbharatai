@@ -120,7 +120,10 @@ describe('the pinned model must reach the STREAMING path — without this the ce
    * would have changed nothing on the path that actually carries the traffic.
    */
   it('🔒 slot() passes its model into executeStream', () => {
-    expect(src).toContain('base.executeStream!(p, sys, cb, model)');
+    // Updated 2026-10-09 (Q-621): the call gained a 5th argument, the abort signal. The model pin
+    // this test exists for is still asserted — `model` in position 4 — and the signal is asserted
+    // too, because the wrapper dropping EITHER argument is the same class of silent disabling.
+    expect(src).toContain('base.executeStream!(p, sys, cb, model, signal)');
   });
 
   it('🔒 the contract carries a model, and Vertex no longer hardcodes pro when streaming', () => {

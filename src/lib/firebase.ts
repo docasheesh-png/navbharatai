@@ -19,6 +19,7 @@ import { getFirestore } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { firebaseConfig } from '../config/firebase';
 import { ensureSessionPersisted, hasPersistedSession, type SessionPersistenceOutcome } from './authPersistence';
+import { API_READ_CACHE } from './swCaches';
 
 export const app = initializeApp({ ...firebaseConfig, firestoreDatabaseId: firebaseConfig.firestoreDbId });
 
@@ -114,6 +115,13 @@ export async function ensureNativeSessionPersisted(): Promise<SessionPersistence
  * web signOut that actually flips the app to logged-out.
  */
 export async function signOutEverywhere(): Promise<void> {
+  // UI-5 — this cache is shared by every account on the device. Drop it BEFORE the
+  // web sign-out: performSignOut reloads as soon as this promise settles (or times
+  // out), and a delete that loses that race would leave the previous user's
+  // conversations and status for whoever signs in next, including offline.
+  if (typeof window !== 'undefined' && 'caches' in window) {
+    try { await caches.delete(API_READ_CACHE); } catch { /* best-effort — sign-out still proceeds */ }
+  }
   if (Capacitor.isNativePlatform()) {
     try {
       const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');

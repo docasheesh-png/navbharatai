@@ -573,7 +573,7 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     expect(r.typecheckRan).toBe(false);
     expect(logs.some((l) => l.includes('Build verified'))).toBe(false); // no fake success line
     expect(logs.some((l) => l.includes('could not run'))).toBe(true);   // the honest warning instead
-    expect(r.outcome).toBe('BUILD_PARTIAL'); // typecheckOk null — "unknown", never a pass
+    expect(r.outcome).toBe('BUILD_UNVERIFIED'); // typecheckOk null — nothing was checked, never "compiles"
   });
 
   it('a verify that reports ran:false (retries exhausted) is treated the same as a throw', async () => {

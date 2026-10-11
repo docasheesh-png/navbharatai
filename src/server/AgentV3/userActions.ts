@@ -68,6 +68,19 @@ export type UserActionStatus = 'open' | 'done' | 'not_needed' | 'superseded';
  */
 export type UserActionClosedBy = 'user' | 'verified' | 'ai' | 'system';
 
+/**
+ * A button that OPENS A SCREEN. It never charges.
+ *
+ * `billing` is Billing → Plans — the live hosting plans, and only when the row is a server the user
+ * does not already have a plan for. `settings` + `database` is Settings → Database, where they
+ * connect their own database (free from us). Any other view is dropped when the row is read back.
+ */
+export interface UserActionLink {
+  view: 'billing' | 'settings';
+  settingsScreen?: 'database';
+  label: string;
+}
+
 export interface UserAction {
   /** Stable, derived from the THING — see `actionKey`. Two asks for one thing share this id. */
   id: string;
@@ -76,6 +89,8 @@ export interface UserAction {
   title: string;
   /** One line on why it is needed. '' when there is nothing honest to add. */
   why: string;
+  /** Opens a real screen. Absent when there is nothing honest to open. Never a charge. */
+  cta?: UserActionLink;
   /** The exact environment variable this row is about (kind 'secret'). */
   envName?: string;
   /** The pending gate this row answers, when a build is waiting on it. */
@@ -198,6 +213,11 @@ export function mayReopen(existing: UserAction, incoming: UserAction): boolean {
   return incoming.buildId !== existing.buildId;
 }
 
+function takeCta(prev: UserAction, next: UserAction): void {
+  if (next.cta) prev.cta = { ...next.cta };
+  else delete prev.cta;
+}
+
 /**
  * Fold new asks into the stored list. PURE.
  *
@@ -220,6 +240,7 @@ export function mergeUserActions(
     if (prev.status === 'open') {
       prev.title = next.title;
       prev.why = next.why;
+      takeCta(prev, next);
       prev.blocking = next.blocking;
       prev.buildId = next.buildId;
       if (next.callId) prev.callId = next.callId;
@@ -229,6 +250,7 @@ export function mergeUserActions(
       prev.status = 'open';
       prev.title = next.title;
       prev.why = next.why;
+      takeCta(prev, next);
       prev.blocking = next.blocking;
       prev.buildId = next.buildId;
       prev.callId = next.callId;

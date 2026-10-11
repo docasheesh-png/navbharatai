@@ -91831,3 +91831,1610 @@ The row was removed from the open queue and its ID appended to the closed regist
 **Watch:**
 - the image-scan run on the PR branch goes green;
 - the next `.aab` run shows no `track` deprecation warning.
+## 2026-10-08 — Q-699: Android "Save to Photos" has never saved, and the obvious fix would have broken iOS
+
+**Report:** Q-699, found on the way through Q-697 (the Play policy block). The image generator's
+one-tap "Save to Photos" works on iOS and has never worked on Android.
+
+**Root cause, read from the plugin's own Android source rather than inferred** —
+`node_modules/@capacitor-community/media/android/.../MediaPlugin.java`, `_saveMedia`:
+
+```java
+String album = call.getString("albumIdentifier");
+if (album != null) { albumDir = new File(album); }
+else { call.reject("Album identifier required", EC_ARG_ERROR); return; }
+```
+
+Our call was `Media.savePhoto({ path: written.uri })` — no `albumIdentifier`. So on Android it threw
+**every single time**, and `handleDownload`'s `catch` fell through to the OS share sheet. Nothing was
+faked (the "Saved to your Photos ✓" note only ever ran on the success path) and nothing was lost (the
+share sheet can still save), but the one-tap save the button promises was iOS-only.
+
+### 🔴 The trap, and why this is a platform-branched fix rather than a one-line one
+
+The obvious fix is "always pass `albumIdentifier`". It would have **broken iOS**, the one platform that
+worked. The field means two different things, and the plugin's own typings say so:
+
+| | Android | iOS |
+|---|---|---|
+| What it is | a filesystem **path** (`new File(album)`) | an opaque **PHAssetCollection localIdentifier** |
+| Required? | **yes** — rejected without it | **no** — an unknown value is rejected with "Unable to find that album" |
+
+The typings add a second reason to leave iOS alone: *"On iOS 14+, if the identifier is not specified
+… **add-only** permissions will be requested instead of full permissions."* So on iOS the
+no-identifier call is not a gap — it is the better call. iOS behaviour is byte-for-byte unchanged and
+two tests lock it.
+
+This is the "a fix must never trade one problem for another" rule catching a real trade before it
+shipped.
+
+### Why the plugin's album API and NOT a new MediaStore plugin
+
+Q-699's own note suggested writing through Android's MediaStore into `Pictures/NavBharatAI`. That is
+the better long-term home — it survives an uninstall — but it needs **new native Java, and this repo
+has no Android SDK**: it could not be compiled here, let alone run, before shipping. Shipping native
+code nobody can build is the "built but not really working" state the second absolute rule forbids.
+
+The plugin's existing album API reaches the gallery with **zero new native code**, and crucially with
+**no permission**: `_getAlbumsPath()` returns `getExternalMediaDirs()[0]` (the app's own external
+media directory), and `isStoragePermissionGranted()` returns `true` outright while `androidGalleryMode`
+is off — which it is, and which Q-697's test pins. So the Play-restricted `READ_MEDIA_IMAGES` that
+Q-697 removed does **not** come back.
+
+**Fix:** `src/lib/saveToGallery.ts` — Android resolves (and first-time creates) a `NavBharatAI` album
+and passes its path; every other platform calls `savePhoto({ path })` exactly as before. The plugin's
+`createAlbum` is **not** idempotent (it rejects an existing album with "Album already exists"), so that
+rejection is swallowed on purpose and the identifier always comes from `getAlbums()` — the only source
+that reports the real path. Any failure **throws**, by contract, so the caller's share-sheet fallback
+still runs; a silent resolve here would turn a failed save into a "Saved to your Photos ✓" the user
+never got.
+
+**Siblings:** hunted across the whole repo — `savePhoto`/`saveVideo`/`@capacitor-community/media` has
+exactly **one** call site, so this class has no second instance.
+
+**Lock:** `src/lib/saveToGallery.test.ts` (11 tests), reversion-proven three ways:
+- the naive "always pass the identifier" fix → **2 iOS tests fail**;
+- the original bug (Android branch removed) → **5 fail**;
+- a silent empty identifier instead of a throw → **3 fail**.
+
+⚠️ **The honest limit, recorded rather than implied.** There is no Android SDK in this environment, so
+this is **not device-verified**: the JS is fully tested and the native behaviour is read from the
+plugin's own source, but the real proof is the next `.aab` on a real phone. **The Q-699 row therefore
+stays IN PROGRESS until then, not closed on merge.** Also recorded: files under
+`Android/media/<package>/` are removed when the app is uninstalled, and some OEM galleries index that
+directory late — the MediaStore route stays the better long-term home for a session that can build
+Android.
+
+### ⚠️ Two defects in my own first draft, caught by reading the plugin instead of trusting my call
+
+Recorded because both would have shipped silently, and each is a precision hole worth keeping:
+
+1. **`photo.png.png`.** `copyFile` does `fileName + extension`, taking the extension from the SOURCE
+   file, so passing our already-suffixed `photo.png` would have written `photo.png.png` into the
+   user's gallery. The plugin's typings say it in one line — *"Do not include extension. Android
+   only."* — which I only read after the Java. `albumFileName()` strips it, and the all-extension
+   edge (`.png`) returns the input rather than an empty name.
+2. **I changed iOS while claiming I had not.** My first draft forwarded `fileName` on every platform,
+   including iOS, where the old call was `savePhoto({ path })` alone. `fileName` is documented
+   *Android only* (iOS names the asset with a UUID), so this was a change to the one working platform
+   in exchange for nothing — exactly the trade this PR exists to avoid, committed by me in the act of
+   avoiding it. iOS now sends `{ path }` and a test asserts the WHOLE payload, so an extra key is
+   itself the regression.
+
+Both are reversion-proven (5 reversions, 5 failures, across the two rounds).
+
+**What to watch:** on the next Android build, tap Save to Photos in the image generator — it should
+report "Saved to your Photos ✓" and the image should appear in a **NavBharatAI** album, with no share
+sheet, no permission prompt, and a single `.png` on the end of the file name.
+## 2026-10-08: Q-618, Q-650 and Q-704 closed (#3566, #3546, #3576 all merged)
+
+Found at the start of a session, doing safeguard #1's fresh-state check: three rows still read **IN
+PROGRESS** with an owner PR, and all three of those PRs were already merged into `main` — #3566
+(Q-618, the server runs as the unprivileged `node` user), #3546 (Q-650, a browser-only script is
+refused before it is run) and #3576 (Q-704, user apps and their builds no longer run as the apps
+project's default identity).
+
+**Why this was worth a PR of its own rather than left for whoever noticed next.** The sixth absolute
+rule makes an owner PR number mean *this row is TAKEN* — it is the signal a concurrent session reads
+to decide what NOT to pick up. Three rows carrying a merged PR therefore lie in the one direction
+that wastes the most work: they hide finished items behind a "someone is on it" marker, and with no
+open PRs at the time there was no session for a reader to go and ask. The queue is the contract; a
+contract that misreports its own state is the defect, independent of the code it points at.
+
+Each row's ledger stays in `PROGRESS.md` (2026-10-06 for Q-618 and Q-704, 2026-10-05 for Q-650), so
+nothing is lost by removing the rows — only the false claim. Their IDs are appended to
+`docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in this same commit, and the queue was edited on a FRESH
+`main`, both because of the #3543 incident that reopened closed rows from a stale copy.
+
+**What each row left behind, carried forward rather than dropped:**
+- **Q-618** asked for one post-merge observation: the first deploy's boot line and one real build. 20+
+  commits have merged to `main` since (each one a Cloud Run deploy), so the `USER node` change did not
+  break boot — the observation it asked for has been made by the deploy history itself.
+- **Q-650** said in its own words "Moves to ✅ on merge" — nothing outstanding.
+- **Q-704**'s residuals were already split out when it was written: **Q-705** (🟡 BLOCKED, the admin's
+  Cloud IAM steps) and **Q-706** (OPEN, the two isolation gaps the identity fix does not close). Both
+  stay in the queue; closing Q-704 does not touch them.
+
+---
+
+## 2026-10-08 — Q-760: a credential outlived the account it belonged to (four stores)
+
+**Found while widening the collection census for Q-701** — not reported by anyone. Q-701's whole premise
+is that `tests/everyCollectionIsClassified.test.ts` sees only EXPORTED `*_COLLECTION` constants, so ~57
+private constants and ~53 inline `collection('x')` literals are invisible to the one guard that is
+supposed to make an unclassified store fail CI. Scanning for them to do that work turned up four
+collections that hold a **working credential** and are in no erase path at all.
+
+**What `DELETE /api/profile` actually did.** It calls `deleteUserData` (registry-driven),
+`deleteUserWorkspaceData` (the workspace-id prefix range) and `deleteAuthAccount`. The Firebase Auth
+record goes, so the person can never sign in again — which is what makes this hard to notice. Access
+through a credential does not need a sign-in:
+
+| Store | What it holds | Why it still worked |
+|---|---|---|
+| `user_secrets` | the person's own API keys and database passwords, encrypted | nothing deleted them; rows are only ever SOFT-deleted elsewhere ("the vault has never destroyed a user's stored key", `supabaseProvisionFlow.ts`), so a retired row keeps its ciphertext too |
+| `api_keys` | a live NavBharatAI API key | `findByHash` (`ApiKeyStore.ts:112`) resolves ANY non-revoked key to its owner and never asks whether the owner exists. The free daily images on that path (`apiKeyImage.ts`) are drawn at NavBharatAI's cost |
+| `bots` | a chat bot's `token` AND `appSecret` | credentials for a third-party messaging platform, untouched |
+| `webhooks` | the outbound URLs we POST the person's build events to | doc id IS the uid, and the uid was never erased here |
+
+**The class, and it had already been caught once.** `supabase_connections` is the same shape, found on
+2026-10-06: *"a deleted account left behind encrypted tokens that could still act inside the person's own
+Supabase account"*, and its own registry comment says the census could not see it **because the collection
+name was a private constant**. The instance was fixed; the siblings were never hunted. That is precisely
+what the fifth rule's 2026-09-30 section forbids, and it is the second time this exact mechanism (a private
+constant hiding a store from the census) has produced a live defect.
+
+**The honesty half (fifth rule, step 5).** The Delete-account screen and `AppKnowledgeBase`'s
+`settings_delete_account` entry both already told the user that "saved API keys and sessions" are deleted,
+and Privacy Policy §9 promises erasure within 30 days with four stated exceptions — none of which is a
+credential. So the app was making a false statement to the user. **No knowledge-base edit was needed: the
+code now matches what the entry already claims.** That is the right direction for this fix; editing the
+claim to match the code would have been the wrong one.
+
+**The fix.** Four entries in `USER_SCOPED_COLLECTIONS`, each key strategy read from the real read/write
+path rather than guessed (the module's own SAFETY note: a wrong strategy either misses data or deletes the
+wrong person's):
+- `user_secrets` → `{ field: 'user_id' }` — written at `routes/secrets.ts:128` and
+  `supabaseProvisionFlow.ts:105`, read at `secrets.ts:227` and four places in `routes/secrets.ts`. A
+  `user_id` query takes the soft-deleted rows too, which is the point.
+- `api_keys` → `{ field: 'userId' }` (`ApiKeyStore.ts:77`). Deleting the row IS the fix for the auth hole:
+  `findByHash` then finds nothing, so no extra owner-existence check was added.
+- `bots` → `{ field: 'ownerUid' }` (`BotStore.ts:178`).
+- `webhooks` → `'docId'` (`WebhookManager.ts:63` read, `:90`/`:106` writes).
+
+**The test, and why it reads SOURCE.** `tests/aCredentialDiesWithTheAccount.test.ts` (5 tests). A registry
+entry agreeing with itself proves nothing — the entry has to agree with the code that writes the rows, or
+a renamed field leaves an erase that reports a confident `deleted: 0`. So one test greps each store's own
+file for the query it registers. Reversion-proven twice: the four entries removed → **3 fail**;
+`ownerUid` renamed to `owner_uid` in `BotStore.ts`'s real query → **1 fail** (the drift guard, exactly the
+case it exists for).
+
+**Left open, recorded not dropped.** `bot_sessions` (`Q-761`) is keyed `${botId}_${chatId}`, so neither
+key strategy reaches it. It holds no credential; it needs a cascade keyed by the bot rather than the user,
+which is a different shape from every other registry entry and is its own decision.
+
+**Still the bigger item: Q-701.** This PR fixes the four worst instances. The CLASS — a hand-maintained
+registry guarded by a census that cannot see most of the code — is only killed when the census is widened.
+The scan so far finds **~95 collection names in no registry at all**, and about thirty of them are
+user-keyed: `conversation_memory_v1`, `professional_user_memory`, `sonic_voice_memory`,
+`agentv3_conversations` (+ its `turns`/`timeline` subcollections), `userPrefs`, `user_brain_v3`,
+`user_mistakes_v3`, `user_diagnostics_v3`, `user_notification_reads`, `terminal_daily_usage`,
+`tool_daily_usage`, `professional_passes`, `promptAudits`, `gallery_apps`, `nav_store_apps`,
+`nav_store_web_apps`, `wallet_balance_alerts`, `agentv3_onboarding_credits`, `ai_usage_logs`,
+`zip_uploads` and more — plus roughly fourteen workspace-keyed stores that `WORKSPACE_SCOPED_COLLECTIONS`
+does not list (`agentv3_deployments`, `agentv3_sandboxes`, `buildTraces`, `build_queues_v3`,
+`incrementalCache`, `mega_roadmaps_v3`, `workspace_traceability`, `agentv3_provider_state`,
+`agentv3_attachment_memory`, `agentv3_build_outcome`, `app_ai_apps`, …). Each needs its key strategy read
+from its own store before it is registered — nothing goes in on a guess — and the widened census should
+also enforce the obligation per KIND (a `workspace` collection must be in the workspace eraser), which is
+the part that makes the drift impossible rather than merely corrected once.
+
+Also recorded while scanning: the widened scan must **strip comments** — `'coll'` in `serverDb.ts`'s doc
+comment is a false positive — and must not treat a subcollection segment (`files`, `items`, `turns`,
+`entries`, `members`) as a top-level collection; those are Q-682's territory.
+
+**⚠️ CORRECTION, found by the repo's own guard before this PR left the machine.** The paragraph above
+says "No knowledge-base edit was needed". That is true of `AppKnowledgeBase.ts` and FALSE of the public
+deletion page: `tests/accountDeletionPage.test.ts` failed the full gate with *"deletion page must describe
+the user_secrets data it erases"*. It holds `USER_SCOPED_COLLECTIONS` against
+`src/content/legal/accountDeletion.ts` and requires a plain-words description of every collection the
+eraser touches — so growing the registry without growing the page is a CI failure by design. Google Play
+requires that page to say what is deleted; a registry that erases four more things than the page admits
+to would have understated it.
+
+The page now names all four (the vault line already covered `user_secrets`; the NavBharatAI API keys, the
+chat bots with their token and app secret, and the webhook addresses were described to nobody), and the
+guard's map carries each with the reason. Reversion-proven: the webhook bullet removed → that test fails.
+
+**The lesson is about the gate, not the page.** This is the second time in two days that running the FULL
+suite at the END, on the final state, caught something a targeted run could not: the tests I chose to run
+(retention, census, queue, the new credential test — 60 passing) all passed, and the one that mattered was
+in a file I had no reason to think about. Safeguard #5's "at the end, on the final state" is not ceremony.
+
+---
+
+## 2026-10-08 — Q-701 PR A: the personal data the registry could not see (33 stores registered)
+
+**The premise, restated because it is the whole point.** `tests/everyCollectionIsClassified.test.ts`
+makes an unclassified Firestore store fail CI — and it could only see **exported** `*_COLLECTION`
+constants. A private `const COLLECTION = '…'` or an inline `db.collection('x')` was invisible to it.
+That is how `supabase_connections` escaped account deletion (its own registry comment says so), how the
+four credentials in Q-760 escaped, and how the 33 stores below escaped.
+
+**The widened scan, now written and proven, finds 144 top-level collections. The census saw 46.**
+
+### What PR A registers
+
+**21 user-keyed stores into `USER_SCOPED_COLLECTIONS`**, each key strategy read at its own store:
+`conversation_memory_v1`, `professional_user_memory`, `sonic_voice_memory`, `agentv3_conversations`,
+`user_diagnostics_v3`, `user_notification_reads`, `userPrefs`, `user_brain_v3`, `user_mistakes_v3`,
+`terminal_daily_usage`, `tool_daily_usage`, `professional_passes`, `wallet_balance_alerts`,
+`agentv3_onboarding_credits`, `zip_uploads`, `agentv3_sheet_files`, `shares`, `custom_domains`,
+`pwa_apps`, `ai_usage_logs`, `user_referrals`.
+
+**12 workspace-keyed stores into `WORKSPACE_SCOPED_COLLECTIONS`**: `agentv3_attachment_memory`,
+`agentv3_build_outcome`, `agentv3_deployments`, `agentv3_provider_state`, `agentv3_sandboxes`,
+`buildTraces`, `build_queues_v3`, `incrementalCache`, `mega_roadmaps_v3`, `workspace_traceability`,
+`migrationHistory`, `sboms` (+ its `builds` sub).
+
+### 🔴 The part that would have been a FALSE fix
+
+`agentv3_conversations` is matched by a `userId` FIELD and its messages live one level down in `turns`
+and `timeline` (`FirestoreConversationStore.ts:142/146`). Firestore does not cascade.
+`USER_SCOPED_SUBCOLLECTIONS` only covers the other shape — `parent/{uid}/sub`, a document whose own id
+IS the uid — so it cannot express this one. **Registering the collection without its children would
+have deleted each conversation's header and orphaned every message in it**, while the deletion page
+promises "every build conversation you had with the builder". That is Q-134's defect in a new place.
+
+So `UserScopedCollection` gained `subs?: readonly string[]`: for each matched document, the named
+subcollections are page-deleted FIRST, then the document. A handle that cannot reach subcollections
+**throws** rather than reporting a deletion that did not happen — and the parent is then left alone,
+because deleting it would orphan the messages for ever.
+
+`tests/theErasureReachesEveryChild.test.ts` (6 tests) holds: the subs are declared; the messages die;
+**children before parent** (asserted on the recorded delete ORDER); another person's conversation is
+untouched; the reported count includes the children; and the unreachable-handle case reports its error
+and deletes nothing. Reversion-proven twice: `subs` dropped → **5 fail**; the parent moved before its
+children → **2 fail**.
+
+### Three places my own first answer was wrong, caught by reading rather than assuming
+
+- **`promptAudits` is deliberately NOT registered.** `promptAudits/{uid}/entries` is already a
+  subcollection entry, and I was about to add the parent — but **nothing anywhere writes the parent
+  document** (`PromptAuditStore.ts:71` writes only the subcollection), so it is a virtual ancestor with
+  no fields. An entry would delete nothing and report `deleted: 0` for ever: a row that reads as
+  coverage while covering nothing.
+- **`migrationHistory`'s parameter is called `projectId`**, which is exactly why it was checked: both
+  callers pass `this.workspaceId` (`ToolDispatcher.ts:8896`, `:8916`), so the doc id IS the workspace id
+  and the eraser's range reaches it.
+- **`app_ai_apps` was left OUT** (Q-765): its doc id is the APP id, so the `agentv3-{uid}-` range cannot
+  match it. Registering it would have been a guess, and the registry's SAFETY note forbids guesses
+  because a wrong strategy either misses data or deletes the wrong person's.
+
+### The page had to grow with the registry, and the repo enforces that
+
+`tests/accountDeletionPage.test.ts` requires a plain-words description of every registered collection,
+because Google Play requires that page to say what is deleted. It failed on the first run with 33
+missing descriptions — by design. The page now names all of them, grouped (21 separate bullets would be
+a wall nobody reads, and the point of that page is that somebody reads it). `custom_domains` is written
+**with its limit**: our record goes, and nothing changes at the person's registrar or host, which are
+not ours to touch.
+
+### Recorded, not dropped — six new rows
+
+- **Q-762** the composite-id class: `adrDecisions` and `techDebt` use `${userId}__${projectId}` with no
+  uid in the body, so nothing can find them by uid. Fix the writers, then register; older rows stay a
+  stated residue. A prefix range was considered and REJECTED for the ambiguity `workspaceDataErase`
+  already documents.
+- **Q-763** `user_workspaces`: the base doc is only a manifest; the payload is in `${uid}__c{i}` chunks.
+  Registering it as `'docId'` would have been the same false fix as above. A dedicated eraser reads
+  `chunkCount` and deletes exact ids.
+- **Q-764** `build_history` is keyed by a bare sessionId — outside both erasers.
+- **Q-765** `app_ai_apps`, above.
+- **Q-766** 🟡 the admin's decision: a published App Mart listing can have been BOUGHT, so erasing it
+  because the AUTHOR left would destroy a stranger's purchase — the `gift_codes` reasoning. Options and
+  a recommendation (unlist + de-identify) are in the row.
+- **Q-767** twelve stores that grow with no retention window, plus `payment_transactions` which belongs
+  in `RETAINED_INDEFINITELY`.
+
+**PR B is the class fix** and is why this row stays open: the widened scan (comments stripped,
+`*SUBCOLLECTION*` constants excluded, a receiver allowlist whose unknown-receiver report must stay
+empty) plus the per-kind obligation — a `workspace` kind must be in the workspace eraser, a `retained`
+kind must have a policy. Shipping B first would have meant a check failing on ~30 known violations:
+either a red CI or a disabled check, both worse than this order.
+
+**A second guard fired on PR A, and it was pointing at its own assumption.**
+`src/server/lib/workspaceDataErase.test.ts` asserted every registered collection matches
+`/^[a-z][a-z0-9_]+$/`, so registering `buildTraces` failed it. The pattern was written as a shape check
+against a typo or an empty string, but it quietly encoded a NAMING POLICY the repo does not follow:
+`buildTraces`, `incrementalCache` and `migrationHistory` are the real, live Firestore names, and
+`adrDecisions`, `techDebt`, `abuseLedger`, `userPrefs`, `promptAudits`, `teamInvites` and `deviceTokens`
+are camelCase elsewhere. Renaming a live collection is a data migration, not a tidy-up — and it would
+orphan every document already written under the old name — so **the test is what gives**. It now accepts
+either convention and says why, and it still rejects a malformed name: proven by adding
+`{ collection: 'bad-name' }` and watching it fail.
+
+This is worth recording because the first instinct was the wrong one: a failing assertion is not
+automatically a failing change. Here the change was right and the assertion was carrying a belief
+nobody had checked against the data. The repo having two naming conventions is a real (small)
+inconsistency, but it is not one a test may fix on a live database.
+
+---
+
+## 2026-10-09 — Q-701 PR B: the census can finally see the codebase (46 → 144), and every kind now owes something
+
+**What the guard was actually doing.** `tests/everyCollectionIsClassified.test.ts` is the test that makes
+a new Firestore store fail CI until somebody decides what it is. Its scan read exactly one pattern:
+`export const *COLLECTION = '…'`. So a private constant or an inline `db.collection('x')` was invisible,
+and three live defects came out of that one blind spot — `supabase_connections` (a deleted account's
+Supabase tokens, kept), Q-760 (four stores holding a working credential, kept), Q-701 PR A (33 stores of
+personal and app data, in no erase path).
+
+**The widened scan reads three forms**, each needed by something real here:
+1. `const *COLLECTION* = 'x'`, exported or not — but **never** `*SUBCOLLECTION*`;
+2. `collection(db, 'x')` and `doc(db, 'x', …)` (in the second the FIRST segment is the collection);
+3. `<handle>.collection('x')` where the handle is a Firestore root.
+
+It strips comments first, because `serverDb.ts`'s doc comment says `doc(db, 'coll', 'id')` and an earlier
+draft of this scan duly reported a collection called `coll`. And `FEEDBACK_SUBCOLLECTION = 'feedback'`
+contains the substring COLLECTION, which is how `feedback`, `history` and `members` first appeared as
+top-level stores.
+
+🔒 **It declares what it could not read.** A receiver that is not a known root goes into
+`UNREADABLE_RECEIVERS` and must be listed with its reason — today only `root`, which is always a `.doc()`
+reference, so what follows it is a subcollection. A **new** unknown receiver fails the test, because a
+scan that silently skips what it does not understand is precisely how this one went blind for 98
+collections.
+
+### Every kind now carries an obligation, and the new one found three stores immediately
+
+`user` ⇒ in `USER_SCOPED_COLLECTIONS`. `retained` ⇒ a `RETENTION_POLICIES` entry. Both always had a
+consequence. **`workspace` had none** — it was a label with nothing behind it, which reads as coverage
+from every direction, and that is how twelve stores of the user's own app data sat unerased while this
+file called them classified.
+
+Adding `workspace` ⇒ in `WORKSPACE_SCOPED_COLLECTIONS` failed on its first run with **three stores that
+were classified `workspace` before Q-701 existed**:
+- `site_configs` — the app's own site settings, doc id is the workspaceId. Registered.
+- `agentv3_mcp_servers` — the app's MCP wiring: which outside services it may call **and the keys held
+  for them**. Doc id is the workspaceId. Registered. It was being kept for ever.
+- `site_uptime` — and **its classification was itself wrong.** It said `workspace`, with the reason "one
+  record per connected domain, not per user" — a sentence that argues against its own label. Its doc id
+  IS the domain (`siteUptimeStore.ts:12`), so the workspace eraser's `agentv3-{uid}-` range could never
+  reach it. The body carries `userId` (`siteUptime.ts:81`), so it is now a user entry, which is where a
+  domain-keyed record of one person's domain belongs.
+
+### 🟡 A fifth kind, so that "unresolved" cannot be silent
+
+`blocked` — the obligation is **not** met, and a queue row owns the reason, which the test requires the
+reason to name (`/\bQ-\d{3}\b/`). This is the sixth absolute rule expressed as a test. Without it, the
+only way to make this file pass for a store whose erasure is undecided would be to mislabel it
+`platform`, and a false label is worse than an open row. A second test refuses the opposite error: a
+`blocked` store that is *already* covered by one of the registries is a false claim in the other
+direction, and fails.
+
+Nineteen stores are `blocked`, each naming Q-761 through Q-767.
+
+### 🔴 My own reversion proof found a hole in the test I had just written
+
+Reverting the scan to exported-constants-only left **all ten tests green** — on 46 collections instead of
+144. Every obligation is checked against what the scan FOUND, so narrowing the scan narrows the world
+being judged and nothing complains. **A guard whose coverage its own tests cannot see is a guard that can
+be switched off by accident, which is a fair description of how this started.**
+
+So each form now has a named witness that only that form can find — `conversation_memory_v1` (private
+constant), `api_keys` (inline `db.collection`), `user_workspaces` (`doc(db,'x',…)`), `user_secrets`
+(`collection(db,'x')`) — plus a floor of 130 on the total, set below today's 144 so adding a store is not
+a failure while losing a tenth of them is.
+
+**Reversion-proven five ways:** the scan narrowed to exported constants → the FORM test fails · a
+workspace entry dropped from the eraser → the workspace obligation fails · the `Q-###` removed from a
+blocked reason → that test fails · comment stripping disabled → `coll` appears, 2 fail · the
+`*SUBCOLLECTION*` exclusion removed → `feedback`/`history`/`members` appear, 2 fail.
+
+### Also closed here
+
+`payment_transactions` is now in `RETAINED_INDEFINITELY` with its reason: a record of money received,
+which tax and accounting law requires and which Privacy §9 names as the first of its four exceptions to
+erasure. Nothing ever deleted it, so this changes no behaviour — it ends the census being silent about
+the one collection whose retention is a legal duty rather than a choice. (Q-767's remaining twelve still
+need a window each.)
+
+**A third guard fired, and the fix had to strengthen it rather than loosen it.**
+`tests/anMcpCredentialIsNeverStoredInTheClear.test.ts` keeps a census: only the two MCP store files may
+name `agentv3_mcp_servers` / `agentv3_mcp_library`, with ONE exemption —
+`DataRetentionManager.ts`, "because it names the library only to DELETE it with the account". Registering
+the app's MCP wiring in `workspaceDataErase.ts` made a second file name it, and the test failed.
+
+The tempting fix is to add the file to an allowlist and move on. That would have quietly dropped the
+part of the assertion that matters: the exemption is from *"is this a store"*, **not** from *"it must
+never write"*. So both erasers are now named as erasers and the **no-write assertion is applied to both**
+— an eraser that started writing to these collections still fails. Proven by adding a function to
+`workspaceDataErase.ts` that writes `{ servers: [] }` and watching the test name the file.
+
+Worth recording because it is the same shape as the `workspaceDataErase` naming check earlier in this
+PR and the opposite conclusion: there, the assertion carried a belief that was wrong (snake_case names)
+and the test gave way; here the assertion was right and only its *scope* needed to grow. A failing guard
+has to be read, not pattern-matched.
+
+**And a fourth thing the gate caught, which was not mine: a flaky test whose flake was in the assertion.**
+`tests/vaultPin.test.ts` failed in PR B's gate run on a change that touched nothing near it —
+`expect(hashPin('8274', newSalt())).not.toContain('8274')`, with the digest built from a RANDOM salt. A
+64-character hex digest has 61 four-character windows, each matching a given hex sequence with
+probability 16⁻⁴, so roughly one run in 1,100 fails. The run that failed produced
+`…ab7e90ef8274edfd…`.
+
+**Measured rather than asserted:** 2,000,000 random 32-byte digests gave 1 in 1,063 observed against
+1 in 1,074 predicted.
+
+That is the worst kind of red: it appears in an unrelated PR and the first instinct is to go looking at
+the change. It was also testing nothing — four of a PIN's digits appearing somewhere in sixty-four is
+not a leak. So the substring claim moved to a FIXED-salt case where the digest is identical on every
+machine and every run, and the random-salt case keeps the property that actually matters, that two
+salts give two hashes.
+
+**The sibling was hunted, not waited for.** `'stores only the hash — the record never contains the code'`
+ran the same shape over `JSON.stringify(writePinRecord(…))`, which carries ~128 hex characters of random
+salt, so a six-digit OTP would appear in it about once in 136,000 runs — rarer, and therefore worse,
+because it would fire years from now in somebody else's unrelated PR. It now asserts on the record's
+FIELDS: no field equals the code, no non-random field contains it, and the two hash fields are checked
+for shape. That is deterministic AND a stricter statement than scanning a blob. Proven by reversion:
+adding `otp_debug: '427391'` to the stored record fails it by name.
+
+A wider sibling sweep found no third instance — the other ~18 `not.toContain` assertions in the suite
+run against text the code produced deterministically (redaction, sealed secrets, generated workflow
+files), where the claim is sound and is the point of the test. Recorded as Q-768.
+## 2026-10-08 — Q-707: a plain `node:http` server was published as a static site, silently
+
+**Report:** Q-707, found by the C-1 hosting re-audit and deliberately left unfixed there (that PR
+changed only the probe).
+
+**Root cause:** every server detector in this codebase recognised a server by its **framework**.
+`deployPlan.ts` had `NODE_SERVER_DEPS` (express, fastify, koa, NestJS, Hapi, Apollo) and
+`importsNodeServer` matching the same list. An app whose server is plain `node:http` matches none of
+them → `shape: 'unknown'` → `staticHostingSufficient: true` → **published as a static site, with its
+API dead and the user told the publish succeeded.** Q-707's own proof: the real `planDeployment()` on
+the hosting probe returned exactly that.
+
+**The class, and the sibling the row told me to check.** The same blind spot is in
+`BackendPresence.ts`, with a *different* harm: `hasBackend: false` → the in-browser preview shows a
+frontend whose API calls all fail, **without** the honest "this app needs a live server" banner that
+exists precisely for that case. Its endpoint fallback cannot rescue it either — `extractEndpoints`
+matches `app.get('/x')` and decorators, while a bare http server routes on `req.url`. Verified by
+reading `apiGraph.ts`, not assumed.
+
+So the fix is **one shared detector** (`coreHttpServer.ts`) that both modules call, not a second
+framework list in each — the class rule, and the reason `safeRelPath` once had four drifted copies.
+
+**🔒 The precision that makes this safe.** A CLIENT imports `http` too. Treating the import alone as
+a server would REFUSE a working static publish — which is the 2026-08-25 harm (a dev dependency read
+as a server) in a new costume. So the import is never sufficient: the file must also CREATE a server.
+`createServer(` / `createSecureServer(` is the signal, because no client ever calls it.
+
+**Lock:** `coreHttpServer.test.ts` — a census of real server SHAPES (require, `node:` prefix, ESM
+default, ESM named, https, http2, createServer with no listen in the same file) and of things that
+are NOT servers (an `http.get` client, an https client, `createServer` from Vite, prose, a non-code
+file). Plus the two end-to-end facts that matter: such an app now plans as `node-server` /
+`fullstack`, BackendPresence shows the banner, **and the two detectors are asserted to AGREE** — the
+drift the shared module exists to prevent. 21 tests, reversion-proven three ways (detector disabled →
+10 fail; client guard removed → 3 fail including the "a Vite SPA is still static" no-new-refusals
+case; `createSecureServer` support removed → 1 fail).
+
+⚠️ **My own gap, caught by my own census on its first run:** I wrote the signal as the literal
+`createServer(`, and **`createSecureServer` does not contain that substring** — so http2's and tls's
+spelling would have been missed. That is exactly why the census is of shapes rather than of the one
+file in the report.
+
+**Not fixed here, deliberately:** `RuntimeRouter.ts`, `ProjectImport.ts`, `serviceGraph.ts`,
+`previewSnapshot.ts` and `ProjectSummary.ts` carry their own copies of the framework list. They were
+found while hunting siblings, but each feeds a different decision with a different failure mode, and
+widening detection in all of them in one PR would change behaviour nobody has measured. Q-707's own
+scope was deployPlan + the sibling it named; the rest is recorded here as a known, bounded follow-up.
+
+## 2026-10-09 — Q-381 batch one: nine findings about OUR run stop being charged to the user's app (56 → 47)
+
+**Report:** Q-381, from the 2026-10-04 census (`tests/aProblemTheUserIsShownCanBeActedOn.test.ts`). That
+census measured something nobody had counted: **82 codes recorded at warning or error severity were in
+none of the three registries**, so `isAppFinding` answered YES to every one. Each landed in the user's
+build-health card as a problem with THEIR app and took 6 points off their app's health score — with no
+button to press. 26 were classified then; 56 were left as a ratcheted backlog that may only shrink.
+
+**What this change does, and why it needed no decision from the admin.** It classifies the nine codes
+whose OWN recording site already answers the question. Every one is quoted from that site rather than
+judged now, which is the whole reason this batch could be shipped without an admin call:
+
+| Code | Its own words at the recording site |
+|---|---|
+| `RELEASE_GATE_UNPROVEN` | *"not evidence the app is broken — it is the absence of evidence that it works, and the two must never be reported as the same thing"* |
+| `LAST_CHANCE_PROOF_UNAVAILABLE` | *"an infrastructure limit here, never evidence about the app itself"* |
+| `SANDBOX_UNAVAILABLE` | *"Infrastructure condition, not an app error."* |
+| `RUNTIME_UNCHECKED` | our console capture failed; `PROCESS_ONLY_CODES` already calls `VERIFY_DID_NOT_RUN` *"the class of RUNTIME_UNCHECKED"* |
+| `CLAIM_UNSUPPORTED` | OUR closing summary over-claimed and is corrected in place — the class of `SUMMARY_OFF_TOPIC`, already process-only |
+| `TIMELINE_TRUNCATED` | our diagnostics timeline hit its own entry cap |
+| `PREVIEW_REVIVAL_RECIPE` | our storage could not keep the wake-up recipe; the preview itself rendered |
+| `GUARD_REPEAT` | our mistake guard did not hold — *"needs an upstream/architectural fix, not a better reminder"* |
+| `UPSELL_SUPPRESSED` | whether WE asked for credits; its own comment calls the warning cases *"a real fault of ours"* |
+
+`RELEASE_GATE_UNPROVEN` is the sharpest of the nine: its own detail forbids reporting "unproven" as
+"broken", and showing it in the user's build-health card as a problem with their app was doing exactly
+that. The honesty fix was already written at the recording site; only the registry entry was missing.
+
+🔒 **Why this moves no money, on the same argument the existing block in `BuildDiagnostics.ts` makes.**
+A RED gate flips a build to free only on `shippingIssueCount('error')`, and all nine are recorded at
+WARNING or INFO severity, so the error count cannot change. What changes is the caveat count, which is
+the point. **`PLATFORM_SOURCE_WORKSPACE` is deliberately left out** — it is the one unclassified code
+recorded at ERROR severity, so reclassifying it is money-adjacent and gets its own look. That exclusion
+is asserted as a test, not just written in a comment, because "left out on purpose" and "forgotten" look
+identical in a diff.
+
+**Not in this batch, deliberately:** the codes that genuinely need a decision about what a user should
+be told — `TOOL_ERROR`, `STUCK_TOOL`, the `OUTCOME_*` roll-ups, `FEATURE_COVERAGE`,
+`SIMULATED_DATA_SHIPPED`. Classifying those from a guess is how 82 unclassified codes happened in the
+first place.
+
+**Locked by 12 new assertions** in the census file, which test the thing that mattered to a user rather
+than the presence of a name in a list: `isAppFinding` now answers NO for each of the nine, in both the
+`readiness` and `build` phases (the phases they are recorded in, and ones `isAppFinding` does not exclude
+outright). Plus the fixture is asserted not to list them, so the ratchet cannot be satisfied by listing
+a code twice, and the new backlog size (47) is pinned. Reversion-proven: commenting one code back out of
+`PROCESS_ONLY_CODES` fails both the ratchet and that code's own assertion.
+
+**The row stays OPEN — 47 remain.** Under the sixth absolute rule a row leaves the table only when it is
+finished, and this is batch one of a shrinking backlog, not the end of it.
+## 2026-10-09 — Q-621 second half: a client that left now stops COSTING, not just stops being shown
+
+**Report:** Q-621, the forensic audit of 2026-10-04. #3551 merged the first half — `clientDisconnect.ts`,
+which made the server genuinely notice a streaming client going away (on `res` 'close', because after
+`express.json()` has read a POST's body its `req` 'close' has already fired, so a listener attached later
+never ran at all). The row's own words for what was left: *"thread the signal into `executeStream`."*
+
+**The root cause, stated exactly.** `chat.ts` created an `AbortController` and aborted it on
+`onClientGone` — and the signal had nowhere to go. `AIRouter.routeStream` read `signal.aborted` in two
+places only: between rungs, and inside its own chunk callback. `ProviderTypes.executeStream` took no
+signal at all. So the HTTP request already in flight to the provider **ran to completion and was billed
+in full**: a user who closed the tab after one word still paid for the whole answer, and on a universe
+that races two providers, paid for it twice. Reading a flag stops the OUTPUT; only handing the signal to
+the SDK stops the BILL. The first half made the disconnect VISIBLE; this half makes it FREE.
+
+**The class, not the instance.** The fix is a parameter on the interface, not a patch at one call site:
+- `ProviderTypes.executeStream` takes `signal?: AbortSignal`, documented with why it exists.
+- `AIRouterManager.slot()` forwards it. This is the hop that would have silently disabled the whole
+  feature: most of the free ladder is slotted rungs, and a wrapper that drops an argument is exactly how
+  the model pin was lost on the streaming path before (same file, same shape, recorded there).
+- Both `AIRouter` stream paths pass it — the sequential ladder (watchdog on and off) and the race.
+- All six providers hand it to their SDK: `{ signal }` for Anthropic and the three OpenAI-shaped ones
+  (GLM, Grok, OpenAiChat), `config.abortSignal` for `@google/genai`. Each also breaks its read loop on
+  `signal.aborted`, as the belt to that braces.
+
+**Locked by `tests/anAbandonedStreamStopsCosting.test.ts`** — 26 tests in three layers, so the CLASS
+cannot return: a **census** that every file under `providers/` defining `async executeStream` declares
+the parameter and forwards it (a provider added later fails this test rather than joining a list
+silently); **wiring guards** on each hop between the route and the provider, including the slot wrapper
+and the race; and a **behavioural** test through the real `AIRouter` where the client leaves after the
+first chunk — the in-flight call ends, `reason: 'aborted'` comes back, nothing further is written, and
+**the second rung is never started** (falling through to it would bill a second provider for an answer
+nobody will read). Reversion-proven three ways: dropping the signal from the sequential ladder, from the
+race, and from one provider's SDK call each fail it.
+
+⚠️ **One provider cannot be aborted at all, and it is recorded rather than papered over (Q-769).**
+`@google-cloud/vertexai` exposes no abort hook: `generateContentStream(request)` takes no per-call
+options, and the `RequestOptions` given to `getGenerativeModel` carries only `timeout`, `apiClient` and
+`customHeaders` — checked against the installed typings, not assumed. `VertexProvider.executeStream`
+therefore stops CONSUMING the stream the moment the signal aborts, which ends our turn and releases the
+rung immediately, while the generation upstream finishes on its own. That is an honest mitigation, not
+the fix (fourth absolute rule, rule 6), so it is an OPEN root cause with its three real options and a
+recommendation: move the Vertex rungs onto `@google/genai` with `vertexai: true`, which does accept
+`config.abortSignal`. That is a provider swap touching auth and model ids, so it is the admin's call and
+a bounded PR of its own — not a silent refactor smuggled into this one. The census lists Vertex by name
+with its reason, so the gap is a declared exception and a NEW forgetful provider still fails.
+
+**Not changed, deliberately:** `timeout` on the Vertex model is not a substitute (it bounds a hung call,
+not an abandoned one), and the AgentV3 build routes already thread their own `abort.signal` deeply, so
+they were read and left alone — this row was always about the chat streaming path.
+---
+
+## 2026-10-09 — The queue after four merges: four rows closed, and one that was quietly lying
+
+All four PRs are on `main`: #3592 (Q-707), #3593 (Q-760), #3594 (Q-701 PR A), #3595 (Q-701 PR B).
+Under the sixth absolute rule a row leaves the open table only when its PR is MERGED, so **Q-707,
+Q-760, Q-701 and Q-768** are removed here and their IDs appended to
+`docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` **in the same commit**, on a FRESH `main` — both because of
+the #3543 incident that reopened closed rows from a stale copy, which
+`tests/aClosedQueueRowStaysClosed.test.ts` now fails on.
+
+### 🔴 And Q-699 was in the exact false state I had closed three other rows for, this morning
+
+The first task of this session was #3589: three rows sitting at `IN PROGRESS` with their owner PR
+already merged. The ledger for it says plainly why that matters — *"a contract that misreports its own
+state is the defect"* — because an owner PR number means a session is working the row, and a concurrent
+session reads it to decide what NOT to pick up.
+
+**Q-699 was the fourth, and I left it there myself.** Its code merged in #3590 yesterday; the row still
+read `IN PROGRESS | #3590`. I had decided deliberately that it was not RESOLVED — the Android gallery
+save is not proven without a real device — and then recorded that decision in the one state that says
+the opposite of it. Nobody was working it. The sixth rule has exactly two final states and
+"IN PROGRESS with a merged PR" is neither.
+
+It is now **🟡 BLOCKED — REQUIRES ACTION (device check)** with all four fields, owner cleared:
+- **What:** that Android's one-tap gallery save actually works on a real device.
+- **Why:** no Android SDK and no phone in this session, so the only honest proof is a real `.aab`.
+- **Needs**, five things on one tap of Save to Photos: the toast says "Saved to your Photos ✓"; the image
+  appears in a **NavBharatAI** album; **no** share sheet; **no** permission prompt; a single `.png`
+  extension and not `photo.png.png`.
+- **Already tried:** the plugin's own `MediaPlugin.java` and `MediaPlugin.swift` read rather than its
+  README; its typings confirm `fileName` carries no extension and is Android-only, which is why
+  `albumFileName()` strips it; the album is resolved `getAlbums → createAlbum → getAlbums` because
+  `savePhoto` rejects on Android without an `albumIdentifier`; and the iOS call is kept byte-for-byte as
+  `{ path }`, asserted on the WHOLE payload after a first draft of mine changed iOS while claiming it
+  had not.
+
+**The lesson is about the shape of the mistake, not the row.** Fixing three instances of a class in the
+morning and leaving the fourth in place by the evening — in the same file, while writing the ledger that
+named the class — is the sibling-hunting failure the fifth rule's 2026-09-30 section is about, in
+miniature. The queue's own guards cannot catch it either: nothing compares a row's owner against
+GitHub's merge state. That is worth building, and is recorded as the next queue-hygiene item rather than
+claimed as done here.
+
+### On the merges themselves
+
+`main` moved under all three stacked branches, because #3592 was merged while they were open and then
+each of mine landed in turn. Every one was merged in with `git merge origin/main` and **the full gate
+re-run on the merged state** — never on the pre-merge state, which proves nothing about what is being
+pushed.
+
+The conflicts were worth the care they took. Squash-merging a stack guarantees them: the branch holds
+#3593's real commits while `main` holds their squashed equivalent, so git sees the same addition on both
+sides. For #3594 all three conflicts had an EMPTY `origin/main` side, so keeping ours lost nothing — but
+that was **checked, not assumed**, and then checked again by counting the lines that differ from `main`
+and accounting for each one. For #3595 the `main` side was NOT empty in three of five hunks, and the
+diff showed ours was `theirs` plus PR B's own edits in every case. Seven lines read as "removed from
+main" across both merges; every one was a line this work had rewritten.
+
+Gates on the merged states: #3593 **35,821 passed**, #3594 **35,827 passed**, #3595 **35,834 passed** —
+plus `tsc` ×2, `noUnusedImports`, `native:guard`, `build`, `test:bundle`, `boot:check` and
+`deps:server-gate` on each.
+
+## 2026-10-09 — queue closure: Q-621 (#3599 merged)
+
+Sixth absolute rule, point 3: the row leaves the open table when the PR that resolves it is MERGED, and
+its ID is appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main`.
+
+**Q-621 ✅** — a disconnecting chat client never stopped the provider call, so an abandoned stream ran to
+completion and was billed in full. Both halves are now on `main`: the listener half in **#3551**
+(`clientDisconnect.ts`, on `res` 'close') and the signal half in **#3599** (merged, `cbd478e`) — the abort
+threaded through `ProviderTypes.executeStream`, `AIRouterManager.slot()`, both `AIRouter` stream paths, and
+every provider's own SDK call, locked by `tests/anAbandonedStreamStopsCosting.test.ts`.
+
+⚠️ **What to watch for on the next real build:** the behaviour is covered by tests through the real
+`AIRouter`, but no session can observe a live provider socket closing. The signal that this works in
+production is the per-build cost of turns the user abandoned — if an abandoned stream still bills a full
+reply, reopen with that build's cost lines.
+
+**Not closed by this:** **Q-769** stays OPEN — `@google-cloud/vertexai` exposes no abort hook at all, so a
+Vertex rung still cannot be cancelled. #3599 shipped the honest mitigation (stop consuming, release the
+rung) and recorded the real fix as that row's own decision for the admin: move the Vertex rungs onto
+`@google/genai` with `vertexai: true`, which does accept `config.abortSignal`. Closing Q-621 while Q-769
+is open is deliberate and is the point of splitting them — Q-621's own scope was the signal's path from
+the route to the SDK, which is done and proven; the one SDK that has no hook is a separate, named gap
+rather than an asterisk on a closed row.
+
+Open table after this change: 81 rows.
+## 2026-10-09 — Q-600 batch one: a finished feature no screen could reach (Q-770, #3607)
+
+**What the sweep was for.** Q-600 is `tsc --noUnusedLocals`' backlog: 95 client locals in 19 files that
+nothing reads, ratcheted in CI by `scripts/noUnusedImports.mjs` against `scripts/unusedLocalsBaseline.json`
+so it can only shrink. Its own row warned the class is "state or a handler nothing reads" — the kind that
+hid a `saveError` message until #3531. This batch took the largest non-App file: `LiveCollaboration.tsx`, 9.
+
+**What was actually there — recorded as Q-770.** All nine were ONE feature. P-DESIGN.7's shared code editor
+and line-anchored comments were complete and real: the Firestore `content/shared` doc with its debounced
+last-write-wins sync, the throttled presence/caret writes, the `comments` subcollection with its
+`onSnapshot`, `handleCodeChange` / `handleCaret` / `addComment` / `resolveComment` / `jumpToLine` /
+`relativeTime`, and the pure, separately unit-tested helpers in `src/lib/collabAnnotations.ts`. The only
+missing piece was the JSX: the `RoomTab` union was `'free' | 'pro' | 'professional' | 'team'`, with no
+`'code'`, so nothing rendered any of it. `git log -S"roomTab === 'code'"` across all branches returns
+nothing — the tab was never built, not removed.
+
+Meanwhile `AppKnowledgeBase.ts`'s `live_collaboration` entry — the single source of truth every AI in
+NavBharatAI reads to answer "where is X?" — told users: *"the Code tab for the shared editor + line
+comments"*, and *"Use the AI tab"*. Neither tab existed. So the app was confidently directing users to a
+screen that was not there, and the `comments` listener was paying for Firestore reads nobody could see.
+
+**Why it was built rather than deleted.** The second absolute rule allows exactly two states, and the
+backend half was already in state (a). Deleting a complete, tested, Firestore-wired subsystem to satisfy a
+lint — and then correcting the knowledge base downward — would have removed a real capability to tidy a
+count. Building the ~80 lines of JSX puts a documented feature into the product instead.
+
+**Shipped:** a Code tab (shared editor with the caret line and character count, everyone else's cursor
+lines beneath it, a comments pane that pins to the caret's line with jump-to-line and resolve), the
+knowledge-base entry corrected on all three counts (the tab list now names Free / Pro v5 / Professional /
+Code / Team, the Code tab's behaviour is described, the non-existent "AI tab" is gone) with new keywords,
+and the dead `bootedMsg` state removed — it held the same string as `errorMsg`, which is what the idle
+screen actually renders, so nothing was hidden by it. `createRoom` and `joinRoom` now clear `errorMsg`
+where they used to clear `bootedMsg`, which is a real (small) fix: a stale error no longer survives the
+next attempt.
+
+**Locked at the class, not the instance.** `tests/aRoomTabTheKnowledgeBaseNamesExists.test.ts` asserts
+every `RoomTab` member has a header button AND a render branch, that no branch renders an undeclared tab,
+that every shared-editor handler is referenced from the JSX, and that every rendered tab label appears in
+the knowledge-base entry (with the stale "the AI tab" phrasing asserted gone). Reversion-proven in both
+directions: removing the Code button fails with *"RoomTab declares 'code' but no header button lets a user
+tap it"*; restoring the old `howToUse` fails on the missing labels and on "the AI tab".
+
+**Baseline: 95 → 86**, and `LiveCollaboration.tsx` is out of `unusedLocalsBaseline.json` entirely.
+Q-600 stays OPEN — 86 locals in 18 files remain. The next files worth reading for this same class are
+`GitPanel.tsx` (4) and `BotBuilder.tsx` (4, where a `copyWebhook` sits beside a `showWebhookModal` that
+nothing opens).
+---
+
+## 2026-10-09 — Q-763: the synced workspace, and the registry entry that would have made it worse
+
+**`user_workspaces/{uid}` is the most obvious `'docId'` entry in this repo. Adding it would have been a
+false fix, and a worse state than before.** The document whose id is the uid is only a MANIFEST —
+`{ version, chunkCount, totalBytes, updatedAt }` — while the person's whole cross-device workspace
+(every chat session and their last built app) lives in separate documents at `user_workspaces/{uid}__c{i}`.
+
+Registering it with the retention manager would have deleted the **index** and kept the **data**: an
+erase that reports success, satisfies every test, and leaves the workspace in our database for ever,
+now unreachable because the manifest that counted its chunks is gone.
+
+That is the third appearance of one shape in four days — Q-134 (a subcollection left behind by a
+parent-only delete), Q-701 PR A (`agentv3_conversations`, caught before it shipped), and this one. The
+tell is always the same: **the thing that points at the data is not the data.**
+
+### The fix, and why it is its own module
+
+`src/server/lib/syncWorkspaceErase.ts`, called from `DELETE /api/profile` beside
+`deleteUserWorkspaceData`, reported on its own `synced` line.
+
+- **Chunks first, manifest last.** The manifest is the only thing that says how many chunks exist.
+  Delete it first and a failure one step later strands them with nothing pointing at them — findable
+  only by a prefix query, which `workspaceDataErase.ts` documents as dangerous here (a uid containing
+  the separator makes the range ambiguous, and getting it wrong deletes a different person's data). In
+  this order a partial failure leaves the manifest, so running it again finishes the job.
+- **It does not trust `chunkCount`.** A save writes the chunks first and the manifest last, and when a
+  workspace SHRINKS the route deletes the now-surplus chunks — either step can be interrupted, leaving
+  chunk documents the manifest does not count. The sweep therefore goes to `max(chunkCount, ceiling)`,
+  where the ceiling is computed from the format's own two constants (`MAX_WORKSPACE_BYTES /
+  DEFAULT_CHUNK_SIZE`, doubled, so a historically smaller chunk size is still covered). Every id is
+  exact; deleting a document that is not there is a no-op.
+- **An empty uid is refused, not attempted** — `__c0` is a real, constructible document name belonging
+  to nobody, so deleting it is not harmless.
+- **Not a `KeyStrategy`.** `DataRetentionManager`'s header is explicit that it is exact-match only and
+  that nothing goes in on a guess. A manifest-and-chunks layout is a shape it does not have, and
+  contorting it would weaken the one property that makes that registry safe.
+
+### 🔴 A second defect, found because the first one needed the id
+
+`WorkspaceStore.ts`'s header documented the layout as `user_workspaces/{userId}_chunk_{i}`.
+**No such document has ever existed.** The real id has always been `{userId}__c{i}`, built by a private
+helper inside `routes/sync.ts` — so the only written DESCRIPTION of the layout disagreed with the only
+IMPLEMENTATION of it, and nothing could notice.
+
+This is not a typo to shrug at: an eraser or a migration that trusted the comment would have built ids
+matching nothing, deleted nothing, and **reported success**. I only caught it because writing the
+eraser forced me to ask which of the two was true.
+
+So the id builder, the size cap and the sweep ceiling now live in `WorkspaceStore.ts` next to the codec
+that defines the format, `sync.ts` imports them, and the header says what the builder produces. Two
+tests hold it: `sync.ts` must import `chunkDocId` and must not define one, and the comment is parsed and
+compared against `chunkDocId()`'s actual output.
+
+### The census now checks the DUTY, not one mechanism
+
+`user_workspaces` was `blocked` naming this row; it is now `kind: 'user'`. But it is not in
+`USER_SCOPED_COLLECTIONS` and must not be, so the census's `user ⇒ in that registry` rule would have
+failed — and the honest conclusion is that the rule named a mechanism where it meant an obligation.
+
+`user`-kind is now satisfied by the registry **or** by a named entry in `USER_ERASED_BY_MODULE`, which
+records the file, how `DELETE /api/profile` calls it, and why the registry could not hold it. A second
+test **reads those files** rather than trusting the map — otherwise it would be a new way to say
+"classified" with nothing behind it, which is exactly the failure `workspace` had before Q-701 gave it
+a consequence.
+
+### Verification
+
+`tests/theSyncedWorkspaceIsErased.test.ts` (12 tests) + the two new census tests.
+**Reversion-proven seven ways:** manifest deleted first → the ORDER test fails · the ceiling replaced
+by `chunkCount` → the orphan-sweep test fails · the empty-uid refusal removed → that test fails · the
+old wrong layout comment restored → the layout test fails · a private `chunkDocId` put back in
+`sync.ts` → the one-definition test fails · the module map pointed at the wrong file → the
+reads-the-file test fails · the call removed from the route → the same test fails.
+
+The deletion page now names it too: *"your **cross-device workspace** — the copy of your chat sessions
+and your last built app that we keep so they follow you from one device to another"*.
+
+---
+
+## 2026-10-09 — Build reliability series (`fix/build-reliability`, admin-approved)
+
+Implements the solutions doc for root causes 2–5 of the ~30% failed-build audit (root cause #1 — Claude on
+weak — dropped by the admin: **weak tier never uses Claude**). Every change is behind its own flag, **all
+default OFF** — see `docs/claude/ENV_REGISTRY.md` → "Build reliability flags". Code lives in
+`src/server/AgentV3/reliability/` with colocated tests.
+
+- P1 benchmark: `scripts/fixtures/reliability-bench-prompts.json` (50 prompts, 15 smoke),
+  `npm run bench:reliability` (dry run unless `BENCH_CONFIRM=yes`), `npm run bench:compare`. **Not run yet** —
+  the paid baseline/candidate runs are the next step and decide which flags go on.
+- P4 sticky rung + quality escalation + reasoning passback + handoff note.
+- P3 token-budget compaction + working set.
+- P2 stream no-clamp + append_file resume (partials never persisted) + 200-line rule.
+- P5 modular prompt + read_guide, banned-package guard, 16 core tools + load_tools.
+- P6 fast lane v2 (contract, topo waves, full deps code, >12 files → agent loop).
+
+Open: measure with the benchmark before enabling anything in prod; AppKnowledgeBase not updated (no
+user-facing change while the flags are off).
+## 2026-10-09 — Q-780: a version history anyone could read, "protected" by a timestamp
+
+**Found while investigating Q-764**, which is only about erasing `build_history`. Reading the store to
+answer that question turned up something sharper: **three routes with no authorization at all.**
+
+```
+GET  /api/build-history/:sessionId              → the list of versions
+GET  /api/build-history/:sessionId/:versionId   → the app's whole `files` map — the source code
+POST /api/build-history/:sessionId/checkpoint   → writes a version into that history
+```
+
+The stated security model, written in `routes/build.ts` and again in `CodeVersioning.tsx`, was that
+*"the sessionId is the unguessable capability"*. `App.tsx:693`:
+
+```js
+const id = `pro-${Date.now()}`;
+```
+
+A millisecond timestamp, then kept in localStorage for ever. **The chain was verified end to end, not
+assumed:** that id goes to the build → the workspace is `agentv3-{uid}-{sessionId}` → `restorePointKey`
+strips the prefix back off → the history document id is the bare `pro-<ts>`. App Check was no help:
+it covers six POST routes, none of these, and it attests the app rather than the user.
+
+So: guess the timestamp and you could read a stranger's source code, or write a version into their
+Time Machine. The ids cluster by when people started using the product, which makes a targeted window
+small.
+
+⚠️ **And the same file already carried the lesson.** The route immediately below these three has the
+comment *"SECURITY (audit IDOR): scope to the verified token uid — this exposes a user's build count
+and AI spend; without the check any uid could be read."* This exact class was audited **in this file**
+and these three were missed — the audit fixed the instances it was looking at, not the class.
+
+### The fix, and the part that is actually load-bearing
+
+`src/server/lib/buildHistoryAccess.ts` — all three routes now require that the caller **owns a
+workspace with that session id**, probed with `countWorkspaceFiles` (one metadata document, never
+throws, injected so the rule is unit-testable).
+
+🔒 **`ownedByVerifiedUid` alone would have been security theatre here.** The workspace id is DERIVED by
+prefixing the caller's own uid, so that check is true for any string they send. Only the existence
+probe — *does this person really have an app with that session id?* — refuses a guessed
+`pro-<timestamp>`. The reversion proof is exactly this: remove the probe and the "a signed-in stranger
+guesses the timestamp" test fails while everything else still passes.
+
+**The refusal is deliberately uninformative.** "Not found" and "not yours" return the same status and
+the same sentence, because a refusal that distinguishes them is an oracle for enumerating session ids.
+
+### 🔒 What was deliberately left alone, and why that took checking
+
+`agentv3-anon-…` histories keep the capability model **unchanged**. `workspaceIdentity.ts` says such a
+workspace has *"no real owner to protect — they are scoped only by their unguessable random sessionId
+(a capability, like a secret URL)"*, and a signed-out person has no token to present. Demanding one
+would have deleted a working feature for them — the first absolute rule.
+
+That required proving a signed-out build really does land under that prefix rather than under
+`pro-<ts>`: `deriveWorkspaceId` falls back to the literal uid `'anon'` when the real one is unusable,
+giving `agentv3-anon-{session}`, and `restorePointKey` leaves an anon id whole because there is no user
+prefix to strip. So the anon branch matches the key those histories are actually stored under. Checked,
+not assumed.
+
+Residue recorded honestly: for anon histories the "unguessable" claim now rests entirely on **their**
+generator being random. That is a different question from this one and is not answered here.
+
+### Both ends had to move
+
+Four client calls reach these routes and **one** of the four sent a token: the list call in
+`CodeVersioning.tsx`. The version fetch, the checkpoint POST, and both helpers in `buildService.ts`
+(used by `FilesPanel.tsx`) sent none — so without fixing the client, the fix would have turned every
+owner's own history into a silent empty list. A test now walks every `fetch(\`/api/build-history/…\`)`
+in both files and fails on any that does not carry `authedHeaders()`.
+
+**A correction to my own first reading:** I said those two `buildService` helpers were dead code. They
+are not — `FilesPanel.tsx` imports both. My first grep searched for the wrong names. It cost nothing
+because the re-check happened before the change, but the lesson is the repo's own: a search that finds
+nothing has usually guessed the wrong word.
+
+### The ID collided, and the guard caught it
+
+I numbered this Q-769 and `tests/theQueueIdsAreUnique.test.ts` failed: another live session already
+holds Q-769 (split from Q-621). Renumbered to **Q-780**, and only my own files' references were
+rewritten — `VertexProvider.ts` and `anAbandonedStreamStopsCosting.test.ts` carry the other session's
+Q-769 and were left untouched. This is the queue header's own prescription ("the session whose PR is
+not yet merged renumbers its own rows") working exactly as written.
+
+### Verification
+
+`tests/aBuildHistoryIsNotPublic.test.ts` — 16 tests, led by the attack itself: a signed-in stranger
+who knows the timestamp is refused. **Reversion-proven three ways:** the existence probe removed → the
+stranger-guesses test fails · one route's guard removed → the per-handler count AND the
+"guarded before it reads the files" order test fail · the client token removed → the
+no-unauthenticated-call test fails.
+## 2026-10-09 — Q-770 closed (#3607 merged), and the admin lifted the merge hold for this session
+
+**Q-770 ✅ RESOLVED.** #3607 merged as `4117ae4`, so the row left the open table and `Q-770` was
+appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main` — the
+#3543 rule. The room's Code tab is live: the shared editor, every member's caret line, and
+line-pinned comments with jump and resolve. `tests/aRoomTabTheKnowledgeBaseNamesExists.test.ts`
+keeps the component and `AppKnowledgeBase` from drifting apart again.
+
+**Q-600 stays OPEN** — 86 unused locals in 18 files. **Q-769 stays OPEN** (Vertex has no abort hook).
+**Q-381 stays OPEN** — 47 unclassified finding codes.
+
+**On the merge hold.** CLAUDE.md's 2026-09-13 correction says a session merges only when the admin
+names the PR in that session's own conversation, and that assuming it is the rule it removes. The
+admin said it on 2026-10-09: *"ap marge karo! aur apko bacha hua kam complete kar ke unko pr bhi
+marge karo"* — merge these, and merge the remaining work's PRs too once they are green. CI green
+before every merge is unchanged; that gate is not what was lifted.
+
+**One thing worth recording about GitHub rather than the code:** #3601 was reported by the API as
+having merge conflicts (`405 Pull Request has merge conflicts`) while `git merge-tree --write-tree`
+against the same `main` merged it clean, and the subsequent real merge of `main` into the branch was
+also clean. GitHub's mergeability cache had gone stale after three PRs landed in quick succession.
+The honest reading: a 405 from the merge endpoint is not proof of a conflict — check it against a
+local three-way merge before believing it, and a `main` merge plus a push is what makes GitHub
+recompute.
+
+---
+
+## 2026-10-09 — Q-762 and Q-765: a document id nothing could search by
+
+Three stores were `blocked` in the census — **not forgotten, and not quietly mislabelled.** Each had a
+document id no query could reach:
+
+- `adrDecisions` and `techDebt` key on `${userId}__${projectId}`, and the body carried **no uid at
+  all**. So the person's own architecture decisions and the tech-debt list the builder kept for them
+  outlived their account with no way to find them.
+- `app_ai_apps` keys on the **app** id, so the workspace eraser's `agentv3-{uid}-` range can never
+  reach it.
+
+### The fix is to store the field, not to loosen the rule
+
+Both writers now persist `userId` — `adrMemory.ts` (`tx.set(ref, { userId, records, updatedAt },
+{ merge: false })`) and `TechnicalDebtTracker.ts` (`setDoc(ref, { userId, items, updatedAt },
+{ merge: true })`) — and all three collections are registered as `{ field: 'userId' }`.
+`app_ai_apps` needed no writer change: it has always carried the field (`AppAiRegistryStore.ts:91`).
+
+🔒 **The doc-id prefix range stays refused, and that is the whole reason this took a writer change
+rather than one line of registry.** `workspaceDataErase.ts` documents the ambiguity in its own words:
+a uid that contains the separator makes `a__b` ambiguous with `a` + `b__…`. A compliance gap is
+recoverable; deleting a different person's data is not. Pinned by a test that fails if `startAt(`/
+`endAt(` ever appears in `DataRetentionManager.ts`.
+
+### 🟡 The residue is asserted, not claimed away
+
+A row written **before** this change has no `userId` and is **not** reached — and there is a test that
+proves exactly that, rather than a comment hoping nobody checks. It would have been easy to write
+"fixed" here; the honest claim is narrower.
+
+It also self-heals for a **live** project: both writers rewrite the same document on the next build
+(`merge: false` replaces it, `merge: true` merges into it), so an active project's row gains the field
+the next time that project is touched. Only an abandoned project's row stays unreachable. That claim is
+pinned too — the test asserts the merge modes those writers use, so "it self-heals" cannot quietly stop
+being true.
+
+And `app_ai_apps` mints `userId: userId || ''` (`DeploymentStore.ts:626`), so a publish with no
+signed-in owner stores an empty string and is not reached. Those rows hold no person either: such an
+app's workspace is `agentv3-anon-…`, the shared anon bucket `deriveWorkspaceId` falls back to. Stated
+because "every row is covered" would have been false.
+
+### The page had to grow again, and the guard said so first
+
+`tests/accountDeletionPage.test.ts` failed the moment the three became `user`-kind — by design, because
+Play requires that page to say what is deleted. It now names *"the engineering notes the builder kept
+for you — the design decisions it recorded for each project and the list of rough edges it was tracking
+in your code"* and *"the AI identity of each app you published"*.
+
+### Verification
+
+`tests/theCompositeIdStoresCarryTheirOwner.test.ts` — 6 tests, including the two-user cascade and the
+residue. One of them **reads the writers' source** rather than trusting the registry: an entry that
+queries a field no document has would report a confident `deleted: 0` for ever, which is the failure
+this class keeps producing.
+
+**Reversion-proven three ways:** either writer's `userId` removed → the reads-the-source test and the
+self-heal test fail · the three registry entries removed → the registry test and the two-user cascade
+fail.
+## 2026-10-09 — Q-600 batch two (#3609, Q-771): the same sweep, two opposite verdicts
+
+Batch one (#3607) proved the unused-locals backlog is not cosmetic. Batch two proves the harder
+half: **what a found local deserves is a judgement, and the two answers go opposite ways.** A count
+cannot tell you which; only the call sites can.
+
+**SHOWN — `GitPanel.tsx`.** `activeStep` and `currentBuildTime` were both maintained by the real
+deploy paths and rendered nowhere. Every path sets the step — the GitHub push
+(`executeRealGitHubPush`), the static ZIP export, the managed Render deploy and the
+config-injection path — 1 on validate/prepare, 2 on build/package, 3 on done. And a `useEffect`
+ran a 100 ms ticker into `currentBuildTime` for as long as the deploy was validating or building,
+correctly cleaned up on unmount. So the component knew exactly which step a deploy was on and how
+many seconds it had taken, and the user watching it saw one pulsing word ("Building..."). The
+ticker's state updates were re-rendering the panel ten times a second to display nothing.
+
+Fixed by rendering what was already there: a three-step strip (Validate / Build / Done) in the
+console header, the current step amber and pulsing, completed steps green, the failed step red when
+a deploy errors or comes back unavailable, and the elapsed seconds beside the status word. No new
+state, no new machinery — the missing piece was only ever the display.
+
+**DELETED — `BotBuilder.tsx`.** The webhook modal's snippet was
+`POST https://your-server.com/webhook` with an `<exported_json>` placeholder: an illustration of an
+endpoint that does not exist. Nothing rendered it any more, because the real Go Live flow replaced
+it — a Telegram bot token that connects the bot for real, and WhatsApp's actual callback URL and
+verify token to paste into Meta, both copied by the live `copyField`. Wiring a copy button to a
+placeholder URL would have shipped exactly the fake feature the second absolute rule forbids, so
+`showWebhookModal`, `copied`, `webhookSnippet` and `copyWebhook` all went, with a comment at the
+site recording why, so nobody re-derives the old design from the leftover.
+
+Also dropped `changesCount` and `changes` in `GitPanel` — a changed-files list rendered nowhere. The
+`files` object the live commit-message heuristic reads is untouched.
+
+**Locked:** `tests/aDeployStepTheCodeSetsIsAStepTheUserSees.test.ts` holds both halves. No
+`setActiveStep` call may name a step with no label — a 4th step would render as nothing, which is
+the class returning in a new shape — the strip and the elapsed time must stay rendered, the removed
+webhook pieces must not come back, and no placeholder host may appear outside a comment.
+Reversion-proven both ways: emptying the step strip fails, and `setActiveStep(4)` fails with
+*"a deploy path sets step 4, but only 3 labels exist, so that step would render as nothing"*.
+
+**Baseline 86 → 78**, both files out of `unusedLocalsBaseline.json` (18 files → 16). **Q-600 stays
+OPEN** — 78 locals in 16 files, of which `App.tsx` (46) and `AgentV3Panel.tsx` (11) are 57 and are
+left alone while other sessions may be editing them. The remaining small files are the next batch.
+
+## 2026-10-09 — Q-771 closed (#3609 merged). Where the session's work stands.
+
+**Q-771 ✅ RESOLVED.** #3609 merged as `555a3e6`, so the row left the open table and `Q-771` was
+appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main`.
+
+**Four items shipped today, in merge order:** Q-621 (#3599, the other session's), Q-770 (#3607),
+Q-381 batch one (#3601), Q-771 (#3609).
+
+**What is left on the rows this session touched, stated plainly rather than as "done":**
+
+- **Q-600 — OPEN.** 78 unused locals in 16 files, down from 95 in 19. **57 of the 78 are `App.tsx`
+  (46) and `AgentV3Panel.tsx` (11)**, which the row itself says to leave alone while other sessions
+  may be editing them — and on a day when `main` took eight merges in seven hours, that condition
+  held the whole time. The remaining 21 are in small files and are the next batch.
+- **Q-381 — OPEN.** 47 finding codes still in no registry. The ones left are not like batch one's:
+  each needs a decision about what a user should be told (`TOOL_ERROR`, `STUCK_TOOL`, the `OUTCOME_*`
+  roll-ups, `FEATURE_COVERAGE`, `SIMULATED_DATA_SHIPPED`), and `PLATFORM_SOURCE_WORKSPACE` is the
+  one at ERROR severity, so it is money-adjacent.
+- **Q-769 — OPEN.** `@google-cloud/vertexai` exposes no abort hook, so a Vertex rung's request
+  cannot be cancelled when the client leaves. Mitigated (consumption stops), not fixed. Recorded
+  with two options and a recommendation.
+
+**The pattern worth carrying forward, because it is what both Q-600 batches found.** Twice in one
+day an unused local turned out to be a finished feature or a maintained value that no screen read —
+P-DESIGN.7's shared editor and line comments, then the deploy panel's step and elapsed timer. The
+class is *real state the code maintains on every run that nothing renders*, and nothing in the
+toolchain can catch it: an unrendered value passes `tsc`, passes every test, and costs real work at
+runtime (a Firestore listener, a 10 Hz ticker) to display nothing. The two verdicts went opposite
+ways — build the UI where the backend was already real and documented, delete where the design had
+been superseded and the leftover pointed at a placeholder endpoint. **So the remaining 21 small-file
+locals should be read as possible features, not as lint.** The count is the symptom; the call sites
+are the evidence.
+
+## 2026-10-09 — Q-763 and Q-780 closed: the last two rows whose owner PRs had already merged
+
+Both rows read `IN PROGRESS` on `main` with their owner PRs merged — Q-763 (#3604, the synced
+workspace eraser) and Q-780 (#3608, the three unauthenticated build-history routes). Under the
+sixth absolute rule a merged owner means the row is ✅ and must leave the open table with its ID
+appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit. Four rows were caught in
+that same false state today (Q-699, Q-621, then these two), which is worth noticing: **the gap is
+structural, not careless.** A session closes its own row in the turn after its merge, and if that
+turn never comes — the session ends, or is working on something else — the row simply stays wrong,
+and only a later audit finds it.
+
+**Neither row's text was taken on trust; both were read in full on a fresh `main` first.** Each
+self-reports a complete fix with reversion-proof, and the two are good examples of why that check
+matters rather than a formality:
+- **Q-763** fixed it in its own module (`syncWorkspaceErase.ts`) rather than the retention registry,
+  deleting chunks first and the manifest last and sweeping to the format's ceiling instead of
+  trusting `chunkCount`. It also records a second defect found on the way: `WorkspaceStore.ts`'s
+  header documented the layout as `{userId}_chunk_{i}` while every real document has always been
+  `{userId}__c{i}` — the only written description disagreed with the only implementation, and an
+  eraser trusting the comment would have built ids matching nothing and reported success.
+- **Q-780** required ownership on all three routes, and its row names the load-bearing part
+  honestly: `ownedByVerifiedUid` alone proves nothing there, because the workspace id is built by
+  prefixing the caller's own uid, so an existence probe is what actually closes it.
+
+**These were another session's rows, and that needed care rather than a rule.** Closing another
+session's row went wrong earlier today: Q-699 was marked ✅ on the reasoning that no device could
+check it, and the session that WROTE that fix knew it was unprovable without one — #3600 corrected
+it and this session closed its own #3598. The difference here is that nothing is being claimed.
+That session is no longer in the project, both PRs are merged, each row carries its own proof, and
+asheesh's instruction was explicit about scope — *"apka kaam ya kisi aur agent ka kaam"*. Moving a
+row whose owner PR is merged is bookkeeping the rule already decides; asserting that somebody
+else's fix works is not, and still is not.
+
+**Queue: 80 rows, and nothing is left in a self-reported-false state** — 8 OPEN (Q-600, Q-381,
+Q-706, Q-761, Q-762, Q-764, Q-765, Q-767), the rest 🟡 BLOCKED on the admin, money, a vendor or a
+real device. No row now reads `IN PROGRESS` against a merged PR.
+
+---
+
+## 2026-10-09 — Q-761 · Q-762 · Q-764 · Q-765: four queue rows were ONE missing reachability shape
+
+**The class, named plainly: a Firestore document whose id is DERIVED.** Account deletion had exactly
+two ways to find a document — the doc id IS the uid (or a verified field equals it,
+`DataRetentionManager`), or the doc id is a workspace id inside the `agentv3-{uid}-` range
+(`workspaceDataErase`). A store whose id is *built* out of a key the eraser holds, but not equal to it
+and not carried in the body, is reachable by neither. There is nothing to query.
+
+Every session that met one of these did the right thing and got the same result. It read the store,
+correctly judged the document unreachable, and correctly refused to register it on a guess — which
+left a queue row. Four rows accumulated that way:
+
+| Row | Store | Why no key reached it |
+|---|---|---|
+| Q-762 | `adrDecisions`, `techDebt` | id `${uid}__${projectId}`, body `{records\|items, updatedAt}` — no uid field at all |
+| Q-764 | `build_history` + `versions` | a BARE sessionId; the `agentv3-{uid}-` range cannot match it |
+| Q-761 | `bot_sessions` | id `${botId}_${chatId}` — reachable from the BOT, never from the uid |
+| Q-765 | `app_ai_apps` | id is the public APP id, so the workspace range cannot reach it |
+
+**The 50/50 half that mattered.** Fixing four stores is the first half. The other half is why a
+correct judgement kept producing a permanent gap: *"I cannot express this key"* had no answer except
+a queue row. So `src/server/lib/derivedIdErase.ts` is that answer — a third reachability shape that
+resolves the key first and then deletes the exact id:
+
+- the uid itself → the `${uid}__` prefix range (Q-762);
+- the user's `bots` (`ownerUid`) → an id range per `${botId}_` (Q-761);
+- `user_build_history.sessionId` **and** the workspace id range with the prefix stripped, unioned
+  because neither source is provably complete alone → `build_history/{key}`, `versions` first (Q-764).
+
+**And Q-765 turned out not to need it.** Reading the store answered what the guess could not: `mint`
+is the only writer of `app_ai_apps` in the repo and always sets `userId`, so the existing user
+registry reaches it exactly. It is a plain `{field: 'userId'}` entry — which is the point of reading
+the store rather than inventing a mechanism for it.
+
+**Ordering is load-bearing, and it is why the route changed.** Every key above is derived from a
+parent the *other two* erasers delete. Run second, this would resolve no keys, delete nothing, and
+report success — the "an erase that LOOKS complete and is not" failure `workspaceDataErase` was
+written to prevent. So `DELETE /api/profile` calls it FIRST, and a partial failure therefore leaves
+every parent findable, so running it again finishes the job.
+
+**The class is locked where the class lives.** `tests/everyCollectionIsClassified.test.ts` already
+refuses to let a `user`-kind collection exist without an erase path, and it reads the named module
+rather than trusting the map — so all four stores are now `user` kind pointing at `derivedIdErase`,
+and the four `blocked` entries are gone. Proven by reversion: removing `bot_sessions` from the
+eraser map fails two assertions, one of them *"user-keyed but never erased: bot_sessions"*. The scan
+also widened — `store` joined `DB_HANDLES`, so collection literals on that handle are now counted.
+
+**Writing the key tests found a real gap in my own code.** `buildHistoryKeysFor` split a workspace id
+on the `agentv3-{uid}-` prefix without applying the hyphenated-uid refusal `planWorkspaceErase` makes
+for exactly that reason: `agentv3-abc-d-pro-1` is both `abc-d`'s workspace `pro-1` and `abc`'s
+workspace `d-pro-1`, so the split could have handed the eraser a key belonging to a different person.
+The pure guard is now in the function that performs the split, and both refusals are reversion-proven
+in `tests/aDerivedDocumentIdIsReachable.test.ts` (14 assertions).
+
+**Honesty fixed too (fifth rule, step 5).** `AppKnowledgeBase`'s delete-account entry already promised
+"build history" was erased, and until this change that was false. It is true now, and the entry also
+names the two things a user would not have guessed: their bots' conversations, and their recorded
+architecture decisions and tech-debt notes.
+
+**Queue: 76 rows, 4 OPEN** (Q-600, Q-381, Q-706, Q-767). Q-767 still lists `bot_sessions` and that is
+correct: account deletion reaching it is a different duty from a retention window for the sessions of
+bots whose owner is still here.
+
+**And the gate found two more things the change implied, which is the whole argument for running it
+last on the final state.** Neither was in any report:
+
+- `tests/accountDeletionPage.test.ts` refuses to let the eraser wipe data the public deletion page
+  does not describe in plain words. Registering `app_ai_apps` failed it immediately. The page now
+  names three more things, in the terms a user would notice rather than ours: every saved version of
+  every app they could have restored, the conversations each bot had with the people who messaged it,
+  and the assistant inside any app they published — *"it stops answering, which is the point: it was
+  answering as you."*
+- `tests/everySubcollectionIsClassified.test.ts` flagged `build_history/{id}/versions`, and the
+  classification it already carried is the interesting part. It was `bounded`, which was TRUE —
+  `MAX_SAVED_VERSIONS` per session, oldest dropped on every save — and that kind only ever claimed the
+  data cannot GROW. It said nothing about erasure, so the label read as coverage while every saved
+  version survived account deletion for ever. That is Q-134's defect wearing a different word. The
+  kind now takes an `erasedBy` obligation, and the test reads the named module rather than trusting
+  the map — reversion-proven by renaming the string: *"derivedIdErase.ts does not mention 'versions',
+  so it cannot be erasing it."*
+
+---
+
+## 2026-10-09 — #3614 narrowed to Q-761 and Q-764, because #3611 got there first
+
+Correcting the entry above rather than erasing it. `#3614` was built for four rows; **#3611** (another
+session, opened 12:12, CI green) already owned two of them, and I did not list the open PRs immediately
+before starting. Safeguard #6 exists for exactly that, and the cost was two of four rows done twice.
+
+So the overlap is withdrawn from my side, not argued:
+
+- `adrDecisions` and `techDebt` (**Q-762**) — the `UID_PREFIXED_COLLECTIONS` registry and
+  `planUidPrefixErase` are removed from `derivedIdErase.ts`. #3611 fixes them by making the writers
+  store `userId`.
+- `app_ai_apps` (**Q-765**) — the `{field: 'userId'}` entry, its deletion-page bullet and that bullet's
+  guard entry are reverted. #3611 registers it.
+- Both rows are back in `BUILD_REPORT_QUEUE.md`, both IDs removed from the closed register, and each row
+  now names **#3611** as its owner so no third session takes it again. Their census entries go back to
+  `blocked` naming that PR.
+
+**What stays is what was only mine:** `bot_sessions` (Q-761) and `build_history` + `versions` (Q-764),
+the derived-key resolution for both, the `erasedBy` obligation on subcollections, and the class guard.
+
+**And one real difference is recorded rather than settled.** #3611 refuses a doc-id prefix range on the
+grounds that a uid containing the separator makes `a__b` ambiguous with `a` + `b__…` — *"a compliance
+gap is recoverable; deleting a different person's data is not"*. That is sound. It also means their fix
+cannot reach a row written **before** it, which they state plainly: a live project self-heals on its
+next build, an abandoned one does not. A uid prefix range would reach those, and the ambiguity they
+refuse becomes impossible once any uid outside `[A-Za-z0-9]` is refused outright. Put to the admin, in
+the row and in the thread. Not taken by overwriting somebody else's in-flight change.
+## 2026-10-09 — a control string the user was reading, and the contract that had no holder (Q-600 batch three, Q-781)
+
+**What a user actually saw.** Whenever the chat AI talked about an API key, the message bubble contained
+`[ACTION_SECRET_HELPER:gemini]`. The server prompt told the model it "MUST proactively" append that
+string, and that doing so *"immediately triggers our high-tech inline Direct-Fill Assistant in their
+chat window, letting them paste and save it instantly"*. No such assistant existed anywhere in the
+repository. The only code that could even remove the string was `parseMessageAndTriggers`, a local in
+`AIChat.tsx` that nothing called — which is how Q-600's sweep found it.
+
+Two defects from one cause: a control string leaked into content a person reads, and a feature was
+promised to them that was never built.
+
+**⛔ And the fix was NOT to build it.** `SecretManager.tsx` says it in its own words — *"This component
+is the vault's UI, and it is deliberately the ONLY one… there is no second store to keep in step,
+because there is no second implementation"* — and `tests/secretsOneVault.test.ts` fails CI if a change
+forks that. An inline key form in a chat bubble would have been a THIRD implementation of saving a
+secret, built to make a sentence in a prompt true. So the sentence went instead: the prompt now names
+the two doors that really exist (Settings → App Settings → Secrets & API Keys, and ⋮ More → Keys &
+Secrets) and promises nothing else. The marker is still stripped, and that is not belt-and-braces —
+chat history is stored, so every message already written with it is still rendered on every scroll
+back.
+
+**The class: a contract between the prompt and the renderer with nothing holding it.** The prompt could
+ask for any control string and nothing checked that the other end had kept up. `src/lib/chatMarkers.ts`
+is the holder, and `tests/everyPromptMarkerHasARenderer.test.ts` is what makes it one.
+
+**🔴 And writing that test found the contract broken the OTHER way, which nothing had ever looked for.**
+Its first assertion is a guard on the guard — "the scan finds markers in the prompt" — and it FAILED:
+`prompts.ts` names no `__MARKER__` at all. A whole-repo search (every extension, `server.ts` at the
+root included, the stale `dist/` bundle excluded) finds `__SWITCH_TO_BUILD__`, `__URGENT_BUILD__`,
+`__VIEW_PREVIEW__`, `__DEPLOY_ACTIONS__` and `__AUTO_PLAN__` in exactly one file: the renderer that
+branches on them. **Nothing emits any of them**, so five user-facing buttons can never appear.
+
+The `__VIEW_PREVIEW__` button carries the history in its own comment: *"previously the flag was parsed
+but never used, so a successful build offered no way to open the preview"*. A session found a
+parsed-and-unused flag, correctly built the missing button, and never asked whether anything produced
+the flag. **The instance fixed, the class left alive** — the a38c6fef pattern, in a different file.
+Recorded as **Q-781** and held in `NO_EMITTER_YET` against that row, because deciding the chat AI
+should start emitting five CTAs is a product change, not a sweep. The list may only shrink: the test
+fails if a new unreachable branch appears, and fails again if one of these gains an emitter and is not
+removed.
+
+**The third verdict in this sweep, and a new one.** Batch one SHOWED a finished feature (the room's
+Code tab); batch two did both — showed the deploy step strip, deleted BotBuilder's placeholder webhook.
+Here `intentUI` looked like the first kind: a seven-persona badge ("Architect Mode", "Security
+Auditor") computed on every render and shown nowhere. It is not. `activeIntent` is
+`useState<string>('social')` in App.tsx and **nothing in the repository ever calls `setActiveIntent`**,
+so the value is frozen and not one of the seven cases — the badge would have rendered the default,
+"Navbharat AI", on every message for ever. A status indicator that does not reflect state is what the
+second absolute rule forbids outright, so showing it would have shipped a fake. Deleted. The dead
+`activeIntent` prop chain (App.tsx → ViewPanels → NBIChatPanel → AIChat) is left for its own row: it
+crosses App.tsx, which Q-600 says to leave while other sessions may be editing it.
+
+`AIChat.tsx` leaves the baseline entirely (6 → 0, and four lucide icons with it). **78 → 72.**
+
+### ⚠️ And I duplicated another session's work, which is worth recording plainly
+
+`#3614` (this session, Q-761/762/764/765) overlaps **#3611** (another session, opened 12:12, green),
+which fixes Q-762 and Q-765 by making the writers store `userId`. I did not list the open PRs
+immediately before starting — safeguard #6 exists for exactly this, and the cost is two of four rows
+done twice. Q-761 and Q-764 are mine alone.
+
+The two approaches genuinely differ and both are sound: #3611 refuses a doc-id prefix range outright
+(*"a compliance gap is recoverable; deleting a different person's data is not"*) and states its residue
+honestly — rows written before it have no `userId` and are not reached. Mine uses the prefix range with
+a refusal for any uid outside `[A-Za-z0-9]`, which makes that ambiguity impossible and does reach the
+already-written rows. That is a real advantage, and it is still not mine to take by racing their file:
+the row is theirs, the operation is irreversible, and safeguard #3 says ask. Put to the admin rather
+than resolved unilaterally.
+
+## 2026-10-09 — Q-767: the eleven stores that grew with nothing deleting them
+
+**One autopsy ledger row per item, as the sixth absolute rule requires.** Every window below is a
+sentence the Privacy Policy already publishes; where it is silent, the nearest registered precedent
+decides and the entry in `DataRetentionManager.ts` names which one.
+
+| store | window | where the number comes from |
+|---|---|---|
+| `guest_daily_usage` | 3 days | §12: *"that count is deleted after a few days"* — and the writer's own `expireAt` (day + 3) |
+| `analytics_events` | 30 days | `server_logs`' window: a raw stream beside a durable rollup. The half that names a person gets the shorter window |
+| `build_events` | 90 days | §9: *"technical logs are retained for up to 90 days"* |
+| `analytics_daily` | 400 days | `metrics_snapshots` / `build_failures`: one doc a day, read as a trend. `getFunnel` caps itself at 365 |
+| `abuseLedger` | 180 days | §9's safety-record pair: 180 days AND surviving account deletion (`safety_flags` precedent) |
+| `user_reports` | 180 days + `subs: ['shot']` | `app_mart_comment_reports`: a report a person must be able to review |
+| `admin_build_reports` | 180 days | §9: *"the reports of your past builds … are kept for 180 days"* |
+| `admin_apk_reports` | 180 days | the same sentence — a reported phone build is one of those reports |
+| `admin_build_triage` | 180 days | tied to the reports it triages: a verdict must not outlive its subject |
+| `hosting_billing` | **kept for ever** | the document IS the double-charge guard (`create`, never `set`) |
+| `hosting_period_usage` | **kept for ever** | holds `gbBilled` (the charge is a difference from it) and unpaid `owedInr` |
+
+**Four things the queue row did not know, each a root cause of its own:**
+
+1. 🔴 **A second published promise with no mechanism.** §12 says the signed-out visitor's daily count is
+   *"deleted after a few days"*. Nothing deleted it. The module even computes an `expireAt` for a
+   Firestore TTL policy, with the comment "harmless without one" — and no TTL policy was ever configured
+   on the project, so the field was decoration. This is the `site_analytics` shape exactly (2026-09-02's
+   class: the policy states a limit as fact, the mechanism is nowhere), and it mattered more than its
+   size suggests: the ids are `${day}_ip_${hash}`, and a hashed IP is personal data under the DPDP Act.
+
+2. 🔴 **`purgeExpired` would have orphaned every support screenshot — Q-134's class in the OTHER
+   mechanism.** The purge called `d.ref.delete()` and nothing else, which was harmless only because no
+   policy had ever been written for a collection that owns children. `user_reports/{id}/shot/{shotId}`
+   holds the screenshot as its own document by design (a compressed image against Firestore's 1 MiB
+   cap), so expiring the report alone would have left the picture — the one part of a ticket that can
+   show a person's face — alive and unreachable for ever. Q-134 added `subs` to the ERASE registry in
+   October and nobody asked whether the second deleting mechanism had the same hole. It did.
+   `RetentionPolicy.subs` now pages children out first, and a handle that cannot reach a declared
+   subcollection fails loudly rather than reporting an expiry that left half the record behind.
+
+3. 🔴 **The two "money input" stores belong on no clock at all**, and for a reason stronger than tax law:
+   `hosting_billing` is written with Firestore's `create`, never `set`, precisely so a second run for the
+   same (owner, day) FAILS — the document's existence is the proof that wallet was already debited. A
+   retention window there would not have trimmed a log, it would have re-armed a double charge.
+   `hosting_period_usage` is the mirror: `gbBilled` is what the overage charge is the DIFFERENCE from, so
+   deleting it re-bills the whole period, and `owedInr`/`owedSince` is money a user still owes.
+
+4. 🔴 **`analytics_events` was in no ERASE path either.** Q-767 came to it for a missing window and found
+   one row per event carrying the person's real uid, surviving their account. It is now
+   `{field:'userId'}` in `USER_SCOPED_COLLECTIONS` and described on the deletion page, whose stated
+   "30 days" is tied by test to the registry's `ttlDays` so the two cannot drift.
+
+**THE OTHER 50% — why eleven stores could be forgotten at once.** They were not eleven oversights. The
+Load board's storage warning is `collectionsNeedingRetention(GROWING_COLLECTIONS)`, and
+`GROWING_COLLECTIONS` is a hand-typed array in `routes/admin.ts` carrying the comment "verified by
+reading each store on 2026-09-07". A hand-typed inventory cannot warn about the store nobody typed into
+it, so each of the eleven was invisible to the only number that asks the question, from the day it
+shipped — and so was `site_analytics`. `tests/aGrowingStoreCannotHideFromTheBoard.test.ts` makes that
+impossible: a collection with a retention policy GROWS (that is why it has a clock), so the policy list
+is a mechanical lower bound on the inventory, and CI fails on any drift in either direction.
+
+**A second hole found in the same place, and fixed with it.** The census had no label for a store kept
+for ever ON PURPOSE, so `payment_transactions`, `app_builds` and `hosting_usage` were all filed as
+`platform` — the one kind that obliges nothing — each with a `why` that CLAIMED a `RETAINED_INDEFINITELY`
+entry while nothing checked the entry existed. Prose is not a registry; that is the same "label with
+nothing behind it" defect Q-701 found in `workspace`. The census gained a **`forever`** kind whose
+obligation is a real entry *with a reason*, and the five stores moved onto it.
+
+**And a window nobody can keep no longer reports itself kept.** Each policy may delete at most
+`maxPerRun` (500) documents a night. For a store whose arrival rate is higher — `build_events` takes one
+row per published bus event — the cap is not a slow drain: the collection grows for ever while every
+registry says it is on a clock, and the old log line (a single total) read like a clean run. Nothing in a
+session can measure the real rate, so this does not guess a larger number: `PurgeResult.capped` is set
+when a run spends its whole allowance, `cappedCollections()` reports it, and the nightly job warns with
+the collection names. One capped night is a backlog draining; capped every night means that number is
+wrong. Added to **both** purge mechanisms — fixing one of a pair is how Q-764 came back twice.
+
+**Proof.** 9 TTL policies + 2 `RETAINED_INDEFINITELY` entries + 1 erase entry, 30 new tests across
+`tests/aGrowingStoreCannotHideFromTheBoard.test.ts` (17) and
+`tests/anExpiredReportTakesItsScreenshot.test.ts` (13), each class proven by reversion — children-first
+removed, an inventory entry dropped, a window widened past "a few days", `abuseLedger`'s kind flipped to
+`date` (the silent-delete-nothing defect), a `RETAINED_INDEFINITELY` entry deleted, the erase entry
+removed, the capped flag and its log un-wired, and the page's number changed — nine reversions, each
+failing the specific guard that owns it.
+
+**Still open, and recorded rather than taken: Q-783.** `analytics_events` is written on every event and
+**nothing in the repository reads it** — the "cohort/segmentation drill-down" it exists for was never
+built. The window and the erase entry are needed either way and are done; whether to keep writing a store
+that holds a uid and answers no question is a product decision. Recommendation in the row: stop writing
+it (the funnel reads the day rollup and loses nothing), but not taken here, because deleting a writer on
+our own initiative removes a capability its author intended.
+
+## 2026-10-09 — Q-784: a store can hide behind its constant's NAME, and three did
+
+Found while finishing Q-767, which is the whole point: Q-767's own sibling hunt asked whether any
+other store had the shapes it had just fixed, and the answer exposed the thing that was supposed to
+make those shapes impossible to miss.
+
+**The census's blind spot.** `tests/everyCollectionIsClassified.test.ts` scanned for
+`const *COLLECTION* = 'x'`, the two web-SDK literal forms, and `<handle>.collection('literal')`.
+`navStoreRemixPurchase.ts` calls its constants `PURCHASES` and `PENDING_CREDITS`; `navStoreWeb.ts`
+calls one `REMIX_ORIGINS`. So three real top-level collections were invisible to all four forms, and
+the census passed while asserting that every collection in the repository was accounted for:
+
+| store | what it is | answer |
+|---|---|---|
+| `nav_store_purchases` | one doc per (app, buyer): `{appId, buyerUid, creatorUid, priceInr, creatorInr, at}` — a sale, and the buyer's own proof of purchase | `RETAINED_INDEFINITELY`: money, Privacy §9's first exception |
+| `nav_store_pending_credits` | money **owed** to a creator whose credit failed to land, written for manual reconciliation | `RETAINED_INDEFINITELY`: a debt an account closure erases is a debt nobody can pay |
+| `nav_store_remix_origins` | which App Mart app a workspace was remixed from — **doc id IS the workspaceId** | `WORKSPACE_SCOPED_COLLECTIONS`: the id range always could reach it, it was never listed |
+
+**Form 4** resolves `<db>.collection(IDENT)` through the file's own string constants — keyed on the
+VALUE rather than on a naming convention. That is safeguard #6's lesson mechanized: *"my search found
+nothing" almost always means the wrong word was guessed*, and a scan keyed on a convention inherits
+every convention nobody followed. It surfaced exactly those three and nothing else.
+
+🔴 **And narrowing form 4 back to `*COLLECTION*` left the file GREEN on the first reversion attempt** —
+because every obligation in that census is checked against what the scan FOUND, so a scan that finds
+less simply has less to object to, and the three stores sat in `CLASSIFICATION` quietly unexamined.
+Form 4 now carries three named witnesses, the same fix the other three forms needed in Q-701 PR B.
+A census is only ever as honest as its witnesses.
+
+**Q-134's class, third instance — and now a mechanical hunt.** `shares` was erased by
+`{field:'ownerId'}` with no `subs`, so every `shares/{token}/feedback/{autoId}` a visitor left on a
+shared app survived the owner's account, intact and unreachable. The registry has had the `subs`
+capability since Q-701; this entry simply never used it, which is the worst version of the defect —
+nothing was missing except somebody noticing. So the hunt is no longer a thing to remember:
+`tests/noParentIsErasedWithoutItsChildren.test.ts` reads every
+`<db>.collection(A).doc(…).collection(B)` write in `src/server`, resolving both names through the
+file's own constants, and fails when an ERASED parent has an undeclared child. Eighteen parent/child
+pairs found; `teams`, `nav_store_web_apps`, `promptAudits` and `build_history` are excused with
+written reasons, and a parent that gains an eraser must leave that list.
+
+**The fourth reachability shape.** `build_events` is appended with `.add()`, so its id is random, and
+its only link to a person is a `workspaceId` FIELD holding `agentv3-{uid}-…`. Account deletion had
+three queries and none of them could match it: `'docId'` wants the id to BE the uid; `{field}` wants a
+field to EQUAL the uid (this one holds a workspace id, of which a person has many); the workspace
+eraser sweeps a range over the DOCUMENT ID, which here says nothing about anybody. So every build
+event of every app a person ever built outlived their account.
+
+`planWorkspaceFieldErase` sweeps a RANGE over that field — Firestore serves it from the single-field
+index it maintains automatically. It refuses a uid containing `-` outright (`agentv3-a-b-` is
+ambiguous between uid `a-b` and uid `a` with a suffix starting `b-`), which is the reasoning #3611
+recorded and this reuses: a compliance gap is recoverable, deleting a different person's data is not.
+Each matched document is then verified with the workspace eraser's own `eraseableWorkspaceId`, because
+"the range should already guarantee this" is not a safety property when the action is irreversible.
+A test asserts the two planners refuse *exactly* the same uids, so the erasers can never disagree
+about whose data a workspace id names.
+
+It keeps BOTH obligations, and neither replaces the other: 90 days for everyone (Q-767, the
+technical-log ceiling §9 publishes) and erasure for a person who left — because §9 publishes **thirty**
+days for personal data after a deletion, so the window alone could not keep that promise.
+
+**Proof.** 14 new tests across `tests/noParentIsErasedWithoutItsChildren.test.ts` (4) and
+`tests/aBuildEventDiesWithTheAccount.test.ts` (10), plus form 4's witnesses. Six reversions, each
+failing the guard that owns it: `shares`' subs removed, `user_reports`' subs removed, form 4 narrowed
+(the one that first passed), the dash refusal dropped, the per-document verifier dropped, the progress
+guard dropped.
+
+**One thing worth saying plainly.** Q-767 and Q-784 were found by the same method and neither came from
+a report: the sibling hunt the fourth absolute rule requires. Q-767 fixed the Load board's hand-typed
+inventory so a growing store cannot hide; Q-784 fixed the census's name-keyed scan so a store cannot
+hide behind what its constant was called. Both were instruments that read as coverage while being
+blind — which is the single most expensive shape in this repository's history.
+
+## 2026-10-09 — Q-682: four of eight subcollections, and the fifth reachability shape
+
+The admin answered *"sabhi Q complete karo"*, which is this row's own requested input ("the admin's
+yes/no per item (or 'all as recommended')"), so its recommendations stand. Four of eight are done;
+the four under `nav_store_web_apps` are the same decision as Q-766 and go with it.
+
+🔴 **First, honestly: Q-767 and Q-784 RE-DISCOVERED two of these.** `shares/*/feedback` and
+`user_reports/*/shot` were named in this row on 2026-10-05, with recommendations, waiting on a
+decision. I searched the registries and the collection census and reported them as newly found. The
+fifth rule says to check whether a class has come back before by searching `PROGRESS.md` **and the
+queue** — I searched the code and not the queue. The fixes happen to be exactly what this row
+recommended, which is luck, not method.
+
+**Done:**
+- ✅ `user_reports/*/shot` — rec (5), the 180-day policy. Shipped in #3616, which also had to teach
+  `purgeExpired` to delete children **at all**: it never did, so the first policy on a parent with
+  children would have orphaned every screenshot.
+- ✅ `shares/*/feedback` — rec (2), erased with the owner's shares (#3617).
+- ✅ `teams/*/members`, ✅ `teams/*/library` — recs (1) and (3). Reaching them exposed three things:
+
+**(a) `teams` was classified `platform` on a sentence true about the wrong noun.** The census said
+"a team outlives any one member". It does outlive a MEMBER — but `teamId === owner uid`
+(`TeamStore.ts:14`, and `requireTeamManager` short-circuits on `uid === teamId`), so the document id
+IS a person's uid and the record is theirs. Nothing in the repository ever deleted a team, so an
+owner's team, its member list — holding **other people's uid and email** — and its shared library
+survived their account for ever. It is `user` now with `subs: ['members','library']`.
+
+Why the team goes with its owner rather than being left to the remaining members: ownership is the
+doc id, so once the account is gone **nobody can own it** — `canManageTeam` admits the owner by
+`requesterUid === teamId`. The alternative is an unmanageable team holding third parties' email
+addresses for ever, which is worse for those third parties than deleting it.
+
+**(b) THE FIFTH REACHABILITY SHAPE — my document under somebody else's parent.** The four shapes the
+erasers could express all assume the eraser can reach the PARENT: the id is the uid; a field equals
+the uid; the id is a workspace id in my range; the id or field is derived from a key I hold.
+`teams/{someoneElse}/members/{myUid}` is the mirror image — the document is mine (its id is my uid,
+and it holds my email) and the parent is somebody else's. No key points at that parent, so there was
+nothing to query and nothing to declare. `removeMember` makes it worse by design: it writes
+`status: 'removed'` and keeps the record, so the team can show who left.
+
+`FOREIGN_PARENT_USER_DOCS` is that shape named, and it is a SCAN — no index answers "which teams is
+this person in" without a collection-group query, which this project deploys no indexes for. Bounded,
+references only, paid once per account deletion. A handle that cannot list parents **throws**, because
+silently skipping would report a clean erase while leaving other people's email addresses behind.
+
+**(c) The `docId` branch of `deleteUserData` ignored `subs` entirely.** Latent only because every
+entry with children happened to be a `{field}` one — the registry would have declared the children and
+no code would have read it. That is the **third** place "delete the parent, forget the children" had to
+be fixed: the field branch (Q-701), `purgeExpired` (Q-767), and this. `teams` is the first `docId`
+entry that owns children, and one of them holds other people's email addresses.
+
+**Also closed a gap in the census that let (a) happen:** every obligation there read ONE way — a `user`
+label must have an erase entry. The reverse was unchecked, so a store could be registered for deletion
+and still be labelled `platform` ("no user owns it"), with this file agreeing to both claims at once.
+
+**Still open — the four `nav_store_web_apps` subs, and a contradiction worth stating.** Rec (4) says
+erase the creator's listing with its `files`/`baked`/`screenshots`. That contradicts Q-766's
+recommendation to keep the app and de-identify the creator, and **Q-766 is right**:
+`nav_store_purchases` proves people BUY these listings, so erasing one takes away something a buyer
+paid for. De-identification removes the personal data (the uid, the creator code) while the app's files
+stay what they always were — the product. Doing both rows in one PR on that basis, with the `reports`
+sub on the 180-day safety clock.
+
+**Proof.** 9 new tests (`tests/aMembershipDiesWithTheMember.test.ts`), two new census kinds with
+mechanically-checked obligations (`parent-subs`, `retained-parent`) and a `foreignParent` flag, and
+three reversions: the foreign-parent sweep removed, the team's `subs` removed, the `docId` branch's
+sub sweep removed — each failing the guard that owns it. The `DataRetentionManager` mock gained
+`listDocuments` and `doc()` on subcollections rather than the eraser losing its checks: a mock more
+forgiving than the real database is a test that passes for code that cannot work.
+
+## 2026-10-09 — Q-766 (with Q-682's last four): the app outlives its author, the author does not outlive in it
+
+The admin chose *"all as recommended"*, so recommendation (b) ships: **erase what was never public,
+de-identify and unlist what was.** `publishedListingErase.ts` + `LISTING_POLICIES`, wired into
+`DELETE /api/profile` and reported on its own line — a de-identify count is not a deletion count, and
+folding it into one would tell a user the opposite of what happened to their published apps.
+
+**Why this was a decision and not a one-line fix.** Three stores are keyed to one person by a plain
+`uid` field and all three survived account deletion. Registering them as ordinary erases would have
+been one line in the registry — and wrong. They are PUBLIC LISTINGS, and an App Mart app can be
+BOUGHT; Terms §4 makes such a purchase non-refundable *because the app can be run free before buying*.
+Erasing a listing because its AUTHOR closed their account would take away something a stranger paid
+for and cannot get back.
+
+**Two facts read off the code that refine recommendation (b) rather than restate it:**
+
+1. 🔒 **`unlisted` still SERVES.** `routes/navStore.ts` 404s a web app only on `status === 'removed'`,
+   so "unlist" really does preserve the buyer's access. Moving a listing to `removed` would have
+   satisfied the word and destroyed the purpose — the kind of fix that passes review and breaks a user.
+2. 🔴 **`gallery_apps` and `nav_store_apps` carry no `priceInr` at all.** Nothing in either store can be
+   bought, so the money argument — the entire basis of the recommendation — applies to the web store
+   ALONE, which is why those two delete a never-public submission outright. The census had called
+   `nav_store_apps` "purchasable"; it is not, and that is corrected with the evidence beside it.
+
+**"De-identified" had to be defined field by field, because each store carries more than a uid:**
+
+| store | identity it carried | what happens |
+|---|---|---|
+| `gallery_apps` | `uid`, `authorEmail`, `authorName` | pending/rejected deleted; published de-identified + unlisted |
+| `nav_store_apps` | `uid` + a whole `developer` block: name, EMAIL, phone, website | same |
+| `nav_store_web_apps` | `uid`, `workspaceId` — which IS `agentv3-{uid}-…`, so it carries the uid under another name (Q-762's class) | never deleted; de-identified, `listed` → `unlisted` |
+
+The uid becomes a tombstone (`CREATOR_GONE`) rather than `''` or a field delete, so every reader can
+tell "this app has no creator any more" from "the creator was not loaded" — and so the money path can
+ask.
+
+🔴 **And the money path had to close with it.** A de-identified paid listing is still purchasable, and
+`settleRemixPurchase` credits `creatorUid` — now a tombstone, whose wallet does not exist. Charging
+there would be NavBharatAI taking a stranger's money for a person who cannot be paid. `creatorHasLeft`
+delivers it **free** instead, which is this function's own established answer whenever it cannot charge
+properly ("wallet unavailable — delivered free"), and the reasoning `HostingBillingStore` states as
+*when in doubt, we eat it*. Refusing would punish the buyer for somebody else's departure.
+
+**Both published pages were corrected, because the old text became FALSE.** The deletion page promised
+*"we do not remove a published app unless you ask"* — deletion now unlists every listing automatically.
+It states the three consequences a reader cannot undo: the identity goes, the app is kept for whoever
+bought it, and a paid app stops being sellable. Privacy §9 now names the anonymise-rather-than-delete
+outcome instead of leaving it to the general sentence; a general sentence is not a disclosure when the
+specific outcome is one a reader would never guess — that the app they published survives their own
+account deletion.
+
+**Q-682's last four close here too.** `files`, `baked` and `screenshots` are KEPT with the listing —
+they ARE the app a buyer paid for — and `reports` goes on the 180-day clock, the window §9 publishes
+for every other report-and-review record. That sub is the one thing under a listing that does **not**
+belong to the author: it holds the REPORTER's uid, and an abuse record an author can erase by closing
+their account is not a record (the `safety_flags` precedent). So Q-682 is now 8/8.
+
+**Two small things the work turned up, both fixed:**
+- The subcollection census read my new module's generic `doc.ref.collection(sub)` loop as a store named
+  `sub`. It has a `MECHANISM` exclusion list for exactly this (`derivedIdErase.ts` is on it); the new
+  module joined it rather than a non-store being classified.
+- A JSDoc comment containing `` `nav_store_web_apps/*/reports` `` **ended the comment early** — `*/`
+  closes a block comment — and broke the file's parse. Worth recording because it cost a confusing
+  minute: the error pointed at a line twenty rows below the real cause.
+
+**Proof.** 14 new tests (`tests/aBuyersAppOutlivesItsAuthor.test.ts`), a new census kind
+(`de-identified`) whose obligation is a real `LISTING_POLICIES` entry naming the fields it clears, and
+**five reversions**, each failing the guard that owns it: `unlistTo` set to `removed` (which would 404
+every buyer), the `developer` block left in place, the purchase guard removed, the web store made to
+delete on `unlisted`, and the page's false promise put back.

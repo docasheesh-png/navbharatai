@@ -4,7 +4,7 @@ import { withoutPreviewBridge } from './previewBridge';
 import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
 import type { TurnRunner } from './ClaudeClient';
-import type { ActuatorPort, SubAgentSpawn, ReadLedger, KitKeptTally } from './ToolDispatcher';
+import type { ActuatorPort, SubAgentSpawn, ReadLedger, KitKeptTally, BuildToolBudget } from './ToolDispatcher';
 import type { ShadowTwinTally } from './shadowTwin';
 import type { Checkpointer } from './GitManager';
 import { ToolDispatcher } from './ToolDispatcher';
@@ -167,6 +167,12 @@ export interface SubAgentDeps {
   onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number }) => void;
 
   /**
+   * The parent's paid-tool budget (`this.toolBudget`). A thunk: the parent dispatcher does not
+   * exist when the spawn is built. The child receives the SAME object, not a copy (TD-16).
+   */
+  toolBudget?: () => BuildToolBudget | undefined;
+
+  /**
    * Per-model-call telemetry. `AgentRunner` has always accepted it; the child was built without it, so
    * the majority of a build's turns appear in no `llmCalls` log — which is also why a sub-agent's slow
    * or failing provider is invisible to every instrument that reads that log.
@@ -281,9 +287,12 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     // cost. `subAgentGetsTheWholeWiring.test.ts` compares this call's argument count against the
     // constructor's real arity, so a fourteenth parameter added later fails CI here instead of
     // becoming the next thing nobody threaded.
+    let sharedBudget: BuildToolBudget | undefined;
+    try { sharedBudget = deps.toolBudget?.(); } catch { /* a child keeps a fresh budget */ }
     const childDispatcher = new ToolDispatcher(
       deps.actuator, deps.workspaceId, deps.state, deps.events, undefined, deps.checkpointer,
       undefined, undefined, undefined, undefined, deps.onFileWrite, deps.framework, deps.onCommand,
+      sharedBudget, // this.toolBudget from the parent — same object, not a copy
     );
     // C2 — arm the guard on the child too. Read at SPAWN time via the thunk, so it sees the rules
     // however late they were loaded.

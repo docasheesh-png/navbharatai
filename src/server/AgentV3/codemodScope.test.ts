@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { containsSymbol, scopeFilesForSymbol } from './codemodScope';
+import { CODEMOD_SKIP, containsSymbol, scopeFilesForSymbol } from './codemodScope';
+import { ToolDispatcher } from './ToolDispatcher';
+import { WorkspaceState } from './WorkspaceState';
+import { AgentEventStream } from './AgentEventStream';
+import { FakeActuator } from '../../../tests/helpers/dispatcherHarness';
+import type { ToolUse } from './ClaudeClient';
+
 import { renameSymbol } from './CodemodeExecutor';
 
 describe('containsSymbol', () => {
@@ -55,3 +61,38 @@ describe('T3 headline regression — a repo-wide rename is COMPLETE past 50 file
     expect(result.changes.length).toBeGreaterThanOrEqual(56); // all relevant files, not capped at 50
   });
 });
+
+describe('CODEMOD_SKIP is segment-anchored', () => {
+  it('does not skip names that merely contain a directory word', () => {
+    for (const p of ['src/utils/distance.ts', 'src/components/BuildCard.tsx', '.github/x.yml']) {
+      expect(CODEMOD_SKIP.test(p), p).toBe(false);
+    }
+  });
+  it('skips generated and dependency trees', () => {
+    expect(CODEMOD_SKIP.test('dist/a.js')).toBe(true);
+    expect(CODEMOD_SKIP.test('node_modules/x/y.js')).toBe(true);
+  });
+});
+
+describe('a codemod that cannot write one file is an error', () => {
+  it('lists the file that was written and the one that failed', async () => {
+    const act = new FakeActuator();
+    act.files.set('src/ok.ts', 'export function oldFn(){ return 1; }\n');
+    act.files.set('src/bad.ts', 'export function oldFn(){ return 2; }\n');
+    const orig = act.writeFile.bind(act);
+    act.writeFile = async (ws, path, content) => {
+      if (path === 'src/bad.ts') throw new Error('disk full');
+      return orig(ws, path, content);
+    };
+    const stream = new AgentEventStream();
+    const d = new ToolDispatcher(act, 'ws-codemod', new WorkspaceState(stream), stream);
+    const call: ToolUse = { id: 'c1', name: 'codemod_rename', input: { old_name: 'oldFn', new_name: 'newFn' } };
+    const res = await d.dispatch(call, 'architect');
+    expect(res.is_error).toBe(true);
+    expect(res.content).toContain('src/bad.ts');
+    expect(res.content).toContain('Not written');
+    expect(act.files.get('src/ok.ts')).toContain('newFn');
+    expect(act.files.get('src/bad.ts')).toContain('oldFn');
+  });
+});
+

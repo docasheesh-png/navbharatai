@@ -77,7 +77,7 @@ describe('link 3 — the keys reach the RUNNING app, not just the vault', () => 
   it('merges into the app\'s .env immediately', () => {
     // The vault is read once at build START. Without this write, a key saved mid-build would not exist
     // for the running app until the next build — the same gap rescueDatabase closed for the database.
-    expect(fn).toContain('mergeDotEnv(existing, saved)');
+    expect(fn).toContain('mergeDotEnv(existingEnv.text, saved)');
     expect(fn).toContain("writeFile(this.workspaceId, '.env', merged)");
   });
 

@@ -1,12 +1,14 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { COPY } from '../../lib/copy';
 import { ImageLightbox } from '../chat/ImageLightbox';
 import { ComposerShell, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS } from '../chat/ComposerShell';
 import { playTapTone } from '../../lib/tapTone';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
-import { Bot, User, Send, Sparkles, Heart, Zap, ShieldCheck, Languages, ShieldAlert, CheckCircle2, Save, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Zap, CheckCircle2, Save, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
+import { stripChatMarkers } from '../../lib/chatMarkers';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { CHAT_MARKDOWN_PLUGINS } from '../../lib/chatMarkdown';
@@ -16,6 +18,8 @@ import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { AgentProgress } from './AgentProgress';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
+import { ChatCodeBlock } from '../chat/ChatCodeBlock';
+import { USER_BUBBLE_TONE, ASSISTANT_BUBBLE_TONE } from '../chat/bubbleTone';
 import { MessageEditActions } from '../chat/MessageEditActions';
 import { ReportAiContent } from '../chat/ReportAiContent';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
@@ -26,35 +30,6 @@ import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import { ThemeMode } from '../../lib/theme';
 import { useBuild } from './BuildContext';
 
-// B10/B12: Standalone code block with language header and copy button
-const ChatCodeBlock: React.FC<{ lang: string; code: string }> = ({ lang, code }) => {
-  const [copied, setCopied] = useState(false);
-  const lines = code.split('\n');
-  const displayLines = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
-  return (
-    <div className="rounded-xl overflow-hidden border border-line my-2 text-[11px]">
-      <div className="flex items-center justify-between px-3 py-1 bg-surface border-b border-line">
-        <span className="text-[9px] font-mono font-black text-faint uppercase tracking-widest">{lang || 'code'}</span>
-        <button
-          onClick={() => { navigator.clipboard.writeText(code).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-          className="text-[8px] font-black uppercase tracking-widest text-faint hover:text-ink transition-colors flex items-center gap-1"
-        >
-          {copied ? <><Check className="w-2.5 h-2.5 text-success" /> Copied</> : <><Copy className="w-2.5 h-2.5" /> Copy</>}
-        </button>
-      </div>
-      <div className="bg-surface overflow-x-auto">
-        <code className="font-mono text-body leading-relaxed block">
-          {displayLines.map((line, i) => (
-            <div key={i} className="flex hover:bg-raised">
-              <span className="select-none text-right pr-3 pl-2 text-faint text-[9px] min-w-[2rem] shrink-0 leading-[1.6]">{i + 1}</span>
-              <span className="pl-1 pr-3 whitespace-pre leading-[1.6]">{line}</span>
-            </div>
-          ))}
-        </code>
-      </div>
-    </div>
-  );
-};
 
 interface Message {
   id: string;
@@ -466,15 +441,17 @@ export const AIChat: React.FC<AIChatProps> = ({
   );
   
   useEffect(() => {
-    console.log('[AIChat] Received buildSteps:', buildSteps.length, buildSteps);
+    if (import.meta.env.DEV) console.log('[AIChat] Received buildSteps:', buildSteps.length, buildSteps);
   }, [buildSteps]);
   const scrollRef = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
-    console.log(`[AIChat] isLoading changed to: ${isLoading}`);
+    if (import.meta.env.DEV) console.log(`[AIChat] isLoading changed to: ${isLoading}`);
   }, [isLoading]);
 
-  const [showModeDropdown, setShowModeDropdown] = useState(false);
+  // `showModeDropdown` was state nothing set and nothing read. The Free chat's mode picker is a
+  // SHEET that App.tsx owns and this component only asks to open (`onOpenModePicker`), so a local
+  // dropdown flag here could never have been the thing that opened it. Removed by Q-600's sweep.
   const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   // AI replies the user flagged with Report — hidden on this screen at once (the person asked not to see
@@ -553,33 +530,25 @@ export const AIChat: React.FC<AIChatProps> = ({
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  const parseMessageAndTriggers = (msg: Message) => {
-    const text = String(msg.text || '');
-    const match = text.match(/\[ACTION_SECRET_HELPER:([^\]]+)\]/i);
-    if (match) {
-      const providerId = match[1].toLowerCase().trim();
-      const cleanedText = text.replace(/\[ACTION_SECRET_HELPER:[^\]]+\]/gi, '').trim();
-      return { providerId, cleanedText, deservesManual: false };
-    }
+  /**
+   * 🔴 A BADGE WHOSE INPUT IS FROZEN, SO IT WAS DELETED AND NOT SHOWN (Q-600's sweep, 2026-10-09).
+   *
+   * `getDisplayIntent` mapped `activeIntent` to a label, icon and colour for seven personas ("Architect
+   * Mode", "Security Auditor", …) and `intentUI` computed it on every render. Nothing rendered it, and
+   * the obvious reading — a forgotten wire-up worth finishing, as the room's Code tab and the deploy
+   * step strip both were — is wrong here.
+   *
+   * `activeIntent` is `useState<string>('social')` in App.tsx and **nothing in the repository ever calls
+   * `setActiveIntent`**, so the value is permanently `'social'`, which is not one of the seven cases: the
+   * badge would have rendered the default, "Navbharat AI", on every message for ever. That is a status
+   * indicator that does not reflect state, which the second absolute rule forbids outright. Building it
+   * would have shipped a fake.
+   *
+   * The dead `activeIntent` prop chain itself (App.tsx → ViewPanels → NBIChatPanel → here) is recorded
+   * as its own queue row rather than removed in passing: it crosses App.tsx, which Q-600 says to leave
+   * while other sessions may be editing it.
+   */
 
-    const deservesManual = msg.sender === 'ai' && /api key|secret key|stripe_secret_key|gemini_api_key|claude_api_key|openai_api_key|groq_api_key|deepseek_api_key/i.test(text);
-    return { providerId: null, cleanedText: text, deservesManual };
-  };
-
-    const getDisplayIntent = (intent: string) => {
-
-      switch(intent) {
-         case 'greeting': return { label: 'Social Assistant', icon: Heart, color: 'text-danger bg-rose-500/10' };
-         case 'build': return { label: 'Architect Mode', icon: Zap, color: 'text-accent-text bg-indigo-500/10' };
-         case 'technical': return { label: 'Technical Guru', icon: ShieldCheck, color: 'text-success bg-emerald-500/10' };
-         case 'emotional': return { label: 'Empathetic Companion', icon: Languages, color: 'text-warn bg-amber-500/10' };
-         case 'security': return { label: 'Security Auditor', icon: ShieldAlert, color: 'text-accent-text bg-indigo-500/10 border-indigo-500/20' };
-         case 'github': return { label: 'GitHub Cloud Architect', icon: Github, color: 'text-ink bg-well' };
-         default: return { label: 'Navbharat AI', icon: Sparkles, color: 'text-accent-text bg-raised' };
-      }
-    };
-
-  const intentUI = getDisplayIntent(activeIntent);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -598,12 +567,9 @@ export const AIChat: React.FC<AIChatProps> = ({
     const isAI = msg.sender === 'ai';
     const text = msgText;
     const hasSources = text.includes('Sources:') || text.includes('References:');
-    let displayContent = text;
-    
-    // Pro Mode: Hide raw code, show action status
-// (Removed message hiding)
-
-    const isQuestion = isAI && (text.includes('?') || text.includes('what kind of') || text.includes('would you like'));
+    // `displayContent` and `isQuestion` were computed here and read nowhere. `displayContent` was a
+    // leftover of the removed 'hide raw code in Pro mode' branch (its own comment said so); nothing ever
+    // asked whether a reply was a question. Removed by Q-600's sweep.
 
     // ── Special markers ─────────────────────────────────────────────────────
     const hasSwitchToBuild = isAI && text.includes('__SWITCH_TO_BUILD__');
@@ -611,14 +577,13 @@ export const AIChat: React.FC<AIChatProps> = ({
     const hasViewPreview   = isAI && text.includes('__VIEW_PREVIEW__');
     const hasDeployActions = isAI && text.includes('__DEPLOY_ACTIONS__');
     const hasAutoPlan      = isAI && text.includes('__AUTO_PLAN__');
-    const cleanText = text
-      .replace('__SWITCH_TO_BUILD__', '')
-      .replace('__URGENT_BUILD__', '')
-      .replace('__VIEW_PREVIEW__', '')
-      .replace('__DEPLOY_ACTIONS__', '')
-      .replace('__AUTO_PLAN__', '')
-      .replace('__AUTO_BUILD__', '')
-      .trim();
+    // 🔴 EVERY marker the prompt asks the model for, stripped in ONE place (`lib/chatMarkers.ts`).
+    // This list used to be written out here, and it was missing `[ACTION_SECRET_HELPER:provider]` —
+    // which the prompt told the model to append to EVERY message about an API key. The only code that
+    // could remove it was a local in this file that nothing called, so the user read the raw marker in
+    // the message bubble. Chat history is stored, so stripping still matters for messages already
+    // written; the prompt no longer asks for new ones. See that module for the whole finding.
+    const cleanText = stripChatMarkers(text);
     const deployFiles = (msg as any).meta?.deployFiles as Record<string, string> | undefined;
     const deployAppName = (msg as any).meta?.appName as string | undefined;
     const suggestions = (msg as any).meta?.suggestions as string[] | undefined;
@@ -701,25 +666,19 @@ export const AIChat: React.FC<AIChatProps> = ({
         {hasUrgentBuild && onModeChange && (
           <div className="mt-3 pt-3 border-t border-line">
             <div className="rounded-2xl overflow-hidden border border-orange-500/40 shadow-lg shadow-orange-900/20">
-              <div className="bg-gradient-to-r from-orange-950/80 to-amber-950/80 px-4 py-3 flex items-start gap-3 text-on-accent">
-                <span className="text-2xl shrink-0 mt-0.5">🔨</span>
+              <div className="bg-raised px-4 py-3 flex items-start gap-3">
                 <div>
                   <p className="text-[12px] font-black text-warn uppercase tracking-wider">Switch to Build Mode?</p>
                   <p className="text-[11px] text-warn mt-0.5 leading-snug">
-                    Planning Mode only creates a blueprint — switch to Build Mode to generate the actual working app in one click!
+                    Planning Mode only creates a blueprint. Switch to Build Mode to generate the working app.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => onModeChange('build')}
                 className="w-full flex items-center justify-center gap-2 py-3 px-4 font-black text-[13px] uppercase tracking-widest transition-all active:scale-[0.98] hover:brightness-110"
-                style={{
-                  background: 'linear-gradient(135deg, #ea580c, #d97706)',
-                  color: 'var(--text-primary)',
-                  animation: 'pulse 2s ease-in-out infinite',
-                }}
+                style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
               >
-                <span style={{ fontSize: 16 }}>⚡</span>
                 Switch to Build Mode — Build Now
                 <span style={{ fontSize: 16 }}>→</span>
               </button>
@@ -731,16 +690,14 @@ export const AIChat: React.FC<AIChatProps> = ({
         {hasAutoPlan && onSendSuggestion && (
           <div className="mt-3 pt-3 border-t border-indigo-500/20">
             <div className="rounded-2xl overflow-hidden border border-indigo-500/30 shadow-lg shadow-indigo-900/20">
-              <div className="bg-gradient-to-r from-indigo-950/80 to-violet-950/80 px-4 py-2.5 flex items-center gap-2 text-on-accent">
-                <span className="text-lg shrink-0">✨</span>
-                <p className="text-[11px] font-black text-accent-text uppercase tracking-wider">Plan ready — build kar du?</p>
+              <div className="bg-raised px-4 py-2.5 flex items-center gap-2">
+                                <p className="text-[11px] font-black text-accent-text uppercase tracking-wider">Plan ready — build kar du?</p>
               </div>
               <button
                 onClick={() => onSendSuggestion('__CONFIRM_AUTO_BUILD__')}
                 className="w-full flex items-center justify-center gap-2 py-3 px-4 font-black text-[13px] uppercase tracking-widest transition-all active:scale-[0.98] hover:brightness-110"
-                style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: 'var(--text-primary)' }}
+                style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
               >
-                <span>🚀</span>
                 Yes, Build
               </button>
             </div>
@@ -773,10 +730,9 @@ export const AIChat: React.FC<AIChatProps> = ({
           <div className="mt-3 pt-3 border-t border-line">
             <button
               onClick={onPreviewClick}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-[12px] uppercase tracking-wider transition-all active:scale-95 hover:brightness-110 border border-indigo-500/30"
-              style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: 'var(--text-primary)' }}
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-[12px] uppercase tracking-wider transition-all active:scale-95 hover:brightness-110 border border-line"
+              style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
             >
-              <span>👁️</span>
               View Live Preview
               <span style={{ fontSize: 14 }}>→</span>
             </button>
@@ -786,7 +742,7 @@ export const AIChat: React.FC<AIChatProps> = ({
         {/* Deploy Actions — shown after successful build */}
         {hasDeployActions && deployFiles && onDownloadZip && (
           <div className="mt-3 pt-3 border-t border-line">
-            <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">🚀 Deploy your app</p>
+            <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">{COPY.chat.deployHeading}</p>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => onDownloadZip(deployFiles, deployAppName || 'NavBharatAI-App')}
@@ -823,7 +779,7 @@ export const AIChat: React.FC<AIChatProps> = ({
         {/* Smart Follow-Up Suggestions */}
         {suggestions && suggestions.length > 0 && onSendSuggestion && (
           <div className="mt-3 pt-3 border-t border-line">
-            <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">💡 What to build next</p>
+            <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">{COPY.chat.nextHeading}</p>
             <div className="flex overflow-x-auto no-scrollbar gap-2 pb-1">
               {suggestions.map((s, i) => (
                 <button
@@ -1001,12 +957,12 @@ export const AIChat: React.FC<AIChatProps> = ({
                 <div className={cn(
                   "max-w-[90%] p-3.5 rounded-2xl text-[11px] font-medium leading-relaxed shadow-sm break-words select-text",
                   msg.sender === 'user'
-                    ? "bg-indigo-600 text-on-accent rounded-tr-none"
+                    ? `${USER_BUBBLE_TONE} rounded-tr-none`
                     : isNetworkError
                       ? "bg-red-500/10 text-body border border-red-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                       : isAIError
                         ? "bg-amber-500/10 text-body border border-amber-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
-                        : "bg-card text-body border border-line rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                        : `${ASSISTANT_BUBBLE_TONE} border border-line rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]`
                 )}>
                   {/* Attachment image previews — compact grid */}
                   {msg.attachments && msg.attachments.length > 0 && (
@@ -1249,7 +1205,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                 <button
                   onClick={() => { setGuiderInput(''); onGuiderApprove?.(); }}
                   disabled={!!guiderReplanning}
-                  className="flex-1 px-3 py-2 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-on-accent text-[11px] font-black uppercase tracking-wider hover:opacity-90 transition disabled:opacity-50"
+                  className="flex-1 px-3 py-2 rounded-lg bg-accent text-on-accent text-[11px] font-black uppercase tracking-wider hover:opacity-90 transition disabled:opacity-50"
                 >
                   ✅ Approve — Build It
                 </button>

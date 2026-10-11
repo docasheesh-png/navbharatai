@@ -124,10 +124,21 @@ describe('CENSUS TRIPWIRE — a new workspace route must consider ownership', ()
       if (USES_ID.test(src) && !OWNERSHIP.test(src)) offenders.push(f);
     }
     /**
-     * `supabaseIntegration.ts` is the one allowed entry: its workspace id rides an OAuth `state` that
-     * the server itself signed and re-verifies, so the id is not caller-supplied in the sense that
-     * matters here. Every other route must carry a real ownership check.
+     * Two allowed entries, not one.
+     *
+     * Was `['supabaseIntegration.ts']`.
+     * Now `['appData.ts', 'supabaseIntegration.ts']`.
+     *
+     * `appData.ts` is the published app's data API. Its visitors have no Firebase session, so none of
+     * the identity helpers above can run. The workspace id is in the URL and the credential is the
+     * data key: `gateSharedCall` compares it to the hash stored for that workspace only
+     * (`sharedDataStore.ts`). A wrong key writes nothing. A Firebase check here would lock out the
+     * app the key was created for.
+     *
+     * `supabaseIntegration.ts` remains allowed: its workspace id rides an OAuth `state` that the
+     * server itself signed and re-verifies, so the id is not caller-supplied in the sense that
+     * matters here. Every other route must carry a real ownership check. A third file still fails.
      */
-    expect(offenders).toEqual(['supabaseIntegration.ts']);
+    expect(offenders.sort()).toEqual(['appData.ts', 'supabaseIntegration.ts']);
   });
 });

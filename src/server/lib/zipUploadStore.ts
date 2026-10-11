@@ -119,27 +119,78 @@ export async function noteSharedProgress(uploadId: string, chunksSeen: number, b
 }
 
 /**
+ * Is this assembly inside the 5 GB ceiling?
+ *
+ * Two checks, both on ACTUAL numbers rather than the client's claim:
+ *  - `totalChunks` cannot exceed `ceil(maxBytes / chunkBytes)` (640 parts at the real constants).
+ *  - the sum of the part sizes cannot exceed `maxBytes`. A retried index is one part, so the sum
+ *    does not double-count it — the caller passes one size per index.
+ *
+ * PURE.
+ */
+export function sharedAssemblyAllowed(
+  totalChunks: number,
+  partSizes: number[],
+  maxBytes: number,
+  chunkBytes: number,
+): { ok: true } | { ok: false; reason: string } {
+  if (!Number.isInteger(totalChunks) || totalChunks <= 0) return { ok: false, reason: 'bad total' };
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0 || !Number.isFinite(chunkBytes) || chunkBytes <= 0) {
+    return { ok: false, reason: 'bad ceiling' };
+  }
+  if (totalChunks > Math.ceil(maxBytes / chunkBytes)) return { ok: false, reason: 'too many parts' };
+  let sum = 0;
+  for (const n of partSizes) {
+    if (!Number.isFinite(n) || n < 0) return { ok: false, reason: 'bad size' };
+    sum += n;
+  }
+  if (sum > maxBytes) return { ok: false, reason: 'too big' };
+  return { ok: true };
+}
+
+/**
  * Stream every chunk, IN ORDER, into one local file — the archive the existing extractor reads.
  *
  * Assembly happens inside the single /commit request, so doing it on local disk is safe: no other
  * instance needs to see the result. Every chunk is verified present first, because a silently missing
  * chunk would produce a corrupt archive and a baffling "damaged zip" error instead of a clear failure.
+ *
+ * The 5 GB ceiling is enforced HERE, from the objects' actual sizes, not from the progress counter
+ * (which a retried chunk would inflate). `limits` defaults to the same 5 GB / 8 MB constants the
+ * route exports, so a caller that forgets them still cannot assemble past the ceiling.
  */
-export async function assembleSharedUpload(uploadId: string, totalChunks: number, destPath: string): Promise<number> {
+export async function assembleSharedUpload(
+  uploadId: string,
+  totalChunks: number,
+  destPath: string,
+  limits?: { maxBytes: number; chunkBytes: number },
+): Promise<number> {
   const name = bucketName();
   if (!name) throw new Error('no bucket configured');
   const bucket = admin.storage().bucket(name);
+  const maxBytes = limits?.maxBytes ?? 5 * 1024 * 1024 * 1024;
+  const chunkBytes = limits?.chunkBytes ?? 8 * 1024 * 1024;
 
   const missing: number[] = [];
+  const sizes: number[] = [];
   for (let i = 0; i < totalChunks; i++) {
-    const [exists] = await bucket.file(chunkObjectPath(uploadId, i)).exists();
+    const file = bucket.file(chunkObjectPath(uploadId, i));
+    const [exists] = await file.exists();
     if (!exists) missing.push(i);
+    else {
+      const [meta] = await file.getMetadata();
+      sizes.push(Number(meta.size ?? 0));
+    }
   }
   if (missing.length) {
     throw new Error(
       `The upload is incomplete — ${missing.length} of ${totalChunks} parts did not arrive `
       + `(first missing: part ${missing[0] + 1}). Please try the import again.`,
     );
+  }
+  const verdict = sharedAssemblyAllowed(totalChunks, sizes, maxBytes, chunkBytes);
+  if (!verdict.ok) {
+    throw new Error(`This project is larger than the ${Math.round(maxBytes / (1024 ** 3))} GB import limit.`);
   }
 
   await fs.promises.writeFile(destPath, Buffer.alloc(0));

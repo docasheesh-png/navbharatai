@@ -12,6 +12,10 @@ import { isPtyHost, type PtyHost } from './ShellSessions';
  * This is the first step toward full session persistence (D7): today it holds
  * the live GitManager for the workspace; a durable backend can replace the Map
  * without changing callers.
+ *
+ * TTL is sliding (BLD-8): a session that is still being used stays alive. Expiry
+ * is measured from `lastUsedAt`, not from when the session was created. A lookup
+ * of an expired session deletes it and returns a miss.
  */
 export interface WorkspaceSession {
   workspaceId: string;
@@ -20,25 +24,65 @@ export interface WorkspaceSession {
   runner?: CommandRunner;
   userId?: string;
   createdAt: number;
+  /** Epoch ms of the last successful lookup. Sliding TTL reads this, not `createdAt`. */
+  lastUsedAt: number;
 }
 
 const sessions = new Map<string, WorkspaceSession>();
 const TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-function prune(): void {
-  const cutoff = Date.now() - TTL_MS;
+function expired(s: WorkspaceSession, now = Date.now()): boolean {
+  return now - s.lastUsedAt > TTL_MS;
+}
+
+function prune(now = Date.now()): void {
   for (const [id, s] of sessions) {
-    if (s.createdAt < cutoff) sessions.delete(id);
+    if (expired(s, now)) sessions.delete(id);
   }
+}
+
+/**
+ * A runner to re-register when exec misses the in-memory map (another Cloud Run instance,
+ * or this one recycled). Tests inject a fake; production wires the actuator. Null means
+ * there is no live sandbox to rehydrate — exec stays offline. Never used for a PTY.
+ */
+export type SessionReconnect = (
+  workspaceId: string,
+  userId?: string,
+) => Promise<CommandRunner | null | undefined> | CommandRunner | null | undefined;
+
+let sessionReconnect: SessionReconnect | null = null;
+
+/** Install or clear the exec rehydrate hook. Production and tests share this one setter. */
+export function bindSessionReconnectForTests(fn: SessionReconnect | null): void {
+  sessionReconnect = fn;
 }
 
 export function registerSession(workspaceId: string, git: GitManager, userId?: string, runner?: CommandRunner): void {
   prune();
-  sessions.set(workspaceId, { workspaceId, git, runner, userId, createdAt: Date.now() });
+  const now = Date.now();
+  sessions.set(workspaceId, { workspaceId, git, runner, userId, createdAt: now, lastUsedAt: now });
+}
+
+/**
+ * Successful lookup of a LIVE session: refresh `lastUsedAt`.
+ * Expired → delete and miss. Wrong owner → miss WITHOUT touching (and without deleting),
+ * so a probe cannot slide somebody else's TTL or look like a rehydrate opportunity.
+ */
+function takeLive(workspaceId: string, userId?: string): WorkspaceSession | undefined {
+  const s = sessions.get(workspaceId);
+  if (!s) return undefined;
+  if (expired(s)) {
+    sessions.delete(workspaceId);
+    return undefined;
+  }
+  if (userId && s.userId && s.userId !== userId) return undefined;
+  s.lastUsedAt = Date.now();
+  return s;
 }
 
 export function getSession(workspaceId: string): WorkspaceSession | undefined {
-  return sessions.get(workspaceId);
+  return takeLive(workspaceId);
 }
 
 /**
@@ -86,11 +130,14 @@ export async function restoreSessionDetailed(
   // this caught `rm -rf` reaching the sandbox during development.)
   if (!/^[0-9a-f]{4,40}$/i.test(sha)) return { ok: false, reason: 'unknown-sha' };
 
-  const session = sessions.get(workspaceId);
-  if (session && userId && session.userId && session.userId !== userId) return { ok: false, reason: 'forbidden' };
-
-  if (session) {
-    const ok = await session.git.restore(sha);
+  const raw = sessions.get(workspaceId);
+  if (raw && expired(raw)) {
+    sessions.delete(workspaceId);
+  } else if (raw) {
+    if (userId && raw.userId && raw.userId !== userId) return { ok: false, reason: 'forbidden' };
+    // Warm session actually used — slide the TTL.
+    raw.lastUsedAt = Date.now();
+    const ok = await raw.git.restore(sha);
     if (ok) return { ok: true, reason: 'restored' };
     // Fall through: a warm session whose restore refused still deserves a real diagnosis below.
   }
@@ -125,9 +172,8 @@ export async function restoreSession(
   sha: string,
   userId?: string,
 ): Promise<boolean> {
-  const session = sessions.get(workspaceId);
+  const session = takeLive(workspaceId, userId);
   if (!session) return false;
-  if (userId && session.userId && session.userId !== userId) return false;
   return session.git.restore(sha);
 }
 
@@ -140,9 +186,8 @@ export async function gitStatusForSession(
   workspaceId: string,
   userId?: string,
 ): Promise<{ clean: boolean; changed: number; head: string } | null> {
-  const session = sessions.get(workspaceId);
+  const session = takeLive(workspaceId, userId);
   if (!session) return null;
-  if (userId && session.userId && session.userId !== userId) return null;
   return session.git.status();
 }
 
@@ -151,6 +196,11 @@ export async function gitStatusForSession(
  * command runs under a hard `timeout` and its output is capped. Returns { available:false } when the
  * session is unknown / not owned / has no sandbox runner — so the UI shows an honest "sandbox not
  * active" state instead of faking output. Never throws.
+ *
+ * On a MISS (no in-memory session), an optional reconnect hook may re-register a live sandbox on
+ * THIS instance and continue. A session the caller does not own is never rehydrated. A null
+ * reconnect result keeps today's offline answer. PTY hosts do not use this path — a TTY cannot
+ * migrate onto this process.
  */
 export async function execInSession(
   workspaceId: string,
@@ -158,9 +208,22 @@ export async function execInSession(
   userId?: string,
 ): Promise<ExecResult> {
   const offline: ExecResult = { available: false, exitCode: -1, stdout: '', stderr: '' };
-  const session = sessions.get(workspaceId);
+  const raw = sessions.get(workspaceId);
+  // Someone else's session — expired or not — is not a hole to rehydrate through.
+  if (raw && userId && raw.userId && raw.userId !== userId) {
+    if (expired(raw)) sessions.delete(workspaceId);
+    return offline;
+  }
+  let session = takeLive(workspaceId, userId);
+  if (!session && sessionReconnect) {
+    let runner: CommandRunner | null | undefined;
+    try { runner = await sessionReconnect(workspaceId, userId); } catch { runner = null; }
+    if (runner) {
+      registerSession(workspaceId, new GitManager(runner, workspaceId), userId, runner);
+      session = takeLive(workspaceId, userId);
+    }
+  }
   if (!session || !session.runner) return offline;
-  if (userId && session.userId && session.userId !== userId) return offline;
   if (!isRunnableCommand(command)) return { available: true, exitCode: 0, stdout: '', stderr: '' };
   try {
     const r = await session.runner.runCommand(workspaceId, wrapBoundedCommand(command, EXEC_TIMEOUT_SEC));
@@ -184,11 +247,13 @@ export async function execInSession(
  * Undefined when the session is unknown, not owned by the caller, or the actuator has no TTY support
  * (LocalActuator in dev/CI) — so the caller shows an honest "sandbox not active" state rather than a
  * shell that silently swallows every keystroke.
+ *
+ * Pure memory lookup. A TTY cannot be reconnected onto this instance — the caller returns
+ * SHELL_NOT_ON_THIS_INSTANCE and the client opens a new shell here.
  */
 export function ptyHostForSession(workspaceId: string, userId?: string): PtyHost | undefined {
-  const session = sessions.get(workspaceId);
+  const session = takeLive(workspaceId, userId);
   if (!session || !session.runner) return undefined;
-  if (userId && session.userId && session.userId !== userId) return undefined;
   return isPtyHost(session.runner) ? session.runner : undefined;
 }
 

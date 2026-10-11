@@ -28,6 +28,10 @@ describe('HostingChooser — the two-path Publish surface', () => {
     expect(html).toContain(ADVANCED_PUBLISH_HINT);    // and readable without opening it
     expect(html).toContain('Publish on NavBharatAI');
     expect(html).toContain('coming soon'); // full-stack honesty
+    // The resell card names the bring-your-own choice and does not invent a buy button before the server says one can start.
+    expect(html).toContain('You can host it yourself');
+    expect(html).not.toContain('Run this server on NavBharatAI');
+    expect(html).not.toContain('Create the database on NavBharatAI');
     // Open, it is the same card it always was — both sub-choices, nothing dropped.
     const open = render(BYO_OPEN);
     expect(open).toContain('We deploy to your provider');

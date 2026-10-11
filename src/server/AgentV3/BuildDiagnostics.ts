@@ -18,6 +18,7 @@ import { isProjectSummaryNarration } from './ProjectSummary';
 import { isTransientStatusLine } from './workingHeartbeat';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
+import { redactSecrets } from './SecretRedactor';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
 import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { sandboxCost, describeSandboxCost } from './sandboxCost';
@@ -76,6 +77,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'FUTILITY_BREAKER',         // our own loop breaker stopped the build
   'VERIFY_DID_NOT_RUN',       // our fast-lane typecheck could not execute — the class of RUNTIME_UNCHECKED
   'GREEN_GUARD_UNVERIFIED',   // "could not be opened to check this turn" — the class of PREVIEW_UNVERIFIED
+  // A restore point OUR save did not keep (GT-6). The app rendered; the miss is the store, not the app.
+  'IN_BUILD_GREEN_SKIPPED_PARTIAL_SCAN', 'IN_BUILD_GREEN_NOT_SAVED', 'GREEN_SNAPSHOT_NOT_SAVED',
   'HEAL_NOT_DURABLE',         // our repair wrote twice to one file; the user never sees repair passes
   'IMPORT_NOT_DURABLE',       // our store did not confirm saving an import (autopsy d0b2fcd6, Q-735) — their app is unchanged
   'SUMMARY_OFF_TOPIC',        // about OUR closing summary's wording, and already said above the summary
@@ -95,6 +98,29 @@ export const PROCESS_ONLY_CODES = new Set([
   'PASTED_APP_KEPT_ONE_FILE',
   // The user named a stack we do not build (unsupportedStack.ts) — a fact about OUR templates, not the app.
   'UNSUPPORTED_STACK',
+  // ── NINE MORE OF OUR OWN RUN, Q-381's first batch (2026-10-09) ──────────────────────────────────
+  // The 2026-10-04 census left 56 problem-severity codes in no registry at all, so `isAppFinding` said
+  // yes to every one: each reached the user's build-health card as a problem with THEIR app and took 6
+  // points off their app's health score. The nine below are the ones whose OWN recording site already
+  // answers the question — each quote here is from that site, not from a judgement made now, which is
+  // why they could be classified without the admin deciding anything. The codes that genuinely need a
+  // decision about what a user should be told (`TOOL_ERROR`, `STUCK_TOOL`, the `OUTCOME_*` roll-ups,
+  // `FEATURE_COVERAGE`, `SIMULATED_DATA_SHIPPED`) are deliberately NOT in this batch.
+  //
+  // 🔒 WHY THIS MOVES NO MONEY, on the same argument as the block above: a RED gate flips a build to
+  // free only on `shippingIssueCount('error')`, and every code here is recorded at WARNING or INFO
+  // severity, so the error count cannot change. `PLATFORM_SOURCE_WORKSPACE` is left OUT of this batch
+  // for exactly that reason — it is the one unclassified code recorded at ERROR severity, so it is
+  // money-adjacent and gets its own look rather than riding along here.
+  'RELEASE_GATE_UNPROVEN',       // "not evidence the app is broken — the absence of evidence that it works" (its own detail)
+  'LAST_CHANCE_PROOF_UNAVAILABLE', // "an infrastructure limit here, never evidence about the app itself" (its own detail)
+  'SANDBOX_UNAVAILABLE',         // "Infrastructure condition, not an app error." (its own message)
+  'RUNTIME_UNCHECKED',           // our console capture failed — the class `VERIFY_DID_NOT_RUN` above already names
+  'CLAIM_UNSUPPORTED',           // OUR closing summary over-claimed, and the summary is corrected in place — the class of SUMMARY_OFF_TOPIC
+  'TIMELINE_TRUNCATED',          // our diagnostics timeline hit its own entry cap
+  'PREVIEW_REVIVAL_RECIPE',      // our storage could not keep the wake-up recipe; the preview itself rendered
+  'GUARD_REPEAT',                // our mistake guard did not hold — "needs an upstream/architectural fix" (its own message)
+  'UPSELL_SUPPRESSED',           // whether WE asked for credits; its own comment calls the warning cases "a real fault of ours"
   'UNKNOWN_NAME_IN_REQUEST', 'REQUEST_SCOPE_NOTE',
   'SCRIPT_REQUEST_AS_WEB_APP', // a note to our builder and the user (scriptRequest.ts, Q-274)
   'PYTHON_BACKEND_UP', // our own start of the app's Python server (pythonBackendBoot.ts, Q-284)
@@ -1089,6 +1115,13 @@ export class BuildDiagnostics {
   private compatibleAuditFixRan = false;
 
   recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number; timing?: CommandTiming }): void {
+    // TD-4: one door. The audit parser below still sees vulnerability counts; it does not need values.
+    rec = {
+      ...rec,
+      command: redactSecrets(rec.command),
+      stdout: rec.stdout === undefined ? undefined : redactSecrets(rec.stdout),
+      stderr: rec.stderr === undefined ? undefined : redactSecrets(rec.stderr),
+    };
     // NPM ALREADY TOLD US (dukaan report 2026-08-12). That build's install printed "8 vulnerabilities
     // (4 moderate, 4 high)" and the report said nothing at all — not "clean", not "couldn't check". The
     // OSV-backed dep-health gate returns '' for BOTH outcomes, so silence proved nothing either way,

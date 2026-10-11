@@ -8,6 +8,8 @@
  *   - POST /api/preview           → start a live preview for a set of files
  */
 
+import { authedHeaders } from '../lib/authHeaders';
+
 export interface ProjectIssue {
   severity: 'error' | 'warning';
   file: string;
@@ -150,10 +152,16 @@ export interface VersionEntry extends VersionMeta {
   files: Record<string, string>;
 }
 
-/** List all version checkpoints for a workspace (metadata only, newest first). */
+/**
+ * List all version checkpoints for a workspace (metadata only, newest first).
+ *
+ * 🔒 The token travels (Q-780): the route now checks that this history is the caller's. Without the
+ * header a signed-in user's own history would come back EMPTY — the silent-empty-list failure
+ * `CodeVersioning.tsx` already records having hit once, three lines from a Bearer token.
+ */
 export async function listBuildHistory(sessionId: string): Promise<VersionMeta[]> {
   try {
-    const res = await fetch(`/api/build-history/${encodeURIComponent(sessionId)}`);
+    const res = await fetch(`/api/build-history/${encodeURIComponent(sessionId)}`, { headers: await authedHeaders() });
     if (!res.ok) return [];
     const data = await res.json();
     return (data.versions || []) as VersionMeta[];
@@ -165,7 +173,7 @@ export async function listBuildHistory(sessionId: string): Promise<VersionMeta[]
 /** Fetch a specific version with its full file snapshot. */
 export async function fetchBuildVersion(sessionId: string, versionId: string): Promise<VersionEntry | null> {
   try {
-    const res = await fetch(`/api/build-history/${encodeURIComponent(sessionId)}/${encodeURIComponent(versionId)}`);
+    const res = await fetch(`/api/build-history/${encodeURIComponent(sessionId)}/${encodeURIComponent(versionId)}`, { headers: await authedHeaders() });
     if (!res.ok) return null;
     return await res.json() as VersionEntry;
   } catch {

@@ -40,8 +40,12 @@ import { robustTscCommand, TSC_BIN, PRIME_NODE_MODULES, NPM_INSTALL_LOCK_FRESH }
 import { suggestedPropertyRenames, type TscError } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote, remedyFileFor } from './tscErrorCause';
 
-/** The ONE cache every in-build typecheck shares (endgame, `typecheck` tool, this). Ephemeral, never durable. */
-export const WRITE_TYPECHECK_TSBUILDINFO = '/tmp/agentv3.tsbuildinfo';
+/** Per-caller incremental cache. Never the one shared path two builds used to clobber (TD-18). */
+export function tsBuildInfoFile(id: string): string {
+  const safe = /^[A-Za-z0-9]{1,32}$/.test(id) ? id : 'writecheck';
+  return `/tmp/agentv3-${safe}.tsbuildinfo`;
+}
+export const WRITE_TYPECHECK_TSBUILDINFO = tsBuildInfoFile('writecheck');
 /** A single incremental run may take this long before it is abandoned. */
 export const WRITE_TYPECHECK_TIMEOUT_MS = 30_000;
 /** Consecutive timeouts after which the check stands down for the rest of the build. */
@@ -76,9 +80,10 @@ export function shouldTypecheckWrite(path: string): boolean {
  */
 export const WRITE_TYPECHECK_NOT_READY_MARKER = 'NBAI_WRITE_TSC_NOT_READY';
 
-export function writeTypecheckCommand(): string {
+export function writeTypecheckCommand(cacheId = 'writecheck'): string {
+  const info = tsBuildInfoFile(cacheId);
   return `if ${NPM_INSTALL_LOCK_FRESH} || [ ! -x ${TSC_BIN} ] || [ package.json -nt node_modules ]; then echo ${WRITE_TYPECHECK_NOT_READY_MARKER}; else `
-    + `${robustTscCommand(`--noEmit --incremental --tsBuildInfoFile ${WRITE_TYPECHECK_TSBUILDINFO}`, '2>&1 | head -120')}; fi`;
+    + `${robustTscCommand(`--noEmit --incremental --tsBuildInfoFile ${info}`, '2>&1 | head -120')}; fi`;
 }
 
 /**
@@ -103,11 +108,12 @@ export function writeTypecheckCommand(): string {
  */
 export const WARMUP_COMPILED_MARKER = 'NBAI_WARMUP_COMPILED';
 
-export function writeTypecheckWarmupCommand(): string {
+export function writeTypecheckWarmupCommand(cacheId = 'writecheck'): string {
+  const info = tsBuildInfoFile(cacheId);
   // The baked tree is primed first (Q-304): a fresh starter has no node_modules at all, and a copy plus
   // an atomic rename is seconds, where the first write's check would otherwise pay a cold install.
   return `${PRIME_NODE_MODULES}if [ -x ${TSC_BIN} ] && [ -f tsconfig.json ] && [ ! package.json -nt node_modules ]; then `
-    + `${TSC_BIN} --noEmit --incremental --tsBuildInfoFile ${WRITE_TYPECHECK_TSBUILDINFO} >/dev/null 2>&1; echo ${WARMUP_COMPILED_MARKER}; fi; true`;
+    + `${TSC_BIN} --noEmit --incremental --tsBuildInfoFile ${info} >/dev/null 2>&1; echo ${WARMUP_COMPILED_MARKER}; fi; true`;
 }
 
 function normalizePath(p: string): string {

@@ -14,6 +14,7 @@
 // deployment-level axis ("is a live server available HERE?").
 
 import { extractEndpoints } from './apiGraph';
+import { createsCoreHttpServer } from './coreHttpServer';
 
 export interface BackendPresence {
   /** True when the built app includes a backend the in-browser (frontend-only) preview cannot run. */
@@ -74,7 +75,14 @@ export function detectBackendPresence(files: Record<string, string>): BackendPre
   const hasPyBackend = pyFiles.length > 0 && PY_BACKEND_MARKERS.some((m) => pyText.includes(m));
   if (hasPyBackend) reasons.push('a Python server');
 
-  // 4. Defined HTTP route endpoints (reuse apiGraph's pure extractor over the code files). This catches
+  // 4. A plain Node core HTTP server (Q-707). The framework list above cannot name it, and signal 5
+  //    below cannot either — `extractEndpoints` matches `app.get('/x')` and decorators, while a bare
+  //    `http.createServer` routes on `req.url`. Without this the preview showed a frontend whose API
+  //    calls all fail and withheld the very banner that exists to explain it. Shared detector, so
+  //    deployPlan and this module can never disagree about what a server is.
+  if (reasons.length === 0 && createsCoreHttpServer(files)) reasons.push('a Node server');
+
+  // 5. Defined HTTP route endpoints (reuse apiGraph's pure extractor over the code files). This catches
   //    a backend even when the dependency signal is missing (e.g. a hand-rolled route file).
   if (reasons.length === 0) {
     const codeFiles = paths

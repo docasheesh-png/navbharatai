@@ -760,7 +760,7 @@ export function ViewPanels({
 
       {activeView === 'whitelabel' && (
         <div className="flex-1 h-full overflow-hidden">
-          <WhitelabelBranding />
+          <WhitelabelBranding workspaceId={user?.uid ? getAgentV3WorkspaceId(user.uid) : undefined} />
         </div>
       )}
 

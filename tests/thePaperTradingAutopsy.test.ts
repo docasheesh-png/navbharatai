@@ -98,8 +98,10 @@ describe('2 · a backgrounded job never holds the command pipe', () => {
 
   it('the bash tool runs model commands through it, and leaves a dev-server launch to the managed boot', () => {
     expect(DISPATCHER).toMatch(/isLongRunningCommand\(effectiveCommand\)\s*\?\s*\{ command: effectiveCommand, detached: 0 \}\s*:\s*detachBackgroundJobs\(effectiveCommand\)/);
-    // `withAppEnvFile` (Q-153) only adds `.env` to one whole-command shape; what runs is still `background.command`.
-    expect(DISPATCHER).toContain('this.actuator.runCommand(this.workspaceId, withAppEnvFile(background.command))');
+    // `withAppEnvFile` (Q-153) only adds `.env` to one whole-command shape; what runs is still
+    // `background.command`, now held in `prepared` so a retry cannot drift back to the raw string.
+    expect(DISPATCHER).toContain('const prepared = background.command');
+    expect(DISPATCHER).toContain('this.actuator.runCommand(this.workspaceId, withAppEnvFile(prepared))');
   });
 });
 

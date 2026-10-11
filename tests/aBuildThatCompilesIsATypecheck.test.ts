@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { buildScriptTypecheckVerdict, typecheckEvidenceFromCommands } from '../src/server/AgentV3/TscGate';
+import { prodBuildCommand } from '../src/server/AgentV3/prodBuildGate';
 
 // Verbatim from the report's commands log.
 const REPORT_BUILD = {
@@ -23,6 +24,10 @@ describe('the report\'s own build', () => {
   });
   it('the platform\'s own piped production build reads the same', () => {
     expect(buildScriptTypecheckVerdict({ ...REPORT_BUILD, command: 'npm run build 2>&1 | tail -120', exitCode: null })).toBe('passed');
+  });
+  it('the unpiped production command trusts a real non-zero exit (BLD-1)', () => {
+    expect(buildScriptTypecheckVerdict({ ...REPORT_BUILD, command: prodBuildCommand(), exitCode: 0 })).toBe('passed');
+    expect(buildScriptTypecheckVerdict({ ...REPORT_BUILD, command: prodBuildCommand(), exitCode: 2 })).not.toBe('passed');
   });
 });
 
@@ -50,6 +55,10 @@ describe('what it is not', () => {
 describe('both producers feed the gate', () => {
   const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
   it('the platform\'s production build fills a not-run typecheck', () => {
-    expect(route).toContain('const fromBuild = buildScriptTypecheckVerdict({ command: prodBuildCommand(), stdout: output, exitCode });');
+    // The production build is wrapped in `timeout` (BLD-3). The gate still reads THAT command's
+    // own output as typecheck evidence — the argument changed, the feed did not.
+    expect(route).toContain(
+      'const fromBuild = buildScriptTypecheckVerdict({ command: prodBuildCommand(\'$(command -v timeout >/dev/null 2>&1 && echo "timeout -k 5 170") npm run build\'), stdout: output, exitCode });',
+    );
   });
 });

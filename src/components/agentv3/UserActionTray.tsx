@@ -58,11 +58,26 @@ export function UserActionTray({
 
   const row = (action: UserActionView) => {
     const busy = busyId === action.id;
+    const cta = action.cta;
+    const openLink = () => {
+      if (!cta) return;
+      if (cta.view === 'billing') {
+        window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }));
+      } else if (cta.view === 'settings' && cta.settingsScreen === 'database') {
+        window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'settings', settingsScreen: 'database' } }));
+      } else return;
+      onClose();
+    };
     return (
       <div key={action.id} className="px-3 py-2.5 rounded-xl border border-line bg-card">
         <div className="text-[13px] font-semibold text-ink break-words">{action.title}</div>
         {action.why && <div className="text-[11px] text-muted mt-0.5 break-words">{action.why}</div>}
         <div className="flex flex-wrap items-center gap-1.5 mt-2">
+          {cta && !isLiveOnly(action) && (cta.view === 'billing' || (cta.view === 'settings' && cta.settingsScreen === 'database')) && (
+            <button type="button" disabled={busy} onClick={openLink} className={`${BTN} bg-indigo-600 hover:bg-indigo-500 text-on-accent`}>
+              {cta.label}
+            </button>
+          )}
           {action.kind === 'approve' ? (
             <>
               <button type="button" disabled={busy} onClick={() => onAnswerGate(action, true)} className={`${BTN} bg-indigo-600 hover:bg-indigo-500 text-on-accent`}>

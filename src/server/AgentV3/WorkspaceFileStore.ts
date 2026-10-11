@@ -193,25 +193,31 @@ export function liveIndexPaths(paths: unknown): string[] {
   return Array.from(seen);
 }
 
+export type WorkspaceSaveStatus = 'saved' | 'merged' | 'failed' | 'no-store' | 'nothing';
+
 /**
  * Persist the current set of workspace source files. The `paths` metadata list is authoritative:
  * a file removed from `files` won't be returned by loadWorkspaceFiles even if its content doc
- * lingers. GUARDED: a drastically-smaller partial set is MERGED, never a wipe (savePlanForFileSet).
- * Best-effort — never throws.
+ * lingers. GUARDED: a drastically-smaller partial set is MERGED, never a wipe (savePlanForFileSet),
+ * unless `opts.mode` is `'replace'` (a green snapshot must not become a hybrid of old and new).
+ * Best-effort — never throws. The status is what a caller may claim: `'saved'` only when this
+ * write replaced the index, `'merged'` when the shrink guard unioned instead.
  */
-export async function saveWorkspaceFiles(workspaceId: string, files: Record<string, string>): Promise<void> {
-  const db = getDb();
-  if (!db) return;
-  // PHANTOM-FILE GUARD (build 5b4f9b63) — see toDurableFileKey. An absolute in-workspace key stored
-  // here is a file the analyzers see and the sandbox does not have; normalize BEFORE anything is
-  // written so the map can only ever hold paths the sandbox could actually resolve.
+export async function saveWorkspaceFiles(
+  workspaceId: string,
+  files: Record<string, string>,
+  opts?: { mode?: 'replace' },
+): Promise<WorkspaceSaveStatus> {
   const normalized = normalizeFileMapKeys(files);
   const entries = Object.entries(normalized.files).filter(([, c]) => typeof c === 'string' && Buffer.byteLength(c, 'utf8') <= MAX_FILE_BYTES);
-  if (entries.length === 0) return; // never overwrite a good saved set with nothing
+  if (entries.length === 0) return 'nothing'; // never overwrite a good saved set with nothing
+  const db = getDb();
+  if (!db) return 'no-store';
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);
     // SHRINK GUARD (the "49 → 3 files" wipe): read the existing index BEFORE replacing it; a partial
     // set routes to mergeWorkspaceFiles (union) and the wipe is recorded visibly, never silent.
+    // Green snapshots pass mode:'replace' and skip this — a hybrid last-known-good is not a restore point.
     // ⚠️ A FAILED READ IS NOT AN EMPTY INDEX. `.catch(() => null)` used to answer the same `null` for
     // both, and `[].length` then told the guard below there was nothing to protect. Distinguish them.
     let guardMeta: FirebaseFirestore.DocumentSnapshot | null = null;
@@ -222,10 +228,10 @@ export async function saveWorkspaceFiles(workspaceId: string, files: Record<stri
     // real save look like a drastic shrink and route it to a merge that keeps the pollution for ever.
     const existingPaths: string[] = liveIndexPaths(guardMeta?.exists ? guardMeta.data()?.paths : undefined);
     const existingCount: number | 'unknown' = guardRead === 'ok' ? existingPaths.length : 'unknown';
-    if (savePlanForFileSet(existingCount, entries.length) === 'merge') {
+    if (opts?.mode !== 'replace' && savePlanForFileSet(existingCount, entries.length) === 'merge') {
       notePersistenceFailure('workspace_files', 'write', new Error(`shrink-guard: a save of ${entries.length} path(s) would have wiped an index of ${existingCount} — merged instead`));
-      await mergeWorkspaceFiles(workspaceId, files);
-      return;
+      const merged = await mergeWorkspaceFiles(workspaceId, files);
+      return merged.status === 'failed' ? 'failed' : 'merged';
     }
     const filesCol = root.collection('files');
     for (let i = 0; i < entries.length; i += BATCH) {
@@ -258,10 +264,12 @@ export async function saveWorkspaceFiles(workspaceId: string, files: Record<stri
     const keep = [...carried, ...entryCarry];
     const finalPaths = keep.length > 0 ? Array.from(new Set([...safe.paths, ...keep])) : safe.paths;
     await root.set({ paths: finalPaths, count: finalPaths.length, savedAt: Date.now() }, { merge: false });
+    return 'saved';
   } catch (e) {
     // Best-effort — a save failure never blocks a build — but it is the exact "reload pe data gayab"
     // trigger (e.g. free-tier daily write quota exhausted), so make it visible instead of silent.
     notePersistenceFailure('workspace_files', 'write', e);
+    return 'failed';
   }
 }
 
@@ -462,15 +470,16 @@ export type DurableReadStatus = 'ok' | 'empty' | 'unreadable' | 'no-store';
 
 export async function loadWorkspaceFilesWithStatus(
   workspaceId: string,
-): Promise<{ files: Record<string, string>; status: DurableReadStatus; error?: string }> {
+): Promise<{ files: Record<string, string>; status: DurableReadStatus; savedAt: number | null; error?: string }> {
   const db = getDb();
-  if (!db) return { files: {}, status: 'no-store' };
+  if (!db) return { files: {}, status: 'no-store', savedAt: null };
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);
     const meta = await root.get();
-    if (!meta.exists) return { files: {}, status: 'empty' };
+    if (!meta.exists) return { files: {}, status: 'empty', savedAt: null };
     const paths: string[] = Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
-    if (paths.length === 0) return { files: {}, status: 'empty' };
+    const savedAt = typeof meta.data()?.savedAt === 'number' ? meta.data()!.savedAt : null;
+    if (paths.length === 0) return { files: {}, status: 'empty', savedAt };
     // HEAL ON READ, not by migration. The writers above stop NEW phantoms; every workspace that
     // already holds one (the admin's did — that is how this was found) would otherwise keep reporting
     // a duplicate entry point forever. Normalizing here fixes them all at once, with no backfill job
@@ -492,9 +501,9 @@ export async function loadWorkspaceFilesWithStatus(
       out[key] = data.content;
     }
     const files = restoreDroppedEntryModules(out, unindexed);
-    return { files, status: Object.keys(files).length > 0 ? 'ok' : 'empty' };
+    return { files, status: Object.keys(files).length > 0 ? 'ok' : 'empty', savedAt };
   } catch (err) {
-    return { files: {}, status: 'unreadable', error: String((err as Error)?.message ?? err).slice(0, 200) };
+    return { files: {}, status: 'unreadable', savedAt: null, error: String((err as Error)?.message ?? err).slice(0, 200) };
   }
 }
 

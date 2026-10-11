@@ -128,7 +128,7 @@ describe('🔴 end to end: what the shell removed is not saved again', () => {
   it('🔒 a SOURCE folder is still refused by the delete guard, so nothing is forgotten', async () => {
     const act = new ShellActuator();
     const { d, captured } = harness(act, 'ws-q246-srcdir');
-    const out = await d.run(bash('rm -rf src/legacy'), 'architect');
+    const out = await d.run(bash('rm -rf src/legacy'), 'architect').catch((e: unknown) => e instanceof Error ? e.message : String(e));
     expect(String(out)).toContain('GOVERNANCE BLOCKED');
     expect(captured.has('src/legacy/A.tsx')).toBe(true);
   });

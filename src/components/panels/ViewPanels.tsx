@@ -126,7 +126,6 @@ export interface ViewPanelsProps {
   messages: Message[];
   input: string;
   setInput: (v: string) => void;
-  setProInput: (v: string) => void;
   isLoading: boolean;
   activeIntent: string;
   handleSendForTab: (tabId: ViewType, overrideMessage?: string) => void;
@@ -151,7 +150,6 @@ export interface ViewPanelsProps {
   isPushing: boolean;
   connectGitHub: () => void;
   disconnectGitHub: () => void;
-  pushToRepo: () => void;
   firebaseToken: string;
   firebaseUser: any;
   connectFirebase: () => void;
@@ -164,6 +162,8 @@ export interface ViewPanelsProps {
   fileUploadConflict: { file: File; existingKey: string; isZip: boolean } | null;
   resolveFileConflict: (choice: 'replace' | 'merge') => void;
   handleFilesUpload: (file: File) => void;
+  /** A zip import in progress, drawn by the Files panel (Q-792). */
+  zipImportProgress?: { fileName: string; stage: string; percent: number } | null;
   downloadAppZip: (deployFiles: Record<string, string>, appName: string) => void;
   setActiveFile: (path: string) => void;
   wallet: any;
@@ -200,14 +200,14 @@ export function ViewPanels({
   activeView, storeInitialTab, storePublishWorkspaceId, storeSocialTarget, generatedCode, setGeneratedCode, files, setFiles, onIdeFilesChange, onFlushIdeEdits, onReplaceProjectFiles, onFilesRemoved,
   hasGeneratedCode, setIsAppBuilt, setHasGeneratedCode,
   user, activeAgent, mode, setMode, isAppBuilt, theme, setTheme,
-  messages, input, setInput, setProInput, isLoading, activeIntent,
+  messages, input, setInput, isLoading, activeIntent,
   handleSendForTab, toggleTab, onOpenModePicker, onOpenHistory, updatePreview, addLog, addToast,
   imageWindowIds, imageWindowOnScreen,
   handleAgentChange, githubToken, githubUser, githubRepoContext, isGHSyncing,
   pendingGHEdit, handleGHConfirmPush, isPushing, connectGitHub, disconnectGitHub,
-  pushToRepo, firebaseToken, firebaseUser, connectFirebase, disconnectFirebase,
+  firebaseToken, firebaseUser, connectFirebase, disconnectFirebase,
   sessions, currentSessionId, togglePin, currentProSessionId,
-  previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
+  previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload, zipImportProgress,
   downloadAppZip, setActiveFile, wallet, setShowAuth,
   zipSizeModal, setZipSizeModal, v3Preview, previousFiles, onV3FixError, onBuildViaV5Prompt, onAutoFixInV5, onSwitchApp, onOpenProPreview, problems = [],
 }: ViewPanelsProps) {
@@ -266,7 +266,6 @@ export function ViewPanels({
             onFirebaseDisconnect={disconnectFirebase}
             onGHConnect={connectGitHub}
             onGHDisconnect={disconnectGitHub}
-            onGHPush={pushToRepo}
             isPinned={sessions.find(s => s.id === currentSessionId)?.isPinned || false}
             onTogglePin={() => togglePin(currentSessionId)}
             isLoggedIn={!!user}
@@ -365,6 +364,7 @@ export function ViewPanels({
           fileUploadConflict={fileUploadConflict}
           onResolveConflict={resolveFileConflict}
           onUpload={handleFilesUpload}
+          importProgress={zipImportProgress}
           onDownloadZip={() => downloadAppZip(files as any, 'NavBharatApp')}
           onOpenFile={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
           onAddFile={(path: string) => {

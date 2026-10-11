@@ -21,7 +21,6 @@ interface GitPanelProps {
   onConnect: () => void;
   onDisconnect: () => void;
   isSyncing: boolean;
-  onPush: (msg: string) => void;
   isPushing: boolean;
   files: Record<string, string>;
   projectId?: string;
@@ -84,7 +83,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({
   onConnect,
   onDisconnect,
   isSyncing,
-  onPush,
   isPushing,
   files,
   projectId = 'default-project',

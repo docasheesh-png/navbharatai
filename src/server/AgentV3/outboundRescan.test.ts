@@ -163,7 +163,9 @@ describe('🔒 the wiring', () => {
   it('🔒 it HOLDS rather than takes down — reversible by the admin', () => {
     const at = server.indexOf("id: 'outbound-rescan'");
     const body = server.slice(at, at + 2400);
-    expect(body).toContain("setStatus(workspaceId, 'held')");
+    // …and records that the app was LIVE when held, so a restore puts it back to live rather than writing
+    // a false 'unpublished' over a site that never stopped serving (Q-703).
+    expect(body).toContain("setStatus(workspaceId, 'held', { heldFrom: 'active' })");
     expect(body).not.toContain("'taken_down'");
   });
 

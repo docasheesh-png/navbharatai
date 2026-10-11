@@ -1,5 +1,8 @@
-// THE WELCOME GIFT BUYS BUILDS, NOT PLANS (admin-mandated 2026-09-13: "gift (free welcome gift from
-// navbharatai) plan purchase me kam nahi ayenge!!!!!").
+// THE WELCOME GIFT BUYS APP USE, NOT A PURCHASE (admin 2026-09-13, widened 2026-10-09:
+// "gift welcome token only app use me istemal ho sakte hai, kuch bhi purchase me nahi").
+//
+// App use is a build, a chat turn, and measured hosting traffic. A purchase is a hosting plan, an
+// add-on, a paid remix, or the ₹1 charge for a built app file. The gift may not pay any of those.
 //
 // ── WHY A MODULE AND NOT AN `if` AT THE PURCHASE ─────────────────────────────────────────────────
 // The wallet holds ONE balance (THE ONE-WALLET LAW) and the user sees one number. What this adds is
@@ -17,7 +20,9 @@
 //   • a GIFT credit (welcome, weekly top-up, coupon, admin grant)  → gift goes UP
 //   • a REAL-MONEY credit (Cashfree, Play, Apple)                  → gift unchanged
 //   • ordinary spending (builds, chat, hosting traffic)            → gift goes DOWN FIRST
-//   • a PLAN purchase                                              → gift unchanged; only paid money moves
+//   • a purchase (plan, add-on, remix, the ₹1 app file)           → gift unchanged; only paid money moves,
+//                                                                    and the charge is refused if paid money
+//                                                                    cannot cover it (`paid-only`)
 //
 // 🔒 GIFT IS SPENT FIRST, AND THAT IS FOR THE USER, NOT AGAINST THEM. If paid money went first, a
 // user who topped up ₹100 on top of a ₹500 gift would burn their own money while the gift sat there

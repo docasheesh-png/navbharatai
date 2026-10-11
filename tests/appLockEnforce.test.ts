@@ -187,9 +187,14 @@ describe('🔒 the wiring: which routes ask, and which must NEVER ask', () => {
   it('the store-receipt and reconcile routes live elsewhere and have no gate either', () => {
     for (const rel of ['src/server/routes/payment.ts', 'src/server/routes/wallet.ts']) {
       const src = read(rel);
-      // `wallet.ts` may only guard the two hosting-plan routes — never a credit or a balance read.
+      // `wallet.ts` may guard only routes that SPEND or that stop a future spend: the two plan
+      // routes, plus add-on purchase and add-on removal (a removal refunds, so it is money too).
+      // A credit, a balance read, or a statement must never acquire a PIN.
       if (rel.endsWith('wallet.ts')) {
-        expect((src.match(/appLockBlocks\(/g) ?? []).length, 'wallet.ts guards exactly two routes').toBe(2);
+        const guards = src.match(/appLockBlocks\(/g) ?? [];
+        expect(guards.length, 'wallet.ts guards exactly the four subscription routes').toBe(4);
+        expect(src).toContain("'hosting-addon-purchase'");
+        expect(src).toContain("'hosting-addon-remove'");
       }
     }
   });

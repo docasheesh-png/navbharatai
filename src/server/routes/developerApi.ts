@@ -25,6 +25,7 @@
 // every refusal that costs nothing happens before a single provider is called, and the charge lands
 // AFTER the answer is out, exactly like every other assistant on the platform.
 
+import { BoundedCache } from '../lib/boundedCache';
 import type { Express, Request, Response } from 'express';
 import { rateLimiter } from '../lib/authMiddleware';
 import { apiKeyAuth, requireScope, apiAuthOf } from './apiKeys';
@@ -61,14 +62,15 @@ import { effectiveAppName } from '../AgentV3/appName';
 
 // The holder's email for the free-list courtesy — see lib/uidEmail.ts.
 
-/** Per-key request windows, per instance. Bounded by pruning; the ₹ cap is the durable defence. */
-const rateWindows = new Map<string, RateWindow>();
+/**
+ * Per-key request windows, per instance; the ₹ cap is the durable defence. A bounded cache whose windows
+ * expire on their own (performance audit 2026-10-11): the old prune walked every window on every request once
+ * there were 5,000 of them.
+ */
+const rateWindows = new BoundedCache<string, RateWindow>({ maxEntries: 20_000, ttlMs: 120_000 });
 function keyAllowedNow(keyId: string, nowMs: number): boolean {
-  if (rateWindows.size > 5000) {
-    for (const [k, w] of rateWindows) if (nowMs - w.windowStartMs > 60_000) rateWindows.delete(k);
-  }
-  const { next, allowed } = takeRateSlot(rateWindows.get(keyId), nowMs);
-  rateWindows.set(keyId, next);
+  const { next, allowed } = takeRateSlot(rateWindows.get(keyId, nowMs), nowMs);
+  rateWindows.set(keyId, next, nowMs);
   return allowed;
 }
 

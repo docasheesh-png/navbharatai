@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Terminal } from 'xterm';
 import type { FitAddon } from 'xterm-addon-fit';
-import { authJsonHeaders as authHeaders } from '../../lib/authHeaders';
+import { authedHeaders } from '../../lib/authHeaders';
 import { softKeyboardWouldOpen } from '../../lib/dismissKeyboard';
 
 /**
@@ -71,7 +71,7 @@ export async function closeShellSession(
   try {
     await fetch('/api/agentv3/shell/close', {
       method: 'POST',
-      headers: await authHeaders(),
+      headers: await authedHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ workspaceId, userId, email: email || '', shellId }),
     });
   } catch { /* the server's idle reaper is the backstop */ }
@@ -128,6 +128,8 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
    * container. Comparing against the generation this effect was born with makes a stale run inert.
    */
   const genRef = useRef(0);
+  /** BLD-8 — a 409 SHELL_NOT_ON_THIS_INSTANCE reopens the shell once. A second 409 must not loop. */
+  const instanceReopenRef = useRef(false);
   const [status, setStatus] = useState<Status>({ kind: 'connecting' });
   /**
    * ⚠️ 2026-09-24: the bar's LINE INPUT and Run button were removed (admin: typing belongs in the
@@ -173,6 +175,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
     const gen = genRef.current + 1;
     genRef.current = gen;
     const alive = () => genRef.current === gen;
+    instanceReopenRef.current = false;
 
     const host = hostRef.current;
     if (!host) return;
@@ -301,7 +304,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       // pollWake below, judged by PROGRESS, never by a clock.
       const res = await fetch('/api/agentv3/shell/open', {
         method: 'POST',
-        headers: await authHeaders(),
+        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ workspaceId, userId, email: email || '', cols, rows }),
         signal: AbortSignal.timeout(25_000),
       });
@@ -312,7 +315,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
         // Say WHICH failure this is. A bare "couldn't open" sends the user (and whoever debugs it)
         // hunting, when the status code already names the cause.
         const message = j?.error || (
-          res.status === 401 || res.status === 403 ? 'Your session expired — reload the page and sign in again to use the terminal.'
+          res.status === 401 || res.status === 403 ? 'Sign in to use the terminal. Your session expired — reload the page and sign in again.'
           : res.status === 429 ? 'Too many terminals opened just now. Wait a few seconds and try again.'
           : res.status === 404 ? 'The terminal service is not enabled on this server.'
           : res.status >= 500 ? `The terminal service failed (${res.status}). Try again in a moment.`
@@ -427,9 +430,13 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       try {
         const params = new URLSearchParams({ workspaceId: workspaceId || '', userId: userId || '', email: email || '' });
         const res = await fetch(`/api/agentv3/shell/wake?${params.toString()}`, {
-          headers: await authHeaders(),
+          headers: await authedHeaders({ 'Content-Type': 'application/json' }),
           signal: AbortSignal.timeout(10_000),
         });
+        if (res.status === 401) {
+          fail('Sign in to use the terminal. Your session expired — reload the page and sign in again.');
+          return;
+        }
         j = await res.json().catch(() => null);
       } catch { /* one missed poll is not a verdict — the no-progress guard is */ }
       const w = j?.wake;
@@ -479,7 +486,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
           cursor: String(cursorRef.current),
         });
         const res = await fetch(`/api/agentv3/shell/stream?${params.toString()}`, {
-          headers: await authHeaders(),
+          headers: await authedHeaders({ 'Content-Type': 'application/json' }),
           signal: controller.signal,
         });
         if (res.status === 404) {
@@ -492,6 +499,19 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
             term.write('\r\n\x1b[90m[terminal closed — open a new one to continue]\x1b[0m\r\n');
           }
           return;
+        }
+        if (res.status === 409) {
+          // This process does not hold the TTY (the shell was opened on another server).
+          // Reopen ONCE. A second 409 must not loop — instanceReopenRef is the guard.
+          const j = await res.json().catch(() => null);
+          if (j?.code === 'SHELL_NOT_ON_THIS_INSTANCE') {
+            if (!reopenShellOnce(term, alive) && alive()) {
+              attachedShells.delete(sessionKey);
+              shellIdRef.current = null;
+              setStatus({ kind: 'unavailable', message: 'This terminal was opened on another server — reopening…' });
+            }
+            return;
+          }
         }
         if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
 
@@ -576,15 +596,37 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
   const pumpingRef = useRef(false);
   const OUT_BUF_CAP = 8192;                    // the PTY's own per-write input cap (ShellSessions.ts)
 
-  async function postInputBatch(batch: string): Promise<boolean> {
+  async function postInputBatch(batch: string): Promise<'ok' | 'elsewhere' | 'fail'> {
     try {
       const res = await fetch('/api/agentv3/shell/input', {
         method: 'POST',
-        headers: await authHeaders(),
+        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ workspaceId, userId, email: email || '', shellId: shellIdRef.current, data: batch }),
       });
-      return res.ok;
-    } catch { return false; }
+      if (res.status === 409) {
+        const j = await res.json().catch(() => null);
+        if (j?.code === 'SHELL_NOT_ON_THIS_INSTANCE') return 'elsewhere';
+      }
+      return res.ok ? 'ok' : 'fail';
+    } catch { return 'fail'; }
+  }
+
+  /**
+   * The shell the user is typing into is not in memory on the instance that received the request.
+   * Open a new one on THIS instance, once. Returns false when that one reopen was already spent.
+   */
+  function reopenShellOnce(term: Terminal, alive: () => boolean): boolean {
+    if (instanceReopenRef.current) return false;
+    const fit = fitRef.current;
+    if (!fit) return false;
+    instanceReopenRef.current = true;
+    attachedShells.delete(sessionKey);
+    shellIdRef.current = null;
+    cursorRef.current = 0;
+    abortRef.current?.abort();
+    term.write('\r\n\x1b[90mThis terminal was opened on another server — reopening…\x1b[0m\r\n');
+    void start(term, fit, alive);
+    return true;
   }
 
   async function pumpInput(): Promise<void> {
@@ -594,7 +636,16 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       while (outBufRef.current && shellIdRef.current) {
         const batch = outBufRef.current;
         outBufRef.current = '';
-        if (!(await postInputBatch(batch)) && !(await postInputBatch(batch))) {
+        let result = await postInputBatch(batch);
+        if (result === 'fail') result = await postInputBatch(batch);
+        if (result === 'elsewhere') {
+          const term = termRef.current;
+          const gen = genRef.current;
+          if (term && reopenShellOnce(term, () => genRef.current === gen)) return;
+          termRef.current?.write('\r\n\x1b[31m[input did not reach the terminal — check your connection]\x1b[0m\r\n');
+          return;
+        }
+        if (result !== 'ok') {
           termRef.current?.write('\r\n\x1b[31m[input did not reach the terminal — check your connection]\x1b[0m\r\n');
           return;
         }
@@ -639,11 +690,17 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
       lastSizeRef.current = key;
       void (async () => {
         try {
-          await fetch('/api/agentv3/shell/resize', {
+          const res = await fetch('/api/agentv3/shell/resize', {
             method: 'POST',
-            headers: await authHeaders(),
+            headers: await authedHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ workspaceId, userId, email: email || '', shellId, cols, rows }),
           });
+          if (res.status === 409) {
+            const j = await res.json().catch(() => null);
+            const term = termRef.current;
+            const gen = genRef.current;
+            if (j?.code === 'SHELL_NOT_ON_THIS_INSTANCE' && term) reopenShellOnce(term, () => genRef.current === gen);
+          }
         } catch { /* cosmetic until the next resize */ }
       })();
     }, 200);
@@ -653,6 +710,7 @@ export const ShellTerminal: React.FC<ShellTerminalProps> = ({
     const term = termRef.current;
     const fit = fitRef.current;
     if (!term || !fit) return;
+    instanceReopenRef.current = false;
     attachedShells.delete(sessionKey);
     shellIdRef.current = null;
     cursorRef.current = 0;

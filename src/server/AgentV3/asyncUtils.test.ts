@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapWithConcurrency, withTimeout } from './asyncUtils';
+import { mapWithConcurrency, withTimeout, withDeadline } from './asyncUtils';
 
 describe('mapWithConcurrency', () => {
   it('preserves order and maps every item', async () => {
@@ -38,5 +38,32 @@ describe('withTimeout', () => {
   it('supports the .catch sentinel pattern (a hung read degrades to "")', async () => {
     const content = await withTimeout(new Promise<string>(() => {}), 20, 'readFile').catch(() => '');
     expect(content).toBe('');
+  });
+});
+
+describe('withDeadline', () => {
+  it('aborts the signal passed to fn and rejects with the label', async () => {
+    let seen: AbortSignal | undefined;
+    const pending = withDeadline(async (signal) => {
+      seen = signal;
+      await new Promise((r) => setTimeout(r, 200));
+      return 1;
+    }, 30, 'late');
+    await expect(pending).rejects.toThrow(/late timed out after 30ms/);
+    expect(seen?.aborted).toBe(true);
+  });
+
+  it('clears the timer on success', async () => {
+    await expect(withDeadline(async () => 4, 500, 'ok')).resolves.toBe(4);
+  });
+
+  it('a parent abort propagates', async () => {
+    const parent = new AbortController();
+    const pending = withDeadline(async () => {
+      await new Promise((r) => setTimeout(r, 500));
+      return 1;
+    }, 5_000, 'child', parent.signal);
+    parent.abort(new Error('stopped by parent'));
+    await expect(pending).rejects.toThrow(/stopped by parent/);
   });
 });

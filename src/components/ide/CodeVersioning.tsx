@@ -92,10 +92,12 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
     setLoading(true);
     try {
       // SIBLING OF THE BUG RECORDED ABOVE (rule 3): `/api/versioning/apps` was fixed to send the
-      // Bearer token and this call, three lines away, was never hunted. The GET route is a capability
-      // (the session id is unguessable) so it does not require one today — which is exactly why the
-      // omission was invisible, and exactly why it is sent now rather than left to become the next
-      // silent empty list.
+      // Bearer token and this call, three lines away, was never hunted.
+      //
+      // 🔴 THIS COMMENT USED TO END "The GET route is a capability (the session id is unguessable) so
+      // it does not require one today" — and that was FALSE (Q-780). `App.tsx` mints the session id as
+      // `pro-${Date.now()}`. All three routes now check that the history is the caller's, and all
+      // three calls here carry the token.
       const res = await fetch(`/api/build-history/${encodeURIComponent(sid)}`, { headers: await authedHeaders() });
       const data = await res.json().catch(() => null);
       if (!res.ok) { setPoints([]); setLoadFailed(true); return; }
@@ -123,7 +125,9 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
     setBusy(true);
     setNote('');
     try {
-      const res = await fetch(`/api/build-history/${encodeURIComponent(sessionId)}/${encodeURIComponent(v.id)}`);
+      // 🔒 Q-780: this is the call that downloads the app's files, and it travelled with no token
+      // while the route checked nothing. Both ends are fixed.
+      const res = await fetch(`/api/build-history/${encodeURIComponent(sessionId)}/${encodeURIComponent(v.id)}`, { headers: await authedHeaders() });
       const data = await res.json().catch(() => null);
       if (res.ok && data && data.files && typeof data.files === 'object') {
         onRestoreFiles(data.files as Record<string, string>);
@@ -149,7 +153,7 @@ export function CodeVersioning({ files, sessionId, onRestoreFiles, onSwitchApp }
     try {
       const res = await fetch(`/api/build-history/${encodeURIComponent(sessionId)}/checkpoint`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authedHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ name: saveName.trim() || 'Saved version', files: snapFiles }),
       });
       if (res.ok) { setNote('Version saved ✓'); await loadPoints(sessionId); }

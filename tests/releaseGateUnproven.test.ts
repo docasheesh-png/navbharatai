@@ -104,8 +104,9 @@ describe('the wiring — UNKNOWN now has a consequence', () => {
     expect(unprovenBlock()).not.toMatch(/\b(GLM|Kimi|Claude|Sonnet|Opus|Gemini|Grok|Moonshot|Z\.ai|Anthropic|OpenAI)\b/);
   });
 
-  it('the RED flip is still exactly as it was — this change adds a branch, it does not alter one', () => {
-    expect(route).toContain("if (gate.state === 'red' && gateBlockers > 0 && settled && settled.ok) {");
+  it('the RED flip still corrects a lying ok:true — GT-3 added runtimeRed, it did not remove the blocker arm', () => {
+    // before: if (gate.state === 'red' && gateBlockers > 0 && settled && settled.ok) {
+    expect(route).toContain("if (gate.state === 'red' && (gateBlockers > 0 || runtimeRed) && settled && settled.ok) {");
     expect(route).toContain('OUTCOME_RELEASE_GATE_RED');
   });
 });

@@ -5,8 +5,8 @@
 // is to generate a working CI pipeline into the user's own repo and let GitHub's real Linux + macOS
 // runners produce the genuine artifacts. These routes are the thin transport around that.
 //
-// The push itself deliberately reuses the existing POST /api/github/push (one push implementation, no
-// drift — rule 4); this module only GENERATES the kit and DISPATCHES the workflow.
+// The push itself deliberately reuses the existing POST /api/github/push-enhanced (one push implementation,
+// no drift — rule 4); this module only GENERATES the kit and DISPATCHES the workflow.
 
 import type { Express, Request, Response } from 'express';
 import { ANDROID_BUILD_FIX_PREFIX } from '../../lib/platformFixRequest';
@@ -500,11 +500,16 @@ export function registerMobileShipRoutes(app: Express): void {
           // overwrite the workflow and the user's chosen app name with values this route does not know.
           void appBuildStore.setLatestRun(identity.uid, String(owner), String(repo), String(runId));
           if (isAgentV3FreeUser(identity.uid, identityGrantEmail(identity))) break;
+          // The welcome gift cannot pay this ₹1. `paid-only` refuses the charge when the paid
+          // part of the wallet cannot cover it, and the gift is left where it is. The file is
+          // already on the user's own GitHub — this route cannot unpublish it — so the list below
+          // still returns. We do not spend the gift to pretend the file was bought.
           void debitWalletForBuild(getServerDb() as any, identity.uid, {
             feature: 'mobile-build',
             billedInr: apkChargeInr(),
             buildRef: apkChargeRef(owner, repo, String(a.id)),
             description: chargeDescription(String(a.name)),
+            spends: 'paid-only',
           });
         } catch { /* the charge must never break the build from being shown as ready */ }
         break; // one charge per build, not per file in it
@@ -553,7 +558,7 @@ export function registerMobileShipRoutes(app: Express): void {
 
   /**
    * Generate the ship kit (pure — no network, no GitHub needed). The caller then pushes `files` with
-   * POST /api/github/push and follows `requiredSecrets` / SHIPPING.md.
+   * POST /api/github/push-enhanced and follows `requiredSecrets` / SHIPPING.md.
    */
   /**
    * "WHAT HAVE I BUILT?" — the list that survives a back button.

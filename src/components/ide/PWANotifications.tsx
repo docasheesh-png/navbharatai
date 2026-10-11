@@ -18,6 +18,7 @@ import {
   Clock,
   RefreshCw,
 } from 'lucide-react';
+import { deliverFile } from '../../lib/downloadFile';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -118,12 +119,7 @@ interface CodeBlockProps {
 const CodeBlock: React.FC<CodeBlockProps> = ({ title, filename, code }) => {
   const handleDownload = () => {
     const blob = new Blob([code], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile(filename, blob);
   };
 
   // Simple syntax highlight: green for tags/keywords, yellow for values

@@ -5,12 +5,14 @@
 
 import * as admin from 'firebase-admin';
 import { grantEmail, type GrantEmail } from '../AgentV3/featureFlag';
+import { BoundedCache } from './boundedCache';
 
 // 🔒 Only a provider-VERIFIED address is returned (Q-624): this lookup exists to match the free list, and an
 // unverified address is a claim anyone could have registered.
 
-const emailCache = new Map<string, { email: GrantEmail | null; at: number }>();
 const EMAIL_CACHE_MS = 10 * 60 * 1000;
+// Bounded (audit 2026-10-11): one entry per uid ever seen used to stay for the life of the instance.
+const emailCache = new BoundedCache<string, { email: GrantEmail | null; at: number }>({ maxEntries: 20_000, ttlMs: EMAIL_CACHE_MS });
 
 export async function emailForUid(uid: string): Promise<GrantEmail | null> {
   const hit = emailCache.get(uid);

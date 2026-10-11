@@ -1,14 +1,19 @@
 import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Reads/writes user_token_wallets,
 // which navbharat-prod's rules restrict to the owner (server is unauthenticated → was denied).
-import { doc, getDoc, setDoc, runTransaction, collection, query, where, orderBy, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
-import { buildEmptyWallet } from '../lib/newWallet';
+import { doc, getDoc, runTransaction, getServerDb as getDb } from '../lib/serverDb';
+import { buildEmptyWallet, missingWalletFields } from '../lib/newWallet';
+import { listEqNewestFirst, INDEX_SAFE_FETCH_CAP, epochMillis } from '../lib/firestoreIndexSafe';
 import { requireUserMatch } from '../lib/authMiddleware';
 import { appLockBlocks } from '../lib/appLockEnforce';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
 import { readHostingPlanStatus, purchaseHostingPlan, setHostingPlanAutoRenew } from '../lib/hostingPlan';
+import { readHostingAddons, purchaseHostingAddon, removeHostingAddon } from '../lib/hostingAddonLedger';
 import { HOSTING_TIERS } from '../../lib/hostingTiers';
+import { publishedAppCapForTier, liveAppCount } from '../lib/HostingQuota';
+import { deploymentStore } from '../AgentV3/DeploymentStore';
+import { firebaseDomainLinksForUser } from '../lib/firebaseDomainLink';
 import { registerHostingPlanSweep, reattachSuspendedDomains } from '../lib/hostingPlanSweep';
 import { sendSafeError } from '../lib/httpError';
 import { userSafeUsageLog } from '../lib/usageLogPublic';
@@ -55,16 +60,18 @@ export function registerWalletRoutes(app: Express): void {
       const walletRef = doc(db, 'user_token_wallets', userId);
       const snap = await getDoc(walletRef);
       if (snap.exists()) {
-        const data = snap.data();
-        let updated = false;
-
-        if (data.tokenBalance === undefined) { data.tokenBalance = 0; updated = true; }
-        if (data.totalTokensPurchased === undefined) { data.totalTokensPurchased = 0; updated = true; }
-        if (data.totalTokensUsed === undefined) { data.totalTokensUsed = 0; updated = true; }
-        if (data.walletLedger === undefined) { data.walletLedger = []; updated = true; }
-
-        if (updated) {
-          await setDoc(walletRef, data, { merge: true });
+        let data = snap.data();
+        // An older wallet lacking a field gets ONLY that field, in a transaction against a fresh read. This
+        // used to write the whole stale snapshot back (balance and ledger) outside a transaction, which undid
+        // any debit or payment that committed in between (audit 2026-10-11, F4).
+        if (Object.keys(missingWalletFields(data)).length > 0) {
+          data = await runTransaction(db, async (tx) => {
+            const fresh = await tx.get(walletRef);
+            const current = (fresh.exists() ? fresh.data() : {}) as Record<string, unknown>;
+            const patch = missingWalletFields(current);
+            if (Object.keys(patch).length > 0) tx.set(walletRef, patch, { merge: true });
+            return { ...current, ...patch };
+          });
         }
 
         // Billing Phase 2 — the ₹↔token rate travels WITH the wallet (single source of truth:
@@ -160,6 +167,92 @@ export function registerWalletRoutes(app: Express): void {
     return res.json({ ok: true, autoRenew });
   });
 
+  // ---------- Hosting add-ons (one thing at a time, 2026-10-09) ----------
+  // A sellable add-on is delivered in the same transaction as the debit. Anything we cannot
+  // actually hand over is refused here and never charged. Removal refunds unused days only
+  // after the slot is no longer in use.
+
+  app.get('/api/wallet/:userId/hosting-addons', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    try {
+      const menu = await readHostingAddons(getDb() as any, routeParam(req.params.userId));
+      return res.json(menu);
+    } catch (err: any) {
+      return sendSafeError(res, 500, 'Unable to load add-ons right now.', err, 'hosting addons');
+    }
+  });
+
+  app.post('/api/wallet/:userId/hosting-addons/purchase', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    try {
+      const blocked = await appLockBlocks(req, routeParam(req.params.userId), 'hosting-addon-purchase');
+      if (blocked) return res.status(blocked.status).json(blocked.body);
+      const result = await purchaseHostingAddon(
+        getDb() as any,
+        routeParam(req.params.userId),
+        typeof req.body?.addonId === 'string' ? req.body.addonId : '',
+        { agreedToTerms: req.body?.agreedToTerms === true, clientRef: req.body?.clientRef },
+      );
+      if (!result.ok) {
+        const status = (result.reason === 'insufficient' || result.reason === 'gift_only') ? 402
+          : (result.reason === 'not_available' || result.reason === 'disabled') ? 503
+          : 400;
+        return res.status(status).json(result);
+      }
+      return res.json(result);
+    } catch (err: any) {
+      return sendSafeError(res, 500, 'Could not add that — nothing was charged. Please try again.', err, 'hosting addon purchase');
+    }
+  });
+
+  app.post('/api/wallet/:userId/hosting-addons/remove', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    try {
+      const blocked = await appLockBlocks(req, routeParam(req.params.userId), 'hosting-addon-remove');
+      if (blocked) return res.status(blocked.status).json(blocked.body);
+      const userId = routeParam(req.params.userId);
+      const ref = typeof req.body?.ref === 'string' ? req.body.ref : '';
+      const menu = await readHostingAddons(getDb() as any, userId);
+      const row = menu.active.find((a) => a.ref === ref);
+      if (!row) return res.status(404).json({ ok: false, error: 'That add-on was not found. Nothing was changed.' });
+      // A server or a database is not a slot. Refunding here would return the money while the
+      // Cloud Run service, the Supabase project, or the shared database kept running. Stop it
+      // from Publish, which deletes it first and only then returns unused days.
+      if (row.addonId === 'server' || row.addonId === 'dedicated_db' || row.addonId === 'shared_db') {
+        return res.status(409).json({
+          ok: false,
+          reason: 'still_in_use',
+          error: row.addonId === 'server'
+            ? 'A server is stopped from Publish, not from this list. It is taken down first; only then are unused days returned. Nothing was refunded.'
+            : 'A database is removed from Publish, not from this list. It is deleted first; only then are unused days returned. Nothing was refunded.',
+        });
+      }
+      const status = await readHostingPlanStatus(getDb() as any, userId);
+      let base = 0;
+      let inUse = 0;
+      if (row.addonId === 'extra_site') {
+        const records = await deploymentStore.listByUser(userId, 500).catch(() => null);
+        if (!records) {
+          return res.status(503).json({ ok: false, error: 'Could not check your live websites, so this was left in place. Nothing was refunded.' });
+        }
+        base = publishedAppCapForTier(status.tier);
+        inUse = liveAppCount(records);
+      } else if (row.addonId === 'extra_domain') {
+        const links = await firebaseDomainLinksForUser(userId).catch(() => null);
+        if (!links) {
+          return res.status(503).json({ ok: false, error: 'Could not check your domains, so this was left in place. Nothing was refunded.' });
+        }
+        base = status.tier?.domains ?? 0;
+        inUse = links.filter((l) => !l.suspended).length;
+      }
+      const result = await removeHostingAddon(getDb() as any, userId, ref, base, inUse);
+      if (!result.ok) {
+        const http = result.reason === 'still_in_use' ? 409 : result.reason === 'not_found' ? 404 : 503;
+        return res.status(http).json(result);
+      }
+      return res.json(result);
+    } catch (err: any) {
+      return sendSafeError(res, 500, 'Could not remove that. It is still active and nothing was refunded.', err, 'hosting addon remove');
+    }
+  });
+
   /**
    * THE STATEMENT — every credit and every debit, with a running balance, reconciled against the
    * wallet's own figure (admin 2026-09-15: *"ek ek paise ka sahi sahi hisab"*).
@@ -188,34 +281,27 @@ export function registerWalletRoutes(app: Express): void {
     }
   });
 
+  // 🔴 AUDIT 2026-10-11 (D2): both routes below ran `where userId == … orderBy createdAt desc` first. That needs a
+  // composite index this project has never deployed (see firestoreIndexSafe.ts), so it threw on every call and
+  // fell back to an UNORDERED `limit(100)`: two round trips per wallet load, and past 100 rows the "latest"
+  // payments were simply the first 100 by document id. Both now use the one index-free helper, which stays
+  // correct past its page size.
   app.get('/api/wallet/:userId/logs', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     const { userId } = routeParams(req.params);
     try {
-      const logsRef = collection(db, 'ai_usage_logs');
-      const q = query(logsRef, where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(50));
-      const snap = await getDocs(q);
       // WHITE-LABEL LAW, AT THE ROUTE (2026-09-14). These documents carry `providerName` and
       // `modelName`, and this handler used to spread the WHOLE document into the response — so a
       // user's own browser received the vendor and model id of every call, whatever the UI chose to
       // render. "No admin-only diagnostic may ever be surfaced to an end user" is about what LEAVES
       // the server, not about what a component happens to paint.
-      const logs = snap.docs.map(d => userSafeUsageLog(d.id, d.data()));
-      return res.json(logs);
+      const rows = await listEqNewestFirst(
+        db.collection('ai_usage_logs'), [['userId', userId]], '_at', 50, INDEX_SAFE_FETCH_CAP,
+        (id, data) => ({ log: userSafeUsageLog(id, data), _at: epochMillis(data.createdAt) }),
+      );
+      return res.json(rows.map((r) => r.log));
     } catch (err: any) {
-      try {
-        const logsRef = collection(db, 'ai_usage_logs');
-        const q = query(logsRef, where('userId', '==', userId), limit(100));
-        const snap = await getDocs(q);
-        // The SAME redaction on the index-missing fallback. A guard applied to only one of two paths
-        // is a guard that leaks on exactly the day the primary query fails, which is the day nobody
-        // is looking at the shape of the response.
-        const logs = snap.docs.map(d => userSafeUsageLog(d.id, d.data()));
-        logs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        return res.json(logs);
-      } catch (fallbackErr: any) {
-        return sendSafeError(res, 500, 'Unable to load your usage logs right now. Please try again.', fallbackErr, 'wallet logs');
-      }
+      return sendSafeError(res, 500, 'Unable to load your usage logs right now. Please try again.', err, 'wallet logs');
     }
   });
 
@@ -223,22 +309,13 @@ export function registerWalletRoutes(app: Express): void {
     const db = getDb() as any;
     const { userId } = routeParams(req.params);
     try {
-      const txRef = collection(db, 'payment_transactions');
-      const q = query(txRef, where('userId', '==', userId), orderBy('createdAt', 'desc'), limit(50));
-      const snap = await getDocs(q);
-      const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      return res.json(txs);
+      const rows = await listEqNewestFirst(
+        db.collection('payment_transactions'), [['userId', userId]], '_at', 50, 100,
+        (id, data) => ({ tx: { id, ...data }, _at: epochMillis(data.createdAt) }),
+      );
+      return res.json(rows.map((r) => r.tx));
     } catch (err: any) {
-      try {
-        const txRef = collection(db, 'payment_transactions');
-        const q = query(txRef, where('userId', '==', userId), limit(100));
-        const snap = await getDocs(q);
-        const txs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        txs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        return res.json(txs);
-      } catch (fallbackErr: any) {
-        return sendSafeError(res, 500, 'Unable to load your transactions right now. Please try again.', fallbackErr, 'wallet transactions');
-      }
+      return sendSafeError(res, 500, 'Unable to load your transactions right now. Please try again.', err, 'wallet transactions');
     }
   });
 }

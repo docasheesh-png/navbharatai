@@ -48,6 +48,8 @@ class Query {
   where(f: string, _op: string, v: unknown) { return new Query(this.col, [...this.filters, [f, '==', v]], this.order, this.lim); }
   orderBy(f: string, dir: 'asc' | 'desc' = 'asc') { return new Query(this.col, this.filters, [f, dir], this.lim); }
   limit(n: number) { return new Query(this.col, this.filters, this.order, n); }
+  // A projection: the real one returns fewer fields; the deletes only need the refs, so the fake keeps them all.
+  select(..._fields: string[]) { return this; }
   async get() {
     let rows = [...this.col.docs.values()].filter((d) => d.data);
     for (const [f, , v] of this.filters) rows = rows.filter((d) => d.data?.[f] === v);
@@ -64,6 +66,7 @@ class FakeCollection {
   doc(id: string) { return new DocRef(this, id); }
   where(f: string, op: string, v: unknown) { return new Query(this).where(f, op, v); }
   orderBy(f: string, dir: 'asc' | 'desc' = 'asc') { return new Query(this).orderBy(f, dir); }
+  select(...fields: string[]) { return new Query(this).select(...fields); }
   // A CollectionReference IS a Query in Firestore — `.get()` returns every doc.
   get() { return new Query(this).get(); }
 }

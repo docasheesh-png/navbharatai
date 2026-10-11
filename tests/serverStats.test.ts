@@ -24,24 +24,9 @@ describe('defaultServerStats — the documented defaults', () => {
     expect(s.announcements).toEqual([]);
   });
 
-  it('is not in maintenance mode', () => {
-    expect(defaultServerStats().maintenanceMode).toBe(false);
-  });
-
-  it('has doctorAI and appBuilder enabled', () => {
-    expect(defaultServerStats().featureFlags.doctorAI).toBe(true);
-    expect(defaultServerStats().featureFlags.appBuilder).toBe(true);
-  });
-
-  it('prices 100 coins per rupee', () => {
-    expect(defaultServerStats().pricingConfig.coinsPerRupee).toBe(100);
-  });
-
-  it('enables every provider', () => {
-    const p = defaultServerStats().providerEnabled;
-    expect(p.gemini).toBe(true);
-    expect(p.anthropic).toBe(true);
-    expect(p.grok).toBe(true);
+  it('🔒 carries no control that nothing enforces (audit 2026-10-11, F16)', () => {
+    const d = defaultServerStats() as unknown as Record<string, unknown>;
+    for (const gone of ['maintenanceMode', 'featureFlags', 'pricingConfig', 'providerEnabled']) expect(gone in d, gone).toBe(false);
   });
 
   it('hands each caller its OWN nested objects — a shared Map would recreate the coupling', () => {
@@ -55,11 +40,8 @@ describe('defaultServerStats — the documented defaults', () => {
 });
 
 describe('serverStats singleton — what stays true however much traffic it has seen', () => {
-  it('starts FROM the defaults (same shape, same config)', () => {
-    const d = defaultServerStats();
-    expect(serverStats.featureFlags).toEqual(d.featureFlags);
-    expect(serverStats.pricingConfig).toEqual(d.pricingConfig);
-    expect(serverStats.providerEnabled).toEqual(d.providerEnabled);
+  it('starts FROM the defaults (same shape)', () => {
+    expect(Object.keys(serverStats).sort()).toEqual(Object.keys(defaultServerStats()).sort());
   });
 
   it('is the SHARED mutable instance every route writes to', () => {

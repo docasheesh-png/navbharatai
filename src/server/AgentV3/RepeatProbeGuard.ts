@@ -187,3 +187,33 @@ export function collectRepeatProbeSteer(
   // De-dupe identical steer bodies (two loops of the same tool) and bound the message.
   return [...new Set(steers)].slice(0, 3).join('\n\n');
 }
+
+/**
+ * A call that cannot do anything: a `bash` whose command is empty (the dispatcher refuses it before the shell).
+ * PURE. Used with `isProbeBanned` to recognise a model that has stopped making progress.
+ */
+export function isEmptyCommandCall(tu: { name?: unknown; input?: unknown }): boolean {
+  if (tu?.name !== 'bash') return false;
+  const cmd = (tu.input as Record<string, unknown> | null | undefined)?.command;
+  return typeof cmd !== 'string' || cmd.trim() === '';
+}
+
+/**
+ * How many more no-op turns a run is allowed after the FINAL loop steer before it is ended.
+ *
+ * 🔴 WHY (autopsy d0b2fcd6, Q-738). After "[LOOP GUARD — FINAL] … banned for the rest of this build", the
+ * model issued SEVEN more empty `bash` calls (17 output tokens each — the provider really sent nothing), each
+ * one a full ~94 k-character turn, while the narration said "blocking it". Nothing blocked it: `bash` is
+ * deliberately never refused (a repeated `tsc` is a build converging), and a refusal still costs the turn.
+ * A model that keeps doing nothing after being told twice is not going to finish; the run ends honestly.
+ */
+export const MAX_NO_OP_TURNS_AFTER_FINAL = 3;
+
+/** Is every call in this turn a no-op — an empty command or a refused probe? PURE over the injected check. */
+export function isNoOpTurn(
+  toolUses: ReadonlyArray<{ name?: unknown; input?: unknown }>,
+  banned: (name: string, input: unknown) => boolean,
+): boolean {
+  return toolUses.length > 0 && toolUses.every((tu) => isEmptyCommandCall(tu) || (typeof tu?.name === 'string' && banned(tu.name, tu.input)));
+}
+

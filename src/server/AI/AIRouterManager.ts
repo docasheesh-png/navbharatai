@@ -20,8 +20,12 @@ function slot(base: AIProvider, priority: number, model: string): AIProvider {
     // 🔴 THE MODEL MUST RIDE THE STREAM TOO. Dropping it here is what made every slotted rung stream
     // on its provider's hardcoded default — on Vertex, `gemini-2.5-pro` at $10/MTok — so the cheap
     // rungs of the FREE ladder were, on the streaming path chat actually uses, the dearest model.
+    // 🔴 AND THE ABORT SIGNAL MUST RIDE IT TOO (Q-621). Dropping the 5th argument here would make
+    // every SLOTTED rung — which is most of the free ladder — unabortable, so the one path the user
+    // actually streams on would keep billing after they left. Same class as the dropped model pin
+    // directly above: a wrapper that forgets an argument silently disables the feature behind it.
     executeStream: base.executeStream
-      ? (p, sys, cb) => base.executeStream!(p, sys, cb, model)
+      ? (p, sys, cb, _model, signal) => base.executeStream!(p, sys, cb, model, signal)
       : undefined,
   };
 }

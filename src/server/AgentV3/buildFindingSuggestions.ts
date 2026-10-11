@@ -330,8 +330,8 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
  *
  * ⚠️ These five are all ERROR severity, so moving any of them would change `shippingIssueCount('error')`
  * — the one count that can flip a build to free. That is a billing decision and not a session's to take;
- * they stay app findings, and whether the engine's own crash should count as the app's blocker is an
- * OPEN row in `BUILD_REPORT_QUEUE.md`.
+ * they stay app findings. Whether the engine's own crash should count as the app's blocker was decided by
+ * the admin on 2026-10-11 (Q-380, closed): leave it — a crashed build stays free and NavBharatAI absorbs it.
  */
 export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
   // The readiness gate's own blocker text IS the instruction, and it is different every time ("the entry

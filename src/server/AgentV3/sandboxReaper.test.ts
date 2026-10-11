@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   reapAfterMs, buildFlagExpiryMs, touchIntervalMs, maxBuildMs, idleLimitMs,
-  MISSED_TOUCHES_BEFORE_REAP,
+  MISSED_TOUCHES_BEFORE_REAP, shouldMarkPausedAfterFailure, actionAfterPauseFailure,
+  PAUSE_ATTEMPTS_BEFORE_GIVING_UP,
 } from './sandboxReaper';
 
 
@@ -58,5 +60,32 @@ describe('the build-in-flight flag is a DIFFERENT question — do not re-merge t
     const env = { AGENTV3_MAX_BUILD_SECONDS: '600' } as never;
     expect(buildFlagExpiryMs(env)).toBe(600_000 + 10 * 60_000);
     expect(Number.isFinite(buildFlagExpiryMs(env))).toBe(true);
+  });
+});
+
+describe('BLD-16 — pause give-up kills, a busy sandbox does not', () => {
+  it('kills only once retries are exhausted and the sandbox is not busy', () => {
+    expect(actionAfterPauseFailure(1, false)).toBe('retry');
+    expect(actionAfterPauseFailure(2, false)).toBe('retry');
+    expect(actionAfterPauseFailure(PAUSE_ATTEMPTS_BEFORE_GIVING_UP - 1, false)).toBe('retry');
+    expect(shouldMarkPausedAfterFailure(PAUSE_ATTEMPTS_BEFORE_GIVING_UP)).toBe(true);
+    expect(actionAfterPauseFailure(PAUSE_ATTEMPTS_BEFORE_GIVING_UP, false)).toBe('kill');
+    expect(actionAfterPauseFailure(PAUSE_ATTEMPTS_BEFORE_GIVING_UP + 5, false)).toBe('kill');
+    // A build or an in-flight op is never killed, even after the give-up threshold.
+    expect(actionAfterPauseFailure(PAUSE_ATTEMPTS_BEFORE_GIVING_UP, true)).toBe('retry');
+    expect(actionAfterPauseFailure(Number.NaN, false)).toBe('retry');
+  });
+
+  it('the orphan sweep is the path that kills, and it says so', () => {
+    const src = readFileSync(new URL('./sandbox/EngineerAI/actuators/E2BActuator.ts', import.meta.url), 'utf8');
+    const at = src.indexOf('SANDBOX_PAUSE_FAILED_KILLED');
+    expect(at).toBeGreaterThan(-1);
+    const window = src.slice(Math.max(0, at - 900), at + 200);
+    expect(window).toContain('shouldMarkPausedAfterFailure');
+    expect(window).toContain('actionAfterPauseFailure');
+    expect(window).toContain('killSandbox');
+    // One log site — the idle sweep must not also kill (that would be a double-kill).
+    expect(src.split('SANDBOX_PAUSE_FAILED_KILLED').length).toBe(2);
+    expect(src).toContain('Sandbox.kill(sandboxId)');
   });
 });

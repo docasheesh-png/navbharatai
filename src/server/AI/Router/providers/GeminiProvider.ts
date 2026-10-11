@@ -34,11 +34,16 @@ export class GeminiProvider implements AIProvider {
     }
   }
 
-  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string): Promise<string> {
+  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string> {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
     const streamModel = model || 'gemini-2.5-flash';
     const config: any = {};
     if (systemPrompt) config.systemInstruction = systemPrompt;
+    // `abortSignal` is this SDK's own spelling of the same thing the others call `signal`: it aborts
+    // the request, so an abandoned turn stops being generated rather than merely stopping being
+    // shown (Q-621). It goes INSIDE `config`, which is why the emptiness check below now also
+    // accounts for it — with a signal, `config` is never empty.
+    if (signal) config.abortSignal = signal;
     const stream = await ai.models.generateContentStream({
       model: streamModel,
       contents: prompt,
@@ -46,6 +51,10 @@ export class GeminiProvider implements AIProvider {
     });
     let full = '';
     for await (const chunk of stream) {
+      // The client left: stop consuming AND stop paying. The SDK abort above tears the socket down,
+      // so this loop normally ends by throwing; the check is the belt to that braces, for an SDK
+      // version that resolves the stream instead of rejecting it (Q-621).
+      if (signal?.aborted) break;
       const text = chunk.text || '';
       if (text) { full += text; onChunk(text); }
     }

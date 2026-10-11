@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import {
   analyzeCheckup,
@@ -114,7 +115,8 @@ describe('websiteCheckup — exposed secrets (the false-positive guard)', () => 
   });
 
   it('flags an inline private key block', () => {
-    const fakeKey = '-----BEGIN ' + 'PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----';
+    // A real key body — a page that only shows the PEM header leaks nothing (Q-737).
+    const fakeKey = (generateKeyPairSync('rsa', { modulusLength: 1024 }).privateKey.export({ type: 'pkcs1', format: 'pem' }) as string);
     const f = analyzeExposedSecrets(healthyFetch({ body: fakeKey }));
     expect(f[0]?.severity).toBe('critical');
   });

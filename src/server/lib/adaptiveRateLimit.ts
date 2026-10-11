@@ -22,6 +22,8 @@
  */
 import type { Request, Response, NextFunction } from 'express';
 import { errorTracker } from '../observability/ErrorTracker';
+import { BoundedCache } from './boundedCache';
+import { addressRateKey } from './clientAddress';
 
 /** Substrings that, in a User-Agent, strongly indicate an automated client. */
 const BOT_UA_SIGNATURES = [
@@ -144,17 +146,56 @@ export interface AdaptiveGuardOptions {
   blockMs?: number;
   /** Only guard requests whose path passes this test (default: paths starting with /api/). */
   shouldGuard?: (req: Request) => boolean;
+  /**
+   * The VERIFIED uid of a signed-in request, or null (a forged or expired token is not an identity). Consulted
+   * only when the caller's ADDRESS is already hot — at its burst ceiling or blocked — so the cost of a token
+   * check is paid only there.
+   *
+   * 🔴 WHY (audit 2026-10-11, F3): measured, one address at a steady 20 req/s → 39 succeeded, 345 got 429, then
+   * a 60 s block. Indian mobile carriers and offices put many people behind ONE address; when strangers there
+   * were busy at once, every signed-in person behind it was blocked with them. A verified account now gets its
+   * own bucket with the same rules, so it is judged on its own traffic. Anonymous traffic stays on the address.
+   */
+  verifyUid?: (req: Request) => Promise<string | null>;
+  /** Run under vitest too (the guard is skipped there by default so suites never sleep). Tests only. */
+  runInTests?: boolean;
 }
 
-// Per-IP behavioural state. Self-pruned to stay bounded.
-const _clients = new Map<string, ClientState>();
+/**
+ * Per-caller behavioural state, keyed by `addressRateKey` (or `uid:<uid>`, see `verifyUid` below).
+ *
+ * 🔴 BOUNDED AND O(1) PER REQUEST (performance audit 2026-10-11). This was a plain Map pruned by walking ALL of
+ * it on every request once it held 10,000 entries — and the walk only dropped callers idle for 5 minutes, so a
+ * busy instance (or anyone with an IPv6 range) kept it above 10,000 and paid the full walk on every `/api`
+ * request: measured 1,162 → 486 req/s, ~38% of CPU in that loop, memory 304 → 750 MB in 60 s. Now the least
+ * recently seen caller is evicted when the cap is reached, and idle decay stays lazy (checked on the caller's
+ * own next request). An evicted abuser simply starts again from zero, which is all a fresh address would get.
+ */
+export const MAX_TRACKED_CALLERS = 20_000;
+const _clients = new BoundedCache<string, ClientState>({ maxEntries: MAX_TRACKED_CALLERS });
 const DECAY_MS = 5 * 60 * 1000; // a client idle this long has its violation count reset
 
-function pruneClients(now: number) {
-  if (_clients.size <= 10_000) return;
-  for (const [k, v] of _clients) {
-    if (now - v.lastSeen > DECAY_MS) _clients.delete(k);
-  }
+/** How many callers the guard currently tracks (tests and the admin monitor). */
+export function trackedCallerCount(): number {
+  return _clients.size;
+}
+
+/** Test hook: forget every caller. */
+export function resetAdaptiveGuardState(): void {
+  _clients.clear();
+}
+
+/** Timestamps inside the trailing window (history is in arrival order). PURE. */
+function inWindow(history: number[], now: number, windowMs: number): number {
+  const cutoff = now - windowMs;
+  let count = 0;
+  for (let i = history.length - 1; i >= 0 && history[i] >= cutoff; i--) count++;
+  return count;
+}
+
+function hasBearerToken(req: Request): boolean {
+  const h = req.headers.authorization;
+  return typeof h === 'string' && h.startsWith('Bearer ') && h.length > 7;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -176,17 +217,26 @@ export function adaptiveGuard(options: AdaptiveGuardOptions = {}) {
   const shouldGuard = options.shouldGuard ?? ((req: Request) => isGuardedPath(req.path));
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    if (process.env.VITEST) { next(); return; }
+    if (process.env.VITEST && !options.runInTests) { next(); return; }
     if (!shouldGuard(req)) { next(); return; }
 
     const now = Date.now();
-    const key = req.ip || 'anon';
-    pruneClients(now);
+    const addressKey = addressRateKey(req);
+    const stateFor = (key: string): ClientState => {
+      let st = _clients.get(key, now);
+      if (!st) {
+        st = { history: [], violations: 0, blockedUntil: 0, lastSeen: now };
+        _clients.set(key, st, now);
+      }
+      return st;
+    };
 
-    let state = _clients.get(key);
-    if (!state) {
-      state = { history: [], violations: 0, blockedUntil: 0, lastSeen: now };
-      _clients.set(key, state);
+    let state = stateFor(addressKey);
+    // A hot address (blocked, or one request from its burst ceiling) with a VERIFIED account on this
+    // request: judge the account, not the address it shares with strangers.
+    if (options.verifyUid && hasBearerToken(req) && (state.blockedUntil > now || inWindow(state.history, now, windowMs) >= maxInWindow)) {
+      const uid = await options.verifyUid(req).catch(() => null);
+      if (uid) state = stateFor(`uid:${uid}`);
     }
 
     // Hard block still in effect → reject immediately.
@@ -201,10 +251,12 @@ export function adaptiveGuard(options: AdaptiveGuardOptions = {}) {
     if (now - state.lastSeen > DECAY_MS) state.violations = 0;
     state.lastSeen = now;
 
-    // Record + trim history.
+    // Record + trim history. Only the newest `maxInWindow + 1` timestamps can decide a burst, so nothing older
+    // is kept: one caller's state stays a few hundred bytes however hard it hammers.
     state.history.push(now);
     const cutoff = now - windowMs;
     while (state.history.length && state.history[0] < cutoff) state.history.shift();
+    if (state.history.length > maxInWindow + 1) state.history.splice(0, state.history.length - (maxInWindow + 1));
 
     const botScore = scoreUserAgent(req.headers['user-agent'] as string | undefined);
     const bursty = isBurst(state.history, now, windowMs, maxInWindow);

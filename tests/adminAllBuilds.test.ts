@@ -87,8 +87,10 @@ describe('admin dashboard surface', () => {
 
     const saveAt = dashboard.indexOf('const saveJsonFile');
     const saveSeg = dashboard.slice(saveAt, saveAt + 900);
-    expect(saveSeg).toContain('URL.createObjectURL');
-    expect(saveSeg).toContain("a.download = filename");
+    // Saved through the ONE delivery helper (Q-790): share sheet on an iPhone, a real download on desktop,
+    // and a failure is still said.
+    expect(saveSeg).toContain("deliverFile(filename, json, 'application/json')");
+    expect(saveSeg).toContain("if (delivered === 'failed') toast(");
 
     const dlAt = dashboard.indexOf('const downloadWorkspaceReport');
     const dlSeg = dashboard.slice(dlAt, dlAt + 600);

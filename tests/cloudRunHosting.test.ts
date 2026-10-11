@@ -157,7 +157,7 @@ describe('request builders', () => {
 describe('🔒 parseService — "ready" is earned, never assumed', () => {
   it('a service reporting Ready is ready', () => {
     const p = parseService({ name: 'x', uri: 'https://a.run.app', conditions: [{ type: 'Ready', state: 'CONDITION_SUCCEEDED' }] });
-    expect(p).toEqual({ name: 'x', uri: 'https://a.run.app', ready: true });
+    expect(p).toMatchObject({ name: 'x', uri: 'https://a.run.app', ready: true, settled: true, failed: false });
   });
 
   it('🔒 a created-but-not-serving service is NOT ready — Cloud Run answers long before it serves', () => {

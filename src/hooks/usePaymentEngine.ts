@@ -87,9 +87,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   const [loadingWallet, setLoadingWallet] = useState(false);
   const [monthlyAiCost, setMonthlyAiCost] = useState<{ totalBuilds: number; totalCostUsd: number; month: string } | null>(null);
   const [isRecharging, setIsRecharging] = useState(false);
-  const [rechargeStatus, setRechargeStatus] = useState<string | null>(null);
   const [activeBillingDetailTab, setActiveBillingDetailTab] = useState<'purchase' | 'gift' | 'use' | 'remaining' | 'budget'>('remaining');
-  const [customPurchaseCredits, setCustomPurchaseCredits] = useState<string>('5000');
   const [showPurchaseFormPanel, setShowPurchaseFormPanel] = useState<boolean>(false);
   const [couponCodeInput, setCouponCodeInput] = useState('');
   const [isRedeemingCoupon, setIsRedeemingCoupon] = useState(false);
@@ -198,7 +196,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
      */
     if (storeRail === 'none') return;
     setIsRecharging(true);
-    setRechargeStatus('Requesting Cashfree checkout protocol...');
     // START THE GATEWAY SDK DOWNLOADING NOW, beside the order call rather than after it (admin
     // 2026-09-21, a 5-10 s wait on our own page). The SDK needs no session id, so the two are
     // independent; running them in series meant the user paid for both, one after the other.
@@ -218,7 +215,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
       }, { headers: { ...(await authedHeaders()), ...(await unlockHeaders()) } });
       // The real gateway only — there is no simulated checkout (Q-615). Without real payment keys the
       // server refuses the order with an honest 503 and the catch below shows its message.
-      setRechargeStatus('Handshaking with Cashfree secure gateway...');
       triggerCashfreeCheckout(res.data.paymentSessionId, res.data.environment);
     } catch (err: any) {
       alert(`Checkout session initiation failed: ${err.response?.data?.error || err.message}`);
@@ -626,9 +622,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     loadingWallet, setLoadingWallet,
     monthlyAiCost, setMonthlyAiCost,
     isRecharging, setIsRecharging,
-    rechargeStatus, setRechargeStatus,
     activeBillingDetailTab, setActiveBillingDetailTab,
-    customPurchaseCredits, setCustomPurchaseCredits,
     showPurchaseFormPanel, setShowPurchaseFormPanel,
     // coupons
     couponCodeInput, setCouponCodeInput,

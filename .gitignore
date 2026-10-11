@@ -37,3 +37,6 @@ tests/.tmp-*/
 # Executable 3D-layer tests write the generated modules here and delete them afterwards.
 tests/.tmp-game3d-*/
 tests/.tmp-game-meta-*/
+
+# build-reliability benchmark output (scripts/agentv3-reliability-bench.ts)
+scripts/bench-results/

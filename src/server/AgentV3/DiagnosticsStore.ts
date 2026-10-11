@@ -909,56 +909,75 @@ export async function listAllDiagnostics(limit = 100, sinceMs?: number | null): 
     // so this range stays on the same single-field index and can never FAILED_PRECONDITION.
     let q = db.collection(COLLECTION).orderBy('savedAt', 'desc') as FirebaseFirestore.Query;
     if (typeof sinceMs === 'number' && sinceMs > 0) q = q.where('savedAt', '>=', sinceMs);
-    const snap = await q.limit(Math.max(1, Math.min(500, limit))).get();
-    return snap.docs.map((d) => {
-      const r = (d.data()?.report ?? {}) as BuildDiagnosticsReport;
-      return {
-        workspaceId: d.id,
-        savedAt: (d.data()?.savedAt as number) ?? 0,
-        ownerUid: workspaceOwnerUid(d.id),
-        id: String(r.startedAt ?? ''),
-        buildId: r.buildId,
-        startedAt: r.startedAt,
-        endedAt: r.endedAt,
-        ok: r.ok,
-        summary: r.summary,
-        rootCause: r.rootCause,
-        // The machine fact behind the prose — see the field's own note. Free: `r` is already read.
-        outcomeCode: outcomeCodeOf(r.issues) || null,
-        outcomeSeverity: severityOfOutcome(r.issues),
-        // Was this app ever SEEN running? The only way to tell a real failure from a wrong verdict.
-        appSeenRunning: appWasSeenRunning(r.issues),
-        userStopped: Array.isArray(r.issues) ? stoppedByUser(r.issues) : null,
-        counts: r.counts,
-        prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, HISTORY_PROMPT_MAX) : undefined,
-        // Read defensively: `billing` is absent on a legacy or unsettled report, and a number that is
-        // not a number must stay NULL rather than become 0 — "we did not record a charge" and "we
-        // charged nothing" are different things to tell an admin looking at a failed build.
-        ...(() => {
-          const bill = (r as { billing?: Record<string, unknown> }).billing;
-          const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-          const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
-          return {
-            userTier: str(bill?.userTier),
-            billedInr: num(bill?.billedInr),
-            billedUsd: num(bill?.billedUsd),
-            zeroBillReason: str(bill?.zeroBillReason),
-          };
-        })(),
-        // Read-only aggregation over data this query already has in memory. Wrapped because an
-        // admin listing must never fail over an observability field: a summary that throws yields
-        // `null` ("not computed") and the row still carries everything it carried before.
-        modelPerformance: (() => {
-          try { return summarizeModelPerformance(r); } catch { return null; }
-        })(),
-        healCodes: (() => { try { return summarizeHealCodes(r); } catch { return null; } })(),
-        workaroundCount: (() => { try { return workaroundCountOf(r); } catch { return null; } })(),
-        restoredToGreen: restoredToGreenOf(r),
-      };
-    });
+    // PAGED, so the raw reports never sit in memory together (audit 2026-10-11, D5): each document is up to
+    // MAX_DOC_BYTES (900 KB) and this used to read up to 500 at once — ~450 MB on an instance that also serves
+    // users. A page of LIST_PAGE is mapped to its small summary row and dropped before the next is read.
+    const want = Math.max(1, Math.min(500, limit));
+    const rows: AllDiagnosticsEntry[] = [];
+    let take = Math.min(LIST_PAGE, want);
+    let page = q.limit(take);
+    for (;;) {
+      const snap = await page.get();
+      for (const d of snap.docs) rows.push(toAllDiagnosticsEntry(d));
+      if (snap.docs.length < take || rows.length >= want) break;
+      take = Math.min(LIST_PAGE, want - rows.length);
+      page = q.startAfter(snap.docs[snap.docs.length - 1]).limit(take);
+    }
+    return rows;
   } catch {
     return [];
   }
+}
+
+/** One page of `listAllDiagnostics` at a time. */
+const LIST_PAGE = 50;
+
+/** The small row an admin listing shows for one stored report. Reads only the document it is given. */
+function toAllDiagnosticsEntry(d: FirebaseFirestore.QueryDocumentSnapshot): AllDiagnosticsEntry {
+  const r = (d.data()?.report ?? {}) as BuildDiagnosticsReport;
+  return {
+    workspaceId: d.id,
+    savedAt: (d.data()?.savedAt as number) ?? 0,
+    ownerUid: workspaceOwnerUid(d.id),
+    id: String(r.startedAt ?? ''),
+    buildId: r.buildId,
+    startedAt: r.startedAt,
+    endedAt: r.endedAt,
+    ok: r.ok,
+    summary: r.summary,
+    rootCause: r.rootCause,
+    // The machine fact behind the prose — see the field's own note. Free: `r` is already read.
+    outcomeCode: outcomeCodeOf(r.issues) || null,
+    outcomeSeverity: severityOfOutcome(r.issues),
+    // Was this app ever SEEN running? The only way to tell a real failure from a wrong verdict.
+    appSeenRunning: appWasSeenRunning(r.issues),
+    userStopped: Array.isArray(r.issues) ? stoppedByUser(r.issues) : null,
+    counts: r.counts,
+    prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, HISTORY_PROMPT_MAX) : undefined,
+    // Read defensively: `billing` is absent on a legacy or unsettled report, and a number that is
+    // not a number must stay NULL rather than become 0 — "we did not record a charge" and "we
+    // charged nothing" are different things to tell an admin looking at a failed build.
+    ...(() => {
+      const bill = (r as { billing?: Record<string, unknown> }).billing;
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+      const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+      return {
+        userTier: str(bill?.userTier),
+        billedInr: num(bill?.billedInr),
+        billedUsd: num(bill?.billedUsd),
+        zeroBillReason: str(bill?.zeroBillReason),
+      };
+    })(),
+    // Read-only aggregation over data this query already has in memory. Wrapped because an
+    // admin listing must never fail over an observability field: a summary that throws yields
+    // `null` ("not computed") and the row still carries everything it carried before.
+    modelPerformance: (() => {
+      try { return summarizeModelPerformance(r); } catch { return null; }
+    })(),
+    healCodes: (() => { try { return summarizeHealCodes(r); } catch { return null; } })(),
+    workaroundCount: (() => { try { return workaroundCountOf(r); } catch { return null; } })(),
+    restoredToGreen: restoredToGreenOf(r),
+  };
 }
 
 /** The facts a measurement needs about a past build: what was ASKED, what was WRITTEN, and when. */

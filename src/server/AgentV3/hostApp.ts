@@ -229,8 +229,10 @@ export async function hostAppOnNavBharatCloud(
     serviceAccount: ids.identities.runtime,
     image: built.image,
     envVars: envPlan.envVars,
-  }, fetchImpl);
-  if (!deployed.ok) return { ok: false, reason: 'deploy-failed', message: deployed.message };
+  }, fetchImpl, sleep);
+  if (!deployed.ok) {
+    return { ok: false, reason: 'deploy-failed', message: deployed.message, ...(deployed.detail ? { detail: deployed.detail } : {}) };
+  }
 
   return {
     ok: true,

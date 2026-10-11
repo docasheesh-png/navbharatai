@@ -3,9 +3,9 @@
  *
  * THE PRODUCT, in one line: free hosting carries the "Made with NavBharatAI" badge; the Custom
  * Domain plan (₹99/30 days, paid from the ONE wallet) removes the badge and unlocks connecting
- * the user's own domain. DB stays free forever (it runs on the user's own account — standing rule),
- * and coding stays pay-per-use — so the wallet now honestly carries all three: hosting plan,
- * DB (₹0), coding usage.
+ * the user's own domain. A database on the user's own account stays ₹0. A small database and API
+ * from NavBharatAI is a separate add-on, charged only after it exists, and is not part of this plan.
+ * Coding stays pay-per-use — so the wallet carries the plan, that add-on, and coding usage.
  *
  * WHY THE PLAN LIVES ON THE WALLET DOC (`user_token_wallets/{uid}.hostingPlan`) and not in its own
  * collection: the purchase must debit the wallet and grant the plan ATOMICALLY — one Firestore
@@ -27,6 +27,7 @@
  * already-granted plans keep their badge-removal (taking back something paid-for would be theft).
  */
 
+import { BoundedCache } from './boundedCache';
 import { doc, getDoc, runTransaction, getServerDb } from './serverDb';
 import { computeDebitedWallet } from './walletDebit';
 import { ledgerPatch } from './walletStatement';
@@ -38,6 +39,7 @@ import {
   HOSTING_TIERS, LEGACY_HOSTING_PLAN_ID, hostingAgreementTerms, isKnownPlanId, purchasableTier,
   tierForPlanId, tierRank, HOSTING_OVERAGE_INR_PER_GB, type HostingTier, type HostingTierId,
 } from '../../lib/hostingTiers';
+import { activeAddonCount } from '../../lib/hostingAddons';
 
 /**
  * TWO TIERS SINCE 2026-09-10 (admin: "do tier banao, credit bundle karo, 20 GB theek hai").
@@ -142,6 +144,10 @@ export interface HostingPlanStatus {
   renewalPriceInr: number;
   /** ₹ per GB past the included allowance. */
   overageInrPerGb: number;
+  /** Paid extra-website slots that are still inside their period. */
+  extraSites: number;
+  /** Paid extra-domain slots that are still inside their period. */
+  extraDomains: number;
 }
 
 /**
@@ -601,6 +607,8 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
     priceInr: hostingPlanPriceInr(), days: HOSTING_PLAN_DAYS,
     tiers: HOSTING_TIERS, tier: null, renewalPriceInr: hostingPlanPriceInr(),
     overageInrPerGb: HOSTING_OVERAGE_INR_PER_GB,
+    extraSites: 0,
+    extraDomains: 0,
   };
   if (!db || !userId) return base;
   try {
@@ -621,12 +629,15 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
     // one of the two left this function half-injectable: a caller could pass a time, watch the renewal
     // honour it, and still get an `active` computed from today's real date. Caught by its own test.
     const nowMs = nowIso ? Date.parse(nowIso) : undefined;
+    const clock = Number.isFinite(nowMs as number) ? (nowMs as number) : Date.now();
     return {
       ...base,
       active: hostingPlanActive(wallet, Number.isFinite(nowMs as number) ? (nowMs as number) : undefined),
       plan: plan && isKnownPlanId(plan.id) ? plan : null,
       tier: heldTier,
       renewalPriceInr: plan && isKnownPlanId(plan.id) ? planPriceInr(plan.id) : hostingPlanPriceInr(),
+      extraSites: activeAddonCount(wallet, 'extra_site', clock),
+      extraDomains: activeAddonCount(wallet, 'extra_domain', clock),
     };
   } catch {
     return base;
@@ -763,7 +774,13 @@ export interface PlanProbe {
 }
 
 const PROBE_TTL_MS = 5 * 60 * 1000;
-const probeCache = new Map<string, { probe: PlanProbe; at: number }>();
+/**
+ * An INACTIVE answer is the one a purchase changes, and `invalidatePlanCache` clears only the instance that took
+ * the payment — so on every other instance a fresh buyer kept seeing "no plan" for up to 5 minutes. Inactive
+ * answers are therefore kept 30 s; active ones keep the full 5 min (audit 2026-10-11).
+ */
+const PROBE_INACTIVE_TTL_MS = 30 * 1000;
+const probeCache = new BoundedCache<string, { probe: PlanProbe; at: number }>({ maxEntries: 20_000, ttlMs: PROBE_TTL_MS });
 
 export function invalidatePlanCache(userId: string): void {
   probeCache.delete(userId);
@@ -788,7 +805,7 @@ export async function probeHostingPlan(userId: string | null | undefined): Promi
     return { active: false, known: true };
   }
   const hit = probeCache.get(userId);
-  if (hit && Date.now() - hit.at < PROBE_TTL_MS) return hit.probe;
+  if (hit && Date.now() - hit.at < (hit.probe.active ? PROBE_TTL_MS : PROBE_INACTIVE_TTL_MS)) return hit.probe;
   try {
     const db = getServerDb();
     if (!db) return { active: false, known: false };

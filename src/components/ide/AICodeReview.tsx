@@ -5,6 +5,7 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import type { ChatSession } from '../../types';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { guestLimitReached } from '../../lib/guestId';
+import { deliverFile } from '../../lib/downloadFile';
 
 type Severity = 'critical' | 'warning' | 'info' | 'suggestion';
 type Category = 'bugs' | 'performance' | 'security' | 'bestpractice' | 'accessibility';
@@ -85,7 +86,7 @@ const CAT_CONFIG: Record<Category, { label: string; color: string; icon: any }> 
   accessibility: { label: 'Accessibility', color: 'text-success', icon: CheckCircle2 },
 };
 
-function analyzeCode(code: string): ReviewIssue[] {
+export function analyzeCode(code: string): ReviewIssue[] {
   const issues: ReviewIssue[] = [];
   let id = 1;
 
@@ -292,7 +293,10 @@ function analyzeCode(code: string): ReviewIssue[] {
 
   const hasDivOnClick = /<div[^>]*onClick/i.test(code);
   const hasDivRole = /<div[^>]*role\s*=/.test(code);
-  if (hasDivOnClick && !hasDivRole) {
+  // A role alone does not make a <div> reachable — without tabIndex the keyboard can never focus it,
+  // which is exactly what the fix below tells the user to add. `hasTabIndex` was computed for this and
+  // never read (Q-600), so `role="button"` with no tabIndex passed as accessible.
+  if (hasDivOnClick && (!hasDivRole || !hasTabIndex)) {
     issues.push({
       id: String(id++), severity: 'warning', category: 'accessibility',
       title: 'Clickable <div> without role or keyboard support',
@@ -529,10 +533,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
       ),
     ];
     const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'code-review.md'; a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile('code-review.md', blob);
   };
 
   // Prefer the real 0-100 score from the AI reviewer (connected review); fall back to the

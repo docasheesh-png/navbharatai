@@ -36,9 +36,28 @@ class MockFirestore implements RetentionFirestore {
                   },
                 };
               },
+              // Q-682: FOREIGN_PARENT_USER_DOCS addresses ONE document under each parent
+              // (`teams/{someoneElse}/members/{uid}`) instead of paging the whole subcollection.
+              doc(sid: string) {
+                return {
+                  async get() { return { exists: store.col(path).has(sid) }; },
+                  async delete() { store.col(path).delete(sid); },
+                };
+              },
             };
           },
         };
+      },
+      /**
+       * 🔴 THE MOCK GAVE WAY HERE, AND THAT IS THE RIGHT DIRECTION (Q-682). The foreign-parent sweep
+       * needs to LIST a collection's documents, and an entry that needs it and does not get it THROWS
+       * rather than silently skipping — because silently skipping would report a clean erase while
+       * leaving other people's email addresses in every team the departing member had joined. A mock
+       * that is more forgiving than the real database is a test that passes for code that cannot work,
+       * so the fake grew the capability instead of the eraser losing the check.
+       */
+      async listDocuments() {
+        return [...store.col(name).keys()].map((id) => this.doc(id));
       },
       where(field: string, op: '==' | '<', value: unknown) {
         /**

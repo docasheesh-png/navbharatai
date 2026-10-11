@@ -22,6 +22,7 @@
 import { hostingUsageStore } from './HostingUsageStore';
 import { deploymentStore } from '../AgentV3/DeploymentStore';
 import { FREE_PUBLISHED_APPS, type HostingTier } from '../../lib/hostingTiers';
+import { activeAddonCount } from '../../lib/hostingAddons';
 import { activeHostingTier, hostingPlansEnabled } from './hostingPlan';
 import { doc, getDoc, getServerDb } from './serverDb';
 
@@ -37,15 +38,27 @@ import { parseEnvNumber } from './envNumber';
  * still happens on the plan screen and in the sweep, as it always did.
  */
 export async function readHostingTierForQuota(userId: string | null | undefined): Promise<HostingTier | null> {
-  if (!userId || !hostingPlansEnabled()) return null;
+  const allowance = await readHostingAllowance(userId);
+  return allowance.tier;
+}
+
+/**
+ * The plan tier AND the paid extra-website slots, from one wallet read.
+ *
+ * Extra slots fail CLOSED to zero: if the wallet cannot be read, the user gets the free cap
+ * (or their tier, when that read succeeded) and not a bonus we could not see them pay for.
+ */
+export async function readHostingAllowance(userId: string | null | undefined): Promise<{ tier: HostingTier | null; extraSites: number }> {
+  if (!userId || !hostingPlansEnabled()) return { tier: null, extraSites: 0 };
   try {
     const db = getServerDb() as any;
-    if (!db) return null;
+    if (!db) return { tier: null, extraSites: 0 };
     const snap = await getDoc(doc(db, 'user_token_wallets', userId));
-    if (!snap.exists()) return null;
-    return activeHostingTier(snap.data() as Record<string, unknown>);
+    if (!snap.exists()) return { tier: null, extraSites: 0 };
+    const data = snap.data() as Record<string, unknown>;
+    return { tier: activeHostingTier(data), extraSites: activeAddonCount(data, 'extra_site') };
   } catch {
-    return null;
+    return { tier: null, extraSites: 0 };
   }
 }
 
@@ -131,6 +144,15 @@ export function publishedAppCapForTier(tier: { publishedApps?: number } | null |
   const tierCap = Number(tier?.publishedApps);
   if (!Number.isFinite(tierCap) || tierCap <= 0) return free;
   return Math.max(free, Math.floor(tierCap));
+}
+
+/** The tier's cap plus paid extra-website slots. A bad extra count adds nothing. */
+export function publishedAppCapForAccount(
+  tier: { publishedApps?: number } | null | undefined,
+  extraSites: number,
+): number {
+  const extra = Number.isFinite(extraSites) && extraSites > 0 ? Math.floor(extraSites) : 0;
+  return publishedAppCapForTier(tier) + extra;
 }
 
 /** Pure: how many DISTINCT live first-party apps this user holds, excluding the one being republished. */
@@ -254,11 +276,11 @@ export async function enforceHostingQuota(input: {
       // anyone else the free one. Reading the plan is bounded and fails OPEN to the free cap — a plan
       // store hiccup must never quietly hand someone MORE room than they bought, nor refuse a publish
       // it cannot justify, so the free number is the safe answer in both directions.
-      const heldTier = await Promise.race([
-        readHostingTierForQuota(input.userId),
+      const held = await Promise.race([
+        readHostingAllowance(input.userId),
         new Promise<null>((r) => setTimeout(() => r(null), 2_000)),
       ]).catch(() => null);
-      const appCap = publishedAppCapForTier(heldTier);
+      const appCap = publishedAppCapForAccount(held?.tier ?? null, held?.extraSites ?? 0);
       if (appCap > 0) {
         const apps = liveAppCount(records, input.workspaceId);
         if (apps >= appCap) {

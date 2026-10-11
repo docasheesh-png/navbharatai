@@ -276,3 +276,30 @@ Hosting is admin-only today (`NAVBHARAT_CLOUD_PUBLIC` unset), so the only hosted
 
 **Isolation counts as verified only when all three pass.**
 
+
+### 11g. Bring-up — creating the identities, bucket and roles (2026-10-07)
+
+`scripts/navbharatCloudBringUp.sh` is the one command an OWNER runs in Cloud Shell. It is **additive only**: nothing is removed, Editor and the service agents are untouched, and a resource that already exists but differs from the design stops the run instead of being changed.
+
+| Step | What it does |
+|---|---|
+| `snapshot` | Read-only record of IAM, accounts, roles, repo, buckets, services, control-plane env NAMES |
+| `validate` | Every permission below exists in the live catalogue and may go in a custom role (an omitted level means `SUPPORTED`, the enum default) |
+| `apply` | snapshot → validate → YES → two accounts, staging bucket (asia-south1, uniform access, public access prevented, `nbai-source/` deleted after 1 day), five custom roles, resource-level bindings, immutable tags → verify |
+| `wire` | Sets `NAVBHARAT_APPS_RUNTIME_SA` / `NAVBHARAT_APPS_BUILD_SA` on `navbharat-ai-prod` (asks YES) |
+
+| Principal | Role | Scope | Purpose |
+|---|---|---|---|
+| platform | `nbaiPlatformRun` (run.services create/get/list/update/delete/setIamPolicy, run.revisions.list) | project | deploy, readiness wait, public access, takedown, retention |
+| platform | `nbaiPlatformBuild` (cloudbuild.builds create/get/list) | project | start and follow builds |
+| platform | `nbaiPlatformRegistry` (repositories.get, tags.get, tags.delete, dockerimages.list, versions.delete) | repo `nbai-apps` | digest pin, retention |
+| platform | `nbaiPlatformStaging` (objects create/delete/list) | staging bucket | upload, delete, sweep, preflight |
+| platform | `roles/iam.serviceAccountUser` | ON each of the two accounts | actAs only them |
+| builder | `roles/artifactregistry.writer` | repo `nbai-apps` | `pack --publish` |
+| builder | `nbaiBuildSourceReader` (objects.get) | staging bucket | fetch its staged source |
+| builder | `roles/logging.logWriter` | project | `CLOUD_LOGGING_ONLY` |
+| runtime | — | — | nothing, ever |
+
+`tests/theBringUpScriptIsAdditiveAndNarrow.test.ts` locks this table to the script. The broad project roles the platform already holds stay until the probe reads ISOLATED and a real app deploys; they are removed later, one at a time, project-level `serviceAccountUser` first.
+
+**Readiness (same date).** A deploy now waits (bounded, 240 s) until the service stops reconciling. Readiness is read from the v2 `terminalCondition`. Before this, the code read it from `conditions`, which in v2 never carries `Ready`. A server that does not start fails the publish and is never made public. On a first deploy the service is deleted; on an update the serving version is left alone. The preflight also checks the staging bucket now; before, it could report `ready` without one.

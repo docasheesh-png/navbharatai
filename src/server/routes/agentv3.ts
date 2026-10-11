@@ -1,4 +1,10 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { BoundedCache } from '../lib/boundedCache';
+import { FILE_SIZE_RULE, READ_GUIDE_TOOL, fileSizeRuleEnabled, moduleText, modularizePrompt, modularPromptEnabled } from '../AgentV3/reliability/modularPrompt';
+import { APPEND_FILE_TOOL, resumeTruncatedEnabled } from '../AgentV3/reliability/resumeWrite';
+import { CORE_TOOL_NAMES, DynamicToolset, coreToolsetEnabled } from '../AgentV3/reliability/coreToolset';
+import { reliabilityFlag } from '../AgentV3/reliability/flags';
+import { createStickyState, escalateSticky } from '../AgentV3/reliability/stickyRung';
 import { onStreamClosed } from '../lib/clientDisconnect';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
@@ -12,7 +18,7 @@ import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { validateSiteConfig, DEFAULT_SITE_CONFIG, MAX_REDIRECTS } from '../AgentV3/siteConfig';
 import { siteConfigStore } from '../AgentV3/siteConfigStore';
-import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX, requireVerifiedForMoney } from '../lib/identityPolicy';
+import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX, requireVerifiedForMoney, terminalRequiresVerified } from '../lib/identityPolicy';
 import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
 import { recordPlatformBuild } from '../lib/platformBuildMetrics';
 import { isAdminEmail } from '../lib/adminEmails';
@@ -198,7 +204,7 @@ import {
 import { withoutPlatformCheckTools } from '../AgentV3/repairScope';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
-import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
+import { releaseGate, releaseGateSummary, runtimeProven, runtimeRedFlipEnabled, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary, admittedInertControls } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
 import { visibleAppError, appShowsErrorNote, APP_SHOWS_ERROR_CODE } from '../AgentV3/visibleAppError';
@@ -236,6 +242,7 @@ import {
   deriveTitle,
   upsertConversationTurn,
   type ConversationStore,
+  type ConversationRecord,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, importAccountingLine, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace, checkFrameworkCoherence, frameworkCoherenceGuidance } from '../AgentV3/ProjectImport';
@@ -247,7 +254,7 @@ import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
-import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage } from '../AgentV3/GreenGuard';
+import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage, chooseRestoreBase, greenRestoreTurnStartEnabled, attemptIsHonoured } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -258,7 +265,7 @@ import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStor
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
-import { notifyBuildComplete } from '../lib/PushNotificationService';
+import { announceBuildFinished, announceDeploy, serverPublishOutcome } from '../lib/userWebhookEvents';
 // The balance warning goes through ONE door now (admin 2026-09-22). It was a raw push on the block
 // branch with no cooldown — five refused builds were five pushes — and the "running low" half had no
 // caller at all, so the first warning a user ever got arrived at the wall.
@@ -316,6 +323,9 @@ import { planDeployment, deployDecision, choosePublishRoute } from '../AgentV3/d
 import { recordHostedDeployment } from '../AgentV3/hostedDeploymentRecord';
 import { firestoreDeployStore } from '../AgentV3/hostedDeployments';
 import { runServerPublish, type ServerPublishDeps } from '../AgentV3/serverPublish';
+import { registerResellHostingRoutes } from './resellHosting';
+import { registerAppDataRoutes } from './appData';
+import { registerBrandApplyRoutes } from './brandApply';
 import { removeHostedServers } from '../AgentV3/hostedAppLifecycle';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
 import { repoAvailableForDeploy, resolveDeployRepo, ownRepoMemoryPatch, renameStorageRepoPatch } from '../AgentV3/deployRepoMemory';
@@ -332,7 +342,7 @@ import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
 import { summarizeRestore, type SandboxRestoreOutcome } from '../AgentV3/sandboxRestore';
-import { publishedAppCap, publishedAppCapForTier, readHostingTierForQuota } from '../lib/HostingQuota';
+import { publishedAppCap, publishedAppCapForAccount, readHostingAllowance, readHostingTierForQuota } from '../lib/HostingQuota';
 import { hostingPlansEnabled, hostingPlanPriceInr, readHostingPlanStatus } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
 import {
@@ -372,6 +382,7 @@ import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '..
 // `safeRelPath` centralisation). Five files carry a private copy of this string; the probe takes the
 // shared one so it can never search a root the actuator is not using.
 import { SANDBOX_WORKSPACE_ROOT } from '../lib/workspacePath';
+import { isSecretEnvPath } from '../lib/workspacePath';
 import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
@@ -441,7 +452,7 @@ import { LISTENING_PORTS_COMMAND, parseListeningPorts, rankPortCandidates } from
 import { isSandboxSystemPort } from '../AgentV3/neverAppPorts';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
-import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
+import { chatResponseCache, chatCacheEnabled, chatReplyCacheKey } from '../AgentV3/PromptCache';
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
@@ -540,6 +551,7 @@ import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuator
 import { loadUserVaultSecrets, withheldVaultSecretNames, secretsWithheldNote } from '../lib/secrets';
 import { secretRequestPrompt, postBuildKeyAsks, postBuildKeyPrompt } from '../AgentV3/secretRequest';
 import { connectActions } from '../AgentV3/connectActions';
+import { buildNeedsNotice, type ServerPlanOffer } from '../AgentV3/buildNeeds';
 import { saveUserActions } from '../AgentV3/UserActionStore';
 import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
 import { userStorageContext } from '../AgentV3/userStorageContext';
@@ -555,7 +567,8 @@ import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
-import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt } from '../AgentV3/previewAutoRepair';
+import { previewAutoRepairEnabled, autoRepairPrecheck, autoRepairDecision, autoRepairPrompt, claimAutoRepair } from '../AgentV3/previewAutoRepair';
+import { clearPreviewGaveUp } from '../AgentV3/previewGiveUp';
 import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
 import { frameworkMismatchFromListing, messageNamesAFramework, answersFrameworkQuestion, frameworkQuestionMarker, frameworkQuestionSteer, frameworkAnswerNote } from '../AgentV3/frameworkQuestion';
 import type { FrameworkCoherence } from '../AgentV3/ProjectImport';
@@ -696,11 +709,13 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
 // importer keeps working AND there is still exactly one actuator per process — two would silently hand a
 // session's second message a cold, empty sandbox.
 import { buildActuator } from './actuatorFactory';
+import { bindSessionReconnectForTests } from '../AgentV3/WorkspaceRegistry';
 import { envFlag } from '../lib/envFlag';
 import {
   workspaceOwnershipOk as sharedWorkspaceOwnershipOk,
   verifiedWorkspaceReadOk as sharedVerifiedWorkspaceReadOk,
   workspaceIdFor,
+  workspacePrefixFor,
   safeWorkspaceUid,
 } from '../lib/workspaceIdentity';
 import { adminRequestOk, requireAdmin } from '../lib/adminAuth';
@@ -819,6 +834,18 @@ export function resolveIdentityWithFallback(
 ): { userId: string | null; email: string | null } {
   if (verified) return { userId: verified.uid, email: verified.email };
   return { userId: claimedUserId, email: claimedEmail };
+}
+
+/**
+ * The identity a WRITE acts as: the verified token only, never a claimed body/query id (audit 2026-10-11).
+ * `resolveReadIdentity` keeps the claimed fallback for READS (an older bundled app without a token still
+ * opens its history); a write that falls back lets anyone who knows an account's uid rename or copy that
+ * account's apps. Under vitest there is no Firebase, so tests read the claimed id exactly as before.
+ */
+export async function resolveWriteIdentity(req: Request): Promise<{ userId: string | null; email: string | null }> {
+  if (process.env.VITEST) return resolveReadIdentity(req);
+  const verified = await verifyFirebaseIdentity(req);
+  return verified ? { userId: verified.uid, email: verified.email } : { userId: null, email: null };
 }
 
 export async function resolveReadIdentity(req: Request): Promise<{ userId: string | null; email: string | null }> {
@@ -1540,6 +1567,42 @@ export function finalSyntaxErrorSummary(fileCount: number): string {
  */
 export function conversationIdForWorkspace(workspaceId: string): string {
   return workspaceId;
+}
+
+/**
+ * Every id a workspace's conversation record can have: the workspace id itself (`conversationIdForWorkspace`),
+ * the bare session id (a DUPLICATED app's record is keyed by its own session id), and the legacy `v3_<sid>`.
+ * PURE.
+ */
+export function conversationIdCandidatesForWorkspace(workspaceId: string, userId: string | null): string[] {
+  const out = [conversationIdForWorkspace(workspaceId)];
+  for (const prefix of [workspacePrefixFor(userId), ANON_WORKSPACE_PREFIX]) {
+    if (prefix && workspaceId.startsWith(prefix) && workspaceId.length > prefix.length) {
+      const sid = workspaceId.slice(prefix.length);
+      out.push(sid, `v3_${sid}`);
+      break;
+    }
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * THIS workspace's conversation record, by point reads of its possible ids — never by listing the user's
+ * history (performance audit 2026-10-11, D1). Every build turn used to call `listByUser(uid, 10)` TWICE — each
+ * reading up to 200 conversation documents — just to find this one, and silently missed it when the workspace
+ * was not among the 10 most recent. Returns the record WITHOUT its transcript (`getMeta`), or null.
+ */
+export async function findWorkspaceConversation(
+  store: ConversationStore,
+  userId: string | null,
+  workspaceId: string,
+): Promise<ConversationRecord | null> {
+  const owner = userId ?? 'anon';
+  for (const id of conversationIdCandidatesForWorkspace(workspaceId, userId)) {
+    const rec = await (store.getMeta ? store.getMeta(id) : store.get(id)).catch(() => null);
+    if (rec && rec.workspaceId === workspaceId && rec.userId === owner) return rec;
+  }
+  return null;
 }
 
 /**
@@ -2381,9 +2444,11 @@ export function __setRunningBuildForTest(key: string, rb: RunningBuild | null): 
 
 const MAX_BUILD_BUFFER = 4000;
 /** The most recent build's diagnostics report per build key (userId) — for download/endpoint. */
-const lastDiagnostics = new Map<string, BuildDiagnosticsReport>();
+// Bounded (audit 2026-10-11): a full build report per user ever served used to stay for the life of the
+// instance. It is the in-memory FALLBACK to the durable report, so the oldest may leave.
+const lastDiagnostics = new BoundedCache<string, BuildDiagnosticsReport>({ maxEntries: 500, ttlMs: 6 * 60 * 60 * 1000 });
 /** Free users already shown the weak-tier welcome notice this instance (once per user — see the send). */
-const weakNoticeShownFor = new Set<string>();
+const weakNoticeShownFor = new BoundedCache<string, true>({ maxEntries: 50_000 });
 
 /** Shortest gap between two "check my connected services" calls from one app. Each one fans out to
  *  somebody else's servers, so a button must not be loopable. See callCooldown.ts. */
@@ -3714,6 +3779,8 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
   /** The BUILD's bench memory, shared by every runner the build constructs — see
    *  MultiProviderOptions.bench. Omitted ⇒ this runner benches for itself alone, as before. */
   bench?: BuildBenchRegistry;
+  /** P4 (fix/build-reliability) — sticky start; see MultiProviderOptions.sticky. Omitted ⇒ unchanged. */
+  sticky?: { remember: boolean };
 }): TurnRunner {
   const level = toPowerLevel(opts.tier as PowerLevel | boolean | string | undefined | null);
   const parsed = tierLadder(level);
@@ -3766,6 +3833,7 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
     ...(opts.onAttemptWasted ? { onAttemptWasted: opts.onAttemptWasted } : {}),
     ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
     ...(opts.bench ? { bench: opts.bench } : {}),
+    ...(opts.sticky ? { sticky: opts.sticky } : {}),
   });
 }
 
@@ -4110,6 +4178,39 @@ const serverPublishDeps: ServerPublishDeps = {
 };
 
 export function registerAgentV3Routes(app: Express): void {
+  // BLD-8 — when /exec misses the in-memory registry (another instance, or this one recycled),
+  // re-register against the durable sandbox IF it belongs to this caller. The actuator's own
+  // runCommand is the existing Sandbox.connect path; we do not create a session the caller does
+  // not own, and a missing record stays today's offline result. A PTY never uses this hook.
+  // Cloud Run session affinity would reduce cross-instance misses further; that hosting setting
+  // is out of scope.
+  bindSessionReconnectForTests(async (workspaceId, userId) => {
+    if (!workspaceId || !userId) return null;
+    const rec = await sandboxStore.getRecord(workspaceId).catch(() => null);
+    if (!rec?.sandboxId) return null;
+    if (rec.userId && rec.userId !== 'anon' && rec.userId !== userId) return null;
+    return buildActuator();
+  });
+  // The data API is the cheap backend. It is on for every app that has a key. It does not charge.
+  registerAppDataRoutes(app);
+  registerBrandApplyRoutes(app);
+  // Extra server / database. Charge happens inside these handlers, only after delivery.
+  // The normal Publish path is unchanged and does not add ₹149 on top of a plan.
+  registerResellHostingRoutes(app, {
+    publishServer: (input) => runServerPublish(input, {
+      ...serverPublishDeps,
+      serverCap: async () => ({ available: true, message: '' }),
+    }),
+    liveServerWorkspaces: liveServerWorkspaceIdsFor,
+    teardownServer: async (workspaceId, service) => {
+      const removed = await removeHostedServers(workspaceId, {
+        providerId: NAVBHARAT_CLOUD_PROVIDER,
+        service: service ?? '',
+      });
+      if (removed.ok) await deploymentStore.setStatus(workspaceId, 'unpublished').catch(() => false);
+      return { ok: removed.ok };
+    },
+  });
   // WHY WAS THIS SANDBOX STARTED? One zone per request, opened before every route below, so a create
   // or resume deep inside any handler can name its cause (sandboxSessionZone.ts). Decides nothing.
   app.use('/api/agentv3', sandboxReasonMiddleware);
@@ -4220,7 +4321,8 @@ export function registerAgentV3Routes(app: Express): void {
 
   // D7 — load one persisted build (full transcript) for resume. Owner-only.
   app.get('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // SECURITY (C1 follow-up): verified token, not query.userId
+    const verified = await verifiedIdentity(req); // BLD-2: a claimed ?userId= is not an identity
+    const userId = verified?.uid ?? null; const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
@@ -4275,7 +4377,8 @@ export function registerAgentV3Routes(app: Express): void {
   // conversationAccess() ownership check as the GET-one route above. The underlying store's
   // remove() is a no-op if the id doesn't exist, so this is safe to call twice (double-click).
   app.delete('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // SECURITY (C1 follow-up): verified token, not query.userId
+    const verified = await verifiedIdentity(req); // BLD-2: claimed ?userId= cannot delete someone else's app
+    const userId = verified?.uid ?? null; const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
@@ -4332,7 +4435,8 @@ export function registerAgentV3Routes(app: Express): void {
   // pinned-only patch that PRESERVES the record's updatedAt (pinning is not "activity"), so a pinned
   // build keeps its real last-worked time and only its list POSITION changes (pinned float to top).
   app.post('/api/agentv3/conversations/:id/pin', async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // verified token, not query.userId
+    const verified = await verifiedIdentity(req); // BLD-2: claimed ?userId= cannot pin someone else's app
+    const userId = verified?.uid ?? null; const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
@@ -4399,7 +4503,7 @@ export function registerAgentV3Routes(app: Express): void {
    * only honest state for a thing that has never been published or connected. See duplicateApp.ts.
    */
   app.post('/api/agentv3/conversations/:id/duplicate', workspaceRateLimiter(), async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
+    const { userId, email } = await resolveWriteIdentity(req); // verified token only — a write never falls back to a body-supplied id
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
@@ -4448,7 +4552,7 @@ export function registerAgentV3Routes(app: Express): void {
   });
 
   app.post('/api/agentv3/conversations/:id/name', async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
+    const { userId, email } = await resolveWriteIdentity(req); // verified token only — a write never falls back to a body-supplied id
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
@@ -4612,7 +4716,7 @@ async function noteBuildOutcome(
 ): Promise<void> {
   if (!buildOutcomeTrackingEnabled() || !workspaceId) return;
   try {
-    const rec = await buildOutcomeStore.note(workspaceId, patch);
+    const rec = await buildOutcomeStore.note(workspaceId, patch, (await buildOutcomeStore.get(workspaceId).catch(() => null))?.buildId);
     // No record means no build has finished for this workspace — there is nothing to judge, and
     // inventing one here would be inventing a build that never happened.
     if (!rec || !rec.buildId) return;
@@ -5711,9 +5815,14 @@ async function noteBuildOutcome(
     const message = typeof req.body?.message === 'string' ? req.body.message.slice(0, 4000) : '';
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId || !message) { res.status(400).json({ error: 'workspaceId and message are required.' }); return; }
+    if (!previewAutoRepairEnabled()) { res.json({ ok: true, run: false, reason: 'Automatic repair is switched off.' }); return; }
+    // BLD-11: claim synchronously, before any await, so two crash reports cannot both start a repair.
+    if (!claimAutoRepair(workspaceId)) {
+      res.json({ ok: true, run: false, reason: 'This build was already repaired automatically once — the Fix with AI button is next.' });
+      return;
+    }
     // VERIFIED owner only: this route can start a paid repair, so a claimed uid is never enough (aClaimedUidReadsNoOnesSource).
     if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
-    if (!previewAutoRepairEnabled()) { res.json({ ok: true, run: false, reason: 'Automatic repair is switched off.' }); return; }
     const report = await loadDiagnostics(workspaceId).catch(() => null);
     const facts = {
       buildEnded: !!report && typeof report.endedAt === 'number',
@@ -5723,6 +5832,10 @@ async function noteBuildOutcome(
     };
     const pre = autoRepairPrecheck(facts);
     if (pre) { res.json({ ok: true, ...pre }); return; }
+    // Claim durably BEFORE the long reproduce, so a second instance sees the marker while the first is still looking.
+    if (report) {
+      await saveDiagnostics(workspaceId, { ...report, previewAutoRepairAt: Date.now() }).catch(() => {});
+    }
     // REPRODUCE — on a sandbox that is ALREADY awake, never one started just to check.
     let reproduced: boolean | null = null;
     let seen: string[] = [];
@@ -5743,10 +5856,6 @@ async function noteBuildOutcome(
       }
     } catch { reproduced = null; /* could not look — the decision says so, and the button stays */ }
     const decision = autoRepairDecision({ ...facts, reproduced });
-    if (decision.run && report) {
-      // Claimed BEFORE the client sends the repair, so a second report of the same crash cannot start a second one.
-      await saveDiagnostics(workspaceId, { ...report, previewAutoRepairAt: Date.now() }).catch(() => {});
-    }
     res.json({ ok: true, ...decision, ...(decision.run ? { prompt: autoRepairPrompt(message, seen) } : {}) });
   });
 
@@ -6782,10 +6891,13 @@ async function noteBuildOutcome(
   // Every endpoint is workspace-owner-gated (a user can only touch THEIR app's queue) and best-effort.
 
   /** Enqueue a command for THIS app. `source`: 'user' (typed) | 'planner' | 'advisor' (a non-writing
-   *  chat handing work to the executor). Returns the updated queue + summary. */
+   *  chat handing work to the executor). Returns the updated queue + summary.
+   *  🔒 Every queue route takes the VERIFIED owner (audit 2026-10-11): a queued prompt becomes a build that
+   *  spends its owner's wallet, so the claimed-uid fallback `assertWorkspaceOwner` keeps for token blips let
+   *  anyone who learned a workspace id and its owner's uid queue work on that owner's money. */
   app.post('/api/agentv3/queue/enqueue', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
     if (!prompt) { res.status(400).json({ error: 'A non-empty prompt is required.' }); return; }
     if (prompt.length > MAX_PROMPT_LEN) { res.status(400).json({ error: `Prompt is too long (max ${MAX_PROMPT_LEN} chars).` }); return; }
@@ -6801,7 +6913,7 @@ async function noteBuildOutcome(
   /** Read THIS app's queue (items + summary) — for the queue UI and the executor's idle check. */
   app.get('/api/agentv3/queue', async (req: Request, res: Response) => {
     const workspaceId = typeof req.query?.workspaceId === 'string' ? req.query.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const queue = await loadQueue(workspaceId);
     res.json({ summary: queueSummary(queue), items: queue.items });
   });
@@ -6809,7 +6921,7 @@ async function noteBuildOutcome(
   /** Cancel a PENDING command (a running one must be Stopped via the build). */
   app.post('/api/agentv3/queue/cancel', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const id = typeof req.body?.id === 'string' ? req.body.id : '';
     if (!id) { res.status(400).json({ error: 'An item id is required.' }); return; }
     const queue = await mutateQueue(workspaceId, (q) => cancelQueueItem(q, id));
@@ -6822,7 +6934,7 @@ async function noteBuildOutcome(
    *  /queue/complete when that build settles. */
   app.post('/api/agentv3/queue/next', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     // Cheap short-circuit: a cached read tells us if there's anything to claim. When the queue is empty
     // or one is already running (the common case — most builds are not queued), return WITHOUT a
     // transaction/write, so the client-driven executor's per-settle probe costs ~nothing for non-queue users.
@@ -6840,7 +6952,7 @@ async function noteBuildOutcome(
    *  A failure PAUSES the queue client-side (the user decides retry/skip/stop) — recorded here honestly. */
   app.post('/api/agentv3/queue/complete', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const ok = req.body?.ok === true;
     const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 300) : undefined;
     const queue = await mutateQueue(workspaceId, (q) => completeQueuedRunning(q, ok, note));
@@ -7497,8 +7609,13 @@ async function noteBuildOutcome(
   // no runaway processes. available:false when the sandbox isn't warm (honest, never faked output).
   // Ownership-checked + rate-limited.
   app.post('/api/agentv3/exec', workspaceRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    if (terminalRequiresVerified() && !verified) {
+      res.status(401).json({ error: 'Sign in to use the terminal.' });
+      return;
+    }
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -7797,8 +7914,13 @@ async function noteBuildOutcome(
 
   /** Open a shell. Honest available:false (with the dormant/not_started reason) when no warm sandbox. */
   app.post('/api/agentv3/shell/open', workspaceRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    if (terminalRequiresVerified() && !verified) {
+      res.status(401).json({ error: 'Sign in to use the terminal.' });
+      return;
+    }
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -7906,8 +8028,13 @@ async function noteBuildOutcome(
    * (the exact keystroke-limiter lesson, again).
    */
   app.get('/api/agentv3/shell/wake', shellInputRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
-    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    if (terminalRequiresVerified() && !verified) {
+      res.status(401).json({ error: 'Sign in to use the terminal.' });
+      return;
+    }
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -7940,8 +8067,9 @@ async function noteBuildOutcome(
    * no gap and no duplicated output.
    */
   app.get('/api/agentv3/shell/stream', async (req: Request, res: Response) => {
-    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
-    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -7959,7 +8087,13 @@ async function noteBuildOutcome(
     const from = Number(req.query.cursor);
     const backlog = readShell(shellId, Number.isFinite(from) ? from : 0, workspaceId);
     if (!backlog) {
-      res.status(404).json({ error: 'This terminal is no longer open.' });
+      // The shell id is real to the client but this process has never heard of it — a different
+      // Cloud Run instance opened the TTY. 404 would tell the UI the terminal is gone; 409 tells
+      // it to open a new one HERE, once. A brand-new /shell/open does not use this code.
+      res.status(409).json({
+        code: 'SHELL_NOT_ON_THIS_INSTANCE',
+        error: 'This terminal was opened on another server — reopening…',
+      });
       return;
     }
 
@@ -7985,17 +8119,44 @@ async function noteBuildOutcome(
     );
     if (!unsubscribe) { res.end(); return; }
 
+    // GT-16 — register cleanup IMMEDIATELY after subscribe, BEFORE any timer. PR-15 already
+    // awaited verifiedIdentity at the top of this handler, so there is no await between subscribe
+    // and here. Moving that await back under the subscribe would re-open the leak: a client that
+    // leaves during the await would never have a listener, and the intervals below would run
+    // (and keep charging quota) until the process noticed on its own. The invariant is "cleanup
+    // is registered immediately after subscribe, before any timer" — not "before verifiedIdentity".
+    const quotaUid = verified?.uid ?? null;
+    let closed = false;
+    let beat: NodeJS.Timeout | undefined;
+    let meter: NodeJS.Timeout | undefined;
+    let watch: NodeJS.Timeout | undefined;
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (beat) clearInterval(beat);
+      if (watch) clearInterval(watch);
+      if (meter) clearInterval(meter);
+      // Leave the shared stretch, charging the seconds since the last tick so closing a tab never
+      // forgives time. Terminals still open keep the same mark and carry on. detachStream is a
+      // no-op when this stream was never attached (the client was already gone).
+      if (quotaUid) void chargeTerminalSeconds(quotaUid, detachStream(terminalMeters, quotaUid, shellId, Date.now()));
+      unsubscribe();
+    };
+    onStreamClosed(res, cleanup);
+    // A client that already went away must not start intervals. No await sits between the
+    // registration above and this check; it still matters when `close` fired synchronously.
+    if (closed || res.destroyed || res.writableEnded) { cleanup(); return; }
+
     // Heartbeat: keeps intermediaries from closing an idle stream, and lets the client notice a dead
     // connection while a long build produces nothing for minutes.
-    const beat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* client gone */ } }, 20_000);
+    beat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* client gone */ } }, 20_000);
     // A2 — accrue the daily allowance WHILE the terminal is attached. Metering only on close would be
     // bypassable by simply shutting the tab, which is what most people do. When the allowance runs out
     // the stream is ended with an honest event rather than going quiet: a terminal that stops
     // responding for no stated reason is indistinguishable from a broken one.
-    const quotaUid = (await verifiedIdentity(req).catch(() => null))?.uid ?? null;
     // Join this user's shared stretch. A second terminal does NOT start a second bill.
     if (quotaUid) attachStream(terminalMeters, quotaUid, shellId, Date.now());
-    const meter = setInterval(() => {
+    meter = setInterval(() => {
       void (async () => {
         const now = Date.now();
         if (quotaUid) await chargeTerminalSeconds(quotaUid, accrueFor(terminalMeters, quotaUid, now));
@@ -8014,30 +8175,17 @@ async function noteBuildOutcome(
       })();
     }, 30_000);
     // Poll for exit so the UI can show "[process exited]" instead of a shell that just stops responding.
-    const watch = setInterval(() => {
+    watch = setInterval(() => {
       const s = getShell(shellId, workspaceId);
       if (!s || !s.alive) { send('exit', { exitCode: s?.exitCode ?? null }); cleanup(); res.end(); }
     }, 1000);
-
-    let done = false;
-    const cleanup = () => {
-      if (done) return;
-      done = true;
-      clearInterval(beat);
-      clearInterval(watch);
-      clearInterval(meter);
-      // Leave the shared stretch, charging the seconds since the last tick so closing a tab never
-      // forgives time. Terminals still open keep the same mark and carry on.
-      if (quotaUid) void chargeTerminalSeconds(quotaUid, detachStream(terminalMeters, quotaUid, shellId, Date.now()));
-      unsubscribe();
-    };
-    onStreamClosed(res, cleanup);
   });
 
   /** Keystrokes → the TTY. Ctrl+C is just the real \x03 byte arriving here; there is no special case. */
   app.post('/api/agentv3/shell/input', shellInputRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -8053,14 +8201,22 @@ async function noteBuildOutcome(
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
+    if (!getShell(shellId, workspaceId)) {
+      res.status(409).json({
+        code: 'SHELL_NOT_ON_THIS_INSTANCE',
+        error: 'This terminal was opened on another server — reopening…',
+      });
+      return;
+    }
     const ok = await writeShell(shellId, data, workspaceId);
     res.json({ ok });
   });
 
   /** New window size → the TTY, so column-drawn output (top, vim, progress bars) wraps correctly. */
   app.post('/api/agentv3/shell/resize', shellInputRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -8075,14 +8231,22 @@ async function noteBuildOutcome(
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
+    if (!getShell(shellId, workspaceId)) {
+      res.status(409).json({
+        code: 'SHELL_NOT_ON_THIS_INSTANCE',
+        error: 'This terminal was opened on another server — reopening…',
+      });
+      return;
+    }
     const ok = await resizeShell(shellId, Number(req.body?.cols), Number(req.body?.rows), workspaceId);
     res.json({ ok });
   });
 
   /** Kill the shell. Idempotent — closing an already-closed terminal is a success, not an error. */
   app.post('/api/agentv3/shell/close', workspaceRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const verified = await verifiedIdentity(req).catch(() => null);
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: ENGINE_DISABLED });
       return;
@@ -8162,12 +8326,13 @@ async function noteBuildOutcome(
     const tier = await readHostingPlanStatus(getDb() as any, identity.uid)
       .then((st) => st.tier)
       .catch(() => null);
+    const allowance = await readHostingAllowance(identity.uid).catch(() => null);
     res.json({
       apps,
       paused,
       // The cap is stated with the list so "5 of 5 used" is visible before a publish is refused. It
-      // follows the user's PLAN, so a Growth customer is not told they are at the free limit of 5.
-      cap: publishedAppCapForTier(tier),
+      // follows the user's PLAN plus any extra-website add-on they have paid for.
+      cap: publishedAppCapForAccount(tier, allowance?.extraSites ?? 0),
       freeCap: publishedAppCap(),
       planName: tier?.name ?? null,
       used: apps.length,
@@ -8759,7 +8924,7 @@ async function noteBuildOutcome(
     const provider = getDeployProvider(opts.providerId)
       ?? getDeployProvider(DEFAULT_DEPLOY_PROVIDER)
       ?? getDeployProvider('firebase')!;
-    return withDeploymentPersistence(
+    const persisted = withDeploymentPersistence(
       async (ws: string, files: Map<string, Buffer>) => {
         const url = await provider.deploy(ws, files, { userId: opts.userId, githubToken: opts.githubToken });
         // Firebase-NATIVE custom domain: when publishing on OUR hosting AND this workspace has a
@@ -8788,6 +8953,19 @@ async function noteBuildOutcome(
       opts.userId,
       opts.providerId,
     );
+    // EVERY publish passes here — the Publish button and the AI's own `deploy` tool — so this is the one
+    // place the user's DEPLOY_COMPLETE / DEPLOY_FAILED webhooks are told (userWebhookEvents.ts). A refusal
+    // (quota, takedown, held for review) is a failed publish to the person who pressed the button.
+    return async (ws: string, files: Map<string, Buffer>): Promise<string> => {
+      try {
+        const url = await persisted(ws, files);
+        announceDeploy(opts.userId, true, url);
+        return url;
+      } catch (err) {
+        announceDeploy(opts.userId, false);
+        throw err;
+      }
+    };
   };
 
   /**
@@ -9008,11 +9186,14 @@ async function noteBuildOutcome(
                 firstPublish,
               }, serverPublishDeps);
               res.status(published.status).json(published.live ? published.body : { ...published.body, shape: plan.shape });
+              const hookOutcome = serverPublishOutcome(published);
+              if (hookOutcome) announceDeploy(hostOwnerUid, hookOutcome === 'complete', published.url);
               if (published.live) {
                 void (async () => { await noteBuildOutcome(workspaceId, { invested: true }, await outcomeIdentity(req)); })();
               }
               return;
             } catch (e) {
+              announceDeploy(hostOwnerUid, false);
               res.status(502).json({
                 error: `Hosting failed: ${e instanceof Error ? e.message : String(e)}`,
                 code: 'needs-server-hosting',
@@ -9631,7 +9812,8 @@ async function noteBuildOutcome(
       // volatile sandbox and the File Guardian later restores the stale durable copy, silently
       // destroying the edit. mergeWorkspaceFiles UNIONS paths so a partial set never drops other files.
       // Awaited so a subsequent build reads the fresh truth. Best-effort — never blocks the import.
-      try { await mergeWorkspaceFiles(workspaceId, files as Record<string, string>); } catch { /* durable persist is best-effort */ }
+      // The durable outcome travels in the response (Q-735) — a save that did not happen is not reported as one.
+      const durable = await mergeWorkspaceFiles(workspaceId, files as Record<string, string>).catch(() => null);
       // Phase S2 — when this import is a MANUAL IDE EDIT (source: 'ide-edit', sent by the editor's
       // debounced syncer), record the paths so the NEXT v5.0 build acknowledges them ("I noticed you
       // edited N files…") and builds on top of them. Bulk repo imports / uploads do NOT set this flag,
@@ -9703,7 +9885,7 @@ async function noteBuildOutcome(
           needsGithub = true; // large import, no GitHub connected — let the client offer to connect
         }
       }
-      res.json({ imported: written.length, skipped: skipped.length, ...(github ? { github } : {}), ...(needsGithub ? { needsGithub: true } : {}) });
+      res.json({ imported: written.length, skipped: skipped.length, ...(durable ? { durable: { status: durable.status, saved: durable.indexed, unconfirmed: durable.unconfirmed.length } } : {}), ...(github ? { github } : {}), ...(needsGithub ? { needsGithub: true } : {}) });
     } catch (err: any) {
       res.status(500).json({ error: toSafeClientMessage(err, 'Failed to import the files.') });
     }
@@ -10457,7 +10639,7 @@ async function noteBuildOutcome(
     // Shown once per user per server instance (a gentle reminder may repeat after a cold start — fine);
     // the phrasing rotates by seed so repeats never read identically.
     if (callerIsFreeTier === true && powerSpecResolved.cheapOnly && userId && !weakNoticeShownFor.has(userId)) {
-      weakNoticeShownFor.add(userId);
+      weakNoticeShownFor.set(userId, true);
       const langCode = detectLanguageHint(prompt)?.code ?? null;
       send({ type: 'narration', agent: 'system', text: weakTierWelcomeNotice(langCode, userId.length + prompt.length), ts: Date.now() });
     }
@@ -11109,9 +11291,12 @@ async function noteBuildOutcome(
         // LIVE WEB GROUNDING (admin 2026-07-12): a plain chat question that needs current facts
         // (sports/news/prices/"latest"/"aaj") gets real search results folded in, so v5.0 answers from
         // today's data, not its training cutoff. Gated + bounded + best-effort — normal chat is untouched.
+        // A grounded reply carries TODAY's search results, so it is never served from the prompt-keyed cache
+        // below: a cached "aaj ka score" would be up to 15 minutes old (performance audit 2026-10-11).
+        let liveGrounded = false;
         try {
           const liveBlock = await liveSearchContext(prompt, { cheap: freeTierBuildActive || powerSpecResolved.cheapOnly });
-          if (liveBlock) chatPrompt = `${liveBlock}\n\n---\n${chatPrompt}`;
+          if (liveBlock) { chatPrompt = `${liveBlock}\n\n---\n${chatPrompt}`; liveGrounded = true; }
         } catch { /* live search is best-effort */ }
         // v5.0 used to answer a plain chat question ("kितni files hai?") completely blind — the chat
         // lane never loaded any workspace context. projectFileCount was already computed above for
@@ -11148,8 +11333,12 @@ async function noteBuildOutcome(
         // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
         // than reasoned around: the other conditions happen to cover it today, and that is exactly
         // the kind of coincidence that stops being true after an unrelated edit.
-        const cacheable = !answerThenOffer && !askUnrelated && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !answerSpreadsheet && !clarifyWhatToBuild && chatCacheEnabled();
-        const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
+        // `askFramework` and `liveGrounded` are excluded outright for the same reason (audit 2026-10-11): the
+        // first is a per-workspace steer, the second carries today's search results. The key is a SHA-256 of
+        // the prompt plus the model lane, so two different prompts can never share a reply (a 32-bit hash
+        // could) and a cheap-lane answer is never served to a paid turn.
+        const cacheable = !answerThenOffer && !askUnrelated && !askFramework && !liveGrounded && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !answerSpreadsheet && !clarifyWhatToBuild && chatCacheEnabled();
+        const cacheKey = cacheable ? chatReplyCacheKey(prompt, Boolean(freeTierBuildActive || powerSpecResolved.cheapOnly)) : '';
         let reply: string;
         // The spreadsheet this reply carries, when it made one — rides on the narration line and the
         // persisted turn, so the Download button is there live AND after the chat is reopened.
@@ -11635,8 +11824,28 @@ async function noteBuildOutcome(
       // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
       // empty": without it the import lives only in the ephemeral sandbox.
       try { opts.diag?.enterPhase?.('saving your project so it survives a restart'); } catch { /* best-effort */ }
-      try { await mergeWorkspaceFiles(workspaceId, importedFiles); } catch { /* durable persist is best-effort */ }
-      finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
+      /**
+       * 🔒 THE SAVE IS CHECKED, NOT ASSUMED (autopsy d0b2fcd6, Q-735). This line used to be best-effort and
+       * silent: when the commit timed out, the user's 175-file app stayed out of the durable index and the
+       * whole turn treated it as our starter. A store that did not save it says so — to the admin report and,
+       * in plain words, to the user — instead of the next turn quietly losing it.
+       */
+      try {
+      const durable = await mergeWorkspaceFiles(workspaceId, importedFiles).catch((e) => ({ status: 'failed' as const, indexed: 0, unconfirmed: Object.keys(importedFiles), error: String(e) }));
+      if (durable.status === 'failed' || durable.status === 'partial') {
+        try {
+          opts.diag?.record({
+            phase: 'build', severity: 'warning', code: 'IMPORT_NOT_DURABLE', autoResolved: false,
+            message: `The imported project is in the workspace, but the durable copy holds ${durable.indexed} of ${Object.keys(importedFiles).length} file(s) — ${durable.unconfirmed.length} could not be confirmed saved.`,
+            detail: `${durable.status}${durable.error ? ` · ${durable.error}` : ''} · unconfirmed: ${durable.unconfirmed.slice(0, 20).join(', ')}`,
+          });
+        } catch { /* diagnostics are best-effort */ }
+        emit({
+          type: 'narration', agent: 'architect', ts: Date.now(),
+          text: `⚠️ Your project is here and working in this session, but ${durable.unconfirmed.length} of its ${Object.keys(importedFiles).length} files could not be saved permanently yet. Keep this chat open; if it restarts, import the project again.`,
+        });
+      }
+      } finally { try { opts.diag?.exitPhase?.(); } catch { /* best-effort */ } }
       framework = validation.framework;
       // TELL THE REPORT (autopsy d6deaaf0): the diagnostics object captured `framework` at build
       // start, before the import existed, so it kept the request default while the manifest recorded
@@ -12542,6 +12751,36 @@ async function noteBuildOutcome(
       buildObs.telemetryRecorded = true;
       recordPlatformBuild(rec);
     };
+    // ONE failed build counts ONCE, including the one the watchdog ends. The settle and
+    // finalizeOnDeadline can both reach this; the flag is the same idea as telemetry above.
+    let failureLedgerRecorded = false;
+    const recordFailureLedgerOnce = (entry: Parameters<typeof failureLedgerStore.record>[0]) => {
+      if (failureLedgerRecorded) return;
+      failureLedgerRecorded = true;
+      void failureLedgerStore.record(entry);
+    };
+    // The cost expression lives HERE so the settle and the watchdog cannot drift. It is the
+    // expression the settle already used: real provider cost of the ledger plus the VM.
+    // Nothing in this helper changes what the user is billed.
+    const ledgerEntryFor = (i: {
+      entries: Parameters<typeof realProviderCostUsd>[0];
+      remainder: { inputTokens: number; outputTokens: number };
+      sandboxUsd: number;
+      summary: string;
+      rootCause: string;
+      issues: ReadonlyArray<{ code: string }> | null | undefined;
+      inputTokens: number;
+      outputTokens: number;
+      startedAt: number;
+    }) => ({
+      category: classifyFailure(i.rootCause || i.summary || '', outcomeCodeOf(i.issues)).category,
+      framework,
+      realUsd: realProviderCostUsd(i.entries, i.remainder) + Math.max(0, i.sandboxUsd || 0),
+      inputTokens: i.inputTokens || 0,
+      outputTokens: i.outputTokens || 0,
+      ms: Math.max(0, Date.now() - i.startedAt),
+      sample: i.rootCause || '',
+    });
     // Force-finalize a build that overran its wall-clock cap — or, once the build has already SUCCEEDED,
     // its much shorter ADVISORY cap (see armAdvisoryCap). Extracted so the initial arm and the re-arm
     // share one implementation. Guarded by rb.ended so it can never double-emit after a clean finish.
@@ -12825,7 +13064,7 @@ async function noteBuildOutcome(
           watchdogDiscountLine ? `🟢 ${watchdogDiscountLine}` : '',
         ].filter(Boolean).join('\n\n');
         emit({ type: 'result', ok: true, summary: watchdogSummary, steps: buildResultRef.steps ?? 0, billedUsd: watchdogBilledUsd, billedInr, ...(watchdogWalletDebit && watchdogWalletDebit.tokensDebited > 0 ? { walletTokensDebited: watchdogWalletDebit.tokensDebited, walletTokenBalance: watchdogWalletDebit.tokenBalance } : {}), ...(watchdogCostBreakdown ? { costBreakdown: watchdogCostBreakdown } : {}), ...(dl ? { diagnostics: dl } : {}) });
-        void notifyBuildComplete(userId, true);
+        announceBuildFinished(userId, true);
       } else {
         // SEAMLESS WINDOW TRANSITION (admin "sabkuch automatically hona chahiye, user ko pata bhi na
         // lage", 2026-07-20): a wall-clock pause that will be AUTO-CONTINUED must be INVISIBLE — no
@@ -12836,6 +13075,29 @@ async function noteBuildOutcome(
         // (never rendered as a bubble on the resumable path). RC-4's honest-wording lives in the client
         // stopMessage now, so nothing here can claim "almost done".
         const pauseMsg = pauseMsgForReport;
+        // A build the watchdog ended never reached the settle, so the failure ledger would
+        // not see it. Same entry, same cost expression, and the once-flag so a race records it once.
+        try {
+          const sink = buildUsage.total();
+          const ledger = billingCtx.providerLedger;
+          const sandboxUsd = billableSandboxDetail(actuator, workspaceId, billingCtx.buildStartedAt).usd;
+          const entries = ledger ? ledger.entries() : [];
+          const remainder = ledger
+            ? decideBuildBilledUsd(ledger, sink, powerLevelReqEffective, userId ?? undefined, email, sandboxUsd, barrenPhases).realCostRemainder
+            : { inputTokens: Math.max(0, sink.inputTokens || 0), outputTokens: Math.max(0, sink.outputTokens || 0) };
+          const failDiag = dl;
+          recordFailureLedgerOnce(ledgerEntryFor({
+            entries,
+            remainder,
+            sandboxUsd,
+            summary: pauseMsg.summary || '',
+            rootCause: failDiag?.rootCause || '',
+            issues: failDiag?.issues,
+            inputTokens: sink.inputTokens || 0,
+            outputTokens: sink.outputTokens || 0,
+            startedAt: billingCtx.buildStartedAt ?? Date.now(),
+          }));
+        } catch { /* the ledger must never change how a deadline ends */ }
         // A pause that waits for the user (free chain spent) is NOT resumable, so the client renders its
         // `summary` as the build's closing line — which is why freePauseMessage's summary is the full
         // sentence. No separate narration: it would say the same thing twice.
@@ -13935,6 +14197,12 @@ async function noteBuildOutcome(
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         complex: buildIsComplex, // a complex app opens on KIMI, not the flash rung — see makeFastTextRunner
         bench: buildBench,
+        // P4 (fix/build-reliability) — sticky start, default OFF. STICKY_RUNG remembers the rung that
+        // answered; QUALITY_ESCALATE alone only honours explicit upward escalations. Never below rung 0's
+        // guarded chain, so the weak no-Claude guard above still decides what can be reached.
+        ...((reliabilityFlag('STICKY_RUNG') || reliabilityFlag('QUALITY_ESCALATE'))
+          ? { sticky: { remember: reliabilityFlag('STICKY_RUNG') } }
+          : {}),
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
@@ -14799,16 +15067,23 @@ async function noteBuildOutcome(
         // restores a broken tree over a working one, and neither is worth a probabilistic win rate.
         if (greenGuardEnabled() && wantsAttemptBack(prompt)) {
           try {
-            const attempt = await loadWorkspaceFiles(attemptWorkspaceKey(workspaceId)).catch(() => ({} as Record<string, string>));
+            const loaded = await loadWorkspaceFilesWithStatus(attemptWorkspaceKey(workspaceId)).catch(() => ({ files: {} as Record<string, string>, status: 'unreadable' as const, savedAt: null as number | null }));
+            const attempt = loaded.files;
             const count = Object.keys(attempt).length;
             if (count > 0) {
-              await saveWorkspaceFiles(workspaceId, attempt);
-              events.emit({ type: 'narration', agent: 'architect', text: attemptRestoredMessage(count), ts: Date.now() });
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'GREEN_GUARD_ATTEMPT_RESTORED',
-                message: `The user asked for the rolled-back attempt back; ${count} file(s) restored from the preserved attempt before this turn's work began.`,
-                autoResolved: true,
-              });
+              const previous = await loadDiagnostics(workspaceId).catch(() => null);
+              if (!attemptIsHonoured(loaded.savedAt, Date.now(), previous?.endedAt ?? null)) {
+                events.emit({ type: 'narration', agent: 'architect', text: 'That earlier attempt has expired.', ts: Date.now() });
+              } else {
+                await saveWorkspaceFiles(workspaceId, attempt);
+                await removeWorkspaceFiles(attemptWorkspaceKey(workspaceId), Object.keys(attempt)).catch(() => {});
+                events.emit({ type: 'narration', agent: 'architect', text: attemptRestoredMessage(count), ts: Date.now() });
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'GREEN_GUARD_ATTEMPT_RESTORED',
+                  message: `The user asked for the rolled-back attempt back; ${count} file(s) restored from the preserved attempt before this turn's work began.`,
+                  autoResolved: true,
+                });
+              }
             } else {
               // Honest rather than silent: the phrase was understood, there was simply nothing kept.
               events.emit({ type: 'narration', agent: 'architect', text: 'There is no earlier version of yours saved to bring back — nothing was rolled back recently. Tell me what you would like to change and we will go from what is here now.', ts: Date.now() });
@@ -15132,6 +15407,9 @@ async function noteBuildOutcome(
         // And its file READS — so the repeated-read finding covers the reviewer and every other
         // sub-agent, not just the architect (autopsy f97eb0ec).
         readLedger: () => dispatcherForSubAgents?.sharedReadLedger(),
+        // TD-16 — one paid-tool budget for the whole build. The thunk reads the parent after it
+        // exists; makeSubAgentSpawn hands that same object (this.toolBudget) to every child.
+        toolBudget: () => dispatcherForSubAgents?.toolBudget,
         readLoopStops: () => dispatcherForSubAgents?.sharedReadLoopStops(),
         serverlessPayment: () => dispatcherForSubAgents?.serverlessPaymentHandler(),
         // And its stylesheet rewrites that had design-kit rules kept (autopsy e725e002).
@@ -15259,6 +15537,7 @@ async function noteBuildOutcome(
        */
       let inBuildWriteTick = 0;
       const onFileWrite = (path: string, content: string) => {
+        if (isSecretEnvPath(path)) return; // TD-1: a live vault .env is never a durable project file
         inBuildWriteTick++;
         // Security gate: scan AI-generated JS/TS files for malicious patterns before
         // they are persisted. Critical findings emit a security warning event so the
@@ -15380,9 +15659,13 @@ async function noteBuildOutcome(
           });
           // Collect BEFORE judging the race, so a write during the collection is caught too.
           let files: Record<string, string> = {};
+          let scanOk = false;
           if (isProvenGreenRender(shot, verdict)) {
-            try { files = { ...(await collectWorkspaceFiles(actuator, workspaceId)).files }; } catch { /* captured writes below are the reliable source */ }
-            for (const [pth, c] of writtenFiles) files[pth] = c;
+            try {
+              files = { ...(await collectWorkspaceFiles(actuator, workspaceId)).files };
+              scanOk = true;
+            } catch { /* a failed scan is not a snapshot — do not save a partial tree */ }
+            if (scanOk) for (const [pth, c] of writtenFiles) files[pth] = c;
           }
           const judged = attemptOutcome({ shot, verdict, writesBefore, writesAfter: inBuildWriteTick });
           // ⚠️ PROVEN AND NOTHING TO SAVE IS ITS OWN OUTCOME, NOT A MISSING BRANCH. This used to read
@@ -15405,10 +15688,29 @@ async function noteBuildOutcome(
             try { buildDiag.recordTimeToFirstRender(elapsedMs); } catch { /* best-effort */ }
           }
           if (outcome.kind === 'proven') {
-            // The same key the end-of-build GreenGuard reads — no second store, no second rule.
-            await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files);
-            inBuildGreenAt = Date.now();
-            events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
+            if (!scanOk) {
+              try {
+                buildDiag.record({
+                  phase: 'preview', severity: 'warning', code: 'IN_BUILD_GREEN_SKIPPED_PARTIAL_SCAN',
+                  message: 'The working version was not saved as a restore point because the project could not be fully read.',
+                  autoResolved: false,
+                });
+              } catch { /* best-effort */ }
+            } else {
+              const st = await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files, { mode: 'replace' });
+              if (st === 'saved') {
+                inBuildGreenAt = Date.now();
+                events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
+              } else {
+                try {
+                  buildDiag.record({
+                    phase: 'preview', severity: 'warning', code: 'IN_BUILD_GREEN_NOT_SAVED',
+                    message: `The working version could not be saved as a restore point (${st}).`,
+                    autoResolved: false,
+                  });
+                } catch { /* best-effort */ }
+              }
+            }
           }
           try { buildDiag.record({ phase: 'preview', ...inBuildGreenNote(outcome, { elapsedMs, fileCount: Object.keys(files).length }) }); } catch { /* best-effort */ }
         } catch (err) {
@@ -15444,6 +15746,7 @@ async function noteBuildOutcome(
         if (inBuildGreenAt > 0 && postGreenWrites.length < 2000) postGreenWrites.push({ path, pass, at: Date.now() });
       }, workspaceId);
 
+      clearPreviewGaveUp(workspaceId);
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
         // ⚠️ AND COUNT IT (autopsy a2b9c802): this hook only recorded, so the futility breaker never saw
@@ -15832,6 +16135,19 @@ async function noteBuildOutcome(
       // Best-effort: a listFiles failure falls back to the edit prefix without a
       // tree, and a non-edit turn uses the normal architect prompt unchanged.
       let architectSystem = architectSystemPrompt(framework, { parallelBuild });
+      // P5a (AGENTV3_MODULAR_PROMPT, default OFF) — slim core prompt: domain modules the request does not
+      // need move out and stay reachable through read_guide. P2c (AGENTV3_FILE_SIZE_RULE) — the ~200-line rule.
+      const fullArchitectPromptForGuides = architectSystem;
+      let modularDeferred: string[] = [];
+      if (modularPromptEnabled()) {
+        try {
+          const mp = modularizePrompt(architectSystem, prompt, isEditMode ? ['fullstack'] : []);
+          architectSystem = mp.prompt;
+          modularDeferred = mp.deferred;
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'MODULAR_PROMPT', message: `Architect prompt ${mp.charsBefore} → ${mp.charsAfter} chars; on demand: ${mp.deferred.join(', ') || 'none'}`, autoResolved: true });
+        } catch { /* a modularisation failure keeps the full prompt */ }
+      }
+      if (fileSizeRuleEnabled()) architectSystem = `${architectSystem}\n\n${FILE_SIZE_RULE}`;
       // Capture the pure static body BEFORE any per-request context block is prepended below, so the
       // cache-prefix optimization (AGENTV3_CACHE_PREFIX, applied before the runner is built) can split
       // the volatile prefix back out and keep this large static body as a stable Anthropic cache prefix.
@@ -16309,6 +16625,26 @@ async function noteBuildOutcome(
         architectSystem = split.system;
         cachePrefixPreamble = split.preamble;
       }
+      // Built-in tools FIRST, connected services after (locked by mcpClient.test.ts); the reliability
+      // extras (append_file / read_guide) exist only when their flags are on.
+      const architectExtraTools = [
+        ...(resumeTruncatedEnabled() ? [APPEND_FILE_TOOL] : []),
+        ...(modularDeferred.length ? [READ_GUIDE_TOOL] : []),
+      ];
+      const architectToolset = coreToolsetEnabled()
+        ? new DynamicToolset([...catalogForTools(roleConfig('architect').tools), ...architectExtraTools], externalToolDefs(mcpTools), [...CORE_TOOL_NAMES, 'append_file', 'read_guide'])
+        : null;
+      const architectToolsForBuild = architectToolset
+        ? architectToolset.tools
+        : [...catalogForTools(roleConfig('architect').tools), ...externalToolDefs(mcpTools), ...architectExtraTools];
+      try {
+        dispatcher.setReliabilityHooks({
+          ...(architectToolset ? { loadTools: (names: unknown) => architectToolset.load(names) } : {}),
+          ...(modularDeferred.length
+            ? { readGuide: (name: string) => moduleText(fullArchitectPromptForGuides, String(name ?? '').trim().toLowerCase()) || `No guide called "${name}". Available: ${modularDeferred.join(', ')}.` }
+            : {}),
+        });
+      } catch { /* hooks are optional — a dispatcher without them just refuses the meta tools */ }
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -16346,7 +16682,9 @@ async function noteBuildOutcome(
         system: architectSystem,
         // Built-in tools PLUS anything the user connected. Concatenated with ours FIRST so a
         // connected service can never displace a platform tool in the list the model reads.
-        tools: [...catalogForTools(roleConfig('architect').tools), ...externalToolDefs(mcpTools)],
+        // fix/build-reliability — append_file (P2b), read_guide (P5a) and the 16-core + load_tools set
+        // (P5c) are each added only when their flag is on; all off ⇒ exactly the list above as before.
+        tools: architectToolsForBuild,
         onlyOpus,
         powerLevel: powerLevelReqEffective,
         // Slice 2 — weak-tier mid-build checkpoint scope. Same signal Slice 1 uses: a weak/cheap-only
@@ -16400,6 +16738,20 @@ async function noteBuildOutcome(
         ...baseRunnerOpts,
         client,
         model,
+        // P4b (fix/build-reliability, AGENTV3_QUALITY_ESCALATE, default OFF) — quality signals move the
+        // build UP one model on the sticky chain. `noClaude` forbids a Claude target outright, so a weak
+        // build can never be escalated onto Claude (user rule 2026-10-09).
+        ...(reliabilityFlag('QUALITY_ESCALATE')
+          ? {
+              onQualityEscalate: (reason: string) => {
+                const out = escalateSticky(buildBench.sticky ??= createStickyState(), { noClaude: noClaudeBuild });
+                try {
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'QUALITY_ESCALATE', message: out.escalated ? `Escalated ${out.fromModel ?? '?'} → ${out.toModel ?? '?'}: ${reason}` : `Escalation refused (${out.reason ?? 'n/a'}): ${reason}`, autoResolved: true });
+                } catch { /* diagnostics are best-effort */ }
+                return out;
+              },
+            }
+          : {}),
         // ── THE CORRECTION RESERVE, ENFORCED ─────────────────────────────────────────────────────
         // Generation stops at the reserve line instead of at the wall, so the verify → repair →
         // re-verify stage below has a budget of its own rather than whatever generation happened to
@@ -16817,8 +17169,7 @@ async function noteBuildOutcome(
       // turns "continue" from amnesia into a real resume. Best-effort — never blocks the build.
       try {
         const store = getConversationStore();
-        const recent = await store.listByUser(userId ?? 'anon', 10);
-        const prior = recent.find((r) => r.workspaceId === workspaceId);
+        const prior = await findWorkspaceConversation(store, userId, workspaceId);
         if (prior) {
           const full = await store.get(prior.id);
           // MEMORY FIX 6 (long sessions): a ROLLING summary — recent turns verbatim PLUS a condensed
@@ -17026,7 +17377,7 @@ async function noteBuildOutcome(
           client: planGrok ?? client,
           // C2 — the plan runner has tool access too, so it gets the same guard. A planner that
           // "helpfully" edits a protected file would be the same breach by a quieter route.
-          dispatcher: (() => { const d = new ToolDispatcher(actuator, workspaceId, state, events); d.setIgnoreRules(ignoreRulesForBuild); return d; })(),
+          dispatcher: (() => { const d = new ToolDispatcher(actuator, workspaceId, state, events); d.shareToolBudget(dispatcher.toolBudget); d.setIgnoreRules(ignoreRulesForBuild); return d; })(),
           state,
           events,
           usageSink: buildUsage, // billing accounting fix — the plan step's tokens are billed too
@@ -20580,6 +20931,10 @@ async function noteBuildOutcome(
         } catch { /* diagnostics are best-effort — never blocks a build */ }
       }
       let previewVerifiedFailed = false;
+      // GT-11. Billing still reads previewVerifiedFailed. The gate does not:
+      // a server that will not stay up is not "the app did not render".
+      let previewRenderFailed = false;
+      let previewServerDown = false;
       // ── A RUN-PROVEN APP IS NEVER FLIPPED TO "NOT BUILT" BY A VERDICT THAT ONLY READ THE CODE ──
       // (runProvenApp.ts — autopsy e706e068, and the admin's standing 4efab9d7 rule). Two facts only
       // a RUN can establish, kept here so every late flip below asks the same question of the same
@@ -21365,7 +21720,14 @@ async function noteBuildOutcome(
         // Only if there's comfortable time left before the wall-clock cap (verify + a heal pass).
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
       ) {
-        const healMax = autoFixEnabled() ? Math.max(1, autoFixMaxAttempts()) : 1; // ≥1 fix attempt
+        /**
+         * 🔒 AN IMPORT/SURVEY TURN IS LOOKED AT, NEVER REPAIRED (autopsy d0b2fcd6, Q-736). The user said "do not
+         * change any files yet"; every other automatic writer is gated on `expectsArtifacts`, and this loop
+         * was the one that was not — its repair run installed packages, edited three files and rewrote the
+         * iOS workflow on a read-only turn. A budget of 0 keeps the look (attempt 0 verifies and reports
+         * honestly) and removes the repair.
+         */
+        const healMax = !expectsArtifacts ? 0 : autoFixEnabled() ? Math.max(1, autoFixMaxAttempts()) : 1; // ≥1 fix attempt on a build turn
         // Restarting a dead process is NOT a repair attempt and must not spend the repair budget —
         // otherwise one crashed dev server silently costs the app its only chance at a real fix. Bounded
         // on its own so a server that refuses to stay up cannot loop.
@@ -21675,6 +22037,7 @@ async function noteBuildOutcome(
                 autoResolved: false,
               });
               previewVerifiedFailed = true;
+              previewServerDown = true;
               break;
             }
             serverRevivals += 1;
@@ -21718,6 +22081,7 @@ async function noteBuildOutcome(
           // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
           if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
             previewVerifiedFailed = true; // the eyes saw it NOT render, and the heal budget is spent — billing zeroes below
+            previewRenderFailed = true;
             // RUNTIME HONESTY (deep-test 2026-07-18 — "onLinkClick is not a function"): the live preview
             // genuinely did NOT render / crashed at RUNTIME and the heal budget is spent. Record it as an
             // UNRESOLVED ERROR so buildHealthFromDiagnostics marks the build NOT READY — a crashing app must
@@ -22294,7 +22658,7 @@ async function noteBuildOutcome(
             let exitCode: number | null = null;
             let output = '';
             try {
-              const r = await withTimeout(actuator.runCommand(workspaceId, prodBuildCommand()), PROD_BUILD_TIMEOUT_MS, 'prod-build-gate');
+              const r = await withTimeout(actuator.runCommand(workspaceId, prodBuildCommand('$(command -v timeout >/dev/null 2>&1 && echo "timeout -k 5 170") npm run build')), PROD_BUILD_TIMEOUT_MS, 'prod-build-gate');
               ran = true;
               exitCode = typeof r.exitCode === 'number' ? r.exitCode : null;
               output = `${r.stdout || ''}\n${r.stderr || ''}`;
@@ -22305,7 +22669,7 @@ async function noteBuildOutcome(
             // build`) — so it is typecheck evidence too, read from its own echoed script line (autopsy
             // 0c2a987a: "the typecheck did not run" beside PROD_BUILD_OK). Fills a gap only.
             if (gateEvidence.typecheck === 'not-run') {
-              const fromBuild = buildScriptTypecheckVerdict({ command: prodBuildCommand(), stdout: output, exitCode });
+              const fromBuild = buildScriptTypecheckVerdict({ command: prodBuildCommand('$(command -v timeout >/dev/null 2>&1 && echo "timeout -k 5 170") npm run build'), stdout: output, exitCode });
               if (fromBuild) gateEvidence.typecheck = fromBuild;
             }
             buildDiag.record({
@@ -22398,7 +22762,7 @@ async function noteBuildOutcome(
                 // The copy is the output of `npm run build`, so a changed source needs a new build first;
                 // a build that does not pass leaves the earlier copy exactly as it was.
                 try {
-                  const r = await withTimeout(actuator.runCommand(workspaceId, prodBuildCommand()), PROD_BUILD_TIMEOUT_MS, 'snapshot-rebuild');
+                  const r = await withTimeout(actuator.runCommand(workspaceId, prodBuildCommand('$(command -v timeout >/dev/null 2>&1 && echo "timeout -k 5 170") npm run build')), PROD_BUILD_TIMEOUT_MS, 'snapshot-rebuild');
                   const rebuilt = judgeProdBuild({ ran: true, exitCode: typeof r.exitCode === 'number' ? r.exitCode : null, output: `${r.stdout || ''}\n${r.stderr || ''}` });
                   if (!rebuilt.ok) return false;
                 } catch { return false; }
@@ -22577,7 +22941,10 @@ async function noteBuildOutcome(
       // GREEN CANNOT BE EARNED BY STATIC CLEANLINESS. That is the whole rule.
       try {
         gateEvidence.buildOk = result.ok;
-        gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewVerifiedFailed ? 'failed' : 'not-run';
+        gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewRenderFailed ? 'failed' : 'not-run';
+        // GT-11: infrastructure is not a failed render. Wording only — the bill
+        // still keys off previewVerifiedFailed, which this line does not touch.
+        gateEvidence.previewServerDown = previewServerDown && !previewRenderFailed;
         // Only changes the WORDING of an unproven preview, never the verdict — see previewUrlPublished.
         gateEvidence.previewUrlPublished = Boolean(lastPreviewUrl);
         // THE SAME FALLBACK THE TYPECHECK ALREADY HAS, FOR THE SIBLING IT LEFT BEHIND (autopsy
@@ -22817,9 +23184,13 @@ async function noteBuildOutcome(
         //     an ambiguity of OUR OWN sandbox is exactly the #2267 mistake, in the other direction.
         //   • Flipping ok:false also makes the build FREE (the standing "working app or free" guard
         //     keys on !result.ok) — so this fix hands money back as well as telling the truth.
+        //   • GT-3 adds `runtimeRed` (a failed preview, page or journey) but only when
+        //     AGENTV3_RUNTIME_RED_FLIP is on. D-1 was not answered, so the default is off.
+        //     Off, this block behaves exactly as before. It does not change a price.
         const gateBlockers = buildDiag.shippingIssueCount('error');
+        const runtimeRed = runtimeRedFlipEnabled() && runtimeProven(gateEvidence) === 'failed';
         const settled = result; // captured once — `result` is reassigned in the heal loop above
-        if (gate.state === 'red' && gateBlockers > 0 && settled && settled.ok) {
+        if (gate.state === 'red' && (gateBlockers > 0 || runtimeRed) && settled && settled.ok) {
           // …UNLESS THE APP HAS ALREADY BEEN PROVEN TO RUN (runProvenApp.ts, autopsy e706e068). A RED
           // built from STATIC findings — a placeholder in a stray file, a forecast about the bundle —
           // cannot outrank a real browser that rendered the app and a production build that compiled
@@ -22999,6 +23370,7 @@ async function noteBuildOutcome(
                 detail: `signals: ${signals} · ${devServerLastWordsDetail(lastWords)}`,
                 autoResolved: false,
               });
+              previewServerDown = true;
               break;
             }
             runtimeServerRestarted = true;
@@ -23382,8 +23754,8 @@ async function noteBuildOutcome(
       // over a richer, already-saved transcript. Best-effort — a store failure never affects the build.
       try {
         const store = getConversationStore();
-        const recentForUser = await store.listByUser(userId ?? 'anon', 10);
-        if (needsFallbackConversationPersist(recentForUser, workspaceId, buildStartedAt)) {
+        const ownRecord = await findWorkspaceConversation(store, userId, workspaceId);
+        if (needsFallbackConversationPersist(ownRecord ? [ownRecord] : [], workspaceId, buildStartedAt)) {
           // UPSERT on the stable per-session id (shared helper — the ONE server write shape for
           // history): first turn creates the record, later turns append; a create race retries
           // as an append so a turn is never silently dropped.
@@ -24497,8 +24869,9 @@ async function noteBuildOutcome(
           if (greenGuardEnabled()) {
             try {
               const greenKey = greenWorkspaceKey(workspaceId);
-              const snapshot = await loadWorkspaceFiles(greenKey).catch(() => ({} as Record<string, string>));
-              const hasSnapshot = Object.keys(snapshot).length > 0;
+              const greenFiles = await loadWorkspaceFiles(greenKey).catch(() => ({} as Record<string, string>));
+              let snapshot = greenFiles;
+              const hasSnapshot = Object.keys(greenFiles).length > 0;
               const decision = decideGreenGuard({
                 // `at` is set only when THIS build recorded the snapshot (inBuildGreen.ts); with
                 // `turnStartedAt` the guard can then say "earlier in this build" instead of "before this
@@ -24527,13 +24900,37 @@ async function noteBuildOutcome(
                 message: decision.reason, autoResolved: true,
               });
               if (decision.action === 'save') {
-                await saveWorkspaceFiles(workspaceId, toSave);
-                saved = true;
-                // The new last known good. Written AFTER the project save so a failure here can never
-                // cost the user their actual files.
-                await saveWorkspaceFiles(greenKey, toSave).catch(() => {});
+                const projectSt = await saveWorkspaceFiles(workspaceId, toSave);
+                saved = projectSt === 'saved' || projectSt === 'merged';
+                // The new last known good. A replace, never a shrink-guard hybrid. A failed save
+                // must not be described as protection.
+                const greenSt = await saveWorkspaceFiles(greenKey, toSave, { mode: 'replace' });
+                if (greenSt !== 'saved' && greenSt !== 'merged') {
+                  buildDiag.record({
+                    phase: 'build', severity: 'warning', code: 'GREEN_SNAPSHOT_NOT_SAVED', autoResolved: false,
+                    message: `The working version could not be saved as a restore point (${greenSt}).`,
+                  });
+                }
+                const keptAttempt = await loadWorkspaceFiles(attemptWorkspaceKey(workspaceId)).catch(() => ({} as Record<string, string>));
+                const attemptPaths = Object.keys(keptAttempt);
+                if (attemptPaths.length > 0) await removeWorkspaceFiles(attemptWorkspaceKey(workspaceId), attemptPaths).catch(() => {});
               } else if (decision.action === 'restore') {
-                const plan = restorePlan(snapshot, toSave);
+                const fromThisBuild = snapshotIsFromThisBuild(inBuildGreenAt > 0 ? inBuildGreenAt : undefined, buildStartedAt);
+                const chosen = greenRestoreTurnStartEnabled()
+                  ? chooseRestoreBase({ snapshot: greenFiles, turnStart: projectFilesAtTurnStart, snapshotFromThisBuild: fromThisBuild })
+                  : { base: greenFiles, kind: 'green-snapshot' as const };
+                if (!chosen) {
+                  if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {
+                    events.emit({ type: 'narration', agent: 'architect', text: greenGuardUnverifiedMessage(), ts: Date.now() });
+                    buildDiag.record({
+                      phase: 'build', severity: 'warning', code: 'GREEN_GUARD_UNVERIFIED',
+                      message: 'The app could not be opened to check this turn, so the user\u2019s changes were KEPT rather than rolled back. The last known good snapshot is unchanged and still available.',
+                      autoResolved: false,
+                    });
+                  }
+                } else {
+                snapshot = chosen.base;
+                const plan = restorePlan(snapshot, toSave, new Set(Object.keys(projectFilesAtTurnStart ?? {})));
                 // Keep the broken attempt before undoing it — nothing the user paid for is thrown away.
                 await saveWorkspaceFiles(attemptWorkspaceKey(workspaceId), toSave).catch(() => {});
                 await runInPass('green-guard-restore', async () => {
@@ -24543,11 +24940,12 @@ async function noteBuildOutcome(
                 });
                 const rm = buildRemoveCommand(plan.remove);
                 if (rm) { try { await withTimeout(actuator.runCommand(workspaceId, rm), 20_000, 'green-guard-remove'); } catch { /* best-effort */ } }
+                reconcileCapturedWrites(writtenFiles, plan); // GT-4: a later deadline/advisory save must not resurrect the broken files
                 await saveWorkspaceFiles(workspaceId, snapshot);
                 saved = true;
                 persisted = snapshot;
                 if (plan.remove.length > 0) await removeWorkspaceFiles(workspaceId, plan.remove).catch(() => {});
-                events.emit({ type: 'narration', agent: 'architect', text: greenGuardMessage(plan), ts: Date.now() });
+                events.emit({ type: 'narration', agent: 'architect', text: greenGuardMessage(plan, chosen.kind), ts: Date.now() });
                 buildDiag.record({
                   phase: 'build', severity: 'warning', code: 'GREEN_GUARD_RESTORED',
                   message: `Restored the last verified-working version: ${Object.keys(plan.write).length} file(s) put back, ${plan.remove.length} added by the failed attempt removed, ${plan.unchanged} already correct. The attempt itself is kept and was not discarded.`,
@@ -24561,8 +24959,9 @@ async function noteBuildOutcome(
                 greenGuardRestoreFacts = {
                   restored: Object.keys(plan.write).length,
                   removed: plan.remove.length,
-                  fromThisBuild: snapshotIsFromThisBuild(inBuildGreenAt > 0 ? inBuildGreenAt : undefined, buildStartedAt),
+                  fromThisBuild: chosen.kind === 'green-snapshot' && fromThisBuild,
                 };
+                }
               } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {
                 // KEPT, BUT UNCHECKED — and the user hears so. This is the branch that used to be a
                 // silent rollback. Saying nothing here would replace one dishonest outcome with a
@@ -24826,25 +25225,19 @@ async function noteBuildOutcome(
        */
       if (result.ok !== true) {
         try {
-          const failCost = realProviderCostUsd(providerLedger.entries(), realCostRemainderForFailure)
-            + Math.max(0, livePreviewCharge.usd || 0);
           const sink = buildUsage.total();
-          // The build's OWN verdict code decides the category; the summary is only the fallback for a
-          // run that never recorded one. See OUTCOME_TO_CATEGORY — classifying v5's real failures from
-          // their prose would have put nearly all of them in `unknown`.
           const failDiag = buildDiag.report();
-          void failureLedgerStore.record({
-            category: classifyFailure(failDiag.rootCause || result.summary || '', outcomeCodeOf(failDiag.issues)).category,
-            framework,
-            realUsd: failCost,
+          recordFailureLedgerOnce(ledgerEntryFor({
+            entries: providerLedger.entries(),
+            remainder: realCostRemainderForFailure,
+            sandboxUsd: livePreviewCharge.usd,
+            summary: result.summary || '',
+            rootCause: failDiag.rootCause || '',
+            issues: failDiag.issues,
             inputTokens: sink.inputTokens || 0,
             outputTokens: sink.outputTokens || 0,
-            ms: Math.max(0, Date.now() - buildStartedAt),
-            // ONE real example per cause, so "preview: 12 builds" becomes something to act on rather
-            // than something to go and look up twelve times. The rootCause is evidence-derived and
-            // admin-only; the ledger truncates it.
-            sample: failDiag.rootCause || '',
-          });
+            startedAt: buildStartedAt,
+          }));
         } catch { /* the ledger must never be why a failed build fails differently */ }
       }
       let effectiveBilledUsd: number = decidedBilledUsd;
@@ -25853,7 +26246,8 @@ async function noteBuildOutcome(
           const detected = detectAppRequirements({ files: writtenFiles, prompt });
           const implied = impliedRequirementsFor(fakeFeatures).filter((r) => !detected.some((d) => d.id === r.id));
           const missing = unconfiguredRequirements([...detected, ...implied], vaultSecrets);
-          const notice = appRequirementsNotice(missing, detectLanguageHint(prompt)?.code ?? null);
+          const lang = detectLanguageHint(prompt)?.code ?? null;
+          const notice = appRequirementsNotice(missing, lang);
           if (notice) {
             result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${notice}` };
             buildDiag.record({
@@ -25891,23 +26285,24 @@ async function noteBuildOutcome(
             // extra read is the user's Supabase grant, which decides the WORDING ("one press" vs
             // "connect your own"), never whether the row appears. Best-effort by construction: a
             // failure leaves the tray exactly as it is today.
+            // Facts already in hand: the durable files (not this turn's diff) and the Supabase grant.
+            // A server row is `planDeployment` — the same classifier Publish uses — never the prompt.
+            // The plan probe only decides whether the row may open Billing. Unknown → no purchase link.
             try {
               const supabaseConnected = !!(await getConnection(userId).catch(() => null))?.orgId;
-              // The DURABLE copy, not `writtenFiles`: on an EDIT turn the written set is the diff, and
-              // `appNeedsDatabase` reads the app's own source for persistence signals — judging a
-              // two-file edit would report "no database needed" about an app full of them. The build's
-              // own save has already run by this point, so this read IS the app. Same source the
-              // readiness endpoint uses, so the tray and that screen cannot disagree.
               const appFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
-              const rows = connectActions({
-                database: databaseReadiness({
-                  files: appFiles,
-                  vaultSecrets,
-                  dbEnvNames: ALL_DB_ENV_VARS,
-                  supabaseConnected,
-                }),
-              }, buildId, Date.now());
+              const database = databaseReadiness({ files: appFiles, vaultSecrets, dbEnvNames: ALL_DB_ENV_VARS, supabaseConnected });
+              const needsServer = !!planDeployment(appFiles).backend;
+              let serverPlan: ServerPlanOffer = 'none';
+              if (needsServer && hostingPlansEnabled()) {
+                const probe = await probeHostingPlan(userId).catch(() => ({ active: false, known: false as const }));
+                if (probe.known) serverPlan = probe.active ? 'included' : 'buy';
+              }
+              const server = { needsServer, plan: serverPlan };
+              const rows = connectActions({ database, server, lang }, buildId, Date.now());
               if (rows.length > 0) await saveUserActions(workspaceId, rows);
+              const needsText = buildNeedsNotice({ database, server }, lang);
+              if (needsText) result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${needsText}` };
             } catch { /* a task row must never affect a finished build */ }
           }
         } catch {
@@ -25941,7 +26336,7 @@ async function noteBuildOutcome(
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the
       // response the client already has. A resumable module turn is an intermediate step, not a
       // finished build, so it's excluded (the user is mid-flow inside the app already).
-      if (!projectContinue.resumable) void notifyBuildComplete(userId, result.ok);
+      if (!projectContinue.resumable) announceBuildFinished(userId, result.ok);
     } catch (err) {
       // Capture the crash in the diagnostics report too. NOTE: onUpdate only refreshes the per-instance
       // in-memory cache (lastDiagnostics) — it does NOT write to Firestore on every tick — so a crash
@@ -26024,7 +26419,7 @@ async function noteBuildOutcome(
       // vendor's name in our error learns which AI we run — the one thing the white-label law exists to
       // prevent. The admin-side record keeps the raw text (buildDiagRef recorded errMsg verbatim).
       emit({ type: 'error', message: redactProvidersText(errMsg), ts: Date.now(), ...(crashReportForClient ? { diagnostics: crashReportForClient } : {}) });
-      void notifyBuildComplete(userId, false);
+      announceBuildFinished(userId, false);
     } finally {
       // GREEN FREEZE — clear this workspace's green latch no matter how the build ended, so a stale
       // latch can never freeze the EARLY writes of the NEXT build for the same workspace.

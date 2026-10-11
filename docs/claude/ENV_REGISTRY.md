@@ -2630,6 +2630,40 @@ the flag entries above promise.
   the entry is written (`earlyPreviewCue.ts`; a desktop opens the preview itself). 🔒 Only a capitalised import becomes
   a card — a missing helper keeps the empty stub. The fast lane's tier order is deliberately unchanged. Test-locked
   with a real-browser render in `tests/theAppIsOnScreenWhileItIsBuilt.test.ts`.
+- **📱 `AGENTV3_NATIVE_FEEL` — A BUILT APP MUST FEEL LIKE AN APP, NOT A WEBSITE IN A FRAME (admin 2026-10-11,
+  verbatim: *"navbharatai jo app banaye aur navbharatai khud dono ko real netiv app feel aye aisa banao! aur bhi
+  jyada micro polish karo!!"*). ⚠️ NOT set; default ON; `off` removes the baseline, the phone meta tags and the
+  prompt rule.**
+  `nativeFeel.ts`. NavBharatAI's OWN shell has had native polish since 2026-07-08 (`src/lib/nativeShell.ts`);
+  **the apps it BUILDS had none of it.** 🔴 The worst gap was invisible to `appDefaults.ts`'s patcher: its viewport
+  rule is guarded by `name=["']viewport["']`, and **Vite's template always ships a viewport**, so the rule never
+  fired and `viewport-fit=cover` never arrived — leaving **`env(safe-area-inset-*)` at 0px on every device**, so a
+  fixed header sat under the notch and a bottom bar under the home indicator, and any safe-area CSS the app wrote
+  did nothing. An ensure-only patcher cannot fix a wrong ATTRIBUTE on a tag that already exists, so the viewport is
+  now UPGRADED in place (idempotent). Also added: the Apple/Android fullscreen meta tags, and a behaviour-only CSS
+  baseline for the specific tells — the tap flash, the 300 ms double-tap delay, pull-to-refresh, iOS's zoom on a
+  sub-16px input, rotate re-flow, momentum in nested scrollers, and a pressed state so a tap is answered in the
+  same frame. 🎨 **It paints nothing** — colour belongs to the app and to `THEME_RULES.md`; a baseline that set a
+  colour would fight every generated app's theme, and a test asserts the absence of any colour. 🔒 Touch rules are
+  scoped to `@media (pointer: coarse)`, motion respects `prefers-reduced-motion`, selectors name CONTROLS (a
+  paragraph keeps its text selection), and there is no universal selector — the baseline is a floor an app
+  overrides with any more specific rule, never a ceiling. The prompt rule carries ONLY what needs per-field
+  judgement (`inputMode`/`enterKeyHint` per field, 44px targets, safe-area padding on the app's own fixed bars) and
+  is asserted NOT to repeat what the CSS guarantees. Test-locked in `tests/aBuiltAppFeelsNative.test.ts`,
+  reversion-proven six ways.
+- **🧊 `_RELEASE_GATE_URL` — a CLOUD BUILD TRIGGER SUBSTITUTION, not a Cloud Run env key. ✅ SET BY THE ADMIN
+  2026-10-11 to `https://navbharatai.com/api/release/gate`.**
+  Recorded here because `CLAUDE.md` says a key the admin sets is written down in the same session, and because the
+  next session will otherwise read `cloudbuild.yaml`'s empty default (`_RELEASE_GATE_URL: ''`) and conclude the gate
+  is still inert — **the default in the file is NOT the value on the trigger.** With it set, Step 0 of
+  `cloudbuild.yaml` asks the gate before anything is built, so a release freeze now holds the path that ships every
+  merge (queue row Q-141). 🔒 Fail-open by construction: not configured, unreachable, a timeout, a 500, an empty or
+  malformed body all exit 0 and continue the deploy — **the only non-zero exit is an explicit `"allowed":false`**,
+  proven by running the step against a real server in all five cases. ⚠️ Its bash variables are escaped `$$URL` /
+  `$$BODY`: an unescaped `$URL` is read by Cloud Build as a substitution and fails the build at config parse (another
+  session caught that, `df7aef5e2`, after the first version would have broken every deploy). Pinned by
+  `tests/aFreezeThatStopsNothing.test.ts`. The step identifies itself with `X-Release-Gate-Caller: cloudbuild` so the
+  admin board can state the pipeline asked as a fact rather than an inference (Q-808).
 - **🌐 `AGENTV3_BROWSER_ONLY_GUARD` — BROWSER-ONLY CODE IS NOT RUN IN NODE (queue row Q-146, 2026-10-05).
   ⚠️ NOT set; default ON; `off` removes both the write note and the run refusal.**
   `BrowserOnlyInNode.ts`. A report recorded the cost: the agent ran a browser-oriented localStorage seed with
@@ -4038,6 +4072,15 @@ the flag entries above promise.
   over several nights. **What to watch:** Cloud Run logs carry `[P-DATA.4] retention purge removed N expired record(s)`
   on a run that found something; nothing is logged when nothing had expired. To stop it, unset the key (or set `off`)
   and redeploy — the job is then not registered at all.
+  **Q-767 (2026-10-09) added eleven more stores to what this one flag deletes**, so it now carries noticeably more
+  work per night: `guest_daily_usage` 3 d (the count §12 promises is "deleted after a few days"), `analytics_events`
+  30 d, `build_events` 90 d, `analytics_daily` 400 d, and 180 d for `abuseLedger`, `user_reports` (its `shot`
+  screenshot subcollection swept first), `admin_apk_reports`, `admin_build_reports` and `admin_build_triage`.
+  `hosting_billing` and `hosting_period_usage` were deliberately left OFF the clock and put on
+  `RETAINED_INDEFINITELY` — the first one's document is the guard that stops a day being billed twice.
+  **A second log line to watch:** `[P-DATA.4] hit the per-run cap on: …` names any collection that spent its whole
+  500-document allowance. Once or twice is a backlog draining; the SAME collection every night means its write rate
+  is above the cap, the window is not really being kept, and that policy needs an explicit `maxPerRun`.
 
 ### 2026-10-06 — the sleeping-database watch (Q-700)
 
@@ -4059,3 +4102,52 @@ the flag entries above promise.
   Read by `src/server/AgentV3/appsIdentity.ts`. The full design, the setup steps and the verification are in
   `docs/HOSTING_ARCHITECTURE.md` §11.
 
+
+### 2026-10-07 — the two identities are SET (admin, hand-to-hand, `scripts/navbharatCloudBringUp.sh`)
+
+- ✅ `NAVBHARAT_APPS_RUNTIME_SA` = `nbai-app-runtime@navbharatai-user-apps.iam.gserviceaccount.com` — **SET** on
+  `navbharat-ai-prod` by `navbharatCloudBringUp.sh wire` (revision `navbharat-ai-prod-04563-vqp`). Supersedes the
+  "NOT SET" line above. The account holds **no roles** (verify check 1 PASS).
+- ✅ `NAVBHARAT_APPS_BUILD_SA` = `nbai-app-builder@navbharatai-user-apps.iam.gserviceaccount.com` — **SET**, same
+  revision. Corrects the role list above: Artifact Registry Writer on `nbai-apps`, the custom `nbaiBuildSourceReader`
+  (`storage.objects.get` only — NOT Storage Object Viewer, which would let a build list every app's source) on the
+  staging bucket, and Logs Writer on the project.
+- What `apply` found and did in `navbharatai-user-apps` (verify: **IAM half PASSED, all 8 checks**):
+  - Both accounts now exist.
+  - The bucket `navbharatai-user-apps_cloudbuild` and the five custom roles **already existed**, matched the design and were left untouched. The bucket is asia-south1, uniform access, public access prevention enforced, lifecycle Delete age 1 on `nbai-source/`.
+  - Resource-level bindings were added, and immutable tags are ON.
+  - The default compute account `219549203609-compute@` holds **no roles at all**, so the "remove Editor" step planned earlier is not needed.
+- **NOT changed, deliberately:** `NAVBHARAT_CLOUD_PUBLIC` stays unset (admin-only hosting). The platform account's broad
+  project roles (`run.admin`, `storage.admin`, `artifactregistry.writer`, `cloudbuild.builds.editor`, project-level
+  `iam.serviceAccountUser`) stay until the isolation probe reads ISOLATED and a real app deploys.
+
+
+### 2026-10-09 — Build reliability flags (`fix/build-reliability`) — ALL DEFAULT OFF, NONE SET IN CLOUD RUN
+
+Admin-approved series that targets the ~30% failed-build rate (audit + solutions docs of 2026-10-09). **Every flag
+below is default OFF; with none set, every build is byte-identical to before.** They are read through
+`src/server/AgentV3/reliability/flags.ts` (`parseEnvFlag`, so `on` / `true` / `1` all enable). **Weak tier never
+uses Claude:** quality escalation refuses a Claude target on a `noClaude` build, and the sticky chain is the
+already-guarded chain (`enforceNoClaude`). No existing default was changed (the old
+`AGENTV3_MODEL_COMPACT_KEEP_RECENT` / `_MAX_CHARS` defaults 6 / 2,000 are untouched; the higher thresholds live
+behind `AGENTV3_TOKEN_COMPACT`).
+
+| Flag | What it does | Tunables (default) | Code |
+|---|---|---|---|
+| `AGENTV3_STICKY_RUNG` | The architect's chain keeps the rung (model) that last answered instead of re-opening every turn at rung 0. Upward only; a key pool stays a pool. | — | `reliability/stickyRung.ts`, `MultiProviderTurnRunner` `opts.sticky` |
+| `AGENTV3_QUALITY_ESCALATE` | Truncation ×2, edit_file fail ×3 (in a row), or tsc errors not dropping move the build UP one distinct model, with a handoff note to the next model. Never onto Claude on a weak build. | `AGENTV3_ESCALATE_TRUNCATIONS` (2), `AGENTV3_ESCALATE_EDIT_FAILS` (3), `AGENTV3_ESCALATE_TSC_STALLS` (3), `AGENTV3_ESCALATE_MAX` (2 per build) | `reliability/qualityEscalation.ts`, `AgentRunner` `onQualityEscalate` |
+| `AGENTV3_REASONING_PASSBACK` | Kimi/GLM `reasoning_content` is kept (bounded side table, keyed by tool_call id) and sent back on historical assistant messages — only to models matching `kimi|moonshot|glm`. The Anthropic-shaped transcript is unchanged. | — | `reliability/reasoningPassback.ts` |
+| `AGENTV3_TOKEN_COMPACT` | Model transcript goes out verbatim until ~50% of the window; then gentle compaction (keep 12 / 6,000 chars), then the old tight one (6 / 2,000). | `AGENTV3_COMPACT_WINDOW_TOKENS` (128,000 = GLM, the smallest weak-ladder window), `AGENTV3_COMPACT_TRIGGER_PCT` (50), `AGENTV3_TOKEN_COMPACT_KEEP_RECENT` (12), `AGENTV3_TOKEN_COMPACT_MAX_CHARS` (6,000) | `reliability/contextBudget.ts` |
+| `AGENTV3_WORKING_SET` | Appends the CURRENT on-disk content of the most recently written/edited files as the last block the model reads. | `AGENTV3_WORKING_SET_FILES` (4), `_FILE_CHARS` (12,000), `_TOTAL_CHARS` (32,000) | `reliability/contextBudget.ts`, `ToolDispatcher.readForWorkingSet` |
+| `AGENTV3_STREAM_NO_CLAMP` | When streaming (`AGENTV3_STREAM_BUILD_CALLS=on`), max_tokens is NOT clamped to the clock (was ~9,833 at 300 s / ~4,833 at 150 s); capped by the model's own ceiling instead. Idle/hard-cap stream timers still apply. | `AGENTV3_STREAM_MAX_OUTPUT_DEFAULT` (16,000; per-model table — values marked *estimate* in code) | `reliability/streamBudget.ts` |
+| `AGENTV3_RESUME_TRUNCATED` | A write_file cut at the output limit is buffered (NEVER written to disk) and finished with the new `append_file` tool (`done:true` writes the whole file through write_file and all its guards). | — | `reliability/resumeWrite.ts`, `ToolDispatcher` `append_file` |
+| `AGENTV3_FILE_SIZE_RULE` | Adds the "keep every file under ~200 lines" rule to the architect prompt. | — | `reliability/modularPrompt.ts` |
+| `AGENTV3_MODULAR_PROMPT` | Slim core prompt: domain modules (games, fullstack, python, ai-in-app, secrets, android, finishing) the request does not need are moved out and listed; `read_guide` loads one. Measured: todo app 91,252 → ~65,400 chars. | — | `reliability/modularPrompt.ts` |
+| `AGENTV3_BANNED_PACKAGE_GUARD` | The `packageChoiceRule` list (xlsx, uuid, @types/uuid) is enforced: a bash install naming one is refused before it runs; a package.json write has them removed. | — | `reliability/bannedPackages.ts` |
+| `AGENTV3_CORE_TOOLSET` | The architect is offered 16 core tools + `load_tools` (+ append_file/read_guide when on, + connected MCP tools) instead of ~56; every tool still dispatches. | — | `reliability/coreToolset.ts` |
+| `AGENTV3_FAST_LANE_V2` | Fast lane: export/import contract on each manifest line, topological generation waves (stylesheets last), FULL code of a file's imports (capped) + signatures for the rest, and a plan of more than N files goes to the agent loop. | `AGENTV3_FAST_LANE_MAX_FILES` (12), `AGENTV3_FAST_LANE_DEPS_CHARS` (12,000) | `reliability/fastLaneV2.ts`, `SimpleBuilder` |
+
+**How to verify (before turning any flag on in prod):** run the reliability benchmark on a staging server
+(`scripts/agentv3-reliability-bench.ts`, 15-prompt smoke set first, `BENCH_CONFIRM=yes` required — it spends
+real money) once with all flags off (baseline) and once with the flag(s) on, then `npm run bench:compare`.
+Turn flags on one or two at a time so a regression has one owner.

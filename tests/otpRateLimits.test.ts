@@ -87,14 +87,21 @@ describe('the platform ceiling — what actually caps the SMS bill', () => {
 });
 
 describe('the tracking maps cannot grow forever', () => {
-  it('prunes stale records once the map is large', () => {
-    expect(SRC).toMatch(/function pruneStale/);
-    expect(SRC).toMatch(/if \(map\.size < MAX_TRACKED_KEYS\) return;/);
-    expect(SRC).toMatch(/if \(now - rec\.lastRequestedAt > hourMs\) map\.delete\(key\);/);
+  // The property is unchanged: a record nothing can still be limited by must leave the map. The mechanism
+  // changed (audit 2026-10-11): the old prune walked the WHOLE map on every send once it held 20,000 keys —
+  // the per-request O(n) class measured in the bot guard. Each map is now a BoundedCache whose records expire
+  // an hour after their last request, with LRU eviction at the bound, so a request costs O(1).
+  it('every OTP tracking map is a bounded cache with an hour TTL, never a raw Map', () => {
+    expect(SRC).toMatch(/const phoneOtpRecords = new BoundedCache<string, OtpRequestRecord>\(\{ maxEntries: MAX_TRACKED_KEYS, ttlMs: OTP_RECORD_TTL_MS \}\)/);
+    expect(SRC).toMatch(/const ipOtpRecords = new BoundedCache<string, OtpRequestRecord>\(\{ maxEntries: MAX_TRACKED_KEYS, ttlMs: OTP_RECORD_TTL_MS \}\)/);
+    expect(SRC).toMatch(/const otpReportLog = new BoundedCache<string, number\[\]>/);
+    expect(SRC).toMatch(/const OTP_RECORD_TTL_MS = 3_600_000;/);
+    expect(SRC).not.toMatch(/new Map</);
+    expect(SRC).not.toMatch(/for \(const \[[^\]]*\] of (phoneOtpRecords|ipOtpRecords|otpReportLog)\)/);
   });
 
-  it('prunes both maps on a successful request', () => {
-    expect(SRC).toMatch(/pruneStale\(phoneOtpRecords, now, HOUR_MS\);/);
-    expect(SRC).toMatch(/pruneStale\(ipOtpRecords, now, HOUR_MS\);/);
+  it('an IPv6 caller is keyed by its network, not by one of its billions of addresses', () => {
+    expect(SRC).toMatch(/const ip = addressRateKey\(req\);/);
+    expect(SRC).not.toMatch(/clientAddress\(req\)/);
   });
 });

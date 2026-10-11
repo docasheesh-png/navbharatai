@@ -16,6 +16,7 @@
 // rather than a guessed one, which is the whole point: buildRecipe() refuses a partial recipe.
 
 import { isLongRunningCommand, isOneShotSegment } from './sandbox/EngineerAI/actuators/devServerHost';
+import { BoundedCache } from '../lib/boundedCache';
 
 export interface DevServerLaunch {
   /** The command as handed to the actuator — replaying it re-applies every transformation it does. */
@@ -28,7 +29,9 @@ export interface DevServerLaunch {
 /** A launch older than this is not evidence about the server running now. */
 const LAUNCH_TTL_MS = 60 * 60 * 1000;
 
-const launches = new Map<string, DevServerLaunch>();
+// An LRU (audit 2026-10-11): the bound replaces a walk over every launch on every new one past 500. A stale
+// launch is still treated as absent where it is read.
+const launches = new BoundedCache<string, DevServerLaunch>({ maxEntries: 2_000 });
 
 /** A segment that sets up the environment the server needs, so it must be replayed with it. */
 const SETUP_SEGMENT = /^(cd\s|export\s|source\s|\.\s|set\s+-a)/;
@@ -92,12 +95,6 @@ export function recordDevServerLaunch(workspaceId: string, command: string, port
   if (!startsAServer(cmd)) return;
   if (!Number.isInteger(port) || port <= 0 || port >= 65536) return;
   launches.set(workspaceId, { command: cmd, port, at: now });
-  // Bounded: a long-lived instance must not accumulate a map entry per workspace it ever served.
-  if (launches.size > 500) {
-    for (const [id, l] of launches) {
-      if (now - l.at > LAUNCH_TTL_MS) launches.delete(id);
-    }
-  }
 }
 
 /** The last observed-up launch for this workspace, or null when there is none / it is stale. */

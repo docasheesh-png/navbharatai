@@ -11,6 +11,7 @@
  * the publisher ever awaiting or being affected by a Firestore failure.
  */
 import * as admin from 'firebase-admin';
+import { listEqNewestFirst, type EqFilter } from './firestoreIndexSafe';
 import { getServerDb } from './serverDb';
 import { eventBus, type BusEvent } from './eventBus';
 
@@ -71,11 +72,17 @@ class EventStore {
     try {
       const db = this.getDb();
       if (!db) return eventBus.recent(opts).slice(0, limit);
-      let q: admin.firestore.Query = db.collection(COLLECTION);
-      if (opts.workspaceId) q = q.where('workspaceId', '==', opts.workspaceId);
-      if (opts.correlationId) q = q.where('correlationId', '==', opts.correlationId);
-      q = q.orderBy('ts', 'desc').limit(limit);
-      const snap = await q.get();
+      const filters: EqFilter[] = [];
+      if (opts.workspaceId) filters.push(['workspaceId', opts.workspaceId]);
+      if (opts.correlationId) filters.push(['correlationId', opts.correlationId]);
+      // A FILTERED search used to add `orderBy('ts', 'desc')` after the equality filter — a composite index
+      // this project has never deployed — so it threw and quietly answered from this instance's in-memory
+      // ring (audit 2026-10-11, D12). Filters now go through the index-free helper; only the unfiltered
+      // listing orders in the query, which the automatic single-field index on `ts` serves.
+      if (filters.length > 0) {
+        return await listEqNewestFirst<BusEvent>(db.collection(COLLECTION), filters, 'ts', limit);
+      }
+      const snap = await db.collection(COLLECTION).orderBy('ts', 'desc').limit(limit).get();
       return snap.docs.map(d => d.data() as BusEvent);
     } catch {
       return eventBus.recent(opts).slice(0, limit);

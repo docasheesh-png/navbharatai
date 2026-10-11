@@ -8,6 +8,10 @@
 // happens in the USER's Supabase organization with a token THEY granted, so the project, the data and
 // the bill are theirs. We are doing the work, not owning the resource.
 //
+// The one exception is not this file. A database NavBharatAI resells is created by platformDatabase.ts
+// with a platform token, in the platform org. That path deletes the project if it cannot hand it over,
+// and it is the only path allowed to put the bill on NavBharatAI. The functions below stay the user's.
+//
 // HONESTY IS THE HARD PART, NOT THE HTTP. Provisioning fails in ways that are entirely normal and must
 // never look like our bug:
 //   • Supabase's FREE plan allows 2 projects per organization. A user already at the cap gets a 402/403
@@ -216,6 +220,29 @@ export async function createProject(
     name: typeof body?.name === 'string' ? body.name : input.name,
     region: typeof body?.region === 'string' ? body.region : input.region,
   } };
+}
+
+/**
+ * Delete a project we created. 404 counts as gone. Anything else is not gone — the caller must
+ * keep charging, because a database left running is still our bill.
+ */
+export async function deleteProject(
+  token: string,
+  projectRef: string,
+  fetchImpl: Fetch = globalThis.fetch,
+): Promise<{ ok: true } | ProvisionError> {
+  const ref = String(projectRef ?? '').trim();
+  if (!ref || !/^[A-Za-z0-9_-]{8,64}$/.test(ref)) {
+    return { ok: false, failure: 'api-error', message: 'That database id is not one we can remove.' };
+  }
+  let res: Response;
+  try {
+    res = await fetchImpl(`${SUPABASE_API}/v1/projects/${ref}`, { method: 'DELETE', headers: authHeaders(token) });
+  } catch (e) {
+    return { ok: false, failure: 'api-error', detail: String(e), message: 'We could not reach Supabase to remove the database. It is still on, and nothing was refunded.' };
+  }
+  if (res.ok || res.status === 404) return { ok: true };
+  return classifyStatus(res.status, await res.text().catch(() => ''), 'read');
 }
 
 /** The only status that means "you can connect to it now". */

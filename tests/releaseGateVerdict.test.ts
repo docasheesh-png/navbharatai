@@ -26,9 +26,13 @@ const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 
 
 describe('the verdict may no longer contradict the evidence', () => {
   it('a RED gate WITH real blockers corrects ok:true to NOT ok', () => {
-    expect(route).toContain("if (gate.state === 'red' && gateBlockers > 0 && settled && settled.ok)");
+    // A4 (GT-3): the old lock was
+    //   if (gate.state === 'red' && gateBlockers > 0 && settled && settled.ok)
+    // The runtime arm is behind AGENTV3_RUNTIME_RED_FLIP (default off).
+    expect(route).toContain("if (gate.state === 'red' && (gateBlockers > 0 || runtimeRed) && settled && settled.ok)");
     expect(route).toContain('ok: false, summary: releaseGateFailureSummary(');
     expect(route).toContain("code: 'OUTCOME_RELEASE_GATE_RED'");
+    expect(route).toContain('const runtimeRed = runtimeRedFlipEnabled() && runtimeProven(gateEvidence) === \'failed\'');
   });
 
   it('it counts blockers with the SAME function the gate itself used', () => {

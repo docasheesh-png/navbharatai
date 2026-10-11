@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
+import { agentV3Reducer, adoptWorkspace as adoptWorkspaceState } from '../components/agentv3/agentV3Reducer';
 import { createRevealPacer } from '../components/agentv3/revealPacer';
 import { carryOverActivity } from '../components/agentv3/activityTimeline';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
@@ -8,6 +8,7 @@ import { conversationToEvents, conversationToUserMessages, isUnfinishedBuild, ty
 import { shouldSurfaceStreamError, reconnectOutcome, type ReconnectOutcome } from './agentV3StreamError';
 import { nextLivePollDelayMs, resumeSinceSeq, LIVE_POLL_FAST_MS } from './livePollPolicy';
 import { auth } from '../lib/firebase';
+import { authedHeaders } from '../lib/authHeaders';
 import { writeFailure } from '../lib/serverAnswer';
 // FILE-REVEAL PACING (admin 2026-07-23 — "one by one user ko dikhe … har 2 file ke bich ~5–10 sec"):
 // reveal generated files ONE BY ONE with a ~6s gap so the user watches files land while the backend keeps
@@ -56,6 +57,8 @@ export interface UseAgentV3Build {
   start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean; confirmedFeatures?: { include: string[]; exclude: string[] } }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
+  /** A project import gave this session a workspace without a build — adopt it unless one is already live. */
+  adoptWorkspace: (workspaceId: string) => void;
   /** Restore the workspace to a checkpoint commit. `message` is the SERVER's sentence — it is the
    *  only side that knows why a restore did not happen, and those reasons are not interchangeable.
    *  ⚠️ NO UI CALLS THIS SINCE 2026-09-20 (admin: "system A ko hata do … B hi lagao"). The History
@@ -389,6 +392,11 @@ export function useAgentV3Build(): UseAgentV3Build {
   // Keep the latest workspace id available to restore() without a stale closure.
   workspaceIdRef.current = state.workspaceId;
 
+  /** A project import gave this session a workspace without a build — adopt it (see adoptWorkspace). */
+  const adoptWorkspace = useCallback((workspaceId: string) => {
+    setState((prev) => adoptWorkspaceState(prev, workspaceId));
+  }, []);
+
   const reset = useCallback(() => {
     // Invalidate any in-flight resume()/subscribeLive() from a PREVIOUS session first, and cancel the
     // in-flight attach stream (detach-only — does NOT call /api/agentv3/stop, so a build that's still
@@ -692,7 +700,12 @@ export function useAgentV3Build(): UseAgentV3Build {
         convoId = recent?.id ? String(recent.id) : undefined;
       }
       if (!convoId) { lastLoadDiagRef.current = 'no conversation id to load (history was empty)'; return null; }
-      const oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(convoId)}?${params.toString()}`, { headers: authHeaders });
+      let oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(convoId)}?${params.toString()}`, { headers: authHeaders });
+      // BLD-2: a flaky token used to be papered over by trusting ?userId=. Retry once with a forced refresh.
+      if (oneRes.status === 401 || oneRes.status === 403) {
+        try { await auth.currentUser?.getIdToken(true); } catch { /* rebuild headers with whatever token is cached */ }
+        oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(convoId)}?${params.toString()}`, { headers: await authedHeaders() });
+      }
       if (!oneRes.ok) {
         // THE key signal: 404 = no server transcript stored for this session's candidate ids;
         // 403 = the record exists but the verified/claimed identity does not own it; 400 = missing id.
@@ -1664,5 +1677,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

@@ -1,5 +1,8 @@
 import { useState } from 'react';
+import { COPY } from '../../lib/copy';
 import { Paintbrush, Download, Check, Copy, RefreshCw, Image as ImageIcon, Monitor, Smartphone, Sun, Moon } from 'lucide-react';
+import { authedFetch } from '../../lib/authedFetch';
+import { deliverFile } from '../../lib/downloadFile';
 
 interface BrandConfig {
   appName: string;
@@ -22,7 +25,7 @@ interface BrandConfig {
 }
 
 const DEFAULT_CONFIG: BrandConfig = {
-  appName: 'NavBharat AI', tagline: 'World-class AI app maker', logoUrl: '', faviconUrl: '',
+  appName: 'NavBharat AI', tagline: COPY.branding.defaultTagline, logoUrl: '', faviconUrl: '',
   primaryColor: '#6366f1', secondaryColor: '#10b981', accentColor: '#f59e0b',
   // ⚠️ THE USER'S BRANDING, not ours — exported into their app and their assets, so these stay
   // literal colours. Deliberately outside the 2026-08-16 theme-variable sweep.
@@ -47,7 +50,7 @@ const COLOR_PRESETS = [
 
 const STORAGE_KEY = 'navbharat_brand_config';
 
-export function WhitelabelBranding() {
+export function WhitelabelBranding({ workspaceId }: { workspaceId?: string } = {}) {
   const [config, setConfig] = useState<BrandConfig>(() => {
     try { return { ...DEFAULT_CONFIG, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') }; } catch { return DEFAULT_CONFIG; }
   });
@@ -55,6 +58,8 @@ export function WhitelabelBranding() {
   const [previewMode, setPreviewMode] = useState<'desktop' | 'mobile'>('desktop');
   const [copied, setCopied] = useState('');
   const [darkPreview, setDarkPreview] = useState(true);
+  const [applying, setApplying] = useState(false);
+  const [applyNote, setApplyNote] = useState('');
 
   const update = (patch: Partial<BrandConfig>) => {
     const next = { ...config, ...patch };
@@ -132,19 +137,41 @@ module.exports = {
     navigator.clipboard.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(''), 2000); });
   };
 
-  const downloadCSS = () => {
-    const blob = new Blob([generateCSS()], { type: 'text/css' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'brand.css'; a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const downloadAll = () => {
     const content = `/* ===== ${config.appName} Brand Config ===== */\n\n${generateCSS()}\n\n/* ===== Meta Tags ===== */\n/*\n${generateMetaTags()}\n*/\n\n/* ===== Tailwind Config ===== */\n/*\n${generateTailwindConfig()}\n*/`;
     const blob = new Blob([content], { type: 'text/css' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `${config.appName.toLowerCase().replace(/\s+/g, '-')}-brand.css`; a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile(`${config.appName.toLowerCase().replace(/\s+/g, '-')}-brand.css`, blob);
+  };
+
+  const applyToApp = () => {
+    if (!workspaceId) {
+      setApplyNote('Open an app first. Nothing was written and nothing was charged.');
+      return;
+    }
+    setApplying(true);
+    setApplyNote('');
+    void authedFetch('/api/agentv3/brand/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId,
+        appName: config.appName,
+        tagline: config.tagline,
+        primaryColor: config.primaryColor,
+        secondaryColor: config.secondaryColor,
+        accentColor: config.accentColor,
+        bgColor: config.bgColor,
+        textColor: config.textColor,
+        fontFamily: config.fontFamily,
+        borderRadius: config.borderRadius,
+        footerText: config.footerText,
+      }),
+    }).then(async (res) => {
+      const data = await res.json().catch(() => null);
+      setApplyNote(data?.message || data?.error || 'That did not finish. Nothing was charged.');
+    }).catch(() => {
+      setApplyNote('That did not finish. Nothing was charged.');
+    }).finally(() => setApplying(false));
   };
 
   const css = generateCSS();
@@ -167,11 +194,11 @@ module.exports = {
           <Paintbrush className="w-5 h-5 text-accent-text" />
         </div>
         <div>
-          {/* Honest name (admin autopsy 2026-07-21): this generates a brand kit (CSS variables, meta
-              tags, Tailwind config) to EXPORT and paste into your app — it does not auto-apply to the
-              built app. Renamed so it no longer implies one-click white-labeling. */}
-          <h2 className="font-semibold text-ink text-base">Brand Kit Generator</h2>
-          <p className="text-xs text-faint">Define name, logo, colors &amp; fonts → export a brand kit (CSS, meta tags, Tailwind config) to drop into your app</p>
+          {/* Apply writes name and colours into this app. It does not remove the Made with
+              NavBharatAI badge. That badge is injected at publish. A hosting plan stops it.
+              Nothing is charged. Export still downloads a kit you can paste by hand. */}
+          <h2 className="font-semibold text-ink text-base">Brand Kit</h2>
+          <p className="text-xs text-faint">Name, colours and fonts. Export a kit, or apply it into this app. Applying does not remove the Made with NavBharatAI badge, and nothing is charged.</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={resetToDefault} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-surface border border-line rounded-lg text-faint hover:text-ink transition-all">
@@ -180,8 +207,12 @@ module.exports = {
           <button onClick={downloadAll} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-pink-600 hover:bg-pink-500 rounded-lg text-on-accent font-medium transition-all">
             <Download className="w-3.5 h-3.5" /> Export Brand Kit
           </button>
+          <button type="button" onClick={applyToApp} disabled={applying} className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-on-accent font-medium transition-all">
+            {applying ? 'Applying…' : 'Apply to this app'}
+          </button>
         </div>
       </div>
+      {applyNote ? <p className="px-6 py-2 text-[11.5px] text-warn leading-relaxed border-b border-line">{applyNote}</p> : null}
 
       {/* Tabs */}
       <div className="flex border-b border-line bg-card overflow-x-auto">
@@ -364,7 +395,7 @@ module.exports = {
                       <button onClick={() => copyText(item.content, item.key)} className={`text-[9px] flex items-center gap-1 px-2 py-0.5 rounded-lg transition-all ${copied === item.key ? 'text-success bg-emerald-500/10' : 'text-faint bg-raised'}`}>
                         {copied === item.key ? <><Check className="w-2.5 h-2.5" /> Copied</> : <><Copy className="w-2.5 h-2.5" /> Copy</>}
                       </button>
-                      <button onClick={() => { const b = new Blob([item.content], { type: 'text/plain' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = item.filename; a.click(); URL.revokeObjectURL(u); }} className="text-[9px] flex items-center gap-1 px-2 py-0.5 rounded-lg text-faint bg-raised">
+                      <button onClick={() => { void deliverFile(item.filename, item.content, 'text/plain'); }} className="text-[9px] flex items-center gap-1 px-2 py-0.5 rounded-lg text-faint bg-raised">
                         <Download className="w-2.5 h-2.5" /> Save
                       </button>
                     </div>

@@ -212,11 +212,15 @@ describe('robustness — this sits on the path of every build reply', () => {
 });
 
 describe('the prompt half', () => {
-  it('teaches placement and the forbidden case, not just "use emoji"', () => {
-    expect(EMOJI_RULE).toContain('START of each step');
+  it('allows only the three status markers, and still states the forbidden case', () => {
+    // 2026-10 owner decision D-2: chat emoji are status-only (✅ ⚠️ ❌). Was: one topical emoji per step.
+    expect(EMOJI_RULE).toContain('STATUS ONLY');
+    expect(EMOJI_RULE).toContain('✅');
+    expect(EMOJI_RULE).toContain('⚠️');
+    expect(EMOJI_RULE).toContain('❌');
+    expect(EMOJI_RULE).not.toContain('START of each step');
     expect(EMOJI_RULE).toContain('NEVER put two emoji next to each other');
     expect(EMOJI_RULE).toContain('FORBIDDEN');
-    expect(EMOJI_RULE).toContain('🔐');
   });
 
   it('🔒 tells the model no emoji beats a wrong emoji', () => {

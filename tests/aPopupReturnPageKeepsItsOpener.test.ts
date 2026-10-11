@@ -82,7 +82,12 @@ describe('2 · the proxied handler cannot get an opener policy back from upstrea
     expect(helmetAt).toBeGreaterThan(-1);
     expect(exemptAt).toBeGreaterThan(helmetAt);
     expect(exemptAt).toBeLessThan(proxyAt);
-    expect(s).toContain('res.writeHead(pres.statusCode || 502, withoutOpenerPolicy(rewriteProxyHeaders(');
+    // The writeHead that strips the upstream opener policy moved into lib/authProxy.ts with the
+    // handler (BLD-10) so the post-headers destroy path is unit-tested without booting server.ts.
+    // Old assertion (server.ts): res.writeHead(pres.statusCode || 502, withoutOpenerPolicy(rewriteProxyHeaders(
+    const proxy = read('src/server/lib/authProxy.ts');
+    expect(proxy).toContain('res.writeHead(pres.statusCode || 502, withoutOpenerPolicy(rewriteProxyHeaders(');
+    expect(s).toContain('createAuthProxy(');
   });
 });
 

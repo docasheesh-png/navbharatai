@@ -54,7 +54,6 @@ import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSe
 import { HISTORY_TAB_NOTE } from './versionHelp';
 import { toggleCompareSelection, compareOrder, type CheckpointDiffResponse } from './checkpointCompare';
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
-import { saveLastReport, readLastReport } from './reportCache';
 import type { ReportPickerItem } from '../../lib/reportPicker';
 import { reportKey, reportSendCount, bumpReportSendCount, reportButtonLabel, reportAlreadySentHint } from './reportSendCount';
 import { ReportNoteDialog } from './ReportNoteDialog';
@@ -84,6 +83,7 @@ import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
 import { buildChatBlocks } from './activityTimeline';
 import { ChatToolbar } from '../chat/ChatToolbar';
+import { USER_BUBBLE_TONE, ASSISTANT_BUBBLE_TONE } from '../chat/bubbleTone';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 import { ActionGroupRow } from './ActivityTimelineRow';
@@ -91,7 +91,6 @@ import { AppMemoryCard } from './AppMemoryCard';
 import { AppAiSettingsCard, fetchAppAiSettings } from './AppAiSettingsCard';
 import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
-import { deliverTextFile } from '../../lib/downloadFile';
 import SheetFileCard from './SheetFileCard';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
 import { resolveFrameworkSelection } from '../../lib/frameworkDetect';
@@ -108,13 +107,13 @@ import { checkpointDisplayName } from '../../lib/checkpointLabel';
 import { useAppServices } from '../../hooks/useAppServices';
 import { activeMentionQuery, rankMentionSuggestions, applyMentionSuggestion } from '../../lib/fileMentionPicker';
 import { runtimeLogEmptyMessage } from '../../lib/runtimeLogBuffer';
-import { db } from '../../lib/firebase';
+import { auth, db } from '../../lib/firebase';
 import { sanitizeFirestoreData } from '../../lib/firestoreUtils';
 /** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
  *  Returns {} for the synthetic admin / anonymous users (no Firebase user) — the server falls back
  *  to its claimed-id + random-sessionId check for those. */
 import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { authJsonHeaders } from '../../lib/authHeaders';
+import { authJsonHeaders, authedHeaders } from '../../lib/authHeaders';
 import { beginGithubOauthAttempt, browserStorage, GITHUB_WEB_NONCE_KEY } from '../../lib/githubOauthNonce';
 
 /**
@@ -136,20 +135,13 @@ interface ChatMsg {
   file?: SheetFileRef;
 }
 
-const V3_EXT_COLOR: Record<string, string> = {
-  html: 'text-warn', css: 'text-info', js: 'text-warn',
-  ts: 'text-info', tsx: 'text-info', jsx: 'text-warn',
-  json: 'text-success', md: 'text-accent-text', py: 'text-success',
-  svg: 'text-accent-text', png: 'text-accent-text', jpg: 'text-accent-text',
-};
-
 // Last `resume` nonce actually applied — at MODULE scope on purpose, so it SURVIVES the panel
 // unmounting/remounting. A component useRef resets to 0 on every remount, which is exactly what let a
 // stale (never-cleared) `resume` prop re-apply an old chat on each reopen. See the resume effect below.
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPreviewNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; openPreviewNonce?: number; onFilesSync?: (files: Record<string, string>, opts?: { live?: boolean }) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number; autoSend?: boolean } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, errorBeforeBuildStarted, start, respond, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, errorBeforeBuildStarted, start, respond, adoptWorkspace, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -350,18 +342,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // report — so the divider's last step calls setShowWorkspace(false) instead.
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
   const [split, setSplit] = useState<number>(() => loadSplit());
-  // The row's measured width. The DIVIDER can read this on demand (it only needs it mid-gesture),
-  // but the device chips need it during RENDER — "is a true 768px tablet possible in this window?"
-  // is a question asked on every paint, and it changes when the window does. Hence one observer.
-  const [splitContainerPx, setSplitContainerPx] = useState(0);
-  useEffect(() => {
-    const el = splitContainerRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(([entry]) => setSplitContainerPx(entry.contentRect.width));
-    ro.observe(el);
-    setSplitContainerPx(el.getBoundingClientRect().width);
-    return () => ro.disconnect();
-  }, [showWorkspace]);
   const applySplit = useCallback((pct: number) => {
     const width = splitContainerRef.current?.getBoundingClientRect().width ?? 0;
     const next = clampSplit(pct, width);
@@ -1809,6 +1789,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     try {
       const result = await run(targetWorkspaceId, (p) => setZipProgress(p.label));
       if (!result) return; // the user cancelled the picker — a normal outcome, not a failure
+      // The session now HAS a workspace, even though no build ran — without this, Publish and Report stay
+      // disabled on a fresh chat over an app that is right there in the preview (agentV3Reducer.adoptWorkspace).
+      adoptWorkspace(targetWorkspaceId);
       // The tree is already in hand on the browser path — paint Files immediately instead of making the
       // user wait on a round trip for data this tab just read itself.
       if (result.files) { try { onFilesSync?.(result.files); } catch { /* the read-back below still covers it */ } }
@@ -2161,10 +2144,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     setQueueItems([]);
     setQueueOpen(false);
     setChatMode('build');
-    // Report surfaces — the past-builds dropdown and any picked past build.
-    setSelectedHistoryBuildId(null);
-    setHistoryReportItems([]);
-    setHistoryReportOpen(false);
+    // Report surfaces — the report picker.
     setReportPickerOpen(false);
     setReportPickerItems([]);
     // Git / ship / billing footers from the previous project.
@@ -2190,7 +2170,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     rehydratedWsRef.current = '';            // re-arm file rehydrate for the new (empty) workspace
     setWorkspaceFiles(null);
     setWorkspaceFilesFor(null); // clear the stale-switch tag so the new workspace's files load
-    setSelectedFile(null);
+    setFileError(''); // a new session never shows the previous one's load error
     setUserMsgs([]);
     setAgentHistory([]);
     setCheckpointHistory([]);
@@ -2379,9 +2359,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       const qs = new URLSearchParams();
       if (userId) qs.set('userId', userId);
       if (email) qs.set('email', email);
-      const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}?${qs.toString()}`, {
+      let res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}?${qs.toString()}`, {
         headers: await authJsonHeaders(),
       });
+      if (res.status === 401 || res.status === 403) {
+        try { await auth.currentUser?.getIdToken(true); } catch { /* retry with the next header build */ }
+        res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(sid)}?${qs.toString()}`, {
+          headers: await authedHeaders(),
+        });
+      }
       if (!res.ok) return;
       const data = await res.json().catch(() => null);
       const rec = data?.conversation;
@@ -2473,7 +2459,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       reset();
       setWorkspaceFiles(null);
       setWorkspaceFilesFor(null); // clear the stale-switch tag so the new workspace's files load
-      setSelectedFile(null);
+      setFileError(''); // a new session never shows the previous one's load error
       setAgentHistory([]);
       setCheckpointHistory([]);
       setFiles([]);
@@ -2746,168 +2732,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const anyToggleOn = onlyOpus; // Planning/Thinking toggles removed; the dot now reflects the Opus tier only
 
 
-  // Download the LAST build's diagnostics report (every issue v5.0 hit — provider fallbacks,
-  // tool errors, "replied without building" nudges, readiness blockers, sandbox problems) as
-  // JSON, so the admin can hand it to Claude and the rough edges get fixed in code.
-  const [downloadingDiag, setDownloadingDiag] = useState(false);
-  // Resolve the freshest diagnostics report. Prefer the SERVER copy: it is durable (survives a Cloud
-  // Run instance rotation / reload, #657) AND fresher than the client's build-end copy — crucially it
-  // carries PREVIEW errors captured AFTER the build finished (#666), which the client copy never sees.
-  // Fall back to the client's local copy only if the server has nothing (e.g. a stream that dropped
-  // mid-build before the durable save).
-  // P-REPORT.4 — history: which past build's report to read instead of "latest" (null = latest).
-  // Lets a small/quick recent build never permanently hide a previous, richer report.
-  const [selectedHistoryBuildId, setSelectedHistoryBuildId] = useState<string | null>(null);
-  const [historyReportOpen, setHistoryReportOpen] = useState(false);
-  const [historyReportItems, setHistoryReportItems] = useState<Array<{ id: string; startedAt: number; endedAt?: number; ok?: boolean; rootCause?: string }>>([]);
-  const [historyReportLoading, setHistoryReportLoading] = useState(false);
-  const toggleHistoryReport = async () => {
-    const next = !historyReportOpen;
-    setHistoryReportOpen(next);
-    if (next && state.workspaceId) {
-      setHistoryReportLoading(true);
-      try {
-        const params = new URLSearchParams({ workspaceId: state.workspaceId, history: '1' });
-        if (userId) params.set('userId', userId);
-        if (email) params.set('email', email);
-        const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
-        const data = await res.json().catch(() => ({}));
-        setHistoryReportItems(Array.isArray(data?.history) ? data.history : []);
-      } catch { setHistoryReportItems([]); }
-      finally { setHistoryReportLoading(false); }
-    }
-  };
-
-  const getLatestDiagnostics = useCallback(async (buildId?: string | null): Promise<unknown> => {
-    try {
-      const params = new URLSearchParams();
-      if (userId) params.set('userId', userId);
-      if (email) params.set('email', email);
-      if (state.workspaceId) params.set('workspaceId', state.workspaceId);
-      if (buildId) params.set('buildId', buildId);
-      // P0 — for the LATEST-report path (no specific history buildId), assert the ACTIVE build's identity
-      // so the server returns THIS build's report or aborts — never a previous, different app's report.
-      else {
-        if (state.buildId) params.set('activeBuildId', state.buildId);
-        if (state.promptHash) params.set('promptHash', state.promptHash);
-      }
-      const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
-      if (res.ok) {
-        const data = await res.json() as { diagnostics?: unknown };
-        if (data.diagnostics) return data.diagnostics;
-      }
-    } catch { /* fall through to the local copy */ }
-    // Latest-report fallbacks: the live state's copy, then the DEVICE-LOCAL cache (saved the moment
-    // any report reached this device) — the last-resort layer that makes "No build report" impossible
-    // on the device where the build ran, even fully offline (admin 2026-07-11, pukhta prabandh).
-    return buildId ? null : (state.diagnostics ?? readLastReport());
-  }, [userId, email, state.workspaceId, state.diagnostics, state.buildId, state.promptHash]);
-
-  // Persist every report that reaches this device (rides the live result event) into the local
-  // last-resort cache — see reportCache.ts. Quota-safe; never throws.
+  // The device-local report cache (reportCache.ts, 2026-07-11) lost its only reader when the report became
+  // admin-only (2026-07-29), yet it kept writing every build report — provider names included — to this
+  // device. Removed in the Q-600 cleanup (2026-10-11); this clears the copy earlier versions left behind.
   useEffect(() => {
-    if (state.diagnostics) saveLastReport(state.diagnostics);
-  }, [state.diagnostics]);
-
-  // mode 'download' saves the report JSON as a file; 'copy' (admin 2026-07-12 — re-add the removed
-  // "Copy build report" button) writes the SAME resolved report to the clipboard. All the resolution
-  // logic below is shared, so copy and download always carry the identical report.
-  const downloadDiagnostics = async (mode: 'download' | 'copy' = 'download') => {
-    if (downloadingDiag) return;
-    setDownloadingDiag(true);
-    try {
-      let payload: unknown;
-      if (selectedHistoryBuildId) {
-        // A specific past build picked from the History dropdown → just that build's report.
-        payload = await getLatestDiagnostics(selectedHistoryBuildId);
-        if (!payload) { alert('No diagnostics found for that build.'); return; }
-      } else if (state.workspaceId) {
-        // Admin 2026-07-06 ("starting se lekar last tak"): default = the WHOLE session JSON — every
-        // build 0 → last, stitched together — not just the latest message's build. The server keeps
-        // each build in a durable per-workspace history behind the "latest" doc; scope=session
-        // aggregates it (byte-budgeted server-side so mobile Safari can actually load it).
-        //
-        // DELIVERY GUARANTEE (admin 2026-07-06, "bas build report milni chahiye"): the session stitch
-        // is the PREFERRED payload, never the only path. If its fetch fails for ANY reason (network
-        // drop, an oversized response, a server hiccup), fall back to the single LATEST report
-        // (getLatestDiagnostics: server latest → per-user durable copy → the client's local copy) so
-        // the user still gets a report — a slightly smaller report always beats no report.
-        try {
-          const params = new URLSearchParams({ workspaceId: state.workspaceId, scope: 'session' });
-          if (userId) params.set('userId', userId);
-          if (email) params.set('email', email);
-          // P0 — assert the active build so the session stitch's per-user fallback can't splice in a
-          // previous, different app's report when this workspace's own history is momentarily empty.
-          if (state.buildId) params.set('activeBuildId', state.buildId);
-          if (state.promptHash) params.set('promptHash', state.promptHash);
-          const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
-          if (res.ok) payload = await res.json();
-        } catch { /* session stitch failed — the latest-report fallback below still delivers */ }
-        if (!payload) {
-          payload = await getLatestDiagnostics(null);
-          if (!payload) { alert('No build report yet — build an app first, then download the report.'); return; }
-        }
-      } else if (userMsgs.length === 0 && agentHistory.length === 0) {
-        // BLANK NEW CHAT (admin 2026-07-12, "+New chat" leak): zero messages + no workspace = this
-        // chat has never built anything, so it honestly has NO report. Without this guard the
-        // per-user "latest" fallback below would hand back the PREVIOUS project's report here.
-        alert('No build report yet in this chat — build an app first, then download the report.');
-        return;
-      } else {
-        // NO LIVE WORKSPACE (a reopened/remounted panel — Fix 26, the "No build report yet" after a
-        // finished build, 2026-07-07): the report is stored per-WORKSPACE, and this session's workspace
-        // is derivable even without a live build. Try the session-derived candidates (user-keyed, then
-        // the anon-degraded twin) BEFORE the per-user "latest" fallback, which misses anon-run builds.
-        for (const wsId of [clientWorkspaceId(userId, sessionIdRef.current), clientWorkspaceId(undefined, sessionIdRef.current)]) {
-          if (!wsId || payload) continue;
-          try {
-            const params = new URLSearchParams({ workspaceId: wsId, scope: 'session' });
-            if (userId) params.set('userId', userId);
-            if (email) params.set('email', email);
-            const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
-            if (res.ok) {
-              const j = await res.json();
-              // The session stitch returns an empty shell when the workspace has no reports — only
-              // adopt a payload that actually carries content.
-              if (j && (Array.isArray(j.builds) ? j.builds.length > 0 : true)) payload = j;
-            }
-          } catch { /* try the next candidate / the latest-report fallback */ }
-        }
-        if (!payload) payload = await getLatestDiagnostics(null);
-        if (!payload) { alert('No build report yet — build an app first, then download the report.'); return; }
-      }
-      const reportText = JSON.stringify(payload, null, 2);
-      if (mode === 'copy') {
-        // Copy the full report JSON to the clipboard (re-added button). Falls back to a hidden textarea
-        // + execCommand when the async Clipboard API is unavailable (older / insecure-context WebViews).
-        let copied = false;
-        try { await navigator.clipboard.writeText(reportText); copied = true; } catch { /* fall through */ }
-        if (!copied) {
-          try {
-            const ta = document.createElement('textarea');
-            ta.value = reportText; ta.style.position = 'fixed'; ta.style.opacity = '0';
-            document.body.appendChild(ta); ta.select(); copied = document.execCommand('copy'); document.body.removeChild(ta);
-          } catch { copied = false; }
-        }
-        alert(copied ? '✅ Build report copied to clipboard.' : 'Could not copy — try the Download button instead.');
-      } else {
-        // iOS Safari IGNORES <a download> (nothing saves) — deliverTextFile prefers the Web Share API
-        // (share sheet → "Save to Files") on mobile and falls back to the anchor download on desktop.
-        await deliverTextFile(`navbharatai-v3-build-diagnostics-${Date.now()}.json`, reportText);
-      }
-    } catch (e) {
-      alert(`Could not ${mode === 'copy' ? 'copy' : 'download'} the report: ${e instanceof Error ? e.message : String(e)}.`);
-    } finally {
-      setDownloadingDiag(false);
-    }
-  };
+    try { localStorage.removeItem('nbv3:last-build-report'); } catch { /* storage blocked — nothing to clear */ }
+  }, []);
 
   // REPORT TO ADMIN (admin 2026-07-29): the build report is ADMIN-ONLY now. The user can no longer
   // see, download or copy it — a single "Report" button submits the current build's report to the
   // admin inbox (POST /api/agentv3/report-to-admin), which resolves + snapshots it server-side. The
   // user gets only an acknowledgement; the report content never reaches the client. (The older
-  // download/copy/history helpers above are no longer wired to any UI and are retained dormant to
-  // avoid a risky large deletion in this file — they can be removed in a dedicated cleanup.)
+  // download/copy/history helpers that were left dormant here were removed in the Q-600 cleanup,
+  // 2026-10-11 — nothing had called them since this change.)
   //
   // PICK WHICH BUILD (admin 2026-08-04): a chat is many builds — the first build and every edit
   // after it. "Report" could only ever send the LATEST one, so a bug from three edits ago was
@@ -3640,7 +3477,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // see it non-null and skip loading the NEW workspace — leaving stale files visible. Comparing this to
   // the current workspace makes the guard workspace-specific.
   const [workspaceFilesFor, setWorkspaceFilesFor] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  // Shown in the Files tab's empty state (Q-600, 2026-10-11): these were set but never displayed, so a
+  // load in flight and a load that FAILED both read "No files shown." — exactly the "sari file gone" look.
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState<string>('');
   // Heavy generated dirs are never shown/synced — the user cares about source.
@@ -3653,6 +3491,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     // ANON PARITY (Fix 26): the anon identity derives its real `agentv3-anon-<sid>` workspace too.
     const wsId = wsIdArg || state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current);
     if (!wsId) return null;
+    setFileLoading(true);
+    try {
     // IDENTITY-DEGRADATION FALLBACK (Fix 26 — the "tab switch → sab gayab" wipe, 2026-07-07): a build
     // that ran while the auth token was transiently missing lives under `agentv3-anon-<sid>`, but a
     // signed-in client derives `agentv3-<uid>-<sid>` — a DIFFERENT, empty workspace. The transcript
@@ -3675,6 +3515,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
         if (Object.keys(files).length === 0 && candidate !== candidates[candidates.length - 1]) continue; // empty → try the anon-degraded candidate
         setWorkspaceFiles(files);
         setWorkspaceFilesFor(candidate); // tag which workspace these files belong to (stale-switch guard)
+        setFileError('');
         return files;
       } catch (e) {
         lastError = e;
@@ -3682,16 +3523,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     }
     setFileError(lastError instanceof Error ? lastError.message : 'Failed to load file contents');
     return null;
-  };
-
-  // Open a file in the viewer — fetch contents once, then read from cache.
-  const openFile = async (path: string) => {
-    setSelectedFile(path);
-    setFileError('');
-    if (workspaceFiles && path in workspaceFiles) return;
-    setFileLoading(true);
-    await loadWorkspaceFiles();
-    setFileLoading(false);
+    } finally {
+      setFileLoading(false);
+    }
   };
 
   // Sidebar sync (Task 2): when a build finishes, pull the real file contents and
@@ -3966,7 +3800,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     setAgentHistory((prev) => [...prev, {
       role: 'agent',
       agent: 'architect',
-      text: `🎉 **${h.appName}** is yours now — all ${count} files are in this chat and ready to edit. I've opened the preview so you can see it running. Tell me what you'd like to change, in your own words.`,
+      text: `**${h.appName}** is yours now — all ${count} files are in this chat and ready to edit. I've opened the preview so you can see it running. Tell me what you'd like to change, in your own words.`,
       ts: Date.now(),
     }]);
     openSurfaceFromFooter('preview');
@@ -4654,7 +4488,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                               {starterLocked.length > 0 && (
                                 <div className="mt-4">
                                   <div className="text-[11px] uppercase tracking-wide text-accent-text mb-2 flex items-center justify-center gap-1">
-                                    <span aria-hidden>⚡</span> Unlock with Pro
+                                    Unlock with Pro
                                   </div>
                                   <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
                                     {starterLocked.map((t) => (
@@ -4682,7 +4516,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                         onClick={openScreenshotGallery}
                         disabled={screenshotBusy || running}
                         title="Pick a website/app screenshot from your gallery — NavBharatAI Pro builds it"
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-on-accent bg-gradient-to-r from-indigo-500 to-violet-500 ring-1 ring-indigo-300/40 shadow-[0_0_18px_rgba(99,102,241,0.6)] hover:shadow-[0_0_26px_rgba(99,102,241,0.9)] transition-shadow disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-on-accent bg-accent hover:brightness-110 transition disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         {screenshotBusy ? <TirangaLoader className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
                         {screenshotBusy ? 'Reading screenshot…' : 'Screenshot → App'}
@@ -5694,7 +5528,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       : chatMode === 'advisor'
                       ? '🔍 Advise mode (read-only) — ask for an audit / bug scan / comparison; nothing is built…'
                       : canSteerMidBuild(running, powerLevel, chatMode)
-                      ? '⚡ Message the team while they build — they will act on it at the next step…'
+                      ? 'Message the team while they build — they will act on it at the next step…'
                       : 'Type…'
                   }
                   value={prompt}
@@ -5786,7 +5620,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-danger hover:text-on-accent hover:bg-red-600/80`}>
                       <Square className="w-4 h-4" />
                     </button>
-                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-on-accent shadow-[0_0_12px_rgba(129,80,255,0.45)]`}>
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-40 rounded-lg text-on-accent shadow-[0_0_12px_rgba(129,80,255,0.45)]`}>
                       <Send className="w-4 h-4" />
                     </button>
                   </>
@@ -5967,7 +5801,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               return (
                 <div className="flex-1 overflow-auto p-3 font-mono text-xs">
                   <div className="flex flex-col items-start gap-2">
-                    <Empty>No files shown.</Empty>
+                    <Empty>{fileLoading ? 'Loading your files…' : fileError ? `Could not load your files (${fileError}). Your saved files are not lost — try again, or use Restore all files.` : 'No files shown.'}</Empty>
                     {state.workspaceId && (
                       <button
                         onClick={handleRestoreAll}
@@ -6903,7 +6737,7 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
   if (msg.role === 'user') {
     return (
       <div className="group flex flex-col items-end">
-        <div className="max-w-[85%] bg-indigo-600 text-on-accent rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words">
+        <div className={`max-w-[85%] ${USER_BUBBLE_TONE} rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words`}>
           <FoldableMessage text={msg.text} className="whitespace-pre-wrap nb-selectable" />
         </div>
         {/* Copy / fold on every user message; Edit + Unsend attach ONLY to the LAST user message (slice 2). */}
@@ -6925,7 +6759,7 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
           className={
             isThinking
               ? 'text-faint italic text-xs px-3 py-2 whitespace-pre-wrap break-words'
-              : 'bg-card text-body rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words'
+              : `${ASSISTANT_BUBBLE_TONE} rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words`
           }
         >
           {/* A finished AI reply folds when long + gets a copy action; while streaming it just types out. */}
@@ -6998,6 +6832,16 @@ function BuildFeedback({ workspaceId }: { workspaceId: string }) {
  * need nahi hai — simple aur short karo"). Every detail stays available in the Report.
  */
 function BuildHealthCard({ health }: { health: BuildHealth }) {
+  if (health.unassessed) {
+    return (
+      <div className="mt-1 rounded-lg border px-2.5 py-1.5 text-[11px] border-amber-800/60 bg-amber-500/10">
+        <div className="flex items-center gap-1.5 font-semibold">
+          <AlertCircle className="w-3.5 h-3.5 text-warn shrink-0" />
+          <span className="text-warn">Build health: Not checked — the readiness check timed out</span>
+        </div>
+      </div>
+    );
+  }
   const ready = health.ready;
   const blockers = simplifyHealthLines(health.blockers, 3);
   const warnings = simplifyHealthLines(health.warnings, 2);
@@ -7080,11 +6924,11 @@ function TeamHqCard({ agents, todos, elapsedMs }: { agents: Record<string, Agent
   const m = teamHqModel(agents, todos);
   const squares = m.progress.total > 0 ? todos.slice(0, 24) : [];
   return (
-    <div className="mx-2 mt-2 rounded-xl p-[1px] bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-amber-400 shadow-[0_0_18px_rgba(129,80,255,0.25)] text-on-accent">
+    <div className="mx-2 mt-2 rounded-xl p-[1px] bg-line">
       <div className="rounded-[11px] bg-surface px-3 py-2">
         <div className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-[11px] font-bold tracking-wide">
-            <span className="bg-gradient-to-r from-indigo-400 via-fuchsia-400 to-amber-300 bg-clip-text text-transparent">⚡ FULL TEAM</span>
+            <span className="text-accent-text">FULL TEAM</span>
             <span className="text-faint font-normal">
               {m.roster.length > 0 ? `${m.roster.length} agent${m.roster.length > 1 ? 's' : ''}` : 'assembling…'}
               {m.activeCount > 0 && ` · ${m.activeCount} working`}
@@ -7177,13 +7021,6 @@ function ToggleRow({ label, checked, disabled, onClick }: { label: string; check
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <div className="text-xs text-faint italic">{children}</div>;
-}
-
-function fileDot(kind: string): string {
-  const base = 'inline-block w-2 h-2 rounded-full ';
-  if (kind === 'create') return base + 'bg-emerald-500 text-on-accent';
-  if (kind === 'delete') return base + 'bg-red-500 text-on-accent';
-  return base + 'bg-amber-500 text-on-accent';
 }
 
 function colorizeDiff(patch: string): React.ReactNode {

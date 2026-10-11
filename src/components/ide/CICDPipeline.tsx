@@ -3,6 +3,7 @@ import { GitBranch, Check, X, Plus, Trash2, Download, Zap, Shield, Rocket, Setti
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { workflowPath, commitTarget, commitMessage } from '../../lib/cicdTarget';
+import { deliverFile } from '../../lib/downloadFile';
 
 type StepType = 'checkout' | 'install' | 'test' | 'build' | 'deploy' | 'notify' | 'custom';
 type StepStatus = 'idle' | 'running' | 'pass' | 'fail' | 'skip';
@@ -24,7 +25,6 @@ interface PipelineStep {
 
 const STEP_ICONS: Record<StepType, any> = { checkout: GitBranch, install: Download, test: Shield, build: Settings, deploy: Rocket, notify: Zap, custom: Settings };
 const STEP_COLORS: Record<StepType, string> = { checkout: 'text-info', install: 'text-warn', test: 'text-success', build: 'text-accent-text', deploy: 'text-danger', notify: 'text-info', custom: 'text-faint' };
-const STATUS_COLORS: Record<StepStatus, string> = { idle: 'bg-raised text-faint', running: 'bg-amber-500/20 text-warn', pass: 'bg-emerald-500/20 text-success', fail: 'bg-red-500/20 text-danger', skip: 'bg-raised text-faint' };
 
 const DEFAULT_STEPS: PipelineStep[] = [
   { id: '1', type: 'checkout', name: 'Checkout Code', command: 'git checkout $BRANCH', enabled: true, status: 'idle', envVars: [{ key: 'BRANCH', value: 'main' }] },
@@ -209,9 +209,7 @@ export function CICDPipeline({ githubToken, onConnectGitHub }: CICDPipelineProps
   const downloadYaml = () => {
     const filename = filePath;
     const blob = new Blob([yaml], { type: 'text/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = filename.split('/').pop()!; a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile(filename.split('/').pop()!, blob);
   };
 
   const copyYaml = () => {

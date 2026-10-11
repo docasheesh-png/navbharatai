@@ -14,6 +14,18 @@
 
 import { isNeverSourcePath } from './generatedDirs';
 
+/** Live env files carry the user's vault — never durable. Examples/templates are fine. */
+const ENV_ALLOWED = /^\.env\.(example|sample|template)$/i;
+
+/**
+ * True for a live env file (`.env`, `.env.local`, `server/.env.production`).
+ * `.env.example` / `.env.sample` / `.env.template` stay durable — they hold names, not values.
+ */
+export function isSecretEnvPath(relPath: string): boolean {
+  const base = String(relPath ?? '').split('/').pop() ?? '';
+  return (base === '.env' || base.startsWith('.env.')) && !ENV_ALLOWED.test(base);
+}
+
 /**
  * Normalize an agent-supplied file path to a workspace-RELATIVE path (no leading slash), safe to join
  * under `workspaceRoot`. Accepts BOTH a relative path ("src/App.tsx") and an absolute path that points
@@ -62,7 +74,8 @@ export function toDurableFileKey(filePath: string): string | null {
   // files: `loadWorkspaceFiles` and `listWorkspaceFilePaths` read through this function, exactly as they
   // do for the phantom paths above. Only the unambiguous tier (`NEVER_SOURCE_DIRS`) is refused — a
   // folder called `build` can hold hand-written files and stays stored.
-  return isNeverSourcePath(key) ? null : key;
+  if (isNeverSourcePath(key) || isSecretEnvPath(key)) return null;
+  return key;
 }
 
 /**

@@ -13,7 +13,7 @@ import { firestoreBackup } from '../lib/FirestoreBackup';
 import { audit } from '../lib/audit';
 import { noteAppOpen } from '../lib/ownAudience';
 import { doraMetrics } from '../lib/DoraMetrics';
-import { serverStats } from '../lib/serverStats';
+import { tierEngineAvailable } from '../AgentV3/tierLadder';
 import { buildHealthReport, renderStatusPageHtml, type HealthCheck } from '../lib/HealthReport';
 import { adminRequestOk, adminUsername } from '../lib/adminAuth';
 import { normalizeFeePct } from '../../lib/platformFee';
@@ -132,23 +132,26 @@ function collectHealthChecks(): HealthCheck[] {
   // `providerEnabled` map from `/api/admin/*`. The COUNT is the honest, useful part of this check
   // (it is what tells a reader whether the engine can serve requests at all); the names were never
   // information a visitor could act on.
-  const providers = serverStats.providerEnabled || ({} as Record<string, boolean>);
-  const entries = Object.entries(providers);
+  //
+  // 🔴 AND THE COUNT ITSELF WAS FAKE until 2026-10-11 (audit F16). It counted `serverStats.providerEnabled`, a map
+  // nothing routed on and nothing could change, so it read "4 of 4 available" on every instance forever — even
+  // with no provider key set. It now counts the build TIERS that can actually run here, by the same predicate
+  // the build route refuses on (`tierEngineAvailable`), so the status page and a refusal can never disagree.
+  const entries = BUILD_TIERS.map((level) => [level, tierEngineAvailable(level)] as const);
   const enabled = entries.filter(([, on]) => on);
   checks.push({
     name: 'AI engines',
-    status: enabled.length > 0 ? 'ok' : 'down',
+    status: enabled.length === entries.length ? 'ok' : enabled.length > 0 ? 'degraded' : 'down',
     detail: enabled.length > 0
       ? `${enabled.length} of ${entries.length} available`
       : 'No engines available',
   });
 
-  if (serverStats.maintenanceMode) {
-    checks.push({ name: 'Maintenance mode', status: 'degraded', detail: 'Maintenance mode is ON' });
-  }
-
   return checks;
 }
+
+/** The three build tiers, in the order the admin's engine page lists them. */
+const BUILD_TIERS = ['weak', 'off', 'mini'] as const;
 
 export function registerHealthRoutes(app: Express): void {
   // Q-159 — every instance records each exclusive job's run durably, so the external tick below knows what ran
@@ -185,7 +188,6 @@ export function registerHealthRoutes(app: Express): void {
       version: (process.env.K_REVISION || process.env.SERVICE_VERSION || process.env.GAE_VERSION || 'unknown').trim(),
       nodeVersion: process.version,
       memory: process.memoryUsage(),
-      maintenanceMode: !!serverStats.maintenanceMode,
       checks: collectHealthChecks(),
     });
     res.status(isServerReady() ? 200 : 503).json(report);

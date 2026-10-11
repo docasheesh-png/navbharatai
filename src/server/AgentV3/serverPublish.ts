@@ -48,6 +48,11 @@ export interface ServerPublishResult {
   body: Record<string, unknown>;
   /** True when the app went live — the caller then records the build outcome. */
   live: boolean;
+  /** Cloud Run's own word that a revision is serving. False on every failure. A resell must not bill without it. */
+  ready: boolean;
+  /** Set only when `live` is true. The service a failed charge has to delete. */
+  service?: string;
+  url?: string;
 }
 
 /** HTTP status for a failed host. ONE mapping, so a reason can never be reported as a different one. PURE. */
@@ -63,16 +68,16 @@ export function hostFailureStatus(reason: Extract<HostAppOutcome, { ok: false }>
 export async function runServerPublish(input: ServerPublishInput, deps: ServerPublishDeps): Promise<ServerPublishResult> {
   const now = deps.now ?? Date.now;
   const fail = (status: number, error: string, extra: Record<string, unknown> = {}): ServerPublishResult =>
-    ({ status, live: false, body: { error, code: 'needs-server-hosting', ...extra } });
+    ({ status, live: false, ready: false, body: { error, code: 'needs-server-hosting', ...extra } });
 
   const cap = await deps.serverCap({ ownerUid: input.ownerUid, workspaceId: input.workspaceId, isAdmin: input.isAdmin })
     .catch(() => ({ available: true, message: '' })); // an unreadable count fails open — see serverAppLimit
-  if (!cap.available) return { status: 403, live: false, body: { error: cap.message, code: 'server_app_limit' } };
+  if (!cap.available) return { status: 403, live: false, ready: false, body: { error: cap.message, code: 'server_app_limit' } };
 
   const claim = await deps.store.claim(input.workspaceId, input.ownerUid, now());
   if (!claim.claimed) {
     return {
-      status: 409, live: false,
+      status: 409, live: false, ready: false,
       body: {
         error: 'This app is already being deployed — wait for that to finish; a second deploy was not started.',
         code: 'deploy-in-progress', deploymentId: claim.running.deploymentId, startedAt: claim.running.startedAt,
@@ -107,7 +112,7 @@ export async function runServerPublish(input: ServerPublishInput, deps: ServerPu
     });
     await tracked.move('live', { url: hosted.url, service: hosted.service, buildId: hosted.buildId, ready: hosted.ready });
     return {
-      status: 200, live: true,
+      status: 200, live: true, ready: hosted.ready, service: hosted.service, url: hosted.url,
       body: {
         ok: true,
         url: hosted.url,

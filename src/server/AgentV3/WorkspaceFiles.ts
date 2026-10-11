@@ -29,6 +29,13 @@ export interface WorkspaceFileSink {
   writeBinaryFile?(workspaceId: string, filePath: string, base64: string): Promise<void>;
   runCommand?(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   readFile?(workspaceId: string, filePath: string): Promise<string>;
+  /**
+   * OPTIONAL: told the files a BULK landing wrote, so a sink that keeps its own copy of recent writes (the E2B
+   * actuator's warm cache, used to refill a dead machine and to put back an emptied package.json) holds the
+   * project that is really there. Per-file writes already go through `writeFile`; the archive did not
+   * (autopsy d0b2fcd6, Q-740 — the cache kept our starter, and a restore wrote it over the imported app).
+   */
+  noteFilesLanded?(workspaceId: string, files: Record<string, string>): void;
 }
 
 export interface CollectedFiles {
@@ -429,6 +436,7 @@ async function bulkLand(
         if (got !== map[path]) return null; // extraction did not really happen ⇒ fall back
       }
     }
+    try { sink.noteFilesLanded?.(workspaceId, Object.fromEntries(included.map((p) => [p, map[p]]))); } catch { /* the landing itself succeeded */ }
     return { written: included, leftover: excluded.map((p) => [p, map[p]] as [string, string]), verifiedCount: extracted };
   } catch {
     return null; // any failure at all ⇒ the per-file path, which was already working

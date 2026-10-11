@@ -11,6 +11,7 @@
 // visitor ever holds. It is erased with the account (USER_SCOPED_COLLECTIONS, key field `uid`).
 
 import * as admin from 'firebase-admin';
+import { BoundedCache } from './boundedCache';
 import { getServerDb } from './serverDb';
 
 export const APP_MART_CREATOR_IDS_COLLECTION = 'app_mart_creator_ids';
@@ -29,16 +30,16 @@ function getDb(): admin.firestore.Firestore | null {
 }
 
 /** Accounts already recorded by THIS process — so a Browse page of 60 cards writes nothing twice. */
-const written = new Set<string>();
 const MAX_REMEMBERED = 20_000;
+// An LRU (audit 2026-10-11): the old Set was CLEARED at the bound, re-writing every account at once.
+const written = new BoundedCache<string, true>({ maxEntries: MAX_REMEMBERED });
 
 /** Record code → account. Best-effort and fire-and-forget: a missed write only delays one profile. */
 export function rememberCreatorId(creatorId: string, uid: string): void {
   if (!creatorId || !uid || written.has(uid)) return;
   const db = getDb();
   if (!db) return;
-  if (written.size > MAX_REMEMBERED) written.clear();
-  written.add(uid);
+  written.set(uid, true);
   db.collection(APP_MART_CREATOR_IDS_COLLECTION).doc(creatorId)
     .set({ uid, at: Date.now() }, { merge: true })
     .catch(() => { written.delete(uid); });

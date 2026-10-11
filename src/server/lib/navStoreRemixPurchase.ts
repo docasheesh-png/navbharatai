@@ -29,11 +29,14 @@
 //     the platform stealing from its own sellers.
 
 import * as admin from 'firebase-admin';
+// Q-766: a de-identified listing's uid is a tombstone, and a tombstone has no wallet to credit.
+import { creatorHasLeft } from './publishedListingErase';
 import { getServerDb } from './serverDb';
 import { listEqNewestFirst } from './firestoreIndexSafe';
-import { TOKENS_PER_RUPEE } from './payments';
+import { TOKENS_PER_RUPEE, inrToDebitTokens } from './payments';
 import { ledgerPatch } from './walletStatement';
 import { debitWalletForBuild } from './walletDebit';
+import { checkPlanPayable } from './giftSpend';
 
 /**
  * 🔴 PAID REMIX IS PARKED — every remix is FREE (admin 2026-08-15: "abhi app remix free rakho, paid
@@ -154,15 +157,17 @@ export async function canAffordRemix(buyerUid: string, priceInr: number): Promis
   if (!d) return { ok: false, reason: 'The wallet is unavailable right now — try again in a moment.' };
   try {
     const snap = await d.collection('user_token_wallets').doc(buyerUid).get();
-    const w = snap.exists ? (snap.data() as Record<string, unknown>) : null;
-    const bal = typeof w?.remaining_balance === 'number' && Number.isFinite(w.remaining_balance) ? w.remaining_balance : null;
-    const tok = typeof w?.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance / TOKENS_PER_RUPEE : null;
-    // The same unified read the build gate uses: EITHER view showing money counts (the gift-token
-    // lesson — a wallet holding 50,000 gifted tokens with ₹0 in the other field is not empty).
-    const spendable = Math.max(bal ?? -Infinity, tok ?? -Infinity);
-    if (!Number.isFinite(spendable)) return { ok: false, reason: 'Your wallet has no balance yet — add money first (Wallet → Recharge).' };
-    if (spendable < priceInr) return { ok: false, reason: `This remix costs ₹${priceInr}; your wallet has ₹${Math.max(0, Math.floor(spendable))}. Add money first (Wallet → Recharge).` };
-    return { ok: true };
+    const w = snap.exists ? (snap.data() as Record<string, unknown>) : {};
+    // The welcome gift is not money that can buy a remix. `checkPlanPayable` reads the paid part
+    // only. A gift-only wallet is refused here, before any file is copied.
+    const refusal = checkPlanPayable(w, inrToDebitTokens(priceInr));
+    if (!refusal) return { ok: true };
+    if (refusal.giftTokens > 0 && refusal.paidTokens <= 0) {
+      return { ok: false, reason: `This remix costs ₹${priceInr}. Your welcome gift is for building apps, not for buying — it stays where it is. Add money first (Wallet → Recharge).` };
+    }
+    if (refusal.paidTokens <= 0) return { ok: false, reason: 'Your wallet has no balance yet — add money first (Wallet → Recharge).' };
+    const paidInr = Math.floor(refusal.paidTokens / TOKENS_PER_RUPEE);
+    return { ok: false, reason: `This remix costs ₹${priceInr}; your own money covers ₹${paidInr}. The welcome gift cannot buy this. Add money first (Wallet → Recharge).` };
   } catch {
     return { ok: false, reason: 'The wallet is unavailable right now — try again in a moment.' };
   }
@@ -194,6 +199,23 @@ export async function settleRemixPurchase(input: {
   const d = db();
   if (!d) return { charged: false, creatorCredited: false, note: 'wallet unavailable — delivered free' };
   const { appId, appName, buyerUid, creatorUid, priceInr } = input;
+  /**
+   * 🔴 THE CREATOR HAS DELETED THEIR ACCOUNT — CHARGE NOBODY, DELIVER ANYWAY (Q-766).
+   *
+   * When an author leaves, their listings are de-identified rather than erased, because a buyer's
+   * purchase must survive the seller (Terms §4: non-refundable, *because the app can be run free
+   * before buying*). That leaves a paid listing with no payee: the credit below would go to a
+   * tombstone uid whose wallet no longer exists, so NavBharatAI would be taking a stranger's money
+   * for a person who cannot be paid.
+   *
+   * Delivered free is the answer this function already gives whenever it cannot charge properly —
+   * "wallet unavailable", "purchase record failed" — and the same reasoning HostingBillingStore states
+   * as "when in doubt, we eat it". Refusing instead would punish the buyer for somebody else's
+   * departure; charging would be worse than either.
+   */
+  if (creatorHasLeft(creatorUid)) {
+    return { charged: false, creatorCredited: false, note: 'the creator has left NavBharatAI — delivered free' };
+  }
   const { creatorInr } = splitRemixPrice(priceInr);
   const ref = `store_remix_${purchaseDocId(appId, buyerUid)}`;
 
@@ -217,11 +239,18 @@ export async function settleRemixPurchase(input: {
     feature: 'remix',
     billedInr: priceInr,
     buildRef: ref,
+    spends: 'paid-only',
     // White-label + ledger honesty: the row names the APP the user bought, never internals.
     description: `Nav App Store — remix of "${appName}" (non-refundable)`,
   });
-  if (!debit.ok) {
-    return { charged: false, creatorCredited: false, note: 'debit failed after delivery — remix delivered free (working result or free)' };
+  const giftRefused = debit.ok && debit.refused === true;
+  if (!debit.ok || giftRefused) {
+    // The purchase row was written first, for idempotency. A refused gift debit must not leave
+    // them owning a paid app they did not pay for.
+    try { await d.collection(PURCHASES).doc(purchaseDocId(appId, buyerUid)).delete(); } catch { /* the debit did not happen */ }
+    return { charged: false, creatorCredited: false, note: giftRefused
+      ? 'Welcome gift cannot buy a remix — nothing was taken. Add money and try again.'
+      : 'debit failed after delivery — remix delivered free (working result or free)' };
   }
 
   // 3) Credit the creator's wallet with their 80% — same doc shape, additive, idempotent by ref.

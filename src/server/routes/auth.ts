@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseToken, getAdminAuthForPhone, getAdminAuthForExchange } from '../lib/authMiddleware';
-import { clientAddress } from '../lib/clientAddress';
+import { addressRateKey } from '../lib/clientAddress';
+import { BoundedCache } from '../lib/boundedCache';
 import { exchangePhoneIdToken } from '../lib/phoneTokenExchange';
 import { otpSendDecision, phoneOwnerUid, phoneForLog, type OtpPurpose } from '../lib/phoneGate';
 import { consumeDurableRate } from '../lib/DurableRateLimit';
@@ -19,8 +20,13 @@ interface OtpRequestRecord {
   requestTimestamps: number[];
 }
 
-const phoneOtpRecords = new Map<string, OtpRequestRecord>();
-const ipOtpRecords = new Map<string, OtpRequestRecord>();
+const OTP_RECORD_TTL_MS = 3_600_000;
+const MAX_TRACKED_KEYS = 20_000;
+// Bounded and O(1) per request (performance audit 2026-10-11): a record expires an hour after its last
+// request — exactly when nothing can still be limited by it — and the least recent is evicted at the bound.
+// The old stale-record prune walked the whole map on every OTP send once it held 20,000 keys.
+const phoneOtpRecords = new BoundedCache<string, OtpRequestRecord>({ maxEntries: MAX_TRACKED_KEYS, ttlMs: OTP_RECORD_TTL_MS });
+const ipOtpRecords = new BoundedCache<string, OtpRequestRecord>({ maxEntries: MAX_TRACKED_KEYS, ttlMs: OTP_RECORD_TTL_MS });
 
 /**
  * These maps are the FAST first line, and they are per-INSTANCE. Cloud Run runs several instances
@@ -31,21 +37,6 @@ const ipOtpRecords = new Map<string, OtpRequestRecord>();
  * they are instant, free, and still hold when Firestore is unreachable (the durable limiter is
  * deliberately fail-open, so something has to).
  */
-const MAX_TRACKED_KEYS = 20_000;
-
-/**
- * Drop entries nothing can still be rate-limited by. Without this the maps grow for every unique
- * phone and IP ever seen and are never emptied — a slow leak on a long-lived instance, since only
- * the timestamps INSIDE a record were ever pruned, never the record itself. Swept only when the map
- * is already large, so the normal path costs nothing.
- */
-function pruneStale(map: Map<string, OtpRequestRecord>, now: number, hourMs: number): void {
-  if (map.size < MAX_TRACKED_KEYS) return;
-  for (const [key, rec] of map) {
-    if (now - rec.lastRequestedAt > hourMs) map.delete(key);
-  }
-}
-
 /** Platform-wide OTP ceiling per hour. This is the one that caps the actual SMS BILL: per-phone and
  *  per-IP limits are both evaded by a botnet rotating numbers and addresses, and neither bounds what
  *  we can be made to spend in an hour. Generous by default and env-tunable, because a ceiling set too
@@ -57,18 +48,15 @@ function otpGlobalHourlyMax(env: NodeJS.ProcessEnv = process.env): number {
 
 /** At most this many OTP-outcome reports per address per hour — a tally, not a firehose. */
 export const OTP_REPORTS_PER_HOUR = 30;
-const otpReportLog = new Map<string, number[]>();
+const otpReportLog = new BoundedCache<string, number[]>({ maxEntries: MAX_TRACKED_KEYS, ttlMs: OTP_RECORD_TTL_MS });
 
 /** Per-address budget for `/api/auth/otp-outcome`. Per instance, like the maps above; it bounds noise. */
 export function otpReportAllowed(ip: string, now: number): boolean {
   const HOUR = 3_600_000;
-  const recent = (otpReportLog.get(ip) ?? []).filter((t) => now - t < HOUR);
-  if (recent.length >= OTP_REPORTS_PER_HOUR) { otpReportLog.set(ip, recent); return false; }
+  const recent = (otpReportLog.get(ip, now) ?? []).filter((t) => now - t < HOUR);
+  if (recent.length >= OTP_REPORTS_PER_HOUR) { otpReportLog.set(ip, recent, now); return false; }
   recent.push(now);
-  otpReportLog.set(ip, recent);
-  if (otpReportLog.size > MAX_TRACKED_KEYS) {
-    for (const [k, v] of otpReportLog) if (!v.length || now - v[v.length - 1] > HOUR) otpReportLog.delete(k);
-  }
+  otpReportLog.set(ip, recent, now);
   return true;
 }
 
@@ -80,7 +68,7 @@ export function registerAuthRoutes(app: Express): void {
   // per address, answers 204 whatever happens, and stores nothing that names anyone.
   app.post('/api/auth/otp-outcome', (req: Request, res: Response) => {
     try {
-      const ip = clientAddress(req);
+      const ip = addressRateKey(req);
       const input = parseOtpOutcome(req.body);
       if (input && otpReportAllowed(ip, Date.now())) void recordOtpOutcome(input).catch(() => {});
     } catch { /* a report must never fail the caller */ }
@@ -91,7 +79,7 @@ export function registerAuthRoutes(app: Express): void {
   // confirmed the number without an SMS; every other phone sign-in never calls it. Bounded per address.
   app.post('/api/auth/phone-exchange', async (req: Request, res: Response) => {
     try {
-      const ip = clientAddress(req);
+      const ip = addressRateKey(req);
       const now = Date.now();
       const rate = await consumeDurableRate('phone_exchange_ip', ip, 20, 3_600_000, now);
       if (!rate.allowed) return res.status(429).json({ ok: false, code: 'rate-limited', message: 'Too many attempts. Please wait a while.' });
@@ -119,7 +107,7 @@ export function registerAuthRoutes(app: Express): void {
        * on exactly today's behaviour.
        */
       const purpose: OtpPurpose = req.body?.purpose === 'verify' ? 'verify' : 'login';
-      const ip = clientAddress(req);
+      const ip = addressRateKey(req);
 
       // Validate TYPE, not just truthiness: a non-string phone (number/object/array) used to reach
       // `phone.replace(...)` below and throw → a 500 on malformed input. Reject it cleanly as a 400.
@@ -237,8 +225,6 @@ export function registerAuthRoutes(app: Express): void {
 
       phoneOtpRecords.set(cleanPhone, updateOtpRecord(phoneOtpRecords.get(cleanPhone)));
       ipOtpRecords.set(ip, updateOtpRecord(ipOtpRecords.get(ip)));
-      pruneStale(phoneOtpRecords, now, HOUR_MS);
-      pruneStale(ipOtpRecords, now, HOUR_MS);
 
       console.log(`[OTP PROTECTION SUCCESS] Request verified for phone ${cleanPhone} from source IP ${ip}`);
       return res.json({ success: true, message: "Verification cooldown validated. Safe to initialize OTP dispatch." });

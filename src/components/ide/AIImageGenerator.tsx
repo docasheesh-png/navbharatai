@@ -12,6 +12,7 @@ import { ImageResizeEditor } from './ImageResizeEditor';
 import { ReferenceImagePicker, type ReferencePicture } from './ReferenceImagePicker';
 import { CUSTOM_SIZE_ID, DEFAULT_CUSTOM_SIZE, describeSize, resolveCustomSize } from '../../lib/imageSize';
 import { Capacitor } from '@capacitor/core';
+import { saveToGallery } from '../../lib/saveToGallery';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';
 import { imageHistoryStore, pruneHistory, type ImageHistoryItem } from '../../lib/imageHistoryStore';
@@ -23,6 +24,7 @@ import { ReportAiContent } from '../chat/ReportAiContent';
 import { TextOverlayEditor } from './TextOverlayEditor';
 import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPrompt';
 import { IMAGE_PROMPT_MAX, imagePromptLimit, imagePromptLimitNote } from '../../lib/imagePromptLimit';
+import { deliverFile, deliveryMessage } from '../../lib/downloadFile';
 
 type GeneratedImage = ImageHistoryItem;
 
@@ -552,6 +554,11 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   // ONE-TAP Save to Photos on the native app: write a temp file (Filesystem), then hand its file URI to
   // the media plugin (savePhoto → the device Photo gallery). Plugins are dynamically imported so the web
   // bundle never loads native code. Throws on any failure so the caller falls back to the share sheet.
+  //
+  // The two platforms need DIFFERENT calls — Android requires an album identifier (a path) and iOS must
+  // not be given one — and that whole decision lives in `saveToGallery` (pure, tested, Q-699). Before
+  // this, Android was always rejected here with "Album identifier required" and every Android tap
+  // silently became a share sheet.
   const saveToPhotosNative = async (base64: string, filename: string): Promise<void> => {
     const [{ Filesystem, Directory }, { Media }] = await Promise.all([
       import('@capacitor/filesystem'),
@@ -559,7 +566,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
     ]);
     const written = await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Cache });
     try {
-      await Media.savePhoto({ path: written.uri });
+      await saveToGallery(Media, { path: written.uri, platform: Capacitor.getPlatform(), fileName: filename });
     } finally {
       try { await Filesystem.deleteFile({ path: filename, directory: Directory.Cache }); } catch { /* best-effort cleanup */ }
     }
@@ -596,15 +603,10 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
         }
       }
 
-      // Web (and native final fallback): trigger a real file download from a blob URL.
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      // Web (and native final fallback): the one save helper — the share sheet where it can take a file
+      // (iPhone Safari), else a real download; inside the app, Documents/NavBharatAI (Q-790).
+      const delivered = await deliverFile(filename, blob);
+      if (delivered === 'saved' || delivered === 'failed') flashNote(deliveryMessage(delivered, filename));
     } catch {
       flashNote('Could not save the image automatically — long-press the image to save it.');
     }

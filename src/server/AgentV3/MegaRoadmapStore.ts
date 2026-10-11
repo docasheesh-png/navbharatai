@@ -7,6 +7,7 @@
 // VITEST-skip, bounded retries, in-process cache, never throws) with its own collection.
 
 import * as admin from 'firebase-admin';
+import { BoundedCache } from '../lib/boundedCache';
 import type { MegaRoadmap } from '../lib/megaRoadmap';
 import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
@@ -42,12 +43,10 @@ function getDb(): admin.firestore.Firestore | null {
 }
 
 interface CacheEntry { record: StoredMegaRoadmap | null; at: number }
-const cache = new Map<string, CacheEntry>();
+// Bounded, O(1) per access (audit 2026-10-11): an entry expires CACHE_TTL_MS after it was written and the least
+// recently used workspace is evicted at the bound. The old `pruneCache` walked every entry on every read/write.
+const cache = new BoundedCache<string, CacheEntry>({ maxEntries: 2_000, ttlMs: CACHE_TTL_MS });
 
-function pruneCache(): void {
-  const cutoff = Date.now() - CACHE_TTL_MS;
-  for (const [k, v] of cache) if (v.at < cutoff) cache.delete(k);
-}
 
 /** Strict parse of a stored JSON blob → a StoredMegaRoadmap, or null if it is corrupt/incomplete. */
 export function parseStoredMegaRoadmap(raw: unknown): StoredMegaRoadmap | null {
@@ -86,7 +85,6 @@ export function parseStoredMegaRoadmap(raw: unknown): StoredMegaRoadmap | null {
 
 /** Persist a workspace's roadmap (cache + Firestore, write-through). Best-effort; never blocks a build. */
 export async function saveMegaRoadmap(workspaceId: string, record: StoredMegaRoadmap): Promise<void> {
-  pruneCache();
   cache.set(workspaceId, { record, at: Date.now() });
   const db = getDb();
   if (!db) return;
@@ -107,7 +105,6 @@ export async function saveMegaRoadmap(workspaceId: string, record: StoredMegaRoa
 
 /** Load a workspace's roadmap: cache first, then Firestore. Null when there is no fresh valid roadmap. */
 export async function loadMegaRoadmap(workspaceId: string): Promise<StoredMegaRoadmap | null> {
-  pruneCache();
   const hit = cache.get(workspaceId);
   if (hit) return hit.record;
   const db = getDb();

@@ -17,6 +17,9 @@
  * the moment it records, so nothing is reported twice.
  */
 
+import { isSecretEnvPath, SANDBOX_WORKSPACE_ROOT, toWorkspaceRelPath } from '../lib/workspacePath';
+import { currentToolSignal, lapsedGuardEnabled, LAPSED_WRITE_MESSAGE } from './toolDeadline';
+
 export interface WritablePort {
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
 }
@@ -30,18 +33,40 @@ export function recordingActuator<T extends WritablePort>(
   inner: T,
   workspaceId: string,
   onWritten: (path: string, content: string) => void,
+  beforeWrite?: (path: string) => void,
 ): T {
+  const refuseIfLapsed = (): void => {
+    if (!lapsedGuardEnabled()) return;
+    if (currentToolSignal()?.aborted) throw new Error(LAPSED_WRITE_MESSAGE);
+  };
   const writeFile = async (ws: string, filePath: string, content: string): Promise<void> => {
+    refuseIfLapsed();
+    if (beforeWrite) beforeWrite(filePath);
     await inner.writeFile(ws, filePath, content);
-    if (ws === workspaceId) {
+    if (ws === workspaceId && !isDurableSecretEnv(filePath)) {
       try { onWritten(filePath, content); } catch { /* recording must never fail a write */ }
     }
+  };
+  const runCommand = async (ws: string, command: string, ...rest: unknown[]): Promise<unknown> => {
+    refuseIfLapsed();
+    const fn = (inner as unknown as { runCommand: (ws: string, command: string, ...rest: unknown[]) => Promise<unknown> }).runCommand;
+    return fn.call(inner, ws, command, ...rest);
   };
   return new Proxy(inner, {
     get(target, prop, receiver) {
       if (prop === 'writeFile') return writeFile;
+      if (prop === 'runCommand' && typeof (target as { runCommand?: unknown }).runCommand === 'function') return runCommand;
       const value = Reflect.get(target, prop, receiver);
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
+}
+
+/** A vault env file stays in the sandbox. It must not be noted for the durable save. */
+function isDurableSecretEnv(filePath: string): boolean {
+  try {
+    return isSecretEnvPath(toWorkspaceRelPath(filePath, SANDBOX_WORKSPACE_ROOT));
+  } catch {
+    return isSecretEnvPath(String(filePath ?? ''));
+  }
 }

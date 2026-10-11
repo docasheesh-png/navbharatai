@@ -121,6 +121,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Shared app database (Publish → database and API). Admin SDK only. A browser must not
+    // read or write these documents, or it could spend the platform's Firestore quota directly.
+    match /nbai_app_data/{document=**} {
+      allow read, write: if false;
+    }
+
     // Chat sessions — owner only
     match /chat_sessions/{sessionId} {
       allow read: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);

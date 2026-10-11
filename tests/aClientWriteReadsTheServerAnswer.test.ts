@@ -26,9 +26,11 @@ const BEST_EFFORT: Record<string, Record<string, string>> = {
   'src/components/ide/MentionInbox.tsx': { '/api/mentions/read': 'mark-read; a lost mark reappears on the next load' },
   'src/components/ide/ShellTerminal.tsx': {
     '/api/agentv3/shell/close': "closing a terminal; the server's idle reaper ends it anyway",
-    '/api/agentv3/shell/resize': 'terminal size; corrected by the next resize',
+    // Old entry: '/api/agentv3/shell/resize': 'terminal size; corrected by the next resize'
+    // The resize POST now reads the response (409 SHELL_NOT_ON_THIS_INSTANCE reopens once).
   },
   'src/components/ide/StoreBuildPanel.tsx': { '/api/mobile-ship/cancel': "an abandoned store build; the workflow's own timeout stops it" },
+  'src/components/agentv3/PreviewSurface.tsx': { '/api/agentv3/preview-error': 'error telemetry for the platform; nothing is shown or promised to the user' },
   'src/hooks/useAgentV3Build.ts': { '/api/agentv3/queue/complete': "queue bookkeeping; a stale 'running' item self-heals to 'failed' on next load" },
   'src/lib/zipProjectUpload.ts': { '/api/zip-upload/abort': 'cleanup of an abandoned upload; the server sweeps stale uploads' },
   'src/lib/referralClaim.ts': { '/claim-failed': 'a failure count for the server; nothing is shown or promised to the user' },

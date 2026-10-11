@@ -25,6 +25,7 @@
 // PURE above `fetchForCheckup`. Every analyzer is a pure function of a fetched response, so the exact
 // findings a user is shown are unit-tested and can never drift onto a live network call.
 
+import { PEM_PRIVATE_KEY_MATERIAL } from './pemKeyMaterial';
 import { assertPublicHttpUrl, publicOnlyInit } from './ssrfGuard';
 import { isLiveDeployment, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 
@@ -298,7 +299,8 @@ export function analyzeCookies(f: CheckupFetch): CheckupFinding[] {
 const SECRET_PATTERNS: Array<{ id: string; re: RegExp; name: string }> = [
   { id: 'stripe-secret', re: /\bsk_live_[0-9a-zA-Z]{16,}\b/, name: 'a Stripe secret key' },
   { id: 'aws-akia', re: /\bAKIA[0-9A-Z]{16}\b/, name: 'an AWS access key id' },
-  { id: 'private-key', re: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/, name: 'a private key' },
+  // The key's MATERIAL, not its marker — a page that documents PEM headers leaks nothing (Q-737).
+  { id: 'private-key', re: PEM_PRIVATE_KEY_MATERIAL, name: 'a private key' },
   { id: 'slack-token', re: /\bxox[baprs]-[0-9A-Za-z-]{10,}\b/, name: 'a Slack token' },
   { id: 'generic-secret', re: /["'`](?:api[_-]?secret|secret[_-]?key|client[_-]?secret)["'`]\s*[:=]\s*["'][A-Za-z0-9_\-]{16,}["']/i, name: 'a secret key' },
 ];

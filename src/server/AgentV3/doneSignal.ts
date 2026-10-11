@@ -34,6 +34,7 @@
  * PURE — no I/O, no clock, never throws. The caller supplies the counters it already holds.
  */
 import type { ReadinessReport } from './Readiness';
+import { envFlag } from '../lib/envFlag';
 
 /**
  * The score a build must clear to be called FINISHED — deliberately far above `MIN_READY_SCORE`.
@@ -127,9 +128,21 @@ export function shouldCheckDone(p: {
  */
 export function appIsDone(readiness: ReadinessReport | null | undefined): boolean {
   if (!readiness) return false;
+  // A check that did not finish is not "the app is complete" (TD-2). `ready: false` on that report
+  // means we did not look, which this already refuses — said explicitly so a later edit cannot
+  // treat the flag as optional decoration.
+  if (readiness.unassessed) return false;
   if (!readiness.ready) return false;
   if (readiness.blockers.length > 0) return false;
   return Number.isFinite(readiness.score) && readiness.score >= DONE_SCORE;
+}
+
+/**
+ * Owner decision D-6. Default OFF: a readiness timeout does not by itself turn `ok` false
+ * (the build is simply not claimed verified). `AGENTV3_UNASSESSED_FAILS=on` is the strict reading.
+ */
+export function unassessedFailsBuild(): boolean {
+  return envFlag('AGENTV3_UNASSESSED_FAILS', false);
 }
 
 /**
@@ -140,6 +153,7 @@ export function appIsDone(readiness: ReadinessReport | null | undefined): boolea
  * check cannot know that the user asked for a feature nobody has built yet.
  */
 export function doneSteer(readiness: ReadinessReport | null | undefined): string | null {
+  if (readiness?.unassessed) return null;
   if (!appIsDone(readiness)) return null;
   const r = readiness as ReadinessReport;
   return [

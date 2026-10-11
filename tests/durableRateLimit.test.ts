@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { windowKey, decideRate, consumeDurableRate } from '../src/server/lib/DurableRateLimit';
+import { windowKey, decideRate, consumeDurableRate, consumeWithStore, decideAfterIncrement, windowExpiry } from '../src/server/lib/DurableRateLimit';
+import { readFileSync } from 'node:fs';
 
 // SECURITY Phase 1.4 — durable, cross-instance rate limiting. The in-memory limiter reset on every
 // Cloud Run cold start (per-instance), so limits didn't actually hold; this durable layer makes them
@@ -47,5 +48,53 @@ describe('consumeDurableRate — VITEST-skipped, bounded, FAIL-OPEN (never block
   it('is inert for a non-positive limit / empty key (no accidental block)', async () => {
     await expect(consumeDurableRate('build', 'user-1', 0, 3_600_000, 0)).resolves.toMatchObject({ allowed: true });
     await expect(consumeDurableRate('build', '', 5, 3_600_000, 0)).resolves.toMatchObject({ allowed: true });
+  });
+});
+
+describe('audit 2026-10-11 (D9): a concurrent burst can never pass more than the limit', () => {
+  // A store whose increment is atomic (as Firestore's `increment` is), with the read-back delayed so every
+  // request's increment lands before any of them reads — the worst interleaving for the old read-then-write.
+  function atomicStore() {
+    let count = 0;
+    const gate: Array<() => void> = [];
+    return {
+      store: { async incrementAndRead() { count += 1; await new Promise<void>((r) => gate.push(r)); return count; } },
+      release: () => { while (gate.length) gate.shift()!(); },
+    };
+  }
+
+  it('20 parallel requests against a limit of 10: at most 10 allowed', async () => {
+    const { store, release } = atomicStore();
+    const pending = Array.from({ length: 20 }, () => consumeWithStore(store, 10));
+    await new Promise((r) => setTimeout(r, 0));
+    release();
+    const results = await Promise.all(pending);
+    expect(results.filter((r) => r.allowed).length).toBeLessThanOrEqual(10);
+  });
+
+  it('sequential requests: exactly the limit passes, the next is refused', async () => {
+    let count = 0;
+    const store = { async incrementAndRead() { count += 1; return count; } };
+    const out: boolean[] = [];
+    for (let i = 0; i < 4; i++) out.push((await consumeWithStore(store, 3)).allowed);
+    expect(out).toEqual([true, true, true, false]);
+  });
+
+  it('a store error fails OPEN, never blocking a real request', async () => {
+    const store = { async incrementAndRead(): Promise<number> { throw new Error('unavailable'); } };
+    expect((await consumeWithStore(store, 1)).allowed).toBe(true);
+  });
+
+  it('counters expire a day after their window, so a TTL policy can delete them', () => {
+    expect(windowExpiry(0, 3_600_000).getTime()).toBe(3_600_000 + 86_400_000);
+    expect(windowExpiry(3_599_999, 3_600_000).getTime()).toBe(3_600_000 + 86_400_000);
+    expect(decideAfterIncrement(10, 10)).toBe(true);
+    expect(decideAfterIncrement(11, 10)).toBe(false);
+  });
+
+  it('the live path increments atomically and never writes a count it read', () => {
+    const src = readFileSync('src/server/lib/DurableRateLimit.ts', 'utf8');
+    expect(src).toMatch(/count: admin\.firestore\.FieldValue\.increment\(1\)/);
+    expect(src).not.toMatch(/count: used \+ 1/);
   });
 });

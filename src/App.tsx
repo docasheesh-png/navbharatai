@@ -1,5 +1,6 @@
 import UpdateBanner from './components/UpdateBanner';
 import { platformFixRequestPrompt } from './lib/platformFixRequest';
+import { EMPTY_PREVIEW_HTML } from './lib/workspaceSource';
 import { setUserContext, clearUserContext, setCrashKey, setFeatureContext, featureAreaForView, recordNonFatal } from './lib/observability';
 import React, { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
@@ -45,7 +46,7 @@ import { isNativeApp } from './lib/mobileNative';
 import { medicalViewBlocked, medicalFeaturesHidden } from './lib/playCompliance';
 import { isComingSoonTool } from './lib/comingSoonTools';
 // SDAChat kept eager — used immediately on tab open
-import { PROFESSIONAL_CHATS, PROFESSIONALS_IMPLEMENTED_ELSEWHERE } from './components/professionals/professionalConfigs';
+import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { useNotificationInbox, NotificationPanel } from './components/NotificationBell';
 import { RewardsChecklistCard } from './components/RewardsChecklistCard';
 import { walletNeedsTopUp } from './lib/walletNeedsTopUp';
@@ -89,6 +90,7 @@ import { Browser } from '@capacitor/browser';
 // depending, put the WRONG cross-origin authDomain on the default app — silently breaking the first
 // Google sign-in). Re-exported here so every existing `import { auth, db } from './App'` still works.
 import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib/firebase';
+import { API_READ_CACHE, shouldClearApiReadCache } from './lib/swCaches';
 import { readRedirectMarker, clearRedirectMarker, redirectReturnVerdict, redirectLostMessage } from './lib/redirectSignInMarker';
 import { isNewAccount, decideSignupReport, SIGNUP_REPORTED_KEY } from './lib/signupSignal';
 import { authedHeaders } from './lib/authHeaders';
@@ -106,8 +108,6 @@ import { initPushNotifications, teardownPushNotifications } from './lib/pushNoti
 const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
   lazy(() => fn().then(m => ({ default: m[k] as React.ComponentType<any> })));
 
-const SecretManager    = _lz(() => import('./components/SecretManager'),        'SecretManager');
-const DatabaseSettings = _lz(() => import('./components/settings/DatabaseSettings'), 'DatabaseSettings');
 const ReportsListView  = _lz(() => import('./components/ReportsListView'),      'ReportsListView');
 
 // ── Route-level views, lazy (2026-08-24) ──────────────────────────────────────────────────────
@@ -136,20 +136,18 @@ const ProfessionalChat = _lz(() => import('./components/professionals/Profession
 const ProfilePage = _lz(() => import('./components/profile/ProfilePage'), 'ProfilePage');
 const RepoAnalystTool = _lz(() => import('./components/repoAnalyst/RepoAnalystTool'), 'RepoAnalystTool');
 const AboutPanel = _lz(() => import('./components/panels/AboutPanel'), 'AboutPanel');
-const DeploySuccessPanel = _lz(() => import('./components/panels/DeploySuccessPanel'), 'DeploySuccessPanel');
 
 // HistoryView and ProfessionalHistoryView are STATIC on purpose (Q-625): HistoryPopup above already
 // imports HistoryView statically, and HistoryView imports ProfessionalHistoryView, so both are in the
 // startup chunk whatever this file does. A `lazy()` here split nothing and only added a Suspense hop.
 // To make them lazy, make EVERY importer lazy — tests/aDynamicImportMustSplitSomething.test.ts checks it.
 
-import { useBuild } from './components/ide/BuildContext';
 import { useDevLogs } from './hooks/useDevLogs';
 import { usePaymentEngine } from './hooks/usePaymentEngine';
 import { usePreviewBundler } from './hooks/usePreviewBundler';
 import { useChatEngine } from './hooks/useChatEngine';
 import { useSessionManager } from './hooks/useSessionManager';
-import { useZipImport } from './hooks/useZipImport';
+import { useZipImport, type ZipImportProgress } from './hooks/useZipImport';
 import { useGitHubConnect } from './hooks/useGitHubConnect';
 import { useSettings } from './hooks/useSettings';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
@@ -182,36 +180,16 @@ import { aboutContent, type AboutContent, type AboutOverrides } from './content/
 import { decideBackAction, HARDWARE_BACK_EVENT } from './lib/androidBack';
 import { loadNativeShellContext, exitNativeApp, syncStatusBarToTheme } from './lib/nativeShell';
 import { ExitConfirmDialog } from './components/ExitConfirmDialog';
+import { deliverFile, deliveryMessage } from './lib/downloadFile';
 // AgentMode → re-exported from ./types
 
 // Large keys that can be evicted when localStorage is nearly full.
 // Ordered from least-important to most-important.
-// D21: derive a human-friendly app name from the user's build prompt
-function inferAppName(prompt: string): string {
-  const p = prompt.trim();
-  // "build/create/make/design/generate a(n)? X (app|tool|dashboard|...)"
-  const m1 = p.match(/(?:build|create|make|generate|design)\s+(?:me\s+)?(?:a|an|the)?\s*([a-zA-Z][a-zA-Z\s]{1,28}?)(?:\s+(?:app|application|website|web\s*app|dashboard|tool|platform|system|tracker|manager|portal|page|site))?\s*(?:with|using|in\b|that|which|\.|,|!|\?|$)/i);
-  if (m1 && m1[1].trim().length >= 2) {
-    const words = m1[1].trim().split(/\s+/);
-    if (words.length <= 5) {
-      return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-    }
-  }
-  // Direct "X app" / "X dashboard" / "X tool"
-  const m2 = p.match(/\b([A-Za-z][a-zA-Z\s]{1,25}?)\s+(?:app|dashboard|tool|tracker|manager|website|portal)\b/i);
-  if (m2) {
-    const words = m2[1].trim().split(/\s+/);
-    if (words.length >= 1 && words.length <= 4) {
-      return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-    }
-  }
-  return 'NavBharat App';
-}
 
 export default function App() {
   // ── Phase 1 hooks ──────────────────────────────────────────────────────
-  const { logs, setLogs, addLog } = useDevLogs();
-  const { theme, setTheme, hinglishMode, setHinglishMode, preferredLanguage, setPreferredLanguage, mode, setMode, enabledModules, setEnabledModules, isThemePickerOpen, setIsThemePickerOpen } = useSettings();
+  const { logs, addLog } = useDevLogs();
+  const { theme, setTheme, preferredLanguage, setPreferredLanguage, mode, setMode, enabledModules, setEnabledModules, isThemePickerOpen, setIsThemePickerOpen } = useSettings();
   // ───────────────────────────────────────────────────────────────────────
 
   // Startup: evict large cached data if localStorage is > 3 MB to keep space for Firebase auth
@@ -285,7 +263,6 @@ export default function App() {
     }
   }, [deviceMode]);
 
-  const [tabHistories, setTabHistories] = useState<Record<string, ViewType[]>>({});
   const [user, setUser] = useState<FirebaseUser | null>(null);
   // 🔔 The notifications inbox lives at App level (admin 2026-09-22): its unread count is drawn on the
   // ☰ button and the sidebar's Notifications row while the panel is CLOSED, so a component that only
@@ -311,19 +288,17 @@ export default function App() {
   // /api/wallet/* actions; nothing payment-owned flows into the build/preview/chat pipeline.
   const {
     wallet, setWallet,
-    dailyUsage, setDailyUsage, incrementDailyUsage,
+    dailyUsage, incrementDailyUsage,
     billingTransactions, setBillingTransactions,
-    loadingWallet, setLoadingWallet,
-    monthlyAiCost, setMonthlyAiCost,
-    isRecharging, setIsRecharging,
-    rechargeStatus, setRechargeStatus,
+    loadingWallet,
+    monthlyAiCost,
+    isRecharging,
     activeBillingDetailTab, setActiveBillingDetailTab,
-    customPurchaseCredits, setCustomPurchaseCredits,
     showPurchaseFormPanel, setShowPurchaseFormPanel,
     couponCodeInput, setCouponCodeInput,
-    isRedeemingCoupon, setIsRedeemingCoupon,
-    couponError, setCouponError,
-    couponSuccess, setCouponSuccess,
+    isRedeemingCoupon,
+    couponError,
+    couponSuccess,
     buyAmountInput, setBuyAmountInput,
     fetchWallet,
     createBillingOrder,
@@ -332,7 +307,7 @@ export default function App() {
     giftFaceInput, setGiftFaceInput,
     isBuyingGift, giftError,
     giftCodes, giftBounds, lastGiftCode,
-    fetchGiftCodes, createGiftOrder,
+    createGiftOrder,
   } = usePaymentEngine({ user, addLog });
 
   // 💳 THE TOP-UP TRAIL (admin 2026-09-22: "agar balance khatam hai, to ☰ menu → wallet and billing →
@@ -425,37 +400,6 @@ export default function App() {
   // store too (NavAppStore reads the id itself and opens the player directly). `?view=appstore` is the
   // older share link, still in circulation. All three live in routeForPath now.
   const readStoreRoute = (): boolean => readUrlRoute() === 'appstore';
-  /**
-   * "wahi se start ho" (admin 2026-09-17) — the places the app may land somebody in on launch.
-   *
-   * Sourced from the professionals REGISTRY rather than a pattern: `other_ai` is the builder-tools
-   * hub and matches any `_ai` test, so a regex would have resumed people into a grid of tools they
-   * never opened. `PROFESSIONALS_IMPLEMENTED_ELSEWHERE` carries Doctor AI, which has its own
-   * component instead of a config — the same list `tabParenting.test.ts` keeps honest.
-   */
-  const RESUMABLE_PROFESSIONALS = useMemo(
-    () => [...Object.keys(PROFESSIONAL_CHATS), ...PROFESSIONALS_IMPLEMENTED_ELSEWHERE],
-    [],
-  );
-  /**
-   * 🔒 DOES THE URL ALREADY SAY WHERE TO GO? Then the remembered place must not argue with it.
-   *
-   * Deliberately broad — ANY non-root path, ANY query string, ANY hash. A share link, an OAuth
-   * return (`#gh_token`, `?sbconnect`), `/privacy`, `/store/app/<id>`: each is somebody stating a
-   * destination, and a guess about where they might want to be must never override a statement of
-   * where they asked to be. An unreadable URL counts as "explicit" for the same reason — when in
-   * doubt, leave today's behaviour alone.
-   */
-  const hasExplicitDestination = (): boolean => {
-    try {
-      if (typeof window === 'undefined') return true;
-      if (readAdminRoute() || readStoreRoute() || readV3ViewFlag()) return true;
-      if (window.location.pathname.replace(/\/+$/, '') !== '') return true;
-      if ((window.location.search || '').length > 1) return true;
-      if ((window.location.hash || '').length > 1) return true;
-      return false;
-    } catch { return true; }
-  };
   const [activeView, setActiveView] = useState<ViewType>(() =>
     readAdminRoute() ? 'admin'
       : readStoreRoute() ? 'appstore'
@@ -568,7 +512,6 @@ export default function App() {
   const setProMessages = (v: Message[] | ((p: Message[]) => Message[])) =>
     setMessagesMap(prev => ({ ...prev, nbi_pro_chat: typeof v === 'function' ? v(prev['nbi_pro_chat'] || []) : v }));
   const [input, setInput] = useState<string>('');
-  const [proInput, setProInput] = useState<string>('');
   // 9.5 — AI Teaching Mode (beginner-friendly explanations)
   const [teachMode, setTeachMode] = useState<boolean>(() => localStorage.getItem('navbharat_teach_mode') === 'true');
   useEffect(() => { localStorage.setItem('navbharat_teach_mode', teachMode.toString()); }, [teachMode]);
@@ -593,29 +536,15 @@ export default function App() {
   };
   // Phase 6.2 — real-time network status for mobile UX.
   const networkStatus = useNetworkStatus();
-  // 10.1 — Onboarding
-  const [proBuildProgress, setProBuildProgress] = useState<{
-    active: boolean;
-    stage: string;
-    steps: { label: string; sub: string; status: 'pending' | 'running' | 'done' | 'error'; code?: string; expanded?: boolean }[];
-    percent: number;
-    generatedFiles: Record<string, { content: string; expanded: boolean }>;
-    /** When the current build (or auto-continue chain) started — drives the live timer. */
-    startedAt?: number;
-    /** Auto-continue part number (1 = first pass) when a build is resumed after the soft deadline. */
-    part?: number;
-    /** G3 — Execution tier reported by the agentic engine: 'vfs' | 'cloudrun' | 'e2b'. */
-    tier?: 'vfs' | 'cloudrun' | 'e2b';
-    /** G5 — Code review result from the last completed build. */
-    codeReview?: import('./services/buildService').CodeReviewResult;
-  }>({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+  // The zip import's progress, drawn by the Files panel that started it (Q-792). It replaced the legacy Pro
+  // builder's `proBuildProgress`/`isProLoading`/`proInput`, which the import still wrote and nothing read.
+  const [zipImportProgress, setZipImportProgress] = useState<ZipImportProgress | null>(null);
   const [sdaResetKey, setSdaResetKey] = useState(0);
   /** Which Doctor AI case History asked for, if any — see SDAChat's `openCaseId`. */
   const [sdaOpenCaseId, setSdaOpenCaseId] = useState<string | undefined>(undefined);
   // The Mode sheet (admin 2026-08-25): footer Mode button → pick FREE / a new FREE chat / any expert.
   const [showModePicker, setShowModePicker] = useState(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [isProLoading, setIsProLoading] = useState<boolean>(false);
   const [activeIntent, setActiveIntent] = useState<string>('social');
   const [activeAgent, _setActiveAgent] = useState<string>('navbharatai');
   
@@ -672,18 +601,6 @@ export default function App() {
     toggleTab('nbi_chat');
   };
 
-  // ==================================================
-  // CLOUD SYNC PREMIUM WORKSPACE & PREVIEW CONTEXT ACTIONS
-  // ==================================================
-  const [isWorkspacePreparing, setIsWorkspacePreparing] = useState(false);
-  const [workspacePrepError, setWorkspacePrepError] = useState<string | null>(null);
-
-
-
-  const ascMessages = messages;
-
-  const isSplitChat = false;
-
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>(() => Date.now().toString());
   // Pro App Builder chat needs its own session id — it must never share/overwrite
@@ -712,14 +629,6 @@ export default function App() {
       });
       setIsAppBuilt(true);
       setHasGeneratedCode(true);
-      setProBuildProgress(prev => ({
-        ...prev,
-        percent: 100,
-        stage: '✅ App restored from last session',
-        generatedFiles: Object.fromEntries(
-          Object.entries(saved.files).map(([k, v]) => [k, { content: v as string, expanded: false }])
-        ),
-      }));
     }).catch(() => {});
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -809,7 +718,6 @@ export default function App() {
   } | null>(null);
 
   const [selectedModel, setSelectedModel] = useState('auto');
-  const [invalidKeys, setInvalidKeys] = useState<Set<string>>(new Set());
   const [pendingProvider, setPendingProvider] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -940,35 +848,9 @@ export default function App() {
   const [ghSearchQuery, setGHSearchQuery] = useState('');
   const [isPushing, setIsPushing] = useState(false);
   const [pendingGHEdit, setPendingGHEdit] = useState<{ path: string, content: string, message: string, sha?: string } | null>(null);
-  const [pushStatus, setPushStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ status: 'idle' });
   // theme, isThemePickerOpen → from useSettings() hook
-  const { buildSteps, setBuildSteps } = useBuild();
   const [isAppBuilt, setIsAppBuilt] = useState(false);
-  const [buildVersionStack, setBuildVersionStack] = useState<Array<{files: Record<string, string>, timestamp: string, request: string}>>([]);
 
-  useEffect(() => {
-    let active = true;
-    let timeoutId: ReturnType<typeof setTimeout>;
-
-    const pollBuildStatus = async () => {
-      if (!active) return;
-      try {
-        const res = await fetch('/build_status.json?t=' + Date.now());
-        const data = await res.json();
-        if (data.status === 'building' && data.steps) {
-          setBuildSteps(data.steps.filter((s: any) => s.status !== 'pending'));
-          timeoutId = setTimeout(pollBuildStatus, 2000);
-        } else {
-          setBuildSteps([]);
-        }
-      } catch {
-        // /build_status.json not found — not in a build, stop polling
-      }
-    };
-
-    pollBuildStatus();
-    return () => { active = false; clearTimeout(timeoutId); };
-  }, [setBuildSteps]);
   // ABOUT US — served from the SERVER so every user sees the same page (2026-09-20).
   //
   // 🔴 It used to be `loadPersistedContent('navbharat_about_v1', …)` with a `localStorage.setItem`
@@ -1113,7 +995,6 @@ export default function App() {
     }
   }, [githubRepoContext]);
 
-  const [isSearching, setIsSearching] = useState(false);
   // A user with no app has NO files — the state starts EMPTY, the same `{}` a New Chat resets it to
   // (admin 2026-09-23: "studio open ho jaye, bas andar koi file na dikhe, kyu ki file hai hi nahi").
   // It used to start with three placeholder files (a "Welcome to Navbharat AI Sandbox" index.html, a
@@ -1128,9 +1009,6 @@ export default function App() {
   const [activeFile, setActiveFile] = useState<string>('index.html');
   const [fileUploadConflict, setFileUploadConflict] = useState<{ file: File; existingKey: string; isZip: boolean } | null>(null);
   const [zipSizeModal, setZipSizeModal] = useState<{ variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null>(null);
-  const filesUploadRef = useRef<HTMLInputElement>(null);
-  const [isDeployed, setIsDeployed] = useState(false);
-  const [deployUrl, setDeployUrl] = useState('');
   const [showDeployPanel, setShowDeployPanel] = useState(false);
   // logs, setLogs → from useDevLogs() hook
   const _initialCode = (() => {
@@ -1139,7 +1017,7 @@ export default function App() {
       const saved = localStorage.getItem('navbharat_last_app');
       if (saved && saved.length > 200) return saved;
     } catch {}
-    return '<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>';
+    return EMPTY_PREVIEW_HTML;
   })();
 
   // 9.1 — undo/redo for generated code (Ctrl+Z / Ctrl+Y)
@@ -1377,7 +1255,19 @@ export default function App() {
           if (message) addToast(message, 'error');
         });
     }
+    // UI-5 — the offline API cache is not partitioned by account. Track the uid this
+    // listener has already seen and drop the bucket when that account is replaced,
+    // including by null. Every sign-out path ends here; signOutEverywhere also deletes
+    // ahead of the reload so the wipe is not lost on the way out.
+    let previousUid: string | null = null;
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      const nextUid = currentUser?.uid ?? null;
+      if (shouldClearApiReadCache(previousUid, nextUid)) {
+        void (async () => {
+          if ('caches' in window) await caches.delete(API_READ_CACHE);
+        })().catch(() => { /* a failed wipe must not break the auth listener */ });
+      }
+      previousUid = nextUid;
       setUser(currentUser);
       setLoadingUser(false);
       // Crash reports name the user only by a one-way hash of the uid, and forget it on sign-out. Every
@@ -1499,8 +1389,11 @@ export default function App() {
    * refused open never leaves a row "ongoing" with nothing behind it. Without either, a professional
    * with no window open reopens its most recent ongoing conversation (or starts one), and one with
    * windows open is simply focused — so every door into an expert leads to a window, by construction.
+   *
+   * `_pushToHistory` only keeps the positional slot for existing callers: there is no per-tab history to push
+   * to. The old `tabHistories` was written and never read — Back goes Home (androidBack.ts). Q-600 batch five.
    */
-  const toggleTab = useCallback((view: ViewType, pushToHistory = true, conversationId?: string, resumeEndedAt?: number): boolean => {
+  const toggleTab = useCallback((view: ViewType, _pushToHistory = true, conversationId?: string, resumeEndedAt?: number): boolean => {
     // Play compliance choke point: EVERY tab-open path goes through toggleTab, so blocking here (plus
     // the render guards below) means a medical view cannot open in the native shell no matter which
     // button, deep link, or restored state asked for it.
@@ -1595,13 +1488,6 @@ export default function App() {
       });
     }
 
-    if (pushToHistory && activeView !== view) {
-      setTabHistories(prev => ({
-        ...prev,
-        [activeView]: [...(prev[activeView] || []), view]
-      }));
-    }
-    
     setActiveView(view);
     return true;
   }, [user, openTabs, activeView, addLog, setShowAuth, openChats, activeChatId, addToast, viewWindows]);
@@ -1795,7 +1681,6 @@ export default function App() {
     if (!pendingGHEdit || !githubRepoContext) return;
     
     setIsPushing(true);
-    setPushStatus({ status: 'loading' });
     addLog(`GitHub: Pushing changes to ${pendingGHEdit.path}...`, 'info');
     
     try {
@@ -1807,7 +1692,6 @@ export default function App() {
         pendingGHEdit.sha || ''
       );
       
-      setPushStatus({ status: 'success', message: 'Successfully pushed to GitHub!' });
       addLog(`GitHub: Push successful! Commit: ${result.commit.sha.substring(0, 7)}`, 'success');
       addToast(`Pushed to GitHub ✓ (${result.commit.sha.substring(0, 7)})`, 'success');
       
@@ -1821,8 +1705,11 @@ export default function App() {
       setMessages(prev => [...prev, successMsg]);
       setPendingGHEdit(null);
     } catch (e: any) {
-      setPushStatus({ status: 'error', message: e.message });
       addLog(`GitHub Error: ${e.message}`, 'error');
+      // The success path has always shown a toast; a failure went only to the developer log, so the
+      // "Confirm & Push to GitHub" button just stopped spinning and nothing said the push had not
+      // happened (Q-794). The proposed edit stays pending, so the user can press it again.
+      addToast(`Push to GitHub failed: ${e?.message || 'unknown error'}`, 'error');
     } finally {
       setIsPushing(false);
     }
@@ -1832,17 +1719,15 @@ export default function App() {
   // toggleTab, incrementDailyUsage) are defined above, and closeTab below can still reset preview
   // state. Destructured back into the SAME identifiers the render tree already referenced.
   const {
-    isPreviewBuilding, setIsPreviewBuilding,
+    isPreviewBuilding,
     previewBuildError, setPreviewBuildError,
-    previewBuildStage, setPreviewBuildStage,
-    detectedFramework, setDetectedFramework,
-    problems, setProblems,
-    previewHistory, setPreviewHistory,
+    previewBuildStage,
+    detectedFramework,
+    problems,
+    previewHistory,
     handleTriggerPreviewBuild,
     updatePreview,
-    handleFileChange,
-    runCode,
-  } = usePreviewBundler({ files, setFiles, setGeneratedCode, activeFile, activeAgent, toggleTab, incrementDailyUsage, addLog, addToast });
+  } = usePreviewBundler({ files, setGeneratedCode, activeAgent, toggleTab, incrementDailyUsage, addLog, addToast });
 
   // `e` is OPTIONAL so the SAME close runs from two places: the header tab's ✕ (which must stop the
   // click from also selecting the tab) and a panel's own "Close" button, which has no tab click to
@@ -1860,7 +1745,7 @@ export default function App() {
     // Compute the FULL set of tabs to close: the tab itself + every option opened from inside it
     // (Settings/Professionals children) + fixed companions (the Pro chat owns the preview tab). This is
     // what makes ✕-closing Settings/Professionals also close the options launched from within them.
-    const { closing, nextTabs, nextActiveView } = computeTabClose(
+    const { closing, nextActiveView } = computeTabClose(
       view,
       openTabs as string[],
       activeView as string,
@@ -1884,11 +1769,6 @@ export default function App() {
     if (closingSet.has('nbi_chat')) freeWindowSnapshotsRef.current.clear();
     if (closingSet.has('sda_chat')) sdaDefaultCaseRef.current = null;
 
-    setTabHistories(prevHistories => {
-      const nextHistories = { ...prevHistories };
-      for (const v of closing) delete nextHistories[v as ViewType];
-      return nextHistories;
-    });
     // Drop the parent links for every tab we just closed so they can't leak into a future close.
     setTabOpeners(prev => {
       const next = { ...prev };
@@ -1914,7 +1794,6 @@ export default function App() {
         // and lands in ☰ History with all its build files (durable WorkspaceFileStore).
         clearStickySession(user?.uid);
         setProMessages([]);
-        setProInput('');
         try { localStorage.removeItem('navbharat_pro_messages'); } catch {}
         // Fresh session id so the next conversation doesn't inherit this one's memory
         const newProSessionId = `pro-${Date.now()}`;
@@ -1923,9 +1802,7 @@ export default function App() {
         // Wipe workspace so next open starts with a blank canvas
         setFiles({});
         clearWorkspace().catch(() => {});
-        setBuildVersionStack([]);
-        setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
-        setGeneratedCode('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
+        setGeneratedCode(EMPTY_PREVIEW_HTML);
         setHasGeneratedCode(false);
         setIsAppBuilt(false);
       } else if (v === 'sda_chat') {
@@ -1951,7 +1828,7 @@ export default function App() {
         if (store) for (const w of windowsOf(openChats, v)) endConversation(store, v, w.id);
       }
     }
-  }, [openTabs, activeView, tabOpeners, toggleTab, user, openChats, activeChatId, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setBuildVersionStack, setProBuildProgress, setCurrentSessionId, setCurrentProSessionId, setSdaResetKey, setSettingsScreen]);
+  }, [openTabs, activeView, tabOpeners, toggleTab, user, openChats, activeChatId, setMessages, setProMessages, setInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setCurrentSessionId, setCurrentProSessionId, setSdaResetKey, setSettingsScreen]);
   /**
    * Close ONE conversation window (admin 2026-09-21) — the header chip's ✕ and the Mode sheet's recent-row
    * ✕. Its transcript is archived (it reappears under History); its sibling windows with the same expert
@@ -2309,11 +2186,11 @@ export default function App() {
   // defined above, and the retry/Enter consumers below still resolve handleSend/handleSendForTab.
   const { handleSendForTab, handleSend, stop: stopChat, unsend: unsendChat } = useChatEngine({
     input, messages, isLoading, sessions, currentSessionId, activeAgent, mode, activeView, activeIntent,
-    errorContext, preferredLanguage, user, keys, invalidKeys, selectedModel, apnapanProfile,
+    errorContext, preferredLanguage, user, keys, selectedModel, apnapanProfile,
     hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files,
-    setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setIsSearching, setPreferredLanguage,
+    setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setPreferredLanguage,
     setMode, setShowAuth, setUser, setGithubToken, setGithubRepoContext,
-    setFiles, setHasGeneratedCode, setIsDeployed, setIsAppBuilt,
+    setFiles, setHasGeneratedCode, setIsAppBuilt,
     addLog, addToast, incrementDailyUsage, handleGHConfirmPush, learnFromMessage, updatePreview,
   });
 
@@ -2536,7 +2413,7 @@ export default function App() {
   // setFiles, syncFilesToV3, updatePreview, toggleTab, addToast) are all defined above; the file-drop /
   // conflict-resolve callers below resolve the returned handleZipImport unchanged.
   const { handleZipImport } = useZipImport({
-    setFiles, setHasGeneratedCode, setIsAppBuilt, setIsProLoading, setProBuildProgress, setProInput,
+    setFiles, setHasGeneratedCode, setIsAppBuilt, setImportProgress: setZipImportProgress,
     setProMessages, syncFilesToV3, updatePreview, toggleTab, addToast,
   });
 
@@ -2551,15 +2428,11 @@ export default function App() {
       });
       if (!response.ok) throw new Error('Download failed');
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${appName.replace(/[^a-zA-Z0-9-_]/g, '-')}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      addToast('App downloaded as ZIP ✓', 'success');
+      const zipName = `${appName.replace(/[^a-zA-Z0-9-_]/g, '-')}.zip`;
+      const delivered = await deliverFile(zipName, blob, 'application/zip');
+      if (delivered === 'failed') addToast(deliveryMessage(delivered, zipName), 'error');
+      else if (delivered === 'downloaded') addToast('App downloaded as ZIP ✓', 'success');
+      else if (delivered !== 'cancelled') addToast(deliveryMessage(delivered, zipName), 'success');
     } catch {
       addToast('Download failed — try again', 'error');
     }
@@ -3018,17 +2891,18 @@ export default function App() {
         addLog('GitHub connected successfully.', 'success');
         fetchGitHubUser(token);
       } else if (e.data.type === 'GITHUB_AUTH_ERROR') {
+        // Q-794: the developer log is drawn on no screen, so this failure used to be silent. Only our own
+        // callback page may raise it, and the toast never echoes the sender's text.
+        if (e.origin !== window.location.origin) return;
         addLog(`GitHub connection failed: ${e.data.error}`, 'error');
+        addToast('GitHub connection failed — please try connecting again.', 'error');
       // Q-671: there is no FIREBASE_AUTH_SUCCESS handler. No server sends one (the Firebase connect route
       // answers CANCELLED only), so a message carrying a Firebase token could only come from a page
       // trying to plant one — the same hole Q-623 closed for GitHub.
-      } else if (e.data.type === 'FIREBASE_AUTH_ERROR') {
-        addLog(`Firebase connection failed: ${e.data.error}`, 'error');
-        setFirebaseOauthError({
-          errorType: e.data.errorType || "Firebase OAuth Connection Failure",
-          message: e.data.error || "The remote Firebase OAuth authorization handshake failed.",
-          suggestions: e.data.suggestions || "Verify your connection settings, check your network environment, and try again."
-        });
+      // Q-794: and no FIREBASE_AUTH_ERROR handler, for the same reason. Nothing sends that either, and it
+      // opened a full-screen error dialog in the SENDER's words with no origin check — so the only page
+      // that could ever raise it was a foreign one (an app preview, an embedded site) putting its own text
+      // in front of the user.
       }
     };
     window.addEventListener('message', handleMessage);
@@ -3120,6 +2994,7 @@ export default function App() {
               // The ticket is single-purpose and short-lived; a failure here is a dead end, not
               // something to retry silently. Say so and clear the overlay rather than spinning.
               addLog('GitHub sign-in could not be completed. Please try connecting again.', 'error');
+              addToast('GitHub sign-in could not be completed. Please try connecting again.', 'error');
               recordNonFatal(ticket ? 'GitHub sign-in ticket could not be redeemed' : 'GitHub deep link with a raw token refused', 'github');
               setGithubRedirectingMessage(null);
               void Promise.resolve().then(() => Browser.close()).catch(() => {});
@@ -3177,6 +3052,7 @@ export default function App() {
       fetchGitHubUser(ghReturn.token);
     } else if (ghReturn.kind === 'rejected') {
       addLog('A GitHub sign-in link was ignored because it was not started from this tab. Connect GitHub again if you meant to.', 'warn');
+      addToast('A GitHub sign-in link was ignored because it was not started from this tab. Connect GitHub again if you meant to.', 'warning');
     }
     // Clean URL — accepted or not, the token never stays in the address bar or history.
     if (ghReturn.kind !== 'absent') window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -3224,10 +3100,6 @@ export default function App() {
     localStorage.setItem('firebase_oauth_return_state', JSON.stringify(returnPath));
     localStorage.setItem('github_oauth_return_active_screen', 'git');
 
-    const width = 600, height = 700;
-    const communitiesLeft = window.innerWidth / 2 - width / 2;
-    const communitiesTop = window.innerHeight / 2 - height / 2;
-    
     const state = window.location.href.split('#')[0];
     const redirectUri = `${window.location.origin}/api/auth/firebase/callback`;
 
@@ -3269,7 +3141,6 @@ export default function App() {
   };
 
 
-  const [availableBranches, setAvailableBranches] = useState<string[]>([]);
   const [currentBranch, setCurrentBranch] = useState<string>('main');
   const [patInputValue, setPatInputValue] = useState('');
 
@@ -3322,11 +3193,6 @@ export default function App() {
         updatePreview(data.files);
         addLog(`Successfully imported ${Object.keys(data.files).length} files from ${repo.name} (${targetBranch}).`, 'success');
         
-        // Fetch branches for later use
-        GitHubService.getBranches({ token: githubToken!, owner: repo.owner.login, repo: repo.name })
-          .then(setAvailableBranches)
-          .catch(() => {});
-
         // Workflow: Open in Studio automatically
         openGitHubFilesInStudio();
 
@@ -3338,54 +3204,16 @@ export default function App() {
         3. Suggest 3 immediate improvements or features I can add.`);
       } else {
         addLog('Repository seems to be empty or has incompatible structure.', 'warn');
+        addToast('Nothing to import — this repository looks empty, or has no files this app can open.', 'warning');
       }
     } catch (err: any) {
       addLog(`Import failed: ${err.message}`, 'error');
+      addToast(`GitHub import failed: ${err?.message || 'unknown error'}`, 'error');
     } finally {
       setIsGHSyncing(false);
     }
   };
 
-  const pushToRepo = async (commitMessage: string = 'Update from Navbharat AI') => {
-    if (!selectedRepo || !githubToken) {
-      addLog('No repository connected to push to.', 'error');
-      return;
-    }
-    
-    setIsPushing(true);
-    setPushStatus({ status: 'loading' });
-    addLog(`Pushing changes to ${selectedRepo.full_name}...`, 'info');
-    
-    try {
-      const targetBranch = currentBranch || selectedRepo.default_branch || 'main';
-      const response = await fetch('/api/github/push', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${githubToken}`
-        },
-        body: JSON.stringify({ 
-          owner: selectedRepo.owner.login, 
-          repo: selectedRepo.name,
-          files: files,
-          message: commitMessage,
-          branch: targetBranch
-        })
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Push failed');
-
-      setPushStatus({ status: 'success', message: 'Changes pushed successfully!' });
-      addLog(`✅ Successfully pushed to GitHub (${data.sha.slice(0,7)})`, 'success');
-      setTimeout(() => setPushStatus({ status: 'idle' }), 3000);
-    } catch (err: any) {
-      setPushStatus({ status: 'error', message: err.message });
-      addLog(`Push failed: ${err.message}`, 'error');
-    } finally {
-      setIsPushing(false);
-    }
-  };
 
   useEffect(() => {
     if (githubToken && !githubUser) {
@@ -3856,6 +3684,7 @@ export default function App() {
                 fileUploadConflict,
                 onResolveConflict: resolveFileConflict,
                 onUpload: handleFilesUpload,
+                importProgress: zipImportProgress,
                 onDownloadZip: () => downloadAppZip(files as any, 'NavBharatApp'),
                 onOpenFile: (path: string) => { setActiveFile(path); toggleTab('studio'); },
                 onAddFile: (path: string) => {
@@ -4163,7 +3992,6 @@ export default function App() {
                 onImportRepo={importRepo}
                 onConnectGitHub={connectGitHub}
                 onDisconnectGitHub={disconnectGitHub}
-                onPushToRepo={selectedRepo ? pushToRepo : null}
                 onConnectFirebase={connectFirebase}
                 onDisconnectFirebase={disconnectFirebase}
                 onFilesChange={applyIdeFileChange}
@@ -4363,14 +4191,6 @@ export default function App() {
                 includeProfessionals={historyInitialFilter === 'free'}
                 onOpenProfessional={openProfessionalConversation} onDeleteProfessional={deleteProfessionalConversation} />)}
 
-          {activeView === 'deploy' && (
-            <DeploySuccessPanel
-              deployUrl={deployUrl}
-              onOpenPreview={() => toggleTab('preview')}
-              onBackToCode={() => setIsDeployed(false)}
-            />
-          )}
-
           <ViewPanels
             imageWindowIds={viewWindowsFor(viewWindows, openTabs, IMAGE_MODE_ID).map((w) => w.id)}
             imageWindowOnScreen={activeViewWindowOf(IMAGE_MODE_ID)}
@@ -4432,7 +4252,6 @@ export default function App() {
             messages={messages}
             input={input}
             setInput={setInput}
-            setProInput={setProInput}
             isLoading={isLoading}
             activeIntent={activeIntent}
             handleSendForTab={handleSendForTab}
@@ -4450,7 +4269,6 @@ export default function App() {
             isPushing={isPushing}
             connectGitHub={connectGitHub}
             disconnectGitHub={disconnectGitHub}
-            pushToRepo={pushToRepo}
             firebaseToken={firebaseToken}
             firebaseUser={firebaseUser}
             connectFirebase={connectFirebase}
@@ -4463,6 +4281,7 @@ export default function App() {
             fileUploadConflict={fileUploadConflict}
             resolveFileConflict={resolveFileConflict}
             handleFilesUpload={handleFilesUpload}
+            zipImportProgress={zipImportProgress}
             downloadAppZip={downloadAppZip}
             setActiveFile={setActiveFile}
             wallet={wallet}
@@ -4499,9 +4318,6 @@ export default function App() {
         pendingKey={pendingKey}
         setPendingKey={setPendingKey}
         handleKeySave={handleKeySave}
-        isWorkspacePreparing={isWorkspacePreparing}
-        workspacePrepError={workspacePrepError}
-        setWorkspacePrepError={setWorkspacePrepError}
         isPreviewBuilding={isPreviewBuilding}
         previewBuildStage={previewBuildStage}
         detectedFramework={detectedFramework}

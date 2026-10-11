@@ -101,6 +101,23 @@ interface RuntimeContext {
   spanId: string; // current active span id (becomes parent of children started under it)
 }
 
+/** A request slower than this is always logged and kept, whatever its path. */
+export const SLOW_SPAN_MS = 1_000;
+
+/**
+ * PURE: a span not worth a log line — a request span for a NON-`/api` path (a page or a static asset) that
+ * succeeded under `SLOW_SPAN_MS`. Every `/api` span, every error, every slow request and every child span (an AI
+ * provider call, a Firestore call) is still logged.
+ */
+export function isRoutineSpan(span: Pick<SpanData, 'name' | 'status' | 'durationMs' | 'attributes'>): boolean {
+  if (!span.name.startsWith('HTTP ')) return false;
+  if (span.status === 'error' || !(Number(span.durationMs) < SLOW_SPAN_MS)) return false;
+  const path = span.attributes?.['http.path'];
+  if (typeof path !== 'string' || path.startsWith('/api')) return false;
+  const code = Number(span.attributes?.['http.status_code']);
+  return Number.isFinite(code) && code < 400;
+}
+
 export class Tracer {
   private readonly als = new AsyncLocalStorage<RuntimeContext>();
   private readonly buffer: SpanData[] = [];
@@ -186,6 +203,9 @@ export class Tracer {
   }
 
   private record(span: SpanData): void {
+    // A fast, successful page or asset request is neither logged nor kept (audit 2026-10-11, F13): one page view
+    // fetches dozens of assets, and each wrote a log line and pushed an API trace out of the admin's 1000-span view.
+    if (isRoutineSpan(span)) return;
     this.buffer.push(span);
     if (this.buffer.length > this.maxSpans) this.buffer.splice(0, this.buffer.length - this.maxSpans);
     this.emitStructuredLog(span);

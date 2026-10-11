@@ -119,9 +119,9 @@ describe('3 — verification and repair can use the reserved budget', () => {
 
 describe('4 / 5 / 6 — a detected error can enter repair, spend the reserve, and be re-verified', () => {
   it('the verify→repair→re-verify loop is a LOOP, so a repair is followed by another browse', () => {
-    const at = route.indexOf('const healMax = autoFixEnabled()');
+    const at = route.indexOf('const healMax = ');
     expect(at).toBeGreaterThan(0);
-    const loop = route.slice(at, at + 1200);
+    const loop = route.slice(at, at + 1600);
     expect(loop).toMatch(/for \(let attempt = 0; attempt <= healMax/);
     expect(loop).toContain('actuator.browseUrl'); // the re-verify is the next iteration's browse
   });
@@ -141,9 +141,10 @@ describe('7 / 8 — an exhausted budget produces an HONEST state, never a manufa
   });
 
   it('🔒 a broken app is never downgraded to UNKNOWN because the budget ran out', () => {
-    // previewVerifiedFailed feeds gateEvidence.preview = 'failed', which is RED. The UNKNOWN branch
-    // is reached only when nothing was ever proven either way.
-    expect(route).toContain("gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewVerifiedFailed ? 'failed' : 'not-run';");
+    // previewRenderFailed (GT-11: a real failed render, NOT an infrastructure outage) feeds
+    // gateEvidence.preview = 'failed', which is RED. The UNKNOWN branch is reached only when nothing
+    // was ever proven either way.
+    expect(route).toContain("gateEvidence.preview = previewVerifiedRendered ? 'passed' : previewRenderFailed ? 'failed' : 'not-run';");
   });
 
   it('an inconclusive read is still not treated as a failure — unproven stays unproven', () => {
@@ -165,8 +166,8 @@ describe('9 — an unused reserve creates no delay', () => {
 describe('10 — the repair loop stays bounded', () => {
   it('the existing round limit is used as-is and is NOT raised', () => {
     // autoFixMaxAttempts(): default 1, hard-capped at 3. This change does not touch it.
-    const at = route.indexOf('const healMax = autoFixEnabled()');
-    expect(route.slice(at, at + 120)).toContain('Math.max(1, autoFixMaxAttempts())');
+    const at = route.indexOf('const healMax = ');
+    expect(route.slice(at, at + 160)).toContain('Math.max(1, autoFixMaxAttempts())');
     expect(route).not.toContain('autoFixMaxAttempts() + ');
   });
 

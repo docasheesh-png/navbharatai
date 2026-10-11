@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { rateLimiter } from '../lib/authMiddleware';
 import { validateBody, vobject, vstring } from '../lib/validate';
 import { assertPublicHttpUrl, publicOnlyInit } from '../lib/ssrfGuard';
+import { verifiedIdentity } from '../lib/identityPolicy';
 
 /**
  * API Tester proxy — the REAL /api/devtools/proxy route (admin autopsy 2026-07-21).
@@ -19,8 +20,33 @@ import { assertPublicHttpUrl, publicOnlyInit } from '../lib/ssrfGuard';
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024; // 5 MB cap
 const TIMEOUT_MS = 15_000;
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
+const DEFAULT_DEVTOOLS_PORTS = [80, 443, 8080, 8443];
 // Request headers we never let the caller set (hop-by-hop / identity spoofing).
 const BLOCKED_REQUEST_HEADERS = new Set(['host', 'content-length', 'connection', 'cookie']);
+
+/** Ports the proxy may dial. `DEVTOOLS_PROXY_PORTS` (comma-separated) replaces the default four. */
+function devtoolsProxyPorts(env: NodeJS.ProcessEnv = process.env): Set<number> {
+  const raw = env.DEVTOOLS_PROXY_PORTS;
+  if (raw == null || raw.trim() === '') return new Set(DEFAULT_DEVTOOLS_PORTS);
+  const ports = new Set<number>();
+  for (const part of raw.split(',')) {
+    const n = Number(part.trim());
+    if (Number.isInteger(n) && n >= 1 && n <= 65535) ports.add(n);
+  }
+  return ports;
+}
+
+/** Explicit port, or 80/443 when the URL omits one. Null when the URL is not http(s). */
+function httpPort(raw: string): number | null {
+  let u: URL;
+  try { u = new URL(raw); } catch { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  if (u.port) {
+    const n = Number(u.port);
+    return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null;
+  }
+  return u.protocol === 'https:' ? 443 : 80;
+}
 
 const schema = vobject({
   url: vstring({ max: 4_000 }),
@@ -33,11 +59,17 @@ const proxyLimiter = () => rateLimiter({ name: 'devtools-proxy', authed: 120, an
 
 export function registerDevtoolsProxyRoutes(app: Express): void {
   app.post('/api/devtools/proxy', proxyLimiter(), validateBody(schema), async (req: Request, res: Response) => {
+    const v = await verifiedIdentity(req); if (!v) return res.status(401).json({ error: 'Sign in to use the API tester.' });
     const body = req.body as { url?: string; method?: string; headers?: unknown; body?: string };
     const url = typeof body.url === 'string' ? body.url.trim() : '';
     const method = (typeof body.method === 'string' ? body.method : 'GET').toUpperCase();
     if (!url) { res.status(400).json({ error: 'A "url" is required.' }); return; }
     if (!ALLOWED_METHODS.has(method)) { res.status(400).json({ error: `Method ${method} is not allowed.` }); return; }
+    const port = httpPort(url);
+    if (port != null && !devtoolsProxyPorts().has(port)) {
+      res.status(400).json({ error: `Port ${port} is not allowed.` });
+      return;
+    }
 
     const guard = await assertPublicHttpUrl(url);
     if (!guard.ok) { res.status(400).json({ error: guard.reason || 'This URL is not allowed.' }); return; }

@@ -221,6 +221,7 @@ export interface RestorePlan {
 export function restorePlan(
   snapshot: Record<string, string>,
   current: Record<string, string>,
+  protect?: ReadonlySet<string>,
 ): RestorePlan {
   const write: Record<string, string> = {};
   let unchanged = 0;
@@ -228,8 +229,58 @@ export function restorePlan(
     if (current && current[path] === content) unchanged++;
     else write[path] = content;
   }
-  const remove = Object.keys(current || {}).filter((p) => !(p in (snapshot || {})));
+  const remove = Object.keys(current || {}).filter((p) => !(p in (snapshot || {})) && !(protect && protect.has(p)));
   return { write, remove, unchanged };
+}
+
+function sameFileMap(a: Record<string, string>, b: Record<string, string>): boolean {
+  const ak = Object.keys(a || {});
+  const bk = Object.keys(b || {});
+  if (ak.length !== bk.length) return false;
+  return ak.every((k) => b[k] === a[k]);
+}
+
+/**
+ * Which tree a restore may put back (GT-6). A green snapshot from an earlier turn must not undo
+ * every turn since then. When the snapshot is not from this build and the turn-start tree differs,
+ * the turn start is the base — "exactly as it was before this request". No base means do not restore.
+ * PURE.
+ */
+export function chooseRestoreBase(i: {
+  snapshot: Record<string, string>;
+  turnStart: Record<string, string> | null;
+  snapshotFromThisBuild: boolean;
+}): { base: Record<string, string>; kind: 'green-snapshot' | 'turn-start' } | null {
+  if (i.snapshotFromThisBuild) return { base: i.snapshot, kind: 'green-snapshot' };
+  if (i.turnStart) {
+    if (!sameFileMap(i.snapshot, i.turnStart)) return { base: i.turnStart, kind: 'turn-start' };
+    return { base: i.snapshot, kind: 'green-snapshot' };
+  }
+  return null;
+}
+
+/** Default on. `off` restores the pre-GT-6 behaviour: always the green snapshot. */
+export function greenRestoreTurnStartEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.AGENTV3_GREEN_RESTORE_TURN_START ?? '').trim().toLowerCase() !== 'off';
+}
+
+/** An attempt older than this is not brought back, unless it is still the immediately previous build. */
+export const ATTEMPT_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Honour a kept attempt only while it is fresh, or still the build the user just left.
+ * A missing timestamp is not honoured — we cannot show it is recent. PURE.
+ */
+export function attemptIsHonoured(
+  savedAt: number | null | undefined,
+  now: number,
+  previousBuildEndedAt?: number | null,
+): boolean {
+  if (typeof savedAt !== 'number' || !Number.isFinite(savedAt) || savedAt <= 0) return false;
+  if (now >= savedAt && now - savedAt <= ATTEMPT_TTL_MS) return true;
+  if (typeof previousBuildEndedAt === 'number' && Number.isFinite(previousBuildEndedAt)
+    && Math.abs(previousBuildEndedAt - savedAt) <= 10 * 60_000) return true;
+  return false;
 }
 
 /**
@@ -285,8 +336,6 @@ export function wantsAttemptBack(prompt: string | null | undefined): boolean {
     'restore my changes',
     'mere changes rakho',
     'mere changes wapas',
-    'wo wapas do',
-    'purana wala wapas',
   ].some((phrase) => p.includes(phrase));
 }
 
@@ -296,14 +345,17 @@ export function wantsAttemptBack(prompt: string | null | undefined): boolean {
  * blaming their request. It also states the EXACT words that undo this, because a safety net the user
  * cannot escape is a cage. Carries no vendor or model name (the white-label law). PURE.
  */
-export function greenGuardMessage(plan: RestorePlan): string {
+export function greenGuardMessage(plan: RestorePlan, kind: 'green-snapshot' | 'turn-start' = 'green-snapshot'): string {
   const changed = Object.keys(plan.write).length;
   const removed = plan.remove.length;
   const bits: string[] = [];
   if (changed > 0) bits.push(`${changed} file${changed === 1 ? '' : 's'} put back`);
   if (removed > 0) bits.push(`${removed} file${removed === 1 ? '' : 's'} added by that attempt removed`);
   const detail = bits.length > 0 ? ` (${bits.join(', ')})` : '';
-  return `↩️ That change stopped your app from working, so I restored the last version that ran correctly${detail}. Your working app is back exactly as it was — nothing of it was lost, and the attempt is saved too. Tell me what you wanted and I'll try a different way — or reply "${KEEP_CHANGES_PHRASE}" if you meant to keep that version and carry on from there.`;
+  const back = kind === 'turn-start'
+    ? 'Your working app is back exactly as it was before this request'
+    : 'Your working app is back exactly as it was';
+  return `↩️ That change stopped your app from working, so I restored the last version that ran correctly${detail}. ${back} — nothing of it was lost, and the attempt is saved too. Tell me what you wanted and I'll try a different way — or reply "${KEEP_CHANGES_PHRASE}" if you meant to keep that version and carry on from there.`;
 }
 
 /**

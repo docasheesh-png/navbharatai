@@ -27,7 +27,9 @@ describe('Export .zip — rock-solid', () => {
     expect(i).toBeGreaterThan(-1);
     const block = app.slice(i, i + 900);
     expect(block).toContain("'/api/download-zip'");
-    expect(block).toContain("a.click()"); // triggers the real browser download
+    // the real download goes through the ONE delivery helper (Q-790) — on an iPhone a raw anchor saves nothing
+    expect(block).toContain("deliverFile(zipName, blob, 'application/zip')");
+    expect(block).toContain("delivered === 'downloaded'"); // "downloaded ✓" only when it was
     expect(block).toMatch(/Download failed/); // honest failure, never a silent stall
   });
 

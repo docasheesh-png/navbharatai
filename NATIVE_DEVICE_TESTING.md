@@ -177,3 +177,16 @@ If issues found:
 1. Create a bug issue with reproduction steps
 2. Reference the logs from Logcat (Android) or Xcode (iOS)
 3. Fix in a follow-up PR
+
+## Open device checks from the build-report queue (2026-10-11)
+
+Each of these is a row in `BUILD_REPORT_QUEUE.md` that only a real phone can close. Install the current
+store bundle (`.aab` 151 on Android, `.ipa` 110 on iPhone), run the check, and tell the session what you saw.
+A screenshot is enough.
+
+| Row | Phone | Do this | Pass looks like |
+|---|---|---|---|
+| Q-120 (back button) | Android | Open Settings, then any sub-screen, then press the phone's Back button twice; on Home press it once more | Back goes up one screen each time; on Home it asks "Exit?" instead of closing the app. |
+| Q-120 (safe area) | Android with a notch / punch-hole, and an iPhone | Open Home, a chat and Settings in portrait | No button or text sits under the camera cut-out or the bottom gesture bar. |
+| Q-699 | Android | Image generator → make an image → "Save to Photos" | The image appears in Photos / Gallery. |
+| Q-791 | Android | Any tool with Download or Export (for example Dark Mode Generator → Export) | A note says it was saved to Documents/NavBharatAI, and the file is there in the Files app. |

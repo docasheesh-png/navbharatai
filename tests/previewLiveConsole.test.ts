@@ -79,7 +79,11 @@ describe('the bridge can never reach a user’s shipped app', () => {
 
   it('is stripped from what the model WRITES — the guarantee, not just the likelihood', () => {
     const writeCase = dispatcher.slice(dispatcher.indexOf("case 'write_file'"));
-    expect(guarded(writeCase.slice(0, 4000))).toBe(true);
+    // The strip lives in the one write door. Old lock looked for withoutPreviewBridge
+    // inside the first 4000 chars of this case; the case now enters guardedWrite.
+    expect(writeCase.slice(0, 4000)).toContain('this.guardedWrite(');
+    const doorAt = dispatcher.indexOf('private async guardedWrite(');
+    expect(guarded(dispatcher.slice(doorAt, doorAt + 2500))).toBe(true);
   });
 
   it('is stripped from what our own ANALYSERS read — the third path, which nobody guarded', () => {

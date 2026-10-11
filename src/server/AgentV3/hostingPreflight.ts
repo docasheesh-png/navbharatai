@@ -24,9 +24,10 @@
 // PURE classification + one thin request per check.
 
 import { appsProject, appsRegion, buildListServicesRequest } from './cloudRunHosting';
-import { appsImageRepo, BUILD_API } from './containerBuild';
+import { appsImageRepo, buildStagingBucket, BUILD_API } from './containerBuild';
 import { appsServiceAccount } from './appsIdentity';
 import { MONITORING_API } from './hostingUsage';
+import { STORAGE_API, SOURCE_PREFIX } from './imageRetention';
 
 export const ARTIFACT_REGISTRY_API = 'https://artifactregistry.googleapis.com/v1';
 
@@ -240,6 +241,24 @@ export async function runHostingPreflight(opts: {
     missingRemedy: `Create a DOCKER repository named “${repo}” in region ${region} (Artifact Registry → Create repository).`,
   }));
 
+  /**
+   * 🔴 THE STAGING BUCKET (2026-10-07). Every publish uploads the source here before Cloud Build can start,
+   * and this check did not exist: the live apps project had no bucket while every other check could pass,
+   * so `ready` was reachable for a setup whose first publish fails at the upload with a 404.
+   *
+   * It LISTS at most one object under the source prefix: `storage.objects.list` is a permission the platform
+   * already needs (the staged-source sweep), while reading bucket metadata would need `storage.buckets.get`,
+   * which the platform's least-privilege staging role deliberately does not hold.
+   */
+  const bucket = buildStagingBucket(p, env);
+  const staging = await ask(`${STORAGE_API}/b/${encodeURIComponent(bucket)}/o?maxResults=1&prefix=${encodeURIComponent(SOURCE_PREFIX)}`);
+  checks.push(classifyResponse({
+    id: 'stagingBucket', label: `Build staging bucket “${bucket}”`, status: staging.status, body: staging.body,
+    apiName: 'Cloud Storage API', role: 'nbaiPlatformStaging (bound on the staging bucket)',
+    missingRemedy: `Create the bucket gs://${bucket} in region ${region} with uniform bucket-level access, public access `
+      + `prevention, and a lifecycle rule deleting objects under ${SOURCE_PREFIX} after 1 day — see docs/HOSTING_ARCHITECTURE.md §11.`,
+  }));
+
   const mon = await ask(`${MONITORING_API}/projects/${p}/timeSeries?`
     + `filter=${encodeURIComponent('metric.type="run.googleapis.com/request_count"')}`
     + `&interval.startTime=${new Date(Date.now() - 600_000).toISOString()}`
@@ -267,6 +286,7 @@ const REMOTE_CHECKS: ReadonlyArray<readonly [string, string]> = [
   ['cloudRun', 'Cloud Run'],
   ['cloudBuild', 'Cloud Build'],
   ['artifactRegistry', 'Image repository'],
+  ['stagingBucket', 'Build staging bucket'],
   ['monitoring', 'Usage metering'],
   ['runtimeIdentity', 'App runtime identity'],
   ['buildIdentity', 'App build identity'],

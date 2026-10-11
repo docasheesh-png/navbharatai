@@ -224,11 +224,23 @@ describe('🔒 census: the MCP stores never write a `headers` field in plaintext
   });
 
   it('nothing else in the server writes to the two MCP collections', () => {
-    // DataRetentionManager names the library only to DELETE it with the account (right to erasure).
-    const ERASE_ONLY = 'src/server/lib/DataRetentionManager.ts';
+    /**
+     * Two files may NAME these collections without being a store, and both name them only to DELETE:
+     *  · `DataRetentionManager.ts`  — `agentv3_mcp_library` with the ACCOUNT (right to erasure);
+     *  · `workspaceDataErase.ts`    — `agentv3_mcp_servers` with the APP (added by Q-701 PR B, after
+     *    the new `workspace`-kind obligation found that the app's MCP wiring — the services it may
+     *    call AND the keys held for them — was in no erase path at all and was being kept for ever).
+     *
+     * The exemption is only from "is it a store"; the no-write assertion applies to BOTH, so an eraser
+     * that started writing to these collections would still fail here.
+     */
+    const ERASERS = ['src/server/lib/DataRetentionManager.ts', 'src/server/lib/workspaceDataErase.ts'];
     const touching = walk('src/server').filter((f) => /agentv3_mcp_(servers|library)|MCP_(LIBRARY_)?COLLECTION/.test(code(f)));
-    expect(touching.filter((f) => f !== ERASE_ONLY).sort()).toEqual([...STORES].sort());
-    expect(code(ERASE_ONLY)).not.toMatch(/\.(set|update|add)\(\s*\{|setDoc\(|updateDoc\(|addDoc\(/);
+    expect(touching.filter((f) => !ERASERS.includes(f)).sort()).toEqual([...STORES].sort());
+    for (const eraser of ERASERS) {
+      expect(code(eraser), `${eraser} must only delete, never write`)
+        .not.toMatch(/\.(set|update|add)\(\s*\{|setDoc\(|updateDoc\(|addDoc\(/);
+    }
   });
 
   it('the routes fail closed: check does not probe an unreadable service, attach refuses it, the build names it', () => {

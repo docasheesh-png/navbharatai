@@ -263,8 +263,12 @@ describe('REVERSION GUARDS — the wiring lives in a 20k-line route no unit test
     // Three readers since 2026-09-28: the two settle paths, and the LIVE figure (liveBuildCost.ts), which
     // prices the running build with the same verdict so the number the user watches cannot disagree
     // with the bill. It reads; it never bills.
-    expect(route.match(/decideBuildBilledUsd\([\s\S]{0,220}?barrenPhases\)/g) ?? []).toHaveLength(3);
+    // Old: three readers (the two settle paths and the live figure).
+    // New: those three, plus the watchdog failure-ledger remainder. That fourth call
+    // reads realCostRemainder for the admin ledger. It does not set the user bill.
+    expect(route.match(/decideBuildBilledUsd\([\s\S]{0,220}?barrenPhases\)/g) ?? []).toHaveLength(4);
     expect(route).toContain('decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, vm.usd, barrenPhases)');
+    expect(route).toContain('decideBuildBilledUsd(ledger, sink, powerLevelReqEffective, userId ?? undefined, email, sandboxUsd, barrenPhases).realCostRemainder');
   });
 
   it('the verdict set is declared ABOVE the deadline finalizer that closes over it', () => {

@@ -108,7 +108,11 @@ describe('the wiring', () => {
   const route = codeOf(read('src/server/routes/agentv3.ts'));
 
   it('🔒 the ledger classifies from the ROOT CAUSE and the verdict code, not the agent’s narrative', () => {
-    expect(route).toContain('classifyFailure(failDiag.rootCause || result.summary || \'\', outcomeCodeOf(failDiag.issues))');
+    // Old: `classifyFailure(failDiag.rootCause || result.summary || '', outcomeCodeOf(failDiag.issues))`
+    // at the one settle site. New: the same order lives in the shared helper both exits call,
+    // so the watchdog-ended build cannot classify from a different string.
+    expect(route).toContain("category: classifyFailure(i.rootCause || i.summary || '', outcomeCodeOf(i.issues)).category");
+    expect(route.match(/recordFailureLedgerOnce\(ledgerEntryFor\(/g) ?? []).toHaveLength(2);
   });
 
   it('🔎 the per-workspace retrospective got the SAME fix — it had the same bug', () => {

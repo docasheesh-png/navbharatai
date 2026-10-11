@@ -10,6 +10,9 @@
 // codemod then processes. Strictly more correct than the old cap (which ran the AST on an arbitrary 50).
 // Pure + unit-tested.
 
+/** Skip generated / VCS directories as whole path segments — not as substrings (`distance.ts`, `BuildCard.tsx`, `.github`). */
+export const CODEMOD_SKIP = /(^|\/)(node_modules|dist|build|\.git|\.next|coverage)(\/|$)/;
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

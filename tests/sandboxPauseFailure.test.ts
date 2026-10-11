@@ -61,9 +61,13 @@ describe('both sweeps are wired to the answer', () => {
   });
 
   it('the orphan sweep marks only on success or after enough failures', () => {
-    expect(src).toContain('} else if (shouldMarkPausedAfterFailure(this._notePauseFailure(rec.workspaceId))) {');
-    // And a confirmed pause clears the counter, so a workspace that fails twice and then succeeds does
-    // not carry its history into the next time it is swept.
+    // Old assertion:
+    //   } else if (shouldMarkPausedAfterFailure(this._notePauseFailure(rec.workspaceId))) {
+    // BLD-16: give-up now kills the sandbox (unless it is busy) and only then marks paused.
+    // The counter is still incremented first, and a confirmed pause still clears it.
+    expect(src).toContain('const attempts = this._notePauseFailure(rec.workspaceId);');
+    expect(src).toContain("if (shouldMarkPausedAfterFailure(attempts) && actionAfterPauseFailure(attempts, busy) === 'kill') {");
+    expect(src).toContain('SANDBOX_PAUSE_FAILED_KILLED');
     expect(src).toContain('this._pauseFailures.delete(rec.workspaceId);');
   });
 

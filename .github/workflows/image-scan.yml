@@ -73,19 +73,28 @@ jobs:
           key: trivy-db-${{ github.run_id }}
           restore-keys: trivy-db-
 
+      # 🔒 THE RED X CARRIES ITS REASON (2026-10-08, Q-750). The table went only to the job log, which a
+      # session cannot read over the API, so four red nights in a row (2026-10-05..08) said nothing but
+      # "exit code 1". Each finding is now an ::error annotation (readable over the API) and a summary line.
       - name: Trivy scan — FAIL on CRITICAL
         run: |
           mkdir -p "$HOME/.cache/trivy"
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "$HOME/.cache/trivy:/root/.cache/trivy" \
+            -v "$RUNNER_TEMP:/out" \
             aquasec/trivy:0.73.0 image \
               --scanners vuln \
               --severity CRITICAL \
               --ignore-unfixed \
-              --format table \
-              --exit-code 1 \
+              --format json \
+              --output /out/trivy-critical.json \
               navbharatai:scan
+          jq -r '.Results[]? | .Target as $t | (.Vulnerabilities // [])[] | "::error title=CRITICAL \(.VulnerabilityID)::\(.PkgName) \(.InstalledVersion), fixed in \(.FixedVersion) (\($t)): \(.Title // "")"' "$RUNNER_TEMP/trivy-critical.json"
+          n=$(jq '[.Results[]? | (.Vulnerabilities // [])[]] | length' "$RUNNER_TEMP/trivy-critical.json")
+          echo "**CRITICAL vulnerabilities with an upstream fix: $n**" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.Results[]? | .Target as $t | (.Vulnerabilities // [])[] | "- \(.VulnerabilityID): \(.PkgName) \(.InstalledVersion) → \(.FixedVersion) (\($t))"' "$RUNNER_TEMP/trivy-critical.json" >> "$GITHUB_STEP_SUMMARY"
+          [ "$n" -eq 0 ]
 
       - name: Trivy scan — report HIGH (non-blocking)
         if: always()
@@ -100,3 +109,12 @@ jobs:
               --format table \
               --exit-code 0 \
               navbharatai:scan
+
+      # 🔒 THE CACHE ACTUALLY SAVES (2026-10-11, Q-752). Trivy runs as root inside its container, so
+      # everything it writes into the runner's ~/.cache/trivy is root-owned and the cache's post-job save
+      # fails ("/usr/bin/tar failed with exit code 2"). Every green run carried that warning, so the cache
+      # above never saved once and each run downloaded the vulnerability DB again: the rate-limit protection
+      # its comment promises did not exist. Hand the files back to the runner user so the save can read them.
+      - name: Hand the Trivy cache back to the runner user (so it can be saved)
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$HOME/.cache/trivy"

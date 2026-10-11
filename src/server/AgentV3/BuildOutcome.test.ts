@@ -35,19 +35,25 @@ describe('classifyBuildOutcome', () => {
     expect(classifyBuildOutcome({ filesWritten: 5, typecheckOk: true })).toBe('BUILD_PARTIAL');
   });
 
-  it('files written but nothing verified at all → BUILD_PARTIAL', () => {
-    expect(classifyBuildOutcome({ filesWritten: 5 })).toBe('BUILD_PARTIAL');
+  it('files written but nothing verified at all → BUILD_UNVERIFIED, and the label does not say compiles', () => {
+    expect(classifyBuildOutcome({ filesWritten: 3 })).toBe('BUILD_UNVERIFIED');
+    expect(classifyBuildOutcome({ filesWritten: 5 })).toBe('BUILD_UNVERIFIED');
+    expect(buildOutcomeLabel('BUILD_UNVERIFIED')).not.toMatch(/compiles/i);
+  });
+
+  it('compiles but live not verified still says BUILD_PARTIAL', () => {
+    expect(classifyBuildOutcome({ filesWritten: 3, typecheckOk: true })).toBe('BUILD_PARTIAL');
   });
 
   it('isBuildFailure marks only the real build failures', () => {
     const failures: BuildOutcome[] = ['TYPECHECK_FAILED', 'BUILD_FAILED'];
-    const notFailures: BuildOutcome[] = ['BUILD_SUCCESS', 'BUILD_PARTIAL', 'PREVIEW_FAILED', 'RUNTIME_FAILED'];
+    const notFailures: BuildOutcome[] = ['BUILD_SUCCESS', 'BUILD_PARTIAL', 'BUILD_UNVERIFIED', 'PREVIEW_FAILED', 'RUNTIME_FAILED'];
     for (const o of failures) expect(isBuildFailure(o)).toBe(true);
     for (const o of notFailures) expect(isBuildFailure(o)).toBe(false);
   });
 
   it('every outcome has a human label', () => {
-    const all: BuildOutcome[] = ['BUILD_SUCCESS', 'BUILD_PARTIAL', 'TYPECHECK_FAILED', 'BUILD_FAILED', 'PREVIEW_FAILED', 'RUNTIME_FAILED'];
+    const all: BuildOutcome[] = ['BUILD_SUCCESS', 'BUILD_PARTIAL', 'BUILD_UNVERIFIED', 'TYPECHECK_FAILED', 'BUILD_FAILED', 'PREVIEW_FAILED', 'RUNTIME_FAILED'];
     for (const o of all) expect(buildOutcomeLabel(o).length).toBeGreaterThan(0);
   });
 });

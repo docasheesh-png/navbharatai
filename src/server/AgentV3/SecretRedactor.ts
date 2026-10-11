@@ -14,6 +14,7 @@
 // - Never throw: redaction must never break a build. Any failure returns input as-is.
 // - Idempotent: re-running on already-redacted text changes nothing.
 
+import { pemPrivateKeyBlocks } from '../lib/pemKeyMaterial';
 import { previewUrlPattern } from './PreviewDomain';
 
 const PLACEHOLDER = '[REDACTED:%s]';
@@ -50,11 +51,10 @@ const PROVIDER_PATTERNS: Array<{ kind: string; re: RegExp }> = [
 
 /** Multi-line / structural secret blocks handled separately (need the `m`/`s` flags). */
 const BLOCK_PATTERNS: Array<{ kind: string; re: RegExp }> = [
-  // PEM private key blocks (RSA/EC/OPENSSH/generic).
-  {
-    kind: 'private-key',
-    re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/g,
-  },
+  // PEM private key blocks — the MATERIAL, never the bare markers (pemKeyMaterial.ts, Q-737): a `sed` that
+  // strips the markers used to be masked too, so the model saw `[REDACTED]` where the disk had plain text
+  // and no edit of that line could ever match.
+  { kind: 'private-key', re: pemPrivateKeyBlocks() },
   // JWTs: three base64url segments. Require a reasonably long signature to avoid
   // matching innocuous dotted identifiers.
   { kind: 'jwt', re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g },

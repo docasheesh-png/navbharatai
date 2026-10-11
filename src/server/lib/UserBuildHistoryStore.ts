@@ -91,8 +91,10 @@ class UserBuildHistoryStore {
    * FAILED_PRECONDITION into `return []` — so a user with a full build history was shown an empty
    * one, which is a worse outcome than an error because nobody reports it as a bug.
    *
-   * `HISTORY_FETCH_CAP` bounds the read: a user past that many builds sees their most recent ones,
-   * never a silently truncated arbitrary subset, because the sort happens after the fetch.
+   * `HISTORY_FETCH_CAP` is the page size. 🔴 CORRECTED 2026-10-11: this comment used to say a user past the
+   * cap "sees their most recent ones, never a silently truncated arbitrary subset" — false: a capped read with no
+   * order returns an arbitrary subset, and sorting it afterwards cannot recover the newest. `listEqNewestFirst`
+   * now reads past a full page in document-id order, so the claim is true (up to its scan ceiling).
    */
   async list(userId: string, opts: BuildHistoryQuery = {}): Promise<BuildRecord[]> {
     const db = this.getDb();

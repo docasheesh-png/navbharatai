@@ -67,7 +67,7 @@ describe('planAppDefaults', () => {
   it('leaves a fully-configured head + registered SW untouched', () => {
     const full = `<!doctype html><html lang="en"><head>
       <meta charset="UTF-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
       <title>Done</title>
       <meta name="description" content="d" />
       <meta property="og:title" content="t" />
@@ -76,6 +76,16 @@ describe('planAppDefaults', () => {
       <meta name="theme-color" content="#000" />
       <link rel="manifest" href="/manifest.webmanifest" />
       <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+      <!-- ⚠️ 2026-10-11: the phone tags and the native-feel link joined the "fully configured" set
+           (nativeFeel.ts). The invariant this test protects is unchanged — a document that needs
+           NOTHING is not churned — but what counts as needing nothing now includes these. A head
+           without viewport-fit=cover genuinely does need something: without it every
+           env(safe-area-inset-*) in the app reads 0px. -->
+      <meta name="apple-mobile-web-app-capable" content="yes" />
+      <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+      <meta name="mobile-web-app-capable" content="yes" />
+      <meta name="format-detection" content="telephone=no" />
+      <link rel="stylesheet" href="/nbai-native.css" data-nbai-native-feel="1" />
     </head><body><script>navigator.serviceWorker.register('/sw.js')</script></body></html>`;
     const r = planAppDefaults(full, 'Done');
     expect(r.added).toEqual([]);

@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { generateKeyPairSync } from 'node:crypto';
 import {
   preparePublishBundle,
   findPublishBlockers,
@@ -76,7 +77,8 @@ describe('🔒 secrets can never be published', () => {
   });
 
   it('🔒 a private key blocks', () => {
-    const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----';
+    // A real key: a BEGIN/END pair with no key body is a marker, not a secret (autopsy d0b2fcd6, Q-737).
+    const pem = (generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs1', format: 'pem' }) as string).trim();
     const bundle = preparePublishBundle(app({ 'src/key.ts': `const k = \`${pem}\`;` }));
     expect(bundle.ok).toBe(false);
   });

@@ -3,18 +3,18 @@
 import { hasAnalyticsConsent } from './consent';
 import { forwardToMetaPixel } from './metaPixel';
 
-const SESSION_ID = Math.random().toString(36).slice(2);
-
 export function trackEvent(event: string, props?: Record<string, unknown>) {
   if (!import.meta.env.PROD) return;
   // P-UX.1 — GDPR/DPDP: do not fire non-essential analytics until the user has consented.
   if (!hasAnalyticsConsent()) return;
   try {
-    const userId = localStorage.getItem('navbharat_uid') || undefined;
+    // 🔒 NO PERSON IN THE EVENT (admin 2026-10-11, Q-783). This used to send the signed-in `userId` and a
+    // per-tab session id with every event. The server stores neither any more (it keeps the day rollup,
+    // which holds no person), so collecting them at all is exactly what data minimisation forbids.
     fetch('/api/analytics/event', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event, props, userId, sessionId: SESSION_ID, ts: Date.now() }),
+      body: JSON.stringify({ event, props, ts: Date.now() }),
     }).catch(() => {});
   } catch {}
 

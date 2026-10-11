@@ -206,7 +206,7 @@ describe('6 · an orphan this build made is this build\'s, not "your existing co
 
   it('both write doors record what they stopped importing, and the readiness split reads it', () => {
     const src = read('src/server/AgentV3/ToolDispatcher.ts');
-    expect(src).toContain("if (kind === 'modify') this.noteDroppedImports(path, existingContent, content);");
+    expect(src).toContain("if (kind === 'modify') this.noteDroppedImports(rel, existingContent, content);");
     expect(src).toContain('this.noteDroppedImports(path, existing, updated);');
     expect(src).toContain('this._droppedImportStems.has(importStem(o.file))');
   });

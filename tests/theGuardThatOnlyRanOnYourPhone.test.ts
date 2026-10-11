@@ -94,8 +94,8 @@ describe('the guard that only ran on your phone', () => {
     // Two call sites: the setup response and the explicit "Create my signing key" press. The
     // definition reads `= useCallback(`, so it is not one of these matches.
     expect(panel.match(/receiveKeystore\(/g)!.length).toBe(2);
-    expect(panel).toContain('a.download = `${repoName}-upload.keystore`;');
-    // And exactly one place builds that download, so the two callers cannot drift.
-    expect(panel.match(/URL\.createObjectURL\(new Blob\(\[bytes\]/g)!.length).toBe(1);
+    // And exactly one place builds that download (through the one delivery helper, Q-790), so the two
+    // callers cannot drift.
+    expect(panel.match(/deliverFile\(`\$\{repoName\}-upload\.keystore`, new Blob\(\[bytes\]/g)!.length).toBe(1);
   });
 });

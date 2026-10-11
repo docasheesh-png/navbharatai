@@ -77,6 +77,8 @@ export function backendDeployConfig(host: BackendHost, app: BackendAppInfo = {})
     const dockerfile = [
       `# Google Cloud Run — container for the ${name} backend (deploys to YOUR GCP project).`,
       `FROM node:${node}-slim`,
+      '# Debian security fixes on every build: the base image can lag behind them (Q-750).',
+      'RUN apt-get update && apt-get upgrade -y --no-install-recommends && apt-get clean && rm -rf /var/lib/apt/lists/*',
       'WORKDIR /app',
       'COPY package*.json ./',
       'RUN npm ci --omit=dev || npm install --omit=dev',

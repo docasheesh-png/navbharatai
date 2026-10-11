@@ -106,13 +106,15 @@ const config: CapacitorConfig = {
       androidScaleType: 'CENTER_CROP',
       showSpinner: false,
     },
-    // Status bar: match app theme (dark text on light background, or vice versa).
+    // Status bar: LAUNCH value matches the dark boot surface (light icons on #0d1117).
     // NOTE: this is only the LAUNCH value. The live bar follows the user's theme at runtime via
     // syncStatusBarToTheme (src/lib/nativeShell.ts) — pinning it here alone left a bright bar above a
     // dark app whenever the user chose dark mode.
     StatusBar: {
-      style: 'dark',
-      backgroundColor: '#ffffff',
+      // DARK = light icons, for the dark boot surface (index.html / splash #0d1117).
+      // Capacitor Style.Dark is light text. Runtime syncStatusBarToTheme still restyles after launch.
+      style: 'DARK',
+      backgroundColor: '#0d1117',
     },
     // KEYBOARD (admin 2026-07-26) — the loudest WebView giveaway in a chat app.
     //

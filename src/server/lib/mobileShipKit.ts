@@ -30,6 +30,7 @@
 import { generateMobileExport, type MobileExportResult } from './MobileExportGenerator';
 import { toolchainForMajor } from './capacitorToolchain';
 import { nativePermissionScript } from '../AgentV3/nativeCapabilities';
+import { bundlePermissionWarnScript } from './bundlePermissions';
 // The publishing walkthrough is embedded from the ONE structured source that also drives the in-app
 // checklist and the AI's answers, so the three can never drift (rule 4).
 import { renderPublishGuideText } from './storePublishGuide';
@@ -764,6 +765,17 @@ ${gradleCacheSave(java)}
           name: release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 14
+
+      # Google Play judges the bundle it receives, not the source. This reads the permissions out of the finished
+      # .aab and WARNS if one is on Play's restricted list, before you upload it and Play refuses to send the
+      # release for review. It never fails the build: if your app's core purpose needs one, declare it in Play.
+      - name: Check the bundle's permissions against Google Play's restricted list
+        run: |
+          unzip -p android/app/build/outputs/bundle/release/app-release.aab base/manifest/AndroidManifest.xml > "$RUNNER_TEMP/manifest.pb" 2>/dev/null || true
+          cat > "$RUNNER_TEMP/nbai-permissions.cjs" <<'NBAI_PERMISSIONS'
+${indentLines(bundlePermissionWarnScript().split('\n'), 10)}
+          NBAI_PERMISSIONS
+          node "$RUNNER_TEMP/nbai-permissions.cjs" "$RUNNER_TEMP/manifest.pb"
 
       # The keystore is a secret — never let it linger on the runner.
       - name: Always remove the keystore

@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import { motion } from 'motion/react';
-import { LayoutGrid, ArrowLeft } from 'lucide-react';
+import { LayoutGrid, ArrowLeft, FlaskConical, ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { HOME_TOOL_GROUPS } from './homeToolGroups';
+import { HOME_TOOL_GROUPS, type HomeTool } from './homeToolGroups';
 import { isComingSoonTool, COMING_SOON_LABEL } from '../../lib/comingSoonTools';
 
 interface OtherAIViewProps {
@@ -17,49 +18,15 @@ interface OtherAIViewProps {
  * inside Other AI, not expand below the Home cards). Each tile opens its tool via onOpenTool.
  */
 export function OtherAIView({ onOpenTool, onBack }: OtherAIViewProps) {
-  return (
-    <div className="flex-1 w-full overflow-y-auto overflow-x-hidden bg-surface text-body">
-      <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col gap-6">
-        {/* Header */}
-        <div className="flex items-center gap-3">
-          {onBack && (
-            <button
-              onClick={onBack}
-              className="flex items-center gap-1.5 text-xs font-bold text-muted hover:text-ink transition-colors px-2.5 py-1.5 rounded-lg hover:bg-raised"
-              aria-label="Back to Home"
-            >
-              <ArrowLeft className="w-4 h-4" /> Home
-            </button>
-          )}
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-fuchsia-500/15 flex items-center justify-center shrink-0">
-              <LayoutGrid className="w-5 h-5 text-accent-text" />
-            </div>
-            <div>
-              <h1 className="text-lg sm:text-xl font-black text-ink tracking-tight leading-none">Other</h1>
-              <p className="text-[11px] sm:text-xs text-muted mt-0.5">Builder tools &amp; utilities — design, develop, ship &amp; monetize your app</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Tool groups */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-          {HOME_TOOL_GROUPS.map((group, gi) => {
-            const GroupIcon = group.icon;
-            return (
-              <motion.div
-                key={group.title}
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.35, delay: 0.04 * gi }}
-                className="bg-card border border-line rounded-2xl p-4"
-              >
-                <div className="flex items-center gap-2 mb-3">
-                  <GroupIcon className={cn('w-3.5 h-3.5', group.color)} />
-                  <span className={cn('text-[10px] font-black uppercase tracking-widest', group.color)}>{group.title}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {group.items.map((item) => {
+  // LABS (owner decision D-1, 2026-10): tools still held back as "Coming soon" no longer sit greyed out
+  // between the live ones. They are listed, unchanged and still disabled, in one collapsed Labs section
+  // below. Nothing is deleted, and every live tool keeps its tile exactly where it was.
+  const [labsOpen, setLabsOpen] = useState(false);
+  const labsGroups = HOME_TOOL_GROUPS
+    .map((g) => ({ title: g.title, items: g.items.filter((i) => isComingSoonTool(i.id)) }))
+    .filter((g) => g.items.length > 0);
+  const labsCount = labsGroups.reduce((n, g) => n + g.items.length, 0);
+  const renderTile = (item: HomeTool) => {
                     const ToolIcon = item.icon;
                     // HELD BACK until the admin has tested it (2026-09-15) — see lib/comingSoonTools.ts.
                     // The tile STAYS VISIBLE on purpose: the admin asked for "coming soon likh do", not
@@ -105,12 +72,83 @@ export function OtherAIView({ onOpenTool, onBack }: OtherAIViewProps) {
                         </span>
                       </button>
                     );
-                  })}
+  };
+  return (
+    <div className="flex-1 w-full overflow-y-auto overflow-x-hidden bg-surface text-body">
+      <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col gap-6">
+        {/* Header */}
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="flex items-center gap-1.5 text-xs font-bold text-muted hover:text-ink transition-colors px-2.5 py-1.5 rounded-lg hover:bg-raised"
+              aria-label="Back to Home"
+            >
+              <ArrowLeft className="w-4 h-4" /> Home
+            </button>
+          )}
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-fuchsia-500/15 flex items-center justify-center shrink-0">
+              <LayoutGrid className="w-5 h-5 text-accent-text" />
+            </div>
+            <div>
+              <h1 className="text-lg sm:text-xl font-black text-ink tracking-tight leading-none">Other</h1>
+              <p className="text-[11px] sm:text-xs text-muted mt-0.5">Builder tools &amp; utilities — design, develop, ship &amp; monetize your app</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Tool groups */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          {HOME_TOOL_GROUPS.map((group, gi) => {
+            const GroupIcon = group.icon;
+            if (!group.items.some((item) => !isComingSoonTool(item.id))) return null;
+            return (
+              <motion.div
+                key={group.title}
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: 0.04 * gi }}
+                className="bg-card border border-line rounded-2xl p-4"
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <GroupIcon className={cn('w-3.5 h-3.5', group.color)} />
+                  <span className={cn('text-[10px] font-black uppercase tracking-widest', group.color)}>{group.title}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {group.items.filter((item) => !isComingSoonTool(item.id)).map(renderTile)}
                 </div>
               </motion.div>
             );
           })}
         </div>
+
+        {/* Labs: held-back tools, collapsed by default */}
+        {labsCount > 0 && (
+          <div className="bg-card border border-line rounded-2xl">
+            <button
+              type="button"
+              onClick={() => setLabsOpen((v) => !v)}
+              aria-expanded={labsOpen}
+              className="w-full flex items-center gap-2 p-4 text-left hover:bg-raised rounded-2xl transition-colors"
+            >
+              <FlaskConical className="w-3.5 h-3.5 text-muted" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-muted">Labs</span>
+              <span className="text-[11px] text-faint">{labsCount} tools in testing</span>
+              <ChevronDown className={cn('w-4 h-4 text-muted ml-auto transition-transform', labsOpen && 'rotate-180')} />
+            </button>
+            {labsOpen && (
+              <div className="px-4 pb-4 flex flex-col gap-4">
+                {labsGroups.map((g) => (
+                  <div key={g.title}>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-faint mb-2">{g.title}</div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">{g.items.map(renderTile)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

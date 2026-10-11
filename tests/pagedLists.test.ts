@@ -149,7 +149,8 @@ describe('🔴 THE SERVER HALF — the one a button cannot fix', () => {
     // Limiting the READ would quietly turn "search all users" into "search the first page" — the fix
     // trading one problem for a worse one. Firestore cannot do substring search, so the scan is the
     // only way, and what gets limited is the expensive part.
-    expect(route).toContain("getDocs(walletsRef)");
+    // Since audit 2026-10-11 the scan is PROJECTED to the summary fields — still every wallet, never a limit.
+    expect(route).toContain("collection('user_token_wallets').select(...WALLET_SUMMARY_FIELDS).get()");
     const i = route.indexOf('const paged = String(req.query.paged');
     const before = route.slice(Math.max(0, i - 6000), i);
     expect(before).toContain("if (sort === 'alpha')");        // sorting happens BEFORE the slice

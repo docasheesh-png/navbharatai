@@ -4,6 +4,13 @@
 // (framework / simple-React / static) and post an honest import summary. Code moved BYTE-IDENTICAL —
 // pure relocation, zero logic change. Deps are injected; App.tsx destructures the SAME handleZipImport
 // identifier back, so every file-drop / conflict-resolve caller is unchanged.
+//
+// 🔒 THE USER SEES THE IMPORT (2026-10-11, Q-792). Progress went to `proBuildProgress` and the outcome only
+// to the Pro chat's message list — and no screen read either. The import is started from the Files panel
+// (the Upload button, up to 5 GB through the chunked uploader), so a large zip showed NOTHING for minutes,
+// and a FAILED import changed nothing on screen at all, the error sitting in state no one rendered. Now the
+// progress is `ZipImportProgress`, drawn by the Files panel that started it, and the outcome is a toast on
+// whatever screen the user is on: the file count, what was dropped, or why it failed.
 
 import { saveAllFiles } from '../lib/storage';
 import { importDropSummary, type DropCounts } from '../lib/importDropReport';
@@ -18,13 +25,21 @@ import { authJsonHeaders } from '../lib/authHeaders';
  */
 export const SINGLE_REQUEST_ZIP_BYTES = 25 * 1024 * 1024;
 
+/** What the Files panel shows while a zip imports. `null` = no import running. */
+export interface ZipImportProgress {
+  fileName: string;
+  /** One plain line: uploading 40%, loading 120 files, … */
+  stage: string;
+  /** 0..100 */
+  percent: number;
+}
+
 export interface ZipImportDeps {
   setFiles: (v: any) => void;
   setHasGeneratedCode: (v: any) => void;
   setIsAppBuilt: (v: any) => void;
-  setIsProLoading: (v: any) => void;
-  setProBuildProgress: (v: any) => void;
-  setProInput: (v: any) => void;
+  /** The progress the Files panel draws; set to `null` when the import ends, however it ends. */
+  setImportProgress: (p: ZipImportProgress | null) => void;
   setProMessages: (v: any) => void;
   syncFilesToV3: (files: Record<string, string>, opts?: any) => Promise<void>;
   updatePreview: (files: any) => void;
@@ -34,19 +49,23 @@ export interface ZipImportDeps {
 
 export function useZipImport(deps: ZipImportDeps) {
   const {
-    setFiles, setHasGeneratedCode, setIsAppBuilt, setIsProLoading, setProBuildProgress, setProInput,
+    setFiles, setHasGeneratedCode, setIsAppBuilt, setImportProgress,
     setProMessages, syncFilesToV3, updatePreview, toggleTab, addToast,
   } = deps;
 
   const handleZipImport = async (zipFile: File, extraMessage?: string) => {
-    setIsProLoading(true);
-    setProInput('');
+    // The latest stage, so a `progress` event that carries only a percentage keeps the words on screen.
+    let progress: ZipImportProgress = { fileName: zipFile.name, stage: 'Uploading…', percent: 5 };
+    const showProgress = (next: Partial<ZipImportProgress>) => {
+      progress = { ...progress, ...next };
+      setImportProgress(progress);
+    };
+    showProgress({});
     setProMessages(prev => [...prev, {
       id: Date.now().toString(),
       text: `📦 Uploading ${zipFile.name} (${(zipFile.size / 1024 / 1024).toFixed(1)} MB)...`,
       sender: 'user', timestamp: new Date(),
     }]);
-    setProBuildProgress({ active: true, stage: `📦 Streaming ${zipFile.name}...`, steps: [], percent: 5, generatedFiles: {} });
 
     const loadedFiles: Record<string, string> = {};
     // Refusals reported by the server's stream, tallied so the import summary can state them.
@@ -64,11 +83,7 @@ export function useZipImport(deps: ZipImportDeps) {
       if (zipFile.size > SINGLE_REQUEST_ZIP_BYTES) {
         const { uploadId } = await uploadFileChunked(zipFile, (p) => {
           if (p.phase === 'uploading') {
-            setProBuildProgress({
-              active: true,
-              stage: `📦 Uploading ${zipFile.name} — ${Math.round(p.fraction * 100)}%…`,
-              steps: [], percent: Math.max(5, Math.round(p.fraction * 60)), generatedFiles: {},
-            });
+            showProgress({ stage: `Uploading — ${Math.round(p.fraction * 100)}%`, percent: Math.max(5, Math.round(p.fraction * 60)) });
           }
         });
         const auth = await authJsonHeaders();
@@ -130,7 +145,7 @@ export function useZipImport(deps: ZipImportDeps) {
               // 2500-file import ≈ 125 spreads of up-to-2500 keys). We now show ONLY the first few instantly
               // (so a tiny app still feels live) and let the SINGLE bulk `setFiles(loadedFiles)` at the end
               // (below) commit everything at once — O(N), a few seconds instead of tens of minutes. The cheap
-              // progress counter (setProBuildProgress, further down) keeps the user informed meanwhile.
+              // progress counter (showProgress, further down) keeps the user informed meanwhile.
               if (fileCount <= 8) {
                 setFiles({ ...loadedFiles } as any);
               }
@@ -146,10 +161,10 @@ export function useZipImport(deps: ZipImportDeps) {
               }
 
               if (fileCount % 8 === 0) {
-                setProBuildProgress(prev => ({ ...prev, stage: `📂 Loading ${fileCount} files...`, percent: Math.min(90, 5 + fileCount) }));
+                showProgress({ stage: `Loading files — ${fileCount} so far`, percent: Math.max(progress.percent, Math.min(90, 5 + fileCount)) });
               }
             } else if (evt.type === 'progress') {
-              setProBuildProgress(prev => ({ ...prev, stage: evt.stage || evt.message || prev.stage }));
+              if (typeof (evt.stage || evt.message) === 'string') showProgress({ stage: evt.stage || evt.message });
             } else if (evt.type === 'skipped') {
               // NOT "fine, keep going" (admin 2026-08-04). These events were received and discarded, so a
               // media-heavy project reported a clean import while thousands of the user's own files had
@@ -202,11 +217,6 @@ export function useZipImport(deps: ZipImportDeps) {
         setTimeout(() => updatePreview(loadedFiles as any), 100);
       }
 
-      const generatedFilesObj = Object.fromEntries(
-        Object.entries(loadedFiles).map(([k, v]) => [k, { content: v, expanded: false }])
-      );
-      setProBuildProgress({ active: false, stage: '', steps: [], percent: 100, generatedFiles: generatedFilesObj });
-
       const fileListText = fileList.slice(0, 10).map(f => `• \`${f}\``).join('\n');
       const moreText = fileList.length > 10 ? `\n• ... and ${fileList.length - 10} more` : '';
 
@@ -226,6 +236,10 @@ export function useZipImport(deps: ZipImportDeps) {
       // message must also say what did NOT come in. '' for a clean import, so a complete project reads
       // exactly as before — this only ever ADDS truth, never noise.
       const dropSummary = importDropSummary({ kept: fileCount, dropped: droppedCounts });
+      // The outcome the USER sees, wherever they are (Q-792). The longer summary below stays in the
+      // project's conversation history, as before.
+      addToast(`${appName}: ${fileCount} file${fileCount === 1 ? '' : 's'} imported`, 'success');
+      if (dropSummary) addToast(dropSummary, 'warning');
       setProMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         text: dropSummary ? `${importMessage}\n\n⚠️ ${dropSummary}` : importMessage,
@@ -242,15 +256,14 @@ export function useZipImport(deps: ZipImportDeps) {
         setTimeout(() => toggleTab('preview'), 400);
       }
     } catch (err: any) {
-      setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+      addToast(`ZIP import failed: ${err?.message || 'unknown error'}`, 'error');
       setProMessages(prev => [...prev, {
         id: (Date.now() + 2).toString(),
         text: `❌ ZIP import failed: ${err.message}`,
         sender: 'ai', timestamp: new Date(),
       }]);
     } finally {
-      setIsProLoading(false);
-      setProInput('');
+      setImportProgress(null);
     }
   };
   return { handleZipImport };

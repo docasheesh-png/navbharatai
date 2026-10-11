@@ -40,16 +40,20 @@ describe('the switch and the scope', () => {
     expect(shouldTypecheckWrite('package.json')).toBe(false);
   });
 
-  it('🔒 runs the robust LOCAL binary on the ONE shared incremental cache — never npx, never a second cache', () => {
+  it('🔒 runs the robust LOCAL binary on one incremental cache per dispatcher — never npx, never the shared path', () => {
     const cmd = writeTypecheckCommand();
     expect(cmd).toContain('node_modules/.bin/tsc --noEmit --incremental');
     expect(cmd).toContain(`--tsBuildInfoFile ${WRITE_TYPECHECK_TSBUILDINFO}`);
     expect(cmd).not.toMatch(/npx\s+tsc/);
-    // The endgame and the `typecheck` tool use this exact cache path; a different one would make every
-    // write-time run a cold compile.
+    // The no-arg form is the salvage helper's own cache. A dispatcher passes its id so the write-time
+    // check, the warm-up and endgame tsc share THAT build's cache and never another build's.
+    expect(WRITE_TYPECHECK_TSBUILDINFO).toBe('/tmp/agentv3-writecheck.tsbuildinfo');
+    expect(writeTypecheckCommand('abc12def')).toContain('--tsBuildInfoFile /tmp/agentv3-abc12def.tsbuildinfo');
     const dispatcher = readFileSync(resolve(__dirname, '../src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
-    expect(dispatcher).toContain("--tsBuildInfoFile /tmp/agentv3.tsbuildinfo");
-    expect(WRITE_TYPECHECK_TSBUILDINFO).toBe('/tmp/agentv3.tsbuildinfo');
+    expect(dispatcher).toContain('writeTypecheckCommand(this.tsBuildInfoId)');
+    expect(dispatcher).toContain('writeTypecheckWarmupCommand(this.tsBuildInfoId)');
+    expect(dispatcher).toContain('--tsBuildInfoFile /tmp/agentv3-${this.tsBuildInfoId}.tsbuildinfo');
+    expect(dispatcher).not.toContain('/tmp/agentv3.tsbuildinfo');
   });
 });
 
@@ -153,10 +157,12 @@ describe('🔒 the dispatcher asks after EVERY write path, and the route reports
     expect(dispatcher).toContain('const steeringNotes = await this.writeSteeringNotes({ [path]: content });');
     expect(dispatcher).toContain('const batchSteeringNotes = await this.writeSteeringNotes(writtenRecord);');
     expect(dispatcher).toContain('const editSteeringNotes = await this.writeSteeringNotes({ [path]: updated });');
-    expect(dispatcher).toContain('const symbolSteeringNotes = await this.writeSteeringNotes({ [path]: result.content });');
+    expect(dispatcher).toContain('const symbolSteeringNotes = await this.writeSteeringNotes({ [path]: wrote.content });');
     for (const v of ['steeringNotes', 'batchSteeringNotes', 'editSteeringNotes', 'symbolSteeringNotes']) {
-      // Each note variable is used in a return, not only computed.
-      expect(dispatcher).toMatch(new RegExp(`(?:return [^;]*|\\+ )\\b${v}\\b`));
+      // Each note variable is used in the text the model gets back, not only computed.
+      // The batch door builds one summary (refused on a partial write, returned otherwise),
+      // so the name sits in `const summary = \`…${batchSteeringNotes}…\`` rather than on the return line.
+      expect(dispatcher, v).toMatch(new RegExp(`(?:return [^;]*|\\+ |const summary = [^;]*)\\b${v}\\b`));
     }
     const helper = dispatcher.slice(dispatcher.indexOf('private async writeSteeringNotes('), dispatcher.indexOf('private async hookWriteNote('));
     expect(helper).toContain('const typecheck = await this.writeTypecheckNote(files);');

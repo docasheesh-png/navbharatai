@@ -177,8 +177,47 @@ describe('runHostingPreflight', () => {
       fetchImpl: answering(403, { error: { details: [{ reason: 'SERVICE_DISABLED' }] } }),
     });
     expect(r.verdict).toBe('blocked');
-    // Four APIs + the two identities' existence checks (P0 2026-10-06).
-    expect(r.checks.filter((c) => c.state === 'failed').length).toBe(6);
+    // Five APIs (the staging bucket is Cloud Storage) + the two identities' existence checks (P0 2026-10-06).
+    expect(r.checks.filter((c) => c.state === 'failed').length).toBe(7);
+  });
+
+  /**
+   * 🔴 THE STAGING BUCKET WAS NEVER CHECKED (2026-10-07). Every publish uploads the app's source to
+   * `<project>_cloudbuild` before Cloud Build can start, and the live apps project had no such bucket. The
+   * preflight asked about Cloud Run, Cloud Build, the repository, metering and both identities — and said
+   * `ready` — while the first real publish would fail at the upload with a 404.
+   */
+  it('🔒 a MISSING staging bucket blocks the verdict, and the remedy names it exactly', async () => {
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      urls.push(String(url));
+      const missing = String(url).startsWith('https://storage.googleapis.com/storage/v1/b/');
+      return { status: missing ? 404 : 200, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+    const r = await runHostingPreflight({ token: 't', env: IDS as any, fetchImpl });
+    expect(r.verdict).toBe('blocked');
+    const bucket = r.checks.find((c) => c.id === 'stagingBucket')!;
+    expect(bucket.state).toBe('failed');
+    expect(bucket.remedy).toContain('gs://apps-1_cloudbuild');
+    expect(bucket.remedy).toContain('asia-south1');
+    expect(bucket.remedy).toContain('nbai-source/');
+    // It LISTS one object under the source prefix — the same permission the cleanup sweep uses — and never
+    // asks for bucket metadata, which the platform's staging role deliberately does not hold.
+    const asked = urls.find((u) => u.startsWith('https://storage.googleapis.com/storage/v1/b/'))!;
+    expect(asked).toBe('https://storage.googleapis.com/storage/v1/b/apps-1_cloudbuild/o?maxResults=1&prefix=nbai-source%2F');
+  });
+
+  it('the bucket checked is the one the engine stages to, including the override', async () => {
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string) => { urls.push(String(url)); return { status: 200, json: async () => ({}) }; }) as unknown as typeof fetch;
+    const r = await runHostingPreflight({ token: 't', env: { ...IDS, NAVBHARAT_APPS_BUILD_BUCKET: 'custom-stage' } as any, fetchImpl });
+    expect(r.verdict).toBe('ready');
+    expect(urls.some((u) => u.includes('/storage/v1/b/custom-stage/o?'))).toBe(true);
+  });
+
+  it('🔒 with no credential the bucket check is SKIPPED, never ok', async () => {
+    const r = await runHostingPreflight({ token: null, env: IDS as any, fetchImpl: never });
+    expect(r.checks.find((c) => c.id === 'stagingBucket')!.state).toBe('skipped');
   });
 
   it('the region and repo name in the remedy are the ones the engine really uses', async () => {

@@ -15,8 +15,9 @@
  *
  * ⚠️ PRECISION OVER RECALL. A false target could refuse a legitimate command, so heredoc bodies and quoted
  * text that is not itself a target are ignored, fd duplications (`2>&1`) are not files, and paths outside
- * the workspace (`/tmp`, `/dev/null`) are dropped. A write this cannot see (a script that writes a file,
- * `node -e`) is not caught — the freeze is a guard against the obvious route, not a sandbox. PURE.
+ * the workspace (`/tmp`, `/dev/null`) are dropped. A path built at run time inside `node -e` /
+ * `python -c` is not knowable and is not guessed; a quoted literal `writeFile` / `open(..., 'w')`
+ * path is. The freeze is a guard against the obvious route, not a sandbox. PURE.
  */
 
 import { shellCommandVariants } from './shellNormalize';

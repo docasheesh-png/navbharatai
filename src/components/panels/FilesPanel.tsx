@@ -50,6 +50,12 @@ export interface FilesPanelProps {
    * phones. Desktop (default) keeps tap-to-open + hover actions.
    */
   tapActions?: boolean;
+  /**
+   * A zip import in progress (Q-792): the Upload button above starts it, so this panel is where its
+   * progress belongs. Before, the import wrote its progress to state nothing rendered, and a large zip
+   * (up to 5 GB, chunked) showed nothing for minutes. `null`/absent = no import running.
+   */
+  importProgress?: { fileName: string; stage: string; percent: number } | null;
 }
 
 const EXT_COLOR: Record<string, string> = {
@@ -83,6 +89,7 @@ export function FilesPanel({
   sessionId,
   onRestoreVersion,
   tapActions,
+  importProgress,
 }: FilesPanelProps) {
   const uploadRef = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<'files' | 'history'>('files');
@@ -247,6 +254,18 @@ export function FilesPanel({
           </div>
         )}
       </div>
+
+      {importProgress && (
+        <div role="status" aria-live="polite" className="px-4 py-2 border-b border-line bg-raised">
+          <div className="flex items-center justify-between gap-2 text-[10px]">
+            <span className="text-ink font-semibold truncate">Importing {importProgress.fileName}</span>
+            <span className="text-muted shrink-0">{importProgress.stage}</span>
+          </div>
+          <div className="mt-1.5 h-1 rounded-full bg-well overflow-hidden">
+            <div className="h-full bg-accent transition-all" style={{ width: `${Math.max(2, Math.min(100, importProgress.percent))}%` }} />
+          </div>
+        </div>
+      )}
 
       {/* Files tab */}
       {tab === 'files' && (

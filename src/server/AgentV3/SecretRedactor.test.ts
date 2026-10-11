@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { redactSecrets, containsSecret, redactEventForUser } from './SecretRedactor';
 
@@ -34,7 +35,8 @@ describe('redactSecrets — provider key shapes', () => {
 
 describe('redactSecrets — structural blocks', () => {
   it('masks a PEM private-key block', () => {
-    const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----';
+    // A REAL key: a marker around a 16-character body is not one (pemKeyMaterial.ts, Q-737).
+    const pem = (generateKeyPairSync('rsa', { modulusLength: 1024 }).privateKey.export({ type: 'pkcs1', format: 'pem' }) as string).trim();
     expect(redactSecrets(pem)).toBe('[REDACTED:private-key]');
   });
 

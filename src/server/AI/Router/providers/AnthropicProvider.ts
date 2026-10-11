@@ -84,7 +84,7 @@ export class AnthropicProvider implements AIProvider {
     };
   }
 
-  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string): Promise<string> {
+  async executeStream(prompt: string, systemPrompt: string | undefined, onChunk: (text: string) => void, model?: string, signal?: AbortSignal): Promise<string> {
     const params: any = {
       model: model || this.modelId,
       max_tokens: this.enableThinking ? this.thinkingBudget + 16_000 : 8_000,
@@ -94,9 +94,15 @@ export class AnthropicProvider implements AIProvider {
     if (this.enableThinking) {
       params.thinking = { type: 'enabled', budget_tokens: this.thinkingBudget };
     }
-    const stream = this.client.messages.stream(params);
+    // `signal` goes to the SDK, which aborts the underlying request — not just to a flag we read
+    // between chunks. Reading a flag stops the OUTPUT; only the abort stops the BILL (Q-621).
+    const stream = this.client.messages.stream(params, signal ? { signal } : undefined);
     let full = '';
     for await (const event of stream) {
+      // The client left: stop consuming AND stop paying. The SDK abort above tears the socket down,
+      // so this loop normally ends by throwing; the check is the belt to that braces, for an SDK
+      // version that resolves the stream instead of rejecting it (Q-621).
+      if (signal?.aborted) break;
       if ((event as any).type === 'content_block_delta') {
         const delta = (event as any).delta;
         if (delta?.type === 'text_delta') {

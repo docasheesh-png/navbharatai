@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
+import { authedHeaders } from '../../lib/authHeaders';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -231,7 +232,7 @@ const APITester: React.FC<APITesterProps> = () => {
         // browser would block with CORS) actually return a response. The server fetches, we render.
         const pr = await fetch('/api/devtools/proxy', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await authedHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ url: finalUrl, method, headers: activeHeaders, body: reqBody }),
         });
         const data = await pr.json().catch(() => null);

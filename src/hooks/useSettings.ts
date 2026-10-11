@@ -1,4 +1,4 @@
-// useSettings — theme, hinglishMode, mode, enabledModules (Task 1.1 module extraction)
+// useSettings — theme, mode, enabledModules (Task 1.1 module extraction)
 // localStorage keys match App.tsx exactly so existing user data is preserved.
 import { useState, useEffect } from 'react';
 import { ThemeMode, normalizeThemeMode } from '../lib/theme';
@@ -24,9 +24,6 @@ export function useSettings() {
     if (saved) return saved;
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
-  const [hinglishMode, setHinglishModeState] = useState<boolean>(
-    () => localStorage.getItem('navbharat_hinglish') === 'true'
-  );
   const [preferredLanguage, setPreferredLanguageState] = useState<PreferredLanguage | null>(() => {
     const saved = localStorage.getItem('navbharat_language') as PreferredLanguage | null;
     return saved || null;
@@ -39,11 +36,6 @@ export function useSettings() {
   const setTheme = (t: ThemeMode) => {
     setThemeState(t);
     localStorage.setItem('theme', t);
-  };
-
-  const setHinglishMode = (v: boolean) => {
-    setHinglishModeState(v);
-    localStorage.setItem('navbharat_hinglish', v.toString());
   };
 
   const setPreferredLanguage = (v: PreferredLanguage) => {
@@ -69,7 +61,6 @@ export function useSettings() {
 
   return {
     theme, setTheme,
-    hinglishMode, setHinglishMode,
     preferredLanguage, setPreferredLanguage,
     mode, setMode,
     enabledModules, setEnabledModules,

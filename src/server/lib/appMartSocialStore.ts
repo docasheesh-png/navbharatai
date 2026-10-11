@@ -22,6 +22,7 @@
 // would leave it showing a number nothing supports. It also avoids a single document that every like
 // on a popular app writes to (the hot-document wall in CLAUDE.md's SCALE PLAN).
 
+import { BoundedCache } from './boundedCache';
 import * as admin from 'firebase-admin';
 import { randomBytes } from 'node:crypto';
 import { getServerDb } from './serverDb';
@@ -99,7 +100,7 @@ export async function resolveTarget(k: AppKey): Promise<SocialTarget | null> {
 // ─── People ───────────────────────────────────────────────────────────────────────────────────────
 
 const PEOPLE_CACHE_MS = 10 * 60_000;
-const peopleCache = new Map<string, { person: PublicPerson; at: number }>();
+const peopleCache = new BoundedCache<string, { person: PublicPerson; at: number }>({ maxEntries: 20_000, ttlMs: PEOPLE_CACHE_MS });
 
 /** Drop a person's cached name and photo — after they edit their profile, so the next read is fresh. */
 export function forgetPerson(uid: string): void {
@@ -147,7 +148,7 @@ export async function resolvePeople(uids: readonly string[]): Promise<Map<string
 // ─── Counts ───────────────────────────────────────────────────────────────────────────────────────
 
 const COUNT_CACHE_MS = 30_000;
-const countCache = new Map<string, { counts: SocialCounts; at: number }>();
+const countCache = new BoundedCache<string, { counts: SocialCounts; at: number }>({ maxEntries: 5_000, ttlMs: COUNT_CACHE_MS });
 
 function forgetCounts(appKey: string): void {
   countCache.delete(appKey);
@@ -179,7 +180,6 @@ export async function countsFor(keys: readonly string[]): Promise<Record<string,
       out[key] = counts;
     } catch { /* omitted: the screen shows no number rather than a wrong one */ }
   }));
-  if (countCache.size > 5000) countCache.clear();
   return out;
 }
 
@@ -394,7 +394,8 @@ export async function setBlocked(uid: string, targetUid: string, blocked: boolea
 // ─── Notifications to the creator ────────────────────────────────────────────────────────────────
 
 const PUSH_GAP_MS = 10 * 60_000;
-const lastPush = new Map<string, number>();
+// Expires with its own gap; LRU past the bound (a clear-all at the bound released every throttle at once).
+const lastPush = new BoundedCache<string, number>({ maxEntries: 10_000, ttlMs: PUSH_GAP_MS });
 
 /**
  * Tell somebody that something happened on their app. Never throws, never blocks the action that caused
@@ -427,10 +428,9 @@ export async function notifySocial(input: {
     // A push for words people wrote to you — throttled so a busy thread is one buzz per 10 minutes.
     if ((input.kind === 'comment' || input.kind === 'reply') && input.text) {
       const throttleKey = `${input.recipientUid}|${input.appKey}`;
-      const last = lastPush.get(throttleKey) ?? 0;
+      const last = lastPush.get(throttleKey, now) ?? 0;
       if (now - last >= PUSH_GAP_MS) {
-        lastPush.set(throttleKey, now);
-        if (lastPush.size > 10_000) lastPush.clear();
+        lastPush.set(throttleKey, now, now);
         void sendPushToUser(input.recipientUid, {
           title: 'NavBharatAI App Mart',
           body: socialPushBody(input.kind, actorName, input.appName, input.text),
@@ -500,7 +500,7 @@ export async function updateSocialInbox(uid: string, ids: readonly string[], fie
 // ─── Following ────────────────────────────────────────────────────────────────────────────────────
 
 const FOLLOW_COUNT_CACHE_MS = 30_000;
-const followCountCache = new Map<string, { counts: FollowCounts; at: number }>();
+const followCountCache = new BoundedCache<string, { counts: FollowCounts; at: number }>({ maxEntries: 5_000, ttlMs: FOLLOW_COUNT_CACHE_MS });
 
 /** How many people follow this account, and how many it follows. Counted from the records; omitted on failure. */
 export async function followCounts(uid: string): Promise<FollowCounts | null> {
@@ -517,7 +517,6 @@ export async function followCounts(uid: string): Promise<FollowCounts | null> {
     ]);
     const counts = { followers, following };
     followCountCache.set(uid, { counts, at: now });
-    if (followCountCache.size > 5000) followCountCache.clear();
     return counts;
   } catch {
     return null;

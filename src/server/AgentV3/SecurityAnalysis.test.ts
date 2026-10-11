@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { scanSecurity, securitySummary, isPlaceholderValue } from './SecurityAnalysis';
 
@@ -476,7 +477,9 @@ describe('scanSecurity', () => {
 
   it('flags AWS keys and private keys', () => {
     expect(scanSecurity('a.ts', 'const k = "AKIAIOSFODNN7EXAMPLE";').some((f) => f.rule === 'aws-access-key')).toBe(true);
-    expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(true);
+    // The key's MATERIAL, not its marker (pemKeyMaterial.ts, Q-737) — a bare header is not a committed key.
+    expect(scanSecurity('key.pem', (generateKeyPairSync('rsa', { modulusLength: 1024 }).privateKey.export({ type: 'pkcs1', format: 'pem' }) as string)).some((f) => f.rule === 'private-key')).toBe(true);
+    expect(scanSecurity('key.pem', '-----BEGIN RSA PRIVATE KEY-----').some((f) => f.rule === 'private-key')).toBe(false);
   });
 
   it('flags dangerous code patterns with line numbers', () => {

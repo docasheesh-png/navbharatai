@@ -148,8 +148,8 @@ describe('wiring', () => {
   });
   it('the preview answers only our own two frames', () => {
     const ps = read('src/components/agentv3/PreviewSurface.tsx');
-    expect(ps).toMatch(/const frames = \[liveIframeRef\.current\?\.contentWindow, inBrowserIframeRef\.current\?\.contentWindow\];/);
-    expect(ps).toMatch(/if \(!e\.source \|\| !frames\.includes\(e\.source as Window\)\) return;/);
+    // Source check lives in the shared helper (PR #3605): only our two preview frames are heard.
+    expect(ps).toMatch(/isFromOurPreviewFrame\(e, \[liveIframeRef\.current\?\.contentWindow, inBrowserIframeRef\.current\?\.contentWindow\]\)/);
   });
   it('Keys & Secrets shows the card and carries the dot; the server registers the routes', () => {
     const panel = read('src/components/agentv3/AgentV3Panel.tsx');

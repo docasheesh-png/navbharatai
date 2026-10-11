@@ -262,9 +262,13 @@ describe('the camera sits BEHIND what you drive (admin: "gadi ka front side dikh
   });
 
   it('the game shell follows the vehicle with the chase rig, never from the front', () => {
+    // Since 2026-10-11 (admin, build 46e2d74b) the shell also follows a vehicle the game DRIVES without
+    // being told, so the wiring is `chased` (the game's ctx.follow choice, else the driven vehicle). The
+    // behaviour — tail lights toward the player and LEFT going screen-left on every shell option — is
+    // EXECUTED in tests/theCarIsSeenFromBehind.test.ts; this only keeps the shape recognisable.
     const shell = Object.values(generateGameShellFiles()).join('\n');
-    expect(shell).toContain('follow: (object) => { this.followTarget = object; }');
-    expect(shell).toMatch(/if \(this\.followTarget\) this\.rig\.follow\(this\.followTarget, frameDelta\);\s*else this\.rig\.update\(p, frameDelta\);/);
+    expect(shell).toContain('follow: (object) => { this.followTarget = object; this.followChosen = true;');
+    expect(shell).toMatch(/if \(chased\) this\.rig\.follow\(chased, frameDelta\);\s*else this\.rig\.update\(/);
   });
 });
 

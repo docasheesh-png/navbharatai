@@ -43,6 +43,7 @@ import { createRenderer, handleResize } from './three/renderer';
 import { applyLighting, followShadow, type LightingPresetName, type AppliedLighting } from './three/lighting';
 import { disposeMaterials } from './three/materials';
 import { CameraRig, type CameraKind } from './three/camera';
+import { watchVehicles, isVehicle } from './three/objects';
 import { CharacterController } from './play/character';
 import { createHumanoid, type Humanoid } from './three/humanoid';
 import { ParticleSystem } from './fx/particles';
@@ -65,6 +66,10 @@ import { TouchControls, type TouchControlsOptions } from './ui/touchControls';
 export interface GameOptions {
   container: HTMLElement;
   lighting?: LightingPresetName;
+  /**
+   * 'third-person' (default) for a character on foot; 'chase' for anything driven or ridden. A vehicle
+   * the game drives with createVehicleState()/driveVehicle() is chased from BEHIND whatever this says.
+   */
   camera?: CameraKind;
   shadows?: boolean;
   /** Build the world here: add meshes, return the ones the player collides with. */
@@ -104,9 +109,10 @@ export interface GameContext {
   lights: AppliedLighting;
   /**
    * Put the camera BEHIND this object (a car, a bike, a horse) and keep it there through every turn —
-   * CameraRig.follow(). Pass null to go back to following the player. ANY game where the player drives
-   * or rides calls this in setup(): without it the camera sits in FRONT of a +Z-facing vehicle, the
-   * player sees its face, and every control feels reversed.
+   * CameraRig.follow(). Pass null to go back to following the player on foot. Call it in setup() for
+   * whatever the player drives or rides. A vehicle handed to createVehicleState()/driveVehicle() is
+   * followed even if you forget (the shell sees it), but a horse or anything you move by hand is only
+   * followed when you say so — and once you call this, your choice wins, null included.
    */
   follow: (object: THREE.Object3D | null) => void;
 }
@@ -127,8 +133,27 @@ export class Game {
   private readonly options: GameOptions;
   private disposed = false;
   private followTarget: THREE.Object3D | null = null;
+  /** The game called ctx.follow(): from then on its choice wins, null included. */
+  private followChosen = false;
+  /**
+   * 🔴 THE VEHICLE THE GAME DRIVES, SEEN BY THE SHELL ITSELF (admin 2026-10-11, build 46e2d74b: "car ulti
+   * chal rahi hai" — the car showed its HEADLIGHTS and LEFT turned it RIGHT). The camera used to follow
+   * a vehicle only when the game remembered ctx.follow(); otherwise render() framed the on-foot player
+   * from the rig's resting yaw, which sits IN FRONT of a +Z car — face-on, and face-on the driver's
+   * left is the screen's right. The kit's own usage example never called ctx.follow, so following the
+   * example produced exactly the admin's game. Now the first vehicle handed to createVehicleState() or
+   * driveVehicle() in setup() or update() is chased from behind with no call at all, until the game
+   * chooses otherwise with ctx.follow() or the vehicle leaves the scene.
+   */
+  private drivenVehicle: THREE.Object3D | null = null;
+  private setupDone = false;
   /** The default body (createHumanoid), when the game did not bring its own. */
   private hero: Humanoid | null = null;
+  /** What a 'chase' camera chases on foot: the body that turns to face where it walks. */
+  private readonly body: THREE.Object3D;
+  private touch: TouchControls | null = null;
+  /** The game left the touch layout to us (no buttons, no layout of its own) — so a car gets pedals. */
+  private readonly touchLayoutIsOurs: boolean;
 
   constructor(options: GameOptions) {
     this.options = options;
@@ -156,6 +181,7 @@ export class Game {
       this.hero = createHumanoid({ height: 1.75, shirt: options.playerColor ?? 0x2e5a87 });
       this.player.object.add(this.hero.root);
     }
+    this.body = this.hero?.root ?? (options.playerBody || this.player.object);
     // BOTH blend layers. Adding one is how half the effects end up invisible.
     this.particles.addTo(this.scene);
 
@@ -172,8 +198,11 @@ export class Game {
     this.disposers.push(() => this.canvas.removeEventListener('pointerdown', refocus));
     this.input = new Input(this.canvas);
     // Most players hold a phone. Without these, a game built for WASD + mouse renders and cannot be played.
+    const touchOptions = options.touchControls || {};
+    this.touchLayoutIsOurs = !touchOptions.buttons && !touchOptions.layout;
     if (options.touchControls !== false) {
-      const touch = new TouchControls(options.container, this.input, options.touchControls || {});
+      const touch = new TouchControls(options.container, this.input, touchOptions);
+      this.touch = touch;
       this.disposers.push(() => touch.dispose());
     }
 
@@ -211,7 +240,9 @@ export class Game {
     // Once, here — not in whichever gameplay file remembers. Browsers suspend audio until a gesture.
     audio.unlock();
 
-    const colliders = options.setup?.(this.context) || [];
+    const colliders = watchVehicles((v) => this.noteVehicle(v), () => options.setup?.(this.context)) || [];
+    this.setupDone = true;
+    this.syncTouchLayout();
     if (Array.isArray(colliders)) {
       this.player.setColliders(colliders);
       this.rig.setCollidables(colliders);
@@ -233,8 +264,39 @@ export class Game {
       feel: this.feel,
       input: this.input,
       lights: this.lights,
-      follow: (object) => { this.followTarget = object; },
+      follow: (object) => { this.followTarget = object; this.followChosen = true; this.syncTouchLayout(); },
     };
+  }
+
+  /** createVehicleState()/driveVehicle() was handed this vehicle inside setup() or update(). */
+  private noteVehicle(vehicle: THREE.Object3D): void {
+    if (vehicle === this.drivenVehicle) return;
+    // The FIRST vehicle is the player's (opponents and traffic come after it), and it stays the one —
+    // until it leaves the scene (a respawn builds a new car). During setup nothing is in the scene yet.
+    if (this.drivenVehicle && (!this.setupDone || this.inScene(this.drivenVehicle))) return;
+    this.drivenVehicle = vehicle;
+    this.syncTouchLayout();
+  }
+
+  private inScene(object: THREE.Object3D): boolean {
+    for (let o: THREE.Object3D | null = object; o; o = o.parent) if (o === this.scene) return true;
+    return false;
+  }
+
+  /** What the camera chases this frame: the game's own choice, else the vehicle it drives, else nothing. */
+  private get chased(): THREE.Object3D | null {
+    if (this.followChosen) return this.followTarget;
+    return this.drivenVehicle && this.inScene(this.drivenVehicle) ? this.drivenVehicle : null;
+  }
+
+  /**
+   * A phone in a car gets Left/Right and Brake/Gas instead of a joystick and Attack/Jump/Use/Run — the
+   * buttons feed the SAME actions as the arrow keys, so LEFT on the screen is LEFT on the keyboard.
+   */
+  private syncTouchLayout(): void {
+    if (!this.touch || !this.touchLayoutIsOurs) return;
+    const chased = this.chased;
+    this.touch.setLayout(chased && isVehicle(chased) ? 'drive' : 'move');
   }
 
   /** FIXED 60Hz. Everything that affects the simulation lives here and nowhere else. */
@@ -274,9 +336,11 @@ export class Game {
         }
         this.hero.update(delta, speed, this.player.isGrounded);
         // In a vehicle the camera follows the vehicle; a body standing at the spawn point would read as a bug.
-        this.hero.root.visible = !this.followTarget;
+        this.hero.root.visible = !this.chased;
       }
-      this.options.update?.(this.context, delta);
+      // The shell listens while the game runs, so a vehicle it drives is known without being declared.
+      watchVehicles((v) => this.noteVehicle(v), () => this.options.update?.(this.context, delta));
+      this.syncTouchLayout();   // back to the joystick if the car has left the scene
       this.particles.update(delta);
     }
     this.input.endFrame();
@@ -284,10 +348,13 @@ export class Game {
 
   /** Display rate. Camera and drawing only — never gameplay. */
   private render(_alpha: number, frameDelta: number): void {
-    // Driving or riding: the camera sits behind the VEHICLE's own front, whatever its heading.
-    const p = this.followTarget ? this.followTarget.position : this.player.object.position;
-    if (this.followTarget) this.rig.follow(this.followTarget, frameDelta);
-    else this.rig.update(p, frameDelta);
+    // Driving or riding: the camera sits behind the VEHICLE's own front, whatever its heading — the one
+    // the game named with ctx.follow(), or the one it drives. On foot, a 'chase' camera chases the body
+    // (which turns to face where it walks); every other kind frames the player as it always has.
+    const chased = this.chased;
+    const p = chased ? chased.position : this.player.object.position;
+    if (chased) this.rig.follow(chased, frameDelta);
+    else this.rig.update(this.options.camera === 'chase' ? this.body : p, frameDelta);
     // Defaults, NOT small 3D-looking numbers: applyShake already scales the offset into world units
     // (×0.02). Passing 0.35 here would produce a 0.007-unit shake — mathematically present, invisible.
     this.rig.applyShake(this.feel.shake());
@@ -555,6 +622,9 @@ const TOUCH_CONTROLS = `import type { Input } from '../core/input';
  *     spaced so a thumb pressing one never brushes another.
  *   • MULTI-TOUCH by construction: every control tracks its OWN pointer id, so moving and attacking at
  *     the same time works — the one thing a single-touch implementation always gets wrong.
+ *   • A CAR GETS PEDALS ('drive' layout, 2026-10-11): Left/Right under the left thumb, Brake/Gas under
+ *     the right, on the same actions as the arrow keys. The game shell switches to it by itself when
+ *     the game drives a vehicle.
  *
  * Shown only where it belongs: a device whose PRIMARY pointer is coarse (a phone, a tablet), or the
  * moment a touch lands on a laptop with a touch screen. A desktop with a mouse never sees it.
@@ -566,9 +636,19 @@ export interface TouchButton {
   label: string;
 }
 
+/**
+ * 'move': a joystick under the left thumb, camera drag on the right, action buttons bottom-right.
+ * 'drive': Left / Right bottom-left and Brake / Gas bottom-right — no joystick, no camera drag (the
+ * camera chases the vehicle). The game shell switches to 'drive' by itself the moment the game drives a
+ * vehicle, unless the game chose its own buttons or layout.
+ */
+export type TouchLayout = 'move' | 'drive';
+
 export interface TouchControlsOptions {
   /** Which buttons to draw, bottom-right. Default: Attack, Jump, Use, Run. */
   buttons?: TouchButton[];
+  /** Which set to show. Default 'move'; see TouchLayout. */
+  layout?: TouchLayout;
   /** Drag in the right half to turn the camera. Default true; set false for a fixed-camera game. */
   look?: boolean;
   /** Camera pixels per finger pixel. Default 1.6 (a thumb covers less ground than a mouse). */
@@ -583,6 +663,18 @@ export const DEFAULT_TOUCH_BUTTONS: TouchButton[] = [
   { action: 'interact', label: 'Use' },
   { action: 'sprint', label: 'Run' },
 ];
+
+/**
+ * 🔴 A CAR ON A PHONE (admin 2026-10-11, build 46e2d74b). A driving game used to get Attack/Jump/Use/Run
+ * and a joystick, so builders hand-rolled their own Gas/Brake pads — and a hand-rolled pad is one more
+ * place to get LEFT backwards. These are the SAME actions the keyboard uses ('left' is A / ArrowLeft,
+ * 'up' is W / ArrowUp), so a tap on Left gives exactly the axis.x a press of A gives, and driveVehicle
+ * decides what that means. Left/Right sit under the left thumb, Brake/Gas under the right.
+ */
+export const DRIVE_TOUCH_BUTTONS: { steer: TouchButton[]; pedals: TouchButton[] } = {
+  steer: [{ action: 'left', label: 'Left' }, { action: 'right', label: 'Right' }],
+  pedals: [{ action: 'down', label: 'Brake' }, { action: 'up', label: 'Gas' }],
+};
 
 /** Is the PRIMARY pointer a finger? A touch-screen laptop answers no until it is actually touched. */
 export function prefersTouch(): boolean {
@@ -608,6 +700,14 @@ const CSS = [
   '.nbg-tc-btn.down{background:rgba(255,255,255,0.45);color:#111}',
   '.nbg-tc-hint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:10px 16px;border-radius:10px;background:rgba(0,0,0,0.6);color:#fff;font:500 14px/1.3 system-ui,sans-serif;text-align:center;pointer-events:none;display:none}',
   '@media (orientation: portrait){.nbg-tc.hinting .nbg-tc-hint{display:block}}',
+  // The 'drive' layout: two pads in the bottom corners, bigger than the action buttons (a thumb rests
+  // on them for the whole race), and the move/look/action set hidden while it is up.
+  '.nbg-tc-steer,.nbg-tc-pedals{position:absolute;bottom:max(16px,env(safe-area-inset-bottom));display:none;gap:16px;pointer-events:none}',
+  '.nbg-tc-steer{left:max(16px,env(safe-area-inset-left))}',
+  '.nbg-tc-pedals{right:max(16px,env(safe-area-inset-right))}',
+  '.nbg-tc-steer .nbg-tc-btn,.nbg-tc-pedals .nbg-tc-btn{width:76px;height:76px;border-radius:18px}',
+  '.nbg-tc.drive .nbg-tc-steer,.nbg-tc.drive .nbg-tc-pedals{display:flex}',
+  '.nbg-tc.drive .nbg-tc-move,.nbg-tc.drive .nbg-tc-look,.nbg-tc.drive .nbg-tc-buttons{display:none}',
 ].join('');
 
 export class TouchControls {
@@ -623,6 +723,7 @@ export class TouchControls {
   private lookX = 0;
   private lookY = 0;
   private shown = false;
+  private current: TouchLayout = 'move';
 
   constructor(
     private readonly container: HTMLElement,
@@ -655,17 +756,19 @@ export class TouchControls {
 
     const buttons = document.createElement('div');
     buttons.className = 'nbg-tc-buttons';
-    for (const b of options.buttons ?? DEFAULT_TOUCH_BUTTONS) {
-      const el = document.createElement('button');
-      el.type = 'button';
-      el.className = 'nbg-tc-btn';
-      el.textContent = b.label;
-      el.setAttribute('aria-label', b.label);
-      this.on(el, 'pointerdown', (e) => this.pressButton(e, b.action, el));
-      for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) this.on(el, t, (e) => this.releaseButton(e));
-      buttons.appendChild(el);
-    }
+    for (const b of options.buttons ?? DEFAULT_TOUCH_BUTTONS) this.addButton(buttons, b);
     this.root.appendChild(buttons);
+
+    // The 'drive' pads exist from the start (hidden by CSS) so switching layout is one class, not a rebuild.
+    const steer = document.createElement('div');
+    steer.className = 'nbg-tc-steer';
+    for (const b of DRIVE_TOUCH_BUTTONS.steer) this.addButton(steer, b);
+    this.root.appendChild(steer);
+    const pedals = document.createElement('div');
+    pedals.className = 'nbg-tc-pedals';
+    for (const b of DRIVE_TOUCH_BUTTONS.pedals) this.addButton(pedals, b);
+    this.root.appendChild(pedals);
+    if (options.layout === 'drive') this.setLayout('drive');
 
     const hint = document.createElement('div');
     hint.className = 'nbg-tc-hint';
@@ -701,6 +804,32 @@ export class TouchControls {
 
   /** Is the overlay on screen? */
   get visible(): boolean { return this.shown; }
+
+  /** Which set is up: 'move' (joystick + actions) or 'drive' (Left/Right + Brake/Gas). */
+  get layout(): TouchLayout { return this.current; }
+
+  /**
+   * Switch sets. Everything held is released first — a thumb that was on the joystick must not keep the
+   * car steering after the pads change under it.
+   */
+  setLayout(layout: TouchLayout): void {
+    if (layout === this.current) return;
+    this.releaseAll();
+    this.current = layout;
+    if (layout === 'drive') this.root.classList.add('drive');
+    else this.root.classList.remove('drive');
+  }
+
+  private addButton(parent: HTMLElement, b: TouchButton): void {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'nbg-tc-btn';
+    el.textContent = b.label;
+    el.setAttribute('aria-label', b.label);
+    this.on(el, 'pointerdown', (e) => this.pressButton(e, b.action, el));
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) this.on(el, t, (e) => this.releaseButton(e));
+    parent.appendChild(el);
+  }
 
   show(): void {
     if (this.shown) return;
@@ -860,24 +989,55 @@ export function generateGameShell(include?: string[]): GameShellResult {
   return {
     files,
     dependencies: [], // three comes from the 3D layer; react is already the app's
+    // 🔒 THE EXAMPLE BELOW IS COMPILED IN CI (tests/aRecipeExampleCompiles.test.ts). It used to pass
+    // camera: 'thirdPerson' — not a CameraKind, so it failed tsc (TS2820) — and it never showed a vehicle,
+    // so a racing game written from it framed the car from the FRONT (admin 2026-10-11, build 46e2d74b:
+    // headlights toward the player, LEFT turning the car RIGHT). Keep it a whole, importable module.
     instructions:
       `Added the game shell (${Object.keys(files).length} files). This COMPOSES the runtime, 3D, ` +
       'controller and VFX layers — render it and you have a running game.\n' +
       '```tsx\n' +
       "import { GameCanvas } from './game/GameCanvas';\n" +
+      "import { createTerrain } from './game/three/world';\n" +
+      "import { createCar, createRoad, createVehicleState, driveVehicle, ROAD_SURFACE_Y, type VehicleState } from './game/three/objects';\n" +
       '\n' +
-      '<GameCanvas options={{\n' +
-      "  lighting: 'sunset',\n" +
-      "  camera: 'thirdPerson',\n" +
-      '  setup: (ctx) => {\n' +
-      '    const ground = createTerrain({ size: 120 });\n' +
-      '    ctx.scene.add(ground);\n' +
-      '    return [ground];            // what the player collides with\n' +
-      '  },\n' +
-      '  update: (ctx, dt) => {\n' +
-      '    // YOUR GAMEPLAY. Fixed 60Hz. Emit events; never call particles or audio directly.\n' +
-      '  },\n' +
-      '}} />\n' +
+      '// ON FOOT: the shell already has a player that walks, jumps and is followed by the camera.\n' +
+      'export function AdventureGame() {\n' +
+      '  return <GameCanvas options={{\n' +
+      "    lighting: 'sunset',\n" +
+      "    camera: 'third-person',\n" +
+      '    setup: (ctx) => {\n' +
+      '      const ground = createTerrain({ size: 120 });\n' +
+      '      ctx.scene.add(ground);\n' +
+      '      return [ground];            // what the player collides with\n' +
+      '    },\n' +
+      '    update: (ctx, dt) => {\n' +
+      '      // YOUR GAMEPLAY. Fixed 60Hz. Emit events; never call particles or audio directly.\n' +
+      '    },\n' +
+      '  }} />;\n' +
+      '}\n' +
+      '\n' +
+      '// DRIVING / RIDING: every model faces +Z. driveVehicle owns the control signs, ctx.follow keeps the\n' +
+      '// camera BEHIND the car (tail lights toward the player), and a phone gets Left/Right + Brake/Gas.\n' +
+      'export function RacingGame() {\n' +
+      '  let car: ReturnType<typeof createCar>;\n' +
+      '  let drive: VehicleState;\n' +
+      '  return <GameCanvas options={{\n' +
+      "    camera: 'chase',\n" +
+      '    setup: (ctx) => {\n' +
+      '      const road = createRoad({ length: 400 });\n' +
+      '      car = createCar({ color: 0xb42b2b });\n' +
+      '      car.position.y = ROAD_SURFACE_Y;   // wheels ON the asphalt\n' +
+      '      ctx.scene.add(road, car);\n' +
+      '      drive = createVehicleState(car);   // starts moving, pointing where the model points (+Z)\n' +
+      '      ctx.follow(car);                   // the camera sits behind the car through every turn\n' +
+      '      return [road];\n' +
+      '    },\n' +
+      '    update: (ctx, dt) => {\n' +
+      '      drive = driveVehicle(car, drive, ctx.input.axis(), dt);   // W forward, LEFT turns left\n' +
+      '    },\n' +
+      '  }} />;\n' +
+      '}\n' +
       '```\n' +
       'WHAT THE SHELL ALREADY GUARANTEES — do not re-implement these:\n' +
       '- Gameplay runs at a FIXED 60Hz and the camera at the display rate. Physics in render makes the\n' +
@@ -893,6 +1053,10 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '  drag on the right, Attack/Jump/Use/Run buttons bottom-right, and a Pause button in the HUD. They\n' +
       '  drive the same Input actions as the keyboard. Choose the buttons with\n' +
       "  touchControls: { buttons: [{ action: 'attack', label: 'Punch' }, …] } — never hand-roll a joystick.\n" +
+      '- A GAME THAT DRIVES A VEHICLE (createVehicleState / driveVehicle) is recognised by the shell: the\n' +
+      '  camera chases the car from BEHIND even if you forget ctx.follow, and a phone gets Left/Right\n' +
+      '  bottom-left and Brake/Gas bottom-right, wired to the same actions as the arrow keys. Never write\n' +
+      '  your own steering pad or chase camera — a hand-written one is how LEFT ends up turning RIGHT.\n' +
       '- No WebGL on the device gives an honest message, never a blank screen.',
   };
 }

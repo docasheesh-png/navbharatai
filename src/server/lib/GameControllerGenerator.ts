@@ -197,11 +197,24 @@ export function stepMotor(
   return { state: s, jumped, landed };
 }
 
-/** Rotate an input vector into CAMERA space, so "forward" means "away from the camera". */
+/**
+ * Rotate an input vector into CAMERA space, so "forward" means "away from the camera" and "right" means
+ * the right of the SCREEN.
+ *
+ * The rig's yaw means one thing in every mode (camera.ts): the camera looks along (−sin yaw, 0, −cos yaw)
+ * and its right is (cos yaw, 0, −sin yaw). Input arrives with forward as moveZ = −1 (W) and right as
+ * moveX = +1 (D), so the world move is moveX·right − moveZ·forward.
+ *
+ * 🔴 THIS USED TO ROTATE THE OTHER WAY (moveX·cos − moveZ·sin, moveX·sin + moveZ·cos). The two agree only
+ * at yaw 0 and π — exactly where a game starts — so it looked right until the camera turned: at a quarter
+ * turn W walked TOWARD the camera and D went screen-left (measured 2026-10-11 while working the admin's
+ * "left dabane par right" report, build 46e2d74b; tests/theCarIsSeenFromBehind.test.ts). The same
+ * "controls feel reversed" class as the car camera that sat in front of the car.
+ */
 export function cameraRelative(moveX: number, moveZ: number, cameraYaw: number): { x: number; z: number } {
   const sin = Math.sin(cameraYaw);
   const cos = Math.cos(cameraYaw);
-  return { x: moveX * cos - moveZ * sin, z: moveX * sin + moveZ * cos };
+  return { x: moveX * cos + moveZ * sin, z: -moveX * sin + moveZ * cos };
 }
 `;
 

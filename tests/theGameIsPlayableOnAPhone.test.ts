@@ -33,7 +33,10 @@ describe('the game shell draws touch controls and wires them in', () => {
     expect(TOUCH).toContain('export class TouchControls');
     const game = shell['src/game/Game.ts'];
     expect(game).toContain("import { TouchControls, type TouchControlsOptions } from './ui/touchControls';");
-    expect(game).toMatch(/if \(options\.touchControls !== false\) \{\s*const touch = new TouchControls\(options\.container, this\.input, options\.touchControls \|\| \{\}\);\s*this\.disposers\.push\(\(\) => touch\.dispose\(\)\);/);
+    // The shell keeps the controls (this.touch) since 2026-10-11, so a game that drives a vehicle can be
+    // switched to the Left/Right + Brake/Gas layout (tests/theCarIsSeenFromBehind.test.ts runs it).
+    expect(game).toContain('const touchOptions = options.touchControls || {};');
+    expect(game).toMatch(/if \(options\.touchControls !== false\) \{\s*const touch = new TouchControls\(options\.container, this\.input, touchOptions\);\s*this\.touch = touch;\s*this\.disposers\.push\(\(\) => touch\.dispose\(\)\);/);
   });
 
   it('a subset that includes Game always carries the controls', () => {

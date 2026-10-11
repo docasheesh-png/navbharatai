@@ -31,6 +31,10 @@ describe('a recipe brings the layers it imports', () => {
       // third-person hero invisible — so the closure brings humanoid.ts too.
       'src/game/three/humanoid.ts',
       'src/game/three/lighting.ts', 'src/game/three/materials.ts',
+      // Game.ts and camera.ts import objects.ts since 2026-10-11 (admin, build 46e2d74b: the car showed its
+      // headlights): the rig and the shell ask it whether what they frame is a VEHICLE, which is always
+      // chased from behind — so the closure brings objects.ts too.
+      'src/game/three/objects.ts',
       // world.ts imports surfaces.ts since 2026-10-05 (the ground reads the detail tier and is textured
       // in the real tier) — so the closure must bring it too, or the added world.ts would not compile.
       'src/game/three/renderer.ts', 'src/game/three/surfaces.ts', 'src/game/three/world.ts',

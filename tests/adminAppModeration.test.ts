@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  appStatusView, canUnpublish, canBan, matchesAppQuery, confirmCopy, isRestorableStatus, MODERATION_ROUTE, type AppRow,
+  appStatusView, canUnpublish, canBan, matchesAppQuery, confirmCopy, isRestorableStatus, MODERATION_ROUTE, restoredStatusFor, type AppRow,
 } from '../src/lib/adminAppModeration';
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
@@ -182,7 +182,7 @@ describe('the wiring — the capability must actually be reachable', () => {
   });
 
   it('the panel renders the ban in red and asks for a reason before it can run', () => {
-    expect(admin).toContain('confirmCopy(moderating.action)');
+    expect(admin).toContain('confirmCopy(moderating.action, moderating.rec)');
     // Every action needs the admin's own reason — the same function the server refuses with.
     expect(admin).toContain("const reasonMissing = !('reason' in readAdminReason(moderateReason));");
     expect(admin).toContain('disabled={moderateBusy || reasonMissing}');
@@ -213,18 +213,34 @@ describe('Restore — a mistaken ban can be undone from the screen (admin panel 
     expect(r.title).not.toBe(confirmCopy('ban').title);
     expect(r.body.toLowerCase()).toContain('owner can publish');
     expect(r.body.toLowerCase()).toContain('stays offline');
+    // …and a hold that took nothing offline is NOT described as an app coming back offline (Q-703)
+    const held = confirmCopy('restore', { status: 'held', heldFrom: 'active' });
+    expect(held.body.toLowerCase()).toContain('stays live');
+    expect(held.body.toLowerCase()).not.toContain('stays offline');
   });
 
   it('the panel shows Restore by the same rule the server refuses with', () => {
     expect(panel).toContain("isRestorableStatus(d.status) && (");
-    expect(panel).toContain("onModerate(d.workspaceId, 'restore')");
+    expect(panel).toContain("onModerate(d.workspaceId, 'restore', { status: d.status, heldFrom: d.heldFrom })");
     expect(restoreBlock).toContain('isRestorableStatus(before)');
     expect(restoreBlock).toContain('409');
   });
 
-  it('marks the app unpublished, not live — the ban deleted the site, so "active" would be a lie', () => {
-    expect(restoreBlock).toContain("setStatus(workspaceId, 'unpublished')");
+  it('🔒 writes the TRUE status: a ban deleted the site (offline); a hold of a live app deleted nothing (live) — Q-703', () => {
+    expect(restoredStatusFor({ status: 'taken_down' })).toBe('unpublished');
+    expect(restoredStatusFor({ status: 'taken_down', heldFrom: 'active' })).toBe('unpublished');
+    expect(restoredStatusFor({ status: 'held', heldFrom: 'active' })).toBe('active');
+    expect(restoredStatusFor({ status: 'held', heldFrom: 'none' })).toBe('unpublished');
+    expect(restoredStatusFor({ status: 'held' })).toBe('unpublished'); // a hold from before heldFrom existed
+    expect(restoredStatusFor(null)).toBe('unpublished');
+    expect(restoreBlock).toContain('const after = restoredStatusFor(current);');
+    expect(restoreBlock).toContain('setStatus(workspaceId, after)');
     expect(restoreBlock).not.toContain("setStatus(workspaceId, 'active')");
+  });
+
+  it('🔒 both writers of a hold record what the app was, so a restore can know (Q-703)', () => {
+    expect(read('server.ts')).toContain("deploymentStore.setStatus(workspaceId, 'held', { heldFrom: 'active' })");
+    expect(read('src/server/AgentV3/DeploymentStore.ts')).toContain("deploymentStore.setStatus(workspaceId, 'held', { heldFrom: existing?.status ?? 'none' })");
   });
 
   it('ban, unpublish and restore all require the admin\'s own reason on the server, and audit who did it', () => {
@@ -237,8 +253,18 @@ describe('Restore — a mistaken ban can be undone from the screen (admin panel 
     expect(admin).toContain('Reason (required)');
   });
 
-  it('the held line names the one thing that holds an app — the publish-time safety scan', () => {
-    expect(appStatusView('held').meaning.toLowerCase()).toContain('safety scan');
-    expect(appStatusView('held').meaning.toLowerCase()).not.toContain('outside address');
+  it('🔒 the held line tells the truth: a hold takes nothing offline (Q-703)', () => {
+    const live = appStatusView('held', 'active');
+    expect(live.label).toBe('Held — still live');
+    expect(live.live).toBe(true);
+    expect(live.meaning.toLowerCase()).toContain('not taken offline');
+    expect(canUnpublish('held', 'active')).toBe(true); // so the admin CAN take it down
+    const notLive = appStatusView('held');
+    expect(notLive.live).toBe(false);
+    expect(notLive.meaning.toLowerCase()).toContain('nothing of it is serving');
+    for (const v of [live, notLive]) {
+      expect(v.meaning.toLowerCase()).toContain('automatic safety check');
+      expect(v.meaning.toLowerCase()).not.toContain('outside address');
+    }
   });
 });

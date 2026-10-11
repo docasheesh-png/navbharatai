@@ -122,6 +122,8 @@ export interface BuiltAppRow {
   publish: PublishState;
   /** Registry status as stored — the moderation buttons key off this, not off `publish`. */
   status: string | null;
+  /** The status the app had when it was held; `'active'` = still serving (Q-703). */
+  heldFrom: string | null;
   /** The public URL when the registry has one (live or not — an offline app keeps its old link). */
   url: string | null;
   /** Registry `updatedAt`, so the row can show when it was last published/unpublished. */
@@ -169,6 +171,7 @@ export function builtAppRow(
     savedAt: Number.isFinite(meta?.savedAt) ? Number(meta!.savedAt) : 0,
     publish: publishStateOf(rec),
     status: rec ? String(rec.status ?? 'active') : null,
+    heldFrom: rec?.status === 'held' && rec.heldFrom ? String(rec.heldFrom) : null,
     url: typeof rec?.url === 'string' && rec.url ? rec.url : null,
     publishedAt: Number.isFinite(rec?.updatedAt) ? Number(rec!.updatedAt) : 0,
     snapshotUrl,

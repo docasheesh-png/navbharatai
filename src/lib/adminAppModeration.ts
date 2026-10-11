@@ -36,7 +36,7 @@ export interface AppStatusView {
  * Saying "unknown" instead would be worse than useless here — it is live, the admin is looking at
  * this screen to decide whether it should be, and a shrug is not an answer.
  */
-export function appStatusView(status?: AppStatus): AppStatusView {
+export function appStatusView(status?: AppStatus, heldFrom?: string | null): AppStatusView {
   switch (status || 'active') {
     case 'active':
       return { label: 'Live', live: true, tone: 'live', meaning: 'Anyone with the link can open this app.' };
@@ -45,10 +45,16 @@ export function appStatusView(status?: AppStatus): AppStatusView {
     case 'taken_down':
       return { label: 'Banned', live: false, tone: 'banned', meaning: 'Removed. The owner can never publish this workspace again unless an admin restores it.' };
     case 'held':
-      // The ONE writer of 'held' is the publish-time content scan (DeploymentStore, AGENTV3_PUBLISH_SCAN=block):
-      // the app was stopped BEFORE it went live. This line used to blame "an outside address reported unsafe",
-      // a reason no code path ever records.
-      return { label: 'Held', live: false, tone: 'warn', meaning: 'Held automatically — the safety scan stopped it before it went live.' };
+      // 🔒 A HOLD TAKES NOTHING OFFLINE (Q-703, admin 2026-10-11: "shabd sach kar do"). Two writers set it:
+      // the publish-time content scan (AGENTV3_PUBLISH_SCAN=block), which refuses a NEW version while any
+      // version already live keeps serving, and the daily outbound re-scan, which holds an app that is LIVE
+      // and leaves it serving — a machine acting on a third party's list must not take a real site down
+      // (outboundRescan.ts). This line used to say the scan "stopped it before it went live", and the
+      // restore copy said "the site stays offline": both false for a re-scan hold. `heldFrom` (recorded
+      // with the hold) says whether a live version is still out there.
+      return heldFrom === 'active'
+        ? { label: 'Held — still live', live: true, tone: 'warn', meaning: 'Flagged for review by an automatic safety check. It was NOT taken offline: anyone with the link can still open it until you Unpublish or Ban it. The owner cannot publish again until it is restored.' }
+        : { label: 'Held', live: false, tone: 'warn', meaning: 'Flagged for review by an automatic safety check before a new version went live. Nothing of it is serving. The owner cannot publish again until it is restored.' };
     case 'plan_paused':
       return { label: 'Paused', live: false, tone: 'warn', meaning: 'Paused over the owner’s hosting plan, not over its content.' };
     default:
@@ -63,8 +69,8 @@ export function appStatusView(status?: AppStatus): AppStatusView {
  * already gone and re-writes a status it already holds — it would "succeed" and change nothing,
  * which teaches a moderator that the buttons here are decorative.
  */
-export function canUnpublish(status?: AppStatus): boolean {
-  return appStatusView(status).live;
+export function canUnpublish(status?: AppStatus, heldFrom?: string | null): boolean {
+  return appStatusView(status, heldFrom).live;
 }
 
 /**
@@ -87,6 +93,19 @@ export function canBan(status?: AppStatus): boolean {
  */
 export function isRestorableStatus(status?: AppStatus | null): boolean {
   return status === 'taken_down' || status === 'held';
+}
+
+/**
+ * The status a RESTORE writes. PURE — the server route and its test read this one rule.
+ *
+ * A ban DELETED the live site, so the app comes back offline (`unpublished`) and the owner republishes.
+ * A hold deleted nothing (see `appStatusView`): an app that was live when it was held is STILL serving,
+ * and writing `unpublished` for it would put a lie in the registry the other way round (Q-703). So it
+ * goes back to `active`. A hold recorded before `heldFrom` existed is treated as not live — the old
+ * behaviour — because nothing on the record can prove otherwise.
+ */
+export function restoredStatusFor(rec: { status?: AppStatus | null; heldFrom?: string | null } | null | undefined): 'active' | 'unpublished' {
+  return rec?.status === 'held' && rec.heldFrom === 'active' ? 'active' : 'unpublished';
 }
 
 /** A row as this screen needs it — a subset of the server's DeploymentRecord. */
@@ -128,11 +147,13 @@ export const MODERATION_ROUTE: Record<ModerationAction, 'unpublish' | 'takedown'
   restore: 'restore',
 };
 
-export function confirmCopy(action: ModerationAction): { title: string; body: string; cta: string } {
+export function confirmCopy(action: ModerationAction, rec?: { status?: AppStatus | null; heldFrom?: string | null }): { title: string; body: string; cta: string } {
   if (action === 'restore') {
     return {
       title: 'Restore this app?',
-      body: 'The block is lifted and the owner can publish this app again from their own screen. Nothing goes live by itself: the app stays offline until the owner publishes it.',
+      body: restoredStatusFor(rec) === 'active'
+        ? 'The hold is lifted and the owner can publish this app again. It was never taken offline, so it simply stays live.'
+        : 'The block is lifted and the owner can publish this app again from their own screen. Nothing goes live by itself: the app stays offline until the owner publishes it.',
       cta: 'Restore',
     };
   }
@@ -170,6 +191,8 @@ export interface BuiltAppRow {
   savedAt: number;
   publish: PublishState;
   status: string | null;
+  /** What the app was when it was held — `'active'` means it is still serving (Q-703). */
+  heldFrom?: string | null;
   url: string | null;
   publishedAt: number;
   snapshotUrl: string | null;
@@ -186,12 +209,12 @@ export interface BuiltAppRow {
 }
 
 /** What the admin reads on a built app's row — every state yields real words, never blank. */
-export function publishStateView(state: PublishState | string | undefined): AppStatusView {
+export function publishStateView(state: PublishState | string | undefined, heldFrom?: string | null): AppStatusView {
   switch (state) {
     case 'live': return appStatusView('active');
     case 'offline': return appStatusView('unpublished');
     case 'banned': return appStatusView('taken_down');
-    case 'held': return appStatusView('held');
+    case 'held': return appStatusView('held', heldFrom);
     case 'paused': return appStatusView('plan_paused');
     case 'never':
       return { label: 'Not published', live: false, tone: 'off', meaning: 'Built, and never put on the internet. Only the owner can open it.' };

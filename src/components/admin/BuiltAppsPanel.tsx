@@ -43,7 +43,7 @@ export interface BuiltAppsPanelProps {
   headers: Record<string, string>;
   openAccount: (uid: string) => void;
   toast: (msg: string) => void;
-  onModerate: (workspaceId: string, action: ModerationAction) => void;
+  onModerate: (workspaceId: string, action: ModerationAction, rec?: { status?: string | null; heldFrom?: string | null }) => void;
   /** Set by the dashboard after an Unpublish / Ban landed, so the affected row is re-read in place. */
   moderated: { workspaceId: string; tick: number } | null;
 }
@@ -157,7 +157,7 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
   }, [headers]);
 
   const renderRow = (d: BuiltAppRow, opts: { orphan?: boolean } = {}) => {
-    const view = publishStateView(d.publish);
+    const view = publishStateView(d.publish, d.heldFrom);
     const plan = previewPlan(d);
     const owner = d.userId || d.ownerUid;
     // WHO built WHAT, before any id (admin 2026-09-27: "admin ko dikhna chahiye kon kya bana raha hai").
@@ -219,7 +219,8 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
             >
               <Eye size={11} /> Preview
             </button>
-            {d.status !== null && canUnpublish(d.status) && d.publish === 'live' && (
+            {/* A held app that was live when held is STILL serving (Q-703), so Unpublish is how it really goes. */}
+            {d.status !== null && canUnpublish(d.status, d.heldFrom) && (d.publish === 'live' || d.publish === 'held') && (
               <button
                 onClick={() => onModerate(d.workspaceId, 'unpublish')}
                 className="px-2.5 py-1.5 rounded-lg bg-raised border border-line text-[10px] font-black uppercase tracking-wider text-body hover:text-ink"
@@ -242,7 +243,7 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
                 The server checks the same rule (isRestorableStatus) and refuses anything else. */}
             {isRestorableStatus(d.status) && (
               <button
-                onClick={() => onModerate(d.workspaceId, 'restore')}
+                onClick={() => onModerate(d.workspaceId, 'restore', { status: d.status, heldFrom: d.heldFrom })}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-raised border border-line text-[10px] font-black uppercase tracking-wider text-body hover:text-ink"
               >
                 <RotateCcw size={11} /> Restore

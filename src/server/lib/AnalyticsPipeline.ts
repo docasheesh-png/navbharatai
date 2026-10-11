@@ -2,15 +2,22 @@
 //
 // `/api/analytics/event` previously only console.log'd events — no aggregation, no funnels. This adds a
 // real server-side rollup: every event increments a daily aggregate doc (per-event counts + the
-// activation funnel signup→build→deploy→pay), race-safe via Firestore FieldValue.increment, plus a
-// bounded raw-event log. Funnel/cohort queries read the daily rollups. Pure helpers (stage mapping,
-// funnel aggregation) are unit-tested; the store is best-effort + VITEST-skip (never throws).
+// activation funnel signup→build→deploy→pay), race-safe via Firestore FieldValue.increment. Funnel
+// queries read the daily rollups. Pure helpers (stage mapping, funnel aggregation) are unit-tested; the
+// store is best-effort + VITEST-skip (never throws).
+//
+// 🔒 NO PER-PERSON EVENT LOG (admin 2026-10-11, Q-783 option B). This also appended every event, with the
+// person's real `userId`, to `analytics_events` "for cohort/segmentation drill-down" — a drill-down that
+// was never built, so nothing ever read it. A store that holds a uid and answers no question is pure
+// liability under the DPDP Act's data-minimisation duty, and the funnel loses nothing: it reads the day
+// rollup, which holds no person. The 30-day window and the account-erasure entry for `analytics_events`
+// stay in DataRetentionManager, so the rows written before this change still expire and are still erased.
+// Locked by `tests/noAnalyticsEventNamesAPerson.test.ts`.
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
 
 const DAILY_COLLECTION = 'analytics_daily';
-const EVENTS_COLLECTION = 'analytics_events';
 
 export type FunnelStage = 'signup' | 'build' | 'deploy' | 'pay';
 export const FUNNEL_ORDER: FunnelStage[] = ['signup', 'build', 'deploy', 'pay'];
@@ -77,12 +84,9 @@ function getDb(): admin.firestore.Firestore | null {
   }
 }
 
-/** Record one analytics event into the daily rollup (race-safe increments) + a bounded raw log. Best-effort. */
+/** Record one analytics event into the daily rollup (race-safe increments). Best-effort. No person is stored. */
 export async function recordAnalyticsEvent(input: {
   event: string;
-  userId?: string;
-  sessionId?: string;
-  props?: Record<string, unknown>;
   ts?: number;
 }): Promise<void> {
   const event = typeof input?.event === 'string' ? input.event : '';
@@ -103,14 +107,6 @@ export async function recordAnalyticsEvent(input: {
     };
     if (stage) update[`funnel.${stage}`] = inc;
     await db.collection(DAILY_COLLECTION).doc(date).set(update, { merge: true });
-    // Bounded raw event (for cohort/segmentation drill-down). Best-effort, fire-and-forget.
-    await db.collection(EVENTS_COLLECTION).add({
-      event: key,
-      userId: typeof input.userId === 'string' ? input.userId.slice(0, 128) : 'anon',
-      sessionId: typeof input.sessionId === 'string' ? input.sessionId.slice(0, 128) : '',
-      stage: stage || '',
-      ts,
-    });
   } catch {
     /* best-effort — analytics never breaks the request */
   }

@@ -427,16 +427,31 @@ export function generateGameController(include?: string[]): GameControllerResult
   return {
     files,
     dependencies: [], // motor is pure; character uses the `three` the 3D layer already declares
+    // 🔒 COMPILED IN CI (tests/aRecipeExampleCompiles.test.ts) — keep it a whole module with real imports.
+    // It used to name terrain, buildings, input and cameraYaw without making any of them.
     instructions:
       `Added the character controller (${Object.keys(files).length} files under src/game/play).\n` +
       '```ts\n' +
-      "const player = new CharacterController({ config: { maxSpeed: 7 } });\n" +
-      'player.setColliders([terrain, ...buildings]);\n' +
+      "import * as THREE from 'three';\n" +
+      "import { CharacterController } from './game/play/character';\n" +
+      "import { CameraRig } from './game/three/camera';\n" +
+      "import { createTerrain } from './game/three/world';\n" +
+      "import { Input } from './game/core/input';\n" +
+      '\n' +
+      'const scene = new THREE.Scene();\n' +
+      'const terrain = createTerrain({ size: 200 });\n' +
+      'scene.add(terrain);\n' +
+      "const input = new Input(document.querySelector('canvas')!);\n" +
+      "const rig = new CameraRig({ kind: 'third-person', collidables: [terrain] });\n" +
+      'const player = new CharacterController({ config: { maxSpeed: 7 } });\n' +
+      'player.setColliders([terrain]);\n' +
       'scene.add(player.object);\n' +
-      '// inside the FIXED update:\n' +
-      'const a = input.axis();\n' +
-      "player.update(dt, { moveX: a.x, moveZ: a.y, sprint: input.isDown('sprint'),\n" +
-      "  jumpPressed: input.wasPressed('jump'), jumpHeld: input.isDown('jump') }, cameraYaw);\n" +
+      '\n' +
+      'export function fixedUpdate(dt: number): void {   // inside the FIXED update\n' +
+      '  const a = input.axis();\n' +
+      "  player.update(dt, { moveX: a.x, moveZ: a.y, sprint: input.isDown('sprint'),\n" +
+      "    jumpPressed: input.wasPressed('jump'), jumpHeld: input.isDown('jump') }, rig.yaw);   // W = away from the camera\n" +
+      '}\n' +
       '```\n' +
       'WHY IT FEELS RIGHT (do not "simplify" these away — each one is deliberate):\n' +
       '- COYOTE TIME: jump still works ~100ms after walking off a ledge. Without it players who press a\n' +

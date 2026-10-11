@@ -4439,31 +4439,73 @@ export function generateGame3D(include?: string[]): Game3DResult {
     files,
     // The ONLY dependency the whole game stack takes, and only when 3D is actually used.
     dependencies: [{ name: 'three', version: '^0.180.0' }],
+    // 🔒 THE EXAMPLE BELOW IS COMPILED IN CI (tests/aRecipeExampleCompiles.test.ts), so keep it a whole
+    // module with real imports. It used to be a list of fragments that named variables it never made
+    // (canvas, car, rider, terrain, buildings), told a vehicle game to use a 'third-person' rig with
+    // rig.update(playerPos) — the view that sits IN FRONT of a +Z car — and leaned the bike the wrong
+    // way (bike.lean(-steerInput * 0.5) leans RIGHT on LEFT). Admin 2026-10-11, build 46e2d74b: "car ulti
+    // chal rahi hai" — the headlights faced the player and LEFT turned the car RIGHT.
     instructions:
       `Added the 3D layer (${Object.keys(files).length} files under src/game/three). Install: three (+ @types/three).\n` +
       '```ts\n' +
-      "const renderer = createRenderer({ canvas });\n" +
-      "const scene = new THREE.Scene();\n" +
+      "import * as THREE from 'three';\n" +
+      "import { createRenderer } from './game/three/renderer';\n" +
+      "import { applyLighting, followShadow } from './game/three/lighting';\n" +
+      "import { applyEnvironment } from './game/three/environment';\n" +
+      "import { surfaceMaterial, enableAO, setDetailLevel } from './game/three/surfaces';\n" +
+      "import { sharedMaterial, paletteColor } from './game/three/materials';\n" +
+      "import { createTerrain, scatterInstances, treeGeometry } from './game/three/world';\n" +
+      "import { createHumanoid } from './game/three/humanoid';\n" +
+      "import { createCar, createTree, createMountain, createRoad, createHouse, createRiver, createAnimal,\n" +
+      "  createMotorcycle, createVehicleState, driveVehicle, ROAD_SURFACE_Y } from './game/three/objects';\n" +
+      "import { CameraRig } from './game/three/camera';\n" +
+      "import { Input } from './game/core/input';\n" +
+      '\n' +
+      "const canvas = document.querySelector('canvas')!;\n" +
+      'const input = new Input(canvas);\n' +
+      'const renderer = createRenderer({ canvas });\n' +
+      'const scene = new THREE.Scene();\n' +
       "const { key } = applyLighting(scene, renderer, 'sunset');\n" +
       "applyEnvironment(scene, renderer, 'sunset');            // reflections — do NOT skip this\n" +
-      "const wall = new THREE.Mesh(enableAO(geo), surfaceMaterial('brick', { repeat: 6 }));\n" +
-      "const hero = createHumanoid({ height: 1.8 }); scene.add(hero.root);\n" +
       "setDetailLevel('real');   // 'real' when the user asked for real/asli; 'lite' for plain 3D\n" +
-      "scene.add(createCar({ color: 0xb42b2b }));  scene.add(createTree({ height: 7 }));\n" +
-      "scene.add(createMountain({ size: 140, height: 50 }));  scene.add(createRoad({ length: 400 }));\n" +
-      "const house = createHouse({ roof: 'flat', storeys: 2 }); house.position.set(16, 0, 0); house.rotation.y = -Math.PI / 2; scene.add(house); // door faces +Z — turn it to the road\n" +
-      "car.position.y = ROAD_SURFACE_Y;   // wheels ON the asphalt, which sits 3 cm above the ground\n" +
-      "let drive = createVehicleState(car);                       // every model faces +Z (MODEL_FORWARD)\n" +
-      "// each frame: drive = driveVehicle(car, drive, input.axis(), dt); rig.follow(car, dt);  // camera BEHIND the car\n" +
-      "const river = createRiver(); scene.add(river.mesh);   // in the loop: river.update(elapsed)\n" +
-      "const deer = createAnimal({ kind: 'deer' }); scene.add(deer.root); // deer.update(dt, speed)\n" +
-      "const bike = createMotorcycle({ kind: 'sport', color: 0xc4231f }); scene.add(bike.root);\n" +
-      "bike.seat.add(rider.root);            // a bike with no rider reads as a showroom prop\n" +
-      "// in the loop: bike.roll(speed, dt); bike.lean(-steerInput * 0.5); bike.steer(steerInput * 0.3);\n" +
-      "// in the loop: hero.update(dt, speed, grounded)\n" +
-      "const rig = new CameraRig({ kind: 'third-person', collidables: [terrain, buildings] });\n" +
-      "scene.add(createTerrain({ palette: 'indianVillage' }));\n" +
+      "const terrain = createTerrain({ palette: 'indianVillage' });\n" +
+      'scene.add(terrain, createTree({ height: 7 }), createMountain({ size: 140, height: 50 }), createRoad({ length: 400 }));\n' +
       "scene.add(scatterInstances(treeGeometry(), sharedMaterial('foliage', paletteColor('forest', 1)), { count: 400 }));\n" +
+      "scene.add(new THREE.Mesh(enableAO(new THREE.BoxGeometry(6, 3, 0.3)), surfaceMaterial('brick', { repeat: 6 })));\n" +
+      "const house = createHouse({ roof: 'flat', storeys: 2 }); house.position.set(16, 0, 0); house.rotation.y = -Math.PI / 2; scene.add(house); // door faces +Z — turn it to the road\n" +
+      'const river = createRiver(); scene.add(river.mesh);\n' +
+      "const deer = createAnimal({ kind: 'deer' }); scene.add(deer.root);\n" +
+      'const hero = createHumanoid({ height: 1.8 }); scene.add(hero.root);   // on foot: hero.update(dt, speed, grounded) each frame\n' +
+      '\n' +
+      '// DRIVING. Every model faces +Z (MODEL_FORWARD). driveVehicle owns the control signs; the camera stays BEHIND.\n' +
+      'const car = createCar({ color: 0xb42b2b });\n' +
+      'car.position.y = ROAD_SURFACE_Y;   // wheels ON the asphalt, which sits 3 cm above the ground\n' +
+      'scene.add(car);\n' +
+      'let drive = createVehicleState(car);   // starts moving, pointing where the model points\n' +
+      "const rig = new CameraRig({ kind: 'chase', collidables: [terrain, house] });\n" +
+      '\n' +
+      '// RIDING. A bike is driven the same way; bike.ride() leans it and turns its bars from the SAME axis.\n' +
+      "const bike = createMotorcycle({ kind: 'sport', color: 0xc4231f }); scene.add(bike.root);\n" +
+      'bike.seat.add(createHumanoid({ height: 1.75 }).root);   // a bike with no rider reads as a showroom prop\n' +
+      'let ride = createVehicleState(bike.root);\n' +
+      '\n' +
+      'export function frame(dt: number, elapsed: number): void {\n' +
+      '  const axis = input.axis();                   // RAW: LEFT is x = -1, W is y = -1 — never flip a sign yourself\n' +
+      '  drive = driveVehicle(car, drive, axis, dt);  // W forward; LEFT turns to the driver\'s left = the screen\'s left\n' +
+      "  rig.update(car, dt);                         // 'chase': behind the car through every turn (same as rig.follow(car, dt))\n" +
+      '  river.update(elapsed);\n' +
+      '  deer.update(dt, 1.2);\n' +
+      '  followShadow(key, car.position);\n' +
+      '  renderer.render(scene, rig.camera);\n' +
+      '  input.endFrame();\n' +
+      '}\n' +
+      '\n' +
+      'export function rideFrame(dt: number): void {   // the same frame when the player rides the bike\n' +
+      '  const axis = input.axis();\n' +
+      '  ride = driveVehicle(bike.root, ride, axis, dt);  // moves it and rolls BOTH wheels\n' +
+      '  bike.ride(axis, ride.speed, dt);                 // leans + turns the bars to the rider\'s left on LEFT\n' +
+      '  rig.update(bike.root, dt);\n' +
+      '}\n' +
       '```\n' +
       'WHAT ACTUALLY MAKES IT LOOK GOOD — do not skip these:\n' +
       '- 🔴 applyEnvironment IS THE BIGGEST ONE. A PBR material is mostly a description of what it\n' +
@@ -4478,17 +4520,24 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '  createAutoRickshaw, createBus, createTruck, createTractor — and createTraffic() to fill a road\n' +
       '  with them (keeps left, keeps distance, stops for the player); createWeapon({ kind }) for a\n' +
       '  pistol, rifle, smg, shotgun, sniper, sword, axe or bow — hero.hold(weapon.root), hero.aim(true),\n' +
-      '  fire from weapon.muzzle, and bow.setDraw(held ? 1 : 0). Call setDetailLevel()\n' +      "- 🌦️ An outdoor world gets atmosphere.ts: createAtmosphere({ scene, renderer, camera, lighting })\n" +
+      '  fire from weapon.muzzle, and bow.setDraw(held ? 1 : 0). Call setDetailLevel()\n' +
+      "  ONCE at start-up — 'real' when the user asked for real/realistic/asli/100%, 'lite' when they\n" +
+      '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
+      '- 🔴 ANYTHING DRIVEN OR RIDDEN: move it with driveVehicle(vehicle, state, input.axis(), dt) — the raw\n' +
+      "  axis, never a sign you worked out — and frame it with a 'chase' rig (rig.update(vehicle, dt)) or\n" +
+      '  rig.follow(vehicle, dt). The camera then sits BEHIND it: the player sees the TAIL lights, and LEFT\n' +
+      '  turns it to the left of the screen. A camera you place yourself at +Z of the car is IN FRONT of it\n' +
+      '  (every model faces +Z) — the player sees the headlights and every control reads as reversed.\n' +
+      "- 🌦️ An outdoor world gets atmosphere.ts: createAtmosphere({ scene, renderer, camera, lighting })\n" +
       "  — a day-night clock (dayLength seconds per day) and weather via setWeather('rain'|'storm'|'snow'|\n" +
       "  'fog'|'dust'|'cloudy'|'clear', seconds). addNightLight(lamp), wet([roadMaterial]), and\n" +
       "  onLightning = (d, delay) => setTimeout(() => audio.play('thunder'), delay * 1000). Call\n" +
       '  atmo.update(dt) every frame AFTER the camera moves; it drives the lights, fog and sky itself.\n' +
-      "  ONCE at start-up — 'real' when the user asked for real/realistic/asli/100%, 'lite' when they\n" +
-      '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
       '- 🔴 A BIKE IS createMotorcycle() / createBicycle(), never a capsule over two cylinders. A\n' +
       '  motorcycle is mostly AIR: the wheels sit 1.35 m apart with daylight under the engine, the\n' +
       '  forks are RAKED, and the tank-to-tail line falls backwards. Put a rider in bike.seat, and\n' +
-      '  call bike.lean() in corners — a bike that corners flat reads as a prop on rails.\n' +
+      '  call bike.ride(input.axis(), speed, dt) every frame — it leans into corners and turns the bars to\n' +
+      '  the rider\'s left on LEFT. A bike that corners flat reads as a prop on rails.\n' +
       '- 🔴 A human character is createHumanoid(), never a capsule or a stack of spheres. Call\n' +
       '  hero.update(dt, speed, grounded) every frame — arms swing opposite the legs, knees only bend\n' +
       '  one way, and the body tucks in the air. A capsule with a hat is the single clearest sign of an\n' +
@@ -4498,7 +4547,9 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '- Use ONE palette for the whole scene. Per-object colours are what make a world look like a parts bin.\n' +
       '- Share materials (sharedMaterial) and scatter with InstancedMesh — a thousand trees must be ONE draw call.\n' +
       '- Give scatter an accept() so props stay off roads and out of the play space.\n' +
-      '- Feed rig.update(playerPos, dt) the FIXED delta, and rig.applyShake(feel.shake()) after it.\n' +
+      '- Move the camera once per DISPLAY frame with that frame\'s delta (the game shell does it in render();\n' +
+      '  a camera stepped at the fixed 60Hz stutters on any other display), then rig.applyShake(feel.shake()).\n' +
+      '  rig.update(player.object.position, dt) frames a character ON FOOT; a vehicle gets the chase above.\n' +
       '- Call followShadow(key, playerPos) on a large map, or shadows blur out as the player walks away.\n' +
       '- Keep bloom subtle if you add post-processing. Heavy bloom is the classic first-WebGL-project tell.',
   };

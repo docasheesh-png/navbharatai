@@ -128,7 +128,8 @@ describe('🔒 WIRING — one reading, taken before the platform writes a word',
   });
 
   it('the question note is recorded only where its own sentence is true — a zero-file turn', () => {
-    expect(route).toContain('if (firstAttemptAskedTheUser && expectsArtifacts && writtenFiles.size === 0) {');
+    // A zero-file turn counts the builder's writes, never our game kit alone (build 46e2d74b).
+    expect(route).toContain('if (firstAttemptAskedTheUser && expectsArtifacts && builderWroteCount() === 0) {');
   });
 
   it('a refusal left standing is visible in the admin report, and counts against nothing', () => {

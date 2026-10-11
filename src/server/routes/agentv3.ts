@@ -373,7 +373,8 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
-import { fastLaneSkipsImageApp } from '../AgentV3/inAppImageGeneration';
+import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult } from '../AgentV3/gameKitSeed';
+import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { entryFirstHandoffLine, renderWhileBuilding } from '../AgentV3/earlyPreview';
@@ -652,7 +653,7 @@ import {
   type VersionPreviewDeps,
 } from '../AgentV3/versionPreview';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, etaTaskKey } from '../AgentV3/etaHistory';
+import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, etaTaskKey, etaBuildKind, type EtaBuildKind } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -13458,6 +13459,12 @@ async function noteBuildOutcome(
     // See progressEta.ts for why measurement beats every constant we could tune here.
     let etaPlannedFiles = 0;
     let etaFirstFileAt = 0;
+    /**
+     * Files the PLATFORM laid down before the builder's first call (the game-kit seed, gameKitSeed.ts —
+     * build 46e2d74b). They sit in `writtenFiles` so they are saved, but they are not progress on the
+     * builder's file plan: counted as done, ~30 kit files would make a planned build look nearly finished.
+     */
+    let etaPlatformSeededFiles = 0;
     /** Stamp the first file's arrival — the start of the only interval we can honestly measure. */
     const noteEtaFileWritten = (): void => { if (etaFirstFileAt === 0) etaFirstFileAt = Date.now(); };
     // PLAN-STEP measurement (autopsy d11ad529, 2026-09-14) — the SAME measurement, over the signal the
@@ -13615,7 +13622,8 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: finalChecksEtaLine(elapsedMs), ts: now, id: 'eta-live' });
             return;
           }
-          const measured = measuredRemainingMs({ plannedFiles: etaPlannedFiles, filesDone: writtenFiles.size, firstFileAt: etaFirstFileAt, now });
+          const etaFilesDone = Math.max(0, writtenFiles.size - etaPlatformSeededFiles);
+          const measured = measuredRemainingMs({ plannedFiles: etaPlannedFiles, filesDone: etaFilesDone, firstFileAt: etaFirstFileAt, now });
           if (measured !== null) {
             // Re-anchor the fallback's budget too, so if measurement later stops applying (the build
             // enters repair) liveEtaTick continues from the measured total rather than from the stale
@@ -13626,7 +13634,7 @@ async function noteBuildOutcome(
             // honestly own the line again — it would be continuing from something real rather than
             // from the prompt guess it was still carrying.
             etaEvidenced = true;
-            events.emit({ type: 'narration', agent: 'architect', text: measuredEtaText(elapsedMs, measured, writtenFiles.size, etaPlannedFiles), ts: now, id: 'eta-live' });
+            events.emit({ type: 'narration', agent: 'architect', text: measuredEtaText(elapsedMs, measured, etaFilesDone, etaPlannedFiles), ts: now, id: 'eta-live' });
             return;
           }
           // THEN THE PLAN, which is the full builder's only honest measurement (autopsy d11ad529).
@@ -13758,6 +13766,23 @@ async function noteBuildOutcome(
       const complexityDecision = workspaceSizedComplexity(promptComplexityDecision, buildOrderReadAsEdit);
       const buildIsComplex = complexityDecision.verdict === 'complex';
       console.log(`[AGENTV3] complexity: ${complexityDecision.reason} → ${complexityDecision.verdict} (${complexityDecision.source})`);
+      // ⏱️ ONE ETA KEY, DECIDED BEFORE THE ESTIMATE (admin 2026-10-11, build 46e2d74b — "2–4 min", 7.4 real).
+      // That game scored `simple_app`, so the opening ETA was taught by fast-lane simple apps — but every
+      // game skips the fast lane, a decision this route only made thousands of lines further down. The
+      // build's KIND (a game, an app that makes pictures) is known from the prompt here, by the same
+      // classifiers those skips use, so it keys the slice now. And the telemetry writer at the end of the
+      // build files the result through THIS function too: it used to build its key a second way (no
+      // routed-complex flag, no port rule), so a build was filed under one slice and priced from another.
+      // Only the scaffold fact differs between the two calls: predicted here, observed at the end.
+      // A NEW build only: an edit of a game is an edit (autopsy 0473628e gave edits their own slices), and
+      // pricing it from whole new games would be the same mistake the other way round.
+      const etaKind: EtaBuildKind | null = intent === 'new_build' && !isImportTurn ? (() => {
+        try { return etaBuildKind(analyzeRequirementGaps(prompt).domain, appGeneratesImages(prompt)); } catch { return null; }
+      })() : null;
+      // A port is estimated by the project it ports, as it is routed (autopsy 51ef24ad).
+      const etaKeyForBuild = (scaffolded: boolean): string => (complexityDecision.source === 'workspace'
+        ? 'complex_app'
+        : etaTaskKey(analysis?.taskType, scaffolded, buildIsComplex, etaKind));
       // LARGE-PROJECT ROUTING (admin 2026-07-05: "badi apps direct Sonnet"): list the existing
       // project ONCE up-front (edit/import mode only — a fresh build has nothing to list). The
       // listing is REUSED further down for the edit-mode prompt, so this adds no extra sandbox
@@ -14666,7 +14691,8 @@ async function noteBuildOutcome(
           // A seeded template is its own kind of build (autopsy 4a1c0157): the same `scaffoldWillSeed` that
           // routed it to the cheap rung picks the slice, so the ETA never prices template polish as a
           // from-scratch `complex_app`.
-          const etaFleetKey = etaByProject ? 'complex_app' : analysis?.taskType ? etaTaskKey(analysis.taskType, scaffoldWillSeed, buildIsComplex) : null;
+          // The key comes from `etaKeyForBuild` — the same function the telemetry writer files this build under.
+          const etaFleetKey = etaByProject ? 'complex_app' : (analysis?.taskType || etaKind) ? etaKeyForBuild(scaffoldWillSeed) : null;
           if (past.length === 0 && etaFleetKey) {
             try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), etaFleetKey, etaComplexity); } catch { /* best-effort */ }
           }
@@ -15726,6 +15752,14 @@ async function noteBuildOutcome(
        * opens and after the files are collected; a change between them discards the attempt.
        */
       let inBuildWriteTick = 0;
+      /**
+       * True only while the PLATFORM is laying its own files down through the dispatcher (the game-kit
+       * seed, gameKitSeed.ts — admin 2026-10-11, build 46e2d74b). Those writes are recorded, persisted and
+       * scanned exactly like any other (below), but they are not progress on the user's plan and not the
+       * build's first file: ~30 kit files landing in two seconds would tick "Plan 30/8" and anchor the
+       * measured ETA to a moment before the builder had written anything.
+       */
+      let platformSeedInFlight = false;
       const onFileWrite = (path: string, content: string) => {
         if (isSecretEnvPath(path)) return; // TD-1: a live vault .env is never a durable project file
         inBuildWriteTick++;
@@ -15755,10 +15789,10 @@ async function noteBuildOutcome(
         } catch { /* security scan is best-effort — never blocks the build pipeline */ }
 
         writtenFiles.set(path, content);
-        noteEtaFileWritten();
+        if (!platformSeedInFlight) noteEtaFileWritten();
         try {
           const cur = state.snapshot().todos;
-          if (cur.length > 0) {
+          if (cur.length > 0 && !platformSeedInFlight) {
             planSteps += 1;
             state.setTodos(computePlanProgress(cur, planSteps, false));
             // THE ETA'S ONLY REAL FACT ON THIS PATH. The line above already turns this same counter
@@ -17266,10 +17300,17 @@ async function noteBuildOutcome(
         // A FLAT game (cards, a board, a grid, a quiz) is not a scene — see wantsSceneObjects.
         if (wantsSceneObjects(prompt)) {
           const realism = realismIntent(prompt);
+          // 🔴 NAMED BY PATH AND RECIPE, NEVER AS PRESENT (admin 2026-10-11, build 46e2d74b). This line said
+          // "build every object with objects.ts" as if the file were in the project; it exists only after
+          // the 3D recipe runs. 46e2d74b never ran it and wrote its OWN src/lib/game/objects.ts to match the
+          // name. This block is written before the game-kit seed below, so it states only what is true
+          // either way: where the builders live and which recipe writes them.
           buildPrompt = `OBJECT DETAIL TIER: ${realism.tier.toUpperCase()} — ${realism.reason}\n`
             + `Call setDetailLevel('${realism.tier}') once at start-up, and build every object with `
-            + 'objects.ts (createCar / createTree / createMountain / createRiver / createDesert / '
-            + 'createRoad / createAnimal / createHumanoid) rather than hand-modelling shapes.'
+            + 'the 3D layer\'s builders in src/game/three/objects.ts (createCar / createTree / createMountain / '
+            + 'createRiver / createDesert / createRoad / createAnimal / createHumanoid) rather than hand-modelling '
+            + 'shapes. That file is written by run_recipe({ name: "generate_game_3d" }) — if it is not in the '
+            + 'project yet, run that recipe first; never write your own objects.ts.'
             + (realism.tier === 'real'
               ? ' Say "real-looking" in your summary — never "photorealistic", which this cannot deliver.'
               : ' Keep it light and fast; this is what runs well on a mid-range phone.')
@@ -17987,6 +18028,123 @@ async function noteBuildOutcome(
         }
       }
 
+      // ── GAME KIT SEED (admin 2026-10-11, build 46e2d74b: "racing game me car ulti chal rahi hai") ──
+      // The player's car showed its headlights and LEFT turned it right. The kit had the correct camera and
+      // steering since 2026-10-05; that build never ran a single recipe and hand-wrote its own engine, so
+      // none of it applied. Whether a game got the kit was the MODEL'S optional choice, even though this
+      // route already knew the request was a game (it skips the fast lane for exactly that reason, below).
+      // So the platform now runs the recipes itself — the PREVENT half, the same discipline as the golden
+      // scaffold above — and the builder is told the kit is on disk and to build only the game on it.
+      //
+      // 🔒 Same gates as the golden scaffold, plus: no golden template already seeded and no pasted page.
+      // A new build only, never an edit, an import or a project module; and only onto a workspace holding
+      // nothing but our untouched starter, so a user's files are never written over (the recipes also
+      // refuse to replace an existing file). Through `dispatcher.dispatch`, so the writes, the missing-
+      // layer adder and the `three` install are exactly what a model's own call does. Best-effort: any
+      // failure is RECORDED and the build continues exactly as it did before this block existed.
+      // Kill switch AGENTV3_GAME_KIT_SEED=off.
+      /** The recipes laid down before the first model call; empty when none were (see `gameKitSkipReason`). */
+      const gameKitSeeded: string[] = [];
+      /** Path → the exact content the game-kit seed wrote (the kit, its layers, package.json). See `builderWroteCount`. */
+      const kitSeededFiles = new Map<string, string>();
+      /**
+       * HOW MANY FILES THE BUILDER PRODUCED — `writtenFiles` minus every game-kit file it never touched.
+       *
+       * 🔴 The engine's "did this build produce anything?" questions all read `writtenFiles.size`: the
+       * empty-build retry ("the cheap model replied instead of building"), "NEVER charge for a build that
+       * produced nothing", the claim audit ("complete" over zero files), the render rescue. The game-kit
+       * seed puts ~30 of OUR files in that map before the first model call, so without this a builder that
+       * wrote nothing at all would skip the retry, pass the claim audit and be BILLED — for the kit alone.
+       * ⚠️ The golden scaffold is deliberately NOT subtracted: that template IS a working app, so a turn
+       * that only verified it produced something (see `preseededUnchanged`); the kit is an engine with no
+       * game in it. With no kit seeded this is exactly `writtenFiles.size`.
+       */
+      const builderWroteCount = (): number => builderWrittenCount(writtenFiles, kitSeededFiles);
+      /** Why a game build did not get the kit — said in FAST_LANE_SKIPPED_GAME, never left implied. */
+      let gameKitSkipReason = '';
+      let gameKitSeedFailed = false;
+      if (intent === 'new_build' && !projectModuleRef && !isImportTurn) {
+        const kitPlan: GameKitRecipe[] = (() => { try { return gameKitPlan(prompt, framework); } catch { return []; } })();
+        if (kitPlan.length === 0) {
+          gameKitSkipReason = gameKitFrameworkSupported(framework)
+            ? 'this request is not a game the kit serves'
+            : `the ${framework} project cannot run the kit's TypeScript/React recipes`;
+        } else if (!gameKitSeedEnabled()) {
+          gameKitSkipReason = 'the seed is switched off (AGENTV3_GAME_KIT_SEED=off)';
+        } else if (goldenPreseeded) {
+          gameKitSkipReason = 'a tested template was seeded instead';
+        } else if (pastedSeed.size > 0) {
+          gameKitSkipReason = 'the build starts from the page the user pasted';
+        } else {
+          try {
+            const existingSrc = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
+              .filter((p) => p.startsWith('src/'));
+            const nobodysWorkHere = existingSrc.length === 0 || await srcHoldsOnlyOurStarter(
+              existingSrc, (p) => actuator.readFile(workspaceId, p).then((c) => (typeof c === 'string' ? c : null)),
+            );
+            if (!nobodysWorkHere) {
+              gameKitSkipReason = `the workspace already holds ${existingSrc.length} source file(s) that are not our untouched starter, and the kit is never written over somebody's work`;
+            } else {
+              const kitThreeD = kitPlan.includes('generate_game_3d');
+              emit({ type: 'narration', agent: 'architect', text: `🎮 Setting up NavBharatAI's game engine first — game loop, controls, sound effects and music${kitThreeD ? ', visual effects, the 3D world and a playable 3D shell' : ''} — so your game is built on it.`, ts: Date.now() });
+              const writtenBeforeKit = new Map(writtenFiles);
+              const kitStartedAt = Date.now();
+              const kitResults: GameKitSeedResult[] = [];
+              platformSeedInFlight = true;
+              try {
+                for (const recipe of kitPlan) {
+                  if (abort.signal.aborted) break;
+                  // A 2D plan takes the effects layer's SOUND half only — its particles would install three.js.
+                  const recipeInput = gameKitRecipeInput(recipe, kitPlan);
+                  const r = await dispatcher.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe, ...(recipeInput ? { input: recipeInput } : {}) } }, 'architect', { signal: abort.signal });
+                  kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
+                }
+              } finally {
+                platformSeedInFlight = false;
+              }
+              // 🔴 REMEMBERED AS OURS, exactly like the golden scaffold (autopsy 2b0a3ed5): the cancelled-build
+              // bill, the review's "changed files" and the edit summary all read `preseededGolden`, so a kit
+              // file the builder never touched is never billed, reviewed or summarised as the model's work.
+              // Every file the seed wrote — the kit, the layers it pulled in and the package.json the `three`
+              // install rewrote — and nothing else.
+              let kitFiles = 0;
+              for (const [kp, kc] of writtenFiles) {
+                if (writtenBeforeKit.get(kp) === kc) continue;
+                preseededGolden.set(kp, kc);
+                kitSeededFiles.set(kp, kc);
+                kitFiles++;
+              }
+              etaPlatformSeededFiles += kitFiles;
+              for (const r of kitResults) if (r.ok) gameKitSeeded.push(r.recipe);
+              if (gameKitSeeded.length > 0) {
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt) });
+                buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt) })}\n\n---\n\n${buildPrompt}`;
+              } else {
+                gameKitSeedFailed = kitResults.length > 0;
+                gameKitSkipReason = kitResults.length > 0
+                  ? `every recipe failed (${kitResults.map((r) => `${r.recipe}: ${r.content.slice(0, 80)}`).join('; ')})`
+                  : 'the build was stopped before the kit could be laid down';
+              }
+              // The seed is the platform's preparation, not the build moving. The futility breaker was armed
+              // above ("THE BUILD STARTS HERE"), before the platform's seeds; re-armed now, so ~30 kit files and
+              // the `three` install do not read as the builder making progress on its first quiet minute.
+              futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone });
+            }
+          } catch (kitErr) {
+            gameKitSeedFailed = true;
+            gameKitSkipReason = `the seed failed (${String((kitErr as Error)?.message ?? kitErr).slice(0, 160)})`;
+          }
+        }
+        // A game build that qualified for the kit and did not get it is SAID. A deliberate choice (switched
+        // off, a template or a pasted page instead, somebody's files already here) is information; a seed
+        // that was attempted and failed is a warning, because the builder now starts without the engine.
+        if (kitPlan.length > 0 && gameKitSeeded.length === 0) {
+          try {
+            buildDiag.record({ phase: 'build', severity: gameKitSeedFailed ? 'warning' : 'info', code: 'GAME_KIT_NOT_SEEDED', autoResolved: !gameKitSeedFailed, message: `The game kit was NOT laid down before the builder started: ${gameKitSkipReason}. The builder must run the game recipes itself.` });
+          } catch { /* observation only */ }
+        }
+      }
+
       // ── ONE-SHOT FAST LANE (additive, flag-gated; the agentic loop is untouched) ──
       // For a SIMPLE new-build app, try ONE cheap generation call first (no Architect, no
       // sub-agents, no per-file round-trips, no Opus, no rebuild loop). On success the build is
@@ -18031,7 +18189,13 @@ async function noteBuildOutcome(
       if (fastLaneWouldRun && !fastLaneRung.skip) {
         try { fastLaneGameSkip = fastLaneSkipsGame(analyzeRequirementGaps(prompt).domain); } catch { fastLaneGameSkip = false; }
         if (fastLaneGameSkip) {
-          buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_GAME', autoResolved: true, message: 'Skipped the fast lane: a game is built with the game tools (loop, input, 3D, audio), and only the full builder can run them. Building directly with the full builder.' });
+          // 🔴 THE PREMISE IS NOW STATED AS A FACT, NOT ASSUMED (admin 2026-10-11, build 46e2d74b). This line
+          // said the full builder "can run" the game tools, and 46e2d74b's full builder never ran one — the
+          // skip was right and its reason was never checked. It now says whether the kit is on disk.
+          const kitFact = gameKitSeeded.length > 0
+            ? ` The game kit is already laid down (${gameKitSeeded.join(', ')}); the builder builds the game on it.`
+            : ` The game kit was NOT laid down (${gameKitSkipReason || 'reason unknown'}), so the builder must run the recipes itself.`;
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_GAME', autoResolved: true, message: `Skipped the fast lane: a game is built with the game tools (loop, input, 3D, audio), and only the full builder can run them. Building directly with the full builder.${kitFact}` });
         }
       }
       // An app that makes pictures is built with the image recipe, which only the full builder can run.
@@ -19062,7 +19226,7 @@ async function noteBuildOutcome(
       // so a failed todo app never silently spirals to $26. An honest error is emitted instead.
       const costAfterFirstAttempt = result.billedUsd;
       const capUsd = sessionCostCapUsd();
-      if (expectsArtifacts && writtenFiles.size === 0 && costAfterFirstAttempt > capUsd) {
+      if (expectsArtifacts && builderWroteCount() === 0 && costAfterFirstAttempt > capUsd) {
         events.emit({
           type: 'narration', agent: 'architect',
           text: `⚠️ Build stopped: session cost ($${costAfterFirstAttempt.toFixed(2)}) reached the $${capUsd.toFixed(0)} cap. No files were produced — you will not be charged. Try again with a simpler prompt or contact support.`,
@@ -19082,7 +19246,7 @@ async function noteBuildOutcome(
       // build" describes a zero-file turn that was meant to produce an app. A turn that BUILT and
       // then offered more ("Want me to add dark mode?") ends on a question too, and used to be
       // reported as if it had answered one instead of building (2026-09-26).
-      if (firstAttemptAskedTheUser && expectsArtifacts && writtenFiles.size === 0) {
+      if (firstAttemptAskedTheUser && expectsArtifacts && builderWroteCount() === 0) {
         try {
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'TURN_ANSWERED_A_QUESTION', autoResolved: true,
@@ -19094,7 +19258,7 @@ async function noteBuildOutcome(
       }
       if (shouldRetryEmptyBuild({
         expectsArtifacts,
-        filesWritten: writtenFiles.size,
+        filesWritten: builderWroteCount(), // our game kit alone is not a build (see `builderWroteCount`)
         isEditMode,
         existingProjectFiles: editFileTree?.length ?? 0,
         aborted: abort.signal.aborted,
@@ -19159,7 +19323,7 @@ async function noteBuildOutcome(
         });
         try {
           const retry = await retryRunner.run(buildPrompt);
-          if (retry.ok || writtenFiles.size > 0) {
+          if (retry.ok || builderWroteCount() > 0) {
             result = retry;
             // Record what ACTUALLY delivered. This was the literal `'sonnet'`, which on a GLM-served
             // retry filed the build under Sonnet in the per-tier cost table. Unknown ⇒ keep the
@@ -19178,7 +19342,7 @@ async function noteBuildOutcome(
       // at their own moment, and the platform had by then overwritten it: the upsell found no refusal
       // in our own "please try again" and asked a user whose request the engine had declined for money.
       const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt);
-      if (expectsArtifacts && writtenFiles.size === 0 && modelAnswer.declined && !abort.signal.aborted) {
+      if (expectsArtifacts && builderWroteCount() === 0 && modelAnswer.declined && !abort.signal.aborted) {
         try {
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'TURN_DECLINED', autoResolved: true,
@@ -19945,7 +20109,7 @@ async function noteBuildOutcome(
         // did this turn begin?".
         const untouchedReason: UntouchedCodeReason | null = isImportTurn
           ? 'import'
-          : (writtenFiles.size === 0 ? 'no-writes' : null);
+          : (builderWroteCount() === 0 ? 'no-writes' : null);
         const obs = (message: string) => findingAboutUntouchedCode(untouchedReason, message);
         // MISSING SPA FALLBACK (ROADMAP #1 Phase 4.1) — the "Cannot GET /customer/home" class. Until now
         // this was only ever noticed AFTER the fact, by the preview verifier, as a symptom with no named
@@ -21496,7 +21660,7 @@ async function noteBuildOutcome(
           const decision = shouldAutoScaffoldE2e({
             files: e2eFiles,
             // Runs before the render proof (#3313): a rescue-eligible build is not a failed one (6461025c).
-            ok: result.ok || renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size }),
+            ok: result.ok || renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: builderWroteCount() }),
             isImportTurn,
             hasPreview: !!lastPreviewUrl,
           });
@@ -21855,7 +22019,7 @@ async function noteBuildOutcome(
 
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
-        && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size })
+        && renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: builderWroteCount() })
         && lastPreviewUrl && actuator.browseUrl && !abort.signal.aborted
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 30_000)
       ) {
@@ -22634,24 +22798,42 @@ async function noteBuildOutcome(
       // keys, a drag and a thumb, measures from pixels whether anything answered, and scores it (the Game
       // Quality Score). Evidence, never a gate, no model call; a finding is a one-tap fix offer carrying the
       // measured scorecard. Kill switch AGENTV3_GAME_PLAYTEST=off.
-      const playtestFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
-      if (
-        gamePlaytestEnabled() && result.ok && lastPreviewUrl && actuator.runCommand
-        && !isImportTurn && !abort.signal.aborted && !moduleAwaitsShell
-        && isCanvasGameProject(playtestFiles)
-        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
-      ) {
-        try {
-          const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState() })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
-          const verdict = playtestVerdict(parsePlaytest(out.stdout), replayFromCode(playtestFiles));
-          buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
-          gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
-        } catch (err) {
+      //
+      // ⏱️ IT RUNS AFTER THE CLICK EXPLORER HAS PRESSED THE APP, NOT BEFORE (admin 2026-10-11, build 46e2d74b —
+      // item L-18). In that build the playtest could not find a canvas: the game only mounted after a "Start
+      // Race" button its start list did not know, so it gave up — and the explorer, which DID press "Start
+      // Race", ran afterwards, so nothing it learned could help. The call order is now press-run → playtest
+      // → the explorer's repair: the explorer's record (`exploreRun`) exists at the playtest call, and the
+      // explorer's repair, which may change files, still comes after the game is played, exactly as before.
+      // The repair's time headroom is unchanged (both runs still precede it). It runs ONCE: inside the
+      // explorer block when the explorer ran, otherwise right after it.
+      // ⚠️ THE ORDER ALONE CHANGES NO OUTCOME, AND THIS SAYS SO (verification, same day). The playtest opens its
+      // OWN fresh browser and still finds Start by its own matcher; nothing the explorer pressed is handed to
+      // it yet — `gamePlaytestScript` has no parameter for it on this branch. L-18 stays OPEN until the
+      // explorer's start label (in `exploreRun`) is passed at the call inside the explorer block.
+      let gamePlaytestDone = false;
+      const runGamePlaytest = async (): Promise<void> => {
+        if (gamePlaytestDone) return;
+        gamePlaytestDone = true;
+        const playtestFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
+        if (
+          gamePlaytestEnabled() && result?.ok && lastPreviewUrl && actuator.runCommand
+          && !isImportTurn && !abort.signal.aborted && !moduleAwaitsShell
+          && isCanvasGameProject(playtestFiles)
+          && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+        ) {
           try {
-            buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_PLAYTEST_NOT_RUN', autoResolved: true, message: `The game was not played: ${String((err as { message?: string })?.message ?? err).slice(0, 160)}.` });
-          } catch { /* best-effort */ }
+            const out = await withTimeout(actuator.runCommand(workspaceId, gamePlaytestScript(lastPreviewUrl, { storageState: signedInState() })), PLAYTEST_BUDGET_MS + 20_000, 'game-playtest');
+            const verdict = playtestVerdict(parsePlaytest(out.stdout), replayFromCode(playtestFiles));
+            buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
+            gameProof = { outcome: playtestOutcome(verdict.code), score: verdict.score?.overall ?? null };
+          } catch (err) {
+            try {
+              buildDiag.record({ phase: 'preview', severity: 'info', code: 'GAME_PLAYTEST_NOT_RUN', autoResolved: true, message: `The game was not played: ${String((err as { message?: string })?.message ?? err).slice(0, 160)}.` });
+            } catch { /* best-effort */ }
+          }
         }
-      }
+      };
       // The journey above drives ONE form. Nothing pressed the rest of the app, so the commonest
       // first-minute failure — a tab that white-screens, a button whose handler throws, a link to a page
       // that was never written — survived every check we own. This opens the running app in the
@@ -22689,6 +22871,9 @@ async function noteBuildOutcome(
           // interaction, and for an app with nothing to save they are its whole journey.
           gateEvidence.explore = explored.outcome;
           gateEvidence.explorePresses = explored.pressed;
+
+          // 🎮 The game is played HERE — after every control was pressed, before any repair (see runGamePlaytest).
+          await runGamePlaytest();
 
           // A BROKEN BUTTON GETS ONE VERIFIED REPAIR (admin 2026-09-28: "han dono ho jaye … world class
           // banao" — explorerRepair.ts). The explorer's evidence is the strongest this platform has: a
@@ -22793,6 +22978,9 @@ async function noteBuildOutcome(
           }
         } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
       }
+      // The explorer did not run (switched off, no time, or it failed before its presses were in): the game
+      // is still played. A no-op when it already ran above.
+      await runGamePlaytest();
       // 🔴 THE CARD IS EMITTED WHERE ITS EVIDENCE IS FINAL, NOT HERE (buildProofCard.ts). At this point
       // in the route the app's own test suite has not run, the render proof has not been reconciled and
       // the last-chance proof has not happened — so a card built here could only ever carry the journey
@@ -23774,8 +23962,8 @@ async function noteBuildOutcome(
           // "Your to-do list app is complete and ready" over ZERO written files (build 5b4f9b63). The
           // cheapest honest check in the engine: a claim of delivery, weighed against what was written.
           // It needs no preview and no browser, which is exactly why it is the one that still works on
-          // the builds where every runtime check skipped.
-          filesWritten: writtenFiles.size,
+          // the builds where every runtime check skipped. Our game kit alone is not a delivery.
+          filesWritten: builderWroteCount(),
           buildWasRequested: userAskedToBuildAnApp,
           // "Live NSE prices" from code that only simulates them (Q-274, autopsy 241215d1).
           liveDataRequested: liveDataAsked,
@@ -24787,7 +24975,7 @@ async function noteBuildOutcome(
         } catch { /* no findings layer — the sentence falls back to exactly what it always said */ }
         const verifiedNoChange = verifiedNoChangeSummary({
           expectsArtifacts,
-          filesWritten: writtenFiles.size,
+          filesWritten: builderWroteCount(),
           sandboxUnavailable,
           isEditMode: intent === 'edit_existing',
           existingProjectFiles: editFileTree?.length ?? 0,
@@ -24820,8 +25008,12 @@ async function noteBuildOutcome(
           // user's own 25-file app — restored, served, and watched rendering — was told it produced
           // nothing. The app keeps whatever summary the turn actually produced, and a zero-file build is
           // free either way (`effectiveBilledUsd = 0` a few hundred lines below, unconditionally).
+          // `builderWroteCount()`, not `writtenFiles.size` (build 46e2d74b, found in verification): the game-kit
+          // seed puts ~30 of OUR files in `writtenFiles` before the first model call, so a builder that then
+          // wrote nothing kept `ok: true` and its own "your game is ready" over an engine with no game in it —
+          // while the bill, the retry and the claim audit beside this already read the builder's count.
           const emptyFail = emptyBuildFailureSummary(
-            expectsArtifacts, writtenFiles.size, sandboxUnavailable, buildObs.previewRendered,
+            expectsArtifacts, builderWroteCount(), sandboxUnavailable, buildObs.previewRendered,
             // 🔴 CORRECTED 2026-09-26. This comment used to say the answer is read "from the summary as
             // it stands at the flip — never cached earlier, because the summary can be rewritten
             // between the retry decision and here". The second half was the reason to do the
@@ -25564,7 +25756,8 @@ async function noteBuildOutcome(
       // NEVER charge for a build that produced nothing. If the user asked for an app/edit and
       // zero files were created (even after the Claude retry), the build failed — bill ₹0.
       // "Preview is EARNED" cuts both ways: no artifacts, no charge.
-      if (expectsArtifacts && writtenFiles.size === 0) {
+      // A build whose builder wrote nothing is free even when our game kit was laid down (`builderWroteCount`).
+      if (expectsArtifacts && builderWroteCount() === 0) {
         effectiveBilledUsd = 0;
         // A VERIFIED_NO_CHANGE turn is a SUCCESS that wrote nothing (report 697b38ee), so calling it an
         // "empty build" in the admin's own ledger would re-tell the exact falsehood this change removes.
@@ -26013,8 +26206,10 @@ async function noteBuildOutcome(
       agentV3CostTelemetry
         .record({
           // A seeded template build is counted as its own kind, so the ETA can learn from it and the
-          // `complex_app` average is not pulled down by template polish (autopsy 4a1c0157).
-          taskType: etaTaskKey(analysis?.taskType, goldenPreseeded),
+          // `complex_app` average is not pulled down by template polish (autopsy 4a1c0157). Filed through
+          // the SAME function the opening ETA reads its slice with (build 46e2d74b): a game is filed as a
+          // game, a routed-complex build as complex — never under a key the reader does not use.
+          taskType: etaKeyForBuild(goldenPreseeded),
           // Record the tier the build was actually DELIVERED on (after any P3 escalation),
           // so per-tier success rates reflect what really ran, not just the start tier.
           startTier: deliveredTier,

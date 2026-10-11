@@ -102,6 +102,10 @@ export const PROCESS_ONLY_CODES = new Set([
   'TIME_TO_FIRST_CALL',       // our setup time before the first model call (it was in NEVER_SUGGEST only)
   // Our template seeding and a user's Stop (autopsy 31254f9a): facts about the ENGINE's run, never the app.
   'GOLDEN_SCAFFOLD_SKIPPED', 'LLM_CALL_STOPPED', 'SIMPLE_BUILD_STOPPED', 'DOMAIN_KNOWLEDGE', 'DURABLE_HOLDS_ONLY_STARTER',
+  // Whether OUR game-kit seed laid the engine down before the builder started (gameKitSeed.ts, admin
+  // 2026-10-11, build 46e2d74b). A failed seed is a warning about our preparation; the app is judged
+  // by what the builder then made, so it is never a mark against the user's game.
+  'GAME_KIT_SEEDED', 'GAME_KIT_NOT_SEEDED',
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   // The game playtest (gamePlaytest.ts): a pass, or a run that could not look, is never a defect of the app.
   'GAME_PLAYTEST_NOT_RUN', 'GAME_PLAYTEST_OK',

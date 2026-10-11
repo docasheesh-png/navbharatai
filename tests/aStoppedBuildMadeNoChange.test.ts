@@ -125,7 +125,8 @@ describe('🔴 door 2 — a money statement is made once, after the money is fin
     // The emit must come AFTER every rule that can change the bill.
     const emitAt = route.indexOf('waivedMarkupNotice && effectiveBilledUsd > 0');
     for (const zeroer of [
-      'if (expectsArtifacts && writtenFiles.size === 0) {',
+      // Counts the builder's writes, never our game kit alone (build 46e2d74b, `builderWroteCount`).
+      'if (expectsArtifacts && builderWroteCount() === 0) {',
       'if (zeroBillForUnrenderedPreview(expectsArtifacts, previewVerifiedFailed)) {',
       '} else if (zeroBillForFailedBuild(result.ok) && effectiveBilledUsd > 0) {',
     ]) {
@@ -209,7 +210,7 @@ describe('🔴 door 4 — a finding about code we did not write is an OBSERVATIO
   });
 
   it('🔒 the route asks "did we write this?", not "how did this turn begin?"', () => {
-    expect(route).toContain("(writtenFiles.size === 0 ? 'no-writes' : null)");
+    expect(route).toContain("(builderWroteCount() === 0 ? 'no-writes' : null)");
     expect(route).toContain('const obs = (message: string) => findingAboutUntouchedCode(untouchedReason, message);');
   });
 });

@@ -63,7 +63,10 @@ describe('the heartbeat prefers the measurement over the guess', () => {
     const fallback = route.indexOf('const tick = liveEtaTick(');
     expect(tick).toBeGreaterThan(-1);
     expect(fallback).toBeGreaterThan(tick); // the guess is the FALLBACK, not the default
-    expect(route).toContain('measuredEtaText(elapsedMs, measured, writtenFiles.size, etaPlannedFiles)');
+    // Files done = what was written MINUS what the platform laid down itself (the game-kit seed, build
+    // 46e2d74b): our kit is not progress on the builder's plan.
+    expect(route).toContain('const etaFilesDone = Math.max(0, writtenFiles.size - etaPlatformSeededFiles);');
+    expect(route).toContain('measuredEtaText(elapsedMs, measured, etaFilesDone, etaPlannedFiles)');
   });
 
   it('re-anchors the fallback budget, so a build entering repair does not revert to the prompt guess', () => {

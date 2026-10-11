@@ -15,6 +15,7 @@ import { verifyFirebaseToken, verifyFirebaseIdentity, deleteAuthAccount, rateLim
 import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
 import { deleteUserDerivedIdData } from '../lib/derivedIdErase';
 import { deleteUserWorkspaceData } from '../lib/workspaceDataErase';
+import { eraseUserSnapshots, liveSnapshotEraseDeps } from '../lib/snapshotErase';
 import { eraseSyncedWorkspace, type SyncEraseFirestore } from '../lib/syncWorkspaceErase';
 import { deIdentifyPublishedListings, getListingDb } from '../lib/publishedListingErase';
 import { sendSafeError } from '../lib/httpError';
@@ -275,6 +276,12 @@ export function registerProfileRoutes(app: Express): void {
       // actually asked for.
       const derived = await deleteUserDerivedIdData(identity.uid)
         .catch((e) => ({ uid: identity.uid, collections: [], totalDeleted: 0, keys: { bots: 0, historySessions: 0 }, error: e instanceof Error ? e.message : String(e) }));
+      // …AND THE SNAPSHOTS OF THEIR APPS, ON OUR HOSTING (Q-795). A copy of each built app sits in the bucket
+      // (`s-…`) or a Firebase channel (`sn-…`), keyed by the workspace id. Those ids are listed only in the
+      // stores the apps eraser below deletes, so this runs BEFORE it — after, it would find nothing, delete
+      // nothing and report success. Best-effort like the rest: reported, never thrown.
+      const snapshots = await eraseUserSnapshots(identity.uid, liveSnapshotEraseDeps())
+        .catch((e) => ({ uid: identity.uid, workspaces: 0, bucketRemoved: 0, channelsRemoved: 0, failures: [e instanceof Error ? e.message : String(e)] }));
       // DATA FIRST, THEN THE CREDENTIAL. Erasing the sign-in first would strand any data whose
       // deletion then failed, with the owner unable to sign in and retry.
       const report = await deleteUserData(db, identity.uid);
@@ -342,6 +349,9 @@ export function registerProfileRoutes(app: Express): void {
         // to see that they were swept. `keys` says how many derived ids were resolved, so the counts
         // are checkable rather than a bare claim.
         derived,
+        // Its own line (Q-795): the copies of their apps on our HOSTING, which no Firestore count covers.
+        // `failures` names every location that could not be confirmed removed — never counted as done.
+        snapshots,
         /**
          * Its own line, and the one line here that is NOT a deletion count. `totalDeIdentified` is how
          * many published listings were kept and stripped of their author; `totalDeleted`, how many were

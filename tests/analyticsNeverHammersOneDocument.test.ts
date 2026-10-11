@@ -25,7 +25,7 @@ function fold(events: Array<{ event: string; ts?: number }>): AnalyticsBuffer {
   const b = new AnalyticsBuffer();
   for (const e of events) {
     const r = analyticsRowFor(e, NOW)!;
-    b.add(r.row, r.date);
+    b.fold(r.row, r.date);
   }
   return b;
 }
@@ -85,7 +85,7 @@ describe('the store and the route', () => {
     const src = read('src/server/lib/AnalyticsPipeline.ts');
     const body = src.slice(src.indexOf('export async function recordAnalyticsEvent'), src.indexOf('function scheduleFlush'));
     expect(body).not.toMatch(/db\.|collection\(|\.commit\(/);
-    expect(body).toMatch(/buffer\.add\(/);
+    expect(body).toMatch(/buffer\.fold\(/);
   });
 
   it('🔒 the route is limited per address and answers a quiet 204 over it', () => {

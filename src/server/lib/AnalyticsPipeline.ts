@@ -9,7 +9,7 @@
 // to `analytics_events` carrying the person's real `userId`, "for a cohort drill-down" that was never built —
 // nothing in the repository ever read it. A store that holds a uid and answers no question is pure liability, so
 // it is no longer written. Its 30-day window and its erase-with-the-account entry stay (`DataRetentionManager`),
-// so the rows already written still expire and are still erased. Funnel/cohort queries read the daily rollups. Pure helpers (stage mapping,
+// so the rows already written still expire and are still erased. Locked by `tests/noAnalyticsEventNamesAPerson.test.ts`. Funnel/cohort queries read the daily rollups. Pure helpers (stage mapping,
 // funnel aggregation) are unit-tested; the store is best-effort + VITEST-skip (never throws).
 
 import * as admin from 'firebase-admin';
@@ -112,7 +112,7 @@ export class AnalyticsBuffer {
   private dailies = new Map<string, DailyDelta>();
   private keys = 0;
 
-  add(row: AnalyticsRow, date: string): void {
+  fold(row: AnalyticsRow, date: string): void {
     let d = this.dailies.get(date);
     if (!d) {
       d = { date, totalEvents: 0, events: {}, funnel: {} };
@@ -206,7 +206,7 @@ export async function recordAnalyticsEvent(input: {
   const r = analyticsRowFor(input, Date.now());
   if (!r) return;
   if (!getDb()) return;
-  buffer.add(r.row, r.date);
+  buffer.fold(r.row, r.date);
   if (buffer.full) {
     void flushAnalytics();
     return;

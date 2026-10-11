@@ -3236,7 +3236,8 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Money") stil
 • Search by full app id, owner uid or public link (looked up directly); a fragment — including part of the app's name or the owner's name or email — filters the apps already loaded
 • Filter by state (Live / Offline / Banned / Held / Paused)
 • Unpublish takes a live site offline (the owner can publish again); Ban removes it and the owner can never publish that workspace again unless an admin restores it
-• RESTORE on a Banned or Held app lifts the block: the app stays offline and the owner can publish it again from their own screen
+• A HELD app was flagged by an automatic safety check, and a hold takes nothing offline: "Held — still live" means anyone with the link can still open it, so Unpublish (offered on it) or Ban is how it actually goes offline
+• RESTORE on a Banned or Held app lifts the block and the owner can publish again: a banned app stays offline until the owner publishes, and a held app that was still live simply stays live
 • Unpublish, Ban and Restore each need the admin's own reason, and each is written to the audit log with the admin's name
 • Live apps whose owner deleted the workspace are shown in their own strip so they can still be moderated — and previewed at their public link`,
     howToUse: 'Admin login required. Open the Admin Dashboard → Apps → All apps. Press Preview on any row to see the app; press "Load 12 more" for the next page; type a full app id, owner uid or link and press Enter to look one up; use the state dropdown to filter. Unpublish, Ban and Restore ask for confirmation and a reason; Restore appears only on a Banned or Held app.',

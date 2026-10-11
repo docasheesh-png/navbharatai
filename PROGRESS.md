@@ -93667,7 +93667,7 @@ local build, no production traffic, no paid tokens) found F1–F18 and D1–D12.
 | D11 | Conversation/metrics deletes could exceed 500 writes per batch | Unchunked batch → `deleteInChunks` (≤400) | `batchChunks.ts` | `aBatchNeverExceedsFirestoresLimit` |
 | D7 | Cross-device sync saves lost another device's sessions | Non-transactional read-merge-write → one transaction; loads one snapshot | `syncTransaction.ts` | `aSyncSaveNeverLosesAnotherDevicesSession` |
 | D8 | Every page view wrote the same `analytics_daily/{date}` doc (+ a raw row), unauthenticated, no limiter | Per-event write to a hot doc → per-instance buffer, one merged increment per 10 s; route limited; flushed on shutdown | `AnalyticsPipeline.ts`, `telemetry.ts`, `server.ts` | `analyticsNeverHammersOneDocument` |
-| Q-783 | `analytics_events` per-person trail nothing read (admin decided B) | — | No longer written; log line carries no user/session id | same test |
+| Q-783 | `analytics_events` per-person trail nothing read (admin decided B) | — | Fixed concurrently by #3659 (merged first); this branch merged it, kept the buffered rollup (which folds no person) and the bounded log helper, and holds both locks | `noAnalyticsEventNamesAPerson` + `analyticsNeverHammersOneDocument` |
 | F9 | Zip import lease and SBOM store used the CLIENT Firestore SDK (lease threw and failed open; SBOM refused) | Two SDKs reachable from the server → one (admin); `lib/db.ts` and the client init removed | `zipUpload.ts`, `sbom.ts`, `server.ts` | `theServerNeverUsesTheClientFirestoreSdk` (reverted → 3 failed) |
 | F13 | Two log lines per request, including every asset | Per-request console line + span log for routine requests | ids on the span; routine spans not logged/kept | `aRoutineRequestWritesNoLogLine` |
 | F14 | A 15-minute exclusive job ran several times per cycle across instances | Per-instance cadence + 10-min lease < 15-min interval → tick asks the durable run record and joins the shared cadence | `ScheduledJobs.tick` | `anExclusiveJobRunsOncePerCycle` (without the record: >13 runs; with: 11–13) |
@@ -93676,9 +93676,36 @@ local build, no production traffic, no paid tokens) found F1–F18 and D1–D12.
 | F18 | Scale doc said max 10 instances (real: 100); k6 test POSTed writes | Doc drift; write endpoints in a load test | doc corrected; k6 reads only | `aLoadTestNeverWrites` |
 | Chat cache | Reply cache keyed on the raw prompt, and cached live/framework answers | → `chatReplyCacheKey` (sha256 + lane); live-grounded answers never cached | `PromptCache.ts`, `agentv3.ts` | existing chat-cache tests |
 | Q-162 | Uncalled routes in files this change touched | Decided: settings/feature-flags deleted; funnel admin-only (503 on failure); old exec named legacy-bundled | baseline shrank by 4 | `everyRouteHasACaller` |
-| F17, D-TTL, retention, indexes, PKCE, service split | Need the admin, a console or a decision | — | 🟡 rows Q-807…Q-812 | `BUILD_REPORT_QUEUE.md` |
-| Found | Doctor AI calculators claimed with no screen; no way to disconnect a bot; `pwa/save` caller unknown | — | rows Q-813, Q-814 (OPEN), Q-815 | `BUILD_REPORT_QUEUE.md` |
+| F17, D-TTL, retention, indexes, PKCE, service split | Need the admin, a console or a decision | — | 🟡 rows Q-808…Q-813 | `BUILD_REPORT_QUEUE.md` |
+| Found | Doctor AI calculators claimed with no screen; no way to disconnect a bot; `pwa/save` caller unknown | — | rows Q-814, Q-815 (OPEN), Q-816 | `BUILD_REPORT_QUEUE.md` |
 
 **What to watch for after deploy:** Cloud Logging volume should drop sharply (no `[TRACE][API ENTRY]`, no span line per
 asset); the Monitor's event-loop p99 should stop reading 0 on its second panel; `site-uptime` and `monitor-alerts` should
 run once per 15 minutes in Cloud Logging, not once per instance; `/api/health` shows "N of 3 available".
+
+### 2026-10-11 — #3657 and #3658 merged; first four of the admin's group-4 decisions built (Q-783, Q-703, Q-117, Q-795)
+
+**Correction to the batch-five entry above:** it says "(#3657)". The admin merged #3657 (Q-381 batch two and
+Q-600 batch four) before batch five was pushed, so batch five and the queue answers shipped as **#3658**,
+which is now merged too. Closed with it, and appended to the register: Q-600, Q-792, Q-793, Q-794.
+
+**Built next, each locked by a test proven by reversion:**
+- **Q-783 (privacy):** analytics keeps counts, not people.
+  - `analytics_events` is no longer written.
+  - Its two siblings go too: the server log line no longer prints `userId`/`sessionId`, and the client no longer sends them.
+  - The log keeps `props`, because web-vital and cold-start numbers land only there.
+- **Q-703 (truth):** a hold takes nothing offline, and now everything says so.
+  - The hold records `heldFrom`.
+  - "Held — still live" offers Unpublish; before, a held live app could only be banned.
+  - Restore writes `active` for a hold of a live app instead of the false `unpublished`.
+- **Q-117 (domain):** a feature tie goes to the domain the prompt names with more distinct headline words.
+  - dhaba → restaurant.
+  - udhaar khata → fintech.
+  - 36 domain suites (726 tests) unchanged.
+- **Q-795 (DPDP):** account deletion now removes each app's saved snapshot from our hosting, in both the bucket and the Firebase channel.
+  - It runs before the Firestore erase that deletes the ids it needs.
+  - The configs part was already done by Q-701.
+
+**Found on the way and recorded, not fixed:**
+- **Q-807:** an account deletion leaves the user's PUBLISHED sites live with no record pointing at them. Taking them down
+  touches App Mart buyers (Q-766), so it is the admin's decision. Recommendation: offline, except sold listings.

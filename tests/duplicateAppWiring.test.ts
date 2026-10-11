@@ -14,7 +14,7 @@ const block = routes.slice(start, start + 3500);
 describe('🔒 the duplicate route', () => {
   it('exists, resolves identity from the VERIFIED token, and refuses anon', () => {
     expect(start).toBeGreaterThan(-1);
-    expect(block).toContain('await resolveReadIdentity(req)');
+    expect(block).toContain('await resolveWriteIdentity(req)');
     expect(block).toContain("if (!userId || userId === 'anon') {");
   });
 

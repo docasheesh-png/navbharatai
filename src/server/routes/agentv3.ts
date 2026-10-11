@@ -834,6 +834,18 @@ export function resolveIdentityWithFallback(
   return { userId: claimedUserId, email: claimedEmail };
 }
 
+/**
+ * The identity a WRITE acts as: the verified token only, never a claimed body/query id (audit 2026-10-11).
+ * `resolveReadIdentity` keeps the claimed fallback for READS (an older bundled app without a token still
+ * opens its history); a write that falls back lets anyone who knows an account's uid rename or copy that
+ * account's apps. Under vitest there is no Firebase, so tests read the claimed id exactly as before.
+ */
+export async function resolveWriteIdentity(req: Request): Promise<{ userId: string | null; email: string | null }> {
+  if (process.env.VITEST) return resolveReadIdentity(req);
+  const verified = await verifyFirebaseIdentity(req);
+  return verified ? { userId: verified.uid, email: verified.email } : { userId: null, email: null };
+}
+
 export async function resolveReadIdentity(req: Request): Promise<{ userId: string | null; email: string | null }> {
   const claimedUserId = typeof req.query.userId === 'string' ? req.query.userId
     : (typeof req.body?.userId === 'string' ? req.body.userId : null);
@@ -4453,7 +4465,7 @@ export function registerAgentV3Routes(app: Express): void {
    * only honest state for a thing that has never been published or connected. See duplicateApp.ts.
    */
   app.post('/api/agentv3/conversations/:id/duplicate', workspaceRateLimiter(), async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
+    const { userId, email } = await resolveWriteIdentity(req); // verified token only — a write never falls back to a body-supplied id
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
@@ -4502,7 +4514,7 @@ export function registerAgentV3Routes(app: Express): void {
   });
 
   app.post('/api/agentv3/conversations/:id/name', async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
+    const { userId, email } = await resolveWriteIdentity(req); // verified token only — a write never falls back to a body-supplied id
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
@@ -6841,10 +6853,13 @@ async function noteBuildOutcome(
   // Every endpoint is workspace-owner-gated (a user can only touch THEIR app's queue) and best-effort.
 
   /** Enqueue a command for THIS app. `source`: 'user' (typed) | 'planner' | 'advisor' (a non-writing
-   *  chat handing work to the executor). Returns the updated queue + summary. */
+   *  chat handing work to the executor). Returns the updated queue + summary.
+   *  🔒 Every queue route takes the VERIFIED owner (audit 2026-10-11): a queued prompt becomes a build that
+   *  spends its owner's wallet, so the claimed-uid fallback `assertWorkspaceOwner` keeps for token blips let
+   *  anyone who learned a workspace id and its owner's uid queue work on that owner's money. */
   app.post('/api/agentv3/queue/enqueue', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
     if (!prompt) { res.status(400).json({ error: 'A non-empty prompt is required.' }); return; }
     if (prompt.length > MAX_PROMPT_LEN) { res.status(400).json({ error: `Prompt is too long (max ${MAX_PROMPT_LEN} chars).` }); return; }
@@ -6860,7 +6875,7 @@ async function noteBuildOutcome(
   /** Read THIS app's queue (items + summary) — for the queue UI and the executor's idle check. */
   app.get('/api/agentv3/queue', async (req: Request, res: Response) => {
     const workspaceId = typeof req.query?.workspaceId === 'string' ? req.query.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const queue = await loadQueue(workspaceId);
     res.json({ summary: queueSummary(queue), items: queue.items });
   });
@@ -6868,7 +6883,7 @@ async function noteBuildOutcome(
   /** Cancel a PENDING command (a running one must be Stopped via the build). */
   app.post('/api/agentv3/queue/cancel', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const id = typeof req.body?.id === 'string' ? req.body.id : '';
     if (!id) { res.status(400).json({ error: 'An item id is required.' }); return; }
     const queue = await mutateQueue(workspaceId, (q) => cancelQueueItem(q, id));
@@ -6881,7 +6896,7 @@ async function noteBuildOutcome(
    *  /queue/complete when that build settles. */
   app.post('/api/agentv3/queue/next', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     // Cheap short-circuit: a cached read tells us if there's anything to claim. When the queue is empty
     // or one is already running (the common case — most builds are not queued), return WITHOUT a
     // transaction/write, so the client-driven executor's per-settle probe costs ~nothing for non-queue users.
@@ -6899,7 +6914,7 @@ async function noteBuildOutcome(
    *  A failure PAUSES the queue client-side (the user decides retry/skip/stop) — recorded here honestly. */
   app.post('/api/agentv3/queue/complete', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const ok = req.body?.ok === true;
     const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 300) : undefined;
     const queue = await mutateQueue(workspaceId, (q) => completeQueuedRunning(q, ok, note));

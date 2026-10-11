@@ -18,6 +18,7 @@ import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { AgentProgress } from './AgentProgress';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
+import { USER_BUBBLE_TONE, ASSISTANT_BUBBLE_TONE } from '../chat/bubbleTone';
 import { MessageEditActions } from '../chat/MessageEditActions';
 import { ReportAiContent } from '../chat/ReportAiContent';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
@@ -984,12 +985,12 @@ export const AIChat: React.FC<AIChatProps> = ({
                 <div className={cn(
                   "max-w-[90%] p-3.5 rounded-2xl text-[11px] font-medium leading-relaxed shadow-sm break-words select-text",
                   msg.sender === 'user'
-                    ? "bg-indigo-600 text-on-accent rounded-tr-none"
+                    ? `${USER_BUBBLE_TONE} rounded-tr-none`
                     : isNetworkError
                       ? "bg-red-500/10 text-body border border-red-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
                       : isAIError
                         ? "bg-amber-500/10 text-body border border-amber-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
-                        : "bg-card text-body border border-line rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
+                        : `${ASSISTANT_BUBBLE_TONE} border border-line rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]`
                 )}>
                   {/* Attachment image previews — compact grid */}
                   {msg.attachments && msg.attachments.length > 0 && (

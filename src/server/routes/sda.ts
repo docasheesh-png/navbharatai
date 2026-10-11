@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import { BoundedCache } from '../lib/boundedCache';
+import { sdaStoreKey } from '../lib/clinical/sdaStoreKey';
 import type { Express } from 'express';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { extractDocumentText } from '../lib/attachmentText';
@@ -42,22 +44,19 @@ interface SdaClinicalEntry {
   createdAt: number;
   updatedAt: number;
 }
-const sdaClinicalStore = new Map<string, SdaClinicalEntry>();
-const sdaRecentMessages = new Map<string, Array<{ role: 'user' | 'assistant'; content: string; ts: number }>>();
+// Bounded, 24h after the last turn (each turn re-stores the entry, so an active case stays). The hourly sweep
+// below remains for the report files; these two expire on their own (audit 2026-10-11).
+const SDA_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const sdaClinicalStore = new BoundedCache<string, SdaClinicalEntry>({ maxEntries: 5_000, ttlMs: SDA_SESSION_TTL_MS });
+const sdaRecentMessages = new BoundedCache<string, Array<{ role: 'user' | 'assistant'; content: string; ts: number }>>({ maxEntries: 5_000, ttlMs: SDA_SESSION_TTL_MS });
+
 // REPORT MEMORY (admin 2026-08-18): the session's recently-sent report files (ECG/X-ray/USG images and
 // PDFs), so a follow-up like "lead V2 dekho" can RE-ATTACH the report to the model instead of honestly
 // admitting the pipeline dropped it — which is exactly what a real transcript showed. See reportMemory.ts.
 const sdaReportStore = new SessionReportStore();
 setInterval(() => {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  for (const [id, entry] of sdaClinicalStore.entries()) {
-    if (entry.updatedAt < cutoff) sdaClinicalStore.delete(id);
-  }
-  for (const [id] of sdaRecentMessages.entries()) {
-    if (!sdaClinicalStore.has(id)) sdaRecentMessages.delete(id);
-  }
   sdaReportStore.sweep(Date.now());
-}, 60 * 60 * 1000);
+}, 60 * 60 * 1000).unref?.();
 
 /**
  * B — independent safety audit: a SECOND model reviews SDA's reply for dangerous
@@ -155,8 +154,9 @@ export function registerSdaRoutes(app: Express): void {
       }
 
       // ── Session / clinical-store resolution ──────────────────────────────────
-      // sessionId is preferred; fall back to userId for backwards compat.
-      const sdaSessionId: string = sessionId || userId || crypto.randomBytes(8).toString('hex');
+      // The case id the client sent (one per patient), scoped to the verified account — see sdaStoreKey.
+      // Scoped to the VERIFIED account — never to an id taken from the body (see sdaStoreKey).
+      const sdaSessionId: string = sdaStoreKey(sdaIdentity?.uid, sessionId, () => crypto.randomBytes(8).toString('hex'));
       const now = Date.now();
 
       let clinicalEntry = sdaClinicalStore.get(sdaSessionId);
@@ -750,7 +750,11 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         usdInrRate(),
         Date.now(),
       );
-      return res.json({ reply: finalReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: sdaSessionId, reportResendNeeded });
+      // Re-store both so an active case keeps its 24h from the LAST turn, not the first.
+      sdaClinicalStore.set(sdaSessionId, clinicalEntry);
+      sdaRecentMessages.set(sdaSessionId, storedMsgs);
+      // The CLIENT's case id goes back, never the internal account-scoped key.
+      return res.json({ reply: finalReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: typeof sessionId === 'string' ? sessionId : null, reportResendNeeded });
 
     } catch (err: any) {
       // Full detail to the server log (admin diagnostics); a safe, on-brand message to the doctor —

@@ -4,6 +4,7 @@ import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
 import { analyzeAppDependencies } from '../AppMakerLab/SBOMGenerator';
 import { workspaceRateLimiter } from '../lib/authMiddleware';
 import { validateBody, vobject, vrecord, vstring } from '../lib/validate';
+import { getServerDb } from '../lib/serverDb';
 
 // P-DATA.1 — runtime schema for the SBOM request body (replaces the manual `if` check).
 const sbomBodySchema = vobject({
@@ -45,11 +46,11 @@ export function registerSbomRoutes(app: Express): void {
     // Best-effort persistence — a storage failure must not fail the SBOM response.
     if (ownedWorkspaceId && buildId) {
       try {
-        const { getDb } = await import('../lib/db');
-        const { doc, setDoc } = await import('firebase/firestore');
-        const db = getDb() as any;
+        // The ADMIN handle (audit 2026-10-11, F9). This wrote through the client SDK until then — on a server, an
+        // anonymous client the security rules refuse — so no SBOM was ever stored and the error was only logged.
+        const db = getServerDb();
         if (db) {
-          await setDoc(doc(db, 'sboms', ownedWorkspaceId, 'builds', String(buildId)), {
+          await db.collection('sboms').doc(ownedWorkspaceId).collection('builds').doc(String(buildId)).set({
             sbom: result.sbom,
             copyleft: result.copyleft,
             componentCount: result.componentCount,

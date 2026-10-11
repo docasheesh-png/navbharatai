@@ -37,6 +37,7 @@ import {
   sourceById,
   type ExternalSource,
 } from './registry';
+import { BoundedCache } from '../boundedCache';
 
 /** One row as the portal returns it. Field names differ per dataset, so this stays open. */
 export type GovRecord = Record<string, unknown>;
@@ -96,7 +97,9 @@ export const MAX_RECORDS = 500;
 interface CacheEntry { at: number; records: GovRecord[]; }
 interface InFlight { p: Promise<GovFetchResult>; settled: boolean; }
 
-const cache = new Map<string, CacheEntry>();
+// Bounded (audit 2026-10-11): the key is a dataset plus the caller's filters, so every distinct question ever
+// asked stayed in memory with up to 500 records. Freshness is still judged by `at` where it is read.
+const cache = new BoundedCache<string, CacheEntry>({ maxEntries: 300 });
 const inFlight = new Map<string, InFlight>();
 
 const meter = { calls: 0, cacheHits: 0, coalesced: 0, failures: 0 };

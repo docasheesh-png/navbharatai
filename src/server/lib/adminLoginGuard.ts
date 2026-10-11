@@ -9,7 +9,9 @@
 //     used to lock the admin out;
 //   • every lock AUTO-EXPIRES — worst case the admin waits out one window;
 //   • it is disabled instantly via `ADMIN_LOGIN_LOCKOUT=off` (kill switch, no redeploy of logic needed).
-// Pure escalation math is unit-tested; the small in-memory store is bounded by pruning.
+// Pure escalation math is unit-tested; the small in-memory store is a bounded cache.
+
+import { BoundedCache } from './boundedCache';
 
 /** The escalating lockout duration (ms) for a given cumulative failure count. 0 = no lock yet. Pure. */
 export function lockDurationMs(fails: number): number {
@@ -30,19 +32,12 @@ const IDLE_FORGET_MS = 60 * 60_000; // 1 h
 const MAX_ENTRIES = 10_000;
 
 interface Attempt { fails: number; lockedUntil: number; last: number }
-const attempts = new Map<string, Attempt>();
-
-/** Prune records that have been idle past IDLE_FORGET_MS (and hard-cap the map size). */
-function prune(now: number): void {
-  for (const [ip, a] of attempts) {
-    if (now - a.last > IDLE_FORGET_MS) attempts.delete(ip);
-  }
-  if (attempts.size > MAX_ENTRIES) {
-    // Evict the oldest-touched entries first.
-    const sorted = [...attempts.entries()].sort((x, y) => x[1].last - y[1].last);
-    for (let i = 0; i < sorted.length - MAX_ENTRIES; i++) attempts.delete(sorted[i][0]);
-  }
-}
+/**
+ * Bounded, O(1) per attempt (performance audit 2026-10-11): a record expires IDLE_FORGET_MS after its last
+ * failure and the least recent is evicted at the bound. The old prune walked — and past the bound SORTED —
+ * the whole map on every failed login, so a brute-force run paid more per guess the longer it ran.
+ */
+const attempts = new BoundedCache<string, Attempt>({ maxEntries: MAX_ENTRIES, ttlMs: IDLE_FORGET_MS });
 
 /** Is the admin-login lockout enabled? (Kill switch: `ADMIN_LOGIN_LOCKOUT=off`.) */
 export function adminLockoutEnabled(): boolean {
@@ -51,20 +46,19 @@ export function adminLockoutEnabled(): boolean {
 
 /** Is this IP currently locked? Returns the remaining wait in ms (0 if not locked). Does not mutate. */
 export function checkAdminLock(ip: string, now: number = Date.now()): { locked: boolean; retryAfterMs: number } {
-  const a = attempts.get(ip);
+  const a = attempts.peek(ip, now);
   if (a && a.lockedUntil > now) return { locked: true, retryAfterMs: a.lockedUntil - now };
   return { locked: false, retryAfterMs: 0 };
 }
 
 /** Record a FAILED admin-login attempt for this IP and (re)compute its escalating lock. */
 export function recordAdminFail(ip: string, now: number = Date.now()): void {
-  const a = attempts.get(ip) ?? { fails: 0, lockedUntil: 0, last: now };
+  const a = attempts.get(ip, now) ?? { fails: 0, lockedUntil: 0, last: now };
   a.fails += 1;
   a.last = now;
   const dur = lockDurationMs(a.fails);
   if (dur > 0) a.lockedUntil = now + dur;
-  attempts.set(ip, a);
-  prune(now);
+  attempts.set(ip, a, now);
 }
 
 /** Record a SUCCESSFUL admin login — clears this IP's failure history immediately. */

@@ -24,6 +24,7 @@
 // erase each other's records.
 
 import * as admin from 'firebase-admin';
+import { BoundedCache } from '../../lib/boundedCache';
 import { getServerDb } from '../../lib/serverDb';
 import { notePersistenceFailure } from '../../lib/persistenceHealth';
 import { parseEngineeringMemory, emptyMemory, type EngineeringMemory } from './changeLog';
@@ -49,12 +50,10 @@ function getDb(): admin.firestore.Firestore | null {
   }
 }
 
-const cache = new Map<string, { mem: EngineeringMemory; at: number }>();
+// Bounded, O(1) per access (audit 2026-10-11): an entry expires CACHE_TTL_MS after it was written and the least
+// recently used workspace is evicted at the bound. The old `pruneCache` walked every entry on every read/write.
+const cache = new BoundedCache<string, { mem: EngineeringMemory; at: number }>({ maxEntries: 2_000, ttlMs: CACHE_TTL_MS });
 
-function pruneCache(): void {
-  const cutoff = Date.now() - CACHE_TTL_MS;
-  for (const [k, v] of cache) if (v.at < cutoff) cache.delete(k);
-}
 
 /** Test seam: the in-process cache doubles as the store under VITEST (no Firestore there). */
 export function __resetEngineeringMemoryCache(): void {
@@ -64,7 +63,6 @@ export function __resetEngineeringMemoryCache(): void {
 /** Load an app's memory. Empty memory on any failure — never a half-parsed one, never a throw. */
 export async function loadEngineeringMemory(workspaceId: string): Promise<EngineeringMemory> {
   if (!workspaceId) return emptyMemory();
-  pruneCache();
   const hit = cache.get(workspaceId);
   if (hit) return hit.mem;
   const db = getDb();

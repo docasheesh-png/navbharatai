@@ -27,6 +27,7 @@
  * already-granted plans keep their badge-removal (taking back something paid-for would be theft).
  */
 
+import { BoundedCache } from './boundedCache';
 import { doc, getDoc, runTransaction, getServerDb } from './serverDb';
 import { computeDebitedWallet } from './walletDebit';
 import { ledgerPatch } from './walletStatement';
@@ -773,7 +774,13 @@ export interface PlanProbe {
 }
 
 const PROBE_TTL_MS = 5 * 60 * 1000;
-const probeCache = new Map<string, { probe: PlanProbe; at: number }>();
+/**
+ * An INACTIVE answer is the one a purchase changes, and `invalidatePlanCache` clears only the instance that took
+ * the payment — so on every other instance a fresh buyer kept seeing "no plan" for up to 5 minutes. Inactive
+ * answers are therefore kept 30 s; active ones keep the full 5 min (audit 2026-10-11).
+ */
+const PROBE_INACTIVE_TTL_MS = 30 * 1000;
+const probeCache = new BoundedCache<string, { probe: PlanProbe; at: number }>({ maxEntries: 20_000, ttlMs: PROBE_TTL_MS });
 
 export function invalidatePlanCache(userId: string): void {
   probeCache.delete(userId);
@@ -798,7 +805,7 @@ export async function probeHostingPlan(userId: string | null | undefined): Promi
     return { active: false, known: true };
   }
   const hit = probeCache.get(userId);
-  if (hit && Date.now() - hit.at < PROBE_TTL_MS) return hit.probe;
+  if (hit && Date.now() - hit.at < (hit.probe.active ? PROBE_TTL_MS : PROBE_INACTIVE_TTL_MS)) return hit.probe;
   try {
     const db = getServerDb();
     if (!db) return { active: false, known: false };

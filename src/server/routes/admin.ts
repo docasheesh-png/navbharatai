@@ -1,4 +1,7 @@
 import crypto from 'crypto';
+import { AggregateField } from 'firebase-admin/firestore';
+import { WALLET_SUMMARY_FIELDS, USAGE_LOG_FIELDS, revenueToday } from '../lib/adminReadFields';
+import { addressRateKey } from '../lib/clientAddress';
 import { cashfreePaymentsAvailability, platformCashfreeCredentials } from '../lib/cashfreeCredentials';
 import fs from 'fs';
 import path from 'path';
@@ -295,7 +298,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const totpCode = String(req.body?.totp || '').trim();
     const validUser = adminUsername();
     const validPass = adminPassword();
-    const clientIp = String(req.ip || 'unknown');
+    // The shared address key (real address, IPv6 grouped by /56): a raw `req.ip` let one IPv6 host try a
+    // fresh address per guess and never meet the lockout (audit 2026-10-11).
+    const clientIp = addressRateKey(req);
 
     // SEC (admin 2026-07-19) — escalating brute-force lockout ON TOP of the 5/min IP rate limiter.
     // Once an IP crosses the failure threshold, each further attempt is refused for a window that
@@ -497,7 +502,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       // wallet scan and the Firebase Auth lookups below never run on a routine tab switch.
       (async () => {
         try {
-          const wallets = await getDocs(collection(getDb() as any, 'user_token_wallets'));
+          // Only the fields this card reads, never the 500-entry ledgers (adminReadFields.ts, audit 2026-10-11).
+          const wallets = await (getDb() as any).collection('user_token_wallets').select(...WALLET_SUMMARY_FIELDS).get();
           const rows = wallets.docs.map((d: any) => ({ id: d.id, ...d.data() })) as any[];
           const meta = await fetchAuthMetadata(rows.map((u: any) => u.userId || u.id), await firebaseAuthBatch());
           return peopleAudience(rows.map((u: any) => {
@@ -749,6 +755,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       }
     })();
     const liveSandboxes = liveCount.running;
+    // ONE reading of this instance's load per response, so the health score and the load panel beside it can
+    // never disagree (audit 2026-10-11, F15).
+    const load = serverLoad.snapshot();
     const providerStats = guard(() => getProviderStats());
 
     // The same composite health inputs the dedicated /health-score endpoint reports, from the same
@@ -758,7 +767,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const inputs = platformHealthInputs({
         builds: scoped.snapshot.builds,
         router: getRouterOutcomeStats(),
-        serverWaitMs: serverLoad.snapshot().eventLoopP99Ms,
+        serverWaitMs: load.eventLoopP99Ms,
         minRequests: AI_MIN_SAMPLE,
       });
       return { score: computeHealthScore(inputs), inputs };
@@ -777,7 +786,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       liveSandboxes,
       liveSandboxNote: liveSandboxNote(liveCount),
       // How hard THIS instance is working right now. One instance of several — the client says so.
-      serverLoad: serverLoad.snapshot(),
+      serverLoad: load,
       // Whether alerts can reach the admin OUTSIDE the app, and plainly why not when they cannot.
       // Never a secret: only the configured flag and the reason travel, never the key or the sender.
       emailAlerts: (() => {
@@ -1672,12 +1681,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.get('/api/admin/analytics', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      const walletsRef = collection(db, 'user_token_wallets');
-      const walletSnap = await getDocs(walletsRef);
+      // Only the fields this page reads (adminReadFields.ts): a wallet carries a 500-entry ledger, and
+      // reading every one in full moved hundreds of KB per user through this instance (audit 2026-10-11).
+      const walletSnap = await db.collection('user_token_wallets').select(...WALLET_SUMMARY_FIELDS).get();
       const wallets = walletSnap.docs.map((d: any) => d.data());
 
-      const logsRef = collection(db, 'ai_usage_logs');
-      const logsSnap = await getDocs(logsRef);
+      const logsSnap = await db.collection('ai_usage_logs').select(...USAGE_LOG_FIELDS).get();
       const logs = logsSnap.docs.map((d: any) => d.data());
 
       const txRef = collection(db, 'payment_transactions');
@@ -1858,10 +1867,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         newUsersToday, activeUsers24h,
         providerRanking, tokenPurchaseCount, recentPurchases,
         liveProviderStats,
-        maintenanceMode: serverStats.maintenanceMode,
-        featureFlags: serverStats.featureFlags,
-        pricingConfig: serverStats.pricingConfig,
-        providerEnabled: serverStats.providerEnabled,
         failedLoginAttempts: serverStats.failedLoginIPs.slice(-20),
       });
     } catch (err: any) {
@@ -1932,7 +1937,10 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
       let total: number | null = null;
       try {
-        total = (await getDocs(collection(getDb() as never, 'user_token_wallets'))).size;
+        // A COUNT aggregation (one read per 1,000 index entries) — this used to read every wallet, ledger
+        // and all, on every admin page view just to take `.size` (audit 2026-10-11, D6).
+        const agg = await (getDb() as any).collection('user_token_wallets').count().get();
+        total = Number(agg.data().count);
       } catch { /* unmeasured ⇒ the pair shows its numerator alone */ }
 
       if (visitors !== null || total !== null) {
@@ -1965,21 +1973,24 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
     // REVENUE — today / all time, from the SAME `payment_transactions` + SUCCESS filter the analytics
     // page totals. Today is bounded on the SERVER's clock; a device clock must never move this number.
+    //
+    // 🔴 AUDIT 2026-10-11 (D6 + a wrong number). This read EVERY payment ever made on every admin visit, and
+    // its "today" figure read `Number(tx.createdAt)` — but orders store `createdAt` as an ISO STRING, so
+    // `Number()` was NaN and today's revenue was always ₹0. The total is now a SUM aggregation, and today
+    // reads only today's orders (both spellings of the time field), so the cost no longer grows with history.
     try {
-      const db = getDb();
-      const txSnap = await getDocs(collection(db as never, 'payment_transactions'));
+      const db = getDb() as any;
+      const col = db.collection('payment_transactions');
       const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
       const from = startOfDay.getTime();
-      let today = 0; let total = 0;
-      txSnap.forEach((d: any) => {
-        const tx = d.data() || {};
-        if (tx.paymentStatus !== 'SUCCESS') return;
-        const amt = Number(tx.amountPaid) || 0;
-        total += amt;
-        const at = Number(tx.createdAt ?? tx.created_at ?? 0);
-        if (Number.isFinite(at) && at >= from) today += amt;
-      });
-      out.revenue = { todayInr: Math.round(today), totalInr: Math.round(total) };
+      const totalAgg = await col.where('paymentStatus', '==', 'SUCCESS')
+        .aggregate({ total: AggregateField.sum('amountPaid') }).get();
+      const [isoToday, msToday] = await Promise.all([
+        col.where('createdAt', '>=', startOfDay.toISOString()).get(),
+        col.where('createdAt', '>=', from).get(),
+      ]);
+      const today = revenueToday([...isoToday.docs, ...msToday.docs].map((d: any) => d.data()), from);
+      out.revenue = { todayInr: Math.round(today), totalInr: Math.round(Number(totalAgg.data().total) || 0) };
     } catch { /* unmeasured ⇒ no badge */ }
 
     // BUILD REPORTS — never opened / not yet marked fixed. `reportTriage` already owns both words
@@ -2097,7 +2108,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       const [txSnap, walletSnap, playRun] = await Promise.all([
         getDocs(collection(db, 'payment_transactions')),
-        getDocs(collection(db, 'user_token_wallets')),
+        // Names only — never the 500-entry ledgers (adminReadFields.ts, audit 2026-10-11).
+        (db as any).collection('user_token_wallets').select('userId', 'userEmail', 'userName').get(),
         // Q-690 — the daily Play refund check's last outcome. Its own failure must not cost the admin the
         // purchase table, so an unreadable record reads as "never run" (which the screen says plainly).
         getDoc(doc(db, JOB_RUNS_COLLECTION, PLAY_VOIDED_JOB)).then((s: any) => (s.exists() ? s.data() : null)).catch(() => null),
@@ -2152,8 +2164,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       const sort = (req.query.sort as string) || 'tokens';
       const search = ((req.query.search as string) || '').toLowerCase();
-      const walletsRef = collection(db, 'user_token_wallets');
-      const snap = await getDocs(walletsRef);
+      // Only the fields this list reads, never the 500-entry ledgers (adminReadFields.ts, audit 2026-10-11).
+      const snap = await db.collection('user_token_wallets').select(...WALLET_SUMMARY_FIELDS).get();
       let users = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as any[];
 
       if (search) {
@@ -2473,6 +2485,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       return res.status(400).json({ ok: false, error: `Choose how new: a whole number of days from 1 to ${NEW_USER_MAX_DAYS}.` });
     }
     try {
+      // The WHOLE wallet, deliberately: `walletRefusal` and `planWelcomeGift` are money rules over many fields,
+      // and a projection that missed one would decide a payment on `undefined` (audit 2026-10-11 left this one).
       const snap = await getDocs(collection(db, 'user_token_wallets'));
       const wallets = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as Array<{ id: string } & Record<string, unknown>>;
       // The join date is the users list's own ("Joined" column): Firebase Auth, else the wallet's
@@ -3495,54 +3509,14 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // amount, and `totalMoneySpent` carries the rupees — so nothing about a real payment is lost.
   // If a genuine Pro entitlement is ever wanted, it needs a real access check first, not a flag.
 
-  // ── Settings (pricing, feature flags, maintenance) ────────────────────────
-  app.get('/api/admin/settings', verifyAdminToken, (_req: Request, res: Response) => {
-    res.json({
-      maintenanceMode: serverStats.maintenanceMode,
-      featureFlags: serverStats.featureFlags,
-      pricingConfig: serverStats.pricingConfig,
-      providerEnabled: serverStats.providerEnabled,
-    });
-  });
-
-  app.post('/api/admin/settings', verifyAdminToken, (req: Request, res: Response) => {
-    const { maintenanceMode, featureFlags, pricingConfig, providerEnabled } = req.body;
-    if (maintenanceMode !== undefined) serverStats.maintenanceMode = !!maintenanceMode;
-    if (featureFlags) Object.assign(serverStats.featureFlags, featureFlags);
-    if (pricingConfig) Object.assign(serverStats.pricingConfig, pricingConfig);
-    if (providerEnabled) Object.assign(serverStats.providerEnabled, providerEnabled);
-    audit('ADMIN_SETTINGS_CHANGED', { admin: adminUsername(), changes: req.body, ip: req.ip });
-    // P-PME.8 — persist feature flags to Firestore so they survive Cloud Run restarts (in-memory
-    // serverStats alone reset on every deploy). Best-effort: a persistence failure never fails the toggle.
-    if (featureFlags) {
-      import('../FeatureFlagManager')
-        .then(({ saveFlagConfig }) => saveFlagConfig({ flags: { ...serverStats.featureFlags } }))
-        .catch(() => { /* persistence is best-effort */ });
-    }
-    res.json({ ok: true, settings: { maintenanceMode: serverStats.maintenanceMode, featureFlags: serverStats.featureFlags, pricingConfig: serverStats.pricingConfig, providerEnabled: serverStats.providerEnabled } });
-  });
-
-  // P-PME.8 — runtime feature-flag config (incl. percentage rollout + per-user overrides), persisted
-  // in Firestore. GET returns the full persisted config; POST replaces it. Admin-only.
-  app.get('/api/admin/feature-flags', verifyAdminToken, async (_req: Request, res: Response) => {
-    const { loadFlagConfig } = await import('../FeatureFlagManager');
-    const config = (await loadFlagConfig()) || { flags: { ...serverStats.featureFlags } };
-    res.json(config);
-  });
-
-  app.post('/api/admin/feature-flags', verifyAdminToken, async (req: Request, res: Response) => {
-    const { saveFlagConfig } = await import('../FeatureFlagManager');
-    const body = req.body || {};
-    const config = {
-      flags: body.flags && typeof body.flags === 'object' ? body.flags : { ...serverStats.featureFlags },
-      ...(body.rollout && typeof body.rollout === 'object' ? { rollout: body.rollout } : {}),
-      ...(body.overrides && typeof body.overrides === 'object' ? { overrides: body.overrides } : {}),
-    };
-    const saved = await saveFlagConfig(config);
-    if (config.flags) Object.assign(serverStats.featureFlags, config.flags); // keep in-memory cache in sync
-    audit('ADMIN_FEATURE_FLAGS_CHANGED', { admin: adminUsername(), ip: req.ip, persisted: saved });
-    res.json({ ok: true, persisted: saved, config });
-  });
+  // ── Settings, feature flags, maintenance mode: REMOVED (audit 2026-10-11, F16) ──────────────────────
+  // `GET/POST /api/admin/settings` and `GET/POST /api/admin/feature-flags` held `maintenanceMode`, `featureFlags`,
+  // `pricingConfig` and `providerEnabled`. NOTHING enforced any of them — no route gated on a flag, maintenance
+  // mode blocked no request (it only turned `/api/health` "degraded"), the pricing values were read by nothing and
+  // no router consulted `providerEnabled`. Their screen was removed on 2026-10-04 (admin panel audit, PR 1, D1)
+  // for exactly that reason, and the routes were left with no caller (Q-162 listed all four as undecided). The
+  // audit's first instinct — persist them across instances — would have made a control that does nothing
+  // durable. A real kill switch is built as its own system, with enforcement, an audit trail and rollback.
 
   // ── P-SEC.5: Encryption key rotation ──────────────────────────────────────
   // Re-encrypts ALL user_secrets under the latest key version (SECRET_KEY_V<N>).

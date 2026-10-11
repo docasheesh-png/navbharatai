@@ -14,6 +14,7 @@
 // decide "already encoded — leave it", so a response can never be compressed twice.
 
 import { stat } from 'fs/promises';
+import { BoundedCache } from './boundedCache';
 import { join, normalize, sep, extname } from 'path';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { cacheControlFor } from './staticCache';
@@ -61,13 +62,12 @@ export function assetPathFor(distPath: string, urlPath: string): string | null {
 }
 
 /** `stat` results, so a hot asset costs one disk lookup per process, not one per request. Bounded. */
-const exists = new Map<string, number | null>();
-const MAX_REMEMBERED = 5_000;
+// An LRU: requests for made-up asset paths only push out the oldest answers, never every real one at once.
+const exists = new BoundedCache<string, number | null>({ maxEntries: 5_000 });
 async function sizeOf(p: string): Promise<number | null> {
   if (exists.has(p)) return exists.get(p) ?? null;
   let size: number | null = null;
   try { const st = await stat(p); size = st.isFile() ? st.size : null; } catch { size = null; }
-  if (exists.size >= MAX_REMEMBERED) exists.clear();
   exists.set(p, size);
   return size;
 }

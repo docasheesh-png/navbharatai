@@ -1,8 +1,11 @@
+import { BoundedCache } from '../lib/boundedCache';
+
 /**
  * Preview give-up is per workspace, not per dispatcher (TD-20).
  * A later dispatcher on the same workspace must see that an earlier one already gave up.
  */
-const gaveUp = new Map<string, true>();
+// Bounded (audit 2026-10-11): one entry per workspace ever given up on used to stay for the instance's life.
+const gaveUp = new BoundedCache<string, true>({ maxEntries: 20_000 });
 
 export function markPreviewGaveUp(workspaceId: string): void {
   if (workspaceId) gaveUp.set(workspaceId, true);

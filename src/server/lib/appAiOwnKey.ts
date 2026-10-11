@@ -12,6 +12,7 @@
 // (revoked, out of credit), the answer is an honest failure — quietly falling back to NavBharatAI's engine
 // would spend the owner's wallet behind a choice they made not to.
 
+import { BoundedCache } from './boundedCache';
 import { loadUserVaultSecrets } from './secrets';
 
 export type OwnKeyProvider = 'openai' | 'anthropic';
@@ -41,15 +42,21 @@ export function ownKeyFromSecrets(secrets: Readonly<Record<string, string>> | nu
   return null;
 }
 
-const cache = new Map<string, { key: OwnKey | null; at: number }>();
 const CACHE_MS = 60_000;
+/**
+ * Bounded (audit 2026-10-11): one entry per app ever asked used to stay for the life of the instance, holding
+ * the owner's decrypted key. Now an entry leaves after a minute or at the bound. `forgetOwnKey` records WHEN a
+ * user's keys changed instead of walking every entry: an entry older than that moment is a miss.
+ */
+const cache = new BoundedCache<string, { key: OwnKey | null; at: number }>({ maxEntries: 5_000, ttlMs: CACHE_MS });
+const forgottenAt = new BoundedCache<string, number>({ maxEntries: 20_000, ttlMs: CACHE_MS });
 
 /** The owner's own key for this app, if any. A vault read at most once a minute per app. Never throws. */
 export async function ownKeyFor(userId: string, workspaceId: string): Promise<OwnKey | null> {
   if (!userId) return null;
   const k = `${userId}::${workspaceId}`;
   const hit = cache.get(k);
-  if (hit && Date.now() - hit.at < CACHE_MS) return hit.key;
+  if (hit && Date.now() - hit.at < CACHE_MS && hit.at > (forgottenAt.get(userId) ?? -1)) return hit.key;
   let key: OwnKey | null = null;
   try { key = ownKeyFromSecrets(await loadUserVaultSecrets(userId, workspaceId)); } catch { key = null; }
   cache.set(k, { key, at: Date.now() });
@@ -58,7 +65,7 @@ export async function ownKeyFor(userId: string, workspaceId: string): Promise<Ow
 
 /** Forget a cached key (after the owner saves or deletes one). */
 export function forgetOwnKey(userId: string): void {
-  for (const k of cache.keys()) if (k.startsWith(`${userId}::`)) cache.delete(k);
+  forgottenAt.set(userId, Date.now());
 }
 
 export type OwnKeyAnswer = { ok: true; text: string } | { ok: false; reason: 'refused' | 'failed' };

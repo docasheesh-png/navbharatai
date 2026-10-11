@@ -143,11 +143,16 @@ describe('the synced workspace is erased with the account', () => {
 });
 
 describe('one definition of the chunk id, and the documented layout matches it', () => {
-  it('🔒 `routes/sync.ts` no longer builds the id itself — it imports the shared builder', () => {
+  it('🔒 the sync writer does not build the id itself — it imports the shared builder', () => {
+    // Since audit 2026-10-11 the route saves through `syncTransaction.ts` (one transaction per save), so the
+    // writer that names chunk documents is that module; the route names none.
+    const writer = read('src/server/project/syncTransaction.ts');
+    expect(writer, 'the sync writer must import chunkDocId rather than define it').toMatch(/import \{[\s\S]*?chunkDocId[\s\S]*?\} from '\.\/WorkspaceStore'/);
     const sync = read('src/server/routes/sync.ts');
-    expect(sync, 'sync.ts must import chunkDocId rather than define it').toMatch(/import \{[\s\S]*?chunkDocId[\s\S]*?\} from '\.\.\/project\/WorkspaceStore'/);
-    expect(sync, 'a second definition of the chunk id would be free to drift from the eraser')
-      .not.toMatch(/const chunkDocId\s*=/);
+    for (const src of [writer, sync]) {
+      expect(src, 'a second definition of the chunk id would be free to drift from the eraser').not.toMatch(/const chunkDocId\s*=/);
+    }
+    expect(sync).toMatch(/from '\.\.\/project\/syncTransaction'/);
   });
 
   it('🔒 the layout comment says the id the builder actually produces', () => {

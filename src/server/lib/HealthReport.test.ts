@@ -8,7 +8,6 @@ function signals(partial: Partial<HealthSignals> = {}): HealthSignals {
     version: 'rev-123',
     nodeVersion: 'v20.0.0',
     memory: { rss: 200 * 1024 * 1024, heapUsed: 80 * 1024 * 1024, heapTotal: 120 * 1024 * 1024 },
-    maintenanceMode: false,
     checks: [],
     ...partial,
   };
@@ -48,10 +47,9 @@ describe('buildHealthReport', () => {
     expect(r.ready).toBe(true);
   });
 
-  it('is degraded under maintenance mode even with all checks ok', () => {
-    const r = buildHealthReport(signals({ maintenanceMode: true }));
-    expect(r.status).toBe('degraded');
-    expect(r.maintenanceMode).toBe(true);
+  it('🔒 reports no maintenance mode — nothing enforces one (audit 2026-10-11, F16)', () => {
+    const r = buildHealthReport(signals());
+    expect('maintenanceMode' in r).toBe(false);
   });
 
   it('takes the worst check status into account', () => {

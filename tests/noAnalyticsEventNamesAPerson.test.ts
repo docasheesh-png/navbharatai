@@ -26,7 +26,11 @@ describe('analytics keeps counts, not people', () => {
     const route = code('src/server/routes/telemetry.ts');
     const block = route.slice(route.indexOf("app.post('/api/analytics/event'"), route.indexOf("app.post('/api/analytics/event'") + 900);
     expect(block).not.toMatch(/userId|sessionId/);
-    expect(block).toMatch(/console\.log\('\[ANALYTICS\]', JSON\.stringify\(\{ event: sanitizeEventKey\(String\(event\)\), props/);
+    // Since the performance audit (2026-10-11, D8) the line is built by one bounded helper; it carries the event
+    // and its props, and no person — checked on the helper itself, comments stripped.
+    expect(block).toMatch(/console\.log\('\[ANALYTICS\]', analyticsLogLine\(\{ event, props, ts \}\)\)/);
+    const helper = route.slice(route.indexOf('export function analyticsLogLine'), route.indexOf('export function registerTelemetryRoutes'));
+    expect(helper).not.toMatch(/userId|sessionId/);
   });
 
   it('🔒 the client never sends who the person is', () => {

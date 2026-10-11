@@ -1,4 +1,5 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { BoundedCache } from '../lib/boundedCache';
 import { FILE_SIZE_RULE, READ_GUIDE_TOOL, fileSizeRuleEnabled, moduleText, modularizePrompt, modularPromptEnabled } from '../AgentV3/reliability/modularPrompt';
 import { APPEND_FILE_TOOL, resumeTruncatedEnabled } from '../AgentV3/reliability/resumeWrite';
 import { CORE_TOOL_NAMES, DynamicToolset, coreToolsetEnabled } from '../AgentV3/reliability/coreToolset';
@@ -241,6 +242,7 @@ import {
   deriveTitle,
   upsertConversationTurn,
   type ConversationStore,
+  type ConversationRecord,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, importAccountingLine, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace, checkFrameworkCoherence, frameworkCoherenceGuidance } from '../AgentV3/ProjectImport';
@@ -450,7 +452,7 @@ import { LISTENING_PORTS_COMMAND, parseListeningPorts, rankPortCandidates } from
 import { isSandboxSystemPort } from '../AgentV3/neverAppPorts';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
-import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
+import { chatResponseCache, chatCacheEnabled, chatReplyCacheKey } from '../AgentV3/PromptCache';
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
@@ -713,6 +715,7 @@ import {
   workspaceOwnershipOk as sharedWorkspaceOwnershipOk,
   verifiedWorkspaceReadOk as sharedVerifiedWorkspaceReadOk,
   workspaceIdFor,
+  workspacePrefixFor,
   safeWorkspaceUid,
 } from '../lib/workspaceIdentity';
 import { adminRequestOk, requireAdmin } from '../lib/adminAuth';
@@ -831,6 +834,18 @@ export function resolveIdentityWithFallback(
 ): { userId: string | null; email: string | null } {
   if (verified) return { userId: verified.uid, email: verified.email };
   return { userId: claimedUserId, email: claimedEmail };
+}
+
+/**
+ * The identity a WRITE acts as: the verified token only, never a claimed body/query id (audit 2026-10-11).
+ * `resolveReadIdentity` keeps the claimed fallback for READS (an older bundled app without a token still
+ * opens its history); a write that falls back lets anyone who knows an account's uid rename or copy that
+ * account's apps. Under vitest there is no Firebase, so tests read the claimed id exactly as before.
+ */
+export async function resolveWriteIdentity(req: Request): Promise<{ userId: string | null; email: string | null }> {
+  if (process.env.VITEST) return resolveReadIdentity(req);
+  const verified = await verifyFirebaseIdentity(req);
+  return verified ? { userId: verified.uid, email: verified.email } : { userId: null, email: null };
 }
 
 export async function resolveReadIdentity(req: Request): Promise<{ userId: string | null; email: string | null }> {
@@ -1552,6 +1567,42 @@ export function finalSyntaxErrorSummary(fileCount: number): string {
  */
 export function conversationIdForWorkspace(workspaceId: string): string {
   return workspaceId;
+}
+
+/**
+ * Every id a workspace's conversation record can have: the workspace id itself (`conversationIdForWorkspace`),
+ * the bare session id (a DUPLICATED app's record is keyed by its own session id), and the legacy `v3_<sid>`.
+ * PURE.
+ */
+export function conversationIdCandidatesForWorkspace(workspaceId: string, userId: string | null): string[] {
+  const out = [conversationIdForWorkspace(workspaceId)];
+  for (const prefix of [workspacePrefixFor(userId), ANON_WORKSPACE_PREFIX]) {
+    if (prefix && workspaceId.startsWith(prefix) && workspaceId.length > prefix.length) {
+      const sid = workspaceId.slice(prefix.length);
+      out.push(sid, `v3_${sid}`);
+      break;
+    }
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * THIS workspace's conversation record, by point reads of its possible ids — never by listing the user's
+ * history (performance audit 2026-10-11, D1). Every build turn used to call `listByUser(uid, 10)` TWICE — each
+ * reading up to 200 conversation documents — just to find this one, and silently missed it when the workspace
+ * was not among the 10 most recent. Returns the record WITHOUT its transcript (`getMeta`), or null.
+ */
+export async function findWorkspaceConversation(
+  store: ConversationStore,
+  userId: string | null,
+  workspaceId: string,
+): Promise<ConversationRecord | null> {
+  const owner = userId ?? 'anon';
+  for (const id of conversationIdCandidatesForWorkspace(workspaceId, userId)) {
+    const rec = await (store.getMeta ? store.getMeta(id) : store.get(id)).catch(() => null);
+    if (rec && rec.workspaceId === workspaceId && rec.userId === owner) return rec;
+  }
+  return null;
 }
 
 /**
@@ -2393,9 +2444,11 @@ export function __setRunningBuildForTest(key: string, rb: RunningBuild | null): 
 
 const MAX_BUILD_BUFFER = 4000;
 /** The most recent build's diagnostics report per build key (userId) — for download/endpoint. */
-const lastDiagnostics = new Map<string, BuildDiagnosticsReport>();
+// Bounded (audit 2026-10-11): a full build report per user ever served used to stay for the life of the
+// instance. It is the in-memory FALLBACK to the durable report, so the oldest may leave.
+const lastDiagnostics = new BoundedCache<string, BuildDiagnosticsReport>({ maxEntries: 500, ttlMs: 6 * 60 * 60 * 1000 });
 /** Free users already shown the weak-tier welcome notice this instance (once per user — see the send). */
-const weakNoticeShownFor = new Set<string>();
+const weakNoticeShownFor = new BoundedCache<string, true>({ maxEntries: 50_000 });
 
 /** Shortest gap between two "check my connected services" calls from one app. Each one fans out to
  *  somebody else's servers, so a button must not be loopable. See callCooldown.ts. */
@@ -4450,7 +4503,7 @@ export function registerAgentV3Routes(app: Express): void {
    * only honest state for a thing that has never been published or connected. See duplicateApp.ts.
    */
   app.post('/api/agentv3/conversations/:id/duplicate', workspaceRateLimiter(), async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
+    const { userId, email } = await resolveWriteIdentity(req); // verified token only — a write never falls back to a body-supplied id
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
@@ -4499,7 +4552,7 @@ export function registerAgentV3Routes(app: Express): void {
   });
 
   app.post('/api/agentv3/conversations/:id/name', async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // verified token, never a body-supplied id
+    const { userId, email } = await resolveWriteIdentity(req); // verified token only — a write never falls back to a body-supplied id
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' });
       return;
@@ -6838,10 +6891,13 @@ async function noteBuildOutcome(
   // Every endpoint is workspace-owner-gated (a user can only touch THEIR app's queue) and best-effort.
 
   /** Enqueue a command for THIS app. `source`: 'user' (typed) | 'planner' | 'advisor' (a non-writing
-   *  chat handing work to the executor). Returns the updated queue + summary. */
+   *  chat handing work to the executor). Returns the updated queue + summary.
+   *  🔒 Every queue route takes the VERIFIED owner (audit 2026-10-11): a queued prompt becomes a build that
+   *  spends its owner's wallet, so the claimed-uid fallback `assertWorkspaceOwner` keeps for token blips let
+   *  anyone who learned a workspace id and its owner's uid queue work on that owner's money. */
   app.post('/api/agentv3/queue/enqueue', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
     if (!prompt) { res.status(400).json({ error: 'A non-empty prompt is required.' }); return; }
     if (prompt.length > MAX_PROMPT_LEN) { res.status(400).json({ error: `Prompt is too long (max ${MAX_PROMPT_LEN} chars).` }); return; }
@@ -6857,7 +6913,7 @@ async function noteBuildOutcome(
   /** Read THIS app's queue (items + summary) — for the queue UI and the executor's idle check. */
   app.get('/api/agentv3/queue', async (req: Request, res: Response) => {
     const workspaceId = typeof req.query?.workspaceId === 'string' ? req.query.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const queue = await loadQueue(workspaceId);
     res.json({ summary: queueSummary(queue), items: queue.items });
   });
@@ -6865,7 +6921,7 @@ async function noteBuildOutcome(
   /** Cancel a PENDING command (a running one must be Stopped via the build). */
   app.post('/api/agentv3/queue/cancel', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const id = typeof req.body?.id === 'string' ? req.body.id : '';
     if (!id) { res.status(400).json({ error: 'An item id is required.' }); return; }
     const queue = await mutateQueue(workspaceId, (q) => cancelQueueItem(q, id));
@@ -6878,7 +6934,7 @@ async function noteBuildOutcome(
    *  /queue/complete when that build settles. */
   app.post('/api/agentv3/queue/next', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     // Cheap short-circuit: a cached read tells us if there's anything to claim. When the queue is empty
     // or one is already running (the common case — most builds are not queued), return WITHOUT a
     // transaction/write, so the client-driven executor's per-settle probe costs ~nothing for non-queue users.
@@ -6896,7 +6952,7 @@ async function noteBuildOutcome(
    *  A failure PAUSES the queue client-side (the user decides retry/skip/stop) — recorded here honestly. */
   app.post('/api/agentv3/queue/complete', async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
     const ok = req.body?.ok === true;
     const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 300) : undefined;
     const queue = await mutateQueue(workspaceId, (q) => completeQueuedRunning(q, ok, note));
@@ -10583,7 +10639,7 @@ async function noteBuildOutcome(
     // Shown once per user per server instance (a gentle reminder may repeat after a cold start — fine);
     // the phrasing rotates by seed so repeats never read identically.
     if (callerIsFreeTier === true && powerSpecResolved.cheapOnly && userId && !weakNoticeShownFor.has(userId)) {
-      weakNoticeShownFor.add(userId);
+      weakNoticeShownFor.set(userId, true);
       const langCode = detectLanguageHint(prompt)?.code ?? null;
       send({ type: 'narration', agent: 'system', text: weakTierWelcomeNotice(langCode, userId.length + prompt.length), ts: Date.now() });
     }
@@ -11235,9 +11291,12 @@ async function noteBuildOutcome(
         // LIVE WEB GROUNDING (admin 2026-07-12): a plain chat question that needs current facts
         // (sports/news/prices/"latest"/"aaj") gets real search results folded in, so v5.0 answers from
         // today's data, not its training cutoff. Gated + bounded + best-effort — normal chat is untouched.
+        // A grounded reply carries TODAY's search results, so it is never served from the prompt-keyed cache
+        // below: a cached "aaj ka score" would be up to 15 minutes old (performance audit 2026-10-11).
+        let liveGrounded = false;
         try {
           const liveBlock = await liveSearchContext(prompt, { cheap: freeTierBuildActive || powerSpecResolved.cheapOnly });
-          if (liveBlock) chatPrompt = `${liveBlock}\n\n---\n${chatPrompt}`;
+          if (liveBlock) { chatPrompt = `${liveBlock}\n\n---\n${chatPrompt}`; liveGrounded = true; }
         } catch { /* live search is best-effort */ }
         // v5.0 used to answer a plain chat question ("kितni files hai?") completely blind — the chat
         // lane never loaded any workspace context. projectFileCount was already computed above for
@@ -11274,8 +11333,12 @@ async function noteBuildOutcome(
         // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
         // than reasoned around: the other conditions happen to cover it today, and that is exactly
         // the kind of coincidence that stops being true after an unrelated edit.
-        const cacheable = !answerThenOffer && !askUnrelated && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !answerSpreadsheet && !clarifyWhatToBuild && chatCacheEnabled();
-        const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
+        // `askFramework` and `liveGrounded` are excluded outright for the same reason (audit 2026-10-11): the
+        // first is a per-workspace steer, the second carries today's search results. The key is a SHA-256 of
+        // the prompt plus the model lane, so two different prompts can never share a reply (a 32-bit hash
+        // could) and a cheap-lane answer is never served to a paid turn.
+        const cacheable = !answerThenOffer && !askUnrelated && !askFramework && !liveGrounded && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !answerSpreadsheet && !clarifyWhatToBuild && chatCacheEnabled();
+        const cacheKey = cacheable ? chatReplyCacheKey(prompt, Boolean(freeTierBuildActive || powerSpecResolved.cheapOnly)) : '';
         let reply: string;
         // The spreadsheet this reply carries, when it made one — rides on the narration line and the
         // persisted turn, so the Download button is there live AND after the chat is reopened.
@@ -17124,8 +17187,7 @@ async function noteBuildOutcome(
       // turns "continue" from amnesia into a real resume. Best-effort — never blocks the build.
       try {
         const store = getConversationStore();
-        const recent = await store.listByUser(userId ?? 'anon', 10);
-        const prior = recent.find((r) => r.workspaceId === workspaceId);
+        const prior = await findWorkspaceConversation(store, userId, workspaceId);
         if (prior) {
           const full = await store.get(prior.id);
           // MEMORY FIX 6 (long sessions): a ROLLING summary — recent turns verbatim PLUS a condensed
@@ -23720,8 +23782,8 @@ async function noteBuildOutcome(
       // over a richer, already-saved transcript. Best-effort — a store failure never affects the build.
       try {
         const store = getConversationStore();
-        const recentForUser = await store.listByUser(userId ?? 'anon', 10);
-        if (needsFallbackConversationPersist(recentForUser, workspaceId, buildStartedAt)) {
+        const ownRecord = await findWorkspaceConversation(store, userId, workspaceId);
+        if (needsFallbackConversationPersist(ownRecord ? [ownRecord] : [], workspaceId, buildStartedAt)) {
           // UPSERT on the stable per-session id (shared helper — the ONE server write shape for
           // history): first turn creates the record, later turns append; a create race retries
           // as an append so a turn is never silently dropped.

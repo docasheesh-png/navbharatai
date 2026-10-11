@@ -13,6 +13,7 @@
 // Pattern mirrors WorkspaceFileStore: firebase-admin, VITEST-skip, best-effort, never throws.
 
 import * as admin from 'firebase-admin';
+import { BoundedCache } from '../lib/boundedCache';
 import { getServerDb } from '../lib/serverDb';
 
 const COLLECTION = 'workspace_manual_edits_v3';
@@ -42,12 +43,14 @@ function getDb(): admin.firestore.Firestore | null {
 }
 
 // Same-instance cache so the common case (record + consume on one instance) never needs a read.
-const _cache = new Map<string, Set<string>>();
-const _cacheAt = new Map<string, number>();
+// Bounded (audit 2026-10-11): one entry per workspace ever edited used to stay for the instance's life. The
+// durable doc is the source of truth; these are the same-instance fast path, so the oldest may leave.
+const _cache = new BoundedCache<string, Set<string>>({ maxEntries: 2_000 });
+const _cacheAt = new BoundedCache<string, number>({ maxEntries: 2_000 });
 // Every path the user has put in or edited from Code Studio — NEVER cleared by a build (autopsy
 // 4d538ca3: a page the user added was deleted by the model two turns later, and the pending set above
 // is emptied at the start of every build, so the next one would not have known it was theirs).
-const _userFilesCache = new Map<string, Set<string>>();
+const _userFilesCache = new BoundedCache<string, Set<string>>({ maxEntries: 2_000 });
 
 /** Record that the user MANUALLY edited these files in the IDE since the last build. Best-effort, never throws. */
 export async function recordManualEdits(workspaceId: string, paths: string[], at: number): Promise<void> {

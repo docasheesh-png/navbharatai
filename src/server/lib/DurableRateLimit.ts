@@ -1,4 +1,5 @@
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes durable rate-limit docs (server-only).
+import * as admin from 'firebase-admin';
 import { doc, getDoc, setDoc, getServerDb as getDb } from './serverDb';
 
 // SECURITY Phase 1.4 (admin-approved 2026-07-07) — DURABLE rate limiting.
@@ -36,12 +37,48 @@ export interface DurableRateResult {
 }
 
 /**
- * Atomically check + consume one unit of a durable, windowed rate bucket. Returns allowed=false
- * (without incrementing) when the limit is already reached. FAIL-OPEN: no DB / any error / a missing
+ * The decision AFTER an atomic increment: allowed while the incremented count is within the limit. PURE.
+ *
+ * Paired with `consumeDurableRate`, which increments FIRST and reads the result. Two requests can no longer both
+ * read "count = limit - 1" and both pass, which is what the old read-then-write did (audit 2026-10-11, D9): every
+ * concurrent burst under-counted, on the very limits — build, workspace, OTP — that exist for bursts. At the exact
+ * boundary a burst may now be refused one request early; it is never let through one request late.
+ */
+export function decideAfterIncrement(countAfter: number, limit: number): boolean {
+  return countAfter <= limit;
+}
+
+/** When a window's counter may be deleted: one day after the window ends (a Firestore TTL policy reads it). PURE. */
+export function windowExpiry(now: number, windowMs: number): Date {
+  const w = Math.max(1, windowMs);
+  return new Date((Math.floor(now / w) + 1) * w + 24 * 60 * 60 * 1000);
+}
+
+/** The two storage calls the limiter needs — injectable so the concurrency rule is testable without Firestore. */
+export interface RateCounterStore {
+  /** Add one to the window's counter and return the count AFTER the add. Atomic per document. */
+  incrementAndRead(): Promise<number>;
+}
+
+/** Consume one unit through a store. FAIL-OPEN on any store error, like the rest of this module. */
+export async function consumeWithStore(store: RateCounterStore, limit: number): Promise<DurableRateResult> {
+  try {
+    const used = await store.incrementAndRead();
+    return { allowed: decideAfterIncrement(used, limit), used, limit };
+  } catch {
+    return { allowed: true, used: 0, limit }; // fail-open — never block on an infra hiccup
+  }
+}
+
+/**
+ * Atomically consume one unit of a durable, windowed rate bucket: an `increment(1)` (atomic on the document,
+ * whatever else is incrementing it) followed by a read of the result. FAIL-OPEN: no DB / any error / a missing
  * key resolves to allowed=true, so infra problems never block a real request.
  *
- * `now` is injectable for tests; production passes the real clock at the call site (Date.now is not
- * available inside pure helpers here, but this function is the impure boundary and receives it).
+ * Each counter carries `expireAt` (a day after its window), so a Firestore TTL policy on
+ * `rate_limits_v1.expireAt` deletes old windows; without that policy the collection only grows.
+ *
+ * `now` is injectable for tests; production passes the real clock at the call site.
  */
 export async function consumeDurableRate(
   name: string,
@@ -54,13 +91,15 @@ export async function consumeDurableRate(
   const db = getDb() as any;
   if (!db) return { allowed: true, used: 0, limit };
   const ref = doc(db, COLLECTION, windowKey(name, key, now, windowMs));
-  try {
-    const snap = await getDoc(ref);
-    const used = snap.exists() ? Number(snap.data()?.count || 0) : 0;
-    if (!decideRate(used, limit)) return { allowed: false, used, limit };
-    await setDoc(ref, { name, key, count: used + 1, windowMs, updatedAt: now }, { merge: true });
-    return { allowed: true, used: used + 1, limit };
-  } catch {
-    return { allowed: true, used: 0, limit }; // fail-open — never block on an infra hiccup
-  }
+  return consumeWithStore({
+    async incrementAndRead() {
+      await setDoc(ref, {
+        name, key, windowMs, updatedAt: now,
+        count: admin.firestore.FieldValue.increment(1),
+        expireAt: admin.firestore.Timestamp.fromDate(windowExpiry(now, windowMs)),
+      }, { merge: true });
+      const snap = await getDoc(ref);
+      return Number(snap.data()?.count || 0);
+    },
+  }, limit);
 }

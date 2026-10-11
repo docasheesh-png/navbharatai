@@ -1,7 +1,8 @@
 import type { Express, Request, Response } from 'express';
 import { errorTracker } from '../observability/ErrorTracker';
-import { recordAnalyticsEvent, getFunnel, sanitizeEventKey } from '../lib/AnalyticsPipeline';
+import { recordAnalyticsEvent, getFunnel } from '../lib/AnalyticsPipeline';
 import { sendSafeError } from '../lib/httpError';
+import { requireAdmin } from '../lib/adminAuth';
 import rateLimit from 'express-rate-limit';
 import { sanitizeText, sanitizeUrl } from '../../lib/observability/sanitize';
 
@@ -31,6 +32,41 @@ const clientErrorLimiter = rateLimit({
   legacyHeaders: false,
   handler: (_req, res) => { res.status(204).end(); },
 });
+
+/**
+ * Page views, web vitals and product events from one address (audit 2026-10-11, D8). A real session sends a
+ * handful a minute; 120 is far above that and far below a flood. Over it: a quiet 204, like the error sink —
+ * the browser ignores the answer either way, and a 429 would only teach a script where the limit is.
+ */
+const analyticsLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: false,
+  legacyHeaders: false,
+  handler: (_req, res) => { res.status(204).end(); },
+});
+
+export const ANALYTICS_LOG_MAX = 2_000;
+
+/**
+ * The one log line per analytics event, bounded in size whatever the body holds. PURE.
+ *
+ * It carries no `userId` or `sessionId` (Q-783, admin 2026-10-11: stop keeping a per-person event trail nothing
+ * reads). The line exists for the web-vitals and cold-start samples in `props`, which need no person.
+ */
+export function analyticsLogLine(b: { event?: unknown; props?: unknown; ts?: unknown }): string {
+  let line: string;
+  try {
+    line = JSON.stringify({
+      event: sanitizeText(b.event, 80),
+      props: b.props,
+      ts: typeof b.ts === 'number' ? b.ts : Date.now(),
+    }) ?? '';
+  } catch {
+    line = JSON.stringify({ event: sanitizeText(b.event, 80), props: '[unserializable]' });
+  }
+  return line.length > ANALYTICS_LOG_MAX ? `${line.slice(0, ANALYTICS_LOG_MAX)}…[truncated]` : line;
+}
 
 /**
  * Registers self-contained telemetry/analysis routes extracted from the
@@ -101,16 +137,15 @@ export function registerTelemetryRoutes(app: Express): void {
   });
 
   // User analytics event ingestion endpoint
-  app.post('/api/analytics/event', (req: Request, res: Response) => {
+  //
+  // 🔒 Unauthenticated and called on every page view, so it is limited per address (`analyticsLimiter`, a quiet
+  // 204 over it) and its log line is bounded: `props` is untrusted and is the only place web vitals and the
+  // cold-start sample land (`main.tsx`), so it is kept — but cut to `ANALYTICS_LOG_MAX` characters.
+  app.post('/api/analytics/event', analyticsLimiter, (req: Request, res: Response) => {
     try {
       const { event, props, ts } = req.body || {};
       if (!event) return res.status(400).json({ error: 'event required' });
-      // 🔒 NO PERSON IN THE LOG EITHER (Q-783 sibling, 2026-10-11). This line used to print every event
-      // with the caller's `userId` and `sessionId` — the same per-person stream the admin chose to stop
-      // keeping in `analytics_events`, kept a second time in Cloud Logging. The person is dropped; the
-      // event and its `props` stay, because they are the only place a web-vital or cold-start NUMBER
-      // lands (the day rollup counts events, it does not keep values).
-      console.log('[ANALYTICS]', JSON.stringify({ event: sanitizeEventKey(String(event)), props, ts: ts || Date.now() }));
+      console.log('[ANALYTICS]', analyticsLogLine({ event, props, ts }));
       // P-MON.1 — server-side aggregation: fold into the daily rollup + activation funnel. Best-effort.
       recordAnalyticsEvent({ event, ts }).catch(() => {});
       res.status(204).end();
@@ -119,14 +154,17 @@ export function registerTelemetryRoutes(app: Express): void {
     }
   });
 
-  // P-MON.1 — activation funnel (signup → build → deploy → pay) over the last N days. Aggregate counts
-  // only (no PII), so it is safe as a lightweight admin/analytics read. `?days=30` (1..365).
-  app.get('/api/analytics/funnel', async (req: Request, res: Response) => {
+  // P-MON.1 — activation funnel (signup → build → deploy → pay) over the last N days. `?days=30` (1..365).
+  //
+  // 🔒 ADMIN ONLY since 2026-10-11 (audit; Q-162 decided it when this file was touched). Aggregate counts hold no
+  // person, but they are the business's own signup-to-payment conversion — nothing a visitor should be able to
+  // read by URL. And a failure is a 503, never a 200 of zeros that reads as "nobody signed up".
+  app.get('/api/analytics/funnel', requireAdmin, async (req: Request, res: Response) => {
     try {
       const days = Number(req.query.days);
       res.json(await getFunnel(Number.isFinite(days) && days > 0 ? days : 30));
     } catch {
-      res.status(200).json({ stages: { signup: 0, build: 0, deploy: 0, pay: 0 }, conversion: { signup: 1, build: 0, deploy: 0, pay: 0 } });
+      res.status(503).json({ error: 'The funnel could not be read. Try again in a moment.' });
     }
   });
 }

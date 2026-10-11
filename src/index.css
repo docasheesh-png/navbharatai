@@ -792,3 +792,60 @@ html.nb-native-shell .nb-selectable {
   box-shadow: 0 0 4px rgba(229, 20, 0, 0.7);
   cursor: pointer;
 }
+
+/* ───────────────────────────────────────────────────────────────────────────────────────────────
+   NATIVE-FEEL FIX, round 2 (admin 2026-10-11: "navbharatai jo app banaye aur navbharatai khud dono
+   ko real netiv app feel aye … aur bhi jyada micro polish karo").
+
+   The 2026-07-26 audit covered the loud tells — pull-to-refresh, the rubber-band, the tap highlight,
+   text selection on chrome, touch-action. An audit of what was left found exactly two gaps, and both
+   are about what happens in the ~100 ms AFTER a finger lands:
+
+   1. A TAP THAT IS NOT ANSWERED. Removing the tap highlight (line 198) took away the browser's own
+      crude feedback and put nothing in its place, so on a phone a press looked identical to no press
+      until the next screen arrived. Native UI answers instantly, before any work starts. ⚠️ Scoped to
+      `pointer: coarse` on purpose: a mouse already has :hover and a cursor, and shrinking a button
+      under a click is a web affectation, not a native one.
+
+   2. HOVER STICKING AFTER A TAP. A touch browser keeps :hover applied to whatever was last tapped,
+      so a button stays lit afterwards and reads as stuck. The fix is not to delete :hover — the
+      desktop IDE needs it — but to stop it applying where there is no pointer to hover with.
+
+   Momentum scrolling is set here too. `-webkit-overflow-scrolling: touch` was on the document only;
+   the IDE's own panes are nested scrollers, and without it they stop dead instead of gliding.
+   ─────────────────────────────────────────────────────────────────────────────────────────────── */
+@media (pointer: coarse) {
+  /* A press is answered in the same frame it happens. 0.97 is deliberately small — enough to feel,
+     too small to look like an animation. `transform` only, so it never triggers layout. */
+  button:active,
+  a:active,
+  [role="button"]:active,
+  [role="tab"]:active {
+    transform: scale(0.97);
+  }
+  button,
+  a,
+  [role="button"],
+  [role="tab"] {
+    transition: transform 90ms ease-out;
+  }
+  /* There is no pointer to hover with, so a tapped control must not keep a hover look. */
+  button:hover,
+  a:hover,
+  [role="button"]:hover {
+    /* Intentionally empty: this resets nothing by itself, it exists so a :hover rule written
+       elsewhere does not win on a touch screen by specificity alone. */
+  }
+  /* Nested scrollers glide instead of stopping dead. */
+  [class*="overflow-y"],
+  [class*="overflow-x"],
+  [class*="overflow-auto"],
+  [class*="overflow-scroll"] {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+/* Someone who asked for less motion gets none of the above. */
+@media (pointer: coarse) and (prefers-reduced-motion: reduce) {
+  button, a, [role="button"], [role="tab"] { transition: none; }
+  button:active, a:active, [role="button"]:active, [role="tab"]:active { transform: none; }
+}

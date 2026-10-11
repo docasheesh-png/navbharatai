@@ -166,7 +166,7 @@ import { OtherAIView } from './components/home/OtherAIView';
 import { trackEvent } from './lib/analytics';
 import { makeWorkspaceSyncer, type WorkspaceSyncer } from './lib/workspaceSync';
 import { saveFile, loadAllFiles, clearWorkspace, deleteFile as storageDeleteFile } from './lib/storage';
-import { getAgentV3WorkspaceId } from './lib/agentv3Workspace';
+import { getAgentV3WorkspaceId, normalizeUid } from './lib/agentv3Workspace';
 import { chunkFilesForSync, totalFilesBytes } from './lib/chunkFilesForSync';
 import { type ApnapanProfile, loadApnapanProfile, saveApnapanProfile, updateApnapanProfile } from './lib/apnapanEngine';
 import { isZipFile, isTextFile, classifyZipSize } from './lib/uploadClassify';
@@ -4174,6 +4174,11 @@ export default function App() {
               setCurrentProSessionId(sid);
               setV3Resume({ sessionId: sid, messages: [], nonce: Date.now() });
               v3ResumeInFlightRef.current = true;
+              // Time Machine names its current app from the builder's workspace (Q-128), and the builder
+              // may not be mounted to report the switch — so the switch says it here. The old app's
+              // preview is dropped with it: it belongs to the app we just left.
+              const switchedWs = sid.startsWith('agentv3-') ? sid : `agentv3-${normalizeUid(user?.uid)}-${sid}`;
+              setV3Preview({ workspaceId: switchedWs });
             }}
             problems={problems}
             activeView={activeView}

@@ -6,6 +6,7 @@ import type { AgentMode } from '../../types';
 import type { ThemeMode } from '../../lib/theme';
 import type { PreviewProblem } from '../../lib/previewProblems';
 import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
+import { historyKeyFor } from '../../lib/versionRestoreClient';
 import { resolveAppSource, hasAnalysableApp } from '../../lib/workspaceSource';
 import { hasConflictMarkers } from '../../lib/merge3';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -662,18 +663,31 @@ export function ViewPanels({
       ))}
 
       {/* Phase 9 — Code Versioning */}
-      {activeView === 'versioning' && (
-        <div className="flex-1 h-full overflow-hidden">
-          <CodeVersioning
-            generatedCode={generatedCode}
-            files={files as Record<string, string>}
-            sessionId={currentProSessionId}
-            onRestore={(c: string) => setGeneratedCode(c)}
-            onRestoreFiles={(f: any) => { setFiles(f as any); updatePreview(f as any); setIsAppBuilt(true); setHasGeneratedCode(true); addToast('Version restored ✓', 'success'); }}
-            onSwitchApp={onSwitchApp}
-          />
-        </div>
-      )}
+      {activeView === 'versioning' && (() => {
+        // 🔒 THE CURRENT APP IS THE BUILDER'S APP (Q-128). This used to be `currentProSessionId` — App's
+        // legacy `pro-<timestamp>` id — while the builder keeps the app under its sticky v5 session, so the
+        // app being worked on was listed as "another app" and its versions sat behind "Open this app".
+        // The builder's live workspace wins; with the builder never opened, the same sticky session it
+        // would open. `historyKeyFor` is the writer's own key rule (restorePointKey), tested case for case.
+        const timeMachineWorkspace = v3Preview?.workspaceId || getAgentV3WorkspaceId(user?.uid);
+        return (
+          <div className="flex-1 h-full overflow-hidden">
+            <CodeVersioning
+              generatedCode={generatedCode}
+              files={files as Record<string, string>}
+              sessionId={historyKeyFor(timeMachineWorkspace, user?.uid)}
+              workspaceId={timeMachineWorkspace}
+              userId={user?.uid ?? null}
+              email={user?.email ?? null}
+              onRestore={(c: string) => setGeneratedCode(c)}
+              // The server has already put the version back into the app; this brings the screen to it.
+              // No toast: the timeline itself says what happened, including when a second press is needed.
+              onRestoreFiles={(f: Record<string, string>) => { setFiles(f as any); updatePreview(f as any); setIsAppBuilt(true); setHasGeneratedCode(true); }}
+              onSwitchApp={onSwitchApp}
+            />
+          </div>
+        );
+      })()}
 
       {/* Phase 9 — API Marketplace */}
       {activeView === 'apimarket' && (

@@ -176,7 +176,7 @@ import { getServerDb as getDb } from '../lib/serverDb';
 import { randomUUID } from 'crypto';
 import { processOwnerId } from '../lib/jobLease';
 import {
-  claimWorkspaceBuild, renewWorkspaceBuild, releaseWorkspaceBuild, requestWorkspaceBuildStop,
+  claimWorkspaceBuild, renewWorkspaceBuild, releaseWorkspaceBuild, requestWorkspaceBuildStop, workspaceBuildIsLive,
   LEASE_HEARTBEAT_MS, BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
 } from '../AgentV3/workspaceBuildLease';
 import { getConnection } from '../lib/supabaseConnectionStore';
@@ -256,7 +256,7 @@ import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
-import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage, chooseRestoreBase, greenRestoreTurnStartEnabled, attemptIsHonoured } from '../AgentV3/GreenGuard';
+import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, removablePaths, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage, chooseRestoreBase, greenRestoreTurnStartEnabled, attemptIsHonoured } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -604,7 +604,9 @@ import {
   deleteWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
-import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity } from '../AgentV3/restorePoint';
+import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity, restorePointKey } from '../AgentV3/restorePoint';
+import { buildHistoryStore } from '../project/BuildHistoryStore';
+import { versionRestorePlan, versionRestoreMessage, beforeRestoreVersionName, VERSION_RESTORE_BUILD_RUNNING, type SandboxRestoreState } from '../project/versionRestore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
@@ -9974,6 +9976,107 @@ async function noteBuildOutcome(
       res.json({ files: [], count: 0, restored: false, source: 'none' });
     } catch (err: any) {
       res.status(500).json({ error: toSafeClientMessage(err, 'Failed to restore the workspace files.') });
+    }
+  });
+
+  // GO BACK TO A SAVED VERSION — the ONE restore the Time Machine and the builder's History tab both call
+  // (Q-128, admin 2026-10-11: "one timeline — Time Machine is the one version history"). The version replaces
+  // the app's SAVED file set (what the next build, a reload and another device all read) and the running copy,
+  // after the app as it stood is saved as a version first, so the restore can be undone from the same list.
+  // It used to happen in the browser alone: "Version restored ✓" while the next build carried on from the
+  // newer files (versionRestore.ts has the whole story). Ownership-checked; refused while a build runs.
+  app.post('/api/agentv3/restore-version', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: ENGINE_DISABLED });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const versionId = typeof req.body?.versionId === 'string' ? req.body.versionId.trim().slice(0, 120) : '';
+    if (!workspaceId || !versionId) {
+      res.status(400).json({ error: 'workspaceId and versionId are required.' });
+      return;
+    }
+    const verifiedUid = await verifyFirebaseToken(req);
+    if (!verifiedWorkspaceReadOk(verifiedUid, workspaceId)) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    // A build writes this app's files and saves them when it ends — a restore underneath it would be
+    // overwritten, or leave a mix of both. Checked here and on every instance (the build lease).
+    if (isBuildRunningFor(workspaceId) || (await workspaceBuildIsLive(getDb() as unknown as BuildLeaseStore, workspaceId)) === true) {
+      res.status(409).json({ error: VERSION_RESTORE_BUILD_RUNNING });
+      return;
+    }
+    try {
+      const historyKey = restorePointKey(workspaceId, verifiedUid);
+      const version = await buildHistoryStore.get(historyKey, versionId);
+      if (!version) {
+        res.status(404).json({ error: 'That version was not found — nothing was changed.' });
+        return;
+      }
+      const current = await loadWorkspaceFiles(workspaceId);
+      const plan = versionRestorePlan({ versionFiles: version.files, omittedFileCount: version.omittedFileCount, omittedPaths: version.omittedPaths, current });
+      if (!plan.ok) {
+        res.status(409).json({ error: 'That version could not be read, so nothing was changed.' });
+        return;
+      }
+      // The app as it stands is saved FIRST. If that copy cannot be made, nothing is changed: going back
+      // must never cost the user the app they have now.
+      let savedBefore = false;
+      if (!plan.noChange && Object.keys(current).length > 0) {
+        savedBefore = await buildHistoryStore.save(historyKey, {
+          commitMessage: beforeRestoreVersionName(version.commitMessage),
+          fileCount: Object.keys(current).length,
+          files: current,
+          isEdit: true,
+          tier: 'before-restore',
+          ok: true,
+        });
+        if (!savedBefore) {
+          res.status(503).json({ error: 'Your current app could not be saved first, so nothing was changed. Please try again.' });
+          return;
+        }
+      }
+      if (!plan.noChange) {
+        const saved = await saveWorkspaceFiles(workspaceId, plan.target, { mode: 'replace' });
+        if (saved !== 'saved') {
+          res.status(503).json({ error: 'Your app could not be put back to that version, so it is unchanged. Please try again.' });
+          return;
+        }
+      }
+      // The RUNNING copy goes to the same state — run even when the saved app already matched, so pressing
+      // Restore again finishes a restore whose first sandbox step failed. A copy left on the newer files is
+      // what the next build would start from (the File Guardian only re-adds MISSING files).
+      let sandbox: SandboxRestoreState = 'not-updated';
+      try {
+        const actuator = buildActuator();
+        try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse an existing sandbox */ }
+        const live = (await collectWorkspaceFiles(actuator, workspaceId)).files;
+        const sb = restorePlan(plan.target, live);
+        const { skipped } = await runInPass('version-restore', () => writeWorkspaceFiles(actuator, workspaceId, sb.write));
+        const removable = removablePaths(sb.remove);
+        let removed = true;
+        if (removable.length > 0) {
+          const r = await withTimeout(actuator.runCommand(workspaceId, buildRemoveCommand(removable, removable.length)), 20_000, 'version-restore-remove');
+          removed = r.exitCode === 0;
+        }
+        sandbox = skipped.length === 0 && removed && removable.length === sb.remove.length ? 'updated' : 'not-updated';
+      } catch { sandbox = 'not-updated'; }
+      res.json({
+        ok: true,
+        files: plan.target,
+        restored: Object.keys(plan.target).length,
+        removed: plan.remove.length,
+        keptUnknown: plan.keptUnknown,
+        savedBefore,
+        sandbox,
+        noChange: plan.noChange,
+        message: versionRestoreMessage({ name: version.commitMessage, savedBefore, keptUnknown: plan.keptUnknown, sandbox, noChange: plan.noChange }),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: toSafeClientMessage(err, 'Could not go back to that version. Please try again.') });
     }
   });
 

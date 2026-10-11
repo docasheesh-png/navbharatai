@@ -106,16 +106,11 @@ describe('Build routes — /api/guider/grade', () => {
 });
 
 describe('Build routes — the legacy /api/build engine is RETIRED (2026-09-25)', () => {
-  it.each(['POST /api/build', 'POST /api/build-stream'])('%s answers 410 without running anything', async (route) => {
+  // The 410 tombstones were deleted on 2026-10-11 (Q-162): nothing called them, and no bundled phone app can.
+  it.each(['POST /api/build', 'POST /api/build-stream'])('%s is not registered at all', async (route) => {
     const register = await importBuildRoutes();
     const routes = captureRoutes(register);
-    const handler = routes.get(route);
-    expect(handler).toBeDefined();
-    const req = mockReq({ body: { prompt: 'build a todo app' } });
-    const res = mockRes();
-    await handler!(req, res);
-    expect(res.statusCode).toBe(410);
-    expect(res.body?.error).toMatch(/retired/i);
+    expect(routes.get(route)).toBeUndefined();
   });
 
   it('no model client, engine or paid fallback chain is imported by the route file any more', () => {

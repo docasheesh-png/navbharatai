@@ -415,6 +415,14 @@ export function attemptRestoredMessage(fileCount: number): string {
 const SAFE_REL_PATH = /^(?!.*\.\.)[A-Za-z0-9._][A-Za-z0-9._\-/]{0,200}$/;
 
 /**
+ * The paths `buildRemoveCommand` will actually remove. A caller that must say whether a restore was COMPLETE
+ * compares this with what it asked for — a path dropped here stays on disk (Q-128, versionRestore.ts). PURE.
+ */
+export function removablePaths(paths: readonly string[], max = 200): string[] {
+  return (paths || []).filter((p) => typeof p === 'string' && SAFE_REL_PATH.test(p)).slice(0, max);
+}
+
+/**
  * The shell command that removes the files a failed attempt added, or '' when there is nothing safe
  * to remove.
  *
@@ -426,7 +434,7 @@ const SAFE_REL_PATH = /^(?!.*\.\.)[A-Za-z0-9._][A-Za-z0-9._\-/]{0,200}$/;
  * restore is not worth inventing a command-injection surface for.
  */
 export function buildRemoveCommand(paths: readonly string[], max = 200): string {
-  const safe = (paths || []).filter((p) => typeof p === 'string' && SAFE_REL_PATH.test(p)).slice(0, max);
+  const safe = removablePaths(paths, max);
   if (safe.length === 0) return '';
   return `rm -f -- ${safe.map((p) => `'${p}'`).join(' ')}`;
 }

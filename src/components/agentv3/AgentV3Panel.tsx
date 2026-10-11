@@ -53,6 +53,8 @@ import { type FeaturePlanView, featureConfirmDisabled, setFeatureConfirmDisabled
 import { isBuildBusyError, shouldRestoreFinishedBuild } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSessionsByQuery, partitionPinnedSessions } from './agentV3History';
 import { HISTORY_TAB_NOTE } from './versionHelp';
+import { VersionTimeline } from '../versions/VersionTimeline';
+import { historyKeyFor } from '../../lib/versionRestoreClient';
 import { toggleCompareSelection, compareOrder, type CheckpointDiffResponse } from './checkpointCompare';
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import type { ReportPickerItem } from '../../lib/reportPicker';
@@ -3444,6 +3446,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // writes the durably-saved files back in), then show the real file list. Honest status, no fake.
   const [restoring, setRestoring] = useState(false);
   const [restoreMsg, setRestoreMsg] = useState<string>('');
+  /**
+   * The server has put a saved version back into this app (Q-128). Bring every view to it: the panel's file
+   * list (read back from the workspace, so it shows what is really there), the cached file contents, and the
+   * main app's Files / Code Studio.
+   */
+  const handleVersionRestored = (restored: Record<string, string>) => {
+    setWorkspaceFiles(restored);
+    onFilesSync?.(restored);
+    void restoreAllFiles();
+  };
+
   const handleRestoreAll = async () => {
     if (restoring || !state.workspaceId) return;
     setRestoring(true);
@@ -4290,7 +4303,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           {/* B1 — the user's OWN app's runtime log. Distinct from Terminal, which is the AI's build
               log: this is what THEIR server printed. It polls only while this tab is open (billed VM). */}
           <TabPill active={showWorkspace && tab === 'logs'} onClick={() => openTab('logs')} icon={<ScrollText className="w-3.5 h-3.5" />}>App Logs</TabPill>
-          <TabPill active={showWorkspace && tab === 'history'} onClick={() => openTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({allCheckpoints.length})</TabPill>
+          <TabPill active={showWorkspace && tab === 'history'} onClick={() => openTab('history')} icon={<History className="w-3.5 h-3.5" />}>History</TabPill>
           {/* Report to admin (admin 2026-07-29): the report itself stays admin-only — the user submits
               it and never sees the content. Since 2026-08-04 clicking it first asks WHICH build, so a
               problem from an earlier edit is reportable instead of always sending the newest build. */}
@@ -5949,6 +5962,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <div className="space-y-2">
                   {/* What the app does, what is open, what each change did (Change Engine memory). */}
                   {state.workspaceId && <AppMemoryCard workspaceId={state.workspaceId} userId={userId ?? undefined} email={email ?? undefined} refreshKey={running} />}
+                  {/* 🔒 THE ONE TIMELINE (Q-128, admin 2026-10-11): the app's saved versions, the SAME list and
+                      the same Restore as Time Machine — `VersionTimeline` is one component rendered by both. A
+                      build that finishes re-reads it (`refreshKey`), so its new version appears here at once. */}
+                  {state.workspaceId && (
+                    <VersionTimeline
+                      historyKey={historyKeyFor(state.workspaceId, userId)}
+                      workspaceId={running ? undefined : state.workspaceId}
+                      userId={userId ?? null}
+                      email={email ?? null}
+                      refreshKey={running}
+                      dense
+                      onRestored={handleVersionRestored}
+                    />
+                  )}
+                  <p className="mb-2 text-[11px] leading-relaxed text-muted">{HISTORY_TAB_NOTE}</p>
+                  <details className="rounded border border-line px-2 py-1.5">
+                  <summary className="cursor-pointer text-[11px] text-muted select-none">Steps inside this session ({allCheckpoints.length}) — look and compare</summary>
+                  <div className="mt-2 space-y-2">
                   {/* Restore the WHOLE project at once — a real restore (files written back into the
                       workspace), available even when there are no in-session checkpoints (e.g. after a reload). */}
                   {state.workspaceId && (
@@ -5965,7 +5996,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       {restoreMsg && <span className="text-[11px] text-muted">{restoreMsg}</span>}
                     </div>
                   )}
-                  <p className="mb-2 text-[11px] leading-relaxed text-muted">{HISTORY_TAB_NOTE}</p>
                   {gitStatus && (
                     <div className="mb-2 flex items-center gap-2 text-[11px] px-2 py-1 rounded bg-raised border border-line">
                       <GitBranch className="w-3.5 h-3.5 text-faint shrink-0" />
@@ -6105,6 +6135,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                       ))}
                     </ul>
                   )}
+                  </div>
+                  </details>
                 </div>
               )}
             </div>

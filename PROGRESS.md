@@ -94008,3 +94008,18 @@ to it. Recorded as a deliberate non-item, not an omission.
   - Measured on 66,309 test strings at both complexity answers: Project Mode's decision changed for none. APP_SCOPE's line now says LARGE for 14 strings that already went to Project Mode, so the report stops calling them one-shot apps.
   - Honest limit: the eed79815 game prompt is not in the repo. A 40-part game whose subject is not a small app is large under the one verdict, so a spec like it is still split. The change guarantees that the two answers agree; it does not keep games out of Project Mode.
   - Test: `tests/oneScopeVerdictDecidesTheSize.test.ts`, with three guards reverted and seen to fail. Five route pins were updated to the one-verdict wiring.
+- **Q-128 (admin decision 2026-10-11: "one timeline — Time Machine is the one version history; the History tab becomes a view of it"):**
+  - One component, `src/components/versions/VersionTimeline.tsx`, is rendered by Time Machine and by the builder's History tab. The session's git steps (preview, compare, rename) stay, folded below the timeline.
+  - **Defect found while building it:** Time Machine's Restore only ran `setFiles` and `updatePreview` in the browser. The saved app, which the next build reads, stayed on the newer files, so "Version restored ✓" described one tab's memory. Class: a restore that changes the view, not the thing viewed.
+  - Fix: one server route, `POST /api/agentv3/restore-version`, with `versionRestore.ts` doing the planning:
+    - it is ownership-checked, and refused while a build runs (this instance, plus the cross-instance lease via `workspaceBuildIsLive`);
+    - the app as it stands is saved as a version first ("Before going back to …"); if that copy fails, nothing is changed;
+    - the saved file set is replaced, not merged, using GreenGuard's `restorePlan` (no hybrid);
+    - the running sandbox is brought to the same state, because the File Guardian only re-adds missing files. If that step fails, the user is told to press Restore again, which is safe to repeat.
+  - Siblings fixed in the same change:
+    - Time Machine's "current app" was App's legacy `pro-<timestamp>` id, not the builder's sticky v5 session. The builder's workspace is now used, through `historyKeyFor`, which is tested case for case against `restorePointKey`. An app switch now reports itself.
+    - "Save this version" saved the screen's copy, which could belong to the app the user had just switched from. It now saves the app's own files server-side (`fromWorkspace`).
+    - A version now records which files it could not keep (`omittedPaths`), so a restore never deletes them. For older versions, files are kept and the count is stated.
+  - Q-162, decided because `routes/build.ts` was touched: the 410 tombstones `POST /api/build` and `POST /api/build-stream` are deleted. Nothing called them, and their last client was gone before any Play production release.
+  - Not a third timeline: `project/VersionStore.ts` is never constructed by live code.
+  - Test: `tests/oneVersionTimeline.test.ts`, with four guards reverted and seen to fail. One of those guards first passed when reverted, because no test case put a bad uid's prefix in the workspace id; that case was added.

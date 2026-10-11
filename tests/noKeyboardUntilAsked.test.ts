@@ -118,7 +118,8 @@ describe('the sibling: a panel you NAVIGATE to must not open the keyboard either
     // `autoFocus` there is correct, and this assertion is what says so out loud.
     for (const [file, gate] of [
       ['src/components/panels/FilesPanel.tsx', '{showNewFile && ('],
-      ['src/components/ide/CodeVersioning.tsx', '{showSaveName ? ('],
+      // Time Machine's save field moved into the one timeline both screens render (Q-128).
+      ['src/components/versions/VersionTimeline.tsx', '{showSaveName ? ('],
       ['src/components/ide/LocalizationManager.tsx', '{showAddKey && ('],
       ['src/components/chat/ChatToolbar.tsx', '{searchOpen && showActions && ('],
     ] as const) {

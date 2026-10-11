@@ -14,4 +14,11 @@ describe('shared chat-bubble tones', () => {
     expect(panel).toContain('${USER_BUBBLE_TONE} rounded-2xl rounded-br-sm');
     expect(panel).toContain('${ASSISTANT_BUBBLE_TONE} rounded-2xl rounded-bl-sm');
   });
+
+  it('the IDE chat bubbles read their tone from the shared module too', () => {
+    const chat = readFileSync('src/components/ide/AIChat.tsx', 'utf8');
+    expect(chat).toContain("from '../chat/bubbleTone'");
+    expect(chat).toContain('`${USER_BUBBLE_TONE} rounded-tr-none`');
+    expect(chat).toContain('`${ASSISTANT_BUBBLE_TONE} border border-line rounded-tl-none');
+  });
 });

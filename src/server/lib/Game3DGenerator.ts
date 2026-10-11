@@ -2624,11 +2624,13 @@ export const MODEL_FORWARD = new THREE.Vector3(0, 0, 1);
  * vehicle here is what lets the default itself be right.
  */
 const vehicleByPosition = new WeakMap<THREE.Vector3, THREE.Object3D>();
-let vehicleListener: ((vehicle: THREE.Object3D) => void) | null = null;
+/** Told about each vehicle, with the axis it was driven by (null when it was only given a state). */
+export type VehicleListener = (vehicle: THREE.Object3D, axis: { x: number; y: number } | null) => void;
+let vehicleListener: VehicleListener | null = null;
 
-function noteVehicle(vehicle: THREE.Object3D): void {
+function noteVehicle(vehicle: THREE.Object3D, axis: { x: number; y: number } | null): void {
   if (vehicleByPosition.get(vehicle.position) !== vehicle) vehicleByPosition.set(vehicle.position, vehicle);
-  vehicleListener?.(vehicle);
+  vehicleListener?.(vehicle, axis);
 }
 
 /** The vehicle whose LIVE position vector this is (\`car.position\` → car), or null — a clone is not it. */
@@ -2643,10 +2645,11 @@ export function isVehicle(object: THREE.Object3D): boolean {
 
 /**
  * Run \`fn\`, telling \`listener\` about every vehicle createVehicleState() / driveVehicle() is handed while
- * it runs. The game shell wraps the game's setup() and update() in this, so it knows a driving game
- * from its first frame. Nested calls restore the outer listener.
+ * it runs, and the axis driveVehicle() drove it with. The game shell wraps the game's setup() and
+ * update() in this, so it knows which vehicle the PLAYER drives (the one driven by its own input) without
+ * being told. Nested calls restore the outer listener.
  */
-export function watchVehicles<T>(listener: (vehicle: THREE.Object3D) => void, fn: () => T): T {
+export function watchVehicles<T>(listener: VehicleListener, fn: () => T): T {
   const outer = vehicleListener;
   vehicleListener = listener;
   try { return fn(); } finally { vehicleListener = outer; }
@@ -2674,7 +2677,7 @@ export interface VehicleState { speed: number; heading: number }
  * start screen where the game has not begun driving it yet.
  */
 export function createVehicleState(vehicle: THREE.Object3D, tuning: VehicleTuning = {}): VehicleState {
-  noteVehicle(vehicle);
+  noteVehicle(vehicle, null);
   return { speed: tuning.startSpeed ?? 5, heading: vehicle.rotation.y };
 }
 
@@ -2725,7 +2728,7 @@ export function driveVehicle(
   vehicle.position.x += Math.sin(heading) * speed * dt;
   vehicle.position.z += Math.cos(heading) * speed * dt;
   rollWheels(vehicle, speed, dt);   // every wheel of a car, a bike or a cycle — a no-op for a horse
-  noteVehicle(vehicle);
+  noteVehicle(vehicle, axis);
   return { speed, heading };
 }
 

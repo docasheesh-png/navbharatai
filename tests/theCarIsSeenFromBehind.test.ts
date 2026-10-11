@@ -251,9 +251,14 @@ describe('the rest of the rig, after the fix', () => {
 });
 
 // ── The game shell: the path the admin's games actually take ─────────────────────────────────────────
-interface ShellRun { game: any; car: THREE.Group; container: FakeEl }
+// The car starts PARKED, the way a race sits behind its "Start Race" screen: the game's update() drives it
+// only once `race.go` is set. That matters for the proof — a car already moving drives AWAY from a camera
+// left at the spawn point, which then ends up "behind" it by accident (found by reverting the fix: the
+// first draft of these tests still passed with the shell's auto-follow removed).
+interface ShellRun { game: any; car: THREE.Group; container: FakeEl; race: { go: boolean } }
 function racingGame(opts: { camera?: string; follow?: boolean; touchControls?: unknown; heading?: number } = {}): ShellRun {
   const container = new FakeEl('div');
+  const race = { go: false };
   let car!: THREE.Group;
   let drive: any;
   const game = new SHELL.Game({
@@ -268,51 +273,116 @@ function racingGame(opts: { camera?: string; follow?: boolean; touchControls?: u
       if (opts.follow) ctx.follow(car);
       return [];
     },
-    update: (ctx: any, dt: number) => { drive = O.driveVehicle(car, drive, ctx.input.axis(), dt); },
+    update: (ctx: any, dt: number) => { if (race.go) drive = O.driveVehicle(car, drive, ctx.input.axis(), dt); },
   });
-  return { game, car, container };
+  return { game, car, container, race };
 }
 const canvasOf = (g: any): FakeEl => g.canvas;
 const key = (g: any, type: 'keydown' | 'keyup', code: string) => canvasOf(g).fire(type, { code, repeat: false });
 
+/** The camera CHASES the car: behind it along the car's own heading, and within chase distance of it. */
+function chasing(cam: THREE.Camera, car: THREE.Object3D) {
+  const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(car.getWorldQuaternion(new THREE.Quaternion())).setY(0).normalize();
+  const rel = cam.position.clone().sub(car.getWorldPosition(new THREE.Vector3())).setY(0);
+  return { ok: rel.dot(fwd) < -4 && rel.length() < 12, why: `camera ${rel.dot(fwd).toFixed(2)} m along the car's heading, ${rel.length().toFixed(2)} m away` };
+}
+
+// `fromFirstFrame`: the camera is behind the car even while it is PARKED behind a start screen — true
+// whenever the game said so (camera: 'chase', or ctx.follow). With neither, the shell can only know the
+// player's car once the player drives it (driveVehicle with ctx.input.axis()); before that, a car the
+// game merely set up might be an opponent or a bus crossing the road, and must not take the camera from
+// a player on foot.
 const SHELL_PATHS = [
-  { name: 'the shell with NO camera option and NO ctx.follow (what the admin\'s game was)', opts: {} },
-  { name: "the shell with camera: 'chase' and no ctx.follow", opts: { camera: 'chase' } },
-  { name: "the shell with camera: 'third-person' + ctx.follow(car) (the documented path)", opts: { camera: 'third-person', follow: true } },
-  { name: "the shell's own usage example: camera: 'chase' + ctx.follow(car)", opts: { camera: 'chase', follow: true } },
+  { name: 'the shell with NO camera option and NO ctx.follow (what the admin\'s game was)', opts: {}, fromFirstFrame: false },
+  { name: "the shell with camera: 'chase' and no ctx.follow", opts: { camera: 'chase' }, fromFirstFrame: true },
+  { name: "the shell with camera: 'third-person' + ctx.follow(car) (the documented path)", opts: { camera: 'third-person', follow: true }, fromFirstFrame: true },
+  { name: "the shell's own usage example: camera: 'chase' + ctx.follow(car)", opts: { camera: 'chase', follow: true }, fromFirstFrame: true },
 ];
 
 describe('🔴 the GAME SHELL frames a driven car from behind, on every option a game can pass', () => {
   for (const path of SHELL_PATHS) {
     for (const heading of [0, Math.PI, -2.2]) {
-      it(`${path.name} — heading ${heading.toFixed(2)}: tail lights toward the player`, () => {
-        const { game, car } = racingGame({ ...path.opts, heading });
-        game.loop.step(240);
+      it(`${path.name} — heading ${heading.toFixed(2)}: tail lights toward the player${path.fromFirstFrame ? ', parked AND racing' : ' once racing'}`, () => {
+        const { game, car, race } = racingGame({ ...path.opts, heading });
+        game.loop.step(240);                       // the start screen: parked
+        if (path.fromFirstFrame) {
+          const r = seesTail(game.rig.camera, car);
+          const c = chasing(game.rig.camera, car);
+          expect(r.ok, `parked: ${r.why}`).toBe(true);
+          expect(c.ok, `parked: ${c.why}`).toBe(true);
+        }
+        race.go = true;
+        game.loop.step(240);                       // racing
         const r = seesTail(game.rig.camera, car);
-        expect(r.ok, r.why).toBe(true);
+        const c = chasing(game.rig.camera, car);
+        expect(r.ok, `racing: ${r.why}`).toBe(true);
+        expect(c.ok, `racing: ${c.why}`).toBe(true);
         game.dispose();
       });
     }
 
     it(`${path.name}: keyboard LEFT (ArrowLeft) goes screen-LEFT, RIGHT (KeyD) goes screen-RIGHT`, () => {
       for (const [code, sign] of [['ArrowLeft', -1], ['KeyD', 1]] as const) {
-        const { game, car } = racingGame(path.opts);
-        game.loop.step(120);
+        const { game, car, race } = racingGame(path.opts);
+        game.loop.step(60);                        // parked behind the start line
+        race.go = true;
+        game.loop.step(120);                       // racing straight, the camera settled behind
         const cam0 = frozen(game.rig.camera);
         const x0 = ndcX(cam0, car.position);
         key(game, 'keydown', code);
         game.loop.step(30);
         const x1 = ndcX(cam0, car.position);
         expect(Math.sign(x1 - x0), `${code}: NDC ${x0.toFixed(4)} → ${x1.toFixed(4)}`).toBe(sign);
+        expect(Math.abs(x1 - x0)).toBeGreaterThan(0.02);
         game.dispose();
       }
     });
   }
 
-  it('the on-foot hero is hidden while the shell chases the car it found by itself', () => {
-    const { game } = racingGame();
+  it('the on-foot hero is hidden while the shell chases the car the player drives', () => {
+    const { game, race } = racingGame();
+    race.go = true;
     game.loop.step(2);
     expect(game.hero.root.visible).toBe(false);
+    game.dispose();
+  });
+
+  it('🔒 a car the GAME drives with its own axis (a bus crossing the road) never takes the camera from a player on foot', () => {
+    const container = new FakeEl('div');
+    let bus!: THREE.Group; let drive: any;
+    const game = new SHELL.Game({
+      container,
+      setup: (ctx: any) => { bus = O.createCar({ detail: 'lite' }); bus.position.set(20, 0, -30); ctx.scene.add(bus); drive = O.createVehicleState(bus); return []; },
+      update: (_ctx: any, dt: number) => { drive = O.driveVehicle(bus, drive, { x: 0, y: -1 }, dt); },   // the game's own AI axis
+    });
+    game.loop.step(240);
+    // Still the on-foot view of the player at the origin: the resting +Z offset, hero visible, joystick up.
+    expect(game.rig.camera.position.z).toBeGreaterThan(5);
+    expect(Math.abs(game.rig.camera.position.x)).toBeLessThan(0.5);
+    expect(game.hero.root.visible).toBe(true);
+    expect(game.touch.layout).toBe('move');
+    game.dispose();
+  });
+
+  it('with an opponent driven first, the camera still chases the car the PLAYER drives', () => {
+    const container = new FakeEl('div');
+    let mine!: THREE.Group; let rival!: THREE.Group; let a: any; let b: any;
+    const game = new SHELL.Game({
+      container,
+      setup: (ctx: any) => {
+        rival = O.createCar({ detail: 'real' }); rival.position.set(-6, 0, 0); ctx.scene.add(rival); a = O.createVehicleState(rival);
+        mine = O.createCar({ detail: 'real' }); mine.position.set(6, 0, 0); ctx.scene.add(mine); b = O.createVehicleState(mine);
+        return [];
+      },
+      update: (ctx: any, dt: number) => {
+        a = O.driveVehicle(rival, a, { x: 0.3, y: -1 }, dt);          // the opponent's AI, driven first
+        b = O.driveVehicle(mine, b, ctx.input.axis(), dt);            // the player's car
+      },
+    });
+    game.loop.step(240);
+    const c = chasing(game.rig.camera, mine);
+    expect(c.ok, c.why).toBe(true);
+    expect(seesTail(game.rig.camera, mine).ok).toBe(true);
     game.dispose();
   });
 
@@ -349,16 +419,24 @@ describe('🔴 a driving game on a phone gets Left / Right / Brake / Gas, on the
     return b;
   };
   const touch = (pointerId: number) => ({ pointerId, clientX: 0, clientY: 0, pointerType: 'touch', preventDefault: () => {} });
+  /** A race under way: the player's car is driving, so the shell knows it. */
+  const racing = (opts: Parameters<typeof racingGame>[0] = {}) => { const run = racingGame(opts); run.race.go = true; run.game.loop.step(2); return run; };
 
-  it('the shell switches to the drive layout by itself the moment the game has a vehicle', () => {
-    const { game, container } = racingGame();
-    expect(game.touch.layout).toBe('drive');
-    expect(container.all('nbg-tc')[0].classList.contains('drive')).toBe(true);
-    game.dispose();
+  it('the shell switches to the drive layout by itself: from setup with camera \'chase\', on the first drive otherwise', () => {
+    const declared = racingGame({ camera: 'chase' });
+    expect(declared.game.touch.layout).toBe('drive');
+    expect(declared.container.all('nbg-tc')[0].classList.contains('drive')).toBe(true);
+    declared.game.dispose();
+    const plain = racingGame();
+    expect(plain.game.touch.layout).toBe('move');
+    plain.race.go = true;
+    plain.game.loop.step(1);
+    expect(plain.game.touch.layout).toBe('drive');
+    plain.game.dispose();
   });
 
   it("the Left pad gives exactly the axis.x the A key gives, and turns the car screen-LEFT", () => {
-    const { game, car, container } = racingGame();
+    const { game, car, container } = racing();
     game.loop.step(120);
     const cam0 = frozen(game.rig.camera);
     const x0 = ndcX(cam0, car.position);
@@ -376,7 +454,7 @@ describe('🔴 a driving game on a phone gets Left / Right / Brake / Gas, on the
   });
 
   it('Right is +1, Gas is up (W), Brake is down (S) — the same signs as the keys, so driveVehicle decides', () => {
-    const { game, container } = racingGame();
+    const { game, container } = racing();
     const cases: Array<[string, 'x' | 'y', number]> = [['Right', 'x', 1], ['Gas', 'y', -1], ['Brake', 'y', 1]];
     cases.forEach(([label, k, v], i) => {
       pad(container, label).fire('pointerdown', touch(20 + i));
@@ -388,7 +466,7 @@ describe('🔴 a driving game on a phone gets Left / Right / Brake / Gas, on the
   });
 
   it('a game that chose its own buttons keeps them; an on-foot game keeps the joystick', () => {
-    const own = racingGame({ touchControls: { buttons: [{ action: 'up', label: 'Pedal' }] } });
+    const own = racing({ touchControls: { buttons: [{ action: 'up', label: 'Pedal' }] } });
     expect(own.game.touch.layout).toBe('move');
     own.game.dispose();
     const onFoot = new SHELL.Game({ container: new FakeEl('div') });
@@ -398,7 +476,7 @@ describe('🔴 a driving game on a phone gets Left / Right / Brake / Gas, on the
   });
 
   it('switching layout releases whatever was held — a thumb on Left must not keep steering', () => {
-    const { game, container } = racingGame();
+    const { game, container } = racing();
     pad(container, 'Left').fire('pointerdown', touch(3));
     expect(game.input.axis().x).toBe(-1);
     game.touch.setLayout('move');

@@ -102,7 +102,8 @@ describe('the route — every sizer reads planning.sizing, every model reads pla
     // never the bare message — is unchanged and still fully enforced; only the line break is allowed.
     ['request analysis', /analyzeRequest\(\{\s*prompt: planning\.sizing/],
     ['complexity routing', /\{ prompt: planning\.sizing, score: analysis\?\.complexityScore/],
-    ['project-mode detection', /detectMegaProject\(planning\.sizing\)/],
+    // Since Q-138 (2026-10-11) APP_SCOPE and project mode read ONE verdict, sized once from planning.sizing.
+    ['scope verdict (APP_SCOPE, roadmap and project mode)', /const appScope = scopeVerdict\(planning\.sizing, \{ complex: buildIsComplex \}\)/],
     ['fast lane', /runSimpleBuild\(\{ prompt: planning\.text/],
   ])('%s', (_name, re) => {
     expect(ROUTE).toMatch(re);
@@ -111,6 +112,7 @@ describe('the route — every sizer reads planning.sizing, every model reads pla
     expect(ROUTE).not.toMatch(/complexityFromPrompt\(prompt\)/);
     expect(ROUTE).not.toMatch(/analyzeAppScope\(prompt\)/);
     expect(ROUTE).not.toMatch(/detectMegaProject\(prompt\)/);
+    expect(ROUTE).not.toMatch(/scopeVerdict\(prompt\b/);
   });
 });
 

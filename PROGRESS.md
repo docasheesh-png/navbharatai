@@ -93999,3 +93999,12 @@ to it. Recorded as a deliberate non-item, not an omission.
   - Siblings: the explorer and functional repairs are already judged by their own re-measure (kept or rolled back), so this was the one repair trusted unseen.
   - Pins updated honestly: three barren sites (`aBarrenPassIsNotTheUsersBill`); two `reviewBuild` calls, the second after `fix.ok` on its own phase (`reviewLateLanding`).
   - Test: `tests/aRepairIsReviewedAgain.test.ts`, reverted and seen to fail.
+- **Q-138 (admin decision 2026-10-11: "keep APP_SCOPE as the one scope analyser; Project Mode reads its answer"):**
+  - Root cause: two rule sets sized the same request with no rule for which wins. In autopsy eed79815, Project Mode split a 40-bullet car game while APP_SCOPE called it one app.
+  - Fix: `scopeVerdict` in `lib/appScopeAnalyzer.ts`. The route sizes once from `planning.sizing`. The report line, the roadmap, Project Mode's gate and its report line all read that answer, and the route calls no other sizer (census in the test).
+  - Project Mode's size signals moved into APP_SCOPE: a stated scale, a big-software noun with named parts, and a long spec. The thresholds stay in `ProjectPlan.ts`.
+  - What the measurement caught, which a literal "APP_SCOPE wins" would have broken: APP_SCOPE's veto reads a small word anywhere. Read literally, the decision would have built Blue Berry (144 parts, "resume") and the 6461025c ads platform (429 parts, "Budget") in one pass. A long spec is now vetoed only when the app itself is small.
+  - Sibling bug found the same way: the scale reader counted "404 page" as 404 pages, which put a portfolio over Project Mode's 100-page rule. `statedScale` skips an HTTP status before the singular word, and reads no links.
+  - Measured on 66,309 test strings at both complexity answers: Project Mode's decision changed for none. APP_SCOPE's line now says LARGE for 14 strings that already went to Project Mode, so the report stops calling them one-shot apps.
+  - Honest limit: the eed79815 game prompt is not in the repo. A 40-part game whose subject is not a small app is large under the one verdict, so a spec like it is still split. The change guarantees that the two answers agree; it does not keep games out of Project Mode.
+  - Test: `tests/oneScopeVerdictDecidesTheSize.test.ts`, with three guards reverted and seen to fail. Five route pins were updated to the one-verdict wiring.

@@ -78,6 +78,7 @@ describe('the roadmap block in the route', () => {
   it('APP_SCOPE no longer calls a default-on planner "not yet active"', () => {
     const code = route.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     expect(code).not.toContain('step-by-step roadmap (not yet active)');
-    expect(code).toContain('its outcome is recorded as MEGA_ROADMAP_*');
+    // Since Q-138 a LARGE verdict feeds project mode too, so the line names both planners' outcomes.
+    expect(code).toContain('outcomes: PROJECT_MODE, MEGA_ROADMAP_*');
   });
 });

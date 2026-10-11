@@ -28,7 +28,7 @@ import { resolveDomainKnowledge, type DomainKnowledge } from '../lib/domainKnowl
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { memoryLinkedSuggestions, mergeSuggestions } from '../AgentV3/memoryLinkedSuggestions';
 import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
-import { analyzeAppScope, scopeDispute } from '../lib/appScopeAnalyzer';
+import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, hardConstraintLines, type MegaRoadmap } from '../lib/megaRoadmap';
@@ -400,7 +400,7 @@ import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/ca
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -13828,8 +13828,13 @@ async function noteBuildOutcome(
       // signal into the report so the classification can be reviewed against real prompts before it steers
       // anything. Default is always 'direct'; only a strong mega-signal (famous product / heavy infra /
       // huge feature spec) reads as 'analyze'.
+      //
+      // 🔒 ONE SCOPE VERDICT FOR THE WHOLE BUILD (Q-138, admin 2026-10-11): sized once, here, and read by the
+      // report line below, the mega-app roadmap and Software Project Mode alike. Project Mode no longer sizes
+      // a request on its own — it splits only what this verdict calls large (scopeVerdict).
+      const appScope = scopeVerdict(planning.sizing, { complex: buildIsComplex });
       try {
-        const scope = analyzeAppScope(planning.sizing);
+        const scope = appScope.scope;
         buildDiag.record({
           phase: 'plan',
           severity: 'info',
@@ -13839,7 +13844,9 @@ async function noteBuildOutcome(
             // this line said "not yet active" for a month after that, so a reader of the report could not
             // know a planner call was about to spend up to a minute on this build. Its outcome is recorded
             // as MEGA_ROADMAP_ACTIVE / MEGA_ROADMAP / MEGA_ROADMAP_FAILED, always.
-            ? `Scope: LARGE — ${scope.famousApp ? `clone of ${scope.famousApp}; ` : ''}the mega-app roadmap planner is asked for a step-by-step plan next (its outcome is recorded as MEGA_ROADMAP_*). Signals: ${scope.signals.join('; ')}.`
+            // Since Q-138 a LARGE verdict is also what Software Project Mode reads, so the line names both
+            // planners instead of promising the roadmap one.
+            ? `Scope: LARGE — ${scope.famousApp ? `clone of ${scope.famousApp}; ` : ''}a big-app planner runs next: Software Project Mode when the request is a project spec and the mode is on for this account, otherwise the mega-app roadmap (outcomes: PROJECT_MODE, MEGA_ROADMAP_*). Signals: ${scope.signals.join('; ')}.`
             : `Scope: ordinary one-shot app — built directly (today's behaviour). ${scope.signals.join('; ')}.`,
           autoResolved: true,
         });
@@ -14332,10 +14339,10 @@ async function noteBuildOutcome(
       // A pasted one-file app is improved in place, never split into milestones (pastedAppFormat.ts).
       if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode && !pastedFormat.keep) {
         try {
-          const scope = analyzeAppScope(planning.sizing);
           // TWO CLASSIFIERS DISAGREEING IS A FACT, NOT A TIE THE DEARER ONE WINS (autopsy Study-Racer,
           // 2026-09-25 — see scopeDispute). Recorded as a fact about OUR routing; the build runs direct.
-          const dispute = scopeDispute(scope, { complex: buildIsComplex });
+          // Both come from the one verdict sized above (Q-138).
+          const { scope, dispute } = appScope;
           if (dispute) {
             buildDiag.record({
               phase: 'plan', severity: 'info', code: 'APP_SCOPE_DISPUTED', autoResolved: true,
@@ -14352,7 +14359,7 @@ async function noteBuildOutcome(
           const projectModeOwns = roadmapStandsDownForProjectMode({
             projectModeOn: projectModeEnabled(process.env, { userId, email }),
             planFirst,
-            megaProject: detectMegaProject(planning.sizing),
+            megaProject: appScope.projectMode,
           });
           if (projectModeOwns && scope.decision === 'analyze' && !dispute) {
             buildDiag.record({
@@ -17516,7 +17523,9 @@ async function noteBuildOutcome(
           preEmptedBy: megaRoadmapActive ? 'mega-roadmap' : planFirst ? 'plan-first' : null,
           isNewBuild: intent === 'new_build',
           isEditMode,
-          prompt,
+          // The text the gate sized and the verdict it read — never a second derivation (Q-138).
+          prompt: planning.sizing,
+          scope: { large: appScope.large, signals: appScope.scope.signals },
         });
         buildDiag.record({ phase: 'plan', severity: 'info', code: pmDiag.code, message: pmDiag.message, detail: pmDiag.detail, autoResolved: true });
       } catch { /* diagnostics are best-effort and must never touch a build */ }
@@ -17576,7 +17585,7 @@ async function noteBuildOutcome(
             ppLast.outputTokens = t.usage.outputTokens;
             return t.text;
           };
-          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && detectMegaProject(planning.sizing)) {
+          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && appScope.projectMode) {
             ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);

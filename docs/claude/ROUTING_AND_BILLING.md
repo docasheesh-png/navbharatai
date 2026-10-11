@@ -302,6 +302,21 @@ enumerated features, or ≥14 enumerated features. A false positive costs an ord
 planner call; a false negative just builds exactly as it does today. Minimum 3 modules or it falls
 straight back to the normal path.
 
+🔒 **SINCE 2026-10-11 (Q-138, admin: "keep APP_SCOPE as the one scope analyser; Project Mode reads its answer")
+PROJECT MODE NO LONGER SIZES A REQUEST ITSELF.** The route sizes once — `scopeVerdict(planning.sizing, { complex })`
+in `lib/appScopeAnalyzer.ts` — and the report line, the mega-app roadmap and Project Mode all read that one answer.
+Project Mode decomposes only what the verdict calls LARGE **and** what `megaProjectSignals` reads as a project spec.
+- APP_SCOPE took over the three size signals only Project Mode used to read: a stated scale ≥ `MEGA_SCALE_MIN`, a
+  big-software noun with ≥ `MEGA_BULLETS_WITH_NOUN` parts, and a ≥ `MEGA_BULLETS_ALONE`-part spec. The thresholds
+  still live in `ProjectPlan.ts`, read through `megaProjectSignals`.
+- The long-spec signal is vetoed only when the app ITSELF is small (the Q-398 subject reading), never by a stray
+  word. Without that, Blue Berry ("resume") and the 6461025c ads platform ("Budget") would have been built in one pass.
+- Measured on 66,309 test strings at both complexity answers: Project Mode's decision changed for **none**.
+  APP_SCOPE's report line now says LARGE for 14 that already went to Project Mode.
+- Same change: `statedScale` no longer reads "404 page" as 404 pages, or a number inside a link as a scale.
+- The `PROJECT_MODE` report line gains `scope-says-one-app`.
+- Locked by `tests/oneScopeVerdictDecidesTheSize.test.ts`.
+
 🔴 **THE STATE IS A PENDING ADMIN DECISION, NOT AN UNFINISHED FEATURE.** `PROGRESS.md` (2026-07-04)
 records it as *"fully built and dormant … ADMIN DECISION NEEDED (asked in chat, safeguard #3)"*,
 with the exact action: set `AGENTV3_PROJECT_MODE=aashishcpmt09@gmail.com` on Cloud Run, send one

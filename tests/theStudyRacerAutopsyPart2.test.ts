@@ -116,7 +116,9 @@ describe('2 · when the scope analyzer and the complexity router disagree, the d
   });
   it('🔒 the route records APP_SCOPE_DISPUTED and skips the planner on a dispute', () => {
     const route = strip(src('src/server/routes/agentv3.ts'));
-    expect(route).toContain('const dispute = scopeDispute(scope, { complex: buildIsComplex });');
+    // Since Q-138 the dispute is part of the one scope verdict, sized once with the router's answer.
+    expect(route).toContain('const appScope = scopeVerdict(planning.sizing, { complex: buildIsComplex });');
+    expect(route).toContain('const { scope, dispute } = appScope;');
     expect(route).toContain("code: 'APP_SCOPE_DISPUTED'");
     // The dispute still gates the planner; since autopsy a2b9c802 Project Mode owning the build does too
     // (theJarvisBuildWasStoppedWhileItWorked.test.ts).

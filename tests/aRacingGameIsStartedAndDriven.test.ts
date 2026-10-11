@@ -154,6 +154,8 @@ describe('the start control is found by its SHAPE (startLabelRank — the one de
     expect(startLabelRank('Start Race')).toBe(2);
     expect(startLabelRank('Quick Race')).toBe(1);
     expect(startLabelRank('Turbo!', ['turbo!'])).toBe(3);
+    // …but a control that deletes, pays or shares is never pressed, whoever vouches for it.
+    expect(startLabelRank('Buy coins', ['Buy coins'])).toBe(0);
   });
 
   it('precision: a control that does something else is never pressed as the start', () => {

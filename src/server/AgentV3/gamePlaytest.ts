@@ -120,8 +120,10 @@ export const MAX_START_PRESSES = 3;
 export function startLabelRank(label: unknown, known: readonly string[] = []): number {
   const t = String(label ?? '').trim().replace(/\s+/g, ' ');
   if (!t || t.length > 40 || t.split(' ').length > 6) return 0;
+  // A control that deletes, pays, shares or logs out is never pressed, whoever vouches for it.
+  if (NEVER_PRESS.test(t)) return 0;
   if (known.some((k) => String(k ?? '').trim().replace(/\s+/g, ' ').toLowerCase() === t.toLowerCase())) return 3;
-  if (NEVER_PRESS.test(t) || NOT_A_START.test(t)) return 0;
+  if (NOT_A_START.test(t)) return 0;
   if (START_LABEL_LEADING.test(t)) return 2;
   return START_LABEL.test(t) ? 1 : 0;
 }
@@ -257,7 +259,7 @@ async function startCandidates(page) {
       if (b.width <= 0 || b.height <= 0 || s.visibility === 'hidden' || s.display === 'none' || el.disabled) continue;
       const t = String(el.getAttribute('aria-label') || el.innerText || el.value || '').trim().replace(/\\s+/g, ' ');
       if (!t || t.length > 40 || t.split(' ').length > 6) continue;
-      const rank = known.has(t.toLowerCase()) ? 3 : (never.test(t) || notStart.test(t)) ? 0 : lead.test(t) ? 2 : any.test(t) ? 1 : 0;
+      const rank = never.test(t) ? 0 : known.has(t.toLowerCase()) ? 3 : notStart.test(t) ? 0 : lead.test(t) ? 2 : any.test(t) ? 1 : 0;
       if (rank > 0) found.push({ rank, order: order++, t, el });
     }
     found.sort((a, b) => b.rank - a.rank || a.order - b.order);

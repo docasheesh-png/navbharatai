@@ -17,6 +17,8 @@
  */
 import type { Request, Response, NextFunction } from 'express';
 import { consumeDurableRate } from './DurableRateLimit';
+import { BoundedCache } from './boundedCache';
+import { addressRateKey } from './clientAddress';
 import { loadFirebaseAdmin } from './firebaseAdminModule';
 import { getServerDb, doc, getDoc } from './serverDb';
 import { readBanStatus, suspendedMessage } from './banGate';
@@ -397,11 +399,15 @@ export function requireUserMatch(paramName = 'userId') {
   };
 }
 
-// In-memory rate-limit buckets — keyed by "<bucketName>:<uid|IP>" so DIFFERENT
-// limiters (build vs workspace) never share a counter for the same user. Map is
-// periodically self-pruning to prevent unbounded growth.
-const _rateBuckets = new Map<string, { count: number; windowStart: number }>();
+// In-memory rate-limit buckets — keyed by "<bucketName>:<uid|address>" so DIFFERENT
+// limiters (build vs workspace) never share a counter for the same user.
+//
+// 🔴 BOUNDED, O(1) PER REQUEST (performance audit 2026-10-11). This was a Map that, once it held 5,000 keys,
+// was swept IN FULL on every request and kept only... everything still inside its hour — so a busy instance
+// stayed above 5,000 and every request on ~100 routes paid the whole walk (the bot guard's measured class).
+// A bucket now expires with its own window and the least recently used one is evicted at the bound.
 const RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const _rateBuckets = new BoundedCache<string, { count: number; windowStart: number }>({ maxEntries: 50_000, ttlMs: RATE_WINDOW_MS });
 
 export interface RateLimitOptions {
   /** Namespace so each limiter has its own counters (e.g. 'build', 'workspace'). */
@@ -443,16 +449,12 @@ export function rateLimiter(opts: RateLimitOptions) {
     if (process.env.VITEST) { next(); return; }
 
     const uid = await verifyFirebaseToken(req);
-    const key = `${opts.name}:${uid ?? (req.ip || 'anon')}`;
+    // An anonymous caller is keyed by the shared address key (the real address, IPv6 grouped by /56), never
+    // by raw `req.ip`: one IPv6 host owns billions of addresses and could otherwise mint a bucket per request.
+    const who = uid ?? addressRateKey(req);
+    const key = `${opts.name}:${who}`;
     const limit = uid ? opts.authed : opts.anon;
     const now = Date.now();
-
-    // Self-prune when the map gets large (evict windows that have expired).
-    if (_rateBuckets.size > 5000) {
-      for (const [k, v] of _rateBuckets) {
-        if (now - v.windowStart > RATE_WINDOW_MS) _rateBuckets.delete(k);
-      }
-    }
 
     // Layer 1 — fast in-memory pre-filter (per instance). A local over-limit short-circuits the
     // durable read entirely (cheap denial for a hammering client already hot on THIS instance).
@@ -476,7 +478,7 @@ export function rateLimiter(opts: RateLimitOptions) {
     // limit real on min-instances=0. A global anon ceiling caps total anonymous volume platform-wide.
     const durable = await Promise.race([
       (async () => {
-        const per = await consumeDurableRate(opts.name, uid ?? (req.ip || 'anon'), limit, RATE_WINDOW_MS, now);
+        const per = await consumeDurableRate(opts.name, who, limit, RATE_WINDOW_MS, now);
         if (!per.allowed) return { ok: false, limit: per.limit };
         if (!uid && opts.anonGlobalPerHour && opts.anonGlobalPerHour > 0) {
           const global = await consumeDurableRate(opts.name, 'GLOBAL_ANON', opts.anonGlobalPerHour, RATE_WINDOW_MS, now);

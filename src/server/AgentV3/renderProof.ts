@@ -63,6 +63,7 @@
  */
 
 import { IN_BUILD_GREEN_CODE } from './inBuildGreen';
+import { BoundedCache } from '../lib/boundedCache';
 
 /**
  * The one code that means *"a real browser opened this app and it rendered"*.
@@ -159,7 +160,8 @@ export function renderProvenByAnyActor(
  * `BuildDiagnostics` writes it (from `record`, the one door every proof already goes through), so this is
  * not a second producer of the fact; it is the same write made readable to the tools.
  */
-const renderSeenByWorkspace = new Map<string, number>();
+// Bounded (audit 2026-10-11): one entry per workspace ever rendered used to stay for the instance's life.
+const renderSeenByWorkspace = new BoundedCache<string, number>({ maxEntries: 20_000 });
 
 /** Called by `BuildDiagnostics.record` when a render-proof code is recorded. */
 export function noteRenderSeen(workspaceId: string, at: number = Date.now()): void {

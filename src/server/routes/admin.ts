@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { addressRateKey } from '../lib/clientAddress';
 import { cashfreePaymentsAvailability, platformCashfreeCredentials } from '../lib/cashfreeCredentials';
 import fs from 'fs';
 import path from 'path';
@@ -291,7 +292,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const totpCode = String(req.body?.totp || '').trim();
     const validUser = adminUsername();
     const validPass = adminPassword();
-    const clientIp = String(req.ip || 'unknown');
+    // The shared address key (real address, IPv6 grouped by /56): a raw `req.ip` let one IPv6 host try a
+    // fresh address per guess and never meet the lockout (audit 2026-10-11).
+    const clientIp = addressRateKey(req);
 
     // SEC (admin 2026-07-19) — escalating brute-force lockout ON TOP of the 5/min IP rate limiter.
     // Once an IP crosses the failure threshold, each further attempt is refused for a window that

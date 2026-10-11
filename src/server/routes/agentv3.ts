@@ -1,4 +1,5 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { BoundedCache } from '../lib/boundedCache';
 import { FILE_SIZE_RULE, READ_GUIDE_TOOL, fileSizeRuleEnabled, moduleText, modularizePrompt, modularPromptEnabled } from '../AgentV3/reliability/modularPrompt';
 import { APPEND_FILE_TOOL, resumeTruncatedEnabled } from '../AgentV3/reliability/resumeWrite';
 import { CORE_TOOL_NAMES, DynamicToolset, coreToolsetEnabled } from '../AgentV3/reliability/coreToolset';
@@ -450,7 +451,7 @@ import { LISTENING_PORTS_COMMAND, parseListeningPorts, rankPortCandidates } from
 import { isSandboxSystemPort } from '../AgentV3/neverAppPorts';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
-import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
+import { chatResponseCache, chatCacheEnabled, chatReplyCacheKey } from '../AgentV3/PromptCache';
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
@@ -2393,9 +2394,11 @@ export function __setRunningBuildForTest(key: string, rb: RunningBuild | null): 
 
 const MAX_BUILD_BUFFER = 4000;
 /** The most recent build's diagnostics report per build key (userId) — for download/endpoint. */
-const lastDiagnostics = new Map<string, BuildDiagnosticsReport>();
+// Bounded (audit 2026-10-11): a full build report per user ever served used to stay for the life of the
+// instance. It is the in-memory FALLBACK to the durable report, so the oldest may leave.
+const lastDiagnostics = new BoundedCache<string, BuildDiagnosticsReport>({ maxEntries: 500, ttlMs: 6 * 60 * 60 * 1000 });
 /** Free users already shown the weak-tier welcome notice this instance (once per user — see the send). */
-const weakNoticeShownFor = new Set<string>();
+const weakNoticeShownFor = new BoundedCache<string, true>({ maxEntries: 50_000 });
 
 /** Shortest gap between two "check my connected services" calls from one app. Each one fans out to
  *  somebody else's servers, so a button must not be loopable. See callCooldown.ts. */
@@ -10583,7 +10586,7 @@ async function noteBuildOutcome(
     // Shown once per user per server instance (a gentle reminder may repeat after a cold start — fine);
     // the phrasing rotates by seed so repeats never read identically.
     if (callerIsFreeTier === true && powerSpecResolved.cheapOnly && userId && !weakNoticeShownFor.has(userId)) {
-      weakNoticeShownFor.add(userId);
+      weakNoticeShownFor.set(userId, true);
       const langCode = detectLanguageHint(prompt)?.code ?? null;
       send({ type: 'narration', agent: 'system', text: weakTierWelcomeNotice(langCode, userId.length + prompt.length), ts: Date.now() });
     }
@@ -11235,9 +11238,12 @@ async function noteBuildOutcome(
         // LIVE WEB GROUNDING (admin 2026-07-12): a plain chat question that needs current facts
         // (sports/news/prices/"latest"/"aaj") gets real search results folded in, so v5.0 answers from
         // today's data, not its training cutoff. Gated + bounded + best-effort — normal chat is untouched.
+        // A grounded reply carries TODAY's search results, so it is never served from the prompt-keyed cache
+        // below: a cached "aaj ka score" would be up to 15 minutes old (performance audit 2026-10-11).
+        let liveGrounded = false;
         try {
           const liveBlock = await liveSearchContext(prompt, { cheap: freeTierBuildActive || powerSpecResolved.cheapOnly });
-          if (liveBlock) chatPrompt = `${liveBlock}\n\n---\n${chatPrompt}`;
+          if (liveBlock) { chatPrompt = `${liveBlock}\n\n---\n${chatPrompt}`; liveGrounded = true; }
         } catch { /* live search is best-effort */ }
         // v5.0 used to answer a plain chat question ("kितni files hai?") completely blind — the chat
         // lane never loaded any workspace context. projectFileCount was already computed above for
@@ -11274,8 +11280,12 @@ async function noteBuildOutcome(
         // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
         // than reasoned around: the other conditions happen to cover it today, and that is exactly
         // the kind of coincidence that stops being true after an unrelated edit.
-        const cacheable = !answerThenOffer && !askUnrelated && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !answerSpreadsheet && !clarifyWhatToBuild && chatCacheEnabled();
-        const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
+        // `askFramework` and `liveGrounded` are excluded outright for the same reason (audit 2026-10-11): the
+        // first is a per-workspace steer, the second carries today's search results. The key is a SHA-256 of
+        // the prompt plus the model lane, so two different prompts can never share a reply (a 32-bit hash
+        // could) and a cheap-lane answer is never served to a paid turn.
+        const cacheable = !answerThenOffer && !askUnrelated && !askFramework && !liveGrounded && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !answerSpreadsheet && !clarifyWhatToBuild && chatCacheEnabled();
+        const cacheKey = cacheable ? chatReplyCacheKey(prompt, Boolean(freeTierBuildActive || powerSpecResolved.cheapOnly)) : '';
         let reply: string;
         // The spreadsheet this reply carries, when it made one — rides on the narration line and the
         // persisted turn, so the Download button is there live AND after the chat is reopened.

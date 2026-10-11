@@ -13,6 +13,7 @@
 // disabling. An in-process cache fronts Firestore so the every-turn read in a long build is free.
 
 import * as admin from 'firebase-admin';
+import { BoundedCache } from '../lib/boundedCache';
 import type { ProjectPlan } from './ProjectPlan';
 import { serializeProjectPlan, parseStoredProjectPlan } from './ProjectPlan';
 import { getServerDb } from '../lib/serverDb';
@@ -44,12 +45,10 @@ interface CacheEntry {
   at: number;
 }
 
-const cache = new Map<string, CacheEntry>();
+// Bounded, O(1) per access (audit 2026-10-11): an entry expires CACHE_TTL_MS after it was written and the least
+// recently used workspace is evicted at the bound. The old `pruneCache` walked every entry on every read/write.
+const cache = new BoundedCache<string, CacheEntry>({ maxEntries: 2_000, ttlMs: CACHE_TTL_MS });
 
-function pruneCache(): void {
-  const cutoff = Date.now() - CACHE_TTL_MS;
-  for (const [k, v] of cache) if (v.at < cutoff) cache.delete(k);
-}
 
 /**
  * Persist the plan (cache + Firestore, write-through). Best-effort with bounded retries — a save
@@ -58,7 +57,6 @@ function pruneCache(): void {
  * keeps working even through a Firestore outage.
  */
 export async function saveProjectPlan(workspaceId: string, plan: ProjectPlan): Promise<void> {
-  pruneCache();
   cache.set(workspaceId, { plan, at: Date.now() });
   const db = getDb();
   if (!db) return;
@@ -83,7 +81,6 @@ export async function saveProjectPlan(workspaceId: string, plan: ProjectPlan): P
  * (parseStoredProjectPlan is strict), so scheduling can never run on garbage. Never throws.
  */
 export async function loadProjectPlan(workspaceId: string): Promise<ProjectPlan | null> {
-  pruneCache();
   const hit = cache.get(workspaceId);
   if (hit) return hit.plan;
   const db = getDb();

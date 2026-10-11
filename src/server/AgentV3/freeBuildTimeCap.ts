@@ -34,6 +34,7 @@
 // Pure except for the chain map (plain module state with injected time) and the injected durable store.
 
 import { isContinuationMessage } from './ProjectPlan';
+import { BoundedCache } from '../lib/boundedCache';
 
 /** A free build's window when the env is unset: 25 minutes. An assumption, not a measurement. */
 export const FREE_BUILD_SECONDS_DEFAULT = 1500;
@@ -92,12 +93,15 @@ export function freeBuildWindow(paidSeconds: number, isFreeBuild: boolean, env: 
 // ── The unattended chain ─────────────────────────────────────────────────────────────────────────
 
 interface Chain { spentMs: number; touchedAt: number }
-const chains = new Map<string, Chain>();
 /** A record nobody has touched for this long is dropped, so the map cannot grow for ever. */
 const CHAIN_FORGET_MS = 6 * 60 * 60 * 1000;
-
-function prune(now: number): void {
-  for (const [k, c] of chains) if (now - c.touchedAt > CHAIN_FORGET_MS) chains.delete(k);
+// An LRU (audit 2026-10-11): the bound replaces a walk over every chain on every free build start. A chain
+// older than CHAIN_FORGET_MS is treated as absent where it is read (`liveChain`).
+const chains = new BoundedCache<string, Chain>({ maxEntries: 20_000 });
+function liveChain(workspaceId: string, now: number): Chain | undefined {
+  const c = chains.get(workspaceId);
+  if (c && now - c.touchedAt > CHAIN_FORGET_MS) { chains.delete(workspaceId); return undefined; }
+  return c;
 }
 
 /**
@@ -105,7 +109,6 @@ function prune(now: number): void {
  * begins a new chain; a continuation keeps counting the chain it continues.
  */
 export function noteFreeBuildStart(workspaceId: string, prompt: string, now: number = Date.now()): void {
-  prune(now);
   if (!isContinuationMessage(prompt)) chains.delete(workspaceId);
 }
 
@@ -123,9 +126,8 @@ export interface FreePauseDecision {
  * chain and says whether the pause may still be auto-continued.
  */
 export function decideFreePause(workspaceId: string, windowMs: number, env: Env = process.env, now: number = Date.now()): FreePauseDecision {
-  prune(now);
   const allowance = freeBuildAutoSeconds(env);
-  const prev = chains.get(workspaceId);
+  const prev = liveChain(workspaceId, now);
   const spentMs = (prev?.spentMs ?? 0) + Math.max(0, windowMs);
   chains.set(workspaceId, { spentMs, touchedAt: now });
   const spentSeconds = Math.round(spentMs / 1000);
@@ -180,14 +182,14 @@ export async function noteFreeBuildStartDurable(
 export async function decideFreePauseDurable(
   workspaceId: string, windowMs: number, store: FreeChainStore | null, env: Env = process.env, now: number = Date.now(),
 ): Promise<FreePauseDecision> {
-  const memoryBefore = chains.get(workspaceId)?.spentMs ?? 0;
+  const memoryBefore = liveChain(workspaceId, now)?.spentMs ?? 0;
   const durable = store ? await withinTimeout(store.get(workspaceId), DURABLE_CHAIN_TIMEOUT_MS) : undefined;
   const durableBefore = durable && now - durable.touchedAt <= CHAIN_FORGET_MS && Number.isFinite(durable.spentMs)
     ? Math.max(0, durable.spentMs) : 0;
   if (durableBefore > memoryBefore) chains.set(workspaceId, { spentMs: durableBefore, touchedAt: now });
   const decision = decideFreePause(workspaceId, windowMs, env, now);
   if (store) {
-    const chain = chains.get(workspaceId);
+    const chain = liveChain(workspaceId, now);
     if (chain) await withinTimeout(store.set(workspaceId, { spentMs: chain.spentMs, touchedAt: chain.touchedAt }), DURABLE_CHAIN_TIMEOUT_MS);
   }
   return decision;

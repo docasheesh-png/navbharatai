@@ -10,7 +10,8 @@ import { TRUSTED_PROXY_HOPS } from './src/server/lib/clientAddress';
 import { denyServerOnlyArtifacts } from './src/server/lib/serverOnlyArtifacts';
 // Side-effect import: every axios error in this process loses its credential headers (P1, 2026-10-04).
 import './src/server/lib/axiosCredentialRedaction';
-import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
+import { registerPwaRoutes, type PwaStore, type PwaEntry } from './src/server/routes/pwa';
+import { BoundedCache } from './src/server/lib/boundedCache';
 import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
 import { noteWebsiteVisit } from './src/server/lib/ownAudience';
 // The rate-limit keys (forensic audit 2026-10-04): an address string, or a verified uid — never a request.
@@ -273,34 +274,12 @@ try {
 
 
 // Token counter helpers
-// ══ PWA App Store (in-memory, 24h TTL) ══
-const pwaStore: PwaStore = new Map();
-setInterval(() => {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  for (const [id, entry] of pwaStore.entries()) {
-    if (entry.createdAt < cutoff) pwaStore.delete(id);
-  }
-}, 60 * 60 * 1000);
+// ══ PWA App Store: per-instance read-through cache of `pwa_apps` (24h TTL) ══
+// Bounded (audit 2026-10-11): an entry is up to 900 KB of HTML, and an hourly sweep by age alone let a busy
+// instance hold every app visited in a day. 200 entries bound it to ~180 MB in the worst case; a miss is one
+// Firestore read.
+const pwaStore: PwaStore = new BoundedCache<string, PwaEntry>({ maxEntries: 200, ttlMs: 24 * 60 * 60 * 1000 });
 
-// ══ SDA Clinical Store (in-memory, 24h TTL) ══
-interface SdaClinicalEntry {
-  patientData: Record<string, any>;
-  redFlags: string[];
-  stage: string;
-  createdAt: number;
-  updatedAt: number;
-}
-const sdaClinicalStore = new Map<string, SdaClinicalEntry>();
-const sdaRecentMessages = new Map<string, Array<{ role: 'user' | 'assistant'; content: string; ts: number }>>();
-setInterval(() => {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  for (const [id, entry] of sdaClinicalStore.entries()) {
-    if (entry.updatedAt < cutoff) sdaClinicalStore.delete(id);
-  }
-  for (const [id, msgs] of sdaRecentMessages.entries()) {
-    if (!sdaClinicalStore.has(id)) sdaRecentMessages.delete(id);
-  }
-}, 60 * 60 * 1000);
 
 (async () => {
   // P2.2 — install process-level error handlers ASAP so nothing goes unreported
@@ -417,7 +396,9 @@ setInterval(() => {
   // Behavioural layer in FRONT of the static per-IP limiters below: bot-UA + burst
   // fingerprinting with an escalating slow-down, then a short hard block for repeat
   // offenders. Scoped to the /api/ surface (the expensive, abuse-prone endpoints).
-  app.use(adaptiveGuard());
+  // A signed-in person behind a busy shared address (carrier NAT, office, college) is judged on their own
+  // VERIFIED account once that address is hot, instead of being blocked with strangers (audit 2026-10-11, F3).
+  app.use(adaptiveGuard({ verifyUid: verifyFirebaseTokenForIntegrations }));
 
   // App Check — "is this the real NavBharatAI app?" on the routes that spend money (build, chat, image,
   // Professionals, OTP). Default MONITOR: it verifies and counts, and refuses nothing. See appCheck.ts

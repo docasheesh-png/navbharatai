@@ -40,7 +40,10 @@ describe('nothing decides where a reload lands', () => {
     // These are the names that chose a screen FOR the user. If any returns, a reload can once again
     // take somebody out of the screen they were working in.
     const app = read('src/App.tsx');
-    for (const symbol of ['decideLanding', 'readLastPlace', 'recordLastPlace', 'pickFreeChatResume', 'lastPlace', 'freeChatResume']) {
+    // `RESUMABLE_PROFESSIONALS` and `hasExplicitDestination` were the landing rule's own inputs, left behind
+    // by the revert with nothing reading them (found by the Q-600 sweep, 2026-10-11) — a ready-made half of
+    // the rule a future change could wire back up without anyone deciding to.
+    for (const symbol of ['decideLanding', 'readLastPlace', 'recordLastPlace', 'pickFreeChatResume', 'lastPlace', 'freeChatResume', 'RESUMABLE_PROFESSIONALS', 'hasExplicitDestination']) {
       expect(app, `${symbol} is back — a reload can hijack the current screen again`).not.toContain(symbol);
     }
   });

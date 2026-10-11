@@ -40,16 +40,19 @@ describe('serverArtifactsIn — what gets removed, and what must not', () => {
 
   it('leaves every real web asset alone', () => {
     const assets = ['index.html', 'sw.js', 'manifest.json', 'logo.png', 'preview-sandbox.html',
-      'assets', 'monaco', 'vendor', 'build_status.json'];
+      'assets', 'monaco', 'vendor'];
     expect(serverArtifactsIn(assets)).toEqual([]);
   });
 
-  it('does NOT touch build_status.json — src/App.tsx really polls it', () => {
-    // 548 bytes, and a live feature depends on it. Sweeping "stray JSON" out of the bundle would
-    // have broken the build-progress screen on the native app only, where nobody would look.
+  it('build_status.json is gone from the app itself, not swept out of the native bundle (Q-793)', () => {
+    // This case used to protect the file because src/App.tsx polled it. That poll was the defect: the
+    // file was a STATIC fixture saying "building" for ever, so every open app re-fetched it every two
+    // seconds for its whole life and re-rendered App each time, feeding a progress panel that could
+    // never show. The fix removed the poll and the file at the source (2026-10-11); this script still
+    // names only server artifacts, so nothing here had to change except the reason this case exists.
     expect(serverArtifactsIn(['build_status.json'])).toEqual([]);
     const app = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8');
-    expect(app).toContain('/build_status.json');
+    expect(app).not.toContain('/build_status.json');
   });
 
   it('is an explicit list, never a pattern that could grow onto a real file', () => {

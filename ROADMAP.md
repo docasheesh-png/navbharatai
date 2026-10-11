@@ -1577,3 +1577,20 @@ whole tree (`bucket`, `template`, `sketch`, `animation`), never for the file or 
 every one of these was hiding in a module named something else. And confirm the feature is **rendered or
 called**, not merely present: `starterSketch.ts` existing proves nothing; `AgentV3Panel.tsx` mounting
 `<StarterSketch/>` is what proves it ships.
+
+---
+
+## Moved from the build-report queue (admin, 2026-10-11)
+
+The admin closed these queue rows as **roadmap items, not defects** ("roadmap me daalo, queue se hatao" —
+Q-149; "photoreal 3D baad me" — part of Q-119). They are ideas for new capability, each blocked on
+infrastructure, a licence or a purchase. 🔒 None is to be started in a session without a fresh admin go.
+
+- 🔒 **Persistent `node_modules` cache** for build sandboxes (faster installs). Needs storage in the E2B template.
+- 🔒 **Runtime profiler** for user apps (CPU / memory per screen).
+- 🔒 **Blast-radius analysis** before an edit (which screens a change can touch).
+- 🔒 **Supervisor daemon** inside the sandbox (restart a crashed dev server without a model call).
+- 🔒 **Rust / Ruby / PHP toolchains** in the sandbox.
+- 🔒 **WebContainers** (run Node in the browser) — a commercial licence decision.
+- 🔒 **Photoreal 3D assets** — needs real scanned `.glb` models, i.e. hosting, licensing and a source
+  (the honest ceiling is recorded in PROGRESS.md: hand-modelled objects can look deliberate, not photoreal).

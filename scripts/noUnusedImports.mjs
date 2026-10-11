@@ -14,9 +14,12 @@
  * #2634 removed them; this stops the next one.
  *
  * The unused LOCALS are no longer unpoliced: since 2026-10-06 (Q-600) their count per file is
- * ratcheted against `scripts/unusedLocalsBaseline.json` — see `compareUnusedLocals` below. When that
- * baseline is empty, delete this script and set `noUnusedLocals: true` in tsconfig.json instead — one
- * compiler flag beats a bespoke gate.
+ * ratcheted against `scripts/unusedLocalsBaseline.json` — see `compareUnusedLocals` below.
+ *
+ * 🟢 THE BASELINE REACHED EMPTY ON 2026-10-11 and `noUnusedLocals: true` is now set in tsconfig.json, so
+ * `npm run typecheck` (and every editor) fails on a new unused local before this script runs. The script
+ * stays because CI and CLAUDE.md's gate name it, and because its TS6192 note below is still the reason a
+ * whole unused import line matters; remove it only together with that CI step and those references.
  *
  * ⚠️ TWO ERROR CODES, NOT ONE — and missing the second is a bug this script shipped with.
  * TypeScript reports an unused import binding as TS6133, but when EVERY binding in a declaration is

@@ -93,7 +93,8 @@ describe('the unused-locals ratchet', () => {
   it('the committed baseline is well-formed: sorted file keys, positive whole counts', () => {
     const baseline = JSON.parse(readFileSync(join(__dirname, '../scripts/unusedLocalsBaseline.json'), 'utf8'));
     const keys = Object.keys(baseline);
-    expect(keys.length).toBeGreaterThan(0);
+    // EMPTY since 2026-10-11 (Q-600 batch five): the backlog reached zero and `noUnusedLocals` is on in
+    // tsconfig.json. An empty object is the well-formed end state, so this no longer demands a key.
     expect([...keys].sort((a, b) => a.localeCompare(b))).toEqual(keys);
     for (const k of keys) expect(Number.isInteger(baseline[k]) && baseline[k] > 0, k).toBe(true);
   });

@@ -42,7 +42,7 @@ export class GitHubService {
   }
 
   static async updateFile(context: GitHubRepoContext, path: string, content: string, message: string, sha: string) {
-    // Note: The /api/github/push is for bulk update. We can use it or create a single file update proxy.
+    // Bulk updates go through POST /api/github/push-enhanced; this proxies a single-file update.
     // For now, let's use the bulk push with a single file for single file updates.
     const res = await axios.post(`${API_BASE}/push`, { 
       owner: context.owner, 

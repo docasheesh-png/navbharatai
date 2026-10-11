@@ -84,6 +84,7 @@ import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
 import { buildChatBlocks } from './activityTimeline';
 import { ChatToolbar } from '../chat/ChatToolbar';
+import { USER_BUBBLE_TONE, ASSISTANT_BUBBLE_TONE } from '../chat/bubbleTone';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 import { ActionGroupRow } from './ActivityTimelineRow';
@@ -6912,7 +6913,7 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
   if (msg.role === 'user') {
     return (
       <div className="group flex flex-col items-end">
-        <div className="max-w-[85%] bg-indigo-600 text-on-accent rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words">
+        <div className={`max-w-[85%] ${USER_BUBBLE_TONE} rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words`}>
           <FoldableMessage text={msg.text} className="whitespace-pre-wrap nb-selectable" />
         </div>
         {/* Copy / fold on every user message; Edit + Unsend attach ONLY to the LAST user message (slice 2). */}
@@ -6934,7 +6935,7 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
           className={
             isThinking
               ? 'text-faint italic text-xs px-3 py-2 whitespace-pre-wrap break-words'
-              : 'bg-card text-body rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words'
+              : `${ASSISTANT_BUBBLE_TONE} rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words`
           }
         >
           {/* A finished AI reply folds when long + gets a copy action; while streaming it just types out. */}

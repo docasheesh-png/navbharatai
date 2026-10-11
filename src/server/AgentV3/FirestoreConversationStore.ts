@@ -17,6 +17,7 @@
 // injectable so a future integration test (or the emulator) can drive it without globals.
 
 import * as admin from 'firebase-admin';
+import { deleteInChunks } from '../lib/batchChunks';
 import { packJson, unpackJson, utf8Bytes, compactStorageEnabled } from '../lib/compactStore';
 import type {
   ConversationStore,
@@ -327,13 +328,12 @@ export class FirestoreConversationStore implements ConversationStore {
   }
 
   async remove(id: string): Promise<void> {
-    const turns = await this.turnsCol(id).get();
-    const timeline = await this.timelineCol(id).get().catch(() => null);
-    const batch = this.db.batch();
-    turns.docs.forEach((d) => batch.delete(d.ref));
-    timeline?.docs.forEach((d) => batch.delete(d.ref));
-    batch.delete(this.mainDoc(id));
-    await batch.commit();
+    // References only, and in chunks (audit 2026-10-11): this read every turn's messages just to delete them,
+    // and put every page into ONE batch, which Firestore refuses past 500 writes — so a long conversation could
+    // not be deleted at all. The main document goes LAST, so a failure part-way leaves it to retry.
+    const turns = await this.turnsCol(id).select().get();
+    const timeline = await this.timelineCol(id).select().get().catch(() => null);
+    await deleteInChunks(this.db, [...turns.docs, ...(timeline?.docs ?? [])].map((d) => d.ref), this.mainDoc(id));
   }
 
   /** Build a ConversationRecord from stored metadata + (possibly empty) messages. */

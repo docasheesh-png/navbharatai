@@ -4,7 +4,7 @@ import { APP_KNOWLEDGE_BASE } from '../server/AppContext/AppKnowledgeBase';
 
 // Admin 2026-07-24: make every AI aware of Code Versioning and, whenever a user expresses the INTENT to
 // undo / go back / reverse a change (in ANY wording, not one literal phrase), guide them to restore an
-// earlier version. These tests lock the intent-based awareness across Free / Pro / Offline.
+// earlier version. These tests lock the intent-based awareness across Free / Pro (the Offline AI was deleted in #2948).
 
 const cv = APP_KNOWLEDGE_BASE.find(f => f.id === 'code_versioning');
 
@@ -12,6 +12,10 @@ describe('Code Versioning — intent-based undo awareness', () => {
   it('exists as a first-class KB feature with a current path + one-tap nav', () => {
     expect(cv).toBeTruthy();
     expect(cv!.path).toContain('Other AI → AI Tools → Versioning');
+    // The "one-tap nav" this test is named for — it lived in the Offline AI's map until that feature was
+    // deleted (#2948) and the target moved into the KB entry; the assertion went with the module and the
+    // name kept promising it (an empty-test sweep, 2026-10-11).
+    expect(cv!.nav).toEqual({ view: 'versioning' });
   });
 
   it('is framed around undo / restore, not just "versioning"', () => {
@@ -39,8 +43,4 @@ describe('Code Versioning — intent-based undo awareness', () => {
     }
   });
 
-  it('the OFFLINE AI finds it for undo/restore intent (same shared KB)', () => {
-    for (const q of ['undo', 'restore previous version', 'go back', 'revert change', 'purana version wapas', 'app bigad gayi']) {
-    }
-  });
 });

@@ -30,6 +30,11 @@ interface ProjectInsightsPanelProps {
   workspaceId?: string;
 }
 
+/**
+ * The events a webhook receives — the same list the server fires (`WebhookManager.WEBHOOK_EVENTS`);
+ * `tests/aWebhookHearsTheRealEvent.test.ts` fails if the two drift. This card used to spell the list out
+ * twice in prose while this constant sat unread (Q-600), and nothing on the server fired any of them.
+ */
 const WEBHOOK_EVENTS = ['BUILD_COMPLETE', 'BUILD_FAILED', 'DEPLOY_COMPLETE', 'DEPLOY_FAILED'] as const;
 
 async function authedHeaders(): Promise<Record<string, string>> {
@@ -608,7 +613,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
             <Popover align="right" trigger={<button aria-label="Which events fire?" className="text-muted hover:text-ink text-[11px] w-5 h-5 rounded-full border border-line leading-none">?</button>}>
               <div className="px-2 py-1.5 text-[11px] text-body max-w-[15rem] space-y-1">
                 <p className="font-bold text-ink">Events delivered</p>
-                <p>BUILD_COMPLETE · BUILD_FAILED · DEPLOY_COMPLETE · DEPLOY_FAILED — a POST is sent to every configured URL.</p>
+                <p>{WEBHOOK_EVENTS.join(' · ')} — a JSON POST to every URL here when a build finishes, and when your app is published (by the Publish button or by the AI). It carries the event, whether it succeeded, the time and, for a publish, the live link.</p>
               </div>
             </Popover>
             {hooks.length > 0 && <Button variant="ghost" size="sm" onClick={testHooks} className="uppercase tracking-widest text-info"><Send className="w-3 h-3" />Send test</Button>}
@@ -618,7 +623,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
           <p className="text-[11px] text-muted">Sign in to manage webhooks for build/deploy events.</p>
         ) : (
           <div className="space-y-3">
-            <p className="text-[11px] text-muted">Get a POST on BUILD_COMPLETE / FAILED / DEPLOY_COMPLETE / FAILED — wire builds into Slack/Discord/your CI.</p>
+            <p className="text-[11px] text-muted">Get a POST when a build finishes or your app is published — wire builds into Slack/Discord/your CI. The address must be on the public internet.</p>
             <div className="flex gap-2">
               <Input value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://hooks.slack.com/…" className="flex-1 bg-well focus:border-cyan-500" />
               <Button onClick={addHook} disabled={whBusy || !newUrl.trim()} className="bg-cyan-600 hover:bg-cyan-700 text-on-accent"><Plus className="w-3.5 h-3.5" />Add</Button>

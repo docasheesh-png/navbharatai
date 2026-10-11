@@ -78,7 +78,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
     setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setIsSearching, setPreferredLanguage,
     setMode, setShowAuth, setUser, setGithubToken, setGithubRepoContext,
     setFiles, setHasGeneratedCode, setIsDeployed, setIsAppBuilt,
-    addLog, addToast, incrementDailyUsage, handleGHConfirmPush, learnFromMessage, updatePreview,
+    addLog, incrementDailyUsage, handleGHConfirmPush, learnFromMessage, updatePreview,
   } = deps;
 
   // STOP support (admin 2026-08-13: "koi galat search rukti nahi"). Every AI here streams a reply over one
@@ -371,7 +371,6 @@ export function useChatEngine(deps: ChatEngineDeps) {
 
     try {
       let data: any;
-      let usedBackend = false;
 
       // Smart Intent Detection & Routing
       const buildTriggers = /bana do|build|create|generate|coding|program|code kardo|app chahiye|banao|project/i;
@@ -640,11 +639,9 @@ export function useChatEngine(deps: ChatEngineDeps) {
         } catch (frontendErr: any) {
           console.warn('Frontend Gemini failed, trying backend fallback...', frontendErr.message);
           data = await callWithRetry();
-          usedBackend = true;
         }
       } else {
         data = await callWithRetry();
-        usedBackend = true;
       }
       
       // Only add aiMessage if streaming didn't already add it

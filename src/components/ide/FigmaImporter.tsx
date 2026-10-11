@@ -243,7 +243,6 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, o
   const [copied, setCopied] = useState(false);
   const [aiRefineOpen, setAiRefineOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
-  const [isRefining, setIsRefining] = useState(false);
 
   const [history, setHistory] = useState<string[]>([]);
   const pagedHistory = usePagedList(history);
@@ -859,10 +858,10 @@ ${generatedCode}
                     />
                     <button
                       onClick={handleAiRefine}
-                      disabled={isRefining || !aiPrompt.trim()}
+                      disabled={!aiPrompt.trim()}
                       className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-on-accent text-xs px-4 py-2 rounded-lg transition-colors"
                     >
-                      {isRefining ? <TirangaLoader size={13} /> : <Sparkles size={13} />}
+                      <Sparkles size={13} />
                       Refine
                     </button>
                     <button

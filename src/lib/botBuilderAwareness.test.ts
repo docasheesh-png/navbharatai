@@ -29,12 +29,9 @@ describe('Bot Builder — 100% AI awareness (Free · Pro)', () => {
     }
   });
 
-  it('the OFFLINE AI finds the Bot Builder (same shared KB, no internet)', () => {
-    for (const q of ['bot builder', 'whatsapp bot', 'chatbot', 'telegram bot', 'chatbot banao']) {
-    }
-  });
-
   it('offers a real one-tap navigation target (never a dead button)', () => {
+    // Emptied with the Offline AI (#2948) while the target moved into the KB's `nav` field — restored.
+    expect(bot!.nav).toEqual({ view: 'botbuilder' });
   });
 
   it('every AI describes the CURRENT Bot Builder (connect nodes · simulate · Go Live to Telegram/WhatsApp)', () => {

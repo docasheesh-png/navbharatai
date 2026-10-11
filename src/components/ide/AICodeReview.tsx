@@ -85,7 +85,7 @@ const CAT_CONFIG: Record<Category, { label: string; color: string; icon: any }> 
   accessibility: { label: 'Accessibility', color: 'text-success', icon: CheckCircle2 },
 };
 
-function analyzeCode(code: string): ReviewIssue[] {
+export function analyzeCode(code: string): ReviewIssue[] {
   const issues: ReviewIssue[] = [];
   let id = 1;
 
@@ -292,7 +292,10 @@ function analyzeCode(code: string): ReviewIssue[] {
 
   const hasDivOnClick = /<div[^>]*onClick/i.test(code);
   const hasDivRole = /<div[^>]*role\s*=/.test(code);
-  if (hasDivOnClick && !hasDivRole) {
+  // A role alone does not make a <div> reachable — without tabIndex the keyboard can never focus it,
+  // which is exactly what the fix below tells the user to add. `hasTabIndex` was computed for this and
+  // never read (Q-600), so `role="button"` with no tabIndex passed as accessible.
+  if (hasDivOnClick && (!hasDivRole || !hasTabIndex)) {
     issues.push({
       id: String(id++), severity: 'warning', category: 'accessibility',
       title: 'Clickable <div> without role or keyboard support',

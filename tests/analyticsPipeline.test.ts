@@ -54,7 +54,7 @@ describe('dayKey', () => {
 
 describe('store (best-effort, no Firestore under VITEST)', () => {
   it('recordAnalyticsEvent never throws; getFunnel returns an empty funnel', async () => {
-    await expect(recordAnalyticsEvent({ event: 'build_start', userId: 'u1' })).resolves.toBeUndefined();
+    await expect(recordAnalyticsEvent({ event: 'build_start' })).resolves.toBeUndefined();
     await expect(recordAnalyticsEvent({ event: '' })).resolves.toBeUndefined();
     const f = await getFunnel(30);
     expect(f.stages).toEqual({ signup: 0, build: 0, deploy: 0, pay: 0 });

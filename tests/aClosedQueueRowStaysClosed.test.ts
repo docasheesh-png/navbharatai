@@ -39,8 +39,11 @@ describe('the build-report queue never un-resolves an item', () => {
     }
     for (const id of ['Q-111', 'Q-114', 'Q-126']) {
       const row = queue.split('\n').find((l) => l.startsWith(`| ${id} |`)) ?? '';
-      expect(row, id).toContain('BLOCKED');
+      // The incident ERASED these records. What must hold is that the record is there — its four-field
+      // body — and that its state moved only by a recorded decision: Q-114 left BLOCKED on 2026-10-11 when
+      // the admin chose its recommendation, and the row carries that decision.
       expect(row, id).toContain('**What:**');
+      expect(row.includes('BLOCKED') || row.includes('**Decided by the admin'), id).toBe(true);
     }
   });
 });

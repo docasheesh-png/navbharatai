@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { ExternalLink, ShieldCheck, Sparkles, AlertCircle, Settings, Globe, Lock } from 'lucide-react';
+import { ExternalLink, ShieldCheck, AlertCircle, Settings, Globe, Lock } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { cn } from '../../lib/utils';
 import { AuthComponent } from '../AuthComponent';
@@ -25,11 +25,6 @@ export interface AppModalsProps {
   pendingKey: string;
   setPendingKey: (v: string) => void;
   handleKeySave: (provider: string, key: string) => void;
-  // Workspace preparing overlay
-  isWorkspacePreparing: boolean;
-  // Workspace prep error
-  workspacePrepError: string | null;
-  setWorkspacePrepError: (v: string | null) => void;
   // Preview builder overlay
   isPreviewBuilding: boolean;
   previewBuildStage: string;
@@ -44,8 +39,6 @@ export function AppModals({
   githubRedirectingMessage, githubDebugData, setGithubRedirectingMessage,
   firebaseOauthError, setFirebaseOauthError,
   pendingProvider, setPendingProvider, pendingKey, setPendingKey, handleKeySave,
-  isWorkspacePreparing,
-  workspacePrepError, setWorkspacePrepError,
   isPreviewBuilding, previewBuildStage, detectedFramework,
   previewBuildError, setPreviewBuildError,
 }: AppModalsProps) {
@@ -274,91 +267,6 @@ export function AppModals({
         )}
       </AnimatePresence>
 
-      {/* Premium AI Workspace Builder Overlay */}
-      <AnimatePresence>
-        {isWorkspacePreparing && (
-          <div className="fixed inset-0 bg-surface backdrop-blur-md flex items-center justify-center p-4 z-[999999]">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-sm bg-card border border-indigo-500/40 rounded-3xl p-6 space-y-6 text-center shadow-3xl relative overflow-hidden"
-            >
-              <div className="absolute top-0 left-0 w-full h-[3px] bg-indigo-500 animate-pulse shadow-[0_0_15px_rgba(99,102,241,0.5)] text-on-accent"></div>
-
-              <div className="flex flex-col items-center justify-center space-y-4 pt-4">
-                <div className="relative">
-                  <div className="absolute inset-0 bg-indigo-500/25 rounded-full blur-xl animate-pulse" />
-                  <div className="relative w-16 h-16 rounded-2xl bg-indigo-600/10 border border-indigo-500/40 flex items-center justify-center text-accent-text">
-                    <Sparkles className="w-8 h-8 animate-spin" style={{ animationDuration: '4s' }} />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <h4 className="text-ink text-base font-black uppercase tracking-wider font-sans">🔥 Opening AI Workspace</h4>
-                  <p className="text-[10px] text-accent-text font-bold uppercase tracking-widest font-mono font-black">Cognitive Pipeline Authorization</p>
-                </div>
-              </div>
-
-              <div className="bg-well border border-line rounded-2xl p-4 text-center">
-                <div className="flex items-center justify-center space-x-2.5 mb-2">
-                  <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-                <p className="text-muted text-[11px] font-semibold leading-relaxed">
-                  Preparing synced project context for <span className="text-ink font-black">navBharatAI</span>...
-                </p>
-              </div>
-
-              <p className="text-[8.5px] text-faint font-bold uppercase tracking-wider font-mono">
-                Sovereign Model Intercept active • Do not refresh
-              </p>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* AI Workspace Binding Error Popup */}
-      <AnimatePresence>
-        {workspacePrepError && (
-          <div className="fixed inset-0 bg-scrim backdrop-blur-md flex items-center justify-center p-4 z-[999999]">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 10 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 10 }}
-              className="w-full max-w-sm bg-card border border-red-500/30 rounded-3xl p-6 space-y-4 shadow-3xl text-center relative"
-            >
-              <div className="absolute top-0 left-0 w-full h-[3px] bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)] text-on-accent"></div>
-
-              <div className="flex flex-col items-center justify-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/35 flex items-center justify-center text-danger font-bold text-xl font-mono">
-                  ✕
-                </div>
-                <div>
-                  <h4 className="text-ink text-sm font-black uppercase tracking-wider font-sans">❌ Failed to open AI Workspace</h4>
-                  <p className="text-[9px] text-danger font-bold uppercase tracking-widest font-mono font-black">Workspace session error</p>
-                </div>
-              </div>
-
-              <div className="p-3.5 bg-well border border-line rounded-2xl text-[11px] text-muted leading-relaxed text-left space-y-1.5">
-                <div className="font-sans font-bold text-[10px] uppercase text-danger font-extrabold">Detailed Reason:</div>
-                <p className="font-mono text-danger block text-[10px] break-words">{workspacePrepError}</p>
-              </div>
-
-              <div className="flex flex-col gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setWorkspacePrepError(null)}
-                  className="w-full py-2.5 bg-raised hover:bg-raised-hover active:scale-95 border border-line text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer"
-                >
-                  Dismiss / Rectify Error
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Premium Real-Time Preview Builder Overlay */}
       <AnimatePresence>

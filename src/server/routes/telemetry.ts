@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { errorTracker } from '../observability/ErrorTracker';
-import { recordAnalyticsEvent, getFunnel } from '../lib/AnalyticsPipeline';
+import { recordAnalyticsEvent, getFunnel, sanitizeEventKey } from '../lib/AnalyticsPipeline';
 import { sendSafeError } from '../lib/httpError';
 import rateLimit from 'express-rate-limit';
 import { sanitizeText, sanitizeUrl } from '../../lib/observability/sanitize';
@@ -103,11 +103,16 @@ export function registerTelemetryRoutes(app: Express): void {
   // User analytics event ingestion endpoint
   app.post('/api/analytics/event', (req: Request, res: Response) => {
     try {
-      const { event, props, userId, sessionId, ts } = req.body || {};
+      const { event, props, ts } = req.body || {};
       if (!event) return res.status(400).json({ error: 'event required' });
-      console.log('[ANALYTICS]', JSON.stringify({ event, props, userId: userId || 'anon', sessionId, ts: ts || Date.now() }));
+      // 🔒 NO PERSON IN THE LOG EITHER (Q-783 sibling, 2026-10-11). This line used to print every event
+      // with the caller's `userId` and `sessionId` — the same per-person stream the admin chose to stop
+      // keeping in `analytics_events`, kept a second time in Cloud Logging. The person is dropped; the
+      // event and its `props` stay, because they are the only place a web-vital or cold-start NUMBER
+      // lands (the day rollup counts events, it does not keep values).
+      console.log('[ANALYTICS]', JSON.stringify({ event: sanitizeEventKey(String(event)), props, ts: ts || Date.now() }));
       // P-MON.1 — server-side aggregation: fold into the daily rollup + activation funnel. Best-effort.
-      recordAnalyticsEvent({ event, userId, sessionId, props, ts }).catch(() => {});
+      recordAnalyticsEvent({ event, ts }).catch(() => {});
       res.status(204).end();
     } catch {
       res.status(204).end();

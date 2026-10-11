@@ -897,7 +897,11 @@ export function BillingPanel(props: BillingPanelProps) {
                         {/* The end of the trail. The dot stops here because this button IS the fix —
                             pressing it is what clears every dot behind it. */}
                         {needsTopUp && <span aria-hidden className="w-2 h-2 rounded-full bg-danger" />}
-                        Purchase Wallet Tokens (₹{(parseFloat(buyAmountInput) || 0).toLocaleString('en-IN')})
+                        {/* While the order is being created the button is disabled; it now says why (Q-600 batch
+                            five: the hook kept a progress string that no screen ever showed). */}
+                        {isRecharging
+                          ? 'Opening secure checkout…'
+                          : <>Purchase Wallet Tokens (₹{(parseFloat(buyAmountInput) || 0).toLocaleString('en-IN')})</>}
                       </button>
                     </div>
                     )}

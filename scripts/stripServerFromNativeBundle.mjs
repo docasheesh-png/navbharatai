@@ -49,7 +49,6 @@
  *
  * • `monaco/` (24 MB) — a product decision, not a defect. Removing it makes Code Studio require a
  *   network connection. That is the admin's call, not this script's.
- * • `build_status.json` — 548 bytes, and `src/App.tsx` really polls it.
  * • Anything not on the explicit list below. This removes named server artifacts, never a pattern
  *   that could grow to match a real asset.
  */

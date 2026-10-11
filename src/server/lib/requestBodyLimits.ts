@@ -81,7 +81,6 @@ export const LARGE_BODY_ROUTES: readonly BodyRoute[] = [
   { path: '/preview-app/:sessionId/*splat', why: 'the previewed app\'s OWN requests, forwarded verbatim — its uploads are its business, not ours' },
   { path: '/api/workspace/write', why: '`files` (AppTargetPicker.tsx)' },
   { path: '/api/download-zip', why: '`files` — the project to package (App.tsx)' },
-  { path: '/api/github/push', why: '`files` — the project to commit (App.tsx, githubService.ts)' },
   { path: '/api/github/push-enhanced', why: '`files` — the project to commit (AgentV3Panel.tsx, GitPanel.tsx, MonetizationWizard.tsx, CICDPipeline.tsx)' },
   { path: '/api/pro/deploy', why: '`files` — the project to deploy' },
   { path: '/api/gallery/publish', why: '`files` — the project to publish (GalleryPanel.tsx)' },

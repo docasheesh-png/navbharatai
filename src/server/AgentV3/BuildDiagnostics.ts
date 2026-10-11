@@ -81,6 +81,18 @@ export const PROCESS_ONLY_CODES = new Set([
   'IN_BUILD_GREEN_SKIPPED_PARTIAL_SCAN', 'IN_BUILD_GREEN_NOT_SAVED', 'GREEN_SNAPSHOT_NOT_SAVED',
   'HEAL_NOT_DURABLE',         // our repair wrote twice to one file; the user never sees repair passes
   'IMPORT_NOT_DURABLE',       // our store did not confirm saving an import (autopsy d0b2fcd6, Q-735) — their app is unchanged
+  // ── Q-381 batch two (2026-10-11): each of these says, at its own recording site, that it is about OUR run.
+  // All WARNING/INFO, so the error count a RED gate reads cannot change and no bill moves.
+  'FASTLANE_CONTINUATION_FAILED',    // our generation's continuation call failed; the complete files were kept
+  'FASTLANE_TRUNCATED_FILE_DROPPED', // our output limit cut a file mid-write; we discarded it and rebuild it
+  'IMPORT_DIAGNOSTIC',               // how our server-side GitHub import ran
+  'IMPORT_DB_PROVISION_FAILED',      // the PostgreSQL WE set up in the sandbox failed its connection test
+  'IMPORT_DB_MIGRATIONS_SKIPPED',    // our sandbox could not install the deps, so we skipped the migration
+  'REVIEW_PARTIAL',                  // our post-build review ran out of time (its salvaged findings are offered)
+  'FIX_REVERT_FAILED',               // our repair pass broke the app and OUR rollback did not complete
+  'EXPLORE_REPAIR_UNDONE',           // our click-explorer repair was not kept (the app's control finding stands)
+  'REVIEW_FUNCTIONAL_REPAIR_UNDONE', // our reviewer repair was not kept (the findings are offered instead)
+  'TOOL_ERROR',                      // a tool call the model made failed (the model's step, not the app)
   'SUMMARY_OFF_TOPIC',        // about OUR closing summary's wording, and already said above the summary
   'DATABASE_OFFER_AT_START',  // we OFFERED (or created) a database — a thing we did for them, not a fault
   'DATABASE_ASLEEP',          // the user's own Supabase project is paused — their account's state, not the app's code

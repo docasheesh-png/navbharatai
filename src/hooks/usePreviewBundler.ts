@@ -1,17 +1,18 @@
 // usePreviewBundler — the preview-build / client-side bundling slice of the app, lifted out of the
 // App.tsx God component (P3.1 slice 2, behavior-preserving). It owns the preview build-state + the
 // Problems panel data + the preview history, and the four functions that turn the virtual file set into
-// a rendered preview document: handleTriggerPreviewBuild (the "Build preview" action), updatePreview
+// a rendered preview document: handleTriggerPreviewBuild (the "Build preview" action) and updatePreview
 // (the core bundler: server-side esbuild for React/Vue with a client-side fallback, CSS/JS inlining for
-// vanilla web, universal viewer otherwise), handleFileChange (debounced edit→rebuild bridge) and runCode.
+// vanilla web, universal viewer otherwise). `handleFileChange` and `runCode` were removed 2026-10-11
+// (Q-600 batch five): nothing called either, and runCode's "dry-run mode" printed a made-up
+// "[PROCESS] Exited with code 0" for a file it never ran.
 //
 // Everything the bundler needs from the rest of the app (the file set, the undo/redo-backed preview
 // doc setter, nav, the active agent for telemetry, the free-tier build counter, log/toast sinks) is
 // injected as deps, so the code moved BYTE-IDENTICAL — pure relocation, zero logic change. App.tsx
 // destructures the SAME identifiers this hook returns, so the render tree is unchanged.
 
-import { useState, useRef } from 'react';
-import type { Dispatch, SetStateAction } from 'react';
+import { useState } from 'react';
 import type { FileSystem, ViewType } from '../types';
 import type { PreviewProblem } from '../lib/previewProblems';
 import { detectFrameworkFromFiles, detectAppType, isClassicVanillaWeb } from '../lib/appUtils';
@@ -21,12 +22,8 @@ import { trackEvent } from '../lib/analytics';
 export interface UsePreviewBundlerDeps {
   /** The virtual file set to bundle (read by handleTriggerPreviewBuild). */
   files: FileSystem;
-  /** File-set setter — handleFileChange writes a single file then debounces a rebuild. */
-  setFiles: Dispatch<SetStateAction<FileSystem>>;
   /** Undo/redo-backed setter for the rendered preview document. */
   setGeneratedCode: (code: string) => void;
-  /** The file currently open in the editor (runCode decides how to run by its extension). */
-  activeFile: string;
   /** Active AI agent id — attached to the app_generated telemetry event. */
   activeAgent: string;
   /** Nav — switch the surface tab to 'preview' once a build is ready. */
@@ -42,7 +39,7 @@ export interface UsePreviewBundlerDeps {
  * referenced, so the extraction is a pure relocation (no behavior change).
  */
 export function usePreviewBundler({
-  files, setFiles, setGeneratedCode, activeFile, activeAgent, toggleTab, incrementDailyUsage, addLog, addToast,
+  files, setGeneratedCode, activeAgent, toggleTab, incrementDailyUsage, addLog, addToast,
 }: UsePreviewBundlerDeps) {
   const [isPreviewBuilding, setIsPreviewBuilding] = useState(false);
   const [previewBuildError, setPreviewBuildError] = useState<string | null>(null);
@@ -291,44 +288,14 @@ export function usePreviewBundler({
     }
   };
 
-  // K4: debounce preview rebuild so rapid edits don't trigger a rebuild on every keystroke
-  const previewDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleFileChange = (path: string, content: string) => {
-    setFiles(prev => {
-      const next = { ...prev, [path]: content };
-      if (previewDebounceRef.current) clearTimeout(previewDebounceRef.current);
-      previewDebounceRef.current = setTimeout(() => { updatePreview(next); }, 400);
-      return next;
-    });
-  };
-
-  const runCode = (currentFiles: FileSystem) => {
-    const ext = activeFile.split('.').pop();
-    addLog(`Preparing to run ${activeFile}...`, 'info');
-
-    if (['html', 'js', 'css'].includes(ext || '')) {
-        updatePreview(currentFiles);
-        toggleTab('preview');
-        addLog(`Application launched in Sandbox mode.`, 'success');
-    } else {
-        addLog(`Runtime for .${ext} is currently in limited availability. Executing in dry-run mode...`, 'warn');
-        setTimeout(() => {
-            addLog(`[STDOUT] Execution of ${activeFile} completed.`, 'info');
-            addLog(`[PROCESS] Exited with code 0.`, 'success');
-        }, 1500);
-    }
-  };
-
   return {
-    isPreviewBuilding, setIsPreviewBuilding,
+    isPreviewBuilding,
     previewBuildError, setPreviewBuildError,
-    previewBuildStage, setPreviewBuildStage,
-    detectedFramework, setDetectedFramework,
-    problems, setProblems,
-    previewHistory, setPreviewHistory,
+    previewBuildStage,
+    detectedFramework,
+    problems,
+    previewHistory,
     handleTriggerPreviewBuild,
     updatePreview,
-    handleFileChange,
-    runCode,
   };
 }

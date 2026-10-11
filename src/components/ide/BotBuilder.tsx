@@ -3,6 +3,7 @@ import { Play, Download, Trash2, Plus, X, ChevronRight, MessageSquare, GitBranch
 import { auth } from '../../lib/firebase';
 import { BotBuildHelp, type HelpMode } from './BotBuildHelp';
 import { WhatsAppAppSecretNotice, looksLikeAppSecret } from './WhatsAppAppSecretNotice';
+import { deliverFile } from '../../lib/downloadFile';
 
 type NodeType = 'start' | 'message' | 'menu' | 'condition' | 'api' | 'end';
 
@@ -272,12 +273,7 @@ export const BotBuilder: React.FC = () => {
   function exportJson() {
     const flow = { platform, version: '1.0', nodes, edges, webhookUrl: '' };
     const blob = new Blob([JSON.stringify(flow, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `bot-flow-${platform}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile(`bot-flow-${platform}.json`, blob);
   }
 
   // The old webhook-modal snippet was REMOVED on 2026-10-09 (Q-600's sweep). It printed a

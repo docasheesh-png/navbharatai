@@ -82,6 +82,12 @@ export interface DeploymentRecord {
   sizeMb?: number;
   /** Registry status; defaults to 'active'. */
   status?: DeploymentStatus;
+  /**
+   * The status the app had when it was put on HOLD (Q-703). A hold takes nothing offline, so this is how a
+   * restore knows whether a live version is still out there: `'active'` = it was serving and still is.
+   * Written only together with `status: 'held'`; absent on holds recorded before it existed.
+   */
+  heldFrom?: DeploymentStatus | 'none';
   /** True when the content-safety scanner flagged this app in WARN mode (published, but surfaced). */
   flagged?: boolean;
   /**
@@ -317,11 +323,16 @@ class DeploymentStore {
    * a missing doc, which is reported as `false` — the honest answer, since nothing was updated.
    * `markOrphaned` and `setOutboundVerdict` had the same shape and were fixed in the same change.
    */
-  async setStatus(workspaceId: string, status: DeploymentStatus): Promise<boolean> {
+  async setStatus(workspaceId: string, status: DeploymentStatus, extra?: Pick<DeploymentRecord, 'heldFrom'>): Promise<boolean> {
     const db = this.getDb();
     if (!db || !workspaceId) return false;
     try {
-      await db.collection('agentv3_deployments').doc(workspaceId).update({ status, updatedAt: Date.now() });
+      await db.collection('agentv3_deployments').doc(workspaceId).update({
+        status,
+        // `heldFrom` only ever travels with a hold (Q-703); every other status leaves it as it was.
+        ...(status === 'held' && extra?.heldFrom ? { heldFrom: extra.heldFrom } : {}),
+        updatedAt: Date.now(),
+      });
       return true;
     } catch {
       return false;
@@ -501,8 +512,10 @@ export function withDeploymentPersistence(
     // TAKEDOWN re-publish guard: an app an admin took down for a policy violation must not be
     // silently re-published. Bounded (3s) + fail-OPEN — a store outage must never block a legit
     // deploy (blocking a taken-down republish during a rare outage is an acceptable trade vs rule #1).
+    // Kept outside the block: a publish-scan hold below records what this record's status WAS (Q-703).
+    let existing: DeploymentRecord | null = null;
     if (isFirstPartyProvider(providerId)) {
-      const existing = await Promise.race([
+      existing = await Promise.race([
         deploymentStore.get(workspaceId),
         new Promise<DeploymentRecord | null>((r) => setTimeout(() => r(null), 3_000)),
       ]).catch(() => null);
@@ -521,7 +534,8 @@ export function withDeploymentPersistence(
       if (!scan.safe) {
         audit('APP_PUBLISH_FLAGGED', { workspaceId, userId: userId ?? 'anon', findings: scan.findings.map((f) => `${f.severity}:${f.rule}`).join(',') });
         if (publishScanBlocks()) {
-          void deploymentStore.setStatus(workspaceId, 'held');
+          // Whatever was already live stays live — the scan refuses the NEW version only (Q-703).
+          void deploymentStore.setStatus(workspaceId, 'held', { heldFrom: existing?.status ?? 'none' });
           throw new Error(
             `This app was held for review: it looks like it may ${scan.findings[0]?.description || 'contain unsafe content'} ` +
             `Publishing is paused pending review. If this is a mistake (a legitimate login for your own product), contact support.`,

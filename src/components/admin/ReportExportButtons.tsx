@@ -28,6 +28,7 @@ import { isNativeShell, type NativeShellContext } from '../../lib/nativeShell';
 import {
   downloadWorksHere, exportStatusText, reportExportText, reportFilename,
 } from '../../lib/reportExport';
+import { deliverFile, deliveryMessage } from '../../lib/downloadFile';
 
 export interface ReportExportButtonsProps {
   /** The card's visible heading. It names the report in the envelope, the toast and the filename. */
@@ -87,21 +88,11 @@ export function ReportExportButtons({
   const onDownload = useCallback(() => {
     const text = buildText();
     if (!text) { say(`${label} has nothing to download yet.`); return; }
-    try {
-      const blob = new Blob([text], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = reportFilename(label, Date.now());
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      say(exportStatusText(label, true, 'download'));
-    } catch (e) {
-      console.error(e);
-      say(exportStatusText(label, false, 'download'));
-    }
+    const filename = reportFilename(label, Date.now());
+    void deliverFile(filename, text, 'application/json').then((delivered) => {
+      if (delivered === 'cancelled') say(deliveryMessage(delivered, filename));
+      else say(exportStatusText(label, delivered !== 'failed', 'download'));
+    });
   }, [buildText, label, say]);
 
   const btn = 'inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-line text-[10px] '

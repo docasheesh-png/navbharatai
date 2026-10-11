@@ -36,7 +36,6 @@ export interface ChatEngineDeps {
   preferredLanguage: any;
   user: FirebaseUser | null;
   keys: any;
-  invalidKeys: any;
   selectedModel: string;
   apnapanProfile: any;
   hasGeneratedCode: boolean;
@@ -50,7 +49,6 @@ export interface ChatEngineDeps {
   setIsLoading: Dispatch<SetStateAction<boolean>>;
   setActiveIntent: (v: any) => void;
   setErrorContext: (v: any) => void;
-  setIsSearching: Dispatch<SetStateAction<boolean>>;
   setPreferredLanguage: (v: any) => void;
   setMode: (v: any) => void;
   setShowAuth: Dispatch<SetStateAction<boolean>>;
@@ -59,7 +57,6 @@ export interface ChatEngineDeps {
   setGithubRepoContext: (v: any) => void;
   setFiles: Dispatch<SetStateAction<FileSystem>>;
   setHasGeneratedCode: Dispatch<SetStateAction<boolean>>;
-  setIsDeployed: Dispatch<SetStateAction<boolean>>;
   setIsAppBuilt: Dispatch<SetStateAction<boolean>>;
   // functions
   addLog: (message: string, level?: any) => void;
@@ -73,11 +70,11 @@ export interface ChatEngineDeps {
 export function useChatEngine(deps: ChatEngineDeps) {
   const {
     input, messages, isLoading, sessions, currentSessionId, activeAgent, mode, activeView, activeIntent,
-    errorContext, preferredLanguage, user, keys, invalidKeys, selectedModel, apnapanProfile,
+    errorContext, preferredLanguage, user, keys, selectedModel, apnapanProfile,
     hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files,
-    setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setIsSearching, setPreferredLanguage,
+    setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setPreferredLanguage,
     setMode, setShowAuth, setUser, setGithubToken, setGithubRepoContext,
-    setFiles, setHasGeneratedCode, setIsDeployed, setIsAppBuilt,
+    setFiles, setHasGeneratedCode, setIsAppBuilt,
     addLog, incrementDailyUsage, handleGHConfirmPush, learnFromMessage, updatePreview,
   } = deps;
 
@@ -367,7 +364,6 @@ export function useChatEngine(deps: ChatEngineDeps) {
     setErrorContext(null);
 
     const isRealTime = /today|current|latest|now|news|weather|time|date|day|aaj|samachar|update/i.test(messageToSend);
-    if (isRealTime) setIsSearching(true);
 
     try {
       let data: any;
@@ -440,7 +436,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
         addLog('Falling back to background AI processing...', 'info');
         // The account token (or, signed out, this device's guest id) — see the axios path above.
         const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(await authHeader()) };
-        if (keys.gemini && !invalidKeys.has(keys.gemini)) headers['x-gemini-key'] = keys.gemini;
+        if (keys.gemini) headers['x-gemini-key'] = keys.gemini;
         if (keys.groq) headers['x-groq-key'] = keys.groq;
         if (keys.deepseek) headers['x-deepseek-key'] = keys.deepseek;
         if (keys.openai) headers['x-openai-key'] = keys.openai;
@@ -700,7 +696,6 @@ export function useChatEngine(deps: ChatEngineDeps) {
                updatePreview(newFiles);
                addLog('Workspace synced with AI generated code.', 'success');
                setHasGeneratedCode(true);
-               setIsDeployed(true);
                setIsAppBuilt(true);
              }
              return newFiles;
@@ -745,7 +740,6 @@ export function useChatEngine(deps: ChatEngineDeps) {
       setMessagesForTab((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoadingForTab(false);
-      setIsSearching(false);
     }
   };
 
@@ -760,7 +754,6 @@ export function useChatEngine(deps: ChatEngineDeps) {
     stoppedRef.current = true;
     try { abortRef.current?.abort(); } catch { /* already settled — nothing to abort */ }
     setIsLoading(false);
-    setIsSearching(false);
   };
 
   // UNSEND — take back the last message: stop any in-flight reply, drop the last exchange (the AI reply and

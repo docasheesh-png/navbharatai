@@ -29,7 +29,6 @@ installDomTranslateGuard();
 if (isNativeShell(typeof window !== 'undefined' ? window as never : ({} as never))) {
   installZoomLock(typeof document !== 'undefined' ? document : null);
 }
-import { BuildProvider } from './components/ide/BuildContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { installOfflineQueueFlush } from './lib/offlineQueue';
 import { initializeObservability, recordError, setAppContext, crashTestTools } from './lib/observability';
@@ -334,14 +333,12 @@ window.addEventListener(CONSENT_EVENT, syncNativeMeta);
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary fallback={RootFallback}>
-      <BuildProvider>
-        <App />
-        <ConsentBanner />
-        <InviteAcceptGate />
-        <SharePortal />
-        <MobileEngagementGate />
-        <PlatformRatingHost />
-      </BuildProvider>
+      <App />
+      <ConsentBanner />
+      <InviteAcceptGate />
+      <SharePortal />
+      <MobileEngagementGate />
+      <PlatformRatingHost />
     </ErrorBoundary>
   </StrictMode>,
 );

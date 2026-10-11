@@ -62,6 +62,7 @@ import { ReportShot } from './ReportShot';
 import { compressForReport } from '../lib/reportImage';
 import { writeFailure, readAnswer, isRecord } from '../lib/serverAnswer';
 import { playRefundCheckText } from '../lib/playRefundCheckText';
+import { deliverFile, deliveryMessage } from '../lib/downloadFile';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -882,11 +883,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    *   • Unpublish — the site goes offline and the OWNER can publish it again. The everyday action.
    *   • Ban       — the site goes offline and the owner can NEVER publish again from that workspace.
    *                  Only an admin's Restore lifts it (admin panel audit, PR 3).
-   *   • Restore   — lifts a ban or an automatic hold; the app stays offline until the OWNER publishes.
+   *   • Restore   — lifts a ban or an automatic hold. A banned app stays offline until the OWNER publishes;
+   *                  a held app that was live when held simply stays live (`restoredStatusFor`, Q-703).
    * All three need the admin's own reason: the server refuses the request without one (readAdminReason).
    */
   /** The app awaiting confirmation, and which of the two actions was asked for. */
-  const [moderating, setModerating] = useState<{ workspaceId: string; action: ModerationAction } | null>(null);
+  const [moderating, setModerating] = useState<{ workspaceId: string; action: ModerationAction; rec?: { status?: string | null; heldFrom?: string | null } } | null>(null);
   const [moderateReason, setModerateReason] = useState('');
   const [moderateBusy, setModerateBusy] = useState(false);
   /** Told to the panel after an action lands, so it re-reads THAT row in place instead of reloading page one. */
@@ -1128,17 +1130,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   /** Save a JSON string as a file. One implementation — every Download button funnels through it. */
   const saveJsonFile = (json: string, filename: string) => {
-    try {
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e) { console.error(e); toast('Download failed.'); }
+    void deliverFile(filename, json, 'application/json').then((delivered) => {
+      if (delivered === 'failed') toast(deliveryMessage(delivered, filename));
+    });
   };
 
   /** Copy a JSON string, and say honestly whether it worked (a browser can refuse the clipboard). */
@@ -1797,7 +1791,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               written from it — an empty reason there is a record that explains nothing.
             • The backdrop does not dismiss, so a stray tap answers nothing. */}
       {moderating && (() => {
-        const copy = confirmCopy(moderating.action);
+        const copy = confirmCopy(moderating.action, moderating.rec);
         const isBan = moderating.action === 'ban';
         const isRestore = moderating.action === 'restore';
         // The same rule the server enforces — every one of the three actions carries a reason.
@@ -4839,7 +4833,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 headers={headers}
                 openAccount={(uid) => void openAccount(uid)}
                 toast={toast}
-                onModerate={(workspaceId, action) => { setModerating({ workspaceId, action }); setModerateReason(''); }}
+                onModerate={(workspaceId, action, rec) => { setModerating({ workspaceId, action, rec }); setModerateReason(''); }}
                 moderated={moderated}
               />
 

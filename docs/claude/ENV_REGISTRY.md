@@ -2642,7 +2642,7 @@ the flag entries above promise.
   `$$BODY`: an unescaped `$URL` is read by Cloud Build as a substitution and fails the build at config parse (another
   session caught that, `df7aef5e2`, after the first version would have broken every deploy). Pinned by
   `tests/aFreezeThatStopsNothing.test.ts`. The step identifies itself with `X-Release-Gate-Caller: cloudbuild` so the
-  admin board can state the pipeline asked as a fact rather than an inference (Q-791).
+  admin board can state the pipeline asked as a fact rather than an inference (Q-808).
 - **🌐 `AGENTV3_BROWSER_ONLY_GUARD` — BROWSER-ONLY CODE IS NOT RUN IN NODE (queue row Q-146, 2026-10-05).
   ⚠️ NOT set; default ON; `off` removes both the write note and the run refusal.**
   `BrowserOnlyInNode.ts`. A report recorded the cost: the agent ran a browser-oriented localStorage seed with

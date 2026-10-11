@@ -15,7 +15,6 @@ import { CHAT_MARKDOWN_PLUGINS } from '../../lib/chatMarkdown';
 import { AttachMenu } from '../AttachMenu';
 import { saveSecret } from '../../lib/secretsApi';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
-import { AgentProgress } from './AgentProgress';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { ChatCodeBlock } from '../chat/ChatCodeBlock';
@@ -28,7 +27,6 @@ import { deleteMessage, editMessage } from '../../lib/chatMessageActions';
 import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 
 import { ThemeMode } from '../../lib/theme';
-import { useBuild } from './BuildContext';
 
 
 interface Message {
@@ -359,7 +357,6 @@ export const AIChat: React.FC<AIChatProps> = ({
   const showFreeModeButton = Boolean(onOpenModePicker) && !(onModeChange && activeAgent === 'navbharatai-pro');
   /** Same carve-out as Mode: the composer's left slot belongs to the free chat's controls only. */
   const showFreeHistoryButton = Boolean(onOpenHistory) && !(onModeChange && activeAgent === 'navbharatai-pro');
-  const { buildSteps } = useBuild();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const kbHeight = useKeyboardHeight();
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -440,9 +437,6 @@ export const AIChat: React.FC<AIChatProps> = ({
     }, [onInputChange]),
   );
   
-  useEffect(() => {
-    if (import.meta.env.DEV) console.log('[AIChat] Received buildSteps:', buildSteps.length, buildSteps);
-  }, [buildSteps]);
   const scrollRef = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
@@ -910,7 +904,6 @@ export const AIChat: React.FC<AIChatProps> = ({
           const lastUser = [...messages].reverse().find((m: any) => m?.sender === 'user');
           return lastUser ? <AppUpdateChatNotice /> : null;
         })()}
-        {/* AgentProgress removed here to only be rendered dynamically in messages if needed */}
         {messages.length === 0 && (
           <>
               <div className="flex flex-col items-center justify-center p-6 space-y-2 opacity-50">
@@ -1136,13 +1129,6 @@ export const AIChat: React.FC<AIChatProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }} />
               <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }} />
             </div>
-          </div>
-        )}
-
-        {buildSteps && buildSteps.length > 0 && buildSteps.some(step => step.status === 'running') && activeAgent === 'navbharatai-pro' && (
-          <div className="mt-4 p-4 bg-card border border-line rounded-2xl animate-in fade-in slide-in-from-bottom-4 duration-300">
-             <span className="text-[9px] font-black uppercase tracking-widest text-muted mb-3 block">Live Execution Progress</span>
-             <AgentProgress steps={buildSteps} />
           </div>
         )}
 

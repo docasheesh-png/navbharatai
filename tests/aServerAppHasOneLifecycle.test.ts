@@ -321,10 +321,13 @@ describe('censuses — a NEW path cannot skip the shared functions', () => {
 
   it('🔒 the only direct "unpublished" writers are the two that already removed everything, named', () => {
     const writers = serverFiles.filter((f) => /\.setStatus\([^,()]+,\s*'unpublished'/.test(read(f))).sort();
-    // agentv3.ts: the OWNER's unpublish — removeHostedServers runs first. admin.ts: the restore of a banned
-    // app, which is offline already (the ban took it down through takeAppOffline).
-    expect(writers).toEqual(['src/server/routes/admin.ts', 'src/server/routes/agentv3.ts']);
+    // agentv3.ts: the OWNER's unpublish — removeHostedServers runs first.
+    expect(writers).toEqual(['src/server/routes/agentv3.ts']);
     expect(read('src/server/routes/agentv3.ts')).toContain('await removeHostedServers(workspaceId, rec);');
+    // admin.ts's restore no longer writes the literal: it writes `restoredStatusFor(current)` (Q-703) —
+    // 'unpublished' for a banned app (offline already: the ban went through takeAppOffline), 'active' for
+    // a held app that was never taken offline. One pure rule, pinned in adminAppModeration.test.ts.
+    expect(read('src/server/routes/admin.ts')).toContain('const after = restoredStatusFor(current);');
   });
 
   it('🔒 hosting has ONE caller, and the duplicate route is gone', () => {

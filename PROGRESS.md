@@ -93641,3 +93641,30 @@ Q-795 (account deletion erases workspace configs and snapshots), Q-796 (per-owne
 - Q-161 ("a workspace wiped mid-build is noticed only at the next turn") is a real gap rather than lost
   evidence. The admin closed it with group 3; if it recurs, the next report opens a new row with full
   evidence.
+
+### 2026-10-11 — #3657 and #3658 merged; first four of the admin's group-4 decisions built (Q-783, Q-703, Q-117, Q-795)
+
+**Correction to the batch-five entry above:** it says "(#3657)". The admin merged #3657 (Q-381 batch two and
+Q-600 batch four) before batch five was pushed, so batch five and the queue answers shipped as **#3658**,
+which is now merged too. Closed with it, and appended to the register: Q-600, Q-792, Q-793, Q-794.
+
+**Built next, each locked by a test proven by reversion:**
+- **Q-783 (privacy):** analytics keeps counts, not people.
+  - `analytics_events` is no longer written.
+  - Its two siblings go too: the server log line no longer prints `userId`/`sessionId`, and the client no longer sends them.
+  - The log keeps `props`, because web-vital and cold-start numbers land only there.
+- **Q-703 (truth):** a hold takes nothing offline, and now everything says so.
+  - The hold records `heldFrom`.
+  - "Held — still live" offers Unpublish; before, a held live app could only be banned.
+  - Restore writes `active` for a hold of a live app instead of the false `unpublished`.
+- **Q-117 (domain):** a feature tie goes to the domain the prompt names with more distinct headline words.
+  - dhaba → restaurant.
+  - udhaar khata → fintech.
+  - 36 domain suites (726 tests) unchanged.
+- **Q-795 (DPDP):** account deletion now removes each app's saved snapshot from our hosting, in both the bucket and the Firebase channel.
+  - It runs before the Firestore erase that deletes the ids it needs.
+  - The configs part was already done by Q-701.
+
+**Found on the way and recorded, not fixed:**
+- **Q-807:** an account deletion leaves the user's PUBLISHED sites live with no record pointing at them. Taking them down
+  touches App Mart buyers (Q-766), so it is the admin's decision. Recommendation: offline, except sold listings.

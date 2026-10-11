@@ -66,7 +66,10 @@ describe('layer B — the starter is never a rendered app', () => {
   it('every render verdict in the route passes through the starter check (source guard)', () => {
     const src = readFileSync(resolve(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
     // the three places a real-browser verdict can call a build rendered: rescue, verify loop, last chance
-    expect(src.match(/withStarterVerdict\(analyzePreviewHtml\(/g)?.length).toBe(3);
+    expect(src.match(/starterChecked\(analyzePreviewHtml\(/g)?.length).toBe(3);
+    // …and the helper is the one place the starter verdict is applied (Q-381 batch three)
+    expect(src.match(/withStarterVerdict\(/g)?.length).toBe(1);
+    expect(src).toContain('return withStarterVerdict(verdict, shown);');
     // the in-build proof reads the tree that rendered
     expect(src).toMatch(/starterIsWhatRendered\(starterEntryIn\(files\), shot\.html\)/);
     // the fast lane is told when the workspace entry is still the starter

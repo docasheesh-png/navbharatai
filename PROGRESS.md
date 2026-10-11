@@ -94067,3 +94067,32 @@ The admin merged #3668. Closed, IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt` 
     - The Publish screen reads it on open and says "live at …", the last failure, or "still being checked", resuming a check that a reload interrupted within 15 minutes.
   - Both stores carry the field. The duplicate path does not copy it, because it names the original's service (named in the comment and pinned).
   - Test: `tests/theBackendIsRememberedAfterAReload.test.ts`, with two guards reverted and seen to fail. KB updated.
+
+### 2026-10-11 — Q-381 batch three: a defect the user is shown has a button (37 → 19)
+
+- **The class:** a real defect in the user's app reached their build-health card as a warning with nothing to press.
+- **Fourteen got a one-tap fix**, written for the person who pressed the button, with no vendor, tool or file path:
+  - a starter page where the app should be (`STARTER_STILL_SHOWING`);
+  - code that does not compile, imports that point at nothing, and a name another file does not export (`SYNTAX_ERROR_DETECTED`, `MISSING_FILES_DETECTED`, `MISSING_EXPORT_DETECTED`, each handed the exact list);
+  - a secret printed to the logs, on an import turn (`COMPLIANCE_LOG_LEAK_FOUND`);
+  - pages held hostage by the database (`DB_COUPLED_BOOT`);
+  - payment checking that did not finish (`SERVERLESS_PAYMENT_NOT_SET_UP`), which never fakes "paid";
+  - made-up people or results shown as real (`SIMULATED_DATA_SHIPPED`, `SIMULATED_RESULT_SHIPPED`);
+  - features asked for and not on the screen (`FEATURE_COVERAGE`, handed the list; the fix checks first, because that probe has been wrong before);
+  - the four integrity findings (`INTEGRITY_ORPHAN_STYLESHEET`, `_FOCUS_CONFLICT`, `_DUPLICATE_ENTRY`, `_DUPLICATE_MODULE`).
+- **Four roll-ups are offered through the finding they restate** (`OFFERED_THROUGH`): `OUTCOME_SYNTAX_ERROR`, `OUTCOME_MISSING_FILES`, `OUTCOME_MISSING_EXPORT` and `BOOT_KILLING_ENV_GUARD_UNRESOLVED`.
+  - The result is one button, never two, and the roll-up's later message is the evidence.
+  - A declared "no offer" would have been wrong: the final syntax re-check records `OUTCOME_SYNTAX_ERROR` on its own when a late repair broke a file the first check passed.
+- **No offer outlives its problem:**
+  - The compile and integrity findings are answered by their heals (`HEAL_RESOLVES`).
+  - `STARTER_STILL_SHOWING` was never answered. Now the three real-browser verdicts go through one helper, `starterChecked`, which answers it when a later look sees the app itself render. The starter census follows the helper: 3 calls, and `withStarterVerdict` applied in exactly one place.
+- **Nothing moves a bill:** every one of the eighteen stays an app finding at its own severity. Only the offer table and the alias map changed.
+- **Left in the backlog on purpose**, each with its reason in a test:
+  - `DB_SCHEMA_MISSING`: read from the first boot's log, and the migration retried after that boot can create the tables without anything answering it.
+  - `FRAMEWORK_SOURCE_MISMATCH`: a plan-time note to our builder, never re-checked against the delivered app.
+  - Each needs its re-check before it can carry a button.
+- **Found while doing it — Q-821 (🟡, money):** an early `OUTCOME_SYNTAX_ERROR` is never answered when a later repair makes every file parse, so a build whose final files parse can stay NOT READY and free. Recorded with the recommendation; ERROR severity makes it the admin's call.
+- **Tests:**
+  - `tests/aDefectTheUserIsShownHasAButton.test.ts`, plus the census now counting a roll-up as offered only through a real offer.
+  - Reverted three ways and seen to fail each time: one offer removed, the alias loop removed, and the starter answer removed.
+- **#3673 merged (2026-10-11):** Q-796, Q-797 and Q-806 are closed. Their rows were deleted from `BUILD_REPORT_QUEUE.md` and their IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`, on the merged `main`. Q-381 batch three (above) and Q-821 were rebuilt on that `main` for the next PR from this branch.

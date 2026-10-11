@@ -9,7 +9,7 @@ import { PublishedAppsCard } from './profile/PublishedAppsCard';
 import { publishedAppRows, liveAppCount } from '../lib/publishedAppsView';
 import { platformMarginView } from '../lib/platformMarginView';
 import { adultOptInSummary } from '../lib/adultContent';
-import { confirmCopy, MODERATION_ROUTE, type ModerationAction } from '../lib/adminAppModeration';
+import { confirmCopy, ownerConfirmCopy, MODERATION_ROUTE, type ModerationAction } from '../lib/adminAppModeration';
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
@@ -889,11 +889,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    * All three need the admin's own reason: the server refuses the request without one (readAdminReason).
    */
   /** The app awaiting confirmation, and which of the two actions was asked for. */
-  const [moderating, setModerating] = useState<{ workspaceId: string; action: ModerationAction; rec?: { status?: string | null; heldFrom?: string | null } } | null>(null);
+  // `ownerUid` set = ONE PERSON'S apps, one action (Q-796); `workspaceId` then names the person for the panel.
+  const [moderating, setModerating] = useState<{ workspaceId: string; action: ModerationAction; rec?: { status?: string | null; heldFrom?: string | null }; ownerUid?: string; count?: number; more?: boolean } | null>(null);
   const [moderateReason, setModerateReason] = useState('');
   const [moderateBusy, setModerateBusy] = useState(false);
   /** Told to the panel after an action lands, so it re-reads THAT row in place instead of reloading page one. */
   const [moderated, setModerated] = useState<{ workspaceId: string; tick: number } | null>(null);
+  /** Re-read the whole list after an owner-wide action, and open one person's apps after a ban (Q-796). */
+  const [ownerModerated, setOwnerModerated] = useState<{ tick: number } | null>(null);
+  const [focusOwner, setFocusOwner] = useState<{ uid: string; tick: number } | null>(null);
 
   /**
    * Run the confirmed action. Both routes delete the LIVE site first and only then touch the
@@ -903,8 +907,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
    */
   const runModeration = useCallback(async () => {
     if (!moderating) return;
-    const { workspaceId, action } = moderating;
+    const { workspaceId, action, ownerUid } = moderating;
     setModerateBusy(true);
+    if (ownerUid && (action === 'ban' || action === 'unpublish')) {
+      // ONE PERSON'S APPS (Q-796): the server acts app by app and says, per app, what was confirmed.
+      try {
+        const r = await fetch(`/api/admin/owners/${encodeURIComponent(ownerUid)}/moderate`, {
+          method: 'POST', headers, body: JSON.stringify({ action, reason: moderateReason.trim() }),
+        });
+        const d = await r.json().catch(() => null);
+        if (r.ok && d && typeof d.done === 'number') {
+          const verb = action === 'ban' ? 'Banned' : 'Unpublished';
+          toast(d.failed > 0
+            ? `${verb} ${d.done} app(s); ${d.failed} could NOT be confirmed offline — nothing was recorded for those.`
+            : `${verb} ${d.done} app(s) of this person.${d.truncated ? ' More apps remain beyond this batch — run it again.' : ''}`);
+          setModerating(null);
+          setModerateReason('');
+        } else {
+          toast(d?.error || 'The owner-wide action did not run.');
+        }
+      } catch (e) { console.error(e); toast('The owner-wide action did not run.'); }
+      finally { setModerateBusy(false); setOwnerModerated({ tick: Date.now() }); }
+      return;
+    }
     try {
       const path = MODERATION_ROUTE[action];
       const r = await fetch(`/api/admin/deployments/${encodeURIComponent(workspaceId)}/${path}`, {
@@ -912,8 +937,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       });
       const d = await r.json();
       if (d?.ok) {
+        // A banned person's OTHER live apps are named and opened, so none is left serving by oversight (Q-796).
+        const others = action === 'ban' && typeof d.otherLiveApps === 'number' ? d.otherLiveApps : 0;
+        if (others > 0 && typeof d.ownerUid === 'string' && d.ownerUid) setFocusOwner({ uid: d.ownerUid, tick: Date.now() });
         toast(action === 'ban'
-          ? `Banned — ${workspaceId} cannot publish again unless an admin restores it.`
+          ? `Banned — ${workspaceId} cannot publish again unless an admin restores it.${others > 0 ? ` This person has ${others} other live app${others === 1 ? '' : 's'} — they are listed now.` : ''}`
           : action === 'restore'
             ? 'Restored — the owner can publish this app again.'
             : 'Unpublished — the owner can publish again.');
@@ -1792,7 +1820,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               written from it — an empty reason there is a record that explains nothing.
             • The backdrop does not dismiss, so a stray tap answers nothing. */}
       {moderating && (() => {
-        const copy = confirmCopy(moderating.action, moderating.rec);
+        const copy = moderating.ownerUid && moderating.action !== 'restore'
+          ? ownerConfirmCopy(moderating.action, moderating.count ?? 0, moderating.more === true)
+          : confirmCopy(moderating.action, moderating.rec);
         const isBan = moderating.action === 'ban';
         const isRestore = moderating.action === 'restore';
         // The same rule the server enforces — every one of the three actions carries a reason.
@@ -1810,7 +1840,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               </div>
 
               <p className="text-[11px] font-mono text-body bg-well border border-line rounded-lg px-2.5 py-1.5 mb-3 truncate">
-                {moderating.workspaceId}
+                {moderating.ownerUid ? `Every app of ${moderating.ownerUid}` : moderating.workspaceId}
               </p>
               <p className={`text-sm leading-relaxed mb-4 ${isBan ? 'text-danger' : 'text-muted'}`}>{copy.body}</p>
 
@@ -4843,6 +4873,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 toast={toast}
                 onModerate={(workspaceId, action, rec) => { setModerating({ workspaceId, action, rec }); setModerateReason(''); }}
                 moderated={moderated}
+                onModerateOwner={(ownerUid, action, count, more) => { setModerating({ workspaceId: ownerUid, action, ownerUid, count, more }); setModerateReason(''); }}
+                ownerModerated={ownerModerated}
+                focusOwner={focusOwner}
               />
 
               {/* Restoring a removed app is built in PR 3 (the server route exists; this screen does not offer it yet). */}

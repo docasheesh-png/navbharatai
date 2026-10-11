@@ -3238,6 +3238,8 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Money") stil
 • Search by full app id, owner uid or public link (looked up directly); a fragment — including part of the app's name or the owner's name or email — filters the apps already loaded
 • Filter by state (Live / Offline / Banned / Held / Paused)
 • Unpublish takes a live site offline (the owner can publish again); Ban removes it and the owner can never publish that workspace again unless an admin restores it
+• ONE PERSON'S APPS, ONE ACTION (2026-10-11): search by an owner's uid and a bar shows how many apps that person has and how many are live, with "Unpublish all live" and "Ban all". It acts on exactly the apps the per-row buttons would offer, one at a time, each with its own audit line and 180-day record, and says per app if any could not be confirmed offline. It needs the same typed reason
+• After a single Ban, the toast says how many OTHER live apps that person still has, and the list opens on that person's apps so none is left serving by oversight
 • A HELD app was flagged by an automatic safety check, and a hold takes nothing offline: "Held — still live" means anyone with the link can still open it, so Unpublish (offered on it) or Ban is how it actually goes offline
 • RESTORE on a Banned or Held app lifts the block and the owner can publish again: a banned app stays offline until the owner publishes, and a held app that was still live simply stays live
 • Unpublish, Ban and Restore each need the admin's own reason, and each is written to the audit log with the admin's name

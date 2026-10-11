@@ -94040,3 +94040,11 @@ to it. Recorded as a deliberate non-item, not an omission.
   - `buildJobConfig` is the one job builder. `scripts/printCredentiallessBuild.ts` prints it, and `scripts/verifyCredentiallessBuild.sh` submits it in Cloud Shell with the isolation probe and reads `"identity": null` from inside `npm install`.
   - Test: `tests/aBuildRunsUserCodeWithNoCredential.test.ts`, with two guards reverted and seen to fail.
   - Honest state: **🟡 BLOCKED on the admin's Cloud Shell run.** Whether the workers honour the rule is unknowable from here. Gap (b), the egress allow-list, is now Q-820. Hosting stays admin-only until both are closed.
+- **Q-796 (admin decision 2026-10-11: "a per-owner view in the admin's app moderation: every app of that person, their states, and one action across them"):**
+  - Root cause: a ban was per app, so a person with nine live apps took nine bans, and nothing re-checked a banned person's other live apps.
+  - Built:
+    - In Admin → Apps, an owner-uid search shows a bar (apps, live) with Unpublish all live and Ban all. It goes through the existing confirmation dialog, with its own sentences (`ownerConfirmCopy`, "at least N" when more pages exist) and the same required reason.
+    - Server route `POST /api/admin/owners/:uid/moderate`: per app it runs the single routes' three steps (take offline, which throws unless confirmed; audit line; 180-day record), reports per app, and is bounded with the bound stated.
+    - A single Ban returns the person's other live-app count, and the list opens on that person.
+  - Design note: the first draft centralised the three steps into one helper. Three existing censuses pin each single route doing them visibly, and that pinning is deliberate. So the single routes are untouched, and a new census pins the owner route's steps and their order to the same ones.
+  - Test: `tests/onePersonsAppsOneAction.test.ts`, with two guards reverted and seen to fail. KB entry `admin-built-apps` updated.

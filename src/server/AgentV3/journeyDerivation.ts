@@ -32,6 +32,7 @@ import { rendersDataList } from './DesignCoverage';
 import { scanMarkup, enclosingTag, isHtmlElement, tagName, type ScannedTag } from './jsxTags';
 import { NEVER_PRESS, WRITE_VERBS } from './clickExplorer';
 import { withoutAppSignature } from './appSignature';
+import { isCanvasGameProject } from './gamePlaytest';
 
 /** How a single element is addressed, in the order Playwright should be asked for it. */
 export type SelectorKind = 'testid' | 'name' | 'id' | 'placeholder' | 'label' | 'text' | 'role';
@@ -248,15 +249,48 @@ const DATA_ENTRY_SIGNS: ReadonlyArray<readonly [RegExp, string]> = [
  * no data entry skips the save-and-reload journey AND says there is nothing to prove — which can let a
  * real data app reach GREEN on presses alone. So only an `input` whose literal `type` is one of these
  * stands down: a text box, a checkbox, a `<select>`, a `<textarea>`, a UI-library `<Slider>` or
- * `<Switch>` (whose contract we cannot know) and `type={expr}` all still count exactly as before.
+ * `<Switch>` (whose contract we cannot know) and a computed `type={kind}` all still count exactly as
+ * before — in any app that is not a game (see `GAME_SETTING_INPUT_TYPE` for the one exception).
+ *
+ * 🔴 A LITERAL IS A LITERAL IN EITHER SPELLING (admin 2026-10-11, build 46e2d74b). `type={'range'}` is the
+ * same element as `type="range"`, and JSX writes it that way as often as not; the pattern read only the
+ * quoted attribute, so the brace spelling of the very same slider turned a game back into a "data app".
+ * `typeAttr` reads both spellings — and still never a computed expression, whose value we cannot know.
  */
-const NON_DATA_INPUT_TYPE = /(?<![-\w])type\s*=\s*["']\s*(?:range|button|submit|reset|hidden|image)\s*["']/i;
+function typeAttr(types: string): RegExp {
+  return new RegExp(`(?<![-\\w])type\\s*=\\s*(?:\\{\\s*)?["'\`]\\s*(?:${types})\\s*["'\`](?:\\s*\\})?`, 'i');
+}
+const NON_DATA_INPUT_TYPE = typeAttr('range|button|submit|reset|hidden|image');
 
-/** Is the markup at `offset` inside an `<input>` that cannot hold saveable data? PURE. */
-function insideNonDataControl(src: string, offset: number): boolean {
+/**
+ * 🎮 A GAME'S SETTINGS ARE NOT ITS DATA (admin 2026-10-11, build 46e2d74b). The racing game had nothing
+ * a player types and expects to find again — and a settings control, so `dataEntryEvidence` read it as a
+ * data app: no journey could be derived from a form that does not exist (JOURNEY_NOT_DERIVED), and the
+ * release gate judged a GAME by a save-and-reload journey and called it YELLOW, "whether it keeps what a
+ * user enters is untested". The platform's own definition (NO_DATA_ENTRY_REASON, and the 2026-10-04
+ * entry "a game is no longer told its saving is untested") already said a game has nothing to save; a
+ * sound checkbox, a difficulty `<select>`, a laps number box or a volume `<Slider>` is a SETTING.
+ *
+ * 🔒 ONLY IN A GAME (`isCanvasGameProject` — the same predicate that decides the game is PLAYED by the
+ * playtest, so "is this a game" has one answer), and only for these setting-shaped controls. A text box,
+ * a `<textarea>`, a `<form>`, an editable surface and a computed `type={…}` still count in a game too: a
+ * leaderboard that asks for a player's name and keeps it IS data entry, and its journey is still derived.
+ */
+const GAME_SETTING_INPUT_TYPE = typeAttr('checkbox|radio|range|color|number');
+const GAME_SETTING_COMPONENT = /^(?:Checkbox|Switch|Slider|Radio|RadioGroup|Select|Toggle|ToggleGroup)$/;
+
+/** Is the markup at `offset` inside a control that cannot hold saveable data? PURE. */
+function insideNonDataControl(src: string, offset: number, game = false): boolean {
   const tag = enclosingTag(src, offset);
-  if (!tag || !isHtmlElement(tag) || tagName(tag).toLowerCase() !== 'input') return false;
-  return NON_DATA_INPUT_TYPE.test(tag) || SEARCH_INPUT.test(tag);
+  if (!tag) return false;
+  const name = tagName(tag);
+  const html = isHtmlElement(tag);
+  if (html && name.toLowerCase() === 'input') {
+    if (NON_DATA_INPUT_TYPE.test(tag) || SEARCH_INPUT.test(tag)) return true;
+    return game && GAME_SETTING_INPUT_TYPE.test(tag);
+  }
+  if (!game) return false;
+  return (html && name.toLowerCase() === 'select') || (!html && GAME_SETTING_COMPONENT.test(name));
 }
 
 /**
@@ -267,7 +301,7 @@ function insideNonDataControl(src: string, offset: number): boolean {
  * dhoondh or filter — narrows what is shown; the explorer's narrowing probe already presses it. Any other
  * field in the same app still counts, so a contacts app with search AND an add form is a data app as before.
  */
-const SEARCH_INPUT = /(?<![-\w])type\s*=\s*["']\s*search\s*["']|(?<![-\w])(?:placeholder|aria-label|name|id)\s*=\s*\{?\s*["'`][^"'`]*(?:search|khoj|dhoond|dhundh|खोज|ढूंढ|ढूँढ|filter)/i;
+const SEARCH_INPUT = /(?<![-\w])type\s*=\s*(?:\{\s*)?["'`]\s*search\s*["'`]|(?<![-\w])(?:placeholder|aria-label|name|id)\s*=\s*\{?\s*["'`][^"'`]*(?:search|khoj|dhoond|dhundh|खोज|ढूंढ|ढूँढ|filter)/i;
 
 /**
  * WHICH file made `appHasNoDataEntry` answer false, and why — or null when nothing did.
@@ -279,13 +313,15 @@ const SEARCH_INPUT = /(?<![-\w])type\s*=\s*["']\s*search\s*["']|(?<![-\w])(?:pla
  */
 export function dataEntryEvidence(files: Record<string, string>): { path: string; what: string; line: string } | null {
   const unused = unreferencedComponents(files);
+  // One answer to "is this a game", asked once (see GAME_SETTING_INPUT_TYPE).
+  const game = isCanvasGameProject(files ?? {});
   for (const [path, src] of Object.entries(appOwnFiles(files))) {
     if (!src || unused.has(path.replace(/^\.?\/+/, ''))) continue;
     for (const [re, what] of DATA_ENTRY_SIGNS) {
       // EVERY occurrence, not the first: one slider's `onChange` must not hide a real text box below it.
       const all = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
       for (let m = all.exec(src); m; m = all.exec(src)) {
-        if (insideNonDataControl(src, m.index + 1)) continue;
+        if (insideNonDataControl(src, m.index + 1, game)) continue;
         const start = src.lastIndexOf('\n', m.index) + 1;
         const end = src.indexOf('\n', m.index);
         return { path, what, line: src.slice(start, end < 0 ? undefined : end).trim().slice(0, 140) };
@@ -438,6 +474,27 @@ export function savedStateEvidence(files: Record<string, string>): { path: strin
     }
   }
   return null;
+}
+
+/**
+ * 🎮 THE HONEST SENTENCE FOR A GAME (admin 2026-10-11, build 46e2d74b). A game has no form to fill in and
+ * reload, so a save-and-reload journey is the wrong test for it; what proves a game is PLAYING it, which
+ * the game playtest (gamePlaytest.ts) does and reports on its own line — including, when it could not,
+ * that the game was never played. The release gate repeats this sentence (journeyNoneWhy), so it must not
+ * claim more than that: it says how a game is judged, never that this one passed. PURE.
+ */
+export function gameNoJourneyReason(saved: { path: string; what: string } | null): string {
+  return 'this is a game — there is no form to fill in and reload, so a save-and-reload journey is the wrong test '
+    + `for it${saved ? ` (it keeps its progress in ${saved.what} in ${saved.path})` : ''}, and its settings controls `
+    + '(a sound switch, a speed slider) are not data. A game is proven by being PLAYED: the game playtest, '
+    + 'reported on its own line, drives its keys, a drag and a touch';
+}
+
+/** "There is nothing to save here", in the one true form for this project — a game, a saving app, or neither. PURE. */
+function nothingToSaveReason(files: Record<string, string>): string {
+  const saved = savedStateEvidence(files);
+  if (isCanvasGameProject(files)) return gameNoJourneyReason(saved);
+  return saved ? savedWithoutFormReason(saved) : NO_DATA_ENTRY_REASON;
 }
 
 /** The honest sentence for an app that saves state but has no form to fill in. PURE. */
@@ -647,8 +704,15 @@ function numberWithinBounds(tag: string, preferred: number): string {
  * bounds and be refused as malformed.
  */
 function skippableInput(tag: string): boolean {
-  const type = (ATTR(tag, 'type') || '').toLowerCase();
-  return ['hidden', 'file', 'submit', 'reset', 'button', 'image', 'checkbox', 'radio', 'range'].includes(type);
+  // Either spelling of a literal type (`type="range"`, `type={'range'}` — see `typeAttr`): the brace
+  // spelling used to make a skippable slider a required field nobody could address (build 46e2d74b).
+  return SKIPPABLE_INPUT_TYPE.test(tag);
+}
+const SKIPPABLE_INPUT_TYPE = typeAttr('hidden|file|submit|reset|button|image|checkbox|radio|range');
+
+/** A game's setting-shaped control (see `GAME_SETTING_INPUT_TYPE`) — never a field of a journey in a game. */
+function isGameSettingField(tag: string): boolean {
+  return /^<\s*select\b/i.test(tag) || GAME_SETTING_INPUT_TYPE.test(tag);
 }
 
 const CREATE_WORDS = /\b(add|create|new|save|submit|post|send|register|sign\s*up|signup)\b/i;
@@ -1153,6 +1217,10 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
   const noWrites = writesToUserDatabase(files);
 
   const candidates = journeyCandidates(files);
+  // 🎮 In a game, a settings control sitting beside a real form (a leaderboard's name box) is not a field
+  // of that form: an unlabelled difficulty `<select>` used to make the whole form "unaddressable", so the
+  // one journey a game really has was never derived (build 46e2d74b's class, see GAME_SETTING_INPUT_TYPE).
+  const game = isCanvasGameProject(files);
   // One form, one journey. `App.tsx` imports `Home.tsx` (formSourcesFor looks one level deep), so the
   // same newsletter box was derived twice and failed twice — autopsy b9287f85 reported "2 user
   // journey(s) failed" about ONE form. The form's own file is the identity, not the page that reached it.
@@ -1170,7 +1238,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     let credential = false;
     for (const candidate of formSourcesFor(path, files)) {
       if (usedForms.has(candidate.path)) continue;
-      const tags = formFields(candidate.source);
+      const tags = formFields(candidate.source).filter(({ tag }) => !(game && isGameSettingField(tag)));
       if (tags.length === 0) continue;
 
       const got: JourneyField[] = [];
@@ -1350,16 +1418,16 @@ export function noJourneyReason(files: Record<string, string>): string {
     // `NO_DATA_ENTRY_REASON` says "TWO branches now reach it"; only the other one was fixed when the
     // Duolingo app was told it had nothing to save, and a sibling left behind is this repo's headline
     // class. `savedStateEvidence` is asked here too, so the two branches cannot say different things.
-    if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) {
-      const saved = savedStateEvidence(files ?? {});
-      return saved ? savedWithoutFormReason(saved) : NO_DATA_ENTRY_REASON;
-    }
+    if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) return nothingToSaveReason(files ?? {});
     return 'no page components were found to derive a user journey from';
   }
   // THE SAME SOURCES THE DERIVATION READS, for the same reason the candidate list is shared: a page
   // composes its form from components, and asking a narrower question here is how this sentence came
   // to tell a chat app it takes no user input (see formSourcesFor).
   const anyForm = pages.some((p) => formSourcesFor(p, files).some((s) => inputTags(s.source).length > 0));
+  // 🎮 A GAME WHOSE ONLY "FORM" IS ITS SETTINGS is a game first (admin 2026-10-11, build 46e2d74b): its
+  // sound checkbox is an `<input>`, so `anyForm` is true, and every sentence below is about forms.
+  if (anyForm && isCanvasGameProject(files ?? {}) && appHasNoDataEntry(files ?? {})) return nothingToSaveReason(files ?? {});
   if (!anyForm) {
     // 🔴 A REACT GAME HAS A PAGE, SO IT NEVER REACHED THE SENTENCE WRITTEN FOR IT (autopsy f97eb0ec,
     // 2026-09-20 — the THIRD time this line has told an app it takes no input when it does).
@@ -1378,10 +1446,7 @@ export function noJourneyReason(files: Record<string, string>): string {
     // 🔒 …AND "NO FORM" IS NOT "NOTHING TO SAVE" (autopsy 536c8189 — see `savedStateEvidence`). Ask the
     // second question before saying the second sentence: an app whose controls are buttons and which keeps
     // its state in storage DOES save and reload, and telling the user it has nothing to save is false.
-    if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) {
-      const saved = savedStateEvidence(files ?? {});
-      return saved ? savedWithoutFormReason(saved) : NO_DATA_ENTRY_REASON;
-    }
+    if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) return nothingToSaveReason(files ?? {});
     if (appOnlyShowsWhatItHolds(files ?? {})) return LOOKUP_ONLY_REASON;
     // 🔴 "NOTHING HERE TAKES USER INPUT" WAS SAID ABOUT AN APP WHOSE FORMS SIT ON SCREENS NO PAGE REACHES
     // (autopsy 2b1f845e: a five-step wizard in src/steps/, switched by state, no router). The data-entry
@@ -1440,6 +1505,11 @@ export function noJourneyReason(files: Record<string, string>): string {
       + 'so there is nothing a journey could submit and then look for after a reload — no journey was derived, '
       + 'and nothing needs changing for this check.';
   }
+  // 🔴 THE REMEDY BELOW IS ONLY TRUE OF AN APP THAT TAKES DATA (report map of build 46e2d74b). An app whose
+  // only field is a slider was told, here, to "give each field a name … so this check can prove the app
+  // really saves what is typed" — while `appHasNoDataEntry`, which the release gate reads, said it has
+  // nothing to save. Two readers, two answers; the gate's is the true one, so it is said here as well.
+  if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) return nothingToSaveReason(files ?? {});
   return 'the forms in this app have no field this check could address honestly (no name, id, placeholder, '
     + 'label or test id), so no journey was derived rather than one that would fail for the wrong reason. '
     + 'Give each field a `name` and a label and this check can prove the app really saves what is typed — '

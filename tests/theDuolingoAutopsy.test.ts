@@ -395,8 +395,16 @@ describe('an app whose controls are buttons can still save and reload', () => {
   // fixed the first time a claim like this was wrong.
   it('both branches of noJourneyReason ask the same second question', () => {
     const src = readFileSync(join(__dirname, '../src/server/AgentV3/journeyDerivation.ts'), 'utf8');
-    const asks = src.match(/savedStateEvidence\(files \?\? \{\}\)/g) ?? [];
-    expect(asks.length).toBeGreaterThanOrEqual(2);
+    // Since build 46e2d74b (admin 2026-10-11) the question is asked in ONE place, `nothingToSaveReason`, and
+    // every "nothing to save" branch goes through it — so no branch can answer without asking it, and the
+    // game sentence added that day could not be given by one branch and missed by the other.
+    const helperAt = src.indexOf('function nothingToSaveReason');
+    expect(helperAt).toBeGreaterThan(0);
+    expect(src.slice(helperAt, src.indexOf('\n}\n', helperAt))).toContain('savedStateEvidence(files)');
+    const fn = src.slice(src.indexOf('export function noJourneyReason'));
+    const body = fn.slice(0, fn.indexOf('\n}\n')).replace(/^\s*\/\/.*$/gm, '');
+    expect((body.match(/nothingToSaveReason\(files \?\? \{\}\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(body).not.toMatch(/NO_DATA_ENTRY_REASON|savedWithoutFormReason\(/);
   });
 
   it('the release gate repeats the derivation\'s sentence instead of its own paraphrase', () => {

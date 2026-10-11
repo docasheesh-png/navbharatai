@@ -93921,3 +93921,7 @@ the CSS is in the page. *A threshold copied from another test's fixture is not a
   - Three dead marker branches are deleted, along with the unanswerable Code Review button.
   - Sibling removed: the deploy panel state, which nothing could ever open.
   - Test: `tests/aBuildOffersItsOwnPreview.test.ts`.
+- **Q-248 (honesty):** a size nobody measured is not claimed.
+  - The claim audit reads the phone-size check's outcome.
+  - "44×44 buttons" or "fits a phone" is corrected out loud as unmeasured or contradicted, unless the check passed.
+  - Test: `tests/aSizeNobodyMeasuredIsNotClaimed.test.ts`.

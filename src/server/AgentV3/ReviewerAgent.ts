@@ -234,8 +234,24 @@ const TAG_POLISH_CATEGORY = new Set(['cosmetic', 'style', 'styling', 'naming', '
 const TAG_NOT_A_FINDING = new Set(['pass', 'passed', 'ok', 'okay', 'done', 'fixed', 'resolved', 'verified', 'good', 'great',
   'fine', 'works', 'working', 'correct', 'valid', 'na', 'none', 'score', 'summary', 'overview', 'verdict', 'conclusion',
   'assessment', 'review', 'praise', 'strength', 'strengths', 'positive', 'positives', 'file', 'files', 'path', 'link']);
-/** "[NOT WORKING]" is a break, whatever the verdict word inside it says. */
+/** A negation word. It is read WITH the word after it, never alone — see the two sets below. */
 const TAG_NEGATION = new Set(['not', 'non', 'no']);
+/**
+ * "[NO ISSUES]", "[NO BUGS FOUND]", "[NOT APPLICABLE]", "[NO REGRESSION]": a negation of one of these is a clean
+ * bill, never a finding.
+ *
+ * 🔴 (verification of build 46e2d74b's fix, 2026-10-11) A negation used to make ANY tag a break, so
+ * "[NO ISSUES] The app works as requested." parsed to a BROKEN warning — and a broken finding is exactly what a
+ * working app's one verified repair is allowed to act on (`selectGreenRepairable`). Measured: all seven of
+ * "[NO ISSUES]", "[No bugs found]", "[NO ERRORS]", "[No Problems]", "[Not Applicable]", "[No Regression]" and
+ * "[NOT WORKING]" were selected for that repair; only the last names a break.
+ */
+const TAG_NEGATED_CLEAN = new Set(['issue', 'issues', 'bug', 'bugs', 'error', 'errors', 'problem', 'problems', 'defect',
+  'defects', 'regression', 'regressions', 'concern', 'concerns', 'finding', 'findings', 'blocker', 'blockers', 'critical',
+  'warning', 'warnings', 'applicable', 'needed', 'required']);
+/** "[NOT WORKING]", "[NOT IMPLEMENTED]", "[NON FUNCTIONAL]": a negation of one of these says the app misbehaves. */
+const TAG_NEGATED_BREAK = new Set(['working', 'works', 'work', 'functional', 'functioning', 'implemented', 'fixed', 'done',
+  'correct', 'valid', 'ok', 'okay', 'saved', 'saving', 'wired', 'responding', 'responsive', 'rendering', 'loading', 'playable']);
 /** Words that only qualify a severity ("[HIGH PRIORITY]", "Severity / Critical:") — known, but carry nothing. */
 const TAG_QUALIFIER = new Set(['priority', 'severity', 'impact', 'risk', 'level']);
 
@@ -257,9 +273,17 @@ function classifyTagWords(inner: string, strict: boolean): { severity: ReviewIss
   const norm = words.map((w) => (/^a11y$/i.test(w) ? 'accessibility' : w.toLowerCase()));
   if (!norm.every((w) => /^[a-z]{2,20}$/.test(w))) return null;
   const negated = norm.some((w) => TAG_NEGATION.has(w));
+  // A negation says what it negates: a clean bill is no tag at all, a negated "works" is a break, and anything
+  // else ("[NOT TESTED]") negates nothing this vocabulary knows (see TAG_NEGATED_CLEAN).
+  let negatedBreak = false;
+  for (let i = 0; i < norm.length; i++) {
+    if (!TAG_NEGATION.has(norm[i])) continue;
+    if (TAG_NEGATED_CLEAN.has(norm[i + 1] ?? '')) return null;
+    if (TAG_NEGATED_BREAK.has(norm[i + 1] ?? '')) negatedBreak = true;
+  }
   if (!negated && norm.some((w) => TAG_NOT_A_FINDING.has(w))) return null;
   let rank = 0; // 0 none, 1 suggestion, 2 warning, 3 critical
-  let broken = negated;
+  let broken = negatedBreak;
   let polish = 0;
   let known = 0;
   for (const w of norm) {

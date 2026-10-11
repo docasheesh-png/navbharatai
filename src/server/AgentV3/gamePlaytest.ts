@@ -52,12 +52,29 @@ export function gamePlaytestEnabled(env: NodeJS.ProcessEnv = process.env): boole
 
 const CODE_FILE = /\.(tsx?|jsx?|mjs|html?|vue|svelte)$/i;
 
-/** Is this project a game drawn on a canvas? Only those are played. PURE. */
+/**
+ * Is this project a game drawn on a canvas? Only those are played. PURE.
+ *
+ * 🔴 THE TWO HALVES ARE ASKED SEPARATELY (verification of build 46e2d74b's fixes, 2026-10-11). This used to read
+ * `GAME_SIGNAL && /requestAnimationFrame|…/` on one file — and `GAME_SIGNAL` itself contains
+ * `requestAnimationFrame`, so the "and" was empty: ONE animation frame anywhere made any app a canvas game.
+ * While the answer only decided whether to run a playtest, that cost a wasted run. The same day made two more
+ * readers depend on it — a playtest that could not look became a WARNING ("The game was never played"), and
+ * `journeyDerivation` began reading a game's checkboxes and selects as SETTINGS — and, measured, a habit
+ * tracker whose only data is its checkboxes, with an animated progress bar, was told "this is a game" and its
+ * save-and-reload proof was skipped. So a game needs a SURFACE it is drawn on (a 2D/WebGL context, three.js,
+ * Phaser, a <canvas>: `GAME_SIGNAL` with the frame left out) AND a LOOP that redraws it. The two may sit in
+ * different files, as a hand-written game's scene.ts and loop.ts do (46e2d74b's own layout).
+ */
 export function isCanvasGameProject(files: Record<string, string>): boolean {
+  let surface = false;
+  let loop = false;
   for (const [path, content] of Object.entries(files || {})) {
     if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof content !== 'string') continue;
     if (/(^|\/)src\/game\//.test(path)) return true;
-    if (GAME_SIGNAL.test(content) && /requestAnimationFrame|GameLoop|setAnimationLoop/.test(content)) return true;
+    if (!surface && GAME_SIGNAL.test(content.replace(/requestAnimationFrame/g, ''))) surface = true;
+    if (!loop && /requestAnimationFrame|GameLoop|setAnimationLoop/.test(content)) loop = true;
+    if (surface && loop) return true;
   }
   return false;
 }
@@ -253,10 +270,39 @@ async function startCandidates(page) {
     const found = [];
     let order = 0;
     for (const el of document.querySelectorAll('[data-nb-start]')) el.removeAttribute('data-nb-start');
-    for (const el of document.querySelectorAll('button, [role=button], a, input[type=button], input[type=submit]')) {
+    // A START CONTROL WITHOUT A CONTROL'S TAG (the click explorer's lesson, autopsy f496c75b, missed here until the
+    // verification of build 46e2d74b's fix): a hand-written game's "Start Race" is as often a <div onClick> as a
+    // <button>. An element counts when it carries an inline onclick or React holds a press handler in its props —
+    // never the page's own roots, never inside or around a real control, and only the innermost of nested ones.
+    const CONTROL = 'button, [role=button], a, input[type=button], input[type=submit]';
+    const reactPress = (el) => {
+      for (const k of Object.keys(el)) {
+        if (k.indexOf('__reactProps$') !== 0) continue;
+        const p = el[k];
+        return !!(p && (p.onClick || p.onPointerDown || p.onPointerUp || p.onMouseDown || p.onMouseUp || p.onTouchStart || p.onTouchEnd));
+      }
+      return false;
+    };
+    const roots = new Set([document.documentElement, document.body, document.querySelector('#root, #app, #__next')]);
+    const extra = [];
+    const all = document.body ? document.body.getElementsByTagName('*') : [];
+    for (let n = 0; n < all.length && n < 4000; n++) {
+      const el = all[n];
+      if (roots.has(el) || el.closest(CONTROL) || el.querySelector(CONTROL)) continue;
+      if (el.hasAttribute('onclick') || reactPress(el)) extra.push(el);
+    }
+    const nodes = Array.from(document.querySelectorAll(CONTROL)).concat(extra.filter((el) => !extra.some((o) => o !== el && el.contains(o))));
+    for (const el of nodes) {
       const b = el.getBoundingClientRect();
       const s = getComputedStyle(el);
       if (b.width <= 0 || b.height <= 0 || s.visibility === 'hidden' || s.display === 'none' || el.disabled) continue;
+      // A link that leaves the app ("Play on Android", a store page, a new tab) is never the start — the same
+      // rule the click explorer applies before it presses a link.
+      if (el.tagName === 'A') {
+        const href = el.getAttribute('href') || '';
+        if (el.target === '_blank' || /^(mailto|tel|sms|javascript):/i.test(href)) continue;
+        try { if (href && new URL(href, location.href).origin !== location.origin) continue; } catch { continue; }
+      }
       const t = String(el.getAttribute('aria-label') || el.innerText || el.value || '').trim().replace(/\\s+/g, ' ');
       if (!t || t.length > 40 || t.split(' ').length > 6) continue;
       const rank = never.test(t) ? 0 : known.has(t.toLowerCase()) ? 3 : notStart.test(t) ? 0 : lead.test(t) ? 2 : any.test(t) ? 1 : 0;

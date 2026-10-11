@@ -26,10 +26,14 @@ import {
 import { buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
 
 /** A racing game behind a title screen. `accelerates: false` is the 46e2d74b bug: the gas is read and never applied. */
-function racer(o: { accelerates: boolean; title?: 'start-race' | 'how-only' | 'two-screens' }): string {
+function racer(o: { accelerates: boolean; title?: 'start-race' | 'how-only' | 'two-screens' | 'div-start' }): string {
   // 'two-screens': "Play" opens a car picker whose "Race!" is what finally shows the track.
   const title = o.title === 'how-only'
     ? '<button id="how">How to Play</button><button id="set">Settings</button>'
+    // 'div-start': the start is a <div> whose press handler React holds (no button anywhere), and the first
+    // start-shaped control on the screen is a link that LEAVES the app.
+    : o.title === 'div-start'
+      ? '<a id="store" href="http://127.0.0.2:9/app">Play on Android</a><button id="how">How to Play</button><div id="start" class="pulse" style="padding:12px 24px">Start Race</div>'
     : o.title === 'two-screens'
       ? '<button id="how">How to Play</button><button id="play" onclick="this.parentElement.innerHTML=\'<h2>Pick a car</h2><button>Red</button><button id=start>Race!</button>\'; document.getElementById(\'start\').onclick = () => { document.getElementById(\'title\').remove(); start(); }; window.__plays = (window.__plays || 0) + 1;">Play</button>'
       : '<button id="how">How to Play</button><button id="start" class="pulse">Start Race</button>';
@@ -43,6 +47,8 @@ button{font-size:22px;margin:8px;padding:12px 24px}</style></head>
 document.getElementById('how').onclick = () => { document.body.insertAdjacentHTML('beforeend', '<p id="rules">Arrows to drive</p>'); };
 const s = document.getElementById('start');
 if (s) s.onclick = () => { document.getElementById('title').remove(); start(); };
+// What React leaves on a <div onClick={…}>: the handler in the element's props, no onclick attribute.
+if (s && s.tagName === 'DIV') s['__reactProps$nb'] = { onClick: s.onclick };
 function start() {
   const c = document.createElement('canvas'); c.style.cssText = 'display:block;width:100vw;height:100vh;touch-action:none';
   document.body.appendChild(c); const g = c.getContext('2d');
@@ -75,6 +81,7 @@ const PAGES: Record<string, string> = {
   '/race-stalled': racer({ accelerates: false }),
   '/no-start': racer({ accelerates: true, title: 'how-only' }),
   '/two-screens': racer({ accelerates: true, title: 'two-screens' }),
+  '/div-start': racer({ accelerates: true, title: 'div-start' }),
 };
 
 const PW = '/opt/node22/lib/node_modules/playwright/index.js';
@@ -131,6 +138,12 @@ describe.skipIf(!haveBrowser)('a racing game behind a "Start Race" title screen 
     const run = await play('/two-screens');
     expect(run.ok).toBe(true);
     expect(run.started).toBe('Race!');
+  }, 180_000);
+
+  it('a "Start Race" that is a <div onClick> (no button at all) is pressed, and a link that leaves the app is not', async () => {
+    const run = await play('/div-start');
+    expect(run.ok).toBe(true);
+    expect(run.started).toBe('Start Race');
   }, 180_000);
 
   it('a title screen with no control that starts a game is NOT RUN — a warning that says the game was never played', async () => {

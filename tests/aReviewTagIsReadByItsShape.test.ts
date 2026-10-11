@@ -100,12 +100,29 @@ describe('precision — what is NOT a finding stays not a finding', () => {
     'Risk: the data is lost',
     '[1] footnote text here',
     '- **[src/App.tsx]** the entry',
+    // A NEGATED clean bill (verification of this fix): these once parsed to BROKEN warnings that a working
+    // app's verified repair would act on.
+    '[NO ISSUES] The app works as requested.',
+    '- **[No bugs found]** All features work as requested.',
+    '[NO ERRORS] Build compiles cleanly and renders.',
+    '- **[Not Applicable]** The app has no backend.',
+    '- **[No Regression]** The earlier save fix still holds.',
   ];
   for (const line of notFindings) {
     it(`${JSON.stringify(line)} reads as nothing`, () => {
       expect(parseReviewOutput(line)).toEqual([]);
     });
   }
+
+  it('a negation reads the word after it: a negated "works" is a break, a negated "issues" is nothing, anything else is not a break', () => {
+    expect(parseReviewOutput('- **[NOT IMPLEMENTED]** the leaderboard never saves a score.')).toEqual([
+      { severity: 'warning', message: 'the leaderboard never saves a score.', broken: true },
+    ]);
+    expect(parseReviewOutput('[NON FUNCTIONAL] the pause button does nothing.')[0]?.broken).toBe(true);
+    expect(readLeadingTags('[NO ISSUES] The app works.')).toBeNull();
+    expect(readLeadingTags('[NOT TESTED] the share sheet on iOS')?.broken).toBe(false);
+    expect(selectGreenRepairable(parseReviewOutput('[NO ISSUES] The app works as requested.\n[No Problems] Everything renders correctly.'))).toEqual([]);
+  });
 
   it('the reader itself: no tag at the start is null, a verdict is null', () => {
     expect(readLeadingTags('The car never accelerates [BROKEN]')).toBeNull();

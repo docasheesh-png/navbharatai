@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import {
   appHasNoDataEntry, dataEntryEvidence, noJourneyReason, deriveJourneys, gameNoJourneyReason, NO_DATA_ENTRY_REASON,
 } from '../src/server/AgentV3/journeyDerivation';
+import { isCanvasGameProject } from '../src/server/AgentV3/gamePlaytest';
 
 /** A hand-written three.js racing game laid out the way 46e2d74b laid its own out (src/lib/game, a GameShell). */
 function racingGame(shell: string): Record<string, string> {
@@ -116,5 +117,45 @@ describe('THE SIBLINGS — the literal spelling, and the sentence that contradic
     });
     expect(why).toBe(NO_DATA_ENTRY_REASON);
     expect(why).not.toMatch(/saves what is typed/);
+  });
+});
+
+/**
+ * VERIFICATION OF THIS FIX (2026-10-11). "Only in a game" leaned on `isCanvasGameProject`, whose conjunction was
+ * empty: `GAME_SIGNAL` itself contains `requestAnimationFrame`, so one animation frame anywhere made any app a
+ * game. A habit tracker whose only data is its checkboxes was then told "this is a game" and its save-and-reload
+ * proof was skipped. A game now needs a surface it is drawn on AND a loop.
+ */
+describe('a game is known by its drawing surface and its loop, never by one animation frame', () => {
+  const HABITS: Record<string, string> = {
+    'src/main.tsx': "import { createRoot } from 'react-dom/client';\nimport App from './App';\ncreateRoot(document.getElementById('root')!).render(<App />);",
+    'src/App.tsx': `import { useEffect, useState } from 'react';
+type Habit = { id: number; name: string; done: boolean };
+export default function App() {
+  const [habits, setHabits] = useState<Habit[]>(() => JSON.parse(localStorage.getItem('habits') || '[]'));
+  const [shown, setShown] = useState(0);
+  useEffect(() => { localStorage.setItem('habits', JSON.stringify(habits)); }, [habits]);
+  const pct = habits.filter((h) => h.done).length / Math.max(1, habits.length);
+  useEffect(() => { let raf = 0; const tick = () => { setShown((s) => s + (pct - s) * 0.1); raf = requestAnimationFrame(tick); }; raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf); }, [pct]);
+  return (<main><div className="bar" style={{ width: shown * 100 + '%' }} />
+    <ul>{habits.map((h) => (<li key={h.id}><label><input type="checkbox" checked={h.done} onChange={() => setHabits(habits.map((x) => x.id === h.id ? { ...x, done: !x.done } : x))} /> {h.name}</label></li>))}</ul></main>);
+}`,
+  };
+
+  it('a habit tracker with an animated progress bar is not a game, so its checkboxes are still its data', () => {
+    expect(isCanvasGameProject(HABITS)).toBe(false);
+    expect(appHasNoDataEntry(HABITS)).toBe(false);
+    expect(dataEntryEvidence(HABITS)?.line).toMatch(/type="checkbox"/);
+    expect(noJourneyReason(HABITS)).not.toMatch(/this is a game/);
+  });
+
+  it('a hand-written game whose surface and loop sit in different files is still a game', () => {
+    expect(isCanvasGameProject({
+      'src/lib/game/scene.ts': "import * as THREE from 'three';\nexport const renderer = new THREE.WebGLRenderer();",
+      'src/lib/game/loop.ts': 'export function start(step: () => void) { const f = () => { step(); requestAnimationFrame(f); }; requestAnimationFrame(f); }',
+    })).toBe(true);
+    expect(isCanvasGameProject(racingGame(SETTINGS_SHELL))).toBe(true);
+    // A surface with no loop (a static chart on a canvas) is not a game either.
+    expect(isCanvasGameProject({ 'src/Chart.tsx': "const g = ref.current.getContext('2d'); g.fillRect(0, 0, 10, 10);" })).toBe(false);
   });
 });

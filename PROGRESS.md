@@ -93819,3 +93819,10 @@ than undoing it, and re-ran the full gate on the merged state.
   - Both admin margin cards read it, and say "at least" / "at most" when a source was not fully measured.
   - The chat burn panel's cost line is now labelled chat; it was a sibling mislabel.
   - Test: `tests/onePlatformMargin.test.ts`.
+- **Q-733 (product):** a project import never lands on top of another app.
+  - One rule: `projectImportTarget.ts`.
+  - In the builder, Import project (.zip), Open folder and the GitHub repo import all open a new chat when this chat holds an app.
+  - Code Studio refuses a zip into a workspace that has files. It shares the builder's session, and its Replace/Merge choices both merged server-side.
+  - The server refuses an import that reaches an occupied chat, before any model call and at no charge.
+  - Test: `tests/aProjectImportNeverLandsOnAnotherApp.test.ts`.
+  - Limit: an installed phone app older than the next bundle still imports through `import-files`.

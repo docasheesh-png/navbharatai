@@ -93509,3 +93509,61 @@ restricted list. Q-698 therefore waits only on an older bundle still active in a
 The rows were removed from the open queue and their IDs appended to the closed register. Live proof:
 - **Q-750 and Q-752:** image-scan run #108 on `main` (`50894a524`) is green. 0 CRITICAL, the image boots and serves, and the cache step ran with no "Failed to save" warning, so the cache saves for the first time. The nightly scan had been red since 2026-10-05.
 - **Q-751** is proven by the next `.aab` run: it must log no "`track` is deprecated" warning.
+
+## 2026-10-11 — The admin set `_RELEASE_GATE_URL`, and setting it exposed a defect in my own fix (Q-791)
+
+**Admin, this turn:** `_RELEASE_GATE_URL = https://navbharatai.com/api/release/gate` — **done**, on the Cloud
+Build trigger. So Q-141's blocker is cleared and the release gate is now live on the path that ships every
+merge. Registered in `docs/claude/ENV_REGISTRY.md` in this same commit, because `cloudbuild.yaml`'s own
+default is `''` and a future session reading only the file would conclude the gate is still inert.
+
+### 🔴 The defect the configuration exposed, and it is mine
+
+I was about to verify the wiring by curling the endpoint, and stopped — **because that call would itself have
+become the evidence.** Which is the bug:
+
+`/api/release/gate` is **public**; it has to be, because Cloud Build asks it without logging in. The route
+recorded a check on **every** GET, and `freezeEnforcementNote` then printed:
+
+> *"A deploy pipeline last asked this gate at … so a freeze does reach the pipeline."*
+
+**A browser, an uptime monitor, a crawler, or me testing the URL wrote that record**, after which the admin
+board vouched for a safety control on the strength of it. The store held *that a call happened*; the sentence
+stated *who made it*. One fact, two readings, and the stronger one was printed.
+
+🔑 **This is the exact class the module was written to fix** — a status that reports more than its evidence
+supports — **shipped inside the fix.** That is why it gets a row (Q-791) and this entry rather than a quiet
+patch: the fifth rule's "check whether it has come back before" answers *yes, in my own change*.
+
+**Fix — grade the evidence by what the call actually carried; never infer:**
+
+| what arrived | grade | what the board says |
+|---|---|---|
+| `X-Release-Gate-Caller: cloudbuild` (the step now sends it) | `pipeline` | *"The deploy pipeline asked this gate at … for commit abc123"* |
+| no header, but a real commit SHA | `commit` | *"… very likely the deploy pipeline — but it did not identify itself, so this is not proof"* |
+| neither | `none` | **not recorded at all**, so it can never become evidence later |
+
+Locked by `tests/aFreezeThatStopsNothing.test.ts` (31 cases), reversion-proven five ways: record every call
+again → 2 fail · print PROVEN without the header → 1 · accept any string as a SHA → 2 · drop the header from
+the step → 1 · "tidy" the escaping back to `$URL` → 1.
+
+### ⚠️ And another session fixed a REAL bug in my step — worth more than my own fix
+
+`df7aef5e2`: *"the gate step's bash variables are escaped for Cloud Build — $$URL / $$BODY"*. An unescaped
+`$URL` is read by Cloud Build as a **substitution**, and an unknown one fails the build at config parse — so
+**my first version of Step 0 would have broken every deploy**, not just the gate. When I shipped it I wrote
+that the residual risk was unverifiable from a session (*"no session here can run Cloud Build to prove
+otherwise"*). The risk was real and it landed. Two conclusions, both recorded:
+
+1. **A fail-open script is not a safe step if the file it lives in can fail to parse.** My five runtime
+   proofs tested the bash; nothing tested that Cloud Build would accept the YAML around it. The safety
+   argument covered the wrong layer.
+2. The escaping is now **pinned by a test**, so it is never "tidied" back by someone who reads `$$URL` as a
+   typo.
+
+**What to watch, since the live effect is only visible on a real deploy:** after the next merge to `main`, the
+admin board's Release gate card should change from *"No deploy pipeline has ever asked this endpoint"* to the
+proven sentence naming the commit. If it still says *never asked*, the step ran but could not reach the URL —
+it fails OPEN, so the deploy still succeeded, and that build's Cloud Build log says which. ⚠️ I cannot check
+this myself: outbound to `navbharatai.com` is denied from this session (`connect_rejected`, organization
+policy), so this one is the admin's observation to make, not mine to claim.

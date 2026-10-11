@@ -51,7 +51,7 @@ class ReleaseGateStore {
    * guessable. Best-effort and never awaited by the route: a storage hiccup must not slow, or fail, the
    * answer a pipeline is waiting on.
    */
-  async noteChecked(sha?: string): Promise<void> {
+  async noteChecked(sha?: string, viaPipelineHeader = false): Promise<void> {
     const db = this.getDb();
     if (!db) return;
     try {
@@ -59,6 +59,9 @@ class ReleaseGateStore {
         lastCheckedAtMs: Date.now(),
         lastCheckedSha: typeof sha === 'string' ? sha.slice(0, 64) : '',
         checkCount: admin.firestore.FieldValue.increment(1),
+        // Whether the CALLER said it was the pipeline, kept separate from the fact that a call happened —
+        // the two are different facts and the board must not print the stronger one by default (Q-141).
+        viaPipelineHeader: viaPipelineHeader === true,
       }, { merge: true });
     } catch {
       /* the gate's answer matters; this record does not */
@@ -77,6 +80,7 @@ class ReleaseGateStore {
         lastCheckedAtMs: typeof d.lastCheckedAtMs === 'number' ? d.lastCheckedAtMs : undefined,
         lastCheckedSha: typeof d.lastCheckedSha === 'string' ? d.lastCheckedSha : undefined,
         checkCount: typeof d.checkCount === 'number' ? d.checkCount : undefined,
+        viaPipelineHeader: d.viaPipelineHeader === true,
       };
     } catch {
       return null;

@@ -196,8 +196,41 @@ export function fleetHistoryFromTelemetry(
  * agree on one answer: a seeded build is its own kind. PURE.
  */
 export const SCAFFOLD_TASK_KEY = 'scaffold';
-export function etaTaskKey(taskType: string | null | undefined, scaffolded: boolean, routedComplex = false): string {
+
+/**
+ * WHAT KIND OF BUILD THIS IS, KNOWN FROM THE PROMPT BEFORE THE ETA IS SHOWN (admin 2026-10-11, build
+ * 46e2d74b — item L-12).
+ *
+ * 🔴 "Create an racing game for Nokia c 2-01" scored `simple_app` (a game counts as a personal tool unless
+ * it names 3D, multiplayer, a physics engine or an open world — admin decision 2026-09-27), so its ETA was
+ * learned from the `simple_app` slice: mostly fast-lane apps finished in two to four minutes. But EVERY
+ * game skips the fast lane (`fastLaneSkipsGame`) and is built by the full builder with the game recipes
+ * and a playtest, and the route only decided that a few thousand lines AFTER the ETA was fixed. The user
+ * was told 2–4 min; the build took 7.4. The same blindness priced an app that makes pictures
+ * (`fastLaneSkipsImageApp`) as a fast-lane app.
+ *
+ * Both facts are deterministic from the prompt alone — the platform's own domain classifier and the image-
+ * app detector, the same readings the fast-lane skips use — so the kind is decided here, up front, and
+ * keys its own slice: games learn from games, picture apps from picture apps. Routing is untouched; this
+ * only changes which past builds the estimate is taught by.
+ */
+export type EtaBuildKind = 'game' | 'image_app';
+export function etaBuildKind(domain: string | null | undefined, generatesImages: boolean): EtaBuildKind | null {
+  if (domain === 'game') return 'game';
+  if (generatesImages) return 'image_app';
+  return null;
+}
+
+/**
+ * The ONE key both sides use: the reader that picks the ETA's slice and the telemetry writer that files the
+ * finished build under it. They were built two different ways (the writer left out `routedComplex`), so the
+ * history a routed-complex build was filed under was not the history it was later priced from. `kind` is
+ * `etaBuildKind`'s answer. PURE.
+ */
+export function etaTaskKey(taskType: string | null | undefined, scaffolded: boolean, routedComplex = false, kind: EtaBuildKind | null = null): string {
   if (scaffolded) return SCAFFOLD_TASK_KEY;
+  // A seeded template stays its own kind (above); otherwise the build's kind decides before its label.
+  if (kind) return kind;
   const t = String(taskType ?? '').trim() || 'unknown';
   // The scorer cannot read every script (autopsy Sur Taal: a Hindi design note scored `simple_app`), and the
   // complexity router then asked a second opinion and opened the build as COMPLEX. The ETA must price the
@@ -210,7 +243,11 @@ export function etaTaskKey(taskType: string | null | undefined, scaffolded: bool
 export function fleetEtaBasisNote(taskType: string, builds: number, days: number): string {
   const kind = taskType === SCAFFOLD_TASK_KEY
     ? 'builds that start from a tested template (verify and polish)'
-    : `"${taskType}" builds`;
+    : taskType === 'game'
+      ? 'game builds'
+      : taskType === 'image_app'
+        ? 'builds of apps that make pictures'
+        : `"${taskType}" builds`;
   return `No past builds of this app — using NavBharatAI's recent average for ${kind} (${builds} build${builds === 1 ? '' : 's'} over ${days} day${days === 1 ? '' : 's'}).`;
 }
 

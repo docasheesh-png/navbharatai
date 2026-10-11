@@ -132,7 +132,7 @@ describe('4 · the report tells one story about a stopped build', () => {
   it('the route records the waiver line only once the bill is settled', () => {
     const settle = ROUTE.indexOf('const markupDecision = decideMarkupOnProof({');
     const released = ROUTE.indexOf('markupWaiverSettledLine(markupDecision.reason, effectiveBilledUsd, zeroBillReason)');
-    const zeroRule = ROUTE.indexOf('if (expectsArtifacts && writtenFiles.size === 0) {', settle);
+    const zeroRule = ROUTE.indexOf('if (expectsArtifacts && builderWroteCount() === 0) {', settle);
     expect(settle).toBeGreaterThan(-1);
     expect(released).toBeGreaterThan(zeroRule);
   });

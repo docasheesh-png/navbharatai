@@ -13,7 +13,7 @@ import { roleConfig } from './AgentRegistry';
 import { catalogForTools } from './ToolCatalog';
 import { agentLifecycle } from './AgentLifecycle';
 import { getWorkspaceMemory } from './WorkspaceMemory';
-import { DESIGN_KIT_BRIEF } from './systemPrompt';
+import { DESIGN_KIT_BRIEF, GAME_KIT_RULE } from './systemPrompt';
 import { shellEarlyRule, writesTheEntry } from './earlyPreview';
 import { NO_EVAL_RULE, NO_FAKED_RESULT_RULE, NO_FAKE_FEATURE_RULE } from './noEvalRule';
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
@@ -442,6 +442,13 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     }
     // A writing specialist builds the image screen too, so it reads the same image-generation rule.
     if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(IMAGE_IN_APP_RULE);
+    // …and the game screen (admin 2026-10-11, build 46e2d74b: "racing game me car ulti chal rahi hai").
+    // The architect's prompt carries the whole game section; a Frontend or Fullstack specialist handed
+    // "the race screen" carried none of it — no kit, no +Z convention, no camera rule — so the defect
+    // that build shipped (the camera in front of the car, every turn mirrored) was one delegation away
+    // even in a build whose architect followed every rule. GAME_KIT_RULE holds the run_recipe calls and
+    // the SAME camera lines the architect reads (systemPrompt.ts, VEHICLE_CAMERA_RULE_LINES).
+    if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(GAME_KIT_RULE);
     // …and the packages not to install (autopsy 3f959fde: the Frontend specialist installed xlsx).
     if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(packageChoiceRule());
     if (roleExpectsArtifacts(cfg.tools)) {

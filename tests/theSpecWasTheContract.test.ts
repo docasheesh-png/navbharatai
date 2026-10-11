@@ -88,7 +88,8 @@ describe('a build the browser proved working does not end on "isn\'t fully worki
     const route = read('src/server/routes/agentv3.ts');
     expect(route).toContain('summary: summaryAfterRescue(result.summary, result.modelAnswer)');
     expect(route).not.toContain("summary: result.summary || 'The app builds and the live preview renders correctly.'");
-    expect(route).toContain('ok: result.ok || renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size }),');
+    // The builder's own writes, not our game kit (build 46e2d74b, `builderWroteCount` in the route).
+    expect(route).toContain('ok: result.ok || renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: builderWroteCount() }),');
   });
 });
 

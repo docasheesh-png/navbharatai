@@ -577,6 +577,68 @@ export const SINGLE_HTML_FILE_RULE = [
   'map, e.g. three.js). Keep package.json as it is: it only serves the file for the preview.',
 ].join('\n');
 
+/**
+ * THE CAMERA HALF OF THE +Z CONVENTION, IN PLAIN THREE.JS (admin 2026-10-11, build 46e2d74b).
+ *
+ * Admin, verbatim: *"ek bahut dangerous issue … racing game me car ulti chal rahi hai"* — the player's car
+ * showed its HEADLIGHTS, and pressing LEFT turned it RIGHT, "on every game built now".
+ *
+ * 🔴 BOTH SYMPTOMS ARE ONE DEFECT. The camera sat on the side the car's nose points to. Seen face-on, the
+ * driver's left is the screen's right, so steering that was correct read as mirrored. Measured twice: the
+ * kit's own yaw-0 camera (headlamps 5.56 m from the camera, tail lamps 9.50 m; LEFT moved the car
+ * screen-right), and a hand-written car facing +Z under the usual three.js chase offset `car + (0, 3, 6)`
+ * (headlamps 4.61 m, tail lamps 8.30 m; LEFT went screen-right). The same code with a car facing −Z saw
+ * the tail lamps and steered correctly.
+ *
+ * 🔑 THE CLASS: a spatial convention given to every builder by HALVES. The 2026-10-05 fix told the prompt
+ * "every model faces its local +Z" and gave the camera only as kit calls (ctx.follow, rig.follow). Build
+ * 46e2d74b never ran the kit, so it obeyed the half it could use and kept the three.js habit for the
+ * other — the exact combination that films the front. So the camera half is written here in terms ANY
+ * builder can follow, with or without the kit, and every surface that states the +Z rule (the architect
+ * prompt and the writing sub-agents' `GAME_KIT_RULE`) carries these same lines, not a paraphrase of them.
+ *
+ * The geometry, so nobody "corrects" a sign: a +Z car's nose is `forward = (0,0,1)` rotated by the car.
+ * The camera at `car − forward·d` looks along +forward, so its screen-right is world −X and its
+ * screen-left is world +X — which is the driver's left (forward × up points to the driver's right, −X).
+ * Turning left therefore increases `rotation.y` (the nose swings toward +X) and moves the car screen-left.
+ */
+export const VEHICLE_CAMERA_RULE_LINES: readonly string[] = [
+  '🚗 THE CAMERA SITS BEHIND WHAT THE PLAYER DRIVES OR RIDES — the player sees its BACK (the tail',
+  'lights), never its face. Every model faces its local +Z. The camera goes on the OPPOSITE side from the',
+  'nose — in plain three.js, with or without the game kit:',
+  '    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(car.quaternion); // where the nose points',
+  '    camera.position.copy(car.position).addScaledVector(forward, -6); camera.position.y += 2.5;',
+  '    camera.lookAt(car.position);',
+  'i.e. camera = car.position − forward·d + up·h: at −Z LOCAL of a +Z model, looking at the car. NEVER',
+  'camera.position.z = car.position.z + d — for a +Z model that is IN FRONT of the car: the player sees the',
+  'headlights and every turn looks mirrored. LEFT (A / ←) turns the car toward the DRIVER\'S left = its own',
+  '+X (car.rotation.y increases), which is SCREEN-left when the camera is behind; up/W moves it along',
+  '+forward. To drive into the screen, turn the model (rotation.y = Math.PI); never flip a control or',
+  'mirror a model to make it "look right".',
+];
+
+/**
+ * THE GAME RULE FOR A WRITING SUB-AGENT (admin 2026-10-11, build 46e2d74b; critic item P-3).
+ *
+ * The architect's prompt carries the whole game section; a Frontend or Fullstack specialist handed a game
+ * screen carried NONE of it — `SubAgent.ts` gave writing roles the image rule, the no-fake rules and the
+ * package rule, and no word about games. So a specialist asked for "the race screen" had no instruction to
+ * use the kit, no +Z convention and no camera rule: the 46e2d74b defect, one delegation away. This is the
+ * short form — the run_recipe calls, the rule that the kit is built on rather than re-written, and the
+ * SAME camera lines the architect reads (`VEHICLE_CAMERA_RULE_LINES`). Worded "if", so a writing
+ * specialist on a to-do app reads one paragraph that does not apply to it, exactly like the image rule.
+ */
+export const GAME_KIT_RULE = [
+  'GAMES: if the app is a game, its engine comes from NavBharatAI\'s game recipes, never from hand-written',
+  'code. If src/game/core/loop.ts exists, the kit is ALREADY in the project: import from it (src/game/core/',
+  'for the loop, input and meta; src/game/three/ for 3D, objects and the CameraRig; src/game/fx/ for',
+  'effects and sound; src/game/GameCanvas.tsx for a 3D game) and never write a second loop, input, camera',
+  'or meta. Otherwise call run_recipe({ name: "generate_game_runtime" }) first, and the other',
+  'run_recipe({ name: "generate_game_…" }) recipes the game needs. A player\'s vehicle has a NON-ZERO',
+  'starting speed unless the user asked for a standing start.',
+  ...VEHICLE_CAMERA_RULE_LINES,
+].join('\n');
+
 export function architectSystemPrompt(framework?: string, opts?: { parallelBuild?: boolean }): string {
   const scaffoldHint = frameworkScaffoldHint(framework);
   return [
@@ -798,31 +860,45 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  run_recipe({ name: "list" }) once if you need a recipe\'s exact inputs. Never hand-write what a recipe ships.',
     '- 🎮 GAMES ARE BUILT WITH THE GAME TOOLS — NEVER HAND-ROLL THE ENGINE. If the user asks for a game',
     '  (2D or 3D, any genre), do NOT write your own loop, controller, particle system or combat code.',
-    '  Six tools already ship the parts that are hard to get right, and each one encodes bugs that are',
+    // 🔴 ADMIN 2026-10-11, build 46e2d74b ("racing game me car ulti chal rahi hai" — the car showed its
+    // headlights and LEFT turned it right). The builder never called run_recipe: this section named every
+    // step as a bare `generate_game_*` tool that was not in its tool list (the recipes moved behind
+    // run_recipe on 2026-09-30), and it described meta.ts, objects.ts and driveVehicle as if they were
+    // already in the project. So the model hand-wrote its own src/lib/game/meta.ts, objects.ts and camera,
+    // and every fix that lives inside the kit (the camera behind the car, the steering signs) never
+    // reached the game. Each step is now written as the call the model can actually make, every kit file
+    // is named by its real path and the recipe that writes it, and nothing is described as present.
+    '  The game tools are RECIPES: each one is called as run_recipe({ name: "…" }) and writes real files',
+    '  under src/game/ (src/audio/ for music). NONE of those files exists until its recipe has run. When',
+    '  the build prompt says the game kit is ALREADY in src/game, read it and build on it — never run a',
+    '  recipe a second time and never write a second loop, input, camera or meta. Otherwise run them.',
+    '  These recipes ship the parts that are hard to get right, and each one encodes bugs that are',
     '  invisible in review and obvious the moment somebody plays. Call them in this order, taking only',
     '  what the game needs:',
-    '    1. generate_game_runtime  — ALWAYS FIRST. Fixed-timestep loop, input (incl. touch), events,',
-    '       pooling, save/load, game feel. A hand-written requestAnimationFrame loop makes the game run',
-    '       at a different SPEED on every monitor.',
+    '    1. run_recipe({ name: "generate_game_runtime" }) — ALWAYS FIRST. Writes src/game/core/: a',
+    '       fixed-timestep loop (src/game/core/loop.ts), input incl. touch (src/game/core/input.ts), events,',
+    '       pooling, save/load, game feel. A hand-written requestAnimationFrame loop makes the game run at a',
+    '       different SPEED on every monitor.',
     // 🔁 ADMIN 2026-10-05: "navbharatai jab game banaye to user ko navbharatai ki latt lag jaye". A game
     // that forgets everything when it ends is played once — best score, progress and a fast restart are
     // what bring a player back, and the runtime already ships them (meta.ts).
-    '       🔁 IT ALSO SHIPS meta.ts — WHAT BRINGS THE PLAYER BACK. Every game calls startMeta({ gameId })',
-    '       once (the 3D shell does it for you), scores successful actions with combo.hit(points), and ends',
-    '       a round on a screen showing summaryLines(meta.lastSummary) — NEW BEST, or "only N more to beat',
-    '       your best" — with a big, already-focused "Play again". No best score, no progress, or a slow',
-    '       restart means the game is played once. Reward playing and improving: NEVER loot boxes, paid',
-    '       randomness, fake timers or guilt messages.',
-    '    2. generate_game_3d       — only for 3D. Colour management, lighting presets, camera rigs,',
-    '       procedural world. Adds `three`.',
+    '       🔁 IT ALSO WRITES src/game/core/meta.ts — WHAT BRINGS THE PLAYER BACK. Every game imports',
+    '       startMeta from there and calls startMeta({ gameId }) once (the 3D shell does it for you),',
+    '       scores successful actions with combo.hit(points), and ends a round on a screen showing',
+    '       summaryLines(meta.lastSummary) — NEW BEST, or "only N more to beat your best" — with a big,',
+    '       already-focused "Play again". No best score, no progress, or a slow restart means the game is',
+    '       played once. Reward playing and improving: NEVER loot boxes, paid randomness, fake timers or',
+    '       guilt messages. Never write your own meta store or startMeta: import them from src/game/core/meta.ts.',
+    '    2. run_recipe({ name: "generate_game_3d" }) — only for 3D. Writes src/game/three/: colour',
+    '       management, lighting presets, camera rigs (src/game/three/camera.ts), procedural world. Adds `three`.',
     // 🎨 ADMIN 2026-08-26, from a real 3D game: "not so realistic". The audit found the lighting was
     // already correct and the GEOMETRY had nothing on it — flat colours, no reflections, a capsule for
     // a person. These three lines are the difference, so they are stated as rules rather than hints.
     // 🚗 ADMIN 2026-08-27: "sabhi objects asli chahiye — car, tree, river, pahad, sky, registan,
     // animal, road. agar user bole real/asli/100% (wording par nahi jana, INTENTION samjhna hai) to
     // hu-ba-hu real banao. agar sirf 3d bole to lite se kaam chal jayega."
-    '       🔴 NEVER HAND-MODEL AN OBJECT. objects.ts builds them properly: createCar, createTree,',
-    '         createMountain, createRiver, createDesert, createRoad, createAnimal, createHouse (+ createHumanoid),',
+    '       🔴 NEVER HAND-MODEL AN OBJECT. src/game/three/objects.ts (written by this recipe) builds them',
+    '         properly: createCar, createTree, createMountain, createRiver, createDesert, createRoad, createAnimal, createHouse (+ createHumanoid),',
     '         and INDIA\'S ROADS: createAutoRickshaw (livery delhi|mumbai), createBus, createTruck, createTractor.',
     '         Animals: createAnimal({ kind }) with dog, cow (Indian, with hump), horse, deer, goat or tiger.',
     '         🚦 A DRIVING OR CITY GAME HAS TRAFFIC: createTraffic({ road: { length, width } }) fills the road',
@@ -831,9 +907,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '         An empty road reads as a stage set.',
     '         ⚔️ ENEMIES FIGHT DIFFERENTLY AND FAIRLY: mix RANGED_ENEMY (holds distance, strafes, shoots),',
     '         FLANKER_ENEMY (surrounds) and DEFAULT_ENEMY; every heavy hit is telegraphed (AttackTelegraph —',
-    '         a visible wind-up the player can dodge); a boss changes per BossPhases. All in the systems ai.ts.',
+    '         a visible wind-up the player can dodge); a boss changes per BossPhases. All in',
+    '         src/game/systems/ai.ts (written by the systems recipe, step 4 below).',
     '         🎢 A RUN HAS A RHYTHM: an action game with waves uses the Director from the systems layer',
-    '         (director.ts) — tension builds, peaks, then a breather with no new enemies, and difficulty moves',
+    '         (src/game/systems/director.ts) — tension builds, peaks, then a breather with no new enemies, and difficulty moves',
     '         slowly toward what THIS player handles: planWave(wave, director.difficulty), spawn only while',
     '         director.canSpawn. adapt: false when scores are compared on a leaderboard.',
     '         🌦️ AN OPEN WORLD HAS A SKY THAT LIVES: createAtmosphere({ scene, renderer, camera, lighting })',
@@ -843,15 +920,15 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '         Use it for any outdoor driving, village, city or adventure game — one frozen noon is a photo.',
     '         🔫 A WEAPON IS TWO THINGS, BOTH FROM THE LIBRARY: the MODEL createWeapon({ kind }) (pistol, rifle,',
     '         smg, shotgun, sniper, sword, axe, bow) put in the hand with hero.hold(weapon.root), and the',
-    '         BEHAVIOUR new Weapon(kind) / new MeleeWeapon() from the systems layer, weapon.ts (fire rate, semi/auto,',
+    '         BEHAVIOUR new Weapon(kind) / new MeleeWeapon() from src/game/systems/weapon.ts (fire rate, semi/auto,',
     '         magazine + reload, spread that blooms, recoil, pellets, falling arrows; a swing that lands once,',
     '         in front). One projectile per click is not a gun; a radius check every frame is not a sword.',
     '         A building is createHouse() (door, windows, sun-shades, flat roof + water tank or clay tiles) —',
     '         never a box with a cone on top. Stand vehicles on the road at y = ROAD_SURFACE_Y.',
     '         A hand-written box-with-wheels beside these reads as a bug, not a style. If an object you',
     '         need is not there, build it from the SAME rules — real proportions and a real silhouette.',
-    '       🔴 CALL setDetailLevel() ONCE at start-up, from what the user actually MEANT — not from the',
-    "         words they used. 'real' when they asked for real / realistic / asli / hubahu / 100% /",
+    '       🔴 CALL setDetailLevel() (src/game/three/surfaces.ts) ONCE at start-up, from what the user',
+    "         actually MEANT — not from the words they used. 'real' when they asked for real / realistic / asli / hubahu / 100% /",
     "         photorealistic / \"GTA jaisa\". 'lite' when they only said \"3d game\" — that build is",
     '         deliberately lighter and runs well on a mid-range phone, which is what they asked for.',
     '         ⚠️ A named art style WINS: "realistic low-poly" or "cartoon with realistic lighting" is a',
@@ -868,21 +945,25 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '             sign of an AI-generated game, and the admin reported it by name.',
     '       Be honest about the ceiling: this produces a STYLISED-REALISTIC look, not a scanned human.',
     '       Say "stylised 3D" in your summary rather than promising photorealism you cannot deliver.',
-    '    3. generate_game_controller — a player character. Coyote time, jump buffering, step offset.',
-    '    4. generate_game_systems  — enemies, health/damage, shooting, waves. It already handles',
-    '       i-frames and fast-bullet collision, which a fresh implementation reliably gets wrong.',
-    '    5. generate_game_vfx      — particles, audio and the ONE table that fires effect + sound +',
-    '       shake together, which is what makes a hit feel like force.',
+    '    3. run_recipe({ name: "generate_game_controller" }) — a player character (src/game/play/).',
+    '       Coyote time, jump buffering, step offset.',
+    '    4. run_recipe({ name: "generate_game_systems" }) — enemies, health/damage, shooting, waves',
+    '       (src/game/systems/). It already handles i-frames and fast-bullet collision, which a fresh',
+    '       implementation reliably gets wrong.',
+    '    5. run_recipe({ name: "generate_game_vfx" }) — particles, audio and the ONE table that fires',
+    '       effect + sound + shake together (src/game/fx/), which is what makes a hit feel like force.',
     // The audio manager used to play only a LOADED file, and a generated app has none — so every game
     // shipped silent (found again 2026-10-05: the feedback table fired 'shoot'/'hit'/'jump' at nothing).
     // It now synthesises every effect it names itself (fx/synth.ts); `generate_melody` is the MUSIC.
     '       Every effect sound the table fires (shoot, hit, jump, explosion, pickup, level-up…) is',
     '       synthesised from code — no file needed, so the game is never silent. Add a sound by NAME',
     "       (audio.play('thunder'), audio.play('rain', 'sfx', { loop: true })) — never ship a game mute.",
-    '    5b. generate_melody       — the MUSIC: a theme or a tune from notes (sargam or letters), no file,',
-    '       no dependency, no cost. Effects come from 5; melody is for the song.',
-    '    6. generate_game_shell    — LAST, and ONLY for a game drawn in 3D: it renders a three.js scene.',
-    '       Composes all of the above into something playable, with HUD,',
+    '    5b. run_recipe({ name: "generate_melody" }) — the MUSIC (src/audio/): a theme or a tune from',
+    '       notes (sargam or letters), no file, no dependency, no cost. Effects come from 5; melody is for',
+    '       the song.',
+    '    6. run_recipe({ name: "generate_game_shell" }) — LAST, and ONLY for a game drawn in 3D: it',
+    '       renders a three.js scene (src/game/Game.ts, mounted with <GameCanvas> from',
+    '       src/game/GameCanvas.tsx). Composes all of the above into something playable, with HUD,',
     '       on-screen TOUCH CONTROLS (joystick, camera drag, Attack/Jump/Use/Run, Pause — shown only on a',
     '       touch screen; choose buttons with `touchControls`, never hand-roll a joystick),',
     '       pause and restart, and handles WebGL teardown so the tab does not die after a few visits.',
@@ -893,22 +974,28 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     // character controller — 24 files nothing used, and `three` installed for an app that draws emoji
     // in a grid. The shell was the "LAST" step of every game because nothing said it was 3D-only.
     '  🧩 A 2D GAME ON A BOARD OR THE PAGE — puzzle, match-3, memory cards, quiz, snake, tic-tac-toe,',
-    '  sudoku, word game — takes NEITHER generate_game_3d NOR generate_game_shell. Draw it with React',
-    '  (or one 2D canvas), keep generate_game_runtime, generate_game_vfx and generate_melody for the loop,',
-    '  the feel and the sound, and make every control a real button (or pointer events) so it plays by touch.',
+    '  sudoku, word game — takes NEITHER the 3D layer NOR the shell: no run_recipe({ name: "generate_game_3d" })',
+    '  and no run_recipe({ name: "generate_game_shell" }). Draw it with React (or one 2D canvas), keep the',
+    '  runtime, the vfx and the melody recipes for the loop, the feel and the sound, and make every control',
+    '  a real button (or pointer events) so it plays by touch.',
     // 🏁 ADMIN 2026-08-25, from a real racing game: "baar baar kehne par gaadi ki speed kyu nahi badhayi
     // ja rahi… speed 0 sirf aur sirf tab ho, jab user bole". A vehicle that will not move is not a
     // difficulty setting — it is an unplayable game, and it is the single easiest way to ship one.
     // 🚗 ADMIN 2026-10-05: "gadi ka front side dikhta hai, jisse button ulte kaam karte hai… game ka
     // backside dikhna chahiye". Every model faces +Z; the default rig sat in FRONT of it and games used
     // the runtime's up axis (−1) as throttle — the car drove at the camera with every control mirrored.
-    '  🚗 THE CAMERA SITS BEHIND WHAT THE PLAYER DRIVES OR RIDES — the player sees its BACK, never its face.',
-    '  Every model faces its local +Z (MODEL_FORWARD). Move a car, bike or ridden animal ONLY with',
-    '  driveVehicle(vehicle, state, input.axis(), dt) (state from createVehicleState) — it owns the signs:',
-    '  up/W goes toward the front, left/A turns left. Keep the camera behind it with ctx.follow(vehicle)',
-    '  in the game shell, or rig.follow(vehicle, dt) — NEVER rig.update(vehicle.position), which looks',
-    '  at the vehicle from the front. To drive into the screen, turn the model (rotation.y = Math.PI);',
-    '  never flip a control or mirror a model to make it "look right".',
+    // 🔴 ADMIN 2026-10-11, build 46e2d74b — the SAME two symptoms, five days after the fix above. That fix
+    // gave every builder the +Z half of the convention and gave the CAMERA half only as kit calls
+    // (ctx.follow / rig.follow). A builder that hand-writes the game cannot call those, so it followed
+    // the +Z rule with the usual three.js habit (camera at car.z + d) and filmed the headlights — and seen
+    // face-on, the driver's left is the screen's right, so correct steering read as mirrored. Bugs 1 and 2
+    // were ONE defect. The camera half is now stated in plain three.js, true with or without the kit.
+    ...VEHICLE_CAMERA_RULE_LINES.map((l) => `  ${l}`),
+    '  With the kit: move a car, bike or ridden animal with driveVehicle(vehicle, state, input.axis(), dt)',
+    '  (state from createVehicleState; both in src/game/three/objects.ts) — it owns those signs — and keep',
+    '  the camera behind it with ctx.follow(vehicle) in the game shell, or rig.follow(vehicle, dt) on the',
+    '  CameraRig from src/game/three/camera.ts — NEVER rig.update(vehicle.position), which looks at the',
+    '  vehicle from the front.',
     '  🏁 A VEHICLE STARTS MOVING, ALWAYS. In any racing, driving or flying game, the player\'s vehicle',
     '  must have a NON-ZERO starting speed and must be able to accelerate from the very first frame.',
     '  Speed may be zero ONLY if the user explicitly asked for it (a standing start, a countdown, a',

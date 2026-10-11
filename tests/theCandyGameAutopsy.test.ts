@@ -187,8 +187,12 @@ describe('4 · a name exported by ANOTHER module is an import to fix, not an exp
 describe('(+) the 3D shell is not every game\'s last step', () => {
   it('the prompt and the tool say a 2D board game takes neither the 3D layer nor the shell', () => {
     const prompt = readFileSync('src/server/AgentV3/systemPrompt.ts', 'utf8');
-    expect(prompt).toContain('generate_game_shell    — LAST, and ONLY for a game drawn in 3D');
-    expect(prompt).toContain('takes NEITHER generate_game_3d NOR generate_game_shell');
+    // Worded as the run_recipe calls since 2026-10-11 (build 46e2d74b: bare tool names the model did
+    // not have were part of why it never ran the kit). The rule asserted is unchanged: the shell is the
+    // last step and 3D-only, and a 2D board game takes neither the 3D layer nor the shell.
+    expect(prompt).toContain('run_recipe({ name: "generate_game_shell" }) — LAST, and ONLY for a game drawn in 3D');
+    expect(prompt).toContain('takes NEITHER the 3D layer NOR the shell: no run_recipe({ name: "generate_game_3d" })');
+    expect(prompt).toContain('and no run_recipe({ name: "generate_game_shell" })');
     const catalog = readFileSync('src/server/AgentV3/ToolCatalog.ts', 'utf8');
     expect(catalog).toContain('COMPOSE a runnable 3D game from the other game layers');
   });

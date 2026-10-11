@@ -81,7 +81,15 @@ const MAX_PLACEMENT = 4;
  */
 const SCENE_WORDS = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional|game|khel)\b/i;
 const SAYS_3D = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional)\b/i;
-const FLAT_GAME = /\b(?:2\s*-?\s*d|two\s*-?\s*dimensional|memory\s*(?:card|match|game)|card\s*(?:game|matching)|matching\s*(?:cards?|pairs?|game)|board\s*game|puzzle|jigsaw|sudoku|crossword|word\s*(?:game|search|puzzle)|wordle|quiz|trivia|tic\s*-?\s*tac\s*-?\s*toe|chess|ludo|carrom|snakes?\s*(?:and|&|n)\s*ladders?|2048|tetris|solitaire|minesweeper|flash\s*cards?|\d+\s*[x×]\s*\d+\s*(?:grid|board))\b/i;
+// 🔴 ONE LIST OF 2D GAMES, NOT TWO (admin 2026-10-11, build 46e2d74b). The architect prompt says a 2D game
+// on a board or the page — "puzzle, match-3, memory cards, quiz, snake, tic-tac-toe, sudoku, word game" —
+// takes neither the 3D layer nor the 3D shell. This gate is how the platform reads the same question, and
+// it did not know match-3 or snake: "snake game banao" and "a candy crush game" read as 3D scenes. Since
+// that report the gate also decides whether the game-kit seed lays down three.js and the 3D shell
+// (gameKitSeed.ts), so a disagreement here is no longer a stray paragraph — it is `three` installed and
+// sixteen 3D files written for a grid of candies (the candy autopsy 7da1cdca, by another door). A bare
+// "snake" stays a scene word ("a jungle game with snakes"); only the game is flat.
+const FLAT_GAME = /\b(?:2\s*-?\s*d|two\s*-?\s*dimensional|match\s*-?\s*(?:3|three)|candy\s*crush|snake\s*(?:game|khel)|memory\s*(?:card|match|game)|card\s*(?:game|matching)|matching\s*(?:cards?|pairs?|game)|board\s*game|puzzle|jigsaw|sudoku|crossword|word\s*(?:game|search|puzzle)|wordle|quiz|trivia|tic\s*-?\s*tac\s*-?\s*toe|chess|ludo|carrom|snakes?\s*(?:and|&|n)\s*ladders?|2048|tetris|solitaire|minesweeper|flash\s*cards?|\d+\s*[x×]\s*\d+\s*(?:grid|board))\b/i;
 
 export function wantsSceneObjects(prompt: string | null | undefined): boolean {
   const text = String(prompt ?? '');
@@ -136,7 +144,10 @@ export function heroObjectContract(prompt: string | null | undefined): HeroObjec
     lines.push('• ' + s.name.toUpperCase());
     lines.push(s.builder
       // A builder that exists and is not used is the reported failure, inverted.
-      ? '  BUILD IT WITH ' + s.builder + ' from objects.ts. Do NOT hand-model it — the library version '
+      // Named by its real path and the recipe that writes it (admin 2026-10-11, build 46e2d74b): "from
+      // objects.ts" read as a file already in the project, and that build wrote its own objects.ts.
+      ? '  BUILD IT WITH ' + s.builder + ' from src/game/three/objects.ts (written by run_recipe({ name: '
+        + '"generate_game_3d" })). Do NOT hand-model it — the library version '
         + 'already has the real proportions and every part below.'
       : '  There is no library builder for this one, so HAND-MODEL it to this spec — never as two or '
         + 'three primitives stuck together.');

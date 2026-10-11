@@ -275,7 +275,9 @@ describe('it is wired into the build', () => {
     // Both signals matter: writtenFiles.size is what actually happened, and userAskedToBuildAnApp is
     // the intent captured BEFORE a non-empty workspace reclassified the turn as an edit. Wiring either
     // one to a constant would make the check unable to fire on the build that motivated it.
-    expect(routes).toContain('filesWritten: writtenFiles.size');
+    // Since build 46e2d74b the count is the BUILDER's writes: the game kit the platform lays down before
+    // the first model call is not a delivery, so it can never make a "complete" claim over zero files pass.
+    expect(routes).toContain('filesWritten: builderWroteCount(),');
     expect(routes).toContain('buildWasRequested: userAskedToBuildAnApp');
     // 🔴 IT USED TO ASSERT `intent === 'new_build'`, AND THAT WAS THE BUG (autopsy 697b38ee). The
     // keyword ladder matches the NOUN "build" in "fix the build", so "Continue from where you left off

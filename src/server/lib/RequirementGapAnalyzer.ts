@@ -724,10 +724,29 @@ function selectDomain(text: string): DomainDef | undefined {
   if (MEDIA_PLAYER_APP.test(text)) return undefined;
   return DOMAINS
     .filter((d) => d.re.test(text) || indicDomainMatches(d.key, text))
-    .reduce<DomainDef | undefined>(
-      (best, d) => (best && domainFeatureScore(best, text) >= domainFeatureScore(d, text) ? best : d),
-      undefined,
-    );
+    .reduce<DomainDef | undefined>((best, d) => {
+      if (!best) return d;
+      const a = domainFeatureScore(best, text);
+      const b = domainFeatureScore(d, text);
+      if (a !== b) return a > b ? best : d;
+      // 🔑 A FEATURE TIE GOES TO THE DOMAIN THE PROMPT NAMES MORE SPECIFICALLY (Q-117, admin 2026-10-11:
+      // "dhaba → restaurant"). "dhaba ke liye khana order karne ka app" tied 1–1 (both domains have an
+      // "order" feature) and array order handed it to ecommerce, the EARLIER domain, on the strength of one
+      // shared word. Restaurant's headline matched two of its own words ("dhaba", "khana"). Counting the
+      // DISTINCT headline words each domain matched breaks such a tie by what the person actually said;
+      // only a tie on that too falls back to array order, so every classification without a feature tie
+      // is byte-identical.
+      return domainHeadlineHits(d, text) > domainHeadlineHits(best, text) ? d : best;
+    }, undefined);
+}
+
+/** How many DISTINCT words of a domain's headline the prompt names (+1 when it names it in an Indic
+ *  script). Used only to break a feature-score tie. Pure. */
+function domainHeadlineHits(domain: DomainDef, text: string): number {
+  const flags = domain.re.flags.includes('g') ? domain.re.flags : `${domain.re.flags}g`;
+  const seen = new Set<string>();
+  for (const m of text.matchAll(new RegExp(domain.re.source, flags))) seen.add(m[0].toLowerCase().trim());
+  return seen.size + (indicDomainMatches(domain.key, text) ? 1 : 0);
 }
 
 /** How specifically a domain fits the prompt: the count of its FEATURE signals present in the text. Used to

@@ -94096,3 +94096,21 @@ The admin merged #3668. Closed, IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt` 
   - `tests/aDefectTheUserIsShownHasAButton.test.ts`, plus the census now counting a roll-up as offered only through a real offer.
   - Reverted three ways and seen to fail each time: one offer removed, the alias loop removed, and the starter answer removed.
 - **#3673 merged (2026-10-11):** Q-796, Q-797 and Q-806 are closed. Their rows were deleted from `BUILD_REPORT_QUEUE.md` and their IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`, on the merged `main`. Q-381 batch three (above) and Q-821 were rebuilt on that `main` for the next PR from this branch.
+
+### 2026-10-11 — #3674 merged; Q-381 batch four (19 → 14)
+
+- **#3674 merged** (Q-381 batch three, Q-821 recorded, #3673's rows closed). Batch four was rebuilt on the merged `main`.
+- **Batch four.** The two findings batch three left out on purpose got the re-check they were waiting for, and then a button:
+  - `DB_SCHEMA_MISSING` ("Create the tables your app reads") is answered when the migration retried after the boot runs clean. This uses `HEAL_RESOLVES.IMPORT_DB_MIGRATIONS_APPLIED`, and matches what the finding's own message says the pages wait for.
+  - `FRAMEWORK_SOURCE_MISMATCH` ("Settle your project on one framework") is re-checked in the integrity pass against the whole project the build leaves, and is answered when it is coherent. It is never re-checked on an import turn.
+- **Sibling found and fixed:** the first attempt's `IMPORT_DB_MIGRATIONS_FAILED` stayed open after the retry succeeded, so a fixed database kept its "fix the database setup" button. The same `HEAL_RESOLVES` entry answers it.
+- **Three more are offered through what they restate** (`OFFERED_THROUGH`):
+  - `PLATFORM_PREVIEW_NOT_UP` goes through `PREVIEW_NEVER_CAME_UP`, because no preview is set after the platform's proof.
+  - `REVIEW_CRITICAL_UNVERIFIED` and `OUTCOME_REVIEW_CRITICAL` go through `REVIEW_RECHECK_CRITICALS_REMAIN`, because they carry the findings the second look left in `reviewCriticalsUnresolved`. That button's words now say "not confirmed fixed", which is true in every case it now covers.
+- **Nothing moves a bill:** severities and `isAppFinding` are unchanged.
+- **Tests:** `tests/aDefectTheUserIsShownHasAButton.test.ts` gained a batch-four block. It was reverted three ways and failed each time: the migration answer removed, the framework re-check removed, and one alias removed (which also trips the census ratchet).
+- **What is left (14), and why each still waits:**
+  - `ARCHITECTURE_INVARIANT_VIOLATED`: recorded before the late repairs, so a button could outlive it.
+  - `PREVIEW_SERVER_DOWN`: its own message says the app's code was never the problem, which is unproven when the server's last words show an app crash.
+  - `BACKSTOP_GATE_FAIL`, `REVIEWER_AUTOFIX_INCOMPLETE`, `LAST_CHANCE_PROOF`.
+  - The ERROR-severity codes.

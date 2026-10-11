@@ -2038,6 +2038,13 @@ the code (it is actually read somewhere) on 2026-07-11.
     (`<project>_cloudbuild`, which Cloud Build creates itself) already have exactly those code defaults,
     so setting them would only add three more values to keep in sync. Verified against
     `cloudRunHosting.ts` and `containerBuild.ts` rather than taken from the doc.
+- 🔒 **`NAVBHARAT_APPS_CREDENTIALLESS_BUILD` — NOT set; leave it unset until its Cloud Shell check passes (Q-706 gap a,
+  2026-10-11).** When `on`, a hosted app's build runs the app's own install scripts with the metadata route dropped,
+  the untrusted lifecycle phase never gets the Docker socket (`--trust-builder=false`), and only Cloud Build pushes
+  (`images:`). Unset/`off` is the old build, byte for byte. The design is unverified on real Cloud Build, because
+  this session has no gcloud. **To turn it on:** run `bash scripts/verifyCredentiallessBuild.sh` in Cloud Shell
+  (it builds the isolation probe exactly this way and reads, from inside `npm install`, that no identity was
+  reachable); only an ALL PASS justifies `on`. `containerBuild.ts` has the whole design.
   **How to check it without guessing:** admin panel → home → **"Check app hosting setup"**
   (`LoadBoard.tsx` → `GET /api/admin/hosting/preflight`). It makes the SAME Google calls a real publish
   makes, and a check that could not run reports as skipped rather than ok.

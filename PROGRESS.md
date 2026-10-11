@@ -94031,3 +94031,12 @@ to it. Recorded as a deliberate non-item, not an omission.
   - Sibling bug found by the swap: Doctor AI's two direct-Gemini calls passed `systemInstruction` at the top level, cast `as any`. The SDK ignored it, so Doctor AI answered on that rung without its own instructions. Fixed; the race call also forwards its signal now. The audit call's unneeded cast was removed too.
   - Class lock: a census that parses every `models.generateContent(Stream)` call in `src/` and fails on a cast parameter object or a top-level `systemInstruction`.
   - Test: `tests/oneGoogleSdkForVertex.test.ts`, reverted twice and seen to fail.
+- **Q-706 gap (a) — the credential-less build (admin decision 2026-10-11: "this session designs it; the admin verifies it in Cloud Shell on real Cloud Build before it is claimed"):**
+  - Built, OFF by default (`NAVBHARAT_APPS_CREDENTIALLESS_BUILD`). With it unset, the job is byte-identical to before; a test pins that.
+  - When on, the build has three steps:
+    - a privileged step drops build containers' route to the metadata server (`169.254.169.254`) in `DOCKER-USER`, trying both iptables backends, and fails closed if no rule took;
+    - `pack build` runs with `--trust-builder=false` and without `--publish`, so the phase that runs the app's scripts never gets the Docker socket;
+    - Cloud Build pushes the image (`images:`) after the untrusted step has exited.
+  - `buildJobConfig` is the one job builder. `scripts/printCredentiallessBuild.ts` prints it, and `scripts/verifyCredentiallessBuild.sh` submits it in Cloud Shell with the isolation probe and reads `"identity": null` from inside `npm install`.
+  - Test: `tests/aBuildRunsUserCodeWithNoCredential.test.ts`, with two guards reverted and seen to fail.
+  - Honest state: **🟡 BLOCKED on the admin's Cloud Shell run.** Whether the workers honour the rule is unknowable from here. Gap (b), the egress allow-list, is now Q-820. Hosting stays admin-only until both are closed.

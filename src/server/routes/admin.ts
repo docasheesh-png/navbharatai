@@ -751,6 +751,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       }
     })();
     const liveSandboxes = liveCount.running;
+    // ONE reading of this instance's load per response, so the health score and the load panel beside it can
+    // never disagree (audit 2026-10-11, F15).
+    const load = serverLoad.snapshot();
     const providerStats = guard(() => getProviderStats());
 
     // The same composite health inputs the dedicated /health-score endpoint reports, from the same
@@ -760,7 +763,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const inputs = platformHealthInputs({
         builds: scoped.snapshot.builds,
         router: getRouterOutcomeStats(),
-        serverWaitMs: serverLoad.snapshot().eventLoopP99Ms,
+        serverWaitMs: load.eventLoopP99Ms,
         minRequests: AI_MIN_SAMPLE,
       });
       return { score: computeHealthScore(inputs), inputs };
@@ -779,7 +782,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       liveSandboxes,
       liveSandboxNote: liveSandboxNote(liveCount),
       // How hard THIS instance is working right now. One instance of several — the client says so.
-      serverLoad: serverLoad.snapshot(),
+      serverLoad: load,
       // Whether alerts can reach the admin OUTSIDE the app, and plainly why not when they cannot.
       // Never a secret: only the configured flag and the reason travel, never the key or the sender.
       emailAlerts: (() => {

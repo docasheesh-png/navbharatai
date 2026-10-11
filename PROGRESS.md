@@ -93668,3 +93668,31 @@ which is now merged too. Closed with it, and appended to the register: Q-600, Q-
 **Found on the way and recorded, not fixed:**
 - **Q-807:** an account deletion leaves the user's PUBLISHED sites live with no record pointing at them. Taking them down
   touches App Mart buyers (Q-766), so it is the admin's decision. Recommendation: offline, except sold listings.
+
+### 2026-10-11 — #3659 merged (Q-783, Q-703, Q-117, Q-795 closed); Q-124 and Q-343 built
+
+Closed when #3659 merged, and appended to the register: Q-783, Q-703, Q-117, Q-795.
+
+**Built next, each locked by a test proven by reversion:**
+- **Q-124 (security):** a wallet spend asks for the PIN again.
+  - The unlock ticket carries the area it was opened at, signed into its MAC (`pin.<area>.<exp>.<sig>`).
+  - A money area (billing, wallet recharge, subscription) opens only for a ticket opened at it, or at Wallet & Billing, which contains both.
+  - Every other area keeps one PIN for five minutes, as the admin chose on 2026-09-13.
+  - An older app names no area and gets an unscoped ticket, so nobody is stranded before the new bundle.
+  - Server routes and client gates ask one rule (`src/lib/appLockAreas.ts`).
+  - Test: `tests/aWalletSpendAsksForThePinAgain.test.ts`.
+- **Q-343 (money):** Claude's prompt cache is priced at its real rate.
+  - Class: a token count with two meanings. Anthropic's `input_tokens` excludes the cache; OpenAI-style `prompt_tokens` includes it.
+  - `inputTokens` now means the TOTAL input everywhere, and one helper (`src/server/lib/anthropicUsage.ts`) reads Anthropic's field.
+  - One formula (`tokenCostUsd`) prices the shares: Claude cache read 0.1×, write 1.25×. A rate without a cache line prices the share at full input.
+  - Siblings fixed in the same change:
+    - the AI router's usage reader and the SDA Claude call;
+    - the sink, ledger, unbilled and abandoned turns;
+    - the provider chain's three report sites, the planners and the one-shot lane;
+    - the runner's budget guard, platform metrics, per-model telemetry, and the admin Engine Reports table (new Cache write column).
+  - Unknown providers keep the Sonnet price WITHOUT Anthropic's cache lines, so no unknown cache gets a discount.
+  - The queue row's example turn now records $0.03675, not $0.006.
+  - Test: `tests/claudeCacheIsPricedAtItsRealRate.test.ts`. Reverted three ways, it gave 6, 4 and 1 failures.
+  - Checked and left alone: `buildCostLedger.realCostFromCalls` prices the call log only for reports with no settled real cost, and all of those predate this change.
+  - Live effect to watch: a Claude-led build's real cost and bill rise to their true size, and the context meter on a Claude turn reads fuller. Both were under-reported.
+  - Legacy note: when real-cost billing is switched OFF, the flat Sonnet-equivalent bill now discounts every provider's cache share at Sonnet's cache rate. Real-cost billing is on by default, and the Opus tiers were retired on 2026-09-14.

@@ -2630,6 +2630,27 @@ the flag entries above promise.
   the entry is written (`earlyPreviewCue.ts`; a desktop opens the preview itself). 🔒 Only a capitalised import becomes
   a card — a missing helper keeps the empty stub. The fast lane's tier order is deliberately unchanged. Test-locked
   with a real-browser render in `tests/theAppIsOnScreenWhileItIsBuilt.test.ts`.
+- **📱 `AGENTV3_NATIVE_FEEL` — A BUILT APP MUST FEEL LIKE AN APP, NOT A WEBSITE IN A FRAME (admin 2026-10-11,
+  verbatim: *"navbharatai jo app banaye aur navbharatai khud dono ko real netiv app feel aye aisa banao! aur bhi
+  jyada micro polish karo!!"*). ⚠️ NOT set; default ON; `off` removes the baseline, the phone meta tags and the
+  prompt rule.**
+  `nativeFeel.ts`. NavBharatAI's OWN shell has had native polish since 2026-07-08 (`src/lib/nativeShell.ts`);
+  **the apps it BUILDS had none of it.** 🔴 The worst gap was invisible to `appDefaults.ts`'s patcher: its viewport
+  rule is guarded by `name=["']viewport["']`, and **Vite's template always ships a viewport**, so the rule never
+  fired and `viewport-fit=cover` never arrived — leaving **`env(safe-area-inset-*)` at 0px on every device**, so a
+  fixed header sat under the notch and a bottom bar under the home indicator, and any safe-area CSS the app wrote
+  did nothing. An ensure-only patcher cannot fix a wrong ATTRIBUTE on a tag that already exists, so the viewport is
+  now UPGRADED in place (idempotent). Also added: the Apple/Android fullscreen meta tags, and a behaviour-only CSS
+  baseline for the specific tells — the tap flash, the 300 ms double-tap delay, pull-to-refresh, iOS's zoom on a
+  sub-16px input, rotate re-flow, momentum in nested scrollers, and a pressed state so a tap is answered in the
+  same frame. 🎨 **It paints nothing** — colour belongs to the app and to `THEME_RULES.md`; a baseline that set a
+  colour would fight every generated app's theme, and a test asserts the absence of any colour. 🔒 Touch rules are
+  scoped to `@media (pointer: coarse)`, motion respects `prefers-reduced-motion`, selectors name CONTROLS (a
+  paragraph keeps its text selection), and there is no universal selector — the baseline is a floor an app
+  overrides with any more specific rule, never a ceiling. The prompt rule carries ONLY what needs per-field
+  judgement (`inputMode`/`enterKeyHint` per field, 44px targets, safe-area padding on the app's own fixed bars) and
+  is asserted NOT to repeat what the CSS guarantees. Test-locked in `tests/aBuiltAppFeelsNative.test.ts`,
+  reversion-proven six ways.
 - **🌐 `AGENTV3_BROWSER_ONLY_GUARD` — BROWSER-ONLY CODE IS NOT RUN IN NODE (queue row Q-146, 2026-10-05).
   ⚠️ NOT set; default ON; `off` removes both the write note and the run refusal.**
   `BrowserOnlyInNode.ts`. A report recorded the cost: the agent ran a browser-oriented localStorage seed with

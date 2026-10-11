@@ -7,6 +7,7 @@
 // AgentRegistry so the Architect always delegates by real, current capability.
 
 import { shellEarlyRule } from './earlyPreview';
+import { nativeFeelBuildRule } from './nativeFeel';
 import { MAX_FILES_PER_BATCH } from './batchSize';
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
 import { packageChoiceRule } from '../lib/unfixablePackages';
@@ -673,6 +674,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '      not written yet — the root imports its children, so a child importing from the',
     '      root fails to compile until the root is rewritten.',
     ...shellEarlyRule(),
+    ...nativeFeelBuildRule(),
     '    • Add defensive guards (null/undefined checks, sensible defaults, try/catch at',
     '      I/O and async boundaries) so missing data degrades instead of crashing.',
     '    • No fragile magic: avoid hidden ordering dependencies, side effects on import,',

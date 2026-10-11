@@ -93668,3 +93668,89 @@ which is now merged too. Closed with it, and appended to the register: Q-600, Q-
 **Found on the way and recorded, not fixed:**
 - **Q-807:** an account deletion leaves the user's PUBLISHED sites live with no record pointing at them. Taking them down
   touches App Mart buyers (Q-766), so it is the admin's decision. Recommendation: offline, except sold listings.
+
+## 2026-10-11 — Native feel, for the apps NavBharatAI builds AND for NavBharatAI itself
+
+**Admin, verbatim:** *"navbharatai jo app banaye aur navbharatai khud dono ko real netiv app feel aye aisa
+banao! aur bhi jyada micro polish karo!!"* — chosen from the three options I had laid out, after they asked
+what "native" would actually mean (the answer: today's APK is already a real signed package; what differs is
+that a web view sits inside it, so the cheap and visible win is the FEEL, not a Kotlin rewrite).
+
+### Measured first, and the split was lopsided
+
+NavBharatAI's own shell was already well covered: `src/lib/nativeShell.ts` (444 lines — splash, status bar,
+haptics with a tap tone and user prefs, back button, keyboard inset), and `index.html` already carried
+`viewport-fit=cover` and the Apple meta tags, with a whole "NATIVE-FEEL FIX (admin audit 2026-07-26)" block
+in `index.css` for pull-to-refresh, the rubber-band, the tap highlight and text selection.
+
+**The apps it BUILDS had none of it.** `appDefaults.ts` gave a generated app exactly
+`width=device-width, initial-scale=1.0` plus a `theme-color`.
+
+🔑 **And the worst gap was structurally invisible to the patcher.** `appDefaults`'s viewport rule is guarded
+by `name=["']viewport["']`, and **Vite's own template always ships a viewport** — so the rule never fired and
+`viewport-fit=cover` never arrived. Without that one token **`env(safe-area-inset-*)` resolves to 0px on every
+device**: a fixed header sits under the notch, a bottom bar under the home indicator, and any safe-area CSS a
+generated app writes does nothing at all. **An `ensure`-only patcher cannot fix a wrong ATTRIBUTE on a tag
+that is already present** — that is the class, and it is why the viewport is now upgraded in place.
+
+### What shipped
+
+**For generated apps** (`nativeFeel.ts`, wired through `appDefaults.ts`): the viewport upgrade; the
+Apple/Android fullscreen meta tags; and a behaviour-only CSS baseline covering the tap flash, the ~300 ms
+double-tap delay, pull-to-refresh, iOS's page zoom on a sub-16px input, rotate re-flow, momentum in nested
+scrollers, safe-area variables, and a pressed state. Plus a prompt rule for what only the model can decide
+per element — `inputMode`/`enterKeyHint` on the right field, 44px targets, safe-area padding on its own bars.
+
+**For our own app** (`index.css`): the audit of what 2026-07-26 left found exactly two gaps, both about the
+~100 ms after a finger lands. (1) **A tap was not answered** — removing the tap highlight took away the
+browser's crude feedback and put nothing in its place, so a press looked identical to no press until the next
+screen arrived. (2) **Hover stuck after a tap**, so a tapped button stayed lit and read as stuck. Momentum was
+on the document but not on the IDE's own nested panes.
+
+### Two decisions worth stating, because both could have gone wrong
+
+- 🎨 **The baseline paints nothing.** Every rule is behaviour. A baseline that set a colour would fight every
+  generated app's own theme and `THEME_RULES.md`; a test asserts the absence of any hex, `rgb()` or
+  `background`/`color` declaration.
+- 🔒 **It is a floor, not a ceiling.** Touch rules are scoped to `@media (pointer: coarse)` (a mouse needs
+  none of them, and shrinking a button under a click is a web affectation); motion respects
+  `prefers-reduced-motion`; selectors name CONTROLS so a paragraph keeps its text selection; and there is no
+  universal selector, so a drawing canvas that needs `touch-action: none` still wins.
+
+### ⚠️ Three of my own assertions were wrong on the way, all the same shape
+
+1. I guessed `generateAppDefaults`; the function is **`planAppDefaults`**.
+2. I counted `/viewport-fit/` in the output and read **2** as a duplicated tag — the second was the baseline
+   CSS's own **comment** explaining why the token matters. The invariant is the META TAG carrying it once, and
+   the assertion now says that.
+3. **A reversion probe silently tested nothing.** Probe 6 replaced a prompt line that did not exist in that
+   exact form, so the file was unchanged and the suite passed — which I read as "the test does not bite"
+   until I checked the probe itself. Re-run with the real string, it fails as it should. *A proof that does
+   not bite is not a proof — and a probe that does not apply is not a probe.*
+
+### ⚠️ And an existing guard caught my DESIGN, not just my code (same change, 2026-10-11)
+
+The first full gate came back `2 failed`, and one of them was the valuable kind.
+
+**`tests/theBootGuardRanOnOneLaneOfTwo.test.ts` → *"🔴 THE MEASUREMENT FROM THE REPORT: 299 bytes in,
+18 KB out"*.** That test caps what WE persist into a user's own `index.html` at **2,000 bytes**, and it
+exists because an 18 KB preview shim once got saved into a user's source. My baseline injected ~2.5 KB of
+CSS as an inline `<style>` — **exactly the shape it watches for.**
+
+🔑 **The guard was right and my design was wrong.** The baseline is now a FILE (`/nbai-native.css`) plus one
+`<link>`, which is the mechanism `appDefaults` already uses for the manifest, the icon and the service
+worker. Measured after the change: the generated document grows by **75 bytes**, the CSS is cacheable, and
+the user can read, edit or delete one obvious file instead of finding our rules inlined in their page.
+Re-proven: putting the inline `<style>` back fails that guard again.
+
+**The second failure was `appDefaults.test.ts > leaves a fully-configured head + registered SW untouched`.**
+Its fixture's definition of "fully configured" predated the phone tags — and its head had a viewport with no
+`viewport-fit=cover`, which genuinely DOES need something. The invariant it protects (a document needing
+nothing is never churned) is unchanged and still asserted; the fixture now includes the new tags, with the
+reason written into it.
+
+⚠️ **A third wrong assertion of mine, and the fourth of this change:** I reused the 2,000-byte figure from
+that other test in my own case — but it measures a *different* fixture, so the number meant nothing where I
+put it, and the case then failed on a `html` variable that was not even in that `describe`'s scope. It now
+asserts the thing that actually matters: **our contribution** to the document (<120 bytes), and that none of
+the CSS is in the page. *A threshold copied from another test's fixture is not a measurement.*

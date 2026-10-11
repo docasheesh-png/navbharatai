@@ -21,7 +21,12 @@ const ROLL_UPS: Record<string, string> = {
   OUTCOME_MISSING_FILES: 'MISSING_FILES_DETECTED',
   OUTCOME_MISSING_EXPORT: 'MISSING_EXPORT_DETECTED',
   BOOT_KILLING_ENV_GUARD_UNRESOLVED: 'BOOT_KILLING_ENV_GUARD',
+  // batch four
+  PLATFORM_PREVIEW_NOT_UP: 'PREVIEW_NEVER_CAME_UP',
+  REVIEW_CRITICAL_UNVERIFIED: 'REVIEW_RECHECK_CRITICALS_REMAIN',
+  OUTCOME_REVIEW_CRITICAL: 'REVIEW_RECHECK_CRITICALS_REMAIN',
 };
+const BATCH_FOUR = ['DB_SCHEMA_MISSING', 'FRAMEWORK_SOURCE_MISMATCH'];
 const idOf = (code: string) => `found-${code.toLowerCase().replace(/_/g, '-')}`;
 const baseline: string[] = JSON.parse(readFileSync('tests/fixtures/findingClassificationBaseline.json', 'utf8'));
 
@@ -57,7 +62,7 @@ describe('the fourteen offers', () => {
 });
 
 describe('🔁 a roll-up is offered through the finding it restates', () => {
-  it('the map is exactly these four, and each target really has an offer', () => {
+  it('the map is exactly these, and each target really has an offer', () => {
     expect({ ...OFFERED_THROUGH }).toEqual(ROLL_UPS);
     for (const source of Object.values(OFFERED_THROUGH)) expect(FINDING_SUGGESTIONS.some((s) => s.code === source)).toBe(true);
   });
@@ -95,12 +100,13 @@ describe('🔁 a roll-up is offered through the finding it restates', () => {
 });
 
 describe('🔒 nothing moves a bill, and no offer outlives its problem', () => {
-  it('all eighteen are still findings about the app, at the phase they are recorded in', () => {
+  it('every one is still a finding about the app, at the phase it is recorded in', () => {
     const phaseOf: Record<string, string> = {
       STARTER_STILL_SHOWING: 'preview', DB_COUPLED_BOOT: 'build', SERVERLESS_PAYMENT_NOT_SET_UP: 'tool',
+      PLATFORM_PREVIEW_NOT_UP: 'preview', DB_SCHEMA_MISSING: 'preview', FRAMEWORK_SOURCE_MISMATCH: 'plan',
       SIMULATED_DATA_SHIPPED: 'readiness', SIMULATED_RESULT_SHIPPED: 'readiness', FEATURE_COVERAGE: 'readiness',
     };
-    for (const code of [...OFFERED, ...Object.keys(ROLL_UPS)]) expect(isAppFinding({ phase: phaseOf[code] ?? 'build', code })).toBe(true);
+    for (const code of [...OFFERED, ...BATCH_FOUR, ...Object.keys(ROLL_UPS)]) expect(isAppFinding({ phase: phaseOf[code] ?? 'build', code })).toBe(true);
   });
 
   it('the compile and integrity offers are answered by the heal that fixes them', () => {
@@ -144,13 +150,49 @@ describe('the backlog', () => {
     expect(baseline.length).toBeLessThanOrEqual(19);
   });
 
-  it('two app findings stay in it on purpose: nothing re-checks them, so a button would outlive the problem', () => {
-    // DB_SCHEMA_MISSING is read from the first boot's log, and the migration retried after that boot can create
-    // the tables without anything answering it. FRAMEWORK_SOURCE_MISMATCH is a plan-time note handed to our
-    // builder, never re-checked against the delivered app. Each needs its re-check first.
-    for (const code of ['DB_SCHEMA_MISSING', 'FRAMEWORK_SOURCE_MISMATCH']) {
-      expect(baseline).toContain(code);
-      expect(FINDING_SUGGESTIONS.some((s) => s.code === code)).toBe(false);
-    }
+  it('batch four: the two that waited for a re-check got one, and three more restatements are offered — 19 → 14', () => {
+    for (const code of [...BATCH_FOUR, 'PLATFORM_PREVIEW_NOT_UP', 'REVIEW_CRITICAL_UNVERIFIED', 'OUTCOME_REVIEW_CRITICAL']) expect(baseline).not.toContain(code);
+    expect(baseline.length).toBeLessThanOrEqual(14);
+  });
+});
+
+describe('Q-381 batch four: a button only once its finding can be answered', () => {
+  for (const code of BATCH_FOUR) {
+    it(`${code} has a one-tap fix`, () => {
+      const out = buildFindingSuggestions([{ code, autoResolved: false }]);
+      expect(out.map((o) => o.id)).toEqual([idOf(code)]);
+      expect(out[0].prompt.length).toBeGreaterThan(80);
+    });
+  }
+
+  it('🔒 a migration that runs clean on its second attempt answers the first failure AND the missing tables', () => {
+    expect(HEAL_RESOLVES.IMPORT_DB_MIGRATIONS_APPLIED).toEqual(['IMPORT_DB_MIGRATIONS_FAILED', 'DB_SCHEMA_MISSING']);
+    const d = new BuildDiagnostics();
+    d.record({ phase: 'preview', severity: 'warning', code: 'IMPORT_DB_MIGRATIONS_FAILED', message: 'exit 217', autoResolved: false });
+    d.record({ phase: 'preview', severity: 'warning', code: 'DB_SCHEMA_MISSING', message: 'relation "profiles" does not exist', autoResolved: false });
+    expect(buildFindingSuggestions(d.report().issues, 10).map((o) => o.id).sort()).toEqual([idOf('DB_SCHEMA_MISSING'), idOf('IMPORT_DB_MIGRATIONS_FAILED')].sort());
+    d.record({ phase: 'preview', severity: 'info', code: 'IMPORT_DB_MIGRATIONS_APPLIED', message: 'ran clean on a second attempt', autoResolved: true });
+    expect(buildFindingSuggestions(d.report().issues, 10)).toEqual([]);
+  });
+
+  it('…but a clean migration BEFORE the boot does not answer a table the boot then proves missing', () => {
+    const d = new BuildDiagnostics();
+    d.record({ phase: 'preview', severity: 'info', code: 'IMPORT_DB_MIGRATIONS_APPLIED', message: 'ran clean', autoResolved: true });
+    d.record({ phase: 'preview', severity: 'warning', code: 'DB_SCHEMA_MISSING', message: 'relation "orders" does not exist', autoResolved: false });
+    expect(buildFindingSuggestions(d.report().issues).map((o) => o.id)).toEqual([idOf('DB_SCHEMA_MISSING')]);
+  });
+
+  it('🔒 the plan-time framework note is answered when the delivered project is coherent — never on an import turn', () => {
+    const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    expect(route).toContain("if (!isImportTurn && typeof integrityFiles['package.json'] === 'string' && checkFrameworkCoherence(integrityFiles).ok) {\n            buildDiag.resolveOnRecheck('FRAMEWORK_SOURCE_MISMATCH');");
+  });
+
+  it('the review button no longer claims a second look ran — it now also speaks for the settle lines', () => {
+    const r = FINDING_SUGGESTIONS.find((s) => s.code === 'REVIEW_RECHECK_CRITICALS_REMAIN')!;
+    expect(r.prompt).toContain('not confirmed fixed');
+    expect(r.detail).not.toMatch(/checked again/);
+    const [out] = buildFindingSuggestions([{ code: 'REVIEW_CRITICAL_UNVERIFIED', message: '1 reviewer [CRITICAL] finding(s) were not verifiably fixed: the total is never saved' }]);
+    expect(out.id).toBe(idOf('REVIEW_RECHECK_CRITICALS_REMAIN'));
+    expect(out.prompt).toContain('the total is never saved');
   });
 });

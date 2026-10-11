@@ -93925,3 +93925,7 @@ the CSS is in the page. *A threshold copied from another test's fixture is not a
   - The claim audit reads the phone-size check's outcome.
   - "44×44 buttons" or "fits a phone" is corrected out loud as unmeasured or contradicted, unless the check passed.
   - Test: `tests/aSizeNobodyMeasuredIsNotClaimed.test.ts`.
+- **Q-123 (iOS):** the iPhone app never teaches a way to pay.
+  - On `ios`, `iosPurchaseGuard.ts` removes every buying sentence from the knowledge each AI is handed, and tells the model money cannot be added in this app.
+  - The four chat clients send `X-NBAI-Platform`.
+  - Test: `tests/theIphoneAppNeverTeachesAWayToPay.test.ts`.

@@ -20,7 +20,6 @@ import { SaveToFolderButton } from './SaveToFolderButton';
 export interface FileConflict {
   file: File;
   existingKey: string;
-  isZip?: boolean;
 }
 
 export interface FilesPanelProps {
@@ -176,12 +175,10 @@ export function FilesPanel({
         <div className="fixed inset-0 z-[9999] bg-scrim flex items-center justify-center p-4" onClick={() => onResolveConflict('merge')}>
           <div className="bg-card border border-line rounded-2xl p-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
             <p className="text-[13px] font-black text-ink mb-1">
-              {fileUploadConflict.isZip ? 'ZIP Upload' : `File Conflict: ${fileUploadConflict.file.name}`}
+              {`File Conflict: ${fileUploadConflict.file.name}`}
             </p>
             <p className="text-[11px] text-muted mb-5">
-              {fileUploadConflict.isZip
-                ? 'Workspace already has files. Replace everything or merge new files alongside existing ones?'
-                : `"${fileUploadConflict.existingKey}" already exists. Replace it or keep both versions?`}
+              {`"${fileUploadConflict.existingKey}" already exists. Replace it or keep both versions?`}
             </p>
             <div className="flex gap-3">
               <button onClick={() => onResolveConflict('replace')} className="flex-1 py-2.5 rounded-xl bg-red-600/20 border border-red-500/30 text-danger text-[11px] font-black hover:bg-red-600/30 transition-all active:scale-95">Replace</button>

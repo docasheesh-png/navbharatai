@@ -1,6 +1,7 @@
 import UpdateBanner from './components/UpdateBanner';
 import { platformFixRequestPrompt } from './lib/platformFixRequest';
 import { EMPTY_PREVIEW_HTML } from './lib/workspaceSource';
+import { appFileCount, IMPORT_NOT_MERGED_MESSAGE } from './lib/projectImportTarget';
 import { setUserContext, clearUserContext, setCrashKey, setFeatureContext, featureAreaForView, recordNonFatal } from './lib/observability';
 import React, { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
@@ -1007,7 +1008,7 @@ export default function App() {
   // Do not seed this state with example files again.
   const [files, setFiles] = useState<FileSystem>({});
   const [activeFile, setActiveFile] = useState<string>('index.html');
-  const [fileUploadConflict, setFileUploadConflict] = useState<{ file: File; existingKey: string; isZip: boolean } | null>(null);
+  const [fileUploadConflict, setFileUploadConflict] = useState<{ file: File; existingKey: string } | null>(null);
   const [zipSizeModal, setZipSizeModal] = useState<{ variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null>(null);
   const [showDeployPanel, setShowDeployPanel] = useState(false);
   // logs, setLogs → from useDevLogs() hook
@@ -2446,13 +2447,18 @@ export default function App() {
         setZipSizeModal({ variant: 'too-large', fileName: selectedFile.name, fileSizeMB: sizeMB });
         return;
       }
-      // Up to 5 GB: proceed with the normal conflict check + import (chunked transport handles size)
-      const hasExisting = Object.keys(files).filter(k => !k.startsWith('.')).length > 0;
-      if (hasExisting) {
-        setFileUploadConflict({ file: selectedFile, existingKey: '', isZip: true });
-      } else {
-        handleZipImport(selectedFile);
+      // A PROJECT NEVER LANDS ON TOP OF ANOTHER APP (Q-733, admin 2026-10-11). This used to ask
+      // "Replace or Merge?", and neither did what it said: the import writes into the build workspace
+      // through `import-files`, which MERGES, so "Replace" cleared only this browser's copy and both
+      // left the old app and the new project mixed in the saved workspace (and a tap outside the
+      // dialog chose Merge). Code Studio shares the builder's session, so it cannot open a new chat
+      // without the two surfaces disagreeing about which project is open — it refuses instead, and
+      // points to the builder's Import project, which opens a new chat (projectImportTarget.ts).
+      if (appFileCount(Object.keys(files)) > 0) {
+        addToast(IMPORT_NOT_MERGED_MESSAGE, 'warning');
+        return;
       }
+      handleZipImport(selectedFile);
       return;
     }
 
@@ -2476,7 +2482,7 @@ export default function App() {
     try {
       const content = await readFile();
       if (existingKey) {
-        setFileUploadConflict({ file: selectedFile, existingKey, isZip: false });
+        setFileUploadConflict({ file: selectedFile, existingKey });
         // Store content in a ref-like way via a temp key — resolved in conflict handler
         setFiles(prev => ({ ...prev, [`__pending__${selectedFile.name}`]: content }));
       } else {
@@ -2499,23 +2505,10 @@ export default function App() {
 
   const resolveFileConflict = useCallback(async (choice: 'replace' | 'merge') => {
     if (!fileUploadConflict) return;
-    const { file, existingKey, isZip } = fileUploadConflict;
+    const { file, existingKey } = fileUploadConflict;
     setFileUploadConflict(null);
 
-    if (isZip) {
-      if (choice === 'replace') {
-        setFiles({});
-        clearWorkspace().catch(() => {}); // wipe persisted workspace before re-import
-        setHasGeneratedCode(false);
-        setIsAppBuilt(false);
-        setTimeout(() => handleZipImport(file), 50);
-      } else {
-        handleZipImport(file); // merge = add on top of existing
-      }
-      return;
-    }
-
-    // Non-ZIP conflict
+    // A single file's conflict — a zip never reaches here (Q-733, see handleFilesUpload).
     const pendingContent = files[`__pending__${file.name}`] || '';
     const next = { ...files };
     delete next[`__pending__${file.name}`];

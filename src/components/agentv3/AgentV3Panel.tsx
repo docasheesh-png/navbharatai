@@ -43,6 +43,7 @@ import { authedFetch } from '../../lib/authedFetch';
 const ConnectedServices = lazy(() => import('./ConnectedServices').then((m) => ({ default: m.ConnectedServices })));
 import { importProjectArchive, importProjectFolder, pickProjectFolder, type MasterImportResult } from '../../lib/masterZipImport';
 import { resolveImportWorkspaceId, importTargetUnavailableMessage } from './zipImportTarget';
+import { chatHoldsAnApp, appFileCount, importOpenedNewChatNote } from '../../lib/projectImportTarget';
 import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
@@ -748,6 +749,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const [featureConfirm, setFeatureConfirm] = useState<{ plan: FeaturePlanView; launch: (answer?: { include: string[]; exclude: string[] }) => void } | null>(null);
   const fwName = useCallback((id: string) => FRAMEWORKS.find((f) => f.id === id)?.name ?? id, []);
   const [importUrl, setImportUrl] = useState('');
+  // A repository import waiting for the new chat it opened to render (Q-733 — see importRepo).
+  const [pendingRepoImport, setPendingRepoImport] = useState<string | null>(null);
   const [showFrameworkPicker, setShowFrameworkPicker] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   // ── GitHub repo picker (1-click import, admin plan 2026-07-04) ────────────────────────────
@@ -891,8 +894,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // send() — a memoized version would freeze the first render's userId/email/session bindings.
   const importRepo = (repoUrl: string) => {
     if (running || importSending) return;
-    setImportSending(true);
     setShowImportModal(false);
+    // A PROJECT IMPORT NEVER LANDS ON TOP OF ANOTHER APP (Q-733) — the same rule as runProjectImport.
+    // The send waits for the NEXT render (the effect below), because this render's `send` still holds
+    // the old chat's workspace; sending from here would import into exactly the app we are leaving.
+    const wsNow = state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current);
+    if (chatHoldsAnApp({
+      workspaceId: state.workspaceId,
+      fileCount: workspaceFiles !== null && workspaceFilesFor === wsNow ? appFileCount(Object.keys(workspaceFiles)) : null,
+    })) {
+      startNewSession();
+      setUserMsgs([{ role: 'agent', text: importOpenedNewChatNote(repoUrl.replace(/^https:\/\/github\.com\//, '')), ts: Date.now() }]);
+      setPendingRepoImport(repoUrl);
+      return;
+    }
+    sendRepoImport(repoUrl);
+  };
+  const sendRepoImport = (repoUrl: string) => {
+    setImportSending(true);
     void send({
       text: 'Import this app from my GitHub repository and give me a short survey of what it is and how it is structured. Do not change any files yet.',
       importUrl: repoUrl,
@@ -1767,7 +1786,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // start behaving differently for no reason anyone chose.
   const runProjectImport = async (
     announce: string,
-    run: (workspaceId: string, onProgress: (p: { label: string }) => void) => Promise<MasterImportResult | null>,
+    // `landIn(name)` is called by the importer once it knows WHAT it is importing (after the folder
+    // picker, before any bytes move) and returns the workspace to land it in — see `landIn` below.
+    run: (landIn: (name: string) => string, onProgress: (p: { label: string }) => void) => Promise<MasterImportResult | null>,
   ) => {
     if (running || zipImporting) return;
     // PRECONDITION FIRST (admin report 2026-08-04). The workspace id is only used once the bytes are
@@ -1776,18 +1797,39 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     // the server's own size/disk preflight. This also fixes the id itself: the import was the one call
     // site passing `state.workspaceId` (empty until a build attaches) instead of the session's real id,
     // so a FRESH tab could never import at all.
-    const targetWorkspaceId = resolveImportWorkspaceId({
+    const resolvedTarget = resolveImportWorkspaceId({
       stateWorkspaceId: state.workspaceId,
       fallbackWorkspaceId: clientWorkspaceId(userId, sessionIdRef.current),
     });
-    if (!targetWorkspaceId) {
+    if (!resolvedTarget) {
       setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${importTargetUnavailableMessage()}`, ts: Date.now() }]);
       return;
     }
+    let targetWorkspaceId: string = resolvedTarget;
+    // A PROJECT IMPORT NEVER LANDS ON TOP OF ANOTHER APP (Q-733, admin 2026-10-11). Writing it into a chat
+    // that already holds an app merged the two, deleting nothing: the import's package.json replaced the
+    // old one and the preview crashed on the mixture. When this chat holds an app, the import opens a NEW
+    // chat and lands there, and the old app stays exactly as it was, in History. Decided from the files
+    // this panel has read for THIS workspace; unread counts as an app (see projectImportTarget.ts).
+    const holdsApp = chatHoldsAnApp({
+      workspaceId: state.workspaceId,
+      fileCount: workspaceFiles !== null && workspaceFilesFor === targetWorkspaceId ? appFileCount(Object.keys(workspaceFiles)) : null,
+    });
+    const landIn = (name: string): string => {
+      if (!holdsApp) return targetWorkspaceId;
+      startNewSession();
+      targetWorkspaceId = clientWorkspaceId(userId, sessionIdRef.current);
+      // startNewSession empties the thread, so the new chat opens with why it exists and what is coming.
+      setUserMsgs([
+        { role: 'agent', text: importOpenedNewChatNote(name), ts: Date.now() },
+        { role: 'agent', text: announce, ts: Date.now() },
+      ]);
+      return targetWorkspaceId;
+    };
     setZipImporting(true);
     setUserMsgs((c) => [...c, { role: 'agent', text: announce, ts: Date.now() }]);
     try {
-      const result = await run(targetWorkspaceId, (p) => setZipProgress(p.label));
+      const result = await run(landIn, (p) => setZipProgress(p.label));
       if (!result) return; // the user cancelled the picker — a normal outcome, not a failure
       // The session now HAS a workspace, even though no build ran — without this, Publish and Report stay
       // disabled on a fresh chat over an app that is right there in the preview (agentV3Reducer.adoptWorkspace).
@@ -1878,17 +1920,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     if (!pick.ok) { setZipProgress(notZipMessage(file.name)); return; }
     await runProjectImport(
       `📦 Importing “${file.name}” (${(file.size / 1024 / 1024).toFixed(1)} MB)…`,
-      (workspaceId, onProgress) => importProjectArchive(file, workspaceId, userId, email, onProgress),
+      (landIn, onProgress) => importProjectArchive(file, landIn(file.name), userId, email, onProgress),
     );
   };
 
   // A FOLDER: no zip, no archive, nothing staged — the browser reads the project where it already is.
   const handleOpenFolder = () => runProjectImport(
     '📂 Opening your project folder…',
-    async (workspaceId, onProgress) => {
+    async (landIn, onProgress) => {
       const dir = await pickProjectFolder();
-      if (!dir) return null; // cancelled
-      return importProjectFolder(dir, dir.name || 'your project', workspaceId, userId, email, onProgress);
+      if (!dir) return null; // cancelled — before landIn, so a cancelled picker never opens a new chat
+      const name = dir.name || 'your project';
+      return importProjectFolder(dir, name, landIn(name), userId, email, onProgress);
     },
   );
 
@@ -3705,6 +3748,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     if (pendingFix.autoSend) void send({ text: pendingFix.text, importUrl: '' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingFix?.nonce]);
+
+  // The repository import that opened a new chat (Q-733 — see importRepo) is sent once that chat has
+  // rendered: this render's `send` belongs to the new session, which has no workspace yet, so the
+  // import lands in an empty project and never on the app the user left.
+  useEffect(() => {
+    if (!pendingRepoImport || state.workspaceId) return;
+    const url = pendingRepoImport;
+    setPendingRepoImport(null);
+    sendRepoImport(url);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRepoImport, state.workspaceId]);
 
   // Deploy requested from the Git panel (sidebar) for a specific real provider — run v5's REAL
   // build+deploy pipeline for that provider (the actual, tested deploy engine). Fires on each new

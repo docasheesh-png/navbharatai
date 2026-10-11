@@ -227,6 +227,7 @@ import { summarizeFileTree, NAVBHARATAI_UI_MAP } from '../AgentV3/systemPrompt';
 import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
 import { inlineLinkedStylesheet } from '../AgentV3/singleFileKit';
 import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
+import { appFileCount, IMPORT_NOT_MERGED_MESSAGE, IMPORT_NOT_CHECKED_MESSAGE } from '../../lib/projectImportTarget';
 import { StaticProvider } from '../AgentV3/sandbox/AppMakerLab/generator/templates/StaticProvider';
 import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration, depsAddedByBuild, unusedDependencyLine, hasBuildScript } from '../AgentV3/unusedDepPrune';
 import { pruneDeadSalvageEnabled, deadSalvagedFiles, removeDeadSalvage } from '../AgentV3/deadSalvage';
@@ -12418,7 +12419,21 @@ async function noteBuildOutcome(
       }
       return true;
     };
-    if (zipImports.length > 0) {
+    // A PROJECT IMPORT NEVER LANDS ON TOP OF ANOTHER APP (Q-733, admin 2026-10-11). `landImportedProject`
+    // MERGES — it deletes nothing — so a zip or a GitHub repository imported into a chat that already
+    // holds an app mixed the two (the import's package.json replaced the old one; the preview crashed on
+    // the mixture). The builder opens a new chat for an import (projectImportTarget.ts); one that arrives
+    // here anyway — an attached zip, or an older app sending an import into an occupied chat — is not
+    // merged, and the turn ends below, honestly and at no charge, before any model call. A store we could
+    // not read is not evidence the chat is empty.
+    let projectImportNotMerged: string | null = null;
+    if (zipImports.length > 0 || importUrl) {
+      const before = await listWorkspaceFilePaths(workspaceId).catch(() => null);
+      if (before === null) projectImportNotMerged = IMPORT_NOT_CHECKED_MESSAGE;
+      else if (appFileCount(before) > 0) projectImportNotMerged = IMPORT_NOT_MERGED_MESSAGE;
+      if (projectImportNotMerged) emit({ type: 'narration', agent: 'architect', text: `⚠️ ${projectImportNotMerged}`, ts: Date.now() });
+    }
+    if (zipImports.length > 0 && !projectImportNotMerged) {
       try {
         emit({ type: 'narration', agent: 'architect', text: `📦 Unpacking ${zipImports[0].name || 'your zip'} into the workspace…`, ts: Date.now() });
         const extracted = await extractZipProject(Buffer.from(zipImports[0].base64, 'base64'));
@@ -13752,6 +13767,20 @@ async function noteBuildOutcome(
       // server (ok:null) instead of building anything. Building the platform itself as a user app is never
       // valid — refuse HONESTLY up front instead of grinding to the wall-clock wall, and record it so the
       // storage/isolation contamination can be investigated. False-positive-proof (needs ≥2 internal paths).
+      // The import that was not merged (Q-733, above) ends its turn here: nothing was imported, so there is
+      // nothing to build on, and building the user's message onto the OTHER app is the one thing they did
+      // not ask for. Same honest early end as the refusal below — no model call, nothing billed.
+      if (projectImportNotMerged) {
+        buildDiag.record({
+          phase: 'build', severity: 'warning', code: 'IMPORT_NOT_MERGED',
+          message: 'A project import (zip or repository) arrived in a chat that already holds an app, or whose files could not be read; it was not merged into it.',
+          autoResolved: false,
+        });
+        buildDiag.finish(false, projectImportNotMerged);
+        events.emit({ type: 'done', ok: false, summary: projectImportNotMerged, ts: Date.now() });
+        emit({ type: 'result', ok: false, summary: projectImportNotMerged, steps: 0, billedUsd: 0, billedInr: 0 });
+        return;
+      }
       if (looksLikePlatformSource(durableFilePaths)) {
         buildDiag.record({
           phase: 'build', severity: 'error', code: 'PLATFORM_SOURCE_WORKSPACE',

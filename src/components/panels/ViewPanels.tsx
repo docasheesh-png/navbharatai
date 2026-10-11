@@ -159,7 +159,7 @@ export interface ViewPanelsProps {
   togglePin: (id: string) => void;
   currentProSessionId: string;
   previewHistory: { id: string; label: string; ts: Date; html: string }[];
-  fileUploadConflict: { file: File; existingKey: string; isZip: boolean } | null;
+  fileUploadConflict: { file: File; existingKey: string } | null;
   resolveFileConflict: (choice: 'replace' | 'merge') => void;
   handleFilesUpload: (file: File) => void;
   /** A zip import in progress, drawn by the Files panel (Q-792). */

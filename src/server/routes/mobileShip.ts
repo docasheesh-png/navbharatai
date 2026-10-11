@@ -5,8 +5,8 @@
 // is to generate a working CI pipeline into the user's own repo and let GitHub's real Linux + macOS
 // runners produce the genuine artifacts. These routes are the thin transport around that.
 //
-// The push itself deliberately reuses the existing POST /api/github/push (one push implementation, no
-// drift — rule 4); this module only GENERATES the kit and DISPATCHES the workflow.
+// The push itself deliberately reuses the existing POST /api/github/push-enhanced (one push implementation,
+// no drift — rule 4); this module only GENERATES the kit and DISPATCHES the workflow.
 
 import type { Express, Request, Response } from 'express';
 import { ANDROID_BUILD_FIX_PREFIX } from '../../lib/platformFixRequest';
@@ -558,7 +558,7 @@ export function registerMobileShipRoutes(app: Express): void {
 
   /**
    * Generate the ship kit (pure — no network, no GitHub needed). The caller then pushes `files` with
-   * POST /api/github/push and follows `requiredSecrets` / SHIPPING.md.
+   * POST /api/github/push-enhanced and follows `requiredSecrets` / SHIPPING.md.
    */
   /**
    * "WHAT HAVE I BUILT?" — the list that survives a back button.

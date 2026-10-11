@@ -127,56 +127,10 @@ export function registerGithubRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/github/push', async (req: Request, res: Response) => {
-    const token = req.headers.authorization?.split(' ')[1];
-    const { owner, repo, files, message = 'Update from Navbharat AI', branch = 'main' } = req.body;
-    if (!token) return res.status(401).json({ error: 'Unauthorized' });
-
-    try {
-      // Professional push logic using GitHub API (simplified for standard web projects)
-      // 1. Get latest commit SHA
-      // 2. Create blobs
-      // 3. Create tree
-      // 4. Create commit
-      // 5. Update reference
-
-      const headers = { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' };
-
-      // Get base branch info
-      const refRes = await axios.get(`https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${branch}`, { headers });
-      const lastCommitSha = refRes.data.object.sha;
-
-      const treeItems = [];
-      for (const [path, content] of Object.entries(files)) {
-        treeItems.push({
-          path,
-          mode: '100644',
-          type: 'blob',
-          content: content as string
-        });
-      }
-
-      const treeRes = await axios.post(`https://api.github.com/repos/${owner}/${repo}/git/trees`, {
-        base_tree: lastCommitSha,
-        tree: treeItems
-      }, { headers });
-
-      const commitRes = await axios.post(`https://api.github.com/repos/${owner}/${repo}/git/commits`, {
-        message,
-        tree: treeRes.data.sha,
-        parents: [lastCommitSha]
-      }, { headers });
-
-      // SAFE ref update (no force) — a non-fast-forward is rejected, never clobbered.
-      const ok = await updateBranchRefSafely(res, { owner, repo, branch, sha: commitRes.data.sha, headers });
-      if (!ok) return; // the safe updater already sent the 409
-
-      res.json({ success: true, sha: commitRes.data.sha });
-    } catch (err: any) {
-      console.error('Push Error:', err.response?.data || err.message);
-      sendSafeError(res, err.response?.status || 500, err.response?.data?.message || 'Push to GitHub failed. Please try again.', err, 'github push');
-    }
-  });
+  // `POST /api/github/push` — DELETED 2026-10-11 (Q-600 batch five). The older duplicate of push-enhanced
+  // below. Its one client caller, App.tsx `pushToRepo`, was reachable only through GitPanel's `onPush`, which
+  // GitPanel never invoked — so no build of the app, bundled phone apps included, could ever have sent it.
+  // Removing that dead caller left the route with none (`everyRouteHasACaller`); deleting it is the decision.
 
   app.post('/api/github/push-enhanced', async (req: Request, res: Response) => {
     const authHeader = req.headers.authorization;

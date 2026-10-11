@@ -145,6 +145,37 @@ export function coveredByBilling(id: AppLockArea): boolean {
   return id === 'subscription' || id === 'wallet_recharge';
 }
 
+/**
+ * Which lock area an unlock ticket was opened for. `'*'` = an unlock that named no area — what every app
+ * built before 2026-10-11 sends, so a phone that has not taken the new bundle keeps working exactly as it did.
+ */
+export type TicketArea = AppLockArea | '*';
+
+/** The areas that SPEND money or change what is charged. */
+export const MONEY_AREAS: readonly AppLockArea[] = ['billing', 'wallet_recharge', 'subscription'];
+
+/** Read an area off a request body: one of the seven, or `'*'` for anything else. Pure. */
+export function ticketAreaFrom(raw: unknown): TicketArea {
+  const v = String(raw ?? '').trim();
+  return (APP_LOCK_AREA_IDS as readonly string[]).includes(v) ? (v as AppLockArea) : '*';
+}
+
+/**
+ * Does a ticket opened for `ticketArea` open `area`? PURE — the server's money check and the client's
+ * gates ask this one question, so the screen can never call open what the server will refuse.
+ *
+ * 🔒 A MONEY AREA NEEDS ITS OWN PIN (admin 2026-10-11, Q-124: "wallet kharch par PIN dobara maango").
+ * The ticket used to authorise everything for five minutes whichever screen the PIN was typed at, so
+ * opening Settings silently authorised a wallet recharge. Now a money area opens only for a ticket minted
+ * for that area — or for Wallet & Billing, the screen that contains both money tabs (`coveredByBilling`).
+ * Every other area keeps the one-PIN behaviour the admin asked for on 2026-09-13.
+ */
+export function ticketOpensArea(ticketArea: TicketArea | undefined | null, area: AppLockArea): boolean {
+  if (!ticketArea || ticketArea === '*') return true;
+  if (!MONEY_AREAS.includes(area)) return true;
+  return ticketArea === area || (ticketArea === 'billing' && coveredByBilling(area));
+}
+
 /** The areas that are genuinely in force, once containment is applied. Pure. */
 export function effectiveLockedAreas(areas: unknown): AppLockArea[] {
   const list = normaliseLockedAreas(areas);

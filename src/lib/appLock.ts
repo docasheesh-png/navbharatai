@@ -60,7 +60,7 @@
  * gate simply asks the server about the user who is actually signed in.
  */
 import { authHeaders } from './authedFetch';
-import { effectiveLockedAreas, normaliseLockedAreas, type AppLockArea } from './appLockAreas';
+import { effectiveLockedAreas, normaliseLockedAreas, ticketOpensArea, type AppLockArea, type TicketArea } from './appLockAreas';
 
 /** The header the server reads the unlock ticket from. Must match `UNLOCK_TICKET_HEADER` server-side. */
 export const UNLOCK_TICKET_HEADER = 'x-vault-unlock';
@@ -71,6 +71,11 @@ export type UnlockMethod = 'pin';
 export interface UnlockState {
   ticket: string;
   method: UnlockMethod;
+  /**
+   * The area the PIN was typed at (Q-124). A money area opens only for a ticket opened at it, so a gate on
+   * the recharge form asks again after a PIN typed in Settings. Absent = unscoped (the server minted `'*'`).
+   */
+  area?: TicketArea;
   /** Epoch ms after which the ticket is dead and every gate must re-lock. */
   expiresAt: number;
   /**
@@ -202,7 +207,7 @@ export function unlockIsLive(state: UnlockState | null, nowMs: number = Date.now
  * gate rendering for user B can never be handed user A's open lock. Omitting it asks the old, unscoped
  * question — see `sameAccount`.
  */
-export function currentUnlock(forUserId?: string): UnlockState | null {
+export function currentUnlock(forUserId?: string, area?: AppLockArea): UnlockState | null {
   if (!unlockIsLive(unlockState)) {
     if (unlockState) { unlockState = null; }
     return null;
@@ -210,6 +215,9 @@ export function currentUnlock(forUserId?: string): UnlockState | null {
   // Deliberately does NOT clear the ticket: the rightful owner may still be signed in in another tab,
   // and this reader's job is to answer a question, not to destroy somebody else's live unlock.
   if (!sameAccount(unlockState?.userId ?? null, forUserId)) return null;
+  // 🔒 The same rule the server's money check applies (Q-124), so a gate never shows open what the
+  // server would refuse. Without an `area` the old, unscoped question is asked.
+  if (area && !ticketOpensArea(unlockState?.area, area)) return null;
   return unlockState;
 }
 
@@ -348,26 +356,26 @@ export function sendPinCode(userId: string, purpose: 'create' | 'reset'): Promis
  * One call for both, because both need the same proof; a separate reset path would be a second place for
  * that requirement to weaken. Returns a live unlock, so the user lands inside what they were opening.
  */
-export async function setPin(userId: string, pin: string, otp: string): Promise<UnlockState> {
+export async function setPin(userId: string, pin: string, otp: string, area?: AppLockArea): Promise<UnlockState> {
   const out = await call<{ ticket: string; expiresInMs: number; method: UnlockMethod }>(
     `/api/app-lock/${userId}/pin`,
-    jsonBody('POST', { pin, otp }),
+    jsonBody('POST', { pin, otp, area }),
     'Could not save your PIN. Please try again.',
   );
-  const state = { ticket: out.ticket, method: out.method, expiresAt: Date.now() + out.expiresInMs, userId };
+  const state: UnlockState = { ticket: out.ticket, method: out.method, expiresAt: Date.now() + out.expiresInMs, userId, area: area ?? '*' };
   setUnlock(state);
   invalidateAppLockStatus();
   return state;
 }
 
 /** Open the lock with the PIN. The comparison happens on the server; this only carries the answer. */
-export async function unlockWithPin(userId: string, pin: string): Promise<UnlockState> {
+export async function unlockWithPin(userId: string, pin: string, area?: AppLockArea): Promise<UnlockState> {
   const out = await call<{ ticket: string; expiresInMs: number; method: UnlockMethod }>(
     `/api/app-lock/${userId}/unlock`,
-    jsonBody('POST', { pin }),
+    jsonBody('POST', { pin, area }),
     'Could not open your app lock. Please try again.',
   );
-  const state = { ticket: out.ticket, method: out.method, expiresAt: Date.now() + out.expiresInMs, userId };
+  const state: UnlockState = { ticket: out.ticket, method: out.method, expiresAt: Date.now() + out.expiresInMs, userId, area: area ?? '*' };
   setUnlock(state);
   return state;
 }
@@ -388,10 +396,11 @@ export async function changePin(userId: string, currentPin: string, newPin: stri
   }
   const out = await call<{ ticket: string; expiresInMs: number; method: UnlockMethod }>(
     `/api/app-lock/${userId}/pin/change`,
-    jsonBody('POST', { currentPin, newPin }, unlock.ticket),
+    jsonBody('POST', { currentPin, newPin, area: 'settings' }, unlock.ticket),
     'Could not change your PIN. Please try again.',
   );
-  const state = { ticket: out.ticket, method: out.method, expiresAt: Date.now() + out.expiresInMs, userId };
+  // Changing the PIN happens on the App Lock screen, inside Settings — so the fresh ticket is a Settings one.
+  const state: UnlockState = { ticket: out.ticket, method: out.method, expiresAt: Date.now() + out.expiresInMs, userId, area: 'settings' };
   setUnlock(state);
   invalidateAppLockStatus();
   return state;

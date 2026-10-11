@@ -28,6 +28,7 @@
  * can be replaced without touching a single route that spends the ticket.
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { ticketAreaFrom, type TicketArea } from '../../lib/appLockAreas';
 
 /**
  * 🔒 DOMAIN SEPARATION, and the reason this module does not borrow `previewDoor`'s signer.
@@ -92,10 +93,15 @@ function mac(label: string, payload: string, secret: string): string {
  */
 export type UnlockMethod = 'pin';
 
-export function mintUnlockTicket(uid: string, nowMs: number, secret: string, method: UnlockMethod = 'pin'): string {
+/**
+ * Mint a ticket for the area the PIN was typed at (Q-124). The area is SIGNED, so a ticket opened at
+ * Settings cannot be relabelled as a wallet ticket: `ticketOpensArea` decides what it opens. `'*'` is the
+ * unscoped ticket an older app gets, because it names no area.
+ */
+export function mintUnlockTicket(uid: string, nowMs: number, secret: string, method: UnlockMethod = 'pin', area: TicketArea = '*'): string {
   const exp = nowMs + TICKET_TTL_MS;
-  const payload = `${uid}|${method}|${exp}`;
-  return `${method}.${exp}.${mac(TICKET_LABEL, payload, secret)}`;
+  const scoped = ticketAreaFrom(area) === area ? area : '*';
+  return `${method}.${scoped}.${exp}.${mac(TICKET_LABEL, `${uid}|${method}|${scoped}|${exp}`, secret)}`;
 }
 
 /**
@@ -107,15 +113,27 @@ export function verifyUnlockTicket(
   uid: string,
   nowMs: number,
   secret: string,
-): { method: UnlockMethod } | null {
+): { method: UnlockMethod; area: TicketArea } | null {
   const parts = String(ticket ?? '').split('.');
-  if (parts.length !== 3) return null;
-  const [method, expRaw, sig] = parts;
+  // The three-part shape is a ticket minted before areas existed (at most five minutes old at deploy).
+  // It is read as unscoped, exactly what it authorised when it was issued.
+  if (parts.length === 3) {
+    const [method, expRaw, sig] = parts;
+    if (method !== 'pin') return null;
+    const exp = Number(expRaw);
+    if (!Number.isFinite(exp) || exp <= nowMs) return null;
+    if (!sameSecret(sig, mac(TICKET_LABEL, `${uid}|${method}|${exp}`, secret))) return null;
+    return { method, area: '*' };
+  }
+  if (parts.length !== 4) return null;
+  const [method, areaRaw, expRaw, sig] = parts;
   if (method !== 'pin') return null;
+  const area = areaRaw === '*' ? '*' : ticketAreaFrom(areaRaw);
+  if (area !== areaRaw) return null; // an area name we never mint
   const exp = Number(expRaw);
   if (!Number.isFinite(exp) || exp <= nowMs) return null;
-  if (!sameSecret(sig, mac(TICKET_LABEL, `${uid}|${method}|${exp}`, secret))) return null;
-  return { method };
+  if (!sameSecret(sig, mac(TICKET_LABEL, `${uid}|${method}|${area}|${exp}`, secret))) return null;
+  return { method, area };
 }
 
 /**

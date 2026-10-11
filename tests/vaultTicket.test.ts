@@ -17,7 +17,7 @@ const SECRET = 'a-test-server-secret';
 describe('a ticket opens the vault only for the user it was minted for', () => {
   it('verifies for its own uid and nobody else', () => {
     const t = mintUnlockTicket('user_a', NOW, SECRET);
-    expect(verifyUnlockTicket(t, 'user_a', NOW + 1_000, SECRET)).toEqual({ method: 'pin' });
+    expect(verifyUnlockTicket(t, 'user_a', NOW + 1_000, SECRET)).toEqual({ method: 'pin', area: '*' });
     // The uid is inside the signed payload, so another user's id cannot be substituted in the URL.
     expect(verifyUnlockTicket(t, 'user_b', NOW + 1_000, SECRET)).toBeNull();
   });

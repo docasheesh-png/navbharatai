@@ -214,7 +214,7 @@ describe('POST /pin — setting the PIN', () => {
     expect(readPinRecord(STORE).pinHash).not.toBe('');
     expect(readPinRecord(STORE).otpHash, 'the code must be burnt').toBe('');
     // The ticket is the whole output: it must verify under the server's own secret, for THIS user.
-    expect(verifyUnlockTicket(res.body.ticket, UID, Date.now(), unlockSecret())).toEqual({ method: 'pin' });
+    expect(verifyUnlockTicket(res.body.ticket, UID, Date.now(), unlockSecret())).toEqual({ method: 'pin', area: '*' });
     expect(AUDIT.some((a) => a.action === 'pin-created')).toBe(true);
   });
 
@@ -243,7 +243,7 @@ describe('POST /unlock — the only place a PIN is ever compared', () => {
     const res = mockRes();
     await (await unlock())(mockReq({ params: { userId: UID }, body: { pin: PIN } }), res);
     expect(res.statusCode).toBe(200);
-    expect(verifyUnlockTicket(res.body.ticket, UID, Date.now(), unlockSecret())).toEqual({ method: 'pin' });
+    expect(verifyUnlockTicket(res.body.ticket, UID, Date.now(), unlockSecret())).toEqual({ method: 'pin', area: '*' });
     expect(AUDIT.some((a) => a.action === 'unlock' && a.unlock_method === 'pin')).toBe(true);
   });
 
@@ -394,7 +394,7 @@ describe('🔒 POST /pin/change — a new PIN needs the CURRENT one, right now (
     const res = mockRes();
     await (await change())(mockReq({ params: { userId: UID }, headers: liveTicket(), body: { currentPin: PIN, newPin: NEW } }), res);
     expect(res.statusCode).toBe(200);
-    expect(verifyUnlockTicket(res.body.ticket, UID, Date.now(), unlockSecret())).toEqual({ method: 'pin' });
+    expect(verifyUnlockTicket(res.body.ticket, UID, Date.now(), unlockSecret())).toEqual({ method: 'pin', area: '*' });
     expect(AUDIT.some((a) => a.action === 'pin-changed')).toBe(true);
     // The store now opens on the NEW pin and refuses the old one.
     const unlock = await handler('POST /api/app-lock/:userId/unlock');

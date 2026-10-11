@@ -23601,6 +23601,8 @@ async function noteBuildOutcome(
           // Unreachable until 2026-09-21, because an ordinary build captured nothing; the same change
           // that made `browseUrl` record its console is what makes this fact real.
           consoleErrorsFound: runtimeErrorsRemaining,
+          // "44×44 buttons" / "fits any phone" stand only when the phone-size check measured and passed (Q-248).
+          phoneLayout: phoneProof,
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),
           // "✅ Login with Google" about a login whose password is written into the app (fakeFeatureScan.ts).
           fakeFeatures: fakeFeatures.map((f) => f.kind),

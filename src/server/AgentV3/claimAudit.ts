@@ -63,6 +63,12 @@ export interface MeasuredFacts {
    * Omitted ⇒ nothing was measured, and silence is never an accusation.
    */
   fakeFeatures?: readonly string[];
+  /**
+   * What the phone-size layout check found (mobileLayoutCheck.ts): 'passed' (fits, controls big enough to
+   * tap), 'failed' (sideways scroll or too-small controls), 'not-run' (it did not measure the app). A size
+   * claim — "44×44 buttons", "fits a phone" — is kept only on 'passed' (Q-248). Omitted ⇒ not judged.
+   */
+  phoneLayout?: 'passed' | 'failed' | 'not-run';
   /** Did a screenshot tool call complete during this build? */
   screenshotTaken: boolean;
   /** Did a real browser open the preview and see it render? */
@@ -137,7 +143,7 @@ export interface MeasuredFacts {
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store';
+export type ClaimKind = 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -163,6 +169,18 @@ const FAKE_FEATURE_CLAIMS: Record<string, { feature: RegExp; label: string; meas
 const FEATURE_DONE = /✅|\b(?:works?|working|implemented|integrated|added|ready|complete[d]?|done|functional|enabled|live|secure|real)\b/i;
 /** The same line already says it is not real — no contradiction to correct. */
 const ADMITS_DEMO = /\b(?:demo|sample|mock|placeholder|simulated|not\s+real|not\s+yet|coming\s+soon|needs?\s+(?:a\s+)?key|add\s+(?:your|a)\s+key|until\s+you)\b/i;
+
+/**
+ * Sentences that state a SIZE for the app on a phone (Q-248). Each one is narrow on purpose: a dimension
+ * beside a tap word, a tap target with a pixel size, or "fits" a phone/mobile screen.
+ */
+const SIZE_CLAIMED: readonly RegExp[] = [
+  /\b\d{2}\s*(?:×|x|by)\s*\d{2}\s*(?:px|dp|pt)?\b[^\n]{0,40}\b(?:tap|touch|thumb|button|target|hit area)/i,
+  /\b(?:tap|touch|thumb|button|hit)[^\n]{0,40}\b\d{2}\s*(?:×|x|by)\s*\d{2}\b/i,
+  /\b(?:tap|touch)[ -]targets?\b[^\n]{0,30}\b\d{2}\s*(?:px|dp|pt)\b/i,
+  /\b\d{2}\s*(?:px|dp|pt)\b[^\n]{0,30}\b(?:tap|touch)[ -]targets?\b/i,
+  /\bfits?\b[^\n]{0,20}\b(?:on\s+)?(?:a|any|every|all)?\s*(?:phone|mobile)(?:\s+screens?)?\b/i,
+];
 
 export interface ClaimContradiction {
   kind: ClaimKind;
@@ -448,6 +466,26 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
       claimed: 'that the project type-checks cleanly',
       measured: 'no typecheck ran on this build, so nothing was compiled to find out',
     });
+  }
+  // A SIZE NOBODY MEASURED (Q-248, admin 2026-10-11: "(c) only"). "44×44 buttons" and "fits any phone" were
+  // stated about apps no check had opened at phone size. The phone-size check measures exactly this — tap
+  // targets and sideways scroll — so a size claim stands only when it ran and passed. Deliberately narrow:
+  // "responsive" and "mobile-friendly" are not size claims and are left alone.
+  if (facts.phoneLayout && facts.phoneLayout !== 'passed') {
+    const line = text.split(/\n+/).find((l) => SIZE_CLAIMED.some((re) => re.test(l)));
+    if (line) {
+      out.push(facts.phoneLayout === 'failed'
+        ? {
+          kind: 'size-contradicted',
+          claimed: 'a size for the app on a phone (tap targets, or that it fits the screen)',
+          measured: 'the phone-size check opened the app at 390×844 and found controls too small to tap or a page wider than the screen',
+        }
+        : {
+          kind: 'size-unmeasured',
+          claimed: 'a size for the app on a phone (tap targets, or that it fits the screen)',
+          measured: 'the phone-size check did not measure the app on this build, so no size was measured',
+        });
+    }
   }
   if (!facts.screenshotTaken && SCREENSHOT_SEEN.test(text)) {
     out.push({

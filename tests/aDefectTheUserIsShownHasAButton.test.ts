@@ -196,3 +196,38 @@ describe('Q-381 batch four: a button only once its finding can be answered', () 
     expect(out.prompt).toContain('the total is never saved');
   });
 });
+
+describe('Q-381 batch five: a repaired app does not keep "may still be present"', () => {
+  // The reviewer auto-fix retries once after a thrown first attempt. That attempt recorded
+  // REVIEWER_AUTOFIX_INCOMPLETE; a second attempt that completed recorded "Auto-fixed" — and left the first
+  // line open, so the user's build-health card warned that the findings "may still be present" in an app
+  // whose repair had just completed. A completed pass now answers it.
+  it('🔒 the route answers the earlier attempt\'s line when a pass completes', () => {
+    const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    const at = route.indexOf("buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(fix.ok, label) });");
+    expect(at).toBeGreaterThan(-1);
+    expect(route.slice(at, at + 900)).toContain("if (fix.ok) { try { buildDiag.resolveOnRecheck('REVIEWER_AUTOFIX_INCOMPLETE'); }");
+  });
+
+  it('once answered, it is neither a problem in the report nor open', () => {
+    const d = new BuildDiagnostics();
+    d.record({ phase: 'build', severity: 'warning', code: 'REVIEWER_AUTOFIX_INCOMPLETE', message: 'Reviewer auto-fix did NOT complete — 2 critical issue(s) may still be present in the app.', autoResolved: false });
+    d.record({ phase: 'build', severity: 'info', code: 'REVIEWER_AUTOFIX', message: 'Auto-fixed 2 critical issue(s) from the reviewer', autoResolved: true });
+    expect(d.resolveOnRecheck('REVIEWER_AUTOFIX_INCOMPLETE')).toBe(1);
+    expect(d.report().issues.filter((i) => i.code === 'REVIEWER_AUTOFIX_INCOMPLETE' && !i.autoResolved)).toEqual([]);
+  });
+});
+
+describe('Q-381 batch five: payment checking that later worked does not keep its button', () => {
+  it('🔒 a setup that succeeds answers an earlier failure for the same table — and only that table', () => {
+    const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    expect(route).toContain('could not be set up in the user\'s Supabase project for table "${table}" (${done.failure}).');
+    expect(route).toContain("buildDiag.resolveOnRecheck('SERVERLESS_PAYMENT_NOT_SET_UP', { messageIncludes: `for table \"${table}\"` });");
+    const d = new BuildDiagnostics();
+    d.record({ phase: 'tool', severity: 'warning', code: 'SERVERLESS_PAYMENT_NOT_SET_UP', message: 'Payment verification could not be set up in the user\'s Supabase project for table "orders" (api-error).', autoResolved: false });
+    d.record({ phase: 'tool', severity: 'warning', code: 'SERVERLESS_PAYMENT_NOT_SET_UP', message: 'Payment verification could not be set up in the user\'s Supabase project for table "bookings" (api-error).', autoResolved: false });
+    expect(d.resolveOnRecheck('SERVERLESS_PAYMENT_NOT_SET_UP', { messageIncludes: 'for table "orders"' })).toBe(1);
+    const open = d.report().issues.filter((i) => i.code === 'SERVERLESS_PAYMENT_NOT_SET_UP' && !i.autoResolved);
+    expect(open.map((i) => i.message)).toEqual(['Payment verification could not be set up in the user\'s Supabase project for table "bookings" (api-error).']);
+  });
+});

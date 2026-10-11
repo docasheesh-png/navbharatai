@@ -111,7 +111,7 @@ export const SLOW_SPAN_MS = 1_000;
  */
 export function isRoutineSpan(span: Pick<SpanData, 'name' | 'status' | 'durationMs' | 'attributes'>): boolean {
   if (!span.name.startsWith('HTTP ')) return false;
-  if (span.status === 'error' || span.durationMs >= SLOW_SPAN_MS) return false;
+  if (span.status === 'error' || !(Number(span.durationMs) < SLOW_SPAN_MS)) return false;
   const path = span.attributes?.['http.path'];
   if (typeof path !== 'string' || path.startsWith('/api')) return false;
   const code = Number(span.attributes?.['http.status_code']);

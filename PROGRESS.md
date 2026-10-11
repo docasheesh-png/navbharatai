@@ -93916,3 +93916,8 @@ the CSS is in the page. *A threshold copied from another test's fixture is not a
   - A build that did not work goes to `wip/build-<UTC stamp>`, with a note in the chat.
   - The working branch, the pull request and the merge are left alone.
   - Test: `tests/aFailedBuildNeverReachesTheUsersBranch.test.ts`.
+- **Q-781 (product):** a build offers its own preview.
+  - The chat engine marks a reply as built when its code lands (`chatBuildMeta.ts`). View Live Preview and the deploy row read that mark.
+  - Three dead marker branches are deleted, along with the unanswerable Code Review button.
+  - Sibling removed: the deploy panel state, which nothing could ever open.
+  - Test: `tests/aBuildOffersItsOwnPreview.test.ts`.

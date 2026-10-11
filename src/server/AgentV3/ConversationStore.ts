@@ -12,6 +12,7 @@
 // CONTRACT plus an in-memory implementation used for dev/CI and as the reference for the
 // Firestore-backed implementation that follows. PURE of any framework so it is fully testable.
 
+import type { BackendDeployRecord } from '../../lib/backendDeployRecord';
 import type { TurnUsage } from './ClaudeClient';
 import { isPastedSource, pastedAppFacts, readablePrompt } from '../lib/pastedSource';
 
@@ -83,6 +84,11 @@ export interface ConversationRecord {
    * backend's CNAME and take the live site down. See domainPointing.ts.
    */
   backendDomain?: string;
+  /**
+   * The backend deploy — service, address and last verdict (Q-806). Written by the deploy and by each status
+   * check, read by the Publish screen when it opens, so "live at …" survives a reload. See backendDeployRecord.ts.
+   */
+  backendDeploy?: BackendDeployRecord;
   status: ConversationStatus;
   /** The AgentRunner transcript, stored VERBATIM so a resumed run sees its exact prior context. */
   messages: unknown[];
@@ -149,6 +155,8 @@ export interface ConversationPatch {
   deployBranch?: string;
   /** See ConversationRecord.backendDomain — written when a deploy moves a domain to the service. */
   backendDomain?: string;
+  /** See ConversationRecord.backendDeploy. */
+  backendDeploy?: BackendDeployRecord;
 }
 
 /**
@@ -342,6 +350,7 @@ export class InMemoryConversationStore implements ConversationStore {
     if (patch.deployRepoName !== undefined) rec.deployRepoName = patch.deployRepoName;
     if (patch.deployBranch !== undefined) rec.deployBranch = patch.deployBranch;
     if (patch.backendDomain !== undefined) rec.backendDomain = patch.backendDomain;
+    if (patch.backendDeploy !== undefined) rec.backendDeploy = { ...patch.backendDeploy };
     rec.updatedAt = patch.updatedAt;
   }
 }

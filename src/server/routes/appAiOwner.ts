@@ -18,6 +18,7 @@ import { answerForApp, type AppAiRefusal } from '../lib/appAiAnswer';
 import { getAppAiSettings, setAppAiDisabled } from '../lib/AppAiSettingsStore';
 import { ownKeyFor, forgetOwnKey } from '../lib/appAiOwnKey';
 import { appAiUsageStore } from '../lib/AppAiUsageStore';
+import { lastDayKeys, spendHistory } from '../../lib/appAiSpendHistory';
 import { dayKey } from '../lib/siteAnalytics';
 import { loadWorkspaceFilesByPath } from '../AgentV3/WorkspaceFileStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
@@ -130,6 +131,22 @@ export function registerAppAiOwnerRoutes(app: Express): void {
       previewSpentTodayInr: Math.round(preview.spentInr * 100) / 100,
       publishedSpentTodayInr: Math.round(published.spentInr * 100) / 100,
     });
+  });
+
+  /**
+   * WHAT THIS APP'S AI HAS COST, DAY BY DAY (Q-797). The last 30 days of the published app and the preview, from
+   * the same counters the daily caps are enforced against. Owner only.
+   */
+  app.get('/api/app-ai/spend', limiter, async (req: Request, res: Response) => {
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    const ownerId = await ownerOf(req, workspaceId);
+    if (!ownerId) { res.status(403).json({ error: 'Forbidden' }); return; }
+    const days = lastDayKeys(Date.now());
+    const [preview, published] = await Promise.all([
+      appAiUsageStore.appSpentDays(previewCounterId(workspaceId), days),
+      appAiUsageStore.appSpentDays(siteIdForWorkspace(workspaceId), days),
+    ]);
+    res.json({ known: preview.known && published.known, ...spendHistory(days, preview.byDay, published.byDay) });
   });
 
   app.post('/api/app-ai/settings', limiter, async (req: Request, res: Response) => {

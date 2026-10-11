@@ -16,6 +16,7 @@
 // and this implementation faithfully reproduces its semantics. The Firestore handle is
 // injectable so a future integration test (or the emulator) can drive it without globals.
 
+import type { BackendDeployRecord } from '../../lib/backendDeployRecord';
 import * as admin from 'firebase-admin';
 import { deleteInChunks } from '../lib/batchChunks';
 import { packJson, unpackJson, utf8Bytes, compactStorageEnabled } from '../lib/compactStore';
@@ -73,6 +74,8 @@ interface ConversationMeta {
   deployBranch?: string;
   /** See ConversationRecord.backendDomain. */
   backendDomain?: string;
+  /** See ConversationRecord.backendDeploy. */
+  backendDeploy?: BackendDeployRecord;
 }
 
 /**
@@ -360,6 +363,7 @@ export class FirestoreConversationStore implements ConversationStore {
       ...(meta.deployRepoName ? { deployRepoName: meta.deployRepoName } : {}),
       ...(meta.deployBranch ? { deployBranch: meta.deployBranch } : {}),
       ...(meta.backendDomain ? { backendDomain: meta.backendDomain } : {}),
+      ...(meta.backendDeploy ? { backendDeploy: meta.backendDeploy } : {}),
     };
   }
 
@@ -379,6 +383,7 @@ export class FirestoreConversationStore implements ConversationStore {
     if (patch.deployRepoName !== undefined) out.deployRepoName = patch.deployRepoName;
     if (patch.deployBranch !== undefined) out.deployBranch = patch.deployBranch;
     if (patch.backendDomain !== undefined) out.backendDomain = patch.backendDomain;
+    if (patch.backendDeploy !== undefined) out.backendDeploy = { ...patch.backendDeploy };
     return out;
   }
 }

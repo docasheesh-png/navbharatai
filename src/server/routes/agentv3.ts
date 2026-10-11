@@ -605,6 +605,7 @@ import {
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
 import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity, restorePointKey } from '../AgentV3/restorePoint';
+import { deployedRecord, checkedRecord, readBackendDeployRecord } from '../../lib/backendDeployRecord';
 import { buildHistoryStore } from '../project/BuildHistoryStore';
 import { versionRestorePlan, versionRestoreMessage, beforeRestoreVersionName, VERSION_RESTORE_BUILD_RUNNING, type SandboxRestoreState } from '../project/versionRestore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
@@ -4544,7 +4545,7 @@ export function registerAgentV3Routes(app: Express): void {
     try {
       await saveWorkspaceFiles(newWorkspaceId, files);
       // Files + chat + name. Deliberately NOT: repoName, deployRepoName, repoOwner, deployBranch,
-      // backendDomain,
+      // backendDomain, backendDeploy (it names the ORIGINAL's service — Q-806),
       // pinned, or anything about hosting — see duplicateApp.ts.
       await store.create({ id: newSessionId, userId, workspaceId: newWorkspaceId, title: name, messages: source.messages ?? [], createdAt: now });
       await store.update(newSessionId, { appName: name, status: copyStatus(source.status), updatedAt: now, ...(source.framework ? { framework: source.framework } : {}) });
@@ -5579,6 +5580,13 @@ async function noteBuildOutcome(
        * 409 as "connect your repo in Render" — so a rejected key, a host outage and a refused creation
        * all came back as a Blueprint walkthrough. The code now says what the reason says.
        */
+      // THE DEPLOY IS REMEMBERED (Q-806): service, address, and "not checked yet" — so a reload of the
+      // Publish screen shows where the backend is instead of offering a first deploy again.
+      if (result.ok && typeof result.serviceId === 'string' && result.serviceId) {
+        await getConversationStore().update(workspaceId, {
+          backendDeploy: deployedRecord(result.serviceId, typeof result.url === 'string' ? result.url : '', Date.now()), updatedAt: Date.now(),
+        }).catch(() => { /* best-effort — the deploy itself already happened */ });
+      }
       const status = result.ok ? 200
         : result.reason === 'no-service' ? 409
         : result.reason === 'not-configured' ? 503
@@ -5625,6 +5633,22 @@ async function noteBuildOutcome(
    * holding the deploy request open would trade a dishonest fast answer for an honest one that times
    * out — no better. The client asks this as often as it likes, and each answer is evidence-backed.
    */
+  /**
+   * WHERE IS THIS APP'S BACKEND? (Q-806). The deploy and every status check write it on the app's record; the
+   * Publish screen reads it when it opens, so "live at …" survives a reload. Owner only. The host's own words
+   * never appear — the record holds our sentence, not the provider's status.
+   */
+  app.get('/api/agentv3/deploy-record', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    const rec = await getConversationStore().get(workspaceId).catch(() => null);
+    res.json({ record: readBackendDeployRecord(rec?.backendDeploy) });
+  });
+
   app.post('/api/agentv3/deploy-status', deployOpsRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
@@ -5641,6 +5665,12 @@ async function noteBuildOutcome(
     const key = resolveRenderKey(vault);
     if (!key) { res.status(503).json({ error: renderRequirement(process.env, vault) }); return; }
     const verdict = await readDeployVerdict({ apiKey: key.key, serviceId, serviceUrl });
+    // The verdict is remembered on the app, for the service the record is about (Q-806).
+    try {
+      const store = getConversationStore();
+      const next = checkedRecord(readBackendDeployRecord((await store.get(workspaceId).catch(() => null))?.backendDeploy), serviceId, verdict, Date.now());
+      if (next) await store.update(workspaceId, { backendDeploy: next, updatedAt: Date.now() });
+    } catch { /* best-effort — the answer below is the user's either way */ }
     // `status` is the HOST'S OWN word (build_failed, live, …) and names a provider's pipeline, so it
     // stays out of the user-facing payload under the white-label law. The message is ours.
     res.json({ live: verdict.live, phase: verdict.phase, message: verdict.message });

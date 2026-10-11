@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Globe, Search, ExternalLink, Eye, X, Ban as BanIcon, RotateCcw } from 'lucide-react';
 import {
-  canBan, canUnpublish, isRestorableStatus, matchesBuiltApp, previewPlan, publishStateView, replaceRow, type BuiltAppRow, type ModerationAction,
+  canBan, canUnpublish, isRestorableStatus, matchesBuiltApp, ownerModerationTargets, previewPlan, publishStateView, replaceRow, type BuiltAppRow, type ModerationAction, type OwnerAction,
 } from '../../lib/adminAppModeration';
 import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
 
@@ -46,13 +46,19 @@ export interface BuiltAppsPanelProps {
   onModerate: (workspaceId: string, action: ModerationAction, rec?: { status?: string | null; heldFrom?: string | null }) => void;
   /** Set by the dashboard after an Unpublish / Ban landed, so the affected row is re-read in place. */
   moderated: { workspaceId: string; tick: number } | null;
+  /** One person's apps, one action (Q-796): the dashboard opens its confirmation for the whole owner. */
+  onModerateOwner?: (ownerUid: string, action: OwnerAction, count: number, more: boolean) => void;
+  /** After an owner-wide action: the list is re-read, because many rows changed at once. */
+  ownerModerated?: { tick: number } | null;
+  /** After a ban that left the person other live apps: their apps are opened here. */
+  focusOwner?: { uid: string; tick: number } | null;
 }
 
 function fmtDate(ms: number): string {
   return ms > 0 ? new Date(ms).toLocaleDateString('en-IN', { dateStyle: 'medium' }) : '';
 }
 
-export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAccount, toast, onModerate, moderated }) => {
+export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAccount, toast, onModerate, moderated, onModerateOwner, ownerModerated, focusOwner }) => {
   const [rows, setRows] = useState<BuiltAppRow[] | null>(null);
   const [orphaned, setOrphaned] = useState<BuiltAppRow[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -128,6 +134,22 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moderated?.tick]);
+
+  // An owner-wide action changed many rows at once — read the list again (Q-796).
+  useEffect(() => {
+    if (!ownerModerated) return;
+    void load({ q: query, status: statusFilter, append: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerModerated?.tick]);
+
+  // A ban left that person other live apps: open their apps here, so the admin sees every one (Q-796).
+  useEffect(() => {
+    if (!focusOwner?.uid) return;
+    setQueryInput(focusOwner.uid);
+    if (query === focusOwner.uid) void load({ q: focusOwner.uid, status: statusFilter, append: false });
+    else setQuery(focusOwner.uid);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusOwner?.tick]);
 
   const submitSearch = useCallback(() => { setQuery(queryInput.trim()); }, [queryInput]);
 
@@ -317,6 +339,31 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
           <option value="plan_paused">Paused</option>
         </select>
       </div>
+
+      {/* ONE PERSON'S APPS, ONE ACTION (Q-796). Shown only when the search is an owner's id. The buttons act on
+          exactly the apps the per-row buttons would offer, by the same rules (ownerModerationTargets). */}
+      {mode === 'owner' && rows !== null && rows.length > 0 && !error && onModerateOwner && (() => {
+        const owner = rows[0].ownerUid ?? query;
+        const live = ownerModerationTargets(rows, 'unpublish').length;
+        const bannable = ownerModerationTargets(rows, 'ban').length;
+        const more = !!nextCursor;
+        return (
+          <div className="mb-3 rounded-xl border border-line bg-raised px-3 py-2.5 flex flex-wrap items-center gap-2">
+            <p className="text-[12px] text-body flex-1 min-w-[200px]">
+              This person: <span className="font-bold text-ink">{rows.length}{more ? '+' : ''}</span> app{rows.length === 1 && !more ? '' : 's'}, <span className="font-bold text-ink">{live}{more ? '+' : ''}</span> live.
+              {more && <span className="text-faint"> The action covers the apps not loaded yet too.</span>}
+            </p>
+            <button onClick={() => onModerateOwner(owner, 'unpublish', live, more)} disabled={live === 0 && !more}
+              className="px-3 py-1.5 rounded-lg bg-surface border border-line text-[12px] font-bold text-ink disabled:opacity-40">
+              Unpublish all live
+            </button>
+            <button onClick={() => onModerateOwner(owner, 'ban', bannable, more)} disabled={bannable === 0 && !more}
+              className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-[12px] font-bold text-on-accent disabled:opacity-40">
+              Ban all
+            </button>
+          </div>
+        );
+      })()}
 
       {mode === 'text' && rows !== null && !error && (
         <p className="text-[10px] text-faint">

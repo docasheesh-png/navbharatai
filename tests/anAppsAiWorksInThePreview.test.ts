@@ -136,8 +136,11 @@ describe('the switch and the notice', () => {
 describe('wiring', () => {
   const owner = read('src/server/routes/appAiOwner.ts');
   it('every owner route is a STRICT owner check (verified uid owns the workspace)', () => {
-    // 4 since 2026-10-04: the preview's picture route is an owner route too.
-    expect(owner.match(/await ownerOf\(req, workspaceId\)/g)).toHaveLength(4);
+    // 4 since 2026-10-04 (the preview's picture route), 5 since 2026-10-11 (the 30-day spend, Q-797). The rule, not
+    // the number: every route this file registers is an owner route, so each one carries the strict check.
+    const routes = owner.match(/\bapp\.(?:get|post|put|delete)\(/g) ?? [];
+    expect(routes.length).toBeGreaterThanOrEqual(5);
+    expect(owner.match(/await ownerOf\(req, workspaceId\)/g)).toHaveLength(routes.length);
     expect(owner).toMatch(/ownedByVerifiedUid\(uid, workspaceId\)/);
   });
   it('the preview counter is separate from the published app and uses the preview cap', () => {

@@ -35,6 +35,7 @@ import { writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { claimWorkspaceBuild, releaseWorkspaceBuild, BUILD_RUNNING_ELSEWHERE_CODE, BUILD_RUNNING_ELSEWHERE_MESSAGE, type BuildLeaseStore } from '../AgentV3/workspaceBuildLease';
 import { processOwnerId } from '../lib/jobLease';
+import { getServerDb } from '../lib/serverDb';
 
 import { importDropSummary } from '../../lib/importDropReport';
 // CROSS-INSTANCE upload state — the fix for "Unknown or expired upload" on a big archive.
@@ -454,8 +455,10 @@ export function registerZipUploadRoutes(app: Express): void {
         return;
       }
       if ((process.env.AGENTV3_WORKSPACE_LEASE ?? '').trim().toLowerCase() !== 'off') {
-        const { getDb } = await import('../lib/db');
-        const store = getDb() as unknown as BuildLeaseStore | null;
+        // The ADMIN handle — the one the build route's lease uses. This read the client SDK's handle until audit
+        // 2026-10-11 (F9): that object has no `.collection()` / `.runTransaction()`, so the claim threw, failed
+        // open, and an import could overwrite a workspace a build on another instance was writing.
+        const store = getServerDb() as unknown as BuildLeaseStore | null;
         const token = randomUUID();
         const claim = await claimWorkspaceBuild(store, { workspaceId, token, owner: processOwnerId(), userId: uid });
         if (!claim.ok) {

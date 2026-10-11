@@ -24,7 +24,6 @@ import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
 import { appCheckGuard } from './src/server/lib/appCheck';
 import { securityHeadersConfig, permissionsPolicyMiddleware, popupReturnOpenerPolicyMiddleware } from './src/server/lib/securityHeaders';
 import { responseCompression } from './src/server/lib/responseCompression';
-import { setDb as setSharedDb } from './src/server/lib/db';
 import { envFlag } from './src/server/lib/envFlag';
 import { registerWalletRoutes } from './src/server/routes/wallet';
 import { registerReferralRoutes } from './src/server/routes/referral';
@@ -205,8 +204,6 @@ assertProductionConfig();
 // ── In-memory server stats ─────────────────────────────────────────────────
 // serverStats singleton — extracted to src/server/lib/serverStats.ts (Phase 1).
 
-import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
 // Fallback: load a local .env file (skip placeholder values).
 //
 // 🔒 FORENSIC AUDIT 2026-10-04 — two things were removed from this block, on purpose:
@@ -243,20 +240,23 @@ const loadEnvFile = (filePath: string) => {
 
 loadEnvFile(path.join(process.cwd(), '.env'));
 
-// Initialize Firebase SDK for Node process (Backend Database Sync)
-let firebaseApp: any;
-let db: any;
+// Read the Firebase web config for its api key (used by the token-exchange fallbacks below).
+//
+// 🔒 AUDIT 2026-10-11 (F9): this block also started the CLIENT Firestore SDK and shared its handle with route
+// modules through `lib/db.ts`. On a server that handle has no signed-in user, so every read and write through it
+// ran as an anonymous browser against the security rules — and it is not the admin API at all: the workspace
+// build lease called `.collection()` / `.runTransaction()` on it, threw, and its fail-open path let a zip import
+// overwrite a workspace another instance was building. Every server read and write goes through
+// `getServerDb()` (the admin SDK); the client handle and `lib/db.ts` are gone, and
+// `tests/theServerNeverUsesTheClientFirestoreSdk.test.ts` keeps them gone.
 let firebaseApiKey: string | undefined = undefined;
 
 try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
   if (fs.existsSync(configPath)) {
     const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    firebaseApp = initializeApp(firebaseConfig);
-    db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
-    setSharedDb(db); // share the handle with extracted route modules (Phase 1)
     firebaseApiKey = firebaseConfig.apiKey;
-    console.log('✅ Firebase initialized successfully. Resolved fallback ApiKey:', firebaseApiKey ? 'present' : 'absent');
+    console.log('✅ Firebase config loaded. Resolved fallback ApiKey:', firebaseApiKey ? 'present' : 'absent');
     // P-PME.8 — hydrate persisted feature flags into the in-memory cache so admin toggles survive
     // restarts. Best-effort + non-blocking: a load failure leaves the hardcoded defaults in place.
     import('./src/server/FeatureFlagManager')

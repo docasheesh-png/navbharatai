@@ -21266,6 +21266,17 @@ async function noteBuildOutcome(
         return null;
       };
       /**
+       * The starter check, and its answer (Q-381 batch three). STARTER_STILL_SHOWING carries a button now ("Show
+       * your app instead of the starter page"), so it must not outlive the starter: a later look that sees the APP
+       * render — a real render, and not the starter — answers it, exactly as a heal answers the finding it fixed.
+       */
+      const starterChecked = async <V extends { rendered: boolean; inconclusive?: boolean; problems: string[] }>(verdict: V, html: string): Promise<V> => {
+        const shown = await starterShownOn(html);
+        // Re-armed when answered: if the starter ever came back, a later look would record it again.
+        if (!shown && starterNoted && verdict.rendered) { starterNoted = false; try { buildDiag.resolveOnRecheck('STARTER_STILL_SHOWING'); } catch { /* best-effort */ } }
+        return withStarterVerdict(verdict, shown);
+      };
+      /**
        * 🔴 DID A REAL BROWSER SEE THIS APP RENDER? — THE ONE ANSWER, FOR EVERY VERDICT BELOW
        * (autopsy 697b38ee, EIGHTH appearance, 2026-09-21).
        *
@@ -21860,11 +21871,11 @@ async function noteBuildOutcome(
           // has spent the week removing, and it would produce the WRONG sentence — telling someone
           // with a real web app that their API returned an error. Unknown falls back to today's
           // wording, which is correct for an API and merely unhelpful for a site.
-          const verdict = withStarterVerdict(analyzePreviewHtml(shot.html, {
+          const verdict = await starterChecked(analyzePreviewHtml(shot.html, {
             painted: shot.painted,
             source: shot.source,
             hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
-          }), await starterShownOn(shot.html));
+          }), shot.html);
           let consoleErrs: string[] = [];
           try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: rescueCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
@@ -21946,7 +21957,7 @@ async function noteBuildOutcome(
             shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl');
           } catch { break; /* couldn't open the preview (no browser / timeout) — skip silently */ }
           const html = shot.html;
-          const verdict = withStarterVerdict(analyzePreviewHtml(html, { painted: shot.painted, source: shot.source }), await starterShownOn(html));
+          const verdict = await starterChecked(analyzePreviewHtml(html, { painted: shot.painted, source: shot.source }), html);
           let consoleErrs: string[] = [];
           try {
             if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text);
@@ -23243,7 +23254,7 @@ async function noteBuildOutcome(
           try {
             events.emit({ type: 'narration', agent: 'architect', text: '🔎 Nothing proved your app runs yet — opening it once more to check…', ts: Date.now() });
             const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'last-chance-proof');
-            const verdict = withStarterVerdict(analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source }), await starterShownOn(shot.html));
+            const verdict = await starterChecked(analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source }), shot.html);
             let consoleErrs: string[] = [];
             try {
               if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: proofStartedAt, buildStartedAt }))).errors).map((e) => e.text);

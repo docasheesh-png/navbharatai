@@ -57,7 +57,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PROCESS_ONLY_CODES, isAppFinding } from '../src/server/AgentV3/BuildDiagnostics';
-import { FINDING_SUGGESTIONS, APP_FINDINGS_WITHOUT_AN_OFFER, buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
+import { FINDING_SUGGESTIONS, APP_FINDINGS_WITHOUT_AN_OFFER, OFFERED_THROUGH, buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
 
 /** Phases `isAppFinding` excludes outright — our infrastructure and our provider calls. */
 const NOT_THE_APP_BY_PHASE = new Set(['provider', 'sandbox']);
@@ -134,7 +134,11 @@ export function couldReachTheUserAsAProblem(o: Occurrence): boolean {
   return true;                                                       // warning, error, or not literal
 }
 
-const OFFERED = new Set(FINDING_SUGGESTIONS.map((s) => s.code));
+const OFFERED = new Set([
+  ...FINDING_SUGGESTIONS.map((s) => s.code),
+  // A roll-up is offered through the finding it restates — but only when that finding really has an offer.
+  ...Object.entries(OFFERED_THROUGH).filter(([, source]) => FINDING_SUGGESTIONS.some((s) => s.code === source)).map(([rollUp]) => rollUp),
+]);
 const BASELINE_PATH = 'tests/fixtures/findingClassificationBaseline.json';
 
 describe('a problem the user is shown can be acted on — the census', () => {
@@ -355,9 +359,9 @@ describe('Q-381 batch two: ten more findings about our own run (2026-10-11)', ()
     }
   });
 
-  it('the backlog went from 47 to 37', () => {
+  it('the backlog went from 47 to 37 (and it only shrinks from there)', () => {
     const baseline: string[] = JSON.parse(readFileSync(join(__dirname, 'fixtures/findingClassificationBaseline.json'), 'utf8'));
     for (const code of OURS) expect(baseline).not.toContain(code);
-    expect(baseline.length).toBe(37);
+    expect(baseline.length).toBeLessThanOrEqual(37);
   });
 });

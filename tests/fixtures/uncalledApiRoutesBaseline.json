@@ -1,7 +1,5 @@
 {
-  "GET /api/admin/feature-flags": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "GET /api/admin/health-score": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
-  "GET /api/admin/settings": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "GET /api/agentv3/decision-trace": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
   "GET /api/agentv3/diag": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
   "GET /api/agentv3/persistence-status": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
@@ -38,10 +36,8 @@
   "GET /api/workspace/traceability": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/admin/backup/firestore": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
   "POST /api/admin/deploy-risk": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
-  "POST /api/admin/feature-flags": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/admin/incident-analysis": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
   "POST /api/admin/rotate-keys": "admin-url: an admin or ops check opened by URL or a runbook, not from a screen",
-  "POST /api/admin/settings": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/agentv3/exec": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",
   "POST /api/agentv3/preview-keepalive": "injected: the script the server injects into a running preview pings it (previewKeepAlive.ts)",
   "POST /api/audit/full": "undecided: no caller in the app \u2014 needs a decision: give it a screen, name its external caller, or delete it",

@@ -1849,10 +1849,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         newUsersToday, activeUsers24h,
         providerRanking, tokenPurchaseCount, recentPurchases,
         liveProviderStats,
-        maintenanceMode: serverStats.maintenanceMode,
-        featureFlags: serverStats.featureFlags,
-        pricingConfig: serverStats.pricingConfig,
-        providerEnabled: serverStats.providerEnabled,
         failedLoginAttempts: serverStats.failedLoginIPs.slice(-20),
       });
     } catch (err: any) {
@@ -3493,54 +3489,14 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // amount, and `totalMoneySpent` carries the rupees — so nothing about a real payment is lost.
   // If a genuine Pro entitlement is ever wanted, it needs a real access check first, not a flag.
 
-  // ── Settings (pricing, feature flags, maintenance) ────────────────────────
-  app.get('/api/admin/settings', verifyAdminToken, (_req: Request, res: Response) => {
-    res.json({
-      maintenanceMode: serverStats.maintenanceMode,
-      featureFlags: serverStats.featureFlags,
-      pricingConfig: serverStats.pricingConfig,
-      providerEnabled: serverStats.providerEnabled,
-    });
-  });
-
-  app.post('/api/admin/settings', verifyAdminToken, (req: Request, res: Response) => {
-    const { maintenanceMode, featureFlags, pricingConfig, providerEnabled } = req.body;
-    if (maintenanceMode !== undefined) serverStats.maintenanceMode = !!maintenanceMode;
-    if (featureFlags) Object.assign(serverStats.featureFlags, featureFlags);
-    if (pricingConfig) Object.assign(serverStats.pricingConfig, pricingConfig);
-    if (providerEnabled) Object.assign(serverStats.providerEnabled, providerEnabled);
-    audit('ADMIN_SETTINGS_CHANGED', { admin: adminUsername(), changes: req.body, ip: req.ip });
-    // P-PME.8 — persist feature flags to Firestore so they survive Cloud Run restarts (in-memory
-    // serverStats alone reset on every deploy). Best-effort: a persistence failure never fails the toggle.
-    if (featureFlags) {
-      import('../FeatureFlagManager')
-        .then(({ saveFlagConfig }) => saveFlagConfig({ flags: { ...serverStats.featureFlags } }))
-        .catch(() => { /* persistence is best-effort */ });
-    }
-    res.json({ ok: true, settings: { maintenanceMode: serverStats.maintenanceMode, featureFlags: serverStats.featureFlags, pricingConfig: serverStats.pricingConfig, providerEnabled: serverStats.providerEnabled } });
-  });
-
-  // P-PME.8 — runtime feature-flag config (incl. percentage rollout + per-user overrides), persisted
-  // in Firestore. GET returns the full persisted config; POST replaces it. Admin-only.
-  app.get('/api/admin/feature-flags', verifyAdminToken, async (_req: Request, res: Response) => {
-    const { loadFlagConfig } = await import('../FeatureFlagManager');
-    const config = (await loadFlagConfig()) || { flags: { ...serverStats.featureFlags } };
-    res.json(config);
-  });
-
-  app.post('/api/admin/feature-flags', verifyAdminToken, async (req: Request, res: Response) => {
-    const { saveFlagConfig } = await import('../FeatureFlagManager');
-    const body = req.body || {};
-    const config = {
-      flags: body.flags && typeof body.flags === 'object' ? body.flags : { ...serverStats.featureFlags },
-      ...(body.rollout && typeof body.rollout === 'object' ? { rollout: body.rollout } : {}),
-      ...(body.overrides && typeof body.overrides === 'object' ? { overrides: body.overrides } : {}),
-    };
-    const saved = await saveFlagConfig(config);
-    if (config.flags) Object.assign(serverStats.featureFlags, config.flags); // keep in-memory cache in sync
-    audit('ADMIN_FEATURE_FLAGS_CHANGED', { admin: adminUsername(), ip: req.ip, persisted: saved });
-    res.json({ ok: true, persisted: saved, config });
-  });
+  // ── Settings, feature flags, maintenance mode: REMOVED (audit 2026-10-11, F16) ──────────────────────
+  // `GET/POST /api/admin/settings` and `GET/POST /api/admin/feature-flags` held `maintenanceMode`, `featureFlags`,
+  // `pricingConfig` and `providerEnabled`. NOTHING enforced any of them — no route gated on a flag, maintenance
+  // mode blocked no request (it only turned `/api/health` "degraded"), the pricing values were read by nothing and
+  // no router consulted `providerEnabled`. Their screen was removed on 2026-10-04 (admin panel audit, PR 1, D1)
+  // for exactly that reason, and the routes were left with no caller (Q-162 listed all four as undecided). The
+  // audit's first instinct — persist them across instances — would have made a control that does nothing
+  // durable. A real kill switch is built as its own system, with enforcement, an audit trail and rollback.
 
   // ── P-SEC.5: Encryption key rotation ──────────────────────────────────────
   // Re-encrypts ALL user_secrets under the latest key version (SECRET_KEY_V<N>).

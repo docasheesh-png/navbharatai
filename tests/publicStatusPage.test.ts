@@ -32,6 +32,10 @@ describe('the public status page names no vendor', () => {
     // The count is the honest, useful part — it says whether the engine can serve requests at all.
     expect(src).toContain('of ${entries.length} available');
     expect(src).toContain("name: 'AI engines'");
+    // 🔒 And it counts something REAL (audit 2026-10-11, F16): the build tiers that can run here, by the same
+    // predicate the build route refuses on — never a map nothing routes on, which read "4 of 4" forever.
+    expect(src).toMatch(/BUILD_TIERS\.map\(\(level\) => \[level, tierEngineAvailable\(level\)\]/);
+    expect(src).not.toContain('providerEnabled ||');
   });
 
   it('no vendor name is interpolated into any public health response', () => {
@@ -42,9 +46,10 @@ describe('the public status page names no vendor', () => {
     expect(VENDOR.test(src)).toBe(false);
   });
 
-  it('the ADMIN still gets the full provider map — this hides it from visitors, not from ops', () => {
+  it('the ADMIN still gets the full engine picture — this hides it from visitors, not from ops', () => {
     const admin = readFileSync('src/server/routes/admin.ts', 'utf8');
-    expect(admin).toContain('providerEnabled');
+    expect(admin).toContain("app.get('/api/admin/engines'");
+    expect(admin).toContain('tierLadder(level).rungs');
   });
 });
 

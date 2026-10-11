@@ -16262,7 +16262,7 @@ async function noteBuildOutcome(
           if (!done.ok) {
             buildDiag.record({
               code: 'SERVERLESS_PAYMENT_NOT_SET_UP', severity: 'warning', phase: 'tool',
-              message: `Payment verification could not be set up in the user's Supabase project (${done.failure}).`,
+              message: `Payment verification could not be set up in the user's Supabase project for table "${table}" (${done.failure}).`,
               detail: done.detail, autoResolved: false,
             });
             return { ok: false, message: done.message };
@@ -16271,6 +16271,9 @@ async function noteBuildOutcome(
             code: 'SERVERLESS_PAYMENT_SET_UP', severity: 'info', phase: 'tool',
             message: `Razorpay verification deployed to the user's Supabase project for table "${table}".`, autoResolved: true,
           });
+          // A later attempt that worked answers the earlier failure FOR THE SAME TABLE (Q-381 batch five) — the
+          // "Finish setting up payment checking" button must not outlive a setup that has since succeeded.
+          try { buildDiag.resolveOnRecheck('SERVERLESS_PAYMENT_NOT_SET_UP', { messageIncludes: `for table "${table}"` }); } catch { /* best-effort */ }
           return { ok: true };
         });
       }
@@ -24632,6 +24635,11 @@ async function noteBuildOutcome(
                 // SUCCEEDED — a failed pass (e.g. the provider chain 400'd) must NOT report the criticals as
                 // fixed while they still ship. reviewerAutofixOutcome records the truthful line either way.
                 try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(fix.ok, label) }); } catch { /* best-effort */ }
+                // A pass that COMPLETED answers an earlier attempt's "did NOT complete" (Q-381 batch five). The retry
+                // after a thrown first attempt left that line open beside "Auto-fixed", so a repaired app kept a
+                // warning that its findings "may still be present". What is really still there is the review just
+                // below's to say (REVIEW_RECHECK_CRITICALS_REMAIN, which carries its own button).
+                if (fix.ok) { try { buildDiag.resolveOnRecheck('REVIEWER_AUTOFIX_INCOMPLETE'); } catch { /* best-effort */ } }
                 // ONE MORE REVIEW, ONLY BECAUSE A FIX WAS APPLIED (Q-157, admin 2026-10-11). A completed pass
                 // is not a correct one: the reviewer looks again, and whatever it still calls critical keeps
                 // the build honestly not-ok. One look — no second repair follows it. Its own abort and spawn

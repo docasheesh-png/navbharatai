@@ -94114,3 +94114,11 @@ The admin merged #3668. Closed, IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt` 
   - `PREVIEW_SERVER_DOWN`: its own message says the app's code was never the problem, which is unproven when the server's last words show an app crash.
   - `BACKSTOP_GATE_FAIL`, `REVIEWER_AUTOFIX_INCOMPLETE`, `LAST_CHANCE_PROOF`.
   - The ERROR-severity codes.
+
+### 2026-10-11 — #3675 merged; Q-381 batch five (two stale-success siblings)
+
+- **#3675 merged** (Q-381 batch four, 19 → 14).
+- **The class, a third time:** a retry that succeeded left the earlier attempt's failure open, so a thing that had been fixed kept its warning or button. Batch four found it in the import migration. This batch hunted it across the route by listing every failure code that has a success twin, and found two more:
+  - `REVIEWER_AUTOFIX_INCOMPLETE`: the reviewer auto-fix retries after a thrown first attempt. When the retry completed, its "Auto-fixed" line sat beside the open "did NOT complete — may still be present" warning. A completed pass now answers it. What is really left is for the Q-157 second review to say.
+  - `SERVERLESS_PAYMENT_NOT_SET_UP`: a later setup that worked did not answer the earlier failure. The message now names the table, and a success answers that table only. This matters because batch three gave this code a button.
+- **Tests:** `tests/aDefectTheUserIsShownHasAButton.test.ts` gained two blocks. Each was reverted and seen to fail. The backlog stays at 14: neither code changed home.

@@ -93536,3 +93536,22 @@ The rows were removed from the open queue and their IDs appended to the closed r
 - **Fix:** the builder moved to `src/lib/darkModeCss.ts`. Each colour is swapped only on its own property, and an override becomes a real rule in every strategy.
 - Without overrides, the output is byte-identical to before (proven against a copy of the old builder).
 - **Lock:** `tests/aDarkModeMappingDoesWhatItsTableSays.test.ts`. 3 reversions, 3 failures.
+
+**Q-381 batch two (same day):** 47 → 37.
+- Ten WARNING/INFO codes whose recording site says they are about our run joined `PROCESS_ONLY_CODES`: our fast lane, our import mechanics, our sandbox database, our review budget, our repair rollback, and a model's tool call.
+- Left out and pinned by a test: `STUCK_TOOL` (ERROR) and `REVIEWER_AUTOFIX_INCOMPLETE` (about the app).
+- Locked in `aProblemTheUserIsShownCanBeActedOn` (batch-two describe; reversion proven).
+
+**Q-600 batch four (same day):** AgentV3Panel.tsx 11 → 0 (the baseline is now App.tsx 46 only).
+- Removed the dormant report download/copy/history helpers, as the 2026-07-29 admin-only decision's comment said to do in a dedicated cleanup.
+- **Defects found and fixed:**
+  - The local report cache kept writing admin-only reports, provider names included, to user devices with no reader. It is removed, and the stored copy is cleared on open.
+  - The Files tab hid its loading and error state behind "No files shown.". The empty state now says which.
+- **Lock:** `tests/theFilesTabSaysWhyItIsEmpty.test.ts` (reversion proven).
+
+### 2026-10-11 — Q-789 and Q-790 closed (#3656 merged by the admin)
+
+#3656 merged at 11:43 UTC. Its two rows are deleted from `BUILD_REPORT_QUEUE.md` and appended to
+`docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`, on a fresh `main`. Q-791 (the Android device check of the
+Documents/NavBharatAI save) stays open as 🟡 BLOCKED on a real phone with the next `.aab`, and now has
+its own line in the queue's summary table.

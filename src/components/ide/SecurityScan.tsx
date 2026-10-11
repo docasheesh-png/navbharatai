@@ -9,17 +9,6 @@ import { deliverTextFile } from '../../lib/downloadFile';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { guestLimitReached } from '../../lib/guestId';
 
-interface SecurityFinding {
-  id: string;
-  name: string;
-  severity: 'Critical' | 'High' | 'Medium' | 'Low' | 'Info';
-  file: string;
-  line: number;
-  explanation: string;
-  threatActorContext: string;
-  fix: string;
-}
-
 interface SecurityScanProps {
   files: Record<string, string>;
   userKeys?: { gemini: string };

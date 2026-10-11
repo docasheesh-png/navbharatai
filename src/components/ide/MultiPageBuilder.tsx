@@ -346,7 +346,6 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
   const [showPreview, setShowPreview] = useState(false);
   const [showNavPreview, setShowNavPreview] = useState(false);
   const [navPreviewHtml, setNavPreviewHtml] = useState('');
-  const [generating, setGenerating] = useState(false);
   const [showExportStructure, setShowExportStructure] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -656,7 +655,6 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
               onCodeChange={(code) => updatePage(activePageId, { code })}
               onTitleChange={(title) => updatePage(activePageId, { title })}
               onAIGenerate={handleAIGenerate}
-              generating={generating}
               showPreview={showPreview}
               onTogglePreview={() => setShowPreview((v) => !v)}
               iframeRef={iframeRef}
@@ -852,13 +850,12 @@ interface ContentTabProps {
   onCodeChange: (code: string) => void;
   onTitleChange: (title: string) => void;
   onAIGenerate: () => void;
-  generating: boolean;
   showPreview: boolean;
   onTogglePreview: () => void;
   iframeRef: React.RefObject<HTMLIFrameElement>;
 }
 
-function ContentTab({ page, onCodeChange, onTitleChange, onAIGenerate, generating, showPreview, onTogglePreview, iframeRef }: ContentTabProps) {
+function ContentTab({ page, onCodeChange, onTitleChange, onAIGenerate, showPreview, onTogglePreview, iframeRef }: ContentTabProps) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 16, gap: 12 }}>
       {/* Page title */}
@@ -876,12 +873,9 @@ function ContentTab({ page, onCodeChange, onTitleChange, onAIGenerate, generatin
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <button
           onClick={onAIGenerate}
-          disabled={generating}
           style={{
             ...primaryBtnStyle,
             display: 'flex', alignItems: 'center', gap: 6,
-            opacity: generating ? 0.6 : 1,
-            cursor: generating ? 'not-allowed' : 'pointer',
           }}
         >
           <ChevronRight size={12} />

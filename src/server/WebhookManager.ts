@@ -2,7 +2,8 @@
  * P-PME.9 — per-user Webhook Manager.
  *
  * Lets a user register their own webhook URLs (e.g. Slack/Discord/their CI) and receive a POST on
- * build/deploy events — building on the P-BRE.7 webhook sender (`NotificationManager.sendBuildWebhook`).
+ * build/deploy events. The events are FIRED by `userWebhookEvents.ts` from the one place each outcome is
+ * decided — until 2026-10-11 nothing fired them at all and only "Send test" ever sent (see there).
  * P-BRE.7 covers a single global `BUILD_WEBHOOK_URL`; this adds managed, per-user, multi-URL,
  * per-event subscriptions stored in Firestore.
  *
@@ -10,9 +11,9 @@
  * best-effort (degrades to a no-op when the DB / VITEST is unavailable, never throws).
  */
 import crypto from 'crypto';
-import { sendBuildWebhook } from './NotificationManager';
 import { loadFirebaseAdmin } from './lib/firebaseAdminModule';
 import { getServerDb } from './lib/serverDb';
+import { assertPublicHttpUrl, publicOnlyInit, type UrlCheck } from './lib/ssrfGuard';
 
 export const WEBHOOK_EVENTS = ['BUILD_COMPLETE', 'BUILD_FAILED', 'DEPLOY_COMPLETE', 'DEPLOY_FAILED'] as const;
 export type WebhookEvent = typeof WEBHOOK_EVENTS[number];
@@ -26,7 +27,10 @@ export interface Webhook {
 
 const MAX_WEBHOOKS_PER_USER = 20;
 
-/** Accept only well-formed http(s) URLs. Pure. */
+/**
+ * Accept only well-formed http(s) URLs. Pure, and ONLY the shape — whether the address may be reached
+ * is `assertPublicHttpUrl`'s question, asked when a webhook is added AND again when it is sent.
+ */
 export function isValidWebhookUrl(url: unknown): url is string {
   if (typeof url !== 'string') return false;
   try {
@@ -72,8 +76,19 @@ export async function listWebhooks(userId: string): Promise<Webhook[]> {
 export interface AddWebhookResult { ok: boolean; webhook?: Webhook; error?: string }
 
 /** Register a webhook for a user (validated, capped). */
-export async function addWebhook(userId: string, url: string, events: unknown, nowIso: string): Promise<AddWebhookResult> {
+export async function addWebhook(
+  userId: string,
+  url: string,
+  events: unknown,
+  nowIso: string,
+  deps: { checkUrl?: (url: string) => Promise<UrlCheck> } = {},
+): Promise<AddWebhookResult> {
   if (!isValidWebhookUrl(url)) return { ok: false, error: 'A valid http(s) URL is required.' };
+  // 🔒 OUR SERVER POSTS TO THIS ADDRESS (2026-10-11). Unchecked, a signed-in user could register the
+  // cloud metadata server or an internal address and make NavBharatAI's server send to it with one press
+  // of "Send test". Refused here so the list never holds one; checked again at send time (DNS can change).
+  const reach = await (deps.checkUrl ?? assertPublicHttpUrl)(url);
+  if (!reach.ok) return { ok: false, error: `That address cannot receive webhooks: ${reach.reason ?? 'it is not a public internet address.'}` };
   const db = await getAdminFirestore();
   if (!db) return { ok: false, error: 'Database unavailable.' };
   try {
@@ -112,13 +127,46 @@ export async function removeWebhook(userId: string, id: string): Promise<boolean
 }
 
 /**
+ * POST one event to a USER-SUPPLIED address. The address is vetted again here, not only when it was
+ * added: a name that resolved to a public address then can resolve to a private one now. The connection
+ * itself goes through `publicOnlyInit` (no DNS-rebinding window) and a redirect is refused (an unvetted
+ * second hop). Never throws; false on any failure. 5 s timeout, as the page promises.
+ */
+export async function sendUserWebhook(url: string, body: unknown, timeoutMs = 5000): Promise<boolean> {
+  const reach = await assertPublicHttpUrl(url).catch((): UrlCheck => ({ ok: false }));
+  if (!reach.ok) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, publicOnlyInit({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      redirect: 'error',
+      signal: controller.signal,
+    }));
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Fire all of a user's webhooks subscribed to `event`. Best-effort + parallel; a single failing
  * webhook never affects the others or the caller. Returns how many were attempted/succeeded.
  */
-export async function fireWebhooks(userId: string, event: WebhookEvent, payload: Record<string, unknown> = {}): Promise<{ attempted: number; succeeded: number }> {
-  const hooks = (await listWebhooks(userId)).filter((h) => h.events.includes(event));
+export async function fireWebhooks(
+  userId: string,
+  event: WebhookEvent,
+  payload: Record<string, unknown> = {},
+  deps: { list?: (uid: string) => Promise<Webhook[]>; send?: (url: string, body: unknown) => Promise<boolean> } = {},
+): Promise<{ attempted: number; succeeded: number }> {
+  const hooks = (await (deps.list ?? listWebhooks)(userId)).filter((h) => Array.isArray(h.events) && h.events.includes(event));
   if (hooks.length === 0) return { attempted: 0, succeeded: 0 };
   const body = { event, ...payload };
-  const results = await Promise.all(hooks.map((h) => sendBuildWebhook(h.url, body).catch(() => false)));
+  const send = deps.send ?? sendUserWebhook;
+  const results = await Promise.all(hooks.map((h) => send(h.url, body).catch(() => false)));
   return { attempted: hooks.length, succeeded: results.filter(Boolean).length };
 }

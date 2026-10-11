@@ -263,7 +263,7 @@ import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStor
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
-import { notifyBuildComplete } from '../lib/PushNotificationService';
+import { announceBuildFinished, announceDeploy, serverPublishOutcome } from '../lib/userWebhookEvents';
 // The balance warning goes through ONE door now (admin 2026-09-22). It was a raw push on the block
 // branch with no cooldown — five refused builds were five pushes — and the "running low" half had no
 // caller at all, so the first warning a user ever got arrived at the wall.
@@ -8868,7 +8868,7 @@ async function noteBuildOutcome(
     const provider = getDeployProvider(opts.providerId)
       ?? getDeployProvider(DEFAULT_DEPLOY_PROVIDER)
       ?? getDeployProvider('firebase')!;
-    return withDeploymentPersistence(
+    const persisted = withDeploymentPersistence(
       async (ws: string, files: Map<string, Buffer>) => {
         const url = await provider.deploy(ws, files, { userId: opts.userId, githubToken: opts.githubToken });
         // Firebase-NATIVE custom domain: when publishing on OUR hosting AND this workspace has a
@@ -8897,6 +8897,19 @@ async function noteBuildOutcome(
       opts.userId,
       opts.providerId,
     );
+    // EVERY publish passes here — the Publish button and the AI's own `deploy` tool — so this is the one
+    // place the user's DEPLOY_COMPLETE / DEPLOY_FAILED webhooks are told (userWebhookEvents.ts). A refusal
+    // (quota, takedown, held for review) is a failed publish to the person who pressed the button.
+    return async (ws: string, files: Map<string, Buffer>): Promise<string> => {
+      try {
+        const url = await persisted(ws, files);
+        announceDeploy(opts.userId, true, url);
+        return url;
+      } catch (err) {
+        announceDeploy(opts.userId, false);
+        throw err;
+      }
+    };
   };
 
   /**
@@ -9117,11 +9130,14 @@ async function noteBuildOutcome(
                 firstPublish,
               }, serverPublishDeps);
               res.status(published.status).json(published.live ? published.body : { ...published.body, shape: plan.shape });
+              const hookOutcome = serverPublishOutcome(published);
+              if (hookOutcome) announceDeploy(hostOwnerUid, hookOutcome === 'complete', published.url);
               if (published.live) {
                 void (async () => { await noteBuildOutcome(workspaceId, { invested: true }, await outcomeIdentity(req)); })();
               }
               return;
             } catch (e) {
+              announceDeploy(hostOwnerUid, false);
               res.status(502).json({
                 error: `Hosting failed: ${e instanceof Error ? e.message : String(e)}`,
                 code: 'needs-server-hosting',
@@ -12985,7 +13001,7 @@ async function noteBuildOutcome(
           watchdogDiscountLine ? `🟢 ${watchdogDiscountLine}` : '',
         ].filter(Boolean).join('\n\n');
         emit({ type: 'result', ok: true, summary: watchdogSummary, steps: buildResultRef.steps ?? 0, billedUsd: watchdogBilledUsd, billedInr, ...(watchdogWalletDebit && watchdogWalletDebit.tokensDebited > 0 ? { walletTokensDebited: watchdogWalletDebit.tokensDebited, walletTokenBalance: watchdogWalletDebit.tokenBalance } : {}), ...(watchdogCostBreakdown ? { costBreakdown: watchdogCostBreakdown } : {}), ...(dl ? { diagnostics: dl } : {}) });
-        void notifyBuildComplete(userId, true);
+        announceBuildFinished(userId, true);
       } else {
         // SEAMLESS WINDOW TRANSITION (admin "sabkuch automatically hona chahiye, user ko pata bhi na
         // lage", 2026-07-20): a wall-clock pause that will be AUTO-CONTINUED must be INVISIBLE — no
@@ -26258,7 +26274,7 @@ async function noteBuildOutcome(
       // Native push notification (admin 2026-07-26): fire-and-forget — never delays or fails the
       // response the client already has. A resumable module turn is an intermediate step, not a
       // finished build, so it's excluded (the user is mid-flow inside the app already).
-      if (!projectContinue.resumable) void notifyBuildComplete(userId, result.ok);
+      if (!projectContinue.resumable) announceBuildFinished(userId, result.ok);
     } catch (err) {
       // Capture the crash in the diagnostics report too. NOTE: onUpdate only refreshes the per-instance
       // in-memory cache (lastDiagnostics) — it does NOT write to Firestore on every tick — so a crash
@@ -26341,7 +26357,7 @@ async function noteBuildOutcome(
       // vendor's name in our error learns which AI we run — the one thing the white-label law exists to
       // prevent. The admin-side record keeps the raw text (buildDiagRef recorded errMsg verbatim).
       emit({ type: 'error', message: redactProvidersText(errMsg), ts: Date.now(), ...(crashReportForClient ? { diagnostics: crashReportForClient } : {}) });
-      void notifyBuildComplete(userId, false);
+      announceBuildFinished(userId, false);
     } finally {
       // GREEN FREEZE — clear this workspace's green latch no matter how the build ended, so a stale
       // latch can never freeze the EARLY writes of the NEXT build for the same workspace.

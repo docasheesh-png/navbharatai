@@ -87,6 +87,45 @@ export interface GateCheckRecord {
   lastCheckedAtMs?: number;
   lastCheckedSha?: string;
   checkCount?: number;
+  /**
+   * Did the caller IDENTIFY itself as the deploy pipeline (the `X-Release-Gate-Caller` header the
+   * Cloud Build step sends)? See `pipelineEvidence` for why this field has to exist.
+   */
+  viaPipelineHeader?: boolean;
+}
+
+/**
+ * 🔴 MY OWN OVER-CLAIM, FOUND THE DAY THE ADMIN CONFIGURED THE TRIGGER (2026-10-11).
+ *
+ * `/api/release/gate` is PUBLIC — it has to be, because Cloud Build asks it without logging in. The
+ * first version of this recorded a check on **every** GET and then printed *"A deploy pipeline last
+ * asked this gate … so a freeze does reach the pipeline."*
+ *
+ * **Anyone reaching the URL wrote that record:** a browser, an uptime monitor, a crawler, or me
+ * testing it. The record stores *that a call happened*; the sentence stated *who made it*. One fact,
+ * two readings, and the stronger reading was the one printed — on a SAFETY control, which is the worst
+ * possible place for a false verification. It is the same class this module was written to fix, and I
+ * shipped it inside the fix.
+ *
+ * 🔑 So the evidence is now graded by what the call actually carried, and each grade gets its own
+ * sentence. Nothing is inferred:
+ *   · `pipeline` — the caller sent the `X-Release-Gate-Caller: cloudbuild` header the step sends.
+ *   · `commit`   — no header, but a plausible commit SHA, which an idle GET does not have.
+ *   · `none`     — neither. **Not recorded at all**, so it can never become evidence.
+ */
+export type GateEvidence = 'pipeline' | 'commit' | 'none';
+
+/** A git commit SHA as a pipeline sends it — `$COMMIT_SHA` is 40 hex, short forms are 7+. PURE. */
+export function isCommitSha(value: unknown): boolean {
+  return typeof value === 'string' && /^[0-9a-f]{7,40}$/i.test(value.trim());
+}
+
+/** How much a single call to the gate is worth as evidence. PURE. */
+export function pipelineEvidence(opts: { sha?: unknown; callerHeader?: unknown }): GateEvidence {
+  const header = String(opts.callerHeader ?? '').trim().toLowerCase();
+  if (header === 'cloudbuild') return 'pipeline';
+  if (isCommitSha(opts.sha)) return 'commit';
+  return 'none';
 }
 
 /**
@@ -104,7 +143,15 @@ export function freezeEnforcementNote(record: GateCheckRecord | null | undefined
   if (at !== null && nowMs - at <= CHECK_IS_RECENT_MS) {
     const when = new Date(at).toISOString();
     const n = typeof record?.checkCount === 'number' && record.checkCount > 0 ? record.checkCount : 1;
-    return `A deploy pipeline last asked this gate at ${when} (${n} check(s) recorded), so a freeze does reach the pipeline.`;
+    const sha = typeof record?.lastCheckedSha === 'string' && record.lastCheckedSha ? record.lastCheckedSha.slice(0, 12) : '';
+    // Two different facts, two different sentences — never the stronger one by default. See `pipelineEvidence`.
+    if (record?.viaPipelineHeader === true) {
+      return `The deploy pipeline asked this gate at ${when}${sha ? ` for commit ${sha}` : ''} (${n} check(s) recorded), `
+        + 'so a freeze does reach the pipeline.';
+    }
+    return `This gate was asked at ${when}${sha ? ` for commit ${sha}` : ''} (${n} check(s) recorded). The call carried a `
+      + 'commit SHA, which an idle request does not, so it was very likely the deploy pipeline — but it did not identify '
+      + 'itself, so this is not proof. A freeze is likely to reach the pipeline.';
   }
 
   const primary = primaryDeployPath();

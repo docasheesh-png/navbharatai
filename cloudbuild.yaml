@@ -40,7 +40,9 @@ steps:
           echo "Release gate: _RELEASE_GATE_URL is not set on this trigger — no gate check. A freeze will NOT stop this deploy."
           exit 0
         fi
-        BODY=$(curl -fsS --max-time 20 "$$URL?sha=$COMMIT_SHA" 2>/dev/null)
+        # The header is what lets the admin board say "the deploy pipeline asked" as a FACT rather than
+        # as an inference: this route is public, so without it any GET looked like a pipeline check.
+        BODY=$(curl -fsS --max-time 20 -H "X-Release-Gate-Caller: cloudbuild" "$$URL?sha=$COMMIT_SHA" 2>/dev/null)
         if [ -z "$$BODY" ]; then
           echo "Release gate: $$URL did not answer — failing OPEN and continuing the deploy."
           exit 0

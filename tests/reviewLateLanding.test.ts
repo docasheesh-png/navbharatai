@@ -85,7 +85,15 @@ describe('WIRING — the timeout stops us waiting, not looking', () => {
     // A second reviewer would double the user's bill for one review, and two reviewers reasoning
     // about one workspace is exactly the concurrency the C9 retry rule already forbids.
     expect(route).toContain("raceTimeout(reviewPromise, graceMs, 'post-build-review-grace')");
-    expect((route.match(/reviewBuild\(\{/g) || []).length).toBe(1);
+    // 2026-10-11 (Q-157): there are now TWO reviewBuild calls, and the second is not a grace reviewer.
+    // It is the one look after an APPLIED C9 repair — it starts only after the first review's spawn was
+    // ended and the repair finished (sequential, never concurrent), on its own billing phase. The grace
+    // above still re-races the same promise; the second call must stay where it is.
+    const calls = [...route.matchAll(/reviewBuild\(\{/g)].map((m) => m.index ?? -1);
+    expect(calls).toHaveLength(2);
+    const second = route.slice(Math.max(0, calls[1] - 600), calls[1]);
+    expect(second).toContain('runInBillingPhase(PHASE_POST_FIX_REVIEW, async () => ');
+    expect(route.slice(0, calls[1])).toContain('if (fix.ok && !abort.signal.aborted) {');
   });
 
   it('the grace runs ONLY after a timeout, never after a thrown reviewer', () => {

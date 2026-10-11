@@ -20,6 +20,7 @@ import {
 import { clientProfileStore } from './ClientProfileStore';
 import { retrieveMemoryBlock, rememberTurn } from '../memory/conversationMemory';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
+import type { ClientPlatform } from '../AppContext/iosPurchaseGuard';
 import type { ProfessionalConfig } from './types';
 
 export interface ProfessionalTurn { role: 'user' | 'assistant'; content: string; }
@@ -134,6 +135,8 @@ export interface ProfessionalChatOptions {
    * `MemoryChunk.conversationId` and `professionals/conversationId.ts`.
    */
   conversationId?: string;
+  /** The client's platform (`X-NBAI-Platform`) — on the iPhone app no answer teaches a way to pay (Q-123). */
+  platform?: ClientPlatform;
 }
 
 /** One professional turn, with what the model call cost — see ProfessionalAnswer / chatSpend.ts. */
@@ -157,7 +160,7 @@ export async function runProfessionalChatWithUsage(
   tier: ProfessionalTier = 'paid',
   opts: ProfessionalChatOptions = {},
 ): Promise<ProfessionalChatResult> {
-  const { conversationId } = opts;
+  const { conversationId, platform } = opts;
   // Per-user memory (memory-enabled professionals): load what we remember about this
   // user and inject it + the memory behaviour layer. Anonymous users still get the
   // introduction behaviour, but with an honest "cannot remember you" constraint.
@@ -196,7 +199,7 @@ export async function runProfessionalChatWithUsage(
   // The injector returns empty unless the message genuinely matches an app feature, so a normal domain
   // question is unaffected — only an app-capability question (in any language) surfaces the right screen,
   // and NavBharatAI's own builder is offered first, never an external/GitHub route.
-  const appKnowledge = AppContextInjector.getRelevantContext(message, 'professional');
+  const appKnowledge = AppContextInjector.getRelevantContext(message, 'professional', platform);
   if (appKnowledge) systemPrompt = `${systemPrompt}\n\n${appKnowledge}`;
 
   // Remember more of the conversation (admin 2026-07-15: grow memory) and DE-DUPLICATE it so the same

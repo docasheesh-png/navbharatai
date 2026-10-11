@@ -562,7 +562,9 @@ describe('THE MODEL IS TAKEN OUT OF THE LOOP for a complete dose question', () =
     expect(route).toContain('directDoseReply(message, vials)');
     expect(route).toContain('DOSE_DIRECT_ANSWER');
     // It must sit BEFORE the app-context injection, which is itself before the model call.
-    expect(route.indexOf('directDoseReply(message, vials)')).toBeLessThan(route.indexOf('AppContextInjector.getRelevantContext(message, chatSurface)'));
+    // (A prefix: the call also carries the client's platform since Q-123 — the ORDER is what is guarded.)
+    expect(route.indexOf('AppContextInjector.getRelevantContext(message, chatSurface')).toBeGreaterThan(-1);
+    expect(route.indexOf('directDoseReply(message, vials)')).toBeLessThan(route.indexOf('AppContextInjector.getRelevantContext(message, chatSurface'));
   });
 
   it('WIRING — it answers a streaming request too, not just a plain one', () => {

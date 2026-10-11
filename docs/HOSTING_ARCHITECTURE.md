@@ -303,3 +303,18 @@ Hosting is admin-only today (`NAVBHARAT_CLOUD_PUBLIC` unset), so the only hosted
 `tests/theBringUpScriptIsAdditiveAndNarrow.test.ts` locks this table to the script. The broad project roles the platform already holds stay until the probe reads ISOLATED and a real app deploys; they are removed later, one at a time, project-level `serviceAccountUser` first.
 
 **Readiness (same date).** A deploy now waits (bounded, 240 s) until the service stops reconciling. Readiness is read from the v2 `terminalCondition`. Before this, the code read it from `conditions`, which in v2 never carries `Ready`. A server that does not start fails the publish and is never made public. On a first deploy the service is deleted; on an update the serving version is left alone. The preflight also checks the staging bucket now; before, it could report `ready` without one.
+
+
+### 11.x The credential-less build (Q-706 gap a, designed 2026-10-11, NOT yet verified)
+
+The build identity is shared by every build, and every build runs the app's own install scripts. So, in the
+credential-less mode (`NAVBHARAT_APPS_CREDENTIALLESS_BUILD=on`), the job is three moves:
+1. A privileged step drops traffic from build containers to the metadata server (`169.254.169.254`) in Docker's
+   `DOCKER-USER` chain. It fails closed: if no rule took, the build stops before any user code runs.
+2. `pack build` runs without `--publish` and with `--trust-builder=false`, so the phase that runs the app's scripts
+   never gets the Docker socket.
+3. Cloud Build pushes the image itself (`images:`), after the untrusted step has exited.
+
+The registries stay reachable, so installs work. **Verification is the admin's:** `scripts/verifyCredentiallessBuild.sh`
+in Cloud Shell builds the isolation probe this way and reads its `build-result.json`. `"identity": null` from
+inside `npm install` is the only evidence that counts. Gap (b), an egress allow-list, is separate (Q-820).

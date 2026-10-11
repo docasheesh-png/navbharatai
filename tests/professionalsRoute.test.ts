@@ -170,7 +170,8 @@ describe('professional chat route — verified identity only', () => {
       res,
     );
     expect(res.statusCode).toBe(200);
-    expect(runChatMock.mock.calls[0][5]).toEqual({ conversationId: 'c_9f2a-b' });
+    // The options also carry the client's platform (Q-123); no header ⇒ the web.
+    expect(runChatMock.mock.calls[0][5]).toEqual({ conversationId: 'c_9f2a-b', platform: 'web' });
   });
 
   it('an absent or implausible conversationId reaches the engine as undefined — the legacy conversation, never a guess', async () => {
@@ -180,7 +181,7 @@ describe('professional chat route — verified identity only', () => {
       const res = mockRes();
       await chatHandler()(mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hello', conversationId: bad } }), res);
       expect(res.statusCode).toBe(200);
-      expect(runChatMock.mock.calls[0][5]).toEqual({ conversationId: undefined });
+      expect(runChatMock.mock.calls[0][5]).toEqual({ conversationId: undefined, platform: 'web' });
     }
   });
 });

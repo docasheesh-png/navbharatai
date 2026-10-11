@@ -1,6 +1,7 @@
 import UpdateBanner from './components/UpdateBanner';
 import { platformFixRequestPrompt } from './lib/platformFixRequest';
 import { EMPTY_PREVIEW_HTML } from './lib/workspaceSource';
+import { appFileCount, IMPORT_NOT_MERGED_MESSAGE } from './lib/projectImportTarget';
 import { setUserContext, clearUserContext, setCrashKey, setFeatureContext, featureAreaForView, recordNonFatal } from './lib/observability';
 import React, { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
@@ -162,11 +163,10 @@ import { safeLocalJson } from './lib/safeLocalJson';
 // ReportProblemComponent → lazy above
 import { HomeView } from './components/home/HomeView';
 import { OtherAIView } from './components/home/OtherAIView';
-import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
 import { makeWorkspaceSyncer, type WorkspaceSyncer } from './lib/workspaceSync';
 import { saveFile, loadAllFiles, clearWorkspace, deleteFile as storageDeleteFile } from './lib/storage';
-import { getAgentV3WorkspaceId } from './lib/agentv3Workspace';
+import { getAgentV3WorkspaceId, normalizeUid } from './lib/agentv3Workspace';
 import { chunkFilesForSync, totalFilesBytes } from './lib/chunkFilesForSync';
 import { type ApnapanProfile, loadApnapanProfile, saveApnapanProfile, updateApnapanProfile } from './lib/apnapanEngine';
 import { isZipFile, isTextFile, classifyZipSize } from './lib/uploadClassify';
@@ -846,8 +846,6 @@ export default function App() {
   const [isGHSyncing, setIsGHSyncing] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState<any>(null);
   const [ghSearchQuery, setGHSearchQuery] = useState('');
-  const [isPushing, setIsPushing] = useState(false);
-  const [pendingGHEdit, setPendingGHEdit] = useState<{ path: string, content: string, message: string, sha?: string } | null>(null);
   // theme, isThemePickerOpen → from useSettings() hook
   const [isAppBuilt, setIsAppBuilt] = useState(false);
 
@@ -1007,9 +1005,8 @@ export default function App() {
   // Do not seed this state with example files again.
   const [files, setFiles] = useState<FileSystem>({});
   const [activeFile, setActiveFile] = useState<string>('index.html');
-  const [fileUploadConflict, setFileUploadConflict] = useState<{ file: File; existingKey: string; isZip: boolean } | null>(null);
+  const [fileUploadConflict, setFileUploadConflict] = useState<{ file: File; existingKey: string } | null>(null);
   const [zipSizeModal, setZipSizeModal] = useState<{ variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null>(null);
-  const [showDeployPanel, setShowDeployPanel] = useState(false);
   // logs, setLogs → from useDevLogs() hook
   const _initialCode = (() => {
     // 8.7 — restore last generated app for offline mode
@@ -1085,7 +1082,6 @@ export default function App() {
       if (e.key === 'Escape') {
         if (showAuth) { setShowAuth(false); return; }
         if (showPurchaseFormPanel) { setShowPurchaseFormPanel(false); return; }
-        if (showDeployPanel) { setShowDeployPanel(false); return; }
         // No modal was open — if Focus Mode is on, Esc brings the header back (always works, even
         // though the on-screen toggle/floating button might be out of view).
         if (focusMode) { setFocusMode(false); return; }
@@ -1101,7 +1097,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showPurchaseFormPanel, showDeployPanel, focusMode]);
+  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showPurchaseFormPanel, focusMode]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const defaults = { gemini: '', groq: '', deepseek: '', openai: '', openrouter: '', claude: '' };
@@ -1555,7 +1551,6 @@ export default function App() {
     const onHardwareBack = () => {
       const openOverlays: string[] = [];
       if (isMenuOpen) openOverlays.push('menu');
-      if (showDeployPanel) openOverlays.push('deploy');
       if (showModePicker) openOverlays.push('mode-picker');
       if (historyPopupOpen) openOverlays.push('history');
       if (reportOpen) openOverlays.push('report');
@@ -1568,7 +1563,6 @@ export default function App() {
         case 'close-overlay':
           switch (action.id) {
             case 'menu': setIsMenuOpen(false); return;
-            case 'deploy': setShowDeployPanel(false); return;
             case 'mode-picker': setShowModePicker(false); return;
             case 'history': setHistoryPopupOpen(false); return;
             case 'report': setReportOpen(false); return;
@@ -1586,7 +1580,7 @@ export default function App() {
     return () => window.removeEventListener(HARDWARE_BACK_EVENT, onHardwareBack as EventListener);
   }, [
     exitPromptOpen, activeView, toggleTab,
-    isMenuOpen, showDeployPanel, showModePicker, historyPopupOpen,
+    isMenuOpen, showModePicker, historyPopupOpen,
     reportOpen, zipSizeModal, showAuth,
   ]);
 
@@ -1677,43 +1671,6 @@ export default function App() {
     }
   }, [user, toggleTab]);
 
-  const handleGHConfirmPush = async () => {
-    if (!pendingGHEdit || !githubRepoContext) return;
-    
-    setIsPushing(true);
-    addLog(`GitHub: Pushing changes to ${pendingGHEdit.path}...`, 'info');
-    
-    try {
-      const result = await GitHubService.updateFile(
-        githubRepoContext,
-        pendingGHEdit.path,
-        pendingGHEdit.content,
-        pendingGHEdit.message,
-        pendingGHEdit.sha || ''
-      );
-      
-      addLog(`GitHub: Push successful! Commit: ${result.commit.sha.substring(0, 7)}`, 'success');
-      addToast(`Pushed to GitHub ✓ (${result.commit.sha.substring(0, 7)})`, 'success');
-      
-      const successMsg: Message = {
-        id: Date.now().toString(),
-        text: `✅ **Successfully Pushed!**\n\n**File:** ${pendingGHEdit.path}\n**Commit:** [\`${result.commit.sha.substring(0, 7)}\`](${result.content.html_url})`,
-        sender: 'ai',
-        timestamp: new Date(),
-        modelUsed: 'GitHub Core'
-      };
-      setMessages(prev => [...prev, successMsg]);
-      setPendingGHEdit(null);
-    } catch (e: any) {
-      addLog(`GitHub Error: ${e.message}`, 'error');
-      // The success path has always shown a toast; a failure went only to the developer log, so the
-      // "Confirm & Push to GitHub" button just stopped spinning and nothing said the push had not
-      // happened (Q-794). The proposed edit stays pending, so the user can press it again.
-      addToast(`Push to GitHub failed: ${e?.message || 'unknown error'}`, 'error');
-    } finally {
-      setIsPushing(false);
-    }
-  };
   // P3.1 — preview build / client-side bundler slice extracted into usePreviewBundler (behavior-
   // preserving). Placed here so all its deps (files, setGeneratedCode, activeFile, activeAgent,
   // toggleTab, incrementDailyUsage) are defined above, and closeTab below can still reset preview
@@ -2182,16 +2139,16 @@ export default function App() {
   });
 
   // P3.1 — free (NBI) chat engine extracted into useChatEngine (behavior-preserving). Placed here so
-  // every dep (state, setters, updatePreview, handleGHConfirmPush, learnFromMessage, payment hook) is
+  // every dep (state, setters, updatePreview, learnFromMessage, payment hook) is
   // defined above, and the retry/Enter consumers below still resolve handleSend/handleSendForTab.
   const { handleSendForTab, handleSend, stop: stopChat, unsend: unsendChat } = useChatEngine({
     input, messages, isLoading, sessions, currentSessionId, activeAgent, mode, activeView, activeIntent,
     errorContext, preferredLanguage, user, keys, selectedModel, apnapanProfile,
-    hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files,
+    hasGeneratedCode, generatedCode, githubToken, files,
     setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setPreferredLanguage,
     setMode, setShowAuth, setUser, setGithubToken, setGithubRepoContext,
     setFiles, setHasGeneratedCode, setIsAppBuilt,
-    addLog, addToast, incrementDailyUsage, handleGHConfirmPush, learnFromMessage, updatePreview,
+    addLog, addToast, incrementDailyUsage, learnFromMessage, updatePreview,
   });
 
 
@@ -2446,13 +2403,18 @@ export default function App() {
         setZipSizeModal({ variant: 'too-large', fileName: selectedFile.name, fileSizeMB: sizeMB });
         return;
       }
-      // Up to 5 GB: proceed with the normal conflict check + import (chunked transport handles size)
-      const hasExisting = Object.keys(files).filter(k => !k.startsWith('.')).length > 0;
-      if (hasExisting) {
-        setFileUploadConflict({ file: selectedFile, existingKey: '', isZip: true });
-      } else {
-        handleZipImport(selectedFile);
+      // A PROJECT NEVER LANDS ON TOP OF ANOTHER APP (Q-733, admin 2026-10-11). This used to ask
+      // "Replace or Merge?", and neither did what it said: the import writes into the build workspace
+      // through `import-files`, which MERGES, so "Replace" cleared only this browser's copy and both
+      // left the old app and the new project mixed in the saved workspace (and a tap outside the
+      // dialog chose Merge). Code Studio shares the builder's session, so it cannot open a new chat
+      // without the two surfaces disagreeing about which project is open — it refuses instead, and
+      // points to the builder's Import project, which opens a new chat (projectImportTarget.ts).
+      if (appFileCount(Object.keys(files)) > 0) {
+        addToast(IMPORT_NOT_MERGED_MESSAGE, 'warning');
+        return;
       }
+      handleZipImport(selectedFile);
       return;
     }
 
@@ -2476,7 +2438,7 @@ export default function App() {
     try {
       const content = await readFile();
       if (existingKey) {
-        setFileUploadConflict({ file: selectedFile, existingKey, isZip: false });
+        setFileUploadConflict({ file: selectedFile, existingKey });
         // Store content in a ref-like way via a temp key — resolved in conflict handler
         setFiles(prev => ({ ...prev, [`__pending__${selectedFile.name}`]: content }));
       } else {
@@ -2499,23 +2461,10 @@ export default function App() {
 
   const resolveFileConflict = useCallback(async (choice: 'replace' | 'merge') => {
     if (!fileUploadConflict) return;
-    const { file, existingKey, isZip } = fileUploadConflict;
+    const { file, existingKey } = fileUploadConflict;
     setFileUploadConflict(null);
 
-    if (isZip) {
-      if (choice === 'replace') {
-        setFiles({});
-        clearWorkspace().catch(() => {}); // wipe persisted workspace before re-import
-        setHasGeneratedCode(false);
-        setIsAppBuilt(false);
-        setTimeout(() => handleZipImport(file), 50);
-      } else {
-        handleZipImport(file); // merge = add on top of existing
-      }
-      return;
-    }
-
-    // Non-ZIP conflict
+    // A single file's conflict — a zip never reaches here (Q-733, see handleFilesUpload).
     const pendingContent = files[`__pending__${file.name}`] || '';
     const next = { ...files };
     delete next[`__pending__${file.name}`];
@@ -3594,12 +3543,10 @@ export default function App() {
               mode={mode}
               setMode={setMode}
               activeAgent={activeAgent}
-              pendingGHEdit={pendingGHEdit}
-              onConfirmPush={handleGHConfirmPush}
-              isPushing={isPushing}
               isAppBuilt={isAppBuilt}
               theme={theme}
               onPreviewClick={() => { toggleTab('preview'); setIsMenuOpen(false); }}
+              onDownloadZip={downloadAppZip}
               wallet={wallet}
               setPreferredLanguage={setPreferredLanguage}
               setMessages={setMessages}
@@ -3981,7 +3928,6 @@ export default function App() {
                 githubUser={githubUser}
                 githubRepoContext={githubRepoContext}
                 isGHSyncing={isGHSyncing}
-                isPushing={isPushing}
                 firebaseToken={firebaseToken}
                 firebaseUser={firebaseUser}
                 files={files}
@@ -4228,6 +4174,11 @@ export default function App() {
               setCurrentProSessionId(sid);
               setV3Resume({ sessionId: sid, messages: [], nonce: Date.now() });
               v3ResumeInFlightRef.current = true;
+              // Time Machine names its current app from the builder's workspace (Q-128), and the builder
+              // may not be mounted to report the switch — so the switch says it here. The old app's
+              // preview is dropped with it: it belongs to the app we just left.
+              const switchedWs = sid.startsWith('agentv3-') ? sid : `agentv3-${normalizeUid(user?.uid)}-${sid}`;
+              setV3Preview({ workspaceId: switchedWs });
             }}
             problems={problems}
             activeView={activeView}
@@ -4264,9 +4215,6 @@ export default function App() {
             githubUser={githubUser}
             githubRepoContext={githubRepoContext}
             isGHSyncing={isGHSyncing}
-            pendingGHEdit={pendingGHEdit}
-            handleGHConfirmPush={handleGHConfirmPush}
-            isPushing={isPushing}
             connectGitHub={connectGitHub}
             disconnectGitHub={disconnectGitHub}
             firebaseToken={firebaseToken}

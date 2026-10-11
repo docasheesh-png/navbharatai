@@ -11,12 +11,29 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
-import { uncalledRoutes, isCalled, stripComments, serverApiRoutes } from './apiRouteCallers';
+import { uncalledRoutes, isCalled, stripComments, serverApiRoutes, expandBaseConstants } from './apiRouteCallers';
 import { galleryReviewApi } from '../src/components/panels/GalleryReviewQueue';
 import { stopVersionPreview } from '../src/lib/versionPreviewStop';
 
 const BASELINE: Record<string, string> = JSON.parse(readFileSync('tests/fixtures/uncalledApiRoutesBaseline.json', 'utf8'));
 const KINDS = ['external', 'injected', 'legacy-bundled', 'admin-url', 'undecided'];
+
+describe('🔒 a caller that builds its path from a base is still a caller (Q-818)', () => {
+  it('`${API_BASE}/x`, `${this.BASE}/x` and `${Svc.BASE}/x` are read as the path they build', () => {
+    const src = "const API_BASE = '/api/foo';\nfetch(`${API_BASE}/bar`);\nclass S { static BASE = '/api/svc/'; go() { return fetch(`${this.BASE}/x`) } }\nfetch(`${S.BASE}/y?z=1`);";
+    const client = expandBaseConstants(src);
+    expect(isCalled('/api/foo/bar', client)).toBe(true);
+    expect(isCalled('/api/svc/x', client)).toBe(true);
+    expect(isCalled('/api/svc/y', client)).toBe(true);
+    // without the expansion the census was blind to all three
+    expect(isCalled('/api/foo/bar', src)).toBe(false);
+  });
+
+  it('a name never borrows another file\'s base, and a dynamic value is left alone', () => {
+    expect(expandBaseConstants('fetch(`${API_BASE}/bar`)')).toBe('fetch(`${API_BASE}/bar`)');
+    expect(expandBaseConstants("const B = `/api/${v}`; fetch(`${B}/x`)")).toContain('${B}/x');
+  });
+});
 
 describe('census: every /api route has a caller, or a written reason it has none', () => {
   const now = uncalledRoutes();

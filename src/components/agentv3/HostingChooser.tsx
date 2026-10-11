@@ -28,6 +28,7 @@ import { NbaiDomainConnect } from './NbaiDomainConnect';
 import { usePublishState } from '../../hooks/usePublishState';
 import { needsPublishDot } from '../../lib/publishFreshness';
 import { backendDeployOffer, DEPLOY_BACKEND_LABEL, type BackendKeySource, shouldAutoDeployBackend } from '../../lib/backendDeployOffer';
+import { readBackendDeployRecord, backendDeployView } from '../../lib/backendDeployRecord';
 import { managedDeployRequest, managedDeployOutcome, renderConnectSteps } from '../../lib/backendDeployWiring';
 import { LONG_REQUEST_TIMEOUT_MS, fetchFailureLine, isFetchTimeout } from '../../lib/longRequest';
 import { badgeAt, badgeLabelAt, type PendingAction } from '../../lib/actionNavigator';
@@ -478,6 +479,28 @@ export function HostingChooser({
    * the code before every attempt) and only when the button could already have been pressed. On mount
    * the ref starts at the current code, so simply reopening this panel can never deploy anything.
    */
+  /**
+   * WHERE THE BACKEND IS, AFTER A RELOAD TOO (Q-806). The deploy's outcome used to live only in this panel's
+   * memory, so a reload showed "Deploy backend" again and never "live at …". The server keeps it on the app's
+   * record now; read it when the panel opens, say it, and resume a check that a reload interrupted.
+   */
+  useEffect(() => {
+    if (!authedFetch || !workspaceId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await authedFetch(`/api/agentv3/deploy-record?workspaceId=${encodeURIComponent(workspaceId)}`);
+        const rec = readBackendDeployRecord(r.ok ? (await r.json().catch(() => null))?.record : null);
+        const view = backendDeployView(rec, Date.now());
+        if (cancelled || !rec || !view) return;
+        setBackendLines((prev) => (prev.length > 0 ? prev : [view.line]));
+        if (view.resumeCheck) void verifyBackend(rec.serviceId, rec.url);
+      } catch { /* the panel works as before without it — a first deploy is still offered */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId]);
+
   const lastRefusalCode = useRef<string>(publishRefusalCode ?? '');
   useEffect(() => {
     const code = publishRefusalCode ?? '';

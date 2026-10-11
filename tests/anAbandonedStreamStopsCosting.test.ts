@@ -7,8 +7,11 @@
 // request already in flight to the provider ran to completion and was billed in full: a user who closed
 // the tab after one word still paid for the whole answer, and on a RACED universe paid for it twice.
 //
-// Reading a flag stops the OUTPUT. Only handing the signal to the SDK stops the BILL. These tests hold
+// Reading a flag stops the OUTPUT. Only handing the signal to the SDK closes the REQUEST. These tests hold
 // that distinction in place for every provider, including ones added after this was written.
+// ⚠️ CORRECTED 2026-10-11 (Q-769): this said handing the signal over "stops the BILL". For Google it does
+// not — `@google/genai` documents its abort as client-only ("You will still be charged usage"). What the
+// census guarantees is that no provider keeps a request open that nobody will read.
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,15 +24,11 @@ const PROVIDERS = 'src/server/AI/Router/providers';
 
 // ── THE CENSUS: of the CLASS, not of the six files that happened to exist on the day ────────────────
 //
-// Every provider that can stream must accept the signal AND hand it to its SDK. One provider cannot:
-// `@google-cloud/vertexai` exposes no abort hook of any kind (`generateContentStream(request)` takes no
-// per-call options, and `getGenerativeModel`'s `RequestOptions` carries only `timeout`, `apiClient` and
-// `customHeaders`). That is an OPEN root cause (Q-769), listed here by name with its reason so the gap
-// is a recorded exception rather than an oversight that looks like one — and so a NEW provider that
-// forgets the signal fails this test instead of joining the list silently.
-const NO_SDK_ABORT: Record<string, string> = {
-  'VertexProvider.ts': '@google-cloud/vertexai exposes no abort hook — Q-769, mitigated by stopping consumption',
-};
+// Every provider that can stream must accept the signal AND hand it to its SDK. The one exception —
+// Vertex, on `@google-cloud/vertexai`, which had no abort hook — is gone since 2026-10-11 (Q-769): the
+// rung runs on `@google/genai` and forwards `config.abortSignal`. The list stays, EMPTY, so a NEW provider
+// that cannot forward a signal is added here by name with its reason instead of slipping in silently.
+const NO_SDK_ABORT: Record<string, string> = {};
 
 const providerFiles = readdirSync(join(root, PROVIDERS))
   .filter((f) => f.endsWith('.ts') && !f.includes('.test.'))

@@ -623,7 +623,6 @@ declare module 'firebase/storage';
 declare module 'firebase/functions';
 declare module 'firebase-admin';
 declare module '@google/genai';
-declare module '@google-cloud/vertexai';
 declare module '@anthropic-ai/sdk';
 declare module 'typescript';
 declare module 'express';

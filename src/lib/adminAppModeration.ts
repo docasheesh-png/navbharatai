@@ -140,6 +140,47 @@ export function matchesAppQuery(row: AppRow, query: string): boolean {
  */
 export type ModerationAction = 'unpublish' | 'ban' | 'restore';
 
+/**
+ * ONE PERSON'S APPS, ONE ACTION (admin 2026-10-11, Q-796: "a per-owner view in the admin's app moderation: every
+ * app of that person, their states, and one action across them"). A ban was per app, so a person with nine live
+ * apps took nine bans — and nothing re-checked a banned person's OTHER live apps. The owner-wide action acts on
+ * exactly the apps the per-row buttons would offer, by the same two rules, so it can never reach further than
+ * nine single clicks would have.
+ */
+export type OwnerAction = 'unpublish' | 'ban';
+
+/** The most apps one owner-wide action touches in one request — a bound, said aloud when reached. */
+export const MAX_OWNER_MODERATION = 100;
+
+/** Which of one person's apps an owner-wide action acts on. PURE. */
+export function ownerModerationTargets(
+  apps: ReadonlyArray<{ workspaceId: string; status?: string | null; heldFrom?: string | null }>,
+  action: OwnerAction,
+): string[] {
+  return apps
+    .filter((a) => (action === 'unpublish' ? canUnpublish((a.status ?? undefined) as AppStatus, a.heldFrom) : canBan((a.status ?? undefined) as AppStatus)))
+    .map((a) => a.workspaceId)
+    .slice(0, MAX_OWNER_MODERATION);
+}
+
+/** The confirmation for an owner-wide action — its own sentences, never a single-app one with a number added. PURE. */
+export function ownerConfirmCopy(action: OwnerAction, count: number, more = false): { title: string; body: string; cta: string } {
+  const n = Math.max(0, Math.floor(count));
+  // `more`: the list on screen is one page of this person's apps — the action covers the ones not loaded too.
+  const apps = `${more ? 'at least ' : ''}${n} app${n === 1 && !more ? '' : 's'}`;
+  return action === 'ban'
+    ? {
+        title: `Ban all ${apps} of this person?`,
+        body: `Every one of these ${apps} is taken offline and can never be published again unless an admin restores it — one app at a time. This cannot be undone in one step.`,
+        cta: `Ban ${apps}`,
+      }
+    : {
+        title: `Unpublish all ${apps} of this person?`,
+        body: `Every live one of these ${apps} goes offline now. The person can publish each of them again from their own screen.`,
+        cta: `Unpublish ${apps}`,
+      };
+}
+
 /** The server route each action runs — one table, so the screen cannot send a ban to the restore route. */
 export const MODERATION_ROUTE: Record<ModerationAction, 'unpublish' | 'takedown' | 'restore'> = {
   unpublish: 'unpublish',

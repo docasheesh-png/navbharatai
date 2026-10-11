@@ -20,6 +20,7 @@ import { countEnumeratedFeatures, notAFeatureLine, BIG_SOFTWARE_NOUN, sectionedS
 import { withoutMachineText } from './machineText';
 import { glossDevanagari, withEnglishReading } from './devanagariTechTerms';
 import { MEDIA_PLAYER_APP } from './RequirementGapAnalyzer';
+import { megaProjectSignals, MEGA_SCALE_MIN, MEGA_BULLETS_WITH_NOUN, MEGA_BULLETS_ALONE, type MegaProjectSignals } from '../AgentV3/ProjectPlan';
 
 export type AppSize = 'small' | 'large';
 
@@ -259,18 +260,34 @@ export function analyzeAppScope(prompt: string): AppScope {
   const famous = FAMOUS_APPS.find((f) => namesAsProduct(readable, f.re));
   const heavy = HEAVY_INFRA.filter((h) => h.re.test(readable));
   const feats = featureCount(text);
+  // THE SIZE SIGNALS ONLY PROJECT MODE USED TO READ (Q-138): an explicit scale, a big-software system with
+  // named parts, and a spec long enough to be a project. Read through Project Mode's own function, so the
+  // thresholds stay in one place.
+  const shape = megaProjectSignals(text);
+  const statedScale = shape.scale >= MEGA_SCALE_MIN;
+  const namedSystem = shape.bigNoun && shape.features >= MEGA_BULLETS_WITH_NOUN;
   // The DECISION still reads any small word (unchanged: narrowing it would send 8 of 7,403 test prompts to
   // the roadmap planner — a behaviour change nobody decided). Only the REASON is read from the subject.
   const smallHint = CLEARLY_SMALL.test(readable) && !BIG_SOFTWARE_NOUN.test(readable);
   const smallSubject = namesASmallApp(text);
+  // 🔴 A STRAY WORD DOES NOT MAKE A PROJECT SMALL (measured for Q-138). The small-word veto reads a word
+  // ANYWHERE, so "resume" in a 144-part music streaming spec (Blue Berry, autopsy 6a4a799f) and "Budget"
+  // in a 429-part ads platform (autopsy 6461025c) each read as "kept as one build". While Project Mode
+  // sized on its own, its ≥14 rule caught both; once it reads this verdict, that veto would have built
+  // them in one pass. A spec that long is a project unless the app ITSELF is the small thing (Q-398's
+  // subject reading) — an 8-to-13-part list keeps today's any-word veto, so no new planner call starts.
+  const longSpec = shape.features >= MEGA_BULLETS_ALONE && !smallSubject;
 
   if (famous) signals.push(`asks to clone ${famous.name}`);
   for (const h of heavy) signals.push(`needs ${h.label}`);
   if (feats >= FEATURE_COUNT_MEGA) signals.push(`~${feats} distinct features requested`);
+  if (statedScale) signals.push(`states a scale of ${shape.scale} pages/screens/files/modules`);
+  if (namedSystem && feats < FEATURE_COUNT_MEGA) signals.push(`a big-software system with ${shape.features} named parts`);
+  if (longSpec && smallHint) signals.push(`a ${shape.features}-part spec — a project, whatever small word it mentions`);
 
   // ESCALATE only on a STRONG signal. A "clearly small" single-purpose app with NO heavy infra stays
   // direct even if it happens to mention many small features (a todo app with 8 tweaks is still a todo app).
-  const strongMega = !!famous || heavy.length > 0 || (feats >= FEATURE_COUNT_MEGA && !smallHint);
+  const strongMega = !!famous || heavy.length > 0 || (feats >= FEATURE_COUNT_MEGA && !smallHint) || statedScale || namedSystem || longSpec;
 
   if (strongMega) {
     return { decision: 'analyze', size: 'large', famousApp: famous?.name ?? null, signals, smallHint, smallSubject };
@@ -282,4 +299,48 @@ export function analyzeAppScope(prompt: string): AppScope {
     signals.push(`mentions a small feature ("${word}") but the app itself is "${subject || 'not named'}" — kept as one build (today's behaviour)`);
   } else signals.push('no mega-signal — treated as an ordinary one-shot app (today\'s behaviour)');
   return { decision: 'direct', size: 'small', famousApp: null, signals, smallHint, smallSubject };
+}
+
+/**
+ * 🔒 THE ONE SCOPE VERDICT (Q-138, admin 2026-10-11: "keep APP_SCOPE as the one scope analyser; Project Mode
+ * reads its answer").
+ *
+ * Two analysers sized the same request, and nothing made them agree. Autopsy eed79815: Software Project Mode
+ * decomposed a car game (40 bullets, the ≥14 rule) into modules while APP_SCOPE called the same prompt a
+ * single-purpose app — and the planner then spent 315 s of a free build. THE CLASS: a size decision taken
+ * twice, by two rule sets, with no rule for which wins.
+ *
+ * Now there is one size verdict: APP_SCOPE's, after `scopeDispute`. Project Mode asks only its own second
+ * question — is this LARGE request a project spec it can split into modules (`megaProjectSignals`)? — and
+ * never the first one. The two size signals that only Project Mode read (an explicit scale, a big-software
+ * system with named parts) are now APP_SCOPE signals, so nothing it used to decompose for a real project is
+ * lost; what it loses is exactly the case the admin decided, a request APP_SCOPE reads as one app.
+ *
+ * PURE. Never throws: any failure reads as an ordinary direct build (today's behaviour on an error).
+ */
+export interface ScopeVerdict {
+  scope: AppScope;
+  /** Why a famous-name escalation stood down, or null. */
+  dispute: string | null;
+  /** THE size answer every big-app strategy reads. */
+  large: boolean;
+  /** Large AND shaped like a project spec — the only question Project Mode still answers itself. */
+  projectMode: boolean;
+  shape: MegaProjectSignals;
+}
+
+export function scopeVerdict(sizing: string, opts: { complex: boolean }): ScopeVerdict {
+  try {
+    const scope = analyzeAppScope(sizing);
+    const dispute = scopeDispute(scope, opts);
+    const large = scope.decision === 'analyze' && !dispute;
+    const shape = megaProjectSignals(sizing);
+    return { scope, dispute, large, projectMode: large && shape.fires, shape };
+  } catch {
+    return {
+      scope: { decision: 'direct', size: 'small', famousApp: null, signals: ['scope could not be read — built directly'], smallHint: false, smallSubject: false },
+      dispute: null, large: false, projectMode: false,
+      shape: { scale: 0, features: 0, bigNoun: false, fires: false, sections: null },
+    };
+  }
 }

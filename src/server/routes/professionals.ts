@@ -24,6 +24,7 @@ import {
   AttachmentRecallStore, referencesEarlierAttachment, buildRecallBlock,
 } from '../lib/clinical/attachmentRecall';
 import { conversationIdFromBody, attachmentRecallKey } from '../professionals/conversationId';
+import { clientPlatform } from '../AppContext/iosPurchaseGuard';
 import {
   normalizeExamSpec, examSpecIsUsable, examPaperInstruction, parseExamPaper, EXAM_MAX_QUESTIONS,
 } from '../professionals/examMode';
@@ -197,7 +198,7 @@ export function registerProfessionalsRoutes(app: Express): void {
     }
 
     try {
-      const { reply, spend } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier, { conversationId });
+      const { reply, spend } = await runProfessionalChatWithUsage(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier, { conversationId, platform: clientPlatform(req.headers['x-nbai-platform']) });
       // Only a genuinely-answered FREE turn burns a daily message (never on a paywall block or an error).
       if (gate.countsAgainstFree && verifiedUserId) {
         void professionalUsageStore.increment(verifiedUserId);
@@ -270,7 +271,7 @@ export function registerProfessionalsRoutes(app: Express): void {
         [],
         verifiedUserId || undefined,
         gate.tier,
-        { conversationId: conversationIdFromBody(req.body?.conversationId) },
+        { conversationId: conversationIdFromBody(req.body?.conversationId), platform: clientPlatform(req.headers['x-nbai-platform']) },
       );
       const paper = parseExamPaper(reply, Math.min(spec.count, EXAM_MAX_QUESTIONS));
       // Priced on what was DELIVERED: the free questions this paper used, and the paid share of its

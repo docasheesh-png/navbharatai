@@ -169,7 +169,8 @@ describe('BOTH settle paths write one — the reversion guard', () => {
   it('imports the writer', () => {
     // The import moved to the REPORTING wrapper on 2026-09-20 (saveRestorePointForReport): the same
     // write, bounded, returning an outcome the build report can state instead of guessing at.
-    expect(route).toMatch(/import \{ saveRestorePointForReport, describeRestorePoint, restorePointSeverity \} from '\.\.\/AgentV3\/restorePoint'/);
+    // Since Q-128 (2026-10-11) the route also imports `restorePointKey`, for the one version restore.
+    expect(route).toMatch(/import \{ saveRestorePointForReport, describeRestorePoint, restorePointSeverity, restorePointKey \} from '\.\.\/AgentV3\/restorePoint'/);
   });
 
   it('calls it from the normal settle AND the deadline finalizer', () => {

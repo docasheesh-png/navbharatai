@@ -28,7 +28,7 @@ import { resolveDomainKnowledge, type DomainKnowledge } from '../lib/domainKnowl
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { memoryLinkedSuggestions, mergeSuggestions } from '../AgentV3/memoryLinkedSuggestions';
 import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
-import { analyzeAppScope, scopeDispute } from '../lib/appScopeAnalyzer';
+import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, hardConstraintLines, type MegaRoadmap } from '../lib/megaRoadmap';
@@ -176,7 +176,7 @@ import { getServerDb as getDb } from '../lib/serverDb';
 import { randomUUID } from 'crypto';
 import { processOwnerId } from '../lib/jobLease';
 import {
-  claimWorkspaceBuild, renewWorkspaceBuild, releaseWorkspaceBuild, requestWorkspaceBuildStop,
+  claimWorkspaceBuild, renewWorkspaceBuild, releaseWorkspaceBuild, requestWorkspaceBuildStop, workspaceBuildIsLive,
   LEASE_HEARTBEAT_MS, BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
 } from '../AgentV3/workspaceBuildLease';
 import { getConnection } from '../lib/supabaseConnectionStore';
@@ -227,6 +227,8 @@ import { summarizeFileTree, NAVBHARATAI_UI_MAP } from '../AgentV3/systemPrompt';
 import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
 import { inlineLinkedStylesheet } from '../AgentV3/singleFileKit';
 import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
+import { appFileCount, IMPORT_NOT_MERGED_MESSAGE, IMPORT_NOT_CHECKED_MESSAGE } from '../../lib/projectImportTarget';
+import { gitPushTarget, wipPushNote } from '../AgentV3/gitPushTarget';
 import { StaticProvider } from '../AgentV3/sandbox/AppMakerLab/generator/templates/StaticProvider';
 import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration, depsAddedByBuild, unusedDependencyLine, hasBuildScript } from '../AgentV3/unusedDepPrune';
 import { pruneDeadSalvageEnabled, deadSalvagedFiles, removeDeadSalvage } from '../AgentV3/deadSalvage';
@@ -254,7 +256,7 @@ import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
-import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage, chooseRestoreBase, greenRestoreTurnStartEnabled, attemptIsHonoured } from '../AgentV3/GreenGuard';
+import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, removablePaths, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage, chooseRestoreBase, greenRestoreTurnStartEnabled, attemptIsHonoured } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -398,7 +400,7 @@ import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/ca
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -424,7 +426,8 @@ import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, r
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd } from '../AgentV3/providerRates';
 import { splitUnbilledCost, absorbedWorkDetail } from '../AgentV3/unbilledTurns';
-import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
+import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_POST_FIX_REVIEW, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
+import { postFixRecheckBudgetMs, postFixRecheckOutcome } from '../AgentV3/postFixReview';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
   createProviderUsageLedger,
@@ -601,7 +604,10 @@ import {
   deleteWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
-import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity } from '../AgentV3/restorePoint';
+import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity, restorePointKey } from '../AgentV3/restorePoint';
+import { deployedRecord, checkedRecord, readBackendDeployRecord } from '../../lib/backendDeployRecord';
+import { buildHistoryStore } from '../project/BuildHistoryStore';
+import { versionRestorePlan, versionRestoreMessage, beforeRestoreVersionName, VERSION_RESTORE_BUILD_RUNNING, type SandboxRestoreState } from '../project/versionRestore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
@@ -4539,7 +4545,7 @@ export function registerAgentV3Routes(app: Express): void {
     try {
       await saveWorkspaceFiles(newWorkspaceId, files);
       // Files + chat + name. Deliberately NOT: repoName, deployRepoName, repoOwner, deployBranch,
-      // backendDomain,
+      // backendDomain, backendDeploy (it names the ORIGINAL's service — Q-806),
       // pinned, or anything about hosting — see duplicateApp.ts.
       await store.create({ id: newSessionId, userId, workspaceId: newWorkspaceId, title: name, messages: source.messages ?? [], createdAt: now });
       await store.update(newSessionId, { appName: name, status: copyStatus(source.status), updatedAt: now, ...(source.framework ? { framework: source.framework } : {}) });
@@ -5574,6 +5580,13 @@ async function noteBuildOutcome(
        * 409 as "connect your repo in Render" — so a rejected key, a host outage and a refused creation
        * all came back as a Blueprint walkthrough. The code now says what the reason says.
        */
+      // THE DEPLOY IS REMEMBERED (Q-806): service, address, and "not checked yet" — so a reload of the
+      // Publish screen shows where the backend is instead of offering a first deploy again.
+      if (result.ok && typeof result.serviceId === 'string' && result.serviceId) {
+        await getConversationStore().update(workspaceId, {
+          backendDeploy: deployedRecord(result.serviceId, typeof result.url === 'string' ? result.url : '', Date.now()), updatedAt: Date.now(),
+        }).catch(() => { /* best-effort — the deploy itself already happened */ });
+      }
       const status = result.ok ? 200
         : result.reason === 'no-service' ? 409
         : result.reason === 'not-configured' ? 503
@@ -5620,6 +5633,22 @@ async function noteBuildOutcome(
    * holding the deploy request open would trade a dishonest fast answer for an honest one that times
    * out — no better. The client asks this as often as it likes, and each answer is evidence-backed.
    */
+  /**
+   * WHERE IS THIS APP'S BACKEND? (Q-806). The deploy and every status check write it on the app's record; the
+   * Publish screen reads it when it opens, so "live at …" survives a reload. Owner only. The host's own words
+   * never appear — the record holds our sentence, not the provider's status.
+   */
+  app.get('/api/agentv3/deploy-record', deployOpsRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    const rec = await getConversationStore().get(workspaceId).catch(() => null);
+    res.json({ record: readBackendDeployRecord(rec?.backendDeploy) });
+  });
+
   app.post('/api/agentv3/deploy-status', deployOpsRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
@@ -5636,6 +5665,12 @@ async function noteBuildOutcome(
     const key = resolveRenderKey(vault);
     if (!key) { res.status(503).json({ error: renderRequirement(process.env, vault) }); return; }
     const verdict = await readDeployVerdict({ apiKey: key.key, serviceId, serviceUrl });
+    // The verdict is remembered on the app, for the service the record is about (Q-806).
+    try {
+      const store = getConversationStore();
+      const next = checkedRecord(readBackendDeployRecord((await store.get(workspaceId).catch(() => null))?.backendDeploy), serviceId, verdict, Date.now());
+      if (next) await store.update(workspaceId, { backendDeploy: next, updatedAt: Date.now() });
+    } catch { /* best-effort — the answer below is the user's either way */ }
     // `status` is the HOST'S OWN word (build_failed, live, …) and names a provider's pipeline, so it
     // stays out of the user-facing payload under the white-label law. The message is ours.
     res.json({ live: verdict.live, phase: verdict.phase, message: verdict.message });
@@ -9974,6 +10009,107 @@ async function noteBuildOutcome(
     }
   });
 
+  // GO BACK TO A SAVED VERSION — the ONE restore the Time Machine and the builder's History tab both call
+  // (Q-128, admin 2026-10-11: "one timeline — Time Machine is the one version history"). The version replaces
+  // the app's SAVED file set (what the next build, a reload and another device all read) and the running copy,
+  // after the app as it stood is saved as a version first, so the restore can be undone from the same list.
+  // It used to happen in the browser alone: "Version restored ✓" while the next build carried on from the
+  // newer files (versionRestore.ts has the whole story). Ownership-checked; refused while a build runs.
+  app.post('/api/agentv3/restore-version', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: ENGINE_DISABLED });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const versionId = typeof req.body?.versionId === 'string' ? req.body.versionId.trim().slice(0, 120) : '';
+    if (!workspaceId || !versionId) {
+      res.status(400).json({ error: 'workspaceId and versionId are required.' });
+      return;
+    }
+    const verifiedUid = await verifyFirebaseToken(req);
+    if (!verifiedWorkspaceReadOk(verifiedUid, workspaceId)) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    // A build writes this app's files and saves them when it ends — a restore underneath it would be
+    // overwritten, or leave a mix of both. Checked here and on every instance (the build lease).
+    if (isBuildRunningFor(workspaceId) || (await workspaceBuildIsLive(getDb() as unknown as BuildLeaseStore, workspaceId)) === true) {
+      res.status(409).json({ error: VERSION_RESTORE_BUILD_RUNNING });
+      return;
+    }
+    try {
+      const historyKey = restorePointKey(workspaceId, verifiedUid);
+      const version = await buildHistoryStore.get(historyKey, versionId);
+      if (!version) {
+        res.status(404).json({ error: 'That version was not found — nothing was changed.' });
+        return;
+      }
+      const current = await loadWorkspaceFiles(workspaceId);
+      const plan = versionRestorePlan({ versionFiles: version.files, omittedFileCount: version.omittedFileCount, omittedPaths: version.omittedPaths, current });
+      if (!plan.ok) {
+        res.status(409).json({ error: 'That version could not be read, so nothing was changed.' });
+        return;
+      }
+      // The app as it stands is saved FIRST. If that copy cannot be made, nothing is changed: going back
+      // must never cost the user the app they have now.
+      let savedBefore = false;
+      if (!plan.noChange && Object.keys(current).length > 0) {
+        savedBefore = await buildHistoryStore.save(historyKey, {
+          commitMessage: beforeRestoreVersionName(version.commitMessage),
+          fileCount: Object.keys(current).length,
+          files: current,
+          isEdit: true,
+          tier: 'before-restore',
+          ok: true,
+        });
+        if (!savedBefore) {
+          res.status(503).json({ error: 'Your current app could not be saved first, so nothing was changed. Please try again.' });
+          return;
+        }
+      }
+      if (!plan.noChange) {
+        const saved = await saveWorkspaceFiles(workspaceId, plan.target, { mode: 'replace' });
+        if (saved !== 'saved') {
+          res.status(503).json({ error: 'Your app could not be put back to that version, so it is unchanged. Please try again.' });
+          return;
+        }
+      }
+      // The RUNNING copy goes to the same state — run even when the saved app already matched, so pressing
+      // Restore again finishes a restore whose first sandbox step failed. A copy left on the newer files is
+      // what the next build would start from (the File Guardian only re-adds MISSING files).
+      let sandbox: SandboxRestoreState = 'not-updated';
+      try {
+        const actuator = buildActuator();
+        try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse an existing sandbox */ }
+        const live = (await collectWorkspaceFiles(actuator, workspaceId)).files;
+        const sb = restorePlan(plan.target, live);
+        const { skipped } = await runInPass('version-restore', () => writeWorkspaceFiles(actuator, workspaceId, sb.write));
+        const removable = removablePaths(sb.remove);
+        let removed = true;
+        if (removable.length > 0) {
+          const r = await withTimeout(actuator.runCommand(workspaceId, buildRemoveCommand(removable, removable.length)), 20_000, 'version-restore-remove');
+          removed = r.exitCode === 0;
+        }
+        sandbox = skipped.length === 0 && removed && removable.length === sb.remove.length ? 'updated' : 'not-updated';
+      } catch { sandbox = 'not-updated'; }
+      res.json({
+        ok: true,
+        files: plan.target,
+        restored: Object.keys(plan.target).length,
+        removed: plan.remove.length,
+        keptUnknown: plan.keptUnknown,
+        savedBefore,
+        sandbox,
+        noChange: plan.noChange,
+        message: versionRestoreMessage({ name: version.commitMessage, savedBefore, keptUnknown: plan.keptUnknown, sandbox, noChange: plan.noChange }),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: toSafeClientMessage(err, 'Could not go back to that version. Please try again.') });
+    }
+  });
+
   // Build entry — runs the native tool-use loop and streams events as NDJSON.
   // THE FEATURE LIST, SHOWN BEFORE A FRESH BUILD (admin 2026-09-26). Deterministic: the same two lists
   // the build would restate to the builder (see featurePlan.ts) — no model call, no workspace, nothing
@@ -12418,7 +12554,21 @@ async function noteBuildOutcome(
       }
       return true;
     };
-    if (zipImports.length > 0) {
+    // A PROJECT IMPORT NEVER LANDS ON TOP OF ANOTHER APP (Q-733, admin 2026-10-11). `landImportedProject`
+    // MERGES — it deletes nothing — so a zip or a GitHub repository imported into a chat that already
+    // holds an app mixed the two (the import's package.json replaced the old one; the preview crashed on
+    // the mixture). The builder opens a new chat for an import (projectImportTarget.ts); one that arrives
+    // here anyway — an attached zip, or an older app sending an import into an occupied chat — is not
+    // merged, and the turn ends below, honestly and at no charge, before any model call. A store we could
+    // not read is not evidence the chat is empty.
+    let projectImportNotMerged: string | null = null;
+    if (zipImports.length > 0 || importUrl) {
+      const before = await listWorkspaceFilePaths(workspaceId).catch(() => null);
+      if (before === null) projectImportNotMerged = IMPORT_NOT_CHECKED_MESSAGE;
+      else if (appFileCount(before) > 0) projectImportNotMerged = IMPORT_NOT_MERGED_MESSAGE;
+      if (projectImportNotMerged) emit({ type: 'narration', agent: 'architect', text: `⚠️ ${projectImportNotMerged}`, ts: Date.now() });
+    }
+    if (zipImports.length > 0 && !projectImportNotMerged) {
       try {
         emit({ type: 'narration', agent: 'architect', text: `📦 Unpacking ${zipImports[0].name || 'your zip'} into the workspace…`, ts: Date.now() });
         const extracted = await extractZipProject(Buffer.from(zipImports[0].base64, 'base64'));
@@ -13752,6 +13902,20 @@ async function noteBuildOutcome(
       // server (ok:null) instead of building anything. Building the platform itself as a user app is never
       // valid — refuse HONESTLY up front instead of grinding to the wall-clock wall, and record it so the
       // storage/isolation contamination can be investigated. False-positive-proof (needs ≥2 internal paths).
+      // The import that was not merged (Q-733, above) ends its turn here: nothing was imported, so there is
+      // nothing to build on, and building the user's message onto the OTHER app is the one thing they did
+      // not ask for. Same honest early end as the refusal below — no model call, nothing billed.
+      if (projectImportNotMerged) {
+        buildDiag.record({
+          phase: 'build', severity: 'warning', code: 'IMPORT_NOT_MERGED',
+          message: 'A project import (zip or repository) arrived in a chat that already holds an app, or whose files could not be read; it was not merged into it.',
+          autoResolved: false,
+        });
+        buildDiag.finish(false, projectImportNotMerged);
+        events.emit({ type: 'done', ok: false, summary: projectImportNotMerged, ts: Date.now() });
+        emit({ type: 'result', ok: false, summary: projectImportNotMerged, steps: 0, billedUsd: 0, billedInr: 0 });
+        return;
+      }
       if (looksLikePlatformSource(durableFilePaths)) {
         buildDiag.record({
           phase: 'build', severity: 'error', code: 'PLATFORM_SOURCE_WORKSPACE',
@@ -13797,8 +13961,13 @@ async function noteBuildOutcome(
       // signal into the report so the classification can be reviewed against real prompts before it steers
       // anything. Default is always 'direct'; only a strong mega-signal (famous product / heavy infra /
       // huge feature spec) reads as 'analyze'.
+      //
+      // 🔒 ONE SCOPE VERDICT FOR THE WHOLE BUILD (Q-138, admin 2026-10-11): sized once, here, and read by the
+      // report line below, the mega-app roadmap and Software Project Mode alike. Project Mode no longer sizes
+      // a request on its own — it splits only what this verdict calls large (scopeVerdict).
+      const appScope = scopeVerdict(planning.sizing, { complex: buildIsComplex });
       try {
-        const scope = analyzeAppScope(planning.sizing);
+        const scope = appScope.scope;
         buildDiag.record({
           phase: 'plan',
           severity: 'info',
@@ -13808,7 +13977,9 @@ async function noteBuildOutcome(
             // this line said "not yet active" for a month after that, so a reader of the report could not
             // know a planner call was about to spend up to a minute on this build. Its outcome is recorded
             // as MEGA_ROADMAP_ACTIVE / MEGA_ROADMAP / MEGA_ROADMAP_FAILED, always.
-            ? `Scope: LARGE — ${scope.famousApp ? `clone of ${scope.famousApp}; ` : ''}the mega-app roadmap planner is asked for a step-by-step plan next (its outcome is recorded as MEGA_ROADMAP_*). Signals: ${scope.signals.join('; ')}.`
+            // Since Q-138 a LARGE verdict is also what Software Project Mode reads, so the line names both
+            // planners instead of promising the roadmap one.
+            ? `Scope: LARGE — ${scope.famousApp ? `clone of ${scope.famousApp}; ` : ''}a big-app planner runs next: Software Project Mode when the request is a project spec and the mode is on for this account, otherwise the mega-app roadmap (outcomes: PROJECT_MODE, MEGA_ROADMAP_*). Signals: ${scope.signals.join('; ')}.`
             : `Scope: ordinary one-shot app — built directly (today's behaviour). ${scope.signals.join('; ')}.`,
           autoResolved: true,
         });
@@ -13917,7 +14088,7 @@ async function noteBuildOutcome(
           () => { liveCostDiscountPct = 0; }, // unreadable ⇒ 0% — the ordinary price, as at settle
         );
       }
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number): void => {
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean; discardedOutput?: boolean }, model?: string, cacheReadInputTokens?: number, cacheCreationInputTokens?: number): void => {
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
         // exact misreading autopsy f04421ef already paid for once, arriving here through a different
@@ -13949,6 +14120,8 @@ async function noteBuildOutcome(
         // provider's cheaper cache-read rate (usageCostUsd). Margin-safe: providers without a cache
         // line in the rate card price it at the full input rate (identical to before).
         const cacheRead = Number.isFinite(cacheReadInputTokens) && (cacheReadInputTokens ?? 0) > 0 ? (cacheReadInputTokens ?? 0) : 0;
+        // Q-343 — the cache-WRITE share rides the same way (Anthropic bills it at 1.25× input).
+        const cacheWrite = Number.isFinite(cacheCreationInputTokens) && (cacheCreationInputTokens ?? 0) > 0 ? (cacheCreationInputTokens ?? 0) : 0;
         // Both facts travel as the ledger's OPTIONS argument, not inside `usage` — the tokens are
         // added in FULL either way (we paid them). `producedNothing` records the same counts a second
         // time in the slice's `unbilled` subset; `phase` says which part of the build spent them, so a
@@ -13959,11 +14132,15 @@ async function noteBuildOutcome(
         // makes it correct for an ABANDONED pass: `raceTimeout` walks away from the reviewer, the
         // reviewer keeps spending, and those late turns are still inside its zone.
         const phase = currentBillingPhase() ?? undefined;
+        const cacheShares = {
+          ...(cacheRead > 0 ? { cacheReadInputTokens: cacheRead } : {}),
+          ...(cacheWrite > 0 ? { cacheCreationInputTokens: cacheWrite } : {}),
+        };
         providerLedger.add(
           used,
-          cacheRead > 0 ? { ...usage, cacheReadInputTokens: cacheRead } : usage,
+          cacheRead > 0 || cacheWrite > 0 ? { ...usage, ...cacheShares } : usage,
           model,
-          { producedNothing: usage.producedNothing === true, ...(phase ? { phase } : {}) },
+          { producedNothing: usage.producedNothing === true, ...(usage.discardedOutput === true ? { discardedOutput: true } : {}), ...(phase ? { phase } : {}) },
         );
         // …and accumulate the build total for the diagnostics report's cache-hit rate line.
         if (cacheRead > 0) {
@@ -14028,6 +14205,14 @@ async function noteBuildOutcome(
             } catch { /* a live figure we could not price is simply not shown */ }
           }
         }
+      };
+      // OUTPUT THAT IS THROWN AWAY IS NOT BILLED (Q-166, admin 2026-10-11) — for the lanes that learn it
+      // only after the call was captured: the fast lane drops a half-written file once its continuations
+      // run out, and a planner throws away a plan that was cut off. Same ledger, same slice, same phase
+      // zone as the `captureTurnUsage` that added the tokens; the input stays billed.
+      const discardTurnOutput = (used: string, model: string | undefined, outputTokens: number): void => {
+        try { providerLedger.discardOutput(used, model, outputTokens, { phase: currentBillingPhase() ?? undefined }); }
+        catch { /* billing attribution must never disturb a build */ }
       };
       // The cheap floor (GLM/Kimi) leads a build's FIRST attempt for simple/medium apps for allowlisted
       // users — OR is forced ON+cheap-ONLY for a not-yet-paying free-tier user. Computed ONCE here and
@@ -14287,10 +14472,10 @@ async function noteBuildOutcome(
       // A pasted one-file app is improved in place, never split into milestones (pastedAppFormat.ts).
       if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode && !pastedFormat.keep) {
         try {
-          const scope = analyzeAppScope(planning.sizing);
           // TWO CLASSIFIERS DISAGREEING IS A FACT, NOT A TIE THE DEARER ONE WINS (autopsy Study-Racer,
           // 2026-09-25 — see scopeDispute). Recorded as a fact about OUR routing; the build runs direct.
-          const dispute = scopeDispute(scope, { complex: buildIsComplex });
+          // Both come from the one verdict sized above (Q-138).
+          const { scope, dispute } = appScope;
           if (dispute) {
             buildDiag.record({
               phase: 'plan', severity: 'info', code: 'APP_SCOPE_DISPUTED', autoResolved: true,
@@ -14307,7 +14492,7 @@ async function noteBuildOutcome(
           const projectModeOwns = roadmapStandsDownForProjectMode({
             projectModeOn: projectModeEnabled(process.env, { userId, email }),
             planFirst,
-            megaProject: detectMegaProject(planning.sizing),
+            megaProject: appScope.projectMode,
           });
           if (projectModeOwns && scope.decision === 'analyze' && !dispute) {
             buildDiag.record({
@@ -14360,7 +14545,7 @@ async function noteBuildOutcome(
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += rmT.usage.inputTokens;
             blueprintUsage.outputTokens += rmT.usage.outputTokens;
-            buildUsage.add({ inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens });
+            buildUsage.add({ inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, cacheReadInputTokens: rmT.usage.cacheReadInputTokens, cacheCreationInputTokens: rmT.usage.cacheCreationInputTokens });
             // 🔴 A CALL WHOSE PROVIDER IS KNOWN IS NEVER PRICED AS "UNKNOWN" (autopsy Study-Racer,
             // 2026-09-25). This planner ran on glm-4.7-flashx ($0.40/MTok out) and its 3,543 output
             // tokens reached the bill through the unattributed remainder — priced at Sonnet ($15/MTok)
@@ -14368,13 +14553,17 @@ async function noteBuildOutcome(
             // bill for a call we knew the vendor of. `recordLlmCall` two lines up already names it. The
             // heal runners were fixed for this exact shape in 2026-08-10 (see healRunnerOpts); the three
             // planner calls were the siblings never hunted. Same ledger the fast lane feeds.
-            captureTurnUsage(rmProvider, { inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0);
+            captureTurnUsage(rmProvider, { inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0, rmT.usage.cacheCreationInputTokens ?? 0);
 
             const rmParsed = parseMegaRoadmap(rmT.text, scope.famousApp);
             const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp);
             // "no parseable roadmap" never said WHY (autopsy 6a4a799f: 120 s of a planner, then that
             // sentence alone). A cut-off reply and a malformed one need different fixes.
-            if (!rmParsed) rejected.push(roadmapUnparseableDetail({ stopReason: rmT.stopReason, text: rmT.text }));
+            if (!rmParsed) {
+              rejected.push(roadmapUnparseableDetail({ stopReason: rmT.stopReason, text: rmT.text }));
+              // A reply cut off at the limit and thrown away is not billed for its output (Q-166).
+              if (isTruncatedStop(rmT.stopReason)) discardTurnOutput(rmProvider, rmT.model, rmT.usage.outputTokens);
+            }
             if (roadmap) {
               buildDiag.record({
                 phase: 'plan',
@@ -15500,7 +15689,8 @@ async function noteBuildOutcome(
       // within 3 s of each write. If the client connection drops mid-build (tab close,
       // network hiccup), the files already written are safely on the server. The final
       // save at build-end (below) is still the authoritative snapshot; this is the
-      // mid-build safety net. GitHub push still happens only after 100% completion.
+      // mid-build safety net. The user's GitHub branch receives a build only when it worked; a build that
+      // did not is kept on its own `wip/` branch (Q-745, gitPushTarget.ts).
       let _progressPersistTimer: ReturnType<typeof setTimeout> | null = null;
       // AUTOPSY 2026-07-06 ("yeh app nahi bani"): the sandbox + Cloud Run instance are EPHEMERAL — a
       // rotation/hard-kill mid-build loses everything not yet durably saved. The old code used a
@@ -16354,10 +16544,10 @@ async function noteBuildOutcome(
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
-            buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
+            buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, cacheReadInputTokens: t.usage.cacheReadInputTokens, cacheCreationInputTokens: t.usage.cacheCreationInputTokens });
             // Attributed to the vendor that answered, never swept into the Sonnet-priced remainder —
             // see the roadmap planner above (autopsy Study-Racer, 2026-09-25).
-            captureTurnUsage(bpProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);
+            captureTurnUsage(bpProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
             return t.text;
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
@@ -17466,7 +17656,9 @@ async function noteBuildOutcome(
           preEmptedBy: megaRoadmapActive ? 'mega-roadmap' : planFirst ? 'plan-first' : null,
           isNewBuild: intent === 'new_build',
           isEditMode,
-          prompt,
+          // The text the gate sized and the verdict it read — never a second derivation (Q-138).
+          prompt: planning.sizing,
+          scope: { large: appScope.large, signals: appScope.scope.signals },
         });
         buildDiag.record({ phase: 'plan', severity: 'info', code: pmDiag.code, message: pmDiag.message, detail: pmDiag.detail, autoResolved: true });
       } catch { /* diagnostics are best-effort and must never touch a build */ }
@@ -17485,7 +17677,7 @@ async function noteBuildOutcome(
           const ppTimeoutMs = projectPlannerTimeoutMs();
           // The last answer's stop reason and length — so an answer that came back UNUSABLE (cut off,
           // unreadable) is recorded as the planner failure it is (autopsy 6a4a799f, unusablePlanCause).
-          const ppLast = { stopReason: null as string | null, chars: 0, latencyMs: 0 };
+          const ppLast = { stopReason: null as string | null, chars: 0, latencyMs: 0, provider: '', model: undefined as string | undefined, outputTokens: 0 };
           const ppGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
             let ppProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
@@ -17514,16 +17706,19 @@ async function noteBuildOutcome(
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
-            buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
+            buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, cacheReadInputTokens: t.usage.cacheReadInputTokens, cacheCreationInputTokens: t.usage.cacheCreationInputTokens });
             // Attributed to the vendor that answered, never swept into the Sonnet-priced remainder —
             // see the roadmap planner above (autopsy Study-Racer, 2026-09-25).
-            captureTurnUsage(ppProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);
+            captureTurnUsage(ppProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
             ppLast.stopReason = t.stopReason ?? null;
             ppLast.chars = t.text.length;
             ppLast.latencyMs = Date.now() - startedAt;
+            ppLast.provider = ppProvider;
+            ppLast.model = t.model;
+            ppLast.outputTokens = t.usage.outputTokens;
             return t.text;
           };
-          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && detectMegaProject(planning.sizing)) {
+          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && appScope.projectMode) {
             ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
@@ -17544,6 +17739,8 @@ async function noteBuildOutcome(
               // planner, not a small project, and it is said as one — to the admin with the seconds it
               // cost, and to the user, who was just promised a module plan (autopsy 6a4a799f).
               const cause = unusablePlanCause({ modules: modules.length, stopReason: ppLast.stopReason, responseChars: ppLast.chars });
+              // A plan that was cut off is thrown away — its output is not billed (Q-166).
+              if (cause === 'cut-off') discardTurnOutput(ppLast.provider, ppLast.model, ppLast.outputTokens);
               try {
                 buildDiag.record({
                   phase: 'plan', severity: cause === 'too-small' ? 'info' : 'warning',
@@ -17875,7 +18072,7 @@ async function noteBuildOutcome(
         // The model that served the lane's LAST call reasons before every answer — the lane stops at
         // the next boundary and hands off (SimpleBuildDeps.stopLane; autopsy Study-Racer, 2026-09-25).
         let fastLaneReasoningRung: string | null = null;
-        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number): Promise<{ text: string; stopReason: string | null }> => {
+        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
           // blind spot — a truncated (max_tokens) per-file generation is exactly what produces broken
@@ -17961,12 +18158,12 @@ async function noteBuildOutcome(
           osUsage.cacheReadInputTokens += t.usage.cacheReadInputTokens ?? 0;
           // Billing accounting fix: the fast lane does not use AgentRunner, so feed the build-level
           // sink directly here (mirrors AgentRunner's own sink write).
-          buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
+          buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, cacheReadInputTokens: t.usage.cacheReadInputTokens, cacheCreationInputTokens: t.usage.cacheCreationInputTokens });
           // REAL-cost billing (Fix 65): attribute this fast-lane call to the provider/model that ACTUALLY
           // delivered, so a cheap GLM/Kimi fast-lane build is priced at the cheap rate — not swept into
           // the Sonnet-rate "unattributed remainder". Mirrors the agentic chain's onTurnComplete.
-          captureTurnUsage(usedProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);
-          return { text: t.text, stopReason: t.stopReason ?? null };
+          captureTurnUsage(usedProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);
+          return { text: t.text, stopReason: t.stopReason ?? null, billedAs: { provider: usedProvider, model: t.model, outputTokens: t.usage.outputTokens } };
         };
         // TRUNCATION CONTINUATION (admin report 858f6d7b). Every fast-lane generation now runs to
         // COMPLETION instead of silently stopping at the provider's output ceiling. Previously a
@@ -17980,13 +18177,15 @@ async function noteBuildOutcome(
           const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt);
           let text = first.text;
           let stopReason = first.stopReason;
+          // The call whose reply ends the text — the one a dropped half-written file came from (Q-166).
+          let lastBilledAs = first.billedAs;
           let attempts = 0;
           // The THIRD argument is what stops a reasoning-only response being "continued" three times
           // into the same nothing — see shouldContinue's docblock (report 58fe8254).
           while (shouldContinue(stopReason, attempts, text)) {
             attempts += 1;
             events.emit({ type: 'narration', agent: 'architect', text: `✍️ That file list was longer than one response allows — continuing it (${attempts}/${MAX_CONTINUATIONS}) so nothing is left half-written…`, ts: Date.now() });
-            let next: { text: string; stopReason: string | null };
+            let next: { text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } };
             try {
               // A CONTINUATION FACES THE SAME DEADLINE AS THE CALL IT CONTINUES. It is a fresh provider
               // call, so without this the budget would bound only the first one and the continuation
@@ -18007,6 +18206,7 @@ async function noteBuildOutcome(
             }
             text = joinContinuation(text, next.text);
             stopReason = next.stopReason;
+            lastBilledAs = next.billedAs;
           }
           if (attempts > 0) {
             buildDiag.record({ phase: 'build', severity: 'info', code: 'FASTLANE_CONTINUED', message: `A generation hit the output-token ceiling and was continued ${attempts} time(s) so no file was left half-written.`, autoResolved: true, detail: `finalStopReason=${stopReason ?? 'unknown'}` });
@@ -18019,6 +18219,8 @@ async function noteBuildOutcome(
           if (halfWritten) {
             const cut = text.lastIndexOf('<<<FILE');
             if (cut > 0) text = text.slice(0, cut);
+            // The reply that carried it was cut off and its tail thrown away — its output is not billed.
+            discardTurnOutput(lastBilledAs.provider, lastBilledAs.model, lastBilledAs.outputTokens);
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_TRUNCATED_FILE_DROPPED', message: `${halfWritten} was still being written when the output limit was reached after ${MAX_CONTINUATIONS} continuations — it was DISCARDED rather than saved half-finished.`, autoResolved: false });
             events.emit({ type: 'narration', agent: 'architect', text: `⚠️ ${halfWritten} was cut off mid-write, so I discarded the partial file rather than saving a broken one — I'll rebuild it.`, ts: Date.now() });
           }
@@ -18316,7 +18518,7 @@ async function noteBuildOutcome(
         };
         const fastLog = (msg: string) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() });
         const fastResult = (summary: string, steps: number, typecheckRan = true) => {
-          result = { ok: true, summary, steps, usage: osUsage, billedUsd: billedAmountUsd({ inputTokens: osUsage.inputTokens, outputTokens: osUsage.outputTokens }, powerLevelReqEffective) };
+          result = { ok: true, summary, steps, usage: osUsage, billedUsd: billedAmountUsd(osUsage, powerLevelReqEffective) };
           deliveredTier = analysis?.startTier ?? 'haiku';
           // Skip the agentic readiness gate ONLY when the fast lane genuinely type-checked. If the
           // sandbox check could not run (typecheckRan=false), the downstream gate stays ON so the app
@@ -21064,6 +21266,17 @@ async function noteBuildOutcome(
         return null;
       };
       /**
+       * The starter check, and its answer (Q-381 batch three). STARTER_STILL_SHOWING carries a button now ("Show
+       * your app instead of the starter page"), so it must not outlive the starter: a later look that sees the APP
+       * render — a real render, and not the starter — answers it, exactly as a heal answers the finding it fixed.
+       */
+      const starterChecked = async <V extends { rendered: boolean; inconclusive?: boolean; problems: string[] }>(verdict: V, html: string): Promise<V> => {
+        const shown = await starterShownOn(html);
+        // Re-armed when answered: if the starter ever came back, a later look would record it again.
+        if (!shown && starterNoted && verdict.rendered) { starterNoted = false; try { buildDiag.resolveOnRecheck('STARTER_STILL_SHOWING'); } catch { /* best-effort */ } }
+        return withStarterVerdict(verdict, shown);
+      };
+      /**
        * 🔴 DID A REAL BROWSER SEE THIS APP RENDER? — THE ONE ANSWER, FOR EVERY VERDICT BELOW
        * (autopsy 697b38ee, EIGHTH appearance, 2026-09-21).
        *
@@ -21658,11 +21871,11 @@ async function noteBuildOutcome(
           // has spent the week removing, and it would produce the WRONG sentence — telling someone
           // with a real web app that their API returned an error. Unknown falls back to today's
           // wording, which is correct for an API and merely unhelpful for a site.
-          const verdict = withStarterVerdict(analyzePreviewHtml(shot.html, {
+          const verdict = await starterChecked(analyzePreviewHtml(shot.html, {
             painted: shot.painted,
             source: shot.source,
             hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
-          }), await starterShownOn(shot.html));
+          }), shot.html);
           let consoleErrs: string[] = [];
           try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: rescueCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
@@ -21744,7 +21957,7 @@ async function noteBuildOutcome(
             shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl');
           } catch { break; /* couldn't open the preview (no browser / timeout) — skip silently */ }
           const html = shot.html;
-          const verdict = withStarterVerdict(analyzePreviewHtml(html, { painted: shot.painted, source: shot.source }), await starterShownOn(html));
+          const verdict = await starterChecked(analyzePreviewHtml(html, { painted: shot.painted, source: shot.source }), html);
           let consoleErrs: string[] = [];
           try {
             if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text);
@@ -23041,7 +23254,7 @@ async function noteBuildOutcome(
           try {
             events.emit({ type: 'narration', agent: 'architect', text: '🔎 Nothing proved your app runs yet — opening it once more to check…', ts: Date.now() });
             const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'last-chance-proof');
-            const verdict = withStarterVerdict(analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source }), await starterShownOn(shot.html));
+            const verdict = await starterChecked(analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source }), shot.html);
             let consoleErrs: string[] = [];
             try {
               if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: proofStartedAt, buildStartedAt }))).errors).map((e) => e.text);
@@ -23542,6 +23755,8 @@ async function noteBuildOutcome(
           // Unreachable until 2026-09-21, because an ordinary build captured nothing; the same change
           // that made `browseUrl` record its console is what makes this fact real.
           consoleErrorsFound: runtimeErrorsRemaining,
+          // "44×44 buttons" / "fits any phone" stand only when the phone-size check measured and passed (Q-248).
+          phoneLayout: phoneProof,
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),
           // "✅ Login with Google" about a login whose password is written into the app (fakeFeatureScan.ts).
           fakeFeatures: fakeFeatures.map((f) => f.kind),
@@ -24396,8 +24611,8 @@ async function noteBuildOutcome(
                 fixOk = !!fix.ok;
                 // Only a verifiably-COMPLETED repair pass clears the false-success guard. A failed/thrown
                 // pass (below) leaves reviewCriticalsUnresolved set → the build finalizes honestly NOT-ok.
-                // (A completed pass is trusted here, matching the existing `result = fix` promotion; a
-                // future slice could re-review to confirm the criticals are actually gone.)
+                // (A completed pass clears them here; the one review just below — Q-157 — puts back
+                // whatever the reviewer still finds.)
                 if (fix.ok) { result = adoptHealResult(result, fix); reviewCriticalsUnresolved = []; }
                 // Persist the repair's writes — MERGE, never replace: writtenFiles holds only THIS
                 // TURN's writes (on an edit turn that's a handful of files), and the old
@@ -24408,6 +24623,44 @@ async function noteBuildOutcome(
                 // SUCCEEDED — a failed pass (e.g. the provider chain 400'd) must NOT report the criticals as
                 // fixed while they still ship. reviewerAutofixOutcome records the truthful line either way.
                 try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(fix.ok, label) }); } catch { /* best-effort */ }
+                // ONE MORE REVIEW, ONLY BECAUSE A FIX WAS APPLIED (Q-157, admin 2026-10-11). A completed pass
+                // is not a correct one: the reviewer looks again, and whatever it still calls critical keeps
+                // the build honestly not-ok. One look — no second repair follows it. Its own abort and spawn
+                // (the first review's were ended above) and its own billing phase, so a look that gives no
+                // verdict is left out of the bill without handing back the first review (postFixReview.ts).
+                if (fix.ok && !abort.signal.aborted) {
+                  const recheckBudget = postFixRecheckBudgetMs(rFiles.length, fixHeadroomMs(), projectFileCount);
+                  let recheckReview: Awaited<ReturnType<typeof reviewBuild>> | null = null;
+                  let recheckWhy = recheckBudget === 0 ? 'the build had no time left for it' : '';
+                  if (recheckBudget > 0) {
+                    const recheckAbort = new AbortController();
+                    const stopRecheckWithBuild = (): void => recheckAbort.abort();
+                    abort.signal.addEventListener('abort', stopRecheckWithBuild, { once: true });
+                    try {
+                      const recheckSample = await Promise.all(rFiles.slice(0, 5).map(async (p) => ({
+                        path: p,
+                        content: writtenFiles.has(p) ? (writtenFiles.get(p) ?? '') : await actuator.readFile(workspaceId, p).catch(() => ''),
+                      })));
+                      recheckReview = await raceTimeout(runInBillingPhase(PHASE_POST_FIX_REVIEW, async () => reviewBuild({
+                        userRequest: milestoneRequest ?? checksRequest,
+                        fileTree: rFiles,
+                        fileSample: recheckSample,
+                        spawn: makeSubAgentSpawn({ ...subAgentDeps, signal: recheckAbort.signal, ...(reviewPlan.maxSteps !== undefined ? { maxSteps: reviewPlan.maxSteps } : {}) }),
+                        mode: reviewPlan.mode,
+                        changedFiles: reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden),
+                      })), recheckBudget, 'post-fix-review');
+                    } catch (e) {
+                      recheckWhy = e instanceof Error && /timed out/i.test(e.message) ? 'it ran out of time' : 'it could not finish';
+                    } finally {
+                      recheckAbort.abort();
+                      abort.signal.removeEventListener('abort', stopRecheckWithBuild);
+                    }
+                  }
+                  const recheck = postFixRecheckOutcome(recheckReview, recheckWhy);
+                  if (recheck.unresolved) reviewCriticalsUnresolved = recheck.unresolved;
+                  else if (recheckBudget > 0) barrenPhases.add(PHASE_POST_FIX_REVIEW);
+                  try { buildDiag.record({ phase: 'build', severity: recheck.severity, code: recheck.code, message: recheck.message, autoResolved: recheck.autoResolved }); } catch { /* best-effort */ }
+                }
               } catch (e) {
                 timedOut = e instanceof Error && /timed out/i.test(e.message);
                 console.log(`[AGENTV3] reviewer auto-fix failed (attempt ${fixAttempt}): ${e instanceof Error ? e.message : String(e)}`);
@@ -25081,15 +25334,25 @@ async function noteBuildOutcome(
       // GIT-NATIVE PUSH: when storage is active, commit + push the sandbox back to the project's
       // GitHub repo so it is the durable source of truth for next session. Best-effort and only
       // when files were actually produced — never blocks or fails the build.
+      //
+      // 🔒 THE USER'S BRANCH ONLY RECEIVES WORK THAT RAN (Q-745, admin 2026-10-11). This was gated on files
+      // having been written, never on the build having worked, so a failed turn's half-done edits went onto
+      // the user's own branch. A build that did not work is now pushed to its own `wip/` branch — nothing is
+      // lost — and the user's branch, the pull request and the merge are left alone (gitPushTarget.ts).
       if (repoSync && repoAuthedUrl && writtenFiles.size > 0) {
         try {
           const msg = `NavBharatAI build: ${deriveTitle(prompt)}`;
-          // OWN-REPO WORKING BRANCH (admin model 2026-07-05): the user imported a repo they own — push
-          // edits to the `navbharatai/work` branch (force is safe: single-writer branch, NEVER `main`)
-          // and keep ONE work→base PR open. We do NOT auto-merge: `main` changes only when the USER
-          // merges the PR (an in-app "Ship to main" + "Revert" lands in the next slice). So there is
-          // structurally nothing that can break `main` here.
-          if (ownRepoTarget && prClient) {
+          const userBranch = ownRepoTarget ? ownRepoTarget.workBranch : repoBranch;
+          const pushTarget = gitPushTarget({ buildOk: result.ok === true, successBranch: userBranch, nowMs: Date.now() });
+          if (pushTarget.wip) {
+            const pushed = await repoSync.pushAll(repoAuthedUrl, pushTarget.branch, `${msg} (did not finish — kept on ${pushTarget.branch})`);
+            if (pushed.pushed) events.emit({ type: 'narration', agent: 'architect', text: wipPushNote(pushTarget.branch, userBranch), ts: Date.now() });
+          } else if (ownRepoTarget && prClient) {
+            // OWN-REPO WORKING BRANCH (admin model 2026-07-05): the user imported a repo they own — push
+            // edits to the `navbharatai/work` branch (force is safe: single-writer branch, NEVER `main`)
+            // and keep ONE work→base PR open. We do NOT auto-merge: `main` changes only when the USER
+            // merges the PR (an in-app "Ship to main" + "Revert" lands in the next slice). So there is
+            // structurally nothing that can break `main` here.
             const pushed = await repoSync.pushAll(repoAuthedUrl, ownRepoTarget.workBranch, msg);
             if (pushed.pushed) {
               let prNote = `Saved your edits to the ‘${ownRepoTarget.workBranch}’ branch (your ‘${ownRepoTarget.baseBranch}’ is untouched).`;

@@ -93767,6 +93767,65 @@ which is now merged too. Closed with it, and appended to the register: Q-600, Q-
 - **Q-807:** an account deletion leaves the user's PUBLISHED sites live with no record pointing at them. Taking them down
   touches App Mart buyers (Q-766), so it is the admin's decision. Recommendation: offline, except sold listings.
 
+### 2026-10-11 — #3659 merged (Q-783, Q-703, Q-117, Q-795 closed); Q-124 and Q-343 built
+
+Closed when #3659 merged, and appended to the register: Q-783, Q-703, Q-117, Q-795.
+
+**Built next, each locked by a test proven by reversion:**
+- **Q-124 (security):** a wallet spend asks for the PIN again.
+  - The unlock ticket carries the area it was opened at, signed into its MAC (`pin.<area>.<exp>.<sig>`).
+  - A money area (billing, wallet recharge, subscription) opens only for a ticket opened at it, or at Wallet & Billing, which contains both.
+  - Every other area keeps one PIN for five minutes, as the admin chose on 2026-09-13.
+  - An older app names no area and gets an unscoped ticket, so nobody is stranded before the new bundle.
+  - Server routes and client gates ask one rule (`src/lib/appLockAreas.ts`).
+  - Test: `tests/aWalletSpendAsksForThePinAgain.test.ts`.
+- **Q-343 (money):** Claude's prompt cache is priced at its real rate.
+  - Class: a token count with two meanings. Anthropic's `input_tokens` excludes the cache; OpenAI-style `prompt_tokens` includes it.
+  - `inputTokens` now means the TOTAL input everywhere, and one helper (`src/server/lib/anthropicUsage.ts`) reads Anthropic's field.
+  - One formula (`tokenCostUsd`) prices the shares: Claude cache read 0.1×, write 1.25×. A rate without a cache line prices the share at full input.
+  - Siblings fixed in the same change:
+    - the AI router's usage reader and the SDA Claude call;
+    - the sink, ledger, unbilled and abandoned turns;
+    - the provider chain's three report sites, the planners and the one-shot lane;
+    - the runner's budget guard, platform metrics, per-model telemetry, and the admin Engine Reports table (new Cache write column).
+  - Unknown providers keep the Sonnet price WITHOUT Anthropic's cache lines, so no unknown cache gets a discount.
+  - The queue row's example turn now records $0.03675, not $0.006.
+  - Test: `tests/claudeCacheIsPricedAtItsRealRate.test.ts`. Reverted three ways, it gave 6, 4 and 1 failures.
+  - Checked and left alone: `buildCostLedger.realCostFromCalls` prices the call log only for reports with no settled real cost, and all of those predate this change.
+  - Live effect to watch: a Claude-led build's real cost and bill rise to their true size, and the context meter on a Claude turn reads fuller. Both were under-reported.
+  - Legacy note: when real-cost billing is switched OFF, the flat Sonnet-equivalent bill now discounts every provider's cache share at Sonnet's cache rate. Real-cost billing is on by default, and the Opus tiers were retired on 2026-09-14.
+
+### 2026-10-11 — the rest of the money decisions: Q-166, Q-165, Q-114 (all in #3668, beside Q-124 and Q-343)
+
+**#3668 now carries #3667 too.** The merging session merged #3667's staged head (the performance audit, which carries
+`main` at #3666) into this branch, which cancelled the first CI run. This session merged that into its own work rather
+than undoing it, and re-ran the full gate on the merged state.
+
+- **Q-166 (money):** a cut-off reply that the platform THREW AWAY is not billed for its output.
+  - Thrown away means: a write with no content, a file sent as text the loop never writes, a fast-lane file half-written after its last continuation, or a planner reply too cut off to read.
+  - It is the whole call's output, because a provider reports one output count per call. The input stays billed.
+  - One predicate (`TruncationRecovery.lostTruncatedOutput`) is read by both the truncation guard and the bill.
+  - `ledger.discardOutput` covers the lanes that learn it afterwards. One `sliceKey` is used for `add` and `discardOutput`.
+  - The report names the rule rather than calling it a starved turn.
+  - Test: `tests/aCutOffReplyThrownAwayIsNotBilled.test.ts`, with a census of the cut-off detectors.
+- **Q-165 (money):** already the behaviour since 2026-08-17.
+  - The ₹1 lives on the artifacts call, which GitHub serves only for a successful run.
+  - "My built apps" reads the run's real status first.
+  - Now pinned by `tests/anApkIsChargedOnlyWhenItWasBuilt.test.ts`.
+- **Q-114 (money view):** one platform margin: revenue minus chat + build + assistant cost, over one 30-day window.
+  - Two corrections to the queue row:
+    - `user_costs` holds the BILLED amount, not our cost.
+    - The assistants are a third cost record.
+  - Both admin margin cards read it, and say "at least" / "at most" when a source was not fully measured.
+  - The chat burn panel's cost line is now labelled chat; it was a sibling mislabel.
+  - Test: `tests/onePlatformMargin.test.ts`.
+- **Q-733 (product):** a project import never lands on top of another app.
+  - One rule: `projectImportTarget.ts`.
+  - In the builder, Import project (.zip), Open folder and the GitHub repo import all open a new chat when this chat holds an app.
+  - Code Studio refuses a zip into a workspace that has files. It shares the builder's session, and its Replace/Merge choices both merged server-side.
+  - The server refuses an import that reaches an occupied chat, before any model call and at no charge.
+  - Test: `tests/aProjectImportNeverLandsOnAnotherApp.test.ts`.
+  - Limit: an installed phone app older than the next bundle still imports through `import-files`.
 ## 2026-10-11 — Native feel, for the apps NavBharatAI builds AND for NavBharatAI itself
 
 **Admin, verbatim:** *"navbharatai jo app banaye aur navbharatai khud dono ko real netiv app feel aye aisa
@@ -93852,6 +93911,24 @@ that other test in my own case — but it measures a *different* fixture, so the
 put it, and the case then failed on a `html` variable that was not even in that `describe`'s scope. It now
 asserts the thing that actually matters: **our contribution** to the document (<120 bytes), and that none of
 the CSS is in the page. *A threshold copied from another test's fixture is not a measurement.*
+- **Q-745 (product):** a failed build never reaches the user's GitHub branch.
+  - The push is decided by the outcome (`gitPushTarget.ts`).
+  - A build that did not work goes to `wip/build-<UTC stamp>`, with a note in the chat.
+  - The working branch, the pull request and the merge are left alone.
+  - Test: `tests/aFailedBuildNeverReachesTheUsersBranch.test.ts`.
+- **Q-781 (product):** a build offers its own preview.
+  - The chat engine marks a reply as built when its code lands (`chatBuildMeta.ts`). View Live Preview and the deploy row read that mark.
+  - Three dead marker branches are deleted, along with the unanswerable Code Review button.
+  - Sibling removed: the deploy panel state, which nothing could ever open.
+  - Test: `tests/aBuildOffersItsOwnPreview.test.ts`.
+- **Q-248 (honesty):** a size nobody measured is not claimed.
+  - The claim audit reads the phone-size check's outcome.
+  - "44×44 buttons" or "fits a phone" is corrected out loud as unmeasured or contradicted, unless the check passed.
+  - Test: `tests/aSizeNobodyMeasuredIsNotClaimed.test.ts`.
+- **Q-123 (iOS):** the iPhone app never teaches a way to pay.
+  - On `ios`, `iosPurchaseGuard.ts` removes every buying sentence from the knowledge each AI is handed, and tells the model money cannot be added in this app.
+  - The four chat clients send `X-NBAI-Platform`.
+  - Test: `tests/theIphoneAppNeverTeachesAWayToPay.test.ts`.
 
 ## 2026-10-11 — Round 2 of the native-feel polish: a loading screen has a shape
 
@@ -93911,3 +93988,111 @@ leaves the mechanism to the code that has a router.
 ambiguous (Home → Studio has no back), Android's hardware back is already handled by
 `installBackButtonHandler`, and a swipe-back that guesses wrong subtracts from native feel instead of adding
 to it. Recorded as a deliberate non-item, not an omission.
+- **Q-818 (my own Q-600 leftovers, found by the merging session):**
+  - The dead "Confirm & Push to GitHub" chain is removed whole, including `githubService.ts`, which posted to a deleted route.
+  - The route census now sees callers that build their path from a base constant (`expandBaseConstants`).
+- **Q-157 (admin decision 2026-10-11: "one more review after an auto-fix, only when the fix was applied"):**
+  - Root cause: the C9 pass cleared the reviewer's criticals the moment its repair COMPLETED, and the code beside it said "a future slice could re-review". Class: a fix declared done because it ran, never checked against the finding it was for.
+  - Fix: `postFixReview.ts` plus one block in the route. After an applied repair the reviewer looks once more, with its own abort, spawn and billing phase (`post-fix-review`). No second repair follows it.
+  - What it still finds keeps the build not-ok: `REVIEW_RECHECK_CRITICALS_REMAIN` (warning) is an app finding with a one-tap offer that carries the findings.
+  - A look that gives no verdict (no room, timed out, threw) is reported as `REVIEW_RECHECK_NOT_RUN` and left out of the bill on its own phase, so the first review is never handed back.
+  - Siblings: the explorer and functional repairs are already judged by their own re-measure (kept or rolled back), so this was the one repair trusted unseen.
+  - Pins updated honestly: three barren sites (`aBarrenPassIsNotTheUsersBill`); two `reviewBuild` calls, the second after `fix.ok` on its own phase (`reviewLateLanding`).
+  - Test: `tests/aRepairIsReviewedAgain.test.ts`, reverted and seen to fail.
+- **Q-138 (admin decision 2026-10-11: "keep APP_SCOPE as the one scope analyser; Project Mode reads its answer"):**
+  - Root cause: two rule sets sized the same request with no rule for which wins. In autopsy eed79815, Project Mode split a 40-bullet car game while APP_SCOPE called it one app.
+  - Fix: `scopeVerdict` in `lib/appScopeAnalyzer.ts`. The route sizes once from `planning.sizing`. The report line, the roadmap, Project Mode's gate and its report line all read that answer, and the route calls no other sizer (census in the test).
+  - Project Mode's size signals moved into APP_SCOPE: a stated scale, a big-software noun with named parts, and a long spec. The thresholds stay in `ProjectPlan.ts`.
+  - What the measurement caught, which a literal "APP_SCOPE wins" would have broken: APP_SCOPE's veto reads a small word anywhere. Read literally, the decision would have built Blue Berry (144 parts, "resume") and the 6461025c ads platform (429 parts, "Budget") in one pass. A long spec is now vetoed only when the app itself is small.
+  - Sibling bug found the same way: the scale reader counted "404 page" as 404 pages, which put a portfolio over Project Mode's 100-page rule. `statedScale` skips an HTTP status before the singular word, and reads no links.
+  - Measured on 66,309 test strings at both complexity answers: Project Mode's decision changed for none. APP_SCOPE's line now says LARGE for 14 strings that already went to Project Mode, so the report stops calling them one-shot apps.
+  - Honest limit: the eed79815 game prompt is not in the repo. A 40-part game whose subject is not a small app is large under the one verdict, so a spec like it is still split. The change guarantees that the two answers agree; it does not keep games out of Project Mode.
+  - Test: `tests/oneScopeVerdictDecidesTheSize.test.ts`, with three guards reverted and seen to fail. Five route pins were updated to the one-verdict wiring.
+- **Q-128 (admin decision 2026-10-11: "one timeline — Time Machine is the one version history; the History tab becomes a view of it"):**
+  - One component, `src/components/versions/VersionTimeline.tsx`, is rendered by Time Machine and by the builder's History tab. The session's git steps (preview, compare, rename) stay, folded below the timeline.
+  - **Defect found while building it:** Time Machine's Restore only ran `setFiles` and `updatePreview` in the browser. The saved app, which the next build reads, stayed on the newer files, so "Version restored ✓" described one tab's memory. Class: a restore that changes the view, not the thing viewed.
+  - Fix: one server route, `POST /api/agentv3/restore-version`, with `versionRestore.ts` doing the planning:
+    - it is ownership-checked, and refused while a build runs (this instance, plus the cross-instance lease via `workspaceBuildIsLive`);
+    - the app as it stands is saved as a version first ("Before going back to …"); if that copy fails, nothing is changed;
+    - the saved file set is replaced, not merged, using GreenGuard's `restorePlan` (no hybrid);
+    - the running sandbox is brought to the same state, because the File Guardian only re-adds missing files. If that step fails, the user is told to press Restore again, which is safe to repeat.
+  - Siblings fixed in the same change:
+    - Time Machine's "current app" was App's legacy `pro-<timestamp>` id, not the builder's sticky v5 session. The builder's workspace is now used, through `historyKeyFor`, which is tested case for case against `restorePointKey`. An app switch now reports itself.
+    - "Save this version" saved the screen's copy, which could belong to the app the user had just switched from. It now saves the app's own files server-side (`fromWorkspace`).
+    - A version now records which files it could not keep (`omittedPaths`), so a restore never deletes them. For older versions, files are kept and the count is stated.
+  - Q-162, decided because `routes/build.ts` was touched: the 410 tombstones `POST /api/build` and `POST /api/build-stream` are deleted. Nothing called them, and their last client was gone before any Play production release.
+  - Not a third timeline: `project/VersionStore.ts` is never constructed by live code.
+  - Test: `tests/oneVersionTimeline.test.ts`, with four guards reverted and seen to fail. One of those guards first passed when reverted, because no test case put a bad uid's prefix in the workspace id; that case was added.
+- **Q-769 (admin decision 2026-10-11: move the Vertex rungs onto `@google/genai` with `vertexai: true`):**
+  - Built: the router's Vertex rung, the vision chain and Doctor AI's Vertex fallback share one client, `lib/vertexGenAI.ts`. It passes an explicit project and region, so the service-account auth is unchanged and an env API key is ignored (checked in the SDK constructor).
+  - `@google-cloud/vertexai` is uninstalled with npm; the lockfile only lost packages. Its README said "deprecated as of June 24, 2025 and will be removed on June 24, 2026".
+  - The stream forwards `config.abortSignal`, and the 30 s timeout now aborts the request instead of racing a timer.
+  - 🔴 **Correction of my own earlier recommendation.** I recommended the swap because it would stop Google billing an abandoned answer. `@google/genai`'s typings say the abort "will not cancel the request in the service. You will still be charged usage". The swap still had to happen, because the old SDK is end-of-life, but its billing benefit was false. The same false claim was corrected in GeminiProvider's comment and in `anAbandonedStreamStopsCosting`'s header. The external limit is now 🟡 Q-819.
+  - Sibling bug found by the swap: Doctor AI's two direct-Gemini calls passed `systemInstruction` at the top level, cast `as any`. The SDK ignored it, so Doctor AI answered on that rung without its own instructions. Fixed; the race call also forwards its signal now. The audit call's unneeded cast was removed too.
+  - Class lock: a census that parses every `models.generateContent(Stream)` call in `src/` and fails on a cast parameter object or a top-level `systemInstruction`.
+  - Test: `tests/oneGoogleSdkForVertex.test.ts`, reverted twice and seen to fail.
+- **Q-706 gap (a) — the credential-less build (admin decision 2026-10-11: "this session designs it; the admin verifies it in Cloud Shell on real Cloud Build before it is claimed"):**
+  - Built, OFF by default (`NAVBHARAT_APPS_CREDENTIALLESS_BUILD`). With it unset, the job is byte-identical to before; a test pins that.
+  - When on, the build has three steps:
+    - a privileged step drops build containers' route to the metadata server (`169.254.169.254`) in `DOCKER-USER`, trying both iptables backends, and fails closed if no rule took;
+    - `pack build` runs with `--trust-builder=false` and without `--publish`, so the phase that runs the app's scripts never gets the Docker socket;
+    - Cloud Build pushes the image (`images:`) after the untrusted step has exited.
+  - `buildJobConfig` is the one job builder. `scripts/printCredentiallessBuild.ts` prints it, and `scripts/verifyCredentiallessBuild.sh` submits it in Cloud Shell with the isolation probe and reads `"identity": null` from inside `npm install`.
+  - Test: `tests/aBuildRunsUserCodeWithNoCredential.test.ts`, with two guards reverted and seen to fail.
+  - Honest state: **🟡 BLOCKED on the admin's Cloud Shell run.** Whether the workers honour the rule is unknowable from here. Gap (b), the egress allow-list, is now Q-820. Hosting stays admin-only until both are closed.
+- **Q-796 (admin decision 2026-10-11: "a per-owner view in the admin's app moderation: every app of that person, their states, and one action across them"):**
+  - Root cause: a ban was per app, so a person with nine live apps took nine bans, and nothing re-checked a banned person's other live apps.
+  - Built:
+    - In Admin → Apps, an owner-uid search shows a bar (apps, live) with Unpublish all live and Ban all. It goes through the existing confirmation dialog, with its own sentences (`ownerConfirmCopy`, "at least N" when more pages exist) and the same required reason.
+    - Server route `POST /api/admin/owners/:uid/moderate`: per app it runs the single routes' three steps (take offline, which throws unless confirmed; audit line; 180-day record), reports per app, and is bounded with the bound stated.
+    - A single Ban returns the person's other live-app count, and the list opens on that person.
+  - Design note: the first draft centralised the three steps into one helper. Three existing censuses pin each single route doing them visibly, and that pinning is deliberate. So the single routes are untouched, and a new census pins the owner route's steps and their order to the same ones.
+  - Test: `tests/onePersonsAppsOneAction.test.ts`, with two guards reverted and seen to fail. KB entry `admin-built-apps` updated.
+
+### 2026-10-11 — #3668 merged; its 15 rows closed
+
+The admin merged #3668. Closed, IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main`: Q-114 Q-123 Q-124 Q-128 Q-138 Q-157 Q-165 Q-166 Q-248 Q-343 Q-733 Q-745 Q-769 Q-781 Q-818. Their ledgers stay above. Q-706 stays 🟡 (its build merged, off by default; it waits on the admin's Cloud Shell run). Q-819 (🟡, external) and Q-820 (gap b) stay open. `tests/aClosedQueueRowStaysClosed.test.ts` hard-coded Q-114 as a row that had to exist (an old merge erased it). It now also accepts the right end of a record: the ID in the closed file and the row gone from the open table. The follow-up work (Q-796, Q-797, Q-806) continues on the same branch, restarted from the merged `main`, in a new PR.
+- **Q-797 (admin decision 2026-10-11: "an owner screen of their app's AI spend"):**
+  - Root cause: the owner's "AI in this app" card showed today only, so a cost that grew over a week stayed invisible until the balance showed it.
+  - Built: "Show the last 30 days" on that card, with the published app and the preview apart, per day, answers and totals.
+  - It reads the same counters the daily caps enforce (`AppAiUsageStore.appSpentDays`, one `getAll`) through an owner-only route, `GET /api/app-ai/spend`. A body that is not a history, or unreadable counters, is said as such, never shown as ₹0.
+  - Sibling: the app-AI owner-route census counted owner checks as a fixed 4. It now asserts the rule itself (every route registered in that file has exactly one strict owner check), so a new route without one fails.
+  - Test: `tests/anOwnerSeesWhatTheirAppsAiCosts.test.ts`, reverted (owner check removed) and seen to fail. KB entry updated.
+- **Q-806 (a defect from the 2026-09-07 Render audit: after a reload the Publish screen showed "Deploy backend" again and never "live at …"):**
+  - Root cause: the deploy's outcome lived only in the HostingChooser's memory. Class: a fact learned once, kept only on a screen.
+  - Fix: a durable `backendDeploy` record on the app's conversation record (`src/lib/backendDeployRecord.ts`, shared by server and screen).
+    - `deploy-backend` writes it, as service + address + not-yet-checked.
+    - `deploy-status` settles it, only for the service it names.
+    - A new owner-only `GET /api/agentv3/deploy-record` serves it.
+    - The Publish screen reads it on open and says "live at …", the last failure, or "still being checked", resuming a check that a reload interrupted within 15 minutes.
+  - Both stores carry the field. The duplicate path does not copy it, because it names the original's service (named in the comment and pinned).
+  - Test: `tests/theBackendIsRememberedAfterAReload.test.ts`, with two guards reverted and seen to fail. KB updated.
+
+### 2026-10-11 — Q-381 batch three: a defect the user is shown has a button (37 → 19)
+
+- **The class:** a real defect in the user's app reached their build-health card as a warning with nothing to press.
+- **Fourteen got a one-tap fix**, written for the person who pressed the button, with no vendor, tool or file path:
+  - a starter page where the app should be (`STARTER_STILL_SHOWING`);
+  - code that does not compile, imports that point at nothing, and a name another file does not export (`SYNTAX_ERROR_DETECTED`, `MISSING_FILES_DETECTED`, `MISSING_EXPORT_DETECTED`, each handed the exact list);
+  - a secret printed to the logs, on an import turn (`COMPLIANCE_LOG_LEAK_FOUND`);
+  - pages held hostage by the database (`DB_COUPLED_BOOT`);
+  - payment checking that did not finish (`SERVERLESS_PAYMENT_NOT_SET_UP`), which never fakes "paid";
+  - made-up people or results shown as real (`SIMULATED_DATA_SHIPPED`, `SIMULATED_RESULT_SHIPPED`);
+  - features asked for and not on the screen (`FEATURE_COVERAGE`, handed the list; the fix checks first, because that probe has been wrong before);
+  - the four integrity findings (`INTEGRITY_ORPHAN_STYLESHEET`, `_FOCUS_CONFLICT`, `_DUPLICATE_ENTRY`, `_DUPLICATE_MODULE`).
+- **Four roll-ups are offered through the finding they restate** (`OFFERED_THROUGH`): `OUTCOME_SYNTAX_ERROR`, `OUTCOME_MISSING_FILES`, `OUTCOME_MISSING_EXPORT` and `BOOT_KILLING_ENV_GUARD_UNRESOLVED`.
+  - The result is one button, never two, and the roll-up's later message is the evidence.
+  - A declared "no offer" would have been wrong: the final syntax re-check records `OUTCOME_SYNTAX_ERROR` on its own when a late repair broke a file the first check passed.
+- **No offer outlives its problem:**
+  - The compile and integrity findings are answered by their heals (`HEAL_RESOLVES`).
+  - `STARTER_STILL_SHOWING` was never answered. Now the three real-browser verdicts go through one helper, `starterChecked`, which answers it when a later look sees the app itself render. The starter census follows the helper: 3 calls, and `withStarterVerdict` applied in exactly one place.
+- **Nothing moves a bill:** every one of the eighteen stays an app finding at its own severity. Only the offer table and the alias map changed.
+- **Left in the backlog on purpose**, each with its reason in a test:
+  - `DB_SCHEMA_MISSING`: read from the first boot's log, and the migration retried after that boot can create the tables without anything answering it.
+  - `FRAMEWORK_SOURCE_MISMATCH`: a plan-time note to our builder, never re-checked against the delivered app.
+  - Each needs its re-check before it can carry a button.
+- **Found while doing it — Q-821 (🟡, money):** an early `OUTCOME_SYNTAX_ERROR` is never answered when a later repair makes every file parse, so a build whose final files parse can stay NOT READY and free. Recorded with the recommendation; ERROR severity makes it the admin's call.
+- **Tests:**
+  - `tests/aDefectTheUserIsShownHasAButton.test.ts`, plus the census now counting a roll-up as offered only through a real offer.
+  - Reverted three ways and seen to fail each time: one offer removed, the alias loop removed, and the starter answer removed.
+- **#3673 merged (2026-10-11):** Q-796, Q-797 and Q-806 are closed. Their rows were deleted from `BUILD_REPORT_QUEUE.md` and their IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`, on the merged `main`. Q-381 batch three (above) and Q-821 were rebuilt on that `main` for the next PR from this branch.

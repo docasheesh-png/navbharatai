@@ -63,8 +63,9 @@ describe('pricing — rates & equivalents', () => {
   });
 
   it('default Opus and Sonnet rates', () => {
-    expect(opusRate()).toEqual({ inputPerMTok: 15, outputPerMTok: 75 });
-    expect(sonnetRate()).toEqual({ inputPerMTok: 3, outputPerMTok: 15 });
+    // …with Anthropic's prompt-cache lines derived from the input rate: read 0.1×, write 1.25× (Q-343).
+    expect(opusRate()).toEqual({ inputPerMTok: 15, outputPerMTok: 75, cacheReadPerMTok: 1.5, cacheWritePerMTok: 18.75 });
+    expect(sonnetRate()).toEqual({ inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3, cacheWritePerMTok: 3.75 });
   });
 
   it('opusEquivalentUsd / sonnetEquivalentUsd price tokens at the right rate', () => {
@@ -80,7 +81,8 @@ describe('pricing — rates & equivalents', () => {
   it('honours env rate overrides', () => {
     process.env.SONNET_INPUT_PER_MTOK = '4';
     process.env.SONNET_OUTPUT_PER_MTOK = '20';
-    expect(sonnetRate()).toEqual({ inputPerMTok: 4, outputPerMTok: 20 });
+    // the cache lines follow an overridden input rate — one place says what Anthropic charges
+    expect(sonnetRate()).toEqual({ inputPerMTok: 4, outputPerMTok: 20, cacheReadPerMTok: 0.4, cacheWritePerMTok: 5 });
   });
 });
 

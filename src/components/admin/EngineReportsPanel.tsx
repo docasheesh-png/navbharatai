@@ -429,7 +429,8 @@ export function EngineReportsPanel({ adminToken, onStatus, only, heading }: Engi
                           <th className="py-1 pr-2 font-black">Model</th>
                           <th className="py-1 pr-2 font-black">Builds</th>
                           <th className="py-1 pr-2 font-black">In</th>
-                          <th className="py-1 pr-2 font-black">Cached</th>
+                          <th className="py-1 pr-2 font-black">Cache read</th>
+                          <th className="py-1 pr-2 font-black">Cache write</th>
                           <th className="py-1 font-black">Out</th>
                         </tr>
                       </thead>
@@ -441,6 +442,7 @@ export function EngineReportsPanel({ adminToken, onStatus, only, heading }: Engi
                             <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.builds)}</td>
                             <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.inputTokens)}</td>
                             <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.cacheReadInputTokens)}</td>
+                            <td className="py-1 pr-2 text-muted tabular-nums">{num(row?.cacheCreationInputTokens)}</td>
                             <td className="py-1 text-muted tabular-nums">{num(row?.outputTokens)}</td>
                           </tr>
                         ))}

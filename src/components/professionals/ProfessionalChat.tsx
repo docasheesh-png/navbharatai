@@ -19,6 +19,7 @@ import {
   browserStore, readConversation, saveConversation, deleteOpenConversation, serverConversationId,
 } from '../../lib/professionalChatStore';
 import { LinkedText } from '../../lib/linkify';
+import { platformHeader } from '../../lib/platformHeader';
 
 /**
  * Generic, config-driven chat UI for the "Professional AI" framework. One
@@ -223,7 +224,8 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
       const history = next.filter((m) => m.content !== config.welcome).slice(-20);
       // Bearer token so the server can key persistent memory (e.g. Teacher AI's student
       // profile) to the VERIFIED identity — the body userId alone is never trusted for that.
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      // …and the platform, so on the iPhone app no answer teaches a way to pay (Q-123).
+      const headers: Record<string, string> = { 'Content-Type': 'application/json', ...platformHeader() };
       try {
         const token = await auth.currentUser?.getIdToken();
         if (token) headers.Authorization = `Bearer ${token}`;

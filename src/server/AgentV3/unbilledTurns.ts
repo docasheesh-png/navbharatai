@@ -35,7 +35,7 @@
 // PURE: no clock, no environment, no I/O. Every rule here is unit-testable and cannot lie.
 
 import { realProviderCostUsd, type ProviderCostEntry } from './providerRates';
-import { NO_BARREN_PHASES, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, type BarrenPhases } from './billingPhase';
+import { NO_BARREN_PHASES, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_POST_FIX_REVIEW, type BarrenPhases } from './billingPhase';
 
 /** The token counts of one turn, in the shape the ledger and the rate card both already use. */
 export interface UnbilledTokens {
@@ -43,6 +43,14 @@ export interface UnbilledTokens {
   outputTokens: number;
   /** The cache-hit share of `inputTokens` (already INCLUDED in it, never additional). */
   cacheReadInputTokens?: number;
+  /** The cache-write share of `inputTokens` (Q-343; already INCLUDED in it, never additional). */
+  cacheCreationInputTokens?: number;
+  /**
+   * The part of `outputTokens` that was a reply CUT OFF at the output limit and THROWN AWAY (Q-166) —
+   * already INCLUDED in `outputTokens`, never additional. Kept apart only so the report can say which
+   * rule left those tokens out of the bill; the subtraction itself reads `outputTokens`.
+   */
+  discardedOutputTokens?: number;
 }
 
 /**
@@ -54,7 +62,7 @@ export interface UnbilledTokens {
  * cost ceiling keep pricing the whole thing, and only the code that builds the USER's bill subtracts.
  */
 export interface UnbilledAwareEntry extends ProviderCostEntry {
-  usage: ProviderCostEntry['usage'] & { cacheReadInputTokens?: number };
+  usage: ProviderCostEntry['usage'] & { cacheReadInputTokens?: number; cacheCreationInputTokens?: number };
   unbilled?: UnbilledTokens;
   /** Which part of the build spent this slice — see `billingPhase.ts`. */
   phase?: string;
@@ -72,6 +80,10 @@ export function addUnbilled(into: UnbilledTokens, add: UnbilledTokens): void {
   into.outputTokens += clean(add.outputTokens);
   const cache = clean(add.cacheReadInputTokens);
   if (cache > 0) into.cacheReadInputTokens = clean(into.cacheReadInputTokens) + cache;
+  const write = clean(add.cacheCreationInputTokens);
+  if (write > 0) into.cacheCreationInputTokens = clean(into.cacheCreationInputTokens) + write;
+  const discarded = clean(add.discardedOutputTokens);
+  if (discarded > 0) into.discardedOutputTokens = clean(into.discardedOutputTokens) + discarded;
 }
 
 /**
@@ -101,12 +113,19 @@ export function billableEntries(
     const inputTokens = Math.max(0, clean(e.usage.inputTokens) - clean(u.inputTokens));
     const outputTokens = Math.max(0, clean(e.usage.outputTokens) - clean(u.outputTokens));
     const cacheRead = Math.max(0, clean(e.usage.cacheReadInputTokens) - clean(u.cacheReadInputTokens));
+    const cacheWrite = Math.max(0, clean(e.usage.cacheCreationInputTokens) - clean(u.cacheCreationInputTokens));
+    const read = Math.min(inputTokens, cacheRead);
     return {
       provider: e.provider,
       ...(e.model ? { model: e.model } : {}),
-      // The cache share can never exceed the input it is a share OF — `usageCostUsd` clamps this
+      // The cache shares can never exceed the input they are shares OF — `tokenCostUsd` clamps this
       // too, but a slice that leaves here already coherent cannot be misread by a future caller.
-      usage: { inputTokens, outputTokens, ...(cacheRead > 0 ? { cacheReadInputTokens: Math.min(inputTokens, cacheRead) } : {}) },
+      usage: {
+        inputTokens,
+        outputTokens,
+        ...(read > 0 ? { cacheReadInputTokens: read } : {}),
+        ...(Math.min(inputTokens - read, cacheWrite) > 0 ? { cacheCreationInputTokens: Math.min(inputTokens - read, cacheWrite) } : {}),
+      },
     };
   });
 }
@@ -167,6 +186,7 @@ export function markAbandonedTurn<E>(err: E, usage: UnbilledTokens | null | unde
     inputTokens: clean(usage.inputTokens),
     outputTokens: clean(usage.outputTokens),
     ...(clean(usage.cacheReadInputTokens) > 0 ? { cacheReadInputTokens: clean(usage.cacheReadInputTokens) } : {}),
+    ...(clean(usage.cacheCreationInputTokens) > 0 ? { cacheCreationInputTokens: clean(usage.cacheCreationInputTokens) } : {}),
   };
   if (carried.inputTokens === 0 && carried.outputTokens === 0) return err;
   try {
@@ -206,14 +226,21 @@ export function absorbedWorkDetail(
 ): string {
   const phases = new Set<string>();
   let starved = false;
+  let discarded = false;
   for (const e of Array.isArray(entries) ? entries : []) {
     const spent = clean(e.usage?.inputTokens) + clean(e.usage?.outputTokens);
     if (e.phase && barrenPhases.has(e.phase)) { if (spent > 0) phases.add(e.phase); continue; }
-    if (e.unbilled && clean(e.unbilled.inputTokens) + clean(e.unbilled.outputTokens) > 0) starved = true;
+    if (!e.unbilled) continue;
+    // The two turn rules are told apart by the discarded share they record (Q-166): a starved turn
+    // produced nothing, a discarded one produced a reply that was cut off and thrown away.
+    const cut = clean(e.unbilled.discardedOutputTokens);
+    if (cut > 0) discarded = true;
+    if (clean(e.unbilled.inputTokens) + clean(e.unbilled.outputTokens) - cut > 0) starved = true;
   }
   const causes: string[] = [];
   for (const p of [...phases].sort()) causes.push(PHASE_WORDS[p] ?? `the "${p}" pass delivered nothing the build kept`);
   if (starved) causes.push('one or more model turns produced no text and no tool call (a starved or abandoned turn)');
+  if (discarded) causes.push('a reply was cut off at the output limit and thrown away, so its output was not billed');
   return causes.length ? causes.join('; ') : 'no cause could be attributed from the ledger';
 }
 
@@ -221,4 +248,5 @@ export function absorbedWorkDetail(
 const PHASE_WORDS: Record<string, string> = {
   [PHASE_POST_BUILD_REVIEW]: 'the post-build review delivered no findings (it ran out of time, or its result could not be read)',
   [PHASE_EXPLORER_REPAIR]: 'a button repair was undone, so the app kept nothing it wrote',
+  [PHASE_POST_FIX_REVIEW]: 'the review after a repair gave no verdict (no time left, or it could not finish)',
 };

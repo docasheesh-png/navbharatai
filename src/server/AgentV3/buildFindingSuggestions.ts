@@ -38,7 +38,8 @@
 //      the reason stated.
 // `tests/aProblemTheUserIsShownCanBeActedOn.test.ts` reads the real registries out of the real modules
 // and FAILS CI when a new code appears outside all three. A name added to a hand-list is no longer
-// something anyone has to remember.
+// something anyone has to remember. (A roll-up that restates an offered finding is offered through it —
+// `OFFERED_THROUGH`, Q-381 batch three — so it is in the second home, not a fourth.)
 //
 // PURE: no I/O, no clock, no model. Never throws.
 
@@ -78,6 +79,42 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     detail: 'Your app was opened in a browser and nothing rendered.',
     prompt: 'When the app is opened in a browser it does not render — a blank screen or an error instead of the app. Find the real cause (the mount point, the entry script, an error thrown while loading) and fix it, then confirm the app renders.',
   },
+  // ── Q-381 BATCH THREE (2026-10-11): app findings that were shown with nothing to press ──────────
+  // Each was a warning about the user's app in their build-health card, with no button. Every one is
+  // either the final state of its check or is answered when a later check passes (the HEAL_RESOLVES
+  // map, or `resolveOnRecheck`), so an offer here never outlives the problem it names.
+  {
+    // A real browser opened the app and saw OUR starter page (stillTheStarterApp.ts, autopsy 3ab93068).
+    // Answered by the route when a later look sees the app itself render.
+    code: 'STARTER_STILL_SHOWING',
+    title: 'Show your app instead of the starter page',
+    detail: 'Your app opened, but what it showed was the starter page it began from — not the app that was built.',
+    prompt: 'When the app opens in a browser it still shows the starter page it began from, not the app that was built. Make the entry file render the real app — its main screen and its navigation — so the starter page never appears, and confirm in the browser that the app itself shows.',
+  },
+  {
+    // The syntax gate's finding when its repair could not clear it (SYNTAX_HEALED answers it otherwise).
+    code: 'SYNTAX_ERROR_DETECTED',
+    title: 'Fix the code that does not compile',
+    detail: 'Some of your app\'s files have a mistake in them, so the app cannot be built.',
+    prompt: 'Some files in this app do not parse, so the app cannot compile. Fix each mistake listed below at its real cause — a missing bracket, a duplicate declaration, a broken string — without rewriting what already works, and confirm the whole app builds and opens.',
+    withEvidence: true,
+  },
+  {
+    // Imports that resolve to nothing (MISSING_FILES_HEALED answers it when the creation pass works).
+    code: 'MISSING_FILES_DETECTED',
+    title: 'Add the parts of your app that are missing',
+    detail: 'Your app refers to files that are not there, so parts of it would crash.',
+    prompt: 'Some files in this app import other files that do not exist or point to the wrong place, so the app would crash when it reaches them. For each one listed below, correct the path if the file exists somewhere else, or create the missing file so it does what the files that import it expect. Then confirm the app builds and every screen opens.',
+    withEvidence: true,
+  },
+  {
+    // A name imported from a file that does not export it (MISSING_EXPORT_HEALED answers it otherwise).
+    code: 'MISSING_EXPORT_DETECTED',
+    title: 'Connect the parts that cannot find each other',
+    detail: 'One part of your app asks another for something it does not provide, so the app cannot be built.',
+    prompt: 'Some files in this app import a name that the other file does not export, so the build fails. For each one listed below, make the file export what the files importing it actually use (or correct the import if the name is wrong), keep the behaviour the same, and confirm the app builds and opens.',
+    withEvidence: true,
+  },
   {
     // A page that USED to render and now does not — the regression the route fingerprint catches.
     code: 'ROUTE_REGRESSION',
@@ -102,10 +139,26 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'This app calls an AI provider directly from browser code, so the provider key has to live in the page where every visitor can read and spend it. Replace every such call with NavBharatAI\'s built-in keyless AI helper (generateText / chat), remove any box or setting that asks for an AI key and any key read from storage or the environment in browser code, and keep the feature working. Save the user\'s own data first, then add the AI result when it arrives.',
   },
   {
+    // Recorded only on an import turn, where the user asked for no file to change, so the credential-in-logs
+    // redaction is reported instead of applied — and its own message says "ask me to fix them". This is that ask.
+    code: 'COMPLIANCE_LOG_LEAK_FOUND',
+    title: 'Stop your app printing secrets in its logs',
+    detail: 'Some lines in your project write a password, key or token to the logs, where anyone who can read them could copy it.',
+    prompt: 'Some logging lines in this project print a password, key or token. Change every one so the secret is never written to a log — log that the value is present, or a masked form, never the value itself — and change nothing else.',
+  },
+  {
     code: 'BOOT_KILLING_ENV_GUARD',
     title: 'Stop one missing key from killing the app',
     detail: 'If one setting is missing, the whole app refuses to start instead of just that one feature.',
     prompt: 'The app refuses to start when one configuration value is missing. Change it so a missing value disables only the feature that needs it — with an honest message in that part of the screen — while the rest of the app still loads and works.',
+  },
+  {
+    // The "zombie server" (DbCoupledBootAnalysis.ts): never auto-written, and its message ends with the offer
+    // "say 'fix the boot guard'". This is that ask as a button.
+    code: 'DB_COUPLED_BOOT',
+    title: 'Keep your pages up when the database is down',
+    detail: 'Your app waits for its database before it serves any page, so if the database is down every page fails.',
+    prompt: 'The server only starts serving pages after a database call succeeds, so when the database is slow or down every page fails while the server looks alive. Make the pages load regardless: guard the database call, start serving pages straight away, and show an honest message in the parts of the screen whose data could not load. Confirm the pages still open with the database unavailable.',
   },
   {
     // The app SHIPPED a chat whose replies are hardcoded text. The user is told in the summary; this
@@ -125,6 +178,29 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'Some features in this app are demos: a login that checks a password written into the app, a "Continue with Google" button with nothing behind it, a payment that marks itself paid, or an OTP or email the page produces itself. Make each one real with a real provider using the keys I have saved (ask me with request_secrets for any key that is still missing), keep a clearly visible red demo notice on any screen whose key is still missing, and never fake the result.',
   },
   {
+    // Setting up payment checking in the user's own database did not finish (supabasePayments.ts). Until it
+    // does, an order cannot be confirmed as paid — the next move is to finish it, honestly.
+    code: 'SERVERLESS_PAYMENT_NOT_SET_UP',
+    title: 'Finish setting up payment checking',
+    detail: 'Secure checking of your app\'s payments could not be set up, so a payment cannot be confirmed as real yet.',
+    prompt: 'Setting up secure payment checking for this app did not finish, so a payment cannot yet be confirmed as real. Set it up again for every table that takes payments. If it needs something from me — a reconnected database, a payment key, or a plan that allows it — tell me exactly what. Until it works, never mark an order as paid on the page\'s own say-so.',
+  },
+  {
+    // Made-up people or places shown as real (AuthenticityAnalysis.ts, autopsy f15a9bcc). The summary already
+    // says so and offers to make it real; this is that offer as a button.
+    code: 'SIMULATED_DATA_SHIPPED',
+    title: 'Show real data instead of made-up data',
+    detail: 'Part of your app shows made-up people or places instead of real ones.',
+    prompt: 'Part of this app shows made-up data about other people or places — invented users, shops or listings written into the code. Replace it with real data kept in a shared online database that the app reads and writes (set one up, or ask me to connect one if none is connected yet), show an honest empty state until real entries exist, and never present invented people as real.',
+  },
+  {
+    // Its sibling for a feature whose OUTPUT is invented (autopsy 33812996).
+    code: 'SIMULATED_RESULT_SHIPPED',
+    title: 'Make the demo results real',
+    detail: 'A feature in your app gives made-up answers instead of real ones.',
+    prompt: 'A feature in this app returns made-up results — picked at random or written into the code — instead of doing the real work. Make it real: use NavBharatAI\'s built-in AI where that fits, or a real service (ask me for any key it needs), show a loading state and an honest message when a result cannot be fetched, and never return an invented result.',
+  },
+  {
     code: 'FUZZ_ROBUSTNESS',
     title: 'Stop the app crashing on odd input',
     detail: 'Typing unusual values into your app\'s own forms made it break.',
@@ -135,6 +211,16 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     title: 'Fix the errors your app showed',
     detail: 'When the app ran, it reported errors that are still there.',
     prompt: 'When the app runs it reports errors in the browser console. Find the cause of each one and fix it properly, then confirm the app runs clean.',
+  },
+  {
+    // The reviewer looked AGAIN after its critical findings were repaired, and some are still there
+    // (postFixReview.ts, Q-157). Real defects in the user's app, so they get a button — and the findings
+    // themselves travel with it, so the next pass works on exactly what the second look saw.
+    code: 'REVIEW_RECHECK_CRITICALS_REMAIN',
+    title: 'Fix what the review still found',
+    detail: 'NavBharatAI repaired the serious problems its review found, checked again, and some are still there.',
+    prompt: 'A review of this app found serious problems, a repair was made, and a second review found that some of them are still there. Fix each one listed below at its real cause, keep everything that already works, and confirm the app still builds and runs.',
+    withEvidence: true,
   },
   {
     code: 'JOURNEY_FAILED',
@@ -159,6 +245,15 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     title: 'Restore the feature this change removed',
     detail: 'A control that worked in your app before this change is no longer on the screen.',
     prompt: 'A feature that worked in this app before the last change is missing now — its control is no longer anywhere in the running app. Find what the last change removed or broke, and restore that feature exactly as it was (same place, same behaviour) without redesigning it or touching anything else that works.',
+  },
+  {
+    // Features the request named that the running app shows no control for (FeaturePresence.ts), recorded
+    // after the feature heal. The probe has been wrong before (autopsy 56f0c645), so the fix checks first.
+    code: 'FEATURE_COVERAGE',
+    title: 'Add the features that are missing',
+    detail: 'Some features you asked for have no visible control in the running app.',
+    prompt: 'Some features I asked for have no visible control in the running app (they are listed below). For each one, check the running app first: if it really is missing, add it with a real control that works end to end; if it exists but cannot be found, make it visible where a person would look for it. Do not remove or redesign anything that already works.',
+    withEvidence: true,
   },
   {
     // The build itself ADMITTED a control does nothing ("Cloud Sync … is a UI-only toggle for now",
@@ -203,6 +298,13 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     title: 'Write the missing styles',
     detail: 'Some screens use style names that nothing defines, so those parts show up unstyled.',
     prompt: 'Some class names used by the screens have no styles defined anywhere, so those parts render unstyled. Add the missing rules to the app\'s own stylesheet so every class a screen uses is really styled, and keep the look consistent with the rest of the app.',
+  },
+  {
+    // A stylesheet imported by nothing (ProjectIntegrity). INTEGRITY_HEALED answers it when the heal runs.
+    code: 'INTEGRITY_ORPHAN_STYLESHEET',
+    title: 'Connect the styles your app is not using',
+    detail: 'A stylesheet in your app is not connected to anything, so the look it holds never reaches the screen.',
+    prompt: 'A stylesheet in this app is not imported or linked anywhere, so its styles never reach the screen. Connect it from the entry file (or merge its rules into the stylesheet that is used), make sure nothing it styles is left unstyled, and confirm the look in the browser.',
   },
   {
     // The game was PLAYED in a real browser and scored (gamePlaytest.ts, admin 2026-10-05). The measured
@@ -269,6 +371,12 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'Make the app accessible: give every icon-only button an accessible name, label every form input, and make sure everything can be reached and used with the keyboard.',
   },
   {
+    code: 'INTEGRITY_FOCUS_CONFLICT',
+    title: 'Let one field take focus when a page opens',
+    detail: 'Several parts of a page try to grab the cursor when it opens, so it lands in an unexpected place.',
+    prompt: 'More than one part of a page tries to take keyboard focus when it opens, so the cursor jumps to an unexpected place. Choose the one field that should have focus first, remove the automatic focus from the rest, and keep everything else as it is.',
+  },
+  {
     code: 'TEST_SUITE',
     title: 'Fix the failing tests',
     detail: "The app's own tests did not pass.",
@@ -279,6 +387,18 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     title: 'Untangle the circular imports',
     detail: 'Two files import each other, which can break the app at runtime.',
     prompt: 'There are circular imports between files. Restructure them so nothing imports in a circle, and confirm the app still builds and runs.',
+  },
+  {
+    code: 'INTEGRITY_DUPLICATE_ENTRY',
+    title: 'Remove the second start of your app',
+    detail: 'Your app has more than one starting point, so the wrong version can be the one that opens.',
+    prompt: 'This app starts itself from more than one file, so the preview can open one version while changes land in another. Keep the single starting file the app is actually served from, remove the extra ones (moving over anything they have that the real one lacks), and confirm the right app opens.',
+  },
+  {
+    code: 'INTEGRITY_DUPLICATE_MODULE',
+    title: 'Merge the duplicate copies',
+    detail: 'The same part of your app exists in more than one place, and the copies are drifting apart.',
+    prompt: 'The same component exists in more than one place in this app, and the copies have started to differ. Keep the copy the app actually uses, make every other copy point to it instead of holding its own version, and confirm the app still builds and works the same.',
   },
   {
     code: 'SPA_FALLBACK_MISSING',
@@ -347,6 +467,26 @@ export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
   'OUTCOME_EMPTY_BUILD',
   'OUTCOME_TYPECHECK_FAILED',
 ]);
+
+/**
+ * 🔁 A ROLL-UP IS OFFERED THROUGH THE FINDING IT RESTATES (Q-381 batch three).
+ *
+ * Each key is recorded when a repair could not clear the finding on its right: "after one pass the files STILL
+ * do not parse", "the heal did not clear every guard". It is the same defect, said again later — so it gets the
+ * same button, never a second one, and never none. Two cases make a declared "no offer" wrong here: the final
+ * syntax re-check records `OUTCOME_SYNTAX_ERROR` on its own when a LATE repair broke a file that the first check
+ * passed, so the roll-up can be the only open finding; and when both are open, the roll-up's message is the
+ * later, truer one, so it is the evidence the fix is handed.
+ *
+ * `tests/aProblemTheUserIsShownCanBeActedOn.test.ts` counts a key as offered only when its target really has an
+ * offer above.
+ */
+export const OFFERED_THROUGH: Readonly<Record<string, string>> = {
+  OUTCOME_SYNTAX_ERROR: 'SYNTAX_ERROR_DETECTED',
+  OUTCOME_MISSING_FILES: 'MISSING_FILES_DETECTED',
+  OUTCOME_MISSING_EXPORT: 'MISSING_EXPORT_DETECTED',
+  BOOT_KILLING_ENV_GUARD_UNRESOLVED: 'BOOT_KILLING_ENV_GUARD',
+};
 
 /** Codes that must never become a suggestion — see the header for why each is excluded. */
 const NEVER_SUGGEST = new Set([
@@ -435,6 +575,12 @@ export function buildFindingSuggestions(
     if (typeof f?.message === 'string' && f.message.trim() && !evidence.has(code)) evidence.set(code, f.message.trim().slice(0, 600));
   }
   if (open.size === 0) return [];
+  for (const [rollUp, source] of Object.entries(OFFERED_THROUGH)) {
+    if (!open.has(rollUp)) continue;
+    open.add(source);
+    const said = evidence.get(rollUp);
+    if (said) evidence.set(source, said);
+  }
 
   const out: NextSuggestion[] = [];
   // Table order, not report order: the table is ranked by how much the user would feel the difference.

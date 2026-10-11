@@ -217,6 +217,27 @@ export async function requestWorkspaceBuildStop(
 }
 
 /**
+ * Is a build holding this workspace right now, on ANY instance? For a caller that must not change the app's
+ * files underneath a running build (a version restore — Q-128). `null` when the store could not say; the
+ * caller decides what an unknown means. Bounded like every other lease call.
+ */
+export async function workspaceBuildIsLive(
+  store: BuildLeaseStore | null | undefined,
+  workspaceId: string,
+  nowMs: number = Date.now(),
+): Promise<boolean | null> {
+  if (!store || !workspaceId) return null;
+  const attempt = (async (): Promise<boolean | null> => {
+    const ref = store.collection(WORKSPACE_BUILD_LEASE_COLLECTION).doc(workspaceId);
+    return store.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      return leaseIsLive((snap.exists ? snap.data() : undefined) as Partial<WorkspaceBuildLease> | undefined, nowMs);
+    });
+  })();
+  return bounded(attempt, null);
+}
+
+/**
  * The user-facing refusal when a build is already running on another instance. Branded, no vendor
  * names, and it states the two facts the user needs: the earlier build is still working (so their work
  * is not lost), and how to get their message through.

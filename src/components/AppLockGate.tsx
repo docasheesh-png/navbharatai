@@ -31,12 +31,13 @@ import {
  */
 
 /** Everything the PIN flow needs, shared by the wrapper and the overlay so there is one implementation. */
-function usePinFlow(userId: string) {
+function usePinFlow(userId: string, area?: AppLockArea) {
   // 🔒 EVERY READ NAMES THE USER. `appLockStatus` already drops another account's state, but these run
   // FIRST — on the very first render, before any request — so an unscoped read here would hand this
   // gate the previous account's open lock for exactly as long as it takes the status to come back.
   const [status, setStatus] = useState<AppLockStatus | null>(() => cachedAppLockStatus(userId));
-  const [unlock, setUnlockState] = useState<UnlockState | null>(() => currentUnlock(userId));
+  // …AND THE AREA (Q-124): a ticket typed at Settings does not open a money area, so the wallet's gate asks again.
+  const [unlock, setUnlockState] = useState<UnlockState | null>(() => currentUnlock(userId, area));
   /** `unlock` = type the PIN; `setup` = the code-and-new-PIN form (first time OR after "Forgot PIN"). */
   const [mode, setMode] = useState<'unlock' | 'setup'>('unlock');
   const [pin, setPinValue] = useState('');
@@ -49,14 +50,14 @@ function usePinFlow(userId: string) {
   const [notice, setNotice] = useState('');
   /** The status read itself failed. Shown ONLY on a screen that cannot open without it (`always`). */
   const [statusError, setStatusError] = useState('');
-  const [secondsLeft, setSecondsLeft] = useState(() => secondsRemaining(currentUnlock(userId)));
+  const [secondsLeft, setSecondsLeft] = useState(() => secondsRemaining(currentUnlock(userId, area)));
 
   // ONE subscription to the shared store, so every gate re-renders together when the ticket is minted or
   // lapses. Per-gate timers would drift and leave one screen open while another had re-locked.
   useEffect(() => subscribeAppLock(() => {
-    setUnlockState(currentUnlock(userId));
+    setUnlockState(currentUnlock(userId, area));
     setStatus(cachedAppLockStatus(userId));
-  }), [userId]);
+  }), [userId, area]);
 
   const refreshStatus = useCallback(async (force = false) => {
     try {
@@ -82,7 +83,7 @@ function usePinFlow(userId: string) {
   /** The countdown, so a lock that is about to close does not look like it broke. */
   useEffect(() => {
     if (!unlock) { setSecondsLeft(0); return; }
-    const tick = () => setSecondsLeft(secondsRemaining(currentUnlock(userId)));
+    const tick = () => setSecondsLeft(secondsRemaining(currentUnlock(userId, area)));
     tick();
     const timer = setInterval(tick, 1_000);
     return () => clearInterval(timer);
@@ -111,7 +112,7 @@ function usePinFlow(userId: string) {
     setBusy('unlock');
     setError('');
     try {
-      await unlockWithPin(userId, pin);
+      await unlockWithPin(userId, pin, area);
       setPinValue('');
     } catch (err) {
       setPinValue('');
@@ -148,7 +149,7 @@ function usePinFlow(userId: string) {
     setBusy('save');
     setError('');
     try {
-      await setPin(userId, newPin, code.trim());
+      await setPin(userId, newPin, code.trim(), area);
       setNewPin('');
       setConfirmPin('');
       setCode('');
@@ -464,7 +465,7 @@ export interface AppLockGateProps {
  * switches so an in-flight build survives. Use `AppLockOverlay` there.
  */
 export const AppLockGate: React.FC<AppLockGateProps> = ({ userId, area, render, embedded, always, label, banner }) => {
-  const flow = usePinFlow(userId);
+  const flow = usePinFlow(userId, area);
   const { status, unlock, secondsLeft, relock } = flow;
 
   // Not locked for this user ⇒ the gate is invisible. No banner, no wrapper div, nothing to lay out
@@ -501,12 +502,12 @@ export const AppLockGate: React.FC<AppLockGateProps> = ({ userId, area, render, 
  */
 export function useAreaLocked(userId: string, area: AppLockArea): boolean {
   const [status, setStatus] = useState<AppLockStatus | null>(() => cachedAppLockStatus(userId));
-  const [unlock, setUnlockState] = useState<UnlockState | null>(() => currentUnlock(userId));
+  const [unlock, setUnlockState] = useState<UnlockState | null>(() => currentUnlock(userId, area));
 
   useEffect(() => subscribeAppLock(() => {
     setStatus(cachedAppLockStatus(userId));
-    setUnlockState(currentUnlock(userId));
-  }), [userId]);
+    setUnlockState(currentUnlock(userId, area));
+  }), [userId, area]);
 
   useEffect(() => {
     if (!userId) return;
@@ -536,7 +537,7 @@ export function useAreaLocked(userId: string, area: AppLockArea): boolean {
  * is server-enforced rather than relying on this.
  */
 export const AppLockScreen: React.FC<{ userId: string; area: AppLockArea; embedded?: boolean }> = ({ userId, area, embedded }) => {
-  const flow = usePinFlow(userId);
+  const flow = usePinFlow(userId, area);
   return (
     <div role="dialog" aria-modal="true" aria-label={`${areaLabel(area)} is locked`} className="flex-1 overflow-y-auto bg-surface">
       <PinScreen area={area} flow={flow} embedded={embedded} />

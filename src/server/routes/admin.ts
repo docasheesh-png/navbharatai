@@ -40,7 +40,8 @@ import {
 } from '../lib/adminWelcomeGift';
 import { audit } from '../lib/audit';
 import { readAdminReason, readTokenDelta, broadcastScopeConfirmed } from '../../lib/adminActionReason';
-import { isRestorableStatus, restoredStatusFor } from '../../lib/adminAppModeration';
+import { isRestorableStatus, restoredStatusFor, ownerModerationTargets, MAX_OWNER_MODERATION, type OwnerAction } from '../../lib/adminAppModeration';
+import { WORKSPACE_UID_RE } from '../lib/workspaceIdentity';
 import { readAdminAuditPage } from '../lib/adminAuditLog';
 import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } from '../lib/buildDiscount';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
@@ -100,6 +101,7 @@ import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore, platformHealthInputs } from '../lib/HealthScore';
 import { summariseUsage, marginInr } from '../lib/usageLedger';
+import { platformMarginWindow } from '../lib/platformMargin';
 import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { usdToInr } from '../lib/UsdInrRate';
 import { analyzeFinOps } from '../lib/FinOpsAdvisor';
@@ -225,6 +227,9 @@ import {
   adminUsername,
   adminPassword,
 } from '../lib/adminAuth';
+
+/** The window the Business panel's platform margin covers (Q-114). */
+const PLATFORM_MARGIN_DAYS = 30;
 
 // ── P-SEC.3 — Admin TOTP MFA ───────────────────────────────────────────────
 // Second factor for admin-panel access. The active secret resolves from either an
@@ -1708,6 +1713,18 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         usageCostUsd(u, realRateFor(provider, model)));
       const totalTokensUsed = usage.outputTokens;
       const totalProviderCost = usdToInr(usage.costUsd);
+      // ONE PLATFORM MARGIN (Q-114): revenue minus chat + build + assistant cost, over ONE 30-day window.
+      // The day docs hold the build and assistant cost; one extra day is read so the window's first day
+      // is never cut off by the store's own "newest N" limit.
+      const [buildCostDays, assistantSpend] = await Promise.all([
+        agentV3CostTelemetry.list(PLATFORM_MARGIN_DAYS + 1),
+        assistantSpendStore.summary(PLATFORM_MARGIN_DAYS + 1),
+      ]);
+      const platformMargin = platformMarginWindow({
+        nowMs: Date.now(), days: PLATFORM_MARGIN_DAYS, transactions, chatLogs: logs,
+        priceUsage: (provider, model, u) => usageCostUsd(u, realRateFor(provider, model)),
+        buildDays: buildCostDays, assistantDays: assistantSpend.days, usdToInr,
+      });
       const modelWise: any = {};
 
       logs.forEach((log: any) => {
@@ -1829,6 +1846,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         // the two accountings is a separate change; until then this field is what keeps the labels
         // honest, and the client reads it rather than hardcoding "all providers".
         scope: 'chat' as const,
+        // …except this block, which is the whole platform — see platformMargin.ts.
+        platformMargin,
         totalUsers, totalRevenue, totalTokensUsed, totalProviderCost,
         // HOW SURE ARE WE? `providerCostComplete` false ⇒ the cost above is a FLOOR (some calls could
         // not be priced), so the profit below is an UPPER BOUND and the screen must say "at most".
@@ -2776,6 +2795,15 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
   // Take a live app down: delete its real Firebase Hosting channel, then mark it taken_down so it can
   // never republish (the deploy choke point re-checks status). Honest — reports the real result.
+  /** How many OTHER live apps this person still has — said after a ban so none is missed (Q-796). */
+  async function otherLiveApps(workspaceId: string): Promise<{ ownerUid: string | null; count: number }> {
+    const rec = await deploymentStore.get(workspaceId).catch(() => null);
+    const ownerUid = rec?.userId ?? null;
+    if (!ownerUid) return { ownerUid: null, count: 0 };
+    const all = await deploymentStore.listByUser(ownerUid, MAX_OWNER_MODERATION + 1).catch(() => []);
+    return { ownerUid, count: ownerModerationTargets(all.filter((r) => r.workspaceId !== workspaceId), 'unpublish').length };
+  }
+
   app.post('/api/admin/deployments/:workspaceId/takedown', verifyAdminToken, async (req: Request, res: Response) => {
     const { workspaceId } = routeParams(req.params);
     if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
@@ -2810,7 +2838,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         removedBy: 'admin',
         removedAt: Date.now(),
       });
-      res.json({ ok: true, workspaceId, status: 'taken_down', registryUpdated: marked });
+      // A banned person's OTHER live apps are named, so none is left serving by oversight (Q-796).
+      const others = await otherLiveApps(workspaceId).catch(() => ({ ownerUid: null, count: 0 }));
+      res.json({ ok: true, workspaceId, status: 'taken_down', registryUpdated: marked, otherLiveApps: others.count, ownerUid: others.ownerUid });
     } catch (e: any) {
       console.error('[ADMIN] Takedown error:', e?.message);
       res.status(502).json({ error: 'Takedown failed — the live site was NOT confirmed removed.', detail: e?.message || String(e) });
@@ -2864,6 +2894,55 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     } catch (e: any) {
       console.error('[ADMIN] Unpublish error:', e?.message);
       res.status(502).json({ error: 'Unpublish failed — the live site was NOT confirmed removed.', detail: e?.message || String(e) });
+    }
+  });
+
+  /**
+   * ONE PERSON'S APPS, ONE ACTION (Q-796, admin 2026-10-11). Unpublish or Ban every app of one owner that the
+   * per-row buttons would offer (`ownerModerationTargets` — the same two rules), one at a time, with EXACTLY the
+   * single routes' three steps per app: the app taken offline (`takeAppOffline`, which throws unless it is
+   * confirmed gone), then its own audit line, then its own 180-day record. Honest per app: one that could not be
+   * confirmed offline is reported as failed and nothing is recorded for it. Bounded, and the bound is said.
+   * `tests/onePersonsAppsOneAction.test.ts` pins that the three steps here stay the single routes' three.
+   */
+  app.post('/api/admin/owners/:uid/moderate', verifyAdminToken, async (req: Request, res: Response) => {
+    const { uid } = routeParams(req.params);
+    if (!uid || !WORKSPACE_UID_RE.test(uid)) return res.status(400).json({ error: 'A valid owner id is required.' });
+    const action: OwnerAction | null = req.body?.action === 'ban' ? 'ban' : req.body?.action === 'unpublish' ? 'unpublish' : null;
+    if (!action) return res.status(400).json({ error: 'action must be "unpublish" or "ban".' });
+    const reasonRead = readAdminReason((req.body ?? {}).reason);
+    if (!('reason' in reasonRead)) return res.status(400).json({ error: reasonRead.error });
+    const reason = reasonRead.reason;
+    const kind = action === 'ban' ? 'taken_down' : 'unpublished';
+    try {
+      const all = await deploymentStore.listByUser(uid, MAX_OWNER_MODERATION + 1);
+      const targets = ownerModerationTargets(all, action);
+      const results: Array<{ workspaceId: string; ok: boolean; error?: string }> = [];
+      for (const workspaceId of targets) {
+        try {
+          await takeAppOffline(workspaceId, kind, offlineDeps);
+          audit(kind === 'taken_down' ? 'ADMIN_APP_TAKEDOWN' : 'ADMIN_APP_UNPUBLISH', { admin: adminUsername(), workspaceId, reason, ownerWide: true, result: 'ok', ip: req.ip });
+          await recordTakedown({
+            surface: 'navbharat_hosting',
+            contentId: workspaceId,
+            ownerUid: uid,
+            reason: kind === 'unpublished' ? `[unpublished — owner may republish] ${reason}` : reason,
+            actor: 'admin',
+            removedBy: 'admin',
+            removedAt: Date.now(),
+          });
+          results.push({ workspaceId, ok: true });
+        } catch (e: any) {
+          results.push({ workspaceId, ok: false, error: 'not confirmed offline — nothing was recorded for it' });
+          console.error('[ADMIN] owner moderation, one app failed:', workspaceId, e?.message);
+        }
+      }
+      const failed = results.filter((r) => !r.ok).length;
+      audit('ADMIN_OWNER_MODERATE', { admin: adminUsername(), ownerUid: uid, action, reason, done: results.length - failed, failed, ip: req.ip });
+      res.json({ ok: failed === 0, action, results, done: results.length - failed, failed, truncated: all.length > MAX_OWNER_MODERATION });
+    } catch (e: any) {
+      console.error('[ADMIN] owner moderation error:', e?.message);
+      res.status(502).json({ error: 'The owner-wide action did not run — no app was changed by it.' });
     }
   });
 

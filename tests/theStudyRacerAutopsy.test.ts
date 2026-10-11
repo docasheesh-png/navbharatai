@@ -68,9 +68,9 @@ describe('1 · "youtube video ka link dalunga" is not a request to clone YouTube
 describe('2 · the three planner calls are attributed to the provider that answered', () => {
   const route = strip(src('src/server/routes/agentv3.ts'));
   it('the mega-roadmap, blueprint and project planners each feed the provider ledger', () => {
-    expect(route).toContain('captureTurnUsage(rmProvider, { inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0);');
-    expect(route).toContain('captureTurnUsage(bpProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);');
-    expect(route).toContain('captureTurnUsage(ppProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);');
+    expect(route).toContain('captureTurnUsage(rmProvider, { inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0, rmT.usage.cacheCreationInputTokens ?? 0);');
+    expect(route).toContain('captureTurnUsage(bpProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);');
+    expect(route).toContain('captureTurnUsage(ppProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0, t.usage.cacheCreationInputTokens ?? 0);');
   });
   it('🔒 no planner adds to the build total without also attributing it', () => {
     // Every `blueprintUsage.outputTokens +=` must be followed, within the same block, by a

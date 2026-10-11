@@ -41,6 +41,7 @@ import { MessageEditActions } from '../chat/MessageEditActions';
 import { ReportAiContent } from '../chat/ReportAiContent';
 import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage } from '../../lib/chatMessageActions';
+import { platformHeader } from '../../lib/platformHeader';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -790,7 +791,8 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
         // Send the verified Firebase ID token so the server resolves a REAL identity for the Professional
         // Pass gate. Without it (the bug: this fetch sent only Content-Type), a SIGNED-IN doctor was seen
         // as anonymous → "Please sign in to use the Professionals" even though they were logged in.
-        headers: await authJsonHeaders(),
+        // …and the platform, so on the iPhone app Doctor AI never teaches a way to pay (Q-123).
+        headers: { ...(await authJsonHeaders()), ...platformHeader() },
         body: JSON.stringify({
           message: text || 'Please analyze this medical document and extract all relevant clinical findings.',
           history,

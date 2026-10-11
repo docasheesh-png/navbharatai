@@ -26,12 +26,11 @@ export interface NBIChatPanelProps {
   mode: AgentMode;
   setMode: (mode: AgentMode) => void;
   activeAgent: string;
-  pendingGHEdit: { path: string; content: string; message: string; sha?: string } | null;
-  onConfirmPush: () => void;
-  isPushing: boolean;
   isAppBuilt: boolean;
   theme: ThemeMode;
   onPreviewClick: () => void;
+  /** Downloads the files a reply built — the deploy row under a build (Q-781). */
+  onDownloadZip?: (files: Record<string, string>, appName: string) => void;
   wallet: any;
   setPreferredLanguage: (lang: any) => void;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
@@ -71,12 +70,10 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
   mode,
   setMode,
   activeAgent,
-  pendingGHEdit,
-  onConfirmPush,
-  isPushing,
   isAppBuilt,
   theme,
   onPreviewClick,
+  onDownloadZip,
   wallet,
   setPreferredLanguage,
   setMessages,
@@ -153,12 +150,10 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
           onOpenModePicker={onOpenModePicker}
           onOpenHistory={onOpenHistory}
           activeAgent={activeAgent}
-          pendingGHEdit={pendingGHEdit}
-          onConfirmPush={onConfirmPush}
-          isPushing={isPushing}
           isAppBuilt={isAppBuilt}
           theme={theme}
           onPreviewClick={onPreviewClick}
+          onDownloadZip={onDownloadZip}
           userId={user?.uid}
           wallet={wallet}
           onLanguagePick={(lang) => {

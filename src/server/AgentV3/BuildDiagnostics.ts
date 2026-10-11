@@ -57,6 +57,9 @@ export function findingLabel(message: unknown): string {
 
 export const PROCESS_ONLY_CODES = new Set([
   'BUILD_OFFER_ACCEPTED', 'ATTACHMENT_RECALLED',
+  // A project import refused because the chat already held an app (Q-733). Nothing about the app is wrong —
+  // it was deliberately left untouched — so it is never a problem WITH the user's app.
+  'IMPORT_NOT_MERGED',
   // ── OUR OWN RUN, MEASURED IN 2026-10-04's CENSUS ────────────────────────────────────────────────
   // Eight codes recorded at WARNING severity that were in no registry at all, so `isAppFinding` said
   // yes to every one: each appeared in the USER's build-health card as a problem with THEIR app and

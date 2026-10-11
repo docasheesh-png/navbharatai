@@ -1,5 +1,5 @@
 import { NOT_READY_HEADLINE, NOT_READY_HEADLINE_CONTINUE } from './notReadyHeadline';
-import { PARTIAL_CONTENT_KEY, resumeTruncatedEnabled } from './reliability/resumeWrite';
+import { resumeTruncatedEnabled } from './reliability/resumeWrite';
 import { compactForBudget, recentlyTouchedPaths, tokenCompactEnabled, withWorkingSet, workingSetBlock, workingSetConfig, workingSetEnabled } from './reliability/contextBudget';
 import { QualityMonitor, handoffNote } from './reliability/qualityEscalation';
 import type { AgentEventStream } from './AgentEventStream';
@@ -22,7 +22,7 @@ import { writerTaskSiblings, SIBLING_TASKS_INPUT_KEY } from './parallelSiblings'
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
-import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarration, truncationSteeredPaths } from './TruncationRecovery';
+import { lostTruncatedOutput, truncationRecoverySteer, truncationRecoveryNarration, truncationSteeredPaths } from './TruncationRecovery';
 import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
@@ -617,8 +617,8 @@ export class AgentRunner {
       cacheReadInputTokens: 0,
     };
 
-    const billed = (): number =>
-      billedAmountUsd({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }, billingPower);
+    // The cache shares ride along so the budget guard prices them at their real rates (Q-343).
+    const billed = (): number => billedAmountUsd(usage, billingPower);
 
     // ── Durable persistence (D7), all best-effort — a store error never breaks the build. ──
     const persistence = this.opts.persistence;
@@ -967,7 +967,12 @@ export class AgentRunner {
         usage.cacheReadInputTokens += turn.usage.cacheReadInputTokens;
         // Billing accounting fix: feed the shared build-level sink so this turn's tokens are billed
         // even when this runner is a sub-agent or a heal/fix run whose `result` is later discarded.
-        this.opts.usageSink?.add({ inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens });
+        this.opts.usageSink?.add({
+          inputTokens: turn.usage.inputTokens,
+          outputTokens: turn.usage.outputTokens,
+          cacheReadInputTokens: turn.usage.cacheReadInputTokens,
+          cacheCreationInputTokens: turn.usage.cacheCreationInputTokens,
+        });
 
         if (turn.text.trim()) {
           // A repair pass that changed nothing may not tell the user it changed something (autopsy 6cd698cc —
@@ -1367,40 +1372,13 @@ export class AgentRunner {
         // partial file on disk. `truncated` unmasks them.
         if (turn.truncated || turn.stopReason === 'max_tokens') {
           try {
-            const written: Record<string, string> = {};
-            // A write_file whose arguments were sliced mid-`content` at the token limit: the adapter
-            // salvaged the `path` but there is no `content`, so nothing was written. Name it so the guard
-            // steers a rewrite (the "Unterminated string in JSON" case that previously lost the file's
-            // identity entirely and produced a blind retry).
-            const truncatedToolPaths: string[] = [];
-            for (const tu of turn.toolUses) {
-              // Cover write_file AND write_files_batch — a batch write is just as truncatable, and the
-              // old guard only looked at write_file (so a batch's cut-off tail slipped through).
-              if (tu.name === 'write_file') {
-                const inp = tu.input as { path?: unknown; content?: unknown };
-                if (typeof inp?.path === 'string' && typeof inp?.content === 'string') written[inp.path] = inp.content;
-                // P2b — a buffered cut-off write is resumed with append_file (the tool result says so);
-                // asking for a whole rewrite here would contradict it.
-                else if (typeof inp?.path === 'string' && inp?.content === undefined && !(resumeTruncatedEnabled() && typeof (tu.input as Record<string, unknown>)?.[PARTIAL_CONTENT_KEY] === 'string')) truncatedToolPaths.push(inp.path);
-              } else if (tu.name === 'write_files_batch') {
-                const b = tu.input as { files?: unknown };
-                if (Array.isArray(b?.files)) {
-                  for (const f of b.files) {
-                    const ff = f as { path?: unknown; content?: unknown };
-                    if (typeof ff?.path === 'string' && typeof ff?.content === 'string') written[ff.path] = ff.content;
-                    else if (typeof ff?.path === 'string' && ff?.content === undefined) truncatedToolPaths.push(ff.path);
-                  }
-                }
-              }
-            }
+            // What the cut-off turn kept and what it lost — the SAME sorting the bill reads (Q-166), so
+            // the files the user is told were lost are exactly the output they are not charged for.
+            // Lost: a write sliced mid-`content` (the "Unterminated string in JSON" case), a batch's
+            // cut-off tail, and `<<<FILE …>>>` text blocks the main loop never writes (Connectly autopsy
+            // 2026-07-21). A buffered write resumed with append_file is not lost (P2b).
+            const { written, truncatedToolPaths: truncatedLost, textMarkerPaths: textLost } = lostTruncatedOutput(turn, resumeTruncatedEnabled());
             const broken = Object.keys(written).length > 0 ? await findSyntaxErrors(written) : [];
-            // Connectly autopsy 2026-07-21: a cheap model that wrote a file as a `<<<FILE …>>>` TEXT block
-            // (not a write_file tool call) and hit its token ceiling loses that file entirely — the main
-            // loop only writes tool calls. Recover those lost/partial text-marker files too, not just the
-            // JS parse-failures. (A path also written via a tool call is not "lost", so exclude it.)
-            const writtenPaths = new Set(Object.keys(written));
-            const textLost = textMarkerFilePaths(turn.text).filter((p) => !writtenPaths.has(p));
-            const truncatedLost = truncatedToolPaths.filter((p) => !writtenPaths.has(p));
             const steerInput = { brokenJs: broken, textMarkerPaths: textLost, truncatedToolPaths: truncatedLost };
             truncationSteer = truncationRecoverySteer({
               ...steerInput,

@@ -24,7 +24,7 @@
 // under-bills. All rates are USD per 1,000,000 tokens and env-overridable (track live prices without
 // a deploy).
 
-import { sonnetRate, type TokenRate, type BilledUsage } from './pricing';
+import { sonnetRate, opusRate, withClaudeCacheLines, tokenCostUsd, type TokenRate, type BilledUsage } from './pricing';
 
 function envRate(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -167,7 +167,7 @@ export function realRateCard(): Record<string, TokenRate> {
     // ── xAI (Grok) ────────────────────────────────────────────────────────────────────────────────
     'grok': { inputPerMTok: envRate('RATE_GROK_IN', 3), outputPerMTok: envRate('RATE_GROK_OUT', 15) },
     // ── Anthropic (Claude) ────────────────────────────────────────────────────────────────────────
-    'haiku': { inputPerMTok: envRate('RATE_HAIKU_IN', 1), outputPerMTok: envRate('RATE_HAIKU_OUT', 5) },
+    'haiku': withClaudeCacheLines(envRate('RATE_HAIKU_IN', 1), envRate('RATE_HAIKU_OUT', 5)),
     'sonnet': sonnetRate(),
     // ── OpenAI (GPT) ──────────────────────────────────────────────────────────────────────────────
     // ⚠️ THIS COMMENT USED TO PLACE GPT ON THE WEAK TIER, AND THAT WAS STALE FOR A DAY, in the most
@@ -224,7 +224,7 @@ export function realRateFor(provider: string, model?: string): TokenRate {
 
   // Model-id first — the exact rung that ran.
   if (m) {
-    if (m.includes('opus')) return { inputPerMTok: 15, outputPerMTok: 75 }; // completeness; opus tiers bill elsewhere
+    if (m.includes('opus')) return opusRate(); // the one Opus rate, with its cache lines (Q-343)
     if (m.includes('sonnet')) return card.sonnet;
     if (m.includes('haiku')) return card.haiku;
     // NEWER-MODEL SAFETY (autopsy 2026-07-28): these branches used to send ANY unrecognized id in the
@@ -296,24 +296,18 @@ export function realRateFor(provider: string, model?: string): TokenRate {
     case 'OPENAI': return card.gpt;
     // A Nemotron aux call with no model id: the dearer of the two sizes, for the reason above.
     case 'NEMOTRON': return card['nemotron-ultra'];
-    default: return card.sonnet; // 'other'/unknown → conservative upper bound (never under-bill)
+    // 'other'/unknown → conservative upper bound (never under-bill). The Sonnet PRICE, but WITHOUT its
+    // cache lines: Anthropic's 0.1× cache read is Anthropic's price, and an unknown provider's cache share
+    // must stay at the full input rate (Q-343).
+    default: return { inputPerMTok: card.sonnet.inputPerMTok, outputPerMTok: card.sonnet.outputPerMTok };
   }
 }
 
 /** The real USD cost of one usage bucket at a given rate. Pure; negatives clamp to 0. */
-export function usageCostUsd(usage: BilledUsage & { cacheReadInputTokens?: number }, rate: TokenRate): number {
-  const input = Math.max(0, usage.inputTokens);
-  // Fix 66 billing slice — price the CACHE-HIT share of the input at the provider's (far cheaper)
-  // cache-read rate. cacheRead is clamped to the input total (a provider can never cache-serve more
-  // than it received), and when the rate card has no cache line the cache rate DEFAULTS to the full
-  // input rate — i.e. exactly the old formula, so unknown providers/models keep the margin-safe price.
-  const cacheRead = Math.min(input, Math.max(0, usage.cacheReadInputTokens ?? 0));
-  const cacheRate = rate.cacheReadPerMTok ?? rate.inputPerMTok;
-  return (
-    ((input - cacheRead) / 1_000_000) * rate.inputPerMTok +
-    (cacheRead / 1_000_000) * cacheRate +
-    (Math.max(0, usage.outputTokens) / 1_000_000) * rate.outputPerMTok
-  );
+export function usageCostUsd(usage: BilledUsage, rate: TokenRate): number {
+  // Fix 66 priced the CACHE-HIT share at the provider's cheaper cache-read rate; Q-343 adds the
+  // cache-WRITE share (Anthropic: 1.25× input). One formula for every bill — see `tokenCostUsd`.
+  return tokenCostUsd(usage, rate);
 }
 
 /** One attributed slice of a build's token spend: which provider/model, and how many tokens. */

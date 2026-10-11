@@ -19,6 +19,7 @@
 
 import { claudeVisionAnswerModel, glmVisionModels, grokVisionModels, geminiVisionModels, vertexVisionModels } from './visionModels';
 import { nextPoolKey } from './keyPool';
+import { vertexGenAI } from './vertexGenAI';
 
 export interface VisionAttachment {
   name: string;
@@ -97,28 +98,29 @@ async function tryGlm(atts: VisionAttachment[], o: VisionOptions): Promise<strin
   return null;
 }
 
-/** Vertex vision via @google-cloud/vertexai (service-account auth) — the Free universe's primary. */
+/**
+ * Vertex vision (service-account auth) — the Free universe's primary. Through the one Vertex client
+ * (`vertexGenAI.ts`, Q-769): the old `@google-cloud/vertexai` is past its own end-of-life date.
+ */
 async function tryVertex(atts: VisionAttachment[], o: VisionOptions): Promise<string | null> {
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID;
-  if (!projectId) return null;
-  const location = process.env.GOOGLE_CLOUD_REGION || 'us-central1';
-  const { VertexAI } = await import('@google-cloud/vertexai');
-  const vertex = new VertexAI({ project: projectId, location });
+  const vertex = vertexGenAI();
+  if (!vertex) return null;
   const parts: any[] = [
     ...atts.map((f) => ({ inlineData: { mimeType: f.type, data: f.base64 } })),
     { text: o.prompt },
   ];
   for (const modelId of vertexVisionModels()) {
     try {
-      const modelConfig: any = { model: modelId };
-      if (o.systemPrompt) modelConfig.systemInstruction = { role: 'system', parts: [{ text: o.systemPrompt }] };
-      const model = vertex.getGenerativeModel(modelConfig);
-      const result: any = await withTimeout(
-        model.generateContent({ contents: [{ role: 'user', parts }] }),
+      const result = await withTimeout(
+        vertex.models.generateContent({
+          model: modelId,
+          contents: [{ role: 'user', parts }],
+          ...(o.systemPrompt ? { config: { systemInstruction: o.systemPrompt } } : {}),
+        }),
         o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         `Vertex vision (${modelId})`,
       );
-      const text = result?.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      const text = result?.text?.trim();
       if (text) return text;
     } catch (err: any) {
       console.warn(`[VISION_CHAIN] Vertex ${modelId} failed: ${err?.message || err}`);

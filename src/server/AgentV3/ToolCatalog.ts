@@ -2335,7 +2335,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'gameplay code, or the reactions drift and half the game ends up feeling weaker. '
         + 'The particle system imports three (the 3D layer\'s package, installed with it), so a 2D game takes '
         + 'include: ["audio"] — the sound alone, which adds no dependency. '
-        + 'Needs NO sound files: every sound the table fires has a voice synthesised '
+        + 'The layer needs NO sound files: every sound the table fires has a voice synthesised '
         + 'from code (src/game/fx/synth.ts — shoot, shotgun, laser, reload, empty, swing, impact, hit, hurt, '
         + 'die, death, explosion, boss_die, jump, land, step, pickup, coin, heal, powerup, combo, newbest, '
         + 'levelup, achievement, click, error, thunder, and the loops rain and wind), so a game is never '

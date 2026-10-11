@@ -60,8 +60,11 @@ describe('the render evidence is WIRED, and it is enforced in exactly one place'
     // What this guard exists to prove — stated three lines above: *"the whole defect in report
     // fd021c64 was a call site, not a rule"* — is that `buildObs.previewRendered` REACHES the guard.
     // That is what is asserted now, whitespace-tolerant. Stop passing it and this still fails.
+    // The file count is the BUILDER's since 2026-10-11 (`builderWroteCount()`, build 46e2d74b): the game-kit
+    // seed puts our own files in `writtenFiles`, and a builder that wrote nothing on top of them is still an
+    // empty build. The argument this guard exists for — the render observation — is unchanged.
     expect(route).toMatch(
-      /emptyBuildFailureSummary\(\s*expectsArtifacts,\s*writtenFiles\.size,\s*sandboxUnavailable,\s*buildObs\.previewRendered\s*[,)]/,
+      /emptyBuildFailureSummary\(\s*expectsArtifacts,\s*builderWroteCount\(\),\s*sandboxUnavailable,\s*buildObs\.previewRendered\s*[,)]/,
     );
   });
 

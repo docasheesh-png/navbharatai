@@ -36,7 +36,7 @@
  * summary read that silence as "no TypeScript source was written this build". See
  * `writeTypecheckUntouched` and `writeTypecheckSummary`'s third argument.
  */
-import { robustTscCommand, TSC_BIN, PRIME_NODE_MODULES, NPM_INSTALL_LOCK_FRESH } from './tscCommand';
+import { TSC_BIN, PRIME_NODE_MODULES, NPM_INSTALL_LOCK_FRESH, MANIFEST_CURRENT } from './tscCommand';
 import { suggestedPropertyRenames, type TscError } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote, remedyFileFor } from './tscErrorCause';
 
@@ -80,10 +80,44 @@ export function shouldTypecheckWrite(path: string): boolean {
  */
 export const WRITE_TYPECHECK_NOT_READY_MARKER = 'NBAI_WRITE_TSC_NOT_READY';
 
+/**
+ * WHICH of the three not-ready conditions fired — printed after the marker (`NBAI_WRITE_TSC_NOT_READY:
+ * manifest-changed`) and counted separately.
+ *
+ * 🔴 WHY (admin 2026-10-11, build 46e2d74b). Fourteen TypeScript writes were skipped and the report said
+ * "because dependencies were still being installed" — one sentence for three different facts. The real
+ * cause (the primer's copied timestamp, see `MANIFEST_CURRENT`) could not be read off the report, because
+ * the report could not say which condition it was. Each now has its own name and its own sentence.
+ */
+export type WriteTypecheckNotReadyReason = 'install-running' | 'no-compiler' | 'manifest-changed';
+export const NOT_READY_REASONS: readonly WriteTypecheckNotReadyReason[] = ['install-running', 'no-compiler', 'manifest-changed'];
+
+/** The reason a not-ready answer carries, or null when the output is not one. A bare marker is 'unknown'. PURE. */
+export function writeTypecheckNotReadyReason(stdout: unknown): WriteTypecheckNotReadyReason | 'unknown' | null {
+  const text = String(stdout ?? '');
+  const at = text.indexOf(WRITE_TYPECHECK_NOT_READY_MARKER);
+  if (at < 0) return null;
+  const m = /^:([a-z-]+)/.exec(text.slice(at + WRITE_TYPECHECK_NOT_READY_MARKER.length));
+  const reason = m?.[1] as WriteTypecheckNotReadyReason | undefined;
+  return reason && NOT_READY_REASONS.includes(reason) ? reason : 'unknown';
+}
+
+/**
+ * The command — the LOCAL binary, incremental, on this build's cache. It never installs and never waits
+ * (autopsy Sur Taal): each of the three conditions under which a compile would need either stands it
+ * down at once, by name. Then the compiler is run DIRECTLY — not through `robustTscCommand`, whose
+ * `TSC_ENSURE` would run `npm install` on the very tree `MANIFEST_CURRENT` has just judged current (a
+ * primed tree still carries the image's old timestamp). Pure.
+ */
 export function writeTypecheckCommand(cacheId = 'writecheck'): string {
   const info = tsBuildInfoFile(cacheId);
-  return `if ${NPM_INSTALL_LOCK_FRESH} || [ ! -x ${TSC_BIN} ] || [ package.json -nt node_modules ]; then echo ${WRITE_TYPECHECK_NOT_READY_MARKER}; else `
-    + `${robustTscCommand(`--noEmit --incremental --tsBuildInfoFile ${info}`, '2>&1 | head -120')}; fi`;
+  const notReady = (r: WriteTypecheckNotReadyReason) => `echo ${WRITE_TYPECHECK_NOT_READY_MARKER}:${r}`;
+  return `if ${NPM_INSTALL_LOCK_FRESH}; then ${notReady('install-running')}; `
+    // A TORN compiler (its bin/ without its lib/ — autopsy 120eb52f) is no compiler: `TSC_ENSURE` repairs
+    // it with an install, which this check never runs, so it says so instead of crashing on every write.
+    + `elif [ ! -x ${TSC_BIN} ] || [ ! -f node_modules/typescript/lib/tsc.js ]; then ${notReady('no-compiler')}; `
+    + `elif ! ${MANIFEST_CURRENT}; then ${notReady('manifest-changed')}; `
+    + `else ${TSC_BIN} --noEmit --incremental --tsBuildInfoFile ${info} 2>&1 | head -120; fi`;
 }
 
 /**
@@ -112,7 +146,9 @@ export function writeTypecheckWarmupCommand(cacheId = 'writecheck'): string {
   const info = tsBuildInfoFile(cacheId);
   // The baked tree is primed first (Q-304): a fresh starter has no node_modules at all, and a copy plus
   // an atomic rename is seconds, where the first write's check would otherwise pay a cold install.
-  return `${PRIME_NODE_MODULES}if [ -x ${TSC_BIN} ] && [ -f tsconfig.json ] && [ ! package.json -nt node_modules ]; then `
+  // The same "is the tree current" question the write-time check asks (`MANIFEST_CURRENT`): a tree this
+  // very command just primed carries the image's old timestamp and must not read as stale (build 46e2d74b).
+  return `${PRIME_NODE_MODULES}if [ -x ${TSC_BIN} ] && [ -f tsconfig.json ] && ${MANIFEST_CURRENT}; then `
     + `${TSC_BIN} --noEmit --incremental --tsBuildInfoFile ${info} >/dev/null 2>&1; echo ${WARMUP_COMPILED_MARKER}; fi; true`;
 }
 
@@ -294,6 +330,8 @@ export interface WriteTypecheckStats {
   skippedNoTsconfig: number;
   /** Writes skipped because the compiler was not ready (an install running, or none yet) — see the marker. */
   skippedNotReady?: number;
+  /** The same writes, by WHICH not-ready condition fired (build 46e2d74b) — see `WriteTypecheckNotReadyReason`. */
+  notReadyReasons?: Partial<Record<WriteTypecheckNotReadyReason | 'unknown', number>>;
   /**
    * How many times the `tsconfig.json` probe THREW rather than answering.
    *
@@ -442,6 +480,27 @@ export function writeTypecheckUntouched(s: WriteTypecheckStats): boolean {
     && s.projectVerdict === null && s.disabledReason === null;
 }
 
+/** What each not-ready condition MEANS, in the words the report uses. */
+const NOT_READY_WORDS: Readonly<Record<WriteTypecheckNotReadyReason | 'unknown', string>> = {
+  'install-running': 'an install of the app\'s dependencies was running',
+  'no-compiler': 'the TypeScript compiler was not installed yet',
+  'manifest-changed': 'package.json had changed since the last install (a dependency may be missing until one runs)',
+  unknown: 'the compiler was not ready',
+};
+
+/**
+ * "N TypeScript write(s) skipped — 14 because package.json had changed since the last install". Names every
+ * condition that fired with its own count; a stats object from before the reasons existed keeps the old
+ * install-centric sentence, because that is all it recorded. PURE.
+ */
+function notReadyPhrase(total: number, reasons: WriteTypecheckStats['notReadyReasons']): string {
+  const parts = (Object.keys(NOT_READY_WORDS) as Array<WriteTypecheckNotReadyReason | 'unknown'>)
+    .filter((r) => (reasons?.[r] ?? 0) > 0)
+    .map((r) => `${reasons![r]} because ${NOT_READY_WORDS[r]}`);
+  if (parts.length === 0) return `${total} TypeScript write(s) skipped because dependencies were still being installed (the check never waits for an install)`;
+  return `${total} TypeScript write(s) skipped before the compiler was ready — ${parts.join('; ')} (the check never installs and never waits)`;
+}
+
 /**
  * The admin-only report line. Says plainly when the check never ran and why. Pure.
  *
@@ -464,7 +523,7 @@ export function writeTypecheckUntouched(s: WriteTypecheckStats): boolean {
 export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, tsFilesWritten: number | null = null): string {
   if (!enabled) return 'Write-time typecheck: OFF (AGENTV3_WRITE_TYPECHECK=off) — the first compile is whenever the model asks for one.';
   const notReady = s.skippedNotReady ?? 0;
-  const notReadyNote = notReady > 0 ? `${notReady} TypeScript write(s) skipped because dependencies were still being installed (the check never waits for an install)` : '';
+  const notReadyNote = notReady > 0 ? notReadyPhrase(notReady, s.notReadyReasons) : '';
   if (s.runs === 0) {
     if (s.disabledReason) return `Write-time typecheck: never ran — ${s.disabledReason}.`;
     if (notReadyNote) return `Write-time typecheck: never ran — ${notReadyNote}.`;

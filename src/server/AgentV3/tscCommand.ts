@@ -72,10 +72,51 @@ export const WARM_NODE_MODULES = '/home/user/.warm/vite-react/node_modules';
  * other's rename fails and its stage is removed. The install that follows is then a small delta (the
  * starter's own type packages) instead of a cold one. PURE string.
  */
+/** The manifest the baked tree was installed for — beside it in the image. */
+export const WARM_PACKAGE_JSON = WARM_NODE_MODULES.replace(/\/node_modules$/, '/package.json');
+
+/**
+ * Written by the primer the moment its rename lands: the primed tree's own identity (inode and mtime).
+ * See `MANIFEST_CURRENT` for why, and why it lives outside `node_modules`.
+ */
+export const PRIMED_STAMP = '/tmp/nbai-node-modules-primed';
+
 export const PRIME_NODE_MODULES =
   `if [ ! -e node_modules ] && [ -d ${WARM_NODE_MODULES} ] && grep -qE '"react"[[:space:]]*:' package.json 2>>${TSC_ENSURE_LOG}; then ` +
   `_nbs=$(mktemp -u /home/user/.nbai-nm-stage.XXXXXXXX); ` +
-  `cp -a ${WARM_NODE_MODULES} $_nbs 2>>${TSC_ENSURE_LOG} && mv -T $_nbs node_modules 2>>${TSC_ENSURE_LOG}; rm -rf $_nbs; fi; `;
+  `cp -a ${WARM_NODE_MODULES} $_nbs 2>>${TSC_ENSURE_LOG} && mv -T $_nbs node_modules 2>>${TSC_ENSURE_LOG} ` +
+  `&& stat -c '%i %Y' node_modules >${PRIMED_STAMP} 2>>${TSC_ENSURE_LOG}; rm -rf $_nbs; fi; `;
+
+/**
+ * "Is the installed `node_modules` current for this `package.json`?" — a shell condition, true when it is.
+ *
+ * 🔴 THE QUESTION WAS ANSWERED BY A TIMESTAMP OUR OWN PRIMER FALSIFIES (admin 2026-10-11, build 46e2d74b).
+ * Every reader asked `[ package.json -nt node_modules ]`. That is true after an `npm install` (npm writes
+ * `node_modules/.package-lock.json` last — measured), but the primer above copies the baked tree with
+ * `cp -a`, which KEEPS the image's timestamp: a tree primed this minute reads as months old against the
+ * starter's package.json written a second before it. The write-time typecheck, which never installs, read
+ * that as "not ready" on every write — fourteen TypeScript writes in that racing build, all unchecked, until
+ * the model ran its own `npm install`. The report blamed "dependencies were still being installed".
+ *
+ * 🔑 THE FIX IS TO THE QUESTION, NOT TO THE TIMESTAMP. Stamping the primed tree with `touch` would ALSO
+ * change what the dev-server install and `TSC_ENSURE` decide, for every app — and a primed tree whose
+ * react is 18 under a package.json asking for 19 would then never be installed. So the timestamp keeps its
+ * meaning, and this condition adds the one case it gets wrong: the tree is still EXACTLY the one the
+ * primer put there (same inode, same mtime as `PRIMED_STAMP` recorded — any install since would have
+ * changed the mtime), AND every dependency package.json declares is declared by the baked manifest with
+ * the IDENTICAL range, so the baked install is the install npm would make. Anything else falls back to the
+ * timestamp, exactly as before. The stamp is in /tmp, not in node_modules: a file written into the tree
+ * would itself move the tree's mtime and become the `touch` this refuses to do.
+ *
+ * Read by the write-time typecheck and its warm-up only — the two checks that never install. PURE string.
+ */
+const SAME_DECLARED_RANGES_JS =
+  `const f=require('fs'),d=p=>(j=>Object.assign({},j.dependencies,j.devDependencies))(JSON.parse(f.readFileSync(p,'utf8'))),` +
+  `a=d('package.json'),w=d('${WARM_PACKAGE_JSON}'),_=process.exit(Object.keys(a).length>0&&Object.keys(a).every(k=>w[k]===a[k])?0:1)`;
+export const MANIFEST_CURRENT =
+  `{ [ ! package.json -nt node_modules ] || { [ -f ${PRIMED_STAMP} ] ` +
+  `&& [ "$(cat ${PRIMED_STAMP} 2>>${TSC_ENSURE_LOG})" = "$(stat -c '%i %Y' node_modules 2>>${TSC_ENSURE_LOG})" ] ` +
+  `&& node -e "${SAME_DECLARED_RANGES_JS}" 2>>${TSC_ENSURE_LOG}; }; }`;
 
 export const TSC_ENSURE =
   // Wait (bounded) for an install already filling node_modules. Still busy ⇒ say so and stop: never run

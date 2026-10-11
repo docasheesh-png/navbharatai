@@ -38,7 +38,7 @@
 
 import { browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from './sandboxBrowserScript';
 import { newPageOptionsExpr } from './signInExplore';
-import { CONSOLE_NOISE } from './clickExplorer';
+import { CONSOLE_NOISE, NEVER_PRESS } from './clickExplorer';
 import { GAME_SIGNAL } from './touchPlayableGame';
 
 export const PLAYTEST_RESULT_MARKER = 'NBAI_PLAYTEST:';
@@ -52,18 +52,39 @@ export function gamePlaytestEnabled(env: NodeJS.ProcessEnv = process.env): boole
 
 const CODE_FILE = /\.(tsx?|jsx?|mjs|html?|vue|svelte)$/i;
 
-/** Is this project a game drawn on a canvas? Only those are played. PURE. */
+/**
+ * Is this project a game drawn on a canvas? Only those are played. PURE.
+ *
+ * 🔴 THE TWO HALVES ARE ASKED SEPARATELY (verification of build 46e2d74b's fixes, 2026-10-11). This used to read
+ * `GAME_SIGNAL && /requestAnimationFrame|…/` on one file — and `GAME_SIGNAL` itself contains
+ * `requestAnimationFrame`, so the "and" was empty: ONE animation frame anywhere made any app a canvas game.
+ * While the answer only decided whether to run a playtest, that cost a wasted run. The same day made two more
+ * readers depend on it — a playtest that could not look became a WARNING ("The game was never played"), and
+ * `journeyDerivation` began reading a game's checkboxes and selects as SETTINGS — and, measured, a habit
+ * tracker whose only data is its checkboxes, with an animated progress bar, was told "this is a game" and its
+ * save-and-reload proof was skipped. So a game needs a SURFACE it is drawn on (a 2D/WebGL context, three.js,
+ * Phaser, a <canvas>: `GAME_SIGNAL` with the frame left out) AND a LOOP that redraws it. The two may sit in
+ * different files, as a hand-written game's scene.ts and loop.ts do (46e2d74b's own layout).
+ */
 export function isCanvasGameProject(files: Record<string, string>): boolean {
+  let surface = false;
+  let loop = false;
   for (const [path, content] of Object.entries(files || {})) {
     if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof content !== 'string') continue;
     if (/(^|\/)src\/game\//.test(path)) return true;
-    if (GAME_SIGNAL.test(content) && /requestAnimationFrame|GameLoop|setAnimationLoop/.test(content)) return true;
+    if (!surface && GAME_SIGNAL.test(content.replace(/requestAnimationFrame/g, ''))) surface = true;
+    if (!loop && /requestAnimationFrame|GameLoop|setAnimationLoop/.test(content)) loop = true;
+    if (surface && loop) return true;
   }
   return false;
 }
 
-/** REPLAY, read from the code: a progress/best-score layer, and a way to play again. PURE. */
-export function replayFromCode(files: Record<string, string>): { progress: boolean; restart: boolean } {
+/**
+ * REPLAY, read from the code: a progress/best-score layer, and a way to play again — and, since build
+ * 46e2d74b, whether it is a DRIVING game (`isDrivingGame`), which the score's accelerator probe needs. The
+ * one object the route already hands the verdict, so the new fact reaches it without a second read. PURE.
+ */
+export function replayFromCode(files: Record<string, string>): GameCodeFacts {
   let progress = false;
   let restart = false;
   for (const [path, content] of Object.entries(files || {})) {
@@ -73,25 +94,104 @@ export function replayFromCode(files: Record<string, string>): { progress: boole
     if (/\bstartMeta\s*\(/.test(content) || /localStorage\.setItem\([^)]*(best|high|score|level|progress)/i.test(content)) progress = true;
     if (/\b(play again|restart|try again|retry|replay)\b/i.test(content) || /\.restart\s*\(/.test(content)) restart = true;
   }
-  return { progress, restart };
+  return isDrivingGame(files) ? { progress, restart, driving: true } : { progress, restart };
+}
+
+/**
+ * 🏁 THE BUTTON THAT STARTS THE GAME IS FOUND BY ITS SHAPE (admin 2026-10-11, build 46e2d74b).
+ *
+ * 🔴 WHAT HAPPENED. The racing game opened on a title screen whose only control was "Start Race"; the
+ * canvas existed only after it was pressed. The playtest pressed a control only when its WHOLE label
+ * matched an anchored, closed list — start, play, play now, begin, start game, let's go, go … — and
+ * "Start Race" is not on it. Nothing was pressed, no canvas appeared, and the run stopped with "no game
+ * surface (canvas) on the page". The game was never played, and the report recorded that as an
+ * auto-resolved info line. Measured on the old list, all of these were skipped too: "Play Game",
+ * "Race!", "Start Racing", "Begin Race", "Start Level 1", "▶ Play". The earlier racing build 0bb437b4
+ * used the same "Start Race" label.
+ *
+ * 🔑 THE CLASS: a closed vocabulary standing in for "the control that starts the game" — the same class
+ * as the review parser's exact tags (same build, `readLeadingTags`). So the label is matched by SHAPE:
+ * a short visible control (≤ 40 characters, ≤ 6 words) with a start STEM as a whole word anywhere in it,
+ * and nothing in it that says it does something else (help, settings, a shop, a share, a delete — the
+ * explorer's own `NEVER_PRESS` list plus the menu words below). A label that STARTS with the stem ranks
+ * above one that merely contains it, and a label the caller already saw start this game (`startLabels`,
+ * e.g. the click explorer's record) ranks above both. At most three distinct candidates are pressed, one
+ * at a time and never one twice, until a game surface appears — bounded, so a title screen with ten
+ * buttons is never a tour.
+ */
+export const START_STEM = "(?:start|play|race|begin|go|drive|ride|fly|launch|resume|let'?s\\s+go|tap\\s+to\\s+(?:start|play)|press\\s+start|new\\s+game|khelo|shuru|शुरू|खेलें|खेलो|चलो)";
+/** A start stem as a whole word, anywhere in the label (`u`: the Hindi words have no ASCII word boundary). */
+export const START_LABEL = new RegExp(`(?:^|[^\\p{L}\\p{N}])${START_STEM}(?![\\p{L}\\p{N}])|[▶►⏵]`, 'iu');
+/** The same stem at the very start of the label — ranked first. */
+export const START_LABEL_LEADING = new RegExp(`^\\s*(?:[▶►⏵]\\s*)?${START_STEM}(?![\\p{L}\\p{N}])|^\\s*[▶►⏵]`, 'iu');
+/** Controls on a title screen that do something other than start the game. */
+export const NOT_A_START = /\b(?:how|help|rules|tutorial|instructions?|settings?|options|about|credits|store|shop|leader ?board|high ?scores?|scores?|controls|privacy|terms|sign|log ?in|back|menu|mute|unmute|sound|music|volume|quit|exit|google play|app store)\b/i;
+/** At most this many start candidates are pressed, one at a time, before the game is called unreachable. */
+export const MAX_START_PRESSES = 3;
+
+/**
+ * Would the playtest press this label to start the game? 0 = no; 1 = contains a start stem; 2 = starts
+ * with one; 3 = the caller already saw this label start the game. The in-browser runner applies the same
+ * three regexes (handed over as sources), so this is the one definition. PURE.
+ */
+export function startLabelRank(label: unknown, known: readonly string[] = []): number {
+  const t = String(label ?? '').trim().replace(/\s+/g, ' ');
+  if (!t || t.length > 40 || t.split(' ').length > 6) return 0;
+  // A control that deletes, pays, shares or logs out is never pressed, whoever vouches for it.
+  if (NEVER_PRESS.test(t)) return 0;
+  if (known.some((k) => String(k ?? '').trim().replace(/\s+/g, ' ').toLowerCase() === t.toLowerCase())) return 3;
+  if (NOT_A_START.test(t)) return 0;
+  if (START_LABEL_LEADING.test(t)) return 2;
+  return START_LABEL.test(t) ? 1 : 0;
+}
+
+/**
+ * 🏎️ IS THIS A DRIVING GAME? Read from the code, so the playtest knows to ask whether holding the
+ * accelerator actually moves the vehicle (see `stalledVehicle`). The kit's own vehicle API counts, and so
+ * does hand-written code that names a vehicle, keeps a speed, and reads an accelerator key or a throttle.
+ * All three together — a puzzle that mentions a car and a speed setting is not a driving game. PURE.
+ */
+const VEHICLE_WORD = /\b(?:car|cars|kart|go-?kart|vehicle|truck|bike|motorcycle|motorbike|racer|racecar|race ?car|bus|tractor|rickshaw|scooter)\b/i;
+const SPEED_STATE = /\b(?:speed|velocity)\b/;
+const ACCELERATOR = /['"](?:ArrowUp|KeyW|w)['"]|\baccelerat\w*|\bthrottle\b|\bgas\b/i;
+export function isDrivingGame(files: Record<string, string>): boolean {
+  for (const [path, content] of Object.entries(files || {})) {
+    if (/(^|\/)node_modules\//.test(path) || !CODE_FILE.test(path) || typeof content !== 'string') continue;
+    if (/\bdriveVehicle\s*\(|\bcreateVehicleState\s*\(/.test(content)) return true;
+    if (VEHICLE_WORD.test(content) && SPEED_STATE.test(content) && ACCELERATOR.test(content)) return true;
+  }
+  return false;
+}
+
+/** What the game's CODE says the score needs: the replay layer, and whether a vehicle is driven. */
+export interface GameCodeFacts {
+  progress: boolean;
+  restart: boolean;
+  /** Present (true) only for a driving game — see `isDrivingGame`. */
+  driving?: boolean;
 }
 
 /** The in-sandbox shell command. PURE. */
-export function gamePlaytestScript(previewUrl: string, opts: { storageState?: string | null } = {}): string {
-  const cfg = gamePlaytestConfig(previewUrl, opts.storageState ?? null);
+export function gamePlaytestScript(previewUrl: string, opts: { storageState?: string | null; startLabels?: readonly string[] } = {}): string {
+  const cfg = gamePlaytestConfig(previewUrl, opts.storageState ?? null, opts.startLabels ?? []);
   return `cat > /tmp/nbai-playtest.mjs <<'NBAI_EOF'
 ${gamePlaytestModule(cfg)}
 NBAI_EOF
 ${browserScriptRunLine({ toolsDir: TOOLS_DIR, scriptPath: '/tmp/nbai-playtest.mjs', marker: PLAYTEST_RESULT_MARKER })}`;
 }
 
-export function gamePlaytestConfig(previewUrl: string, storageState: string | null = null): Record<string, unknown> {
+export function gamePlaytestConfig(previewUrl: string, storageState: string | null = null, startLabels: readonly string[] = []): Record<string, unknown> {
   return {
     base: String(previewUrl ?? '').trim(),
     marker: PLAYTEST_RESULT_MARKER,
     loadMs: LOAD_MS,
     noise: CONSOLE_NOISE.source,
     noiseFlags: CONSOLE_NOISE.flags,
+    // The start-control shape (see `startLabelRank`) — the same regexes, handed to the browser as sources.
+    start: { any: START_LABEL.source, lead: START_LABEL_LEADING.source, flags: START_LABEL.flags,
+      never: NEVER_PRESS.source, neverFlags: NEVER_PRESS.flags, notStart: NOT_A_START.source, notStartFlags: NOT_A_START.flags,
+      known: startLabels.map((l) => String(l ?? '').trim()).filter((l) => l && l.length <= 40).slice(0, 5),
+      max: MAX_START_PRESSES },
     // NOT reduced motion: a game is supposed to move, and a game that honours the preference would read
     // as frozen. The saved session still applies, so a game behind a login is played signed in.
     pageOpts: { ...JSON.parse(newPageOptionsExpr(storageState)), reducedMotion: 'no-preference' },
@@ -104,7 +204,6 @@ export function gamePlaytestModule(cfg: Record<string, unknown>, importLine: str
 const cfg = ${JSON.stringify(cfg)};
 const say = (o) => console.log(cfg.marker + JSON.stringify(o));
 const noise = new RegExp(cfg.noise, cfg.noiseFlags);
-const START = /^\\s*(start|play|play now|begin|start game|let'?s go|go|tap to (start|play)|press start|new game|khelo|shuru|शुरू|खेलें)\\s*!?\\s*$/i;
 
 // Frames are counted by DISTINCT timestamps, so a game with three requestAnimationFrame loops is not
 // counted three times; a gap over 100ms is a long frame (a visible hitch).
@@ -160,18 +259,95 @@ async function compare(page, a, b) {
   }, [a, b]);
 }
 
-async function pressStart(page) {
-  const names = await page.evaluate((src) => {
-    const re = new RegExp(src, 'i');
-    for (const el of document.querySelectorAll('button, [role=button], a')) {
-      const b = el.getBoundingClientRect();
-      const t = (el.getAttribute('aria-label') || el.innerText || '').trim();
-      if (b.width > 0 && b.height > 0 && re.test(t)) { el.setAttribute('data-nb-start', '1'); return t; }
+// The controls that look like they start the game, best first — the in-browser half of startLabelRank
+// (gamePlaytest.ts): the same regexes, the same ranks. Each is marked data-nb-start="<n>" so it can be
+// pressed by Playwright, which waits for it the way a finger would.
+async function startCandidates(page) {
+  return page.evaluate((st) => {
+    const any = new RegExp(st.any, st.flags), lead = new RegExp(st.lead, st.flags);
+    const never = new RegExp(st.never, st.neverFlags), notStart = new RegExp(st.notStart, st.notStartFlags);
+    const known = new Set((st.known || []).map((k) => String(k).toLowerCase()));
+    const found = [];
+    let order = 0;
+    for (const el of document.querySelectorAll('[data-nb-start]')) el.removeAttribute('data-nb-start');
+    // A START CONTROL WITHOUT A CONTROL'S TAG (the click explorer's lesson, autopsy f496c75b, missed here until the
+    // verification of build 46e2d74b's fix): a hand-written game's "Start Race" is as often a <div onClick> as a
+    // <button>. An element counts when it carries an inline onclick or React holds a press handler in its props —
+    // never the page's own roots, never inside or around a real control, and only the innermost of nested ones.
+    const CONTROL = 'button, [role=button], a, input[type=button], input[type=submit]';
+    const reactPress = (el) => {
+      for (const k of Object.keys(el)) {
+        if (k.indexOf('__reactProps$') !== 0) continue;
+        const p = el[k];
+        return !!(p && (p.onClick || p.onPointerDown || p.onPointerUp || p.onMouseDown || p.onMouseUp || p.onTouchStart || p.onTouchEnd));
+      }
+      return false;
+    };
+    const roots = new Set([document.documentElement, document.body, document.querySelector('#root, #app, #__next')]);
+    const extra = [];
+    const all = document.body ? document.body.getElementsByTagName('*') : [];
+    for (let n = 0; n < all.length && n < 4000; n++) {
+      const el = all[n];
+      if (roots.has(el) || el.closest(CONTROL) || el.querySelector(CONTROL)) continue;
+      if (el.hasAttribute('onclick') || reactPress(el)) extra.push(el);
     }
-    return null;
-  }, START.source);
-  if (names) { await page.click('[data-nb-start="1"]', { timeout: 3000 }).catch(() => {}); await page.waitForTimeout(500); }
-  return names;
+    const nodes = Array.from(document.querySelectorAll(CONTROL)).concat(extra.filter((el) => !extra.some((o) => o !== el && el.contains(o))));
+    for (const el of nodes) {
+      const b = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      if (b.width <= 0 || b.height <= 0 || s.visibility === 'hidden' || s.display === 'none' || el.disabled) continue;
+      // A link that leaves the app ("Play on Android", a store page, a new tab) is never the start — the same
+      // rule the click explorer applies before it presses a link.
+      if (el.tagName === 'A') {
+        const href = el.getAttribute('href') || '';
+        if (el.target === '_blank' || /^(mailto|tel|sms|javascript):/i.test(href)) continue;
+        try { if (href && new URL(href, location.href).origin !== location.origin) continue; } catch { continue; }
+      }
+      const t = String(el.getAttribute('aria-label') || el.innerText || el.value || '').trim().replace(/\\s+/g, ' ');
+      if (!t || t.length > 40 || t.split(' ').length > 6) continue;
+      const rank = never.test(t) ? 0 : known.has(t.toLowerCase()) ? 3 : notStart.test(t) ? 0 : lead.test(t) ? 2 : any.test(t) ? 1 : 0;
+      if (rank > 0) found.push({ rank, order: order++, t, el });
+    }
+    found.sort((a, b) => b.rank - a.rank || a.order - b.order);
+    return found.slice(0, st.max).map((c, n) => { c.el.setAttribute('data-nb-start', String(n)); return c.t; });
+  }, cfg.start);
+}
+
+// A start button that pulses for ever never "stops moving", and Playwright will not click a moving
+// element (autopsy 0bb437b4 — the explorer met the same "Start Race"). The same element is then clicked
+// by dispatch, exactly as the click explorer does; any other refusal is left as a refusal.
+async function pressMarked(page, n) {
+  const sel = '[data-nb-start="' + n + '"]';
+  try { await page.click(sel, { timeout: 3000 }); }
+  catch (e) { if (/not stable/i.test(String(e && e.message || e))) await page.dispatchEvent(sel, 'click').catch(() => {}); }
+  await page.waitForTimeout(500);
+}
+
+async function pressStart(page) {
+  const labels = await startCandidates(page);
+  if (!labels.length) return null;
+  await pressMarked(page, 0);
+  return labels[0];
+}
+
+// THE LADDER, used only when no game surface is on screen: give the first press a moment more, then press
+// the best start candidate NOT yet pressed, one at a time, until a canvas appears — at most cfg.start.max
+// distinct controls in all, counting the one already pressed. The candidates are read again before each
+// press, so a title screen that leads to a second screen ("Select car" → "Race!") is followed, and a
+// control is never pressed twice. Returns the label that revealed the surface, or null.
+async function startUntilSurface(page, already) {
+  const tried = new Set(already ? [already] : []);
+  while (tried.size < cfg.start.max) {
+    await page.waitForTimeout(400);
+    if (await surface(page)) return null;
+    const labels = await startCandidates(page);
+    const n = labels.findIndex((t) => !tried.has(t));
+    if (n < 0) return null;
+    tried.add(labels[n]);
+    await pressMarked(page, n);
+    if (await surface(page)) return labels[n];
+  }
+  return null;
 }
 
 const errors = [];
@@ -198,7 +374,12 @@ try {
   await page.waitForTimeout(1500);
   out.started = await pressStart(page);
   let box = await surface(page);
-  if (!box) { say({ ok: false, error: 'no game surface (canvas) on the page' }); throw null; }
+  if (!box) {
+    const revealed = await startUntilSurface(page, out.started);
+    if (revealed) out.started = revealed;
+    box = await surface(page);
+  }
+  if (!box) { say({ ok: false, error: out.started ? 'no game surface (canvas) appeared after pressing "' + out.started + '"' : 'no game surface (canvas) on the page, and no control that starts a game' }); throw null; }
   // The tap that starts many games, focuses the canvas for the keyboard, and counts as the user gesture.
   await page.mouse.click(box.x + box.w / 2, box.y + box.h / 2);
   await page.waitForTimeout(400);
@@ -224,7 +405,19 @@ try {
     moves.push({ label, change: Math.round((await compare(page, prev, next)).change * 100) / 100 });
     prev = next;
   };
-  await step('up / W', () => hold(page, ['ArrowUp', 'KeyW'], 700));
+  // THE ACCELERATOR PROBE (admin 2026-10-11, build 46e2d74b: the reviewer's "updateGameState never
+  // accelerates the car"). Up/W is held for 0.9 s, and the picture is compared between 0.35 s and 0.9 s
+  // INTO the hold: a vehicle that is moving keeps changing the picture; one whose speed never rises does
+  // not. Read by the score only for a driving game (see stalledVehicle).
+  await step('up / W', async () => {
+    for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.down(k).catch(() => {});
+    await page.waitForTimeout(350);
+    const g0 = await shot(page, box);
+    await page.waitForTimeout(550);
+    const g1 = await shot(page, box);
+    out.gas = Math.round((await compare(page, g0, g1)).change * 100) / 100;
+    for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.up(k).catch(() => {});
+  });
   await step('left / A', () => hold(page, ['ArrowLeft', 'KeyA'], 500));
   await step('right / D', () => hold(page, ['ArrowRight', 'KeyD'], 500));
   await step('Space', () => hold(page, ['Space'], 120).then(() => page.waitForTimeout(400)));
@@ -244,8 +437,9 @@ try {
   watch(mp);
   await mp.goto(cfg.base, { waitUntil: 'load', timeout: cfg.loadMs });
   await mp.waitForTimeout(1500);
-  await pressStart(mp);
+  const phoneStarted = await pressStart(mp);
   let mbox = await surface(mp);
+  if (!mbox) { await startUntilSurface(mp, phoneStarted); mbox = await surface(mp); }
   if (mbox) {
     await mp.touchscreen.tap(mbox.x + mbox.w / 2, mbox.y + mbox.h / 2).catch(() => {});
     await mp.waitForTimeout(400);
@@ -306,6 +500,8 @@ export interface PlaytestRun {
   touchIdle?: number;
   touch?: number;
   touchSurface?: boolean;
+  /** Picture change WHILE up/W stayed held (0.35 s → 0.9 s into the hold) — the accelerator probe. */
+  gas?: number;
   errors?: string[];
   errorCount?: number;
 }
@@ -347,15 +543,45 @@ export interface PlaytestScore {
   dimensions: Record<Dimension, number>;
   weakest: Dimension;
   respondedTo: string[];
+  /** A driving game whose picture stayed still at idle AND while the accelerator was held — see below. */
+  stalledVehicle?: boolean;
 }
 
+/**
+ * 🏎️ THE CAR THAT NEVER MOVES (admin 2026-10-11, build 46e2d74b). The reviewer wrote "`updateGameState`
+ * never accelerates the car" — the third return of the 2026-08-25 "speed nahi badhti" class, which had
+ * only a prompt rule and a guard inside the kit (`createVehicleState` starts at speed 5) that a
+ * hand-written game never calls. Nothing that PLAYS the game asked the question, so it shipped.
+ *
+ * Asked here, from pixels, and only where the answer cannot be mistaken: a DRIVING game (read from its
+ * code, `isDrivingGame`) whose picture is the SAME picture at idle and the same picture while up/W is held
+ * for most of a second (both below STILL_BELOW). A moving vehicle changes the picture under any camera —
+ * the road streams past a chase camera, the car crosses a fixed one. A world that moves at idle (an
+ * auto-running game, an animated sky) is never judged by this: the probe cannot tell a car that is
+ * already moving from one the accelerator should have moved, so it says nothing.
+ *
+ * ⚠️ THE ONE RESIDUAL, said rather than hidden: a world with nothing in it that can be seen to move — a
+ * flat, untextured road and an empty sky under a camera that follows the car — looks the same moving or
+ * stopped. Such a game would be offered this fix wrongly; it is also a game a player cannot see moving,
+ * which is a defect of its own. PURE.
+ */
+export const STALLED_VEHICLE_FIX = 'Holding the accelerator (Up / W) moved nothing — the vehicle never speeds up. Start it moving (speed above zero) and raise its speed every frame the accelerator is held, then drive it along its own heading.';
+
 /** Turn the measurements into the Game Quality Score. Every number comes from a measurement. PURE. */
-export function scorePlaytest(run: PlaytestRun, replay: { progress: boolean; restart: boolean }): PlaytestScore {
+export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): PlaytestScore {
   const idle = run.idle ?? 0;
   const threshold = Math.max(STILL_BELOW * 4, idle * 1.5 + 0.3);
   const respondedTo = (run.moves ?? []).filter((m) => m.change > threshold).map((m) => m.label);
   const runs = (run.spread ?? 0) >= 3 ? 100 : (run.spread ?? 0) >= 1 ? 50 : 0;
-  const responds = respondedTo.length >= 3 ? 100 : respondedTo.length === 2 ? 85 : respondedTo.length === 1 ? 65 : 0;
+  // "Still" here is the floor this file already uses for "the same picture" (STILL_BELOW), on BOTH reads:
+  // the strictest reading there is, because the cost of a false "your car never moves" is a wrong fix
+  // offered on a working game. A road with lane marks, kerbs or scenery changes far more than this the
+  // moment it moves (measured: a thin-striped test road gave 0.22 moving and 0 stalled).
+  const stalledVehicle = replay.driving === true && typeof run.gas === 'number'
+    && idle < STILL_BELOW && run.gas < STILL_BELOW;
+  // A driving game whose accelerator moves nothing cannot score as controllable, whatever else answered.
+  const responds = Math.min(stalledVehicle ? 40 : 100,
+    respondedTo.length >= 3 ? 100 : respondedTo.length === 2 ? 85 : respondedTo.length === 1 ? 65 : 0);
   const touchThreshold = Math.max(STILL_BELOW * 4, (run.touchIdle ?? 0) * 1.5 + 0.3);
   const touchMoved = (run.touch ?? 0) > touchThreshold;
   const mobile = run.touchSurface === false ? 0 : touchMoved ? 100 : (run.touchControls ?? 0) >= 2 ? 60 : 0;
@@ -375,7 +601,9 @@ export function scorePlaytest(run: PlaytestRun, replay: { progress: boolean; res
     const lost = (100 - dimensions[d]) * DIMENSION_WEIGHTS[d];
     if (lost > worst) { worst = lost; weakest = d; }
   }
-  return { overall: Math.round(total / weight), dimensions, weakest, respondedTo };
+  // A car that never moves is THE defect, whichever dimension lost more points on paper.
+  if (stalledVehicle) weakest = 'responds';
+  return { overall: Math.round(total / weight), dimensions, weakest, respondedTo, ...(stalledVehicle ? { stalledVehicle: true } : {}) };
 }
 
 /** At or above this, with nothing at zero, a game is reported as playable. */
@@ -393,22 +621,40 @@ const LABEL: Readonly<Record<Dimension, string>> = {
   runs: 'Runs', responds: 'Controls', mobile: 'Phone', stable: 'Stable', smooth: 'Smooth', alive: 'Alive', replay: 'Replay',
 };
 
+/**
+ * A GAME THAT WAS NEVER PLAYED IS SAID SO, AS A WARNING (admin 2026-10-11, build 46e2d74b).
+ *
+ * 🔴 This line used to be recorded `info` and auto-resolved — the way a pass is recorded. In 46e2d74b the
+ * playtest never pressed "Start Race", never found a canvas, and the report filed that beside the passes;
+ * nothing anywhere said the racing game had never been played, while the admin found within a minute that
+ * its car showed its headlights and steered backwards. A check that could not look is not a check that
+ * passed: it stays an open WARNING that names what was not done. It is still OUR instrument, not a defect
+ * of the user's app (BuildDiagnostics keeps the code process-only, so it costs the app no health points and
+ * no money) — the change is that it can no longer read as fine. One sentence for every way it is reached
+ * (the runner's own answer, and the route's timeout or crash), so the two can never drift apart. PURE.
+ */
+export function playtestNotRunVerdict(why: string): PlaytestVerdict {
+  const reason = String(why ?? '').trim().replace(/\.+$/, '') || 'the playtest browser produced no result';
+  return {
+    code: 'GAME_PLAYTEST_NOT_RUN', severity: 'warning', autoResolved: false, score: null,
+    message: `The game was never played — ${reason}. Nothing here shows that it is playable: its controls, its speed and its camera were not checked in a browser.`,
+  };
+}
+
 /** The report line, with the scorecard. PURE. */
-export function playtestVerdict(run: PlaytestRun, replay: { progress: boolean; restart: boolean }): PlaytestVerdict {
-  if (!run.ok) {
-    const why = run.error || run.diagnostic || 'the playtest browser produced no result';
-    return { code: 'GAME_PLAYTEST_NOT_RUN', severity: 'info', autoResolved: true, score: null, message: `The game was not played: ${why}.` };
-  }
+export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): PlaytestVerdict {
+  if (!run.ok) return playtestNotRunVerdict(run.error || run.diagnostic || '');
   const score = scorePlaytest(run, replay);
   const card = (Object.keys(DIMENSION_WEIGHTS) as Dimension[]).map((d) => `${LABEL[d]} ${score.dimensions[d]}`).join(' · ');
   const played = score.respondedTo.length ? `it responded to ${score.respondedTo.join(', ')}` : 'it did not respond to the arrows/WASD, Space or a drag';
   const fpsNote = typeof run.fps === 'number' ? `; ${run.fps} fps in the build sandbox's software renderer (a phone's GPU is faster)` : '';
   const errNote = run.errorCount ? `; ${run.errorCount} error(s) while playing: ${(run.errors ?? [])[0] ?? ''}` : '';
   const anyZero = (Object.keys(score.dimensions) as Dimension[]).some((d) => score.dimensions[d] === 0 && d !== 'replay');
-  const ok = score.overall >= PLAYABLE_SCORE && !anyZero;
+  const ok = score.overall >= PLAYABLE_SCORE && !anyZero && !score.stalledVehicle;
   const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${errNote}.`;
   if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: head };
-  return { code: 'GAME_PLAYTEST_ISSUES', severity: 'warning', autoResolved: false, score, message: `${head} Weakest: ${LABEL[score.weakest]} — ${DIMENSION_FIX[score.weakest]}` };
+  const fix = score.stalledVehicle ? STALLED_VEHICLE_FIX : DIMENSION_FIX[score.weakest];
+  return { code: 'GAME_PLAYTEST_ISSUES', severity: 'warning', autoResolved: false, score, message: `${head} Weakest: ${LABEL[score.weakest]} — ${fix}` };
 }
 
 /** The card's three-way outcome from the code the playtest recorded. One place, so the card and the report agree. PURE. */

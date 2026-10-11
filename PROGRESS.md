@@ -93991,3 +93991,11 @@ to it. Recorded as a deliberate non-item, not an omission.
 - **Q-818 (my own Q-600 leftovers, found by the merging session):**
   - The dead "Confirm & Push to GitHub" chain is removed whole, including `githubService.ts`, which posted to a deleted route.
   - The route census now sees callers that build their path from a base constant (`expandBaseConstants`).
+- **Q-157 (admin decision 2026-10-11: "one more review after an auto-fix, only when the fix was applied"):**
+  - Root cause: the C9 pass cleared the reviewer's criticals the moment its repair COMPLETED, and the code beside it said "a future slice could re-review". Class: a fix declared done because it ran, never checked against the finding it was for.
+  - Fix: `postFixReview.ts` plus one block in the route. After an applied repair the reviewer looks once more, with its own abort, spawn and billing phase (`post-fix-review`). No second repair follows it.
+  - What it still finds keeps the build not-ok: `REVIEW_RECHECK_CRITICALS_REMAIN` (warning) is an app finding with a one-tap offer that carries the findings.
+  - A look that gives no verdict (no room, timed out, threw) is reported as `REVIEW_RECHECK_NOT_RUN` and left out of the bill on its own phase, so the first review is never handed back.
+  - Siblings: the explorer and functional repairs are already judged by their own re-measure (kept or rolled back), so this was the one repair trusted unseen.
+  - Pins updated honestly: three barren sites (`aBarrenPassIsNotTheUsersBill`); two `reviewBuild` calls, the second after `fix.ok` on its own phase (`reviewLateLanding`).
+  - Test: `tests/aRepairIsReviewedAgain.test.ts`, reverted and seen to fail.

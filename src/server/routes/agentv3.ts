@@ -426,7 +426,8 @@ import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, r
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd } from '../AgentV3/providerRates';
 import { splitUnbilledCost, absorbedWorkDetail } from '../AgentV3/unbilledTurns';
-import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
+import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_POST_FIX_REVIEW, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
+import { postFixRecheckBudgetMs, postFixRecheckOutcome } from '../AgentV3/postFixReview';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
   createProviderUsageLedger,
@@ -24457,8 +24458,8 @@ async function noteBuildOutcome(
                 fixOk = !!fix.ok;
                 // Only a verifiably-COMPLETED repair pass clears the false-success guard. A failed/thrown
                 // pass (below) leaves reviewCriticalsUnresolved set → the build finalizes honestly NOT-ok.
-                // (A completed pass is trusted here, matching the existing `result = fix` promotion; a
-                // future slice could re-review to confirm the criticals are actually gone.)
+                // (A completed pass clears them here; the one review just below — Q-157 — puts back
+                // whatever the reviewer still finds.)
                 if (fix.ok) { result = adoptHealResult(result, fix); reviewCriticalsUnresolved = []; }
                 // Persist the repair's writes — MERGE, never replace: writtenFiles holds only THIS
                 // TURN's writes (on an edit turn that's a handful of files), and the old
@@ -24469,6 +24470,44 @@ async function noteBuildOutcome(
                 // SUCCEEDED — a failed pass (e.g. the provider chain 400'd) must NOT report the criticals as
                 // fixed while they still ship. reviewerAutofixOutcome records the truthful line either way.
                 try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(fix.ok, label) }); } catch { /* best-effort */ }
+                // ONE MORE REVIEW, ONLY BECAUSE A FIX WAS APPLIED (Q-157, admin 2026-10-11). A completed pass
+                // is not a correct one: the reviewer looks again, and whatever it still calls critical keeps
+                // the build honestly not-ok. One look — no second repair follows it. Its own abort and spawn
+                // (the first review's were ended above) and its own billing phase, so a look that gives no
+                // verdict is left out of the bill without handing back the first review (postFixReview.ts).
+                if (fix.ok && !abort.signal.aborted) {
+                  const recheckBudget = postFixRecheckBudgetMs(rFiles.length, fixHeadroomMs(), projectFileCount);
+                  let recheckReview: Awaited<ReturnType<typeof reviewBuild>> | null = null;
+                  let recheckWhy = recheckBudget === 0 ? 'the build had no time left for it' : '';
+                  if (recheckBudget > 0) {
+                    const recheckAbort = new AbortController();
+                    const stopRecheckWithBuild = (): void => recheckAbort.abort();
+                    abort.signal.addEventListener('abort', stopRecheckWithBuild, { once: true });
+                    try {
+                      const recheckSample = await Promise.all(rFiles.slice(0, 5).map(async (p) => ({
+                        path: p,
+                        content: writtenFiles.has(p) ? (writtenFiles.get(p) ?? '') : await actuator.readFile(workspaceId, p).catch(() => ''),
+                      })));
+                      recheckReview = await raceTimeout(runInBillingPhase(PHASE_POST_FIX_REVIEW, async () => reviewBuild({
+                        userRequest: milestoneRequest ?? checksRequest,
+                        fileTree: rFiles,
+                        fileSample: recheckSample,
+                        spawn: makeSubAgentSpawn({ ...subAgentDeps, signal: recheckAbort.signal, ...(reviewPlan.maxSteps !== undefined ? { maxSteps: reviewPlan.maxSteps } : {}) }),
+                        mode: reviewPlan.mode,
+                        changedFiles: reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden),
+                      })), recheckBudget, 'post-fix-review');
+                    } catch (e) {
+                      recheckWhy = e instanceof Error && /timed out/i.test(e.message) ? 'it ran out of time' : 'it could not finish';
+                    } finally {
+                      recheckAbort.abort();
+                      abort.signal.removeEventListener('abort', stopRecheckWithBuild);
+                    }
+                  }
+                  const recheck = postFixRecheckOutcome(recheckReview, recheckWhy);
+                  if (recheck.unresolved) reviewCriticalsUnresolved = recheck.unresolved;
+                  else if (recheckBudget > 0) barrenPhases.add(PHASE_POST_FIX_REVIEW);
+                  try { buildDiag.record({ phase: 'build', severity: recheck.severity, code: recheck.code, message: recheck.message, autoResolved: recheck.autoResolved }); } catch { /* best-effort */ }
+                }
               } catch (e) {
                 timedOut = e instanceof Error && /timed out/i.test(e.message);
                 console.log(`[AGENTV3] reviewer auto-fix failed (attempt ${fixAttempt}): ${e instanceof Error ? e.message : String(e)}`);

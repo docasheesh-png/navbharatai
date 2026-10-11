@@ -24,6 +24,7 @@
   "src/server/lib/braveSearch.ts::cache": "bounded in code: MAX_CACHE_ENTRIES",
   "src/server/lib/braveSearch.ts::inFlight": "lifecycle: a lookup in flight, removed when it settles",
   "src/server/lib/braveSearch.ts::loggedStatuses": "closed key set: HTTP status codes",
+  "src/server/lib/globalAnonCeiling.ts::counters": "closed key set: one counter per limiter name declared in the route files",
   "src/server/lib/govData/client.ts::inFlight": "lifecycle: a fetch in flight, removed when it settles",
   "src/server/lib/indicDomainTerms.ts::compiled": "closed key set: terms from a fixed table",
   "src/server/lib/keyPool.ts::cursors": "closed key set: one cursor per configured key pool",

@@ -16,6 +16,7 @@
  *   Returns 429 when over limit. VITEST-skipped.
  */
 import type { Request, Response, NextFunction } from 'express';
+import { globalAnonCounter } from './globalAnonCeiling';
 import { consumeDurableRate } from './DurableRateLimit';
 import { BoundedCache } from './boundedCache';
 import { addressRateKey } from './clientAddress';
@@ -469,10 +470,19 @@ export function rateLimiter(opts: RateLimitOptions) {
       _rateBuckets.set(key, { count: 1, windowStart: now });
     }
 
-    // In-memory-only limiters (opts.durable === false) stop here: no per-request Firestore write. Used
-    // for high-frequency no-cost endpoints (in-browser preview) where the durable write was the #1
-    // source of daily write-quota exhaustion and per-instance limiting is sufficient (nothing to spend).
-    if (opts.durable === false) { next(); return; }
+    // In-memory-only limiters (opts.durable === false) skip the per-request Firestore write: used for
+    // high-frequency endpoints where that write was the #1 source of daily write-quota exhaustion.
+    // 🔴 But their platform-wide ANONYMOUS ceiling still applies (audit 2026-10-11, F5): it used to be
+    // skipped here too, so `app-ai` and `app-ai-image` — which spend money — had no global cap at all.
+    // It is enforced through a batched shared count (globalAnonCeiling.ts), not a write per request.
+    if (opts.durable === false) {
+      if (!uid && opts.anonGlobalPerHour && opts.anonGlobalPerHour > 0 && !globalAnonCounter(opts.name, opts.anonGlobalPerHour).allow(now)) {
+        res.status(429).json({ error: `The platform's hourly limit for anonymous ${noun} has been reached. Sign in or try again later.` });
+        return;
+      }
+      next();
+      return;
+    }
 
     // Layer 2 — DURABLE cross-instance enforcement (bounded + fail-open). This is what makes the
     // limit real on min-instances=0. A global anon ceiling caps total anonymous volume platform-wide.

@@ -93794,3 +93794,28 @@ Closed when #3659 merged, and appended to the register: Q-783, Q-703, Q-117, Q-7
   - Checked and left alone: `buildCostLedger.realCostFromCalls` prices the call log only for reports with no settled real cost, and all of those predate this change.
   - Live effect to watch: a Claude-led build's real cost and bill rise to their true size, and the context meter on a Claude turn reads fuller. Both were under-reported.
   - Legacy note: when real-cost billing is switched OFF, the flat Sonnet-equivalent bill now discounts every provider's cache share at Sonnet's cache rate. Real-cost billing is on by default, and the Opus tiers were retired on 2026-09-14.
+
+### 2026-10-11 — the rest of the money decisions: Q-166, Q-165, Q-114 (all in #3668, beside Q-124 and Q-343)
+
+**#3668 now carries #3667 too.** The merging session merged #3667's staged head (the performance audit, which carries
+`main` at #3666) into this branch, which cancelled the first CI run. This session merged that into its own work rather
+than undoing it, and re-ran the full gate on the merged state.
+
+- **Q-166 (money):** a cut-off reply that the platform THREW AWAY is not billed for its output.
+  - Thrown away means: a write with no content, a file sent as text the loop never writes, a fast-lane file half-written after its last continuation, or a planner reply too cut off to read.
+  - It is the whole call's output, because a provider reports one output count per call. The input stays billed.
+  - One predicate (`TruncationRecovery.lostTruncatedOutput`) is read by both the truncation guard and the bill.
+  - `ledger.discardOutput` covers the lanes that learn it afterwards. One `sliceKey` is used for `add` and `discardOutput`.
+  - The report names the rule rather than calling it a starved turn.
+  - Test: `tests/aCutOffReplyThrownAwayIsNotBilled.test.ts`, with a census of the cut-off detectors.
+- **Q-165 (money):** already the behaviour since 2026-08-17.
+  - The ₹1 lives on the artifacts call, which GitHub serves only for a successful run.
+  - "My built apps" reads the run's real status first.
+  - Now pinned by `tests/anApkIsChargedOnlyWhenItWasBuilt.test.ts`.
+- **Q-114 (money view):** one platform margin: revenue minus chat + build + assistant cost, over one 30-day window.
+  - Two corrections to the queue row:
+    - `user_costs` holds the BILLED amount, not our cost.
+    - The assistants are a third cost record.
+  - Both admin margin cards read it, and say "at least" / "at most" when a source was not fully measured.
+  - The chat burn panel's cost line is now labelled chat; it was a sibling mislabel.
+  - Test: `tests/onePlatformMargin.test.ts`.

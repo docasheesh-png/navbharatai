@@ -173,6 +173,13 @@ export class FirestoreConversationStore implements ConversationStore {
     return { id: input.id, ...meta, usage: { ...meta.usage }, messages: seed };
   }
 
+  /** The main document only — no turns, no timeline. One read. */
+  async getMeta(id: string): Promise<ConversationRecord | null> {
+    const snap = await this.mainDoc(id).get();
+    if (!snap.exists) return null;
+    return this.toRecord(id, snap.data() as ConversationMeta, []);
+  }
+
   async get(id: string, opts?: { includeTimeline?: boolean }): Promise<ConversationRecord | null> {
     const snap = await this.mainDoc(id).get();
     if (!snap.exists) return null;

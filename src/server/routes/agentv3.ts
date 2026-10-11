@@ -242,6 +242,7 @@ import {
   deriveTitle,
   upsertConversationTurn,
   type ConversationStore,
+  type ConversationRecord,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, importAccountingLine, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace, checkFrameworkCoherence, frameworkCoherenceGuidance } from '../AgentV3/ProjectImport';
@@ -714,6 +715,7 @@ import {
   workspaceOwnershipOk as sharedWorkspaceOwnershipOk,
   verifiedWorkspaceReadOk as sharedVerifiedWorkspaceReadOk,
   workspaceIdFor,
+  workspacePrefixFor,
   safeWorkspaceUid,
 } from '../lib/workspaceIdentity';
 import { adminRequestOk, requireAdmin } from '../lib/adminAuth';
@@ -1565,6 +1567,42 @@ export function finalSyntaxErrorSummary(fileCount: number): string {
  */
 export function conversationIdForWorkspace(workspaceId: string): string {
   return workspaceId;
+}
+
+/**
+ * Every id a workspace's conversation record can have: the workspace id itself (`conversationIdForWorkspace`),
+ * the bare session id (a DUPLICATED app's record is keyed by its own session id), and the legacy `v3_<sid>`.
+ * PURE.
+ */
+export function conversationIdCandidatesForWorkspace(workspaceId: string, userId: string | null): string[] {
+  const out = [conversationIdForWorkspace(workspaceId)];
+  for (const prefix of [workspacePrefixFor(userId), ANON_WORKSPACE_PREFIX]) {
+    if (prefix && workspaceId.startsWith(prefix) && workspaceId.length > prefix.length) {
+      const sid = workspaceId.slice(prefix.length);
+      out.push(sid, `v3_${sid}`);
+      break;
+    }
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * THIS workspace's conversation record, by point reads of its possible ids — never by listing the user's
+ * history (performance audit 2026-10-11, D1). Every build turn used to call `listByUser(uid, 10)` TWICE — each
+ * reading up to 200 conversation documents — just to find this one, and silently missed it when the workspace
+ * was not among the 10 most recent. Returns the record WITHOUT its transcript (`getMeta`), or null.
+ */
+export async function findWorkspaceConversation(
+  store: ConversationStore,
+  userId: string | null,
+  workspaceId: string,
+): Promise<ConversationRecord | null> {
+  const owner = userId ?? 'anon';
+  for (const id of conversationIdCandidatesForWorkspace(workspaceId, userId)) {
+    const rec = await (store.getMeta ? store.getMeta(id) : store.get(id)).catch(() => null);
+    if (rec && rec.workspaceId === workspaceId && rec.userId === owner) return rec;
+  }
+  return null;
 }
 
 /**
@@ -17131,8 +17169,7 @@ async function noteBuildOutcome(
       // turns "continue" from amnesia into a real resume. Best-effort — never blocks the build.
       try {
         const store = getConversationStore();
-        const recent = await store.listByUser(userId ?? 'anon', 10);
-        const prior = recent.find((r) => r.workspaceId === workspaceId);
+        const prior = await findWorkspaceConversation(store, userId, workspaceId);
         if (prior) {
           const full = await store.get(prior.id);
           // MEMORY FIX 6 (long sessions): a ROLLING summary — recent turns verbatim PLUS a condensed
@@ -23717,8 +23754,8 @@ async function noteBuildOutcome(
       // over a richer, already-saved transcript. Best-effort — a store failure never affects the build.
       try {
         const store = getConversationStore();
-        const recentForUser = await store.listByUser(userId ?? 'anon', 10);
-        if (needsFallbackConversationPersist(recentForUser, workspaceId, buildStartedAt)) {
+        const ownRecord = await findWorkspaceConversation(store, userId, workspaceId);
+        if (needsFallbackConversationPersist(ownRecord ? [ownRecord] : [], workspaceId, buildStartedAt)) {
           // UPSERT on the stable per-session id (shared helper — the ONE server write shape for
           // history): first turn creates the record, later turns append; a create race retries
           // as an append so a turn is never silently dropped.

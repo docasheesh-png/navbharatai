@@ -93754,3 +93754,62 @@ that other test in my own case — but it measures a *different* fixture, so the
 put it, and the case then failed on a `html` variable that was not even in that `describe`'s scope. It now
 asserts the thing that actually matters: **our contribution** to the document (<120 bytes), and that none of
 the CSS is in the page. *A threshold copied from another test's fixture is not a measurement.*
+
+## 2026-10-11 — Round 2 of the native-feel polish: a loading screen has a shape
+
+Stacks on #3669 (the branch, not `main` — `nativeFeel.ts` does not exist on `main` yet, which I found by
+branching off `main` and watching the edit fail on a missing file).
+
+### Measured first again, and half of what I was about to propose already existed
+
+| | our own app | a built app |
+|---|---|---|
+| Screen transition | ✅ `src/lib/screenTransition.ts` — a fade-through, with Material's and iOS's own rationale written down | — |
+| Skeleton primitive | ✅ `src/components/ui/Skeleton.tsx` (P-UX.2) | ❌ **nothing** |
+| Scroll restoration | ❌ | ❌ |
+| Swipe-back | ❌ | ❌ |
+
+So the honest round-2 list was much shorter than the one I announced. **The real gap: the build rule asked
+for *"the SHAPE of what is coming"* and handed the model nothing to use.** A rule that names no primitive is
+aspirational, not actionable.
+
+**Shipped:** `.nb-skeleton` in the baseline stylesheet — a sized-by-the-app block with a slow opacity pulse,
+`pointer-events: none` (decoration must never swallow a tap meant for the content loading underneath), and
+no motion under `prefers-reduced-motion`. The build rule now names it with a usable snippet.
+
+### 🎨 The colour decision, and an assertion I had to widen honestly
+
+A skeleton needs a fill, and the baseline's standing promise was that it paints nothing. The fill is
+**`currentColor`** — the app's own text colour — so the placeholder is right in light mode, in dark mode,
+and in a theme this file has never seen. A hex would have been wrong in at least one of them.
+
+That meant widening my own test. The first version banned any `background:`/`color:` declaration at all;
+the real invariant is **"no colour this file CHOSE"**, not "no colour property". The assertion now extracts
+every colour value in the stylesheet and requires each to be one of `currentColor`, `transparent` or
+`inherit` — which is stricter in the way that matters and permits the one thing that cannot fight a theme.
+
+### ⚠️ A backtick inside a TS template literal, again
+
+The skeleton's CSS comment quoted three identifiers in backticks — and `NATIVE_FEEL_CSS` **is** a template
+literal, so each one ended the string. It surfaced as two unrelated-looking `TS1005`s about 170 lines away
+from the comment. This repo has recorded the same trap before for the generated journey/explorer modules.
+The block now says so in its own text, and a test asserts the CSS contains no backtick.
+
+🔑 **Honest note on that test: the compiler is the real guard, not the assertion.** Reversion probe 4 put a
+backtick back and the suite failed at *transform* — the file could not compile, so the assertion never ran.
+It earns its place by documenting WHY the rule exists for the next person, not by being the thing that
+catches it.
+
+### Scroll: given to the MODEL, deliberately not shipped as a script
+
+Scroll restoration is genuinely missing on both sides, and I did **not** ship a generic implementation for
+built apps. A generic restore has to guess the app's routing: in a state-routed SPA the pathname never
+changes, so one saved position would be restored onto whatever screen came next — putting the user half-way
+down the wrong list. That is trading one problem for another. The router is the one thing the model knows and
+this module cannot, so the rule asks for the behaviour (new screen → top; back → the exact position) and
+leaves the mechanism to the code that has a router.
+
+⚠️ **And I am not building swipe-back, with the reason rather than silence:** in a tab app "back" is
+ambiguous (Home → Studio has no back), Android's hardware back is already handled by
+`installBackButtonHandler`, and a swipe-back that guesses wrong subtracts from native feel instead of adding
+to it. Recorded as a deliberate non-item, not an omission.

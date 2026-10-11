@@ -132,11 +132,41 @@ describe('📱 the baseline fixes the specific tells, and paints nothing', () =>
     expect(NATIVE_FEEL_CSS).toMatch(/--safe-top:\s*env\(safe-area-inset-top/);      // the notch
   });
 
-  it('🎨 PAINTS NOTHING — colour belongs to the app and to THEME_RULES, never to a baseline', () => {
-    // A baseline that set a colour would fight every generated app's own theme.
+  it('🎨 CHOOSES NO COLOUR — colour belongs to the app and to THEME_RULES, never to a baseline', () => {
+    // A baseline that picked a colour would be wrong in at least one of light mode, dark mode, and a
+    // theme it has never seen. So: no literal colour of any kind.
     expect(NATIVE_FEEL_CSS).not.toMatch(/#[0-9a-f]{3,8}\b/i);
-    expect(NATIVE_FEEL_CSS).not.toMatch(/\b(?:rgba?|hsla?)\(/i);
-    expect(NATIVE_FEEL_CSS).not.toMatch(/(?:^|[\s;{])(?:background|color)\s*:/m);
+    expect(NATIVE_FEEL_CSS).not.toMatch(/\b(?:rgba?|hsla?|color-mix|oklch)\(/i);
+    for (const named of ['white', 'black', 'grey', 'gray', 'silver', 'red', 'blue']) {
+      expect(NATIVE_FEEL_CSS.toLowerCase()).not.toMatch(new RegExp(`:\\s*${named}\\b`));
+    }
+    // ⚠️ ASSERTION WIDENED 2026-10-11, and the reason matters. The first version banned any
+    // `background:`/`color:` declaration at all. The skeleton placeholder then needed a fill — and the
+    // right fill is `currentColor`, which is the APP'S OWN text colour. That cannot fight the app's
+    // theme; it IS the theme. So the real invariant is "no colour this file CHOSE", not "no colour
+    // property", and the only colour value permitted is one inherited from the app.
+    const colourValues = [...NATIVE_FEEL_CSS.matchAll(/(?:background(?:-color)?|color)\s*:\s*([^;]+);/gi)]
+      .map((m) => m[1].trim());
+    expect(colourValues.length).toBeGreaterThan(0);
+    for (const v of colourValues) expect(['currentColor', 'transparent', 'inherit']).toContain(v);
+  });
+
+  it('gives a built app the loading shape it never had, without choosing its colour', () => {
+    expect(NATIVE_FEEL_CSS).toMatch(/\.nb-skeleton\s*\{/);
+    expect(NATIVE_FEEL_CSS).toMatch(/background-color:\s*currentColor/);
+    expect(NATIVE_FEEL_CSS).toMatch(/@keyframes nb-skeleton-pulse/);
+    // Decoration must never swallow a tap meant for the content loading underneath it.
+    expect(NATIVE_FEEL_CSS).toMatch(/pointer-events:\s*none/);
+    // And it stops moving for someone who asked for less motion.
+    const reduced = NATIVE_FEEL_CSS.slice(NATIVE_FEEL_CSS.lastIndexOf('prefers-reduced-motion'));
+    expect(NATIVE_FEEL_CSS.match(/@media \(prefers-reduced-motion: reduce\)/g) ?? []).toHaveLength(2);
+    expect(reduced.length).toBeGreaterThan(0);
+  });
+
+  it('⚠️ carries NO backtick — the CSS lives inside a TS template literal', () => {
+    // One backtick ends the string. This file broke on exactly that when the skeleton comment was
+    // first written, and the error surfaced as two unrelated-looking TS1005s 170 lines away.
+    expect(NATIVE_FEEL_CSS).not.toContain('`');
   });
 
   it('never fights the app: touch rules are scoped to touch, and motion respects the preference', () => {
@@ -154,6 +184,12 @@ describe('📱 the baseline fixes the specific tells, and paints nothing', () =>
     expect(rule).toMatch(/enterKeyHint/);
     expect(rule).toMatch(/44x44px/);
     expect(rule).toMatch(/var\(--safe-bottom\)/);
+    // The primitive is NAMED, so the rule is actionable instead of aspirational.
+    expect(rule).toMatch(/nb-skeleton/);
+    // Scroll is asked of the MODEL, not shipped as a generic script: only it knows this app's router,
+    // and a generic restore that guesses wrong puts the user half-way down the wrong screen.
+    expect(rule).toMatch(/SCROLL LIKE AN APP/);
+    expect(rule).toMatch(/only you know this app's router/);
     // It must NOT re-state what the baseline already guarantees, or the model wastes tokens undoing it.
     expect(rule).toMatch(/do NOT re-declare those/);
     expect(rule).not.toMatch(/tap-highlight/);

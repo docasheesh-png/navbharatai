@@ -138,6 +138,26 @@ class AppAiUsageStore {
     }
   }
 
+  /**
+   * One app's totals for several days in ONE batched read — the owner's history (Q-797). Unreadable is said
+   * (`known: false`), never reported as a confident ₹0.
+   */
+  async appSpentDays(appId: string, days: readonly string[]): Promise<{ byDay: Record<string, { spentInr: number; calls: number }>; known: boolean }> {
+    const db = this.getDb();
+    if (!db || !appId || days.length === 0) return { byDay: {}, known: false };
+    try {
+      const snaps = await db.getAll(...days.map((d) => db.collection(APP_COLLECTION).doc(this.appDoc(appId, d))));
+      const byDay: Record<string, { spentInr: number; calls: number }> = {};
+      snaps.forEach((snap, i) => {
+        const d = (snap.exists ? snap.data() : null) as { spentInr?: unknown; calls?: unknown } | null;
+        byDay[days[i]] = { spentInr: numberOf(d?.spentInr), calls: numberOf(d?.calls) };
+      });
+      return { byDay, known: true };
+    } catch {
+      return { byDay: {}, known: false };
+    }
+  }
+
   /** The app's own total for a day — for the owner's screen. */
   async appSpentOn(appId: string, day: string): Promise<{ spentInr: number; calls: number; known: boolean }> {
     const db = this.getDb();

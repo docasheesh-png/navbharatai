@@ -94052,3 +94052,9 @@ to it. Recorded as a deliberate non-item, not an omission.
 ### 2026-10-11 — #3668 merged; its 15 rows closed
 
 The admin merged #3668. Closed, IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main`: Q-114 Q-123 Q-124 Q-128 Q-138 Q-157 Q-165 Q-166 Q-248 Q-343 Q-733 Q-745 Q-769 Q-781 Q-818. Their ledgers stay above. Q-706 stays 🟡 (its build merged, off by default; it waits on the admin's Cloud Shell run). Q-819 (🟡, external) and Q-820 (gap b) stay open. `tests/aClosedQueueRowStaysClosed.test.ts` hard-coded Q-114 as a row that had to exist (an old merge erased it). It now also accepts the right end of a record: the ID in the closed file and the row gone from the open table. The follow-up work (Q-796, Q-797, Q-806) continues on the same branch, restarted from the merged `main`, in a new PR.
+- **Q-797 (admin decision 2026-10-11: "an owner screen of their app's AI spend"):**
+  - Root cause: the owner's "AI in this app" card showed today only, so a cost that grew over a week stayed invisible until the balance showed it.
+  - Built: "Show the last 30 days" on that card, with the published app and the preview apart, per day, answers and totals.
+  - It reads the same counters the daily caps enforce (`AppAiUsageStore.appSpentDays`, one `getAll`) through an owner-only route, `GET /api/app-ai/spend`. A body that is not a history, or unreadable counters, is said as such, never shown as ₹0.
+  - Sibling: the app-AI owner-route census counted owner checks as a fixed 4. It now asserts the rule itself (every route registered in that file has exactly one strict owner check), so a new route without one fails.
+  - Test: `tests/anOwnerSeesWhatTheirAppsAiCosts.test.ts`, reverted (owner check removed) and seen to fail. KB entry updated.

@@ -975,9 +975,14 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     // in a grid. The shell was the "LAST" step of every game because nothing said it was 3D-only.
     '  🧩 A 2D GAME ON A BOARD OR THE PAGE — puzzle, match-3, memory cards, quiz, snake, tic-tac-toe,',
     '  sudoku, word game — takes NEITHER the 3D layer NOR the shell: no run_recipe({ name: "generate_game_3d" })',
+    // ⚠️ 2026-10-11 (verifying build 46e2d74b's fix): this line said "keep the runtime, the vfx and the
+    // melody recipes" — but the effects layer's particles.ts imports three.js and run_recipe installs what a
+    // recipe imports, so the 2D path it described installed `three` into every 2D game: the candy class again.
     '  and no run_recipe({ name: "generate_game_shell" }). Draw it with React (or one 2D canvas), keep the',
-    '  runtime, the vfx and the melody recipes for the loop, the feel and the sound, and make every control',
-    '  a real button (or pointer events) so it plays by touch.',
+    '  runtime and the melody recipes for the loop, the feel and the music, and take only the SOUND half of',
+    '  the effects layer — run_recipe({ name: "generate_game_vfx", input: { include: ["audio"] } }) — because',
+    '  its particle system is three.js and the whole layer installs `three`. Make every control a real button',
+    '  (or pointer events) so it plays by touch.',
     // 🏁 ADMIN 2026-08-25, from a real racing game: "baar baar kehne par gaadi ki speed kyu nahi badhayi
     // ja rahi… speed 0 sirf aur sirf tab ho, jab user bole". A vehicle that will not move is not a
     // difficulty setting — it is an unplayable game, and it is the single easiest way to ship one.

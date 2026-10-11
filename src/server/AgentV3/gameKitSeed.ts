@@ -24,11 +24,19 @@
 // on disk and to build only the game on it. The model's choice is no longer on the path.
 //
 //   • WHICH RECIPES (`gameKitPlan`, PURE). Every game gets the runtime (loop, input, events, meta), the
-//     effects-and-sound layer and the melody layer — none adds a dependency, and they serve 2D and 3D
-//     alike. The 3D layer and the playable shell are added ONLY when the request is a 3D scene, judged by
-//     the SAME signal the route already uses for the 3D object guidance (`wantsSceneObjects`), so the
-//     seed and that guidance can never disagree. A board, card, puzzle or quiz game never gets three.js
-//     (candy autopsy 7da1cdca: a match-3 got 24 unused 3D files and `three` installed).
+//     effects layer and the melody layer. The 3D layer and the playable shell are added ONLY when the
+//     request itself says the game is drawn in 3D (`gameKitWants3D`): it says "3D", or it is a racing,
+//     driving, vehicle, open-world or village game. A board, card, puzzle or quiz game (the route's flat
+//     list, `wantsSceneObjects`) never gets three.js (candy autopsy 7da1cdca: a match-3 got 24 unused 3D
+//     files and `three` installed), and neither does a game the request leaves open — "rock paper
+//     scissors", "flappy bird", "hangman" — whose builder adds the 3D recipes itself only if it needs them.
+//     A game without the 3D layer gets the SOUND half of the effects layer only (`gameKitRecipeInput`):
+//     the particle system is three.js, so the whole layer would install `three` into a 2D game.
+//     ⚠️ CORRECTED 2026-10-11, in verification of this change: this note first said the three non-3D recipes "add no
+//     dependency" (the effects layer adds `three` and `@types/three`), and the plan first took 3D from
+//     `wantsSceneObjects` alone, which calls EVERY game that is not on the flat list a scene — so a
+//     guess-the-number or rock-paper-scissors game was laid down with three.js and the 3D shell and told
+//     "This is a 3D game". The flat list still always wins; 3D now needs a positive word.
 //   • WHERE. Only for the stack the recipes are written and measured for: the React + Vite project.
 //     A plain HTML site has no compiler to run them (autopsy f496c75b) and the shell is a React component,
 //     so every other framework gets [] and keeps today's behaviour — the builder runs the recipes itself.
@@ -42,7 +50,7 @@
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
 import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
-import { wantsSceneObjects } from '../lib/heroObjectSpec';
+import { wantsSceneObjects, heroObjectContract } from '../lib/heroObjectSpec';
 
 /** The recipes the seed may run, in the order the architect prompt lists them (runtime first, shell last). */
 export type GameKitRecipe = 'generate_game_runtime' | 'generate_game_3d' | 'generate_game_vfx' | 'generate_melody' | 'generate_game_shell';
@@ -77,10 +85,52 @@ export function gameKitPlan(prompt: string | null | undefined, framework?: strin
   let domain = '';
   try { domain = analyzeRequirementGaps(text).domain; } catch { return []; }
   if (domain !== 'game') return [];
-  const threeD = wantsSceneObjects(text);
-  return threeD
+  return gameKitWants3D(text)
     ? ['generate_game_runtime', 'generate_game_3d', 'generate_game_vfx', 'generate_melody', 'generate_game_shell']
     : ['generate_game_runtime', 'generate_game_vfx', 'generate_melody'];
+}
+
+/** Says 3D in so many words — the same reading `wantsSceneObjects` gives "3d". */
+const SAYS_3D = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional)\b/i;
+/**
+ * A kind of game that is drawn in 3D on this platform: a race, a drive, a world you move through. The
+ * 2026-09-14 bike-racing report and build 46e2d74b are this kind. Precision-first on purpose: a game this
+ * misses keeps the 2D-safe layers and its builder may still run the 3D recipes, exactly as before the seed
+ * existed; a game this wrongly matches gets three.js laid down under it.
+ */
+const DRAWN_IN_3D = /\b(?:rac(?:e|es|er|ers|ing)|driv(?:e|es|er|ers|ing)|gaa?di|open\s*-?\s*world|first\s*-?\s*person|third\s*-?\s*person|fps|gta|minecraft|pubg|free\s*-?\s*fire|battle\s*-?\s*royale|flight\s*-?\s*sim\w*|village|gaon|gaanv)\b/i;
+
+/**
+ * Does the REQUEST say this game is drawn in 3D? PURE.
+ *
+ * Never where the route's flat list says 2D (`wantsSceneObjects` false: a board, card, puzzle, quiz,
+ * match-3 or snake game, or one that says 2D) — that list always wins, so the seed can never lay three.js
+ * under a game the route calls flat. Beyond it, 3D needs a POSITIVE sign: the word, a racing / driving /
+ * open-world / village game, or a land vehicle the hero-object catalogue recognises ("a car game").
+ * `wantsSceneObjects` alone is not that sign: it calls every game NOT on the flat list a scene, so
+ * "rock paper scissors", "guess the number", "hangman" and "flappy bird" all read as 3D there.
+ */
+export function gameKitWants3D(prompt: string | null | undefined): boolean {
+  const text = String(prompt ?? '');
+  if (!wantsSceneObjects(text)) return false;
+  if (SAYS_3D.test(text) || DRAWN_IN_3D.test(text)) return true;
+  try {
+    return heroObjectContract(text).categories.some((c) => c === 'vehicle-land' || c === 'vehicle-water');
+  } catch { return false; }
+}
+
+/**
+ * The input the seed passes to one recipe of `plan`, or undefined for the recipe's defaults. PURE.
+ *
+ * The effects layer's particle system imports `three`, and `run_recipe` installs every package a recipe's
+ * files import — so the whole layer under a 2D game installs three.js and `@types/three` (the candy
+ * autopsy's complaint, by another door). Without the 3D layer the seed takes its SOUND half only:
+ * `audio.ts` and the `synth.ts` voices it needs, which import nothing. If the builder later adds the 3D
+ * shell, the shell's missing-layer adder writes the particles it imports.
+ */
+export function gameKitRecipeInput(recipe: GameKitRecipe, plan: readonly GameKitRecipe[]): Record<string, unknown> | undefined {
+  if (recipe === 'generate_game_vfx' && !plan.includes('generate_game_3d')) return { include: ['audio'] };
+  return undefined;
 }
 
 /** One recipe's outcome, as the route's dispatch returned it. */
@@ -121,27 +171,58 @@ export function compactRecipeResult(content: string): string {
  * The block prepended to the build prompt after the seed. It states only what is on disk: the recipes that
  * ran and what each wrote. A recipe that failed is named with the call that runs it, so the builder is
  * never told a file exists that does not. '' when nothing was laid down. PURE.
+ *
+ * `flat` is the route's own reading (`!wantsSceneObjects(prompt)`): a board, card, puzzle or quiz game is
+ * told it is 2D ON PURPOSE; any other game laid down without the 3D layer is told the request did not say
+ * 3D, and how to add the 3D recipes itself if the game truly needs them — never "this is 2D" as a fact the
+ * platform does not have.
  */
-export function gameKitHandoffBlock(results: readonly GameKitSeedResult[]): string {
+export function gameKitHandoffBlock(results: readonly GameKitSeedResult[], opts: { flat?: boolean } = {}): string {
   const done = results.filter((r) => r.ok);
   if (done.length === 0) return '';
   const failed = results.filter((r) => !r.ok);
-  const threeD = done.some((r) => r.recipe === 'generate_game_3d') && done.some((r) => r.recipe === 'generate_game_shell');
+  const has = (recipe: string): boolean => done.some((r) => r.recipe === recipe);
+  // The PLAN was 3D (either 3D recipe was run, whatever its outcome) — never decided from successes alone,
+  // or a failed shell would have the block call a game with the 3D layer on disk "2D, no 3D layer".
+  const threeD = results.some((r) => r.recipe === 'generate_game_3d' || r.recipe === 'generate_game_shell');
+  const vfx = done.find((r) => r.recipe === 'generate_game_vfx');
+  const soundOnly = !!vfx && !/src\/game\/fx\/particles\.ts/.test(vfx.content);
+  const twoD = [
+    opts.flat
+      ? 'This game is drawn in 2D on purpose — no 3D layer and no 3D shell were laid down.'
+      : 'The request does not say this game is 3D, so no 3D layer and no 3D shell were laid down.',
+    'Draw it with React (or one 2D canvas), driven by the fixed-timestep loop and the input in src/game/core/,'
+      + ' and make every control a real button or pointer event so it plays by touch.',
+    opts.flat
+      ? ''
+      : 'Only if the game truly needs a 3D world, run run_recipe({ name: "generate_game_3d" }) and then'
+        + ' run_recipe({ name: "generate_game_shell" }) yourself before you use anything from them.',
+    soundOnly
+      ? 'The effects layer is SOUND ONLY here (src/game/fx/audio.ts and its synth.ts voices): its particle system'
+        + ' is three.js and was left out on purpose, so draw visual effects with CSS or the 2D canvas and never'
+        + ' import src/game/fx/particles or src/game/fx/feedback.'
+      : '',
+  ].filter(Boolean).join(' ');
   const head = [
     '[BUILD ON THE GAME KIT — IT IS ALREADY IN src/game] Before your first turn NavBharatAI ran these game',
     `recipes for this request: ${done.map((r) => r.recipe).join(', ')}. Their files are on disk NOW. Do NOT run`,
-    'them again, and NEVER write a second game loop, input system, camera, meta/best-score store, particle',
-    'system or audio engine — import the ones in src/game (and src/audio). Build ONLY the game itself: its',
+    threeD
+      ? 'them again, and NEVER write a second game loop, input system, camera, meta/best-score store, particle'
+        + '\nsystem or audio engine — import the ones in src/game (and src/audio). Build ONLY the game itself: its'
+      : 'them again, and NEVER write a second game loop, input system, meta/best-score store or audio engine —'
+        + '\nimport the ones in src/game (and src/audio). Build ONLY the game itself: its',
     'rules, levels, content and screens, in your own files under src/game/<your-game>/, wired into src/App.tsx.',
     threeD
-      ? 'This is a 3D game: render it with <GameCanvas> from src/game/GameCanvas.tsx and put your game in its'
-        + ' setup() and update(). For a car, bike or ridden animal, call ctx.follow(vehicle) in setup() so the camera'
-        + ' stays BEHIND it, move it with driveVehicle(...) and createVehicleState(...) from'
-        + ' src/game/three/objects.ts (they own the steering signs and the starting speed), and build every object'
-        + ' with the builders in that file.'
-      : 'This game is drawn in 2D on purpose — no 3D layer and no 3D shell were laid down. Draw it with React (or'
-        + ' one 2D canvas), driven by the fixed-timestep loop and the input in src/game/core/, and make every'
-        + ' control a real button or pointer event so it plays by touch.',
+      ? 'This is a 3D game.'
+        + (has('generate_game_shell')
+          ? ' Render it with <GameCanvas> from src/game/GameCanvas.tsx and put your game in its setup() and update().'
+            + ' For a car, bike or ridden animal, call ctx.follow(vehicle) in setup() so the camera stays BEHIND it.'
+          : ' For a car, bike or ridden animal, keep the camera BEHIND it, opposite its nose.')
+        + (has('generate_game_3d')
+          ? ' Move a vehicle with driveVehicle(...) and createVehicleState(...) from src/game/three/objects.ts (they'
+            + ' own the steering signs and the starting speed), and build every object with the builders in that file.'
+          : '')
+      : twoD,
     failed.length > 0
       ? `NOT laid down: ${failed.map((r) => r.recipe).join(', ')} — if the game needs ${failed.length === 1 ? 'it' : 'them'}, run`
         + ` ${failed.map((r) => `run_recipe({ name: "${r.recipe}" })`).join(' and ')} yourself before you use anything from ${failed.length === 1 ? 'it' : 'them'}.`

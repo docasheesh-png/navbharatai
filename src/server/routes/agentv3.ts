@@ -371,7 +371,7 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
-import { gameKitPlan, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult } from '../AgentV3/gameKitSeed';
+import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
@@ -17889,7 +17889,7 @@ async function noteBuildOutcome(
               gameKitSkipReason = `the workspace already holds ${existingSrc.length} source file(s) that are not our untouched starter, and the kit is never written over somebody's work`;
             } else {
               const kitThreeD = kitPlan.includes('generate_game_3d');
-              emit({ type: 'narration', agent: 'architect', text: `🎮 Setting up NavBharatAI's game engine first — game loop, controls, effects and sound${kitThreeD ? ', the 3D world and a playable 3D shell' : ''} — so your game is built on it.`, ts: Date.now() });
+              emit({ type: 'narration', agent: 'architect', text: `🎮 Setting up NavBharatAI's game engine first — game loop, controls, sound effects and music${kitThreeD ? ', visual effects, the 3D world and a playable 3D shell' : ''} — so your game is built on it.`, ts: Date.now() });
               const writtenBeforeKit = new Map(writtenFiles);
               const kitStartedAt = Date.now();
               const kitResults: GameKitSeedResult[] = [];
@@ -17897,7 +17897,9 @@ async function noteBuildOutcome(
               try {
                 for (const recipe of kitPlan) {
                   if (abort.signal.aborted) break;
-                  const r = await dispatcher.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe } }, 'architect', { signal: abort.signal });
+                  // A 2D plan takes the effects layer's SOUND half only — its particles would install three.js.
+                  const recipeInput = gameKitRecipeInput(recipe, kitPlan);
+                  const r = await dispatcher.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe, ...(recipeInput ? { input: recipeInput } : {}) } }, 'architect', { signal: abort.signal });
                   kitResults.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
                 }
               } finally {
@@ -17919,7 +17921,7 @@ async function noteBuildOutcome(
               for (const r of kitResults) if (r.ok) gameKitSeeded.push(r.recipe);
               if (gameKitSeeded.length > 0) {
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'GAME_KIT_SEEDED', autoResolved: true, message: gameKitSeededMessage(kitResults, kitFiles, Date.now() - kitStartedAt) });
-                buildPrompt = `${gameKitHandoffBlock(kitResults)}\n\n---\n\n${buildPrompt}`;
+                buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt) })}\n\n---\n\n${buildPrompt}`;
               } else {
                 gameKitSeedFailed = kitResults.length > 0;
                 gameKitSkipReason = kitResults.length > 0
@@ -22592,6 +22594,10 @@ async function noteBuildOutcome(
       // explorer's repair, which may change files, still comes after the game is played, exactly as before.
       // The repair's time headroom is unchanged (both runs still precede it). It runs ONCE: inside the
       // explorer block when the explorer ran, otherwise right after it.
+      // ⚠️ THE ORDER ALONE CHANGES NO OUTCOME, AND THIS SAYS SO (verification, same day). The playtest opens its
+      // OWN fresh browser and still finds Start by its own matcher; nothing the explorer pressed is handed to
+      // it yet — `gamePlaytestScript` has no parameter for it on this branch. L-18 stays OPEN until the
+      // explorer's start label (in `exploreRun`) is passed at the call inside the explorer block.
       let gamePlaytestDone = false;
       const runGamePlaytest = async (): Promise<void> => {
         if (gamePlaytestDone) return;
@@ -24749,8 +24755,12 @@ async function noteBuildOutcome(
           // user's own 25-file app — restored, served, and watched rendering — was told it produced
           // nothing. The app keeps whatever summary the turn actually produced, and a zero-file build is
           // free either way (`effectiveBilledUsd = 0` a few hundred lines below, unconditionally).
+          // `builderWroteCount()`, not `writtenFiles.size` (build 46e2d74b, found in verification): the game-kit
+          // seed puts ~30 of OUR files in `writtenFiles` before the first model call, so a builder that then
+          // wrote nothing kept `ok: true` and its own "your game is ready" over an engine with no game in it —
+          // while the bill, the retry and the claim audit beside this already read the builder's count.
           const emptyFail = emptyBuildFailureSummary(
-            expectsArtifacts, writtenFiles.size, sandboxUnavailable, buildObs.previewRendered,
+            expectsArtifacts, builderWroteCount(), sandboxUnavailable, buildObs.previewRendered,
             // 🔴 CORRECTED 2026-09-26. This comment used to say the answer is read "from the summary as
             // it stands at the flip — never cached earlier, because the summary can be rewritten
             // between the retry decision and here". The second half was the reason to do the

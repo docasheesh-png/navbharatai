@@ -25,7 +25,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   gameKitPlan, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, compactRecipeResult,
-  gameKitSeededMessage, builderWrittenCount, HANDOFF_RECIPE_CHARS, type GameKitSeedResult,
+  gameKitSeededMessage, builderWrittenCount, HANDOFF_RECIPE_CHARS, gameKitWants3D, gameKitRecipeInput,
+  type GameKitRecipe, type GameKitSeedResult,
 } from '../src/server/AgentV3/gameKitSeed';
 import { GAME_RECIPES, recipeFilePool } from '../src/server/lib/gameRecipeLayers';
 import { wantsSceneObjects, heroObjectContract } from '../src/server/lib/heroObjectSpec';
@@ -58,14 +59,46 @@ describe('1a · gameKitPlan — which recipes the platform runs, PURE', () => {
     expect(plan).toContain('generate_melody');
   });
 
-  it('the 3D layer and the shell follow the SAME 3D signal the route uses for its object guidance', () => {
-    // One reading of "is this a 3D scene", never two that can disagree (the route's OBJECT DETAIL block
-    // and the seed): the plan carries 3D exactly when wantsSceneObjects says so.
-    for (const p of [REPORTED, 'make a 3d racing game', 'make a bike racing game', 'build a car game', 'sudoku game banao', 'a quiz game for kids']) {
+  it('the route\'s flat list always wins: the seed never lays the 3D layer or the shell under a game the route calls flat', () => {
+    for (const p of [REPORTED, 'make a 3d racing game', 'make a bike racing game', 'build a car game', 'sudoku game banao', 'a quiz game for kids', '3d snake game', 'Create a candy crush game']) {
       const plan = gameKitPlan(p, 'vite-react');
-      expect(plan.includes('generate_game_3d'), p).toBe(wantsSceneObjects(p));
-      expect(plan.includes('generate_game_shell'), p).toBe(wantsSceneObjects(p));
+      if (!wantsSceneObjects(p)) {
+        expect(plan.includes('generate_game_3d'), p).toBe(false);
+        expect(plan.includes('generate_game_shell'), p).toBe(false);
+      }
+      // The 3D layer and the shell travel together, always.
+      expect(plan.includes('generate_game_3d'), p).toBe(plan.includes('generate_game_shell'));
     }
+  });
+
+  it('🔒 3D needs a POSITIVE sign — a game the request leaves open is never laid down as 3D (found in verification)', () => {
+    // wantsSceneObjects calls EVERY game not on the flat list a scene, so the first version of this seed
+    // laid three.js and the 3D shell under each of these and told the builder "This is a 3D game".
+    for (const p of [
+      'rock paper scissors game', 'guess the number game', 'hangman game', 'Create a flappy bird game', 'Make a pong game',
+      'brick breaker game banao', 'whack a mole game', 'typing speed game', 'math game for kids', 'cookie clicker game',
+      'piano tiles game', 'Build a space invaders game', 'make a game',
+    ]) {
+      expect(gameKitWants3D(p), p).toBe(false);
+      expect(gameKitPlan(p, 'vite-react'), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);
+    }
+  });
+
+  it('a request that says 3D, or is a racing / driving / vehicle / open-world / village game, gets the 3D kit', () => {
+    for (const p of [REPORTED, 'make a 3d racing game', 'make a bike racing game', 'build a car game', 'a 3d football game',
+      'open world game like GTA', 'Indian village game', 'truck driving simulator game', '3d snake game']) {
+      expect(gameKitWants3D(p), p).toBe(true);
+      expect(gameKitPlan(p, 'vite-react'), p).toContain('generate_game_shell');
+    }
+    expect(gameKitWants3D('gaadi wala game')).toBe(true); // the Hinglish word, whatever the domain reader says
+  });
+
+  it('🔒 a plan without the 3D layer takes only the SOUND half of the effects layer (its particles are three.js)', () => {
+    const flat: GameKitRecipe[] = gameKitPlan('make a sudoku game');
+    expect(gameKitRecipeInput('generate_game_vfx', flat)).toEqual({ include: ['audio'] });
+    const threeD: GameKitRecipe[] = gameKitPlan(REPORTED);
+    expect(gameKitRecipeInput('generate_game_vfx', threeD)).toBeUndefined();
+    for (const r of threeD) if (r !== 'generate_game_vfx') expect(gameKitRecipeInput(r, threeD), r).toBeUndefined();
   });
 
   it('a racing game gets the whole 3D kit, in the prompt\'s order: runtime first, 3D before the shell, shell last', () => {
@@ -126,7 +159,8 @@ async function seed(act: FakeActuator, plan: string[], recorded: Map<string, str
   );
   const out: GameKitSeedResult[] = [];
   for (const recipe of plan) {
-    const r = await d.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe } }, 'architect');
+    const recipeInput = gameKitRecipeInput(recipe as GameKitRecipe, plan as GameKitRecipe[]);
+    const r = await d.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe, ...(recipeInput ? { input: recipeInput } : {}) } }, 'architect');
     out.push({ recipe, ok: !r.is_error, content: String(r.content ?? '') });
   }
   return out;
@@ -179,6 +213,28 @@ describe('1b · the seed through the real dispatcher — what lands, and whose i
     expect(act.files.has('src/game/core/loop.ts')).toBe(true);
   });
 
+  it('🔒 …and `three` is never installed for it: the effects layer lands as sound only (found in verification)', async () => {
+    // The whole effects layer imports three.js (particles.ts), and run_recipe installs what a recipe imports —
+    // so the first version of this seed ran `npm install three` for every sudoku, snake and candy game.
+    const results = await seed(act, gameKitPlan('Create a candy crush game'), recorded);
+    expect(results.every((r) => r.ok)).toBe(true);
+    expect(act.commands.filter((c) => /\bthree\b/.test(c)), act.commands.join('\n')).toEqual([]);
+    expect(act.files.has('src/game/fx/audio.ts')).toBe(true);
+    expect(act.files.has('src/game/fx/synth.ts')).toBe(true);
+    expect(act.files.has('src/game/fx/particles.ts')).toBe(false);
+    expect(act.files.has('src/game/fx/feedback.ts')).toBe(false);
+    const block = gameKitHandoffBlock(results, { flat: true });
+    expect(block).toContain('This game is drawn in 2D on purpose');
+    expect(block).toContain('The effects layer is SOUND ONLY here');
+    expect(block).not.toContain('particle\nsystem or audio engine');
+  });
+
+  it('a 3D game still gets the whole effects layer, and three installed with the 3D layer', async () => {
+    await seed(act, gameKitPlan(REPORTED), recorded);
+    expect(act.files.has('src/game/fx/particles.ts')).toBe(true);
+    expect(act.commands.some((c) => /npm install[^\n]*\bthree@/.test(c))).toBe(true);
+  });
+
   it('the handoff states only what is on disk, built from the real recipe results', async () => {
     const results = await seed(act, gameKitPlan(REPORTED), recorded);
     const block = gameKitHandoffBlock(results);
@@ -218,6 +274,25 @@ describe('1c · the handoff block, PURE', () => {
     expect(threeD).not.toContain('no 3D layer');
   });
 
+  it('a flat game is 2D on purpose; a game the request left open is told how to add 3D, never "2D" as a fact', () => {
+    const twoD = [ok('generate_game_runtime'), ok('generate_game_vfx'), ok('generate_melody')];
+    const flat = gameKitHandoffBlock(twoD, { flat: true });
+    expect(flat).toContain('drawn in 2D on purpose');
+    expect(flat).not.toContain('run_recipe({ name: "generate_game_shell" })');
+    const open = gameKitHandoffBlock(twoD, { flat: false });
+    expect(open).not.toContain('drawn in 2D on purpose');
+    expect(open).toContain('The request does not say this game is 3D');
+    expect(open).toContain('run_recipe({ name: "generate_game_3d" }) and then run_recipe({ name: "generate_game_shell" })');
+  });
+
+  it('a 3D plan whose shell failed never calls the game 2D, and never names <GameCanvas> as on disk', () => {
+    const block = gameKitHandoffBlock([ok('generate_game_runtime'), ok('generate_game_3d'), { recipe: 'generate_game_shell', ok: false, content: '' }]);
+    expect(block).not.toContain('no 3D layer');
+    expect(block).not.toContain('<GameCanvas> from src/game/GameCanvas.tsx');
+    expect(block).toContain('This is a 3D game.');
+    expect(block).toContain('NOT laid down: generate_game_shell');
+  });
+
   it('the per-file lines collapse to one "Wrote:" line and a long result is bounded', () => {
     expect(compactRecipeResult('Wired the runtime:\nCreated src/a.ts\nUnchanged src/b.ts (already exactly)\n\nDo this.')).toBe('Wrote: src/a.ts, src/b.ts\nDo this.');
     expect(compactRecipeResult(`Wired:\n${'x'.repeat(HANDOFF_RECIPE_CHARS + 500)}`).length).toBeLessThan(HANDOFF_RECIPE_CHARS + 200);
@@ -255,7 +330,8 @@ describe('1d · the route seeds the kit before the first model call, behind ever
   });
 
   it('goes through the dispatcher exactly as a model call would, with the plan bookkeeping muted', () => {
-    expect(block).toContain("dispatcher.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe } }, 'architect', { signal: abort.signal })");
+    expect(block).toContain("const recipeInput = gameKitRecipeInput(recipe, kitPlan);");
+    expect(block).toContain("dispatcher.dispatch({ id: `game-kit-${recipe}`, name: 'run_recipe', input: { name: recipe, ...(recipeInput ? { input: recipeInput } : {}) } }, 'architect', { signal: abort.signal })");
     const on = block.indexOf('platformSeedInFlight = true;');
     const off = block.indexOf('platformSeedInFlight = false;');
     expect(on).toBeGreaterThan(-1);
@@ -268,7 +344,7 @@ describe('1d · the route seeds the kit before the first model call, behind ever
   it('remembers every seeded file as ours, hands the builder the kit, and says so in the report', () => {
     expect(block).toContain('preseededGolden.set(kp, kc);');
     expect(block).toContain('kitSeededFiles.set(kp, kc);');
-    expect(block).toContain('buildPrompt = `${gameKitHandoffBlock(kitResults)}\\n\\n---\\n\\n${buildPrompt}`;');
+    expect(block).toContain('buildPrompt = `${gameKitHandoffBlock(kitResults, { flat: !wantsSceneObjects(prompt) })}\\n\\n---\\n\\n${buildPrompt}`;');
     expect(block).toContain("code: 'GAME_KIT_SEEDED'");
     expect(block).toContain("code: 'GAME_KIT_NOT_SEEDED'");
     expect(block).toContain('futilityState = armedFutilityState(');
@@ -319,7 +395,11 @@ describe('2 · builderWrittenCount — the kit alone is not a build', () => {
       'if (expectsArtifacts && builderWroteCount() === 0 && modelAnswer.declined && !abort.signal.aborted) {',
       "(builderWroteCount() === 0 ? 'no-writes' : null)",
       'renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: builderWroteCount() })',
+      // The empty-build flip (found in verification): with the kit counted, a builder that wrote nothing kept
+      // `ok: true` and its own "your game is ready" over an engine with no game in it.
+      'expectsArtifacts, builderWroteCount(), sandboxUnavailable, buildObs.previewRendered,',
     ]) expect(ROUTE, line).toContain(line);
+    expect(ROUTE).not.toContain('expectsArtifacts, writtenFiles.size, sandboxUnavailable, buildObs.previewRendered,');
     expect(ROUTE).not.toContain('if (expectsArtifacts && writtenFiles.size === 0) {');
   });
 
@@ -448,6 +528,24 @@ describe('3e · one list of 2D games: the 3D gate agrees with the prompt\'s own 
     for (const p of ['a jungle adventure game with snakes and tigers', '3d snake game', REPORTED, 'make a bike racing game']) {
       expect(wantsSceneObjects(p), p).toBe(true);
     }
+  });
+});
+
+describe('3f · the 2D path never pulls three.js in through the effects layer (found in verification)', () => {
+  it('the architect prompt\'s 2D line takes only the effects layer\'s sound half', () => {
+    const games = moduleText(architectSystemPrompt(), 'games');
+    expect(games).toContain('take only the SOUND half of');
+    expect(games).toContain('run_recipe({ name: "generate_game_vfx", input: { include: ["audio"] } })');
+    expect(games).not.toContain('runtime, the vfx and the melody recipes');
+  });
+  it('the recipe\'s own description no longer says it adds no dependency', () => {
+    const catalog = read('src/server/AgentV3/ToolCatalog.ts');
+    expect(catalog).not.toContain('Adds no dependency and needs NO sound files');
+    expect(catalog).toContain('so a 2D game takes \'\n        + \'include: ["audio"]');
+  });
+  it('the seed module no longer claims its 2D recipes add no dependency', () => {
+    const src = read('src/server/AgentV3/gameKitSeed.ts');
+    expect(src).not.toMatch(/melody layer — none adds a dependency/);
   });
 });
 

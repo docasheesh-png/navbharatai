@@ -45,8 +45,24 @@ export function serverApiRoutes(root = '.'): ApiRoute[] {
 export function clientSource(root = '.'): string {
   return walk(join(root, 'src'))
     .filter((f) => !f.includes(`${join(root, 'src/server')}/`) && !f.startsWith('src/server/'))
-    .map((f) => stripComments(readFileSync(f, 'utf8')))
+    .map((f) => expandBaseConstants(stripComments(readFileSync(f, 'utf8'))))
     .join('\n');
+}
+
+/**
+ * A CALLER THAT BUILDS ITS PATH FROM A BASE IS STILL A CALLER (Q-818). `isCalled` matches literal paths, so
+ * `const API_BASE = '/api/github'` + `fetch(\`${API_BASE}/branches\`)` counted as no caller, and two routes a
+ * real client called sat in the "uncalled" baseline. Within ONE file, every `${NAME}` / `${this.NAME}` /
+ * `${Class.NAME}` whose NAME is assigned a literal `/api/…` string is written out as that string first.
+ * Per file, so two files that reuse a name never borrow each other's base. PURE.
+ */
+export function expandBaseConstants(src: string): string {
+  const bases = new Map<string, string>();
+  for (const m of src.matchAll(/\b([A-Za-z_$][\w$]*)\s*(?::\s*string\s*)?=\s*(['"`])(\/api\/[^'"`$\s]*)\2/g)) {
+    bases.set(m[1], m[3].replace(/\/$/, ''));
+  }
+  if (bases.size === 0) return src;
+  return src.replace(/\$\{\s*(?:this\.|[A-Z][\w$]*\.)?([A-Za-z_$][\w$]*)\s*\}/g, (all, name: string) => bases.get(name) ?? all);
 }
 
 export function isCalled(path: string, client: string): boolean {

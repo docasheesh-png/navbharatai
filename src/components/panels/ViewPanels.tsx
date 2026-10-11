@@ -145,9 +145,6 @@ export interface ViewPanelsProps {
   githubUser: any;
   githubRepoContext: any;
   isGHSyncing: boolean;
-  pendingGHEdit: any;
-  handleGHConfirmPush: () => void;
-  isPushing: boolean;
   connectGitHub: () => void;
   disconnectGitHub: () => void;
   firebaseToken: string;
@@ -204,7 +201,7 @@ export function ViewPanels({
   handleSendForTab, toggleTab, onOpenModePicker, onOpenHistory, updatePreview, addLog, addToast,
   imageWindowIds, imageWindowOnScreen,
   handleAgentChange, githubToken, githubUser, githubRepoContext, isGHSyncing,
-  pendingGHEdit, handleGHConfirmPush, isPushing, connectGitHub, disconnectGitHub,
+  connectGitHub, disconnectGitHub,
   firebaseToken, firebaseUser, connectFirebase, disconnectFirebase,
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload, zipImportProgress,
@@ -284,9 +281,6 @@ export function ViewPanels({
             onSocialChatTrigger={() => toggleTab('nbi_pro_chat')}
             theme={theme}
             onThemeChange={setTheme}
-            pendingGHEdit={pendingGHEdit}
-            onConfirmPush={handleGHConfirmPush}
-            isGHPushing={isPushing}
             onGoToMain={() => {
               toggleTab('nbi_pro_chat');
               addLog('Cognitive memory layer successfully merged and redirected to main cockpit.', 'info');

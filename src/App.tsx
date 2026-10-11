@@ -163,7 +163,6 @@ import { safeLocalJson } from './lib/safeLocalJson';
 // ReportProblemComponent → lazy above
 import { HomeView } from './components/home/HomeView';
 import { OtherAIView } from './components/home/OtherAIView';
-import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
 import { makeWorkspaceSyncer, type WorkspaceSyncer } from './lib/workspaceSync';
 import { saveFile, loadAllFiles, clearWorkspace, deleteFile as storageDeleteFile } from './lib/storage';
@@ -847,8 +846,6 @@ export default function App() {
   const [isGHSyncing, setIsGHSyncing] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState<any>(null);
   const [ghSearchQuery, setGHSearchQuery] = useState('');
-  const [isPushing, setIsPushing] = useState(false);
-  const [pendingGHEdit, setPendingGHEdit] = useState<{ path: string, content: string, message: string, sha?: string } | null>(null);
   // theme, isThemePickerOpen → from useSettings() hook
   const [isAppBuilt, setIsAppBuilt] = useState(false);
 
@@ -1674,43 +1671,6 @@ export default function App() {
     }
   }, [user, toggleTab]);
 
-  const handleGHConfirmPush = async () => {
-    if (!pendingGHEdit || !githubRepoContext) return;
-    
-    setIsPushing(true);
-    addLog(`GitHub: Pushing changes to ${pendingGHEdit.path}...`, 'info');
-    
-    try {
-      const result = await GitHubService.updateFile(
-        githubRepoContext,
-        pendingGHEdit.path,
-        pendingGHEdit.content,
-        pendingGHEdit.message,
-        pendingGHEdit.sha || ''
-      );
-      
-      addLog(`GitHub: Push successful! Commit: ${result.commit.sha.substring(0, 7)}`, 'success');
-      addToast(`Pushed to GitHub ✓ (${result.commit.sha.substring(0, 7)})`, 'success');
-      
-      const successMsg: Message = {
-        id: Date.now().toString(),
-        text: `✅ **Successfully Pushed!**\n\n**File:** ${pendingGHEdit.path}\n**Commit:** [\`${result.commit.sha.substring(0, 7)}\`](${result.content.html_url})`,
-        sender: 'ai',
-        timestamp: new Date(),
-        modelUsed: 'GitHub Core'
-      };
-      setMessages(prev => [...prev, successMsg]);
-      setPendingGHEdit(null);
-    } catch (e: any) {
-      addLog(`GitHub Error: ${e.message}`, 'error');
-      // The success path has always shown a toast; a failure went only to the developer log, so the
-      // "Confirm & Push to GitHub" button just stopped spinning and nothing said the push had not
-      // happened (Q-794). The proposed edit stays pending, so the user can press it again.
-      addToast(`Push to GitHub failed: ${e?.message || 'unknown error'}`, 'error');
-    } finally {
-      setIsPushing(false);
-    }
-  };
   // P3.1 — preview build / client-side bundler slice extracted into usePreviewBundler (behavior-
   // preserving). Placed here so all its deps (files, setGeneratedCode, activeFile, activeAgent,
   // toggleTab, incrementDailyUsage) are defined above, and closeTab below can still reset preview
@@ -2179,16 +2139,16 @@ export default function App() {
   });
 
   // P3.1 — free (NBI) chat engine extracted into useChatEngine (behavior-preserving). Placed here so
-  // every dep (state, setters, updatePreview, handleGHConfirmPush, learnFromMessage, payment hook) is
+  // every dep (state, setters, updatePreview, learnFromMessage, payment hook) is
   // defined above, and the retry/Enter consumers below still resolve handleSend/handleSendForTab.
   const { handleSendForTab, handleSend, stop: stopChat, unsend: unsendChat } = useChatEngine({
     input, messages, isLoading, sessions, currentSessionId, activeAgent, mode, activeView, activeIntent,
     errorContext, preferredLanguage, user, keys, selectedModel, apnapanProfile,
-    hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files,
+    hasGeneratedCode, generatedCode, githubToken, files,
     setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setPreferredLanguage,
     setMode, setShowAuth, setUser, setGithubToken, setGithubRepoContext,
     setFiles, setHasGeneratedCode, setIsAppBuilt,
-    addLog, addToast, incrementDailyUsage, handleGHConfirmPush, learnFromMessage, updatePreview,
+    addLog, addToast, incrementDailyUsage, learnFromMessage, updatePreview,
   });
 
 
@@ -3583,9 +3543,6 @@ export default function App() {
               mode={mode}
               setMode={setMode}
               activeAgent={activeAgent}
-              pendingGHEdit={pendingGHEdit}
-              onConfirmPush={handleGHConfirmPush}
-              isPushing={isPushing}
               isAppBuilt={isAppBuilt}
               theme={theme}
               onPreviewClick={() => { toggleTab('preview'); setIsMenuOpen(false); }}
@@ -3971,7 +3928,6 @@ export default function App() {
                 githubUser={githubUser}
                 githubRepoContext={githubRepoContext}
                 isGHSyncing={isGHSyncing}
-                isPushing={isPushing}
                 firebaseToken={firebaseToken}
                 firebaseUser={firebaseUser}
                 files={files}
@@ -4254,9 +4210,6 @@ export default function App() {
             githubUser={githubUser}
             githubRepoContext={githubRepoContext}
             isGHSyncing={isGHSyncing}
-            pendingGHEdit={pendingGHEdit}
-            handleGHConfirmPush={handleGHConfirmPush}
-            isPushing={isPushing}
             connectGitHub={connectGitHub}
             disconnectGitHub={disconnectGitHub}
             firebaseToken={firebaseToken}

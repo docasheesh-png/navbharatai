@@ -19,7 +19,6 @@ export interface GitViewPanelProps {
   githubUser: any;
   githubRepoContext: { owner: string; repo: string; branch: string } | null;
   isGHSyncing: boolean;
-  isPushing: boolean;
   firebaseToken: string;
   firebaseUser: any;
   files: Record<string, string>;
@@ -49,7 +48,6 @@ export function GitViewPanel({
   githubUser,
   githubRepoContext,
   isGHSyncing,
-  isPushing,
   firebaseToken,
   firebaseUser,
   files,
@@ -130,7 +128,6 @@ export function GitViewPanel({
             user={githubUser}
             repoContext={resolvedRepoContext}
             isSyncing={isGHSyncing}
-            isPushing={isPushing}
             onConnect={onConnectGitHub}
             onDisconnect={onDisconnectGitHub}
             // GitPanel pushes through its own executeRealGitHubPush → /api/github/push-enhanced. Its `onPush`

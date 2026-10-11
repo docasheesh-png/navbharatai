@@ -12,7 +12,7 @@
 // The census fails when a new `addLog(..., 'error' | 'warn')` in App.tsx has no visible counterpart near
 // it; the few background ones (nothing the user pressed) are listed with their reason.
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 
 const app = readFileSync('src/App.tsx', 'utf8');
 const lines = app.split('\n');
@@ -43,11 +43,15 @@ describe('the census: no silent failure in App.tsx', () => {
 });
 
 describe('each failure that was silent now says so', () => {
-  it('🔒 Confirm & Push to GitHub: a failed push is a toast, and the edit stays pending to retry', () => {
-    const fn = app.slice(app.indexOf('const handleGHConfirmPush = async'), app.indexOf('const handleGHConfirmPush = async') + 2400);
-    const fail = fn.slice(fn.indexOf('} catch (e: any) {'));
-    expect(fail).toContain("addToast(`Push to GitHub failed: ${e?.message || 'unknown error'}`, 'error');");
-    expect(fail.slice(0, fail.indexOf('} finally {'))).not.toContain('setPendingGHEdit(null)');
+  it('🔒 the "Confirm & Push to GitHub" chain is gone — nothing ever produced a pending edit (Q-818)', () => {
+    // Its failure toast was added by Q-794, but nothing ever set `pendingGHEdit`, so the button could not
+    // appear — and its `updateFile` posted to `POST /api/github/push`, a route #3658 deleted. A dead chain
+    // with a dangling call is removed whole, the way the Q-600 sweep decides everything.
+    expect(app).not.toMatch(/pendingGHEdit|handleGHConfirmPush|GitHubService/);
+    expect(existsSync('src/lib/githubService.ts')).toBe(false);
+    for (const f of ['src/hooks/useChatEngine.ts', 'src/components/ide/AIChat.tsx', 'src/components/panels/NBIChatPanel.tsx', 'src/components/panels/ViewPanels.tsx', 'src/components/ide/CodeStudio.tsx']) {
+      expect(readFileSync(f, 'utf8'), f).not.toMatch(/pendingGHEdit|handleGHConfirmPush|onConfirmPush/);
+    }
   });
 
   it('GitHub connect and import failures are toasts', () => {

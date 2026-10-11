@@ -26,9 +26,6 @@ export interface NBIChatPanelProps {
   mode: AgentMode;
   setMode: (mode: AgentMode) => void;
   activeAgent: string;
-  pendingGHEdit: { path: string; content: string; message: string; sha?: string } | null;
-  onConfirmPush: () => void;
-  isPushing: boolean;
   isAppBuilt: boolean;
   theme: ThemeMode;
   onPreviewClick: () => void;
@@ -73,9 +70,6 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
   mode,
   setMode,
   activeAgent,
-  pendingGHEdit,
-  onConfirmPush,
-  isPushing,
   isAppBuilt,
   theme,
   onPreviewClick,
@@ -156,9 +150,6 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
           onOpenModePicker={onOpenModePicker}
           onOpenHistory={onOpenHistory}
           activeAgent={activeAgent}
-          pendingGHEdit={pendingGHEdit}
-          onConfirmPush={onConfirmPush}
-          isPushing={isPushing}
           isAppBuilt={isAppBuilt}
           theme={theme}
           onPreviewClick={onPreviewClick}

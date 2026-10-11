@@ -55,9 +55,6 @@ interface CodeStudioProps {
   v3WorkspaceId?: string;
   v3UserId?: string;
   v3Email?: string;
-  pendingGHEdit?: any;
-  onConfirmPush?: () => void;
-  isGHPushing?: boolean;
   // GitHub Props
   githubToken: string | null;
   githubUser: any;
@@ -108,9 +105,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   v3WorkspaceId,
   v3UserId,
   v3Email,
-  pendingGHEdit,
-  onConfirmPush,
-  isGHPushing,
   githubToken,
   githubUser,
   githubRepoContext,
@@ -1037,7 +1031,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
             user={githubUser}
             repoContext={githubRepoContext}
             isSyncing={isGHSyncing}
-            isPushing={isGHPushing || false}
             onConnect={onGHConnect}
             onDisconnect={onGHDisconnect}
             files={files}

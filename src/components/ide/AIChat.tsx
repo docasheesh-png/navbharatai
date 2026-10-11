@@ -6,7 +6,6 @@ import { ComposerShell, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_S
 import { playTapTone } from '../../lib/tapTone';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { Bot, User, Send, Sparkles, Zap, CheckCircle2, Save, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
-import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { stripChatMarkers } from '../../lib/chatMarkers';
@@ -271,9 +270,6 @@ interface AIChatProps {
    * when the bottom bar, which already carries History, is not on screen. See chat/HistoryButton.tsx.
    */
   onOpenHistory?: () => void;
-  pendingGHEdit?: any;
-  onConfirmPush?: () => void;
-  isPushing?: boolean;
   isPinned?: boolean;
   onTogglePin?: () => void;
   isLoggedIn?: boolean;
@@ -322,9 +318,6 @@ export const AIChat: React.FC<AIChatProps> = ({
   onModeChange,
   onOpenModePicker,
   onOpenHistory,
-  pendingGHEdit,
-  onConfirmPush,
-  isPushing,
   isPinned = false,
   onTogglePin,
   isLoggedIn = false,
@@ -1059,30 +1052,6 @@ export const AIChat: React.FC<AIChatProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }} />
             </div>
           </div>
-        )}
-
-        {pendingGHEdit && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="p-4 bg-indigo-600/10 border border-indigo-500/20 rounded-2xl space-y-3"
-          >
-            <div className="flex items-center gap-2">
-              <Github className="w-4 h-4 text-accent-text" />
-              <span className="text-[10px] font-black uppercase text-accent-text">GitHub Push Ready</span>
-            </div>
-            <p className="text-[10px] text-body font-medium leading-relaxed">
-              I have prepared changes for <span className="text-ink font-bold">{pendingGHEdit.path}</span>. Are you ready to push?
-            </p>
-            <button
-              onClick={onConfirmPush}
-              disabled={isPushing}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {isPushing ? <TirangaLoader className="w-3 h-3" /> : <Send className="w-3 h-3" />}
-              {isPushing ? 'Pushing...' : 'Confirm & Push to GitHub'}
-            </button>
-          </motion.div>
         )}
 
         {/* ── Guider Confirmation Card (Hybrid: propose → confirm before building) ── */}

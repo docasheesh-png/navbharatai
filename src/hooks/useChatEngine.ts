@@ -42,7 +42,6 @@ export interface ChatEngineDeps {
   apnapanProfile: any;
   hasGeneratedCode: boolean;
   generatedCode: string;
-  pendingGHEdit: any;
   githubToken: string | null;
   files: FileSystem;
   // setters
@@ -64,7 +63,6 @@ export interface ChatEngineDeps {
   addLog: (message: string, level?: any) => void;
   addToast: (message: string, type?: any) => void;
   incrementDailyUsage: (type: any) => void;
-  handleGHConfirmPush: (...args: any[]) => any;
   learnFromMessage: (...args: any[]) => any;
   updatePreview: (files: any) => void;
 }
@@ -73,11 +71,11 @@ export function useChatEngine(deps: ChatEngineDeps) {
   const {
     input, messages, isLoading, sessions, currentSessionId, activeAgent, mode, activeView, activeIntent,
     errorContext, preferredLanguage, user, keys, selectedModel, apnapanProfile,
-    hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files,
+    hasGeneratedCode, generatedCode, githubToken, files,
     setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setPreferredLanguage,
     setMode, setShowAuth, setUser, setGithubToken, setGithubRepoContext,
     setFiles, setHasGeneratedCode, setIsAppBuilt,
-    addLog, incrementDailyUsage, handleGHConfirmPush, learnFromMessage, updatePreview,
+    addLog, incrementDailyUsage, learnFromMessage, updatePreview,
   } = deps;
 
   // STOP support (admin 2026-08-13: "koi galat search rukti nahi"). Every AI here streams a reply over one
@@ -306,13 +304,6 @@ export function useChatEngine(deps: ChatEngineDeps) {
     // tally below stays only as usage bookkeeping for this device.
     incrementDailyUsage('message');
     trackEvent('message_sent', { tab: tabId, agent: activeAgent, isGuest: !user });
-
-    // Handle GitHub Push Confirmation
-    if (pendingGHEdit && /push|confirm|yes|ha|kardo/i.test(messageToSend)) {
-      handleGHConfirmPush();
-      setInputForTab('');
-      return;
-    }
 
     // Capture GitHub PAT if mentioned (e.g. "token asheeshgithubkeys")
     const patMatch = messageToSend.match(/(?:token|key)\s+([a-zA-Z0-9_]{30,})/i) || messageToSend.trim().match(/^([a-zA-Z0-9_]{30,})$/);

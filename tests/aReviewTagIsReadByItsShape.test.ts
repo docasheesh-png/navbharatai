@@ -142,3 +142,22 @@ describe('precision — what is NOT a finding stays not a finding', () => {
     expect(parseReviewOutput('No [CRITICAL] or [WARNING] issues were found.')).toEqual([]);
   });
 });
+
+describe('A CATEGORY IS NOT A VERDICT — a topic tag is judged by its sentence (verification of 46e2d74b, 2026-10-11)', () => {
+  it('praise under a topic tag is no finding at all', () => {
+    for (const line of [
+      '- **[SECURITY]** Inputs are validated properly before use.',
+      '- [PERFORMANCE] The render loop is well structured and uses one renderer.',
+      '- **[GAMEPLAY]** Collision handling works as expected.',
+      '- [CORRECTNESS] The score is saved correctly to localStorage.',
+    ]) expect(parseReviewOutput(line), line).toEqual([]);
+  });
+  it('a topic tag over a defect is a warning; over a neutral note it is a suggestion — never a repair', () => {
+    expect(parseReviewOutput('- **[GAMEPLAY]** the car never leaves the start line.')[0].severity).toBe('warning');
+    expect(parseReviewOutput('- [CONTROLS] left and right steering are mirrored.')[0].severity).toBe('warning');
+    const neutral = parseReviewOutput('- [PERFORMANCE] The scene re-creates its geometry every frame.');
+    expect(neutral).toHaveLength(1);
+    expect(neutral[0].severity).toBe('suggestion');
+    expect(neutral[0].broken === true).toBe(false);
+  });
+});

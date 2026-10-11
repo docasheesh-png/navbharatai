@@ -340,12 +340,28 @@ export function readLeadingTags(line: string): LeadingTags | null {
     take(c);
     s = after;
   }
+  const rest = s.trim();
+  // 🔴 A CATEGORY IS NOT A VERDICT (verification of build 46e2d74b's fix, 2026-10-11). With no severity word
+  // and no break word, a bracket like `[SECURITY]` or `[PERFORMANCE]` only names a topic — and reviewers
+  // label their PRAISE that way as often as their findings ("[SECURITY] Inputs are validated properly").
+  // Read as a warning, every such line became a problem on the user's screen. So a category-only tag is
+  // judged by its sentence: praise is no finding at all, a sentence that names a defect is a warning, and
+  // anything else is a suggestion — surfaced, never repaired, never a failed build.
+  if (rank === 0 && !broken && !allPolish) {
+    if (CATEGORY_DEFECT_RE.test(rest)) return { severity: 'warning', broken, rest };
+    if (CATEGORY_PRAISE_RE.test(rest)) return null;
+    return { severity: 'suggestion', broken, rest };
+  }
   const severity: ReviewIssue['severity'] = rank === 3 ? 'critical' : rank === 2 ? 'warning' : rank === 1 ? 'suggestion'
-    // No severity word: the reviewer said it misbehaves (broken) or labelled a category — a warning,
-    // unless every word was a polish category.
-    : broken || !allPolish ? 'warning' : 'suggestion';
-  return { severity, broken, rest: s.trim() };
+    // No severity word: the reviewer said it misbehaves (broken), or every word was a polish category.
+    : broken ? 'warning' : 'suggestion';
+  return { severity, broken, rest };
 }
+
+/** A sentence that names a defect: something missing, failing, wrong or never happening. */
+const CATEGORY_DEFECT_RE = /\b(?:never|not|no|doesn'?t|don'?t|isn'?t|aren'?t|won'?t|can'?t|cannot|unable|fails?|failing|failed|missing|lacks?|lacking|broken|breaks?|crash(?:es|ed)?|throws?|wrong|incorrect(?:ly)?|bug|leaks?|stale|duplicat\w*|mirrored|reversed|backwards|inverted|unhandled|undefined|nan|blocks?|hangs?|freezes?|vulnerab\w*|insecure|exposed|hard-?coded)\b/i;
+/** A sentence that says something is right — praise, never a finding. */
+const CATEGORY_PRAISE_RE = /\b(?:properly|correctly|well|good|great|nice(?:ly)?|clean(?:ly)?|solid|appropriate(?:ly)?|as expected|handled|works?|working|secure(?:ly)?|consistent(?:ly)?|follows?|looks? (?:fine|good)|no issues?)\b/i;
 
 /** A message that is only "none" / "nothing found" / "n/a". */
 const BARE_NONE_RE = /^\s*(?:none|nothing|nil|n\/?a|no\s+(?:issues?|problems?|findings?|bugs?|concerns?))\b[\s.!,;:-]*(?:found|detected|identified|reported|observed|so far|at all|here)?[\s.!]*$/i;

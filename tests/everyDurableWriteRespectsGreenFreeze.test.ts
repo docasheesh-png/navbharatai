@@ -35,6 +35,8 @@ const VERDICT: Record<string, [Verdict, number]> = {
   'saveWorkspaceFiles | greenKey, toSave, { mode: \'replace\' }': ['other-key', 1],
   'saveWorkspaceFiles | greenWorkspaceKey(workspaceId), files, { mode: \'replace\' }': ['other-key', 1],
   'saveWorkspaceFiles | newWorkspaceId, files': ['user-asked', 1],
+  // The version restore (Q-128): the user's own "go back", refused while a build runs, so no freeze is live.
+  "saveWorkspaceFiles | workspaceId, plan.target, { mode: 'replace' }": ['user-asked', 1],
   'saveWorkspaceFiles | workspaceId, Object.fromEntries(scaffolded.map((p) => [p, writtenFiles.get(p) as string]))': ['landed', 1],
   'saveWorkspaceFiles | workspaceId, Object.fromEntries(writtenFiles)': ['landed', 6],
   'saveWorkspaceFiles | workspaceId, attempt': ['landed', 1],

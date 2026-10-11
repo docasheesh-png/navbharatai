@@ -77,7 +77,7 @@ describe('1a · gameKitPlan — which recipes the platform runs, PURE', () => {
     for (const p of [
       'rock paper scissors game', 'guess the number game', 'hangman game', 'Create a flappy bird game', 'Make a pong game',
       'brick breaker game banao', 'whack a mole game', 'typing speed game', 'math game for kids', 'cookie clicker game',
-      'piano tiles game', 'Build a space invaders game', 'make a game',
+      'piano tiles game', 'Build a space invaders game', 'make a game', 'typing race game', 'Create a battleship game',
     ]) {
       expect(gameKitWants3D(p), p).toBe(false);
       expect(gameKitPlan(p, 'vite-react'), p).toEqual(['generate_game_runtime', 'generate_game_vfx', 'generate_melody']);

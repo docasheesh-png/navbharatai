@@ -98,7 +98,7 @@ const SAYS_3D = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional)\b/i;
  * misses keeps the 2D-safe layers and its builder may still run the 3D recipes, exactly as before the seed
  * existed; a game this wrongly matches gets three.js laid down under it.
  */
-const DRAWN_IN_3D = /\b(?:rac(?:e|es|er|ers|ing)|driv(?:e|es|er|ers|ing)|gaa?di|open\s*-?\s*world|first\s*-?\s*person|third\s*-?\s*person|fps|gta|minecraft|pubg|free\s*-?\s*fire|battle\s*-?\s*royale|flight\s*-?\s*sim\w*|village|gaon|gaanv)\b/i;
+const DRAWN_IN_3D = /\b(?:(?<!typing\s{1,3})rac(?:e|es|er|ers|ing)|driv(?:e|es|er|ers|ing)|gaa?di|open\s*-?\s*world|first\s*-?\s*person|third\s*-?\s*person|fps|gta|minecraft|pubg|free\s*-?\s*fire|battle\s*-?\s*royale|flight\s*-?\s*sim\w*|village|gaon|gaanv)\b/i;
 
 /**
  * Does the REQUEST say this game is drawn in 3D? PURE.

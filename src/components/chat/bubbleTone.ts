@@ -9,8 +9,8 @@
 // width) stay with each UI for now; only the tone is shared. Values are exactly what both UIs used
 // before this module existed, so adopting it is pixel-identical.
 
-/** The user's own message: filled with the brand colour. */
-export const USER_BUBBLE_TONE = 'bg-indigo-600 text-on-accent';
+/** The user's own message: filled with the theme accent token (was hard-coded bg-indigo-600 until 2026-10). */
+export const USER_BUBBLE_TONE = 'bg-accent text-on-accent';
 
 /** An assistant reply on a card surface. */
 export const ASSISTANT_BUBBLE_TONE = 'bg-card text-body';

@@ -3,8 +3,8 @@ import { readFileSync } from 'fs';
 import { USER_BUBBLE_TONE, ASSISTANT_BUBBLE_TONE } from './bubbleTone';
 
 describe('shared chat-bubble tones', () => {
-  it('keep the exact classes the chat UIs used, so adopting them is pixel-identical', () => {
-    expect(USER_BUBBLE_TONE).toBe('bg-indigo-600 text-on-accent');
+  it('use theme tokens: accent for the user, card for the assistant', () => {
+    expect(USER_BUBBLE_TONE).toBe('bg-accent text-on-accent'); // aligned to the theme token (was bg-indigo-600)
     expect(ASSISTANT_BUBBLE_TONE).toBe('bg-card text-body');
   });
 

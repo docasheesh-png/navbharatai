@@ -93439,6 +93439,59 @@ their account is not a record (the `safety_flags` precedent). So Q-682 is now 8/
 every buyer), the `developer` block left in place, the purchase guard removed, the web store made to
 delete on `unlisted`, and the page's false promise put back.
 
+### 2026-10-11 — Q-600 batch three (78 → 57): it found a webhook feature that never fired, an SSRF, and tests that checked nothing (Q-785…Q-788 ✅, Q-789/Q-790 OPEN)
+
+**Fresh-state check first.** Q-699 (Android "Save to Photos"), which this session had started, had been
+fixed by another session in #3590 on 2026-10-08, so it was dropped rather than redone. Bundle 151's build
+log (`checkBundlePermissions.ts`, from #3587) lists the bundle's real permissions, and none is on Play's
+restricted list. Q-698 therefore waits only on an older bundle still active in another Play track.
+
+**The sweep:** 15 unused locals in 13 files, each decided on its own merits.
+
+- **Q-785 ✅ — a fake feature in NavBharatAI itself.**
+  - What the user was told: Settings → Insights & Webhooks promised a POST on BUILD_COMPLETE / BUILD_FAILED / DEPLOY_COMPLETE / DEPLOY_FAILED, and the knowledge base repeated it to every AI.
+  - What actually happened: `fireWebhooks` had exactly one caller, "Send test". Real builds and publishes sent nothing.
+  - Evidence: a filename search plus content search under three names, across the whole repo.
+  - Fix: new `src/server/lib/userWebhookEvents.ts`.
+    - `announceBuildFinished` replaces all three direct `notifyBuildComplete` calls in `agentv3.ts`, so the push and the webhook come from one call.
+    - `announceDeploy` wraps the deploy function every publish goes through (the Publish button and the AI's `deploy` tool), plus the server-app publish branch via the pure `serverPublishOutcome`. That function stays silent for the plan-limit and already-deploying answers.
+  - Payload: only `{event, ok, finishedAt, url?}`. Never a uid, workspace id, e-mail, cost or error text.
+  - The card's copy now reads the single `WEBHOOK_EVENTS` list (the formerly unread local), and the knowledge-base entry was rewritten.
+- **Q-786 ✅ — SSRF.**
+  - Problem: webhook URLs were only syntax-checked, so "Send test" made our server POST to any address, `169.254.169.254` included.
+  - Fix: `addWebhook` refuses a non-public address using the existing `assertPublicHttpUrl`, before storing it.
+  - Every send (`sendUserWebhook`) re-checks the address, connects through `publicOnlyInit` (no DNS-rebinding window), and refuses redirects.
+- **Q-787 ✅ — tests that checked nothing.**
+  - Origin: when the Offline AI was deleted (#2948), three awareness locks kept tests named "offers a real one-tap navigation target (never a dead button)" and "the OFFLINE AI finds …". They had empty bodies or bodiless loops, and they passed.
+  - Fix: the navigation assertions are restored against the KB's `nav` field, which is where #2948 moved the targets. The offline tests are removed.
+  - Class lock: `tests/aTestThatChecksNothingFails.test.ts` fails on an empty or comment-only test or loop body in any test file, and skips fixtures inside string literals.
+  - Two honest notes on getting the detector right:
+    - v1 missed a comment-only body. Its own reversion (R6) proved that, and the detector was strengthened.
+    - v2 over-matched, because a lazy block-comment pattern backtracked across a `*/`. It was fixed and pinned.
+- **Q-788 ✅ — clickable `<div>` check.** AI Code Review's "Clickable `<div>`" warning tells the user to add `tabIndex`, but it only checked `role`. `hasTabIndex` was computed and never read. It is now wired in: a role without a tabIndex is flagged.
+- **Dead residue, removed:**
+  - CICDPipeline `STATUS_COLORS`: left over from the fake run simulation removed on 2026-07-21.
+  - FigmaImporter `isRefining` and MultiPageBuilder `generating`: left over from the never-existing `/api/generate`; both buttons now hand off synchronously.
+  - DarkModeGenerator `colorOverrides`: emitted `--orig-*` variables that nothing references.
+  - SecurityScan's unused `SecurityFinding` type.
+  - WhitelabelBranding `downloadCSS`: duplicated the per-card Save.
+  - useChatEngine `usedBackend`: write-only.
+  - Unused `addToast` destructures in two hooks.
+- **Recorded, not fixed:**
+  - **Q-789:** the Dark Mode overrides apply only to Manual, and Manual paints text and background the same colour.
+  - **Q-790:** about 20 client files use a raw `<a download>` that iOS ignores, instead of `deliverTextFile`.
+- **Queue housekeeping:** Q-682, Q-766 and Q-784 were still IN PROGRESS under #3620 and #3617, both merged. They left the table and joined the closed register.
+
+**Proof:**
+- New tests: `aWebhookHearsTheRealEvent` (13), `aTestThatChecksNothingFails`, and `aClickableDivIsReachableByKeyboard`.
+- Six reversions, each failing its guard:
+  - a direct push call put back;
+  - the deploy announcement removed;
+  - the add-time check removed;
+  - the send-time check removed;
+  - tabIndex unwired;
+  - a test emptied again.
+- `webhookManager.test.ts`'s DB-unavailable case now injects the reachability check, because `hook.test` does not resolve.
 ## 2026-10-11 — Q-750 proven on the branch; Q-752 (the Trivy cache never saved)
 
 **Live proof for Q-750:** image-scan run #107 was dispatched on the #3652 branch.

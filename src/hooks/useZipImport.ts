@@ -35,7 +35,7 @@ export interface ZipImportDeps {
 export function useZipImport(deps: ZipImportDeps) {
   const {
     setFiles, setHasGeneratedCode, setIsAppBuilt, setIsProLoading, setProBuildProgress, setProInput,
-    setProMessages, syncFilesToV3, updatePreview, toggleTab, addToast,
+    setProMessages, syncFilesToV3, updatePreview, toggleTab,
   } = deps;
 
   const handleZipImport = async (zipFile: File, extraMessage?: string) => {

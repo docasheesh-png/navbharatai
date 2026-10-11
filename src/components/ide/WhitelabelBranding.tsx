@@ -136,13 +136,6 @@ module.exports = {
     navigator.clipboard.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(''), 2000); });
   };
 
-  const downloadCSS = () => {
-    const blob = new Blob([generateCSS()], { type: 'text/css' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'brand.css'; a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const downloadAll = () => {
     const content = `/* ===== ${config.appName} Brand Config ===== */\n\n${generateCSS()}\n\n/* ===== Meta Tags ===== */\n/*\n${generateMetaTags()}\n*/\n\n/* ===== Tailwind Config ===== */\n/*\n${generateTailwindConfig()}\n*/`;
     const blob = new Blob([content], { type: 'text/css' });

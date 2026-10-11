@@ -46,7 +46,9 @@ describe('WebhookManager — CRUD/fire degrade gracefully without a DB (VITEST)'
     expect(r.error).toMatch(/valid http/i);
   });
   it('addWebhook reports DB unavailable for a valid URL under VITEST', async () => {
-    const r = await addWebhook('u1', 'https://hook.test/x', ['BUILD_COMPLETE'], '2026-01-01T00:00:00Z');
+    // The reachability check is injected: `hook.test` does not resolve, and since 2026-10-11 an address
+    // must be shown to be public before it is stored (aWebhookHearsTheRealEvent.test.ts covers that).
+    const r = await addWebhook('u1', 'https://hook.test/x', ['BUILD_COMPLETE'], '2026-01-01T00:00:00Z', { checkUrl: async () => ({ ok: true }) });
     expect(r.ok).toBe(false); // no DB in tests
     expect(r.error).toMatch(/database/i);
   });

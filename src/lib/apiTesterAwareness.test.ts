@@ -27,12 +27,12 @@ describe('API Tester — AI awareness (Free · Pro)', () => {
     }
   });
 
-  it('the OFFLINE AI finds the API Tester (same shared KB, no internet)', () => {
-    for (const q of ['api tester', 'test api', 'endpoint not working', 'api chalega ki nahi', 'network error']) {
-    }
-  });
-
   it('offers a real one-tap navigation target (never a dead button)', () => {
+    // These two assertions were emptied when the Offline AI was deleted (#2948): its `navFor` map moved
+    // INTO the KB's `nav` field, but the test kept its name and lost its body, so it passed while checking
+    // nothing — together with an "OFFLINE AI finds it" loop with no body at all (2026-10-11).
+    expect(api!.nav).toEqual({ view: 'api' });
+    expect(runner!.nav).toEqual({ view: 'testing' });
   });
 
   it('describes the CURRENT API Tester (CORS-bypass proxy · real response · safe)', () => {

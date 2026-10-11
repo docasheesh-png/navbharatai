@@ -191,7 +191,12 @@ describe('the route applies it on BOTH query paths', () => {
     const src = await import('node:fs/promises').then((fs) =>
       fs.readFile('src/server/routes/wallet.ts', 'utf8'));
     const logsRoute = src.slice(src.indexOf("app.get('/api/wallet/:userId/logs'"), src.indexOf("app.get('/api/wallet/:userId/transactions'"));
-    expect((logsRoute.match(/userSafeUsageLog\(/g) ?? []).length).toBe(2);
+    // Since audit 2026-10-11 (D2) there is ONE query path (the index-free helper; the doomed ordered query and
+    // its fallback are gone) — and every row it returns passes through the redaction.
+    expect((logsRoute.match(/userSafeUsageLog\(/g) ?? []).length).toBeGreaterThanOrEqual(1);
+    expect(logsRoute).toMatch(/\(id, data\) => \(\{ log: userSafeUsageLog\(id, data\)/);
+    expect(logsRoute).toMatch(/res\.json\(rows\.map\(\(r\) => r\.log\)\)/);
+    expect(logsRoute).not.toMatch(/getDocs\(/);
     expect(logsRoute).not.toMatch(/\{\s*id:\s*d\.id,\s*\.\.\.d\.data\(\)\s*\}/);
   });
 });

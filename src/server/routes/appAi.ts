@@ -13,6 +13,7 @@
 // cannot, and no model is called until all of them have passed.
 
 import type { Express, Request, Response } from 'express';
+import { addressRateKey } from '../lib/clientAddress';
 import { rateLimiter } from '../lib/authMiddleware';
 import {
   GATEWAY_PATH, IMAGE_GATEWAY_PATH, appAiGatewayEnabled, gatewaySecret, verifyAppAiToken, nonceAccepted,
@@ -102,7 +103,7 @@ export function registerAppAiRoutes(app: Express): void {
 
     const ownerId = String(deployment?.userId || record.userId || '').trim();
     const day = dayKey(Date.now());
-    const visitor = visitorHash(req.ip || '', String(req.headers['user-agent'] || ''), day, hashSecret());
+    const visitor = visitorHash(addressRateKey(req), String(req.headers['user-agent'] || ''), day, hashSecret());
     const system = request.system ? `${BASE_SYSTEM}\n\n${request.system}` : BASE_SYSTEM;
 
     // ONE answer path for the published app and the owner's preview (lib/appAiAnswer.ts): the owner's
@@ -146,7 +147,7 @@ export function registerAppAiRoutes(app: Express): void {
     if (!isLiveDeployment(deployment)) { refuse(visitorFacingMessage('not-live')); return; }
     const ownerId = String(deployment?.userId || record.userId || '').trim();
     const day = dayKey(Date.now());
-    const visitor = visitorHash(req.ip || '', String(req.headers['user-agent'] || ''), day, hashSecret());
+    const visitor = visitorHash(addressRateKey(req), String(req.headers['user-agent'] || ''), day, hashSecret());
     const answer = await imageForApp({
       ownerId, workspaceId: record.workspaceId, prompt: request.prompt, px: clampImagePixels(body?.width, body?.height),
       counter: { appId: imageCounterId(verdict.appId), visitor, day, appLimit: APP_IMAGES_PER_DAY, visitorLimit: VISITOR_IMAGES_PER_DAY },

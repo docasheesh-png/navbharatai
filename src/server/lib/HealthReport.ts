@@ -24,7 +24,6 @@ export interface HealthSignals {
   nodeVersion: string;
   /** Raw bytes from process.memoryUsage(). */
   memory: { rss: number; heapUsed: number; heapTotal: number };
-  maintenanceMode: boolean;
   /** Per-dependency checks assembled from real state (backup, providers, …). */
   checks: HealthCheck[];
 }
@@ -32,7 +31,6 @@ export interface HealthSignals {
 export interface HealthReport {
   status: HealthStatus;
   ready: boolean;
-  maintenanceMode: boolean;
   uptimeSec: number;
   uptimeHuman: string;
   version: string;
@@ -60,9 +58,10 @@ export function formatUptime(sec: number): string {
 
 /**
  * Assemble the overall health report from real signals. Pure.
- * Overall status: `down` if the server isn't ready (not serving); otherwise the WORST of maintenance
- * mode (→ degraded) and the individual dependency checks — a `down` dependency degrades the report but
- * does not itself mark the whole server `down` (the process is still serving).
+ * Overall status: `down` if the server isn't ready (not serving); otherwise the WORST of the individual
+ * dependency checks — a `down` dependency degrades the report but does not itself mark the whole server
+ * `down` (the process is still serving). (A `maintenanceMode` input was removed on 2026-10-11, audit F16: no
+ * route enforced it, so it could only ever turn this report "degraded" while every request was served.)
  */
 export function buildHealthReport(s: HealthSignals): HealthReport {
   let overall: HealthStatus;
@@ -73,13 +72,12 @@ export function buildHealthReport(s: HealthSignals): HealthReport {
     let worst: HealthStatus = 'ok';
     for (const c of s.checks) if (RANK[c.status] > RANK[worst]) worst = c.status;
     const depDegraded = worst !== 'ok';
-    overall = (s.maintenanceMode || depDegraded) ? 'degraded' : 'ok';
+    overall = depDegraded ? 'degraded' : 'ok';
   }
 
   return {
     status: overall,
     ready: s.ready,
-    maintenanceMode: s.maintenanceMode,
     uptimeSec: Math.max(0, Math.floor(s.uptimeSec || 0)),
     uptimeHuman: formatUptime(s.uptimeSec),
     version: s.version || 'unknown',
@@ -133,8 +131,7 @@ a{color:#58a6ff}
     b.className='banner '+(h.status||'down');
     document.getElementById('headline').textContent=LABEL[h.status]||'Unknown';
     var meta=[['Uptime',h.uptimeHuman],['Version',h.version],['Node',h.node],
-      ['Memory (RSS)',mb(h.memoryMb&&h.memoryMb.rss)],['Ready',h.ready?'yes':'no'],
-      ['Maintenance',h.maintenanceMode?'on':'off']];
+      ['Memory (RSS)',mb(h.memoryMb&&h.memoryMb.rss)],['Ready',h.ready?'yes':'no']];
     // Built as DOM with textContent, never as an innerHTML string. This page renders values that
     // arrive at RUNTIME from /api/health — versions, check names, failure details — and a detail line
     // is exactly where a dependency's own error text would one day be echoed. Concatenating those into

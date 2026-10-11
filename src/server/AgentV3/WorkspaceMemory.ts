@@ -18,6 +18,7 @@
 // the v5.0 engine. A durable backend can swap the Map without changing callers.
 
 import { scanSecurity, type SecurityFinding } from './SecurityAnalysis';
+import { BoundedCache } from '../lib/boundedCache';
 import { stripCodeComments } from './stripCodeComments';
 import { withoutPreviewBridge } from './previewBridge';
 import { bm25, type Bm25Doc } from './Bm25';
@@ -760,17 +761,13 @@ export class WorkspaceMemory {
 }
 
 // ── Per-workspace registry (in-process, TTL-pruned, like WorkspaceRegistry) ──
-const memories = new Map<string, { mem: WorkspaceMemory; createdAt: number }>();
 const TTL_MS = 2 * 60 * 60 * 1000;
-
-function prune(): void {
-  const cutoff = Date.now() - TTL_MS;
-  for (const [id, v] of memories) if (v.createdAt < cutoff) memories.delete(id);
-}
+// Bounded, O(1) per access (audit 2026-10-11): a memory expires TTL_MS after it was created, as before, and the
+// least recently used workspace is evicted at the bound. The old `prune` walked every workspace on every call.
+const memories = new BoundedCache<string, { mem: WorkspaceMemory; createdAt: number }>({ maxEntries: 2_000, ttlMs: TTL_MS });
 
 /** Get (or create) the memory for a workspace. */
 export function getWorkspaceMemory(workspaceId: string): WorkspaceMemory {
-  prune();
   let entry = memories.get(workspaceId);
   if (!entry) {
     entry = { mem: new WorkspaceMemory(), createdAt: Date.now() };

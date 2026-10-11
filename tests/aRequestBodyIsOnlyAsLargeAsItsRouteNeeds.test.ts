@@ -41,7 +41,6 @@ const REVIEWED_SMALL: Record<string, string> = {
   '/api/admin/update-broadcast/send': '`confirmCount` only',
   '/api/admin/build-discount': '`pct` only',
   '/api/admin/users/:userId/merge': '`fromUserId` only',
-  '/api/admin/feature-flags': 'a flag map',
   '/api/admin/announcement': 'an announcement message',
   '/api/admin/promo': 'promo-code fields (parseAdminPromoInput)',
   '/api/admin/site/about': 'the About page text fields',

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { SharedReadCache } from '../lib/boundedCache';
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { isStoreAdmin } from './navStore';
@@ -17,11 +18,13 @@ import {
   getGalleryApp,
   updateGalleryApp,
   listGalleryApps,
+  listGalleryAppsWithSource,
   listGalleryAppsByUid,
   incrementRemixCount,
   isGalleryConfigured,
   normalizeListing,
   toPublic,
+  type GalleryListing,
   type GalleryApp,
 } from '../lib/galleryStore';
 
@@ -48,6 +51,10 @@ import {
  *    proves no key leaked — it does not prove the code is something we want to host and hand to other
  *    users to run. Same model as the Nav App Store, deliberately, and it uses the same admin list.
  */
+
+/** The approved listing, shared by every viewer; an admin decision on this instance clears it. */
+const approvedGallery = new SharedReadCache<GalleryListing[]>({ maxEntries: 8, ttlMs: 60_000 });
+
 export function registerGalleryRoutes(app: Express): void {
   /** Publish the current app's source. Lands as `pending`; only an admin can make it public. */
   app.post('/api/gallery/publish', async (req: Request, res: Response) => {
@@ -107,7 +114,9 @@ export function registerGalleryRoutes(app: Express): void {
   /** Browse the gallery. Public, and only ever `approved` records. */
   app.get('/api/gallery', async (req: Request, res: Response) => {
     const limit = Math.min(Number(req.query.limit) || 50, 100);
-    const apps = await listGalleryApps('approved', limit);
+    // Public and the same for every viewer: read at most once a minute per instance (audit 2026-10-11).
+    const apps = await approvedGallery.get(`approved:${limit}`, () => listGalleryApps('approved', limit));
+    res.setHeader('Cache-Control', 'public, max-age=60');
     const q = String(req.query.q || '').trim().toLowerCase();
     const filtered = q
       ? apps.filter((a) => `${a.title} ${a.description} ${a.tags.join(' ')}`.toLowerCase().includes(q))
@@ -205,7 +214,7 @@ export function registerGalleryRoutes(app: Express): void {
   app.get('/api/gallery/admin/pending', async (req: Request, res: Response) => {
     const who = await verifyFirebaseIdentity(req);
     if (!isStoreAdmin(identityGrantEmail(who))) return res.status(403).json({ error: 'Not allowed.' });
-    const apps = await listGalleryApps('pending', 100);
+    const apps = await listGalleryAppsWithSource('pending', 100);
     res.json({
       apps: apps.map((a) => ({
         ...toPublic(a),
@@ -234,6 +243,7 @@ export function registerGalleryRoutes(app: Express): void {
   app.post('/api/gallery/admin/:id/review', async (req: Request, res: Response) => {
     const who = await verifyFirebaseIdentity(req);
     if (!isStoreAdmin(identityGrantEmail(who))) return res.status(403).json({ error: 'Not allowed.' });
+    approvedGallery.forget(); // only an admin's decision clears the shared listing
 
     const decision = String(req.body?.decision || '');
     if (!['approved', 'rejected', 'removed'].includes(decision)) {

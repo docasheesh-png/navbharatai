@@ -131,6 +131,37 @@ describe('census: one place decides the caller\'s address', () => {
     expect(server).toMatch(/registerPreviewRoutes\(app, previewLimiter\)/);
   });
 
+  it('no limit keys on a raw address — only addressRateKey groups an IPv6 caller by its network (audit 2026-10-11)', () => {
+    // One IPv6 host owns billions of addresses. A limit keyed on raw `req.ip` (or clientAddress) gave it a fresh
+    // budget per request: the bot guard, the shared rateLimiter, the OTP and admin-login lockouts, the guest
+    // backstop and the app-AI visitor cap all did. What may still read a raw address: audit and analytics
+    // records (`ip: req.ip`), and code that is TEXT for a user's app, not our request handling.
+    const RECORDS_ONLY = new Set([
+      join('src/server/lib/PageViewsGenerator.ts'), join('src/server/lib/ImageAiGenerator.ts'), join('src/server/lib/CaptchaGenerator.ts'),
+      join('src/server/lib/proxyHops.ts'), join('src/server/lib/ownAudience.ts'),
+    ]);
+    const offenders: string[] = [];
+    for (const f of serverSources()) {
+      if (NOT_OUR_REQUESTS.has(f) || RECORDS_ONLY.has(f)) continue;
+      readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
+        if (/^\s*(\/\/|\*)/.test(line) || !/\b_?req\.ip\b/.test(line)) return;
+        if (/\bip:\s*(String\()?_?req\.ip\b/.test(line)) return; // an audit/analytics record
+        if (f === 'src/server/routes/agentv3.ts' && /const ip = req\.ip \|\| '';/.test(line)) return; // site analytics hit
+        if (/uid, routeParam\(req\.headers\['user-agent'\]\) \|\| undefined, req\.ip,/.test(line)) return; // new-device record
+        offenders.push(`${f}:${i + 1}`);
+      });
+    }
+    expect(offenders).toEqual([]);
+    for (const [f, re] of [
+      ['src/server/lib/adaptiveRateLimit.ts', /const addressKey = addressRateKey\(req\)/],
+      ['src/server/lib/authMiddleware.ts', /const who = uid \?\? addressRateKey\(req\)/],
+      ['src/server/routes/auth.ts', /const ip = addressRateKey\(req\);/],
+      ['src/server/routes/admin.ts', /const clientIp = addressRateKey\(req\);/],
+      ['src/server/lib/guestDailyQuota.ts', /hashed\('ip', addressRateKey\(req\)\)/],
+      ['src/server/routes/appAi.ts', /visitorHash\(addressRateKey\(req\),/],
+    ] as const) expect(readFileSync(f, 'utf8'), f).toMatch(re);
+  });
+
   it('nothing sets `trust proxy` to true', () => {
     const offenders = serverSources()
       .filter((f) => !NOT_OUR_REQUESTS.has(f))

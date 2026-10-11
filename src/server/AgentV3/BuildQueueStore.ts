@@ -7,6 +7,7 @@
 // half-queue). Mirrors ProjectPlanStore's firebase-admin/best-effort/VITEST-skip conventions.
 
 import * as admin from 'firebase-admin';
+import { BoundedCache } from '../lib/boundedCache';
 import { emptyQueue, serializeQueue, parseStoredQueue, type CommandQueue } from './BuildQueue';
 import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
@@ -30,16 +31,13 @@ function getDb(): admin.firestore.Firestore | null {
 }
 
 interface CacheEntry { queue: CommandQueue; at: number; }
-const cache = new Map<string, CacheEntry>();
+// Bounded, O(1) per access (audit 2026-10-11): an entry expires CACHE_TTL_MS after it was written and the least
+// recently used workspace is evicted at the bound. The old `pruneCache` walked every entry on every read/write.
+const cache = new BoundedCache<string, CacheEntry>({ maxEntries: 2_000, ttlMs: CACHE_TTL_MS });
 
-function pruneCache(): void {
-  const cutoff = Date.now() - CACHE_TTL_MS;
-  for (const [k, v] of cache) if (v.at < cutoff) cache.delete(k);
-}
 
 /** Load a workspace's queue (cache → Firestore). Always returns a queue (empty when none). Never throws. */
 export async function loadQueue(workspaceId: string): Promise<CommandQueue> {
-  pruneCache();
   const hit = cache.get(workspaceId);
   if (hit) return hit.queue;
   const db = getDb();
@@ -62,7 +60,6 @@ export async function loadQueue(workspaceId: string): Promise<CommandQueue> {
  * in-process cache is always updated so the same instance stays consistent even through an outage.
  */
 export async function mutateQueue(workspaceId: string, op: (q: CommandQueue) => CommandQueue): Promise<CommandQueue> {
-  pruneCache();
   const db = getDb();
   if (!db) {
     const next = op(cache.get(workspaceId)?.queue ?? emptyQueue(workspaceId));

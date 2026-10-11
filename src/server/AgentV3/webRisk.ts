@@ -19,6 +19,8 @@
 // user never waits on a network call), so its only outputs are a record and, on a genuine listing, a
 // takedown the admin can see and reverse.
 
+import { BoundedCache } from '../lib/boundedCache';
+
 export const WEB_RISK_API = 'https://webrisk.googleapis.com/v1';
 
 /**
@@ -93,10 +95,10 @@ export function parseWebRiskVerdict(raw: unknown): { verdict: UrlVerdict; threat
  * publishes. Process-local on purpose: a wrong or stale entry cannot outlive a deploy, and Web Risk's
  * own answers carry an expiry we are not trying to reimplement.
  */
-const cache = new Map<string, { verdict: UrlVerdict; threats: string[]; at: number }>();
-
 /** How long a cached verdict is reused. Short enough that a newly-listed host is caught the same day. */
 export const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+// Bounded (audit 2026-10-11): every origin ever published used to stay for the life of the instance.
+const cache = new BoundedCache<string, { verdict: UrlVerdict; threats: string[]; at: number }>({ maxEntries: 20_000, ttlMs: CACHE_TTL_MS });
 
 /** Test seam — the cache is module state, and a test must be able to start from empty. */
 export function clearWebRiskCache(): void { cache.clear(); }

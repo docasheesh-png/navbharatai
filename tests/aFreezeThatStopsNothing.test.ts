@@ -34,6 +34,8 @@ import { createServer, type Server } from 'http';
 import type { AddressInfo } from 'net';
 import {
   DEPLOY_PATHS,
+  isCommitSha,
+  pipelineEvidence,
   primaryDeployPath,
   anyPathEnforcesWithoutConfig,
   freezeEnforcementNote,
@@ -234,7 +236,11 @@ describe('🧊 the sentence the admin is given is measured, not assumed', () => 
   });
 
   it('believes the EVIDENCE over the table once a pipeline has really asked', () => {
-    const note = freezeEnforcementNote({ lastCheckedAtMs: NOW - 60_000, checkCount: 7 }, NOW);
+    // ⚠️ UPDATED 2026-10-11: `viaPipelineHeader` is now required for the PROVEN sentence. The original
+    // version of this test passed a record with no caller identity and still expected "does reach the
+    // pipeline" — which is precisely the over-claim being fixed, so the assertion had to move with it.
+    // The SHA-only case is asserted separately, and it admits it is not proof.
+    const note = freezeEnforcementNote({ lastCheckedAtMs: NOW - 60_000, checkCount: 7, viaPipelineHeader: true }, NOW);
     expect(note).toMatch(/does reach the pipeline/);
     expect(note).toMatch(/7 check\(s\)/);
     expect(note).not.toMatch(/DOES NOT STOP/);
@@ -290,9 +296,13 @@ describe('🧊 no surface claims the gate is enforced any more', () => {
     expect(card).toMatch(/d\?\.enforcement/);
   });
 
-  it('the public route records the one piece of evidence that exists, without making the pipeline wait', () => {
+  it('the public route records evidence without making the pipeline wait — and only when it IS evidence', () => {
+    // ⚠️ UPDATED 2026-10-11. This pinned the UNCONDITIONAL `noteChecked(sha)`, which is the defect: a
+    // public route recorded every GET as a pipeline check. Both halves of the invariant are asserted
+    // now — still never awaited (`void`), and no longer written for a call that proves nothing.
     const route = read('src/server/routes/releaseGate.ts');
-    expect(route).toMatch(/void releaseGateStore\.noteChecked\(sha\)/);
+    expect(route).toMatch(/void releaseGateStore\.noteChecked\(sha, evidence === 'pipeline'\)/);
+    expect(route).toMatch(/if \(evidence !== 'none'\)/);
   });
 
   it('the evidence lives in its own document, because the config is written with merge:false', () => {
@@ -302,5 +312,66 @@ describe('🧊 no surface claims the gate is enforced any more', () => {
     expect(store).toMatch(/CHECKS_DOC_ID = 'release_gate_checks'/);
     expect(store).toMatch(/doc\(DOC_ID\)\.set\(normalizeGateConfig\(config\), \{ merge: false \}\)/);
     expect(store).toMatch(/doc\(CHECKS_DOC_ID\)\.set\(\{/);
+  });
+});
+
+/**
+ * 🔴 MY OWN OVER-CLAIM, FOUND THE DAY THE ADMIN CONFIGURED THE TRIGGER (2026-10-11).
+ *
+ * `/api/release/gate` is PUBLIC — it must be, because Cloud Build asks it without logging in. The first
+ * version recorded a check on EVERY GET and then printed *"A deploy pipeline last asked this gate … so a
+ * freeze does reach the pipeline."* **A browser, an uptime monitor, a crawler, or me testing the URL wrote
+ * that record.** The store held *that a call happened*; the sentence stated *who made it* — one fact, two
+ * readings, and the stronger one was printed, on a SAFETY control. It is the class this module exists to
+ * fix, shipped inside the fix.
+ */
+describe('🧊 a public endpoint cannot prove who called it', () => {
+  const NOW = 1_800_000_000_000;
+
+  it('grades a call by what it actually carried, and nothing else', () => {
+    expect(pipelineEvidence({ callerHeader: 'cloudbuild', sha: 'deadbeefcafe' })).toBe('pipeline');
+    expect(pipelineEvidence({ callerHeader: 'CloudBuild' })).toBe('pipeline');     // case-insensitive
+    expect(pipelineEvidence({ sha: 'deadbeefcafe' })).toBe('commit');              // pipeline-shaped
+    expect(pipelineEvidence({ sha: '1a2b3c4' })).toBe('commit');                   // a short SHA
+    expect(pipelineEvidence({})).toBe('none');                                     // an idle GET
+    expect(pipelineEvidence({ sha: 'main' })).toBe('none');                        // not a SHA
+    expect(pipelineEvidence({ sha: 'not-a-sha-at-all' })).toBe('none');
+    expect(pipelineEvidence({ callerHeader: 'curl/8.0' })).toBe('none');
+  });
+
+  it('knows a commit SHA from anything else', () => {
+    for (const ok of ['1a2b3c4', 'deadbeef', 'a'.repeat(40)]) expect(isCommitSha(ok), ok).toBe(true);
+    for (const no of ['', 'main', 'a'.repeat(41), '123456', 'zzzzzzz', null, undefined, 42]) {
+      expect(isCommitSha(no), String(no)).toBe(false);
+    }
+  });
+
+  it('a call that is not evidence is NEVER recorded — it cannot become evidence later', () => {
+    const route = read('src/server/routes/releaseGate.ts');
+    expect(route).toMatch(/const evidence = pipelineEvidence\(\{ sha, callerHeader: req\.get\('X-Release-Gate-Caller'\) \}\)/);
+    expect(route).toMatch(/if \(evidence !== 'none'\) void releaseGateStore\.noteChecked\(sha, evidence === 'pipeline'\)/);
+  });
+
+  it('says PROVEN only when the caller identified itself', () => {
+    const proven = freezeEnforcementNote({ lastCheckedAtMs: NOW - 60_000, checkCount: 3, lastCheckedSha: 'deadbeefcafe', viaPipelineHeader: true }, NOW);
+    expect(proven).toMatch(/The deploy pipeline asked this gate/);
+    expect(proven).toMatch(/for commit deadbeefcafe/);
+    expect(proven).not.toMatch(/not proof/);
+  });
+
+  it('says LIKELY — and admits it is not proof — for a SHA-only call', () => {
+    const likely = freezeEnforcementNote({ lastCheckedAtMs: NOW - 60_000, checkCount: 1, lastCheckedSha: 'deadbeefcafe' }, NOW);
+    expect(likely).toMatch(/very likely the deploy pipeline/);
+    expect(likely).toMatch(/this is not proof/);
+    expect(likely).not.toMatch(/^The deploy pipeline asked/);
+  });
+
+  it('the Cloud Build step identifies itself, with Cloud Build\'s own escaping kept intact', () => {
+    expect(CLOUDBUILD).toMatch(/-H "X-Release-Gate-Caller: cloudbuild"/);
+    // ⚠️ $$URL / $$BODY are NOT a typo: an unescaped `$URL` is read by Cloud Build as a substitution and
+    // fails the build at config parse — which my first version would have done to EVERY deploy. Another
+    // session caught it (df7aef5e2). Pinned so it is never "tidied" back.
+    expect(CLOUDBUILD).toMatch(/\$\$URL/);
+    expect(CLOUDBUILD).not.toMatch(/\[ -z "\$URL" \]/);
   });
 });

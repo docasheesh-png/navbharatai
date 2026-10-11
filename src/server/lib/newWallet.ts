@@ -47,3 +47,22 @@ export function buildEmptyWallet(i: NewWalletInput): Record<string, unknown> {
     updatedAt: i.nowIso,
   };
 }
+
+/**
+ * The fields an OLDER wallet document lacks, set to their empty value — and NOTHING else (audit 2026-10-11, F4).
+ *
+ * `GET /api/wallet/:userId` used to fill these by writing back the WHOLE document it had just read, balance and
+ * ledger included, with `setDoc(..., { merge: true })` outside any transaction. A debit or a payment credit that
+ * committed between that read and that write was silently undone. The patch this returns names only the missing
+ * keys, so the caller can apply it inside a transaction without touching a single field that already exists.
+ * PURE.
+ */
+export function missingWalletFields(data: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const d = data ?? {};
+  const patch: Record<string, unknown> = {};
+  if (d.tokenBalance === undefined) patch.tokenBalance = 0;
+  if (d.totalTokensPurchased === undefined) patch.totalTokensPurchased = 0;
+  if (d.totalTokensUsed === undefined) patch.totalTokensUsed = 0;
+  if (d.walletLedger === undefined) patch.walletLedger = [];
+  return patch;
+}

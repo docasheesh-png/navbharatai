@@ -78,4 +78,6 @@ container in a second region; nothing here provisions a second region (no spend)
 
 ## 3. Related
 - Health/readiness/liveness + DR backups: see `docs/DR_RUNBOOK.md`.
-- Deploy pipeline: `cloudbuild.yaml` (region `asia-southeast1`, `min-instances=0`, `max-instances=10`, concurrency 100).
+- Deploy pipeline: `cloudbuild.yaml` (region `asia-southeast1`, 2 vCPU / 2 GiB, `min-instances=0`, `max-instances=${_MAX_INSTANCES}` —
+  100 since 2026-09-08 — concurrency 100). Read the number from `cloudbuild.yaml`'s `substitutions:`, not from here:
+  this line said 10 for a month after the ceiling was raised (corrected in the 2026-10-11 performance audit, F18).

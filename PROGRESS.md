@@ -93510,6 +93510,63 @@ The rows were removed from the open queue and their IDs appended to the closed r
 - **Q-750 and Q-752:** image-scan run #108 on `main` (`50894a524`) is green. 0 CRITICAL, the image boots and serves, and the cache step ran with no "Failed to save" warning, so the cache saves for the first time. The nightly scan had been red since 2026-10-05.
 - **Q-751** is proven by the next `.aab` run: it must log no "`track` is deprecated" warning.
 
+## 2026-10-11 — The admin set `_RELEASE_GATE_URL`, and setting it exposed a defect in my own fix (Q-808)
+
+**Admin, this turn:** `_RELEASE_GATE_URL = https://navbharatai.com/api/release/gate` — **done**, on the Cloud
+Build trigger. So Q-141's blocker is cleared and the release gate is now live on the path that ships every
+merge. Registered in `docs/claude/ENV_REGISTRY.md` in this same commit, because `cloudbuild.yaml`'s own
+default is `''` and a future session reading only the file would conclude the gate is still inert.
+
+### 🔴 The defect the configuration exposed, and it is mine
+
+I was about to verify the wiring by curling the endpoint, and stopped — **because that call would itself have
+become the evidence.** Which is the bug:
+
+`/api/release/gate` is **public**; it has to be, because Cloud Build asks it without logging in. The route
+recorded a check on **every** GET, and `freezeEnforcementNote` then printed:
+
+> *"A deploy pipeline last asked this gate at … so a freeze does reach the pipeline."*
+
+**A browser, an uptime monitor, a crawler, or me testing the URL wrote that record**, after which the admin
+board vouched for a safety control on the strength of it. The store held *that a call happened*; the sentence
+stated *who made it*. One fact, two readings, and the stronger one was printed.
+
+🔑 **This is the exact class the module was written to fix** — a status that reports more than its evidence
+supports — **shipped inside the fix.** That is why it gets a row (Q-808) and this entry rather than a quiet
+patch: the fifth rule's "check whether it has come back before" answers *yes, in my own change*.
+
+**Fix — grade the evidence by what the call actually carried; never infer:**
+
+| what arrived | grade | what the board says |
+|---|---|---|
+| `X-Release-Gate-Caller: cloudbuild` (the step now sends it) | `pipeline` | *"The deploy pipeline asked this gate at … for commit abc123"* |
+| no header, but a real commit SHA | `commit` | *"… very likely the deploy pipeline — but it did not identify itself, so this is not proof"* |
+| neither | `none` | **not recorded at all**, so it can never become evidence later |
+
+Locked by `tests/aFreezeThatStopsNothing.test.ts` (31 cases), reversion-proven five ways: record every call
+again → 2 fail · print PROVEN without the header → 1 · accept any string as a SHA → 2 · drop the header from
+the step → 1 · "tidy" the escaping back to `$URL` → 1.
+
+### ⚠️ And another session fixed a REAL bug in my step — worth more than my own fix
+
+`df7aef5e2`: *"the gate step's bash variables are escaped for Cloud Build — $$URL / $$BODY"*. An unescaped
+`$URL` is read by Cloud Build as a **substitution**, and an unknown one fails the build at config parse — so
+**my first version of Step 0 would have broken every deploy**, not just the gate. When I shipped it I wrote
+that the residual risk was unverifiable from a session (*"no session here can run Cloud Build to prove
+otherwise"*). The risk was real and it landed. Two conclusions, both recorded:
+
+1. **A fail-open script is not a safe step if the file it lives in can fail to parse.** My five runtime
+   proofs tested the bash; nothing tested that Cloud Build would accept the YAML around it. The safety
+   argument covered the wrong layer.
+2. The escaping is now **pinned by a test**, so it is never "tidied" back by someone who reads `$$URL` as a
+   typo.
+
+**What to watch, since the live effect is only visible on a real deploy:** after the next merge to `main`, the
+admin board's Release gate card should change from *"No deploy pipeline has ever asked this endpoint"* to the
+proven sentence naming the commit. If it still says *never asked*, the step ran but could not reach the URL —
+it fails OPEN, so the deploy still succeeded, and that build's Cloud Build log says which. ⚠️ I cannot check
+this myself: outbound to `navbharatai.com` is denied from this session (`connect_rejected`, organization
+policy), so this one is the admin's observation to make, not mine to claim.
 ## 2026-10-11 — The admin: "sabhi open Q ko complete karna hai". Analysis of all 77 open rows; Q-790 fixed; Q-791 opened
 
 **Analysis (given to the admin in chat):**
@@ -93641,6 +93698,47 @@ Q-795 (account deletion erases workspace configs and snapshots), Q-796 (per-owne
 - Q-161 ("a workspace wiped mid-build is noticed only at the next turn") is a real gap rather than lost
   evidence. The admin closed it with group 3; if it recurs, the next report opens a new row with full
   evidence.
+
+---
+
+## 2026-10-11 — Performance & scalability audit: every finding fixed at the root, or a 🟡 row (branch `claude/charming-bell-htxb9u`)
+
+Admin, verbatim: *"pure audit me, jo jo kamiya mili hai. un sabhi ko ek ek kar ke dna level par root cause se fix kar ke
+theek karo!! bina ruke sabhi ko fix karo! aur last me mere karne ka jo ho woh bata dena!!"* The audit (load-tested on a
+local build, no production traffic, no paid tokens) found F1–F18 and D1–D12. Ledger, one row per item:
+
+| Item | Problem | Root cause → class | Fix | Lock |
+|---|---|---|---|---|
+| F1 | Bot guard walked every tracked address per `/api` request (1,162 → 486 req/s; ~38% CPU; RSS 304 → 750 MB) and a dozen caches had no bound | Per-instance state as ad-hoc Maps, swept per request or never → **one bounded O(1) cache** | `lib/boundedCache.ts` (LRU + TTL, O(1)); bot guard, TTLCache, OTP/admin-login/dev-API maps, hosting plan, own keys, uid→email, creator names, web risk, Doctor AI stores, workspace stores and ~25 more converted | `boundedCaches.test.ts` census + `moduleStateCensus.json` |
+| F2 | Doctor AI stores keyed by a client-chosen session id | Client identity used as a key → verified uid | `sdaStoreKey.ts`; report memory byte budget | `aWriteNeverActsAsAClaimedUser` |
+| F3 | A whole office/NAT behind one address blocked by the bot guard | Address-only bucket → a verified uid gets its own bucket once the address is hot | `adaptiveGuard({ verifyUid })` | `boundedCaches` / guard tests |
+| Address class | IPv6 callers rotated through their /64 to dodge every limit | Raw `req.ip` → `addressRateKey` (/56) everywhere | auth, admin login, appData, appAi, guest quota, limiter | `aCallerCannotChooseItsOwnAddress` census |
+| F4 | `GET /wallet` wrote a default wallet over a concurrent payment | Read path writing → fill only MISSING fields, in a transaction | `missingWalletFields` | `aWalletReadNeverUndoesAMoneyWrite` (reverted → failed) |
+| F5 | `durable: false` limiters skipped their declared global anonymous ceiling | Ceiling enforced only on the durable branch → `BatchedGlobalCounter` | `globalAnonCeiling.ts` | `aGlobalCeilingAppliesToEveryLimiter` |
+| F8 | Gift/coupon claim and credit were separate writes | Two-step money flow → one transaction through `mirroredCreditPatch` | `redeemGiftCode`, coupon path | `aBoughtCodeIsSpentOnce` |
+| D9 | Durable limiter read-then-wrote | Lost update → `FieldValue.increment` then read; `expireAt` | `DurableRateLimit.ts` | `durableRateLimit.test.ts` |
+| D1 | Every build turn listed 200 conversation docs twice to find its own | List-to-find → point reads by derived id | `findWorkspaceConversation` | `aBuildTurnFindsItsOwnConversationByReadingIt` |
+| D2/D3 | Newest-first listings wrong past their cap; some needed an undeployable index | Index-dependent queries → `listEqNewestFirst` scan by document id | `firestoreIndexSafe.ts` | `firestoreIndexSafe.test.ts` |
+| D4/D5 | Gallery/store listings read full documents (source code) per visitor | No projection, no cache → `.select()` + 60 s `SharedReadCache` | `galleryStore`, `navStore` | `storeListings.test.ts` |
+| D6/D10 | Admin tabs and trims read whole collections | Full reads for counts → projections, `count()`, `sum()` | `adminReadFields.ts`, `admin.ts` | `adminReadsAreBounded` |
+| D11 | Conversation/metrics deletes could exceed 500 writes per batch | Unchunked batch → `deleteInChunks` (≤400) | `batchChunks.ts` | `aBatchNeverExceedsFirestoresLimit` |
+| D7 | Cross-device sync saves lost another device's sessions | Non-transactional read-merge-write → one transaction; loads one snapshot | `syncTransaction.ts` | `aSyncSaveNeverLosesAnotherDevicesSession` |
+| D8 | Every page view wrote the same `analytics_daily/{date}` doc (+ a raw row), unauthenticated, no limiter | Per-event write to a hot doc → per-instance buffer, one merged increment per 10 s; route limited; flushed on shutdown | `AnalyticsPipeline.ts`, `telemetry.ts`, `server.ts` | `analyticsNeverHammersOneDocument` |
+| Q-783 | `analytics_events` per-person trail nothing read (admin decided B) | — | Fixed concurrently by #3659 (merged first); this branch merged it, kept the buffered rollup (which folds no person) and the bounded log helper, and holds both locks | `noAnalyticsEventNamesAPerson` + `analyticsNeverHammersOneDocument` |
+| F9 | Zip import lease and SBOM store used the CLIENT Firestore SDK (lease threw and failed open; SBOM refused) | Two SDKs reachable from the server → one (admin); `lib/db.ts` and the client init removed | `zipUpload.ts`, `sbom.ts`, `server.ts` | `theServerNeverUsesTheClientFirestoreSdk` (reverted → 3 failed) |
+| F13 | Two log lines per request, including every asset | Per-request console line + span log for routine requests | ids on the span; routine spans not logged/kept | `aRoutineRequestWritesNoLogLine` |
+| F14 | A 15-minute exclusive job ran several times per cycle across instances | Per-instance cadence + 10-min lease < 15-min interval → tick asks the durable run record and joins the shared cadence | `ScheduledJobs.tick` | `anExclusiveJobRunsOncePerCycle` (without the record: >13 runs; with: 11–13) |
+| F15 | Reading server load reset the lag window for the next reader (Monitor read it twice) | Reset-on-read → timed `rotate()`; read-only `snapshot()`; Monitor reads once | `serverLoad.ts`, `admin.ts` | `serverLoad.test.ts` |
+| F16 | Admin settings were memory-only | Investigation: NOTHING enforced them (UI already removed 2026-10-04) → routes, `FeatureFlagManager`, four `serverStats` fields removed; the public "AI engines 4 of 4" count (a dead map) now counts real build tiers | `admin.ts`, `health.ts`, `HealthReport.ts` | `routesAdmin`, `serverStats`, `publicStatusPage`, `HealthReport` tests |
+| F18 | Scale doc said max 10 instances (real: 100); k6 test POSTed writes | Doc drift; write endpoints in a load test | doc corrected; k6 reads only | `aLoadTestNeverWrites` |
+| Chat cache | Reply cache keyed on the raw prompt, and cached live/framework answers | → `chatReplyCacheKey` (sha256 + lane); live-grounded answers never cached | `PromptCache.ts`, `agentv3.ts` | existing chat-cache tests |
+| Q-162 | Uncalled routes in files this change touched | Decided: settings/feature-flags deleted; funnel admin-only (503 on failure); old exec named legacy-bundled | baseline shrank by 4 | `everyRouteHasACaller` |
+| F17, D-TTL, retention, indexes, PKCE, service split | Need the admin, a console or a decision | — | 🟡 rows Q-809…Q-814 | `BUILD_REPORT_QUEUE.md` |
+| Found | Doctor AI calculators claimed with no screen; no way to disconnect a bot; `pwa/save` caller unknown | — | rows Q-815, Q-816 (OPEN), Q-817 | `BUILD_REPORT_QUEUE.md` |
+
+**What to watch for after deploy:** Cloud Logging volume should drop sharply (no `[TRACE][API ENTRY]`, no span line per
+asset); the Monitor's event-loop p99 should stop reading 0 on its second panel; `site-uptime` and `monitor-alerts` should
+run once per 15 minutes in Cloud Logging, not once per instance; `/api/health` shows "N of 3 available".
 
 ### 2026-10-11 — #3657 and #3658 merged; first four of the admin's group-4 decisions built (Q-783, Q-703, Q-117, Q-795)
 

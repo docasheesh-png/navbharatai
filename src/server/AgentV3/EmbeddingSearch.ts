@@ -51,6 +51,7 @@ async function loadOpenAI(): Promise<any> {
 }
 
 import { saveEmbedding, removeEmbedding, loadEmbeddings, hashContent, needsReembed } from './EmbeddingStore';
+import { BoundedCache } from '../lib/boundedCache';
 import { envFlag } from '../lib/envFlag';
 
 /**
@@ -212,7 +213,9 @@ function buildEmbedText(path: string, content: string): string {
 
 // ── Per-workspace store registry ─────────────────────────────────────────────
 
-const stores = new Map<string, EmbeddingStore>();
+// Bounded (audit 2026-10-11): each store holds a workspace's vectors, and every workspace ever searched
+// stayed in memory. An evicted store rehydrates from the durable copy on its next use (`hydrate`).
+const stores = new BoundedCache<string, EmbeddingStore>({ maxEntries: 300 });
 
 /** Get (or create) the EmbeddingStore for a workspace. */
 export function getEmbeddingStore(workspaceId: string): EmbeddingStore {

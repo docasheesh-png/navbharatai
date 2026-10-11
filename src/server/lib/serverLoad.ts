@@ -33,6 +33,22 @@ import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import type { Request, Response, NextFunction } from 'express';
 
+/** How long one event-loop lag window lasts before it is rotated. */
+export const LAG_WINDOW_MS = 60_000;
+
+/**
+ * PURE: the lag to report from the current (partial) window and the previous complete one — the WORSE of the two,
+ * so a stall is visible for at least one full window after it ends, whichever moment a reader looks.
+ */
+export function lagOverWindows(
+  current: { p50: number; p99: number } | null,
+  previous: { p50: number; p99: number } | null,
+): { p50: number; p99: number } | null {
+  if (!current) return previous;
+  if (!previous) return current;
+  return { p50: Math.max(current.p50, previous.p50), p99: Math.max(current.p99, previous.p99) };
+}
+
 export type LoadLevel = 'ok' | 'warn' | 'critical';
 
 export interface ServerLoadSnapshot {
@@ -116,6 +132,9 @@ export function readMemoryLimitBytes(read: (p: string) => string = (p) => readFi
 
 class ServerLoadSampler {
   private histogram: IntervalHistogram | null = null;
+  /** The previous completed lag window — see `rotate()`. */
+  private lastWindow: { p50: number; p99: number } | null = null;
+  private rotateTimer: ReturnType<typeof setInterval> | null = null;
   private lastCpu = process.cpuUsage();
   private lastCpuAt = Date.now();
   private cpuPercent: number | null = null;
@@ -129,6 +148,8 @@ class ServerLoadSampler {
       // 20ms resolution: fine enough to see a blocked thread, coarse enough to cost nothing.
       this.histogram = monitorEventLoopDelay({ resolution: 20 });
       this.histogram.enable();
+      this.rotateTimer = setInterval(() => this.rotate(), LAG_WINDOW_MS);
+      this.rotateTimer.unref?.();
     } catch {
       this.histogram = null; // an older runtime simply reports no lag rather than breaking boot
     }
@@ -161,6 +182,25 @@ class ServerLoadSampler {
     this.lastCpuAt = now;
   }
 
+  /**
+   * Close the current lag window: keep its percentiles as `lastWindow`, start a new one. On a TIMER only.
+   *
+   * 🔴 IT USED TO HAPPEN ON READ (audit 2026-10-11, F15). `snapshot()` reset the histogram after reading it, and
+   * four admin reads call `snapshot()` — the Monitor alone twice in one response. So the second read in a
+   * response saw a window a few microseconds long (reported "no lag" during a stall), and whichever screen read
+   * first stole the window from every other. A reading must not change what the next reader sees; now the
+   * window turns on a clock and every reader sees the same numbers.
+   */
+  rotate(): void {
+    if (!this.histogram) return;
+    try {
+      this.lastWindow = this.histogram.count > 0
+        ? { p50: this.histogram.percentile(50) / 1e6, p99: this.histogram.percentile(99) / 1e6 }
+        : null;
+      this.histogram.reset();
+    } catch { /* a measurement never breaks the process */ }
+  }
+
   snapshot(): ServerLoadSnapshot {
     this.sampleCpu();
     if (this.memoryLimit === undefined) this.memoryLimit = readMemoryLimitBytes();
@@ -174,12 +214,16 @@ class ServerLoadSampler {
     let p99: number | null = null;
     if (this.histogram) {
       try {
-        p50 = Math.round((this.histogram.percentile(50) / 1e6) * 10) / 10;
-        p99 = Math.round((this.histogram.percentile(99) / 1e6) * 10) / 10;
-        // RESET after reading, so the numbers describe the window since the last look rather than
-        // every spike since boot — a single stall hours ago would otherwise show as a permanent
-        // problem and the panel would stop being believed.
-        this.histogram.reset();
+        // The current window together with the previous one: the last one to two `LAG_WINDOW_MS`, never every
+        // spike since boot (a stall hours ago would read as a permanent problem). READ-ONLY — see `rotate()`.
+        const cur = this.histogram.count > 0
+          ? { p50: this.histogram.percentile(50) / 1e6, p99: this.histogram.percentile(99) / 1e6 }
+          : null;
+        const merged = lagOverWindows(cur, this.lastWindow);
+        if (merged) {
+          p50 = Math.round(merged.p50 * 10) / 10;
+          p99 = Math.round(merged.p99 * 10) / 10;
+        }
       } catch { p50 = null; p99 = null; }
     }
 

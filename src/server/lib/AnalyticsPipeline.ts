@@ -1,18 +1,16 @@
 // P-MON.1 — Server-side product-analytics pipeline.
 //
 // `/api/analytics/event` previously only console.log'd events — no aggregation, no funnels. This adds a
-// real server-side rollup: every event increments a daily aggregate doc (per-event counts + the
-// activation funnel signup→build→deploy→pay), race-safe via Firestore FieldValue.increment. Funnel
-// queries read the daily rollups. Pure helpers (stage mapping, funnel aggregation) are unit-tested; the
-// store is best-effort + VITEST-skip (never throws).
+// real server-side rollup: events increment a daily aggregate doc (per-event counts + the
+// activation funnel signup→build→deploy→pay), race-safe via Firestore FieldValue.increment — buffered per
+// instance and written once per flush (see `AnalyticsBuffer`).
 //
-// 🔒 NO PER-PERSON EVENT LOG (admin 2026-10-11, Q-783 option B). This also appended every event, with the
-// person's real `userId`, to `analytics_events` "for cohort/segmentation drill-down" — a drill-down that
-// was never built, so nothing ever read it. A store that holds a uid and answers no question is pure
-// liability under the DPDP Act's data-minimisation duty, and the funnel loses nothing: it reads the day
-// rollup, which holds no person. The 30-day window and the account-erasure entry for `analytics_events`
-// stay in DataRetentionManager, so the rows written before this change still expire and are still erased.
-// Locked by `tests/noAnalyticsEventNamesAPerson.test.ts`.
+// 🔒 NO RAW EVENT ROWS (Q-783, decided by the admin 2026-10-11: option B). Every event also used to append a row
+// to `analytics_events` carrying the person's real `userId`, "for a cohort drill-down" that was never built —
+// nothing in the repository ever read it. A store that holds a uid and answers no question is pure liability, so
+// it is no longer written. Its 30-day window and its erase-with-the-account entry stay (`DataRetentionManager`),
+// so the rows already written still expire and are still erased. Locked by `tests/noAnalyticsEventNamesAPerson.test.ts`. Funnel/cohort queries read the daily rollups. Pure helpers (stage mapping,
+// funnel aggregation) are unit-tested; the store is best-effort + VITEST-skip (never throws).
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
@@ -84,32 +82,142 @@ function getDb(): admin.firestore.Firestore | null {
   }
 }
 
-/** Record one analytics event into the daily rollup (race-safe increments). Best-effort. No person is stored. */
+/**
+ * 🔴 ONE DAILY DOCUMENT, WRITTEN ONCE PER FLUSH — NOT ONCE PER EVENT (performance audit 2026-10-11, D8).
+ *
+ * Every event used to `set(..., {merge:true})` the SAME `analytics_daily/{date}` document and then `add()` a raw
+ * row, two Firestore writes per page view on an unauthenticated route with no limiter. Firestore sustains about
+ * one write per second on a single document; past that, writes to it queue and fail with contention, so the
+ * busiest day — the one worth measuring — was the day the rollup lost counts. Now each instance folds events
+ * into an in-process buffer and writes ONE merged increment per day every `FLUSH_INTERVAL_MS`.
+ *
+ * Pure apart from the writer it is handed, so tests drive it without Firestore.
+ */
+export const FLUSH_INTERVAL_MS = 10_000;
+/** Distinct (day, event) keys held before an early flush — bounds the buffer's memory. */
+export const MAX_BUFFERED_KEYS = 2_000;
+
+/** One event as the buffer folds it: its sanitized key and funnel stage. No person — see Q-783 above. */
+export interface AnalyticsRow { event: string; stage: string; ts: number }
+
+export interface DailyDelta {
+  date: string;
+  totalEvents: number;
+  events: Record<string, number>;
+  funnel: Partial<Record<FunnelStage, number>>;
+}
+
+/** Folds events in memory; `drain()` hands back one delta per day. */
+export class AnalyticsBuffer {
+  private dailies = new Map<string, DailyDelta>();
+  private keys = 0;
+
+  fold(row: AnalyticsRow, date: string): void {
+    let d = this.dailies.get(date);
+    if (!d) {
+      d = { date, totalEvents: 0, events: {}, funnel: {} };
+      this.dailies.set(date, d);
+    }
+    d.totalEvents += 1;
+    if (d.events[row.event] === undefined) this.keys += 1;
+    d.events[row.event] = (d.events[row.event] ?? 0) + 1;
+    if (row.stage) {
+      const s = row.stage as FunnelStage;
+      d.funnel[s] = (d.funnel[s] ?? 0) + 1;
+    }
+  }
+
+  /** True when the buffer should be flushed early, before the timer, to stay bounded. */
+  get full(): boolean {
+    return this.keys >= MAX_BUFFERED_KEYS;
+  }
+
+  get pending(): number {
+    let n = 0;
+    for (const d of this.dailies.values()) n += d.totalEvents;
+    return n;
+  }
+
+  drain(): DailyDelta[] {
+    const out = [...this.dailies.values()];
+    this.dailies = new Map();
+    this.keys = 0;
+    return out;
+  }
+}
+
+/** The Firestore update for one day's delta: every count an atomic increment, so instances never overwrite. */
+export function dailyUpdateFor(d: DailyDelta, inc: (n: number) => unknown, now: number): Record<string, unknown> {
+  const update: Record<string, unknown> = { date: d.date, totalEvents: inc(d.totalEvents), updatedAt: now };
+  for (const [k, n] of Object.entries(d.events)) update[`events.${k}`] = inc(n);
+  for (const [s, n] of Object.entries(d.funnel)) if (n) update[`funnel.${s}`] = inc(n);
+  return update;
+}
+
+/** Turns one request's input into a row and its day. Null for an event with no name. Pure. */
+export function analyticsRowFor(input: { event?: unknown; ts?: unknown }, now: number): { row: AnalyticsRow; date: string } | null {
+  const event = typeof input?.event === 'string' ? input.event : '';
+  if (!event) return null;
+  // A client clock is trusted only within a day of ours: a wild `ts` must not open a rollup document for 1970
+  // or 2999 that the funnel would then read as a real day.
+  const ts = typeof input.ts === 'number' && Number.isFinite(input.ts) && Math.abs(input.ts - now) < 86_400_000 ? input.ts : now;
+  const stage = funnelStage(event);
+  return {
+    date: dayKey(ts),
+    row: { event: sanitizeEventKey(event), stage: stage || '', ts },
+  };
+}
+
+const buffer = new AnalyticsBuffer();
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let flushing: Promise<void> | null = null;
+
+/** Write what the buffer holds: one merged write per day, in one batch. Never throws. */
+export async function flushAnalytics(): Promise<void> {
+  // One write in flight at a time. What arrives meanwhile stays buffered and is rescheduled when it lands.
+  if (flushing) return flushing;
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  const dailies = buffer.drain();
+  if (dailies.length === 0) return;
+  const db = getDb();
+  if (!db) return;
+  flushing = (async () => {
+    try {
+      const inc = (n: number) => admin.firestore.FieldValue.increment(n);
+      const now = Date.now();
+      const batch = db.batch();
+      for (const d of dailies) batch.set(db.collection(DAILY_COLLECTION).doc(d.date), dailyUpdateFor(d, inc, now), { merge: true });
+      await batch.commit();
+    } catch {
+      /* best-effort — analytics never breaks the request */
+    } finally {
+      flushing = null;
+      if (buffer.pending > 0) scheduleFlush();
+    }
+  })();
+  return flushing;
+}
+
+/** Record one analytics event. Buffered in-process and written by the next flush. Never throws. */
 export async function recordAnalyticsEvent(input: {
   event: string;
   ts?: number;
 }): Promise<void> {
-  const event = typeof input?.event === 'string' ? input.event : '';
-  if (!event) return;
-  const db = getDb();
-  if (!db) return;
-  const ts = typeof input.ts === 'number' && input.ts > 0 ? input.ts : Date.now();
-  const date = dayKey(ts);
-  const key = sanitizeEventKey(event);
-  const stage = funnelStage(event);
-  try {
-    const inc = admin.firestore.FieldValue.increment(1);
-    const update: Record<string, unknown> = {
-      date,
-      totalEvents: inc,
-      [`events.${key}`]: inc,
-      updatedAt: Date.now(),
-    };
-    if (stage) update[`funnel.${stage}`] = inc;
-    await db.collection(DAILY_COLLECTION).doc(date).set(update, { merge: true });
-  } catch {
-    /* best-effort — analytics never breaks the request */
+  const r = analyticsRowFor(input, Date.now());
+  if (!r) return;
+  if (!getDb()) return;
+  buffer.fold(r.row, r.date);
+  if (buffer.full) {
+    void flushAnalytics();
+    return;
   }
+  scheduleFlush();
+}
+
+function scheduleFlush(): void {
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => { flushTimer = null; void flushAnalytics(); }, FLUSH_INTERVAL_MS);
+  flushTimer.unref?.();
 }
 
 /** Load the last `days` daily rollups and compute the activation funnel. Never throws. */

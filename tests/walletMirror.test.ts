@@ -121,7 +121,17 @@ describe('wiring — every wallet credit is transactional, and none of them assi
   it('the redemption is still claimed atomically — the double-redeem guard is untouched', () => {
     const at = payment.indexOf("app.post('/api/payment/redeem-coupon'");
     const block = payment.slice(at, payment.indexOf('app.post', at + 10));
-    expect(block).toContain('if (snap.exists()) return false;');
+    expect(block).toContain('if (snap.exists()) return null;');
+  });
+
+  it('claim and credit are ONE transaction — a failure between them cannot burn the redemption (audit 2026-10-11)', () => {
+    const at = payment.indexOf("app.post('/api/payment/redeem-coupon'");
+    const block = payment.slice(at, payment.indexOf('app.post', at + 10));
+    const coupon = block.slice(block.indexOf('const redemptionId = `coupon_${code}_${userId}`;'));
+    expect((coupon.match(/runTransaction\(/g) ?? []).length).toBe(1);
+    const tx = coupon.slice(coupon.indexOf('runTransaction('));
+    expect(tx.indexOf('tx.set(txRef,')).toBeGreaterThan(-1);
+    expect(tx.indexOf("mirroredCreditPatch(w, rupeesToTokens(value), 'gift')")).toBeGreaterThan(tx.indexOf('tx.set(txRef,'));
   });
 });
 

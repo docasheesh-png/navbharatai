@@ -31,6 +31,7 @@
 // reads what was actually persisted.
 
 import { buildHistoryStore } from '../project/BuildHistoryStore';
+import { BoundedCache } from '../lib/boundedCache';
 import { workspacePrefixFor } from '../lib/workspaceIdentity';
 
 /**
@@ -81,15 +82,17 @@ export interface RestorePointDecision {
     | 'unconfirmed';
 }
 
-/** Every build that has already left a restore point, keyed per build so a retry cannot double-write. */
-const savedForBuild = new Set<string>();
-
 /** Bounded so a long-lived instance cannot grow this set without limit. */
-const MAX_REMEMBERED = 500;
+const MAX_REMEMBERED_BUILDS = 500;
+
+/** Every build that has already left a restore point, keyed per build so a retry cannot double-write. */
+// An LRU (audit 2026-10-11): the old Set was CLEARED at 500 builds, so a build still running past that moment
+// lost its "already saved" mark and a retry could write a second restore point. Now only the oldest leaves.
+const savedForBuild = new BoundedCache<string, true>({ maxEntries: MAX_REMEMBERED_BUILDS });
+
 
 export function rememberRestorePoint(buildKey: string): void {
-  if (savedForBuild.size >= MAX_REMEMBERED) savedForBuild.clear();
-  savedForBuild.add(buildKey);
+  savedForBuild.set(buildKey, true);
 }
 
 export function restorePointAlreadySaved(buildKey: string): boolean {

@@ -15,7 +15,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /** A collection double that refuses to be ordered, and applies equality filters itself. */
 function fakeCollection(docs: Array<Record<string, unknown>>) {
-  const state = { filters: [] as Array<[string, unknown]>, limit: 0, orderByCalls: 0 };
+  const state = { filters: [] as Array<[string, unknown]>, limit: 0, orderByCalls: 0, select: null as string[] | null };
   const q: Record<string, unknown> = {
     where(field: string, op: string, value: unknown) {
       expect(op, 'only equality filters keep a query index-free').toBe('==');
@@ -27,6 +27,7 @@ function fakeCollection(docs: Array<Record<string, unknown>>) {
       throw new Error('orderBy() would require a composite index that is not deployed');
     },
     limit(n: number) { state.limit = n; return q; },
+    select(...fields: string[]) { state.select = fields; return q; },
     async get() {
       const matching = docs.filter((d) => state.filters.every(([f, v]) => d[f] === v));
       return { docs: matching.slice(0, state.limit || matching.length).map((data) => ({ id: String(data.id ?? ''), data: () => data })) };
@@ -58,6 +59,9 @@ describe('galleryStore listings', () => {
     expect(state.orderByCalls).toBe(0);
     // A `pending` app must never reach a public listing — the status IS the safety model here.
     expect(apps.some((a) => a.id === 'hidden')).toBe(false);
+    // The listing never reads the source (audit 2026-10-11, D4): up to 700 KB per record, dropped by toPublic.
+    expect(state.select).not.toBeNull();
+    expect(state.select).not.toContain('files');
   });
 
   it("lists one publisher's own apps regardless of status", async () => {

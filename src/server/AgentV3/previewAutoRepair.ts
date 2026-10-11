@@ -1,3 +1,5 @@
+import { BoundedCache } from '../lib/boundedCache';
+
 // AgentV3 — a crash the user hits AFTER the build ended is repaired once, automatically, when the
 // platform can see it too (Q-148, admin-approved option (b) 2026-10-05).
 //
@@ -13,7 +15,8 @@
 // AI" — nothing here spends anything. Kill switch AGENTV3_PREVIEW_AUTO_REPAIR=off. PURE.
 
 /** In-memory claim so two crash reports cannot both pass the check before the durable write lands (BLD-11). */
-const autoRepairClaims = new Map<string, number>();
+// Bounded (audit 2026-10-11): one entry per workspace ever repaired used to stay for the instance's life.
+const autoRepairClaims = new BoundedCache<string, number>({ maxEntries: 20_000 });
 export const AUTO_REPAIR_CLAIM_MS = 120_000;
 
 /** True when this call won the claim. Synchronous — call it before any await. */

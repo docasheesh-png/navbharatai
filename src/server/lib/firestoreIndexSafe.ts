@@ -1,4 +1,4 @@
-import type * as admin from 'firebase-admin';
+import * as admin from 'firebase-admin';
 
 /**
  * Listing helpers that CANNOT require a Firestore composite index.
@@ -47,13 +47,13 @@ import type * as admin from 'firebase-admin';
  *
  * ## The cost, stated honestly
  *
- * In-memory sorting means we fetch up to `fetchCap` documents and keep the newest `limit`. That is
- * correct only while a single filter value matches fewer than `fetchCap` documents — true for every
- * collection using this today (one document per published app or per purchase, not per row or per
- * event) and enforced by the cap rather than assumed. When a collection genuinely outgrows the cap,
- * the answer is a real composite index CREATED IN THE CONSOLE FIRST and then a call site moved off
- * this helper — not a silently raised cap, which would quietly turn "newest 50" into "50 arbitrary
- * ones".
+ * In-memory sorting means we fetch up to `fetchCap` documents and keep the newest `limit`. While a filter
+ * value matches fewer than `fetchCap` documents that is one read per document and correct. When the first
+ * page comes back FULL, the cap used to make "newest 50" quietly mean "50 arbitrary ones" (audit 2026-10-11,
+ * D3: it did, for every user past 200 conversations). Now the helper reads every match in document-id order
+ * (still index-free) and sorts those — more reads for that caller only, never a wrong answer — up to
+ * INDEX_SAFE_SCAN_CEILING, past which it logs. A collection that reaches the ceiling wants a real composite
+ * index CREATED IN THE CONSOLE FIRST and its call site moved off this helper.
  */
 
 /**
@@ -106,7 +106,54 @@ export async function listEqNewestFirst<T>(
 ): Promise<T[]> {
   let q: admin.firestore.Query = collection as admin.firestore.Query;
   for (const [field, value] of filters) q = q.where(field, '==', value);
-  const snap = await q.limit(Math.max(1, fetchCap)).get();
-  const rows = snap.docs.map((d) => (mapDoc ? mapDoc(d.id, d.data()) : (d.data() as T)));
+  const cap = Math.max(1, fetchCap);
+  const snap = await q.limit(cap).get();
+  // A FULL first page means more documents match than were read, so an in-memory sort of that page is the
+  // newest of an ARBITRARY subset — exactly what this file's header warned about (audit 2026-10-11, D3). Read
+  // them all instead, in document-id order: ascending `__name__` with equality filters is served by the
+  // automatic single-field indexes (DeploymentStore.listPage runs it in production), so it still needs no
+  // composite index. Bounded by INDEX_SAFE_SCAN_CEILING, and logged when even that is reached.
+  const docs = snap.docs.length >= cap ? await scanByDocumentId(q, cap) : snap.docs;
+  const rows = docs.map((d) => (mapDoc ? mapDoc(d.id, d.data()) : (d.data() as T)));
   return newestFirstBy(rows, sortField).slice(0, Math.max(1, limit));
+}
+
+/**
+ * The most documents one listing will read when its matches outgrow the fetch cap. Past this the result is
+ * again a subset, and the log says so; a collection that reaches it wants a composite index created in the
+ * console of the RIGHT project (see the header) and its call site moved off this helper.
+ */
+export const INDEX_SAFE_SCAN_CEILING = 5_000;
+
+/** Every matching document, `pageSize` at a time in document-id order, up to the scan ceiling. */
+async function scanByDocumentId(
+  q: admin.firestore.Query,
+  pageSize: number,
+): Promise<admin.firestore.QueryDocumentSnapshot[]> {
+  const out: admin.firestore.QueryDocumentSnapshot[] = [];
+  let page = q.orderBy(admin.firestore.FieldPath.documentId()).limit(pageSize);
+  for (;;) {
+    const snap = await page.get();
+    out.push(...snap.docs);
+    if (snap.docs.length < pageSize) return out;
+    if (out.length >= INDEX_SAFE_SCAN_CEILING) {
+      console.warn(`[firestoreIndexSafe] a listing matched more than ${INDEX_SAFE_SCAN_CEILING} documents; newest-first is not guaranteed past that. It needs a composite index.`);
+      return out;
+    }
+    page = q.orderBy(admin.firestore.FieldPath.documentId()).startAfter(snap.docs[snap.docs.length - 1]).limit(pageSize);
+  }
+}
+
+/**
+ * A stored time as epoch millis, for `newestFirstBy`: a number as-is, an ISO string parsed, a Firestore
+ * Timestamp read. Anything else is `-Infinity`, which sorts last. PURE.
+ */
+export function epochMillis(v: unknown): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') { const t = Date.parse(v); return Number.isFinite(t) ? t : Number.NEGATIVE_INFINITY; }
+  if (v && typeof (v as { toMillis?: unknown }).toMillis === 'function') {
+    const t = (v as { toMillis: () => number }).toMillis();
+    return Number.isFinite(t) ? t : Number.NEGATIVE_INFINITY;
+  }
+  return Number.NEGATIVE_INFINITY;
 }

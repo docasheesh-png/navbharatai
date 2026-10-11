@@ -26,10 +26,13 @@ import {
 import { buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
 
 /** A racing game behind a title screen. `accelerates: false` is the 46e2d74b bug: the gas is read and never applied. */
-function racer(o: { accelerates: boolean; title?: 'start-race' | 'how-only' }): string {
+function racer(o: { accelerates: boolean; title?: 'start-race' | 'how-only' | 'two-screens' }): string {
+  // 'two-screens': "Play" opens a car picker whose "Race!" is what finally shows the track.
   const title = o.title === 'how-only'
     ? '<button id="how">How to Play</button><button id="set">Settings</button>'
-    : '<button id="how">How to Play</button><button id="start" class="pulse">Start Race</button>';
+    : o.title === 'two-screens'
+      ? '<button id="how">How to Play</button><button id="play" onclick="this.parentElement.innerHTML=\'<h2>Pick a car</h2><button>Red</button><button id=start>Race!</button>\'; document.getElementById(\'start\').onclick = () => { document.getElementById(\'title\').remove(); start(); }; window.__plays = (window.__plays || 0) + 1;">Play</button>'
+      : '<button id="how">How to Play</button><button id="start" class="pulse">Start Race</button>';
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>.pulse{animation:p .5s infinite alternate}@keyframes p{from{transform:scale(1)}to{transform:scale(1.2)}}
 button{font-size:22px;margin:8px;padding:12px 24px}</style></head>
@@ -71,6 +74,7 @@ const PAGES: Record<string, string> = {
   '/race': racer({ accelerates: true }),
   '/race-stalled': racer({ accelerates: false }),
   '/no-start': racer({ accelerates: true, title: 'how-only' }),
+  '/two-screens': racer({ accelerates: true, title: 'two-screens' }),
 };
 
 const PW = '/opt/node22/lib/node_modules/playwright/index.js';
@@ -121,6 +125,12 @@ describe.skipIf(!haveBrowser)('a racing game behind a "Start Race" title screen 
     // The same measurement on a game that is NOT a driving game is not judged by this probe.
     expect(playtestVerdict(run, { progress: true, restart: true }).score!.stalledVehicle).toBeUndefined();
     expect(buildFindingSuggestions([{ code: v.code, severity: v.severity, autoResolved: v.autoResolved, message: v.message }]).map((s) => s.title)).toContain('Make the game playable');
+  }, 180_000);
+
+  it('a title screen that leads to a second screen ("Play" → pick a car → "Race!") is followed to the track', async () => {
+    const run = await play('/two-screens');
+    expect(run.ok).toBe(true);
+    expect(run.started).toBe('Race!');
   }, 180_000);
 
   it('a title screen with no control that starts a game is NOT RUN — a warning that says the game was never played', async () => {

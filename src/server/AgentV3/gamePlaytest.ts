@@ -98,8 +98,9 @@ export function replayFromCode(files: Record<string, string>): GameCodeFacts {
  * and nothing in it that says it does something else (help, settings, a shop, a share, a delete — the
  * explorer's own `NEVER_PRESS` list plus the menu words below). A label that STARTS with the stem ranks
  * above one that merely contains it, and a label the caller already saw start this game (`startLabels`,
- * e.g. the click explorer's record) ranks above both. At most three candidates are pressed, one at a
- * time, until a game surface appears — bounded, so a title screen with ten buttons is never a tour.
+ * e.g. the click explorer's record) ranks above both. At most three distinct candidates are pressed, one
+ * at a time and never one twice, until a game surface appears — bounded, so a title screen with ten
+ * buttons is never a tour.
  */
 export const START_STEM = "(?:start|play|race|begin|go|drive|ride|fly|launch|resume|let'?s\\s+go|tap\\s+to\\s+(?:start|play)|press\\s+start|new\\s+game|khelo|shuru|शुरू|खेलें|खेलो|चलो)";
 /** A start stem as a whole word, anywhere in the label (`u`: the Hindi words have no ASCII word boundary). */
@@ -281,12 +282,20 @@ async function pressStart(page) {
   return labels[0];
 }
 
-// THE LADDER, used only when no game surface is on screen: press the next start candidate, one at a
-// time, until a canvas appears (at most cfg.start.max presses). Returns the label that revealed it.
-async function startUntilSurface(page) {
-  for (let n = 0; n < cfg.start.max; n++) {
+// THE LADDER, used only when no game surface is on screen: give the first press a moment more, then press
+// the best start candidate NOT yet pressed, one at a time, until a canvas appears — at most cfg.start.max
+// distinct controls in all, counting the one already pressed. The candidates are read again before each
+// press, so a title screen that leads to a second screen ("Select car" → "Race!") is followed, and a
+// control is never pressed twice. Returns the label that revealed the surface, or null.
+async function startUntilSurface(page, already) {
+  const tried = new Set(already ? [already] : []);
+  while (tried.size < cfg.start.max) {
+    await page.waitForTimeout(400);
+    if (await surface(page)) return null;
     const labels = await startCandidates(page);
-    if (n >= labels.length) return null;
+    const n = labels.findIndex((t) => !tried.has(t));
+    if (n < 0) return null;
+    tried.add(labels[n]);
     await pressMarked(page, n);
     if (await surface(page)) return labels[n];
   }
@@ -318,7 +327,7 @@ try {
   out.started = await pressStart(page);
   let box = await surface(page);
   if (!box) {
-    const revealed = await startUntilSurface(page);
+    const revealed = await startUntilSurface(page, out.started);
     if (revealed) out.started = revealed;
     box = await surface(page);
   }
@@ -380,9 +389,9 @@ try {
   watch(mp);
   await mp.goto(cfg.base, { waitUntil: 'load', timeout: cfg.loadMs });
   await mp.waitForTimeout(1500);
-  await pressStart(mp);
+  const phoneStarted = await pressStart(mp);
   let mbox = await surface(mp);
-  if (!mbox && await startUntilSurface(mp)) mbox = await surface(mp);
+  if (!mbox) { await startUntilSurface(mp, phoneStarted); mbox = await surface(mp); }
   if (mbox) {
     await mp.touchscreen.tap(mbox.x + mbox.w / 2, mbox.y + mbox.h / 2).catch(() => {});
     await mp.waitForTimeout(400);

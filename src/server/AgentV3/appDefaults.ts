@@ -8,6 +8,10 @@
 // Next.js metadata API) the tool says so honestly rather than writing something wrong.
 
 import { PLACEHOLDER_TITLE } from './appDisplayName';
+import {
+  nativeFeelEnabled, nativeFeelHeadTags, nativeFeelLinkTag, nativeFeelStylesheet, NATIVE_FEEL_HREF,
+  withViewportFitCover, hasNativeFeel,
+} from './nativeFeel';
 
 export interface AppDefaultsResult {
   /** Patched index.html, or null when there was no html to patch. */
@@ -238,6 +242,9 @@ export function planAppDefaults(
   files['robots.txt'] = ROBOTS_TXT;
   files[ICON_HREF.replace(/^\//, '')] = iconSvg(appName); // real installable icon (referenced by the manifest)
   files[SW_HREF.replace(/^\//, '')] = swJs();             // network-first service worker (PWA, works offline)
+  // 📱 The native-feel baseline as a FILE, not inline: one <link> in the document instead of ~2.5 KB of
+  // our CSS persisted into the user's index.html. See NATIVE_FEEL_HREF for the guard that proved it.
+  if (nativeFeelEnabled()) files[NATIVE_FEEL_HREF.replace(/^\//, '')] = nativeFeelStylesheet();
 
   if (indexHtml == null) {
     return { indexHtml: null, files, added };
@@ -255,7 +262,9 @@ export function planAppDefaults(
   const safeDescription = escapeHtml(opts.description || appName);
   const ensures: Array<{ test: RegExp; tag: string; label: string }> = [
     { test: /<meta[^>]+charset/i, tag: '<meta charset="UTF-8" />', label: 'charset' },
-    { test: /name=["']viewport["']/i, tag: '<meta name="viewport" content="width=device-width, initial-scale=1.0" />', label: 'viewport' },
+    // `viewport-fit=cover` is not cosmetic: without it `env(safe-area-inset-*)` is 0px on EVERY device,
+    // so a header sits under the notch and a bottom bar under the home indicator (nativeFeel.ts).
+    { test: /name=["']viewport["']/i, tag: '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />', label: 'viewport' },
     { test: /<title>/i, tag: `<title>${safeName}</title>`, label: 'title' },
     { test: /name=["']description["']/i, tag: `<meta name="description" content="${safeDescription}" />`, label: 'meta description' },
     { test: /property=["']og:title["']/i, tag: `<meta property="og:title" content="${safeName}" />`, label: 'og:title' },
@@ -266,6 +275,9 @@ export function planAppDefaults(
     { test: /name=["']theme-color["']/i, tag: '<meta name="theme-color" content="#0f172a" />', label: 'theme-color' },
     { test: /rel=["']manifest["']/i, tag: `<link rel="manifest" href="${MANIFEST_HREF}" />`, label: 'manifest link' },
     { test: /rel=["']icon["']/i, tag: `<link rel="icon" href="${ICON_HREF}" type="image/svg+xml" />`, label: 'icon link' },
+    // 📱 The phone tags — an installed app opens fullscreen instead of inside browser chrome, and
+    // rotating it stops re-flowing every font size. See `nativeFeel.ts` for why each is not optional.
+    ...(nativeFeelEnabled() ? nativeFeelHeadTags() : []),
   ];
 
   // A PLACEHOLDER <title> ("App", "Vite + React") names no app, so it is replaced with the real name
@@ -280,6 +292,16 @@ export function planAppDefaults(
   const toInsert: string[] = [];
   for (const e of ensures) {
     if (!e.test.test(html)) { toInsert.push('    ' + e.tag); added.push(e.label); }
+  }
+
+  // 📱 THE TAG THAT ALREADY EXISTS IS THE ONE THAT WAS WRONG. Vite's template always ships a viewport,
+  // so the `ensures` test above never fired and `viewport-fit=cover` never arrived — leaving every
+  // `env(safe-area-inset-*)` in the generated app at 0px. An ensure cannot fix an attribute on a tag
+  // that is already present, so the viewport is UPGRADED in place (idempotent). See `nativeFeel.ts`.
+  if (nativeFeelEnabled()) {
+    const vp = withViewportFitCover(html);
+    if (vp.changed) { html = vp.html; added.push('viewport-fit=cover'); }
+    if (!hasNativeFeel(html)) { toInsert.push('    ' + nativeFeelLinkTag()); added.push('native-feel baseline'); }
   }
 
   let headPatched = true;

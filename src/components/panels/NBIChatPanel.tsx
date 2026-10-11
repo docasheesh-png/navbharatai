@@ -32,6 +32,8 @@ export interface NBIChatPanelProps {
   isAppBuilt: boolean;
   theme: ThemeMode;
   onPreviewClick: () => void;
+  /** Downloads the files a reply built — the deploy row under a build (Q-781). */
+  onDownloadZip?: (files: Record<string, string>, appName: string) => void;
   wallet: any;
   setPreferredLanguage: (lang: any) => void;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
@@ -77,6 +79,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
   isAppBuilt,
   theme,
   onPreviewClick,
+  onDownloadZip,
   wallet,
   setPreferredLanguage,
   setMessages,
@@ -159,6 +162,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
           isAppBuilt={isAppBuilt}
           theme={theme}
           onPreviewClick={onPreviewClick}
+          onDownloadZip={onDownloadZip}
           userId={user?.uid}
           wallet={wallet}
           onLanguagePick={(lang) => {

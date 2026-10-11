@@ -1010,7 +1010,6 @@ export default function App() {
   const [activeFile, setActiveFile] = useState<string>('index.html');
   const [fileUploadConflict, setFileUploadConflict] = useState<{ file: File; existingKey: string } | null>(null);
   const [zipSizeModal, setZipSizeModal] = useState<{ variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null>(null);
-  const [showDeployPanel, setShowDeployPanel] = useState(false);
   // logs, setLogs → from useDevLogs() hook
   const _initialCode = (() => {
     // 8.7 — restore last generated app for offline mode
@@ -1086,7 +1085,6 @@ export default function App() {
       if (e.key === 'Escape') {
         if (showAuth) { setShowAuth(false); return; }
         if (showPurchaseFormPanel) { setShowPurchaseFormPanel(false); return; }
-        if (showDeployPanel) { setShowDeployPanel(false); return; }
         // No modal was open — if Focus Mode is on, Esc brings the header back (always works, even
         // though the on-screen toggle/floating button might be out of view).
         if (focusMode) { setFocusMode(false); return; }
@@ -1102,7 +1100,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showPurchaseFormPanel, showDeployPanel, focusMode]);
+  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showPurchaseFormPanel, focusMode]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const defaults = { gemini: '', groq: '', deepseek: '', openai: '', openrouter: '', claude: '' };
@@ -1556,7 +1554,6 @@ export default function App() {
     const onHardwareBack = () => {
       const openOverlays: string[] = [];
       if (isMenuOpen) openOverlays.push('menu');
-      if (showDeployPanel) openOverlays.push('deploy');
       if (showModePicker) openOverlays.push('mode-picker');
       if (historyPopupOpen) openOverlays.push('history');
       if (reportOpen) openOverlays.push('report');
@@ -1569,7 +1566,6 @@ export default function App() {
         case 'close-overlay':
           switch (action.id) {
             case 'menu': setIsMenuOpen(false); return;
-            case 'deploy': setShowDeployPanel(false); return;
             case 'mode-picker': setShowModePicker(false); return;
             case 'history': setHistoryPopupOpen(false); return;
             case 'report': setReportOpen(false); return;
@@ -1587,7 +1583,7 @@ export default function App() {
     return () => window.removeEventListener(HARDWARE_BACK_EVENT, onHardwareBack as EventListener);
   }, [
     exitPromptOpen, activeView, toggleTab,
-    isMenuOpen, showDeployPanel, showModePicker, historyPopupOpen,
+    isMenuOpen, showModePicker, historyPopupOpen,
     reportOpen, zipSizeModal, showAuth,
   ]);
 
@@ -3593,6 +3589,7 @@ export default function App() {
               isAppBuilt={isAppBuilt}
               theme={theme}
               onPreviewClick={() => { toggleTab('preview'); setIsMenuOpen(false); }}
+              onDownloadZip={downloadAppZip}
               wallet={wallet}
               setPreferredLanguage={setPreferredLanguage}
               setMessages={setMessages}

@@ -21,6 +21,7 @@ import { GUEST_LIMIT_CODE, guestLimitReached, openSignIn } from '../lib/guestId'
 import { rememberGithubOwner } from '../lib/githubTokenStore';
 import { parseVialTeaching } from '../lib/neonatalDosing';
 import { loadVials, saveVial } from '../lib/vialMemory';
+import { chatBuildMeta } from '../lib/chatBuildMeta';
 export interface ChatEngineDeps {
   // values read
   input: string;
@@ -640,6 +641,9 @@ export function useChatEngine(deps: ChatEngineDeps) {
         data = await callWithRetry();
       }
       
+      // The bubble this reply lives in — the streamed one, or the one added just below. A successful code
+      // sync marks THIS bubble as a build (Q-781), so its View preview / deploy row appear under it.
+      let replyMsgId: string | null = streamingMsgId;
       // Only add aiMessage if streaming didn't already add it
       if (!streamingMsgId) {
         const aiMessage: Message = {
@@ -649,6 +653,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
           timestamp: new Date(),
           modelUsed: data.model
         };
+        replyMsgId = aiMessage.id;
         setMessagesForTab((prev) => {
           const next = [...prev, aiMessage];
           return next;
@@ -697,6 +702,12 @@ export function useChatEngine(deps: ChatEngineDeps) {
                addLog('Workspace synced with AI generated code.', 'success');
                setHasGeneratedCode(true);
                setIsAppBuilt(true);
+               // THE PLATFORM SAYS IT BUILT, NOT THE MODEL (Q-781, admin 2026-10-11). The View preview and
+               // deploy buttons used to wait for the model to print a marker nothing ever told it to
+               // print, so a working build offered neither. The code really landed here, so this reply
+               // is marked as the build that produced it (`chatBuildMeta`).
+               const builtId = replyMsgId;
+               if (builtId) setMessagesForTab((msgs) => msgs.map((m) => (m.id === builtId ? { ...m, meta: chatBuildMeta(m.meta, newFiles) } : m)));
              }
              return newFiles;
            });

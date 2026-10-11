@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { COPY } from '../../lib/copy';
+import { chatBuildView } from '../../lib/chatBuildMeta';
 import { ImageLightbox } from '../chat/ImageLightbox';
 import { ComposerShell, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS } from '../chat/ComposerShell';
 import { playTapTone } from '../../lib/tapTone';
@@ -565,12 +566,13 @@ export const AIChat: React.FC<AIChatProps> = ({
     // leftover of the removed 'hide raw code in Pro mode' branch (its own comment said so); nothing ever
     // asked whether a reply was a question. Removed by Q-600's sweep.
 
-    // ── Special markers ─────────────────────────────────────────────────────
-    const hasSwitchToBuild = isAI && text.includes('__SWITCH_TO_BUILD__');
-    const hasUrgentBuild   = isAI && text.includes('__URGENT_BUILD__');
-    const hasViewPreview   = isAI && text.includes('__VIEW_PREVIEW__');
-    const hasDeployActions = isAI && text.includes('__DEPLOY_ACTIONS__');
-    const hasAutoPlan      = isAI && text.includes('__AUTO_PLAN__');
+    // ── A reply that BUILT something (Q-781) ───────────────────────────────
+    // Five buttons here once waited for markers (`__VIEW_PREVIEW__`, `__DEPLOY_ACTIONS__`,
+    // `__SWITCH_TO_BUILD__`, `__URGENT_BUILD__`, `__AUTO_PLAN__`) that nothing ever told the model to
+    // print, so none could appear. The admin decided (2026-10-11): the platform offers View preview and
+    // deploy after a build it really made — read from the reply's meta, set when its code landed
+    // (useChatEngine → chatBuildMeta) — and the other three are gone, buttons and all.
+    const build = isAI ? chatBuildView(msg.meta) : { built: false, deployFiles: null };
     // 🔴 EVERY marker the prompt asks the model for, stripped in ONE place (`lib/chatMarkers.ts`).
     // This list used to be written out here, and it was missing `[ACTION_SECRET_HELPER:provider]` —
     // which the prompt told the model to append to EVERY message about an API key. The only code that
@@ -578,7 +580,7 @@ export const AIChat: React.FC<AIChatProps> = ({
     // the message bubble. Chat history is stored, so stripping still matters for messages already
     // written; the prompt no longer asks for new ones. See that module for the whole finding.
     const cleanText = stripChatMarkers(text);
-    const deployFiles = (msg as any).meta?.deployFiles as Record<string, string> | undefined;
+    const deployFiles = build.deployFiles;
     const deployAppName = (msg as any).meta?.appName as string | undefined;
     const suggestions = (msg as any).meta?.suggestions as string[] | undefined;
 
@@ -656,71 +658,8 @@ export const AIChat: React.FC<AIChatProps> = ({
           </div>
         )}
 
-        {/* ── Urgent Build CTA — user explicitly asked to build ── */}
-        {hasUrgentBuild && onModeChange && (
-          <div className="mt-3 pt-3 border-t border-line">
-            <div className="rounded-2xl overflow-hidden border border-orange-500/40 shadow-lg shadow-orange-900/20">
-              <div className="bg-raised px-4 py-3 flex items-start gap-3">
-                <div>
-                  <p className="text-[12px] font-black text-warn uppercase tracking-wider">Switch to Build Mode?</p>
-                  <p className="text-[11px] text-warn mt-0.5 leading-snug">
-                    Planning Mode only creates a blueprint. Switch to Build Mode to generate the working app.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => onModeChange('build')}
-                className="w-full flex items-center justify-center gap-2 py-3 px-4 font-black text-[13px] uppercase tracking-widest transition-all active:scale-[0.98] hover:brightness-110"
-                style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
-              >
-                Switch to Build Mode — Build Now
-                <span style={{ fontSize: 16 }}>→</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Auto Plan: show "Build Now" button after AI presents the plan ── */}
-        {hasAutoPlan && onSendSuggestion && (
-          <div className="mt-3 pt-3 border-t border-indigo-500/20">
-            <div className="rounded-2xl overflow-hidden border border-indigo-500/30 shadow-lg shadow-indigo-900/20">
-              <div className="bg-raised px-4 py-2.5 flex items-center gap-2">
-                                <p className="text-[11px] font-black text-accent-text uppercase tracking-wider">Plan ready — build kar du?</p>
-              </div>
-              <button
-                onClick={() => onSendSuggestion('__CONFIRM_AUTO_BUILD__')}
-                className="w-full flex items-center justify-center gap-2 py-3 px-4 font-black text-[13px] uppercase tracking-widest transition-all active:scale-[0.98] hover:brightness-110"
-                style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
-              >
-                Yes, Build
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Regular Switch to Build button — end of every planning response ── */}
-        {hasSwitchToBuild && !hasUrgentBuild && onModeChange && (
-          <div className="mt-3 pt-3 border-t border-line">
-            <button
-              onClick={() => onModeChange('build')}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-bold text-[12px] uppercase tracking-wider transition-all active:scale-95 hover:brightness-110 border border-amber-500/30"
-              style={{
-                background: 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(217,119,6,0.15))',
-                color: 'var(--brand-warn-strong)',
-              }}
-            >
-              <span>🔨</span>
-              Switch to Build Mode
-              <span style={{ fontSize: 14 }}>→</span>
-            </button>
-          </div>
-        )}
-
-            
-        {/* View Preview — the __VIEW_PREVIEW__ marker finally renders its button
-            (previously the flag was parsed but never used, so a successful build
-            offered no way to open the preview). */}
-        {hasViewPreview && onPreviewClick && (
+        {/* View preview — offered under a reply whose code really landed (Q-781). */}
+        {build.built && onPreviewClick && (
           <div className="mt-3 pt-3 border-t border-line">
             <button
               onClick={onPreviewClick}
@@ -733,8 +672,8 @@ export const AIChat: React.FC<AIChatProps> = ({
           </div>
         )}
 
-        {/* Deploy Actions — shown after successful build */}
-        {hasDeployActions && deployFiles && onDownloadZip && (
+        {/* Deploy — the same reply, with the files it built (Q-781). */}
+        {build.built && deployFiles && onDownloadZip && (
           <div className="mt-3 pt-3 border-t border-line">
             <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">{COPY.chat.deployHeading}</p>
             <div className="flex flex-wrap gap-2">
@@ -756,16 +695,6 @@ export const AIChat: React.FC<AIChatProps> = ({
               >
                 🐙 GitHub Pages
               </button>
-              {/* D26: re-run code review from build results */}
-              {onSendSuggestion && (
-                <button
-                  onClick={() => onSendSuggestion('/code-review')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600/10 hover:bg-red-600/20 border border-red-500/20 text-danger text-[10px] font-bold rounded-xl transition-all active:scale-95"
-                  title="Run AI code review on the generated app"
-                >
-                  🔍 Code Review
-                </button>
-              )}
             </div>
           </div>
         )}

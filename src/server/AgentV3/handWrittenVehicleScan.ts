@@ -53,7 +53,8 @@ function termSign(op: string, term: string): 1 | -1 {
 }
 
 export interface CameraHalf { obj: string; sign: 1 | -1; line: string }
-export interface MotionHalf { obj: string; sign: 1 | -1; line: string }
+/** `byHeading`: the move follows the car's heading (Math.cos / Math.sin), so its world sign assumes heading 0. */
+export interface MotionHalf { obj: string; sign: 1 | -1; line: string; byHeading: boolean }
 export interface VehicleShapeHalves {
   cameras: CameraHalf[];
   motions: MotionHalf[];
@@ -67,6 +68,8 @@ export interface VehicleShapeHalves {
   vehicle: boolean;
   /** `throttle = axis.y` from the kit's `input.axis()` without the minus. */
   axisThrottle: string | null;
+  /** The file turns something half a circle (`rotation.y = Math.PI`) — a heading that does not start at 0. */
+  flipsHeading: boolean;
 }
 
 const OBJ = '([A-Za-z_$][\\w$]*(?:\\??\\.[A-Za-z_$][\\w$]*)*)';
@@ -86,13 +89,14 @@ const SPEED_NAME = /\b(\w*(?:speed|Speed)|velocity|vel)\b/;
 
 /** The halves one file contributes. PURE. */
 export function vehicleShapeHalves(path: string, content: string): VehicleShapeHalves {
-  const empty: VehicleShapeHalves = { cameras: [], motions: [], zeroSpeeds: [], movingSpeeds: [], raisedSpeeds: [], accelerator: false, vehicle: false, axisThrottle: null };
+  const empty: VehicleShapeHalves = { cameras: [], motions: [], zeroSpeeds: [], movingSpeeds: [], raisedSpeeds: [], accelerator: false, vehicle: false, axisThrottle: null, flipsHeading: false };
   const p = String(path ?? '').replace(/^\.?\/+/, '');
   const src = typeof content === 'string' ? content : '';
   if (!src || !CODE_FILE.test(p) || /(^|\/)node_modules\//.test(p) || RECIPE_LIBRARY_PATH.test(p)) return empty;
   const out = { ...empty, cameras: [] as CameraHalf[], motions: [] as MotionHalf[], zeroSpeeds: [] as Array<{ name: string; line: string }>, movingSpeeds: [] as string[], raisedSpeeds: [] as string[] };
   out.vehicle = VEHICLE_WORD.test(src);
   out.accelerator = ACCELERATOR.test(src);
+  out.flipsHeading = /rotation\.y\s*=\s*-?\s*Math\.PI\b(?!\s*[/*])|rotateY\(\s*-?\s*Math\.PI\s*\)/.test(src);
   const lineAt = (i: number) => src.slice(src.lastIndexOf('\n', i) + 1, src.indexOf('\n', i) < 0 ? undefined : src.indexOf('\n', i)).trim().slice(0, 160);
 
   for (const m of src.matchAll(CAM_Z_ASSIGN)) {
@@ -116,7 +120,7 @@ export function vehicleShapeHalves(path: string, content: string): VehicleShapeH
   const addMotion = (obj: string, sign: 1 | -1, rest: string, at: number) => {
     const s = SPEED_NAME.exec(rest);
     if (!s) return; // a move that is not by a speed is not a vehicle being driven
-    out.motions.push({ obj: normObj(obj), sign, line: lineAt(at) });
+    out.motions.push({ obj: normObj(obj), sign, line: lineAt(at), byHeading: /Math\.(?:cos|sin)\(/.test(rest) });
     if (!out.movingSpeeds.includes(s[1])) out.movingSpeeds.push(s[1]);
   };
   for (const m of src.matchAll(MOVE_Z_COMPOUND)) {
@@ -175,10 +179,17 @@ export function vehicleShapeFindings(index: ReadonlyMap<string, VehicleShapeHalv
   const all = [...index.entries()];
   const out: VehicleShapeFinding[] = [];
   const motions = all.flatMap(([path, h]) => h.motions.map((m) => ({ ...m, path })));
+  // A heading-driven move's sign is read at heading 0; a game that turns its car half a circle first
+  // (`rotation.y = Math.PI`) drives the other way, and the scan cannot know which — so it says nothing.
+  const headingFlipped = all.some(([, h]) => h.flipsHeading);
   for (const [path, h] of all) {
     for (const cam of h.cameras) {
-      const drive = motions.find((m) => m.obj === cam.obj);
-      if (drive && drive.sign === cam.sign) { out.push({ kind: 'camera-ahead', path, line: cam.line }); break; }
+      const drives = motions.filter((m) => m.obj === cam.obj);
+      // EVERY move of that object toward the camera's side — a reverse gear on another line keeps it silent.
+      if (drives.length > 0 && drives.every((m) => m.sign === cam.sign && !(m.byHeading && headingFlipped))) {
+        out.push({ kind: 'camera-ahead', path, line: cam.line });
+        break;
+      }
     }
     if (out.some((f) => f.kind === 'camera-ahead')) break;
   }

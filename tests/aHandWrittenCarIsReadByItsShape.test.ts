@@ -75,6 +75,13 @@ describe('camera-ahead — the camera on the side the car drives toward', () => 
     expect(kinds({ 'src/scene.ts': SCENE_FRONT })).toEqual([]);
   });
 
+  it('NEGATIVE: a car turned half a circle before it drives, or one that also reverses on another line, is left alone', () => {
+    expect(kinds({ 'src/scene.ts': SCENE_FRONT + '\ncar.rotation.y = Math.PI;', 'src/controls.ts': CONTROLS_FORWARD })).toEqual([]);
+    expect(kinds({ 'src/scene.ts': SCENE_FRONT, 'src/controls.ts': `${CONTROLS_FORWARD}\nif (reversing) car.position.z -= reverseSpeed * dt;` })).toEqual([]);
+    // A quarter turn is not a flip: the finding stands.
+    expect(kinds({ 'src/scene.ts': SCENE_FRONT + '\nwheel.rotation.y = Math.PI / 2;', 'src/controls.ts': CONTROLS_FORWARD })).toContain('camera-ahead');
+  });
+
   it('NEGATIVE: the kit\'s own library files are never read (they are right by construction, and not the model\'s)', () => {
     expect(kinds({ 'src/game/three/camera.ts': SCENE_FRONT, 'src/game/play/vehicle.ts': CONTROLS_FORWARD })).toEqual([]);
   });

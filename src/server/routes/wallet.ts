@@ -1,8 +1,8 @@
 import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Reads/writes user_token_wallets,
 // which navbharat-prod's rules restrict to the owner (server is unauthenticated → was denied).
-import { doc, getDoc, setDoc, runTransaction, collection, query, where, orderBy, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
-import { buildEmptyWallet } from '../lib/newWallet';
+import { doc, getDoc, runTransaction, collection, query, where, orderBy, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
+import { buildEmptyWallet, missingWalletFields } from '../lib/newWallet';
 import { requireUserMatch } from '../lib/authMiddleware';
 import { appLockBlocks } from '../lib/appLockEnforce';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
@@ -59,16 +59,18 @@ export function registerWalletRoutes(app: Express): void {
       const walletRef = doc(db, 'user_token_wallets', userId);
       const snap = await getDoc(walletRef);
       if (snap.exists()) {
-        const data = snap.data();
-        let updated = false;
-
-        if (data.tokenBalance === undefined) { data.tokenBalance = 0; updated = true; }
-        if (data.totalTokensPurchased === undefined) { data.totalTokensPurchased = 0; updated = true; }
-        if (data.totalTokensUsed === undefined) { data.totalTokensUsed = 0; updated = true; }
-        if (data.walletLedger === undefined) { data.walletLedger = []; updated = true; }
-
-        if (updated) {
-          await setDoc(walletRef, data, { merge: true });
+        let data = snap.data();
+        // An older wallet lacking a field gets ONLY that field, in a transaction against a fresh read. This
+        // used to write the whole stale snapshot back (balance and ledger) outside a transaction, which undid
+        // any debit or payment that committed in between (audit 2026-10-11, F4).
+        if (Object.keys(missingWalletFields(data)).length > 0) {
+          data = await runTransaction(db, async (tx) => {
+            const fresh = await tx.get(walletRef);
+            const current = (fresh.exists() ? fresh.data() : {}) as Record<string, unknown>;
+            const patch = missingWalletFields(current);
+            if (Object.keys(patch).length > 0) tx.set(walletRef, patch, { merge: true });
+            return { ...current, ...patch };
+          });
         }
 
         // Billing Phase 2 — the ₹↔token rate travels WITH the wallet (single source of truth:

@@ -204,7 +204,7 @@ describe('🔴 one code, one redemption', () => {
 
 describe('🔴 the wiring — the three expensive mistakes, held at the source', () => {
   it('the CLAIM is on the code document, not on `coupon_<CODE>_<uid>`', () => {
-    expect(GIFT_STORE).toContain('claimGiftCode');
+    expect(GIFT_STORE).toContain('redeemGiftCode');
     // The store claims by flipping the code's own status inside a transaction.
     expect(GIFT_STORE).toMatch(/status:\s*'redeemed'/);
     // And the route reaches the gift path through that claim, never through the coupon claim id.
@@ -213,7 +213,7 @@ describe('🔴 the wiring — the three expensive mistakes, held at the source',
       PAYMENT_ROUTE.indexOf('const value = couponValueInr(code)'),
     );
     expect(giftBranch.length).toBeGreaterThan(200);
-    expect(giftBranch).toContain('claimGiftCode');
+    expect(giftBranch).toContain('redeemGiftCode');
     expect(giftBranch, 'a gift must never take the per-user coupon claim').not.toContain('coupon_${code}');
   });
 
@@ -232,9 +232,27 @@ describe('🔴 the wiring — the three expensive mistakes, held at the source',
       PAYMENT_ROUTE.indexOf('looksLikeGiftCode(code)'),
       PAYMENT_ROUTE.indexOf('const value = couponValueInr(code)'),
     );
-    expect(giftBranch).toContain("mirroredCreditPatch(w, rupeesToTokens(faceInr), 'paid')");
+    // The gift credit lives in the store, in the SAME transaction as the claim (audit 2026-10-11, F8).
+    expect(giftBranch).toContain('redeemGiftCode(');
+    expect(GIFT_STORE).toContain("mirroredCreditPatch(wallet, rupeesToTokens(faceInr), 'paid')");
     const couponBranch = PAYMENT_ROUTE.slice(PAYMENT_ROUTE.indexOf('const value = couponValueInr(code)'));
     expect(couponBranch).toContain("mirroredCreditPatch(w, rupeesToTokens(value), 'gift')");
+  });
+
+  it('🔒 claim, credit and history row are ONE transaction — a code is never spent without the money arriving (F8)', () => {
+    const fn = GIFT_STORE.slice(GIFT_STORE.indexOf('export async function redeemGiftCode'));
+    expect(fn).toMatch(/return runTransaction\(db, async \(tx: any\) => \{/);
+    const body = fn.slice(fn.indexOf('runTransaction('));
+    // All three writes go through the transaction object…
+    expect(body).toMatch(/tx\.update\(codeRef, \{ status: 'redeemed'/);
+    expect(body).toMatch(/tx\.(update|set)\(walletRef,/);
+    expect(body).toMatch(/tx\.set\(historyRef,/);
+    // …and nothing in the store or the route writes them outside it.
+    expect(fn).not.toMatch(/\b(setDoc|updateDoc)\(/);
+    const giftBranch = PAYMENT_ROUTE.slice(PAYMENT_ROUTE.indexOf('looksLikeGiftCode(code)'), PAYMENT_ROUTE.indexOf('const value = couponValueInr(code)'));
+    expect(giftBranch).not.toMatch(/\b(setDoc|updateDoc|runTransaction)\(/);
+    // The claim decision is the refusal's own decision, so a broken face value is refused, never burned for ₹0.
+    expect(body).toMatch(/const verdict = decideGiftRedemption\(record, redeemer\.uid\);/);
   });
 
   it('🔒 the BUYER is credited nothing — the code is the whole delivery', () => {

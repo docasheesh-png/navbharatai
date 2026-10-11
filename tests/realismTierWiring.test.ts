@@ -1,3 +1,4 @@
+import { wantsSceneDetail } from '../src/server/AgentV3/gameKitSeed';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -44,7 +45,11 @@ describe('the tier decision reaches the model', () => {
      * a prompt is billed tokens. Without the gate every CRUD app would pay for game guidance.
      */
     expect(route, 'the 3D gate immediately before realismIntent() has moved or gone')
-      .toMatch(/if \(wantsSceneObjects\(prompt\)\) \{\n\s*const realism = realismIntent/);
+      // Since build 46e2d74b (2026-10-11) the gate is `wantsSceneDetail`: `wantsSceneObjects` for anything that is
+      // not a game, and the game-kit seed's own 3D reading for a game — one answer for the route and the seed.
+      .toMatch(/if \(wantsSceneDetail\(prompt\)\) \{\n\s*const realism = realismIntent/);
+    expect(wantsSceneDetail('make me a 3d racing game')).toBe(true);
+    expect(wantsSceneDetail('a todo list app with dark mode')).toBe(false);
     expect(wantsSceneObjects('make me a 3d racing game')).toBe(true);
     expect(wantsSceneObjects('ek 3D game banao')).toBe(true);
     expect(wantsSceneObjects('a todo list app with dark mode')).toBe(false);

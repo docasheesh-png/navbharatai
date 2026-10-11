@@ -77,6 +77,8 @@ export function isCanvasGameProject(files: Record<string, string>): boolean {
     // to the canvas playtest and, finding no canvas, reported as a game that was "never played". The loop,
     // input, sound and music layers (`src/game/core`, `src/game/fx`, `src/audio`) never draw anything; the
     // surface has to come from the game's own code or from the kit's 3D layer / shell, which do.
+    // The kit's 3D layer and shell DO draw (a WebGL canvas), so a project carrying them is a canvas game.
+    if (/(^|\/)src\/game\/(?:three\/|ui\/|Game\.ts$|GameCanvas\.tsx$)/.test(path)) return true;
     const kitEngineOnly = /(^|\/)src\/(?:game\/(?:core|fx)|audio)\//.test(path);
     if (!surface && !kitEngineOnly && GAME_SIGNAL.test(content.replace(/requestAnimationFrame/g, ''))) surface = true;
     if (!loop && /requestAnimationFrame|GameLoop|setAnimationLoop/.test(content)) loop = true;

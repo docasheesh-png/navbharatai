@@ -109,3 +109,12 @@ describe('the store and the route', () => {
     expect(read('server.ts')).toMatch(/import\('\.\/src\/server\/lib\/AnalyticsPipeline'\)\.then\(\(\{ flushAnalytics \}\)/);
   });
 });
+
+describe('the funnel is the business\'s own numbers (Q-162 decision, 2026-10-11)', () => {
+  it('🔒 only an admin can read it, and a failure is never a 200 of zeros', () => {
+    const src = read('src/server/routes/telemetry.ts');
+    expect(src).toMatch(/app\.get\('\/api\/analytics\/funnel', requireAdmin,/);
+    const route = src.slice(src.indexOf("app.get('/api/analytics/funnel'"));
+    expect(route).not.toMatch(/status\(200\)\.json\(\{ stages/);
+  });
+});

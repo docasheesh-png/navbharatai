@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { errorTracker } from '../observability/ErrorTracker';
 import { recordAnalyticsEvent, getFunnel } from '../lib/AnalyticsPipeline';
 import { sendSafeError } from '../lib/httpError';
+import { requireAdmin } from '../lib/adminAuth';
 import rateLimit from 'express-rate-limit';
 import { sanitizeText, sanitizeUrl } from '../../lib/observability/sanitize';
 
@@ -150,14 +151,17 @@ export function registerTelemetryRoutes(app: Express): void {
     }
   });
 
-  // P-MON.1 — activation funnel (signup → build → deploy → pay) over the last N days. Aggregate counts
-  // only (no PII), so it is safe as a lightweight admin/analytics read. `?days=30` (1..365).
-  app.get('/api/analytics/funnel', async (req: Request, res: Response) => {
+  // P-MON.1 — activation funnel (signup → build → deploy → pay) over the last N days. `?days=30` (1..365).
+  //
+  // 🔒 ADMIN ONLY since 2026-10-11 (audit; Q-162 decided it when this file was touched). Aggregate counts hold no
+  // person, but they are the business's own signup-to-payment conversion — nothing a visitor should be able to
+  // read by URL. And a failure is a 503, never a 200 of zeros that reads as "nobody signed up".
+  app.get('/api/analytics/funnel', requireAdmin, async (req: Request, res: Response) => {
     try {
       const days = Number(req.query.days);
       res.json(await getFunnel(Number.isFinite(days) && days > 0 ? days : 30));
     } catch {
-      res.status(200).json({ stages: { signup: 0, build: 0, deploy: 0, pay: 0 }, conversion: { signup: 1, build: 0, deploy: 0, pay: 0 } });
+      res.status(503).json({ error: 'The funnel could not be read. Try again in a moment.' });
     }
   });
 }

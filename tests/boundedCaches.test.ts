@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { BoundedCache } from '../src/server/lib/boundedCache';
+import { BoundedCache, SharedReadCache } from '../src/server/lib/boundedCache';
 import { TTLCache, chatReplyCacheKey } from '../src/server/AgentV3/PromptCache';
 import { adaptiveGuard, trackedCallerCount, resetAdaptiveGuardState, MAX_TRACKED_CALLERS } from '../src/server/lib/adaptiveRateLimit';
 import { sdaStoreKey } from '../src/server/lib/clinical/sdaStoreKey';
@@ -223,5 +223,36 @@ describe('census: per-instance state cannot grow with traffic', () => {
   it('nothing walks a whole map on the request path because it got big', () => {
     const offenders = serverSources().filter((f) => /if \(\s*\w+\.size\s*>=?\s*(?:\d{3,}[\d_]*|[A-Z][A-Z0-9_]+)\s*\)\s*\{?\s*\n?\s*for \(const/.test(code(readFileSync(f, 'utf8'))));
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('SharedReadCache — public listings read once per TTL per instance', () => {
+  it('concurrent misses share ONE read; a hit within the TTL reads nothing', async () => {
+    const c = new SharedReadCache<number[]>({ maxEntries: 2, ttlMs: 60_000 });
+    let reads = 0;
+    const load = async () => { reads++; await new Promise((r) => setTimeout(r, 5)); return [1, 2]; };
+    const all = await Promise.all(Array.from({ length: 20 }, () => c.get('k', load)));
+    expect(all.every((v) => v.length === 2)).toBe(true);
+    expect(reads).toBe(1);
+    await c.get('k', load);
+    expect(reads).toBe(1);
+  });
+
+  it('a failed read is not cached — the next request tries again', async () => {
+    const c = new SharedReadCache<string>({ maxEntries: 2, ttlMs: 60_000 });
+    await expect(c.get('k', async () => { throw new Error('down'); })).rejects.toThrow('down');
+    expect(await c.get('k', async () => 'ok')).toBe('ok');
+  });
+
+  it('the store and gallery listings use it; an admin review clears it only after the admin check', () => {
+    const nav = readFileSync('src/server/routes/navStore.ts', 'utf8');
+    expect(nav).toMatch(/publicListings\.get\('web-apps'/);
+    expect(nav).toMatch(/publicApprovedApps\.get\('approved'/);
+    for (const route of ['/api/nav-store/admin/review', '/api/nav-store/web/admin/review']) {
+      const block = nav.slice(nav.indexOf(`app.post('${route}'`), nav.indexOf(`app.post('${route}'`) + 600);
+      expect(block.indexOf('.forget()')).toBeGreaterThan(block.indexOf('isStoreAdmin('));
+    }
+    const gal = readFileSync('src/server/routes/gallery.ts', 'utf8');
+    expect(gal).toMatch(/approvedGallery\.get\(`approved:\$\{limit\}`/);
   });
 });

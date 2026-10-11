@@ -115,7 +115,31 @@ export async function updateGalleryApp(id: string, patch: Partial<GalleryApp>): 
  * publishedAt)` chain needs a composite index that has never been deployed to this project, and
  * would therefore THROW here rather than return rows. See `firestoreIndexSafe.ts`.
  */
-export async function listGalleryApps(status: GalleryStatus, limit = 50): Promise<GalleryApp[]> {
+/** A gallery record WITHOUT its source — what every listing needs. */
+export type GalleryListing = Omit<GalleryApp, 'files'>;
+
+/**
+ * Every field a listing reads, and NOT `files` (audit 2026-10-11, D4): each record embeds the app's whole source
+ * (up to 700 KB), and the public listing read up to 500 whole records per request — up to ~350 MB through one
+ * instance — only for `toPublic` to drop the source. A projection reads the same documents (Firestore bills per
+ * document either way) but brings back a few hundred bytes each.
+ */
+export const LISTING_FIELDS = [
+  'id', 'uid', 'authorEmail', 'authorName', 'title', 'description', 'tags', 'status', 'publishedAt',
+  'reviewedAt', 'reviewedBy', 'reviewNote', 'fileCount', 'bytes', 'excludedPaths', 'remixCount', 'remixedFrom',
+] as const;
+
+export async function listGalleryApps(status: GalleryStatus, limit = 50): Promise<GalleryListing[]> {
+  const d = db();
+  if (!d) return [];
+  return listEqNewestFirst<GalleryListing>(
+    d.collection(COLLECTION).select(...LISTING_FIELDS), [['status', status]], 'publishedAt', Math.max(1, Math.min(limit, 200)),
+    undefined, (id, data) => ({ ...(data as GalleryListing), id: (data as GalleryListing).id || id }),
+  );
+}
+
+/** The same, WITH the source — only for the admin review queue, which shows the file paths. */
+export async function listGalleryAppsWithSource(status: GalleryStatus, limit = 50): Promise<GalleryApp[]> {
   const d = db();
   if (!d) return [];
   return listEqNewestFirst<GalleryApp>(
@@ -124,11 +148,12 @@ export async function listGalleryApps(status: GalleryStatus, limit = 50): Promis
 }
 
 /** One publisher's own entries, whatever their state, so they can see where each one stands. */
-export async function listGalleryAppsByUid(uid: string, limit = 50): Promise<GalleryApp[]> {
+export async function listGalleryAppsByUid(uid: string, limit = 50): Promise<GalleryListing[]> {
   const d = db();
   if (!d) return [];
-  return listEqNewestFirst<GalleryApp>(
-    d.collection(COLLECTION), [['uid', uid]], 'publishedAt', Math.max(1, Math.min(limit, 200)),
+  return listEqNewestFirst<GalleryListing>(
+    d.collection(COLLECTION).select(...LISTING_FIELDS), [['uid', uid]], 'publishedAt', Math.max(1, Math.min(limit, 200)),
+    undefined, (id, data) => ({ ...(data as GalleryListing), id: (data as GalleryListing).id || id }),
   );
 }
 
@@ -150,7 +175,7 @@ export async function incrementRemixCount(id: string): Promise<void> {
 }
 
 /** Strip a record to what the public may see. The SOURCE is not in here — that needs an explicit fetch. */
-export function toPublic(app: GalleryApp): PublicGalleryApp {
+export function toPublic(app: GalleryListing): PublicGalleryApp {
   return {
     id: app.id,
     title: app.title,

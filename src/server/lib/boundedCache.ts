@@ -118,3 +118,41 @@ export class BoundedCache<K, V> {
     return out;
   }
 }
+
+/**
+ * A short-lived cache for PUBLIC, user-independent reads — the store and gallery listings (audit 2026-10-11).
+ *
+ * Each of those read up to 500 documents per page view, uncached, so a busy listing cost a Firestore read per
+ * document per visitor. Behind this, one instance reads it at most once per TTL, and concurrent misses share the
+ * one read in flight (single-flight) instead of each starting their own. A failed read is NOT cached: the error
+ * reaches the caller, and the next request tries again.
+ *
+ * 🔒 ONLY for data that is the same for every viewer. Anything per-user is applied AFTER the shared read, by the
+ * caller, never baked into what is cached.
+ */
+export class SharedReadCache<V> {
+  private readonly cache: BoundedCache<string, V>;
+  private readonly inFlight = new Map<string, Promise<V>>();
+
+  constructor(opts: { maxEntries: number; ttlMs: number }) {
+    this.cache = new BoundedCache<string, V>(opts);
+  }
+
+  async get(key: string, load: () => Promise<V>, now: number = Date.now()): Promise<V> {
+    const hit = this.cache.get(key, now);
+    if (hit !== undefined) return hit;
+    const pending = this.inFlight.get(key);
+    if (pending) return pending;
+    const p = load()
+      .then((v) => { this.cache.set(key, v); return v; })
+      .finally(() => { this.inFlight.delete(key); });
+    this.inFlight.set(key, p);
+    return p;
+  }
+
+  /** Drop a key — after an admin changes what it lists, so THIS instance shows the change at once. */
+  forget(key?: string): void {
+    if (key === undefined) this.cache.clear();
+    else this.cache.delete(key);
+  }
+}

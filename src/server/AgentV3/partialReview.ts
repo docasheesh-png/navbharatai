@@ -26,7 +26,7 @@
 // PURE — the impure half (subscribing to the stream) stays at the call site, so every rule below is
 // unit-testable against real reviewer output.
 
-import { parseReviewOutput, readLabelledFinding, type ReviewResult } from './ReviewerAgent';
+import { parseReviewOutput, readLabelledFinding, readLeadingTags, type ReviewResult } from './ReviewerAgent';
 
 /** Reviewer text captured from the live event stream while the review was still running. */
 export interface SalvagedReview extends ReviewResult {
@@ -44,7 +44,12 @@ export interface SalvagedReview extends ReviewResult {
 export function hasSalvageableFindings(text: unknown): boolean {
   if (typeof text !== 'string' || !text.trim()) return false;
   // An untagged "**1. Bug: …**" finding counts too — the sibling of `readLabelledFinding` (autopsy d798ddd3).
-  return /\[(CRITICAL|WARNING|SUGGESTION)\]/i.test(text) || text.split('\n').some((line) => readLabelledFinding(line) !== null);
+  // 🔴 AND A TAG IN ANY SHAPE (admin 2026-10-11, build 46e2d74b). This gate kept its own copy of the three
+  // exact tags, so a review cut off after "- **[BROKEN / CORRECTNESS] `updateGameState` never accelerates
+  // the car.**" was thrown away here before the parser that now reads it was ever asked. One reader for
+  // both: `readLeadingTags` is the shape `parseReviewOutput` reads.
+  return /\[(CRITICAL|WARNING|SUGGESTION)\]/i.test(text)
+    || text.split('\n').some((line) => readLabelledFinding(line) !== null || readLeadingTags(line) !== null);
 }
 
 /**

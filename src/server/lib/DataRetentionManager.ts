@@ -669,6 +669,9 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
    * USER_SCOPED_COLLECTIONS now) are required either way, so both are here; but if that drill-down is
    * not coming, the honest fix is to stop writing a store that holds a uid and answers no question.
    * That is a product decision, recorded as Q-783 rather than taken quietly here.
+   *
+   * ✅ DECIDED 2026-10-11 (admin, Q-783 option B): nothing writes it any more (`AnalyticsPipeline.ts`). This window
+   * stays so the rows already written expire, and the erase entry stays so they leave with an account.
    */
   { collection: 'analytics_events', ttlDays: 30, timestampField: 'ts', timestampKind: 'epochMs' },
   /**

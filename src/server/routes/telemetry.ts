@@ -48,15 +48,18 @@ const analyticsLimiter = rateLimit({
 
 export const ANALYTICS_LOG_MAX = 2_000;
 
-/** The one log line per analytics event, bounded in size whatever the body holds. PURE. */
-export function analyticsLogLine(b: { event?: unknown; props?: unknown; userId?: unknown; sessionId?: unknown; ts?: unknown }): string {
+/**
+ * The one log line per analytics event, bounded in size whatever the body holds. PURE.
+ *
+ * It carries no `userId` or `sessionId` (Q-783, admin 2026-10-11: stop keeping a per-person event trail nothing
+ * reads). The line exists for the web-vitals and cold-start samples in `props`, which need no person.
+ */
+export function analyticsLogLine(b: { event?: unknown; props?: unknown; ts?: unknown }): string {
   let line: string;
   try {
     line = JSON.stringify({
       event: sanitizeText(b.event, 80),
       props: b.props,
-      userId: typeof b.userId === 'string' && b.userId ? b.userId.slice(0, 128) : 'anon',
-      sessionId: typeof b.sessionId === 'string' ? b.sessionId.slice(0, 128) : undefined,
       ts: typeof b.ts === 'number' ? b.ts : Date.now(),
     }) ?? '';
   } catch {
@@ -140,11 +143,11 @@ export function registerTelemetryRoutes(app: Express): void {
   // cold-start sample land (`main.tsx`), so it is kept — but cut to `ANALYTICS_LOG_MAX` characters.
   app.post('/api/analytics/event', analyticsLimiter, (req: Request, res: Response) => {
     try {
-      const { event, props, userId, sessionId, ts } = req.body || {};
+      const { event, props, ts } = req.body || {};
       if (!event) return res.status(400).json({ error: 'event required' });
-      console.log('[ANALYTICS]', analyticsLogLine({ event, props, userId, sessionId, ts }));
+      console.log('[ANALYTICS]', analyticsLogLine({ event, props, ts }));
       // P-MON.1 — server-side aggregation: fold into the daily rollup + activation funnel. Best-effort.
-      recordAnalyticsEvent({ event, userId, sessionId, props, ts }).catch(() => {});
+      recordAnalyticsEvent({ event, ts }).catch(() => {});
       res.status(204).end();
     } catch {
       res.status(204).end();

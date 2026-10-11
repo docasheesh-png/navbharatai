@@ -2,15 +2,20 @@
 //
 // `/api/analytics/event` previously only console.log'd events — no aggregation, no funnels. This adds a
 // real server-side rollup: events increment a daily aggregate doc (per-event counts + the
-// activation funnel signup→build→deploy→pay), race-safe via Firestore FieldValue.increment, plus a
-// bounded raw-event log — buffered per instance and written once per flush (see `AnalyticsBuffer`). Funnel/cohort queries read the daily rollups. Pure helpers (stage mapping,
+// activation funnel signup→build→deploy→pay), race-safe via Firestore FieldValue.increment — buffered per
+// instance and written once per flush (see `AnalyticsBuffer`).
+//
+// 🔒 NO RAW EVENT ROWS (Q-783, decided by the admin 2026-10-11: option B). Every event also used to append a row
+// to `analytics_events` carrying the person's real `userId`, "for a cohort drill-down" that was never built —
+// nothing in the repository ever read it. A store that holds a uid and answers no question is pure liability, so
+// it is no longer written. Its 30-day window and its erase-with-the-account entry stay (`DataRetentionManager`),
+// so the rows already written still expire and are still erased. Funnel/cohort queries read the daily rollups. Pure helpers (stage mapping,
 // funnel aggregation) are unit-tested; the store is best-effort + VITEST-skip (never throws).
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
 
 const DAILY_COLLECTION = 'analytics_daily';
-const EVENTS_COLLECTION = 'analytics_events';
 
 export type FunnelStage = 'signup' | 'build' | 'deploy' | 'pay';
 export const FUNNEL_ORDER: FunnelStage[] = ['signup', 'build', 'deploy', 'pay'];
@@ -84,41 +89,33 @@ function getDb(): admin.firestore.Firestore | null {
  * row, two Firestore writes per page view on an unauthenticated route with no limiter. Firestore sustains about
  * one write per second on a single document; past that, writes to it queue and fail with contention, so the
  * busiest day — the one worth measuring — was the day the rollup lost counts. Now each instance folds events
- * into an in-process buffer and writes ONE merged increment per (day) every `FLUSH_INTERVAL_MS`, plus the raw
- * rows in batches of at most `MAX_RAW_PER_FLUSH` (under Firestore's 500-write batch limit). Raw rows past that
- * bound are still COUNTED in the rollup and the overflow is recorded as `rawDropped`, so the numbers never lie
- * about what was kept.
+ * into an in-process buffer and writes ONE merged increment per day every `FLUSH_INTERVAL_MS`.
  *
  * Pure apart from the writer it is handed, so tests drive it without Firestore.
  */
 export const FLUSH_INTERVAL_MS = 10_000;
-/** Raw rows kept per flush per instance. The rollup counts every event regardless. */
-export const MAX_RAW_PER_FLUSH = 400;
 /** Distinct (day, event) keys held before an early flush — bounds the buffer's memory. */
 export const MAX_BUFFERED_KEYS = 2_000;
 
-export interface RawAnalyticsRow { event: string; userId: string; sessionId: string; stage: string; ts: number }
+/** One event as the buffer folds it: its sanitized key and funnel stage. No person — see Q-783 above. */
+export interface AnalyticsRow { event: string; stage: string; ts: number }
 
 export interface DailyDelta {
   date: string;
   totalEvents: number;
   events: Record<string, number>;
   funnel: Partial<Record<FunnelStage, number>>;
-  rawDropped: number;
 }
 
-export interface AnalyticsFlush { dailies: DailyDelta[]; raw: RawAnalyticsRow[] }
-
-/** Folds events in memory; `drain()` hands back one delta per day and the raw rows to keep. */
+/** Folds events in memory; `drain()` hands back one delta per day. */
 export class AnalyticsBuffer {
   private dailies = new Map<string, DailyDelta>();
-  private raw: RawAnalyticsRow[] = [];
   private keys = 0;
 
-  add(row: RawAnalyticsRow, date: string): void {
+  add(row: AnalyticsRow, date: string): void {
     let d = this.dailies.get(date);
     if (!d) {
-      d = { date, totalEvents: 0, events: {}, funnel: {}, rawDropped: 0 };
+      d = { date, totalEvents: 0, events: {}, funnel: {} };
       this.dailies.set(date, d);
     }
     d.totalEvents += 1;
@@ -128,8 +125,6 @@ export class AnalyticsBuffer {
       const s = row.stage as FunnelStage;
       d.funnel[s] = (d.funnel[s] ?? 0) + 1;
     }
-    if (this.raw.length < MAX_RAW_PER_FLUSH) this.raw.push(row);
-    else d.rawDropped += 1;
   }
 
   /** True when the buffer should be flushed early, before the timer, to stay bounded. */
@@ -143,10 +138,9 @@ export class AnalyticsBuffer {
     return n;
   }
 
-  drain(): AnalyticsFlush {
-    const out = { dailies: [...this.dailies.values()], raw: this.raw };
+  drain(): DailyDelta[] {
+    const out = [...this.dailies.values()];
     this.dailies = new Map();
-    this.raw = [];
     this.keys = 0;
     return out;
   }
@@ -157,12 +151,11 @@ export function dailyUpdateFor(d: DailyDelta, inc: (n: number) => unknown, now: 
   const update: Record<string, unknown> = { date: d.date, totalEvents: inc(d.totalEvents), updatedAt: now };
   for (const [k, n] of Object.entries(d.events)) update[`events.${k}`] = inc(n);
   for (const [s, n] of Object.entries(d.funnel)) if (n) update[`funnel.${s}`] = inc(n);
-  if (d.rawDropped > 0) update.rawDropped = inc(d.rawDropped);
   return update;
 }
 
-/** Turns one request's input into a raw row and its day. Null for an event with no name. Pure. */
-export function analyticsRowFor(input: { event?: unknown; userId?: unknown; sessionId?: unknown; ts?: unknown }, now: number): { row: RawAnalyticsRow; date: string } | null {
+/** Turns one request's input into a row and its day. Null for an event with no name. Pure. */
+export function analyticsRowFor(input: { event?: unknown; ts?: unknown }, now: number): { row: AnalyticsRow; date: string } | null {
   const event = typeof input?.event === 'string' ? input.event : '';
   if (!event) return null;
   // A client clock is trusted only within a day of ours: a wild `ts` must not open a rollup document for 1970
@@ -171,13 +164,7 @@ export function analyticsRowFor(input: { event?: unknown; userId?: unknown; sess
   const stage = funnelStage(event);
   return {
     date: dayKey(ts),
-    row: {
-      event: sanitizeEventKey(event),
-      userId: typeof input.userId === 'string' && input.userId ? input.userId.slice(0, 128) : 'anon',
-      sessionId: typeof input.sessionId === 'string' ? input.sessionId.slice(0, 128) : '',
-      stage: stage || '',
-      ts,
-    },
+    row: { event: sanitizeEventKey(event), stage: stage || '', ts },
   };
 }
 
@@ -185,12 +172,12 @@ const buffer = new AnalyticsBuffer();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let flushing: Promise<void> | null = null;
 
-/** Write what the buffer holds: one merged write per day, raw rows in one batch. Never throws. */
+/** Write what the buffer holds: one merged write per day, in one batch. Never throws. */
 export async function flushAnalytics(): Promise<void> {
   // One write in flight at a time. What arrives meanwhile stays buffered and is rescheduled when it lands.
   if (flushing) return flushing;
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-  const { dailies, raw } = buffer.drain();
+  const dailies = buffer.drain();
   if (dailies.length === 0) return;
   const db = getDb();
   if (!db) return;
@@ -200,7 +187,6 @@ export async function flushAnalytics(): Promise<void> {
       const now = Date.now();
       const batch = db.batch();
       for (const d of dailies) batch.set(db.collection(DAILY_COLLECTION).doc(d.date), dailyUpdateFor(d, inc, now), { merge: true });
-      for (const r of raw) batch.set(db.collection(EVENTS_COLLECTION).doc(), r);
       await batch.commit();
     } catch {
       /* best-effort — analytics never breaks the request */
@@ -215,9 +201,6 @@ export async function flushAnalytics(): Promise<void> {
 /** Record one analytics event. Buffered in-process and written by the next flush. Never throws. */
 export async function recordAnalyticsEvent(input: {
   event: string;
-  userId?: string;
-  sessionId?: string;
-  props?: Record<string, unknown>;
   ts?: number;
 }): Promise<void> {
   const r = analyticsRowFor(input, Date.now());

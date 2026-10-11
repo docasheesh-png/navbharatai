@@ -93911,3 +93911,8 @@ that other test in my own case — but it measures a *different* fixture, so the
 put it, and the case then failed on a `html` variable that was not even in that `describe`'s scope. It now
 asserts the thing that actually matters: **our contribution** to the document (<120 bytes), and that none of
 the CSS is in the page. *A threshold copied from another test's fixture is not a measurement.*
+- **Q-745 (product):** a failed build never reaches the user's GitHub branch.
+  - The push is decided by the outcome (`gitPushTarget.ts`).
+  - A build that did not work goes to `wip/build-<UTC stamp>`, with a note in the chat.
+  - The working branch, the pull request and the merge are left alone.
+  - Test: `tests/aFailedBuildNeverReachesTheUsersBranch.test.ts`.

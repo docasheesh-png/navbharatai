@@ -94058,3 +94058,12 @@ The admin merged #3668. Closed, IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt` 
   - It reads the same counters the daily caps enforce (`AppAiUsageStore.appSpentDays`, one `getAll`) through an owner-only route, `GET /api/app-ai/spend`. A body that is not a history, or unreadable counters, is said as such, never shown as ₹0.
   - Sibling: the app-AI owner-route census counted owner checks as a fixed 4. It now asserts the rule itself (every route registered in that file has exactly one strict owner check), so a new route without one fails.
   - Test: `tests/anOwnerSeesWhatTheirAppsAiCosts.test.ts`, reverted (owner check removed) and seen to fail. KB entry updated.
+- **Q-806 (a defect from the 2026-09-07 Render audit: after a reload the Publish screen showed "Deploy backend" again and never "live at …"):**
+  - Root cause: the deploy's outcome lived only in the HostingChooser's memory. Class: a fact learned once, kept only on a screen.
+  - Fix: a durable `backendDeploy` record on the app's conversation record (`src/lib/backendDeployRecord.ts`, shared by server and screen).
+    - `deploy-backend` writes it, as service + address + not-yet-checked.
+    - `deploy-status` settles it, only for the service it names.
+    - A new owner-only `GET /api/agentv3/deploy-record` serves it.
+    - The Publish screen reads it on open and says "live at …", the last failure, or "still being checked", resuming a check that a reload interrupted within 15 minutes.
+  - Both stores carry the field. The duplicate path does not copy it, because it names the original's service (named in the comment and pinned).
+  - Test: `tests/theBackendIsRememberedAfterAReload.test.ts`, with two guards reverted and seen to fail. KB updated.

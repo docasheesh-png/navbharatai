@@ -7,6 +7,7 @@ import { LoadMore } from './common/LoadMore';
 import { stampLabel, dayLabel, signInMethodWords } from '../lib/adminUserDisplay';
 import { PublishedAppsCard } from './profile/PublishedAppsCard';
 import { publishedAppRows, liveAppCount } from '../lib/publishedAppsView';
+import { platformMarginView } from '../lib/platformMarginView';
 import { adultOptInSummary } from '../lib/adultContent';
 import { confirmCopy, MODERATION_ROUTE, type ModerationAction } from '../lib/adminAppModeration';
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
@@ -2007,12 +2008,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     read a flat "Platform Margin ₹155" while the engine-cost panel beside it showed
                     ₹1,223 of spend — because cost was structurally zero and margin was revenue with a
                     different label. Never again by accident: the word changes with the certainty. */}
-                {statCard(
-                  analytics?.providerCostComplete === false ? `${analytics?.scope === 'chat' ? 'Chat margin' : 'Platform Margin'} (at most)` : (analytics?.scope === 'chat' ? 'Chat margin' : 'Platform Margin'),
-                  `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`,
-                  /* CHAT cost only — build cost is on the Monitor's own tiles (scope from the server) */
-                  `Revenue minus ${analytics?.scope === 'chat' ? 'CHAT AI' : 'AI'} cost${analytics?.scope === 'chat' ? ' · build cost is on the Monitor' : ''}${analytics?.providerCostComplete === false ? ` · ${analytics?.unpricedCalls || 0} call(s) could not be priced` : ''}`,
-                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500 text-on-accent' : 'bg-red-500 text-on-accent', TrendingUp)}
+                {/* ONE PLATFORM MARGIN (Q-114): revenue minus chat + build + assistant cost over one 30-day
+                    window, from the server (platformMargin.ts). It used to be revenue minus CHAT cost only. */}
+                {(() => {
+                  const pm = platformMarginView(analytics?.platformMargin);
+                  return pm
+                    ? statCard(pm.marginLabel, pm.marginValue, pm.marginSub, pm.positive ? 'bg-emerald-500 text-on-accent' : 'bg-red-500 text-on-accent', TrendingUp)
+                    : statCard('Platform margin', '—', 'Not reported by this server yet', 'bg-surface', TrendingUp);
+                })()}
                 {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Paid transactions', 'bg-pink-500 text-on-accent', Tag)}
                 {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, analytics?.scope === 'chat' ? 'Direct provider cost · chat only' : 'Direct provider cost', 'bg-orange-500 text-on-accent', Cpu)}
               </div>
@@ -2655,18 +2658,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             <div className="space-y-6">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {statCard('Total Revenue', `₹${(analytics?.totalRevenue || 0).toLocaleString('en-IN')}`, 'All time', 'bg-emerald-500 text-on-accent', IndianRupee)}
-                {statCard(
-                  analytics?.providerCostComplete === false ? 'Provider Cost (at least)' : 'Provider Cost',
-                  `₹${(analytics?.totalProviderCost || 0).toFixed(4)}`,
-                  analytics?.providerCostComplete === false
-                    ? `AI API cost · ${analytics?.pricedCalls || 0} priced, ${analytics?.unpricedCalls || 0} not`
-                    : 'AI API cost',
-                  'bg-red-500 text-on-accent', Database)}
-                {statCard(
-                  analytics?.providerCostComplete === false ? 'Net Margin (at most)' : 'Net Margin',
-                  `₹${(analytics?.estimatedProfit || 0).toFixed(2)}`,
-                  analytics?.providerCostComplete === false ? 'Revenue - cost (cost is a floor)' : 'Revenue - cost',
-                  (analytics?.estimatedProfit || 0) >= 0 ? 'bg-emerald-500 text-on-accent' : 'bg-red-500 text-on-accent', TrendingUp)}
+                {/* The SAME platform margin as the overview (Q-114). These two cards said "Provider Cost" and
+                    "Net Margin" with no qualifier while holding chat cost alone. */}
+                {(() => {
+                  const pm = platformMarginView(analytics?.platformMargin);
+                  return pm ? (
+                    <>
+                      {statCard(pm.costLabel, pm.costValue, pm.costSub, 'bg-red-500 text-on-accent', Database)}
+                      {statCard(pm.marginLabel, pm.marginValue, pm.marginSub, pm.positive ? 'bg-emerald-500 text-on-accent' : 'bg-red-500 text-on-accent', TrendingUp)}
+                    </>
+                  ) : (
+                    <>
+                      {statCard('AI cost', '—', 'Not reported by this server yet', 'bg-surface', Database)}
+                      {statCard('Platform margin', '—', 'Not reported by this server yet', 'bg-surface', TrendingUp)}
+                    </>
+                  );
+                })()}
                 {statCard('Token Purchases', analytics?.tokenPurchaseCount || 0, 'Successful payments', 'bg-pink-500 text-on-accent', Tag)}
                 {statCard('Cost / Request', `₹${(analytics?.burnRate || 0).toFixed(5)}`, 'Avg AI provider cost', 'bg-orange-500 text-on-accent', Cpu)}
                 {statCard('Active Users', analytics?.activeUsers24h || 0, 'Using AI in 24h', 'bg-violet-500 text-on-accent', UserCheck)}
@@ -3026,7 +3033,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <div className="bg-well rounded-xl p-3 space-y-1 font-mono text-xs border border-line">
                   <div className="flex justify-between">
                     <span className="text-muted">
-                      {analytics?.providerCostComplete === false ? 'Provider Cost (at least)' : 'Total Provider Cost'}
+                      {/* chat providers only — this panel is the chat burn; the whole platform is the margin card (Q-114) */}
+                      {analytics?.providerCostComplete === false ? 'Chat provider cost (at least)' : 'Chat provider cost'}
                     </span>
                     <span className="text-warn font-black">₹{(analytics?.totalProviderCost || 0).toFixed(4)}</span>
                   </div>

@@ -97,6 +97,7 @@ import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore, platformHealthInputs } from '../lib/HealthScore';
 import { summariseUsage, marginInr } from '../lib/usageLedger';
+import { platformMarginWindow } from '../lib/platformMargin';
 import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { usdToInr } from '../lib/UsdInrRate';
 import { analyzeFinOps } from '../lib/FinOpsAdvisor';
@@ -222,6 +223,9 @@ import {
   adminUsername,
   adminPassword,
 } from '../lib/adminAuth';
+
+/** The window the Business panel's platform margin covers (Q-114). */
+const PLATFORM_MARGIN_DAYS = 30;
 
 // ── P-SEC.3 — Admin TOTP MFA ───────────────────────────────────────────────
 // Second factor for admin-panel access. The active secret resolves from either an
@@ -1699,6 +1703,18 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         usageCostUsd(u, realRateFor(provider, model)));
       const totalTokensUsed = usage.outputTokens;
       const totalProviderCost = usdToInr(usage.costUsd);
+      // ONE PLATFORM MARGIN (Q-114): revenue minus chat + build + assistant cost, over ONE 30-day window.
+      // The day docs hold the build and assistant cost; one extra day is read so the window's first day
+      // is never cut off by the store's own "newest N" limit.
+      const [buildCostDays, assistantSpend] = await Promise.all([
+        agentV3CostTelemetry.list(PLATFORM_MARGIN_DAYS + 1),
+        assistantSpendStore.summary(PLATFORM_MARGIN_DAYS + 1),
+      ]);
+      const platformMargin = platformMarginWindow({
+        nowMs: Date.now(), days: PLATFORM_MARGIN_DAYS, transactions, chatLogs: logs,
+        priceUsage: (provider, model, u) => usageCostUsd(u, realRateFor(provider, model)),
+        buildDays: buildCostDays, assistantDays: assistantSpend.days, usdToInr,
+      });
       const modelWise: any = {};
 
       logs.forEach((log: any) => {
@@ -1820,6 +1836,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         // the two accountings is a separate change; until then this field is what keeps the labels
         // honest, and the client reads it rather than hardcoding "all providers".
         scope: 'chat' as const,
+        // …except this block, which is the whole platform — see platformMargin.ts.
+        platformMargin,
         totalUsers, totalRevenue, totalTokensUsed, totalProviderCost,
         // HOW SURE ARE WE? `providerCostComplete` false ⇒ the cost above is a FLOOR (some calls could
         // not be priced), so the profit below is an UPPER BOUND and the screen must say "at most".

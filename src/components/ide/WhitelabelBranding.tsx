@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { COPY } from '../../lib/copy';
 import { Paintbrush, Download, Check, Copy, RefreshCw, Image as ImageIcon, Monitor, Smartphone, Sun, Moon } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
+import { deliverFile } from '../../lib/downloadFile';
 
 interface BrandConfig {
   appName: string;
@@ -139,9 +140,7 @@ module.exports = {
   const downloadAll = () => {
     const content = `/* ===== ${config.appName} Brand Config ===== */\n\n${generateCSS()}\n\n/* ===== Meta Tags ===== */\n/*\n${generateMetaTags()}\n*/\n\n/* ===== Tailwind Config ===== */\n/*\n${generateTailwindConfig()}\n*/`;
     const blob = new Blob([content], { type: 'text/css' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `${config.appName.toLowerCase().replace(/\s+/g, '-')}-brand.css`; a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile(`${config.appName.toLowerCase().replace(/\s+/g, '-')}-brand.css`, blob);
   };
 
   const applyToApp = () => {
@@ -396,7 +395,7 @@ module.exports = {
                       <button onClick={() => copyText(item.content, item.key)} className={`text-[9px] flex items-center gap-1 px-2 py-0.5 rounded-lg transition-all ${copied === item.key ? 'text-success bg-emerald-500/10' : 'text-faint bg-raised'}`}>
                         {copied === item.key ? <><Check className="w-2.5 h-2.5" /> Copied</> : <><Copy className="w-2.5 h-2.5" /> Copy</>}
                       </button>
-                      <button onClick={() => { const b = new Blob([item.content], { type: 'text/plain' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = item.filename; a.click(); URL.revokeObjectURL(u); }} className="text-[9px] flex items-center gap-1 px-2 py-0.5 rounded-lg text-faint bg-raised">
+                      <button onClick={() => { void deliverFile(item.filename, item.content, 'text/plain'); }} className="text-[9px] flex items-center gap-1 px-2 py-0.5 rounded-lg text-faint bg-raised">
                         <Download className="w-2.5 h-2.5" /> Save
                       </button>
                     </div>

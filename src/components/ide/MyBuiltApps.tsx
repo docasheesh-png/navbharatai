@@ -24,6 +24,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Package, RefreshCw, Trash2, AlertTriangle, Clock, CheckCircle2, X } from 'lucide-react';
 import { PublishToNavStore } from './PublishToNavStore';
 import { writeFailure } from '../../lib/serverAnswer';
+import { deliverFile } from '../../lib/downloadFile';
 
 export interface MyBuiltApp {
   id: string;
@@ -138,11 +139,7 @@ export function MyBuiltApps({ ghHeaders }: { ghHeaders: (extra?: Record<string, 
       const res = await fetch(`/api/mobile-ship/download?owner=${encodeURIComponent(app.owner)}&repo=${encodeURIComponent(app.repo)}&artifactId=${encodeURIComponent(String(artifactId))}`, { headers: await ghHeaders() });
       if (!res.ok) return;
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = name.endsWith('.apk') || name.endsWith('.aab') ? name : `${name}.apk`;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
+      void deliverFile(name.endsWith('.apk') || name.endsWith('.aab') ? name : `${name}.apk`, blob);
     } catch { /* the button simply does nothing rather than throwing at the user */ }
   }, [ghHeaders]);
 

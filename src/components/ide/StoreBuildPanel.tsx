@@ -9,6 +9,7 @@ import { authedHeaders } from '../../lib/authHeaders';
 // asked for android-apk.yml while the server's own list had never heard of it.
 import { SHIP_WORKFLOWS, needsUserSecrets, type ShipWorkflowFile } from '../../lib/shipWorkflows';
 import { signingNotReadyMessageFor, signingPlatformOf } from '../../lib/signingReadiness';
+import { deliverFile, deliveryMessage } from '../../lib/downloadFile';
 
 // "Build my app and give me the file" — the real pipeline, end to end, inside NavBharatAI.
 //
@@ -226,14 +227,7 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
   }, repoName: string) => {
     try {
       const bytes = Uint8Array.from(atob(String(k.base64)), (c) => c.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${repoName}-upload.keystore`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      void deliverFile(`${repoName}-upload.keystore`, new Blob([bytes], { type: 'application/octet-stream' }));
     } catch { /* the key is on the repository either way; the panel still shows the password */ }
     setNewKey({
       fingerprint: String(k.sha256Fingerprint || ''),
@@ -700,12 +694,9 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       }
       const data = await res.json();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${setup.repo}-build-report.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const reportName = `${setup.repo}-build-report.json`;
+      const delivered = await deliverFile(reportName, blob);
+      if (delivered === 'failed') setError(deliveryMessage(delivered, reportName));
     } catch {
       setError('Could not read the build report.');
     } finally {
@@ -737,12 +728,8 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
       const name = /apk/i.test(artifact.name)
         ? (buildKind === 'apk' ? 'app-debug.apk' : 'app-release.apk')
         : 'app-release.aab';
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      a.click();
-      URL.revokeObjectURL(url);
+      const delivered = await deliverFile(name, blob);
+      if (delivered === 'failed') setError(deliveryMessage(delivered, name));
       setChargeNote(chargeReceipt({ priceInr: charge.priceInr, applied: charge.applied }));
     } catch {
       setError('Could not download that file.');

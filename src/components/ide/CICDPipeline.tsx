@@ -3,6 +3,7 @@ import { GitBranch, Check, X, Plus, Trash2, Download, Zap, Shield, Rocket, Setti
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { workflowPath, commitTarget, commitMessage } from '../../lib/cicdTarget';
+import { deliverFile } from '../../lib/downloadFile';
 
 type StepType = 'checkout' | 'install' | 'test' | 'build' | 'deploy' | 'notify' | 'custom';
 type StepStatus = 'idle' | 'running' | 'pass' | 'fail' | 'skip';
@@ -208,9 +209,7 @@ export function CICDPipeline({ githubToken, onConnectGitHub }: CICDPipelineProps
   const downloadYaml = () => {
     const filename = filePath;
     const blob = new Blob([yaml], { type: 'text/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = filename.split('/').pop()!; a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile(filename.split('/').pop()!, blob);
   };
 
   const copyYaml = () => {

@@ -3,6 +3,7 @@ import { Moon, Sun, Copy, Download, Check, ChevronDown, ChevronUp, Zap, Sliders,
 import { resolveAppSource, hasAnalysableApp } from '../../lib/workspaceSource';
 import { injectStyleBlock, injectScriptBlock, canCarryStylesheet } from '../../lib/cssInjection';
 import { AppTargetPicker, useUserApps, useAppFiles, readAppFile, saveFilesToApp } from './AppTargetPicker';
+import { deliverFile } from '../../lib/downloadFile';
 
 /** Ids that fence this tool's own blocks, so a re-run replaces them instead of stacking copies. */
 const DARK_CSS_MARKER = 'nb-darkmode';
@@ -340,10 +341,7 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
 
   const handleDownload = () => {
     const blob = new Blob([generatedCSS], { type: 'text/css' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'dark-mode.css'; a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile('dark-mode.css', blob);
   };
 
   /**

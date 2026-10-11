@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Languages, Plus, Trash2, Check, X, Copy, Download, Search, Upload } from 'lucide-react';
+import { deliverFile } from '../../lib/downloadFile';
 
 interface TranslationKey {
   key: string;
@@ -152,10 +153,7 @@ export function LocalizationManager() {
     const obj: Record<string, string> = {};
     translationKeys.forEach(tk => { obj[tk.key] = tk.values[lang] || ''; });
     const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `${lang}.json`; a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile(`${lang}.json`, blob);
   };
 
   const exportAll = () => {
@@ -165,10 +163,7 @@ export function LocalizationManager() {
       translationKeys.forEach(tk => { all[lang][tk.key] = tk.values[lang] || ''; });
     });
     const blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'translations.json'; a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile('translations.json', blob);
   };
 
   const importJson = () => {

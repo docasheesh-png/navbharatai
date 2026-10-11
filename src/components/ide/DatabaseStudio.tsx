@@ -25,6 +25,7 @@ import { Breadcrumb } from '../ui/Breadcrumb';
 import { authedFetch } from '../../lib/authedFetch';
 import { studioState, renderCell, filterRows, pageSummary } from '../../lib/dataStudioSource';
 import { parseCsv, rowsToObjects } from '../../lib/csv';
+import { deliverFile } from '../../lib/downloadFile';
 
 interface DBRow { [key: string]: unknown; }
 
@@ -343,10 +344,7 @@ export function DatabaseStudio() {
       const count = res.headers.get('X-Nbai-Row-Count') ?? '';
       const truncated = res.headers.get('X-Nbai-Truncated') === '1';
       const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `${selected}.csv`; a.click();
-      URL.revokeObjectURL(url);
+      void deliverFile(`${selected}.csv`, blob);
       // The file itself stays clean CSV — a warning inside it would corrupt the data for every other
       // tool — so the partial-export warning is said here instead.
       if (truncated) setImportNote(`Exported the first ${count} rows — this table has more.`);
@@ -402,10 +400,7 @@ export function DatabaseStudio() {
 
   const exportJson = () => {
     const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `${selected || 'table'}.json`; a.click();
-    URL.revokeObjectURL(url);
+    void deliverFile(`${selected || 'table'}.json`, blob);
   };
 
   return (

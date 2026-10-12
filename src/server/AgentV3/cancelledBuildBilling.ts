@@ -106,7 +106,12 @@
 import type { AbortCause } from './buildAbortCause';
 
 /** What the user is holding at the moment they stopped. */
-export type CancelledDelivery = 'working-app' | 'files-saved' | 'nothing' | 'unverified-edit';
+/**
+ * `seed-only` (autopsy 303e8a6f): files exist, but every one is the platform's own seed, untouched — a different
+ * state from `nothing` (zero files written). It was filed as `nothing`, so the user of a seeded template heard
+ * "Your workspace is exactly as it was" while the template sat in it and on screen.
+ */
+export type CancelledDelivery = 'working-app' | 'files-saved' | 'nothing' | 'seed-only' | 'unverified-edit';
 
 export interface CancelledBuildFacts {
   /** From `abortCauseOf(signal)` — never guessed, never defaulted to the user. */
@@ -276,7 +281,7 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
   // not already have by asking, so there is nothing to charge for.
   if (files === 0) {
     return {
-      billedUsd: 0, discountPct: 100, delivery: 'nothing', applies: true, costFloorApplied: false,
+      billedUsd: 0, discountPct: 100, delivery: 'seed-only', applies: true, costFloorApplied: false,
       reason: 'user stopped the build before any file of their own was produced — only the platform template existed and nothing rendered, so not charged',
       userMessage: null,
     };
@@ -343,6 +348,10 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
 export function freeCancellationMessage(delivery: CancelledDelivery | null): string {
   if (delivery === 'unverified-edit') {
     return '🛡️ You stopped this change before it could be checked, so it is FREE — no charge. What it had changed so far is saved; if your app does not work the way it did, send a message and I will fix it.';
+  }
+  if (delivery === 'seed-only') {
+    // The workspace is NOT as it was: the app's starting files are in it (autopsy 303e8a6f) — say so, and how to go on.
+    return "🛡️ You stopped this build before it changed anything, so it is FREE — no charge. The app's starting files are kept in your workspace — send a message and I'll continue from them.";
   }
   return '🛡️ You stopped this build before anything was produced, so it is FREE — no charge. Your workspace is exactly as it was.';
 }

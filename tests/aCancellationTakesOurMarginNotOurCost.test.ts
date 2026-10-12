@@ -134,7 +134,8 @@ describe('🔒 the three ₹0 outcomes are UNTOUCHED — a floor under them woul
   it('only the platform template, untouched, stays free (autopsy 2b0a3ed5)', () => {
     const b = decideCancelledBuildBill(facts({ filesWritten: 12, preseededUnchanged: 12, ...REAL }));
     expect(b.billedUsd).toBe(0);
-    expect(b.delivery).toBe('nothing');
+    // Its own state since 303e8a6f: free exactly as before, but the template IS there — not "nothing".
+    expect(b.delivery).toBe('seed-only');
   });
 
   it('an unverified EDIT of a working app stays free (autopsy 95598899)', () => {

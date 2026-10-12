@@ -28,7 +28,7 @@ import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRe
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
-import { abortCauseOf, abortSummary } from './buildAbortCause';
+import { abortCauseOf, abortSummary, timedOutSummary, stalledModelSummary } from './buildAbortCause';
 import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
@@ -181,6 +181,13 @@ export interface AgentRunnerOptions {
    * before, so this is additive only.
    */
   hasExistingFiles?: () => boolean;
+  /**
+   * Does the workspace hold files the PLATFORM set up for this build (a tested template, a game kit, the page
+   * the user pasted)? Checked live. Read only when `hasExistingFiles` says nothing of the build's own exists,
+   * so an ending can say "the app's starting files are in your workspace" instead of "nothing was written"
+   * (autopsy 303e8a6f). Never changes ok/false or what is persisted — only the sentence.
+   */
+  hasSeededFiles?: () => boolean;
   /**
    * True when this turn is editing a project that ALREADY EXISTS (the route's `isEditMode`).
    *
@@ -572,6 +579,11 @@ export class AgentRunner {
     // "never claim the user did something they did not do" rule this module's summary text states.
     const builtSomethingNow = (): boolean =>
       producingToolUses > 0 || this.opts.hasExistingFiles?.() === true;
+    // The third state every ending can be in (autopsy 303e8a6f): nothing of ours, but the platform's seed is there.
+    const endingContext = (): { builtSomething: boolean; seededOnly: boolean } => {
+      const builtSomething = builtSomethingNow();
+      return { builtSomething, seededOnly: !builtSomething && this.opts.hasSeededFiles?.() === true };
+    };
     // How many times we've nudged a build that only NARRATED (described its plan / said it would
     // "assign the frontend expert") without calling a single tool. The model often plans out loud
     // on its first turn; terminating there is the "model replied without building" bug. We instead
@@ -759,7 +771,7 @@ export class AgentRunner {
         const cause = abortCauseOf(this.opts.signal as AbortSignal);
         const summary = abortSummary(cause, {
           minutes: maxBuildMs ? Math.round(maxBuildMs / 60000) : undefined,
-          builtSomething: builtSomethingNow(),
+          ...endingContext(),
         });
         await persist('stopped');
         events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
@@ -788,10 +800,9 @@ export class AgentRunner {
         // reported ok:true (the work is real and resumable); one that produced nothing is ok:false.
         if (buildTimedOut(buildStartMs, maxBuildMs, Date.now())) {
           const minutes = Math.round((maxBuildMs as number) / 60000);
-          const builtSomething = builtSomethingNow();
-          const summary = builtSomething
-            ? `I stopped after about ${minutes} min to avoid an endless loop. Your files so far are saved — send another message and I'll continue from here.`
-            : `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up). Nothing was lost; try again or rephrase.`;
+          const ending = endingContext();
+          const builtSomething = ending.builtSomething;
+          const summary = timedOutSummary(minutes, ending);
           await persist(builtSomething ? 'complete' : 'stopped');
           events.emit({ type: 'done', ok: builtSomething, summary, ts: Date.now() });
           return { ok: builtSomething, summary, steps, usage, billedUsd: billed(), timedOut: true };
@@ -922,10 +933,9 @@ export class AgentRunner {
           const isTurnTimeout = err instanceof Error && /timed out after/.test(err.message);
           if (isTurnTimeout) {
             const minutes = Math.max(1, Math.round(turnTimeoutMs / 60000));
-            const builtSomething = builtSomethingNow();
-            const summary = builtSomething
-              ? `A model response stalled and was stopped after about ${minutes} min. Your files so far are saved — send another message and I'll continue from here.`
-              : `The model didn't respond in time (stalled after about ${minutes} min). Nothing was lost — please try again.`;
+            const ending = endingContext();
+            const builtSomething = ending.builtSomething;
+            const summary = stalledModelSummary(minutes, ending);
             await persist(builtSomething ? 'complete' : 'error');
             events.emit({ type: 'done', ok: builtSomething, summary, ts: Date.now() });
             return { ok: builtSomething, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };

@@ -80,7 +80,17 @@ export interface AbortSummaryContext {
   minutes?: number;
   /** Did the build actually write files? Decides whether "your work is saved" is TRUE. */
   builtSomething?: boolean;
+  /**
+   * Nothing of the build's own was written, BUT the workspace holds files the platform set up for it first —
+   * a tested template, a game kit, the page the user pasted. 🔴 Autopsy 303e8a6f: with only a yes/no, a stop
+   * on a seeded template said "Nothing had been written yet" while the 14-file app sat in the workspace and
+   * on screen. A third state, so the sentence can say what is actually there. Ignored when `builtSomething`.
+   */
+  seededOnly?: boolean;
 }
+
+/** What a seeded workspace keeps — said wherever the build stopped before changing anything. */
+const SEED_KEPT = "The app's starting files are in your workspace — send a message and I'll continue from them.";
 
 /**
  * The sentence the user reads.
@@ -94,9 +104,12 @@ export interface AbortSummaryContext {
 export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): string {
   const mins = typeof ctx.minutes === 'number' && ctx.minutes > 0 ? ctx.minutes : null;
   const saved = ctx.builtSomething === true;
+  const seededOnly = !saved && ctx.seededOnly === true;
   const resume = saved
     ? " Your files so far are saved — send another message and I'll continue from here."
-    : ' Nothing was lost; try again or rephrase.';
+    : seededOnly
+      ? ` I had not changed anything yet. ${SEED_KEPT}`
+      : ' Nothing was lost; try again or rephrase.';
 
   switch (cause) {
     case 'user-stop':
@@ -108,7 +121,9 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
       // realise anything was kept at all.
       return saved
         ? "Stopped, as you asked. Your files so far are saved — send another message and I'll continue from here."
-        : 'Stopped, as you asked. Nothing had been written yet, so nothing was lost.';
+        : seededOnly
+          ? `Stopped, as you asked. I had not changed anything yet. ${SEED_KEPT}`
+          : 'Stopped, as you asked. Nothing had been written yet, so nothing was lost.';
     case 'watchdog':
       return mins
         ? `I stopped after about ${mins} min to avoid an endless loop — this build was not converging.${resume}`
@@ -129,7 +144,9 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
       // survived, never what the build cost NavBharatAI (that stays in the admin report).
       return saved
         ? "This build reached its size limit, so I stopped it here rather than let it run on. Your files so far are saved — send another message and I'll continue from here."
-        : 'This build reached its size limit before it produced anything. Nothing was lost — try again with a smaller first step.';
+        : seededOnly
+          ? `This build reached its size limit before it changed anything. ${SEED_KEPT}`
+          : 'This build reached its size limit before it produced anything. Nothing was lost — try again with a smaller first step.';
     case 'futile':
       // 🔴 NEITHER THE USER'S FAULT NOR THEIR APP'S, and the two branches are genuinely different
       // situations rather than one sentence with a clause bolted on.
@@ -144,12 +161,31 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
       // minute 12 of a 30-minute budget. The honest word is that it was not getting anywhere.
       return saved
         ? "This build stopped making progress, so I stopped it here rather than let it run on. Your files so far are saved — send another message and I'll continue from here."
-        : 'This build was not getting anywhere — nothing had been produced, so I stopped it instead of letting it run on. Nothing was lost. Try again with a bit more detail about what the app should do.';
+        : seededOnly
+          ? `This build was not getting anywhere — it had not changed anything yet, so I stopped it instead of letting it run on. ${SEED_KEPT} Add a bit more detail about what the app should do.`
+          : 'This build was not getting anywhere — nothing had been produced, so I stopped it instead of letting it run on. Nothing was lost. Try again with a bit more detail about what the app should do.';
     case 'unknown':
     default:
       // Honest about not knowing, rather than picking a plausible culprit.
       return `This build was stopped before it finished.${resume}`;
   }
+}
+
+/**
+ * The wall-clock cap reached between turns (not an abort): the same sentence source as every other ending, so
+ * the three states can never drift apart again. It used to be an inline copy in AgentRunner. PURE.
+ */
+export function timedOutSummary(minutes: number, ctx: Pick<AbortSummaryContext, 'builtSomething' | 'seededOnly'> = {}): string {
+  if (ctx.builtSomething === true) return `I stopped after about ${minutes} min to avoid an endless loop. Your files so far are saved — send another message and I'll continue from here.`;
+  if (ctx.seededOnly === true) return `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up), and had not changed anything yet. ${SEED_KEPT}`;
+  return `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up). Nothing was lost; try again or rephrase.`;
+}
+
+/** A model call that stalled past its per-turn limit. Same three states. PURE. */
+export function stalledModelSummary(minutes: number, ctx: Pick<AbortSummaryContext, 'builtSomething' | 'seededOnly'> = {}): string {
+  if (ctx.builtSomething === true) return `A model response stalled and was stopped after about ${minutes} min. Your files so far are saved — send another message and I'll continue from here.`;
+  if (ctx.seededOnly === true) return `The model didn't respond in time (stalled after about ${minutes} min), before anything was changed. ${SEED_KEPT}`;
+  return `The model didn't respond in time (stalled after about ${minutes} min). Nothing was lost — please try again.`;
 }
 
 /**

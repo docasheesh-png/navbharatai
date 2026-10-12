@@ -16925,6 +16925,9 @@ async function noteBuildOutcome(
         // work to resume from" and the user was told their files were saved. Only files the MODEL
         // authored count as work.
         hasExistingFiles: () => modelAuthoredPaths(writtenFiles).length > 0,
+        // …and the third state (autopsy 303e8a6f): nothing of the build's own, but our seed (template, game kit,
+        // pasted page) IS in the workspace — the ending then says so instead of "nothing was written".
+        hasSeededFiles: () => writtenFiles.size > 0,
         // Autopsy 95598899 — wording of the build nudge only, never whether it fires. An established
         // project must never be told to "start by writing the entry file". See nudgeToBuild.ts.
         editingExistingApp: isEditMode,

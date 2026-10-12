@@ -94416,3 +94416,60 @@ unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong
   - No "skeleton loading" is claimed without a skeleton.
 - **Still open:** Q-926 (248 s to first render on Weak). 🟡 BLOCKED on the admin's routing decision; the options are in the row.
 - **Report db07e0af, final count:** 15 items. ✅ 14 (13 fixed by #3687, plus Q-923 not-a-defect). 🟡 1 (Q-926). Remaining 0.
+
+## 2026-10-12 — AUTOPSY `50378049`, Q-908: the one mechanism built to catch an abandoned kit was switched off by a prediction
+
+Seventh PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911 · #3690 →
+Q-906+Q-907 · #3693 → Q-909 · #3694 → Q-910).
+
+**The defect.** The game kit seeded 24 files under `src/game/**`. The builder then wrote its own game
+structure and used none of them, and `READINESS_WARNING` noted it had removed the only import of
+`GameCanvas.tsx`. The orphan hand-back (Q-202, autopsy 3f959fde) exists for exactly that — a component
+this build wrote that nothing imports — and it **named nothing**, because the turn was a project-mode
+module and `starterExpected` was set.
+
+🔑 **IT IS THE SAME CLASS AS Q-900, in the sibling I named in that PR's ledger and did not fix there.** A
+plan-time PREDICTION disabled a mechanism, and the prediction was false.
+
+**Two holes, and either one alone reproduces the report.**
+
+1. **The carve-out outlived its premise.** It is excused because *"a component is wired in by a later
+   module by design"* — and the thing that wires components in is the app's **ENTRY**. The moment THIS
+   turn writes the entry, no later module is coming, so the premise is dead and the orphans are real.
+   `wroteTheAppEntry(written)` is that fact: pure, local, read from the turn's own write set, with no new
+   plumbing and no dependency on #3684's helper (deliberately — stacking is what I had to undo twice
+   today).
+   🔒 It is unreachable on an HONEST module turn, which is worth stating: a module that owns the entry
+   makes `shellModuleFor` return null, so `starterExpected` is never set. It can only fire when the
+   builder went OUT of its module's scope — exactly the reported build.
+2. **Fixing (1) alone would have traded one problem for another.** The route's write set holds every kit
+   file the seed wrote, so with the carve-out lifted the hand-back would have named OUR OWN untouched kit
+   and told the model to wire in or delete 24 files it never wrote. `isPlatformSeededFile` is byte-exact
+   and knows every kit version (Q-863) and every starter version (db07e0af), so platform files are
+   excluded **inside `orphansToHandBack`** rather than at the call site — no caller can forget it. One
+   edited byte makes a file the model's again, and nameable; a case proves both directions.
+
+**Locked by** `tests/anAbandonedKitIsNotInvisible.test.ts` — 11 cases. **Reversion-proven twice:** restore
+the unconditional carve-out → 3 fails · drop the platform-seeded exclusion → 1.
+
+⚠️ **MY FIRST FIXTURE PROVED NOTHING, AND THE TEST SAID SO.** I handed it the whole real kit, and
+`unreferencedComponents` is deliberately precise: it names nothing unless an entry exists AND every
+relative import resolves to a file it was given. The kit's `Game.ts` imports seventeen files from four
+OTHER recipes, so the graph refused and the answer was empty **for the wrong reason** — a green test would
+have proved the opposite of what I wanted. The fixture is now the reported SHAPE with its imports closed,
+and it uses the kit's REAL BYTES for `GameCanvas.tsx`, the one file the report names. **A fixture that
+cannot fail is not evidence.**
+
+⚠️ **AND I DELETED A CASE OF MY OWN THAT WAS FAKE.** One case asserted a local lambda standing in for the
+old behaviour (`asItWas = (i) => i.starterExpected ? [] : […]`) — it could never fail whatever the code
+did. The reversion probes do that job honestly; a test that exercises a copy of the code instead of the
+code is worse than no test, because it reports confidence it has not earned.
+
+⚠️ **AND THE Q-202 TEST THAT OWNS THIS CARVE-OUT FAILED — correctly, on a fixture that could not happen.**
+Two of its cases passed a write set containing `src/App.tsx` while also setting `starterExpected: true`.
+**The engine never produces that pair:** a module that owns an entry file makes `shellModuleFor` return
+null, so `starterExpected` is never set for it. So those cases asserted the carve-out on a state that
+cannot occur, and in doing so hid the state that DOES occur when a builder leaves its module's scope —
+the reported build. Both now use a write set without the entry (the real state, still excused), and each
+has gained a sibling asserting the new behaviour with the entry present. **One case became two, and the
+pair is stronger than the one it replaces.**

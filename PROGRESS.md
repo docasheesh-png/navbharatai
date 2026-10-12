@@ -94097,6 +94097,32 @@ The admin merged #3668. Closed, IDs appended to `BUILD_REPORT_QUEUE_CLOSED.txt` 
   - Reverted three ways and seen to fail each time: one offer removed, the alias loop removed, and the starter answer removed.
 - **#3673 merged (2026-10-11):** Q-796, Q-797 and Q-806 are closed. Their rows were deleted from `BUILD_REPORT_QUEUE.md` and their IDs appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`, on the merged `main`. Q-381 batch three (above) and Q-821 were rebuilt on that `main` for the next PR from this branch.
 
+## 2026-10-11: Autopsy 46e2d74b — the racing car showed its HEADLIGHTS and LEFT turned it RIGHT (admin: "ek bahut dangerous issue … sab me headlight dikhti hai")
+
+Prompt "Create an racing game for Nokia c 2-01", weak tier (GLM → Kimi). Admin's two bugs, investigated by four parallel
+readers + a critic, fixed in three worktree-isolated groups, each adversarially verified, then wired and re-gated here.
+
+- **One defect, not two (measured):** every model faces +Z; the camera ended up on the NOSE side, so the car was filmed
+  face-on — and face-on, the driver's left is the screen's right, so correct steering read as mirrored. Kit `update()`
+  camera: headlamps 5.56 m vs tail 9.50 m, LEFT → NDC +0.2082; a hand-written +Z car with the usual `car.z + d` camera:
+  4.61 m vs 8.30 m, LEFT → +0.70.
+- **Why it came back (fifth rule):** the 2026-10-05 fix (e2febbdbd) made the correct camera AVAILABLE (`follow`,
+  `driveVehicle`), not the DEFAULT. Three paths missed it: a hand-written game (this build never ran `run_recipe` —
+  the prompt named bare `generate_game_*` tools and described kit files as present), the kit's own default (`'chase'`
+  unimplemented in `CameraRig.update`; the shell fell back to it), and the kit's own examples (`camera:'thirdPerson'`,
+  TS2820, no `ctx.follow`). **Correction (Q-855):** the 10-05 entry above says the `'chase'` kind puts the camera behind
+  the car — that was true only of `follow()`, and its premise was never checked against a real build.
+  "Speed never increases" is the THIRD recurrence of the 2026-08-25 class, whose guard also lived only in the kit.
+- **Fixes:** (A kit) chase implemented, the shell chases the vehicle the PLAYER drives, every recipe example compiled in
+  CI, vehicle touch preset, `cameraRelative` and motorcycle signs; (B delivery) the game kit is seeded by the platform
+  before the first model call (`gameKitSeed.ts`, kill switch `AGENTV3_GAME_KIT_SEED=off`), every prompt step is
+  `run_recipe`, the camera half of the +Z rule in plain three.js, ETA lane decided first; (C checks) review tags read by
+  shape, the playtest presses "Start Race" (and gets the explorer's working start label), NOT_RUN is an open warning,
+  primed node_modules no longer stale, install-on-import, a write-time note on a hand-written vehicle/camera.
+- **Locks:** `theCarIsSeenFromBehind`, `aRecipeExampleCompiles`, `theRacingCarShowedItsHeadlights`,
+  `aRacingGameIsStartedAndDriven`, `aReviewTagIsReadByItsShape`, `aPrimedTreeIsNotAStaleTree` — each reverted-and-failed.
+- **Queue:** Q-830..Q-865 (36 rows). 🟡 admin decisions: Q-842 (GLM crawl not-a-defect), Q-845 (billing an unplayed
+  game), Q-846 (Nokia/keypad device target), Q-860 (flip the default yaw). OPEN follow-ups: Q-843, Q-861..Q-865.
 ### 2026-10-11 — #3674 merged; Q-381 batch four (19 → 14)
 
 - **#3674 merged** (Q-381 batch three, Q-821 recorded, #3673's rows closed). Batch four was rebuilt on the merged `main`.

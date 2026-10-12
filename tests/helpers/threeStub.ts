@@ -25,6 +25,8 @@ export class Obj3D {
   rotation = new Vec3();
   scale = new Vec3(1, 1, 1);
   name = '';
+  /** Every real Object3D has one; the bikes record each wheel's radius there (rollWheels). */
+  userData: Record<string, unknown> = {};
   castShadow = false;
   receiveShadow = false;
   geometry?: StubGeometry;

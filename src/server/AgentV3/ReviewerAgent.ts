@@ -180,6 +180,197 @@ export function readLabelledFinding(line: string): { message: string; broken: bo
   return { message, broken: /^(bug|defect)$/i.test(m[1]) };
 }
 
+/**
+ * THE TAG IS READ BY ITS SHAPE, NOT BY ITS SPELLING (admin 2026-10-11, build 46e2d74b — the racing game
+ * whose car "ulti chal rahi hai").
+ *
+ * 🔴 WHAT WAS LOST. The reviewer of that game wrote the one finding that named a real, shipped defect:
+ *
+ *     - **[BROKEN / CORRECTNESS] `updateGameState` never accelerates the car.**
+ *
+ * and `parseReviewOutput` read ZERO issues from it. A severity came only from the exact tokens
+ * `[critical]` / `[warning]` / `[suggestion]`; `[BROKEN]` only from the exact token `[broken]`; and the
+ * untagged-finding reader (autopsy d798ddd3) only from the four nouns Bug / Defect / Issue / Problem. A
+ * composite bracket matched none of them, so the one verified green repair had nothing to select, nothing
+ * was offered, and the report could only say REVIEW_FINDINGS_UNREAD. Measured on the same parser, nine of
+ * ten sibling shapes were lost the same way: `[CRITICAL / SECURITY]`, `[WARNING / UX]`, a bare
+ * `**[BROKEN]**`, `**CRITICAL:**`, `**Critical —**`, `1. **[Correctness] …**`, `[HIGH]`, `(WARNING)`.
+ *
+ * 🔑 THE CLASS, and why this is not a fourth list: free-form model output was being parsed with CLOSED,
+ * EXACT-TOKEN lists, so every tag shape the model invents became silence. d798ddd3 fixed its instance with
+ * another closed list and the class came back in a new shape eight days later. What is stable is the
+ * SHAPE a reviewer uses to label a finding — a leading bracketed group of words (`[WORD / WORD]`,
+ * `[WORD][WORD]`), a leading parenthesised severity (`(WARNING)`), or a leading severity word with a colon
+ * or dash (`**CRITICAL:**`). The shape is matched; each WORD in it is then read through one vocabulary.
+ *
+ * 🔒 PRECISION, in both directions, because each error has a cost:
+ *   • Only a severity word our own instruction defines can make a finding CRITICAL (which fails a build):
+ *     `critical`, `blocker`, `fatal`, `severe`. A model's own scale — `[HIGH]`, `[MAJOR]`, `[ERROR]` — is
+ *     read as a WARNING: surfaced, repairable when it names broken behaviour, never a failed build on a
+ *     working app (the finance-app phantom-critical class).
+ *   • A bracket of words that are not ours (`[CORRECTNESS]`, `[GAMEPLAY]`, `[UX]`) is a CATEGORY: still a
+ *     finding (a reviewer that bothered to label a line was reporting it), read as a warning — or as a
+ *     suggestion when every word is a polish category (style, naming, a11y …). A verdict word (`[PASS]`,
+ *     `[OK]`, `[FIXED]`, `[SUMMARY]`, `[SCORE]`) means the line is NOT a finding, and a markdown link
+ *     (`[Home](/)`), a checkbox (`[x]`, `[ ]`), a footnote (`[1]`) or a path (`[src/App.tsx]`) is not a
+ *     tag at all.
+ *   • A parenthesis or a `WORD:` prefix is prose far more often than a tag, so those two shapes are read
+ *     only when EVERY word in them is one of our severity / broken words.
+ *   • `[BROKEN]`, `BUG`, `DEFECT` inside the tag set the `broken` flag exactly as `[BROKEN]` always did,
+ *     and the cosmetic veto in `namesBrokenBehaviour` still applies — a model cannot widen what a repair
+ *     may touch by inventing a tag.
+ * Every guard below (section labels, no-findings sentences, self-dismissal, low confidence) runs unchanged
+ * on what this reads. PURE.
+ */
+const TAG_CRITICAL = new Set(['critical', 'blocker', 'blocking', 'fatal', 'severe', 'showstopper']);
+const TAG_WARNING = new Set(['warning', 'warn', 'major', 'high', 'medium', 'moderate', 'important', 'error', 'serious']);
+const TAG_SUGGESTION = new Set(['suggestion', 'suggest', 'minor', 'low', 'nit', 'nitpick', 'trivial', 'optional',
+  'enhancement', 'improvement', 'idea', 'tip', 'note', 'info', 'todo', 'recommendation', 'consider', 'polish']);
+const TAG_BROKEN = new Set(['broken', 'bug', 'defect', 'regression']);
+/** Category words that are polish, never a break: a tag made only of these defaults to a suggestion. */
+const TAG_POLISH_CATEGORY = new Set(['cosmetic', 'style', 'styling', 'naming', 'readability', 'docs', 'documentation',
+  'formatting', 'typo', 'wording', 'accessibility', 'seo', 'i18n']);
+/** A bracket containing one of these is a verdict or a heading, never a finding. */
+const TAG_NOT_A_FINDING = new Set(['pass', 'passed', 'ok', 'okay', 'done', 'fixed', 'resolved', 'verified', 'good', 'great',
+  'fine', 'works', 'working', 'correct', 'valid', 'na', 'none', 'score', 'summary', 'overview', 'verdict', 'conclusion',
+  'assessment', 'review', 'praise', 'strength', 'strengths', 'positive', 'positives', 'file', 'files', 'path', 'link']);
+/** A negation word. It is read WITH the word after it, never alone — see the two sets below. */
+const TAG_NEGATION = new Set(['not', 'non', 'no']);
+/**
+ * "[NO ISSUES]", "[NO BUGS FOUND]", "[NOT APPLICABLE]", "[NO REGRESSION]": a negation of one of these is a clean
+ * bill, never a finding.
+ *
+ * 🔴 (verification of build 46e2d74b's fix, 2026-10-11) A negation used to make ANY tag a break, so
+ * "[NO ISSUES] The app works as requested." parsed to a BROKEN warning — and a broken finding is exactly what a
+ * working app's one verified repair is allowed to act on (`selectGreenRepairable`). Measured: all seven of
+ * "[NO ISSUES]", "[No bugs found]", "[NO ERRORS]", "[No Problems]", "[Not Applicable]", "[No Regression]" and
+ * "[NOT WORKING]" were selected for that repair; only the last names a break.
+ */
+const TAG_NEGATED_CLEAN = new Set(['issue', 'issues', 'bug', 'bugs', 'error', 'errors', 'problem', 'problems', 'defect',
+  'defects', 'regression', 'regressions', 'concern', 'concerns', 'finding', 'findings', 'blocker', 'blockers', 'critical',
+  'warning', 'warnings', 'applicable', 'needed', 'required']);
+/** "[NOT WORKING]", "[NOT IMPLEMENTED]", "[NON FUNCTIONAL]": a negation of one of these says the app misbehaves. */
+const TAG_NEGATED_BREAK = new Set(['working', 'works', 'work', 'functional', 'functioning', 'implemented', 'fixed', 'done',
+  'correct', 'valid', 'ok', 'okay', 'saved', 'saving', 'wired', 'responding', 'responsive', 'rendering', 'loading', 'playable']);
+/** Words that only qualify a severity ("[HIGH PRIORITY]", "Severity / Critical:") — known, but carry nothing. */
+const TAG_QUALIFIER = new Set(['priority', 'severity', 'impact', 'risk', 'level']);
+
+export interface LeadingTags {
+  /** The severity the tag words name, or null when they name none (a category-only tag). */
+  severity: ReviewIssue['severity'] | null;
+  broken: boolean;
+  /** The line after the tag groups, with the markdown that wrapped them removed. */
+  rest: string;
+}
+
+const TAG_SEP_RE = /[\s/|+,&_-]+/;
+
+/** Classify ONE group's words. null = not a tag (wrong shape, or a verdict). PURE. */
+function classifyTagWords(inner: string, strict: boolean): { severity: ReviewIssue['severity'] | null; broken: boolean; polishOnly: boolean } | null {
+  const words = inner.trim().split(TAG_SEP_RE).filter(Boolean);
+  if (words.length === 0 || words.length > 4) return null;
+  // `a11y` is the one tag word with digits in it that a reviewer really writes.
+  const norm = words.map((w) => (/^a11y$/i.test(w) ? 'accessibility' : w.toLowerCase()));
+  if (!norm.every((w) => /^[a-z]{2,20}$/.test(w))) return null;
+  const negated = norm.some((w) => TAG_NEGATION.has(w));
+  // A negation says what it negates: a clean bill is no tag at all, a negated "works" is a break, and anything
+  // else ("[NOT TESTED]") negates nothing this vocabulary knows (see TAG_NEGATED_CLEAN).
+  let negatedBreak = false;
+  for (let i = 0; i < norm.length; i++) {
+    if (!TAG_NEGATION.has(norm[i])) continue;
+    if (TAG_NEGATED_CLEAN.has(norm[i + 1] ?? '')) return null;
+    if (TAG_NEGATED_BREAK.has(norm[i + 1] ?? '')) negatedBreak = true;
+  }
+  if (!negated && norm.some((w) => TAG_NOT_A_FINDING.has(w))) return null;
+  let rank = 0; // 0 none, 1 suggestion, 2 warning, 3 critical
+  let broken = negatedBreak;
+  let polish = 0;
+  let known = 0;
+  for (const w of norm) {
+    if (TAG_CRITICAL.has(w)) { rank = Math.max(rank, 3); known++; }
+    else if (TAG_WARNING.has(w)) { rank = Math.max(rank, 2); known++; }
+    else if (TAG_SUGGESTION.has(w)) { rank = Math.max(rank, 1); known++; }
+    else if (TAG_BROKEN.has(w)) { broken = true; known++; }
+    else if (TAG_NEGATION.has(w) || TAG_QUALIFIER.has(w)) known++;
+    else if (TAG_POLISH_CATEGORY.has(w)) polish++;
+  }
+  // Prose shapes (a parenthesis, a `WORD:` prefix) count only when every word is ours AND one of them is a
+  // severity or a break — "Risk: …" or "(priority)" alone says nothing about a finding.
+  if (strict && (known !== norm.length || (rank === 0 && !broken))) return null;
+  const severity = rank === 3 ? 'critical' : rank === 2 ? 'warning' : rank === 1 ? 'suggestion' : null;
+  return { severity, broken, polishOnly: polish > 0 && polish === norm.length };
+}
+
+/**
+ * Read the tag groups at the START of a finding line by their shape (see the docblock above). Returns null
+ * when the line does not open with a tag. Exported for direct tests. PURE.
+ */
+export function readLeadingTags(line: string): LeadingTags | null {
+  let s = stripLeadingFindingNoise(String(line ?? '')).replace(/^(?:\*\*|__)\s*/, '');
+  let rank = 0;
+  let broken = false;
+  let groups = 0;
+  let allPolish = true;
+  const take = (c: { severity: ReviewIssue['severity'] | null; broken: boolean; polishOnly: boolean }) => {
+    groups++;
+    if (c.severity) rank = Math.max(rank, c.severity === 'critical' ? 3 : c.severity === 'warning' ? 2 : 1);
+    if (c.broken) broken = true;
+    if (!c.polishOnly) allPolish = false;
+  };
+  for (let guard = 0; guard < 4; guard++) {
+    // Not a markdown link `[Home](/)` and not a reference definition `[docs]: https://…`.
+    const bracket = /^\[([^\[\]\n]{1,48})\](?!\(|:\s*(?:https?:|\/))/.exec(s);
+    const paren = bracket ? null : /^\(([^()\n]{1,40})\)/.exec(s);
+    const m = bracket ?? paren;
+    if (!m) break;
+    const c = classifyTagWords(m[1], !!paren);
+    if (!c) break;
+    take(c);
+    s = s.slice(m[0].length).replace(/^\s*(?:\*\*|__)?\s*(?:[:—–]\s*|-\s+)?/, '');
+  }
+  if (groups === 0) {
+    // `**CRITICAL:** …`, `Critical — …`, `Warning / Broken: …` — our words only, and a sentence after it.
+    const colon = /^([A-Za-z]{2,20}(?:\s*[/|+&]\s*[A-Za-z]{2,20}){0,2})\s*(?:\*\*|__)?\s*(?::|—|–|\s-\s)\s*(?:\*\*|__)?\s*/.exec(s);
+    if (!colon) return null;
+    const c = classifyTagWords(colon[1], true);
+    if (!c) return null;
+    // A tally ("High: 2, Medium: 1") is not a finding.
+    const after = s.slice(colon[0].length);
+    if (!/^[`"'A-Za-z]/.test(after)) return null;
+    take(c);
+    s = after;
+  }
+  const rest = s.trim();
+  // 🔴 A CATEGORY IS NOT A VERDICT (verification of build 46e2d74b's fix, 2026-10-11). With no severity word
+  // and no break word, a bracket like `[SECURITY]` or `[PERFORMANCE]` only names a topic — and reviewers
+  // label their PRAISE that way as often as their findings ("[SECURITY] Inputs are validated properly").
+  // Read as a warning, every such line became a problem on the user's screen. So a category-only tag is
+  // judged by its sentence: praise is no finding at all, a sentence that names a defect is a warning, and
+  // anything else is a suggestion — surfaced, never repaired, never a failed build.
+  if (rank === 0 && !broken && !allPolish) {
+    if (CATEGORY_DEFECT_RE.test(rest)) return { severity: 'warning', broken, rest };
+    if (CATEGORY_PRAISE_RE.test(rest)) return null;
+    return { severity: 'suggestion', broken, rest };
+  }
+  const severity: ReviewIssue['severity'] = rank === 3 ? 'critical' : rank === 2 ? 'warning' : rank === 1 ? 'suggestion'
+    // No severity word: the reviewer said it misbehaves (broken), or every word was a polish category.
+    : broken ? 'warning' : 'suggestion';
+  return { severity, broken, rest };
+}
+
+/** A sentence that names a defect: something missing, failing, wrong or never happening. */
+const CATEGORY_DEFECT_RE = /\b(?:never|not|no|doesn'?t|don'?t|isn'?t|aren'?t|won'?t|can'?t|cannot|unable|fails?|failing|failed|missing|lacks?|lacking|broken|breaks?|crash(?:es|ed)?|throws?|wrong|incorrect(?:ly)?|bug|leaks?|stale|duplicat\w*|mirrored|reversed|backwards|inverted|unhandled|undefined|nan|blocks?|hangs?|freezes?|vulnerab\w*|insecure|exposed|hard-?coded)\b/i;
+/** A sentence that says something is right — praise, never a finding. */
+const CATEGORY_PRAISE_RE = /\b(?:properly|correctly|well|good|great|nice(?:ly)?|clean(?:ly)?|solid|appropriate(?:ly)?|as expected|handled|works?|working|secure(?:ly)?|consistent(?:ly)?|follows?|looks? (?:fine|good)|no issues?)\b/i;
+
+/** A message that is only "none" / "nothing found" / "n/a". */
+const BARE_NONE_RE = /^\s*(?:none|nothing|nil|n\/?a|no\s+(?:issues?|problems?|findings?|bugs?|concerns?))\b[\s.!,;:-]*(?:found|detected|identified|reported|observed|so far|at all|here)?[\s.!]*$/i;
+
+/** At least two real words — so a tag followed by a number or a lone word is never a finding. PURE. */
+function hasFindingWords(message: string): boolean {
+  return (message.match(/[A-Za-zऀ-ॿ]{2,}/g) ?? []).length >= 2;
+}
+
 const FILE_HEADING_RE = /^\s*(?:#{1,6}\s*)?(?:(?:review|findings|issues)\s+(?:of|for|in)\s+)?[`*]{1,2}([\w./@-]+\.[a-z0-9]{1,5})[`*]{1,2}\s*:?\s*$/i;
 
 export function parseReviewOutput(text: string): ReviewIssue[] {
@@ -196,6 +387,12 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
       severity = 'warning';
     else if (lower.includes('[suggestion]') || lower.startsWith('suggestion:') || line.includes('💡'))
       severity = 'suggestion';
+    // THE TAG BY ITS SHAPE (admin 2026-10-11, build 46e2d74b — see `readLeadingTags`). The exact tags
+    // above keep their meaning; a line that OPENS with any other tag shape is read here instead of being
+    // dropped, and a composite tag beside an exact one (`[WARNING] [BROKEN / CORRECTNESS]`) still carries
+    // its `broken` word and is stripped whole from the message.
+    const tags = readLeadingTags(line);
+    if (!severity && tags && hasFindingWords(tags.rest)) severity = tags.severity;
     if (!severity) {
       // An untagged finding that labels itself (see LABELLED_FINDING_RE) — read, never invented.
       const labelled = readLabelledFinding(line);
@@ -213,9 +410,9 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
     if (severity) {
       // THE REVIEWER'S OWN "this is broken" MARKER. Read from the raw line, then stripped with the
       // severity tags so a user never reads our internal vocabulary off their screen (autopsy 536c8189).
-      const broken = BROKEN_TAG_RE.test(line);
+      const broken = BROKEN_TAG_RE.test(line) || tags?.broken === true;
       const message = stripLeadingFindingNoise(
-        line
+        (tags ? tags.rest : line)
           .replace(/\[(critical|warning|suggestion|broken)\]/gi, '')
           .replace(/^(critical|warning|suggestion):/gi, ''),
       )
@@ -227,6 +424,9 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
         .replace(/[ \t]{2,}/g, ' ')
         .trim();
       if (!message) continue;
+      // "**Critical:** None" / "Warning: n/a" is the reviewer saying there are none, never a finding — and
+      // read as one it would FAIL a working build (the phantom-critical class this file already guards).
+      if (BARE_NONE_RE.test(message)) continue;
       // A markdown SECTION HEADER ("### [CRITICAL] Issues", "🚨 ### Issues") is not a finding — never count it.
       if (SECTION_LABEL_RE.test(message)) continue;
       // Nor is a clean bill of health. See NO_FINDINGS_RE — this is what put "No  or  issues were

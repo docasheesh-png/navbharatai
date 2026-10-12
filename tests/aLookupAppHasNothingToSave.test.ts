@@ -28,6 +28,7 @@ import {
   writeTypecheckSummary, emptyWriteTypecheckStats, writeTypecheckUntouched,
 } from '../src/server/AgentV3/writeTimeTypecheck';
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
+import { robustTscCommand } from '../src/server/AgentV3/tscCommand';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
 
@@ -194,8 +195,12 @@ describe('6 · the first write-time typecheck reads a warm cache, not a cold com
     expect(cmd).toContain('>/dev/null 2>&1');
     expect(cmd).toMatch(/\[ -x node_modules\/\.bin\/tsc \]/);
     expect(cmd).toMatch(/\[ ! package\.json -nt node_modules \]/);
-    // The real check still ensures its compiler — only the background warm-up must not.
-    expect(writeTypecheckCommand()).toMatch(/npm install/);
+    // The END-OF-BUILD typecheck ensures its compiler. Since autopsy Sur Taal the write-time check stands
+    // down instead of installing, and since build 46e2d74b (admin 2026-10-11) it no longer even carries the
+    // install text: its compile runs the local binary directly, so a primed tree that is current but still
+    // carries the image's old timestamp can never set off an `npm install` from inside a write.
+    expect(robustTscCommand()).toMatch(/npm install/);
+    expect(writeTypecheckCommand()).not.toMatch(/npm install/);
   });
 
   it('the queue reports idle only with nothing running and nothing waiting', async () => {

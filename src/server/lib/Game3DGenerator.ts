@@ -311,6 +311,7 @@ export function disposeMaterials(): void {
 
 const CAMERA = `import * as THREE from 'three';
 import { damp } from '../core/feel';
+import { vehicleAt, isVehicle } from './objects';
 
 /**
  * Camera rigs.
@@ -321,8 +322,18 @@ import { damp } from '../core/feel';
  *
  * The third-person rig casts a ray back from the player and pulls in on a hit. Without that, walking
  * against a wall puts the camera inside it and the player sees the inside of the level.
+ *
+ * ONE MEANING OF YAW IN EVERY MODE: the camera looks along (−sin yaw, 0, −cos yaw). At yaw 0 that is −Z,
+ * so the third-person offset sits at +Z of its target — which is IN FRONT of every model, since they all
+ * face +Z (objects.ts, MODEL_FORWARD). For a character that does not matter (it turns to face where it
+ * walks); for a vehicle it is the whole bug — see update().
  */
 export type CameraKind = 'third-person' | 'first-person' | 'top-down' | 'side-scroller' | 'orbit' | 'fixed' | 'chase';
+
+/** What a rig frames: a point, or the object itself — which also tells it which way the object faces. */
+export type CameraTarget = THREE.Vector3 | THREE.Object3D;
+
+const isObject3D = (t: CameraTarget): t is THREE.Object3D => (t as THREE.Object3D).isObject3D === true;
 
 export interface CameraRigOptions {
   kind?: CameraKind;
@@ -349,6 +360,12 @@ export class CameraRig {
   private readonly followPos = new THREE.Vector3();
   private readonly followQuat = new THREE.Quaternion();
   private readonly followFwd = new THREE.Vector3();
+  private readonly targetPos = new THREE.Vector3();
+  /** A bare point chased by 'chase': which way it last travelled. MODEL_FORWARD (+Z) until it moves. */
+  private readonly travelFwd = new THREE.Vector3(0, 0, 1);
+  private readonly travelLast = new THREE.Vector3();
+  private travelSeen = false;
+  private travelKnown = false;
 
   constructor(options: CameraRigOptions = {}) {
     this.kind = options.kind ?? 'third-person';
@@ -385,7 +402,34 @@ export class CameraRig {
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
   }
 
-  update(target: THREE.Vector3, delta: number): void {
+  /**
+   * Move the camera for this frame. \`target\` is a point (\`player.object.position\`) or the object itself.
+   *
+   * 🔴 A VEHICLE IS ALWAYS FRAMED FROM BEHIND, WHATEVER THE KIND (admin 2026-10-11, build 46e2d74b:
+   * "racing game me car ulti chal rahi hai" — the player saw the car's HEADLIGHTS, and LEFT turned it
+   * RIGHT). Those were one defect: the resting offset below sits at +Z of the target, IN FRONT of every
+   * +Z model, and seen face-on the driver's left is the screen's right. So:
+   *   • 'chase' chases what it is given — an object by its own heading (follow()), a bare point by the
+   *     way it travels. It used to have NO branch here and fell into the front view;
+   *   • any other kind handed a vehicle — the car, or its own \`car.position\` — that createVehicleState()
+   *     or driveVehicle() has seen chases it as well ('first-person' looks out over its bonnet). Only
+   *     'top-down' and 'side-scroller' keep their genre's fixed view. A free orbit around a driven car is
+   *     not offered: it is exactly the view that showed the car's face.
+   * A character on foot is unchanged — its yaw is the player's to turn.
+   */
+  update(target: CameraTarget, delta: number): void {
+    const object = isObject3D(target) ? target : vehicleAt(target);
+    if (this.kind === 'chase') {
+      if (object) this.follow(object, delta);
+      else this.chasePoint(target as THREE.Vector3, delta);
+      return;
+    }
+    const vehicle = object && isVehicle(object) ? object : null;
+    if (vehicle && this.kind === 'first-person') { this.cockpit(vehicle); return; }
+    if (vehicle && this.kind !== 'top-down' && this.kind !== 'side-scroller') { this.follow(vehicle, delta); return; }
+    // A point is used as given (the old contract); an object is framed at its WORLD position.
+    if (isObject3D(target)) target = target.getWorldPosition(this.targetPos);
+
     if (this.kind === 'first-person') {
       this.camera.position.copy(target).add(new THREE.Vector3(0, this.height * 0.8, 0));
       this.camera.rotation.set(this.pitch, this.yawAngle, 0, 'YXZ');
@@ -437,19 +481,56 @@ export class CameraRig {
    * drove it toward the camera, and every control felt reversed (admin 2026-10-05: "gadi ka front side
    * dikhta hai, jisse button ulte kaam karte hai… backside dikhna chahiye"). follow() reads the object's
    * real heading every frame, so the camera stays at its BACK through every turn, and the rig's yaw is
-   * kept in step so camera-relative movement elsewhere still agrees with what is on screen.
+   * kept in step so camera-relative movement elsewhere (motor.ts cameraRelative) agrees with the screen.
+   * Since 2026-10-11 update() routes here by itself for the 'chase' kind and for any vehicle, so a game
+   * that never calls follow() still gets this view.
    */
   follow(object: THREE.Object3D, delta: number, lookAhead = 4): void {
     object.getWorldPosition(this.followPos);
+    this.chaseFrom(this.followPos, this.headingOf(object), delta, lookAhead);
+  }
+
+  /** The object's forward (its local +Z) in the world, flattened onto the ground. */
+  private headingOf(object: THREE.Object3D): THREE.Vector3 {
     object.getWorldQuaternion(this.followQuat);
     const fwd = this.followFwd.set(0, 0, 1).applyQuaternion(this.followQuat);
     fwd.y = 0;
     if (fwd.lengthSq() < 1e-8) fwd.set(0, 0, 1);
-    fwd.normalize();
+    return fwd.normalize();
+  }
 
-    const focus = this.followPos.clone();
+  /**
+   * 'chase' handed a bare point: chase it by the way it TRAVELS (+Z, MODEL_FORWARD, until it first
+   * moves). Reversing does not turn the camera — a car backing up must not swing the view round to its
+   * face — and a jump of 10 m in one frame is a respawn, not travel.
+   */
+  private chasePoint(point: THREE.Vector3, delta: number): void {
+    if (this.travelSeen) {
+      const dx = point.x - this.travelLast.x;
+      const dz = point.z - this.travelLast.z;
+      const d = Math.hypot(dx, dz);
+      const forwardish = !this.travelKnown || dx * this.travelFwd.x + dz * this.travelFwd.z > 0;
+      if (d > 1e-4 && d < 10 && forwardish) { this.travelFwd.set(dx / d, 0, dz / d); this.travelKnown = true; }
+    }
+    this.travelLast.copy(point);
+    this.travelSeen = true;
+    this.chaseFrom(this.targetPos.copy(point), this.travelFwd, delta, 4);
+  }
+
+  /** Inside a vehicle ('first-person'): eye height, looking where the vehicle points, pitch still the player's. */
+  private cockpit(vehicle: THREE.Object3D): void {
+    const fwd = this.headingOf(vehicle);
+    vehicle.getWorldPosition(this.followPos);
+    this.camera.position.copy(this.followPos).add(new THREE.Vector3(0, this.height * 0.8, 0));
+    this.yawAngle = Math.atan2(-fwd.x, -fwd.z);
+    this.camera.rotation.set(this.pitch, this.yawAngle, 0, 'YXZ');
+  }
+
+  /** The one chase view: \`distance\` behind \`pos\` along \`fwd\`, \`height\` up, looking past it. */
+  private chaseFrom(pos: THREE.Vector3, fwd: THREE.Vector3, delta: number, lookAhead: number): void {
+    const focus = pos.clone();
     focus.y += this.height * 0.5;
-    let wanted = this.followPos.clone().addScaledVector(fwd, -this.distance);
+    let wanted = pos.clone().addScaledVector(fwd, -this.distance);
     wanted.y += this.height;
 
     if (this.collidables.length > 0) {
@@ -462,7 +543,7 @@ export class CameraRig {
     }
 
     this.dampTo(wanted, delta);
-    const look = this.followPos.clone().addScaledVector(fwd, lookAhead);
+    const look = pos.clone().addScaledVector(fwd, lookAhead);
     look.y += this.height * 0.35;
     this.camera.lookAt(look);
     // The yaw whose third-person offset (sin yaw, cos yaw) points BEHIND the object: offset = -fwd.
@@ -1852,10 +1933,30 @@ export function createCar(options: CarOptions = {}): THREE.Group {
   return group;
 }
 
-/** Spin the wheels. Call with the car's speed each frame — still wheels on a moving car is the tell. */
-export function rollWheels(car: THREE.Group, speed: number, dt: number): void {
-  for (const child of car.children) {
-    if (child.name === 'wheel') child.rotation.x += speed * dt * 3.2;
+/**
+ * Spin the wheels. Call with the vehicle's speed each frame — still wheels on a moving car is the tell.
+ *
+ * ONE OWNER FOR WHICH WAY A WHEEL TURNS. A positive rotation.x carries the top of a wheel toward +Z, the
+ * direction every model drives, so forward speed always ADDS. The motorcycle once rolled its own wheels
+ * with the opposite sign — they spun backwards as the bike rode forwards — and, driven by driveVehicle,
+ * only its rear wheel (a direct child) turned at all, because the front one sits inside the steering
+ * assembly. So every 'wheel' group in the model is found, however deep (never looking inside a wheel),
+ * and a wheel that knows its own radius (userData.radius) turns at exactly that rate; the car's road
+ * wheels keep the rate they always had.
+ */
+const wheelsOf = new WeakMap<THREE.Object3D, THREE.Object3D[]>();
+export function rollWheels(vehicle: THREE.Object3D, speed: number, dt: number): void {
+  let wheels = wheelsOf.get(vehicle);
+  if (!wheels) {
+    const found: THREE.Object3D[] = [];
+    const walk = (o: THREE.Object3D) => { for (const c of o.children) { if (c.name === 'wheel') found.push(c); else walk(c); } };
+    walk(vehicle);
+    wheels = found;
+    wheelsOf.set(vehicle, found); // a model's wheels are built with it; looked up once, not every frame
+  }
+  for (const w of wheels) {
+    const radius = typeof w.userData.radius === 'number' && w.userData.radius > 0 ? w.userData.radius : 1 / 3.2;
+    w.rotation.x += (speed * dt) / radius;
   }
 }
 
@@ -2506,6 +2607,54 @@ export function createTraffic(options: TrafficOptions = {}): Traffic {
  */
 export const MODEL_FORWARD = new THREE.Vector3(0, 0, 1);
 
+/**
+ * WHAT A CAMERA NEEDS TO KNOW ABOUT A VEHICLE IS THAT IT IS ONE. createVehicleState() and driveVehicle()
+ * record every object they are handed, keyed by that object's own position vector — so a camera given
+ * the car OR \`car.position\` can tell it is framing something with a front (camera.ts,
+ * CameraRig.update), and the game shell can tell that the game drives a vehicle (Game.ts) — without the
+ * game having to remember to say so.
+ *
+ * 🔴 WHY (admin 2026-10-11, build 46e2d74b: "racing game me car ulti chal rahi hai" — the player's car
+ * showed its HEADLIGHTS, and LEFT turned it RIGHT; "every game built now does this"). Those are ONE
+ * defect. Every model faces +Z; the rig's resting offset sits at +Z of its target, which is IN FRONT of a
+ * +Z car, and seen face-on the driver's left is the screen's right — so steering that is correct reads
+ * as mirrored. The 2026-10-05 fix made the right camera AVAILABLE (follow, ctx.follow) but left the wrong
+ * one the DEFAULT: every path that forgot the opt-in call — the 'chase' kind through update(), the
+ * shell without ctx.follow, the kit's own examples — still framed the car from the front. Recording the
+ * vehicle here is what lets the default itself be right.
+ */
+const vehicleByPosition = new WeakMap<THREE.Vector3, THREE.Object3D>();
+/** Told about each vehicle, with the axis it was driven by (null when it was only given a state). */
+export type VehicleListener = (vehicle: THREE.Object3D, axis: { x: number; y: number } | null) => void;
+let vehicleListener: VehicleListener | null = null;
+
+function noteVehicle(vehicle: THREE.Object3D, axis: { x: number; y: number } | null): void {
+  if (vehicleByPosition.get(vehicle.position) !== vehicle) vehicleByPosition.set(vehicle.position, vehicle);
+  vehicleListener?.(vehicle, axis);
+}
+
+/** The vehicle whose LIVE position vector this is (\`car.position\` → car), or null — a clone is not it. */
+export function vehicleAt(position: THREE.Vector3): THREE.Object3D | null {
+  return vehicleByPosition.get(position) ?? null;
+}
+
+/** Has createVehicleState() or driveVehicle() been handed this object? */
+export function isVehicle(object: THREE.Object3D): boolean {
+  return vehicleByPosition.get(object.position) === object;
+}
+
+/**
+ * Run \`fn\`, telling \`listener\` about every vehicle createVehicleState() / driveVehicle() is handed while
+ * it runs, and the axis driveVehicle() drove it with. The game shell wraps the game's setup() and
+ * update() in this, so it knows which vehicle the PLAYER drives (the one driven by its own input) without
+ * being told. Nested calls restore the outer listener.
+ */
+export function watchVehicles<T>(listener: VehicleListener, fn: () => T): T {
+  const outer = vehicleListener;
+  vehicleListener = listener;
+  try { return fn(); } finally { vehicleListener = outer; }
+}
+
 export interface VehicleTuning {
   /** Top speed, m/s (≈ 25 = 90 km/h). */
   maxSpeed?: number;
@@ -2522,8 +2671,13 @@ export interface VehicleTuning {
 }
 export interface VehicleState { speed: number; heading: number }
 
-/** The vehicle's state, starting from where the model already points (its rotation.y). */
+/**
+ * The vehicle's state, starting from where the model already points (its rotation.y). It also marks the
+ * object as a vehicle, so every camera frames it from BEHIND from the very first frame — including a
+ * start screen where the game has not begun driving it yet.
+ */
 export function createVehicleState(vehicle: THREE.Object3D, tuning: VehicleTuning = {}): VehicleState {
+  noteVehicle(vehicle, null);
   return { speed: tuning.startSpeed ?? 5, heading: vehicle.rotation.y };
 }
 
@@ -2573,7 +2727,8 @@ export function driveVehicle(
   vehicle.rotation.y = heading;
   vehicle.position.x += Math.sin(heading) * speed * dt;
   vehicle.position.z += Math.cos(heading) * speed * dt;
-  if (vehicle.children.some((c) => c.name === 'wheel')) rollWheels(vehicle as THREE.Group, speed, dt);
+  rollWheels(vehicle, speed, dt);   // every wheel of a car, a bike or a cycle — a no-op for a horse
+  noteVehicle(vehicle, axis);
   return { speed, heading };
 }
 
@@ -3307,12 +3462,40 @@ export interface Motorcycle {
   root: THREE.Group;
   /** Attach a rider here — createHumanoid().root goes straight in, already seated and facing forward. */
   seat: THREE.Object3D;
-  /** Lean into a corner (radians, + is right). A bike that corners flat reads as a prop on rails. */
+  /** Lean into a corner (radians, + is the rider's RIGHT). A bike that corners flat reads as a prop on rails. */
   lean: (radians: number) => void;
-  /** Turn the bars (radians). Moves the forks, wheel, mudguard and headlight together, as one assembly. */
+  /**
+   * Turn the bars (radians, + is the rider's LEFT — +Z turned toward +X). Moves the forks, wheel,
+   * mudguard and headlight together, as one assembly.
+   */
   steer: (radians: number) => void;
-  /** Spin the wheels from speed in m/s. Still wheels under a moving bike is the oldest tell there is. */
+  /**
+   * Spin the wheels from speed in m/s (forward speed turns them forward). Still wheels under a moving
+   * bike is the oldest tell there is. driveVehicle(bike.root, …) already does this — call roll() only
+   * when you move the bike yourself.
+   */
   roll: (speed: number, dt: number) => void;
+  /**
+   * 🔴 LEAN AND BARS FROM THE RAW INPUT AXIS — call this every frame with \`input.axis()\`, never lean() and
+   * steer() with a sign you worked out. LEFT (axis.x = −1) leans the bike and turns its bars to the
+   * rider's LEFT, the way driveVehicle turns it; RIGHT the other way. The lean grows with speed (a bike
+   * standing still does not lean) and eases in, so a key press does not snap it over.
+   *
+   * WHY (admin 2026-10-11, build 46e2d74b, "left dabane par right"): the kit's own example used to read
+   * \`bike.lean(-steerInput * 0.5); bike.steer(steerInput * 0.3)\` — with steerInput = axis.x that leaned
+   * the bike and turned its bars RIGHT on LEFT, while driveVehicle turned it left. The sign belongs to
+   * the bike, like the throttle and heading signs belong to driveVehicle.
+   */
+  ride: (axis: { x: number; y: number }, speed: number, dt: number) => void;
+}
+
+/** Shared by the motorcycle and the bicycle: the lean and the bars, from the raw axis (see Motorcycle.ride). */
+function rideFromAxis(root: THREE.Object3D, steerGroup: THREE.Object3D, axis: { x: number; y: number }, speed: number, dt: number): void {
+  const x = Math.max(-1, Math.min(1, axis.x || 0));
+  const want = x * 0.5 * Math.min(1, Math.abs(speed) / 6);   // + lean is the rider's right, so LEFT (−1) leans left
+  const k = Math.min(1, Math.max(0, dt) * 8);
+  root.rotation.z += (want - root.rotation.z) * k;
+  steerGroup.rotation.y = -x * 0.3;                           // + bars are the rider's left, so LEFT (−1) turns left
 }
 
 /**
@@ -3378,6 +3561,7 @@ export function createMotorcycle(options: MotorcycleOptions = {}): Motorcycle {
       w.add(disc);
     }
     w.name = 'wheel';
+    w.userData.radius = radius;   // rollWheels() turns it at exactly the rate this wheel rolls
     return w;
   };
 
@@ -3549,16 +3733,15 @@ export function createMotorcycle(options: MotorcycleOptions = {}): Motorcycle {
   tailLight.position.set(0, seatY * 1.08, -L * 0.375);
   root.add(tailLight);
 
-  const wheels: THREE.Group[] = [rearWheel, frontWheel];
   return {
     root,
     seat: seatAnchor,
     lean: (radians: number) => { root.rotation.z = radians; },
     steer: (radians: number) => { steerGroup.rotation.y = radians; },
-    roll: (speed: number, dt: number) => {
-      const spin = (speed * dt) / wheelR;
-      for (const w of wheels) w.rotation.x -= spin;
-    },
+    // The ONE wheel-spin rule (rollWheels). This used to subtract, so the wheels turned BACKWARDS as the
+    // bike rode forwards — the same "reversed" class as the camera and the lean.
+    roll: (speed: number, dt: number) => rollWheels(root, speed, dt),
+    ride: (axis, speed, dt) => rideFromAxis(root, steerGroup, axis, speed, dt),
   };
 }
 
@@ -3598,6 +3781,7 @@ export function createBicycle(options: BicycleOptions = {}): Motorcycle {
       }
     }
     w.name = 'wheel';
+    w.userData.radius = wheelR;   // rollWheels() turns it at exactly the rate this wheel rolls
     return w;
   };
 
@@ -3655,16 +3839,13 @@ export function createBicycle(options: BicycleOptions = {}): Motorcycle {
   bars.rotation.z = Math.PI / 2;
   steerGroup.add(bars);
 
-  const wheels2: THREE.Group[] = [rear, front];
   return {
     root,
     seat: seatAnchor,
     lean: (radians: number) => { root.rotation.z = radians; },
     steer: (radians: number) => { steerGroup.rotation.y = radians; },
-    roll: (speed: number, dt: number) => {
-      const spin = (speed * dt) / wheelR;
-      for (const w of wheels2) w.rotation.x -= spin;
-    },
+    roll: (speed: number, dt: number) => rollWheels(root, speed, dt),   // forward speed turns them forward
+    ride: (axis, speed, dt) => rideFromAxis(root, steerGroup, axis, speed, dt),
   };
 }
 `;
@@ -4242,6 +4423,9 @@ export function generateGame3D(include?: string[]): Game3DResult {
     // a material's reflections matter, and with nothing to reflect a glossy surface goes darker and
     // deader than the flat colour it replaced. So asking for one pulls in the other.
     if (files['src/game/three/surfaces.ts']) files['src/game/three/environment.ts'] = FILES['src/game/three/environment.ts'];
+    // camera.ts imports objects.ts (2026-10-11): the rig asks it whether what it frames is a VEHICLE,
+    // which is always seen from behind. objects.ts then pulls surfaces + environment in below.
+    if (files['src/game/three/camera.ts']) files['src/game/three/objects.ts'] = FILES['src/game/three/objects.ts'];
     // objects.ts imports surfaces.ts directly, and surfaces then pulls environment in above — so an
     // object asked for on its own still arrives with something to be made of and something to reflect.
     // objects.ts AND humanoid.ts import surfaces.ts (the detail tier, the one shared merge).
@@ -4258,31 +4442,73 @@ export function generateGame3D(include?: string[]): Game3DResult {
     files,
     // The ONLY dependency the whole game stack takes, and only when 3D is actually used.
     dependencies: [{ name: 'three', version: '^0.180.0' }],
+    // 🔒 THE EXAMPLE BELOW IS COMPILED IN CI (tests/aRecipeExampleCompiles.test.ts), so keep it a whole
+    // module with real imports. It used to be a list of fragments that named variables it never made
+    // (canvas, car, rider, terrain, buildings), told a vehicle game to use a 'third-person' rig with
+    // rig.update(playerPos) — the view that sits IN FRONT of a +Z car — and leaned the bike the wrong
+    // way (bike.lean(-steerInput * 0.5) leans RIGHT on LEFT). Admin 2026-10-11, build 46e2d74b: "car ulti
+    // chal rahi hai" — the headlights faced the player and LEFT turned the car RIGHT.
     instructions:
       `Added the 3D layer (${Object.keys(files).length} files under src/game/three). Install: three (+ @types/three).\n` +
       '```ts\n' +
-      "const renderer = createRenderer({ canvas });\n" +
-      "const scene = new THREE.Scene();\n" +
+      "import * as THREE from 'three';\n" +
+      "import { createRenderer } from './game/three/renderer';\n" +
+      "import { applyLighting, followShadow } from './game/three/lighting';\n" +
+      "import { applyEnvironment } from './game/three/environment';\n" +
+      "import { surfaceMaterial, enableAO, setDetailLevel } from './game/three/surfaces';\n" +
+      "import { sharedMaterial, paletteColor } from './game/three/materials';\n" +
+      "import { createTerrain, scatterInstances, treeGeometry } from './game/three/world';\n" +
+      "import { createHumanoid } from './game/three/humanoid';\n" +
+      "import { createCar, createTree, createMountain, createRoad, createHouse, createRiver, createAnimal,\n" +
+      "  createMotorcycle, createVehicleState, driveVehicle, ROAD_SURFACE_Y } from './game/three/objects';\n" +
+      "import { CameraRig } from './game/three/camera';\n" +
+      "import { Input } from './game/core/input';\n" +
+      '\n' +
+      "const canvas = document.querySelector('canvas')!;\n" +
+      'const input = new Input(canvas);\n' +
+      'const renderer = createRenderer({ canvas });\n' +
+      'const scene = new THREE.Scene();\n' +
       "const { key } = applyLighting(scene, renderer, 'sunset');\n" +
       "applyEnvironment(scene, renderer, 'sunset');            // reflections — do NOT skip this\n" +
-      "const wall = new THREE.Mesh(enableAO(geo), surfaceMaterial('brick', { repeat: 6 }));\n" +
-      "const hero = createHumanoid({ height: 1.8 }); scene.add(hero.root);\n" +
       "setDetailLevel('real');   // 'real' when the user asked for real/asli; 'lite' for plain 3D\n" +
-      "scene.add(createCar({ color: 0xb42b2b }));  scene.add(createTree({ height: 7 }));\n" +
-      "scene.add(createMountain({ size: 140, height: 50 }));  scene.add(createRoad({ length: 400 }));\n" +
-      "const house = createHouse({ roof: 'flat', storeys: 2 }); house.position.set(16, 0, 0); house.rotation.y = -Math.PI / 2; scene.add(house); // door faces +Z — turn it to the road\n" +
-      "car.position.y = ROAD_SURFACE_Y;   // wheels ON the asphalt, which sits 3 cm above the ground\n" +
-      "let drive = createVehicleState(car);                       // every model faces +Z (MODEL_FORWARD)\n" +
-      "// each frame: drive = driveVehicle(car, drive, input.axis(), dt); rig.follow(car, dt);  // camera BEHIND the car\n" +
-      "const river = createRiver(); scene.add(river.mesh);   // in the loop: river.update(elapsed)\n" +
-      "const deer = createAnimal({ kind: 'deer' }); scene.add(deer.root); // deer.update(dt, speed)\n" +
-      "const bike = createMotorcycle({ kind: 'sport', color: 0xc4231f }); scene.add(bike.root);\n" +
-      "bike.seat.add(rider.root);            // a bike with no rider reads as a showroom prop\n" +
-      "// in the loop: bike.roll(speed, dt); bike.lean(-steerInput * 0.5); bike.steer(steerInput * 0.3);\n" +
-      "// in the loop: hero.update(dt, speed, grounded)\n" +
-      "const rig = new CameraRig({ kind: 'third-person', collidables: [terrain, buildings] });\n" +
-      "scene.add(createTerrain({ palette: 'indianVillage' }));\n" +
+      "const terrain = createTerrain({ palette: 'indianVillage' });\n" +
+      'scene.add(terrain, createTree({ height: 7 }), createMountain({ size: 140, height: 50 }), createRoad({ length: 400 }));\n' +
       "scene.add(scatterInstances(treeGeometry(), sharedMaterial('foliage', paletteColor('forest', 1)), { count: 400 }));\n" +
+      "scene.add(new THREE.Mesh(enableAO(new THREE.BoxGeometry(6, 3, 0.3)), surfaceMaterial('brick', { repeat: 6 })));\n" +
+      "const house = createHouse({ roof: 'flat', storeys: 2 }); house.position.set(16, 0, 0); house.rotation.y = -Math.PI / 2; scene.add(house); // door faces +Z — turn it to the road\n" +
+      'const river = createRiver(); scene.add(river.mesh);\n' +
+      "const deer = createAnimal({ kind: 'deer' }); scene.add(deer.root);\n" +
+      'const hero = createHumanoid({ height: 1.8 }); scene.add(hero.root);   // on foot: hero.update(dt, speed, grounded) each frame\n' +
+      '\n' +
+      '// DRIVING. Every model faces +Z (MODEL_FORWARD). driveVehicle owns the control signs; the camera stays BEHIND.\n' +
+      'const car = createCar({ color: 0xb42b2b });\n' +
+      'car.position.y = ROAD_SURFACE_Y;   // wheels ON the asphalt, which sits 3 cm above the ground\n' +
+      'scene.add(car);\n' +
+      'let drive = createVehicleState(car);   // starts moving, pointing where the model points\n' +
+      "const rig = new CameraRig({ kind: 'chase', collidables: [terrain, house] });\n" +
+      '\n' +
+      '// RIDING. A bike is driven the same way; bike.ride() leans it and turns its bars from the SAME axis.\n' +
+      "const bike = createMotorcycle({ kind: 'sport', color: 0xc4231f }); scene.add(bike.root);\n" +
+      'bike.seat.add(createHumanoid({ height: 1.75 }).root);   // a bike with no rider reads as a showroom prop\n' +
+      'let ride = createVehicleState(bike.root);\n' +
+      '\n' +
+      'export function frame(dt: number, elapsed: number): void {\n' +
+      '  const axis = input.axis();                   // RAW: LEFT is x = -1, W is y = -1 — never flip a sign yourself\n' +
+      '  drive = driveVehicle(car, drive, axis, dt);  // W forward; LEFT turns to the driver\'s left = the screen\'s left\n' +
+      "  rig.update(car, dt);                         // 'chase': behind the car through every turn (same as rig.follow(car, dt))\n" +
+      '  river.update(elapsed);\n' +
+      '  deer.update(dt, 1.2);\n' +
+      '  followShadow(key, car.position);\n' +
+      '  renderer.render(scene, rig.camera);\n' +
+      '  input.endFrame();\n' +
+      '}\n' +
+      '\n' +
+      'export function rideFrame(dt: number): void {   // the same frame when the player rides the bike\n' +
+      '  const axis = input.axis();\n' +
+      '  ride = driveVehicle(bike.root, ride, axis, dt);  // moves it and rolls BOTH wheels\n' +
+      '  bike.ride(axis, ride.speed, dt);                 // leans + turns the bars to the rider\'s left on LEFT\n' +
+      '  rig.update(bike.root, dt);\n' +
+      '}\n' +
       '```\n' +
       'WHAT ACTUALLY MAKES IT LOOK GOOD — do not skip these:\n' +
       '- 🔴 applyEnvironment IS THE BIGGEST ONE. A PBR material is mostly a description of what it\n' +
@@ -4297,17 +4523,24 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '  createAutoRickshaw, createBus, createTruck, createTractor — and createTraffic() to fill a road\n' +
       '  with them (keeps left, keeps distance, stops for the player); createWeapon({ kind }) for a\n' +
       '  pistol, rifle, smg, shotgun, sniper, sword, axe or bow — hero.hold(weapon.root), hero.aim(true),\n' +
-      '  fire from weapon.muzzle, and bow.setDraw(held ? 1 : 0). Call setDetailLevel()\n' +      "- 🌦️ An outdoor world gets atmosphere.ts: createAtmosphere({ scene, renderer, camera, lighting })\n" +
+      '  fire from weapon.muzzle, and bow.setDraw(held ? 1 : 0). Call setDetailLevel()\n' +
+      "  ONCE at start-up — 'real' when the user asked for real/realistic/asli/100%, 'lite' when they\n" +
+      '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
+      '- 🔴 ANYTHING DRIVEN OR RIDDEN: move it with driveVehicle(vehicle, state, input.axis(), dt) — the raw\n' +
+      "  axis, never a sign you worked out — and frame it with a 'chase' rig (rig.update(vehicle, dt)) or\n" +
+      '  rig.follow(vehicle, dt). The camera then sits BEHIND it: the player sees the TAIL lights, and LEFT\n' +
+      '  turns it to the left of the screen. A camera you place yourself at +Z of the car is IN FRONT of it\n' +
+      '  (every model faces +Z) — the player sees the headlights and every control reads as reversed.\n' +
+      "- 🌦️ An outdoor world gets atmosphere.ts: createAtmosphere({ scene, renderer, camera, lighting })\n" +
       "  — a day-night clock (dayLength seconds per day) and weather via setWeather('rain'|'storm'|'snow'|\n" +
       "  'fog'|'dust'|'cloudy'|'clear', seconds). addNightLight(lamp), wet([roadMaterial]), and\n" +
       "  onLightning = (d, delay) => setTimeout(() => audio.play('thunder'), delay * 1000). Call\n" +
       '  atmo.update(dt) every frame AFTER the camera moves; it drives the lights, fog and sky itself.\n' +
-      "  ONCE at start-up — 'real' when the user asked for real/realistic/asli/100%, 'lite' when they\n" +
-      '  only said 3D. A hand-written box car beside these reads as a bug, not a style.\n' +
       '- 🔴 A BIKE IS createMotorcycle() / createBicycle(), never a capsule over two cylinders. A\n' +
       '  motorcycle is mostly AIR: the wheels sit 1.35 m apart with daylight under the engine, the\n' +
       '  forks are RAKED, and the tank-to-tail line falls backwards. Put a rider in bike.seat, and\n' +
-      '  call bike.lean() in corners — a bike that corners flat reads as a prop on rails.\n' +
+      '  call bike.ride(input.axis(), speed, dt) every frame — it leans into corners and turns the bars to\n' +
+      '  the rider\'s left on LEFT. A bike that corners flat reads as a prop on rails.\n' +
       '- 🔴 A human character is createHumanoid(), never a capsule or a stack of spheres. Call\n' +
       '  hero.update(dt, speed, grounded) every frame — arms swing opposite the legs, knees only bend\n' +
       '  one way, and the body tucks in the air. A capsule with a hat is the single clearest sign of an\n' +
@@ -4317,7 +4550,12 @@ export function generateGame3D(include?: string[]): Game3DResult {
       '- Use ONE palette for the whole scene. Per-object colours are what make a world look like a parts bin.\n' +
       '- Share materials (sharedMaterial) and scatter with InstancedMesh — a thousand trees must be ONE draw call.\n' +
       '- Give scatter an accept() so props stay off roads and out of the play space.\n' +
-      '- Feed rig.update(playerPos, dt) the FIXED delta, and rig.applyShake(feel.shake()) after it.\n' +
+      '- Move the camera once per DISPLAY frame with that frame\'s delta (the game shell does it in render();\n' +
+      '  a camera stepped at the fixed 60Hz stutters on any other display), then rig.applyShake(feel.shake()).\n' +
+      "  A character ON FOOT is framed by a 'third-person' rig: rig.update(player.object.position, dt), with\n" +
+      "  player.update(…, rig.yaw) (handed a car that driveVehicle drives, that same rig chases it from\n" +
+      "  behind). Never walk a character under a 'chase' rig — it turns with every step the walker takes\n" +
+      '  relative to it, so a joystick held a little off-centre walks in circles.\n' +
       '- Call followShadow(key, playerPos) on a large map, or shadows blur out as the player walks away.\n' +
       '- Keep bloom subtle if you add post-processing. Heavy bloom is the classic first-WebGL-project tell.',
   };

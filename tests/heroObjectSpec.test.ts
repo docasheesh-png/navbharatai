@@ -137,7 +137,7 @@ describe('the wiring — it reaches a real build, behind the SAME 3D gate as the
   });
 
   it('🔒 lives INSIDE the 3D/game gate — a billing app that mentions a "cab" must not get wheel radii', () => {
-    const gateAt = route.indexOf('if (wantsSceneObjects(prompt)) {');
+    const gateAt = route.indexOf('if (wantsSceneDetail(prompt)) {');
     const heroAt = route.indexOf('const hero = heroObjectContract(prompt);');
     expect(gateAt).toBeGreaterThan(-1);
     expect(heroAt).toBeGreaterThan(gateAt);

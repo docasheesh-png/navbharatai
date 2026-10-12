@@ -53,6 +53,7 @@ import { normalizeAuthoredPath } from './buildAuthorship';
 import { couldBeAppCode } from './userProjectFiles';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { seededForms } from './strictTrial';
+import { recipeFilePool } from '../lib/gameRecipeLayers';
 
 /**
  * path → every byte-exact content NavBharatAI itself seeds at that path.
@@ -94,6 +95,19 @@ function buildSeededIndex(): Map<string, Set<string>> {
     for (const fw of registry.listFrameworks()) {
       for (const [p, c] of Object.entries(registry.getProvider(fw).getFiles([]))) add(p, c);
     }
+  } catch { /* same */ }
+  // 🎮 THE GAME KIT (admin 2026-10-11, build 46e2d74b). Since that report the route lays the game recipes'
+  // files down itself before the first model call (gameKitSeed.ts), so every game build now opens with up
+  // to ~30 files of NavBharatAI's own engine in src/game. They are our code exactly as the golden scaffold
+  // is: without this, the readiness gate would blame the build for a line in our kit, the quality lint
+  // would grade our engine as the user's app, and "your files so far are saved" would be said to a user
+  // who had not written a line. Content, not a flag, for the reason this file's header gives — the next
+  // turn loads the same kit from the store with no flag anywhere.
+  // ⚠️ This also covers a recipe the MODEL runs itself, on purpose: byte-exact recipe output is the
+  // platform's code whoever pressed the button, and the model is answerable for what it writes on top.
+  // The moment one byte of a kit file changes, it is the user's again — the safe direction, unchanged.
+  try {
+    for (const [p, f] of recipeFilePool()) add(p, f.content);
   } catch { /* same */ }
   return index;
 }

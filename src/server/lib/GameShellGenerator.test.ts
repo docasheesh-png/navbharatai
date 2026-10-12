@@ -30,12 +30,15 @@ describe('the fixed/render split — the bug that makes a game unfair per monito
 
   it('the camera runs in RENDER, not the fixed step', () => {
     // In the fixed step the camera stutters on any display that is not exactly 60Hz.
+    // Both camera calls — follow() for a vehicle, update() otherwise (2026-10-11) — use the FRAME delta.
     const render = game.slice(game.indexOf('private render'));
-    expect(render).toContain('this.rig.update(p, frameDelta)');
+    expect(render).toContain('this.rig.follow(chased, frameDelta)');
+    expect(render).toMatch(/this\.rig\.update\([^;]*, frameDelta\)/);
     expect(render).toContain('this.renderer.render(this.scene, this.rig.camera)');
 
     const fixed = game.slice(game.indexOf('private fixedUpdate'), game.indexOf('private render'));
     expect(fixed).not.toContain('this.rig.update(');
+    expect(fixed).not.toContain('this.rig.follow(');
     expect(fixed).not.toContain('this.renderer.render(');
   });
 

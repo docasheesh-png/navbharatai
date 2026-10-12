@@ -1630,7 +1630,7 @@ export class BuildDiagnostics {
         code: 'LLM_CALL_STOPPED',
         message: 'A model call was cancelled because the build was stopped — it did not fail, and no provider was at fault.',
         autoResolved: true,
-        detail: rec.provider && rec.provider !== 'unknown' ? `provider=${rec.provider}` : 'no provider had answered yet',
+        detail: `${rec.provider && rec.provider !== 'unknown' ? `provider=${rec.provider}` : 'no provider had answered yet'} · it had been running ${Math.round(Math.max(0, rec.latencyMs ?? 0) / 1000)}s`,
       });
     } else if (handedOff) {
       this.record({

@@ -582,7 +582,7 @@ import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshSt
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
 import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, type WasteKind } from '../AgentV3/providerWaste';
 import { readTurnAnswer, answeredWithoutBuilding, modelsOwnWords } from '../AgentV3/turnAnswer';
-import { assessBuildInput } from '../AgentV3/buildableInput';
+import { assessBuildInput, shouldAskWhatToBuild } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { realismIntent } from '../lib/realismIntent';
@@ -10945,19 +10945,27 @@ async function noteBuildOutcome(
      * starter, and the next order was built as an "edit" of it. Read only when it can change the answer
      * (no app of the user's own, an earlier request present); unreadable or slow ⇒ today's behaviour.
      */
-    const earlierRequestLeftAnApp = await (async (): Promise<boolean> => {
-      if (userAppExists || recentRequests.length === 0) return userAppExists || recentRequests.length > 0;
-      if (!Array.isArray(projectFilePaths)) return true;
+    /**
+     * Does the workspace hold NOTHING but untouched files of our own starter (or nothing at all)? Asked by
+     * CONTENT, once, only when a gate needs it — `projectExists` counts files, and our starter is files
+     * (autopsy db07e0af: "Banao" built an invented app because the starter read as the user's project).
+     * Unreadable or slow ⇒ false (somebody's work may be here) — the direction that never refuses a real app.
+     */
+    let starterOnlyMemo: Promise<boolean> | null = null;
+    const workspaceHoldsOnlyOurStarter = (): Promise<boolean> => (starterOnlyMemo ??= (async (): Promise<boolean> => {
+      if (!projectExists) return true;
+      if (userAppExists || !Array.isArray(projectFilePaths)) return false;
       const codePaths = projectFilePaths.filter((p) => couldBeAppCode(p));
-      if (codePaths.length === 0) return false;
-      if (codePaths.length > 24) return true;
+      if (codePaths.length === 0) return true;
+      if (codePaths.length > 24) return false;
       try {
         const got = await raceTimeout(loadWorkspaceFilesByPath(intentWorkspaceId, codePaths), 3_000, 'starterCheck');
         const files: Record<string, string | null> = {};
         for (const p of codePaths) files[p] = typeof got[p] === 'string' ? got[p] : null;
-        return !holdsOnlyOurStarter(files);
-      } catch { return true; }
-    })();
+        return holdsOnlyOurStarter(files);
+      } catch { return false; }
+    })());
+    const earlierRequestLeftAnApp = userAppExists || (recentRequests.length > 0 && !(await workspaceHoldsOnlyOurStarter()));
 
     let intent = classifyIntent(prompt);
     // The reader's fourth answer: "they want something made but have not said WHAT" (report
@@ -11169,14 +11177,16 @@ async function noteBuildOutcome(
      */
     const namesNothingToBuild =
       (!inputCheck.buildable && inputCheck.reason === 'no-object') || readerSaysUnclear;
-    const askWhatToBuild =
-      namesNothingToBuild
-      && intent !== 'edit_existing'
-      && !projectExists
-      && recentRequests.length === 0
-      && zipImports.length === 0
-      && !(typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '')
-      && rawAttachments.length === 0;
+    // db07e0af: the workspace is judged by CONTENT (our starter is not a project) and the conversation by
+    // what it names (a "hi" is not a request) — see `shouldAskWhatToBuild`.
+    const askWhatToBuild = namesNothingToBuild && shouldAskWhatToBuild({
+      namesNothing: true,
+      editIntent: intent === 'edit_existing',
+      workspaceHoldsOnlyOurStarter: await workspaceHoldsOnlyOurStarter(),
+      earlierTurns: recentRequests,
+      importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
+      attachments: rawAttachments.length,
+    });
     if (askWhatToBuild) {
       console.log('[AGENTV3] the prompt orders something built but names nothing — asking the user instead of inventing an app');
       intent = 'chat';

@@ -274,6 +274,8 @@ describe('5 — the route wires the signal where no call site can forget it', ()
     const head = call.slice(0, 900);
     expect(head).toMatch(/AbortSignal\.any\(\[\.\.\.\(this\.opts\.signal \? \[this\.opts\.signal\] : \[\]\), AbortSignal\.timeout\(turnTimeoutMs\)\]\)/);
     expect(head).toMatch(/: this\.opts\.signal/);
-    expect(runner).toMatch(/if \(this\.opts\.signal\?\.aborted && isBuildStoppedError\(err\)\) return endAborted\(\);/);
+    // Since autopsy 15e69839 the stopped call is recorded first (theCallRunningAtStopIsOnTheRecord), then the
+    // loop still ends as asked.
+    expect(runner).toMatch(/if \(this\.opts\.signal\?\.aborted && isBuildStoppedError\(err\)\) \{[\s\S]{0,900}?return endAborted\(\);\s*\}/);
   });
 });

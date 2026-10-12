@@ -646,6 +646,11 @@ function paidToolCap(name: string, fallback: number, env: NodeJS.ProcessEnv = pr
   return Math.floor(n);
 }
 
+/** What a lock-aware install did (Q-862): a busy lock is retried, a failure is not. */
+type InstallOutcome = 'installed' | 'busy' | 'failed' | 'skipped';
+/** How many writes may retry an import install that stood down under the background install's lock. */
+export const MAX_DEFERRED_IMPORT_INSTALLS = 6;
+
 export class ToolDispatcher {
   /**
    * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
@@ -969,6 +974,8 @@ export class ToolDispatcher {
   private _vehicleShapeNoted = false;
   /** Recipe-known packages a hand-written import already had its one install attempt for (see below). */
   private _importInstallTried = new Set<string>();
+  /** Q-862: imports whose install stood down because the background install held the lock — retried, and how often. */
+  private _importInstallDeferred = new Map<string, number>();
   /** Once per build: an upload read into text, with nowhere proper to keep it (Q-542 — `browserFileStore.ts`). */
   private _uploadStorageNoted = false;
   /** The entry-first hand-back is said once per build (earlyPreview.ts, autopsy 39e982bd). */
@@ -3426,11 +3433,17 @@ export class ToolDispatcher {
    * package.json is recorded through the one write door, so the saved project lists the package too.
    */
   private async installRecipeDependencies(files: Record<string, string>): Promise<string> {
+    return (await this.installRecipeDependenciesOutcome(files)).note;
+  }
+
+  /** The same install, and what happened — the import path needs to know a busy lock from a done install (Q-862). */
+  private async installRecipeDependenciesOutcome(files: Record<string, string>): Promise<{ note: string; outcome: InstallOutcome }> {
     let pkg: string | null = null;
-    try { pkg = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { return ''; }
+    try { pkg = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { return { note: '', outcome: 'skipped' }; }
     const needed = recipeDependenciesNeeded(files, pkg);
-    if (needed.length === 0) return '';
-    return `\n\n${await this.installDependencies(needed, '')}`;
+    if (needed.length === 0) return { note: '', outcome: 'skipped' };
+    const r = await this.installDependenciesOutcome(needed, '');
+    return { note: `\n\n${r.note}`, outcome: r.outcome };
   }
 
   /**
@@ -3467,9 +3480,13 @@ export class ToolDispatcher {
    * what happened — installed, deferred because another install is running, or failed.
    */
   private async installDependencies(deps: ReadonlyArray<{ name: string; version: string; dev: boolean }>, dir: string): Promise<string> {
+    return (await this.installDependenciesOutcome(deps, dir)).note;
+  }
+
+  private async installDependenciesOutcome(deps: ReadonlyArray<{ name: string; version: string; dev: boolean }>, dir: string): Promise<{ note: string; outcome: InstallOutcome }> {
     const named = deps.map((d) => `${d.name}@${d.version}`).join(', ');
     const base = recipeInstallCommand(deps);
-    if (!base) return `Add the dependency: ${named}`;
+    if (!base) return { note: `Add the dependency: ${named}`, outcome: 'skipped' };
     const cmd = dir ? `cd ${dir} && ${base}` : base;
     const manifest = dir ? `${dir}/package.json` : 'package.json';
     try {
@@ -3477,15 +3494,15 @@ export class ToolDispatcher {
       const r = await withTimeout(this.actuator.runCommand(this.workspaceId, cmd), 150_000, 'recipe-dependencies');
       try { this.onCommand?.({ command: cmd, exitCode: r.exitCode, stdout: r.stdout || '', stderr: r.stderr || '', durationMs: Date.now() - started }); } catch { /* diagnostics are best-effort */ }
       if (String(r.stdout ?? '').includes(RECIPE_DEPS_BUSY_MARKER)) {
-        return `📦 This code needs ${named}. The app's packages are still being installed, so add them when that finishes: npm install ${deps.map((d) => `${d.name}@${d.version}`).join(' ')}${dir ? ` (in ${dir})` : ''}`;
+        return { note: `📦 This code needs ${named}. The app's packages are still being installed, so add them when that finishes: npm install ${deps.map((d) => `${d.name}@${d.version}`).join(' ')}${dir ? ` (in ${dir})` : ''}`, outcome: 'busy' };
       }
       if (r.exitCode !== 0) {
-        return `📦 Installing ${named} failed (npm exit ${r.exitCode}). Install them before you finish — this code does not compile without them.`;
+        return { note: `📦 Installing ${named} failed (npm exit ${r.exitCode}). Install them before you finish — this code does not compile without them.`, outcome: 'failed' };
       }
       try { this.onFileWrite(manifest, await this.actuator.readFile(this.workspaceId, manifest)); } catch { /* the final save's scan still sees it */ }
-      return `📦 Installed ${named} into ${manifest} — this code imports them. Do not install them again.`;
+      return { note: `📦 Installed ${named} into ${manifest} — this code imports them. Do not install them again.`, outcome: 'installed' };
     } catch {
-      return `📦 This code needs ${named} — install them before you finish.`;
+      return { note: `📦 This code needs ${named} — install them before you finish.`, outcome: 'failed' };
     }
   }
 
@@ -4096,9 +4113,11 @@ export class ToolDispatcher {
    * writes. The class is "dependency sync tied to which tool wrote the import"; this ties it to the import.
    *
    * 🔒 Only a package a recipe DECLARES (`recipeDependenciesNeeded` never guesses at an unknown import), only
-   * when package.json does not list it yet, through the same lock-aware install the recipes use, and ONE
-   * attempt per package per build — a busy lock or a failed install is said once in words (the install's own
-   * note), never retried on every write. Best-effort: anything unreadable adds nothing.
+   * when package.json does not list it yet, through the same lock-aware install the recipes use. A FAILED
+   * install is one attempt per package per build, said once. A BUSY lock is not a failure (Q-862): the install
+   * stood down because the background install was still running, so it is said once and retried, silently, on
+   * the next writes until the lock is free — at most MAX_DEFERRED_IMPORT_INSTALLS times — and the write that
+   * finally installs it says so. Best-effort: anything unreadable adds nothing.
    */
   private async importedRecipeDependencyNote(files: Record<string, string>): Promise<string> {
     try {
@@ -4109,8 +4128,18 @@ export class ToolDispatcher {
       // Pure first: a write that imports no recipe-known package costs no read at all.
       const known = recipeDependenciesNeeded(sources, '{}').filter((d) => !this._importInstallTried.has(d.name));
       if (known.length === 0) return '';
+      const r = await this.installRecipeDependenciesOutcome(sources);
+      if (r.outcome === 'busy') {
+        const firstTime = known.some((d) => !this._importInstallDeferred.has(d.name));
+        for (const d of known) {
+          const tries = (this._importInstallDeferred.get(d.name) ?? 0) + 1;
+          this._importInstallDeferred.set(d.name, tries);
+          if (tries >= MAX_DEFERRED_IMPORT_INSTALLS) this._importInstallTried.add(d.name);
+        }
+        return firstTime ? r.note : '';
+      }
       for (const d of known) this._importInstallTried.add(d.name);
-      return await this.installRecipeDependencies(sources);
+      return r.note;
     } catch {
       return '';
     }

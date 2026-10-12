@@ -94435,7 +94435,7 @@ unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong
 - The rule for next time: when the question is "what did the user mean", give the deterministic layer only what is true under every reading, and let the model decide the rest.
 
 **Found while building:**
-- **Q-919:** milestone mode replaces `buildPrompt` and drops every prepended note. The plan-approval sibling of the same bug is fixed here.
+- **Q-975:** milestone mode replaces `buildPrompt` and drops every prepended note. The plan-approval sibling of the same bug is fixed here.
 
 **Locks:**
 - `tests/aPhoneTheAppCannotRunOnIsNamed.test.ts`: the real prompt is the fixture. Six guards, R1–R6, each reverted and seen to fail.

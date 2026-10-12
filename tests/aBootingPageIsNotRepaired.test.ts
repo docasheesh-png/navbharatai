@@ -82,3 +82,29 @@ describe('a missing module the error names is in the repair\'s scope', () => {
     expect(r.dropped).toEqual(['src/login/Login.tsx']); // anything else is still out of scope
   });
 });
+
+// Same census, the DANGLING_STYLESHEET_IMPORT_REMOVED row: the guard removed an import on ANY read error — and the
+// two "is the file absent?" predicates had drifted, only one knowing that a dead sandbox says "no such file" about
+// the whole workspace. One predicate now, and only "absent" removes an import.
+import { isNotFoundError } from '../src/server/AgentV3/fsErrors';
+import { isMissingFileError } from '../src/server/AgentV3/writeTimeTypecheck';
+
+describe('🔒 absent means the sandbox said absent — one predicate', () => {
+  it.each([
+    [Object.assign(new Error('x'), { code: 'ENOENT' }), true],
+    [new Error('ENOENT: no such file or directory, open src/x.css'), true],
+    [new Error('[not_found] file not found: src/x.css'), true],
+    [new Error('[not_found] lstat /home/user/workspace: no such file or directory'), false], // a dead machine
+    [new Error('sandbox timed out'), false],
+    [new Error(''), false],
+  ])('%s → %s', (err, absent) => {
+    expect(isNotFoundError(err)).toBe(absent);
+    expect(isMissingFileError(err)).toBe(absent); // the two can no longer drift
+  });
+
+  it('the stylesheet guard removes an import only on "absent"', () => {
+    const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
+    expect(route).toContain('.then(() => false, (e: unknown) => isNotFoundError(e));');
+    expect(route).not.toContain("readFile(workspaceId, d.sheet).then(() => true, () => false)");
+  });
+});

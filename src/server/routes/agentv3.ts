@@ -684,6 +684,7 @@ import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportS
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
 import { ensureViteConfig } from '../AgentV3/ViteConfigGuard';
 import { ensureHtmlEntryScript, appEntryHtmlKey } from '../AgentV3/HtmlEntryGuard';
+import { isNotFoundError } from '../AgentV3/fsErrors';
 import { withoutPreviewBridge, hasPreviewBridge, injectPreviewBridge, withPreviewAiRelay } from '../AgentV3/previewBridge';
 import { applyVisualTextEdit, applyVisualStyleEdit, applyVisualStyleEdits } from '../AgentV3/VisualEditPatcher';
 import { runCheckpointDiff } from '../AgentV3/checkpointDiff';
@@ -26690,8 +26691,10 @@ async function noteBuildOutcome(
           const dangling = danglingStylesheetImports(full);
           const confirmed: typeof dangling = [];
           for (const d of dangling) {
-            const exists = await actuator.readFile(workspaceId, d.sheet).then(() => true, () => false);
-            if (!exists) confirmed.push(d);
+            // Absent only when the sandbox SAYS absent — a read that failed for another reason (a dead machine, a
+            // timeout) is unknown, and a real import is never removed on it (heal census of autopsy 303e8a6f).
+            const absent = await actuator.readFile(workspaceId, d.sheet).then(() => false, (e: unknown) => isNotFoundError(e));
+            if (absent) confirmed.push(d);
           }
           const byFile = new Map<string, string[]>();
           for (const d of confirmed) byFile.set(d.file, [...(byFile.get(d.file) ?? []), d.specifier]);

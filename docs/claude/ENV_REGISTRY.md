@@ -3682,6 +3682,14 @@ the flag entries above promise.
   `vite.config.*`, root `index.html`) is handed its current content in both fast lanes (`existingConfig.ts`).
   ⚠️ Never let a lane write a project config file blind — that is what `ViteConfigGuard` and the HTML entry guard
   were cleaning up after. Test: `tests/aWebsiteToApkIsAnsweredNotBuilt.test.ts`.
+- **🏷️ `AGENTV3_ORDER_FEATURE_WORDS` — A FEATURE NAMED IN AN APP ORDER IS NOT THE TASK (autopsy 303e8a6f,
+  2026-10-12). ⚠️ NOT set; default ON; `off` reverts.** On a NEW build, a debugging word that sits in a feature clause
+  of an app order ("…and a crash report screen", "friendly error messages with a Try again button") no longer files
+  the request as debugging/50 on the Sonnet start tier (`aDebugWordNamesAFeature`, RequestAnalyser.ts). A problem
+  report on a fresh workspace ("Make the app work, it is broken") still reads as debugging, and the complexity
+  router reads the request with the same intent the analysis used, so the two cannot disagree. Some non-template
+  new builds move from complex to simple routing — the switch exists for exactly that. Test:
+  `tests/aFeatureNamedInAnAppOrderIsNotTheTask.test.ts`.
 - **🔐 `AGENTV3_REQUEST_SCOPE` — A LOGIN NOBODY ASKED FOR IS NOT BUILT (autopsy 70e030bb, 2026-10-04). ⚠️ NOT set;
   default ON; `off` reverts.** "An app which takes notes from online classes" opened on a username/password form with a
   hashed demo account, and "Clear Completed" (a to-do prop the contract invented) deleted every note. `requestScope.ts`:

@@ -229,10 +229,15 @@ const ORDERS_A_BUILD = /\b(?:create|build|make|develop|design|generate|code|bana
  * Without the intent the answer is `false`, so every caller that does not pass one keeps today's verdict.
  * PURE.
  */
-export function aDebugWordNamesAFeature(raw: string, buildIntent?: BuildIntent): boolean {
+export function aDebugWordNamesAFeature(raw: string, buildIntent?: BuildIntent, env: NodeJS.ProcessEnv = process.env): boolean {
+  // Kill switch, the convention for a classifier change that moves routing (AGENTV3_SIZE_EDIT_TURNS, …).
+  if (String(env.AGENTV3_ORDER_FEATURE_WORDS ?? '').trim().toLowerCase() === 'off') return false;
   if (buildIntent !== 'new_build') return false;
   const text = String(raw ?? '');
   if (isPlatformFixRequest(text) || looksLikeMachineError(text)) return false;
+  // A problem report is a problem report even on a fresh workspace ("Make the app work, it is broken" — the
+  // adversarial review of 303e8a6f; filing it as an app order brought back the 31dc61fd class).
+  if (describesWorkAlreadyStarted(text)) return false;
   const subject = withEnglishReading(requestSubject(text)).toLowerCase();
   if (!subject || RE.debugging.test(subject)) return false;
   return ORDERS_A_BUILD.test(subject) || userAskedForAnAppToBeBuilt(subject);
@@ -459,7 +464,7 @@ export function anEditTurnThatCouldNotBeSized(prompt: string, buildIntent?: Buil
  *
  * A GREETING IS NOT "unrecognised" — it matched, and "hi" must not buy a model call.
  */
-export function signalsMatchedNothing(prompt: string): boolean {
+export function signalsMatchedNothing(prompt: string, buildIntent?: BuildIntent): boolean {
   const p = String(prompt ?? '').toLowerCase();
   if (!p.trim()) return false;
   // 💸 A SCRAP IS NOT AN UNRECOGNISED REQUEST — it is a scrap, and it must not buy a model call.
@@ -473,7 +478,9 @@ export function signalsMatchedNothing(prompt: string): boolean {
   const letters = p.match(/\p{L}/gu) ?? [];
   if (letters.length < MIN_LETTERS_TO_JUDGE_SCRIPT) return false;
   if (RE.greeting.test(p)) return false;
-  return detectTaskType(p) === 'chat';
+  // The SAME reading the analysis made, intent included — so the router and the analyser cannot disagree about
+  // whether the request was recognised (the adversarial review of 303e8a6f found them split on exactly this).
+  return detectTaskType(p, buildIntent) === 'chat';
 }
 
 /** Base complexity by task type (before feature adjustments). */

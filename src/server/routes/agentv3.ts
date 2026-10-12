@@ -13770,7 +13770,8 @@ async function noteBuildOutcome(
           ? learnDomain(prompt)
           : null;
       const promptComplexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
-        { prompt: planning.sizing, score: analysis?.complexityScore ?? 0 },
+        // The intent rides along so the router reads the request exactly as the analysis did (review of 303e8a6f).
+        { prompt: planning.sizing, score: analysis?.complexityScore ?? 0, buildIntent: intent },
         (p) => AIRouterManager.getRouter('free')
           .route(p, 'You are a classifier. Reply with one word only.')
           .then((r) => r.response.content),

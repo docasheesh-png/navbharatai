@@ -623,9 +623,18 @@ function matchesSignal(lower: string, signals: readonly string[]): boolean {
  * new app should have, not the user asking us to resume. A bare "try again" / "retry please" is untouched.
  * PURE.
  */
-const CONTROL_LABEL = /["'“”‘’]?\b(?:try again|try it again|retry|redo|continue|resume|once more|start again|start over)\b["'“”‘’]?\s+(?:button|btn|link|option|cta|label|action|tab|icon)s?\b/gi;
+// ⚠️ BUTTONS ONLY, AND READ ONLY BY `describesWorkAlreadyStarted` (adversarial review of 303e8a6f): with link /
+// option / tab / action in the list, and applied at the intent gate too, short continuation turns — "continue
+// option 2", "retry link", "resume tab", "redo action" — lost their continuation reading and fell to chat, the
+// amnesia path CONTINUATION_SIGNALS exists to prevent. The one shape measured in a real order is a button.
+const CONTROL_LABEL = /["'“”‘’]?\b(?:try again|try it again|retry|redo|continue|resume|once more|start again|start over)\b["'“”‘’]?\s+(?:buttons?|btns?)\b/gi;
+/**
+ * …and "resume" is also a CV. "Build a resume builder app" read as work already started (the review's sibling of
+ * this class): the CV noun before a product word, or after an article, is not the user asking us to resume.
+ */
+const CV_RESUME = /\b(?:resume|cv)s?\s+(?:builder|maker|creator|generator|writer|template|app|website|site|page|parser|checker|scanner|review|analy[sz]er|portfolio)s?\b|\b(?:a|an)\s+resume\b/gi;
 export function withoutControlLabels(lower: string): string {
-  return String(lower ?? '').replace(CONTROL_LABEL, ' ');
+  return String(lower ?? '').replace(CONTROL_LABEL, ' ').replace(CV_RESUME, ' ');
 }
 
 /** Strip a trailing fenced code block check / file path / URL detection helper. */
@@ -1079,7 +1088,7 @@ function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence
   }
   // Continuation of an interrupted/in-progress build → resume the existing project (with memory),
   // NOT the amnesiac chat path. High confidence so the LLM upgrade can't downgrade it to chat.
-  if (matchesSignal(withoutControlLabels(lower), CONTINUATION_SIGNALS)) {
+  if (matchesSignal(lower, CONTINUATION_SIGNALS)) {
     return { intent: 'edit_existing', confidence: 'high', signal: 'continuation' };
   }
   // A "something isn't working" bug report → edit_existing, not chat. Checked BEFORE

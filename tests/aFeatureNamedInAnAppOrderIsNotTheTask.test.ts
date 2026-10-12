@@ -109,3 +109,47 @@ describe('4 · the telemetry files the tier that DELIVERED, not the band the pro
     for (const p of ['GLM', 'KIMI', 'NEMOTRON']) expect(deliveredStartTier(p)).toBe('gemini');
   });
 });
+
+// The adversarial review of this fix (2026-10-12) found four ways the first version traded one problem for another.
+describe('5 · 🔒 what the review found, locked', () => {
+  it('the router reads a request exactly as the analysis did — intent included', async () => {
+    const { signalsMatchedNothing } = await import('../src/server/AgentV3/RequestAnalyser');
+    const { needsSecondOpinion, decideComplexity } = await import('../src/server/AgentV3/complexityRouting');
+    for (const p of [
+      'Create a gurudwara langar seva app with volunteer slots, donation records, ration stock, announcements and clear error messages',
+      // The debug word ("crash") sits in a feature clause: only the intent-aware reading files it as an app, so this
+      // twin is what fails if the router stops receiving the intent.
+      'Create a plant care diary app with photo logs, watering reminders and a crash report screen',
+    ]) {
+      const a = newBuild(p);
+      expect(signalsMatchedNothing(p, 'new_build'), p).toBe(a.taskType === 'app_unsized');
+      let calls = 0;
+      await decideComplexity({ prompt: p, score: a.complexityScore, buildIntent: 'new_build' }, async () => { calls++; return 'simple'; });
+      expect(calls, p).toBe(needsSecondOpinion(a.complexityScore, p, 'new_build') ? 1 : 0);
+    }
+    const route = (await import('node:fs')).readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    expect(route).toContain('{ prompt: planning.sizing, score: analysis?.complexityScore ?? 0, buildIntent: intent },');
+  });
+
+  it.each(['continue option 2', 'retry link', 'resume tab', 'redo action'])('a short continuation turn keeps its continuation reading: %s', async (t) => {
+    const { classifyIntentWithConfidence } = await import('../src/server/AgentV3/IntentClassifier');
+    expect(classifyIntentWithConfidence(t)).toMatchObject({ intent: 'edit_existing', confidence: 'high', signal: 'continuation' });
+    expect(describesWorkAlreadyStarted(t)).toBe(true);
+  });
+
+  it('a problem report on a fresh workspace stays a problem report', () => {
+    expect(newBuild('Make the app work, it is broken').taskType).toBe('debugging');
+    expect(aDebugWordNamesAFeature('Make the app work, it is broken', 'new_build')).toBe(false);
+  });
+
+  it('"resume" the CV is not "resume" the build', () => {
+    expect(describesWorkAlreadyStarted('Build a resume builder app')).toBe(false);
+    expect(describesWorkAlreadyStarted('Make a CV maker for students')).toBe(false);
+    expect(describesWorkAlreadyStarted('resume')).toBe(true);
+    expect(describesWorkAlreadyStarted('please resume the build')).toBe(true);
+  });
+
+  it('the kill switch reverts the order-feature reading', () => {
+    expect(aDebugWordNamesAFeature(reportPrompt, 'new_build', { AGENTV3_ORDER_FEATURE_WORDS: 'off' } as NodeJS.ProcessEnv)).toBe(false);
+  });
+});

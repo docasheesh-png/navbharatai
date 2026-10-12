@@ -160,6 +160,28 @@ describe('Q-940 · every writer that joins a compile gets that compile\'s verdic
       expect(outside).not.toContain(perRun);
     }
   });
+
+  it('CENSUS: no heal is called straight from writeTypecheckNote — every heal over the shared errors is keyed on the run', () => {
+    // The heal half of the class. Every writer that joined a compile holds the SAME errors, so a heal called
+    // per writer runs once per joiner: duplicate heal writes when the reads race, or — when the first heal
+    // has already landed — a joiner whose heal finds nothing and quotes the healed error back to the model.
+    // The type-only heal was the instance; a NEW heal added to this function is the next sibling, and this
+    // census is what stops it from coming back through the same door.
+    const src = readFileSync(join(__dirname, '../src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
+    const start = src.indexOf('private async writeTypecheckNote(');
+    const end = src.indexOf('\n  }\n', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const body = src.slice(start, end);
+    const perWriter = body.match(/this\.(?:heal\w*|\w+AtWrite|landHealWrite)\(|this\.actuator\.writeFile\(/g) ?? [];
+    expect(
+      perWriter,
+      'a heal called straight from writeTypecheckNote runs once per JOINED writer. Route it through a helper keyed on '
+      + 'the shared run outcome, as typeOnlyHealForRun does, and share only what the heal ADDS (the healed files, '
+      + 'the note, the remaining errors) — never the first writer\'s own `sources`.',
+    ).toEqual([]);
+    expect(body).toContain('await this.typeOnlyHealForRun(run, tsPaths, sources)');
+  });
 });
 
 // The report's real compiler output at 147.4 s, right after `src/App.tsx` was written (verbatim positions;

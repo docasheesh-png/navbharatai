@@ -94472,3 +94472,14 @@ tests had already passed — on the tree *before* the probes — and the first f
 then failed on exactly one case: the wiring census. Two of safeguard #5's rules did their job together:
 *stage before you probe*, and *run the gate LAST, on the final state*. The census existed because a
 reader of this fact could be forgotten; it caught the fix itself going missing.
+### 2026-10-12 — db07e0af rows closed (#3687 merged)
+
+- **Closed (✅), on a fresh `main` (377d915):** Q-915 … Q-922, Q-924, Q-925, Q-927, Q-928 and Q-929 — 13 rows. They are removed from the open table and appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`. The ledger stays in the autopsy entry above.
+- **What to watch on the next real builds:**
+  - An objectless "Banao" gets the question, not an app.
+  - A light/dark button switches both ways.
+  - No TS1361 heal note appears.
+  - A Weak build's review stops instead of waiting 56 s.
+  - No "skeleton loading" is claimed without a skeleton.
+- **Still open:** Q-926 (248 s to first render on Weak). 🟡 BLOCKED on the admin's routing decision; the options are in the row.
+- **Report db07e0af, final count:** 15 items. ✅ 14 (13 fixed by #3687, plus Q-923 not-a-defect). 🟡 1 (Q-926). Remaining 0.

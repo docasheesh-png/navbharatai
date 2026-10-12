@@ -213,6 +213,8 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     base: String(previewUrl ?? '').trim(),
     marker: PLAYTEST_RESULT_MARKER,
     loadMs: LOAD_MS,
+    // The "same picture" floor, so the script can tell when the accelerator probe saw nothing move (Q-865).
+    stillBelow: STILL_BELOW,
     noise: CONSOLE_NOISE.source,
     noiseFlags: CONSOLE_NOISE.flags,
     // The start-control shape (see `startLabelRank`) — the same regexes, handed to the browser as sources.
@@ -285,6 +287,91 @@ async function compare(page, a, b) {
     const mean = sum / n;
     return { change: (diff / (n * 3 * 255)) * 100, spread: Math.sqrt(Math.max(0, sum2 / n - mean * mean)) };
   }, [a, b]);
+}
+
+// WHICH WAY THE WORLD MOVES (Q-861) — read from CONSECUTIVE frames, inside the page, right after the game drew.
+// Two screenshots are too far apart: a road's lane marks repeat, and a car that travels more than half a mark
+// between them reads as moving BACKWARDS (aliasing). So the frames are taken in the page's own animation frames —
+// our callback runs after the game's in the same frame, while even a WebGL canvas still holds what it just drew —
+// and each consecutive pair is matched at 160×90 for the shift (sub-pixel) that best maps one onto the next. 'y'
+// reads the lower part (the road under a forward camera), 'x' the horizon band (where a turn pans the world). A
+// pair that is faster than the search (an edge of it) or barely changed says nothing; the total, and how many
+// pairs agreed on the sign, go to the score, which judges only when they are firm.
+async function sampleFlow(page, axis, ms) {
+  return page.evaluate(async ([axis, ms]) => {
+    let c = null, area = 0;
+    for (const el of document.querySelectorAll('canvas')) {
+      const b = el.getBoundingClientRect();
+      if (b.width >= 120 && b.height >= 80 && b.width * b.height > area) { area = b.width * b.height; c = el; }
+    }
+    if (!c) return null;
+    // The road's lane marks repeat, so its search stays narrow; the horizon's hills and buildings do not, and a turn on
+    // a slow software renderer (≈20 fps) pans it several pixels a frame, so its search is wider.
+    const W = 160, H = 90, R = axis === 'y' ? 4 : 8;
+    const off = document.createElement('canvas'); off.width = W; off.height = H;
+    const g = off.getContext('2d', { willReadFrequently: true });
+    const frames = [];
+    const end = performance.now() + ms;
+    let last = -1;
+    while (performance.now() < end && frames.length < 14) {
+      await new Promise((r) => requestAnimationFrame(r));
+      try { g.clearRect(0, 0, W, H); g.drawImage(c, 0, 0, W, H); } catch (e) { return null; }
+      const d = g.getImageData(0, 0, W, H).data;
+      const l = new Float32Array(W * H);
+      let sig = 0;
+      for (let i = 0, j = 0; i < d.length; i += 4, j++) { l[j] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; sig += l[j] * ((j % 13) + 1); }
+      if (sig === last) continue; // the game did not draw a new frame
+      last = sig;
+      frames.push(l);
+    }
+    // Perspective makes the near road move faster than the far road, so 'y' is read in three strips and each votes
+    // on its own; a turn pans the whole horizon band alike, so 'x' is one strip.
+    const strips = axis === 'y'
+      ? [[0.55, 0.68], [0.68, 0.81], [0.81, 1]].map(([a, b]) => [Math.floor(H * a), Math.min(H - R, Math.floor(H * b))])
+      : [[Math.floor(H * 0.1), Math.floor(H * 0.6)]];
+    const cost = (p, q, d, y0, y1) => {
+      let sum = 0, n = 0;
+      for (let y = y0; y < y1; y++) {
+        const yy = axis === 'y' ? y + d : y;
+        if (yy < 0 || yy >= H) continue;
+        for (let x = R; x < W - R; x++) { sum += Math.abs(p[y * W + x] - q[yy * W + (axis === 'y' ? x : x + d)]); n++; }
+      }
+      return n ? sum / n : 0;
+    };
+    // One vote per frame PAIR (its readable strips summed), never per strip. A strip that hit the edge of the search
+    // moved faster than this can read — and a repeating texture read past half its period ALIASES, which is exactly
+    // how a correct road can read as backwards — so it is left out and counted (\`edge\`); the slower, farther strips
+    // of the same pair still vote. When most strip reads are too fast, the score voids the whole read.
+    let total = 0, pos = 0, neg = 0, pairs = 0, edge = 0, read = 0;
+    for (let i = 1; i < frames.length; i++) {
+      let sum = 0, voted = false, readable = false, up = false, down = false;
+      for (const [y0, y1] of strips) {
+        const cs = [];
+        for (let d = -R; d <= R; d++) cs.push(cost(frames[i - 1], frames[i], d, y0, y1));
+        const still = cs[R];
+        if (still < 0.5) continue;
+        let b = 0;
+        for (let k = 1; k < cs.length; k++) if (cs[k] < cs[b]) b = k;
+        if (b === 0 || b === cs.length - 1) { edge++; continue; }
+        read++;
+        readable = true;
+        if ((still - cs[b]) / still < 0.1) continue;
+        const den = cs[b - 1] - 2 * cs[b] + cs[b + 1];
+        const shift = (b - R) + (den > 0 ? (cs[b - 1] - cs[b + 1]) / (2 * den) : 0);
+        sum += shift;
+        voted = true;
+        if (shift > 0.25) down = true; else if (shift < -0.25) up = true;
+      }
+      if (!readable) continue;
+      pairs++;
+      // Real motion moves every strip the same way (perspective changes how far, never which way); strips of one pair
+      // that disagree mean one of them aliased, so that pair abstains rather than vote.
+      if (!voted || (up && down)) continue;
+      total += sum;
+      if (sum > 0.25) pos++; else if (sum < -0.25) neg++;
+    }
+    return { total: Math.round(total * 10) / 10, pos, neg, pairs, edge, read };
+  }, [axis, ms]);
 }
 
 // The controls that look like they start the game, best first — the in-browser half of startLabelRank
@@ -444,7 +531,25 @@ try {
     await page.waitForTimeout(550);
     const g1 = await shot(page, box);
     out.gas = Math.round((await compare(page, g0, g1)).change * 100) / 100;
+    // Q-861: which way the road moves while the vehicle drives — down the screen under a camera that looks the way
+    // it drives, UP under one that sits in front of it looking back (the headlights view).
+    if (out.gas >= cfg.stillBelow) out.gasFlow = await sampleFlow(page, 'y', 1200).catch(() => null);
     for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.up(k).catch(() => {});
+    // A SECOND, LONGER LOOK BEFORE "THE CAR NEVER MOVES" (Q-865). Two working games read as stalled on the
+    // first hold: one still showing "Get ready…" (a countdown freezes the car on purpose), and a slow car under
+    // a fixed top-down camera (0.55 s of slow driving is the same picture). So when the first hold saw nothing
+    // move, wait past a countdown and hold again for 2 s, comparing the START of the hold with its END — a slow
+    // car still crosses the screen in that time. Only the stall verdict reads it, and only when both are still.
+    if (out.gas < cfg.stillBelow) {
+      await page.waitForTimeout(2500);
+      for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.down(k).catch(() => {});
+      await page.waitForTimeout(200);
+      const h0 = await shot(page, box);
+      await page.waitForTimeout(2000);
+      const h1 = await shot(page, box);
+      out.gasLate = Math.round((await compare(page, h0, h1)).change * 100) / 100;
+      for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.up(k).catch(() => {});
+    }
   });
   await step('left / A', () => hold(page, ['ArrowLeft', 'KeyA'], 500));
   await step('right / D', () => hold(page, ['ArrowRight', 'KeyD'], 500));
@@ -457,6 +562,16 @@ try {
     await page.waitForTimeout(300);
   });
   out.moves = moves;
+  // THE STEERING PROBE (Q-861). Accelerator and LEFT together — most cars only turn while they move — and which
+  // way the horizon pans: a vehicle that turns to the driver's left pans the world to the RIGHT under any camera
+  // that follows it. Only read when the vehicle was seen to move.
+  if (out.gas >= cfg.stillBelow) {
+    const steer = ['ArrowUp', 'KeyW', 'ArrowLeft', 'KeyA'];
+    for (const k of steer) await page.keyboard.down(k).catch(() => {});
+    await page.waitForTimeout(300);
+    out.steerFlow = await sampleFlow(page, 'x', 1200).catch(() => null);
+    for (const k of steer) await page.keyboard.up(k).catch(() => {});
+  }
   await ctx.close();
 
   // ── PHONE: touch only ─────────────────────────────────────────────────────────────────────────────
@@ -514,6 +629,10 @@ try {
 `;
 }
 
+/** One flow read (Q-861): the summed sub-pixel shift over consecutive frames at 160×90, how the frame pairs voted,
+ *  and how many strip reads moved too fast to read (`edge`) against how many could be read (`read`). */
+export interface FlowRead { total: number; pos: number; neg: number; pairs: number; edge?: number; read?: number }
+
 export interface PlaytestRun {
   ok: boolean;
   error?: string;
@@ -530,6 +649,12 @@ export interface PlaytestRun {
   touchSurface?: boolean;
   /** Picture change WHILE up/W stayed held (0.35 s → 0.9 s into the hold) — the accelerator probe. */
   gas?: number;
+  /** The second, longer accelerator look — taken only when the first saw nothing move (Q-865). */
+  gasLate?: number;
+  /** Which way the lower picture (the road) moved, frame to frame, while the accelerator was held — + is down (Q-861). */
+  gasFlow?: FlowRead | null;
+  /** Which way the horizon band moved while accelerator + LEFT were held — + is right (Q-861). */
+  steerFlow?: FlowRead | null;
   errors?: string[];
   errorCount?: number;
 }
@@ -573,6 +698,10 @@ export interface PlaytestScore {
   respondedTo: string[];
   /** A driving game whose picture stayed still at idle AND while the accelerator was held — see below. */
   stalledVehicle?: boolean;
+  /** A driving game whose road moved UP the screen as it drove — the camera faces the vehicle (Q-861). */
+  cameraFacesVehicle?: boolean;
+  /** A driving game seen from a forward camera whose view panned LEFT when LEFT was held (Q-861). */
+  steeringMirrored?: boolean;
 }
 
 /**
@@ -595,6 +724,40 @@ export interface PlaytestScore {
  */
 export const STALLED_VEHICLE_FIX = 'Holding the accelerator (Up / W) moved nothing — the vehicle never speeds up. Start it moving (speed above zero) and raise its speed every frame the accelerator is held, then drive it along its own heading.';
 
+/**
+ * 🎥 THE CAMERA THAT FACES THE CAR, AND THE STEERING THAT IS MIRRORED — read by PLAYING (Q-861, found by 46e2d74b).
+ * The write-time shape note (`chaseCameraShape`) reads a hand-written camera only when its offset is a literal +Z;
+ * one built with `applyQuaternion` or a lerp is invisible to it. Playing it is not: under a camera that looks the
+ * way the vehicle drives, the road moves DOWN the screen as it drives, and holding LEFT pans the world RIGHT. A
+ * camera in front of the vehicle looking back at it (the headlights view, where LEFT looks like RIGHT) moves the
+ * road UP; mirrored steering pans the world LEFT.
+ *
+ * ⚠️ PRECISION FIRST — a false verdict offers a wrong fix on a working game. Judged only for a DRIVING game, only
+ * from consecutive frames (`sampleFlow` — never two screenshots far apart, where repeating lane marks alias), and
+ * only when FIRM: at least FLOW_MIN_PX in total, three out of four voting frame pairs agreeing, and no more than half
+ * of the strip reads faster than the search can read (those may alias — measured: a correct top-down road at full
+ * speed read −5.5 px on the two pairs that did not hit the edge; a near strip alone too fast, as on a dropped frame
+ * under load, leaves the farther strips voting — a quarter-of-pairs rule voided a correct chase view that way). A top-down or side
+ * view whose camera does not follow the vehicle moves nothing in those bands and gets no verdict; steering is
+ * judged only once the camera was proven to look forward. PURE.
+ */
+export const FLOW_MIN_PX = 3;
+export const CAMERA_FACES_VEHICLE_FIX = 'Driving forward moves the road UP the screen — the camera sits in front of the vehicle looking back at it, so the player sees its headlights and LEFT looks like RIGHT. Put the camera BEHIND the vehicle (offset along its backward direction, looking along its heading); in the kit, ctx.follow(car) does this.';
+export const STEERING_MIRRORED_FIX = 'Holding LEFT turned the view to the RIGHT — the steering is mirrored. LEFT must turn the vehicle to the driver\'s left and RIGHT to the right; in the kit, driveVehicle already does this.';
+
+/** Is this flow read firm enough to judge, and which way did it go? 0 when it is not. PURE. */
+export function firmFlow(f: FlowRead | null | undefined): -1 | 0 | 1 {
+  if (!f || typeof f.total !== 'number' || !Number.isFinite(f.total) || Math.abs(f.total) < FLOW_MIN_PX) return 0;
+  const agree = f.total > 0 ? f.pos : f.neg;
+  const voted = (f.pos ?? 0) + (f.neg ?? 0);
+  if (agree < 3 || agree < Math.ceil(voted * 0.75)) return 0;
+  // Most strip reads faster than the search: what was read may be aliased. No verdict. (A near strip alone being too
+  // fast is normal on a slow frame rate — the farther strips of the same pairs still read true.)
+  const edge = f.edge ?? 0;
+  if (edge > 0 && edge * 2 > edge + (f.read ?? f.pairs ?? 0)) return 0;
+  return f.total > 0 ? 1 : -1;
+}
+
 /** Turn the measurements into the Game Quality Score. Every number comes from a measurement. PURE. */
 export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): PlaytestScore {
   const idle = run.idle ?? 0;
@@ -605,10 +768,19 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
   // the strictest reading there is, because the cost of a false "your car never moves" is a wrong fix
   // offered on a working game. A road with lane marks, kerbs or scenery changes far more than this the
   // moment it moves (measured: a thin-striped test road gave 0.22 moving and 0 stalled).
+  // Q-865: and the second, longer look — after any countdown, start of the hold against its end — saw nothing
+  // move either. Without that look there is no verdict: a countdown or a slow car under a fixed camera is a
+  // working game, and a false "your car never moves" offers a wrong fix.
   const stalledVehicle = replay.driving === true && typeof run.gas === 'number'
-    && idle < STILL_BELOW && run.gas < STILL_BELOW;
-  // A driving game whose accelerator moves nothing cannot score as controllable, whatever else answered.
-  const responds = Math.min(stalledVehicle ? 40 : 100,
+    && idle < STILL_BELOW && run.gas < STILL_BELOW
+    && typeof run.gasLate === 'number' && run.gasLate < STILL_BELOW;
+  const road = replay.driving === true && !stalledVehicle ? firmFlow(run.gasFlow) : 0;
+  const cameraFacesVehicle = road === -1;
+  const steeringMirrored = road === 1 && firmFlow(run.steerFlow) === -1;
+  const backwards = cameraFacesVehicle || steeringMirrored;
+  // A driving game whose accelerator moves nothing cannot score as controllable, whatever else answered — nor one
+  // whose controls read backwards to the player.
+  const responds = Math.min(stalledVehicle || backwards ? 40 : 100,
     respondedTo.length >= 3 ? 100 : respondedTo.length === 2 ? 85 : respondedTo.length === 1 ? 65 : 0);
   const touchThreshold = Math.max(STILL_BELOW * 4, (run.touchIdle ?? 0) * 1.5 + 0.3);
   const touchMoved = (run.touch ?? 0) > touchThreshold;
@@ -629,9 +801,14 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
     const lost = (100 - dimensions[d]) * DIMENSION_WEIGHTS[d];
     if (lost > worst) { worst = lost; weakest = d; }
   }
-  // A car that never moves is THE defect, whichever dimension lost more points on paper.
-  if (stalledVehicle) weakest = 'responds';
-  return { overall: Math.round(total / weight), dimensions, weakest, respondedTo, ...(stalledVehicle ? { stalledVehicle: true } : {}) };
+  // A car that never moves, or one whose controls read backwards, is THE defect, whichever dimension lost more points on paper.
+  if (stalledVehicle || backwards) weakest = 'responds';
+  return {
+    overall: Math.round(total / weight), dimensions, weakest, respondedTo,
+    ...(stalledVehicle ? { stalledVehicle: true } : {}),
+    ...(cameraFacesVehicle ? { cameraFacesVehicle: true } : {}),
+    ...(steeringMirrored ? { steeringMirrored: true } : {}),
+  };
 }
 
 /** At or above this, with nothing at zero, a game is reported as playable. */
@@ -678,10 +855,13 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
   const fpsNote = typeof run.fps === 'number' ? `; ${run.fps} fps in the build sandbox's software renderer (a phone's GPU is faster)` : '';
   const errNote = run.errorCount ? `; ${run.errorCount} error(s) while playing: ${(run.errors ?? [])[0] ?? ''}` : '';
   const anyZero = (Object.keys(score.dimensions) as Dimension[]).some((d) => score.dimensions[d] === 0 && d !== 'replay');
-  const ok = score.overall >= PLAYABLE_SCORE && !anyZero && !score.stalledVehicle;
+  const ok = score.overall >= PLAYABLE_SCORE && !anyZero && !score.stalledVehicle && !score.cameraFacesVehicle && !score.steeringMirrored;
   const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${errNote}.`;
   if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: head };
-  const fix = score.stalledVehicle ? STALLED_VEHICLE_FIX : DIMENSION_FIX[score.weakest];
+  const fix = score.stalledVehicle ? STALLED_VEHICLE_FIX
+    : score.cameraFacesVehicle ? CAMERA_FACES_VEHICLE_FIX
+      : score.steeringMirrored ? STEERING_MIRRORED_FIX
+        : DIMENSION_FIX[score.weakest];
   return { code: 'GAME_PLAYTEST_ISSUES', severity: 'warning', autoResolved: false, score, message: `${head} Weakest: ${LABEL[score.weakest]} — ${fix}` };
 }
 

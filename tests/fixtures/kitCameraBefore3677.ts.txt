@@ -1,0 +1,175 @@
+import * as THREE from 'three';
+import { damp } from '../core/feel';
+
+/**
+ * Camera rigs.
+ *
+ * Every rig damps toward its target with `damp()` rather than a per-frame lerp, because
+ * `a + (b - a) * 0.1` moves twice as fast at 120 fps as at 60 — the camera literally feels different
+ * on different monitors, which is the kind of bug nobody thinks to look for.
+ *
+ * The third-person rig casts a ray back from the player and pulls in on a hit. Without that, walking
+ * against a wall puts the camera inside it and the player sees the inside of the level.
+ */
+export type CameraKind = 'third-person' | 'first-person' | 'top-down' | 'side-scroller' | 'orbit' | 'fixed' | 'chase';
+
+export interface CameraRigOptions {
+  kind?: CameraKind;
+  distance?: number;
+  height?: number;
+  /** Higher = snappier. 6–10 feels responsive; 2–4 feels cinematic. */
+  stiffness?: number;
+  fov?: number;
+  /** Meshes the camera must not pass through (third-person only). */
+  collidables?: THREE.Object3D[];
+}
+
+export class CameraRig {
+  readonly camera: THREE.PerspectiveCamera;
+  private readonly kind: CameraKind;
+  private readonly distance: number;
+  private readonly height: number;
+  private readonly stiffness: number;
+  private collidables: THREE.Object3D[];
+  private readonly ray = new THREE.Raycaster();
+  private yawAngle = 0;
+  private pitch = -0.2;
+  private readonly desired = new THREE.Vector3();
+  private readonly followPos = new THREE.Vector3();
+  private readonly followQuat = new THREE.Quaternion();
+  private readonly followFwd = new THREE.Vector3();
+
+  constructor(options: CameraRigOptions = {}) {
+    this.kind = options.kind ?? 'third-person';
+    this.distance = options.distance ?? 7;
+    this.height = options.height ?? 2.2;
+    this.stiffness = options.stiffness ?? 7;
+    this.collidables = options.collidables ?? [];
+    this.camera = new THREE.PerspectiveCamera(options.fov ?? 60, window.innerWidth / window.innerHeight, 0.1, 1000);
+  }
+
+  /**
+   * The character controller needs this so movement is CAMERA-RELATIVE: pressing forward must go where
+   * the player is looking, not along a fixed world axis. Without it, turning the camera makes the
+   * controls feel inverted and unusable.
+   */
+  get yaw(): number { return this.yawAngle; }
+
+  /**
+   * The world is usually built AFTER the rig exists, so colliders cannot only be a constructor option —
+   * otherwise third-person camera collision silently never works and the view clips through walls.
+   */
+  setCollidables(list: THREE.Object3D[]): void {
+    this.collidables = list;
+    // Raycasts read WORLD matrices, which three.js refreshes only when it renders — and the world is
+    // built before the first render. Same class as CharacterController.setColliders.
+    for (const c of list) c.updateMatrixWorld(true);
+  }
+
+  /** Feed the frame's look delta (Input.lookX/lookY). */
+  look(dx: number, dy: number, sensitivity = 0.0025): void {
+    this.yawAngle -= dx * sensitivity;
+    this.pitch -= dy * sensitivity;
+    // Clamped just short of straight up/down: at exactly ±90° the view flips over.
+    this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
+  }
+
+  update(target: THREE.Vector3, delta: number): void {
+    if (this.kind === 'first-person') {
+      this.camera.position.copy(target).add(new THREE.Vector3(0, this.height * 0.8, 0));
+      this.camera.rotation.set(this.pitch, this.yawAngle, 0, 'YXZ');
+      return;
+    }
+    if (this.kind === 'top-down') {
+      this.desired.set(target.x, target.y + this.distance * 1.6, target.z + this.distance * 0.35);
+      this.dampTo(this.desired, delta);
+      this.camera.lookAt(target);
+      return;
+    }
+    if (this.kind === 'side-scroller') {
+      this.desired.set(target.x, target.y + this.height, target.z + this.distance);
+      this.dampTo(this.desired, delta);
+      this.camera.lookAt(target.x, target.y + this.height * 0.5, target.z);
+      return;
+    }
+
+    // third-person / orbit
+    const offset = new THREE.Vector3(
+      Math.sin(this.yawAngle) * Math.cos(this.pitch),
+      -Math.sin(this.pitch),
+      Math.cos(this.yawAngle) * Math.cos(this.pitch),
+    ).multiplyScalar(this.distance);
+
+    const focus = target.clone().add(new THREE.Vector3(0, this.height, 0));
+    let wanted = focus.clone().add(offset);
+
+    if (this.collidables.length > 0) {
+      const dir = wanted.clone().sub(focus);
+      const dist = dir.length();
+      this.ray.set(focus, dir.normalize());
+      this.ray.far = dist;
+      const hit = this.ray.intersectObjects(this.collidables, true)[0];
+      // Pull in slightly PAST the hit so the near plane does not clip into the wall.
+      if (hit) wanted = focus.clone().add(dir.multiplyScalar(Math.max(0.6, hit.distance - 0.3)));
+    }
+
+    this.dampTo(wanted, delta);
+    this.camera.lookAt(focus);
+  }
+
+  /**
+   * CHASE — sit BEHIND a vehicle (or any model), whichever way it is pointing, and look past it.
+   *
+   * 🔴 USE THIS FOR ANYTHING YOU DRIVE OR RIDE, never update(car.position). Every model in objects.ts
+   * faces its local +Z (MODEL_FORWARD). update() places the camera from the rig's own yaw, which starts
+   * at +Z of the target — that is IN FRONT of a +Z-facing car. Games built that way showed the car's FACE,
+   * drove it toward the camera, and every control felt reversed (admin 2026-10-05: "gadi ka front side
+   * dikhta hai, jisse button ulte kaam karte hai… backside dikhna chahiye"). follow() reads the object's
+   * real heading every frame, so the camera stays at its BACK through every turn, and the rig's yaw is
+   * kept in step so camera-relative movement elsewhere still agrees with what is on screen.
+   */
+  follow(object: THREE.Object3D, delta: number, lookAhead = 4): void {
+    object.getWorldPosition(this.followPos);
+    object.getWorldQuaternion(this.followQuat);
+    const fwd = this.followFwd.set(0, 0, 1).applyQuaternion(this.followQuat);
+    fwd.y = 0;
+    if (fwd.lengthSq() < 1e-8) fwd.set(0, 0, 1);
+    fwd.normalize();
+
+    const focus = this.followPos.clone();
+    focus.y += this.height * 0.5;
+    let wanted = this.followPos.clone().addScaledVector(fwd, -this.distance);
+    wanted.y += this.height;
+
+    if (this.collidables.length > 0) {
+      const dir = wanted.clone().sub(focus);
+      const dist = dir.length();
+      this.ray.set(focus, dir.normalize());
+      this.ray.far = dist;
+      const hit = this.ray.intersectObjects(this.collidables, true)[0];
+      if (hit) wanted = focus.clone().add(dir.multiplyScalar(Math.max(0.6, hit.distance - 0.3)));
+    }
+
+    this.dampTo(wanted, delta);
+    const look = this.followPos.clone().addScaledVector(fwd, lookAhead);
+    look.y += this.height * 0.35;
+    this.camera.lookAt(look);
+    // The yaw whose third-person offset (sin yaw, cos yaw) points BEHIND the object: offset = -fwd.
+    this.yawAngle = Math.atan2(-fwd.x, -fwd.z);
+  }
+
+  private dampTo(wanted: THREE.Vector3, delta: number): void {
+    this.camera.position.set(
+      damp(this.camera.position.x, wanted.x, this.stiffness, delta),
+      damp(this.camera.position.y, wanted.y, this.stiffness, delta),
+      damp(this.camera.position.z, wanted.z, this.stiffness, delta),
+    );
+  }
+
+  /** Apply GameFeel.shake() — offsets the camera without disturbing the rig's own target. */
+  applyShake(shake: { x: number; y: number; roll: number }): void {
+    this.camera.position.x += shake.x * 0.02;
+    this.camera.position.y += shake.y * 0.02;
+    this.camera.rotation.z += shake.roll;
+  }
+}

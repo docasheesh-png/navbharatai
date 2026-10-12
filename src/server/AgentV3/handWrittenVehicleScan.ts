@@ -32,7 +32,9 @@
 // camera and the motion of the SAME object; the zero and the motion and the accelerator), the files under the
 // kit's own library path are never read (`RECIPE_LIBRARY_PATH`), and a half the scan cannot read with
 // certainty — a computed offset, a rotated vector, a camera that follows something else — is not a finding.
-// The halves are indexed per file as the build writes them (`vehicleShapeHalves`), so a camera in scene.ts and
+// Those are not left unread: the playtest PLAYS the game and reads the same two facts from its pixels — the road
+// moving up the screen as it drives (a camera facing the car) and the view panning left on LEFT (mirrored
+// steering) — whatever code produced them (gamePlaytest.ts `firmFlow`, Q-861). The halves are indexed per file as the build writes them (`vehicleShapeHalves`), so a camera in scene.ts and
 // the motion in physics.ts still meet. The note is said once per build, with the file still open. PURE.
 
 import { RECIPE_LIBRARY_PATH } from './typeMembers';

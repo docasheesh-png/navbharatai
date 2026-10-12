@@ -8,7 +8,7 @@
  * ToolDispatcher with a fake sandbox.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
+import { ToolDispatcher, MAX_DEFERRED_IMPORT_INSTALLS, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
 import type { ToolUse } from '../src/server/AgentV3/ClaudeClient';
@@ -68,13 +68,47 @@ describe('L-07 · a hand-written import of a package a recipe declares is instal
     expect(recorded.get('package.json')).toContain('"three"');
   });
 
-  it('one attempt per package per build — a busy install is said once, never retried on every write', async () => {
+  it('🔒 Q-862: a busy install is said ONCE, retried silently on the next writes, and installed when the lock is free', async () => {
     // The background install holds the lock: our install stands down and the package stays unlisted.
-    act.runCommand = async (_ws: string, cmd: string) => { act.commands.push(cmd); return { exitCode: 0, stdout: RECIPE_DEPS_BUSY_MARKER, stderr: '' }; };
+    let busy = true;
+    const real = act.runCommand.bind(act);
+    act.runCommand = async (ws: string, cmd: string) => {
+      if (busy) { act.commands.push(cmd); return { exitCode: 0, stdout: RECIPE_DEPS_BUSY_MARKER, stderr: '' }; }
+      return real(ws, cmd);
+    };
     const d = dispatcher(act, recorded);
     const first = await d.dispatch(call('write_file', { path: 'src/lib/game/scene.ts', content: SCENE }), 'architect');
     expect(first.content).toMatch(/still being installed/);
     expect(first.content).not.toMatch(/📦 Installed/);
+    // Still busy: retried, but not said again.
+    const second = await d.dispatch(call('write_file', { path: 'src/lib/game/objects.ts', content: SCENE }), 'architect');
+    expect(second.content).not.toMatch(/still being installed|📦/);
+    expect(act.commands.filter((c) => c.includes('npm install')).length).toBe(2);
+    // The background install finished: the next write installs it, says so, and records the manifest.
+    busy = false;
+    const third = await d.dispatch(call('write_file', { path: 'src/lib/game/hud.ts', content: SCENE }), 'architect');
+    expect(third.content).toMatch(/📦 Installed @types\/three@\^0\.180\.0, three@\^0\.180\.0 into package\.json/);
+    expect(recorded.get('package.json')).toContain('"three"');
+    // Done: nothing is tried again.
+    const before = act.commands.length;
+    await d.dispatch(call('write_file', { path: 'src/lib/game/more.ts', content: SCENE }), 'architect');
+    expect(act.commands.slice(before).some((c) => c.includes('npm install'))).toBe(false);
+  });
+
+  it('a lock that never frees is retried at most MAX_DEFERRED_IMPORT_INSTALLS times, then left to the note', async () => {
+    act.runCommand = async (_ws: string, cmd: string) => { act.commands.push(cmd); return { exitCode: 0, stdout: RECIPE_DEPS_BUSY_MARKER, stderr: '' }; };
+    const d = dispatcher(act, recorded);
+    for (let i = 0; i < MAX_DEFERRED_IMPORT_INSTALLS + 3; i++) {
+      await d.dispatch(call('write_file', { path: `src/lib/game/f${i}.ts`, content: SCENE }), 'architect');
+    }
+    expect(act.commands.filter((c) => c.includes('npm install')).length).toBe(MAX_DEFERRED_IMPORT_INSTALLS);
+  });
+
+  it('a FAILED install is still one attempt per package per build', async () => {
+    act.runCommand = async (_ws: string, cmd: string) => { act.commands.push(cmd); return { exitCode: 1, stdout: '', stderr: 'E404' }; };
+    const d = dispatcher(act, recorded);
+    const first = await d.dispatch(call('write_file', { path: 'src/lib/game/scene.ts', content: SCENE }), 'architect');
+    expect(first.content).toMatch(/failed \(npm exit 1\)/);
     await d.dispatch(call('write_file', { path: 'src/lib/game/objects.ts', content: SCENE }), 'architect');
     expect(act.commands.filter((c) => c.includes('npm install')).length).toBe(1);
   });

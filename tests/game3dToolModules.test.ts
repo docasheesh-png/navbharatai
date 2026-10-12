@@ -48,6 +48,9 @@ function declaredModules(description: string): string[] | null {
 /** The module names `include` actually matches on — the generated file's basename. */
 function emittedModules(files: Record<string, string>): string[] {
   return Object.keys(files)
+    // A test rides with the module it tests and is never chosen through `include` on its own (Q-843: the game
+    // shell's controls test comes with Game.ts), so it is not a module this census counts.
+    .filter((f) => !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(f))
     .map((f) => (f.split('/').pop() ?? '').replace(/\.[^.]+$/, '').toLowerCase())
     .filter(Boolean)
     .sort();

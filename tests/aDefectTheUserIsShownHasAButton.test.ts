@@ -25,6 +25,9 @@ const ROLL_UPS: Record<string, string> = {
   PLATFORM_PREVIEW_NOT_UP: 'PREVIEW_NEVER_CAME_UP',
   REVIEW_CRITICAL_UNVERIFIED: 'REVIEW_RECHECK_CRITICALS_REMAIN',
   OUTCOME_REVIEW_CRITICAL: 'REVIEW_RECHECK_CRITICALS_REMAIN',
+  // batch six
+  OUTCOME_PREVIEW_COMPILE: 'PREVIEW_COMPILE_DIVERGENCE',
+  REVIEWER_AUTOFIX_INCOMPLETE: 'REVIEW_RECHECK_CRITICALS_REMAIN',
 };
 const BATCH_FOUR = ['DB_SCHEMA_MISSING', 'FRAMEWORK_SOURCE_MISMATCH'];
 const idOf = (code: string) => `found-${code.toLowerCase().replace(/_/g, '-')}`;
@@ -229,5 +232,71 @@ describe('Q-381 batch five: payment checking that later worked does not keep its
     expect(d.resolveOnRecheck('SERVERLESS_PAYMENT_NOT_SET_UP', { messageIncludes: 'for table "orders"' })).toBe(1);
     const open = d.report().issues.filter((i) => i.code === 'SERVERLESS_PAYMENT_NOT_SET_UP' && !i.autoResolved);
     expect(open.map((i) => i.message)).toEqual(['Payment verification could not be set up in the user\'s Supabase project for table "bookings" (api-error).']);
+  });
+});
+
+describe('Q-381 batch six: the last fourteen — and the backlog is empty', () => {
+  const OFFERED_SIX = [
+    'PREVIEW_COMPILE_DIVERGENCE', 'OUTCOME_PREVIEW_FAILED', 'LAST_CHANCE_PROOF', 'PREVIEW_ERROR', 'BUILD_TIMEOUT',
+    'DB_UNREACHABLE', 'BACKSTOP_GATE_FAIL', 'ARCHITECTURE_INVARIANT_VIOLATED',
+  ];
+  const DECLARED_SIX = ['OUTCOME_RELEASE_GATE_RED', 'STUCK_TOOL', 'PLATFORM_SOURCE_WORKSPACE'];
+  const ERROR_CODES = [
+    'BUILD_TIMEOUT', 'DB_UNREACHABLE', 'PLATFORM_SOURCE_WORKSPACE', 'PREVIEW_COMPILE_DIVERGENCE', 'PREVIEW_ERROR', 'STUCK_TOOL',
+    'OUTCOME_PREVIEW_COMPILE', 'OUTCOME_PREVIEW_FAILED', 'OUTCOME_RELEASE_GATE_RED',
+  ];
+
+  for (const code of OFFERED_SIX) {
+    it(`${code} has a one-tap fix`, () => {
+      const out = buildFindingSuggestions([{ code, autoResolved: false }]);
+      expect(out.map((o) => o.id)).toEqual([idOf(code)]);
+      expect(out[0].prompt.length).toBeGreaterThan(80);
+    });
+  }
+
+  it('three are declared: counted against the build, nothing to press', () => {
+    for (const code of DECLARED_SIX) {
+      expect(APP_FINDINGS_WITHOUT_AN_OFFER.has(code)).toBe(true);
+      expect(buildFindingSuggestions([{ code }])).toEqual([]);
+    }
+  });
+
+  it('🔒 NO BILL MOVES: not one ERROR code became "ours" — each still counts against the build', () => {
+    for (const code of ERROR_CODES) {
+      expect(PROCESS_ONLY_CODES.has(code), code).toBe(false);
+      expect(isAppFinding({ phase: 'build', code }), code).toBe(true);
+    }
+  });
+
+  it('the one that became ours is a WARNING, by its own recording site\'s words', () => {
+    expect(PROCESS_ONLY_CODES.has('PREVIEW_SERVER_DOWN')).toBe(true);
+    const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    const records = [...route.matchAll(/severity: '(\w+)', code: 'PREVIEW_SERVER_DOWN'/g)].map((m) => m[1]);
+    expect(records.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(records)).toEqual(new Set(['warning']));
+    expect(route).toContain("The app's code was never the problem here");
+  });
+
+  it('🔒 an architecture rule a later pass restored is answered before the gate counts it', () => {
+    const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    const recheck = route.indexOf("if (!still.has(key)) buildDiag.resolveOnRecheck('ARCHITECTURE_INVARIANT_VIOLATED', { messageIncludes: key });");
+    expect(recheck).toBeGreaterThan(-1);
+    expect(route.indexOf('let gate = releaseGate(gateEvidence, gateFindings(), gateQuality);')).toBeGreaterThan(recheck);
+    expect(route).toContain("const keyOf = (v: { file: string; detail: string }) => `${v.file} breaks how this app is built — ${v.detail}`;");
+    // the key is a prefix of the recorded message, so messageIncludes finds exactly that finding
+    expect(route).toContain('...obs(`${v.file} breaks how this app is built — ${v.detail}. ${v.rule}`)');
+  });
+
+  it('the review evidence that wins is the line that lists the findings', () => {
+    const [out] = buildFindingSuggestions([
+      { code: 'REVIEWER_AUTOFIX_INCOMPLETE', message: 'Reviewer auto-fix did NOT complete — 1 critical issue(s) may still be present in the app.' },
+      { code: 'REVIEW_CRITICAL_UNVERIFIED', message: '1 reviewer [CRITICAL] finding(s) were not verifiably fixed:\n- the cart total is never saved' },
+    ]);
+    expect(out.id).toBe(idOf('REVIEW_RECHECK_CRITICALS_REMAIN'));
+    expect(out.prompt).toContain('the cart total is never saved');
+  });
+
+  it('🎯 THE BACKLOG IS EMPTY — every problem a user is shown has a home', () => {
+    expect(baseline).toEqual([]);
   });
 });

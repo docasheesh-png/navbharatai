@@ -21,6 +21,8 @@ const CLAIMED_CHANGE = new RegExp(
     String.raw`\b(?:now\s+(?:defines|has|includes|works|renders|uses))\b`,
     String.raw`\b(?:has|have)\s+been\s+(?:added|fixed|updated|replaced|corrected|resolved|implemented|defined)\b`,
     String.raw`\b(?:fixed|added|updated|resolved)\s*[:—-]`,
+    // "Every screen is now fully styled." (autopsy db07e0af) — a state that only a change could have produced.
+    String.raw`\b(?:is|are)\s+now\s+(?:fully\s+|properly\s+|correctly\s+|all\s+)?(?:styled|fixed|wired|connected|shown|visible|imported|used|labell?ed|named|working|complete|in\s+place|on\s+screen)\b`,
   ].join('|'),
   'i',
 );
@@ -33,6 +35,13 @@ export function claimsAChange(text: string): boolean {
 export interface RepairClaimInput {
   /** The run is one of OUR repair passes (`platformRequest`), not the user's own request. */
   platformRequest: boolean;
+  /**
+   * Changes made since OUR last hand-back inside the user's own run (the end-of-turn style / unfinished hand-back),
+   * or null when there was none. 🔴 The sibling the first version missed (autopsy db07e0af): a hand-back is a
+   * repair request too, and its closing reply reached the user unchecked — "✅ Every screen is now fully styled."
+   * after a turn that called no tool at all.
+   */
+  changesSinceHandBack?: number | null;
   /** This turn called no tool — it is the run's closing answer. */
   finalTurn: boolean;
   /** Changes this RUN made (its own writes plus delegations that wrote). */
@@ -42,7 +51,18 @@ export interface RepairClaimInput {
 
 /** Withhold this turn's text from the user: a repair's closing claim of a change that never happened. PURE. */
 export function repairClaimWithoutChange(i: RepairClaimInput): boolean {
-  return i.platformRequest && i.finalTurn && i.changesThisRun === 0 && claimsAChange(i.text);
+  if (!i.finalTurn || !claimsAChange(i.text)) return false;
+  return (i.platformRequest && i.changesThisRun === 0) || i.changesSinceHandBack === 0;
+}
+
+/**
+ * The admin line when a hand-back was answered with no change at all (`HANDBACK_IGNORED`) — the struggle the
+ * report must show, whatever the reply said. PURE.
+ */
+export function handBackIgnoredNote(kind: 'style' | 'unfinished', text: string): string {
+  const said = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  const what = kind === 'style' ? 'the end-of-turn style hand-back' : 'the unfinished-app hand-back';
+  return `The model answered ${what} without changing anything — no file was written after it.${said ? ` It said: "${said}"` : ''}`;
 }
 
 /** What the user is shown in its place. */

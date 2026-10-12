@@ -22,6 +22,7 @@
 // PURE. Kill switch: AGENTV3_PICTURE_ANSWER=off builds as before.
 
 import { detectImageIntent } from '../lib/imageIntent';
+import { PLACES, indicAlternatives } from './indicSafetyWords';
 import { IMAGE_STUDIO_MODE_NAME } from '../lib/freeChatModeGuide';
 
 export function pictureAnswerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -42,12 +43,15 @@ const SOFTWARE_OBJECT = new RegExp(
   'i',
 );
 
+/** "app", "site", "platform" in the nine other Indian scripts — the same list the safety triage reads. */
+const INDIC_SOFTWARE_OBJECT = new RegExp(indicAlternatives(PLACES).join('|'));
+
 /** Does this message ask for a PICTURE (and nothing that is software)? PURE. */
 export function isPictureRequest(prompt: string): boolean {
   const text = String(prompt ?? '').trim();
   if (!text) return false;
   if (!detectImageIntent(text).wants) return false;
-  return !SOFTWARE_OBJECT.test(text);
+  return !SOFTWARE_OBJECT.test(text) && !INDIC_SOFTWARE_OBJECT.test(text.normalize('NFC'));
 }
 
 export interface PictureAnswerInput {
@@ -84,3 +88,21 @@ export const PICTURE_REQUEST_STEER =
 export function pictureRequestFallback(): string {
   return `NavBharatAI Pro builds apps and websites, so I haven't built anything for this one. Pictures are made in **${IMAGE_STUDIO_MODE_NAME}**: ${PICTURE_STUDIO_PATH}. Describe the picture there and press send. To change a photo you have, attach it there and type only what should change.\n\nIf you wanted an app that makes pictures, just say "build an image generator app" and I'll build it.`;
 }
+
+/**
+ * Added when a message asks for something to be MADE but says not WHAT. Written for the MODEL, in English.
+ *
+ * 🔴 IT USED TO PLANT AN APP (autopsy 15e69839, 2026-10-12). The steer said "with one brief example … (for
+ * instance a shop billing app with GST)". A Tamil user had asked for a picture of a boy leaning on a tree; the
+ * reply offered that example, the user copied it ("like a man making a GST bill in a shop"), and a 25-minute
+ * GST app was built. An unclear wish has two likely shapes here, an app or a picture, so the question names
+ * both — one example each — and says where pictures are made.
+ */
+export const CLARIFY_WHAT_TO_MAKE_STEER =
+  '\n\nThe user has asked for something to be MADE, but their message does not say WHAT to make. Do NOT guess, '
+  + 'and do NOT invent an app or a product name from their words. Reply in one or two short sentences, in the '
+  + 'user\'s own language: say honestly that you did not understand, and ask whether they want an APP built here '
+  + `or a PICTURE made — pictures are made in **${IMAGE_STUDIO_MODE_NAME}** (${PICTURE_STUDIO_PATH}). Give one brief `
+  + 'example of each, never just one (for instance "a shop billing app" for an app, "a boy sitting under a tree" '
+  + 'for a picture). If their words describe a scene, a person or a place, say a picture seems likelier. Be warm '
+  + 'and brief — they are one sentence away from starting.';

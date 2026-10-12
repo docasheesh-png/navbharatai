@@ -94248,3 +94248,12 @@ Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-
 - **What this session did:** it saw #3678 on `main`, stopped its workflow, and threw its duplicate implementations away unmerged. They lived only in local worktrees.
 - **The lesson:** checking the open PRs once, at the start, does not protect work that runs for hours. Re-list open PRs and re-fetch `main` before each long fan-out, and again at every check-in. A row another session can see as OPEN is free to take until a PR names it.
 - **Rows:** Q-843 and Q-861..Q-865 belong to #3678's session. Q-846 stays with this session, under the admin's corrected reading: #3678's user message is the withdrawn "target" reading, and this session reworks it.
+
+#### 2026-10-12 — the corrected Q-846 is re-filed as Q-868; my row Q-866 is renumbered Q-867
+
+- **Why not reopen Q-846:** #3680 (another session) closes Q-846, because the target-device build merged in #3678. A closed ID may not come back (`aClosedQueueRowStaysClosed`). So this branch now leaves the Q-846 line exactly as `main` has it, and the two PRs cannot conflict on it.
+- **What Q-846's closure covers:** only the target-device build. The admin's correction lives in **Q-868**, which records:
+  - the class: a classic phone named in a game request is the game's origin;
+  - that #3678's detector never matched the real prompt `Nokia c 2-01`;
+  - the build this session does next.
+- **Renumbered row:** #3681 (a third session) took **Q-866** for "basic phone" ≠ keypad phone. The heavy-import row this branch had filed as Q-866 is now **Q-867**.

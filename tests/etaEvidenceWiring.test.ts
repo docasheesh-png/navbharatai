@@ -20,8 +20,7 @@ describe('the first ETA line is gated on evidence', () => {
     expect(line).toContain('firstEtaLine(');
     // Since 2026-09-26 (admin: "ETA dikhao andaaza label ke saath") the unevidenced line is handed the
     // estimate too, so it can SHOW the band as a labelled rough estimate instead of withholding it.
-    // …and since 303e8a6f, whether a seeded template sized it (its label then says so).
-    expect(line).toContain('unevidencedFirstEtaLine(est, { fromTemplate: etaFromTemplate })');
+    expect(line).toContain('unevidencedFirstEtaLine(est)');
   });
 
   it('the flag is set from the estimator, not from a hand-maintained condition', () => {
@@ -53,7 +52,7 @@ describe('🔴 the live tick must not count down from a number we declined to sh
     // SAME sentence at minute 2 and minute 28 — the twelve identical ticks that made a real user
     // press the button three times. Asserting the argument is what stops that silently regressing.
     // And since 2026-09-26 the tick also carries the labelled rough band (null when there is none).
-    expect(block).toContain('unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs, etaFromTemplate)');
+    expect(block).toContain('unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs)');
     expect(block).toContain('return;');
   });
 

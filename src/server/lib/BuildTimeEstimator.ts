@@ -350,22 +350,3 @@ export function projectSizedComplexity(base: Complexity, projectPaths: readonly 
   };
 }
 
-/**
- * A SEEDED TEMPLATE IS ESTIMATED BY THE TEMPLATE (autopsy 303e8a6f, 2026-10-12) — the sibling of
- * `projectSizedComplexity` above.
- *
- * Q-060 (autopsy 4a1c0157) taught the ETA's HISTORY path that a seeded template is its own kind of build. The
- * fallback taken whenever that slice is empty still sized the build by the chip's WORDING, as if the app were
- * built from scratch: across the seeded chips the same verify-and-polish turn was priced anywhere from
- * 2.6–5.5 min to 7.3–15.5 min, and the login-page chip's band (5.9–12.4 min) excluded its own measured build
- * (3.8 min). A `simple` template IS the finished app, so its turn does not grow with the chip's wording: one
- * size, calibrated on the two clean measured template builds (login page 3.8 min, calculator 4.3 min) the way
- * BASE_MS documents its own calibration. A `pro` template is an architecture the builder EXTENDS to the
- * request, so the request still sizes it. Real durations replace this the moment the slice has history.
- */
-export const TEMPLATE_POLISH_COMPLEXITY: Readonly<Complexity> = { moduleCount: 1, featureCount: 9 };
-
-/** The complexity an ETA prices a seeded build at. PURE. */
-export function templateSizedComplexity(base: Complexity, tier: 'simple' | 'pro'): Complexity {
-  return tier === 'simple' ? { ...base, moduleCount: TEMPLATE_POLISH_COMPLEXITY.moduleCount, featureCount: TEMPLATE_POLISH_COMPLEXITY.featureCount } : base;
-}

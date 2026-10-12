@@ -63,18 +63,6 @@ export function roughEstimateBand(est: Pick<BuildEstimate, 'estimateMs' | 'lowMs
 export const ROUGH_ESTIMATE_LABEL = 'a guess from the size of your request, not a measurement';
 
 /**
- * The same honesty for a build that starts from a tested template (autopsy 303e8a6f): its rough figure is sized
- * by the template (BuildTimeEstimator `templateSizedComplexity`), not by the size of the request, so telling the
- * user it came from "the size of your request" would be a false reason attached to a true label.
- */
-export const TEMPLATE_ROUGH_ESTIMATE_LABEL = 'a guess for finishing a tested template, not a measurement';
-
-/** Which label a rough estimate carries. PURE. */
-export function roughEstimateLabel(fromTemplate?: boolean): string {
-  return fromTemplate === true ? TEMPLATE_ROUGH_ESTIMATE_LABEL : ROUGH_ESTIMATE_LABEL;
-}
-
-/**
  * How much of an estimate must come from real past builds before its number may be shown.
  *
  * A half, because that is the point at which the estimate stops being mostly the backwards heuristic
@@ -106,11 +94,11 @@ export function estimateIsEvidenced(est: Pick<BuildEstimate, 'historyWeight'> | 
  * reaches either produces the number this sentence undertakes to produce. The line it replaced made
  * the same promise from a path where no code existed that could keep it.
  */
-export function unevidencedFirstEtaLine(est?: Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'> | null, opts: { fromTemplate?: boolean } = {}): string {
+export function unevidencedFirstEtaLine(est?: Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'> | null): string {
   const band = roughEstimateBand(est);
   if (band) {
     // Admin 2026-09-26: the band is shown, and labelled. The promise of a real figure is kept as before.
-    return `⏱️ Rough estimate: ${band} — ${roughEstimateLabel(opts.fromTemplate)}. `
+    return `⏱️ Rough estimate: ${band} — ${ROUGH_ESTIMATE_LABEL}. `
       + 'I\'ll replace it with a real figure — and keep it updated — as soon as I can measure how big your app is.';
   }
   return '⏱️ Planning your app… I don\'t have a reliable time for this one yet. '
@@ -153,7 +141,7 @@ export const LONG_RUN_BUDGET_SHARE = 0.6;
  * a negative remainder is not a number worth inventing a phrase for.
  */
 export function unevidencedEtaTickLine(
-  elapsedMs: number, budgetMs?: number, roughBand?: string | null, roughHighMs?: number | null, fromTemplate?: boolean,
+  elapsedMs: number, budgetMs?: number, roughBand?: string | null, roughHighMs?: number | null,
 ): string {
   const elapsed = Math.max(0, Number(elapsedMs) || 0);
   const inTxt = formatEta(elapsed).replace('~', '');
@@ -166,7 +154,7 @@ export function unevidencedEtaTickLine(
   const sizing = outrun
     ? `past my rough estimate of ${roughBand}, which was a guess and was too low for this one`
     : roughBand
-      ? `rough estimate ${roughBand} (${roughEstimateLabel(fromTemplate)}) — I'll show a measured time as soon as I have one`
+      ? `rough estimate ${roughBand} (${ROUGH_ESTIMATE_LABEL}) — I'll show a measured time as soon as I have one`
       : 'still working out how big this one is — I\'ll show a time as soon as I can measure it';
   const plain = `⏱️ Still building… ${inTxt} in · ${sizing}, and tell you the moment it's done.`;
   const budget = Number(budgetMs);

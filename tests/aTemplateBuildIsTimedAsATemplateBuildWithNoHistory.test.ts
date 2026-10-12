@@ -8,61 +8,61 @@
 //
 // Found beside it: the ETA the admin decided to show (2026-09-26) never reached the main chat — the timeline drops
 // every '⏱' line as progress noise — while the report said "Shown to the user".
+//
+// ⚠️ CORRECTED BY THE ADVERSARIAL REVIEW: the first fix priced every simple template at one constant calibrated on
+// two builds, which LOWERED seven unmeasured chips (wedding-rsvp 10.5 → 4 min) — the optimistic direction, which
+// breaks a promise instead of arriving early. That constant is gone. The template learns from MEASUREMENT: its
+// slice is split by tier (a pro template is extended, a simple one polished — one slice averaged the two), and a
+// failed telemetry read is said as a failure. Whether big simple templates finish in ~4 min stays open until the
+// slice has data (queue row) — it is never asserted in a test.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { STARTER_TEMPLATES } from '../src/components/agentv3/starterTemplates';
 import { goldenScaffoldForPrompt } from '../src/server/AgentV3/goldenScaffolds/registry';
-import { estimateBuildTime, complexityFromPrompt, templateSizedComplexity, TEMPLATE_POLISH_COMPLEXITY } from '../src/server/lib/BuildTimeEstimator';
-import { fleetHistoryFromTelemetry, fleetEmptyBasisNote, etaSliceWords, etaTaskKey, SCAFFOLD_TASK_KEY, FLEET_MIN_BUILDS_PER_DAY } from '../src/server/AgentV3/etaHistory';
-import { unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, ROUGH_ESTIMATE_LABEL, TEMPLATE_ROUGH_ESTIMATE_LABEL } from '../src/server/AgentV3/etaEvidence';
+import { estimateBuildTime, complexityFromPrompt } from '../src/server/lib/BuildTimeEstimator';
+import { fleetHistoryFromTelemetry, fleetEmptyBasisNote, etaSliceWords, etaTaskKey, SCAFFOLD_TASK_KEY, SCAFFOLD_PRO_TASK_KEY, FLEET_MIN_BUILDS_PER_DAY } from '../src/server/AgentV3/etaHistory';
+import { unevidencedFirstEtaLine, etaEvidenceNote, ROUGH_ESTIMATE_LABEL } from '../src/server/AgentV3/etaEvidence';
 import { BuildDiagnostics, etaAccuracy } from '../src/server/AgentV3/BuildDiagnostics';
 import { latestLiveStatusText, ETA_LINE_ID } from '../src/lib/liveStatusLine';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
 const MIN = 60_000;
-// The two clean measured template builds (PROGRESS.md: 4a1c0157 login page 3.8 min, 8257ca59 calculator 4.3 min).
-const MEASURED_TEMPLATE_BUILDS_MS = [3.8 * MIN, 4.3 * MIN];
 
-const SIMPLE_SEEDED = STARTER_TEMPLATES
+const SEEDED = STARTER_TEMPLATES
   .map((t) => ({ t, g: goldenScaffoldForPrompt(t.prompt) }))
-  .filter((x) => x.g?.tier === 'simple');
+  .filter((x) => !!x.g);
 
-describe('1 · 🔒 census: a seeded simple template is priced as a template, whatever the chip says', () => {
-  it('there are seeded simple chips to read (the census is reading something)', () => {
-    expect(SIMPLE_SEEDED.length).toBeGreaterThanOrEqual(15);
+describe('1 · 🔒 a seeded build learns from builds of its own TIER — and is never priced below its wording by a guess', () => {
+  it('there are seeded chips of both tiers to read (the census is reading something)', () => {
+    expect(SEEDED.filter((x) => x.g!.tier === 'simple').length).toBeGreaterThanOrEqual(15);
+    expect(SEEDED.filter((x) => x.g!.tier === 'pro').length).toBeGreaterThanOrEqual(5);
   });
 
-  it('every one gets the SAME estimate, and its band holds both measured template builds', () => {
-    const estimates = SIMPLE_SEEDED.map(({ t, g }) => estimateBuildTime(templateSizedComplexity(complexityFromPrompt(t.prompt), g!.tier), []));
-    const first = estimates[0]!;
-    for (const [i, e] of estimates.entries()) expect([e.lowMs, e.highMs], SIMPLE_SEEDED[i]!.t.id).toEqual([first.lowMs, first.highMs]);
-    for (const ms of MEASURED_TEMPLATE_BUILDS_MS) {
-      expect(ms).toBeGreaterThanOrEqual(first.lowMs);
-      expect(ms).toBeLessThanOrEqual(first.highMs);
+  it('every seeded chip keys the slice of its tier; a pro template never pours into the simple slice', () => {
+    for (const { t, g } of SEEDED) {
+      const key = etaTaskKey('simple_app', true, false, null, g!.tier);
+      expect(key, t.id).toBe(g!.tier === 'pro' ? SCAFFOLD_PRO_TASK_KEY : SCAFFOLD_TASK_KEY);
     }
+    expect(etaTaskKey('complex_app', true)).toBe(SCAFFOLD_TASK_KEY); // an old caller with no tier keeps its slice
+    expect(etaSliceWords(SCAFFOLD_PRO_TASK_KEY)).toMatch(/extend a tested pro template/);
   });
 
-  it('the wording-sized fallback this replaces excluded the login page\'s own measured build', () => {
-    const login = SIMPLE_SEEDED.find((x) => x.t.id === 'login-page');
-    expect(login).toBeTruthy();
-    const byWording = estimateBuildTime(complexityFromPrompt(login!.t.prompt), []);
-    expect(byWording.lowMs).toBeGreaterThan(3.8 * MIN); // the defect, stated
-    const byTemplate = estimateBuildTime(templateSizedComplexity(complexityFromPrompt(login!.t.prompt), 'simple'), []);
-    expect(byTemplate.lowMs).toBeLessThanOrEqual(3.8 * MIN);
-  });
-
-  it('a pro template is an architecture the request extends — the request still sizes it', () => {
-    const base = complexityFromPrompt('Build a CRM with leads, deals, a pipeline board, reports and email reminders');
-    expect(templateSizedComplexity(base, 'pro')).toEqual(base);
-    expect(templateSizedComplexity(base, 'simple')).toMatchObject(TEMPLATE_POLISH_COMPLEXITY);
-  });
-
-  it('🔒 the route prices a seeded build by its template', () => {
+  it('🔒 the reader and the writer key a seeded build the same way, tier included', () => {
     const route = read('src/server/routes/agentv3.ts');
-    expect(route).toMatch(/: seededScaffold\s*\? templateSizedComplexity\(complexityFromPrompt\(planning\.sizing\), seededScaffold\.tier\)/);
-    expect(route).toMatch(/const scaffoldWillSeed = !!seededScaffold;/);
+    expect(route).toContain('etaKeyForBuild(scaffoldWillSeed, seededScaffold?.tier ?? null)');
+    expect(route).toContain('taskType: etaKeyForBuild(goldenPreseeded, goldenPreseededTier),');
+    expect(route).toContain('goldenPreseededTier = golden.tier;');
+    expect(route.match(/etaKeyForBuild\(/g)!.length).toBe(2); // the reader and the writer — one helper
+  });
+
+  it('🔒 no constant re-sizes a seeded build: an unmeasured chip keeps its wording estimate (the over-estimate side)', () => {
+    const route = read('src/server/routes/agentv3.ts');
+    expect(route).not.toMatch(/templateSizedComplexity|TEMPLATE_POLISH_COMPLEXITY/);
+    expect(route).toMatch(/const etaComplexity = etaByProject\s*\? projectSizedComplexity\(complexityFromPrompt\(planning\.sizing\), projectFilePaths\)\s*: complexityFromPrompt\(planning\.sizing\);/);
+    const wedding = SEEDED.find((x) => x.t.id === 'wedding-rsvp');
+    if (wedding) expect(estimateBuildTime(complexityFromPrompt(wedding.t.prompt), []).estimateMs).toBeGreaterThan(5 * MIN);
   });
 });
 
@@ -74,7 +74,7 @@ const ONE_A_DAY = Array.from({ length: 7 }, (_, i) => ({
 
 describe('2 · an empty slice is reported as what it is', () => {
   it('a week of one finished template build a day: no history, but the window is counted', () => {
-    const f = fleetHistoryFromTelemetry(ONE_A_DAY, SCAFFOLD_TASK_KEY, TEMPLATE_POLISH_COMPLEXITY);
+    const f = fleetHistoryFromTelemetry(ONE_A_DAY, SCAFFOLD_TASK_KEY, { moduleCount: 1, featureCount: 9 });
     expect(f.history).toEqual([]);
     expect(f.seenOk).toBe(7);
     expect(f.daysRead).toBe(7);
@@ -88,6 +88,11 @@ describe('2 · an empty slice is reported as what it is', () => {
     expect(line).not.toMatch(/no past builds to learn from/i);
     expect(fleetEmptyBasisNote(SCAFFOLD_TASK_KEY, 0, 7)).toContain('none of NavBharatAI\'s builds that start from a tested template (verify and polish) finished');
     expect(fleetEmptyBasisNote('complex_app', 0, 0)).toContain('returned no days');
+    expect(fleetEmptyBasisNote('complex_app', 0, 0)).toContain('a read that failed without saying so');
+    // A read that timed out is said as a failure, never as "no days".
+    const failed = fleetEmptyBasisNote(SCAFFOLD_TASK_KEY, 0, 0, { readFailed: true });
+    expect(failed).toContain('could not be read in time');
+    expect(failed).not.toContain('returned no days');
     // A template build and a from-scratch complex app no longer read the same.
     expect(fleetEmptyBasisNote(SCAFFOLD_TASK_KEY, 0, 7)).not.toBe(fleetEmptyBasisNote('complex_app', 0, 7));
   });
@@ -100,7 +105,7 @@ describe('2 · an empty slice is reported as what it is', () => {
     expect(taskTypes.length).toBeGreaterThan(8);
     const keys = new Set([
       ...taskTypes.map((t) => etaTaskKey(t, false)),
-      etaTaskKey('simple_app', true), etaTaskKey('simple_app', false, false, 'game'), etaTaskKey('simple_app', false, false, 'image_app'),
+      etaTaskKey('simple_app', true), etaTaskKey('simple_app', true, false, null, 'pro'), etaTaskKey('simple_app', false, false, 'game'), etaTaskKey('simple_app', false, false, 'image_app'),
       etaTaskKey('simple_app', false, true), etaTaskKey(null, false),
     ]);
     for (const k of keys) expect(etaSliceWords(k), k).not.toMatch(/^"/);
@@ -108,7 +113,8 @@ describe('2 · an empty slice is reported as what it is', () => {
 
   it('🔒 the route uses the empty-slice line whenever a slice was asked and taught nothing', () => {
     const route = read('src/server/routes/agentv3.ts');
-    expect(route).toContain("etaSource === 'heuristic' && etaFleetKey\n              ? fleetEmptyBasisNote(etaFleetKey, fleet.seenOk, fleet.daysRead)");
+    expect(route).toContain("etaSource === 'heuristic' && etaFleetKey\n              ? fleetEmptyBasisNote(etaFleetKey, fleet.seenOk, fleet.daysRead, { readFailed: fleetReadFailed })");
+    expect(route).toContain('catch { fleetReadFailed = true;');
     expect(route).not.toMatch(/fleet\.history\.length > 0 && etaFleetKey \? fleetEtaBasisNote\(etaFleetKey, fleet\.builds, fleet\.days\) : etaBasisNote\(past\)/);
   });
 
@@ -120,18 +126,8 @@ describe('2 · an empty slice is reported as what it is', () => {
 });
 
 describe('3 · the user is told why the figure is a guess — truthfully', () => {
-  const est = { estimateMs: 4 * MIN, lowMs: 2.8 * MIN, highMs: 5.8 * MIN };
-  it('a template build\'s rough estimate does not claim to come from the size of the request', () => {
-    expect(unevidencedFirstEtaLine(est, { fromTemplate: true })).toContain(TEMPLATE_ROUGH_ESTIMATE_LABEL);
-    expect(unevidencedFirstEtaLine(est, { fromTemplate: true })).not.toContain(ROUGH_ESTIMATE_LABEL);
-    expect(unevidencedEtaTickLine(MIN, 30 * MIN, '~3–6 min', 6 * MIN, true)).toContain(TEMPLATE_ROUGH_ESTIMATE_LABEL);
-    // Every other build reads exactly as before.
-    expect(unevidencedFirstEtaLine(est)).toContain(ROUGH_ESTIMATE_LABEL);
-  });
-
-  it('🔒 the route labels it only when the template — not real history — sized it', () => {
-    const route = read('src/server/routes/agentv3.ts');
-    expect(route).toContain("etaFromTemplate = seededScaffold?.tier === 'simple' && past.length === 0 && fleet.history.length === 0;");
+  it('the rough estimate keeps its one honest label (no template-sized figure exists to describe differently)', () => {
+    expect(unevidencedFirstEtaLine({ estimateMs: 4 * MIN, lowMs: 2.8 * MIN, highMs: 5.8 * MIN })).toContain(ROUGH_ESTIMATE_LABEL);
   });
 });
 

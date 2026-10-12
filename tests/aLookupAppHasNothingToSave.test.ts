@@ -164,7 +164,7 @@ describe('4 · the live tick stops restating an estimate the build has outrun', 
   });
   it('🔒 the route passes the band\'s top end to the tick', () => {
     const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(src).toMatch(/unevidencedEtaTickLine\(elapsedMs, effectiveBuildSeconds \* 1000, etaRoughBand, etaRoughHighMs, etaFromTemplate\)/);
+    expect(src).toMatch(/unevidencedEtaTickLine\(elapsedMs, effectiveBuildSeconds \* 1000, etaRoughBand, etaRoughHighMs\)/);
   });
 });
 

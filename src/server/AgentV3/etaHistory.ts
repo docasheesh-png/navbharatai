@@ -205,6 +205,14 @@ export function fleetHistoryFromTelemetry(
 export const SCAFFOLD_TASK_KEY = 'scaffold';
 
 /**
+ * A PRO template is a different build from a simple one (adversarial review of autopsy 303e8a6f). A simple template
+ * IS the finished app — the turn verifies and polishes it; a pro template is an architecture the builder EXTENDS to
+ * the request. Filed under one key, the slice averaged the two, so a simple chip's ETA learned from pro extend
+ * builds and the admin line called those "verify and polish". Each tier learns from its own builds.
+ */
+export const SCAFFOLD_PRO_TASK_KEY = 'scaffold_pro';
+
+/**
  * WHAT KIND OF BUILD THIS IS, KNOWN FROM THE PROMPT BEFORE THE ETA IS SHOWN (admin 2026-10-11, build
  * 46e2d74b — item L-12).
  *
@@ -234,8 +242,8 @@ export function etaBuildKind(domain: string | null | undefined, generatesImages:
  * history a routed-complex build was filed under was not the history it was later priced from. `kind` is
  * `etaBuildKind`'s answer. PURE.
  */
-export function etaTaskKey(taskType: string | null | undefined, scaffolded: boolean, routedComplex = false, kind: EtaBuildKind | null = null): string {
-  if (scaffolded) return SCAFFOLD_TASK_KEY;
+export function etaTaskKey(taskType: string | null | undefined, scaffolded: boolean, routedComplex = false, kind: EtaBuildKind | null = null, scaffoldTier: 'simple' | 'pro' | null = null): string {
+  if (scaffolded) return scaffoldTier === 'pro' ? SCAFFOLD_PRO_TASK_KEY : SCAFFOLD_TASK_KEY;
   // A seeded template stays its own kind (above); otherwise the build's kind decides before its label.
   if (kind) return kind;
   const t = String(taskType ?? '').trim() || 'unknown';
@@ -251,8 +259,9 @@ export function etaTaskKey(taskType: string | null | undefined, scaffolded: bool
  * line that says it was EMPTY name it identically. Keyed by every `TaskType` plus the build kinds `etaTaskKey`
  * adds, so a new task type or kind fails to compile until it has words (autopsy 303e8a6f).
  */
-const SLICE_WORDS: Record<TaskType | typeof SCAFFOLD_TASK_KEY | EtaBuildKind | 'unknown', string> = {
+const SLICE_WORDS: Record<TaskType | typeof SCAFFOLD_TASK_KEY | typeof SCAFFOLD_PRO_TASK_KEY | EtaBuildKind | 'unknown', string> = {
   scaffold: 'builds that start from a tested template (verify and polish)',
+  scaffold_pro: 'builds that extend a tested pro template to the request',
   game: 'game builds',
   image_app: 'builds of apps that make pictures',
   complex_app: 'complex app builds',
@@ -284,11 +293,16 @@ export function fleetEtaBasisNote(taskType: string, builds: number, days: number
  * template build and a from-scratch complex app, so a regressed key was invisible; and it claimed "no past
  * builds" from a filter that only proves "no day with FLEET_MIN_BUILDS_PER_DAY finished builds". PURE.
  */
-export function fleetEmptyBasisNote(taskType: string, seenOk: number, daysRead: number): string {
+export function fleetEmptyBasisNote(taskType: string, seenOk: number, daysRead: number, opts: { readFailed?: boolean } = {}): string {
   const kind = etaSliceWords(taskType);
   const window = `the last ${daysRead} day${daysRead === 1 ? '' : 's'}`;
+  // A read that timed out or threw is said as exactly that — never as "no days" (adversarial review of 303e8a6f).
+  if (opts.readFailed === true) {
+    return `No past builds of this app, and the platform's build telemetry for ${kind} could not be read in time (timed out or failed) — this is the heuristic alone.`;
+  }
   if (daysRead <= 0) {
-    return `No past builds of this app, and the platform's build telemetry returned no days to learn ${kind} from — this is the heuristic alone.`;
+    // The telemetry store turns its own failure into an empty list, so "no days" cannot be told from a quiet failure.
+    return `No past builds of this app, and the platform's build telemetry returned no days to learn ${kind} from (an empty week, or a read that failed without saying so) — this is the heuristic alone.`;
   }
   if (seenOk <= 0) {
     return `No past builds of this app, and none of NavBharatAI's ${kind} finished in ${window} — this is the heuristic alone.`;

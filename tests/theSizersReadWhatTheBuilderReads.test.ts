@@ -96,8 +96,7 @@ describe('the route — every sizer reads planning.sizing, every model reads pla
   });
   it.each([
     ['wall-clock complexity', /const buildComplexity = complexityFromPrompt\(planning\.sizing\)/],
-    // Three branches since 303e8a6f (a seeded template is sized by its template); every one reads planning.sizing.
-    ['ETA complexity', /const etaComplexity = etaByProject[\s\S]{0,120}complexityFromPrompt\(planning\.sizing\)[\s\S]{0,120}templateSizedComplexity\(complexityFromPrompt\(planning\.sizing\)[\s\S]{0,80}: complexityFromPrompt\(planning\.sizing\);/],
+    ['ETA complexity', /const etaComplexity = etaByProject[\s\S]{0,120}complexityFromPrompt\(planning\.sizing\)[\s\S]{0,40}: complexityFromPrompt\(planning\.sizing\);/],
     // Whitespace-tolerant since 2026-10-04: the call became multi-line when `fileCount` joined it
     // (autopsy 8b8743a3 / Q-313). The invariant this row guards — the sizer reads `planning.sizing`,
     // never the bare message — is unchanged and still fully enforced; only the line break is allowed.

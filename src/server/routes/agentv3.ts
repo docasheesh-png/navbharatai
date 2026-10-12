@@ -466,7 +466,7 @@ import { abortOutcomeFor, ABORT_OUTCOME_CODES } from '../AgentV3/abortOutcome';
 import { sandboxWasUnavailable } from '../AgentV3/sandboxAvailability';
 import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser, buildWasStopped } from '../AgentV3/BuildDiagnostics';
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
-import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity, templateSizedComplexity, liveEtaTick } from '../lib/BuildTimeEstimator';
+import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { freeBuildWindow, noteFreeBuildStartDurable, decideFreePauseDurable, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
 import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
@@ -13473,8 +13473,6 @@ async function noteBuildOutcome(
     let etaEvidenced = false;
     // The labelled rough band an unevidenced build shows (admin 2026-09-26) — read by the tick.
     let etaRoughBand: string | null = null;
-    /** The rough band was sized by a seeded template, not by the request (autopsy 303e8a6f) — its label says so. */
-    let etaFromTemplate = false;
     // Its top end, so the tick stops restating a band the build has already outrun.
     let etaRoughHighMs: number | null = null;
     // The HIGH end of the band the user was shown first. The live tick never calls a build "bigger than
@@ -13696,7 +13694,7 @@ async function noteBuildOutcome(
           // d11ad529). Elapsed time is still reported — it has already happened, so it promises
           // nothing — and the moment a real measurement lands the branch above takes over.
           if (!etaEvidenced) {
-            events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs, etaFromTemplate), ts: now, id: 'eta-live' });
+            events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs), ts: now, id: 'eta-live' });
             return;
           }
           const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions, etaPromisedHighMs);
@@ -13813,9 +13811,10 @@ async function noteBuildOutcome(
         try { return etaBuildKind(analyzeRequirementGaps(prompt).domain, appGeneratesImages(prompt)); } catch { return null; }
       })() : null;
       // A port is estimated by the project it ports, as it is routed (autopsy 51ef24ad).
-      const etaKeyForBuild = (scaffolded: boolean): string => (complexityDecision.source === 'workspace'
+      // A seeded build's template TIER picks its slice too (a pro template is extended, a simple one polished).
+      const etaKeyForBuild = (scaffolded: boolean, scaffoldTier: 'simple' | 'pro' | null): string => (complexityDecision.source === 'workspace'
         ? 'complex_app'
-        : etaTaskKey(analysis?.taskType, scaffolded, buildIsComplex, etaKind));
+        : etaTaskKey(analysis?.taskType, scaffolded, buildIsComplex, etaKind, scaffoldTier));
       // LARGE-PROJECT ROUTING (admin 2026-07-05: "badi apps direct Sonnet"): list the existing
       // project ONCE up-front (edit/import mode only — a fresh build has nothing to list). The
       // listing is REUSED further down for the edit-mode prompt, so this adds no extra sandbox
@@ -14712,13 +14711,12 @@ async function noteBuildOutcome(
           // behaviour, and can never delay or fail a build.
           // A port is estimated by the project it ports, as it is routed (autopsy 51ef24ad).
           const etaByProject = complexityDecision.source === 'workspace';
-          // …and a seeded template by the template (autopsy 303e8a6f): with no history for the 'scaffold' slice the
-          // estimate fell back to the chip's WORDING, as if the app were built from scratch.
+          // ⚠️ A seeded template is NOT re-sized here (adversarial review of 303e8a6f): one constant calibrated on two
+          // builds LOWERED seven unmeasured chips (wedding-rsvp 10.5 → 4 min) — the optimistic direction, which breaks
+          // the promise instead of arriving early. It learns from its own slice (split by tier) as builds finish.
           const etaComplexity = etaByProject
             ? projectSizedComplexity(complexityFromPrompt(planning.sizing), projectFilePaths)
-            : seededScaffold
-              ? templateSizedComplexity(complexityFromPrompt(planning.sizing), seededScaffold.tier)
-              : complexityFromPrompt(planning.sizing);
+            : complexityFromPrompt(planning.sizing);
           const past = await recentBuildHistoryFor(
             workspaceId, etaComplexity,
             (id, n) => listDiagnosticsHistory(id, n) as Promise<any>,
@@ -14732,9 +14730,10 @@ async function noteBuildOutcome(
           // routed it to the cheap rung picks the slice, so the ETA never prices template polish as a
           // from-scratch `complex_app`.
           // The key comes from `etaKeyForBuild` — the same function the telemetry writer files this build under.
-          const etaFleetKey = etaByProject ? 'complex_app' : (analysis?.taskType || etaKind) ? etaKeyForBuild(scaffoldWillSeed) : null;
+          const etaFleetKey = etaByProject ? 'complex_app' : (analysis?.taskType || etaKind) ? etaKeyForBuild(scaffoldWillSeed, seededScaffold?.tier ?? null) : null;
+          let fleetReadFailed = false;
           if (past.length === 0 && etaFleetKey) {
-            try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), etaFleetKey, etaComplexity); } catch { /* best-effort */ }
+            try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), etaFleetKey, etaComplexity); } catch { fleetReadFailed = true; /* best-effort — and said so */ }
           }
           const est = estimateBuildTime(etaComplexity, past.length > 0 ? past : fleet.history);
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
@@ -14768,13 +14767,11 @@ async function noteBuildOutcome(
           // show — see the tick below, which withholds the countdown until something real anchors it.
           etaEvidenced = estimateIsEvidenced(est);
           etaRoughBand = etaEvidenced ? null : roughEstimateBand(est);
-          // Sized by the template only where no real history taught it — then the label names the template.
-          etaFromTemplate = seededScaffold?.tier === 'simple' && past.length === 0 && fleet.history.length === 0;
           etaRoughHighMs = etaRoughBand ? Number(est.highMs) || null : null;
           etaPromisedHighMs = etaEvidenced || etaRoughBand ? Number(est.highMs) || 0 : 0;
           const etaShown = etaEvidenced
             ? (past.length === 0 && fleet.history.length > 0 ? fleetEtaLine(est, fleet.builds) : firstEtaLine(est, past.length))
-            : unevidencedFirstEtaLine(est, { fromTemplate: etaFromTemplate });
+            : unevidencedFirstEtaLine(est);
           // KEEP THE PROMISE SO THE ENDING CAN BE MEASURED AGAINST IT (open root cause #6). The
           // `ETA_BASIS` line below records the same numbers as PROSE, for a human; this records them
           // as NUMBERS, so the report can reconcile them against its own clock without anyone parsing
@@ -14786,7 +14783,7 @@ async function noteBuildOutcome(
           const etaBasis = etaSource === 'platform' && etaFleetKey
             ? fleetEtaBasisNote(etaFleetKey, fleet.builds, fleet.days)
             : etaSource === 'heuristic' && etaFleetKey
-              ? fleetEmptyBasisNote(etaFleetKey, fleet.seenOk, fleet.daysRead)
+              ? fleetEmptyBasisNote(etaFleetKey, fleet.seenOk, fleet.daysRead, { readFailed: fleetReadFailed })
               : etaBasisNote(past);
           buildDiag.setEtaPromise({
             estimateMs: est.estimateMs, lowMs: est.lowMs, highMs: est.highMs,
@@ -14796,7 +14793,7 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: `${etaBasis}${etaFromTemplate ? ' Sized by the seeded template, not by the request\'s wording.' : ''} ${etaEvidenceNote(est, etaSource === 'platform' ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
+            detail: `${etaBasis} ${etaEvidenceNote(est, etaSource === 'platform' ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -18016,6 +18013,8 @@ async function noteBuildOutcome(
       // template). Best-effort: any failure just falls through to a normal from-scratch build. Kill switch
       // AGENTV3_GOLDEN_SCAFFOLD=off.
       let goldenPreseeded = false;
+      /** The seeded template's tier — files the build under its tier's ETA slice (see SCAFFOLD_PRO_TASK_KEY). */
+      let goldenPreseededTier: 'simple' | 'pro' | null = null;
       /** Path → the exact content the platform's own template seeded. See the bill note below. */
       const preseededGolden = new Map<string, string>();
       for (const [pp, pc] of pastedSeed) preseededGolden.set(pp, pc); // the user's own pasted page — see pastedSeed
@@ -18078,6 +18077,7 @@ async function noteBuildOutcome(
                 for (const e of firstPaintEvents(Object.keys(goldenFiles))) events.emit(e);
               }
               goldenPreseeded = true;
+              goldenPreseededTier = golden.tier;
               buildDiag.record({ phase: 'build', severity: 'info', code: 'GOLDEN_SCAFFOLD', message: `Pre-seeded the tested "${golden.label}" template (${Object.keys(goldenFiles).length} files) — the builder verifies & customizes instead of writing from scratch.`, autoResolved: true });
               events.emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
               // HANDOFF FRAMING (same discipline as the fast-lane salvage below): the builder must treat the
@@ -26352,7 +26352,7 @@ async function noteBuildOutcome(
           // `complex_app` average is not pulled down by template polish (autopsy 4a1c0157). Filed through
           // the SAME function the opening ETA reads its slice with (build 46e2d74b): a game is filed as a
           // game, a routed-complex build as complex — never under a key the reader does not use.
-          taskType: etaKeyForBuild(goldenPreseeded),
+          taskType: etaKeyForBuild(goldenPreseeded, goldenPreseededTier),
           // Record the tier the build was actually DELIVERED on (after any P3 escalation),
           // so per-tier success rates reflect what really ran, not just the start tier.
           startTier: measuredTier,

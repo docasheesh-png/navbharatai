@@ -151,8 +151,7 @@ describe('WIRING — the live build path finally gets history', () => {
     // confident number that means nothing.
     // Sized from the whole request the builder reads (autopsy e725e002), not the bare message.
     // A port is sized by its project (autopsy 51ef24ad) — still from planning.sizing, still ONE object.
-    // A seeded template is sized by its template (autopsy 303e8a6f) — every branch still reads planning.sizing.
-    expect(route).toMatch(/const etaComplexity = etaByProject\s*\? projectSizedComplexity\(complexityFromPrompt\(planning\.sizing\), projectFilePaths\)\s*: seededScaffold\s*\? templateSizedComplexity\(complexityFromPrompt\(planning\.sizing\), seededScaffold\.tier\)\s*: complexityFromPrompt\(planning\.sizing\);/);
+    expect(route).toMatch(/const etaComplexity = etaByProject\s*\n?\s*\? projectSizedComplexity\(complexityFromPrompt\(planning\.sizing\), projectFilePaths\)\s*\n?\s*: complexityFromPrompt\(planning\.sizing\);/);
     expect(route).toMatch(/recentBuildHistoryFor\(\s*\n?\s*workspaceId, etaComplexity,/);
   });
 

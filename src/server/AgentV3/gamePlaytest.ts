@@ -213,6 +213,8 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     base: String(previewUrl ?? '').trim(),
     marker: PLAYTEST_RESULT_MARKER,
     loadMs: LOAD_MS,
+    // The "same picture" floor, so the script can tell when the accelerator probe saw nothing move (Q-865).
+    stillBelow: STILL_BELOW,
     noise: CONSOLE_NOISE.source,
     noiseFlags: CONSOLE_NOISE.flags,
     // The start-control shape (see `startLabelRank`) — the same regexes, handed to the browser as sources.
@@ -445,6 +447,21 @@ try {
     const g1 = await shot(page, box);
     out.gas = Math.round((await compare(page, g0, g1)).change * 100) / 100;
     for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.up(k).catch(() => {});
+    // A SECOND, LONGER LOOK BEFORE "THE CAR NEVER MOVES" (Q-865). Two working games read as stalled on the
+    // first hold: one still showing "Get ready…" (a countdown freezes the car on purpose), and a slow car under
+    // a fixed top-down camera (0.55 s of slow driving is the same picture). So when the first hold saw nothing
+    // move, wait past a countdown and hold again for 2 s, comparing the START of the hold with its END — a slow
+    // car still crosses the screen in that time. Only the stall verdict reads it, and only when both are still.
+    if (out.gas < cfg.stillBelow) {
+      await page.waitForTimeout(2500);
+      for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.down(k).catch(() => {});
+      await page.waitForTimeout(200);
+      const h0 = await shot(page, box);
+      await page.waitForTimeout(2000);
+      const h1 = await shot(page, box);
+      out.gasLate = Math.round((await compare(page, h0, h1)).change * 100) / 100;
+      for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.up(k).catch(() => {});
+    }
   });
   await step('left / A', () => hold(page, ['ArrowLeft', 'KeyA'], 500));
   await step('right / D', () => hold(page, ['ArrowRight', 'KeyD'], 500));
@@ -530,6 +547,8 @@ export interface PlaytestRun {
   touchSurface?: boolean;
   /** Picture change WHILE up/W stayed held (0.35 s → 0.9 s into the hold) — the accelerator probe. */
   gas?: number;
+  /** The second, longer accelerator look — taken only when the first saw nothing move (Q-865). */
+  gasLate?: number;
   errors?: string[];
   errorCount?: number;
 }
@@ -605,8 +624,12 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
   // the strictest reading there is, because the cost of a false "your car never moves" is a wrong fix
   // offered on a working game. A road with lane marks, kerbs or scenery changes far more than this the
   // moment it moves (measured: a thin-striped test road gave 0.22 moving and 0 stalled).
+  // Q-865: and the second, longer look — after any countdown, start of the hold against its end — saw nothing
+  // move either. Without that look there is no verdict: a countdown or a slow car under a fixed camera is a
+  // working game, and a false "your car never moves" offers a wrong fix.
   const stalledVehicle = replay.driving === true && typeof run.gas === 'number'
-    && idle < STILL_BELOW && run.gas < STILL_BELOW;
+    && idle < STILL_BELOW && run.gas < STILL_BELOW
+    && typeof run.gasLate === 'number' && run.gasLate < STILL_BELOW;
   // A driving game whose accelerator moves nothing cannot score as controllable, whatever else answered.
   const responds = Math.min(stalledVehicle ? 40 : 100,
     respondedTo.length >= 3 ? 100 : respondedTo.length === 2 ? 85 : respondedTo.length === 1 ? 65 : 0);

@@ -26,7 +26,7 @@ import {
 import { buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
 
 /** A racing game behind a title screen. `accelerates: false` is the 46e2d74b bug: the gas is read and never applied. */
-function racer(o: { accelerates: boolean; title?: 'start-race' | 'how-only' | 'two-screens' | 'div-start' }): string {
+function racer(o: { accelerates: boolean; title?: 'start-race' | 'how-only' | 'two-screens' | 'div-start'; countdownOnGas?: boolean; topSpeed?: number }): string {
   // 'two-screens': "Play" opens a car picker whose "Race!" is what finally shows the track.
   const title = o.title === 'how-only'
     ? '<button id="how">How to Play</button><button id="set">Settings</button>'
@@ -37,6 +37,10 @@ function racer(o: { accelerates: boolean; title?: 'start-race' | 'how-only' | 't
     : o.title === 'two-screens'
       ? '<button id="how">How to Play</button><button id="play" onclick="this.parentElement.innerHTML=\'<h2>Pick a car</h2><button>Red</button><button id=start>Race!</button>\'; document.getElementById(\'start\').onclick = () => { document.getElementById(\'title\').remove(); start(); }; window.__plays = (window.__plays || 0) + 1;">Play</button>'
       : '<button id="how">How to Play</button><button id="start" class="pulse">Start Race</button>';
+  // Q-865: the first press of the gas starts a 3 s 'Get ready' freeze; the car only moves after it.
+  const countdown = o.countdownOnGas
+    ? "if ((held.has('ArrowUp') || held.has('KeyW')) && readyUntil === 0) readyUntil = performance.now() + 3000; const ready = readyUntil === 0 || performance.now() < readyUntil;"
+    : 'const ready = false;';
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>.pulse{animation:p .5s infinite alternate}@keyframes p{from{transform:scale(1)}to{transform:scale(1.2)}}
 button{font-size:22px;margin:8px;padding:12px 24px}</style></head>
@@ -54,9 +58,10 @@ function start() {
   document.body.appendChild(c); const g = c.getContext('2d');
   const fit = () => { c.width = innerWidth; c.height = innerHeight; }; fit(); addEventListener('resize', fit);
   const held = new Set(); addEventListener('keydown', (e) => held.add(e.code)); addEventListener('keyup', (e) => held.delete(e.code));
-  let speed = 0, x = 0.5, offset = 0;
+  let speed = 0, x = 0.5, offset = 0, readyUntil = 0;
   function frame() {
-    if (held.has('ArrowUp') || held.has('KeyW')) { ${o.accelerates ? 'speed = Math.min(speed + 0.004, 0.06);' : '/* the gas is read and never applied */'} }
+    ${countdown}
+    if (!ready && (held.has('ArrowUp') || held.has('KeyW'))) { ${o.accelerates ? `speed = Math.min(speed + 0.004, ${o.topSpeed ?? 0.06});` : '/* the gas is read and never applied */'} }
     if (held.has('ArrowLeft') || held.has('KeyA')) x = Math.max(0.3, x - 0.01);
     if (held.has('ArrowRight') || held.has('KeyD')) x = Math.min(0.7, x + 0.01);
     offset = (offset + speed) % 0.25;
@@ -82,6 +87,9 @@ const PAGES: Record<string, string> = {
   '/no-start': racer({ accelerates: true, title: 'how-only' }),
   '/two-screens': racer({ accelerates: true, title: 'two-screens' }),
   '/div-start': racer({ accelerates: true, title: 'div-start' }),
+  // Q-865: two WORKING games the first look used to call stalled.
+  '/race-countdown': racer({ accelerates: true, countdownOnGas: true }),
+  '/race-slow': racer({ accelerates: true, topSpeed: 0.0012 }),
 };
 
 const PW = '/opt/node22/lib/node_modules/playwright/index.js';
@@ -132,6 +140,19 @@ describe.skipIf(!haveBrowser)('a racing game behind a "Start Race" title screen 
     // The same measurement on a game that is NOT a driving game is not judged by this probe.
     expect(playtestVerdict(run, { progress: true, restart: true }).score!.stalledVehicle).toBeUndefined();
     expect(buildFindingSuggestions([{ code: v.code, severity: v.severity, autoResolved: v.autoResolved, message: v.message }]).map((s) => s.title)).toContain('Make the game playable');
+  }, 180_000);
+
+  it('🔒 Q-865: a "Get ready" countdown on the first press of the gas is not a stalled car', async () => {
+    const run = await play('/race-countdown');
+    expect(run.ok).toBe(true);
+    expect(typeof run.gasLate).toBe('number');
+    expect(playtestVerdict(run, DRIVING).score?.stalledVehicle).toBeUndefined();
+  }, 180_000);
+
+  it('🔒 Q-865: a slow car is not a stalled car — the longer look sees it move', async () => {
+    const run = await play('/race-slow');
+    expect(run.ok).toBe(true);
+    expect(playtestVerdict(run, DRIVING).score?.stalledVehicle).toBeUndefined();
   }, 180_000);
 
   it('a title screen that leads to a second screen ("Play" → pick a car → "Race!") is followed to the track', async () => {
@@ -189,7 +210,7 @@ describe('the accelerator probe is precise (scorePlaytest)', () => {
   const base: PlaytestRun = { ok: true, spread: 30, idle: 0.05, fps: 60, longFrames: 0, moves: [{ label: 'up / W', change: 0.1 }, { label: 'left / A', change: 2 }, { label: 'right / D', change: 2 }, { label: 'mouse drag', change: 2 }], touchControls: 4, touchIdle: 0.1, touch: 3, errorCount: 0 };
 
   it('a driving game, still at idle and still under the accelerator, is a stalled vehicle — even when steering answered', () => {
-    const s = scorePlaytest({ ...base, gas: 0.08 }, DRIVING);
+    const s = scorePlaytest({ ...base, gas: 0.08, gasLate: 0.05 }, DRIVING);
     expect(s.stalledVehicle).toBe(true);
     expect(s.dimensions.responds).toBeLessThanOrEqual(40);
     // Without the probe this game scored as playable: left, right and a drag all answered.
@@ -200,6 +221,11 @@ describe('the accelerator probe is precise (scorePlaytest)', () => {
     expect(scorePlaytest({ ...base, idle: 3, gas: 3.2 }, DRIVING).stalledVehicle).toBeUndefined();
     expect(scorePlaytest({ ...base, gas: 4 }, DRIVING).stalledVehicle).toBeUndefined();
     expect(scorePlaytest({ ...base }, DRIVING).stalledVehicle).toBeUndefined();
+  });
+
+  it('🔒 Q-865: no stall verdict without the second, longer look — or when that look saw the car move', () => {
+    expect(scorePlaytest({ ...base, gas: 0.08 }, DRIVING).stalledVehicle).toBeUndefined();
+    expect(scorePlaytest({ ...base, gas: 0.08, gasLate: 0.9 }, DRIVING).stalledVehicle).toBeUndefined();
   });
 
   it('a driving game is read from its code: the kit\'s vehicle API, or a vehicle + a speed + an accelerator', () => {

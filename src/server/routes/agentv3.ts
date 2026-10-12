@@ -683,7 +683,7 @@ import { isUserStoppedBuild } from '../lib/buildFailureCategory';
 import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportSweep';
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
 import { ensureViteConfig } from '../AgentV3/ViteConfigGuard';
-import { ensureHtmlEntryScript } from '../AgentV3/HtmlEntryGuard';
+import { ensureHtmlEntryScript, appEntryHtmlKey } from '../AgentV3/HtmlEntryGuard';
 import { withoutPreviewBridge, hasPreviewBridge, injectPreviewBridge, withPreviewAiRelay } from '../AgentV3/previewBridge';
 import { applyVisualTextEdit, applyVisualStyleEdit, applyVisualStyleEdits } from '../AgentV3/VisualEditPatcher';
 import { runCheckpointDiff } from '../AgentV3/checkpointDiff';
@@ -26656,7 +26656,8 @@ async function noteBuildOutcome(
       try {
         if (result.ok && expectsArtifacts && (process.env.AGENTV3_HTML_ENTRY_GUARD ?? '').trim().toLowerCase() !== 'off') {
           const full = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
-          const htmlKey = Object.keys(full).find((k) => /(^|\/)index\.html$/i.test(k));
+          // The ROOT page only — a `dist/` or `public/` copy can sort first in the store's key order (heal census).
+          const htmlKey = appEntryHtmlKey(full);
           if (htmlKey) {
             const guarded = ensureHtmlEntryScript(full);
             if (guarded.injected && guarded.files[htmlKey] !== full[htmlKey]) {

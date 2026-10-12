@@ -167,7 +167,40 @@ describe('🧪 "No tests at all" stops being said once a suite has been written'
     const src = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
     const at = src.indexOf("code: 'E2E_SCAFFOLDED'");
     expect(at).toBeGreaterThan(-1);
-    const after = src.slice(at, at + 1400);
-    expect(after).toContain("resolveOnRecheck('READINESS_WARNING', { messageIncludes: 'No tests at all' })");
+    const after = src.slice(at, at + 1800);
+    // Since db07e0af: withdrawn, because `resolveOnRecheck` skips a warning born resolved (see the next block).
+    expect(after).toContain("buildDiag.retract('READINESS_WARNING', 'No tests at all',");
+    expect(after).not.toContain("resolveOnRecheck('READINESS_WARNING'");
+  });
+});
+
+describe('🧪 …through the REAL recorder (autopsy db07e0af — the fix above never fired in a build)', () => {
+  // The readiness gate's warnings reach the report through the runner's `done` event, recorded ALREADY
+  // resolved. The tests above record the warning by hand, unresolved, which is why they passed while every real
+  // report kept "No tests at all" beside E2E_SCAFFOLDED.
+  const viaDone = () => {
+    const d = new BuildDiagnostics('b', 'ws');
+    d.ingestEvent({ type: 'done', ok: true, summary: 'built', readiness: { blockers: [], warnings: ['1 component(s) created but never used: src/components/LoadingSpinner.tsx (LoadingSpinner)', 'No tests at all'] } } as never);
+    return d;
+  };
+  it('the real recorder records it resolved — which is why resolving it again changed nothing', () => {
+    const d = viaDone();
+    expect(d.report().issues.find((i) => i.message === 'No tests at all')?.autoResolved).toBe(true);
+    expect(d.resolveOnRecheck('READINESS_WARNING', { messageIncludes: 'No tests at all' })).toBe(0);
+    expect(d.report().problems.map((p) => p.message)).toContain('No tests at all');
+  });
+  it('withdrawn, it leaves the problems list and says why on the timeline', () => {
+    const d = viaDone();
+    expect(d.retract('READINESS_WARNING', 'No tests at all', 'an end-to-end suite was written (e2e/smoke.spec.ts)')).toBe(1);
+    const r = d.report();
+    expect(r.problems.map((p) => p.message)).not.toContain('No tests at all');
+    const kept = r.issues.find((i) => i.message === 'No tests at all');
+    expect(kept?.severity).toBe('info');
+    expect(kept?.detail).toContain('Withdrawn — an end-to-end suite was written');
+  });
+  it('the other readiness warning in the same build stands', () => {
+    const d = viaDone();
+    d.retract('READINESS_WARNING', 'No tests at all', 'x');
+    expect(d.report().problems.map((p) => p.message)).toContain('1 component(s) created but never used: src/components/LoadingSpinner.tsx (LoadingSpinner)');
   });
 });

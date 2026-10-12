@@ -158,7 +158,7 @@ import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
 import { ensureTsconfigBaseUrl } from './TsconfigGuard';
 import { applyFullStackGuards, dedupeSameModuleImports } from './FullStackGuards';
-import { duplicateModuleTarget } from './ProjectIntegrityChecks';
+import { duplicateModuleTarget, dedupeStylesheetImports, isAppWideStylesheet } from './ProjectIntegrityChecks';
 
 /**
  * Deterministic config backstops applied to EVERY file write (each no-ops for a non-matching path):
@@ -1154,9 +1154,11 @@ export class ToolDispatcher {
     }
     content = this.pinPackageJsonContent(rel, content, existingContent);
     content = this.dedupeImportsForSource(rel, content, opts.agent);
+    const sheetOnce = await this.dropEntryCoveredStylesheet(rel, content);
+    content = sheetOnce.content;
     const kitKeep = kind === 'modify' ? this.keepDesignKit(rel, content, existingContent) : { content, note: '' };
     content = kitKeep.content;
-    const kitNote = kitKeep.note;
+    const kitNote = kitKeep.note + sheetOnce.note;
     if (opts.allowOverwrite === false && kind === 'modify') {
       if (content !== existingContent) {
         refuse(`${rel} already exists — ${opts.source} will not replace it wholesale. Use edit_file, or pass overwrite: true if you really mean to replace it.`);
@@ -4022,6 +4024,39 @@ export class ToolDispatcher {
    * duplicate here so it is never born. Pure + safe (only drops a binding that already exists); emits an
    * honest narration when it fires. Source files only. Kill switch AGENTV3_DUP_IMPORT_GUARD=off.
    */
+  /**
+   * 🔁 A GLOBAL STYLESHEET IS IMPORTED ONCE, AT THE ENTRY — and that is settled AT THE WRITE (autopsy db07e0af).
+   * The architect's `src/App.tsx` imported `./index.css`, which the starter's `src/main.tsx` already imports. The
+   * second line is a no-op for a global sheet, and the end-of-build integrity pass removed it — AFTER the app had
+   * first rendered, as one of eleven post-green writes. The fix has exactly one right answer
+   * (`dedupeStylesheetImports`, autopsy 33812996), so it runs here, before the file lands, and the model is told.
+   * Only an app-wide sheet the entry already imports, only a side-effect import line, never the entry itself.
+   * Kill switch: AGENTV3_DUP_IMPORT_GUARD (the same as the duplicate-import guard above). Never throws.
+   */
+  private async dropEntryCoveredStylesheet(path: string, content: string): Promise<{ content: string; note: string }> {
+    const none = { content, note: '' };
+    try {
+      if (envKillSwitch('AGENTV3_DUP_IMPORT_GUARD')) return none;
+      if (!/\.(tsx?|jsx?)$/i.test(path) || !/import\s+['"][^'"]+\.css['"]/.test(content)) return none;
+      const entries = ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'src/index.jsx', 'main.tsx'];
+      if (entries.includes(path)) return none;
+      let entry: string | null = null;
+      let entryContent = '';
+      for (const p of entries) {
+        try { entryContent = await this.actuator.readFile(this.workspaceId, p); entry = p; break; } catch { /* next */ }
+      }
+      if (!entry) return none;
+      const out = dedupeStylesheetImports({ [entry]: entryContent, [path]: content });
+      const mine = out.removed.filter((r) => r.from === path && isAppWideStylesheet(r.stylesheet.replace(/^\.?\/+/, '')));
+      if (mine.length === 0 || typeof out.files[path] !== 'string') return none;
+      const sheets = mine.map((r) => `\`${r.stylesheet}\``).join(', ');
+      return {
+        content: out.files[path],
+        note: `\n🔧 Removed the import of ${sheets} from ${path} — ${entry} already imports it, and a global stylesheet applies once whoever imports it. Import global styles only in ${entry}.`,
+      };
+    } catch { return none; }
+  }
+
   private dedupeImportsForSource(path: string, content: string, agent: AgentRole): string {
     if (envKillSwitch('AGENTV3_DUP_IMPORT_GUARD')) return content;
     if (!/\.(tsx?|jsx?|mjs|cjs)$/i.test(path || '')) return content;

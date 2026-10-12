@@ -21748,7 +21748,9 @@ async function noteBuildOutcome(
               // Playwright suite 17 seconds later — two codes in one build contradicting, with
               // TEST_SUITE_UNVERIFIED stating the honest end state in the same report. Cleared by its own
               // sentence, never by its code: READINESS_WARNING carries many unrelated facts.
-              buildDiag.resolveOnRecheck('READINESS_WARNING', { messageIncludes: 'No tests at all' });
+              // 🔴 …and `resolveOnRecheck` did nothing here, ever (autopsy db07e0af): readiness warnings are recorded
+              // already resolved, so it skipped them. The sentence is FALSE now, so it is withdrawn, not "resolved".
+              buildDiag.retract('READINESS_WARNING', 'No tests at all', `an end-to-end suite was written into the project afterwards (${added.join(', ')})`);
             }
           } else if (decision.reason) {
             // Recorded even when nothing was written: a silent skip cannot be told from a broken skip.

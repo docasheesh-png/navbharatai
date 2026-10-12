@@ -658,7 +658,13 @@ export function contractSystemPrompt(framework: string): string {
     '',
     'OUTPUT: a single TypeScript code block (no prose, no fences) that declares EVERY cross-file',
     'symbol the app shares, so producers and consumers agree by construction. Include, as applicable:',
-    '  • Every ENUM with its EXACT member names (decide casing ONCE — e.g. `enum MediaType { YouTube, Vimeo }`).',
+    // 🧬 NO ENUM AT ALL (autopsy db07e0af, after f496c75b, 6cd698cc and 120eb52f). An enum is a type AND a value,
+    // and every file that writes `import type { FilterType }` from a module of types breaks it: TS1361, healed at
+    // write time in four builds. Rule and fixer treated the import; this removes the condition. A union is a type
+    // everywhere, so `import type` is always right, and the value is just the string.
+    '  • Every fixed set of options as a string-literal UNION TYPE with its EXACT values, never an `enum`',
+    "    (e.g. `export type MediaType = 'youtube' | 'vimeo';` — decide the spelling ONCE). An ENUM is FORBIDDEN here:",
+    '    it is a value, and a file that imports it with `import type` fails to compile.',
     '  • Every shared TYPE / INTERFACE used by more than one file (e.g. `interface PlayerState { … }`).',
     '  • The EXACT signature of every shared util/helper (e.g. `export function extractEmbedUrl(url: string): string`).',
     // Autopsy 6ae30b33: `data.ts` exported `MOCK_GK_QUESTIONS` while both hooks, written at the same
@@ -689,7 +695,7 @@ export function contractUserPrompt(prompt: string, manifest: SimpleFileSpec[]): 
     '',
     `The complete file list:\n${fileList}`,
     '',
-    'Design the shared contract (enums, shared types/interfaces, util signatures, and EACH',
+    'Design the shared contract (option sets as union types — no enums — shared types/interfaces, util signatures, and EACH',
     "component's props interface) now. Output only the TypeScript declarations.",
   ].join('\n');
 }

@@ -59,7 +59,7 @@ describe('what it changes', () => {
 describe('🔒 the wiring', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
   it('the build prompt gets the rule, and the summary gets the line, from the same reading of the request', () => {
-    expect(route).toContain('if (keypadPhone) buildPrompt = `${nonSmartphoneBuildRule(keypadPhone.device)}');
+    expect(route).toContain('if (keypadPhoneForBuild) buildPrompt = `${nonSmartphoneBuildRule(keypadPhoneForBuild.device)}');
     expect(route).toContain('summary: `${result.summary}${nonSmartphoneUserLine(keypadPhone.device)}`');
     expect(route).toContain("code: 'NON_SMARTPHONE_TOLD'");
   });

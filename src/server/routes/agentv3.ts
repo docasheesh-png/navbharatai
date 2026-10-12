@@ -17052,10 +17052,9 @@ async function noteBuildOutcome(
       // '' (coherent, or flag off) leaves buildPrompt unchanged.
       if (frameworkCoherenceMsg) buildPrompt = `${frameworkCoherenceMsg}\n\n---\n\n${buildPrompt}`;
       // A KEYPAD PHONE THE USER NAMED (Q-846): the builder is told before it writes, so what it builds fits the keys.
-      try {
-        const keypadPhone = !isImportTurn ? namedNonSmartphone(prompt) : null;
-        if (keypadPhone) buildPrompt = `${nonSmartphoneBuildRule(keypadPhone.device)}\n\n---\n\n${buildPrompt}`;
-      } catch { /* a device note must never break a build */ }
+      // Pure (deviceTarget.ts never throws), so no best-effort wrapper — like the notes below.
+      const keypadPhoneForBuild = !isImportTurn ? namedNonSmartphone(prompt) : null;
+      if (keypadPhoneForBuild) buildPrompt = `${nonSmartphoneBuildRule(keypadPhoneForBuild.device)}\n\n---\n\n${buildPrompt}`;
       // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built
       // in React with a types file claiming a "PHP MVC backend"). Told to the builder here, to the user
       // in the ready message — see unsupportedStack.ts.

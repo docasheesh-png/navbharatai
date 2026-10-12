@@ -94148,3 +94148,17 @@ readers + a critic, fixed in three worktree-isolated groups, each adversarially 
   - `REVIEWER_AUTOFIX_INCOMPLETE`: the reviewer auto-fix retries after a thrown first attempt. When the retry completed, its "Auto-fixed" line sat beside the open "did NOT complete — may still be present" warning. A completed pass now answers it. What is really left is for the Q-157 second review to say.
   - `SERVERLESS_PAYMENT_NOT_SET_UP`: a later setup that worked did not answer the earlier failure. The message now names the table, and a success answers that table only. This matters because batch three gave this code a button.
 - **Tests:** `tests/aDefectTheUserIsShownHasAButton.test.ts` gained two blocks. Each was reverted and seen to fail. The backlog stays at 14: neither code changed home.
+
+### 2026-10-12 — #3677 merged (autopsy 46e2d74b); 26 queue rows closed
+
+- **#3677 merged** on the admin's word ("merge karo"). The final head had `main` (#3676) merged in and was re-gated on that state: vitest 36931 passed / 1 skipped / 0 failed; typecheck, noUnusedImports, native:guard, typecheck:server, build, test:bundle, boot:check and deps:server-gate all rc=0. CI was green.
+- **Closed (✅):** Q-830..Q-841 except Q-842 and Q-843, plus Q-844 and Q-847..Q-859. That is 26 rows, removed from the open table and appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`. The ledger stays in the 2026-10-11 entry above.
+- **What to watch on the next real game build:**
+  - `GAME_KIT_SEEDED` appears before the first model call;
+  - the player's car is seen from behind;
+  - LEFT turns it left on screen;
+  - the playtest presses the Start button and is not reported as `GAME_PLAYTEST_NOT_RUN`;
+  - a `[BROKEN / …]` reviewer tag is counted.
+- **Still open from this autopsy (NOT COMPLETE):**
+  - 🟡 waiting on the admin: Q-842, Q-845 (money), Q-846 and Q-860;
+  - OPEN: Q-843, Q-861, Q-862, Q-863, Q-864 and Q-865.

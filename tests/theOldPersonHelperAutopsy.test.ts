@@ -225,7 +225,12 @@ describe('🔴 the timer never says "bigger than expected" inside the band it pr
 
   it('the route passes the band it showed', () => {
     const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
-    expect(route).toContain('liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions, etaPromisedHighMs)');
+    // UPDATED DELIBERATELY (autopsy 9c612cdb): the tick's decision moved out of the route into the pure
+    // `etaTickLine` (progressEta.ts), so the band reaches `liveEtaTick` in two hops — the route hands it
+    // to `etaTickLine`, which hands it on. Both hops are asserted.
+    expect(route).toContain('totalMs: etaTotalMs, baseMs: etaBaseMs, revisions: etaRevisions, promisedHighMs: etaPromisedHighMs');
+    const eta = readFileSync(join(process.cwd(), 'src/server/AgentV3/progressEta.ts'), 'utf8');
+    expect(eta).toContain('liveEtaTick(elapsedMs, s.totalMs, s.baseMs || s.totalMs, s.revisions, s.promisedHighMs)');
     expect(route).toContain('etaPromisedHighMs = etaEvidenced || etaRoughBand ? Number(est.highMs) || 0 : 0;');
   });
 });

@@ -44,8 +44,8 @@ import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAutho
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
-import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange, fleetEtaLine, finalChecksEtaLine } from '../AgentV3/progressEta';
-import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
+import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine } from '../AgentV3/progressEta';
+import { estimateIsEvidenced, unevidencedFirstEtaLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity } from '../AgentV3/complexityRouting';
 import { isPortTurn, collectPortSources, portDigest, foreignSourcePaths } from '../AgentV3/portDigest';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
@@ -466,7 +466,7 @@ import { abortOutcomeFor, ABORT_OUTCOME_CODES } from '../AgentV3/abortOutcome';
 import { sandboxWasUnavailable } from '../AgentV3/sandboxAvailability';
 import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser, buildWasStopped } from '../AgentV3/BuildDiagnostics';
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
-import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity, liveEtaTick } from '../lib/BuildTimeEstimator';
+import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { freeBuildWindow, noteFreeBuildStartDurable, decideFreePauseDurable, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
 import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
@@ -13488,16 +13488,27 @@ async function noteBuildOutcome(
     // user read the prompt-word guess. These three fields carry the architect's OWN plan instead — its
     // length, how many steps are done, and when the first one landed. See progressEta.ts.
     let etaPlannedSteps = 0;
+    // Every plan-step WRITE. ⚠️ Not the ETA's step count any more (autopsy 9c612cdb): it is one of the
+    // futility breaker's three progress signals, and a build busy repairing one file must keep moving it.
     let etaStepsDone = 0;
+    /**
+     * The ETA's OWN step count: the DISTINCT paths written against the plan (autopsy 9c612cdb). Two repair
+     * edits of `src/hooks/useVideoList.ts` five seconds apart counted as two plan steps, so the minute-2
+     * line read "3 of 5 steps done · ~2 min to go" with 5.6 minutes left. A rewrite is repair, not plan
+     * progress. Only the ETA reads this — the plan ticks (PlanProgress) and the futility breaker keep the
+     * write count they have always had.
+     */
+    const etaStepPaths = new Set<string>();
     let etaFirstStepAt = 0;
     /**
      * Record the architect's plan and its progress. Both counters only ever GROW, for the same reason
      * `noteEtaPlannedFiles` does: a plan the model extends mid-build supersedes the shorter one, and a
      * transient shorter snapshot must never walk the measurement backwards.
      */
-    const noteEtaPlanStep = (planLength: number, stepsDone: number): void => {
+    const noteEtaPlanStep = (planLength: number, stepsDone: number, path?: string): void => {
       if (Number.isFinite(planLength) && planLength > etaPlannedSteps) etaPlannedSteps = Math.floor(planLength);
       if (Number.isFinite(stepsDone) && stepsDone > etaStepsDone) etaStepsDone = Math.floor(stepsDone);
+      if (path) etaStepPaths.add(path);
       if (etaFirstStepAt === 0) etaFirstStepAt = Date.now();
     };
     /**
@@ -13512,8 +13523,30 @@ async function noteBuildOutcome(
      * The build loop is over and only the platform's own checks and fixes remain (autopsy de3bb2bb: at
      * minute 12 the line promised "about 7 min more" — the build ended 34 seconds later, inside its final
      * checks). Set at the post-answer pass; the ETA tick then says where the build IS, with no number.
+     * 🔴 And, since autopsy 9c612cdb, also the moment the runner's final result settles: the integrity
+     * pass starts later still, and a tick that fell between the two promised "about 3 min more".
      */
     let etaFinalChecks = false;
+    /**
+     * Epoch ms the app was first PROVEN rendered in a real browser and saved as the working version (the
+     * in-build green). 0 until then. Hoisted here, beside `etaFinalChecks`, because the green's own
+     * `inBuildGreenAt` is block-scoped where the heartbeat cannot see it (autopsy 9c612cdb: rendered at
+     * 350.0 s; the 361.4 s tick still said "about 3 min more to go").
+     */
+    let etaAppRenderedAt = 0;
+    /**
+     * Say the build's PHASE the moment it changes, not at the next even minute (autopsy 9c612cdb): the
+     * heartbeat ticks every two minutes, so a phase line left to it can arrive two minutes late. Only when
+     * the live ETA is running, nobody is being asked a question, and the line would actually change.
+     */
+    const emitEtaPhaseNow = (): void => {
+      try {
+        if (!(etaTotalMs > 0 && etaStartMs > 0) || userWait.since !== null) return;
+        const now = Date.now();
+        const line = etaPhaseLine({ elapsedMs: now - etaStartMs, finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt });
+        if (line && line !== lastEtaShown) events.emit({ type: 'narration', agent: 'architect', text: line, ts: now, id: 'eta-live' });
+      } catch { /* the live line is best-effort — it must never affect a build */ }
+    };
     const emitSettlingPhase = (): void => {
       if (settlingAnnounced) return;
       settlingAnnounced = true;
@@ -13622,76 +13655,33 @@ async function noteBuildOutcome(
         try {
           const now = Date.now();
           const elapsedMs = now - etaStartMs;
-          // MEASUREMENT FIRST (2026-08-23). Once the plan's size is known and enough files have landed
-          // to average, the remaining time is extrapolated from THIS build's own observed pace — on this
-          // provider chain, at this tier, under whatever rate limiting is happening right now. It needs
-          // no calibration constant, so it cannot be wrong about a model nobody benchmarked, and it
-          // fixes the 6x miss at its cause rather than re-tuning the prompt heuristic that produced it.
-          //
-          // It returns null in every case where it would be guessing — no plan, too few files, or the
-          // file phase already over (a repair loop is genuinely unpredictable) — and the honest
-          // re-baselining fallback below then owns the line exactly as it does today.
-          if (etaFinalChecks) {
-            events.emit({ type: 'narration', agent: 'architect', text: finalChecksEtaLine(elapsedMs), ts: now, id: 'eta-live' });
-            return;
-          }
+          // 🔴 THE DECISION IS ONE PURE FUNCTION (`etaTickLine`, progressEta.ts — autopsy 9c612cdb). It
+          // used to be written out here, decided from time budgets alone, and it told a user "about 3 min
+          // more to go" 11 s after their app had rendered. The order — phase first, then measurement,
+          // then the evidence gate, then the budget — is now the function's contract and is tested by
+          // executing it, not by reading this file. This block only gathers the facts and carries the
+          // state forward.
+          // Files done = what was written MINUS what the platform laid down itself (the game-kit seed,
+          // build 46e2d74b): our kit is not progress on the builder's plan.
           const etaFilesDone = Math.max(0, writtenFiles.size - etaPlatformSeededFiles);
-          const measured = measuredRemainingMs({ plannedFiles: etaPlannedFiles, filesDone: etaFilesDone, firstFileAt: etaFirstFileAt, now });
-          if (measured !== null) {
-            // Re-anchor the fallback's budget too, so if measurement later stops applying (the build
-            // enters repair) liveEtaTick continues from the measured total rather than from the stale
-            // prompt guess it was still carrying.
-            etaTotalMs = elapsedMs + measured;
-            // A MEASUREMENT IS EVIDENCE. From here the budget is anchored to this build's own observed
-            // pace, so if measurement later stops applying (the build enters repair) liveEtaTick may
-            // honestly own the line again — it would be continuing from something real rather than
-            // from the prompt guess it was still carrying.
-            etaEvidenced = true;
-            events.emit({ type: 'narration', agent: 'architect', text: measuredEtaText(elapsedMs, measured, etaFilesDone, etaPlannedFiles), ts: now, id: 'eta-live' });
-            return;
-          }
-          // THEN THE PLAN, which is the full builder's only honest measurement (autopsy d11ad529).
-          // Second rather than first on purpose: a file manifest is an exact count of what will be
-          // written, while a plan step is a unit of the architect's own choosing — so where both
-          // exist the file count is the better evidence and keeps today's behaviour exactly.
-          const byStep = measuredRemainingFromSteps({ plannedSteps: etaPlannedSteps, stepsDone: etaStepsDone, firstStepAt: etaFirstStepAt, now });
-          if (byStep !== null) {
-            // Re-anchor the fallback's budget for the same reason the file branch does: if the plan
-            // later saturates, liveEtaTick continues from something measured rather than from the
-            // prompt guess it would otherwise still be carrying.
-            etaTotalMs = elapsedMs + byStep;
-            // A PLAN MEASUREMENT IS EVIDENCE TOO (merge of #2932 and #2934, 2026-09-14). The file
-            // branch above flips this flag for exactly the reason stated there — once a real
-            // measurement has anchored the budget, `liveEtaTick` may honestly own the line again if
-            // measurement later stops applying (the build enters repair). Leaving it unset here
-            // would silently suppress the countdown for the whole rest of a build we HAD measured,
-            // and it would fail nothing — which is the class both PRs warned about.
-            etaEvidenced = true;
-            events.emit({ type: 'narration', agent: 'architect', text: stepEtaText(elapsedMs, byStep, etaStepsDone, etaPlannedSteps), ts: now, id: 'eta-live' });
-            return;
-          }
-          // RE-BASELINING tick (autopsy 2026-08-02): liveEtaTick returns the line AND an extended budget
-          // when the build overruns, so an over-estimate build keeps showing a fresh, honest number
-          // instead of freezing on one "wrapping up (a little longer than estimated)" line for 20+ min.
-          // 🔴 NO EVIDENCE ⇒ NO COUNTDOWN. Without this the fix above would have been half a fix: the
-          // opening number was withheld, and two minutes later this line counted down from the very
-          // estimate we declined to show ("~53s to go" on a build with eight minutes left, autopsy
-          // d11ad529). Elapsed time is still reported — it has already happened, so it promises
-          // nothing — and the moment a real measurement lands the branch above takes over.
-          if (!etaEvidenced) {
-            events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs), ts: now, id: 'eta-live' });
-            return;
-          }
-          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions, etaPromisedHighMs);
-          etaTotalMs = tick.totalMs;
-          // Carry the revision count forward: it is what stops the countdown resuming its "~1 min to
-          // go" promise after the estimate has already been broken (mitrify autopsy 2026-08-04).
-          etaRevisions = tick.revisions;
-          const text = tick.text;
+          const decision = etaTickLine({
+            elapsedMs, now,
+            finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt,
+            plannedFiles: etaPlannedFiles, filesDone: etaFilesDone, firstFileAt: etaFirstFileAt,
+            plannedSteps: etaPlannedSteps, stepsDone: etaStepPaths.size, firstStepAt: etaFirstStepAt,
+            evidenced: etaEvidenced, budgetMs: effectiveBuildSeconds * 1000,
+            roughBand: etaRoughBand, roughHighMs: etaRoughHighMs,
+            totalMs: etaTotalMs, baseMs: etaBaseMs, revisions: etaRevisions, promisedHighMs: etaPromisedHighMs,
+          });
+          // Carry the state: a measurement re-anchors the budget and counts as evidence; an overrun
+          // extends the budget and counts a broken promise (which stops later "~1 min to go" promises).
+          etaTotalMs = decision.totalMs;
+          etaRevisions = decision.revisions;
+          etaEvidenced = decision.evidenced;
           // STABLE id so each ETA tick REPLACES the previous line (the reducer dedupes narration by id)
           // instead of stacking a new "Still building…" bubble every 2 min — and so the client can drop
           // this ONE transient line the moment the build finishes (it is live status, not chat history).
-          events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now(), id: 'eta-live' });
+          events.emit({ type: 'narration', agent: 'architect', text: decision.text, ts: now, id: 'eta-live' });
         } catch { /* ETA is best-effort — never affects the build */ }
       }
     }, 60_000);
@@ -15810,8 +15800,9 @@ async function noteBuildOutcome(
             state.setTodos(computePlanProgress(cur, planSteps, false));
             // THE ETA'S ONLY REAL FACT ON THIS PATH. The line above already turns this same counter
             // into the ticks the user watches; handing it to the ETA as well is what lets the
-            // heartbeat measure instead of guess on a build that never planned a file list.
-            noteEtaPlanStep(cur.length, planSteps);
+            // heartbeat measure instead of guess on a build that never planned a file list. The path
+            // goes with it: the ETA counts a file once, however many times it is repaired (9c612cdb).
+            noteEtaPlanStep(cur.length, planSteps, path);
           }
         } catch { /* plan progress is best-effort — never affects the build */ }
         const flushFilesDurably = () => {
@@ -15937,7 +15928,9 @@ async function noteBuildOutcome(
               const st = await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files, { mode: 'replace' });
               if (st === 'saved') {
                 inBuildGreenAt = Date.now();
+                etaAppRenderedAt = inBuildGreenAt; // the ETA stops counting down to an app already on screen (9c612cdb)
                 events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
+                emitEtaPhaseNow();
               } else {
                 try {
                   buildDiag.record({
@@ -19405,10 +19398,18 @@ async function noteBuildOutcome(
       // rather than merely say so — and nobody has it today.
       // It is read from the FINAL `result`, after the empty-build retry (autopsy 0473628e): before the retry it
       // described the ABANDONED first attempt ("never judged finished") on a build whose retry finished and shipped.
+      // 🔴 THE END IS A MOMENT, NOT AN ELAPSED TIME (autopsy 9c612cdb). The mark is an epoch (`ReadyMark.at`);
+      // this passed `Date.now() - buildStartedAt` against a mark measured from the RUNNER's start, and so
+      // counted the preparation and the fast lane as overrun — "105s" where the truth was 39 s.
+      // The builder's loop is over here, so the live ETA stops promising minutes now — the integrity pass,
+      // where this used to be set first, starts later (9c612cdb: a tick fell in between). The line is
+      // announced at once only over an app that exists: a stopped or empty build is never told "your app is built".
+      etaFinalChecks = true;
+      if (!abort.signal.aborted && builderWroteCount() > 0) emitEtaPhaseNow();
       try {
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
-          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode, projectModule: projectModuleRef?.name ?? null }),
+          message: readyOverrunNote(result.readyAt, result.steps, Date.now(), { editingExistingApp: isEditMode, projectModule: projectModuleRef?.name ?? null }),
           autoResolved: true,
         });
       } catch { /* an advisory line must never affect a build */ }

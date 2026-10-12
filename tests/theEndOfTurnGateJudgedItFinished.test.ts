@@ -9,19 +9,23 @@ import type { ReadinessReport } from '../src/server/AgentV3/Readiness';
 const report = (over: Partial<ReadinessReport> = {}): ReadinessReport => ({
   score: 95, ready: true, blockers: [], warnings: [], tier: 'production', ...over,
 });
-const base = { existing: null, readiness: report(), typeErrors: 0, editingExistingApp: false, wroteThisRun: true, step: 9, elapsedMs: 120_000 };
+// UPDATED DELIBERATELY (autopsy 9c612cdb): the mark carries the EPOCH of the judgement (`at`), not an
+// elapsed time on the runner's own clock, and the note reads it against the END epoch — two moments,
+// so no lane-local origin can enter the subtraction.
+const T0 = 1_791_819_048_064;
+const base = { existing: null, readiness: report(), typeErrors: 0, editingExistingApp: false, wroteThisRun: true, step: 9, at: T0 + 120_000 };
 
 describe('the end-of-turn gate records when the app was first finished', () => {
   it('the report\'s build: judged ready at the end, so the note says so', () => {
     const mark = endOfTurnReadyMark(base);
-    expect(mark).toEqual({ step: 9, elapsedMs: 120_000, score: 95 });
-    const note = readyOverrunNote(mark, 9, 120_000);
+    expect(mark).toEqual({ step: 9, at: T0 + 120_000, score: 95 });
+    const note = readyOverrunNote(mark, 9, T0 + 120_000);
     expect(note).toContain('judged finished at step 9');
     expect(note).not.toContain('never judged finished');
   });
 
   it('an earlier mid-build mark is kept (it measures the FIRST time)', () => {
-    const earlier = { step: 5, elapsedMs: 60_000, score: 90 };
+    const earlier = { step: 5, at: T0 + 60_000, score: 90 };
     expect(endOfTurnReadyMark({ ...base, existing: earlier })).toBe(earlier);
   });
 

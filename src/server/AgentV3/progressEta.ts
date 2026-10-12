@@ -29,8 +29,13 @@
 //
 // PURE — no clock, no I/O. Every input is passed in.
 
-import { formatEta } from '../lib/BuildTimeEstimator';
+import { formatEta, formatEtaRange, liveEtaTick } from '../lib/BuildTimeEstimator';
 import type { BuildEstimate } from '../lib/BuildTimeEstimator';
+import { unevidencedEtaTickLine, ROUGH_ESTIMATE_LABEL } from './etaEvidence';
+
+// Moved to BuildTimeEstimator.ts (autopsy 9c612cdb — see its note there); re-exported so every caller
+// that imports it from here keeps working.
+export { formatEtaRange };
 
 /**
  * How many files must be finished before extrapolating.
@@ -200,6 +205,139 @@ export function finalChecksEtaLine(elapsedMs: number): string {
   return `⏱️ Almost done… ${inTxt} in · your app is built — running the final checks.`;
 }
 
+/**
+ * The line once the app has been PROVEN running in a real browser (the in-build green), while the build
+ * is still going. No number: the app is on the user's screen, so the one thing a countdown could add is
+ * a guess about how long the finishing takes (autopsy 9c612cdb — "about 3 min more to go" 11 s after the
+ * app had rendered and been protected). True whether the green fires at the end or mid-build. PURE.
+ */
+export function appRunningEtaLine(elapsedMs: number): string {
+  const inTxt = formatEta(Math.max(0, elapsedMs)).replace('~', '');
+  return `⏱️ ${inTxt} in · your app is already running in the preview — I'm finishing it`;
+}
+
+/**
+ * The phase line a build is in RIGHT NOW, or null when no phase outranks the budget arithmetic. The
+ * route also calls this at the moment a phase begins, so the line changes at the transition rather than
+ * at the next even minute. PURE.
+ */
+export function etaPhaseLine(p: { elapsedMs: number; finalChecks: boolean; appRenderedAt: number }): string | null {
+  if (p.finalChecks) return finalChecksEtaLine(p.elapsedMs);
+  if (Number(p.appRenderedAt) > 0) return appRunningEtaLine(p.elapsedMs);
+  return null;
+}
+
+/**
+ * 🔴 THE LIVE ETA LINE IS DECIDED HERE, AND ONLY HERE (autopsy 9c612cdb, 2026-10-12).
+ *
+ * The decision used to live inline in a 27,000-line route, guarded only by source-position tests, and
+ * it decided from TIME BUDGETS ALONE: a prompt-word guess, a write-cadence pace and a fixed tail. It
+ * consulted one phase flag, set when the integrity pass started. So the minute-6 tick of that build fell
+ * 11 s AFTER the app had rendered and been protected, and told the user "about 3 min more to go" — the
+ * build ended 96 s later — and its minute-4 tick counted down to the top of a rough GUESS with no label
+ * ("~2 min to go"). Four earlier autopsies each patched one branch of this decision (d382b398's wording,
+ * Q-030's promised band, de3bb2bb's final-checks line, d11ad529's plan measurement); none could see the
+ * whole order, because the order was scattered through a closure no test could execute.
+ *
+ * THE ORDER IS THE RULE, and every branch is a fact before it is a number:
+ *   1. final checks — the builder's loop is over; only the platform's checks remain. No number.
+ *   2. app rendered — the app is visibly running in the preview. No number. Outranks the measurements:
+ *      a measured countdown after the app is on screen would be counting down to something the user
+ *      already has.
+ *   3. measured from files, then from plan steps — the build's own observed pace.
+ *   4. unevidenced — nothing measured yet: elapsed time, the build's own limit, the labelled rough band.
+ *   5. the budget countdown (`liveEtaTick`) — and when its target is the top of a ROUGH band, the line
+ *      says it is a guess; past that top, it says the guess was too low (etaEvidence.ts's sentence),
+ *      never the overrun floor.
+ *
+ * Returns the line and the state the caller carries to the next tick. PURE — every input passed in.
+ */
+export interface EtaTickState {
+  /** Build time already spent (the caller's clock, wait-adjusted). Shown as "N min in". */
+  elapsedMs: number;
+  /** Epoch ms now — the measurements extrapolate from it. */
+  now: number;
+  /** The builder's loop is over and only the platform's final checks remain. */
+  finalChecks: boolean;
+  /** Epoch ms the app was first PROVEN rendered in a real browser this build; 0 = not yet. */
+  appRenderedAt: number;
+  plannedFiles: number;
+  filesDone: number;
+  firstFileAt: number;
+  plannedSteps: number;
+  /** DISTINCT paths written against the plan — a rewrite of one file is repair, not a new step. */
+  stepsDone: number;
+  firstStepAt: number;
+  /** Is there evidence behind a number (real history up front, or a measurement since)? */
+  evidenced: boolean;
+  /** The build's own configured time limit, ms; 0 = no cap. */
+  budgetMs: number;
+  /** The labelled rough band the user was first shown (`~4–6 min`), or null when the first figure was evidenced. */
+  roughBand: string | null;
+  roughHighMs: number | null;
+  /** The budget carried between ticks, the original estimate, broken promises so far, and the band's top. */
+  totalMs: number;
+  baseMs: number;
+  revisions: number;
+  promisedHighMs: number;
+}
+
+export interface EtaTickDecision {
+  text: string;
+  kind: 'final-checks' | 'app-running' | 'measured-files' | 'measured-steps' | 'unevidenced' | 'rough-countdown' | 'rough-outrun' | 'budget';
+  /** State to carry into the next tick. */
+  totalMs: number;
+  revisions: number;
+  evidenced: boolean;
+}
+
+export function etaTickLine(s: EtaTickState): EtaTickDecision {
+  const elapsedMs = Math.max(0, Number(s.elapsedMs) || 0);
+  const keep = { totalMs: s.totalMs, revisions: s.revisions, evidenced: s.evidenced };
+  const phase = etaPhaseLine({ elapsedMs, finalChecks: s.finalChecks, appRenderedAt: s.appRenderedAt });
+  if (phase !== null) return { text: phase, kind: s.finalChecks ? 'final-checks' : 'app-running', ...keep };
+
+  const measured = measuredRemainingMs({ plannedFiles: s.plannedFiles, filesDone: s.filesDone, firstFileAt: s.firstFileAt, now: s.now });
+  if (measured !== null) {
+    // A MEASUREMENT IS EVIDENCE, and it re-anchors the budget: if measurement later stops applying (the
+    // build enters repair) the countdown continues from this build's own pace, not from the prompt guess.
+    return { text: measuredEtaText(elapsedMs, measured, s.filesDone, s.plannedFiles), kind: 'measured-files', totalMs: elapsedMs + measured, revisions: s.revisions, evidenced: true };
+  }
+  // The plan second: a file manifest is an exact count of what will be written, a plan step is a unit
+  // of the architect's own choosing — where both exist the file count is the better evidence.
+  const byStep = measuredRemainingFromSteps({ plannedSteps: s.plannedSteps, stepsDone: s.stepsDone, firstStepAt: s.firstStepAt, now: s.now });
+  if (byStep !== null) {
+    return { text: stepEtaText(elapsedMs, byStep, s.stepsDone, s.plannedSteps), kind: 'measured-steps', totalMs: elapsedMs + byStep, revisions: s.revisions, evidenced: true };
+  }
+  // NO EVIDENCE ⇒ NO COUNTDOWN (autopsy d11ad529): elapsed time, the build's own limit and the labelled band.
+  if (!s.evidenced) {
+    return { text: unevidencedEtaTickLine(elapsedMs, s.budgetMs, s.roughBand, s.roughHighMs), kind: 'unevidenced', ...keep };
+  }
+  // A COUNTDOWN WHOSE TARGET IS THE TOP OF A GUESS IS STILL A GUESS. The budget's target is the rough
+  // band's top whenever no broken promise has re-baselined it and no measurement has pushed it past
+  // that top — `liveEtaTick` counts to max(total, promise).
+  const promised = Number(s.promisedHighMs) || 0;
+  const roughTarget = !!s.roughBand && (Number(s.revisions) || 0) === 0 && promised > 0 && (Number(s.totalMs) || 0) <= promised;
+  if (roughTarget && elapsedMs > promised) {
+    // Past it: the guess was too low — said in the words the unevidenced line already uses, with no new
+    // number (the overrun floor is a constant, not a measurement). Nothing is re-baselined, so every
+    // later tick says the same true thing until a real measurement takes the line back.
+    return { text: unevidencedEtaTickLine(elapsedMs, s.budgetMs, s.roughBand, s.roughHighMs ?? promised), kind: 'rough-outrun', ...keep };
+  }
+  const tick = liveEtaTick(elapsedMs, s.totalMs, s.baseMs || s.totalMs, s.revisions, s.promisedHighMs);
+  const next = { totalMs: tick.totalMs, revisions: tick.revisions, evidenced: true };
+  if (roughTarget && tick.kind === 'countdown') {
+    const inTxt = formatEta(elapsedMs).replace('~', '');
+    const leftTxt = formatEta(Math.max(0, tick.totalMs - elapsedMs)).replace('~', '');
+    return { text: `⏱️ Still building… ${inTxt} in · ~${leftTxt} to go on my rough estimate of ${s.roughBand} (${ROUGH_ESTIMATE_LABEL})`, kind: 'rough-countdown', ...next };
+  }
+  if (roughTarget && tick.kind === 'near-end') {
+    const inTxt = formatEta(elapsedMs).replace('~', '');
+    return { text: `⏱️ Still building… ${inTxt} in · nearly at the top of my rough estimate of ${s.roughBand} (${ROUGH_ESTIMATE_LABEL}) — I'll tell you the moment it's done.`, kind: 'rough-countdown', ...next };
+  }
+  return { text: tick.text, kind: 'budget', ...next };
+}
+
 export function measuredEtaText(elapsedMs: number, remainingMs: number, filesDone: number, plannedFiles: number): string {
   const inTxt = formatEta(Math.max(0, elapsedMs)).replace('~', '');
   const leftTxt = formatEta(Math.max(0, remainingMs)).replace('~', '');
@@ -231,24 +369,4 @@ export function firstEtaLine(est: Pick<BuildEstimate, 'estimateMs' | 'lowMs' | '
 export function fleetEtaLine(est: Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'>, builds: number): string {
   const range = formatEtaRange(est.lowMs, est.highMs, est.estimateMs);
   return `⏱️ Estimated build time: ${range} — how long ${builds} recent build${builds === 1 ? '' : 's'} of this kind of app took on NavBharatAI. I'll replace it with your app's own figure as soon as I can measure how big it is.`;
-}
-
-/**
- * Format a low–high band, collapsing to a single figure when the two round to the same thing (a
- * "2–2 min" range is noise, not precision). Falls back to the point estimate if the band is unusable.
- */
-export function formatEtaRange(lowMs: number, highMs: number, fallbackMs: number): string {
-  const lo = Number(lowMs);
-  const hi = Number(highMs);
-  if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo <= 0 || hi < lo) return formatEta(Number(fallbackMs) || 0);
-  const loTxt = formatEta(lo);
-  const hiTxt = formatEta(hi);
-  if (loTxt === hiTxt) return loTxt;
-  // "~2–4 min" rather than "~2 min–~4 min": one tilde covers the whole band, and the unit is shared
-  // whenever both sides carry the same one.
-  const loBare = loTxt.replace('~', '');
-  const hiBare = hiTxt.replace('~', '');
-  const unit = /min$/.test(loBare) && /min$/.test(hiBare) ? 'min' : null;
-  if (unit) return `~${loBare.replace(/\s*min$/, '')}–${hiBare}`;
-  return `~${loBare}–${hiBare}`;
 }

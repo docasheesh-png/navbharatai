@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { measuredRemainingMs } from '../src/server/AgentV3/progressEta';
+import { measuredRemainingMs, etaTickLine } from '../src/server/AgentV3/progressEta';
 
 /**
  * MEASURED-ETA WIRING — the three connections that turn a pure function into a working fix.
@@ -57,22 +57,37 @@ describe('the first file timestamp reaches the ETA', () => {
   });
 });
 
+// UPDATED DELIBERATELY (autopsy 9c612cdb, 2026-10-12): the tick's decision moved out of the route into the
+// pure `etaTickLine` (progressEta.ts), because the inline version decided from time budgets alone. The
+// route still owns the FACTS (files done, the plan's size); the preference for measurement is asserted
+// on the function — by its source order and by executing it.
+const eta = readFileSync(join(process.cwd(), 'src/server/AgentV3/progressEta.ts'), 'utf8');
+const fnStart = eta.indexOf('export function etaTickLine(');
+const fnBody = eta.slice(fnStart, eta.indexOf('\n}\n', fnStart));
 describe('the heartbeat prefers the measurement over the guess', () => {
   it('calls measuredRemainingMs and returns early when it has a real number', () => {
-    const tick = route.indexOf('const measured = measuredRemainingMs(');
-    const fallback = route.indexOf('const tick = liveEtaTick(');
+    const tick = fnBody.indexOf('const measured = measuredRemainingMs(');
+    const fallback = fnBody.indexOf('const tick = liveEtaTick(');
     expect(tick).toBeGreaterThan(-1);
     expect(fallback).toBeGreaterThan(tick); // the guess is the FALLBACK, not the default
     // Files done = what was written MINUS what the platform laid down itself (the game-kit seed, build
     // 46e2d74b): our kit is not progress on the builder's plan.
     expect(route).toContain('const etaFilesDone = Math.max(0, writtenFiles.size - etaPlatformSeededFiles);');
-    expect(route).toContain('measuredEtaText(elapsedMs, measured, etaFilesDone, etaPlannedFiles)');
+    expect(route).toContain('plannedFiles: etaPlannedFiles, filesDone: etaFilesDone, firstFileAt: etaFirstFileAt,');
+    expect(fnBody).toContain('measuredEtaText(elapsedMs, measured, s.filesDone, s.plannedFiles)');
   });
 
   it('re-anchors the fallback budget, so a build entering repair does not revert to the prompt guess', () => {
     // Without this the moment measurement stops applying (every planned file written, repair begins)
     // liveEtaTick would resume counting against the stale ~3 min it was still carrying.
-    expect(route).toContain('etaTotalMs = elapsedMs + measured');
+    const T0 = 1_770_000_000_000;
+    const d = etaTickLine({
+      elapsedMs: 4 * 60_000, now: T0 + 4 * 50_000, finalChecks: false, appRenderedAt: 0,
+      plannedFiles: 19, filesDone: 5, firstFileAt: T0, plannedSteps: 0, stepsDone: 0, firstStepAt: 0,
+      evidenced: false, budgetMs: 0, roughBand: null, roughHighMs: null, totalMs: 3 * 60_000, baseMs: 3 * 60_000, revisions: 0, promisedHighMs: 0,
+    });
+    expect(d.totalMs).toBe(4 * 60_000 + measuredRemainingMs({ plannedFiles: 19, filesDone: 5, firstFileAt: T0, now: T0 + 4 * 50_000 })!);
+    expect(route).toContain('etaTotalMs = decision.totalMs;');
   });
 
   it('the first line shows the band, not the discarded point estimate', () => {

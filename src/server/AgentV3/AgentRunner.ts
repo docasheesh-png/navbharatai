@@ -898,8 +898,21 @@ export class AgentRunner {
             stopWorkingHeartbeat();
           }
         } catch (err) {
-          // A stop that cancelled this call is the build ending as asked — not a failed model turn.
-          if (this.opts.signal?.aborted && isBuildStoppedError(err)) return endAborted();
+          // A stop that cancelled this call is the build ending as asked — not a failed model turn. But the call
+          // WAS running, and for how long is the one fact that explains a long silence before the Stop (autopsy
+          // 15e69839: the call in flight had run ~3 minutes and appeared nowhere in the report). Recorded as a
+          // stopped call — `recordLlmCall` turns it into LLM_CALL_STOPPED, info, never a provider failure.
+          if (this.opts.signal?.aborted && isBuildStoppedError(err)) {
+            try {
+              this.opts.onLlmCall?.({
+                model, promptPreview, promptChars,
+                responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0,
+                inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - llmStartedAt,
+                ok: false, error: err instanceof Error ? err.message : String(err),
+              });
+            } catch { /* diagnostics capture is best-effort */ }
+            return endAborted();
+          }
           // #4 — capture the FAILED model turn before it propagates (provider error, timeout, …).
           try {
             this.opts.onLlmCall?.({

@@ -94313,6 +94313,70 @@ Another session, gating #3679, reported that under CPU load the full suite flipp
 - **Tests executed:** 101 billing test files, 1,935 passed, 0 failed, 0 skipped.
 - **State:** every finding is a 🟡 row in `BUILD_REPORT_QUEUE.md`, waiting on the admin's approval of the ordered plan in §8 of the report. No fix is implemented until the admin approves.
 
+### 2026-10-12 — Autopsy db07e0af ("Banao", Weak tier, todo app, ₹96.93) — fifth + sixth rule
+
+**The build.** The user typed only "Banao" into a project that held nothing but NavBharatAI's persisted starter. The engine built a todo app nobody asked for and billed ₹96.93. On the way it shipped a dark-mode button that did nothing until a repair half-fixed it, a summary that sold "skeleton loading", and a 56 s wait for a review that never answered.
+
+**Tally (fifth rule).**
+- ✅ self-healed: 3. The enum `import type` heal (TS1361), the dark-mode explorer repair, and the duplicate stylesheet import removed after render.
+- 🔀 worked around: 1. The fast lane handed off before the reasoning rung, and the whole app then ran on that rung.
+- ⏭️ skipped: 2. The unimported-component hand-back was ignored, and the review was abandoned.
+- ❌ shipped imperfect: 4. An app nobody asked for, an unused spinner, a "skeleton loading" claim, and a false "no problems recorded".
+- 🥵 struggled: 5. The GLM crawl (15 s), TS2307 compiled 4× during salvage, the review's 45 + 11 s, first render at 248 s, and the ETA 1.27× over its band.
+
+**Came back before — and why.**
+- "No tests at all" was "fixed" by Q-517 (39e982bd) and never fired. Readiness warnings are recorded already resolved, so `resolveOnRecheck` skipped them, and the test recorded the warning by hand.
+- STYLE_RULES_RESUMED's zero counts were fixed for the a11y part only (68f0a486). The orphan part was missed.
+- The enum heal had fired in f496c75b, 6cd698cc and 120eb52f. Each fix treated the import; nothing removed the enum.
+- A dead theme switch was 8257ca59, fixed by a write-time note only.
+
+**Ledger (problem → root cause → class → siblings → lock).** Every row is in `BUILD_REPORT_QUEUE.md` (Q-915 … Q-929).
+- **Q-915 "Banao" built an app.**
+  - Root cause: the ask-what-to-build guard read a file count, so our starter counted as a project, and a "hi" counted as an earlier request.
+  - Class: a presence check standing in for "is anything here somebody's work".
+  - Lock: `aWordThatNamesNothingIsAskedAbout`.
+- **Q-916 Dead dark-mode switch.**
+  - Root cause: the kit's dark palette lived only in the media query.
+  - Class: a switch hook nothing styles.
+  - Siblings:
+    - kitRestore and rewrites dropping the switch;
+    - the preview panel's own switch, which could not force light;
+    - the architect prompt claiming a `src/theme.tsx` the vite starter lacks;
+    - "ours" meaning byte-equal to today's template.
+  - The last sibling is now `platformSeedHistory`: every starter and chip version since 2026-07-01, a generator, and a census.
+  - Lock: `theDarkModeButtonSwitchesTheKit` (real Chromium, 18 cases) and `anOlderStarterIsStillOurs`.
+- **Q-917 Enum heal.**
+  - Root cause: the contract prompt asked for enums.
+  - Fix: unions in the contract and the architect prompt.
+- **Q-918 Ignored hand-back, parroted claim.**
+  - The example now matches the item handed back.
+  - repairClaim now covers in-run hand-backs, and HANDBACK_IGNORED is recorded.
+  - Lock: a runner replay of this build.
+- **Q-919 "No tests at all".**
+  - Fix: `BuildDiagnostics.retract`, locked through the real `done` recorder.
+- **Q-920 Review on a reasoning engine.**
+  - Fix: `stopAtReasoningRung` is plumbed to the suggest-only one-call review.
+  - Honest timeout lines: what the review was handed, and the last engine.
+- **Q-921 False success sentence and zero counts.**
+  - Fix: count what the report lists.
+- **Q-922 Unread writes.**
+  - Class: platform writers paying for, and spending, the model's steering.
+  - Fix: `unreadWrites`. All 10 route sites are marked, with a census.
+- **Q-924 ETA.** It follows from Q-920 and Q-916.
+- **Q-925 Speculative files.** Planner rules plus `dropProvidedTwins`.
+- **Q-927 Kit claim.** `kit-feature-claimed` in the summary audit.
+- **Q-928 Stylesheet import.** Removed at the write door.
+- **Q-929 Test harness.** It used a missing `.on`; it now uses `subscribe`.
+- **Q-923 GLM crawl.** ✅ not-a-defect by the Q-842 precedent (the admin accepted (a)). Closed.
+- **Q-926 248 s to first render on Weak.** 🟡 BLOCKED on a routing decision (options in the row).
+
+**Proof.** Every fix was reverted and its test failed: 6 ways for the theme/seed work, 2 for the intent work, and 10 for the rest.
+
+**Proactive (sixth step).**
+- The single biggest lever is Q-926. A simple app on Weak spent 4 minutes on a reasoning engine after a 15 s GLM crawl.
+- Measure option (b) on five real builds before touching the ladder.
+
+**Also closed this turn.** Q-869 (#3680 merged).
 ---
 
 ## 2026-10-12 — Autopsy 15e69839 (Tamil "GST bill" build, weak tier, stopped at 8.4 min)

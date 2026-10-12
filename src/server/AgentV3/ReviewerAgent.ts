@@ -9,6 +9,7 @@
 // (via sub-agent spawn) so it costs no extra credits and its findings are emitted
 // as narration events visible in the chat. Best-effort — never throws.
 
+import { isReasoningRungHandoff } from './turnDeadline';
 import type { SubAgentSpawn } from './ToolDispatcher';
 
 export interface ReviewIssue {
@@ -718,6 +719,35 @@ export function reviewFileList(fileTree: readonly string[], changed: readonly st
  */
 export function leanReviewAnswersInOneCall(inline: LeanReviewInline | undefined): boolean {
   return !!inline && inline.files.length > 0 && inline.omitted.every(isStylesheetPath);
+}
+
+/**
+ * What a timed-out review was really asked to read (autopsy db07e0af). The lean review was handed 11 changed files
+ * in one call; its timeout line said "on 30 files" — the project listing — so the report contradicted itself and
+ * the size of the work that overran was unknowable. `handed` is null when the review read with tools. PURE.
+ */
+export function reviewScopeWords(handed: number | null, projectFiles: number): string {
+  return handed === null
+    ? `${projectFiles} files`
+    : `${handed} changed file(s) handed in one call (the project has ${projectFiles})`;
+}
+
+/**
+ * The engine a review stopped in front of (`stopAtReasoningRung`), read from what the reviewer said as it ended —
+ * null when it did not stop there. The stop travels as the run's error text, which carries the handoff marker. PURE.
+ */
+export function reviewStoppedAtReasoningRung(said: readonly string[]): string | null {
+  for (const t of said) {
+    if (typeof t !== 'string' || !isReasoningRungHandoff(t)) continue;
+    return /next engine \(([^)]+)\)/.exec(t)?.[1] ?? 'a reasoning engine';
+  }
+  return null;
+}
+
+/** Which engine the build was last served by, for a review's timeout line — '' when unknown. PURE. */
+export function reviewEngineWords(model: string | null | undefined): string {
+  const m = String(model ?? '').trim();
+  return m ? `; the build's last engine was ${m}` : '';
 }
 
 /**

@@ -142,7 +142,8 @@ describe('the wiring in routes/agentv3.ts', () => {
   it('the lean spawn is the SAME deps with only the step cap, its own stop signal and (when all code is inline) no tools changed', () => {
     // The review has carried its own abort signal since autopsy 3a0a8f7f — see
     // theReviewerStopsWhenWeStopWaiting.test.ts. The step cap still applies only when the plan sets one.
-    expect(src).toMatch(/makeSubAgentSpawn\(\{\s*\.\.\.subAgentDeps,\s*signal: reviewAbort\.signal,\s*\.\.\.\(reviewPlan\.maxSteps !== undefined \? \{ maxSteps: reviewPlan\.maxSteps \} : \{\}\),\s*\.\.\.\(reviewOneCall \? \{ toolsOverride: \[\] \} : \{\}\),\s*\}\)/);
+    expect(src).toMatch(/makeSubAgentSpawn\(\{\s*\.\.\.subAgentDeps,\s*signal: reviewAbort\.signal,\s*\.\.\.\(reviewPlan\.maxSteps !== undefined \? \{ maxSteps: reviewPlan\.maxSteps \} : \{\}\),\s*\.\.\.\(reviewOneCall \? \{ toolsOverride: \[\] \} : \{\}\),[\s\S]{0,600}?\.\.\.\(reviewPlan\.mode === 'suggest' && reviewOneCall \? \{ stopAtReasoningRung: true \} : \{\}\),\s*\}\)/);
+    // Since db07e0af the one-call suggest-only review also stops in front of a reasoning engine (and only it).
     expect(src).toMatch(/const spawnSubAgent = makeSubAgentSpawn\(subAgentDeps\);/);
   });
   it('the budget and the review are both told', () => {

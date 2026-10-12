@@ -555,7 +555,11 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
       { ts: 1, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'Tool call failed: Unterminated string in JSON at position 98299', autoResolved: true },
       { ts: 2, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'Tool call failed: exit status 1', autoResolved: true },
     ];
-    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+    // Since db07e0af the recovered items are counted, never denied ("no problems recorded" beside a problems list).
+    const cause = deriveRootCause({ issues, ok: true })!;
+    expect(cause).toMatch(/^Build completed successfully, and nothing recorded is left open against the app\. /);
+    expect(cause).toContain('2 problem(s) were recorded along the way (TOOL_ERROR)');
+    expect(cause).not.toContain('Unterminated string');
   });
 
   it('on ok:true, a recovered TOOL_ERROR is skipped even if its autoResolved flag was never back-filled', () => {
@@ -599,7 +603,8 @@ describe('recovered-on-success honesty (PaisaTrack: an ok:true build never shows
     const r = d.report();
     expect(r.counts.unresolved).toBe(0);
     expect(r.counts.errors).toBe(0);
-    expect(r.rootCause).toBe('Build completed successfully with no problems recorded.');
+    expect(r.rootCause).toMatch(/^Build completed successfully, and nothing recorded is left open against the app\. /);
+    expect(r.rootCause).not.toContain('Unterminated string');
   });
 
   it('SERIALIZATION-time normalization: even without finish(), an ok:true report is honest (the bypassed-finalize bug)', () => {
@@ -1356,7 +1361,9 @@ describe('importTurnObservation (mitrify autopsy 2026-07-27)', () => {
     const adv = importTurnObservation(true, MSG);
     const issues = [{ ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'INTEGRITY_UNUSED_DEP', ...adv }];
     // ok:true + all findings autoResolved → the report says the build succeeded, not "unused dep".
-    expect(deriveRootCause({ issues, ok: true })).toBe('Build completed successfully with no problems recorded.');
+    const cause = deriveRootCause({ issues, ok: true })!;
+    expect(cause).toMatch(/^Build completed successfully, and nothing recorded is left open against the app\. /);
+    expect(cause).not.toContain(MSG);
   });
 
   /**

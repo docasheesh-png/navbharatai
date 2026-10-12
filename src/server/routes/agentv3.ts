@@ -241,7 +241,6 @@ import { deadlinePauseMessage } from '../AgentV3/DeadlinePause';
 import { flushDecision } from '../AgentV3/DurableFlush';
 import { enqueue as enqueueCommand, cancelItem as cancelQueueItem, claimNext as claimNextQueued, completeRunning as completeQueuedRunning, pendingItems as pendingQueueItems, runningItem as runningQueueItem, queueSummary, type QueueItem, type QueueItemSource } from '../AgentV3/BuildQueue';
 import {
-  InMemoryConversationStore,
   deriveTitle,
   upsertConversationTurn,
   type ConversationStore,
@@ -264,7 +263,12 @@ import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffe
 import { appLanguageInstruction } from '../AgentV3/LanguageDetect';
 import { findScriptedAssistant, scriptedAssistantNotice } from '../AgentV3/scriptedAssistant';
 import { decidePublishConsent } from '../AgentV3/publishConsent';
-import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
+// MOVED OUT (Q-867, 2026-10-12) — the conversation-store singleton and the running-build registry each
+// live in a small module of their own, because four routes needed one of them and imported this whole
+// file to get it (~22 s per import under vitest). Re-exported below so every existing importer keeps
+// working, and imported — never redeclared — so there is still ONE store and ONE registry per process.
+import { getConversationStore } from '../AgentV3/sharedConversationStore';
+import { runningBuilds, runningBuildCount, __setRunningBuildForTest, type RunningBuild, type BuildSubscriber } from '../AgentV3/runningBuildRegistry';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
@@ -447,7 +451,7 @@ import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII, redactEventForUser } from '../AgentV3/SecretRedactor';
 import { audit } from '../lib/audit';
-import { notePersistenceFailure, persistenceHealth } from '../lib/persistenceHealth';
+import { persistenceHealth } from '../lib/persistenceHealth';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { adrStore, renderAdrMarkdown } from '../AgentV3/adrMemory';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
@@ -868,42 +872,9 @@ export async function resolveReadIdentity(req: Request): Promise<{ userId: strin
 }
 
 // ── Conversation persistence (D7) ──────────────────────────────────────────────
-let sharedConversationStore: ConversationStore | null = null;
-/**
- * The durable transcript store: Firestore when explicitly enabled (real cross-instance
- * durability in Cloud Run), otherwise the in-memory store (dev/CI, and a safe default so a
- * missing-credentials environment never errors). Singleton. Gated on AGENTV3_PERSIST_FIRESTORE
- * so CI/local stay on the in-memory store, matching the cautious v5.0 flag-gating.
- */
-/**
- * EXPORTED (2026-09-07) so other routes read the SAME singleton rather than constructing a second
- * one. Two stores in one process would each hold their own Firestore client and, worse, their own
- * in-memory fallback — so a fact written through one would be invisible through the other, which is
- * exactly the drift this codebase keeps having to unlearn.
- */
-export function getConversationStore(): ConversationStore {
-  if (sharedConversationStore) return sharedConversationStore;
-  // Durable chat history by DEFAULT — it survives a process restart, a redeploy, and
-  // horizontal scaling across Cloud Run instances. Previously this was OFF unless
-  // AGENTV3_PERSIST_FIRESTORE='true' was set, so the store fell back to IN-MEMORY: a
-  // reload that landed on a different instance — or any redeploy — lost the whole
-  // conversation ("reload pe data gayab"). Now Firestore is the default; opt out with
-  // AGENTV3_PERSIST_FIRESTORE=false. Unit tests (VITEST) always use the in-memory store.
-  const useFirestore = process.env.AGENTV3_PERSIST_FIRESTORE !== 'false' && !process.env.VITEST;
-  if (useFirestore) {
-    try {
-      sharedConversationStore = new FirestoreConversationStore();
-    } catch (e) {
-      // Durable chat history is UNAVAILABLE — the in-memory fallback means transcripts vanish on any
-      // redeploy / instance rotation. Surface it (throttled) so this isn't a silent prod degradation.
-      notePersistenceFailure('conversation_store', 'init', e);
-      sharedConversationStore = new InMemoryConversationStore();
-    }
-  } else {
-    sharedConversationStore = new InMemoryConversationStore();
-  }
-  return sharedConversationStore;
-}
+// The singleton lives in AgentV3/sharedConversationStore (Q-867) — other routes read it from there
+// without loading this file. Re-exported so `getConversationStore` keeps its old address too.
+export { getConversationStore };
 
 /**
  * Access decision for fetching a single conversation. PURE & testable: a build is only
@@ -2390,65 +2361,11 @@ const PAID_OVERDRAFT_INR = (() => {
 // A running BUILD's events are buffered and fanned out to subscribers, so the user can
 // (a) RE-ATTACH to a build whose original connection was lost ("Resume"), and
 // (b) actually STOP it server-side ("Stop") — not just abort their own local fetch.
-interface BuildSubscriber { write: (e: unknown) => void; end: () => void; }
-export interface RunningBuild {
-  abort: AbortController;
-  buffer: unknown[];
-  subscribers: Set<BuildSubscriber>;
-  ended: boolean;
-  startedTs: number;
-  /** Full Team steering (Fix 60): user messages sent MID-BUILD ('max' tier only). The AgentRunner
-   *  drains this between turns and injects each as a REAL user turn, so the very next model call
-   *  acts on it — the Claude-Code-style "talk to the team while it builds" experience. */
-  steerQueue?: string[];
-  /** The build's resolved power level — gates mid-build steering to the Full Team ('max') tier. */
-  powerLevel?: string;
-  /** The channel key (userId) — used to mirror events to the cross-device LiveChannel. Stays the
-   *  ACCOUNT key even under per-workspace locking, so the cross-device mirror is unchanged. */
-  key?: string;
-  /** The owning account (userId ?? 'anon') — lets the per-account concurrency cap count this account's
-   *  live builds even when the registry Map is keyed by workspace (per-workspace locking). */
-  userId?: string | null;
-  /** Which v5.0 session/project this build belongs to (agentv3-{uid}-{sessionId}). One account can
-   *  have several DIFFERENT chat sessions; `runningBuilds` is keyed by userId only (one account can
-   *  only build one thing at a time), but the auto-resume/attach and live-mirror paths must still
-   *  verify the running build is actually the CALLER's session before replaying/mirroring it — else a
-   *  build genuinely still running in session A silently bleeds into a freshly-opened session B under
-   *  the same account (root-caused 2026-07-01: "+ New chat" showing an unrelated build's progress). */
-  workspaceId?: string;
-  /** Stamped by broadcastBuild on every event — the liveness signal isSilentlyStale() reads. */
-  lastEventTs?: number;
-  /** True once the build handler's own code has finished (its `finally` ran) — see stoppingBuild.ts. */
-  exited?: boolean;
-  /** When the user pressed Stop on it. */
-  stoppedAt?: number;
-  /** Woken when the build exits. */
-  exitWaiters?: Array<() => void>;
-}
-const runningBuilds = new Map<string, RunningBuild>();
-
-/**
- * How many builds this INSTANCE is running right now.
- *
- * Exported for the admin load board, whose "Build load" tile read `unknown` because nothing exposed
- * this — a ceiling nobody can see is a hope, not a trigger. Per-instance by nature: no process can
- * count its siblings' builds, and the tile says so rather than presenting one instance's number as
- * the platform's.
- */
-export function runningBuildCount(): number {
-  return runningBuilds.size;
-}
-
-/**
- * TEST-ONLY seam (VITEST): register/clear a running build under a key so the /stop and /attach identity
- * guards (T0-9 — match by VERIFIED uid, never a claimed body.userId) can be regression-tested;
- * `runningBuilds` is module-internal. A hard no-op outside tests, so it can never affect production.
- */
-export function __setRunningBuildForTest(key: string, rb: RunningBuild | null): void {
-  if (!process.env.VITEST) return;
-  if (rb) runningBuilds.set(key, rb);
-  else runningBuilds.delete(key);
-}
+// The registry (`runningBuilds`, `RunningBuild`, `runningBuildCount`) lives in
+// AgentV3/runningBuildRegistry (Q-867): the admin load board reads the count from there without
+// loading this file. This file is still the registry's only WRITER, and it uses that one Map.
+export { runningBuildCount, __setRunningBuildForTest };
+export type { RunningBuild };
 
 const MAX_BUILD_BUFFER = 4000;
 /** The most recent build's diagnostics report per build key (userId) — for download/endpoint. */

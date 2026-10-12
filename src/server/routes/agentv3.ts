@@ -20823,8 +20823,13 @@ async function noteBuildOutcome(
                   const afterRepair = designShipped && projectHasUserCode(nowFiles) ? lintBuiltApp(nowFiles) : null;
                   const designOf = (r: NonNullable<typeof afterRepair>) => `${r.design.score}|${r.design.violations.map((v) => v.message).join('|')}`;
                   if (afterRepair && designShipped && designOf(afterRepair) !== designOf(designShipped)) {
-                    buildDiag.resolveOnRecheck('DESIGN_CONSISTENCY');
                     const left = afterRepair.design.violations.length;
+                    // ⚠️ A HEAL ONLY WHEN THE SAME CHECK NOW FINDS NOTHING (`resolveOnRecheck`'s own obligation).
+                    // A repair that changed the violations but left some (or made them worse) healed nothing:
+                    // the earlier sentence is no longer true, so it is WITHDRAWN (out of the heal tally and the
+                    // problem count), and the line below is the one that stands.
+                    if (left === 0) buildDiag.resolveOnRecheck('DESIGN_CONSISTENCY');
+                    else buildDiag.retract('DESIGN_CONSISTENCY', 'Design consistency', 'the design repair changed the app; the "After the design repair" line says what is true now');
                     buildDiag.record({ phase: 'build', severity: left > 0 ? 'warning' : 'info', code: 'DESIGN_CONSISTENCY',
                       message: `After the design repair: ${designLintSummary(afterRepair)}`, autoResolved: left === 0 });
                     designShipped = afterRepair;

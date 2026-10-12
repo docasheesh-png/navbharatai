@@ -525,6 +525,11 @@ export function releaseGateSummary(v: GateVerdict): string {
  *
  * ⚠️ Invariant, locked by tests/aStopIsNeitherAProblemNorAHeal.test.ts: a closed row is always info, so a
  * gate row can never be counted as a repair.
+ *
+ * ⚠️ The late-stop edge (adversarial review): a Stop that lands after the build already returned ok, on a RED
+ * gate with real shipping blockers, files this row at info + closed while its message still reads "RED — Not
+ * shippable". Nothing is lost: the blockers stay open as their own error rows, and the OUTCOME_RELEASE_GATE_RED
+ * flip still fires — this row only stops claiming that the user's Stop is owed to anyone.
  */
 export function releaseGateRecord(
   gate: Pick<GateVerdict, 'state'>,

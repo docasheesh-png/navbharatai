@@ -131,17 +131,18 @@ describe('3 · 🔒 census: a row closed because of a stop is information', () =
       while ((m = re.exec(src))) {
         const obj = objectAt(src, src.indexOf('{', m.index));
         const ar = /autoResolved:\s*([^,\n}]+)/.exec(obj);
-        if (!ar || !/stop|abort/i.test(ar[1]!)) continue;
+        // Whole identifiers, never a substring: /stop/i would also catch `stopwatch` or `nonstop` (adversarial review).
+        if (!ar || !/\b(?:stopped|stoppedByUser|userStopped|wasStopped|aborted|isAborted)\b/.test(ar[1]!)) continue;
         const where = `${f.slice(ROOT.length + 1)}:${src.slice(0, m.index).split('\n').length} autoResolved: ${ar[1]!.trim()}`;
         sites.push(where);
         const ok = /severity:\s*'info'/.test(obj)
-          || /severity:\s*[\w.!]*(?:stop|abort)\w*\s*\?\s*'info'/i.test(obj)
+          || /severity:\s*[\w.!]*\b(?:stopped|stoppedByUser|userStopped|wasStopped|aborted|isAborted)\s*\?\s*'info'/.test(obj)
           || obj.includes('...releaseGateRecord(')
           || PROVEN_ELSEWHERE.some((s) => obj.includes(s));
         if (!ok) bad.push(where);
       }
     }
-    expect(sites.length).toBeGreaterThan(0); // the census is reading record sites, not nothing
+    expect(sites.length).toBeGreaterThanOrEqual(2); // the abort outcome and the upsell (the gate row spreads the one decision)
     expect(bad).toEqual([]);
   });
 
@@ -149,6 +150,11 @@ describe('3 · 🔒 census: a row closed because of a stop is information', () =
     const userStop = abortOutcomeFor('user-stop');
     expect(userStop?.code).toBe(ABORT_OUTCOME_CODES.userStopped);
     expect(userStop?.severity).toBe('info');
+    // A stop of a prompt NavBharatAI composed is not the user's choice: a different code, an error, and the
+    // route's `autoResolved` (code === userStopped) leaves it open.
+    const composed = abortOutcomeFor('user-stop', { platformComposed: true });
+    expect(composed?.code).not.toBe(ABORT_OUTCOME_CODES.userStopped);
+    expect(composed?.severity).toBe('error');
   });
 
   it('the route files the gate row in exactly one place, through the one decision', () => {

@@ -400,8 +400,8 @@ small, .muted, .text-muted { color: var(--muted); }
    skeleton says WHAT is coming, so the layout does not jump when it arrives. */
 .nb-skeleton { background: linear-gradient(90deg, var(--border) 25%, color-mix(in srgb, var(--border) 40%, transparent) 50%, var(--border) 75%); background-size: 200% 100%; animation: nb-shimmer 1.4s ease-in-out infinite; border-radius: 8px; min-height: 14px; }
 @keyframes nb-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-/* Honour a reader who asked the system for less motion — the shimmer is decoration, not information. */
-@media (prefers-reduced-motion: reduce) { .nb-skeleton { animation: none; } }
+/* A reader who asked for less motion gets no shimmer — see THE ACCOMMODATION at the end: ONE reduced-motion
+   block per file, so an edit anchored on it is never ambiguous (autopsies 981ce4cc, 15e69839). */
 
 /* Dialog — a modal over a dimmed page. */
 .nb-modal-backdrop { position: fixed; inset: 0; background: rgba(9, 9, 14, 0.55); display: grid; place-items: center; padding: 20px; z-index: 50; }
@@ -602,6 +602,8 @@ a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transfor
    CHANGE, they just stop moving. A spinner is kept visible (removing it would hide that something is
    loading); it simply stops rotating. */
 @media (prefers-reduced-motion: reduce) {
+  /* The shimmer is decoration, not information. */
+  .nb-skeleton { animation: none; }
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;

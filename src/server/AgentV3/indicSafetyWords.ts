@@ -42,8 +42,8 @@ export const INDIC_SCRIPT_RANGE: Readonly<Record<IndicScript, RegExp>> = {
   ta: /[஀-௿]/, te: /[ఀ-౿]/, kn: /[ಀ-೿]/, ml: /[ഀ-ൿ]/, ur: /[؀-ۿ]/,
 };
 
-/** "app", "site", "website", "platform" — shared by several rules. */
-const PLACES: ScriptWords = {
+/** "app", "site", "website", "platform" — shared by several rules (and by `imageIntent.ts` / `pictureRequest.ts`). */
+export const PLACES: ScriptWords = {
   bn: ['অ্যাপ' + E, 'অ্যাপ্লিকেশন', 'সাইট', 'ওয়েবসাইট', 'প্ল্যাটফর্ম'],
   pa: ['ਐਪ' + E, 'ਐਪਲੀਕੇਸ਼ਨ', 'ਸਾਈਟ', 'ਵੈੱਬਸਾਈਟ', 'ਵੈਬਸਾਈਟ', 'ਪਲੇਟਫਾਰਮ', 'ਪਲੇਟਫ਼ਾਰਮ'],
   gu: ['એપ' + E, 'એપ્લિકેશન', 'સાઇટ', 'સાઈટ', 'વેબસાઇટ', 'વેબસાઈટ', 'પ્લેટફોર્મ'],
@@ -58,7 +58,8 @@ const VIDEO: ScriptWords = {
   bn: ['ভিডিও'], pa: ['ਵੀਡੀਓ'], gu: ['વીડિયો', 'વિડિયો', 'વિડીયો'], or: ['ଭିଡିଓ'], ta: ['வீடியோ'],
   te: ['వీడియో'], kn: ['ವೀಡಿಯೊ', 'ವಿಡಿಯೋ', 'ವೀಡಿಯೋ'], ml: ['വീഡിയോ'], ur: ['ویڈیو'],
 };
-const PICTURE: ScriptWords = {
+/** "photo", "picture" — also read by `imageIntent.ts` to see a picture request in these scripts. */
+export const PICTURE: ScriptWords = {
   bn: ['ছবি', 'ফটো'], pa: ['ਫੋਟੋ', 'ਫ਼ੋਟੋ', 'ਤਸਵੀਰ'], gu: ['ફોટો', 'તસવીર', 'ચિત્ર'], or: ['ଫଟୋ', 'ଛବି', 'ଚିତ୍ର'],
   ta: ['புகைப்பட', 'படம்', 'படங்க', 'ஃபோட்டோ', 'போட்டோ'], te: ['ఫోటో', 'చిత్ర'], kn: ['ಫೋಟೋ', 'ಚಿತ್ರ'],
   ml: ['ഫോട്ടോ', 'ചിത്ര'], ur: ['تصویر', 'تصاویر', 'فوٹو'],
@@ -124,7 +125,8 @@ const NCII_UNDRESS: ScriptWords = {
   ml: ['വസ്ത്രം\\s*അഴിക്ക', 'വസ്ത്രങ്ങൾ\\s*നീക്ക'], ur: ['کپڑے\\s*اتار'],
 };
 /** "make" right after "deepfake" — a detector never says it. Guessed words here can only make the rule stricter. */
-const MAKE_VERB: ScriptWords = {
+/** "make", "create" — also read by `imageIntent.ts`. */
+export const MAKE_VERB: ScriptWords = {
   bn: ['বানা', 'তৈরি'], pa: ['ਬਣਾ'], gu: ['બનાવ'], or: ['ତିଆରି', 'ବନା'], ta: ['உருவாக்க', 'தயாரி', 'செய்'],
   te: ['తయారు', 'సృష్టి', 'చేయ'], kn: ['ತಯಾರಿಸ', 'ರಚಿಸ', 'ಮಾಡ'], ml: ['ഉണ്ടാക്ക', 'നിർമ്മിക്ക'], ur: ['بنا', 'تیار'],
 };

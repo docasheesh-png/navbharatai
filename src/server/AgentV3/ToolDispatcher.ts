@@ -1369,9 +1369,9 @@ export class ToolDispatcher {
   private async setUpServerlessPayment(table: string | undefined, agent: AgentRole | undefined): Promise<string> {
     const pending = noServerPaymentGuidance('razorpay');
     if (!isSafeTableName(table)) {
-      return 'generate_payment: this app has no server, but Razorpay payments can be verified in the user\'s own '
+      refuse('generate_payment: this app has no server, but Razorpay payments can be verified in the user\'s own '
         + 'Supabase project. Call generate_payment again with provider = "razorpay" and table = the lower-case name '
-        + 'of the table that stores the orders/bookings (it must already exist and have an "id" primary key).';
+        + 'of the table that stores the orders/bookings (it must already exist and have an "id" primary key).');
     }
     const handler = this.onServerlessPayment!;
     let result = await handler({ table }).catch(() => null);
@@ -5005,7 +5005,7 @@ export class ToolDispatcher {
       case 'write_files_batch': {
         const rawFiles = (input as Record<string, unknown>)?.files;
         if (!Array.isArray(rawFiles) || rawFiles.length === 0) {
-          return 'write_files_batch: files array is empty or missing.';
+          refuse('write_files_batch: files array is empty or missing.');
         }
         const parsedFiles: { path: string; content: string }[] = rawFiles.map((f: unknown) => {
           if (typeof f !== 'object' || f === null) throw new Error('Each file entry must be an object.');
@@ -6562,7 +6562,7 @@ export class ToolDispatcher {
           // HONEST, NOT SILENT. Returning "stopped." with nothing wired would make the model tell the
           // user their build had ended while it carried on — the exact fake-success the second
           // absolute rule forbids.
-          return 'Could not stop this build — stopping is not available here. Tell the user plainly, and keep going or wrap up.';
+          refuse('Could not stop this build — stopping is not available here. Tell the user plainly, and keep going or wrap up.');
         }
         this.stopBuild(reason);
         return 'Stopping this build now. The files written so far are saved; the user can resume with one message.';
@@ -6784,7 +6784,7 @@ export class ToolDispatcher {
       case 'generate_openapi': {
         const rawRoutes = (input as Record<string, unknown>)?.routes;
         if (!Array.isArray(rawRoutes) || rawRoutes.length === 0) {
-          return 'generate_openapi: routes array is empty or missing. Pass the API routes you built: [{ method, path, summary? }].';
+          refuse('generate_openapi: routes array is empty or missing. Pass the API routes you built: [{ method, path, summary? }].');
         }
         const routes: RouteSpec[] = rawRoutes.map((r: unknown) => {
           if (typeof r !== 'object' || r === null) throw new Error('Each route entry must be an object with method + path.');
@@ -6811,7 +6811,7 @@ export class ToolDispatcher {
       case 'generate_api_docs': {
         const rawRoutes = (input as Record<string, unknown>)?.routes;
         if (!Array.isArray(rawRoutes) || rawRoutes.length === 0) {
-          return 'generate_api_docs: routes array is empty or missing. Pass the API routes you built: [{ method, path, description?, auth? }].';
+          refuse('generate_api_docs: routes array is empty or missing. Pass the API routes you built: [{ method, path, description?, auth? }].');
         }
         const routes: RouteDoc[] = rawRoutes.map((r: unknown) => {
           if (typeof r !== 'object' || r === null) throw new Error('Each route entry must be an object with method + path.');
@@ -6838,11 +6838,11 @@ export class ToolDispatcher {
         const path = optStr(input, 'path');
         const modulePath = optStr(input, 'module_path');
         if (!path || !modulePath) {
-          return 'generate_tests: both "path" (output test file) and "module_path" (import specifier) are required.';
+          refuse('generate_tests: both "path" (output test file) and "module_path" (import specifier) are required.');
         }
         const rawFns = (input as Record<string, unknown>)?.functions;
         if (!Array.isArray(rawFns) || rawFns.length === 0) {
-          return 'generate_tests: functions array is empty or missing. Pass the exported functions to scaffold: [{ name, params?, async? }].';
+          refuse('generate_tests: functions array is empty or missing. Pass the exported functions to scaffold: [{ name, params?, async? }].');
         }
         const functions: FunctionDef[] = rawFns.map((f: unknown) => {
           if (typeof f !== 'object' || f === null) throw new Error('Each function entry must be an object with a name.');
@@ -7173,7 +7173,7 @@ export class ToolDispatcher {
         }
         const file = resolveGraphFile(graph, target);
         if (!file) {
-          return `code_graph: "${target}" did not resolve to a single indexed file. Pass an exact workspace path (e.g. src/App.tsx), or use query="defines" for a symbol.`;
+          refuse(`code_graph: "${target}" did not resolve to a single indexed file. Pass an exact workspace path (e.g. src/App.tsx), or use query="defines" for a symbol.`);
         }
         if (q === 'who_imports') {
           const who = whoImports(graph, file);
@@ -7391,7 +7391,7 @@ export class ToolDispatcher {
       case 'generate_seed_data': {
         const rawEntities = (input as Record<string, unknown>)?.entities;
         if (!Array.isArray(rawEntities) || rawEntities.length === 0) {
-          return 'generate_seed_data: entities array is empty or missing. Pass [{ name, fields: [{ name, type? }] }].';
+          refuse('generate_seed_data: entities array is empty or missing. Pass [{ name, fields: [{ name, type? }] }].');
         }
         const entities: EntitySpec[] = rawEntities.map((e: unknown) => {
           if (typeof e !== 'object' || e === null) throw new Error('Each entity must be an object with name + fields.');
@@ -7456,7 +7456,7 @@ export class ToolDispatcher {
       case 'generate_migration': {
         const rawEntities = (input as Record<string, unknown>)?.entities;
         if (!Array.isArray(rawEntities) || rawEntities.length === 0) {
-          return 'generate_migration: entities array is empty or missing. Pass [{ name, fields: [{ name, type? }] }].';
+          refuse('generate_migration: entities array is empty or missing. Pass [{ name, fields: [{ name, type? }] }].');
         }
         const entities: MigrationEntity[] = rawEntities.map((e: unknown) => {
           if (typeof e !== 'object' || e === null) throw new Error('Each entity must be an object with name + fields.');
@@ -7864,7 +7864,7 @@ export class ToolDispatcher {
             : 'No dependencies are declared in package.json yet.';
         }
         if (mdAction !== 'add' && mdAction !== 'remove') {
-          return 'manage_dependency: action must be "add", "remove" or "list".';
+          refuse('manage_dependency: action must be "add", "remove" or "list".');
         }
         const mdResult = mdAction === 'remove' ? removeOneDependency(mdPkg, mdName) : addDependency(mdPkg, mdName, mdVersion);
         if (!mdResult.ok) return `manage_dependency: ${mdResult.message}`;
@@ -8896,7 +8896,7 @@ export class ToolDispatcher {
         if (!this.onSecretsNeeded) {
           // An offer we cannot honour is worse than none: without a verified user there is no vault to
           // save into, so say so instead of showing a popup that would lose the input.
-          return `Cannot ask for keys in this session (no signed-in user). Tell the user to add ${plan.ask.map((a) => a.name).join(', ')} in Settings → Secrets & API Keys. ${notes.join(' ')}`.trim();
+          refuse(`Cannot ask for keys in this session (no signed-in user). Tell the user to add ${plan.ask.map((a) => a.name).join(', ')} in Settings → Secrets & API Keys. ${notes.join(' ')}`.trim());
         }
 
         this.events?.emit({ type: 'narration', agent: 'architect', text: `🔑 ${secretRequestPrompt(plan)}`, ts: Date.now() });
@@ -10894,17 +10894,17 @@ export class ToolDispatcher {
         const symbol = optStr(input, 'symbol');
         const code = typeof (input as Record<string, unknown>)?.code === 'string' ? (input as Record<string, unknown>).code as string : '';
         if (!path || !symbol || !code.trim()) {
-          return 'replace_symbol: "path", "symbol" and "code" are all required.';
+          refuse('replace_symbol: "path", "symbol" and "code" are all required.');
         }
         let current: string;
         try {
           current = await this.actuator.readFile(this.workspaceId, path);
         } catch {
-          return `replace_symbol: file not found: ${path}. Use write_file to create it first.`;
+          refuse(`replace_symbol: file not found: ${path}. Use write_file to create it first.`);
         }
         const result = replaceSymbol(current, symbol, code);
         if (!result.ok || typeof result.content !== 'string') {
-          return result.error || `replace_symbol: could not replace "${symbol}" in ${path}.`;
+          refuse(result.error || `replace_symbol: could not replace "${symbol}" in ${path}.`);
         }
         if (result.content === current) {
           return `replace_symbol: no change — the new code for "${symbol}" is identical.`;
@@ -10932,7 +10932,7 @@ export class ToolDispatcher {
           })
           .filter((x): x is { name: string; kind: IdentifierKind } => x !== null);
         if (files.length === 0 && imports.length === 0 && identifiers.length === 0) {
-          return 'check_conventions: pass at least one of files[], identifiers[], or imports[] to check.';
+          refuse('check_conventions: pass at least one of files[], identifiers[], or imports[] to check.');
         }
         const report = analyzeConventions({ files, identifiers, imports });
         if (report.violationCount === 0) {
@@ -10958,7 +10958,7 @@ export class ToolDispatcher {
         const strArr = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
         const features = strArr(rec.features);
         if (features.length === 0) {
-          return 'generate_release_notes: pass the current "features" array (the app\'s user-visible features).';
+          refuse('generate_release_notes: pass the current "features" array (the app\'s user-visible features).');
         }
         const previousFeatures = strArr(rec.previous_features);
         const note = generateReleaseNote(
@@ -11407,7 +11407,7 @@ export class ToolDispatcher {
         try {
           files = await this.actuator.listFiles(this.workspaceId);
         } catch {
-          return 'codemod_rename: failed to list workspace files.';
+          refuse('codemod_rename: failed to list workspace files.');
         }
         // SCOPED read (default, T3): read code files but KEEP only those referencing the symbol as a
         // whole token, so a repo-wide rename is COMPLETE on 200/1000/5000-file apps — not silently capped
@@ -11449,7 +11449,7 @@ export class ToolDispatcher {
         try {
           files = await this.actuator.listFiles(this.workspaceId);
         } catch {
-          return 'codemod_add_prop: failed to list workspace files.';
+          refuse('codemod_add_prop: failed to list workspace files.');
         }
         // SCOPED read (default, T3): only files referencing the component as a whole token — so adding a
         // prop reaches every definition + call site across a large repo, not a blind first-50. Kill switch

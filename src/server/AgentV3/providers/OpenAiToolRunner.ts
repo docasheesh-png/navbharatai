@@ -137,6 +137,11 @@ async function readStream(
     signal?: AbortSignal;
     startedAt?: number;
     now?: () => number;
+    /**
+     * By when the ANSWER must have begun (text or a tool call — reasoning does not count). Absent ⇒ no such
+     * bound, i.e. today's behaviour. See the 'no-answer' stop cause.
+     */
+    answerBy?: number;
   },
 ): Promise<StreamStopCause> {
   const now = opts.now ?? (() => Date.now());
@@ -163,8 +168,10 @@ async function readStream(
       if (opts.signal?.aborted) { disarm(); abort(); throw new BuildStoppedError(); }
       const msToCeiling = opts.endAt - now();
       if (msToCeiling <= 0) { disarm(); abort(); return 'deadline'; }
+      const answerLeft = opts.answerBy !== undefined && !acc.hasAnswer() ? opts.answerBy - now() : Number.POSITIVE_INFINITY;
+      if (answerLeft <= 0) { disarm(); abort(); return 'no-answer'; }
       const idleLeft = opts.idleMs - (now() - lastChunkAt);
-      const waitMs = Math.max(1, Math.min(idleLeft, msToCeiling, pollMs));
+      const waitMs = Math.max(1, Math.min(idleLeft, msToCeiling, pollMs, answerLeft));
 
       let timer: ReturnType<typeof setTimeout> | undefined;
       const stalled = Symbol('stalled');
@@ -191,6 +198,8 @@ async function readStream(
         // A poll wake-up with time still on both clocks: judge the rate, and keep waiting on the SAME read.
         const idleOver = now() - lastChunkAt >= opts.idleMs;
         const ceilingOver = opts.endAt - now() <= 0;
+        const answerOver = opts.answerBy !== undefined && !acc.hasAnswer() && opts.answerBy - now() <= 0;
+        if (answerOver && !idleOver && !ceilingOver) { disarm(); abort(); return 'no-answer'; }
         if (!idleOver && !ceilingOver) {
           if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt }) && opts.canAbandon?.()) {
             disarm();
@@ -469,6 +478,20 @@ export class OpenAiToolRunner implements TurnRunner {
 
     const idleMs = Math.min(streamIdleMs(), timeoutMs);
     const startedAt = Date.now();
+    /**
+     * 🔴 THE ANSWER MUST BEGIN WITHIN THE RUNG'S OWN BOUND (autopsy 15e69839, 2026-10-12). The app had rendered;
+     * the next KIMI call then streamed reasoning for over three minutes and began no answer. Reasoning is real
+     * activity, so neither the 60 s silence bound nor the crawl floor fired, and the call was held to the 300 s
+     * stream ceiling — the user watched "still working" and pressed Stop. Without streaming this rung's whole
+     * call is bounded by its configured timeout (150 s for KIMI); the stream ceiling exists so a LONG ANSWER is
+     * not cut, never so that thinking may run twice as long. So: when there is another rung to try and the
+     * lane's deadline is not the nearer clock, an answer that has not begun by the configured timeout ends
+     * the call as a timeout.
+     */
+    const answerStartMs = this.opts.timeoutMs ?? 120_000;
+    const answerBy = streaming && bound.source === 'configured' && params.hasNextRung === true && answerStartMs < timeoutMs
+      ? startedAt + answerStartMs
+      : undefined;
     // The response OBJECT must still arrive promptly even when streaming: a provider that has not
     // answered the request at all inside the idle window is hung before it has begun.
     //
@@ -548,6 +571,7 @@ export class OpenAiToolRunner implements TurnRunner {
         // Only the ladder knows whether there is somewhere else to go; absent ⇒ never abandon.
         canAbandon: params.canAbandonSlowStream,
         signal: params.signal,
+        answerBy,
       });
 
       // 🔑 THE POINT OF THE WHOLE CHANGE. A stall used to destroy the call; now it keeps the answer
@@ -566,8 +590,16 @@ export class OpenAiToolRunner implements TurnRunner {
       if (stop === 'slow') {
         throw new Error(`${SLOW_STREAM_MESSAGE} after ${Math.max(0, Date.now() - startedAt)}ms`);
       }
+      // 🔴 Only reasoning, past the rung's own answer bound: the provider was slow, not our budget — so it is a
+      // timeout, the chain falls to the next rung and two in a row bench the family (autopsy 15e69839).
+      if (stop === 'no-answer') {
+        throw new Error(`OpenAI-compatible call (GLM/Kimi) timed out after ${answerStartMs}ms — only reasoning arrived, no answer began`);
+      }
+      // 🔴 WHOSE CEILING IT WAS decides the words (autopsy 15e69839). The stream ceiling is the PROVIDER's own
+      // 300 s cap unless the lane's deadline was nearer; reporting it as "build budget reached" ended the whole
+      // chain with "no provider failed" and never tried the next rung. `clockMessage` already knows which.
       if (stop !== 'complete' && !acc.hasAnswer()) {
-        throw new Error(stop === 'deadline' ? BUDGET_REACHED_MESSAGE : clockMessage(idleMs));
+        throw new Error(stop === 'deadline' ? clockMessage(timeoutMs) : clockMessage(idleMs));
       }
       completion = acc.toCompletion(stop);
     } else {

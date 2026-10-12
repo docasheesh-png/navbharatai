@@ -94377,3 +94377,30 @@ Another session, gating #3679, reported that under CPU load the full suite flipp
 - Measure option (b) on five real builds before touching the ladder.
 
 **Also closed this turn.** Q-869 (#3680 merged).
+---
+
+## 2026-10-12 — Autopsy 15e69839 (Tamil "GST bill" build, weak tier, stopped at 8.4 min)
+
+Admin: *"pahle build report wala kam, bad me!"* Real report: a Tamil user asked "like a 17-year-old boy leaning on a tree,
+to be made", was told we did not understand ("for example, a shop billing app with GST"), wrote "OK, like a man making a GST
+bill in a shop", was offered an app, said "ஆம்", and got a GST billing app. It rendered at 299 s; one KIMI call then ran
+~3 minutes with no answer, and the user pressed Stop at 456 s. Billed ₹97.20.
+
+**Tally:** ✅ self-heal 1 (3 transient TS2307 — by design, see ledger) · 🔀 workaround 1 (complexity second opinion for an
+unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong 1 (an app built for a picture request) · 🥵 struggle 3
+(3-min silent call after green; edit_file not-unique + read + retry; replace_symbol reported success on failure).
+
+| Item | Problem | Root cause → class | Fix (siblings) | Lock (reverted → failed) |
+|---|---|---|---|---|
+| ❌ Intent | Picture request in Tamil built as an app | Picture intent read only Latin/Devanagari; the reader had no "picture" answer; the clarify steer planted an app example | Detector reads the 9 other scripts (the safety triage's own word lists); reader's 6th answer `picture` answered before any offer; steer asks app OR picture, one example each; KB updated. Siblings: free chat, Doctor AI, Professionals use the same detector | `aSceneInAnyLanguageIsAPicture` (11 failed) |
+| 🥵 Stall | 3-min silent call after the app rendered | Reasoning counts as stream activity, so only the 300 s ceiling bounded a call that began no answer; that ceiling was then reported as "build budget reached", which ends the chain without fallback | Answer must begin within the rung's own timeout when a next rung exists; the provider's own ceiling reads as a timeout | `aThinkingRungMustBeginItsAnswer` (2 failed) |
+| Honesty | The stopped call appeared nowhere; `calls=0` | Stop path returned before the recorder | Recorded as LLM_CALL_STOPPED with its running time; waste line names user stops | `theCallRunningAtStopIsOnTheRecord` (4 failed) |
+| Honesty | KIMI told "the image is attached" with no image | Chat Completions format drops images | Gap stated where the image was (tool results and user attachments) | same test |
+| 🥵 replace_symbol | Failure returned as success | A returned string is a successful tool result | 19 returns → `refuse()` | `aFailedToolNeverReadsAsSuccess` (2 failed) |
+| 🥵 edit_file | not unique (2 matches) | Our starter CSS repeated the reduced-motion block — 981ce4cc fixed only the message | Blocks merged (design kit + native feel); census on any repeated `@media` | `aSeededStylesheetHasNoAmbiguousAnchor` (1 failed) |
+| ⚠️ DESIGN_CONSISTENCY | 7 off-grid spacings | Not a defect: the deterministic snap correctly writes nothing after a Stop | — | — |
+| Charge wording | "charged in full" vs "not a full build" | Not a defect: both mean the real cost of the work done, 0% discount | — | — |
+| 💰 Refund | ₹97.20 for a misread picture request | Admin's decision | 🟡 Q-895 (recommend refund) | — |
+
+**What to watch for on the next report:** a reasoning-only KIMI call ends at ~150 s as a timeout and the chain falls to GLM;
+`LLM_CALL_STOPPED` carries "it had been running Ns"; a non-English scene description gets a picture answer, not a build offer.

@@ -94265,3 +94265,12 @@ Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-
 - **Lock:** the four prompts above plus "basic phone app with login" are NEGATIVE cases in `tests/aPhoneTheAppCannotRunOnIsNamed.test.ts`. With the old regex back, five of them fail.
 - Raised as a review comment on #3678 before it merged; the PR merged without it, so this is its own change.
 
+
+### 2026-10-12 — Billing, revenue and profitability audit (audit only — no code changed)
+
+- **Asked by the admin:** a forensic audit of the whole billing path (external brief, adapted under the external-suggestion rule). Report: `docs/billing-audit-2026-10-12.md`. Built on the 2026-09-12 money audit and #3538 rather than redoing them.
+- **Brief vs code (conflicts for the admin, not defects):** the brief assumed ₹1 = 200 output tokens, free input and "Sakuni" modes. The code bills real provider cost (input, output and cache) × the tiered markup, at 100 wallet tokens per ₹, on three tiers (Weak / Normal / Strong). Nothing was changed to match the brief.
+- **One confirmed overcharge (Q-880, P1):** the Opus rate card is $15/$75; Anthropic's price for Opus 4.8 is $5/$25 (claude.com/pricing, fetched in-session). Strong builds that reach the Opus rung are billed on a cost 3× too high. The same number pauses those builds early at the $5 ceiling and understates margin on the admin cost cards. `pricing.test.ts:67` pins the stale value. Sonnet 4.6, Haiku 4.5 and the Gemini lines were verified correct; GLM/Kimi/Grok could not be reached from the session (missing evidence).
+- **Other findings (Q-881 … Q-894):** FX rate without a sanity band; per-account build lock in memory only; ₹100 free credit per web account and no cap on the real cost of failed builds; store packs not modelling GST; Play purchases acknowledged by the client only; PII in payment logs; raw gateway error to the browser; failed/dropped webhooks answered 400; unencoded redirect param; fail-open amount check; revenue card not net; aux remainder at Sonnet rate; 500-entry ledger cap; coupons without expiry or total cap.
+- **Tests executed:** 101 billing test files, 1,935 passed, 0 failed, 0 skipped.
+- **State:** every finding is a 🟡 row in `BUILD_REPORT_QUEUE.md`, waiting on the admin's approval of the ordered plan in §8 of the report. No fix is implemented until the admin approves.

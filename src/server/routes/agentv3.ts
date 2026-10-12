@@ -21394,7 +21394,10 @@ async function noteBuildOutcome(
       const recordVerdictHeld = (flip: LateFlip, count: number) => {
         try {
           const proof = runProof();
-          buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'VERDICT_HELD_BY_RUN', message: verdictHeldMessage(flip, proof, count), autoResolved: true, detail: `flip=${flip} · prodBuild=${prodBuildOutcome} · browserRendered=${browserRenderProven}` });
+          // INFORMATION, not a closed warning (autopsy 303e8a6f's heal census): nothing was repaired — the run's proof
+          // outranked a late flip, and the findings it held back stay listed as their own rows. As a closed warning
+          // it was counted as a self-heal on every build that held a verdict.
+          buildDiag.record({ phase: 'readiness', severity: 'info', code: 'VERDICT_HELD_BY_RUN', message: verdictHeldMessage(flip, proof, count), autoResolved: true, detail: `flip=${flip} · prodBuild=${prodBuildOutcome} · browserRendered=${browserRenderProven}` });
         } catch { /* diagnostics best-effort */ }
       };
       // The POSITIVE counterpart. Without it the runtime verdict below could report "no live preview

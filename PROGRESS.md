@@ -94274,3 +94274,67 @@ Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-
 - **Other findings (Q-881 … Q-894):** FX rate without a sanity band; per-account build lock in memory only; ₹100 free credit per web account and no cap on the real cost of failed builds; store packs not modelling GST; Play purchases acknowledged by the client only; PII in payment logs; raw gateway error to the browser; failed/dropped webhooks answered 400; unencoded redirect param; fail-open amount check; revenue card not net; aux remainder at Sonnet rate; 500-entry ledger cap; coupons without expiry or total cap.
 - **Tests executed:** 101 billing test files, 1,935 passed, 0 failed, 0 skipped.
 - **State:** every finding is a 🟡 row in `BUILD_REPORT_QUEUE.md`, waiting on the admin's approval of the ordered plan in §8 of the report. No fix is implemented until the admin approves.
+
+## 2026-10-12 — AUTOPSY `50378049` (BlockWorld, a voxel game): a plan-time PREDICTION outranked an OBSERVED fact, and six verdicts lied at once
+
+**The report.** Weak tier, free, ~20.7 min, `ok: true`, 368 items, 0 errors, 5 warnings, 1 unresolved,
+`RELEASE_GATE: UNKNOWN`, billed ₹129.6 / $1.3366.
+
+**The contradiction, in the report's own words.** The timeline carried `PREVIEW_PUBLISHED` — *"Preview
+address is live at https://5173-i6p2mx9hgq3xqukkl2q3o.e2b.app"* — and `RUNTIME_VERIFIED` — *"the app ran
+in the browser with no actionable console errors"*. In the same report: `RELEASE_GATE: UNKNOWN` (*"no live
+preview was ever available, so nothing here was proven to RUN"*), `E2E_SCAFFOLD_SKIPPED`,
+`LAST_CHANCE_PROOF_SKIPPED` (*"No preview URL was ever available"*), `MARKUP_WAIVED_NO_PREVIEW` ($1.3366
+instead of $5.0098) — and the user was told, about a running game, **"There is nothing to open yet"**.
+
+**Root cause, traced in code, not guessed.** Project Mode's module 1 was *"Shared Types & Constants"*,
+which does not own the app's entry, so `shellModuleFor` predicted a later module would assemble the app
+(`moduleAwaitsShell`), and the module prompt told the builder *"do NOT start or publish a preview this
+turn"*. The builder ignored the scope and wrote the WHOLE GAME — 56 files — and published a real address.
+`routes/agentv3.ts`'s preview subscriber read `type === 'preview' && !moduleAwaitsShell`, so it
+**discarded the address**, and every proof in the engine is gated on `lastPreviewUrl`. One prediction
+disarmed six verdicts.
+
+**A SECOND, independent root cause on the same sentence.** `gateEvidence.previewUrlPublished =
+Boolean(lastPreviewUrl)` wrote an explicit `false`, and `fillGateFromLedger` fills a field only when it
+is `undefined` — so the evidence ledger's own `PREVIEW_PUBLISHED` record could never correct it. Either
+cause alone reproduces the report.
+
+🔴 **SECOND APPEARANCE — the earlier fix was incomplete, and saying so is the point.** `releaseGate.ts`'s
+`previewUrlPublished` field exists for this exact false sentence, from the Fight 3D report (`5e2de8c4`,
+2026-08-27). That fix corrected the READER and left the SOURCE suppressible. Seven weeks later the class
+came back through a route nobody had hunted.
+
+**The fix (the direction of authority, not a new check).** An OBSERVATION outranks a PREDICTION:
+- `ProjectPlan.shellStillAwaited(awaitsShell, previewUrl)` — pure; null the moment an address is up.
+- The subscriber keeps the address whatever the plan predicted; `awaitsShellNow()` is the one question
+  every reader asks (the recap, the markup notice, the runtime record, the gate's excuse, the
+  `RELEASE_GATE` severity, the unproven measurement, the mobile + playtest proofs, the review deferral).
+- The gate asserts only the POSITIVE for `previewUrlPublished`, so the ledger can still answer.
+- `shouldAttemptPlatformPreview` deliberately keeps the RAW prediction: it decides whether to CREATE a
+  preview the module was told not to publish, which is not the honesty fix.
+
+**Why it cannot break autopsy `6a5fb04b`, which the prediction exists for:** a module turn that really
+has nothing openable publishes no address, so the prediction is returned unchanged and behaviour is
+identical. The only turns that change are the ones that published a live address — the lying case. The
+starter-page protection is `ToolDispatcher.setStarterExpected`, a separate mechanism, and
+`_blockIfStillTheStarterApp` re-checks the entry itself (verified, not assumed).
+
+**Locked by** `tests/aPredictionOutrankedTheApp.test.ts` — the truth table, a CENSUS pinning the raw
+variable at 4 code sites so a new reader fails the build, the subscriber's condition, the positive-only
+assertion, the end-to-end ledger→gate read on the report's real codes, and a REVERSION case that asserts
+the old explicit `false` still prints the false sentence. Reverted both bugs: 3 of 13 failed.
+
+**Ledger: 15 items, Q-900…Q-914.** ✅ 5 resolved here (Q-900 the root, Q-901 the gate's false sentence,
+Q-902 "nothing to open yet", Q-903 the two skipped proofs, Q-904 the waived margin). 🔸 10 OPEN and rowed
+in `BUILD_REPORT_QUEUE.md`: Q-905 a module marked `done` having delivered none of its own files · Q-906
+`READY_BEFORE_END` then 62 more steps over 1019 s · Q-907 a `[BUILD CHECKPOINT]` the model had to disobey
+twice · Q-908 24 abandoned recipe files with the orphan hand-back disabled by `starterExpected` · Q-909
+the recipe shell's API guessed wrong six times · Q-910 9 TypeScript writes skipped after a `package.json`
+change · Q-911 a recipe shipped a test whose runner was not installed · Q-912 three no-progress nudges and
+a `console_errors` LOOP GUARD · Q-913 the dark screen rationalised rather than verified · Q-914
+`DESIGN_CONSISTENCY` 60/100 shipped (45 hardcoded colours).
+
+**Honest limit of this entry:** one item from the first pass — an `edit_file` ambiguous-match failure —
+could not be re-verified against the report text and is therefore NOT counted. It is not in the ledger
+rather than in it unproven.

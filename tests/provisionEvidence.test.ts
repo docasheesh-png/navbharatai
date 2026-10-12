@@ -79,8 +79,10 @@ describe('a build that ends with no preview says so, loudly', () => {
   it('fires only for a SUCCESSFUL, non-import build with no preview', () => {
     // A failed build already reports its own cause, and an import turn deliberately changes nothing.
     expect(route).toContain('if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted');
-    // …and not for a Project Mode module whose app is assembled by a later module (autopsy 6a5fb04b).
-    expect(route).toContain('if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted && !moduleAwaitsShell)');
+    // …and not for a Project Mode module whose app is assembled by a later module (autopsy 6a5fb04b) —
+    // read as the CORRECTED prediction since autopsy 50378049, so a module turn that DID publish a live
+    // address is never told its preview never came up.
+    expect(route).toContain('if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted && !awaitsShellNow())');
   });
 
   it('cannot affect the build — diagnostics are best-effort', () => {

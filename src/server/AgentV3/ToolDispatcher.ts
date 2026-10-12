@@ -9,6 +9,7 @@ import { repeatedEditNotice } from './repeatedEdits';
 import { missingMembers, declaredMembers, relativeImports, resolveCandidates, memberListNote, RECIPE_LIBRARY_PATH, type MissingMember } from './typeMembers';
 import { fixNodeModulesTypo } from './nodeModulesTypo';
 import { healWouldOscillate } from './HealLedger';
+import { contractRenamesFromSource, contractRenameHealEnabled, fixRecordedTypeRenames, errorsAfterTypeRenames, typeRenameHealNote, valueUsedAsTypeName, CONTRACT_PATH_CANDIDATES, type ContractRename } from './contractRenames';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
 import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAuditFix';
@@ -3738,12 +3739,18 @@ export class ToolDispatcher {
       // A type-only import of a value is a string edit with one correct form — done here, not asked of the
       // model (autopsy 6cd698cc, writeTimeTypecheck.ts). Only in files this build wrote.
       const healedTypeOnly = errors.length > 0 ? await this.healTypeOnlyImportsAtWrite(errors, tsPaths, sources) : null;
-      const healedNote = healedTypeOnly ? typeOnlyHealNote(healedTypeOnly.healed) : '';
+      let healedNote = healedTypeOnly ? typeOnlyHealNote(healedTypeOnly.healed) : '';
       if (healedTypeOnly && healedTypeOnly.healed.size > 0) {
         sources = { ...sources, ...healedTypeOnly.files };
         errors = withoutHealedTypeOnly(errors, healedTypeOnly.healed);
         if (errors.length === 0) return healedNote;
       }
+      // A contract rename the platform recorded, used as a type (build 9c612cdb, Q-942) — fixed here in files
+      // this build wrote; for the rest the contract joins `sources`, where the note's ✏️ advice reads it.
+      const typeRenames = await this.healRecordedTypeRenamesAtWrite(errors, tsPaths, sources);
+      ({ errors, sources } = typeRenames);
+      healedNote += typeRenames.note;
+      if (typeRenames.note && errors.length === 0) return healedNote;
       const own = splitByWrittenFiles(errors, tsPaths).own.length;
       s.ownErrorsSurfaced += own;
       if (own > 0) {
@@ -3797,6 +3804,62 @@ export class ToolDispatcher {
         if (await this.landHealWrite(file, after, before[file])) { healed.set(file, names); files[file] = after; }
       }
       return { healed, files };
+    } catch {
+      return none;
+    }
+  }
+
+  /**
+   * TS2749 on a name the PLATFORM renamed (build 9c612cdb, Q-942 — contractRenames.ts). The contract file's
+   * header records each rename (`// renamed: VideoList -> VideoListData (…)`); it is read only when such an
+   * error exists. In files this build wrote, the old name in a plain type position becomes the new one and
+   * is imported from the contract module, through the heal write path; everything else — a user's own file,
+   * `ComponentProps<VideoList>` where `typeof` is right, a record the contract does not back — is left to the
+   * model with the ✏️ advice, which `writeTypecheckNote` reads from the contract this adds to `sources`.
+   * Best-effort: anything that fails returns the errors and sources exactly as they came in.
+   */
+  private async healRecordedTypeRenamesAtWrite(errors: TscError[], tsPaths: string[], sources: Record<string, string>): Promise<{
+    errors: TscError[]; sources: Record<string, string>; note: string;
+  }> {
+    const none = { errors, sources, note: '' };
+    try {
+      if (!errors.some((e) => valueUsedAsTypeName(e) !== null)) return none;
+      let contract: { path: string; source: string } | null = null;
+      for (const path of CONTRACT_PATH_CANDIDATES) {
+        const known = sources[path];
+        const source = typeof known === 'string' ? known
+          : await withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'write-typecheck-contract').catch(() => null);
+        if (typeof source === 'string' && contractRenamesFromSource(source).length > 0) { contract = { path, source }; break; }
+      }
+      if (!contract) return none;
+      const renames: ContractRename[] = contractRenamesFromSource(contract.source);
+      const withContract = { errors, sources: { ...sources, [contract.path]: contract.source }, note: '' };
+      if (!contractRenameHealEnabled()) return withContract;
+      const mine = new Set([...tsPaths, ...this._writtenPaths]);
+      const recorded = new Set(renames.map((r) => r.from));
+      const targetFiles = [...new Set(errors.filter((e) => mine.has(e.file) && recorded.has(valueUsedAsTypeName(e) ?? '')).map((e) => e.file))];
+      if (targetFiles.length === 0) return withContract;
+      const before: Record<string, string> = {};
+      for (const file of targetFiles) {
+        const known = sources[file];
+        const content = typeof known === 'string' ? known : await this.actuator.readFile(this.workspaceId, file).catch(() => null);
+        if (typeof content === 'string') before[file] = content;
+      }
+      const fix = fixRecordedTypeRenames(before, errors.filter((e) => e.file in before), renames, contract);
+      const landed = new Set<string>();
+      const files: Record<string, string> = {};
+      for (const file of new Set(fix.fixed.map((f) => f.file))) {
+        const after = fix.files[file];
+        if (typeof after !== 'string' || after === before[file]) continue;
+        if (healWouldOscillate(this.workspaceId, file, after)) continue;
+        if (await this.landHealWrite(file, after, before[file])) { landed.add(file); files[file] = after; }
+      }
+      if (landed.size === 0) return withContract;
+      return {
+        errors: errorsAfterTypeRenames(errors, fix, landed),
+        sources: { ...withContract.sources, ...files },
+        note: typeRenameHealNote(fix.fixed.filter((f) => landed.has(f.file))),
+      };
     } catch {
       return none;
     }

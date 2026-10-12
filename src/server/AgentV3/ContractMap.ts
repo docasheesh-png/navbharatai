@@ -89,6 +89,21 @@ export function extractModuleContract(content: string): ModuleContract {
     if (members.size > 0) enums.set(m[1], members);
   }
 
+  // …and the enum written as DATA — `export const X = { A: 'a', B: 'b' } as const` — the form every shared
+  // contract enum takes since build 9c612cdb (contractEnums.ts). Without this, normalising the contract's
+  // enums would silently retire the `X.Membr` drift line for exactly the enums the contract shares. Flat
+  // literals only: a nested object is not an enum, and its keys are not a member set.
+  const asConstRe = /export\s+const\s+([A-Za-z_$][\w$]*)\s*=\s*\{([^{}]*)\}\s*as\s+const\b/g;
+  for (let m = asConstRe.exec(src); m; m = asConstRe.exec(src)) {
+    if (enums.has(m[1])) continue;
+    // A member key opens the body or follows a comma, after any comments (the normaliser keeps a member's
+    // doc comment). A key found by mistake only ever SUPPRESSES a drift line — never invents one.
+    const members = new Set<string>();
+    const keyRe = /(?:^|,)\s*(?:\/\*[\s\S]*?\*\/\s*|\/\/[^\n]*\n\s*)*([A-Za-z_$][\w$]*)\s*:/g;
+    for (let k = keyRe.exec(m[2]); k; k = keyRe.exec(m[2])) members.add(k[1]);
+    if (members.size > 0) enums.set(m[1], members);
+  }
+
   return { exports, enums, hasWildcard };
 }
 

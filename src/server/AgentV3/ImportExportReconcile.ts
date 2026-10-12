@@ -592,7 +592,11 @@ export async function fixTypeOnlyValueImports(files: Record<string, string>): Pr
   const exportsValue = (target: string, name: string): boolean => {
     try {
       const decls: any[] = sources.get(target)?.getExportedDeclarations?.()?.get(name) ?? [];
-      return decls.length > 0 && decls.every((d) => VALUE_KINDS.has(d?.getKind?.()));
+      // A value of this name EXISTS — not "every declaration is a value". The enum-as-data pair
+      // `export const X = {…} as const` + `export type X = …` declares BOTH under one name, and the shared
+      // contract writes every enum that way since build 9c612cdb (contractEnums.ts); `every` made this heal
+      // fire for an enum and never for the pair. `readsAsValue` below still requires a value READ.
+      return decls.some((d) => VALUE_KINDS.has(d?.getKind?.()));
     } catch { return false; }
   };
   const TYPE_POSITIONS = new Set([SyntaxKind.TypeReference, SyntaxKind.QualifiedName, SyntaxKind.TypeQuery, SyntaxKind.ExpressionWithTypeArguments]);

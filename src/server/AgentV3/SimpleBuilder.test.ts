@@ -731,9 +731,14 @@ describe('runSimpleBuild — shared contract wiring', () => {
     // contract, not generated a second time in an isolated call that could drift from it. The two
     // files that ARE generated still receive the contract in their prompts.
     expect(perFilePrompts).toHaveLength(2);
-    for (const p of perFilePrompts) expect(p).toContain('enum MediaType { YouTube, Vimeo }');
+    // ⚠️ Was `enum MediaType { YouTube, Vimeo }` until build 9c612cdb (Q-941): every contract passes
+    // `prepareSharedContract` first, which writes an enum with no initialisers as an `as const` object of
+    // member-name strings, so an isolated file's plain 'YouTube' compiles. What this test pins is the
+    // WIRING — the same prepared text reaches every per-file prompt and the contract file.
+    const prepared = "const MediaType = { YouTube: 'YouTube', Vimeo: 'Vimeo' } as const;";
+    for (const p of perFilePrompts) expect(p).toContain(prepared);
     const types = written.find((f) => f.path === 'src/types.ts');
-    expect(types?.content).toContain('export enum MediaType { YouTube, Vimeo }');
+    expect(types?.content).toContain(`export ${prepared}`);
   });
 
   it('a failed contract call NEVER fails the build (best-effort, falls back to contract-free)', async () => {
@@ -772,7 +777,8 @@ describe('runSimpleBuild — shared contract wiring', () => {
       repair: async (_errs, files, contract) => { repairContract = contract; return [{ path: files[0].path, content: '// fixed' }]; },
     }));
     expect(r.ok).toBe(true);
-    expect(repairContract).toContain('enum MediaType { YouTube, Vimeo }');
+    // The prepared contract (build 9c612cdb, Q-941 — see the test above) is the one the repair reconciles against.
+    expect(repairContract).toContain("const MediaType = { YouTube: 'YouTube', Vimeo: 'Vimeo' } as const;");
   });
 
   it('contract system prompt freezes enum member casing + per-component props (the drift the report hit)', () => {

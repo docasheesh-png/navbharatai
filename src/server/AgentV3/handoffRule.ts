@@ -35,3 +35,22 @@ export const HANDOFF_MECHANICAL_FIX_RULE: readonly string[] = [
 export const HANDOFF_NOTE_FIX_LINE =
   'Mechanical fixes in these files (an import, a type or props annotation, a name, a path) you make yourself with edit_file — '
   + 'that is the one exception to delegation. New features, components and pages still go to the specialists.';
+
+/**
+ * The hand-off sentence that names every shared type the faster lane renamed off a component's name. '' when
+ * there is none. PURE.
+ *
+ * 🔴 BUILD 9c612cdb (Q-942). The lane renamed `VideoList` (the data) to `VideoListData` because
+ * `src/components/VideoList.tsx` is the component, and said so only to the user. This note said "keep their
+ * types and export names", so the builder — which never saw the contract call — wrote `VideoList` as a type in
+ * App.tsx and met TS2749 with the compiler's own wrong suggestion (`typeof VideoList`). The rename is a fact
+ * the next writer needs; it travels with the hand-off (and in the shared types file's header).
+ */
+export function contractRenameHandoffLine(renames: ReadonlyArray<{ from: string; to: string; component?: string }> | undefined): string {
+  const list = (renames ?? []).filter((r) => r && r.from && r.to && r.from !== r.to);
+  if (list.length === 0) return '';
+  const named = list.map((r) => `${r.from} → ${r.to} (${r.from} is the component${r.component ? ` in ${r.component}` : ''})`).join('; ');
+  return `NavBharatAI renamed these shared types so no data type shares a component's name: ${named}. `
+    + 'In a type position always write the NEW name and import it from the shared types file — the old name is the component, '
+    + 'and the compiler\'s "Did you mean typeof …" suggestion is only right when you mean the component itself.';
+}

@@ -45,6 +45,8 @@ import { injectGlobalStylesheetImport, dedupeStylesheetImports } from './Project
 import { frameworkShipsDesignKit } from './designKitReach';
 import { kitClasses } from './kitRestore';
 import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
+import { contractEnumAsConstEnabled, stringEnumsAsConstObjects } from './contractEnums';
+import { contractRenameHeaderLine, type ContractRename } from './contractRenames';
 
 
 /**
@@ -1079,9 +1081,27 @@ export interface ContractModule {
 const CONTRACT_HEAD = /^(?:export\s+)?(?:declare\s+)?(?:const\s+)?(enum|interface|type)\s+([A-Za-z_$][\w$]*)/;
 /**
  * `const X = { … } as const` / `const X = [ … ] as const` — an enum written as data. Kept only when the
- * literal calls nothing (no `(`), so the contract file never depends on code it does not contain.
+ * literal calls nothing (no `(` outside a string), so the contract file never depends on code it does not
+ * contain. See `literalConstName`.
  */
-const LITERAL_CONST = /^(?:export\s+)?(?:declare\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*[{[][^()]*[}\]]\s*as\s+const\s*;?\s*$/;
+const LITERAL_CONST = /^(?:export\s+)?(?:declare\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*([{[][\s\S]*[}\]])\s*as\s+const\s*;?\s*$/;
+/** Every string literal with no `${…}` substitution — text, never a call. */
+const PLAIN_STRING_LITERAL = /'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\$]|\\.|\$(?!\{))*`/g;
+
+/**
+ * The name a literal `as const` statement declares, or null. PURE.
+ *
+ * 🔴 BUILD 9c612cdb (Q-941). The old test was "no `(` anywhere in the literal", so `{ Other: 'Other (specify)' }
+ * as const` was DROPPED from the contract file while its `type X = (typeof X)[…]` was kept — the type then
+ * named a value that existed nowhere and the types file did not compile (the 120eb52f class, one branch
+ * left open). A parenthesis inside a string is text, not a call, so strings are blanked before the check; a
+ * template literal with a `${…}` substitution can run code and still disqualifies the statement.
+ */
+export function literalConstName(statement: string): string | null {
+  const m = LITERAL_CONST.exec(statement);
+  if (!m) return null;
+  return /[()`]/.test(m[2].replace(PLAIN_STRING_LITERAL, '""')) ? null : m[1];
+}
 /** A line that begins a new top-level statement — used to end a statement that has no `;`. */
 const TOP_LEVEL_START = /^(?:export|declare|import|enum|interface|type|function|const|let|var|class|abstract|namespace|module)\b/;
 
@@ -1176,7 +1196,12 @@ export function contractImport(statement: string): string | null {
   return bare.replace(/^import\s+/, 'import type ');
 }
 
-export function contractModule(contract: string | undefined): ContractModule | null {
+/**
+ * `renamed` — the renames `prepareSharedContract` made (build 9c612cdb, Q-942): each becomes ONE strict header
+ * line (`contractRenameHeaderLine`), because this file is what the hand-off says to read first and what every
+ * later turn reads. The write-time heal reads those lines back, so their format is a pinned protocol.
+ */
+export function contractModule(contract: string | undefined, renamed: readonly ContractRename[] = []): ContractModule | null {
   let text = String(contract ?? '').replace(/\r\n?/g, '\n');
   text = text.replace(/^[ \t]*```[a-zA-Z]*[ \t]*$/gm, ''); // fences the prompt asked it not to add
   const kept: string[] = [];
@@ -1197,9 +1222,9 @@ export function contractModule(contract: string | undefined): ContractModule | n
     // existed nowhere, the types file did not compile, and the full builder spent its first edits
     // writing a second `EventStatus` into it. A literal `as const` object or array is pure data the
     // contract wrote out in full, so it is kept here with its type.
-    const literal = LITERAL_CONST.exec(st);
-    if (literal) {
-      const name = literal[1];
+    const literalName = literalConstName(st);
+    if (literalName) {
+      const name = literalName;
       if (seen.has(`value:${name}`)) continue;
       seen.add(`value:${name}`);
       kept.push(`export ${st.replace(/^(?:export\s+)?(?:declare\s+)?/, '').replace(/;?\s*$/, ';')}`);
@@ -1225,6 +1250,7 @@ export function contractModule(contract: string | undefined): ContractModule | n
   const header = [
     '// Shared contract — the enums, interfaces and types every file of this app imports from here.',
     '// Written by NavBharatAI before any other file, so all files agree on these names by construction.',
+    ...renamed.map(contractRenameHeaderLine),
   ];
   const source = `${[...header, ...(imports.length ? ['', ...imports] : []), '', joined].join('\n')}\n`;
   return { source, symbols };
@@ -1247,6 +1273,12 @@ export function contractNameSplitEnabled(env: NodeJS.ProcessEnv = process.env): 
  * A clashing name `X` becomes `XData` (then `XInfo`, `XRecord`) — the first not already declared — at every
  * whole-word use in the contract, so `XProps` and other compounds are untouched. Only PascalCase `.tsx`/`.jsx`
  * files count as components; nothing else is renamed.
+ *
+ * 🔴 A LITERAL `as const` OBJECT IS DATA, NOT THE COMPONENT (build 9c612cdb, Q-941). Any top-level `const X`
+ * used to count as "the contract declares the component itself", so the enum-as-data pair
+ * `const VideoList = { … } as const` + `type VideoList = (typeof VideoList)[…]` beside `VideoList.tsx` was
+ * never split — and that pair is exactly the shape the contract now asks for. A literal the contract wrote out
+ * in full calls nothing and renders nothing; the pair is renamed together.
  */
 export function separateTypeFromComponentNames(
   contract: string,
@@ -1261,9 +1293,12 @@ export function separateTypeFromComponentNames(
   if (components.size === 0) return { contract, renamed: [] };
   const declared = new Set<string>();
   const values = new Set<string>();
+  const literals = new Set<string>();
   for (const st of topLevelStatements(String(contract ?? '').replace(/\r\n?/g, '\n'))) {
     const head = CONTRACT_HEAD.exec(st);
     if (head) { declared.add(head[2]); continue; }
+    const literal = literalConstName(st);
+    if (literal) { literals.add(literal); continue; }
     const value = /^(?:export\s+)?(?:declare\s+)?(?:default\s+)?(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/.exec(st);
     if (value) values.add(value[1]);
   }
@@ -1273,7 +1308,8 @@ export function separateTypeFromComponentNames(
     // The contract also declares the component itself under this name: a whole-word rename would
     // rename the component too. Leave it; the mechanical TS2865 fix is the net for this shape.
     if (!components.has(name) || values.has(name)) continue;
-    const to = ['Data', 'Info', 'Record'].map((s) => `${name}${s}`).find((n) => !declared.has(n) && !components.has(n));
+    const to = ['Data', 'Info', 'Record'].map((s) => `${name}${s}`)
+      .find((n) => !declared.has(n) && !components.has(n) && !values.has(n) && !literals.has(n));
     if (!to) continue;
     out = out.replace(new RegExp(`(?<![\\w$])${name}(?![\\w$])`, 'g'), to);
     declared.add(to);
@@ -1282,14 +1318,67 @@ export function separateTypeFromComponentNames(
   return { contract: out, renamed };
 }
 
+/** A contract after `prepareSharedContract`: the text every reader gets, and what was changed in it. */
+export interface PreparedContract {
+  contract: string;
+  /** Types renamed off a planned component's name — each must reach every later reader (Q-942). */
+  renamed: ContractRename[];
+  /** Enums rewritten as `as const` objects (contractEnums.ts). */
+  enumsAsConst: string[];
+}
+
+/**
+ * THE ONE DOOR EVERY GENERATED CONTRACT PASSES THROUGH before anything reads it. PURE.
+ *
+ * 🔴 WHY ONE DOOR (build 9c612cdb, Q-941/Q-942). Two lanes ask `contractSystemPrompt` for a contract — the fast
+ * lane and the blueprint step of a deep agentic build — and only the fast lane split type names from
+ * component names (9762f589); the blueprint lane handed the architect the raw text, so the TS2865 class it
+ * fixed was still live there. A post-processing step each lane must remember is a step one lane forgets.
+ * `tests/aQuotedValueFitsTheContractsEnum.test.ts` fails when a lane asks for a contract without coming here.
+ *
+ * Order matters: the name split runs FIRST (an `enum VideoList` beside `VideoList.tsx` is renamed while it is
+ * still an enum), then the enum normaliser (contractEnums.ts). Each step keeps its own kill switch; with both
+ * off the text is returned byte-identical.
+ */
+export function prepareSharedContract(
+  contract: string,
+  manifest: ReadonlyArray<{ path: string }>,
+  env: NodeJS.ProcessEnv = process.env,
+): PreparedContract {
+  let text = contract;
+  let renamed: ContractRename[] = [];
+  let enumsAsConst: string[] = [];
+  if (text && contractNameSplitEnabled(env)) {
+    const split = separateTypeFromComponentNames(text, manifest);
+    if (split.renamed.length > 0) {
+      text = split.contract;
+      renamed = split.renamed.map((r) => {
+        const component = manifest.find((f) => /\.[jt]sx$/.test(f.path) && posix.basename(f.path).replace(/\.[jt]sx$/, '') === r.from)?.path;
+        return component ? { ...r, component } : { ...r };
+      });
+    }
+  }
+  if (text && contractEnumAsConstEnabled(env)) {
+    const normalised = stringEnumsAsConstObjects(text);
+    if (normalised.converted.length > 0) {
+      text = normalised.contract;
+      enumsAsConst = normalised.converted;
+    }
+  }
+  return { contract: text, renamed, enumsAsConst };
+}
+
 /**
  * Render an ADVISORY blueprint block for the AGENTIC architect (P-ARCH+.3). Unlike contractBlock —
  * which FREEZES the contract for the fast lane's isolated per-file calls — this is guidance the
  * architect may refine; it keeps ownership of the plan via update_todo. Reusing the proposed file
  * paths + shared symbol names is what avoids the mismatched-import / missing-file drift that breaks
  * large apps. Returns '' when there is no manifest. Pure.
+ *
+ * `renamed` (Q-942): a type `prepareSharedContract` moved off a component's name is NAMED here, so the
+ * architect never writes the component's name where it means the data.
  */
-export function blueprintAdvisoryBlock(manifest: SimpleFileSpec[], contract?: string): string {
+export function blueprintAdvisoryBlock(manifest: SimpleFileSpec[], contract?: string, renamed: readonly ContractRename[] = []): string {
   if (!manifest || manifest.length === 0) return '';
   const fileList = manifest.map((f) => `  - ${f.path}${f.purpose ? ` — ${f.purpose}` : ''}`).join('\n');
   const parts = [
@@ -1303,6 +1392,12 @@ export function blueprintAdvisoryBlock(manifest: SimpleFileSpec[], contract?: st
   const c = (contract || '').trim();
   if (c) {
     parts.push('', 'Proposed shared contract (types / enums / interfaces):', '```ts', c.slice(0, 12_000), '```');
+    if (renamed.length > 0) {
+      parts.push(
+        'Renamed so no data type shares a component\'s name — in a type position always write the new name; the old name is the component:',
+        ...renamed.map((r) => `  - ${r.from} → ${r.to} (${r.from} is the component${r.component ? ` in ${r.component}` : ''})`),
+      );
+    }
   }
   return parts.join('\n');
 }
@@ -1630,6 +1725,12 @@ export interface SimpleBuildResult {
    */
   plannedPaths?: string[];
   /**
+   * The shared types the lane RENAMED off a planned component's name (`prepareSharedContract`), so the
+   * hand-off can name them to the full builder — which never saw the contract call (build 9c612cdb, Q-942:
+   * it wrote `VideoList` as a type after the contract had made it `VideoListData`). Absent when none.
+   */
+  contractRenames?: ContractRename[];
+  /**
    * FALSE when the verify gate was wired but could not EXECUTE (sandbox infra failure) — the app
    * shipped UNVERIFIED, so the caller must NOT skip its own downstream gates. True = tsc really ran
    * and passed; undefined = verify was not wired at all.
@@ -1777,6 +1878,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
    * the PLAN. `plannedFiles` already existed and is only a count, so the list itself had no home.
    */
   let plannedPaths: string[] = [];
+  // The contract renames (Q-942) — hoisted for the same reason as `plannedPaths`: the hand-off needs them
+  // after the closure is gone.
+  let contractRenames: ContractRename[] = [];
   try {
     files = await withTimeout((async () => {
       deps.log?.('Planning the file list…');
@@ -1956,12 +2060,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         clock.contractCapMs = contractCap;
         // Name what happened, so the report never has to guess which clock ended the call.
         clock.contractOutcome = contract ? 'written' : (contractCallMs >= contractCap - 1_000 ? 'cut' : 'failed');
-        // A type named after a planned component — see `separateTypeFromComponentNames`. Before file one.
-        if (contract && contractNameSplitEnabled()) {
-          const split = separateTypeFromComponentNames(contract, manifest);
-          if (split.renamed.length > 0) {
-            contract = split.contract;
-            deps.log?.(`🏷️ Renamed ${split.renamed.map((r) => `${r.from} → ${r.to}`).join(', ')} in the shared contract so no data type shares a component's name.`);
+        // A type named after a planned component, and an enum isolated files cannot satisfy with a plain
+        // value — see `prepareSharedContract`. Before file one, so every reader gets the same text.
+        if (contract) {
+          const prepared = prepareSharedContract(contract, manifest);
+          contract = prepared.contract;
+          contractRenames = prepared.renamed;
+          if (prepared.renamed.length > 0) {
+            deps.log?.(`🏷️ Renamed ${prepared.renamed.map((r) => `${r.from} → ${r.to}`).join(', ')} in the shared contract so no data type shares a component's name.`);
           }
         }
       } else if (shareContract) {
@@ -1980,7 +2086,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // Decided BEFORE file one so every per-file prompt can name the path, and written FIRST so the
       // dependency context of every tier carries its export surface like any other produced file.
       if (contract && contractFileEnabled() && frameworkSupportsContractFile(deps.framework)) {
-        const mod = contractModule(contract);
+        const mod = contractModule(contract, contractRenames);
         if (mod) {
           contractPath = contractFilePath(manifest);
           const planned = manifest.findIndex((f) => f.path === contractPath);
@@ -2380,6 +2486,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       plannedFiles,
       phases: phasesNow(),
       plannedPaths,
+      ...(contractRenames.length ? { contractRenames } : {}),
     };
   }
 
@@ -2612,6 +2719,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         typecheckRan: verdict.ran !== false,
         // Capture the REAL compiler error (capped) so the build report can be mined for the true cause.
         verifyErrors: (verdict.errors || '').trim().slice(0, 2000) || undefined,
+        ...(contractRenames.length ? { contractRenames } : {}),
       };
     }
     files = [...byPath.values()];

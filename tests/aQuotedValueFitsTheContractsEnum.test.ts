@@ -238,6 +238,34 @@ describe('3 · the siblings the conversion leans on', () => {
     expect(r).toContain('VideoSource.Youtube');
     expect(r).toContain('YouTube');
   });
+
+  // Review of Q-941 (2026-10-12): reading `as const` objects as enums first took ANY flat exported object and
+  // only the keys a regex could see. A drift line is an ORDER to the repair model ("fix these exact
+  // mismatches"), so each case below was a new instruction to break correct code — none existed before.
+  it('🔒 the drift map never invents a member drift line: only the enum PAIR counts, and only a fully written key set', () => {
+    const cases: Array<Record<string, string>> = [
+      { // a flat class-name map is not an enum — and another file's LOCAL `styles` is not checked against it
+        'src/styles.ts': "export const styles = { container: 'p-4', title: 'text-xl' } as const;\n",
+        'src/Button.tsx': "const styles = { button: 'btn' };\nexport const B = () => styles.button;\n",
+      },
+      { // a spread: the member set is not all written here
+        'src/routes.ts': "const BASE = { home: '/' } as const;\nexport const Route = { ...BASE, admin: '/admin' } as const;\nexport type Route = (typeof Route)[keyof typeof Route];\n",
+        'src/App.tsx': "import { Route } from './routes';\nexport const h = Route.home;\n",
+      },
+      { // a quoted key is still a member — the normaliser keeps `'Active' = 'active'` quoted
+        'src/types.ts': typesFile("export enum Status { 'Active' = 'active', Done = 'done' }"),
+        'src/a.ts': "import { Status } from './types';\nexport const s = Status.Active;\n",
+      },
+      { // shorthand and computed keys
+        'src/k.ts': "const a = 'a';\nexport const K = { a, [`b`]: 'b' } as const;\nexport type K = (typeof K)[keyof typeof K];\n",
+        'src/use.ts': "import { K } from './k';\nexport const x = K.a;\n",
+      },
+    ];
+    for (const files of cases) expect({ files: Object.keys(files), drift: contractDriftReport(files) }).toEqual({ files: Object.keys(files), drift: null });
+    // …while a real typo against the pair is still caught, quoted key or not.
+    const typo = contractDriftReport({ ...cases[2], 'src/a.ts': "import { Status } from './types';\nexport const s = Status.Actve;\n" }) ?? '';
+    expect(typo).toContain('uses Status.Actve but Status members are: Active, Done');
+  });
 });
 
 describe('4 · CENSUS — every contract a lane asks for passes through the one door', () => {

@@ -19,6 +19,8 @@
 // skips default imports and computed/namespace access, and returns null on no drift. A miss just degrades
 // to today's behaviour; a false positive at worst wastes part of one repair pass. PURE + unit-testable.
 
+import * as ts from 'typescript';
+
 export interface ModuleContract {
   /** Named exports of the module (function/class/const/let/var/interface/type/enum names + export lists + 'default'). */
   exports: Set<string>;
@@ -89,22 +91,51 @@ export function extractModuleContract(content: string): ModuleContract {
     if (members.size > 0) enums.set(m[1], members);
   }
 
-  // …and the enum written as DATA — `export const X = { A: 'a', B: 'b' } as const` — the form every shared
-  // contract enum takes since build 9c612cdb (contractEnums.ts). Without this, normalising the contract's
-  // enums would silently retire the `X.Membr` drift line for exactly the enums the contract shares. Flat
-  // literals only: a nested object is not an enum, and its keys are not a member set.
+  // …and the enum written as DATA — `export const X = { A: 'a', B: 'b' } as const` PLUS its value-union type
+  // `export type X = (typeof X)[keyof typeof X]` — the form every shared contract enum takes since build
+  // 9c612cdb (contractEnums.ts). Without this, normalising the contract's enums would silently retire the
+  // `X.Membr` drift line for exactly the enums the contract shares.
+  // ⚠️ A drift line is an ORDER to the repair model ("fix these exact mismatches"), so a member set that is
+  // not complete invents a defect in correct code. Two gates keep it exact: the value-union type must be
+  // there (without it this is any flat object — `styles`, `ROUTES` — and another file's LOCAL object of the
+  // same name would be "checked" against it), and every key must be written out in the literal (a spread,
+  // a shorthand or a computed key means the member set is not all here — `objectLiteralKeys` returns null).
+  const valueUnions = new Set<string>();
+  const unionRe = /type\s+([A-Za-z_$][\w$]*)\s*=\s*\(?\s*typeof\s+\1\s*\)?\s*\[\s*keyof\s+typeof\s+\1\s*\]/g;
+  for (let m = unionRe.exec(src); m; m = unionRe.exec(src)) valueUnions.add(m[1]);
   const asConstRe = /export\s+const\s+([A-Za-z_$][\w$]*)\s*=\s*\{([^{}]*)\}\s*as\s+const\b/g;
   for (let m = asConstRe.exec(src); m; m = asConstRe.exec(src)) {
-    if (enums.has(m[1])) continue;
-    // A member key opens the body or follows a comma, after any comments (the normaliser keeps a member's
-    // doc comment). A key found by mistake only ever SUPPRESSES a drift line — never invents one.
-    const members = new Set<string>();
-    const keyRe = /(?:^|,)\s*(?:\/\*[\s\S]*?\*\/\s*|\/\/[^\n]*\n\s*)*([A-Za-z_$][\w$]*)\s*:/g;
-    for (let k = keyRe.exec(m[2]); k; k = keyRe.exec(m[2])) members.add(k[1]);
-    if (members.size > 0) enums.set(m[1], members);
+    if (enums.has(m[1]) || !valueUnions.has(m[1])) continue;
+    const members = objectLiteralKeys(m[2]);
+    if (members && members.size > 0) enums.set(m[1], members);
   }
 
   return { exports, enums, hasWildcard };
+}
+
+/**
+ * Every key of the object literal `{ <body> }`, or null when the key set is not fully written out (a spread,
+ * a shorthand property, a method, a computed key, or text that does not parse). Quoted keys count by their
+ * text, so `{ 'Active': 'a' }` declares `Active`. PURE.
+ */
+function objectLiteralKeys(body: string): Set<string> | null {
+  try {
+    const sf = ts.createSourceFile('as-const.ts', `({${body}})`, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+    if (((sf as unknown as { parseDiagnostics?: readonly unknown[] }).parseDiagnostics ?? []).length > 0) return null;
+    const st = sf.statements.length === 1 ? sf.statements[0] : undefined;
+    let e: ts.Expression | undefined = st && ts.isExpressionStatement(st) ? st.expression : undefined;
+    while (e && ts.isParenthesizedExpression(e)) e = e.expression;
+    if (!e || !ts.isObjectLiteralExpression(e)) return null;
+    const keys = new Set<string>();
+    for (const p of e.properties) {
+      if (!ts.isPropertyAssignment(p)) return null;
+      if (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) || ts.isNumericLiteral(p.name)) keys.add(p.name.text);
+      else return null;
+    }
+    return keys;
+  } catch {
+    return null;
+  }
 }
 
 /** Build the contract for every generated module. PURE. */

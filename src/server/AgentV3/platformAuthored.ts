@@ -53,7 +53,7 @@ import { normalizeAuthoredPath } from './buildAuthorship';
 import { couldBeAppCode } from './userProjectFiles';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { seededForms } from './strictTrial';
-import { recipeFilePool } from '../lib/gameRecipeLayers';
+import { recipeFilePool, isKnownKitVersion } from '../lib/gameRecipeLayers';
 
 /**
  * path → every byte-exact content NavBharatAI itself seeds at that path.
@@ -136,7 +136,12 @@ export function isPlatformSeededFile(path: string | null | undefined, content: s
   const key = normalizeAuthoredPath(path);
   if (!key) return false;
   const forms = index().get(key);
-  return forms ? forms.has(content) : false;
+  if (forms && forms.has(content)) return true;
+  // 🧬 AN OLDER KIT VERSION IS STILL OUR KIT (Q-863). The index above holds only the CURRENT recipe output, so a
+  // game built before the kit last changed held, byte for byte, the engine we wrote back then — and every reader
+  // here graded it as the user's code. `gameKitHistory.ts` holds the hash of every version a recipe ever wrote;
+  // still byte-exact, so one changed byte makes it the user's again.
+  try { return isKnownKitVersion(key, content); } catch { return false; }
 }
 
 /**

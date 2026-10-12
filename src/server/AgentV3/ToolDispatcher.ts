@@ -338,7 +338,7 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
-import { missingLayerFiles, missingLayersNote, recipeDependenciesNeeded } from '../lib/gameRecipeLayers';
+import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
@@ -713,7 +713,7 @@ export class ToolDispatcher {
   ) {
     this.toolBudget = toolBudget ?? emptyBuildToolBudget();
     this._rawActuator = actuatorRaw;
-    this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); }, (p) => {
+    this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); this.kitCurrentPaths.delete(path); }, (p) => {
       if (!this.internalWriteDepth && process.env.AGENTV3_GUARDED_WRITE_DOOR !== 'off') this.assertWritable(p);
     });
   }
@@ -802,6 +802,7 @@ export class ToolDispatcher {
     let targets: string[];
     try { targets = shellReadBackTargets(command, skip); } catch { return; }
     for (const path of targets) {
+      this.kitCurrentPaths.delete(path); // a shell write is not the kit's current content any more (Q-863)
       try {
         const content = await this.actuator.readFile(this.workspaceId, path);
         if (typeof content === 'string') this.onFileWrite(path, content);
@@ -3401,6 +3402,8 @@ export class ToolDispatcher {
     const lines: string[] = [];
     const runner = await this.declareVitestForRecipeTests(files, agent);
     if (runner) lines.push(runner);
+    const refreshed: string[] = [];
+    const refreshFailed: string[] = [];
     for (const [path, content] of Object.entries(files)) {
       let existing: string | null = null;
       let missing = false;
@@ -3413,22 +3416,65 @@ export class ToolDispatcher {
         missing = true;
         existing = null;
       }
-      if (!missing && existing === content) { lines.push(`Unchanged ${path} (already exactly what this recipe writes)`); continue; }
+      if (!missing && existing === content) {
+        this.noteKitCurrent(path, content);
+        lines.push(`Unchanged ${path} (already exactly what this recipe writes)`);
+        continue;
+      }
+      // 🧬 An older kit version nobody edited is brought up to date (Q-863, gameRecipeLayers.ts): the recipe's
+      // instructions describe the CURRENT files, and code written from them against the old file would not compile.
+      if (!missing && existing !== null && kitRefreshable(path, existing, content)) {
+        try {
+          const wrote = await this.guardedWrite(path, content, { agent, source: 'writeRecipeFiles', allowOverwrite: true });
+          this.state?.recordFileChange({ path, kind: 'modify' }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+          this.noteKitCurrent(path, wrote.content);
+          refreshed.push(path);
+          lines.push(`Updated ${path}`);
+        } catch {
+          refreshFailed.push(path);
+          lines.push(`skipped existing ${path}`);
+        }
+        continue;
+      }
       // New files only. No recipe in this tree intentionally patches an existing router or App.tsx.
-      if (!missing) { lines.push(`skipped existing ${path}`); continue; }
+      if (!missing) {
+        const stale = existing !== null && recipeFilePool().has(path) ? staleKitReason(path, existing, content) : null;
+        lines.push(`skipped existing ${path}${stale ? ' — it is not the current kit version (somebody changed it), so it was kept as it is; the instructions below may name functions it does not have' : ''}`);
+        continue;
+      }
       const wrote = await this.guardedWrite(path, content, { agent, source: 'writeRecipeFiles', allowOverwrite: false });
       this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
       getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+      this.noteKitCurrent(path, wrote.content);
       lines.push(`${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path}`);
     }
+    const kitNote = kitVersionNote(refreshed, [], refreshFailed).trim();
+    if (kitNote) lines.push(kitNote);
     return lines;
   }
 
   /**
-   * Write the recipe-owned files a game recipe's output imports and the project does not have — the
-   * 3D layer that `generate_game_shell` and `generate_game_systems` import, when `generate_game_3d` was
-   * never run (autopsy 6a55d939, gameRecipeLayers.ts). Only ABSENT files are written; returns the note
-   * for the tool result. Best-effort: a failure leaves the recipe's own result exactly as it was.
+   * Kit paths this dispatcher wrote with the CURRENT kit content and nothing has written since (the recording actuator
+   * drops a path the moment any write of this dispatcher's reaches it, heals included, and a shell command's read-back
+   * drops what it names). The kit planner treats them as current without reading them — so the
+   * game-kit seed, which writes ~30 files and then plans after every recipe, reads nothing. A shell command that
+   * edits one behind our back can only make the planner skip a refresh or follow that file's imports; a file is
+   * replaced only after it is READ and found to be an older kit version, never on the strength of this set.
+   */
+  private readonly kitCurrentPaths = new Set<string>();
+
+  private noteKitCurrent(path: string, content: string): void {
+    if (recipeFilePool().get(path)?.content === content) this.kitCurrentPaths.add(path);
+  }
+
+  /**
+   * Bring the kit layer the files just written import into line with them — the 3D layer that `generate_game_shell`
+   * and `generate_game_systems` import, when `generate_game_3d` was never run (autopsy 6a55d939), and, since Q-863,
+   * an older kit file nobody edited that the new files need the current version of (gameRecipeLayers.planKitLayers).
+   * Absent files are written; an older untouched version is replaced; anybody's own file is never touched, and
+   * when the new code imports names it lacks the note says which. Returns the note for the tool result.
+   * Best-effort: a failure leaves the recipe's own result exactly as it was.
    */
   private async addMissingRecipeLayers(written: Record<string, string>, agent: AgentRole): Promise<string> {
     let layersNote = '';
@@ -3436,14 +3482,37 @@ export class ToolDispatcher {
     try {
       const listed = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
       const present = new Set(listed.map((f) => String(f).replace(/^\.?\//, '')));
-      const missing = missingLayerFiles(written, present);
-      for (const [path, f] of missing) {
-        await this.actuator.writeFile(this.workspaceId, path, f.content);
+      const pool = recipeFilePool();
+      const existing = new Map<string, string | null>();
+      for (const p of this.kitCurrentPaths) if (present.has(p)) existing.set(p, pool.get(p)!.content);
+      let plan = planKitLayers(written, present, existing, pool);
+      for (let round = 0; plan.unread.length > 0 && round < 10; round++) {
+        for (const p of plan.unread) existing.set(p, await this.actuator.readFile(this.workspaceId, p).catch(() => null));
+        plan = planKitLayers(written, present, existing, pool);
+      }
+      const added = new Map<string, LayerFile>();
+      const failed: string[] = [];
+      for (const [path, f] of plan.add) {
+        try { await this.actuator.writeFile(this.workspaceId, path, f.content); }
+        catch { failed.push(path); continue; } // the write door refused it (an owner's protected path, Green Freeze)
         this.state?.recordFileChange({ path, kind: 'create' }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, f.content);
+        this.noteKitCurrent(path, f.content);
         all[path] = f.content;
+        added.set(path, f);
       }
-      layersNote = missingLayersNote(missing);
+      const refreshed: string[] = [];
+      for (const [path, f] of plan.refresh) {
+        try {
+          const wrote = await this.guardedWrite(path, f.content, { agent, source: 'kitLayers', allowOverwrite: true });
+          this.state?.recordFileChange({ path, kind: 'modify' }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+          this.noteKitCurrent(path, wrote.content);
+          all[path] = wrote.content;
+          refreshed.push(path);
+        } catch { failed.push(path); }
+      }
+      layersNote = missingLayersNote(added) + kitVersionNote(refreshed, plan.kept, failed);
     } catch { /* the recipe's own result stands */ }
     return layersNote + await this.installRecipeDependencies(all);
   }

@@ -22,12 +22,12 @@ import { makeTempDir } from './helpers/tempDir';
 import {
   gamePlaytestModule, gamePlaytestConfig, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict,
   scorePlaytest, startLabelRank, isDrivingGame, replayFromCode, STALLED_VEHICLE_FIX, MAX_START_PRESSES, type PlaytestRun,
-  firmFlow, CAMERA_FACES_VEHICLE_FIX, STEERING_MIRRORED_FIX,
+  firmFlow, CAMERA_FACES_VEHICLE_FIX, STEERING_MIRRORED_FIX, LATE_LOOKS, LATE_MIN_MS, LATE_MIN_FRAMES,
 } from '../src/server/AgentV3/gamePlaytest';
 import { buildFindingSuggestions } from '../src/server/AgentV3/buildFindingSuggestions';
 
 /** A racing game behind a title screen. `accelerates: false` is the 46e2d74b bug: the gas is read and never applied. */
-function racer(o: { accelerates: boolean; title?: 'start-race' | 'how-only' | 'two-screens' | 'div-start'; countdownOnGas?: boolean; topSpeed?: number }): string {
+function racer(o: { accelerates: boolean; title?: 'start-race' | 'how-only' | 'two-screens' | 'div-start'; countdownOnGas?: boolean; topSpeed?: number; countdownMs?: number; stallFirstKeyMs?: number }): string {
   // 'two-screens': "Play" opens a car picker whose "Race!" is what finally shows the track.
   const title = o.title === 'how-only'
     ? '<button id="how">How to Play</button><button id="set">Settings</button>'
@@ -40,7 +40,7 @@ function racer(o: { accelerates: boolean; title?: 'start-race' | 'how-only' | 't
       : '<button id="how">How to Play</button><button id="start" class="pulse">Start Race</button>';
   // Q-865: the first press of the gas starts a 3 s 'Get ready' freeze; the car only moves after it.
   const countdown = o.countdownOnGas
-    ? "if ((held.has('ArrowUp') || held.has('KeyW')) && readyUntil === 0) readyUntil = performance.now() + 3000; const ready = readyUntil === 0 || performance.now() < readyUntil;"
+    ? `if ((held.has('ArrowUp') || held.has('KeyW')) && readyUntil === 0) readyUntil = performance.now() + ${o.countdownMs ?? 3000}; const ready = readyUntil === 0 || performance.now() < readyUntil;`
     : 'const ready = false;';
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>.pulse{animation:p .5s infinite alternate}@keyframes p{from{transform:scale(1)}to{transform:scale(1.2)}}
@@ -59,6 +59,9 @@ function start() {
   document.body.appendChild(c); const g = c.getContext('2d');
   const fit = () => { c.width = innerWidth; c.height = innerHeight; }; fit(); addEventListener('resize', fit);
   const held = new Set(); addEventListener('keydown', (e) => held.add(e.code)); addEventListener('keyup', (e) => held.delete(e.code));
+  // Q-869: the main thread blocked on the first key (a sound engine or an asset decoded on first input, or a loaded
+  // machine) — the key's down AND up are both handled after it, so no frame ever sees the first press.
+  ${o.stallFirstKeyMs ? `let stalled = false; addEventListener('keydown', () => { if (stalled) return; stalled = true; const until = performance.now() + ${o.stallFirstKeyMs}; while (performance.now() < until) {} }, { capture: true });` : ''}
   let speed = 0, x = 0.5, offset = 0, readyUntil = 0;
   function frame() {
     ${countdown}
@@ -138,6 +141,10 @@ const PAGES: Record<string, string> = {
   // Q-865: two WORKING games the first look used to call stalled.
   '/race-countdown': racer({ accelerates: true, countdownOnGas: true }),
   '/race-slow': racer({ accelerates: true, topSpeed: 0.0012 }),
+  // Q-869: two WORKING games a loaded machine made look stalled — the first press never reached a frame, and a
+  // countdown longer than the second look.
+  '/race-countdown-first-key-lost': racer({ accelerates: true, countdownOnGas: true, stallFirstKeyMs: 1500 }),
+  '/race-countdown-long': racer({ accelerates: true, countdownOnGas: true, countdownMs: 9000 }),
   // Q-861: a chase view done right, one whose camera faces the car, one whose steering is mirrored.
   '/chase': chase(),
   '/chase-front': chase({ facesCar: true }),
@@ -204,6 +211,14 @@ describe.skipIf(!haveBrowser)('a racing game behind a "Start Race" title screen 
     expect(typeof run.gasLate).toBe('number');
     expect(playtestVerdict(run, DRIVING).score?.stalledVehicle).toBeUndefined();
   }, 180_000);
+
+  it('🔒 Q-869: a 9-second countdown is not a stalled car (the old 2 s look called it one), nor is a first key a loaded page never drew', async () => {
+    const long = await play('/race-countdown-long');
+    expect(long.ok).toBe(true);
+    expect(long.gasLate).toBeGreaterThanOrEqual(0.15);
+    expect(playtestVerdict(long, DRIVING).score?.stalledVehicle).toBeUndefined();
+    expect(playtestVerdict(await play('/race-countdown-first-key-lost'), DRIVING).score?.stalledVehicle).toBeUndefined();
+  }, 400_000);
 
   it('🔒 Q-865: a slow car is not a stalled car — the longer look sees it move', async () => {
     const run = await play('/race-slow');
@@ -309,10 +324,12 @@ describe('the start control is found by its SHAPE (startLabelRank — the one de
 });
 
 describe('the accelerator probe is precise (scorePlaytest)', () => {
+  // The second look as a stalled car gives it: the full 8 s, the page drawing all along, nothing moving.
+  const LATE_STILL = { gasLate: 0.05, gasLateMs: 8200, gasLateFrames: 480 };
   const base: PlaytestRun = { ok: true, spread: 30, idle: 0.05, fps: 60, longFrames: 0, moves: [{ label: 'up / W', change: 0.1 }, { label: 'left / A', change: 2 }, { label: 'right / D', change: 2 }, { label: 'mouse drag', change: 2 }], touchControls: 4, touchIdle: 0.1, touch: 3, errorCount: 0 };
 
   it('a driving game, still at idle and still under the accelerator, is a stalled vehicle — even when steering answered', () => {
-    const s = scorePlaytest({ ...base, gas: 0.08, gasLate: 0.05 }, DRIVING);
+    const s = scorePlaytest({ ...base, gas: 0.08, ...LATE_STILL }, DRIVING);
     expect(s.stalledVehicle).toBe(true);
     expect(s.dimensions.responds).toBeLessThanOrEqual(40);
     // Without the probe this game scored as playable: left, right and a drag all answered.
@@ -327,7 +344,16 @@ describe('the accelerator probe is precise (scorePlaytest)', () => {
 
   it('🔒 Q-865: no stall verdict without the second, longer look — or when that look saw the car move', () => {
     expect(scorePlaytest({ ...base, gas: 0.08 }, DRIVING).stalledVehicle).toBeUndefined();
-    expect(scorePlaytest({ ...base, gas: 0.08, gasLate: 0.9 }, DRIVING).stalledVehicle).toBeUndefined();
+    expect(scorePlaytest({ ...base, gas: 0.08, ...LATE_STILL, gasLate: 0.9 }, DRIVING).stalledVehicle).toBeUndefined();
+  });
+
+  it('🔒 Q-869: a still picture proves nothing when the look was cut short or the page was not drawing', () => {
+    // A loaded machine that stopped drawing the page: the same picture whatever the car does.
+    expect(scorePlaytest({ ...base, gas: 0.08, ...LATE_STILL, gasLateFrames: 6 }, DRIVING).stalledVehicle).toBeUndefined();
+    // The old 2 s look — what called a 9 s countdown stalled.
+    expect(scorePlaytest({ ...base, gas: 0.08, ...LATE_STILL, gasLateMs: 2100 }, DRIVING).stalledVehicle).toBeUndefined();
+    expect(scorePlaytest({ ...base, gas: 0.08, gasLate: 0.05 }, DRIVING).stalledVehicle).toBeUndefined();
+    expect([LATE_LOOKS, LATE_MIN_MS, LATE_MIN_FRAMES]).toEqual([8, 7000, 40]);
   });
 
   it('🔒 Q-861: a firm read judges — the road moving UP is a camera facing the car; a forward camera panning LEFT on LEFT is mirrored steering', () => {

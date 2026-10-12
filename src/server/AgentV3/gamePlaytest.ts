@@ -215,6 +215,8 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     loadMs: LOAD_MS,
     // The "same picture" floor, so the script can tell when the accelerator probe saw nothing move (Q-865).
     stillBelow: STILL_BELOW,
+    // How many one-second looks the second accelerator hold may take (Q-869: a 9 s countdown is a working game).
+    lateLooks: LATE_LOOKS,
     noise: CONSOLE_NOISE.source,
     noiseFlags: CONSOLE_NOISE.flags,
     // The start-control shape (see `startLabelRank`) — the same regexes, handed to the browser as sources.
@@ -296,7 +298,8 @@ async function compare(page, a, b) {
 // and each consecutive pair is matched at 160×90 for the shift (sub-pixel) that best maps one onto the next. 'y'
 // reads the lower part (the road under a forward camera), 'x' the horizon band (where a turn pans the world). A
 // pair that is faster than the search (an edge of it) or barely changed says nothing; the total, and how many
-// pairs agreed on the sign, go to the score, which judges only when they are firm.
+// pairs agreed on the sign, go to the score, which judges only when they are firm. It stops at 14 DRAWN frames, not at
+// a fixed time: a page a loaded machine draws slowly is given up to \`ms\` to draw them (Q-869).
 async function sampleFlow(page, axis, ms) {
   return page.evaluate(async ([axis, ms]) => {
     let c = null, area = 0;
@@ -533,21 +536,29 @@ try {
     out.gas = Math.round((await compare(page, g0, g1)).change * 100) / 100;
     // Q-861: which way the road moves while the vehicle drives — down the screen under a camera that looks the way
     // it drives, UP under one that sits in front of it looking back (the headlights view).
-    if (out.gas >= cfg.stillBelow) out.gasFlow = await sampleFlow(page, 'y', 1200).catch(() => null);
+    if (out.gas >= cfg.stillBelow) out.gasFlow = await sampleFlow(page, 'y', 3000).catch(() => null);
     for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.up(k).catch(() => {});
-    // A SECOND, LONGER LOOK BEFORE "THE CAR NEVER MOVES" (Q-865). Two working games read as stalled on the
-    // first hold: one still showing "Get ready…" (a countdown freezes the car on purpose), and a slow car under
-    // a fixed top-down camera (0.55 s of slow driving is the same picture). So when the first hold saw nothing
-    // move, wait past a countdown and hold again for 2 s, comparing the START of the hold with its END — a slow
-    // car still crosses the screen in that time. Only the stall verdict reads it, and only when both are still.
+    // A SECOND, LONGER LOOK BEFORE "THE CAR NEVER MOVES" (Q-865, Q-869). Working games read as stalled on the first
+    // hold: one still showing "Get ready…" (a countdown freezes the car on purpose — measured: a 9 s one), a slow car
+    // under a fixed top-down camera, and a page a loaded machine had stopped drawing. So when the first hold saw nothing
+    // move, wait past a short countdown and hold again, looking once a second for up to cfg.lateLooks seconds and
+    // stopping the moment anything moves. It records how long it looked and how many frames the page DREW meanwhile:
+    // a still picture is evidence of a stalled car only if the game was drawing (see stalledVehicle).
     if (out.gas < cfg.stillBelow) {
       await page.waitForTimeout(2500);
       for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.down(k).catch(() => {});
       await page.waitForTimeout(200);
+      const n0 = await page.evaluate(() => (window.__nb && window.__nb.frames) || 0).catch(() => 0);
+      const t0 = Date.now();
       const h0 = await shot(page, box);
-      await page.waitForTimeout(2000);
-      const h1 = await shot(page, box);
-      out.gasLate = Math.round((await compare(page, h0, h1)).change * 100) / 100;
+      let most = 0;
+      for (let k = 0; k < cfg.lateLooks && most < cfg.stillBelow; k++) {
+        await page.waitForTimeout(1000);
+        most = Math.max(most, (await compare(page, h0, await shot(page, box))).change);
+      }
+      out.gasLate = Math.round(most * 100) / 100;
+      out.gasLateMs = Date.now() - t0;
+      out.gasLateFrames = (await page.evaluate(() => (window.__nb && window.__nb.frames) || 0).catch(() => 0)) - n0;
       for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.up(k).catch(() => {});
     }
   });
@@ -569,7 +580,7 @@ try {
     const steer = ['ArrowUp', 'KeyW', 'ArrowLeft', 'KeyA'];
     for (const k of steer) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(300);
-    out.steerFlow = await sampleFlow(page, 'x', 1200).catch(() => null);
+    out.steerFlow = await sampleFlow(page, 'x', 3000).catch(() => null);
     for (const k of steer) await page.keyboard.up(k).catch(() => {});
   }
   await ctx.close();
@@ -649,8 +660,11 @@ export interface PlaytestRun {
   touchSurface?: boolean;
   /** Picture change WHILE up/W stayed held (0.35 s → 0.9 s into the hold) — the accelerator probe. */
   gas?: number;
-  /** The second, longer accelerator look — taken only when the first saw nothing move (Q-865). */
+  /** The second, longer accelerator look — taken only when the first saw nothing move (Q-865): the most it changed. */
   gasLate?: number;
+  /** How long that look lasted, and how many frames the page drew during it (Q-869). */
+  gasLateMs?: number;
+  gasLateFrames?: number;
   /** Which way the lower picture (the road) moved, frame to frame, while the accelerator was held — + is down (Q-861). */
   gasFlow?: FlowRead | null;
   /** Which way the horizon band moved while accelerator + LEFT were held — + is right (Q-861). */
@@ -679,6 +693,13 @@ export const DIMENSION_WEIGHTS: Readonly<Record<Dimension, number>> = {
 
 /** Below this mean change (0–100 at 48×27) two frames are "the same picture". */
 export const STILL_BELOW = 0.15;
+
+/** The second accelerator look: up to this many one-second looks (Q-869). */
+export const LATE_LOOKS = 8;
+/** A "never moves" verdict needs the whole look (≥ 7 s) and at least this many frames drawn during it — a page a
+ *  loaded machine had stopped drawing shows the same picture whatever the car does (Q-869). */
+export const LATE_MIN_MS = 7000;
+export const LATE_MIN_FRAMES = 40;
 
 /** What a player is told to fix, per weakest dimension — a sentence the build card can show. */
 export const DIMENSION_FIX: Readonly<Record<Dimension, string>> = {
@@ -771,9 +792,12 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
   // Q-865: and the second, longer look — after any countdown, start of the hold against its end — saw nothing
   // move either. Without that look there is no verdict: a countdown or a slow car under a fixed camera is a
   // working game, and a false "your car never moves" offers a wrong fix.
+  // Q-869: and that look lasted its full length with the page DRAWING — measured: a 9 s 'Get ready' countdown was called
+  // stalled by a 2 s look, and a page a loaded machine stops drawing is the same picture whatever the car does.
   const stalledVehicle = replay.driving === true && typeof run.gas === 'number'
     && idle < STILL_BELOW && run.gas < STILL_BELOW
-    && typeof run.gasLate === 'number' && run.gasLate < STILL_BELOW;
+    && typeof run.gasLate === 'number' && run.gasLate < STILL_BELOW
+    && (run.gasLateMs ?? 0) >= LATE_MIN_MS && (run.gasLateFrames ?? 0) >= LATE_MIN_FRAMES;
   const road = replay.driving === true && !stalledVehicle ? firmFlow(run.gasFlow) : 0;
   const cameraFacesVehicle = road === -1;
   const steeringMirrored = road === 1 && firmFlow(run.steerFlow) === -1;

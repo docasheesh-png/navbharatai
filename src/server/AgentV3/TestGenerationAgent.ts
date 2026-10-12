@@ -278,15 +278,58 @@ export function recipeShipsVitestTest(files: Readonly<Record<string, string>>): 
   return Object.entries(files ?? {}).some(([p, c]) => /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(p) && /from\s+['"]vitest['"]/.test(String(c ?? '')));
 }
 
+/**
+ * The `test` script the PLATFORM writes when it ships a test into a user's app.
+ *
+ * One string, exported, because two places wrote it and a third was missing it — `projectKit.ts` had its
+ * own copy and the game kit had none (Q-911). It is also what lets `testRunner.ts` tell OUR script from
+ * the author's: a user who edits it owns it again.
+ */
+export const PLATFORM_TEST_SCRIPT = 'vitest run';
+
+/**
+ * 🔴 A SHIPPED TEST MUST BE RUNNABLE BY THE COMMAND WE TELL THE USER TO USE (Q-911, autopsy `50378049`).
+ *
+ * This function declared the DEPENDENCY and stopped there, and `declared` is not `runnable`. The default
+ * Vite scaffold's `package.json` defines only `dev`, `build` and `preview` — **no `test` script at all**.
+ * So every 3D game NavBharatAI builds shipped `src/game/controls.test.ts` with this comment inside it, in
+ * the user's own project: *"Your test runner runs it (npm test, or vitest run)"*. `npm test` in that app
+ * answers `npm error Missing script: "test"`. We wrote the test, we wrote the instruction, and the
+ * instruction did not work — a fake feature by the second absolute rule, in a file we put in their repo.
+ *
+ * 🔑 The repo already had the right pattern TWICE and the game kit was the one path that missed it:
+ * `projectKit.ts` added `test: 'vitest run'` beside its own call, and `e2eScaffold.ts` adds `test:e2e`
+ * before telling anyone to run it. The fix is to do it HERE, once, so no future caller can forget —
+ * `projectKit`'s private copy is removed in the same change.
+ *
+ * 🔒 WHY ADDING THE SCRIPT IS SAFE, checked rather than assumed. `testRunner.detectTestPlan` prefers a
+ * project's own `test` script, and a bare `vitest run` would have lost the `--exclude 'e2e/**'` that keeps
+ * vitest from collecting our unrun Playwright starter — the 2026-08-25 false `vitest: FAIL`. That hole was
+ * already closed on the script branch by autopsy `9cca1fd5` (2026-09-17), which forwards the same exclusion
+ * through the package manager's `--` passthrough. So this cannot bring that failure back.
+ *
+ * Returns the new package.json text, or null when nothing was missing, when it cannot be parsed, or when
+ * there is nothing to read — never a guess written over a file we could not understand. PURE.
+ */
 export function withVitestDeclared(packageJson: string | null | undefined): string | null {
   if (packageJson == null) return null;
   let pkg: Record<string, unknown>;
   try { pkg = JSON.parse(packageJson) as Record<string, unknown>; } catch { return null; }
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return null;
   const has = (k: string) => { const sec = pkg[k]; return !!sec && typeof sec === 'object' && 'vitest' in (sec as object); };
-  if (has('dependencies') || has('devDependencies') || has('peerDependencies') || has('optionalDependencies')) return null;
-  const dev = (pkg.devDependencies && typeof pkg.devDependencies === 'object' ? pkg.devDependencies : {}) as Record<string, string>;
-  pkg.devDependencies = { ...dev, vitest: VITEST_RANGE };
+  const declared = has('dependencies') || has('devDependencies') || has('peerDependencies') || has('optionalDependencies');
+  const scripts = (pkg.scripts && typeof pkg.scripts === 'object' && !Array.isArray(pkg.scripts) ? pkg.scripts : {}) as Record<string, string>;
+  const existing = typeof scripts.test === 'string' ? scripts.test.trim() : '';
+  // The npm-init placeholder is not a test command — `testRunner` skips it for the same reason, and a
+  // project carrying it has no way to run the test we just shipped.
+  const runnable = existing.length > 0 && !/no test specified/i.test(existing);
+  if (declared && runnable) return null;
+  if (!declared) {
+    const dev = (pkg.devDependencies && typeof pkg.devDependencies === 'object' ? pkg.devDependencies : {}) as Record<string, string>;
+    pkg.devDependencies = { ...dev, vitest: VITEST_RANGE };
+  }
+  // An author's own script is never overwritten — only a missing or placeholder one is filled.
+  if (!runnable) pkg.scripts = { ...scripts, test: PLATFORM_TEST_SCRIPT };
   return `${JSON.stringify(pkg, null, 2)}\n`;
 }
 

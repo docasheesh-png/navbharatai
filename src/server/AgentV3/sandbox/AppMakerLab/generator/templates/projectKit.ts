@@ -91,11 +91,11 @@ export function projectKitFiles(packageJson: string): Record<string, string> {
     'src/components/.gitkeep': '',
     'src/pages/.gitkeep': '',
   };
-  const withVitest = withVitestDeclared(packageJson) ?? packageJson;
-  try {
-    const pkg = JSON.parse(withVitest) as { scripts?: Record<string, string> };
-    pkg.scripts = { ...(pkg.scripts || {}), test: pkg.scripts?.test || 'vitest run' };
-    files['package.json'] = `${JSON.stringify(pkg, null, 2)}\n`;
-  } catch { /* unparseable package.json: leave it exactly as shipped */ }
+  // 🔑 ONE PLACE DECIDES WHAT "RUNNABLE" MEANS (Q-911, autopsy 50378049). This used to declare the
+  // dependency through `withVitestDeclared` and then add the `test` script itself, with its own copy of
+  // the string — and the game kit, which also ships a test, had no such copy and so shipped a test the
+  // user's `npm test` could not run. `withVitestDeclared` now does both, so no caller can forget.
+  const runnable = withVitestDeclared(packageJson);
+  if (runnable) files['package.json'] = runnable;
   return files;
 }

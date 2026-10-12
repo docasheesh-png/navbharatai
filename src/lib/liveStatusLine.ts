@@ -49,3 +49,19 @@ export function withoutStaleLiveStatus<T extends { id?: string | null; text?: st
   for (let i = lines.length - 1; i >= 0; i--) if (!isLiveStatusLine(lines[i])) { lastNonLive = i; break; }
   return lines.filter((line, i) => !isLiveStatusLine(line) || (running && i > lastNonLive));
 }
+
+/**
+ * The newest line carrying a live-status id, or null. PURE.
+ *
+ * 🔴 WHY THE ETA NEEDS IT (found working autopsy 303e8a6f). The admin decided on 2026-09-26 that a build shows
+ * its ETA — labelled a rough guess where unmeasured — and the report records it as "Shown to the user". But the
+ * chat timeline drops every '⏱' line as progress noise (the 2026-07-02 redesign moved timers OUT of the prose),
+ * so on the main chat the ETA reached nobody. Live status belongs in the status line, so that is where it goes.
+ */
+export function latestLiveStatusText(lines: readonly { id?: string | null; text?: string | null }[], id: string): string | null {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (line?.id === id && typeof line.text === 'string' && line.text.trim()) return line.text.trim();
+  }
+  return null;
+}

@@ -2246,6 +2246,8 @@ export class BuildDiagnostics {
       highMs: Number.isFinite(Number(p?.highMs)) ? Number(p.highMs) : estimateMs,
       evidenced: p?.evidenced === true,
       ...(typeof p?.shown === 'string' && p.shown ? { shown: p.shown } : {}),
+      ...(typeof p?.key === 'string' && p.key ? { key: p.key } : {}),
+      ...(p?.source === 'workspace' || p?.source === 'platform' || p?.source === 'heuristic' ? { source: p.source } : {}),
     };
   }
 
@@ -3406,6 +3408,13 @@ export interface EtaPromise {
   evidenced: boolean;
   /** The exact sentence the user saw, so the report can never claim a promise that was not made. */
   shown?: string;
+  /**
+   * Which slice of builds the estimate was asked to learn from (`etaTaskKey`: 'scaffold', 'game', 'complex_app',
+   * …), and whose builds actually taught it. Carried so the ETA's accuracy can be measured PER KIND — "is the
+   * band wrong for template builds?" was unanswerable while the promise named no kind (autopsy 303e8a6f).
+   */
+  key?: string;
+  source?: 'workspace' | 'platform' | 'heuristic';
 }
 
 /** How the promise held up. `ratio` is actual ÷ midpoint; `overBandBy` is 0 when it landed inside. */
@@ -3423,6 +3432,9 @@ export interface EtaAccuracy {
    * then it never ran long enough to test the estimate, and its ratio must not be counted as a miss.
    */
   untested?: boolean;
+  /** The promise's slice and source (see EtaPromise) — absent on reports written before 2026-10-12. */
+  key?: string;
+  source?: 'workspace' | 'platform' | 'heuristic';
 }
 
 /**
@@ -3466,6 +3478,23 @@ export function etaAccuracy(
   endedAt: number | null | undefined,
   outcomeCode: string = '',
   userWaitMs: number = 0,
+): EtaAccuracy | null {
+  const judged = judgeEtaPromise(promise, startedAt, endedAt, outcomeCode, userWaitMs);
+  if (!judged) return null;
+  // The kind rides along, so accuracy can be read per slice (autopsy 303e8a6f).
+  return {
+    ...judged,
+    ...(typeof promise?.key === 'string' && promise.key ? { key: promise.key } : {}),
+    ...(promise?.source ? { source: promise.source } : {}),
+  };
+}
+
+function judgeEtaPromise(
+  promise: EtaPromise | null | undefined,
+  startedAt: number | null | undefined,
+  endedAt: number | null | undefined,
+  outcomeCode: string,
+  userWaitMs: number,
 ): EtaAccuracy | null {
   const promisedMs = Number(promise?.estimateMs);
   const a = Number(startedAt);

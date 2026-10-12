@@ -149,6 +149,26 @@ describe('3 · on screen, live status is NOW — or it is gone', () => {
   it('🔒 the chat thread reads narration through that filter', () => {
     const panel = readFileSync(join(__dirname, '../src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
     expect(panel).toContain('...withoutStaleLiveStatus(state.narration, running).map((n) => ({');
+    // …and so does every flush of a finished turn into the thread's history: the build that produced the
+    // clock is over, so a "⏳ Still working — 11s so far" must not ride into the next build's thread.
+    expect(panel).not.toMatch(/\bstate\.narration\.map\(/);
+    expect(panel.match(/withoutStaleLiveStatus\(state\.narration, false\)/g)?.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('🔒 census: no client surface renders build narration without the filter', () => {
+    const ROOT = join(__dirname, '..');
+    const walk = (d: string, out: string[] = []): string[] => {
+      for (const n of readdirSync(d)) {
+        const p = join(d, n);
+        if (statSync(p).isDirectory()) walk(p, out);
+        else if (/\.tsx$/.test(n) && !/\.test\.tsx$/.test(n)) out.push(p);
+      }
+      return out;
+    };
+    const bare = walk(join(ROOT, 'src/components'))
+      .filter((f) => /\bstate\.narration\.(?:map|filter|forEach)\(/.test(readFileSync(f, 'utf8')))
+      .map((f) => f.slice(ROOT.length + 1));
+    expect(bare).toEqual([]);
   });
 });
 

@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
 import { stopVersionPreview } from '../../lib/versionPreviewStop';
-import { isLiveStatusLine, withoutStaleLiveStatus } from '../../lib/liveStatusLine';
+import { isLiveStatusLine, withoutStaleLiveStatus, latestLiveStatusText, ETA_LINE_ID } from '../../lib/liveStatusLine';
 import { buildElapsedMs } from './buildClock';
 import { CONTINUE_INTERRUPTED_BUILD_PROMPT, CONTINUE_PAST_BUDGET_PROMPT, CONTINUE_AND_FIX_BUILD_PROMPT } from '../../lib/continueBuildPrompts';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
@@ -1632,7 +1632,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     if (state.narration.length > 0) {
       setAgentHistory((h) => [
         ...h,
-        ...state.narration.map((n) => ({
+        ...withoutStaleLiveStatus(state.narration, false).map((n) => ({
           role: 'agent' as const,
           agent: n.agent,
           text: n.text,
@@ -2081,7 +2081,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     if (state.narration.length > 0) {
       setAgentHistory((h) => [
         ...h,
-        ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) })),
+        ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) })),
       ]);
     }
     if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
@@ -2116,7 +2116,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       activeQueuedItemRef.current = item.id;
       setUserMsgs((c) => [...c, { role: 'user', text: item.prompt, ts: Date.now() }]);
       if (state.narration.length > 0) {
-        setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) }))]);
+        setAgentHistory((h) => [...h, ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) }))]);
       }
       try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
       start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, appSignature: appSignaturePref() });
@@ -4703,6 +4703,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               <WorkingIndicator
                 activity={state.activity} running={running} progress={progress} costInr={state.costSoFarInr}
                 startedAt={state.startedAt} endedAt={state.endedAt}
+                etaLine={running ? latestLiveStatusText(state.narration, ETA_LINE_ID) : null}
                 onWatchLive={offerWatchLive({ running, entryWrittenAt: state.entryWrittenAt, previewOpen: showWorkspace && tab === 'preview' }) ? () => openSurfaceFromFooter('preview') : undefined}
               />
             )}
@@ -6729,7 +6730,7 @@ function fmtElapsed(ms: number): string {
  * REAL engine events (state.activity); no synthetic activity. Renders while running, and stays as a
  * collapsed "view activity" expander after the build finishes so the work is reviewable.
  */
-function WorkingIndicator({ activity, running, progress, costInr, onWatchLive, startedAt, endedAt }: { activity: ActivityEntry[]; running: boolean; progress?: BuildProgress; costInr?: number; onWatchLive?: () => void; startedAt?: number; endedAt?: number }) {
+function WorkingIndicator({ activity, running, progress, costInr, onWatchLive, startedAt, endedAt, etaLine }: { activity: ActivityEntry[]; running: boolean; progress?: BuildProgress; costInr?: number; onWatchLive?: () => void; startedAt?: number; endedAt?: number; etaLine?: string | null }) {
   const [nowTick, setNowTick] = useState(() => Date.now());
 
   // Tick the elapsed clock only while running. On stop (done OR error) the time FREEZES at the
@@ -6785,6 +6786,12 @@ function WorkingIndicator({ activity, running, progress, costInr, onWatchLive, s
         )}
         <span className="shrink-0 tabular-nums text-faint">{elapsed}</span>
       </div>
+      {/* THE ETA THE USER IS PROMISED (admin 2026-09-26: shown, and labelled a guess where unmeasured). The chat
+          drops every ⏱ line as progress noise, so before this the estimate reached nobody on the main chat while
+          the report said "Shown to the user" (autopsy 303e8a6f). Live status lives in the status line. */}
+      {running && etaLine && (
+        <div className="mt-1 text-[11px] leading-snug text-muted">{etaLine.replace(/^⏱️?\s*/, '')}</div>
+      )}
       {/* EARLY PREVIEW (earlyPreviewCue.ts): the app is on screen while it is still being built. */}
       {running && onWatchLive && (
         <button

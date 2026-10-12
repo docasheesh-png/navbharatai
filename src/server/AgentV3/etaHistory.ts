@@ -25,6 +25,7 @@
 // PURE — no clock, no Firestore. Records are passed in, so every rule here is unit-testable.
 
 import type { Complexity, HistoricalBuild } from '../lib/BuildTimeEstimator';
+import type { TaskType } from './RequestAnalyser';
 
 /** The few fields we need off a stored report. Deliberately loose — old records lack newer fields. */
 export interface BuildRecordLike {
@@ -153,12 +154,18 @@ export function fleetHistoryFromTelemetry(
   taskType: string | null | undefined,
   currentComplexity: Complexity,
   maxDays = 7,
-): { history: HistoricalBuild[]; builds: number; days: number } {
+): { history: HistoricalBuild[]; builds: number; days: number; seenOk: number; daysRead: number } {
   const history: HistoricalBuild[] = [];
   let builds = 0;
-  if (!taskType) return { history, builds, days: 0 };
-  for (const d of (days ?? []).slice(0, maxDays)) {
+  // 🔎 What the window HELD, before the per-day floor: an empty `history` alone cannot tell "no build of this
+  // kind finished" from "they finished one a day" (autopsy 303e8a6f — both read "no past builds").
+  let seenOk = 0;
+  const window = (days ?? []).slice(0, maxDays);
+  if (!taskType) return { history, builds, days: 0, seenOk, daysRead: window.length };
+  for (const d of window) {
     const slice = d?.byTaskType?.[taskType];
+    const finished = Number(slice?.okBuilds);
+    if (Number.isFinite(finished) && finished > 0) seenOk += finished;
     // 🔴 SUCCESSFUL builds only, wherever the day carries them (autopsy 19641ab5). A build the user
     // stopped at 1.8 min and a failure at 40 s are not how long an app of this kind takes; the
     // telemetry has split them out since 728a402d (`okDurationMs`), and this reader still averaged
@@ -181,7 +188,7 @@ export function fleetHistoryFromTelemetry(
     history.push({ complexity: currentComplexity, durationMs: Math.round(mean), ...(daySd > 0 ? { sdMs: Math.round(daySd) } : {}) });
     builds += n;
   }
-  return { history, builds, days: history.length };
+  return { history, builds, days: history.length, seenOk, daysRead: window.length };
 }
 
 /**
@@ -239,16 +246,55 @@ export function etaTaskKey(taskType: string | null | undefined, scaffolded: bool
   return t;
 }
 
+/**
+ * The words for every slice the ETA can learn from — one table, so the line that says a slice WAS used and the
+ * line that says it was EMPTY name it identically. Keyed by every `TaskType` plus the build kinds `etaTaskKey`
+ * adds, so a new task type or kind fails to compile until it has words (autopsy 303e8a6f).
+ */
+const SLICE_WORDS: Record<TaskType | typeof SCAFFOLD_TASK_KEY | EtaBuildKind | 'unknown', string> = {
+  scaffold: 'builds that start from a tested template (verify and polish)',
+  game: 'game builds',
+  image_app: 'builds of apps that make pictures',
+  complex_app: 'complex app builds',
+  simple_app: 'simple app builds',
+  app_unsized: 'app builds the request did not size',
+  edit_unsized: 'edits to an existing app',
+  coding: 'coding changes to an existing app',
+  debugging: 'fix (debugging) turns',
+  architecture: 'architecture turns',
+  translate: 'translation turns',
+  summary: 'summary turns',
+  chat: 'chat turns',
+  unknown: 'builds of an unrecognised kind',
+};
+
+/** How a slice is named to the admin. PURE. */
+export function etaSliceWords(taskType: string): string {
+  return (SLICE_WORDS as Record<string, string>)[taskType] ?? `"${taskType}" builds`;
+}
+
 /** The admin line for an estimate taught by the platform's recent builds of this kind. PURE. */
 export function fleetEtaBasisNote(taskType: string, builds: number, days: number): string {
-  const kind = taskType === SCAFFOLD_TASK_KEY
-    ? 'builds that start from a tested template (verify and polish)'
-    : taskType === 'game'
-      ? 'game builds'
-      : taskType === 'image_app'
-        ? 'builds of apps that make pictures'
-        : `"${taskType}" builds`;
-  return `No past builds of this app — using NavBharatAI's recent average for ${kind} (${builds} build${builds === 1 ? '' : 's'} over ${days} day${days === 1 ? '' : 's'}).`;
+  return `No past builds of this app — using NavBharatAI's recent average for ${etaSliceWords(taskType)} (${builds} build${builds === 1 ? '' : 's'} over ${days} day${days === 1 ? '' : 's'}).`;
+}
+
+/**
+ * The admin line when the platform's slice for this kind gave the estimate NOTHING — which says which slice was
+ * asked and why it was empty, instead of "no past builds" (autopsy 303e8a6f). That sentence was the same for a
+ * template build and a from-scratch complex app, so a regressed key was invisible; and it claimed "no past
+ * builds" from a filter that only proves "no day with FLEET_MIN_BUILDS_PER_DAY finished builds". PURE.
+ */
+export function fleetEmptyBasisNote(taskType: string, seenOk: number, daysRead: number): string {
+  const kind = etaSliceWords(taskType);
+  const window = `the last ${daysRead} day${daysRead === 1 ? '' : 's'}`;
+  if (daysRead <= 0) {
+    return `No past builds of this app, and the platform's build telemetry returned no days to learn ${kind} from — this is the heuristic alone.`;
+  }
+  if (seenOk <= 0) {
+    return `No past builds of this app, and none of NavBharatAI's ${kind} finished in ${window} — this is the heuristic alone.`;
+  }
+  return `No past builds of this app. NavBharatAI finished ${seenOk} of its ${kind} in ${window}, but never ${FLEET_MIN_BUILDS_PER_DAY} on one day — `
+    + `a day's average needs at least ${FLEET_MIN_BUILDS_PER_DAY}, so this is the heuristic alone.`;
 }
 
 /**

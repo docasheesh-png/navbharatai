@@ -466,7 +466,7 @@ import { abortOutcomeFor, ABORT_OUTCOME_CODES } from '../AgentV3/abortOutcome';
 import { sandboxWasUnavailable } from '../AgentV3/sandboxAvailability';
 import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser, buildWasStopped } from '../AgentV3/BuildDiagnostics';
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
-import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity, liveEtaTick } from '../lib/BuildTimeEstimator';
+import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity, templateSizedComplexity, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { freeBuildWindow, noteFreeBuildStartDurable, decideFreePauseDurable, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
 import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
@@ -654,7 +654,7 @@ import {
   type VersionPreviewDeps,
 } from '../AgentV3/versionPreview';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, etaTaskKey, etaBuildKind, type EtaBuildKind } from '../AgentV3/etaHistory';
+import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, fleetEmptyBasisNote, etaTaskKey, etaBuildKind, type EtaBuildKind } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -13449,6 +13449,8 @@ async function noteBuildOutcome(
     let etaEvidenced = false;
     // The labelled rough band an unevidenced build shows (admin 2026-09-26) — read by the tick.
     let etaRoughBand: string | null = null;
+    /** The rough band was sized by a seeded template, not by the request (autopsy 303e8a6f) — its label says so. */
+    let etaFromTemplate = false;
     // Its top end, so the tick stops restating a band the build has already outrun.
     let etaRoughHighMs: number | null = null;
     // The HIGH end of the band the user was shown first. The live tick never calls a build "bigger than
@@ -13670,7 +13672,7 @@ async function noteBuildOutcome(
           // d11ad529). Elapsed time is still reported — it has already happened, so it promises
           // nothing — and the moment a real measurement lands the branch above takes over.
           if (!etaEvidenced) {
-            events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs), ts: now, id: 'eta-live' });
+            events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs, etaFromTemplate), ts: now, id: 'eta-live' });
             return;
           }
           const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions, etaPromisedHighMs);
@@ -13746,7 +13748,9 @@ async function noteBuildOutcome(
       // A starter chip whose tested template will be seeded is verify-and-polish, not a big build — see
       // scaffoldedComplexityDecision. The same four conditions the seeding below checks up front
       // (flag, a fresh build, not an import, a template for this exact prompt).
-      const scaffoldWillSeed = process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !isImportTurn && !!goldenScaffoldForPrompt(prompt);
+      // The scaffold itself is kept (not only the yes/no): the ETA sizes a seeded build by its template's tier.
+      const seededScaffold = process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !isImportTurn ? goldenScaffoldForPrompt(prompt) : null;
+      const scaffoldWillSeed = !!seededScaffold;
       // 🔴 THE DOMAIN QUESTION STARTS HERE, BESIDE SETUP (autopsy 31254f9a, 2026-10-01). It used to be asked
       // after setup, project restore and context loading, right before the first build call, so its whole
       // wait was added to the user's: that calculator build sat 6 seconds in silence (the call's own cap)
@@ -14680,9 +14684,13 @@ async function noteBuildOutcome(
           // behaviour, and can never delay or fail a build.
           // A port is estimated by the project it ports, as it is routed (autopsy 51ef24ad).
           const etaByProject = complexityDecision.source === 'workspace';
+          // …and a seeded template by the template (autopsy 303e8a6f): with no history for the 'scaffold' slice the
+          // estimate fell back to the chip's WORDING, as if the app were built from scratch.
           const etaComplexity = etaByProject
             ? projectSizedComplexity(complexityFromPrompt(planning.sizing), projectFilePaths)
-            : complexityFromPrompt(planning.sizing);
+            : seededScaffold
+              ? templateSizedComplexity(complexityFromPrompt(planning.sizing), seededScaffold.tier)
+              : complexityFromPrompt(planning.sizing);
           const past = await recentBuildHistoryFor(
             workspaceId, etaComplexity,
             (id, n) => listDiagnosticsHistory(id, n) as Promise<any>,
@@ -14691,7 +14699,7 @@ async function noteBuildOutcome(
           // With no history of its own, the estimate learns from how long the platform's recent builds
           // of THIS task type took — read from the cost telemetry every build already writes. The app's
           // own history always wins the moment it exists; a failed read is [] — today's behaviour.
-          let fleet: ReturnType<typeof fleetHistoryFromTelemetry> = { history: [], builds: 0, days: 0 };
+          let fleet: ReturnType<typeof fleetHistoryFromTelemetry> = { history: [], builds: 0, days: 0, seenOk: 0, daysRead: 0 };
           // A seeded template is its own kind of build (autopsy 4a1c0157): the same `scaffoldWillSeed` that
           // routed it to the cheap rung picks the slice, so the ETA never prices template polish as a
           // from-scratch `complex_app`.
@@ -14732,25 +14740,35 @@ async function noteBuildOutcome(
           // show — see the tick below, which withholds the countdown until something real anchors it.
           etaEvidenced = estimateIsEvidenced(est);
           etaRoughBand = etaEvidenced ? null : roughEstimateBand(est);
+          // Sized by the template only where no real history taught it — then the label names the template.
+          etaFromTemplate = seededScaffold?.tier === 'simple' && past.length === 0 && fleet.history.length === 0;
           etaRoughHighMs = etaRoughBand ? Number(est.highMs) || null : null;
           etaPromisedHighMs = etaEvidenced || etaRoughBand ? Number(est.highMs) || 0 : 0;
           const etaShown = etaEvidenced
             ? (past.length === 0 && fleet.history.length > 0 ? fleetEtaLine(est, fleet.builds) : firstEtaLine(est, past.length))
-            : unevidencedFirstEtaLine(est);
+            : unevidencedFirstEtaLine(est, { fromTemplate: etaFromTemplate });
           // KEEP THE PROMISE SO THE ENDING CAN BE MEASURED AGAINST IT (open root cause #6). The
           // `ETA_BASIS` line below records the same numbers as PROSE, for a human; this records them
           // as NUMBERS, so the report can reconcile them against its own clock without anyone parsing
           // a sentence we wrote. Stored structured for exactly the reason `buildFailureCategory.ts`
           // documents: reading our own prose back to recover facts we had in hand is how a reader
           // ends up classifying on a wording change.
+          // Whose builds taught it — and, when nobody's did, the slice that was asked and why it was empty.
+          const etaSource: 'workspace' | 'platform' | 'heuristic' = past.length > 0 ? 'workspace' : fleet.history.length > 0 ? 'platform' : 'heuristic';
+          const etaBasis = etaSource === 'platform' && etaFleetKey
+            ? fleetEtaBasisNote(etaFleetKey, fleet.builds, fleet.days)
+            : etaSource === 'heuristic' && etaFleetKey
+              ? fleetEmptyBasisNote(etaFleetKey, fleet.seenOk, fleet.daysRead)
+              : etaBasisNote(past);
           buildDiag.setEtaPromise({
             estimateMs: est.estimateMs, lowMs: est.lowMs, highMs: est.highMs,
             evidenced: etaEvidenced, shown: etaShown.replace(/^⏱️\s*/, ''),
+            ...(etaFleetKey ? { key: etaFleetKey } : {}), source: etaSource,
           });
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: `${past.length === 0 && fleet.history.length > 0 && etaFleetKey ? fleetEtaBasisNote(etaFleetKey, fleet.builds, fleet.days) : etaBasisNote(past)} ${etaEvidenceNote(est, past.length === 0 && fleet.history.length > 0 ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
+            detail: `${etaBasis}${etaFromTemplate ? ' Sized by the seeded template, not by the request\'s wording.' : ''} ${etaEvidenceNote(est, etaSource === 'platform' ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a

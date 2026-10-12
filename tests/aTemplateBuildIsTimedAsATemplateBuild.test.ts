@@ -61,7 +61,8 @@ describe('a seeded template is its own kind of build', () => {
 
   it('the admin line names the kind in words', () => {
     expect(fleetEtaBasisNote(SCAFFOLD_TASK_KEY, 5, 3)).toContain('start from a tested template');
-    expect(fleetEtaBasisNote('complex_app', 19, 5)).toContain('"complex_app" builds');
+    // In words since 303e8a6f (one table, `etaSliceWords`), never the raw key.
+    expect(fleetEtaBasisNote('complex_app', 19, 5)).toContain('complex app builds');
   });
 });
 

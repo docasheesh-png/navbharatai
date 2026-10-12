@@ -3,6 +3,7 @@ import { Play, Download, Trash2, Plus, X, ChevronRight, MessageSquare, GitBranch
 import { auth } from '../../lib/firebase';
 import { BotBuildHelp, type HelpMode } from './BotBuildHelp';
 import { WhatsAppAppSecretNotice, looksLikeAppSecret } from './WhatsAppAppSecretNotice';
+import { ConnectedBotsPanel } from './ConnectedBotsPanel';
 import { deliverFile } from '../../lib/downloadFile';
 
 type NodeType = 'start' | 'message' | 'menu' | 'condition' | 'api' | 'end';
@@ -617,6 +618,7 @@ export const BotBuilder: React.FC = () => {
 
       {/* ——— WhatsApp bots without an App Secret (or failing its check) — the owner's notice, Q-612 ——— */}
       <WhatsAppAppSecretNotice refreshKey={botsRefresh} />
+      <ConnectedBotsPanel refreshKey={botsRefresh} />
 
       {/* ——— Canvas + (desktop) properties ——— */}
       <div className="flex flex-1 min-h-0">

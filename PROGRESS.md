@@ -94167,3 +94167,17 @@ The admin's instruction: *"rukna hi nahi hai!! sabhi ke liye han hai"* (don't st
   - **No bill moves.** Not one ERROR code went to PROCESS_ONLY, and a test now fails if one ever does.
   - **Census tests that encoded "deliberately unclassified"** were updated to the decided homes. The baseline is `[]`, and the ratchet keeps it empty.
   - Reverted three ways and seen to fail.
+
+### 2026-10-12 — Q-816: a bot you connected can be disconnected
+
+- **The problem:** Bot Builder could connect a Telegram or WhatsApp bot and offered no way to undo it. `POST /api/bots/disconnect` existed and nothing called it, so it sat in the uncalled-route baseline as "undecided".
+- **The class:** a capability the server has and the screen never offers.
+- **Built:**
+  - "Your bots" (`ConnectedBotsPanel`), under the Bot Builder toolbar, lists every connected bot.
+  - Each bot has a Disconnect button that asks first.
+  - The screen says what really happened (`src/lib/connectedBots.ts`): for Telegram, whether Telegram confirmed it stopped delivering; for WhatsApp, where to remove the Callback URL in the user's own Meta app, which we cannot change.
+- **Server honesty, fixed with it:**
+  - `GET /api/bots` answered a failed read with an empty list, "you have no bots", while one was live. It now returns 502, and `BotStore.listForUser` returns null.
+  - `POST /api/bots/disconnect` answered a failed delete with "not found (or not yours)". It now returns 502, and `remove` returns 'error'. It also checks the bot id shape first.
+- **Other changes:** the route left the uncalled-route baseline, and the KB `bot_builder` entry names the new path.
+- **Test:** `tests/aBotYouConnectedCanBeDisconnected.test.ts` drives the real route with a stubbed store. Both honesty guards were reverted and the test failed.

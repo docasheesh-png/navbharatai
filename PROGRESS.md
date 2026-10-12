@@ -94404,3 +94404,60 @@ unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong
 
 **What to watch for on the next report:** a reasoning-only KIMI call ends at ~150 s as a timeout and the chain falls to GLM;
 `LLM_CALL_STOPPED` carries "it had been running Ns"; a non-English scene description gets a picture answer, not a build offer.
+
+## 2026-10-12 — Autopsy 303e8a6f (AI-image starter chip, Weak tier, user stopped at 36 s)
+
+Admin: *"build report ki sabhi problem ko ek ek kar ke solve karna hai, dna level par, jab tak sabhi ke root cause fix na
+ho jaye tab tak rukna nahi hai!"* Real report: the first starter chip ("AI image generator… free image engine that needs no
+API key") was seeded from our image template on a Weak build. The first rung (GLM) never answered, KIMI answered in 3.4 s,
+the template was on screen at ~11 s, and the user pressed Stop at 36 s. The report then told the user nothing had been
+written, counted the Stop as a self-heal, and opened a security issue against our own template.
+
+**Tally (as the report recorded it → what was true):** ✅ self-heal 1 → 0 (it was the user's Stop, Q-945; the heal census
+then found 8 more codes wrongly counted as heals, Q-947) · 🔀 workaround 1 (GLM benched, KIMI answered — a SILENT rung,
+not the "crawl" the report named, Q-941) · ⏭️ skip 1 (a security issue against our own template left open, Q-944) · ❌ shipped
+wrong 4 (a chip promising a keyless engine that no longer exists, Q-940; "nothing had been written" beside our 14-file app,
+Q-951; every browser-proven build shown "READY (not verified)", Q-946; a request told "no sign-in" that never mentioned
+sign-in, Q-954) · 🥵 struggle 3 (15 s on a silent rung, Q-941/Q-948; 11.4 s before the first call with 4.4 s accounted for,
+Q-955; a chat clock that read 11 s at 23 s, Q-949).
+
+| ID | Problem | Root cause → class | Fix (siblings) | Lock (reverted → failed) |
+|---|---|---|---|---|
+| Q-940 | Chip promised a keyless image engine | A capability fact copied as prose with no single source | Every copy (chip, tool schema, "AI needs no key" rules, refusal note, scanner hint, KB, docs); the retired chip text still seeds | chip/tool census |
+| Q-941 | "GLM crawl" — it never answered | One marker for silence and slowness | Silence carries its own mark on every path; waste and failure ledgers file `silent`; time-to-open and first word recorded | `aSilentRungIsNotACrawl` |
+| Q-942 | "Try again" button read as a debugging task (Sonnet band) | A feature of the app read as the task | One clause-anchored reader for the analyser, dialogue phase and change classifier | `aFeatureNamed…` |
+| Q-943 | New build recorded "large/deep · 14 files" | The edit classifier ran on new builds | `classifyNewApp`; the record counts authored files | `aNewAppIsNotARiskyChange` |
+| Q-944 | Security issue against our own template | Analyzer never run over code we ship | Element-lifetime guard; `unsafe-target-blank` LOW (60-second rule, one line to revert); a new app retires old issues | `ourOwnCodePassesOurOwnSecurityScan` |
+| Q-945 | Stop counted as a self-heal | Two expressions decided one fact | `releaseGateRecord` decides severity and closure together | `aStopIsNeitherAProblemNorAHeal` |
+| Q-946 | "READY (not verified)" on proven builds | Card looked for an info row where info never lives | Reads the recorder's outcome | same §4 |
+| Q-947 | 8 codes counted as heals that repaired nothing | Deny-list made "heal" the default | Every warning+closed code classified (CI census); HEAL_RULE 3 | `aClosedWarningIsClassifiedOrItFails` |
+| Q-948 | Rescuer charged with the silent rung's 15 s | One stopwatch round a fallback chain | Answering time and fallback time measured separately | `aChainsClockIsNotItsAnswerersClock` |
+| Q-949 | Chat clock 11 s at 23 s | Origin was first activity, not request arrival | Request-arrival origin; re-attach gets a duration; stale status hides | `userVisibleClockOrigin` |
+| Q-950 | Template ETA from the chip's wording; "No past builds" | Empty slice unnamed; seeded slice not split by tier | Slice named; scaffold / scaffold_pro; ETA in main chat (constant removed on review) | ETA pins |
+| Q-951 | "Nothing had been written" after the Stop | A yes/no for a three-state question | `seedStateOf` in every ending (stop, watchdog, stall, cost cap, bill) | `aStopSaysWhatTheWorkspaceHolds` |
+| Q-952 | 15 narrations outside the report bus | Narration bypassed `events` | All through `events`; `filed` flag | `aNarrationReachesTheReport` |
+| Q-953 | "Peak memory: not available" on every E2B build | Probe read the cgroup root | Own v2/v1 cgroup, start + end probes, own limit | `cgroupOwnPath` |
+| Q-954 / Q-957 | "No sign-in" reason invented; vault/2FA/Face ID missed | The decider did not own its sentence; word list missed mechanisms | Decider's sentence; mechanism words | `aReportReasonIsTheDecidersReason` |
+| Q-955 | 7 s of the first 11.4 s unaccounted | Unmeasured serial awaits | Contiguous windows; waste removed (git, vault, MCP, boot reads) | `everySecondBeforeTheFirstCallIsInAWindow` |
+| Q-956 | Our code failed our scan (starter innerHTML, Fixer over HTTP, schemaLocation) | Found by Q-944's census | DOM nodes; HTTPS; namespace | Q-944 census |
+| Q-958 | False HTML entry repairs | Guard read a fixed id and `main` entry | Reads the entry's own mount id; one `appEntryHtmlKey` | `aBootingPageIsNotRepaired` |
+| Q-959 | A repair creating a missing module dropped | Scope read only the importer | TS2307 / Vite target in scope | same |
+| Q-960 | Two drifted "file absent?" predicates | Copies | One `isNotFoundError` | same (table) |
+| Q-961 | Drain could overwrite a stored app after a failed refill | The Q-740 class | `mayPersistSeededScaffold` | same |
+| Q-962…Q-974 | 13 items needing the admin (routing, product, money, metric, store bundle, logs) | — | 🟡 rows with options and a recommendation in `BUILD_REPORT_QUEUE.md` | — |
+
+**Time-series break:** from this PR, a provider that never answered is filed `silent`, not `timeout`/`crawl`. Older weeks
+counted silence as crawls, so the crawl count drops and a `silent` series starts — that is the honest split, not an
+improvement.
+
+**Proactive (the biggest lever):** Q-963 — a verbatim starter chip should need no model loop at all (seed → install →
+typecheck → dev server → render proof → done). Three reports now show users stopping an app that was already finished.
+
+**What to watch for on the next report:** a silent first rung reads "was silent", the first-call line splits answering and
+abandoned time, the setup coverage clause accounts for every second before the first call, and peak memory shows a number.
+
+```
+BUILD REPORT 303e8a6f — RESOLUTION
+Items: 35 · ✅ Resolved: 0 (22 fixed in the open PR, ✅ on merge) · 🟡 Blocked: 13 · Remaining: 22
+FINAL: ❌ NOT COMPLETE — remaining: Q-940 … Q-961 (fixed, awaiting the admin's merge)
+```

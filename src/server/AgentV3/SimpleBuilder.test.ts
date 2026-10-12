@@ -777,7 +777,8 @@ describe('runSimpleBuild — shared contract wiring', () => {
 
   it('contract system prompt freezes enum member casing + per-component props (the drift the report hit)', () => {
     const p = contractSystemPrompt('vite-react');
-    expect(p).toContain('ENUM');
+    expect(p).toContain('UNION TYPE');
+    expect(p).toContain('An ENUM is FORBIDDEN here');
     expect(p).toContain('FROZEN');
     expect(p).toContain('props interface');
   });

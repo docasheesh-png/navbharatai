@@ -559,6 +559,8 @@ a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transfor
    CHANGE, they just stop moving. A spinner is kept visible (removing it would hide that something is
    loading); it simply stops rotating. */
 @media (prefers-reduced-motion: reduce) {
+  /* The shimmer is decoration, not information. */
+  .nb-skeleton { animation: none; }
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
@@ -568,7 +570,5 @@ a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transfor
   :where(button:active), .btn:active, .btn-primary:active, .btn-secondary:active, .btn-danger:active,
   .btn-primary:hover, .primary:hover, .nb-game-btn:hover, .nb-product:hover,
   a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transform: none; }
-  /* The shimmer is decoration, not information. */
-  .nb-skeleton { animation: none; }
 }
 `;

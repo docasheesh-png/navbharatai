@@ -60,7 +60,7 @@ describe('the call in flight at Stop', () => {
   });
 
   it('the "no time wasted" line says a user-stopped call is listed elsewhere, not that none ran', () => {
-    expect(wasteSummary(emptyWasteLedger())).toMatch(/or by the user.*LLM_CALL_STOPPED/);
+    expect(wasteSummary(emptyWasteLedger())).toMatch(/nor one the user stopped.*LLM_CALL_STOPPED/);
   });
 });
 

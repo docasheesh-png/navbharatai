@@ -69,7 +69,7 @@ export function wasteSummary(ledger: WasteLedger, buildMs?: number): string {
   // deliberately not a provider's waste (`wasteKindFor` returns null for it), so it never reaches this
   // ledger — and that report said "every call returned something" beside a 90-second planner call that
   // returned nothing at all. The zero is about PROVIDERS, and the sentence now says only that.
-  if (calls === 0) return 'Provider time: no engine wasted any time this build (a call stopped by our own clock, or by the user, is not counted here — see PROVIDER_FALLBACK / LLM_CALL_BUDGET_ENDED / LLM_CALL_STOPPED).';
+  if (calls === 0) return 'Provider time: no engine wasted any time this build (a call stopped by our own clock is not counted here, nor one the user stopped — see PROVIDER_FALLBACK / LLM_CALL_BUDGET_ENDED / LLM_CALL_STOPPED).';
   const total = totalWasteMs(ledger);
   const kinds = (Object.keys(ledger.msByKind) as WasteKind[])
     .filter((k) => ledger.callsByKind[k] > 0)

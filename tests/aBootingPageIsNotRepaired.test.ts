@@ -108,3 +108,23 @@ describe('🔒 absent means the sandbox said absent — one predicate', () => {
     expect(route).not.toContain("readFile(workspaceId, d.sheet).then(() => true, () => false)");
   });
 });
+
+// Same census, the Q-740 class it surfaced: the setup drain MERGES the template a fresh machine was seeded with into
+// the durable store, and a merge overwrites each path. When the store held this workspace's files and none came
+// back, the template would replace the user's package.json, index.html and configs.
+import { mayPersistSeededScaffold } from '../src/server/AgentV3/sandboxRestore';
+
+describe('🔒 a failed refill is never repaired by writing our template over the store', () => {
+  const o = (durable: number, restored: number) => ({ durable, warm: 0, attempted: durable, restored, assets: 0, skipped: 0 });
+  it.each([
+    ['an empty store (a new workspace)', o(0, 0), true],
+    ['a refill that landed', o(24, 24), true],
+    ['no restore record (a warm or resumed machine)', null, true],
+    ['the store held 24 files and none landed', o(24, 0), false],
+  ])('%s', (_n, outcome, may) => expect(mayPersistSeededScaffold(outcome as never)).toBe(may));
+
+  it('the route asks before it drains', () => {
+    const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
+    expect(route).toContain('&& mayPersistSeededScaffold(restoreOutcome)) {');
+  });
+});

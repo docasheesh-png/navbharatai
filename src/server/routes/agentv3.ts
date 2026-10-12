@@ -345,7 +345,7 @@ import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
-import { summarizeRestore, type SandboxRestoreOutcome } from '../AgentV3/sandboxRestore';
+import { summarizeRestore, mayPersistSeededScaffold, type SandboxRestoreOutcome } from '../AgentV3/sandboxRestore';
 import { publishedAppCap, publishedAppCapForAccount, readHostingAllowance, readHostingTierForQuota } from '../lib/HostingQuota';
 import { hostingPlansEnabled, hostingPlanPriceInr, readHostingPlanStatus } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
@@ -14948,7 +14948,10 @@ async function noteBuildOutcome(
         // Best-effort — never blocks a build; a resumed sandbox seeds nothing (returns undefined → no-op).
         try {
           const seededScaffold = actuator.takeSeededScaffold?.(workspaceId);
-          if (seededScaffold && Object.keys(seededScaffold).length > 0) {
+          // Never over a store that held this workspace's files when none of them came back — see
+          // mayPersistSeededScaffold (a merge overwrites each path: the template would replace the user's app).
+          const restoreOutcome = (actuator as { sandboxRestore?: (id: string) => SandboxRestoreOutcome | null }).sandboxRestore?.(workspaceId) ?? null;
+          if (seededScaffold && Object.keys(seededScaffold).length > 0 && mayPersistSeededScaffold(restoreOutcome)) {
             await mergeWorkspaceFiles(workspaceId, seededScaffold).catch(() => {});
           }
         } catch { /* scaffold durability is best-effort — the end-of-build scan remains the fallback */ }

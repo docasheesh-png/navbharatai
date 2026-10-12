@@ -54,7 +54,7 @@ describe('one formula: the shares are priced at their own rates', () => {
 
   it('every Claude rate carries Anthropic\'s cache lines: read 0.1×, write 1.25×', () => {
     expect(sonnetRate()).toMatchObject({ cacheReadPerMTok: 0.3, cacheWritePerMTok: 3.75 });
-    expect(opusRate()).toMatchObject({ cacheReadPerMTok: 1.5, cacheWritePerMTok: 18.75 });
+    expect(opusRate()).toMatchObject({ cacheReadPerMTok: 0.5, cacheWritePerMTok: 6.25 });
     expect(realRateFor('CLAUDE_HAIKU')).toMatchObject({ inputPerMTok: 1, cacheReadPerMTok: 0.1, cacheWritePerMTok: 1.25 });
     expect(realRateFor('CLAUDE', 'claude-opus-4-8')).toEqual(opusRate());
   });
@@ -102,8 +102,8 @@ describe('through every bill', () => {
   });
 
   it('🔒 the flat Opus bill is real Opus × 2 of the WHOLE input, cache included', () => {
-    // 2k @ $15 + 40k @ $1.50 + 5k @ $18.75, × 2
-    expect(billedAmountUsd(turn, 'max')).toBeCloseTo((0.03 + 0.06 + 0.09375) * 2, 10);
+    // 2k @ $5 + 40k @ $0.50 + 5k @ $6.25, × 2 (Opus 4.8's price, Q-880)
+    expect(billedAmountUsd(turn, 'max')).toBeCloseTo((0.01 + 0.02 + 0.03125) * 2, 10);
   });
 
   it('a barren turn absorbs its cache write too; a delivering turn keeps it', () => {

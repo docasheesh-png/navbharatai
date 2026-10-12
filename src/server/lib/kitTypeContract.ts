@@ -107,6 +107,19 @@ export const KIT_CONTRACT_HEADING =
   + 'these files to find one. If a name is not here, the kit does not have it:';
 
 /**
+ * ⚠️ DELIBERATELY NOT A ```-FENCED BLOCK, and this is load-bearing rather than cosmetic.
+ *
+ * `tests/aRecipeExampleCompiles.test.ts` compiles EVERY fenced block in a recipe's instructions,
+ * standalone, beside the recipe's real output — that is how it caught a `camera: 'thirdPerson'` that
+ * did not typecheck. A type contract is not an example: these declarations name `THREE.Scene`,
+ * `CharacterController`, `ParticleSystem` and `AppliedLighting` without importing them, because they
+ * are being QUOTED from a file that already imports them. Fenced, it failed that test with
+ * `TS2503 Cannot find namespace 'THREE'` — correctly, for a block that was never meant to compile
+ * alone. So it is indented instead: unambiguous to read, and not mistaken for code to run.
+ */
+const INDENT = '  ';
+
+/**
  * The contract block for whatever kit files this seed actually wrote. '' when none of them is present
  * (a partial `include` set), because an empty heading would promise a contract and deliver nothing.
  */
@@ -120,8 +133,9 @@ export function kitTypeContract(files: Readonly<Record<string, string>> | null |
       .map((n) => extractExportedDeclaration(source, n))
       .filter((d): d is string => !!d);
     if (decls.length === 0) continue;
-    sections.push(`// ${entry.file}\n${decls.join('\n\n')}`);
+    const body = `// ${entry.file}\n${decls.join('\n\n')}`;
+    sections.push(body.split('\n').map((l) => (l ? INDENT + l : l)).join('\n'));
   }
   if (sections.length === 0) return '';
-  return `${KIT_CONTRACT_HEADING}\n\`\`\`ts\n${sections.join('\n\n')}\n\`\`\``;
+  return `${KIT_CONTRACT_HEADING}\n${sections.join('\n\n')}`;
 }

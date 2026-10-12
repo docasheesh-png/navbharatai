@@ -136,6 +136,18 @@ describe('the kit\'s types are handed over, not guessed (Q-909, autopsy 50378049
       expect(at).toBeLessThan(example);
     });
 
+    it('🔒 it is NOT a ```-fenced block, and that is load-bearing', () => {
+      // `aRecipeExampleCompiles` compiles EVERY fenced block in a recipe's instructions, standalone.
+      // A type contract quotes declarations from a file that imports THREE, CharacterController and
+      // the rest — fenced, it fails with `TS2503 Cannot find namespace 'THREE'`, correctly, for a
+      // block that was never meant to compile alone. Caught by that test on the first run of this fix.
+      const text = shell().instructions;
+      const after = text.slice(text.indexOf(KIT_CONTRACT_HEADING) + KIT_CONTRACT_HEADING.length);
+      expect(after.slice(0, 40)).not.toContain('```');
+      // …and it is still plainly readable as TypeScript, indented under the heading.
+      expect(after).toContain('  export interface GameContext {');
+    });
+
     it('a partial kit emits no empty promise', () => {
       // An `include` set without Game.ts or touchControls.ts must produce no heading at all, rather
       // than a heading with nothing under it.

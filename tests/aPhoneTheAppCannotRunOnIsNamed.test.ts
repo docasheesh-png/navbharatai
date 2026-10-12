@@ -28,6 +28,13 @@ describe('which phones it names — precision first', () => {
     expect(namedNonSmartphone(prompt)?.device).toBe(device);
   });
 
+  it('a Nokia MODEL is a classic model (its own games are remembered); a JioPhone / KaiOS / keypad phone is a KIND of phone', () => {
+    expect(namedNonSmartphone(REAL_PROMPT)?.kind).toBe('classic-model');
+    expect(namedNonSmartphone('nokia 3310 snake game')?.kind).toBe('classic-model');
+    expect(namedNonSmartphone('Jio Phone ke liye game')?.kind).toBe('phone-kind');
+    expect(namedNonSmartphone('a quiz for feature phones')?.kind).toBe('phone-kind');
+  });
+
   it.each([
     'racing game for Nokia G42',
     'app for my Nokia C32',
@@ -75,13 +82,26 @@ describe('what it changes', () => {
     expect(rule).toContain('number keys 2 up, 4 left, 6 right, 8 down, 5 or Enter to act');
     // The withdrawn target reading is gone from the builder's instructions.
     expect(rule).not.toMatch(/cannot run|no control that only works by touch/i);
+    // ONE instruction about 3D: never. Offering "a realistic or 3D look" beside "never three.js" contradicted itself, and the
+    // game kit for a keypad phone lays down no three.js anyway (Q-868 review).
+    expect(rule).not.toMatch(/3D look|realistic/i);
+  });
+
+  it('a JioPhone / KaiOS / keypad phone is not told it is "the game that came on that phone" — the builder reads which', () => {
+    const rule = nonSmartphoneBuildRule('JioPhone', 'phone-kind');
+    expect(rule).toContain('a light game that phones like it can play, or the classic game of that era');
+    expect(rule).not.toContain('THE CLASSIC GAME THAT CAME ON THAT PHONE');
+    expect(rule).toContain('never three.js or WebGL');
   });
 
   it('🔒 the user line is true under EVERY reading: what was built and where it plays — no intent claim, no "cannot run"', () => {
     const line = nonSmartphoneUserLine('Nokia c 2-01');
     expect(line).toContain('About Nokia c 2-01');
     expect(line).toContain('light and 2D');
-    expect(line).toContain('any phone or computer browser');
+    // "modern": the build targets a modern browser, and an old keypad phone's own browser cannot load it — the line says so
+    // instead of promising "any phone" (Q-868 review: false for the JioPhone a user asked to play on).
+    expect(line).toContain('any modern phone or computer browser');
+    expect(line).toContain("an old keypad phone's own browser may not open it");
     expect(line).toContain('touch or the arrow / number keys');
     expect(line).not.toMatch(/cannot run|no web app|can't run|not a game|you (?:meant|wanted)|I read this as/i);
     // White-label: no AI vendor or model name ever reaches the user.
@@ -93,20 +113,33 @@ describe('🔒 the wiring — every lane that writes the app hears the same rule
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
   const subAgent = readFileSync('src/server/AgentV3/SubAgent.ts', 'utf8');
   it('the architect: the build prompt opens with the rule, the summary gets the line, from the same reading', () => {
-    expect(route).toContain('if (keypadPhoneForBuild) buildPrompt = `${nonSmartphoneBuildRule(keypadPhoneForBuild.device)}');
+    expect(route).toContain('if (keypadPhoneForBuild) buildPrompt = `${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}');
     expect(route).toContain('summary: `${result.summary}${nonSmartphoneUserLine(keypadPhone.device)}`');
     expect(route).toContain("code: 'NON_SMARTPHONE_TOLD'");
   });
   it('the fast lane: its prompt carries the same rule', () => {
-    expect(route).toContain('const keypadPhoneSuffix = keypadPhoneForBuild ? `\\n\\n${nonSmartphoneBuildRule(keypadPhoneForBuild.device)}`');
+    expect(route).toContain('const keypadPhoneSuffix = keypadPhoneForBuild ? `\\n\\n${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}`');
     expect(route).toMatch(/runSimpleBuild\(\{ prompt: planning\.text \+[^,]*\+ keypadPhoneSuffix,/);
   });
   it('the writing sub-agents: a deviceRule thunk, read only by roles that write files', () => {
-    expect(route).toMatch(/deviceRule: \(\) => \{\s*const phone = !isImportTurn \? namedNonSmartphone\(prompt\) : null;\s*return phone \? nonSmartphoneBuildRule\(phone\.device\) : '';/);
+    expect(route).toMatch(/deviceRule: \(\) => \{\s*const phone = !isImportTurn && intent === 'new_build' && !isEditMode \? namedNonSmartphone\(prompt\) : null;\s*return phone \? nonSmartphoneBuildRule\(phone\.device, phone\.kind\) : '';/);
     expect(subAgent).toContain("roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools) ? (deps.deviceRule?.() ?? '') : ''");
   });
   it('the planner: its goal carries the same rule', () => {
-    expect(route).toContain("const plannerGoalNotes = [unknownNameNote, scriptRequestNote, keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device) : ''].filter(Boolean)");
+    expect(route).toContain("const plannerGoalNotes = [unknownNameNote, scriptRequestNote, keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind) : ''].filter(Boolean)");
+  });
+  it('the plan-first planner: it plans from the rule AND the request, so its todos never contradict the rule', () => {
+    expect(route).toContain('await planRunner.run(keypadPhoneForBuild ? `${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}');
+    expect(route).not.toContain('await planRunner.run(prompt);');
+  });
+  it('🔒 a NEW build only — the rule and the line never touch an edit of an existing (possibly 3D) app', () => {
+    const gate = "!isImportTurn && intent === 'new_build' && !isEditMode";
+    expect(route).toContain(`const keypadPhoneForBuild = ${gate} ? namedNonSmartphone(prompt) : null;`);
+    expect(route).toContain(`const phone = ${gate} ? namedNonSmartphone(prompt) : null;`);
+    expect(route).toContain(`const keypadPhone = result.ok && expectsArtifacts && ${gate} ? namedNonSmartphone(prompt) : null;`);
+    // Every call to the detector in the route sits behind that gate (or the import/new-build guard above it).
+    const calls = route.match(/namedNonSmartphone\(prompt\)/g) ?? [];
+    expect(calls.length).toBe(3);
   });
   it('an approved plan is ADDED to the build prompt — never rebuilt from the bare request, which dropped every note', () => {
     expect(route).toContain('buildPrompt = `${buildPrompt}\\n\\nApproved plan:\\n');

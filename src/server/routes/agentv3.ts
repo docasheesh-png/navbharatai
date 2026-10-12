@@ -15619,8 +15619,8 @@ async function noteBuildOutcome(
         // The SAME classic-phone rule the architect's prompt opens with (Q-868): a writing specialist builds the game
         // too, and until this line only the architect and the fast lane heard which phone the user named.
         deviceRule: () => {
-          const phone = !isImportTurn ? namedNonSmartphone(prompt) : null;
-          return phone ? nonSmartphoneBuildRule(phone.device) : '';
+          const phone = !isImportTurn && intent === 'new_build' && !isEditMode ? namedNonSmartphone(prompt) : null;
+          return phone ? nonSmartphoneBuildRule(phone.device, phone.kind) : '';
         },
         // And the user's own words (autopsy 6db0ff31) — the two lines above derive from them, and a
         // child handed only a thin instruction asked the ARCHITECT "what would you like me to build?".
@@ -16996,8 +16996,11 @@ async function noteBuildOutcome(
       if (frameworkCoherenceMsg) buildPrompt = `${frameworkCoherenceMsg}\n\n---\n\n${buildPrompt}`;
       // A KEYPAD PHONE THE USER NAMED (Q-846): the builder is told before it writes, so what it builds fits the keys.
       // Pure (deviceTarget.ts never throws), so no best-effort wrapper — like the notes below.
-      const keypadPhoneForBuild = !isImportTurn ? namedNonSmartphone(prompt) : null;
-      if (keypadPhoneForBuild) buildPrompt = `${nonSmartphoneBuildRule(keypadPhoneForBuild.device)}\n\n---\n\n${buildPrompt}`;
+      // A NEW BUILD only (Q-868): on an edit of an existing app — "add a Nokia 3310 as a pickup in my 3D city game" — the
+      // phone is a detail of the request, and telling the builder "never three.js" would break a working 3D game. Every
+      // value read here is final: intent and isEditMode are last assigned well above this line.
+      const keypadPhoneForBuild = !isImportTurn && intent === 'new_build' && !isEditMode ? namedNonSmartphone(prompt) : null;
+      if (keypadPhoneForBuild) buildPrompt = `${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}\n\n---\n\n${buildPrompt}`;
       // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built
       // in React with a types file claiming a "PHP MVC backend"). Told to the builder here, to the user
       // in the ready message — see unsupportedStack.ts.
@@ -17514,7 +17517,7 @@ async function noteBuildOutcome(
       const unknownNameSuffix = (unknownNameNote ? `\n\n${unknownNameNote}` : '') // and the unknown-word note (Q-067)
         + (scriptRequestNote ? `\n\n${scriptRequestNote}` : ''); // and the script-request note (Q-274)
       const requestScopeSuffix = requestScopeText ? `\n\n${requestScopeText}` : ''; // and the request-scope rule (autopsy 70e030bb)
-      const keypadPhoneSuffix = keypadPhoneForBuild ? `\n\n${nonSmartphoneBuildRule(keypadPhoneForBuild.device)}` : ''; // and the classic-phone rule (Q-868)
+      const keypadPhoneSuffix = keypadPhoneForBuild ? `\n\n${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}` : ''; // and the classic-phone rule (Q-868)
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -17580,7 +17583,9 @@ async function noteBuildOutcome(
           agentRole: 'architect',
           signal: abort.signal,
         });
-        await planRunner.run(prompt);
+        // The plan-first planner hears the classic-phone rule too (Q-868): its todos are appended to the build prompt, and
+        // a plan drawn from the bare request ("3D track") would contradict the rule the builder reads above them.
+        await planRunner.run(keypadPhoneForBuild ? `${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}\n\n---\n\n${prompt}` : prompt);
 
         // Strategic Intelligence (Layer 54): review the proposed plan for gaps
         // (no verification step, no setup, missing deploy, under-scoped, vague)
@@ -17726,7 +17731,7 @@ async function noteBuildOutcome(
             // note too — or a Kotlin request is planned as Gradle modules the builder may not write (autopsy
             // 042e472f, 2026-10-01). The plan's goal carries it, so every module turn reads it again.
             // The classic-phone rule rides the planner's goal too (Q-868): the plan decides what gets built.
-            const plannerGoalNotes = [unknownNameNote, scriptRequestNote, keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device) : ''].filter(Boolean).join('\n\n');
+            const plannerGoalNotes = [unknownNameNote, scriptRequestNote, keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind) : ''].filter(Boolean).join('\n\n');
             const plannerGoalBase = plannerGoalNotes ? `${plannerGoalNotes}\n\n---\n\n${prompt}` : prompt;
             const plannerGoal = unsupportedStackAsked ? `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${plannerGoalBase}` : plannerGoalBase;
             const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
@@ -24034,13 +24039,14 @@ async function noteBuildOutcome(
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 
-      // 📵 …AND A PHONE IT CANNOT RUN ON IS NAMED (Q-846): the user named a keypad phone, so the summary says plainly
-      // that no web app runs there, and what was built instead. Recorded for the admin as an info line.
+      // 📱 …AND A KEYPAD PHONE THE USER NAMED (Q-846 → Q-868): the summary says what was built and where it plays —
+      // light 2D, any modern browser, touch or keys — and nothing about what the user meant (the admin corrected Q-846's
+      // "no web app runs there" reading on 2026-10-12). Same new-build gate as the rule. Recorded for the admin as info.
       try {
-        const keypadPhone = result.ok && expectsArtifacts && !isImportTurn ? namedNonSmartphone(prompt) : null;
+        const keypadPhone = result.ok && expectsArtifacts && !isImportTurn && intent === 'new_build' && !isEditMode ? namedNonSmartphone(prompt) : null;
         if (keypadPhone) {
           result = { ...result, summary: `${result.summary}${nonSmartphoneUserLine(keypadPhone.device)}` };
-          buildDiag.record({ phase: 'readiness', severity: 'info', code: 'NON_SMARTPHONE_TOLD', autoResolved: true, message: `The request named ${keypadPhone.device}, a classic keypad phone — the build was steered to a light 2D version (touch and keys; for a game, the classic game from that phone unless the request asked otherwise), and the user was told what was built.` });
+          buildDiag.record({ phase: 'readiness', severity: 'info', code: 'NON_SMARTPHONE_TOLD', autoResolved: true, message: `The request named ${keypadPhone.device}, a classic keypad phone — the build was steered to a light 2D version (touch and keys; for a game, the classic game from that phone unless the request asked otherwise), and the user was given a line saying what was built (light 2D, any modern browser, touch or keys).` });
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 

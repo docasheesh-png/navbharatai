@@ -94440,3 +94440,17 @@ unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong
 **Locks:**
 - `tests/aPhoneTheAppCannotRunOnIsNamed.test.ts`: the real prompt is the fixture. Six guards, R1–R6, each reverted and seen to fail.
 - `theRacingCarShowedItsHeadlights` 1c: the real prompt gets the 2D kit. The 3D guarantees are re-pinned on the same race without the phone.
+- **Same day, harm-based review of the simple Q-868.** Four checks passed:
+  - requests that name no phone behave as on `main` across 118,906 strings;
+  - there are no new false positives;
+  - the real prompt is detected;
+  - all 551 related test files pass.
+
+  One check failed, on the user line and the rule, and was fixed in the same PR:
+  - **"any phone browser"** was false, because the Vite build targets modern browsers. The line now says "any **modern** phone or computer browser", and that an old keypad phone's own browser may not open it.
+  - **The rule offered 3D while also saying "never three.js".** 3D is no longer offered.
+  - **An edit turn got the rule.** An edit such as "add a Nokia 3310 pickup to my 3D city game" would have been told "never three.js". The rule now applies to a new build only.
+  - **JioPhone, KaiOS and keypad phones are worded separately.** They are no longer told "the game that came on that phone".
+  - **The plan-first planner now hears the rule.**
+
+  The stale "📵 no web app runs there" comment is gone.

@@ -1,0 +1,295 @@
+{
+ "note": "Report 303e8a6f (2026-10-12): the 40 timeline rows verbatim (phase, severity, code, message). The admin build report; used by tests/aStopIsNeitherAProblemNorAHeal.test.ts.",
+ "counts": {
+  "total": 40,
+  "errors": 0,
+  "warnings": 2,
+  "autoResolved": 1,
+  "workarounds": 1,
+  "leftOpen": 0,
+  "healRule": 2,
+  "unresolved": 0
+ },
+ "issues": [
+  {
+   "ts": 1791817491537,
+   "phase": "build",
+   "severity": "info",
+   "code": "FREE_BUILD_TIME_CAP",
+   "message": "Free build window: 25 min (a paid build would get 58 min)."
+  },
+  {
+   "ts": 1791817491545,
+   "phase": "plan",
+   "severity": "info",
+   "code": "APP_SCOPE",
+   "message": "Scope: ordinary one-shot app — built directly (today's behaviour). no mega-signal — treated as an ordinary one-shot app (today's behaviour)."
+  },
+  {
+   "ts": 1791817491546,
+   "phase": "provider",
+   "severity": "info",
+   "code": "TIER_LADDER",
+   "message": "Weak ladder (default): GLM(glm-4.7-flashx) → KIMI(kimi-k2.7-code) → GLM(glm-5.3) → NEMOTRON(nemotron-super) → CLAUDE_HAIKU"
+  },
+  {
+   "ts": 1791817491546,
+   "phase": "plan",
+   "severity": "info",
+   "code": "COMPLEXITY_ROUTING",
+   "message": "Complexity: simple (score 50, scaffold) — the build opens on the ladder's first rung."
+  },
+  {
+   "ts": 1791817491865,
+   "phase": "plan",
+   "severity": "info",
+   "code": "ETA_BASIS",
+   "message": "ETA ~3–6 min (midpoint ~4 min) · basis heuristic · confidence 0.4"
+  },
+  {
+   "ts": 1791817491866,
+   "phase": "build",
+   "severity": "info",
+   "code": "AGENT_STEP",
+   "message": "⏱️ Rough estimate: ~3–6 min — a guess from the size of your request, not a measurement. I'll replace it with a real figure — and keep it updated — as soon as I can measure how big your app is."
+  },
+  {
+   "ts": 1791817491867,
+   "phase": "build",
+   "severity": "info",
+   "code": "AGENT_STEP",
+   "message": "Setting up your workspace…"
+  },
+  {
+   "ts": 1791817494108,
+   "phase": "build",
+   "severity": "info",
+   "code": "SETUP_TIMING",
+   "message": "Workspace ready in 2s"
+  },
+  {
+   "ts": 1791817495343,
+   "phase": "build",
+   "severity": "info",
+   "code": "SETUP_TIMING",
+   "message": "Project checked in 1s — nothing needed restoring"
+  },
+  {
+   "ts": 1791817499064,
+   "phase": "build",
+   "severity": "info",
+   "code": "SETUP_TIMING",
+   "message": "Personal context loaded in 131ms"
+  },
+  {
+   "ts": 1791817499078,
+   "phase": "plan",
+   "severity": "info",
+   "code": "REQUEST_SCOPE_NOTE",
+   "message": "The request asks for no sign-in, so the builder was told to add no login or accounts and no control for a state the data does not have."
+  },
+  {
+   "ts": 1791817500189,
+   "phase": "build",
+   "severity": "info",
+   "code": "SETUP_TIMING",
+   "message": "Project context prepared in 1.1s"
+  },
+  {
+   "ts": 1791817500263,
+   "phase": "build",
+   "severity": "info",
+   "code": "CHANGE_CLASSIFIED",
+   "message": "Change classified as large (risk high, depth deep); also security, cross-cutting, bug, feature · 0 requirement(s) on record · 0 re-probed for regression · 0 open issue(s) handed to the builder · impact 0 file(s) + 0 dependent(s)"
+  },
+  {
+   "ts": 1791817501231,
+   "phase": "plan",
+   "severity": "info",
+   "code": "PROJECT_MODE",
+   "message": "Software Project Mode is ON for this account, but this prompt is not a mega-project — normal path."
+  },
+  {
+   "ts": 1791817502497,
+   "phase": "build",
+   "severity": "info",
+   "code": "GOLDEN_SCAFFOLD",
+   "message": "Pre-seeded the tested \"AI image generator\" template (14 files) — the builder verifies & customizes instead of writing from scratch."
+  },
+  {
+   "ts": 1791817514950,
+   "phase": "build",
+   "severity": "info",
+   "code": "AGENT_STEP",
+   "message": "⏳ Still working — 11s so far"
+  },
+  {
+   "ts": 1791817517958,
+   "phase": "provider",
+   "severity": "warning",
+   "code": "PROVIDER_FALLBACK",
+   "message": "Provider GLM failed — falling back to the next provider"
+  },
+  {
+   "ts": 1791817517958,
+   "phase": "provider",
+   "severity": "info",
+   "code": "PROVIDER_BENCHED",
+   "message": "GLM benched: glm-4.7-flashx was answering far below a usable rate after 15s — abandoned mid-answer and skipped for 180s, then tried once more, so the ladder can reach the next engine instead of waiting it out"
+  },
+  {
+   "ts": 1791817521373,
+   "phase": "plan",
+   "severity": "info",
+   "code": "TIME_TO_FIRST_CALL",
+   "message": "11s of preparation before the build's first model call began — sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) The first call itself then took 18s; that is model time, not setup."
+  },
+  {
+   "ts": 1791817521374,
+   "phase": "tool",
+   "severity": "info",
+   "code": "TOOL_CALL",
+   "message": "▶ read_file"
+  },
+  {
+   "ts": 1791817521829,
+   "phase": "tool",
+   "severity": "info",
+   "code": "TOOL_DONE",
+   "message": "✓ read_file (0s)"
+  },
+  {
+   "ts": 1791817522233,
+   "phase": "tool",
+   "severity": "info",
+   "code": "TOOL_DONE",
+   "message": "✓ read_file (1s)"
+  },
+  {
+   "ts": 1791817527495,
+   "phase": "build",
+   "severity": "info",
+   "code": "USER_STOPPED_BUILD",
+   "message": "The user asked for this build to stop, and it was stopped."
+  },
+  {
+   "ts": 1791817527495,
+   "phase": "build",
+   "severity": "info",
+   "code": "OUTCOME_USER_STOPPED",
+   "message": "Build outcome: STOPPED BY THE USER — that is why it ended. No failure of the app or the engine is implied."
+  },
+  {
+   "ts": 1791817527497,
+   "phase": "build",
+   "severity": "info",
+   "code": "READY_BEFORE_END",
+   "message": "The app was never judged finished during the build."
+  },
+  {
+   "ts": 1791817527498,
+   "phase": "build",
+   "severity": "info",
+   "code": "WRITE_TIME_TYPECHECK",
+   "message": "Write-time typecheck: no TypeScript source was written this build."
+  },
+  {
+   "ts": 1791817531126,
+   "phase": "build",
+   "severity": "info",
+   "code": "SERVICE_GRAPH_SINGLE",
+   "message": "Single service: project (frontend on port 5173)."
+  },
+  {
+   "ts": 1791817531927,
+   "phase": "build",
+   "severity": "info",
+   "code": "POST_ANSWER_TIMING",
+   "message": "Post-answer integrity pass took 4s, of which loading the durable project was 0s (14 files)."
+  },
+  {
+   "ts": 1791817531979,
+   "phase": "readiness",
+   "severity": "info",
+   "code": "CORRECTION_BUDGET",
+   "message": "Correction reserve: 150s held back from generation"
+  },
+  {
+   "ts": 1791817531979,
+   "phase": "readiness",
+   "severity": "info",
+   "code": "SANDBOX_SESSION",
+   "message": "Sandbox session: 1.0 min up · 0.1 min running our operations (6) · 0.9 min idle (90%) · started by files · came up created-fresh"
+  },
+  {
+   "ts": 1791817532822,
+   "phase": "readiness",
+   "severity": "info",
+   "code": "SANDBOX_PEAK_MEMORY",
+   "message": "Peak memory: not available on this machine (no cgroup accounting exposed)"
+  },
+  {
+   "ts": 1791817532822,
+   "phase": "readiness",
+   "severity": "warning",
+   "code": "RELEASE_GATE",
+   "message": "Release gate: RED — Not shippable yet — you stopped this build before it could be finished or checked.\n  NOT established: no live preview was ever available, so nothing here was proven to RUN; the page-render check needs a running app and was skipped; no user journey could be derived or run; the typecheck did not run; the app has no test suite that could be run here"
+  },
+  {
+   "ts": 1791817534080,
+   "phase": "build",
+   "severity": "info",
+   "code": "GREEN_GUARD_NONE",
+   "message": "No verified working state exists yet for this workspace — nothing to save or restore."
+  },
+  {
+   "ts": 1791817535112,
+   "phase": "build",
+   "severity": "info",
+   "code": "AGENT_STEP",
+   "message": "🛡️ You stopped this build before anything was produced, so it is FREE — no charge. Your workspace is exactly as it was."
+  },
+  {
+   "ts": 1791817535113,
+   "phase": "build",
+   "severity": "info",
+   "code": "MARKUP_WAIVED_NO_PREVIEW",
+   "message": "The app was never confirmed running here, so the service margin was waived: billed at real cost only ($0.0105 instead of $0.0420). Superseded: the final bill is ₹0 (user stopped the build before any file of their own was produced — only the platform template existed and nothing rendered, so not charged)."
+  },
+  {
+   "ts": 1791817535372,
+   "phase": "build",
+   "severity": "info",
+   "code": "CHANGE_RECORDED",
+   "message": "CHG-0001 large/deep · 14 file(s) · status stopped · gate RED · requirements REQ-001 · issues ISS-001"
+  },
+  {
+   "ts": 1791817535372,
+   "phase": "build",
+   "severity": "info",
+   "code": "CHANGE_RECORDED",
+   "message": "Issue queue: 1 opened, 0 reopened, 0 fixed, 0 verified · 1 open"
+  },
+  {
+   "ts": 1791817535373,
+   "phase": "build",
+   "severity": "info",
+   "code": "LADDER_DEPTH",
+   "message": "Fell to rung 2 of 5."
+  },
+  {
+   "ts": 1791817535374,
+   "phase": "build",
+   "severity": "info",
+   "code": "PROVIDER_TIME_WASTED",
+   "message": "Provider time wasted: 15s across 1 call(s) that returned nothing — 34% of the build's clock. By kind: 1 crawl (15s). By engine: GLM 15s."
+  },
+  {
+   "ts": 1791817535374,
+   "phase": "build",
+   "severity": "info",
+   "code": "STRICT_TRIAL",
+   "message": "TypeScript mode: loose-new"
+  }
+ ]
+}

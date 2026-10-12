@@ -205,7 +205,7 @@ import {
 import { withoutPlatformCheckTools } from '../AgentV3/repairScope';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
-import { releaseGate, releaseGateSummary, runtimeProven, runtimeRedFlipEnabled, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
+import { releaseGate, releaseGateRecord, releaseGateSummary, runtimeProven, runtimeRedFlipEnabled, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary, admittedInertControls } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
 import { visibleAppError, appShowsErrorNote, APP_SHOWS_ERROR_CODE } from '../AgentV3/visibleAppError';
@@ -23555,13 +23555,18 @@ async function noteBuildOutcome(
           // `stoppedByUser` fact for its headline; the severity now reads it too.
           // 🧩 …AND A MODULE TURN WHOSE APP IS PUT TOGETHER LATER IS NOT UNPROVEN, IT IS NOT DUE (autopsy 0311186f):
           // two module turns each carried three "nothing proven to run" warnings about an app that did not exist yet.
-          severity: gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error'
-            : gate.state === 'green' || (gate.state === 'unknown' && !!moduleAwaitsShell) ? 'info' : 'warning',
-          code: 'RELEASE_GATE',
-          message: releaseGateSummary(gate),
           // A STOPPED build's RED is the user's own decision, not an item anyone must act on — leaving it open
           // made a clean Stop end with "2 unresolved" problems (autopsy 31254f9a). The verdict stays RED.
-          autoResolved: gate.state === 'green' || gateEvidence.stoppedByUser === true || (gate.state === 'unknown' && !!moduleAwaitsShell),
+          // 🧮 …AND SEVERITY AND "CLOSED" ARE ONE DECISION (autopsy 303e8a6f). They were two expressions here,
+          // each fixed once: a Stop became WARNING + closed, which the heal predicate counts as a repair — every
+          // stopped build reported "1 self-heal" and a warning. `releaseGateRecord` now decides both.
+          ...releaseGateRecord(gate, {
+            buildOk: result.ok === true,
+            stoppedByUser: gateEvidence.stoppedByUser === true,
+            awaitsShell: !!moduleAwaitsShell,
+          }),
+          code: 'RELEASE_GATE',
+          message: releaseGateSummary(gate),
         });
         changeGateState = gate.state;
 

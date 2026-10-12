@@ -475,13 +475,15 @@ export function manifestSystemPrompt(framework: string, scaffoldPaths?: readonly
   ].join('\n');
 }
 
-export function manifestUserPrompt(prompt: string, scaffoldPaths: string[]): string {
+export function manifestUserPrompt(prompt: string, scaffoldPaths: string[], sizeFrom: string = prompt): string {
   const scaffold = scaffoldPaths.length
     ? `Already scaffolded (edit/extend; root is the project root):\n${scaffoldPaths.slice(0, 60).map((p) => `  - ${p}`).join('\n')}`
     : 'The project starts empty — plan all files at the project root.';
   // The size ceiling is derived HERE, from the prompt this function already receives, so every caller of
   // the manifest lane inherits it automatically — there is no second path that can plan unbudgeted.
-  const budget = fileBudgetInstruction(fileBudgetForPrompt(prompt));
+  // `sizeFrom` is the USER'S request when `prompt` also carries NavBharatAI's own notes (`requestNotes`,
+  // autopsy 9c612cdb): a note's commas and "and"s are not features of the app.
+  const budget = fileBudgetInstruction(fileBudgetForPrompt(sizeFrom));
   return `Plan the file list for this app:\n\n${prompt}\n\n${scaffold}\n\n${budget}\n\nOutput the file list now (one "path :: purpose" per line).`;
 }
 
@@ -1520,6 +1522,14 @@ export interface VerifyResult {
 
 export interface SimpleBuildDeps {
   prompt: string;
+  /**
+   * NavBharatAI's own notes about the request — request scope, device, stack, third-party player limits —
+   * kept APART from `prompt` (autopsy 9c612cdb, Q-948). Every model call the lane makes reads them, appended
+   * to the request; what MEASURES the request (the file budget, the in-app-AI detector) reads only `prompt`.
+   * Appended to the request instead, the no-login note alone took that build's file ceiling from 13 to 25,
+   * and a stack or device note took any app to the 32-file maximum.
+   */
+  requestNotes?: string;
   framework: string;
   scaffoldPaths: string[];
   /**
@@ -1773,12 +1783,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // One budget for the whole lane, read ONCE — the race below and the tier arithmetic inside must agree.
   const laneBudgetMs = deps.overallTimeoutMs ?? fastLaneBudgetMs(deps.complex === true);
   const generatedSoFar: OneShotFile[] = [];
+  // The user's words alone: what every reader that MEASURES the request reads (see `requestNotes`).
+  const request = deps.prompt;
   // The app's AI client, written first and by us, never generated (build e52cebbf) — see `laneAiClient`.
-  const aiClient = laneAiClient(deps.prompt, deps.framework);
+  const aiClient = laneAiClient(request, deps.framework);
   if (aiClient) {
     deps = { ...deps, prompt: `${deps.prompt}${laneAiNote()}` };
     generatedSoFar.push(aiClient);
   }
+  const requestNotes = String(deps.requestNotes ?? '').trim();
+  if (requestNotes) deps = { ...deps, prompt: `${deps.prompt}\n\n${requestNotes}` };
   // Q-422 (autopsy 1eaa5f5a, admin chose "wait, but show the finished files"): once the lane has decided
   // to hand off, the tier still waits for the calls already in flight — 67 s there, with nothing on the
   // user's screen. The files finished so far are saved and announced the moment the decision is taken,
@@ -1839,7 +1853,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         manifestText = await withTimeout(
           deps.generate(
             manifestSystemPrompt(deps.framework, deps.scaffoldPaths),
-            manifestUserPrompt(deps.prompt, deps.scaffoldPaths),
+            manifestUserPrompt(deps.prompt, deps.scaffoldPaths, request),
             { deadlineAt: deadlineFromBudget(planCap, laneStartedAt) },
           ),
           planCap, 'simple-plan');

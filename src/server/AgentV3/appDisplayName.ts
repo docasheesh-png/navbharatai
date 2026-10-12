@@ -17,6 +17,7 @@
 //
 // PURE — no I/O, no clock. Never throws.
 import { isPastedSource, pastedAppFacts, readablePrompt } from '../lib/pastedSource';
+import { withoutAdFreeWords } from './thirdPartyLimits';
 
 /** Titles that name no app: framework and template defaults, and our own preview placeholders. */
 export const PLACEHOLDER_TITLE =
@@ -203,18 +204,29 @@ export function resolveAppDisplayName(opts: {
   prompt?: string | null;
   /** The entry component's source (`src/App.tsx`), for the name the app's own screen shows. */
   appSource?: string | null;
+  /**
+   * The project embeds a player that shows its own ads (`thirdPartyLimits.ts` → `projectAdServingPlayers`).
+   * Then the name and description WE derive from the request never carry "ad-free" (autopsy 9c612cdb, Q-947):
+   * "Build an ad-free YouTube player." would otherwise publish og:title "Ad-Free YouTube Player" over
+   * YouTube's own player, whose ads the app cannot switch off. The user's chosen name is theirs and kept.
+   */
+  adServingPlayer?: boolean;
 }): AppDisplayName {
+  const fromRequest = (text: string | null): string | null => {
+    if (!text || !opts.adServingPlayer) return text;
+    return withoutAdFreeWords(text) || null;
+  };
   const chosen = String(opts.chosenName ?? '').replace(/\s+/g, ' ').trim();
   const fromChosen = chosen.length >= 2 ? clip(chosen, MAX_NAME) : null;
   const fromTitle = fromChosen ? null : titleFromIndexHtml(opts.indexHtml);
   const fromHeading = fromChosen || fromTitle ? null : headingFromAppSource(opts.appSource);
-  const fromPrompt = fromChosen || fromTitle || fromHeading ? null : nameFromPrompt(opts.prompt);
+  const fromPrompt = fromChosen || fromTitle || fromHeading ? null : fromRequest(nameFromPrompt(opts.prompt));
   const name = fromChosen ?? fromTitle ?? fromHeading ?? fromPrompt ?? 'App';
   const source: AppDisplayName['source'] = fromChosen ? 'user-chosen' : fromTitle ? 'index-title' : fromHeading ? 'app-heading' : fromPrompt ? 'prompt' : 'fallback';
   return {
     name,
     shortName: shortNameFor(name),
-    description: descriptionFromPrompt(opts.prompt, name),
+    description: fromRequest(descriptionFromPrompt(opts.prompt, name)) ?? name,
     source,
   };
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { clockKeptOnReattach, clockFromAttach } from '../components/agentv3/buildClock';
 import { agentV3Reducer, adoptWorkspace as adoptWorkspaceState } from '../components/agentv3/agentV3Reducer';
 import { createRevealPacer } from '../components/agentv3/revealPacer';
 import { carryOverActivity } from '../components/agentv3/activityTimeline';
@@ -544,6 +545,13 @@ export function useAgentV3Build(): UseAgentV3Build {
         if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
         gotEvent = true;
         lastEventTsRef.current = Date.now(); // WATCHDOG — mark stream activity
+        // ⏱️ A re-attached build says how long the user has been waiting, as a duration (autopsy 303e8a6f). It
+        // becomes the build clock's origin on THIS device unless this device already has its own Send.
+        if ((event as { type?: string }).type === 'build_clock') {
+          const ago = (event as { startedAgoMs?: unknown }).startedAgoMs;
+          if (!isStale(gen)) setState((prev) => { const c = clockFromAttach(prev, ago, Date.now()); return c ? { ...prev, ...c } : prev; });
+          continue;
+        }
         pacer.push(event);
         // TERMINAL EVENT → clear `running` immediately on a re-attached/resumed stream too, so a build
         // whose post-result cleanup keeps the stream open never leaves the UI stuck "building" after the
@@ -979,6 +987,10 @@ export function useAgentV3Build(): UseAgentV3Build {
         activityLog: prev.activityLog,
         diffs: prev.diffs,
         todos: prev.todos,
+        // ⏱️ The build clock survives a reconnect (autopsy 303e8a6f, adversarial review): a build this device
+        // started and never saw end keeps its own Send; otherwise the stream's first line (build_clock) sets it.
+        // Never mount time, never now — that is the "time reset ho jata hai" regression (2026-07-21).
+        ...clockKeptOnReattach(prev),
       }));
       if (opts?.notice) {
         setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: opts.notice as string, ts: Date.now() }));

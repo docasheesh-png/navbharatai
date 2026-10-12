@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
 import { stopVersionPreview } from '../../lib/versionPreviewStop';
-import { isLiveStatusLine, withoutStaleLiveStatus, latestLiveStatusText, ETA_LINE_ID } from '../../lib/liveStatusLine';
+import { isLiveStatusLine, withoutStaleLiveStatus, latestLiveStatusText, lastActivityTs, ETA_LINE_ID } from '../../lib/liveStatusLine';
 import { buildElapsedMs } from './buildClock';
 import { CONTINUE_INTERRUPTED_BUILD_PROMPT, CONTINUE_PAST_BUDGET_PROMPT, CONTINUE_AND_FIX_BUILD_PROMPT } from '../../lib/continueBuildPrompts';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
@@ -1126,7 +1126,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     // ⏱️ A live-status line ("Still working — Ns so far", the ETA) is shown only while it is still TRUE: the
     // build is running and nothing newer has been said since (autopsy 303e8a6f). Once a later line arrives, the
     // call it was timing has ended — left in place, a frozen clock reads as a frozen build.
-    ...withoutStaleLiveStatus(state.narration, running).map((n) => ({
+    ...withoutStaleLiveStatus(state.narration, running, lastActivityTs(state.activity)).map((n) => ({
       role: 'agent' as const,
       agent: n.agent,
       text: n.text,

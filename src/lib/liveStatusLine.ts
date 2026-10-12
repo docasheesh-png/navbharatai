@@ -41,13 +41,25 @@ export function isLiveStatusId(id: string | null | undefined): boolean {
 
 /**
  * The narration a thread shows: every line, except live status that is no longer true — the build stopped, or
- * something newer has been said since (the call it was timing has ended). A frozen clock reads as a frozen
+ * something newer has happened since (the call it was timing has ended). A frozen clock reads as a frozen
  * build, so a stale one is dropped rather than left in place. PURE; keeps order.
+ *
+ * "Something newer" is a later line OR a later action (`lastActivityTs`, a tool call or a file written): a turn
+ * that only calls tools says nothing, so a narration-only rule left the clock frozen beside the live indicator
+ * for the most common turn there is (adversarial review of 303e8a6f).
  */
-export function withoutStaleLiveStatus<T extends { id?: string | null; text?: string | null }>(lines: readonly T[], running: boolean): T[] {
+export function withoutStaleLiveStatus<T extends { id?: string | null; text?: string | null; ts?: number }>(lines: readonly T[], running: boolean, lastActivityTs?: number): T[] {
   let lastNonLive = -1;
   for (let i = lines.length - 1; i >= 0; i--) if (!isLiveStatusLine(lines[i])) { lastNonLive = i; break; }
-  return lines.filter((line, i) => !isLiveStatusLine(line) || (running && i > lastNonLive));
+  const actedSince = (line: T) => typeof lastActivityTs === 'number' && typeof line.ts === 'number' && lastActivityTs > line.ts;
+  return lines.filter((line, i) => !isLiveStatusLine(line) || (running && i > lastNonLive && !actedSince(line)));
+}
+
+/** The newest action's timestamp — what `withoutStaleLiveStatus` compares a live line with. PURE. */
+export function lastActivityTs(activity: readonly { ts?: number }[] | null | undefined): number | undefined {
+  let max: number | undefined;
+  for (const a of activity ?? []) if (typeof a?.ts === 'number' && (max === undefined || a.ts > max)) max = a.ts;
+  return max;
 }
 
 /**

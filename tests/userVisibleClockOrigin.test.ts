@@ -8,16 +8,22 @@
 // The CLASS: a user-visible elapsed clock whose origin is not the moment the user started waiting. And the sibling
 // found beside it: live-status lines recognised by their first character ('⏱' by some readers, '⏳' by another),
 // which let the heartbeat split a real silence and made the report drop real '⏳' progress lines.
+//
+// ⚠️ CORRECTED BY THE ADVERSARIAL REVIEW: the stream's own construction is up to ~30 s after the request arrives,
+// so the origin is now stamped as the handler's first statement; a re-attached page gets the wait as a duration;
+// a live line is stale after a later ACTION too (a tool-only turn says nothing); and the build-budget lines are
+// told once per build, on the build's clock (§5).
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { startWorkingHeartbeat, workingLine, WORKING_FIRST_MS, WORKING_INTERVAL_MS } from '../src/server/AgentV3/workingHeartbeat';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
 import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
-import { isLiveStatusLine, withoutStaleLiveStatus, WORKING_LINE_ID, ETA_LINE_ID } from '../src/lib/liveStatusLine';
+import { isLiveStatusLine, withoutStaleLiveStatus, lastActivityTs, WORKING_LINE_ID, ETA_LINE_ID } from '../src/lib/liveStatusLine';
 import { agentV3Reducer } from '../src/components/agentv3/agentV3Reducer';
 import { initialAgentV3State } from '../src/components/agentv3/agentV3Types';
-import { buildElapsedMs } from '../src/components/agentv3/buildClock';
+import { buildElapsedMs, clockKeptOnReattach, clockFromAttach } from '../src/components/agentv3/buildClock';
+import { buildBudgetNarration, BUDGET_NARRATION } from '../src/server/AgentV3/buildBudgetSteer';
 
 afterEach(() => { vi.useRealTimers(); });
 
@@ -148,7 +154,7 @@ describe('3 · on screen, live status is NOW — or it is gone', () => {
 
   it('🔒 the chat thread reads narration through that filter', () => {
     const panel = readFileSync(join(__dirname, '../src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
-    expect(panel).toContain('...withoutStaleLiveStatus(state.narration, running).map((n) => ({');
+    expect(panel).toContain('...withoutStaleLiveStatus(state.narration, running, lastActivityTs(state.activity)).map((n) => ({');
     // …and so does every flush of a finished turn into the thread's history: the build that produced the
     // clock is over, so a "⏳ Still working — 11s so far" must not ride into the next build's thread.
     expect(panel).not.toMatch(/\bstate\.narration\.map\(/);
@@ -194,5 +200,98 @@ describe('4 · the status bar counts from the user\'s Send, on this device', () 
     const panel = readFileSync(join(__dirname, '../src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
     expect(panel).not.toMatch(/activity\.length \? activity\[0\]\.ts : mountTsRef\.current/);
     expect(panel.match(/startedAt=\{state\.startedAt\} endedAt=\{state\.endedAt\}/g)?.length).toBe(panel.match(/<WorkingIndicator\b/g)?.length);
+  });
+});
+
+describe('5 · 🔒 the corrections of the adversarial review', () => {
+  const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
+
+  it('the origin is stamped as the build handler\'s FIRST statement, before any await of the preamble', () => {
+    const at = route.indexOf("app.post('/api/agentv3/chat',");
+    const body = route.slice(at, at + 4_000).replace(/\/\/.*$/gm, '');
+    const firstAwait = body.search(/\bawait\s/);
+    const stamp = body.indexOf('const requestArrivedAt = Date.now();');
+    expect(stamp).toBeGreaterThan(0);
+    expect(stamp).toBeLessThan(firstAwait);
+    // Every stream the request path makes reads it — none falls back to its own construction time.
+    const streams = [...route.matchAll(/new AgentEventStream\(([^)]*)\)/g)].map((m) => m[1]);
+    expect(streams.length).toBeGreaterThanOrEqual(2);
+    for (const args of streams) expect(args).toBe('500, requestArrivedAt');
+    expect(route).toContain('originTs: requestArrivedAt,');
+  });
+
+  it('a re-attach tells the page how long the user has waited, as a duration, before the replay', () => {
+    const at = route.indexOf("sub.write({ type: 'build_clock', startedAgoMs: Math.max(0, Date.now() - rb.originTs) });");
+    expect(at).toBeGreaterThan(0);
+    expect(at).toBeLessThan(route.indexOf('for (const e of rb.buffer) sub.write(e);'));
+  });
+
+  it('a reconnect keeps this device\'s own Send; a reload takes the server\'s duration; nothing resets to 0', () => {
+    expect(clockKeptOnReattach({ startedAt: 1_000 })).toEqual({ startedAt: 1_000 }); // in-page reconnect, still running
+    expect(clockKeptOnReattach({ startedAt: 1_000, endedAt: 5_000 })).toEqual({}); // an earlier, finished build
+    expect(clockKeptOnReattach({})).toEqual({});
+    expect(clockFromAttach({}, 42_000, 100_000)).toEqual({ startedAt: 58_000, endedAt: undefined }); // reloaded page
+    expect(clockFromAttach({ startedAt: 60_000 }, 42_000, 100_000)).toBeNull(); // this device's Send wins
+    expect(clockFromAttach({}, 'x', 100_000)).toBeNull();
+    // …and the clock it gives reads the real wait, not the time since the page came back.
+    const c = clockFromAttach({}, 42_000, 100_000)!;
+    expect(buildElapsedMs({ startedAt: c.startedAt, running: true, now: 100_000, firstActivityTs: 99_000 })).toBe(42_000);
+  });
+
+  it('🔒 the hook uses both, and the reset never stamps now', () => {
+    const hook = readFileSync(join(__dirname, '../src/hooks/useAgentV3Build.ts'), 'utf8');
+    expect(hook).toContain('...clockKeptOnReattach(prev),');
+    expect(hook).toContain('clockFromAttach(prev, ago, Date.now())');
+    const reset = hook.slice(hook.indexOf('...clockKeptOnReattach(prev),') - 600, hook.indexOf('...clockKeptOnReattach(prev),'));
+    expect(reset).not.toMatch(/startedAt:\s*Date\.now\(\)/);
+  });
+
+  it('a tool-only turn (no prose) ends the clock it was timing — the next action hides it', () => {
+    const tick = { id: WORKING_LINE_ID, text: '⏳ Still working — 27s so far', ts: 5_000 };
+    const lines = [{ text: 'Planning the app', ts: 1_000 }, tick];
+    expect(withoutStaleLiveStatus(lines, true, lastActivityTs([{ ts: 900 }, { ts: 4_000 }]))).toContain(tick);
+    expect(withoutStaleLiveStatus(lines, true, lastActivityTs([{ ts: 900 }, { ts: 6_000 }]))).not.toContain(tick);
+    // A history copy has no id: its words still identify it.
+    expect(withoutStaleLiveStatus([{ text: '⏳ Still working — 27s so far', ts: 5_000 }], false)).toEqual([]);
+  });
+
+  it('the "waiting for your answer" line rides the ETA id: it is live status, newest, and gone once the build stops', () => {
+    let st = initialAgentV3State();
+    st = agentV3Reducer(st, { type: 'narration', agent: 'architect', text: '⏱️ Rough estimate: about 3 minutes', ts: 1_000, id: ETA_LINE_ID } as never);
+    st = agentV3Reducer(st, { type: 'narration', agent: 'architect', text: 'Here is the plan.', ts: 2_000 } as never);
+    st = agentV3Reducer(st, { type: 'narration', agent: 'architect', text: '⏸️ Waiting for your answer above…', ts: 3_000, id: ETA_LINE_ID } as never);
+    expect(st.narration.map((n) => n.text)).toEqual(['Here is the plan.', '⏸️ Waiting for your answer above…']);
+    expect(withoutStaleLiveStatus(st.narration, true).map((n) => n.text)).toContain('⏸️ Waiting for your answer above…');
+    expect(withoutStaleLiveStatus(st.narration, false).map((n) => n.text)).toEqual(['Here is the plan.']);
+  });
+
+  it('🔒 both surfaces that render narration pass the latest action', () => {
+    const panel = readFileSync(join(__dirname, '../src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
+    const mini = readFileSync(join(__dirname, '../src/components/ide/AgentV3MiniChat.tsx'), 'utf8');
+    expect(panel).toContain('withoutStaleLiveStatus(state.narration, running, lastActivityTs(state.activity))');
+    expect(mini).toContain('withoutStaleLiveStatus(state.narration, running, lastActivityTs(state.activity))');
+  });
+
+  it('the build-budget line is the BUILD\'s: two runners in one build say "half" once, at half the build', () => {
+    const said = new Set<string>();
+    const TOTAL = 1_800_000;
+    // The main runner: 45% of the build, nothing yet; 50% → "half".
+    expect(buildBudgetNarration(0.45 * TOTAL, TOTAL, said)).toBeNull();
+    expect(buildBudgetNarration(0.5 * TOTAL, TOTAL, said)).toBe(BUDGET_NARRATION.half);
+    expect(buildBudgetNarration(0.76 * TOTAL, TOTAL, said)).toBe(BUDGET_NARRATION.wrapping);
+    // A retry runner started at 60% with the remaining 40%: its OWN half (80% of the build) must not say "half" again.
+    expect(buildBudgetNarration(0.8 * TOTAL, TOTAL, said)).toBeNull();
+    expect(buildBudgetNarration(0.91 * TOTAL, TOTAL, said)).toBe(BUDGET_NARRATION.final);
+  });
+
+  it('🔒 the runner narrates on the build\'s clock through the build-wide set; a sub-agent shares it', () => {
+    const runner = readFileSync(join(__dirname, '../src/server/AgentV3/AgentRunner.ts'), 'utf8');
+    expect(runner).toContain('buildBudgetNarration(Date.now() - origin, (buildStartMs - origin) + maxBuildMs, events.budgetStagesSaid)');
+    expect(runner).not.toMatch(/text: bs\.narration/);
+    const parent = new AgentEventStream(500, 1_000);
+    const child = Object.create(parent) as AgentEventStream;
+    child.budgetStagesSaid.add('half');
+    expect(parent.budgetStagesSaid.has('half')).toBe(true);
+    expect(child.startedAt).toBe(1_000);
   });
 });

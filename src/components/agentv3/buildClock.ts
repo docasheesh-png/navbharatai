@@ -30,3 +30,23 @@ export function buildElapsedMs(o: {
   }
   return 0;
 }
+
+/**
+ * The build clock a RE-ATTACH keeps (autopsy 303e8a6f, adversarial review). A build this device started and never
+ * saw end keeps its own Send; anything else waits for the stream's `build_clock` line. Never mount time, never
+ * now — restarting at 0 on a reconnect is the 2026-07-21 "time reset ho jata hai" regression. PURE.
+ */
+export function clockKeptOnReattach(prev: { startedAt?: number; endedAt?: number }): { startedAt?: number } {
+  return typeof prev.startedAt === 'number' && typeof prev.endedAt !== 'number' ? { startedAt: prev.startedAt } : {};
+}
+
+/**
+ * The origin a `build_clock` line gives this device: the server's "the user has waited N ms" turned into a
+ * moment on THIS device's clock — unless this device already has its own Send. Null when nothing changes. PURE.
+ */
+export function clockFromAttach(prev: { startedAt?: number }, startedAgoMs: unknown, now: number): { startedAt: number; endedAt: undefined } | null {
+  if (typeof prev.startedAt === 'number') return null;
+  const ago = Number(startedAgoMs);
+  if (!Number.isFinite(ago) || ago < 0) return null;
+  return { startedAt: now - ago, endedAt: undefined };
+}

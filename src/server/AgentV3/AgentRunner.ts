@@ -30,7 +30,7 @@ import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
 import { abortCauseOf, abortSummary, timedOutSummary, stalledModelSummary } from './buildAbortCause';
 import { isBuildStoppedError } from './stopSignal';
-import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
+import { budgetSteer, buildBudgetNarration, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResumeNote } from './unfinishedResume';
@@ -1452,8 +1452,14 @@ export class AgentRunner {
           if (bs) {
             budgetStagesSent.add(bs.stage);
             budgetText = bs.text;
-            // Narrated, because a build that silently stops polishing looks like a build that gave up.
-            events.emit({ type: 'narration', agent: agentRole, text: bs.narration, ts: Date.now() });
+          }
+          // Narrated, because a build that silently stops polishing looks like a build that gave up — on the BUILD's
+          // clock and once per build (a retry runner's own "half" is ~75% of the build). The build's total is this
+          // runner's remaining budget plus what had passed before it started.
+          if (typeof maxBuildMs === 'number' && maxBuildMs > 0 && events.budgetStagesSaid) {
+            const origin = typeof events.startedAt === 'number' ? events.startedAt : buildStartMs;
+            const said = buildBudgetNarration(Date.now() - origin, (buildStartMs - origin) + maxBuildMs, events.budgetStagesSaid);
+            if (said) events.emit({ type: 'narration', agent: agentRole, text: said, ts: Date.now() });
           }
         } catch { /* the budget steer is advisory — it must never break a build */ }
         // DONE — the app may already be finished. Runs the SAME free deterministic scan the weak

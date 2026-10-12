@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import { CHAT_MARKDOWN_PLUGINS } from '../../lib/chatMarkdown';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { getAgentV3SessionId, getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
-import { withoutStaleLiveStatus } from '../../lib/liveStatusLine';
+import { withoutStaleLiveStatus, lastActivityTs } from '../../lib/liveStatusLine';
 
 interface MiniMsg {
   role: 'user' | 'agent';
@@ -104,7 +104,7 @@ export function AgentV3MiniChat({ userId, email, prefill }: { userId?: string; e
   const convo: MiniMsg[] = [
     ...userMsgs,
     // Live status (the clock, the ETA) only while it is still true — the same rule as the main thread (liveStatusLine.ts).
-    ...withoutStaleLiveStatus(state.narration, running).map((n) => ({ role: 'agent' as const, text: n.text, ts: n.ts })),
+    ...withoutStaleLiveStatus(state.narration, running, lastActivityTs(state.activity)).map((n) => ({ role: 'agent' as const, text: n.text, ts: n.ts })),
   ].sort((a, b) => a.ts - b.ts);
 
   if (!userId) {

@@ -2403,6 +2403,12 @@ export interface RunningBuild {
   subscribers: Set<BuildSubscriber>;
   ended: boolean;
   startedTs: number;
+  /**
+   * When the user's request ARRIVED (the handler's first statement) — the origin of every user-visible build
+   * clock. `startedTs` is when the build was registered, after the whole preamble (abuse check, caps, wallet,
+   * intent classifier…), so it is the lock's age, not the user's wait (adversarial review of 303e8a6f).
+   */
+  originTs?: number;
   /** Full Team steering (Fix 60): user messages sent MID-BUILD ('max' tier only). The AgentRunner
    *  drains this between turns and injects each as a REAL user turn, so the very next model call
    *  acts on it — the Claude-Code-style "talk to the team while it builds" experience. */
@@ -7269,6 +7275,10 @@ async function noteBuildOutcome(
       write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
       end: () => { if (!res.writableEnded) res.end(); },
     };
+    // ⏱️ How long the user has been waiting, FIRST — as a duration, so no clock domain crosses the wire. A page that
+    // reloads or re-attaches has no Send of its own; without this its build clock restarted at 0 or counted from
+    // the first replayed event (autopsy 303e8a6f, adversarial review). Older clients ignore an unknown event.
+    if (typeof rb.originTs === 'number') sub.write({ type: 'build_clock', startedAgoMs: Math.max(0, Date.now() - rb.originTs) });
     for (const e of rb.buffer) sub.write(e);                   // replay so the UI catches up to "now"
     rb.subscribers.add(sub);
     // Keepalive: like the /chat stream, ping every 15 s so a RESUMED stream is never seen as
@@ -10133,6 +10143,10 @@ async function noteBuildOutcome(
   });
 
   app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+    // ⏱️ THE USER'S WAIT STARTS HERE — the first statement, before every await of the preamble (autopsy 303e8a6f,
+    // adversarial review): the build's event stream used to take its own construction time as the origin, up to
+    // ~30 s of checks later, so "Still working — Ns so far" still undercounted. Every user-visible clock reads this.
+    const requestArrivedAt = Date.now();
     // SECURITY (C1): identity from the VERIFIED token only — never the client-claimed body.userId.
     // Runs before flushHeaders(), so a reject is a clean HTTP 401 (no stream started yet). Skipped
     // under VITEST (route handler isn't exercised by tests; the pure resolveBuildIdentity is tested
@@ -11601,7 +11615,7 @@ async function noteBuildOutcome(
         } catch { /* memory is best-effort — never blocks a reply */ }
         // Surface the reply EXACTLY like a normal build narration — no provider
         // name, no note — then close out the stream the same way a build does.
-        const chatEvents = new AgentEventStream();
+        const chatEvents = new AgentEventStream(500, requestArrivedAt);
         chatEvents.subscribe((e) => send(e), false);
         chatEvents.emit({ type: 'narration', agent: 'architect', text: reply, ts: Date.now(), ...(sheetFile ? { file: sheetFile } : {}) });
         chatEvents.emit({ type: 'done', ok: true, summary: reply, ts: Date.now() });
@@ -11664,7 +11678,7 @@ async function noteBuildOutcome(
     // `key` stays the ACCOUNT key (userId ?? 'anon') for the cross-device LiveChannel (readers already
     // filter by workspaceId), while the registry Map is keyed by `buildKey` (per-workspace when enabled).
     // `userId` lets the per-account cap count this account's live builds across workspaces.
-    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), key: userId ?? 'anon', userId, workspaceId: intentWorkspaceId, steerQueue: [], powerLevel: powerLevelReqEffective };
+    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), originTs: requestArrivedAt, key: userId ?? 'anon', userId, workspaceId: intentWorkspaceId, steerQueue: [], powerLevel: powerLevelReqEffective };
     const primary: BuildSubscriber = {
       write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
       end: () => { if (!res.writableEnded) res.end(); },
@@ -11703,7 +11717,7 @@ async function noteBuildOutcome(
     let disposeGreenFreezeObserver: (() => void) | null = null;
     let disposeWriteObserver: (() => void) | null = null;
 
-    const events = new AgentEventStream();
+    const events = new AgentEventStream(500, requestArrivedAt);
     events.subscribe((e) => emit(e), false);
     // Said once, at the start, so a user who expected the badge gone is not left to discover it on the
     // finished app and conclude the toggle is broken.

@@ -56,6 +56,11 @@ export class AgentEventStream {
    * model call (autopsy 303e8a6f: a user 23 s in was told 11 s).
    */
   readonly startedAt: number;
+  /**
+   * The build-budget stages already told to the USER, for the whole build — a plain public property, so a
+   * sub-agent's stream (`Object.create(events)`) reads and adds to the same set (see buildBudgetNarration).
+   */
+  readonly budgetStagesSaid: Set<string> = new Set();
 
   constructor(maxBuffer = 500, startedAt = Date.now()) {
     this.maxBuffer = maxBuffer;

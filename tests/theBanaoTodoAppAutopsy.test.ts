@@ -174,3 +174,126 @@ describe('P9 · a global stylesheet is imported once, at the entry — settled a
     expect(architectSystemPrompt('vite-react')).toContain('ONLY there: the starter\'s main.tsx already does');
   });
 });
+
+// ── P6 · the suggest-only review stops in front of a reasoning engine, and its timeout line is true ──────────────
+import { reviewScopeWords, reviewEngineWords, reviewStoppedAtReasoningRung } from '../src/server/AgentV3/ReviewerAgent';
+import { ReasoningRungStopError } from '../src/server/AgentV3/providers/MultiProviderTurnRunner';
+import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
+
+describe('P6 · a suggestion is not worth a reasoning engine\'s minute', () => {
+  it('the timeout line names what the review was handed, not the project listing', () => {
+    expect(reviewScopeWords(11, 30)).toBe('11 changed file(s) handed in one call (the project has 30)');
+    expect(reviewScopeWords(null, 30)).toBe('30 files');
+    expect(reviewEngineWords('kimi-k2.7-code')).toBe("; the build's last engine was kimi-k2.7-code");
+    expect(reviewEngineWords(null)).toBe('');
+  });
+  it('the engine the build last ran on is read from its own calls', () => {
+    const d = new BuildDiagnostics('b', 'ws');
+    expect(d.lastServedModel()).toBeNull();
+    d.recordLlmCall({ model: 'glm-4.7-flashx', ok: true } as never);
+    d.recordLlmCall({ model: 'kimi-k2.7-code', ok: true } as never);
+    d.recordLlmCall({ model: 'unknown', ok: false, error: 'x' } as never);
+    expect(d.lastServedModel()).toBe('kimi-k2.7-code');
+  });
+  it('a review that stopped in front of a reasoning rung is recognised from the words it ended with', () => {
+    const stop = new ReasoningRungStopError('kimi-k2.7-code', ['GLM']);
+    expect(reviewStoppedAtReasoningRung([`Error: ${stop.message}`])).toBe('kimi-k2.7-code');
+    expect(reviewStoppedAtReasoningRung(['[PASS] Score: 90'])).toBeNull();
+  });
+  it('the runner asks the chain to stop there only when told to', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const client = { runTurn: async (p: Record<string, unknown>) => { seen.push(p); return { text: 'done', toolUses: [], stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }, rawContent: [{ type: 'text', text: 'done' }] }; } };
+    for (const stopAtReasoningRung of [true, undefined]) {
+      const stream = new AgentEventStream();
+      await new AgentRunner({ client: client as never, dispatcher: { dispatch: async () => ({}) } as never, state: new WorkspaceState(stream), events: stream, model: 'm', system: 's', tools: [], ...(stopAtReasoningRung ? { stopAtReasoningRung } : {}) }).run('review');
+    }
+    expect(seen[0].stopAtReasoningRung).toBe(true);
+    expect('stopAtReasoningRung' in seen[1]).toBe(false);
+  });
+  it('the sub-agent passes it on, and the route sets it for the suggest-only one-call review alone', () => {
+    expect(read('src/server/AgentV3/SubAgent.ts')).toContain("...(deps.stopAtReasoningRung ? { stopAtReasoningRung: true } : {}),");
+    const route = read('src/server/routes/agentv3.ts');
+    expect(route).toContain("...(reviewPlan.mode === 'suggest' && reviewOneCall ? { stopAtReasoningRung: true } : {}),");
+    expect(route).toContain("code: 'REVIEW_NOT_RUN_REASONING_ENGINE'");
+    expect(PROCESS_ONLY_CODES.has('REVIEW_NOT_RUN_REASONING_ENGINE')).toBe(true);
+  });
+});
+
+// ── P8 · a platform write runs no typecheck and spends no note ───────────────────────────────────────────────────
+import { runAsUnreadWrites, writesAreUnread } from '../src/server/AgentV3/unreadWrites';
+
+describe('P8 · a write nobody reads the answer to is not steered', () => {
+  it('the context is scoped to the call', async () => {
+    expect(writesAreUnread()).toBe(false);
+    expect(await runAsUnreadWrites(async () => writesAreUnread())).toBe(true);
+    expect(writesAreUnread()).toBe(false);
+  });
+  it('🔴 the lane\'s save: no typecheck runs, and the same write from the model still gets one', async () => {
+    const make = () => {
+      const act = new FakeActuator();
+      act.files.set('tsconfig.json', '{"compilerOptions":{}}');
+      act.files.set('package.json', '{"name":"x"}');
+      const s = new AgentEventStream();
+      return { act, d: new ToolDispatcher(act, 'ws-unread', new WorkspaceState(s), s) };
+    };
+    const file = { path: 'src/utils/dateFormatter.ts', content: "import type { formatter } from '../data';\nexport const dateFormatter: formatter = {};\n" };
+    const lane = make();
+    await runAsUnreadWrites(() => lane.d.dispatch(toolCall('write_file', file), 'frontend'));
+    const model = make();
+    await model.d.dispatch(toolCall('write_file', file), 'architect');
+    const tsc = (cmds: string[]) => cmds.filter((c) => /tsc/.test(c)).length;
+    expect(tsc(lane.act.commands)).toBe(0);
+    expect(tsc(model.act.commands)).toBeGreaterThan(0);
+    expect(lane.act.files.get(file.path)).toBe(file.content); // the write itself landed
+  });
+  it('every platform write in the route is marked — a new one fails here', () => {
+    const route = read('src/server/routes/agentv3.ts');
+    const writes = route.split('\n').filter((l) => /dispatcher\.dispatch\(\{ id: `[^`]*`, name: 'write_file'/.test(l));
+    expect(writes.length).toBeGreaterThanOrEqual(10);
+    expect(writes.filter((l) => !l.includes('runAsUnreadWrites(() => dispatcher.dispatch('))).toEqual([]);
+  });
+});
+
+// ── P12 · plan only what a screen shows ─────────────────────────────────────────────────────────────────────────
+import { dropProvidedTwins, manifestSystemPrompt } from '../src/server/AgentV3/SimpleBuilder';
+
+describe('P12 · a second copy of a provided component is left out of the plan', () => {
+  it('🔴 the real plan: src/components/ErrorBoundary.tsx beside the provided src/ErrorBoundary.tsx', () => {
+    const plan = [{ path: 'src/App.tsx', purpose: '' }, { path: 'src/components/ErrorBoundary.tsx', purpose: 'Error boundary' }, { path: 'src/components/TodoItem.tsx', purpose: '' }];
+    const { kept, dropped } = dropProvidedTwins(plan, ['src/ErrorBoundary.tsx', 'tsconfig.json', 'src/vite-env.d.ts']);
+    expect(kept.map((k) => k.path)).toEqual(['src/App.tsx', 'src/components/TodoItem.tsx']);
+    expect(dropped).toEqual([{ path: 'src/components/ErrorBoundary.tsx', provided: 'src/ErrorBoundary.tsx' }]);
+  });
+  it('the provided file itself, and non-component twins, are not touched', () => {
+    expect(dropProvidedTwins([{ path: 'src/ErrorBoundary.tsx' }], ['src/ErrorBoundary.tsx']).dropped).toEqual([]);
+    expect(dropProvidedTwins([{ path: 'src/lib/vite-env.d.ts' }], ['src/vite-env.d.ts']).dropped).toEqual([]);
+  });
+  it('both planners are told not to plan speculative pieces', () => {
+    expect(manifestSystemPrompt('vite-react')).toContain('Plan ONLY what a screen of THIS app shows');
+    expect(architectSystemPrompt('vite-react')).toContain('WRITE ONLY WHAT A SCREEN SHOWS');
+  });
+});
+
+// ── P13 · a capability of the kit is not a feature of the app ───────────────────────────────────────────────────
+import { auditSummaryClaims } from '../src/server/AgentV3/claimAudit';
+
+describe('P13 · "skeleton loading" in the summary of an app that has none', () => {
+  const SUMMARY = '- **Design:** clean, card-based layout with the design kit from the scaffold (buttons, fields, empty states, skeleton loading), fully responsive and dark-mode aware.';
+  const facts = (sourceText: string) => ({ consoleCaptured: true, screenshotTaken: true, previewVerified: true, sourceText });
+  it('🔴 the real sentence, against an app whose source has no skeleton: corrected', () => {
+    const c = auditSummaryClaims(SUMMARY, facts('export default function App(){ return <div className="nb-empty">No tasks</div>; }'));
+    expect(c.map((x) => x.kind)).toContain('kit-feature-claimed');
+    expect(c.find((x) => x.kind === 'kit-feature-claimed')?.claimed).toBe('that the app has skeleton loading');
+  });
+  it('an app that really uses the kit\'s skeleton is left alone', () => {
+    const c = auditSummaryClaims(SUMMARY, facts('<div className="nb-skeleton" />'));
+    expect(c.map((x) => x.kind)).not.toContain('kit-feature-claimed');
+  });
+  it('a turn whose written files are not the app is never judged', () => {
+    const c = auditSummaryClaims(SUMMARY, { ...facts('{}'), sourceIsWholeApp: false });
+    expect(c.map((x) => x.kind)).not.toContain('kit-feature-claimed');
+  });
+  it('the architect is told to name only what the app shows', () => {
+    expect(architectSystemPrompt('vite-react')).toContain('never a capability of the design kit it does not use');
+  });
+});

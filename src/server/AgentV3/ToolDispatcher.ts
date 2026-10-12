@@ -159,6 +159,7 @@ import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuar
 import { ensureTsconfigBaseUrl } from './TsconfigGuard';
 import { applyFullStackGuards, dedupeSameModuleImports } from './FullStackGuards';
 import { duplicateModuleTarget, dedupeStylesheetImports, isAppWideStylesheet } from './ProjectIntegrityChecks';
+import { writesAreUnread } from './unreadWrites';
 
 /**
  * Deterministic config backstops applied to EVERY file write (each no-ops for a non-matching path):
@@ -4123,6 +4124,12 @@ export class ToolDispatcher {
   private async writeSteeringNotes(files: Record<string, string>): Promise<string> {
     const paths = Object.keys(files ?? {});
     if (paths.length === 0) return '';
+    // A platform writer reads no tool result (unreadWrites.ts, autopsy db07e0af): its packages are still installed
+    // — the app needs them — but no typecheck is run and no once-per-build note is spent on it.
+    if (writesAreUnread()) {
+      try { await this.importedRecipeDependencyNote(files); } catch { /* an install is best-effort here, as at any write */ }
+      return '';
+    }
     const hooks = await this.hookWriteNote(files);
     let imports = '';
     for (const p of paths) {

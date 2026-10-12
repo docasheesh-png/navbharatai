@@ -170,6 +170,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'REPAIR_CLAIM_WITHHELD',
   // OUR end-of-turn hand-back answered with no change (repairClaim.ts, autopsy db07e0af): a struggle of the engine.
   'HANDBACK_IGNORED',
+  // OUR suggest-only review stopped in front of a reasoning engine (autopsy db07e0af) — a fact about OUR routing.
+  'REVIEW_NOT_RUN_REASONING_ENGINE',
   // A reviewer finding OUR evidence refuted (reviewEvidence.ts) is a fact about the reviewer, not the app.
   'REVIEW_REFUTED_BY_EVIDENCE',
   // …and a finding not offered because its file no longer exists (autopsy f496c75b): about the reviewer.
@@ -1639,7 +1641,8 @@ export class BuildDiagnostics {
         phase: 'provider',
         severity: 'info',
         code: 'LLM_CALL_HANDED_OFF',
-        message: 'A fast-lane call stopped before a slower reasoning engine and handed its work to the full builder — a planned handoff, not a failure.',
+        // Neutral since db07e0af: the suggest-only review stops the same way, and hands nothing to the full builder.
+        message: 'A budgeted call (the fast lane\'s, or a suggest-only review\'s) stopped in front of a slower reasoning engine instead of spending its budget inside one — a planned stop, not a failure.',
         autoResolved: true,
         detail: String(rec.error ?? '').slice(0, 300),
       });
@@ -1720,6 +1723,19 @@ export class BuildDiagnostics {
    * throws. (A raw non-Haiku Claude call that bypasses provider tracking cannot occur on a weak build:
    * ClaudeClient.runTurn's no-Claude-zone guard refuses it before it runs — see noClaudeZone.ts.)
    */
+  /**
+   * The model that answered this build's most recent successful call — the engine a later call on the same chain
+   * will most likely meet (autopsy db07e0af: the post-build review timed out with no word of which engine it had
+   * waited on). Null when no call has succeeded. Never throws.
+   */
+  lastServedModel(): string | null {
+    for (let i = this.llmCalls.length - 1; i >= 0; i--) {
+      const c = this.llmCalls[i];
+      if (c && c.ok !== false && typeof c.model === 'string' && c.model && c.model !== 'unknown') return c.model;
+    }
+    return null;
+  }
+
   claudeProviderDelivered(): string | null {
     const isViolatingClaude = (name: string): boolean =>
       name === 'CLAUDE' || (isClaudeModel(name) && !/haiku/i.test(name));

@@ -736,6 +736,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '      not written yet — the root imports its children, so a child importing from the',
     '      root fails to compile until the root is rewritten.',
     // Autopsy db07e0af (after f496c75b, 6cd698cc): `import type { FilterType }` of an enum, healed at write time.
+    // Autopsy db07e0af: a loading spinner for a todo app whose data is in browser storage, imported by nothing.
+    '    • WRITE ONLY WHAT A SCREEN SHOWS. No speculative component — a loading spinner when nothing loads',
+    '      from a network, a second error boundary (src/ErrorBoundary.tsx already wraps the app). A file no',
+    '      screen imports is never seen by the user.',
     "    • A FIXED SET OF OPTIONS IS A UNION TYPE, NOT AN ENUM (`type Filter = 'all' | 'active' | 'done'`):",
     '      a union is a type everywhere, so `import type` from src/types.ts is always right. An enum is a',
     '      VALUE — if one exists, import it with a plain `import { Name }`, never `import type`.',
@@ -1570,7 +1574,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '- When the app is genuinely complete and working, end your turn with a short',
     '  summary of what you built and how to run it. Do not call any tool in that',
     '  final turn. That summary is read by the USER: write it to them, about their app — never',
-    '  about tools, turns or this instruction (no "No further tools needed").',
+    '  about tools, turns or this instruction (no "No further tools needed"). Name only what THIS app',
+    '  shows — never a capability of the design kit it does not use (skeleton loading, toasts).',
     '- BUILD, DO NOT INTERVIEW: the platform starts a build only when the user clearly asked for one, so',
     '  for a NEW app — even one named in two words, such as "Music App" — build a complete, sensible',
     '  version NOW. Choose the obvious features, sample data and a polished design yourself. Do NOT stop to',

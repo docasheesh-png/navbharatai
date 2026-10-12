@@ -615,6 +615,7 @@ const NEVER_SUGGEST = new Set([
   'SPACING_SNAPPED', // our own deterministic 4px-grid snap (spacingSnap.ts, autopsy 536c8189) — already done
   'REPAIR_CLAIM_WITHHELD', // our repair pass claimed a change it never made (repairClaim.ts)
   'HANDBACK_IGNORED', // our end-of-turn hand-back answered with no change (repairClaim.ts, db07e0af)
+  'REVIEW_NOT_RUN_REASONING_ENGINE', // our suggest-only review stopped before a reasoning engine (db07e0af)
   'REVIEW_FINDINGS_UNREAD', // our parser could not read the review's findings (autopsy d798ddd3)
   'UNSUPPORTED_STACK', // the user is told in the ready message already (unsupportedStack.ts)
   'UNKNOWN_NAME_IN_REQUEST', // a note to our builder (unknownName.ts), never a finding

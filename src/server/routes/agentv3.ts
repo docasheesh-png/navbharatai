@@ -282,6 +282,7 @@ import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
 import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
 import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
 import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
+import { runAsUnreadWrites } from '../AgentV3/unreadWrites';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { deletedFilesNotice, userVisibleDeletions } from '../AgentV3/deletedFilesNotice';
@@ -595,7 +596,7 @@ import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from 
 import { applyStrictTrial, strictCohort } from '../AgentV3/strictTrial';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, reviewHasUnreadFindings, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, reviewHasUnreadFindings, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths, reviewScopeWords, reviewEngineWords, reviewStoppedAtReasoningRung } from '../AgentV3/ReviewerAgent';
 import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
@@ -18418,7 +18419,7 @@ async function noteBuildOutcome(
           // different files never conflict; the E2B round-trip latency (~150-300ms each) now overlaps.
           // The plan-progress ticker counts writes (order-independent), so completion order is fine.
           await mapWithConcurrency(files, 6, (f, i) =>
-            dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: f.path, content: f.content } }, 'frontend'),
+            runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: f.path, content: f.content } }, 'frontend')),
           );
         };
         // THE WRITE FENCE (autopsy a38c6fef, 2026-09-13). Every fast lane writes through this one
@@ -18476,7 +18477,7 @@ async function noteBuildOutcome(
                 // Route through write_file so each lands in the sandbox AND is recorded in writtenFiles
                 // (the durable store + the reconcile scan below both then see the new package.json).
                 await mapWithConcurrency(Object.entries(foundation.files), 4, ([p, c], i) =>
-                  dispatcher.dispatch({ id: `fast-foundation-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend'),
+                  runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-foundation-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend')),
                 );
               }
             } catch { /* best-effort — a failure here just falls through to the install exactly as before */ }
@@ -18493,7 +18494,7 @@ async function noteBuildOutcome(
                 fastLog(`🩹 Repaired ${ts.fixes.length} tsconfig file(s) that extended an uninstalled base so the dev server can start: ${ts.fixes.map((f) => f.file).join(', ')}`);
                 try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_EXTENDS_REPAIRED', message: `Removed an unresolvable tsconfig extends: ${ts.fixes.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
                 await mapWithConcurrency(Object.entries(ts.patch), 4, ([p, c], i) =>
-                  dispatcher.dispatch({ id: `fast-tsconfig-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend'),
+                  runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-tsconfig-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend')),
                 );
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through to the install as before */ }
@@ -19575,7 +19576,7 @@ async function noteBuildOutcome(
               let current = '';
               try { current = await actuator.readFile(workspaceId, path); } catch { current = ''; }
               if (current !== canonical) {
-                await dispatcher.dispatch({ id: `scaffold-restore-${restored.length}`, name: 'write_file', input: { path, content: canonical } }, 'frontend');
+                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `scaffold-restore-${restored.length}`, name: 'write_file', input: { path, content: canonical } }, 'frontend'));
                 restored.push(path);
               }
             }
@@ -19619,7 +19620,7 @@ async function noteBuildOutcome(
               });
             }
             for (let i = 0; i < fixes.length; i++) {
-              await dispatcher.dispatch({ id: `tscgate-w${i}`, name: 'write_file', input: { path: fixes[i].path, content: fixes[i].content } }, 'frontend');
+              await runAsUnreadWrites(() => dispatcher.dispatch({ id: `tscgate-w${i}`, name: 'write_file', input: { path: fixes[i].path, content: fixes[i].content } }, 'frontend'));
             }
           } catch (e) {
             console.log(`[AGENTV3] agentic tsc-gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19689,7 +19690,7 @@ async function noteBuildOutcome(
               const cssStubs = generateMissingCssModules(fileMapForCss);
               if (cssStubs.length > 0) {
                 for (let i = 0; i < cssStubs.length; i++) {
-                  await dispatcher.dispatch({ id: `cssmod-w${i}`, name: 'write_file', input: { path: cssStubs[i].path, content: cssStubs[i].content } }, 'frontend');
+                  await runAsUnreadWrites(() => dispatcher.dispatch({ id: `cssmod-w${i}`, name: 'write_file', input: { path: cssStubs[i].path, content: cssStubs[i].content } }, 'frontend'));
                 }
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'CSS_MODULES_GENERATED', message: `${cssStubs.length} missing CSS module(s) generated deterministically from component class usage (no repair step spent): ${cssStubs.map((s) => s.path).join(', ')}`, autoResolved: true });
                 events.emit({ type: 'narration', agent: 'architect', text: `🎨 Generated ${cssStubs.length} missing stylesheet(s) from the components' class usage.`, ts: Date.now() });
@@ -19707,7 +19708,7 @@ async function noteBuildOutcome(
               const barrels = await generateMissingBarrels(fileMapForBarrel);
               if (barrels.length > 0) {
                 for (let i = 0; i < barrels.length; i++) {
-                  await dispatcher.dispatch({ id: `barrel-w${i}`, name: 'write_file', input: { path: barrels[i].path, content: barrels[i].content } }, 'frontend');
+                  await runAsUnreadWrites(() => dispatcher.dispatch({ id: `barrel-w${i}`, name: 'write_file', input: { path: barrels[i].path, content: barrels[i].content } }, 'frontend'));
                 }
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'BARRELS_GENERATED', message: `${barrels.length} missing barrel(s) generated deterministically from existing leaf modules (no repair step spent): ${barrels.map((b) => b.path).join(', ')}`, autoResolved: true });
                 events.emit({ type: 'narration', agent: 'architect', text: `📦 Generated ${barrels.length} missing index barrel(s) re-exporting existing modules.`, ts: Date.now() });
@@ -19749,7 +19750,7 @@ async function noteBuildOutcome(
               });
               const created = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
               for (let i = 0; i < created.length; i++) {
-                await dispatcher.dispatch({ id: `missfiles-w${i}`, name: 'write_file', input: { path: created[i].path, content: created[i].content } }, 'frontend');
+                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `missfiles-w${i}`, name: 'write_file', input: { path: created[i].path, content: created[i].content } }, 'frontend'));
               }
             } catch (e) {
               console.log(`[AGENTV3] missing-files gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19816,7 +19817,7 @@ async function noteBuildOutcome(
               recordRepairOutOfScope('syntax', scopedSyntax.dropped);
               const fixed = scopedSyntax.kept;
               for (let i = 0; i < fixed.length; i++) {
-                await dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
+                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend'));
               }
             } catch (e) {
               console.log(`[AGENTV3] syntax gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19888,7 +19889,7 @@ async function noteBuildOutcome(
               recordRepairOutOfScope('missing-export', scopedExport.dropped);
               const fixed = scopedExport.kept;
               for (let i = 0; i < fixed.length; i++) {
-                await dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
+                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend'));
               }
             } catch (e) {
               console.log(`[AGENTV3] missing-export gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -24445,6 +24446,11 @@ async function noteBuildOutcome(
             signal: reviewAbort.signal,
             ...(reviewPlan.maxSteps !== undefined ? { maxSteps: reviewPlan.maxSteps } : {}),
             ...(reviewOneCall ? { toolsOverride: [] } : {}),
+            // 🧬 A SUGGESTION IS NOT WORTH A REASONING ENGINE'S MINUTE (autopsy db07e0af). The one-call review has
+            // 45 s; on that build it walked onto an engine that reasons before every answer and the user watched
+            // "running the final checks" for 56 s for nothing. The fast lane already stops in front of such a rung
+            // for exactly this reason (autopsy 33812996); the suggest-only review is the same kind of call.
+            ...(reviewPlan.mode === 'suggest' && reviewOneCall ? { stopAtReasoningRung: true } : {}),
           });
           const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount, { previewGreen: reviewPlan.mode === 'suggest' });
           if (reviewPlan.mode === 'suggest') {
@@ -24505,6 +24511,11 @@ async function noteBuildOutcome(
           }));
           try {
             review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');
+            // It stopped in front of a reasoning engine instead of spending its budget there — said, never silent.
+            const stoppedAt = reviewStoppedAtReasoningRung(reviewerSaid);
+            if (stoppedAt) {
+              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_NOT_RUN_REASONING_ENGINE', autoResolved: true, message: `The suggest-only review was not run: the engine left on the chain (${stoppedAt}) reasons before every answer, and this review gets one ${Math.round(reviewBudget / 1000)} s call — it stopped instead of keeping the user waiting for an answer that would not arrive in time. Its suggestions are not available for this build; "review it" runs a full review on its own.` }); } catch { /* best-effort */ }
+            }
           } catch (e) {
             // Timeout (or a reviewer error): the app is built + compiles + saved — say so HONESTLY
             // instead of silently dropping the completeness check (the empty-`review` report gap).
@@ -24537,7 +24548,7 @@ async function noteBuildOutcome(
               // which is strictly more than the nothing this branch used to deliver.
               events.emit({ type: 'narration', agent: 'architect', text: formatPartialReview(salvaged), ts: Date.now() });
               try { buildDiag.recordReview(formatPartialReview(salvaged, 50)); } catch { /* best-effort */ }
-              try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_PARTIAL', message: `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — but ${salvaged.issues.length} finding(s) it had already reported were RECOVERED from its own narration instead of discarded. Leads from an UNFINISHED review: they cannot fail a build and do not drive the auto-fix.`, autoResolved: false }); } catch { /* best-effort */ }
+              try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_PARTIAL', message: `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${reviewScopeWords(reviewOneCall ? (reviewInline?.files.length ?? 0) : null, rFiles.length)}${reviewEngineWords(buildDiag.lastServedModel())} — but ${salvaged.issues.length} finding(s) it had already reported were RECOVERED from its own narration instead of discarded. Leads from an UNFINISHED review: they cannot fail a build and do not drive the auto-fix.`, autoResolved: false }); } catch { /* best-effort */ }
               review = null;
             } else {
               events.emit({ type: 'narration', agent: 'architect', text: timedOut
@@ -24562,7 +24573,7 @@ async function noteBuildOutcome(
               // it sat in the app's problem list). Where the review could have REPAIRED, it stays a warning.
               const suggestOnly = reviewPlan.mode === 'suggest';
               barrenPhases.add(PHASE_POST_BUILD_REVIEW);
-              try { buildDiag.record({ phase: 'build', severity: suggestOnly ? 'info' : 'warning', code: suggestOnly ? 'REVIEW_SUGGESTIONS_NOT_READY' : 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build` : `Post-build review errored — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build`, autoResolved: suggestOnly }); } catch { /* best-effort */ }
+              try { buildDiag.record({ phase: 'build', severity: suggestOnly ? 'info' : 'warning', code: suggestOnly ? 'REVIEW_SUGGESTIONS_NOT_READY' : 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${reviewScopeWords(reviewOneCall ? (reviewInline?.files.length ?? 0) : null, rFiles.length)}${reviewEngineWords(buildDiag.lastServedModel())} — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build` : `Post-build review errored — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build`, autoResolved: suggestOnly }); } catch { /* best-effort */ }
               review = null;
             }
           } finally {

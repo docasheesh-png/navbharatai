@@ -73,6 +73,12 @@ export interface AgentRunnerOptions {
   tools: ClaudeToolDef[];
   /** Max model turns before the loop stops (backstop). Default 50. */
   maxSteps?: number;
+  /**
+   * Stop the provider walk in front of a rung that reasons before every answer instead of spending this run's
+   * small budget inside one (`RunTurnParams.stopAtReasoningRung`). Set for a suggest-only one-call review
+   * (autopsy db07e0af: 45 s + 11 s spent waiting on a reasoning engine, for nothing). Absent ⇒ walk the chain.
+   */
+  stopAtReasoningRung?: boolean;
   maxTokensPerTurn?: number;
   /** AP-4 (flag-gated, default off): allow frontend/backend WRITER sub-agents to run in parallel. Safe
    *  only when the actuator is wrapped with the per-path write lock (lockedActuator) — the caller pairs
@@ -875,6 +881,7 @@ export class AgentRunner {
             maxTokens: maxTokensPerTurn,
             thinking,
             effort,
+            ...(this.opts.stopAtReasoningRung ? { stopAtReasoningRung: true } : {}),
             // A Stop cancels THIS call, not only the next one (stopSignal.ts). Before this the loop
             // noticed a stop only between turns, after paying for the call already in flight.
             signal: turnTimeoutMs > 0 && typeof AbortSignal.any === 'function' && typeof AbortSignal.timeout === 'function'

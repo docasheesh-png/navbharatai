@@ -377,6 +377,29 @@ export function providedBoilerplate(scaffoldPaths: readonly string[] = []): stri
   return planProvidedFiles(scaffoldPaths);
 }
 
+/**
+ * A planned component that is a SECOND copy of one we provide, under another folder (autopsy db07e0af: the plan
+ * for a todo app listed `src/components/ErrorBoundary.tsx` beside the provided `src/ErrorBoundary.tsx`, which
+ * already wraps the app in main.tsx). The provided-boilerplate filter matched paths exactly, so the twin went
+ * through; the same component name in another folder is the same component. Only component files (`.tsx` /
+ * `.jsx`) are compared — two `index.ts` files are not twins. PURE.
+ */
+export function dropProvidedTwins<T extends { path: string }>(plan: readonly T[], provided: Iterable<string>): { kept: T[]; dropped: Array<{ path: string; provided: string }> } {
+  const byName = new Map<string, string>();
+  for (const p of provided) {
+    if (!/\.(?:tsx|jsx)$/i.test(p)) continue;
+    byName.set(p.split('/').pop()!.toLowerCase(), p);
+  }
+  const dropped: Array<{ path: string; provided: string }> = [];
+  const kept = plan.filter((m) => {
+    const twin = byName.get(String(m.path).split('/').pop()!.toLowerCase());
+    if (!twin || twin === m.path) return true;
+    dropped.push({ path: m.path, provided: twin });
+    return false;
+  });
+  return { kept, dropped };
+}
+
 /** Where the app's entry lives, in words the planner can act on. */
 function entryFilesHint(framework: string): string {
   return /next/i.test(framework)
@@ -438,6 +461,11 @@ export function manifestSystemPrompt(framework: string, scaffoldPaths?: readonly
     // (fileBudgetInstruction); this is the app-agnostic anti-pattern that produces most of the bloat.
     '- One file per REAL unit of the app. Never a separate file for a single tiny helper, type or constant —',
     '  co-locate it with its only user. Fewer, cohesive files beat many thin ones.',
+    // Autopsy db07e0af: a todo app planned a loading spinner (nothing loads), a second error boundary and a
+    // second global stylesheet; the spinner shipped imported by nothing.
+    '- Plan ONLY what a screen of THIS app shows. No speculative pieces: no loading spinner when nothing loads from',
+    '  a network (browser storage is instant), no second error boundary, no second global stylesheet (src/index.css',
+    '  IS the global stylesheet — its rules go there). A file no screen imports is never shown to the user.',
     '- Do NOT list node_modules, lockfiles, or build output.',
     // The persuasion half of the boilerplate fix; SimpleBuilder drops these from the parsed plan
     // regardless, so a model that ignores this line still cannot overwrite them.
@@ -1844,8 +1872,13 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       if (droppedShadow.length) {
         deps.log?.(`Leaving out ${droppedShadow.join(', ')} — in this project the page entry is the root index.html, and a copy in public/ would shadow it.`);
       }
+      // A second copy of a component we provide, in another folder (autopsy db07e0af) — see dropProvidedTwins.
+      const { kept: keptTwins, dropped: droppedTwins } = dropProvidedTwins(kept, provided);
+      if (droppedTwins.length) {
+        deps.log?.(`Leaving out ${droppedTwins.map((d) => d.path).join(', ')} — ${droppedTwins.map((d) => d.provided).join(', ')} is provided and already in the app.`);
+      }
       // The plan must connect what it builds to the screen — see ensureEntryPlanned.
-      const { manifest, injected: injectedEntry } = ensureEntryPlanned(kept, deps.starterEntryPath);
+      const { manifest, injected: injectedEntry } = ensureEntryPlanned(keptTwins, deps.starterEntryPath);
       if (droppedBoilerplate.length) {
         deps.log?.(`Skipping ${droppedBoilerplate.length} file(s) NavBharatAI already provides — they are correct as shipped: ${droppedBoilerplate.join(', ')}.`);
       }

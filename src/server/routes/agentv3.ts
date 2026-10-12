@@ -277,7 +277,7 @@ import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMe
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
 import { isPlatformNoticeEcho, platformNoticeEchoReply } from '../AgentV3/platformNoticeEcho';
-import { shouldAnswerPictureRequest, PICTURE_REQUEST_STEER, pictureRequestFallback } from '../AgentV3/pictureRequest';
+import { shouldAnswerPictureRequest, pictureAnswerEnabled, PICTURE_REQUEST_STEER, pictureRequestFallback, CLARIFY_WHAT_TO_MAKE_STEER } from '../AgentV3/pictureRequest';
 import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
 import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
 import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
@@ -10963,6 +10963,8 @@ async function noteBuildOutcome(
     // The reader's fourth answer: "they want something made but have not said WHAT" (report
     // d6d664e6). False unless the reader says so, so every path below is unchanged without it.
     let readerSaysUnclear = false;
+    // The reader's sixth answer: "they want a PICTURE made" (autopsy 15e69839). False unless it says so.
+    let readerSaysPicture = false;
     let readerAnswered = false;
     /** Set when a BUILD order was turned into an edit by the net below — recorded once a report exists. */
     let buildOrderReadAsEdit: { files: number; ownFiles: number; readerRan: boolean } | null = null;
@@ -10994,6 +10996,7 @@ async function noteBuildOutcome(
       );
       intent = smart.intent;
       readerSaysUnclear = smart.unclear;
+      readerSaysPicture = smart.picture === true;
       // Did the READER itself answer, or is this a keyword verdict wearing the reader's return type?
       // The deterministic net below stands in for a reader that did not run; it must not overrule one
       // that did. See `SmartIntent.readerAnswered` (autopsy e9b25b08).
@@ -11035,6 +11038,7 @@ async function noteBuildOutcome(
       intent = 'new_build';
       readerAnswered = false;
       readerSaysUnclear = false;
+      readerSaysPicture = false;
     }
     /**
      * Q-144: the previous turn asked which framework this project should use (its files and its build setup
@@ -11053,6 +11057,18 @@ async function noteBuildOutcome(
       intent = 'edit_existing';
       readerAnswered = false;
       readerSaysUnclear = false;
+      readerSaysPicture = false;
+    }
+    /**
+     * 🎨 THE READER SAW A PICTURE (autopsy 15e69839). A scene described in words, in a script no word list reads,
+     * is answered as a picture request before any offer to build is made — so a "yes" can never build it. Only
+     * where `shouldAnswerPictureRequest` would answer too: no app of the user's here (a "logo" may be for it),
+     * nothing being imported, and the switch on.
+     */
+    const readerPicture = readerSaysPicture && pictureAnswerEnabled() && !userAppExists && !importingThisTurn;
+    if (readerPicture) {
+      console.log('[AGENTV3] the intention reader read a picture request — answering instead of offering a build');
+      intent = 'chat';
     }
     const buildCheck = buildConfirmationEnabled()
       && !offerAccepted
@@ -11225,11 +11241,11 @@ async function noteBuildOutcome(
       console.log('[AGENTV3] the prompt asks for a spreadsheet file, not an app — making the file instead of building');
       intent = 'chat';
     }
-    const answerPictureRequest = !echoesPlatformNotice && !answerProjectElsewhere && !answerSpreadsheet && shouldAnswerPictureRequest({
+    const answerPictureRequest = !echoesPlatformNotice && !answerProjectElsewhere && !answerSpreadsheet && (readerPicture || shouldAnswerPictureRequest({
       prompt,
       userAppExists,
       importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
-    });
+    }));
     if (answerPictureRequest) {
       console.log('[AGENTV3] the prompt asks for a picture, not an app — answering instead of building');
       intent = 'chat';
@@ -11532,14 +11548,7 @@ async function noteBuildOutcome(
                 // The SAME constant the architect prompt carries, so a "how do I open it?" that lands
                 // here gets the Preview tab, never `npm run dev`. See NAVBHARATAI_UI_MAP.
                 '\n\n' + NAVBHARATAI_UI_MAP + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +
-                (clarifyWhatToBuild
-                  ? "\n\nThe user has asked for something to be MADE, but their message does not say "
-                    + "WHAT to make. Do NOT guess, and do NOT invent an app or a product name from "
-                    + "their words. Reply in one or two short sentences: say honestly that you did not "
-                    + "understand what to build, and ask them to describe it in a line or two, with one "
-                    + "brief example of the kind of answer that helps (for instance a shop billing app "
-                    + "with GST). Be warm and brief — they are one sentence away from starting."
-                  : '')
+                (clarifyWhatToBuild ? CLARIFY_WHAT_TO_MAKE_STEER : '')
                 + (answerProjectElsewhere ? projectElsewhereSteer(projectElsewhere) : '')
                 + (askUnrelated ? unrelatedRequestSteer(unrelated?.existingHint ?? '', rawAttachments.length > 0) : '')
                 + (answerPictureRequest ? PICTURE_REQUEST_STEER : '')

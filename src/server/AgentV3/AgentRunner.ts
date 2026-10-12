@@ -19,6 +19,8 @@ import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReady
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
 import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { writerTaskSiblings, SIBLING_TASKS_INPUT_KEY } from './parallelSiblings';
+import { toolNameCouldProduceWork } from './toolWork';
+import { isTodoOnlyTurn, TODO_ONLY_TURN_STEER } from './todoOnlyTurn';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
@@ -254,6 +256,12 @@ export interface AgentRunnerOptions {
     error?: string;
   }) => void;
   /**
+   * Called for every model turn whose only tool calls were update_todo, in a run that could have written
+   * (`isTodoOnlyTurn`, autopsy 9c612cdb). `latencyMs` is that turn's model time. The route sums these into
+   * the build's `TODO_ONLY_TURNS` line. Best-effort; a throw here never breaks the build.
+   */
+  onTodoOnlyTurn?: (turn: { latencyMs: number }) => void;
+  /**
    * Build-level token accumulator (billing accounting fix). When provided, EVERY turn's tokens are
    * added here as well as to this runner's own `usage`. The SAME sink is shared across the main
    * runner, every sub-agent, and every heal/fix/escalation runner so the final charge reflects the
@@ -315,13 +323,18 @@ export function isParallelSafeToolUse(toolUse: ToolUse, opts?: { parallelBuild?:
  * answers *"can this run concurrently?"*, and under `parallelBuild` it calls a `frontend` sub-agent
  * parallel-safe — which WRITES. Negating it would make a real builder's work read as no work at all,
  * on exactly the flag that is switched on in production. Two questions, two predicates.
+ *
+ * 🔴 AND NOT A DENY-LIST (autopsy 9c612cdb, Q-945). 2b0a3ed5 answered "not work" only for the parallel-safe
+ * READS, so update_todo, update_preview, typecheck, screenshot and every new check counted as built work,
+ * and a fresh build stopped after a plan-only turn said its files were saved. Every tool is now classified
+ * on purpose in `toolWork.ts`, whose census fails CI on a tool in neither set.
  */
 export function toolUseCouldProduceWork(toolUse: ToolUse): boolean {
   if (toolUse?.name === 'task') {
     const role = typeof toolUse.input?.role === 'string' ? toolUse.input.role : '';
     return !PARALLEL_SAFE_TASK_ROLES.has(role);
   }
-  return !PARALLEL_SAFE_TOOLS.has(String(toolUse?.name ?? ''));
+  return toolNameCouldProduceWork(String(toolUse?.name ?? ''));
 }
 
 /**
@@ -556,6 +569,9 @@ export class AgentRunner {
     // …and of those, the ones that could have PRODUCED something. A build that only ever read a file
     // has not built anything, however many reads it made — see `toolUseCouldProduceWork`.
     let producingToolUses = 0;
+    // Turns whose only tool calls were update_todo (todoOnlyTurn.ts, autopsy 9c612cdb): every one is reported
+    // through `onTodoOnlyTurn`, and the first is handed back with the rule (once per run).
+    let todoOnlySteered = false;
     // ONE place answering "is there something to resume from", so the four abort/timeout/step-cap
     // exits below can never drift into disagreeing with each other (or with the route's own
     // `writtenFiles`-based billing decision — see `hasExistingFiles`'s doc comment for the report
@@ -1274,6 +1290,12 @@ export class AgentRunner {
         }
         totalToolUses += turn.toolUses.length;
         producingToolUses += turn.toolUses.filter(toolUseCouldProduceWork).length;
+        // 📋 A TURN SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-944: five of 22 turns, 20 s of model time).
+        // Measured here, while `llmStartedAt` still times only the model call; handed back below, once.
+        const todoOnlyTurn = isTodoOnlyTurn(turn.toolUses.map((tu) => tu.name), tools.map((t) => t.name));
+        if (todoOnlyTurn) {
+          try { this.opts.onTodoOnlyTurn?.({ latencyMs: Date.now() - llmStartedAt }); } catch { /* a measurement must never fail a build */ }
+        }
 
         // Execute the requested tools and gather results (in the original order, so tool_use
         // ids resolve). Mutating tools (write/edit/bash, builder sub-agents) run SERIALLY and
@@ -1369,6 +1391,16 @@ export class AgentRunner {
               content: `This is the same ${turn.toolUses[i].name} call as ${turn.toolUses[first].id} earlier in this turn — its result is above, so it was not run twice.`,
               is_error: false,
             });
+          }
+        }
+        // The FIRST plan-only turn of this run hears the rule on its own tool result — the place the model
+        // reads next. Once per run: a hand-back repeated every turn is noise the model learns to skim.
+        if (todoOnlyTurn && !todoOnlySteered) {
+          const last = resultBlocks.length - 1;
+          const block = resultBlocks[last];
+          if (block && typeof block.content === 'string' && block.is_error !== true) {
+            resultBlocks[last] = { ...block, content: `${block.content}\n\n${TODO_ONLY_TURN_STEER}` };
+            todoOnlySteered = true;
           }
         }
         // TRUNCATION GUARD (ShopKhata autopsy 2026-07-17): a turn cut off at max_tokens can write a

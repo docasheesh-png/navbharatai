@@ -241,6 +241,8 @@ export const PROCESS_ONLY_CODES = new Set([
   // three facts about our engine (autopsy de3bb2bb — REPEATED_READS was one of the two open warnings that
   // held a working app at YELLOW: "2 thing(s) worth a look").
   'REPEATED_READS',
+  // …and how many model turns did nothing but update the plan (todoOnlyTurn.ts, autopsy 9c612cdb).
+  'TODO_ONLY_TURNS',
   'WORKSPACE_SCAN_FAILED',
   'EMPTY_BUILD_RETRY',
   // …and its sibling: our own page-render browser produced nothing (autopsy c6e4c6ff). Same rule —
@@ -2913,6 +2915,7 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   // build's first model call", because this warning is unresolved-but-not-a-failure and got picked as
   // the successful build's cause. Same class as POST_ANSWER_TIMING directly above; it belongs here too.
   'TIME_TO_FIRST_CALL',          // pure setup-timing measurement — the wait, not a cause
+  'TODO_ONLY_TURNS',             // turns spent only on update_todo — our engine's pace, never the app's fault (autopsy 9c612cdb)
   // 🔴 A NOTE ABOUT OUR OWN BILLING DECISION IS NOT A REASON A BUILD FAILED (build b89ba6f8,
   // 2026-09-17). That report's `rootCause` reads, in full: *"Did not ask this user to add credits:
   // the build failed because the engine did not respond…"* — a sentence about what we chose NOT to

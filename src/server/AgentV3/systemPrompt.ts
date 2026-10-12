@@ -16,6 +16,8 @@ import { rosterBriefing } from './AgentRegistry';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { isBinaryAsset } from './fileClassification';
 import { EMOJI_RULE } from '../lib/responseEmoji';
+import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
+import { TODO_RIDES_WITH_WORK } from './todoOnlyTurn';
 import { DEVICE_POWERS_RULE } from './devicePowers';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
@@ -382,6 +384,8 @@ export function editModePrefix(fileTree: string[] = []): string {
     '   If edit_file reports "old_string not found", it will show you the current',
     '   file content — copy the exact lines from that output and retry. Do NOT',
     '   fall back to write_file on an existing file just because edit_file failed.',
+    // Adding is not changing: no anchor to guess, so none to miss (autopsy 9c612cdb, Q-943).
+    `   ${APPEND_WITH_EMPTY_OLD_STRING}`,
     '',
     '4. MINIMUM CHANGES: alter only what the user asked for. Do not restructure',
     '   unrelated code, rename variables, or add/remove imports the user did not',
@@ -775,7 +779,9 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  text is NOT a label. Do this as you write the field, never as a later pass.',
     ...DESIGN_KIT_BRIEF,
     '  🔴 NEVER REPLACE `src/index.css` WHOLESALE — it IS the kit. Add your app\'s styles by APPENDING',
-    '  (edit_file, new rules at the end); to restyle a kit class, write your own rule for it below the',
+    // HOW to append is said here, before the first attempt (autopsy 9c612cdb, Q-943): the kit is 500+ lines
+    // the builder is told it need not read, so an anchor quoted from memory of it is a guess.
+    `  new rules at the end: ${APPEND_WITH_EMPTY_OLD_STRING} To restyle a kit class, write your own rule for it below the`,
     '  kit. A rewrite that drops kit rules has them put back automatically, so replacing the file gains',
     '  nothing and only costs you the tokens of a whole-file write.',
     '- 🚩 THE INNER PAGES ARE WHERE THIS FAILS, AND IT IS THE #1 COMPLAINT ABOUT GENERATED APPS. The',
@@ -1101,8 +1107,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  ⚠️ If the app writes to the database with NO login at all, RLS cannot save it: say so to the user',
     '  and either add sign-in or move those writes behind the server. Do not paper over it with a policy',
     '  that allows everyone, which is the hole with extra steps.',
-    '- Begin by calling update_todo to lay out a short, concrete plan. Keep it',
-    '  updated as you progress (mark items in_progress / done).',
+    '- Begin by calling update_todo to lay out a short, concrete plan, together with the first tool calls',
+    '  of that turn. Keep it updated as you progress (mark items in_progress / done).',
+    // When, not only whether (autopsy 9c612cdb, Q-944: five of 22 turns were update_todo and nothing else).
+    `  ${TODO_RIDES_WITH_WORK}`,
     '- ONE PLAN for the whole request: the todo list is a single running plan the user watches',
     '  from 0/N to N/N. Never abandon it for a fresh, shorter list mid-build — resend the SAME',
     '  list with statuses updated, appending any newly-discovered steps at the end. Completed',

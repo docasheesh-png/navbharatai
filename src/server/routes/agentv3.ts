@@ -358,6 +358,8 @@ import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoSc
 import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormancy';
 import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
 import { repeatedReadSummary, READ_LOOP_LIMIT } from '../AgentV3/repeatedReads';
+import { todoOnlyTurnsNote } from '../AgentV3/todoOnlyTurn';
+import { APPEND_WITH_EMPTY_OLD_STRING } from '../AgentV3/appendByEdit';
 import { greenGuardUndidWork, withGreenGuardCorrection, type GreenGuardRestoreFacts } from '../AgentV3/greenGuardHonesty';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
@@ -16885,6 +16887,7 @@ async function noteBuildOutcome(
             : {}),
         });
       } catch { /* hooks are optional — a dispatcher without them just refuses the meta tools */ }
+      const todoOnlyTally = { turns: 0, latencyMs: 0 };
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -16967,6 +16970,12 @@ async function noteBuildOutcome(
         // into the build report. Shared by the default build AND every escalated/retry/heal runner.
         onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
           try { buildDiag.recordLlmCall(c); } catch { /* diagnostics are best-effort */ }
+        },
+        // Turns spent only on update_todo (autopsy 9c612cdb, Q-944), summed across the runners that share these
+        // opts and reported once as TODO_ONLY_TURNS after generation (main run, escalation, empty-build retry).
+        onTodoOnlyTurn: (t: { latencyMs: number }) => {
+          todoOnlyTally.turns += 1;
+          todoOnlyTally.latencyMs += Math.max(0, Number(t?.latencyMs) || 0);
         },
       };
       // Hoisted so the fast-lane fallback persistence below (SETTLED section) can reuse the SAME id —
@@ -19431,6 +19440,17 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* an advisory finding must never affect a build */ }
+      // 📋 MODEL TURNS SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-944: 5 of 22 turns, 20.2 s). Recorded on
+      // every build, zero included, for the reason the block above states: a missing line reads as "none".
+      // It covers the generation runs above; a heal pass that starts after this line is not in its count.
+      // Info and never a cause — it describes our engine's pace, not the app.
+      try {
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'TODO_ONLY_TURNS',
+          message: todoOnlyTurnsNote(todoOnlyTally.turns, todoOnlyTally.latencyMs),
+          autoResolved: true,
+        });
+      } catch { /* an advisory line must never affect a build */ }
       // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
       // write time and how many errors were caught while the model still held the file. Reported
       // so the next autopsy can say whether the 7-minute endgame grind actually went away.
@@ -20774,7 +20794,9 @@ async function noteBuildOutcome(
                 const a11yBefore = projectHasUserCode(beforeHeal) ? lintBuiltApp(beforeHeal) : null;
                 const a11yAsk = a11yRepairAddendum(a11yBefore);
                 const designAsk = designRepair ? designRepairInstruction(design) : '';
-                const cssAsk = cssRepair && cssErr ? `\n\n${cssErr}` : '';
+                // `cssConsistencyError` is shared with the fast lane's tool-less whole-file repair, so it cannot
+                // name an edit_file call; THIS consumer has the tool, and is told how to add (autopsy 9c612cdb).
+                const cssAsk = cssRepair && cssErr ? `\n\n${cssErr}\n${APPEND_WITH_EMPTY_OLD_STRING}` : '';
                 const healed = await runInPass('design-consistency-heal', () => designRunner.run(
                   `The app is built and compiles. ${designAsk}${cssAsk}${a11yAsk}`,
                 ));

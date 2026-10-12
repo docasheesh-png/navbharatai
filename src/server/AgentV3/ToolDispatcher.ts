@@ -104,6 +104,7 @@ import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
 import { pruneGeneratedListing } from './generatedListing';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, leftToTheKit, usesNonKitNbClass } from './kitRestore';
 import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
+import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 import { scopeStyleHandBack } from './stylePolishResume';
 import { orphansToHandBack } from './orphanHandBack';
 import { batchSizeNote } from './batchSize';
@@ -11720,7 +11721,7 @@ function nearestEditRegionHeadTail(existing: string, maxChars: number): string {
     + `End of the file:\n\`\`\`\n…\n${existing.slice(existing.length - tailChars)}\n\`\`\`\n`;
 }
 
-export function nearestEditRegion(existing: string, oldStr: string, windowLines = 24, maxChars = 2400): string {
+export function nearestEditRegion(existing: string, oldStr: string, windowLines = 24, maxChars = 2400, opts: { path?: string } = {}): string {
   const lines = existing.split('\n');
   // Distinctive anchors from the intended edit: longest trimmed lines first — a token-bearing line like
   // `const categoryTotals = expenses.reduce(...)` locates the region far better than a bare `}` / `return (`.
@@ -11740,7 +11741,7 @@ export function nearestEditRegion(existing: string, oldStr: string, windowLines 
     const absent = missingCssSelectors(existing, oldStr);
     const absentNote = absent.length > 0
       ? `The rule${absent.length === 1 ? '' : 's'} ${absent.map((x) => `\`${x}\``).join(', ')} ${absent.length === 1 ? 'does' : 'do'} not exist in this file — `
-        + 'there is nothing to edit. To add it, call edit_file with an EMPTY old_string and the full rule as new_string (it appends).\n'
+        + `there is nothing to edit. ${APPEND_WITH_EMPTY_OLD_STRING} Send the full rule as new_string.\n`
       : '';
     if (absentNote) return absentNote + nearestEditRegionHeadTail(existing, maxChars);
     // No anchor located anywhere — the intended text may be entirely gone/hallucinated. Show the head,
@@ -11759,13 +11760,20 @@ export function nearestEditRegion(existing: string, oldStr: string, windowLines 
     const tail = existing.slice(existing.length - tailChars);
     return `Current file content (your target text was not located anywhere). Top of the file:\n\`\`\`\n${head}\n…\n\`\`\`\n`
       + `End of the file:\n\`\`\`\n…\n${tail}\n\`\`\`\n`
-      + 'To ADD content at the end of this file, call edit_file again with an EMPTY old_string and the same new_string — it appends, no anchor needed.\n';
+      + `${APPEND_WITH_EMPTY_OLD_STRING} If adding was what this edit meant, send the same new_string again that way.\n`;
   }
   const from = Math.max(0, hit - windowLines);
   const to = Math.min(lines.length, hit + windowLines + 1);
   let window = lines.slice(from, to).join('\n');
   if (window.length > maxChars) window = window.slice(0, maxChars) + '\n…(truncated — call read_file for more)';
-  return `Current file content around your closest match (lines ${from + 1}-${to}, nearest at line ${hit + 1}):\n\`\`\`\n${window}\n\`\`\`\n`;
+  // 🔴 THE ONE NOT-FOUND BRANCH THAT NEVER SAID HOW TO APPEND (autopsy 9c612cdb, Q-943). An anchor quoted
+  // from a compacted memory of the kit's last lines partly matched (nearest line 526 of 538), so the miss
+  // landed HERE — and this branch, alone of the four, gave no append route: the retry resent 1,964 tokens
+  // of CSS. Said whenever the edit was plausibly an addition: the window reaches the end of the file, or the
+  // file is a stylesheet (where nearly every edit to a sheet the model did not write is an addition).
+  const maybeAddition = to >= lines.length || (opts.path !== undefined && isProjectStylesheet(opts.path));
+  return `Current file content around your closest match (lines ${from + 1}-${to}, nearest at line ${hit + 1}):\n\`\`\`\n${window}\n\`\`\`\n`
+    + (maybeAddition ? `${APPEND_WITH_EMPTY_OLD_STRING}\n` : '');
 }
 
 /** Result of applying a single edit_file replacement. */
@@ -11819,7 +11827,7 @@ export function ambiguousEditRegions(existing: string, offsets: Iterable<number>
   // `@media (prefers-reduced-motion: reduce) {` twice in src/index.css, two failed edits and a read). The
   // not-found error already says how to append; this one did not.
   return `\n${shown.join('\n')}${more}\nAdd a neighbouring line from the match you mean to old_string so it is unique. `
-    + 'To ADD content at the end of the file instead, call edit_file with an EMPTY old_string — it appends, no anchor needed.';
+    + APPEND_WITH_EMPTY_OLD_STRING;
 }
 
 /**
@@ -11873,7 +11881,7 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
     throw new Error(
       `edit_file: old_string not found in ${path}. ` +
         `The string you supplied does not appear verbatim (or close enough) in the current file. ` +
-        `${nearestEditRegion(existing, oldStr)}` +
+        `${nearestEditRegion(existing, oldStr, undefined, undefined, { path })}` +
         `Copy the exact lines you want to change from the content above and retry.`,
     );
   }

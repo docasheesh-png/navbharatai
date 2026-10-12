@@ -3,6 +3,8 @@ import { appAiGatewayEnabled } from '../lib/appAiGateway';
 import type { ToolName } from './types';
 import { MAX_FILES_PER_BATCH } from './batchSize';
 import { WORKER_ROLES } from './AgentRegistry';
+import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
+import { TODO_RIDES_WITH_WORK } from './todoOnlyTurn';
 
 /**
  * ToolCatalog — the native Anthropic tool definitions the v5.0 agent team can
@@ -39,15 +41,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     },
     {
       name: 'edit_file',
+      // The anchor-free append is part of the CONTRACT, not only of the failure message (autopsy 9c612cdb,
+      // Q-943): a model asked to add rules to a stylesheet it never read had to guess an anchor otherwise.
       description:
         'Replace an exact, unique string in a file with a new string. The ' +
         'old_string must appear exactly once; include surrounding context to ' +
-        'make it unique.',
+        `make it unique. ${APPEND_WITH_EMPTY_OLD_STRING}`,
       input_schema: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'Workspace-relative file path.' },
-          old_string: { type: 'string', description: 'The exact text to replace (must be unique).' },
+          old_string: { type: 'string', description: 'The exact text to replace (must be unique). An EMPTY string ("") appends new_string to the end of the file instead — no anchor needed.' },
           new_string: { type: 'string', description: 'The replacement text.' },
         },
         required: ['path', 'old_string', 'new_string'],
@@ -165,7 +169,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     },
     {
       name: 'update_todo',
-      description: 'Update the ONE running build plan shown to the user. Send the full list with statuses updated and new items appended — never a fresh shorter plan (completed items always stay; the workspace keeps finished work even if you omit it).',
+      description: 'Update the ONE running build plan shown to the user. Send the full list with statuses updated and new items appended — never a fresh shorter plan (completed items always stay; the workspace keeps finished work even if you omit it). '
+        + TODO_RIDES_WITH_WORK,
       input_schema: {
         type: 'object',
         properties: {
@@ -3687,7 +3692,7 @@ export function taskToolDef(): ClaudeToolDef {
       'Delegate a focused task to a specialist agent. The agent runs with its own ' +
       'tools and returns a summary of what it did. Use this to parallelise and ' +
       'organise the build across the team. Plan the work yourself with update_todo — ' +
-      'a planning-only role (requirement, planner, product) is not delegated.',
+      `a planning-only role (requirement, planner, product) is not delegated. ${TODO_RIDES_WITH_WORK}`,
     input_schema: {
       type: 'object',
       properties: {

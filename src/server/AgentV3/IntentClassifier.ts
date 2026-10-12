@@ -613,6 +613,21 @@ function matchesSignal(lower: string, signals: readonly string[]): boolean {
   return firstSignalWord(lower, signals) !== undefined;
 }
 
+/**
+ * The text with every continuation phrase that NAMES A CONTROL removed (autopsy 303e8a6f, 2026-10-12).
+ *
+ * The first starter chip asks for *"friendly error messages with a Try again button"*. "try again" is a
+ * continuation signal — the retry button sends it — so a request for a NEW app was read as "work already
+ * started", and the analyser refused the floor every unsized app order gets. A continuation phrase followed
+ * by a control noun ("a Try again button", "a Retry link", "a Continue option") is the name of something the
+ * new app should have, not the user asking us to resume. A bare "try again" / "retry please" is untouched.
+ * PURE.
+ */
+const CONTROL_LABEL = /["'“”‘’]?\b(?:try again|try it again|retry|redo|continue|resume|once more|start again|start over)\b["'“”‘’]?\s+(?:button|btn|link|option|cta|label|action|tab|icon)s?\b/gi;
+export function withoutControlLabels(lower: string): string {
+  return String(lower ?? '').replace(CONTROL_LABEL, ' ');
+}
+
 /** Strip a trailing fenced code block check / file path / URL detection helper. */
 function hasCodeOrPathOrUrl(message: string): boolean {
   if (message.includes('```')) return true; // fenced code block
@@ -1064,7 +1079,7 @@ function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence
   }
   // Continuation of an interrupted/in-progress build → resume the existing project (with memory),
   // NOT the amnesiac chat path. High confidence so the LLM upgrade can't downgrade it to chat.
-  if (matchesSignal(lower, CONTINUATION_SIGNALS)) {
+  if (matchesSignal(withoutControlLabels(lower), CONTINUATION_SIGNALS)) {
     return { intent: 'edit_existing', confidence: 'high', signal: 'continuation' };
   }
   // A "something isn't working" bug report → edit_existing, not chat. Checked BEFORE
@@ -1386,7 +1401,7 @@ export function describesWorkAlreadyStarted(message: string): boolean {
   // "continue", "finish it", "retry", "dobara karo" — and "preview nahi chala", "it isn't working".
   // Both families describe work ALREADY STARTED. Neither is a request for a new app, whatever nouns
   // they happen to contain.
-  if (matchesSignal(lower, CONTINUATION_SIGNALS)) return true;
+  if (matchesSignal(withoutControlLabels(lower), CONTINUATION_SIGNALS)) return true;
   if (matchesSignal(lower, PROBLEM_SIGNALS)) return true;
   // 🔴 NavBharatAI composed this message ITSELF — the preview "Fix error" button. A request we wrote
   // is never a request for a new app, and it must not be guessed at: the template and this test share

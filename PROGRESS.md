@@ -94367,3 +94367,94 @@ forward, so the reversion lives in the suite rather than in a shell history.
 **Still OPEN from the same root (rowed, not forgotten):** the plan's remaining 14 modules are still
 queued and billable on a build whose app already exists. That is `8e124182`'s original damage and it
 needs a decision about money and the plan's lifecycle, so it is not taken silently here.
+### 2026-10-12 — Autopsy db07e0af ("Banao", Weak tier, todo app, ₹96.93) — fifth + sixth rule
+
+**The build.** The user typed only "Banao" into a project that held nothing but NavBharatAI's persisted starter. The engine built a todo app nobody asked for and billed ₹96.93. On the way it shipped a dark-mode button that did nothing until a repair half-fixed it, a summary that sold "skeleton loading", and a 56 s wait for a review that never answered.
+
+**Tally (fifth rule).**
+- ✅ self-healed: 3. The enum `import type` heal (TS1361), the dark-mode explorer repair, and the duplicate stylesheet import removed after render.
+- 🔀 worked around: 1. The fast lane handed off before the reasoning rung, and the whole app then ran on that rung.
+- ⏭️ skipped: 2. The unimported-component hand-back was ignored, and the review was abandoned.
+- ❌ shipped imperfect: 4. An app nobody asked for, an unused spinner, a "skeleton loading" claim, and a false "no problems recorded".
+- 🥵 struggled: 5. The GLM crawl (15 s), TS2307 compiled 4× during salvage, the review's 45 + 11 s, first render at 248 s, and the ETA 1.27× over its band.
+
+**Came back before — and why.**
+- "No tests at all" was "fixed" by Q-517 (39e982bd) and never fired. Readiness warnings are recorded already resolved, so `resolveOnRecheck` skipped them, and the test recorded the warning by hand.
+- STYLE_RULES_RESUMED's zero counts were fixed for the a11y part only (68f0a486). The orphan part was missed.
+- The enum heal had fired in f496c75b, 6cd698cc and 120eb52f. Each fix treated the import; nothing removed the enum.
+- A dead theme switch was 8257ca59, fixed by a write-time note only.
+
+**Ledger (problem → root cause → class → siblings → lock).** Every row is in `BUILD_REPORT_QUEUE.md` (Q-915 … Q-929).
+- **Q-915 "Banao" built an app.**
+  - Root cause: the ask-what-to-build guard read a file count, so our starter counted as a project, and a "hi" counted as an earlier request.
+  - Class: a presence check standing in for "is anything here somebody's work".
+  - Lock: `aWordThatNamesNothingIsAskedAbout`.
+- **Q-916 Dead dark-mode switch.**
+  - Root cause: the kit's dark palette lived only in the media query.
+  - Class: a switch hook nothing styles.
+  - Siblings:
+    - kitRestore and rewrites dropping the switch;
+    - the preview panel's own switch, which could not force light;
+    - the architect prompt claiming a `src/theme.tsx` the vite starter lacks;
+    - "ours" meaning byte-equal to today's template.
+  - The last sibling is now `platformSeedHistory`: every starter and chip version since 2026-07-01, a generator, and a census.
+  - Lock: `theDarkModeButtonSwitchesTheKit` (real Chromium, 18 cases) and `anOlderStarterIsStillOurs`.
+- **Q-917 Enum heal.**
+  - Root cause: the contract prompt asked for enums.
+  - Fix: unions in the contract and the architect prompt.
+- **Q-918 Ignored hand-back, parroted claim.**
+  - The example now matches the item handed back.
+  - repairClaim now covers in-run hand-backs, and HANDBACK_IGNORED is recorded.
+  - Lock: a runner replay of this build.
+- **Q-919 "No tests at all".**
+  - Fix: `BuildDiagnostics.retract`, locked through the real `done` recorder.
+- **Q-920 Review on a reasoning engine.**
+  - Fix: `stopAtReasoningRung` is plumbed to the suggest-only one-call review.
+  - Honest timeout lines: what the review was handed, and the last engine.
+- **Q-921 False success sentence and zero counts.**
+  - Fix: count what the report lists.
+- **Q-922 Unread writes.**
+  - Class: platform writers paying for, and spending, the model's steering.
+  - Fix: `unreadWrites`. All 10 route sites are marked, with a census.
+- **Q-924 ETA.** It follows from Q-920 and Q-916.
+- **Q-925 Speculative files.** Planner rules plus `dropProvidedTwins`.
+- **Q-927 Kit claim.** `kit-feature-claimed` in the summary audit.
+- **Q-928 Stylesheet import.** Removed at the write door.
+- **Q-929 Test harness.** It used a missing `.on`; it now uses `subscribe`.
+- **Q-923 GLM crawl.** ✅ not-a-defect by the Q-842 precedent (the admin accepted (a)). Closed.
+- **Q-926 248 s to first render on Weak.** 🟡 BLOCKED on a routing decision (options in the row).
+
+**Proof.** Every fix was reverted and its test failed: 6 ways for the theme/seed work, 2 for the intent work, and 10 for the rest.
+
+**Proactive (sixth step).**
+- The single biggest lever is Q-926. A simple app on Weak spent 4 minutes on a reasoning engine after a 15 s GLM crawl.
+- Measure option (b) on five real builds before touching the ladder.
+
+**Also closed this turn.** Q-869 (#3680 merged).
+---
+
+## 2026-10-12 — Autopsy 15e69839 (Tamil "GST bill" build, weak tier, stopped at 8.4 min)
+
+Admin: *"pahle build report wala kam, bad me!"* Real report: a Tamil user asked "like a 17-year-old boy leaning on a tree,
+to be made", was told we did not understand ("for example, a shop billing app with GST"), wrote "OK, like a man making a GST
+bill in a shop", was offered an app, said "ஆம்", and got a GST billing app. It rendered at 299 s; one KIMI call then ran
+~3 minutes with no answer, and the user pressed Stop at 456 s. Billed ₹97.20.
+
+**Tally:** ✅ self-heal 1 (3 transient TS2307 — by design, see ledger) · 🔀 workaround 1 (complexity second opinion for an
+unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong 1 (an app built for a picture request) · 🥵 struggle 3
+(3-min silent call after green; edit_file not-unique + read + retry; replace_symbol reported success on failure).
+
+| Item | Problem | Root cause → class | Fix (siblings) | Lock (reverted → failed) |
+|---|---|---|---|---|
+| ❌ Intent | Picture request in Tamil built as an app | Picture intent read only Latin/Devanagari; the reader had no "picture" answer; the clarify steer planted an app example | Detector reads the 9 other scripts (the safety triage's own word lists); reader's 6th answer `picture` answered before any offer; steer asks app OR picture, one example each; KB updated. Siblings: free chat, Doctor AI, Professionals use the same detector | `aSceneInAnyLanguageIsAPicture` (11 failed) |
+| 🥵 Stall | 3-min silent call after the app rendered | Reasoning counts as stream activity, so only the 300 s ceiling bounded a call that began no answer; that ceiling was then reported as "build budget reached", which ends the chain without fallback | Answer must begin within the rung's own timeout when a next rung exists; the provider's own ceiling reads as a timeout | `aThinkingRungMustBeginItsAnswer` (2 failed) |
+| Honesty | The stopped call appeared nowhere; `calls=0` | Stop path returned before the recorder | Recorded as LLM_CALL_STOPPED with its running time; waste line names user stops | `theCallRunningAtStopIsOnTheRecord` (4 failed) |
+| Honesty | KIMI told "the image is attached" with no image | Chat Completions format drops images | Gap stated where the image was (tool results and user attachments) | same test |
+| 🥵 replace_symbol | Failure returned as success | A returned string is a successful tool result | 19 returns → `refuse()` | `aFailedToolNeverReadsAsSuccess` (2 failed) |
+| 🥵 edit_file | not unique (2 matches) | Our starter CSS repeated the reduced-motion block — 981ce4cc fixed only the message | Blocks merged (design kit + native feel); census on any repeated `@media` | `aSeededStylesheetHasNoAmbiguousAnchor` (1 failed) |
+| ⚠️ DESIGN_CONSISTENCY | 7 off-grid spacings | Not a defect: the deterministic snap correctly writes nothing after a Stop | — | — |
+| Charge wording | "charged in full" vs "not a full build" | Not a defect: both mean the real cost of the work done, 0% discount | — | — |
+| 💰 Refund | ₹97.20 for a misread picture request | Admin's decision | 🟡 Q-895 (recommend refund) | — |
+
+**What to watch for on the next report:** a reasoning-only KIMI call ends at ~150 s as a timeout and the chain falls to GLM;
+`LLM_CALL_STOPPED` carries "it had been running Ns"; a non-English scene description gets a picture answer, not a build offer.

@@ -132,11 +132,19 @@ describe('the route only asks when NOTHING else can say what to build', () => {
   // REVERSION GUARD. Each of these four narrows the divert, and dropping any one of them turns a
   // fix into the thing it was written to prevent: asking a user who really did describe an app.
   // They are asserted out of the source because no unit test of a pure function can see them.
-  for (const guard of ['!projectExists', 'recentRequests.length === 0', "intent !== 'edit_existing'", 'rawAttachments.length === 0']) {
+  // db07e0af: the four conditions now live in `shouldAskWhatToBuild` (pure, tested below), and the route must
+  // hand it the workspace judged by CONTENT — never the bare file count that let our starter pass for a project.
+  for (const guard of ['shouldAskWhatToBuild({', 'workspaceHoldsOnlyOurStarter: await workspaceHoldsOnlyOurStarter()', 'earlierTurns: recentRequests', "editIntent: intent === 'edit_existing'", 'attachments: rawAttachments.length']) {
     it(`still requires ${guard}`, () => {
       expect(block).toContain(guard);
     });
   }
+
+  it('🔒 db07e0af: the workspace is judged by its content, not by counting files', () => {
+    const fn = source.slice(source.indexOf('const workspaceHoldsOnlyOurStarter = ()'), source.indexOf('const earlierRequestLeftAnApp ='));
+    expect(fn).toContain('return holdsOnlyOurStarter(files);');
+    expect(block).not.toContain('!projectExists');
+  });
 
   it('is driven by the no-object reason, not by the blunt too-short one', () => {
     expect(block).toContain("inputCheck.reason === 'no-object'");

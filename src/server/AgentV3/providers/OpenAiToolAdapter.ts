@@ -102,6 +102,20 @@ export function toolDefsToOpenAI(tools: ClaudeToolDef[] | undefined): OpenAiTool
   }));
 }
 
+/**
+ * Said in place of an image this transcript format cannot carry (autopsy 15e69839, 2026-10-12).
+ *
+ * 🔴 THE IMAGE WAS DROPPED AND THE MODEL WAS TOLD IT WAS THERE. The `screenshot` tool answers "The image is
+ * attached — inspect it" plus the picture; the Chat Completions `tool` message carries text only, so on every
+ * OpenAI-compatible rung (KIMI, GLM, NEMOTRON) the picture vanished and the sentence stayed. The model was
+ * asked to inspect a screenshot it never received. Now the gap is stated where the picture was.
+ */
+export const IMAGE_NOT_SHOWN_NOTE =
+  '[An image was attached here, but this model cannot receive images, so it was NOT shown to you. Do not '
+  + 'describe it or claim to have inspected it — rely on the text checks instead.]';
+
+const isImageBlock = (b: unknown): boolean => Boolean(b && typeof b === 'object' && (b as AnthropicBlock).type === 'image');
+
 /** Stringify a tool_result block's content (string passthrough; else JSON). */
 function toolResultText(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -111,7 +125,9 @@ function toolResultText(content: unknown): string {
       .map((b) => (b && typeof b === 'object' && (b as AnthropicBlock).type === 'text' ? (b as AnthropicBlock).text ?? '' : ''))
       .filter(Boolean)
       .join('\n');
-    if (text) return text;
+    const dropped = content.some(isImageBlock);
+    if (text) return dropped ? `${text}\n${IMAGE_NOT_SHOWN_NOTE}` : text;
+    if (dropped) return IMAGE_NOT_SHOWN_NOTE;
   }
   try {
     return JSON.stringify(content ?? '');
@@ -169,6 +185,9 @@ export function transcriptToOpenAI(messages: unknown[], system?: string, opts: {
         out.push({ role: 'tool', tool_call_id: b.tool_use_id ?? '', content: toolResultText(b.content) });
       } else if (b.type === 'text') {
         userText.push(b.text ?? '');
+      } else if (b.type === 'image') {
+        // The same gap for a photo the USER attached: dropped by this format, so say so (see IMAGE_NOT_SHOWN_NOTE).
+        userText.push(`\n${IMAGE_NOT_SHOWN_NOTE}`);
       }
     }
     if (userText.length) out.push({ role: 'user', content: userText.join('') });

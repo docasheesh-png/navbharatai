@@ -21,7 +21,7 @@
 //   • touch a Tailwind app or one styled from a CDN (`findUndefinedClasses` already says nothing there).
 // Kill switch: AGENTV3_KIT_RESTORE=off. PURE — the caller writes the file.
 
-import { DESIGN_KIT_CSS } from './sandbox/AppMakerLab/generator/templates/designKit';
+import { DESIGN_KIT_CSS, KIT_DARK_SWITCH, KIT_LIGHT_SWITCH } from './sandbox/AppMakerLab/generator/templates/designKit';
 import { collectDefinedClasses, collectUsedClasses, findUndefinedClasses, isProjectStylesheet } from './CssConsistency';
 
 /** Kill switch. Default ON. */
@@ -90,12 +90,54 @@ interface ParsedKit {
   dark: Map<string, string>;
 }
 
+/**
+ * Is this prelude one of the kit's theme-switch blocks (db07e0af)? They are PALETTE, not component rules: the
+ * class in them (`dark`, `light`) is set on <html>/<body> by a switch, never written on an element by a screen, so
+ * they must never count as "a kit class is styled here" — a screen's `<div className="dark">` is NOT styled by
+ * `:root.dark`. They travel with the tokens instead (`themeSwitchCss`).
+ */
+function isThemeSwitchPrelude(prelude: string): boolean {
+  const p = norm(prelude);
+  return p === norm(KIT_DARK_SWITCH) || p === norm(KIT_LIGHT_SWITCH);
+}
+
+/** Does this stylesheet style a theme switch of its own — a `.dark`/`.light` class or a `data-theme` attribute? */
+function stylesThemeSwitch(css: string, kind: 'dark' | 'light'): boolean {
+  return new RegExp(`\\.${kind}(?![\\w-])|\\[\\s*data-theme\\s*=\\s*['"]?${kind}\\b`).test(css.replace(/\/\*[\s\S]*?\*\//g, ''));
+}
+
+/**
+ * The kit's two theme-switch blocks for `tokens` (db07e0af): the dark one with each token's dark value, the light
+ * one with its light value, so the app's light/dark switch beats the device setting for every token the app reads.
+ * A kind the stylesheet already styles itself is left to it. PURE.
+ */
+function themeSwitchCss(
+  tokens: readonly string[],
+  lightOf: (t: string) => string | undefined,
+  darkOf: (t: string) => string | undefined,
+  existing: string,
+): string[] {
+  const dark = tokens.filter((t) => darkOf(t) !== undefined);
+  if (dark.length === 0) return [];
+  const out: string[] = [];
+  if (!stylesThemeSwitch(existing, 'dark')) {
+    out.push(`${KIT_DARK_SWITCH} {\n  color-scheme: dark;\n${dark.map((t) => `  ${t}: ${darkOf(t)};`).join('\n')}\n}`);
+  }
+  const light = dark.filter((t) => lightOf(t) !== undefined);
+  if (light.length > 0 && !stylesThemeSwitch(existing, 'light')) {
+    out.push(`${KIT_LIGHT_SWITCH} {\n  color-scheme: light;\n${light.map((t) => `  ${t}: ${lightOf(t)};`).join('\n')}\n}`);
+  }
+  return out;
+}
+
 let kitCache: ParsedKit | null = null;
 function parsedKit(): ParsedKit {
   if (kitCache) return kitCache;
   const kit: ParsedKit = { rules: [], media: [], keyframes: new Map(), light: new Map(), dark: new Map() };
   for (const b of parseCssBlocks(DESIGN_KIT_CSS)) {
-    if (b.prelude === ':root') {
+    if (isThemeSwitchPrelude(b.prelude)) {
+      continue; // generated from the same palette as the media block below — see `themeSwitchCss`
+    } else if (b.prelude === ':root') {
       for (const [k, v] of tokenDecls(b.body)) kit.light.set(k, v);
     } else if (/^@keyframes\s+/.test(b.prelude)) {
       kit.keyframes.set(b.prelude.replace(/^@keyframes\s+/, '').trim(), `${b.prelude} {${b.body}}`);
@@ -202,6 +244,7 @@ export function kitRestorePatch(files: Record<string, string>, env: NodeJS.Proce
     tokenCss.push(`:root {\n${tokenList.map((t) => `  ${t}: ${kit.light.get(t)};`).join('\n')}\n}`);
     const dark = tokenList.filter((t) => kit.dark.has(t));
     if (dark.length > 0) tokenCss.push(`@media (prefers-color-scheme: dark) {\n  :root {\n${dark.map((t) => `    ${t}: ${kit.dark.get(t)};`).join('\n')}\n  }\n}`);
+    tokenCss.push(...themeSwitchCss(tokenList, (t) => kit.light.get(t), (t) => kit.dark.get(t), appCss));
   }
 
   const before = files[target] ?? '';
@@ -311,7 +354,9 @@ export function keepKitOnRewrite(path: string, before: string, after: string, en
   const beforeKeyframes = new Map<string, string>();
   const beforeLight = new Map<string, string>();
   const beforeDark = new Map<string, string>();
+  let beforeHadSwitch = false;
   for (const b of beforeBlocks) {
+    if (isThemeSwitchPrelude(b.prelude)) beforeHadSwitch = true;
     if (/^@keyframes\s+/.test(b.prelude)) beforeKeyframes.set(b.prelude.replace(/^@keyframes\s+/, '').trim(), `${b.prelude} {${b.body}}`);
     else if (b.prelude === ':root') for (const [k, v] of tokenDecls(b.body)) beforeLight.set(k, v);
     else if (/^@media\b/.test(b.prelude) && /prefers-color-scheme:\s*dark/.test(b.prelude)) {
@@ -346,6 +391,27 @@ export function keepKitOnRewrite(path: string, before: string, after: string, en
     const dark = tokenList.filter((t) => darkOf(t) !== undefined);
     if (dark.length > 0) tokenCss.push(`@media (prefers-color-scheme: dark) {\n  :root {\n${dark.map((t) => `    ${t}: ${darkOf(t)};`).join('\n')}\n  }\n}`);
   }
+  // 🌗 THE SWITCH TRAVELS WITH THE PALETTE (db07e0af). The old file's theme-switch blocks are not component rules,
+  // so the loop above never keeps them; a rewrite that dropped them would leave the app's light/dark button dead
+  // again. When the old file had them, they are written for every switched token — values from the NEW content's
+  // palette first (its own `:root` and dark block), then the old file's, then the kit's.
+  const afterLight = new Map<string, string>();
+  const afterDark = new Map<string, string>();
+  for (const b of parseCssBlocks(after)) {
+    if (b.prelude === ':root') for (const [k, v] of tokenDecls(b.body)) afterLight.set(k, v);
+    else if (/^@media\b/.test(b.prelude) && /prefers-color-scheme:\s*dark/.test(b.prelude)) {
+      for (const r of parseCssBlocks(b.body)) if (r.prelude === ':root') for (const [k, v] of tokenDecls(r.body)) afterDark.set(k, v);
+    }
+  }
+  const switchTokens = beforeHadSwitch
+    ? [...new Set([...kit.dark.keys(), ...beforeDark.keys(), ...afterDark.keys(), ...tokenList])]
+    : tokenList;
+  tokenCss.push(...themeSwitchCss(
+    switchTokens,
+    (t) => afterLight.get(t) ?? lightOf(t),
+    (t) => afterDark.get(t) ?? darkOf(t),
+    after,
+  ));
 
   const content = `${after.replace(/\s*$/, '')}\n\n${KIT_KEEP_MARKER}\n${[...tokenCss, ...pieces].join('\n')}\n`;
   const { defined: nowDefined } = collectDefinedClasses({ [path]: content });

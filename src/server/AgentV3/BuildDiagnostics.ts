@@ -562,6 +562,12 @@ export interface LlmCallRecord {
    * 303e8a6f's row said "kimi-k2.7-code 18 s" when KIMI answered in 3.4 s after GLM crawled for 15 s.
    */
   answerMs?: number;
+  /**
+   * Time on rungs the chain TRIED and lost before the answering one, in ms (TurnResult.fallbackMs) — measured
+   * per failed attempt. Whatever is left of `latencyMs` beyond `fallbackMs + answerMs` was spent by the caller
+   * before the provider call (transcript compaction, working-set reads), never by an engine.
+   */
+  fallbackMs?: number;
   /** How long the answering provider took to OPEN its streamed response (TurnResult.openedAfterMs). */
   openMs?: number;
   ok: boolean;
@@ -1470,21 +1476,26 @@ export class BuildDiagnostics {
    * How the first call's own time is told — split when a fallback chain walked past engines first.
    *
    * ⏱️ AUTOPSY 303e8a6f: "The first call itself then took 18s; that is model time" described a 15 s crawl on
-   * GLM, abandoned, then 3 s on KIMI. Both numbers are measured (`latencyMs` is the caller's wait, `answerMs`
-   * the answering engine's own), so the sentence now says both; with no split to tell it stays as it was.
+   * GLM, abandoned, then 3 s on KIMI. Every part is MEASURED: `fallbackMs` by the chain per failed attempt,
+   * `answerMs` by the chain for the answering attempt. ⚠️ Never derived as "wait minus answer" (adversarial
+   * review): that charged the caller's own pre-call work (compaction, working-set reads) to the engines. What
+   * the two measured parts do not cover is named as what it is.
    */
-  private static firstCallTime(lat: number, answerMs: number | undefined): { split: boolean; text: string } {
+  private static firstCallTime(lat: number, answerMs: number | undefined, fallbackMs: number | undefined): { split: boolean; text: string } {
     const s = (ms: number): number => Math.round(ms / 1000);
-    if (typeof answerMs === 'number' && Number.isFinite(answerMs) && answerMs >= 0 && lat - answerMs >= 1000) {
+    const ok = (v: number | undefined): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+    if (ok(answerMs) && ok(fallbackMs) && fallbackMs >= 1000) {
+      const rest = lat - fallbackMs - answerMs;
       return {
         split: true,
-        text: `${s(lat)}s: ${s(lat - answerMs)}s on engine(s) that did not answer and were left behind (see PROVIDER_FALLBACK / PROVIDER_TIME_WASTED), then ${s(answerMs)}s for the engine that answered`,
+        text: `${s(lat)}s: ${s(fallbackMs)}s on engine(s) that did not answer and were left behind (see PROVIDER_FALLBACK / PROVIDER_TIME_WASTED), then ${s(answerMs)}s for the engine that answered`
+          + (rest >= 1000 ? `, and ${s(rest)}s of the runner's own work before the provider call (transcript compaction, working-set reads)` : ''),
       };
     }
     return { split: false, text: `${s(lat)}s` };
   }
 
-  private recordTimeToFirstCall(latencyMs?: number, answerMs?: number): void {
+  private recordTimeToFirstCall(latencyMs?: number, answerMs?: number, fallbackMs?: number): void {
     if (this.llmCalls.length > 0) return; // only the first
     const elapsedMs = Math.max(0, this.now() - this.startedAt);
     // Clamped to the elapsed time: a provider-reported latency longer than the whole build so far is
@@ -1496,7 +1507,7 @@ export class BuildDiagnostics {
     // here would turn GLM's abandoned 15 s into "26s of preparation" — blaming setup for a provider crawl,
     // the misattribution autopsies dukaan and a38c6fef already paid for once.
     const seconds = Math.round((lat === undefined ? elapsedMs : elapsedMs - lat) / 1000);
-    const callTime = lat === undefined ? null : BuildDiagnostics.firstCallTime(lat, answerMs);
+    const callTime = lat === undefined ? null : BuildDiagnostics.firstCallTime(lat, answerMs, fallbackMs);
     const message = lat === undefined
       // NEVER INVENT THE SPLIT. Without a latency we cannot separate the two, so we say the number is
       // an upper bound rather than repeating the old confident, wrong attribution.
@@ -1601,7 +1612,10 @@ export class BuildDiagnostics {
     const answerMs = typeof rec.answerMs === 'number' && Number.isFinite(rec.answerMs) && rec.answerMs >= 0
       ? (typeof rec.latencyMs === 'number' && Number.isFinite(rec.latencyMs) ? Math.min(rec.answerMs, Math.max(0, rec.latencyMs)) : rec.answerMs)
       : undefined;
-    this.recordTimeToFirstCall(rec.latencyMs, answerMs);
+    const fallbackMs = typeof rec.fallbackMs === 'number' && Number.isFinite(rec.fallbackMs) && rec.fallbackMs >= 0
+      ? (typeof rec.latencyMs === 'number' && Number.isFinite(rec.latencyMs) ? Math.min(rec.fallbackMs, Math.max(0, rec.latencyMs)) : rec.fallbackMs)
+      : undefined;
+    this.recordTimeToFirstCall(rec.latencyMs, answerMs, fallbackMs);
     this.channelTotals.llmCalls += 1;
     // 🔴 BOTH ENDS, NEVER A PREFIX (2026-09-21). This read `if (this.llmCalls.length < MAX_LLM_CALLS)`,
     // so a build past the cap recorded NO further model calls — and `DiagnosticsStore` then kept the
@@ -1623,6 +1637,7 @@ export class BuildDiagnostics {
       outputTokens: rec.outputTokens,
       latencyMs: rec.latencyMs,
       ...(answerMs !== undefined ? { answerMs } : {}),
+      ...(fallbackMs !== undefined ? { fallbackMs } : {}),
       ...(typeof rec.openMs === 'number' && Number.isFinite(rec.openMs) && rec.openMs >= 0 ? { openMs: rec.openMs } : {}),
       ok: rec.ok,
       error: rec.error ? rec.error.slice(0, 500) : undefined,
@@ -4243,10 +4258,11 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
     lines.push('');
     lines.push(`LLM calls (${r.llmCalls.length}):`);
     r.llmCalls.forEach((c, n) => {
-      // The answering engine's own time first; the caller's wait beside it when a fallback walk made them differ.
+      // The caller's wait is the headline (it is what the build waited); the measured split rides beside it
+      // only when engines were really left behind — never a "differs by a few ms" rule (adversarial review).
       const lat = c.latencyMs == null ? ''
-        : c.answerMs != null && c.latencyMs - c.answerMs >= 1000
-          ? ` ${Math.round(c.answerMs / 1000)}s (${Math.round(c.latencyMs / 1000)}s incl. fallback)`
+        : c.answerMs != null && c.fallbackMs != null && c.fallbackMs >= 1000
+          ? ` ${Math.round(c.latencyMs / 1000)}s (answering engine ${Math.round(c.answerMs / 1000)}s; ${Math.round(c.fallbackMs / 1000)}s on engines left behind)`
           : ` ${Math.round(c.latencyMs / 1000)}s`;
       const tok = (c.inputTokens != null || c.outputTokens != null) ? ` tokens=${c.inputTokens ?? '?'}/${c.outputTokens ?? '?'}` : '';
       lines.push(`${n + 1}. ${c.provider ?? '?'}/${c.model ?? '?'} finish=${c.finishReason ?? '?'}${tok}${lat} ${c.ok ? 'ok' : 'FAILED'}`);

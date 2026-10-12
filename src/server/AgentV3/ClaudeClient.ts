@@ -136,6 +136,12 @@ export interface TurnResult {
    */
   attemptMs?: number;
   /**
+   * Wall time of the rungs a fallback chain TRIED and lost before the one that answered, in ms — measured per
+   * failed attempt (the number the waste ledger receives), 0 when the first rung answered. Absent from a
+   * single-provider runner. Together with `attemptMs` it splits the caller's wait without guessing.
+   */
+  fallbackMs?: number;
+  /**
    * How long the provider took to OPEN its streamed response, in ms (from the request to the stream object) —
    * set by the streaming OpenAI-compatible runner on a call that answered. The data a "has it started yet?"
    * bound is chosen from (autopsy 303e8a6f, admin option (b) for Q-842). Absent where not measured.

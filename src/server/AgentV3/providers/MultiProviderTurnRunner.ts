@@ -766,6 +766,12 @@ export function makeMultiProviderTurnRunner(
       const fellBackFrom: string[] = [];
       let lastError: unknown;
       let alive = 0;
+      /**
+       * Time spent on rungs that were tried and FAILED before the one that answers — MEASURED per attempt
+       * (the same number `onAttemptWasted` receives), never derived as "caller's wait minus the answer"
+       * (adversarial review of 303e8a6f: a subtraction charged the caller's own preparation to the engines).
+       */
+      let fallbackMs = 0;
       // P4 — a sticky runner opens where this build's escalations / successes left it (never below).
       const stickyStart = opts.sticky ? stickyStartIndex(bench.sticky ??= createStickyState(), chain) : 0;
       for (let i = stickyStart; i < chain.length; i++) {
@@ -952,9 +958,10 @@ export function makeMultiProviderTurnRunner(
           // ⏱️ THE ANSWERER'S OWN CLOCK RIDES OUT WITH ITS ANSWER (autopsy 303e8a6f). Callers time the whole
           // chain; the row they file is labelled with the rung that answered. Without this, KIMI's 3.4 s was
           // recorded as 18.4 s — GLM's 15 s crawl charged to the engine that rescued it. `??` keeps the
-          // innermost value when one chain wraps another.
-          return { ...result, attemptMs: result.attemptMs ?? answeredInMs };
+          // innermost value when one chain wraps another; the rungs left behind add up across both.
+          return { ...result, attemptMs: result.attemptMs ?? answeredInMs, fallbackMs: fallbackMs + (result.fallbackMs ?? 0) };
         } catch (err) {
+          fallbackMs += Math.max(0, now() - attemptStartedAt);
           // 🔴 A STOP IS NOT A PROVIDER FAILURE (autopsy 2720e553). Decided FIRST, before any
           // classification below can bench this vendor, count the wait as its waste, or fall to the
           // next rung and start a new call for a build nobody is waiting on.

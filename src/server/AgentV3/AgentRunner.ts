@@ -262,6 +262,8 @@ export interface AgentRunnerOptions {
     latencyMs: number;
     /** The answering model's own time (TurnResult.attemptMs), on a success through a chain. */
     answerMs?: number;
+    /** How long it took to open its streamed answer (TurnResult.openedAfterMs). */
+    openMs?: number;
     ok: boolean;
     error?: string;
   }) => void;

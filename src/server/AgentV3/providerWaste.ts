@@ -18,7 +18,8 @@
 //
 // Pure: an accumulator with no I/O, created per build and thrown away with it.
 
-export type WasteKind = 'timeout' | 'crawl' | 'rate-limit' | 'error';
+/** `silent` (autopsy 303e8a6f): given up on before the provider produced a single byte — not a slow answer (`crawl`). */
+export type WasteKind = 'timeout' | 'crawl' | 'silent' | 'rate-limit' | 'error';
 
 export interface WasteLedger {
   /** Milliseconds spent inside attempts that returned nothing, by kind. */
@@ -31,8 +32,8 @@ export interface WasteLedger {
 
 export function emptyWasteLedger(): WasteLedger {
   return {
-    msByKind: { timeout: 0, crawl: 0, 'rate-limit': 0, error: 0 },
-    callsByKind: { timeout: 0, crawl: 0, 'rate-limit': 0, error: 0 },
+    msByKind: { timeout: 0, crawl: 0, silent: 0, 'rate-limit': 0, error: 0 },
+    callsByKind: { timeout: 0, crawl: 0, silent: 0, 'rate-limit': 0, error: 0 },
     msByFamily: {},
   };
 }

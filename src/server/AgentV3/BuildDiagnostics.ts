@@ -27,7 +27,7 @@ import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
-import { isBudgetEndedError, isReasoningRungHandoff } from './turnDeadline';
+import { isBudgetEndedError, isReasoningRungHandoff, isSilentAbandon, isSlowStreamAbandon } from './turnDeadline';
 import { typecheckEvidenceFromCommands, commandOutcomeText } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
@@ -561,6 +561,8 @@ export interface LlmCallRecord {
    * 303e8a6f's row said "kimi-k2.7-code 18 s" when KIMI answered in 3.4 s after GLM crawled for 15 s.
    */
   answerMs?: number;
+  /** How long the answering provider took to OPEN its streamed response (TurnResult.openedAfterMs). */
+  openMs?: number;
   ok: boolean;
   error?: string;
 }
@@ -829,6 +831,13 @@ export interface BuildDiagnosticsReport {
    * events are PER TURN. See sessionSummary.
    */
   session?: { turns: number; elapsedMs: number; dataLossTotal: number; failedTurns: number; truncated: boolean; line: string };
+  /**
+   * The provider-time waste ledger as NUMBERS, beside the PROVIDER_TIME_WASTED sentence (autopsy 303e8a6f).
+   * The admin accepted the first rung's walk-aways as "provider weather" (Q-009) with a reopen line of "more
+   * than 10% of builds' wall time over a day" — and nothing could compute that: the ledger existed only as
+   * prose, per build. `buildMs` is the clock the shares are of. Absent on reports written before it.
+   */
+  providerWaste?: { msByKind: Record<string, number>; callsByKind: Record<string, number>; msByFamily: Record<string, number>; buildMs: number };
   /** Fix 37c — explicit data-loss/recovery events (sandbox recycled, files restored, generation
    *  reset), each with the observed CAUSE, so "data kyu udha" is answered inside the report itself. */
   dataLossEvents?: Array<{ ts: number; cause: string; detail: string }>;
@@ -972,6 +981,7 @@ export class BuildDiagnostics {
   private liveCacheReadInputTokens?: number;
   private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
   private cacheReadInputTokens?: number;
+  private providerWaste?: BuildDiagnosticsReport['providerWaste'];
   private billing?: BuildBillingRecord;
   /** What the user was promised at t=0 — see `etaAccuracy`. Absent on turns that show no ETA. */
   private etaPromise?: EtaPromise;
@@ -1596,6 +1606,7 @@ export class BuildDiagnostics {
       outputTokens: rec.outputTokens,
       latencyMs: rec.latencyMs,
       ...(answerMs !== undefined ? { answerMs } : {}),
+      ...(typeof rec.openMs === 'number' && Number.isFinite(rec.openMs) && rec.openMs >= 0 ? { openMs: rec.openMs } : {}),
       ok: rec.ok,
       error: rec.error ? rec.error.slice(0, 500) : undefined,
     }, MAX_LLM_CALLS);
@@ -2365,6 +2376,12 @@ export class BuildDiagnostics {
     if (Number.isFinite(n) && n >= 0) this.priorFailedBuilds = Math.floor(n);
   }
 
+  /** Stamp the provider-time waste ledger as numbers (see the report field). Best-effort; a bad value is ignored. */
+  setProviderWaste(ledger: { msByKind: Record<string, number>; callsByKind: Record<string, number>; msByFamily: Record<string, number> }, buildMs: number): void {
+    if (!ledger || !Number.isFinite(buildMs) || buildMs <= 0) return;
+    this.providerWaste = { msByKind: { ...ledger.msByKind }, callsByKind: { ...ledger.callsByKind }, msByFamily: { ...ledger.msByFamily }, buildMs: Math.round(buildMs) };
+  }
+
   /** Stamp the whole-session view (see sessionSummary). Best-effort; a bad value is ignored. */
   setSession(session: BuildDiagnosticsReport['session']): void {
     if (session && Number.isFinite(session.turns)) this.session = session;
@@ -2732,6 +2749,7 @@ export class BuildDiagnostics {
       review: this.reviewText,
       priorFailedBuilds: this.priorFailedBuilds,
       session: this.session,
+      ...(this.providerWaste ? { providerWaste: this.providerWaste } : {}),
       dataLossEvents: this.dataLossEvents.length ? [...this.dataLossEvents] : undefined,
       // DERIVED AT SERIALIZATION, like etaAccuracy above, so no ending path can forget it. This is
       // the FIRST of the report's two truncation passes: what the recorder's own caps refused. The
@@ -3057,6 +3075,11 @@ export function classifyProviderFailure(reason: unknown): string {
   // Checked here, above the generic tests, so a future reword of the marker cannot fall through them.
   if (isStarvedBudgetError(text)) return 'output-budget';
   if (/\b429\b|rate.?limit|too many requests|quota/.test(t)) return 'rate-limit';
+  // OUR walk-away from a provider, before the generic "timed out" test the marker also matches — the same order
+  // `wasteKindFor` uses, so the two classifiers of one error agree (autopsy 303e8a6f: this one said 'timeout',
+  // the waste ledger said 'crawl', and the event was neither — the provider had not started answering).
+  if (isSilentAbandon(text)) return 'silent';
+  if (isSlowStreamAbandon(text)) return 'crawl';
   if (/timeout|timed out|etimedout|deadline/.test(t)) return 'timeout';
   if (/\b401\b|\b403\b|unauthor|forbidden|invalid api key|authentication/.test(t)) return 'auth';
   if (/\b400\b|bad request|invalid request|schema/.test(t)) return 'bad-request';
@@ -3074,7 +3097,7 @@ export function classifyProviderFailure(reason: unknown): string {
  * in here would tell a user to "try again in a few minutes" about a ladder that will still be broken
  * tomorrow. They get their own, louder treatment.
  */
-const DEGRADED_BUCKETS = new Set(['timeout', 'rate-limit', 'server-error', 'network']);
+const DEGRADED_BUCKETS = new Set(['timeout', 'silent', 'crawl', 'rate-limit', 'server-error', 'network']);
 
 /**
  * Buckets that mean OUR OWN REQUEST OR LADDER IS WRONG — they never come right on a retry.

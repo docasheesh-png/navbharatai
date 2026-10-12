@@ -14,7 +14,7 @@
 import { streamingBudget, streamNoClampEnabled } from '../reliability/streamBudget';
 import { modelAcceptsReasoningPassback, reasoningPassbackEnabled } from '../reliability/reasoningPassback';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
-import { turnDeadline, firstAnswerBoundMs, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE, isSlowStreamAbandon } from '../turnDeadline';
+import { turnDeadline, firstAnswerBoundMs, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE, SILENT_OPEN_MARK, isSlowStreamAbandon } from '../turnDeadline';
 import { glmThinkingParam, isThinkingParamRejection, modelAlwaysReasons, type GlmThinkingLevel } from './glmThinking';
 import { reconcileFloorBudget, turnStarvedItsBudget, starvedBudgetError } from '../floorBudget';
 import { markAbandonedTurn } from '../unbilledTurns';
@@ -504,7 +504,10 @@ export class OpenAiToolRunner implements TurnRunner {
     const providerWentSilent = streaming && firstAnswerMs < timeoutMs;
     // A stream that opens AFTER we gave up on it is closed on arrival, so it never generates (and bills)
     // for nobody — the stop path below already did this; the give-up path did not.
-    const opened = call();
+    // When the provider OPENED its response (streaming only) — the time-to-open a "has it started yet?" bound
+    // would be chosen from. Not recorded anywhere before autopsy 303e8a6f, so that choice had no data.
+    let openedAt: number | null = null;
+    const opened = Promise.resolve(call()).then((v) => { openedAt = Date.now(); return v; });
     const closeIfLate = (e: unknown) => {
       opened.then((late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } }, () => { /* already failed */ });
       throw e;
@@ -516,8 +519,9 @@ export class OpenAiToolRunner implements TurnRunner {
       withTimeout(
         opened,
         initialBoundMs,
+        // The provider had not even opened its response: silence, not a slow answer (autopsy 303e8a6f).
         silentBoundMs !== null
-          ? `${SLOW_STREAM_MESSAGE} after ${silentBoundMs}ms`
+          ? `${SLOW_STREAM_MESSAGE} after ${silentBoundMs}ms — ${SILENT_OPEN_MARK}`
           : ordinaryBoundMessage,
       ).catch((e: unknown) => {
         // The silent bound fired. It was only PEEKED at the start, so the abandon is claimed now; if another
@@ -564,7 +568,9 @@ export class OpenAiToolRunner implements TurnRunner {
       // tell this apart from a hung provider and bench the FAMILY immediately, rather than sending
       // the next turn back to the same crawling rung.
       if (stop === 'slow') {
-        throw new Error(`${SLOW_STREAM_MESSAGE} after ${Math.max(0, Date.now() - startedAt)}ms`);
+        // An opened stream that sent no byte is silence too — the words must say which it was.
+        const silent = acc.producedBytes() === 0 ? ` — ${SILENT_OPEN_MARK}` : '';
+        throw new Error(`${SLOW_STREAM_MESSAGE} after ${Math.max(0, Date.now() - startedAt)}ms${silent}`);
       }
       if (stop !== 'complete' && !acc.hasAnswer()) {
         throw new Error(stop === 'deadline' ? BUDGET_REACHED_MESSAGE : clockMessage(idleMs));
@@ -620,6 +626,6 @@ export class OpenAiToolRunner implements TurnRunner {
     // delta by delta, in which case repeating it here would print the answer twice.
     if (!streamedText && params.onText && result.text) params.onText(result.text);
 
-    return result;
+    return streamedText && openedAt !== null ? { ...result, openedAfterMs: Math.max(0, openedAt - startedAt) } : result;
   }
 }

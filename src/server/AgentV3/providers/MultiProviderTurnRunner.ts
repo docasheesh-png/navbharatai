@@ -22,7 +22,8 @@ import { modelAlwaysReasons } from './glmThinking';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
-import { isBudgetEndedError, isSlowStreamAbandon, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
+import { isBudgetEndedError, isSlowStreamAbandon, isSilentAbandon, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
+import type { WasteKind } from '../providerWaste';
 import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
 import { abandonedTurnUsage } from '../unbilledTurns';
 import { turnDiscardedTruncatedOutput } from '../TruncationRecovery';
@@ -88,7 +89,7 @@ export interface MultiProviderOptions {
    * Measurement only (autopsy 21b431e1): the bench's trigger is a COUNT of consecutive timeouts and
    * its cost is a CLOCK, and nothing had ever compared the two. Never read back, never acted on.
    */
-  onAttemptWasted?: (family: string, kind: 'timeout' | 'crawl' | 'rate-limit' | 'error', ms: number) => void;
+  onAttemptWasted?: (family: string, kind: WasteKind, ms: number) => void;
   /**
    * Billing Phase 3 — called when a turn succeeds, with the provider that answered, its measured
    * token usage, AND the exact model id that answered (TurnResult.model — used by REAL-cost billing
@@ -1053,10 +1054,14 @@ export function makeMultiProviderTurnRunner(
                 if (Number.isFinite(until)) bench.slowBenchUntil.set(slowKey, until);
                 else bench.slowBenchUntil.delete(slowKey);
                 const elapsedMs = Math.max(0, now() - attemptStartedAt);
+                // Silence and a slow answer are different events about the provider (autopsy 303e8a6f): the
+                // report said "answering far below a usable rate … mid-answer" of an engine that never answered.
                 opts.onProviderBenched?.(
                   reportName,
-                  `${chain[i].modelId ? `${chain[i].modelId} ` : ''}was answering far below a usable rate after `
-                  + `${Math.round(elapsedMs / 1000)}s — abandoned mid-answer and `
+                  `${chain[i].modelId ? `${chain[i].modelId} ` : ''}`
+                  + (isSilentAbandon(err)
+                    ? `had not started answering after ${Math.round(elapsedMs / 1000)}s — given up before its first byte and `
+                    : `was answering far below a usable rate after ${Math.round(elapsedMs / 1000)}s — abandoned mid-answer and `)
                   + (Number.isFinite(until)
                     ? `skipped for ${Math.round((until - now()) / 1000)}s, then tried once more, `
                     : abandons >= 2
@@ -1160,8 +1165,10 @@ export function makeMultiProviderTurnRunner(
  * waste at all because OUR OWN clock ended it (a lane cap, a build budget). Budget-ended is checked
  * FIRST: such an error can also read as a timeout, and the order is the whole rule. Pure.
  */
-export function wasteKindFor(err: unknown): 'timeout' | 'crawl' | 'rate-limit' | 'error' | null {
+export function wasteKindFor(err: unknown): WasteKind | null {
   if (isBudgetEndedError(err)) return null;
+  // Silence before the crawl test: both carry the crawl marker, and they are different facts (autopsy 303e8a6f).
+  if (isSilentAbandon(err)) return 'silent';
   if (isSlowStreamAbandon(err)) return 'crawl';
   if (isTimeoutProviderError(err)) return 'timeout';
   if (isRateLimitProviderError(err)) return 'rate-limit';

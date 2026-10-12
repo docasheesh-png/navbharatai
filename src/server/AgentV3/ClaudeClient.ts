@@ -135,6 +135,12 @@ export interface TurnResult {
    * the build from (autopsy 303e8a6f: GLM crawled 15 s, KIMI answered in 3.4 s, the row said KIMI 18 s).
    */
   attemptMs?: number;
+  /**
+   * How long the provider took to OPEN its streamed response, in ms (from the request to the stream object) —
+   * set by the streaming OpenAI-compatible runner on a call that answered. The data a "has it started yet?"
+   * bound is chosen from (autopsy 303e8a6f, admin option (b) for Q-842). Absent where not measured.
+   */
+  openedAfterMs?: number;
 }
 
 export interface RunTurnParams {

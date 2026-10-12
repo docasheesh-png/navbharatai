@@ -71,7 +71,11 @@ export function looksLikeFamilyLabelOnly(model: string | null | undefined): bool
  * 3.4 s — the rescuer charged with the crawl, and every per-model speed comparison inverted. `latencyMs` keeps
  * meaning the caller's wait (preparation is measured against it); this is the number a per-model speed reads.
  */
-export function answerTimeOf(turn: { readonly attemptMs?: number } | null | undefined): { answerMs?: number } {
-  const ms = turn?.attemptMs;
-  return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 ? { answerMs: ms } : {};
+export function answerTimeOf(turn: { readonly attemptMs?: number; readonly openedAfterMs?: number } | null | undefined): { answerMs?: number; openMs?: number } {
+  const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+  return {
+    ...(ok(turn?.attemptMs) ? { answerMs: turn!.attemptMs } : {}),
+    // …and how long it took to OPEN its answer, where the runner measured it (autopsy 303e8a6f).
+    ...(ok(turn?.openedAfterMs) ? { openMs: turn!.openedAfterMs } : {}),
+  };
 }

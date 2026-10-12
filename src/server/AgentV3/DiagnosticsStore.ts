@@ -847,6 +847,12 @@ export interface AllDiagnosticsEntry extends DiagnosticsHistoryEntry {
    */
   modelPerformance?: ModelPerformanceSummary | null;
   /**
+   * The build's provider-time waste ledger as numbers (autopsy 303e8a6f) — the instrument for Q-009's reopen line
+   * ("silent or crawling rungs > 10% of builds' wall time over a day"). No extra I/O: the report is in memory.
+   * `null` on a report written before the field.
+   */
+  providerWaste?: BuildDiagnosticsReport['providerWaste'] | null;
+  /**
    * THE BUILD'S OWN `OUTCOME_*` CODE — the machine fact it recorded about how it ended.
    *
    * 🔴 WHY IT IS PROJECTED (admin 2026-09-17, the 40.8% failure panel). Every failure reason on that
@@ -974,6 +980,7 @@ function toAllDiagnosticsEntry(d: FirebaseFirestore.QueryDocumentSnapshot): AllD
     modelPerformance: (() => {
       try { return summarizeModelPerformance(r); } catch { return null; }
     })(),
+    providerWaste: r.providerWaste ?? null,
     healCodes: (() => { try { return summarizeHealCodes(r); } catch { return null; } })(),
     workaroundCount: (() => { try { return workaroundCountOf(r); } catch { return null; } })(),
     restoredToGreen: restoredToGreenOf(r),

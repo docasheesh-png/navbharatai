@@ -58,6 +58,29 @@ export function stoppedLaneSummary(filesSaved: number): string {
     : 'Stopped, as asked — no file had been written yet.';
 }
 
+/**
+ * The SIMPLE_BUILD_FALLBACK line: why the lane ended, in the words of the reason it ended for. PURE.
+ *
+ * 🔴 Q-939 (report 9c612cdb). It read "Simple build timed out after generating 3 file(s)" about a lane
+ * that never ran out of time: it handed off on purpose, 32 s into a 240 s budget, because its next
+ * engine reasons before every answer. The wording was picked by ONE question — were files salvaged? —
+ * so every lane that salvaged anything "timed out": the hand-off, the budget projection that stopped
+ * early, and the lane whose root component was never written. The reason the lane ended now picks the
+ * words, and "timed out" is said only about a timeout.
+ */
+export function laneFallbackSummary(salvaged: number, handedOff: boolean, reason: string): string {
+  if (handedOff) {
+    return salvaged > 0
+      ? `Fast lane handed ${salvaged} finished file(s) to the full builder: the next engine reasons before every answer, which the lane cannot carry — a planned handoff, not a failure.`
+      : 'Fast lane handed its plan to the full builder: the next engine reasons before every answer, which the lane cannot carry — a planned handoff, not a failure.';
+  }
+  if (salvaged === 0) return 'Simple build could not produce the app — switching to the full builder.';
+  if (/\btimed out\b/i.test(reason)) return `Simple build timed out after generating ${salvaged} file(s) — the full builder continues from them.`;
+  if (/stage\(s\) left would need/i.test(reason)) return `Simple build stopped early after generating ${salvaged} file(s): the stages left could not finish inside its time budget — the full builder continues from them.`;
+  if (/root component/i.test(reason)) return `Simple build stopped after generating ${salvaged} file(s): the app's root component was not written — the full builder continues from them.`;
+  return `Simple build stopped after generating ${salvaged} file(s) — the full builder continues from them.`;
+}
+
 export interface SimpleFileSpec {
   path: string;
   /** One-line description of what this file contains — guides its focused generation call. */
@@ -1497,8 +1520,11 @@ export interface SimpleBuildDeps {
    */
   generate: (system: string, user: string, opts?: { deadlineAt?: number }) => Promise<string>;
   /**
-   * Asked before every per-file call and after every tier: should the lane stop NOW and hand what it
-   * has to the full builder? Returns the reason, or null to carry on.
+   * Asked before every per-file call starts, and again whenever one returns a file or fails (Q-939 —
+   * the call that carries the decision is usually the one in flight), plus before every repair round:
+   * should the lane stop NOW and hand what it has to the full builder? Returns the reason, or null to
+   * carry on. Generation asks it through ONE door, `noteHandOffDecision`, which also saves the finished
+   * files the moment the answer turns non-null.
    *
    * 🔴 WHY (autopsy Study-Racer, 2026-09-25): `fastLaneRungDecision` skips the lane when the build
    * OPENS on a rung that always reasons — the opener was glm-4.7-flashx, so the lane ran. Flashx then
@@ -1723,6 +1749,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     ? {
       planMs: clock.planMs, contractMs: clock.contractMs, generateMs: generateMsNow(),
       ...(clock.contractOutcome ? { contractOutcome: clock.contractOutcome, contractCapMs: clock.contractCapMs } : {}),
+      // Q-939 — the hand-off, out of `generate`: the wait for the calls still running, then the saves.
+      ...(clock.handOffDecidedAt && clock.handOffWaitEndedAt ? { handOffWaitMs: Math.max(0, clock.handOffWaitEndedAt - clock.handOffDecidedAt), handOffInFlight: clock.handOffInFlight ?? 0 } : {}),
+      ...(clock.laneEndedAt && clock.handOffSavesEndedAt ? { handOffSaveMs: Math.max(0, clock.handOffSavesEndedAt - clock.laneEndedAt) } : {}),
       verifyMs: clock.verifyMs, repairMs: clock.repairMs,
       verifyRuns: clock.verifyRuns, repairRuns: clock.repairRuns,
       totalMs: Date.now() - clock.startedAt,
@@ -1734,7 +1763,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // are hoisted OUT of the closure for exactly the reason `generatedSoFar` below is: on the failure
   // path — the path this measurement exists for — the closure's locals are gone before the caller can
   // ask. A measurement that only survives success answers the wrong question.
-  const clock: { startedAt: number; planMs: number; contractMs: number; generateMs: number; generateStartedAt?: number; verifyMs: number; repairMs: number; verifyRuns: number; repairRuns: number; contractOutcome?: FastLanePhases['contractOutcome']; contractCapMs?: number } = { startedAt: 0, planMs: 0, contractMs: 0, generateMs: 0, verifyMs: 0, repairMs: 0, verifyRuns: 0, repairRuns: 0 };
+  const clock: {
+    startedAt: number; planMs: number; contractMs: number; generateMs: number; generateStartedAt?: number; verifyMs: number; repairMs: number; verifyRuns: number; repairRuns: number; contractOutcome?: FastLanePhases['contractOutcome']; contractCapMs?: number;
+    // Q-939 — the hand-off's own instants: the decision, how many calls were still running then, the
+    // moment the lane stopped waiting for them, and the moment its hand-off saves were done.
+    handOffDecidedAt?: number; handOffInFlight?: number; handOffWaitEndedAt?: number; laneEndedAt?: number; handOffSavesEndedAt?: number;
+  } = { startedAt: 0, planMs: 0, contractMs: 0, generateMs: 0, verifyMs: 0, repairMs: 0, verifyRuns: 0, repairRuns: 0 };
   // One budget for the whole lane, read ONCE — the race below and the tier arithmetic inside must agree.
   const laneBudgetMs = deps.overallTimeoutMs ?? fastLaneBudgetMs(deps.complex === true);
   const generatedSoFar: OneShotFile[] = [];
@@ -1749,6 +1783,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // user's screen. The files finished so far are saved and announced the moment the decision is taken,
   // and each in-flight file as it lands, so the preview fills in while the wait runs. The catch below
   // waits for these saves before its own salvage write, so its import-fixed copy is always the last word.
+  // "The moment the decision is taken" is wherever a call learns of it — see `noteHandOffDecision` (Q-939).
   const handOffSaves: Promise<void>[] = [];
   const saveForPreviewNow = (files: OneShotFile[]): void => {
     if (lapsed || files.length === 0 || !handOffEarlySaveEnabled()) return;
@@ -1758,6 +1793,36 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         .then(() => { if (deps.onFilesReady) void Promise.resolve(deps.onFilesReady(files)).catch(() => {}); })
         .catch(() => { /* a preview head start never touches the build */ }),
     );
+  };
+  /**
+   * 🔴 Q-939 (report 9c612cdb): THE DECISION IS TAKEN WHERE A CALL SETTLES, NOT ONLY WHERE ONE STARTS.
+   * The lane learned of a hand-off only by asking `deps.stopLane` when a per-file call STARTED. That
+   * report's first tier held three files at concurrency 8, so all three were in flight together: the
+   * decision was made at 32.2 s inside one of them, nothing started after it, and Q-422's "the files
+   * finished so far are saved the moment the decision is taken" fired at 54.3 s, when the NEXT tier's
+   * first call started, seconds before the salvage wrote the same files again. Whether Q-422 worked
+   * depended on concurrency and tier size, and in the default shape (concurrency 8, a tier of 8 files
+   * or fewer) it essentially never did. So one question, asked at every point a call can learn of the
+   * decision: before it starts, after it returns a file, and when it fails (the call that carries the
+   * hand-off is the one that fails).
+   *
+   * Taking the decision only SAVES and stamps the ledger. It does not end the tier: the calls already
+   * in flight still finish (Q-422, the admin's choice), and the tier boundary still hands off only
+   * when a call was refused for it (`laneStopReason`), exactly as before.
+   */
+  let handOffDecision: string | null = null;
+  let callsInFlight = 0;
+  const noteHandOffDecision = (): string | null => {
+    if (handOffDecision) return handOffDecision;
+    // A lapsed lane decides nothing, and a stop is not a hand-off (the stop path saves its own files).
+    if (lapsed || deps.signal?.aborted) return null;
+    const stop = deps.stopLane?.();
+    if (!stop) return null;
+    handOffDecision = stop;
+    clock.handOffDecidedAt = Date.now();
+    clock.handOffInFlight = callsInFlight;
+    saveForPreviewNow([...generatedSoFar]);
+    return stop;
   };
   // The contract module (see `contractModule`) — '' / null when the contract stays prose-only.
   let contractPath = '';
@@ -2032,10 +2097,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // The lane's chain may have fallen to an engine this lane cannot afford (see SimpleBuildDeps.stopLane).
         // Refuse BEFORE spending the call; the tier boundary below turns the refusal into a hand-off.
         if (deps.signal?.aborted) return null; // stopped — the tier boundary below ends the lane
-        const stop = deps.stopLane?.();
+        const stop = noteHandOffDecision();
         if (stop) {
-          if (!laneStopReason) saveForPreviewNow([...generatedSoFar]);
-          laneStopReason = laneStopReason ?? stop;
+          laneStopReason = laneStopReason ?? stop; // a call refused for the hand-off: the tier boundary hands off
           return null;
         }
         try {
@@ -2069,7 +2133,13 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             ? await deps.readExisting(spec.path).catch(() => null)
             : null;
           if (lapsed) return null;
-          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock, contractPath || undefined, existing), { deadlineAt: laneStartedAt + overallMs });
+          let text: string;
+          callsInFlight += 1; // what the hand-off decision reports as still running when it is taken (Q-939)
+          try {
+            text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock, contractPath || undefined, existing), { deadlineAt: laneStartedAt + overallMs });
+          } finally {
+            callsInFlight -= 1;
+          }
           if (lapsed) return null; // timed out while this call was in flight — discard, don't log
           const blocks = parseFileBlocks(text);
           const match = blocks.find((b) => b.path === spec.path) ?? blocks[0];
@@ -2077,10 +2147,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           filesDone += 1; // synchronous — safe even with concurrent genOne calls in flight
           deps.log?.(`✓ ${spec.path} (${filesDone}/${manifest.length})`);
           const file = { path: spec.path, content: ensureReactValueImport(spec.path, match.content) };
+          const decidedBefore = handOffDecision !== null;
           generatedSoFar.push(file); // mirror outside the closure so a timeout can salvage finished work
-          if (laneStopReason) saveForPreviewNow([file]); // landed after the hand-off decision (Q-422)
+          // Landed after the hand-off decision: saved as it lands (Q-422). Otherwise the decision may have
+          // been taken while this call ran, and then everything finished so far, this file too, is saved now.
+          if (decidedBefore) saveForPreviewNow([file]);
+          else noteHandOffDecision();
           return file;
         } catch {
+          // The call that carries the hand-off is the one that fails: take the decision here (Q-939).
+          noteHandOffDecision();
           return null; // a single file's call failing must not kill the whole build
         }
       };
@@ -2294,6 +2370,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     })(), laneBudgetMs, 'simple-build');
   } catch (e) {
     lapsed = true; // from this instant the orphaned closure can neither write files nor burn more tokens
+    // Q-939 — the ledger. Generation that did not finish ends at the hand-off decision when one was taken
+    // (the wait for the calls still running after it is its own phase), and otherwise here. What follows
+    // (the hand-off saves) is measured from this instant, never folded into `generate`.
+    clock.laneEndedAt = Date.now();
+    if (clock.generateStartedAt && !clock.generateMs) {
+      clock.generateMs = Math.max(0, (clock.handOffDecidedAt ?? clock.laneEndedAt) - clock.generateStartedAt);
+      if (clock.handOffDecidedAt) clock.handOffWaitEndedAt = clock.laneEndedAt;
+    }
     // The hand-off's early preview saves (Q-422) finish before the final save below, so they can never
     // land on top of it.
     if (handOffSaves.length > 0) await withTimeout(Promise.allSettled(handOffSaves), 30_000, 'simple-build-handoff-saves').catch(() => {});
@@ -2323,7 +2407,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     // An EARLY BAIL is a budget exhaustion the lane saw coming, so it salvages exactly like a timeout —
     // otherwise predicting the timeout instead of waiting for it would silently DISCARD the finished
     // files the old path preserved, making the improvement a regression.
+    let salvageAttempted = false;
     if ((reason.includes('timed out') || reason.includes('stopped early')) && generatedSoFar.length > 0) {
+      salvageAttempted = true;
       const salvage = [...generatedSoFar]; // snapshot — in-flight genOne pushes can't mutate mid-write
       // The import fixes the lane would have made had it finished, made on what it hands over (autopsy
       // 6cd698cc: four salvaged files carried 17 errors — enums imported with `import type` — and the full
@@ -2364,16 +2450,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         deps.log?.('Still building your app — your work so far is saved and I am carrying on from it.');
       } catch { /* salvage is best-effort — on failure the full builder starts from the scaffold as before */ }
     }
+    // The hand-off saves are done (Q-939): stamped only when there were any, so a lane that failed before
+    // writing a file never reports a "hand-off saves 0s" it did not perform.
+    if (handOffSaves.length > 0 || salvageAttempted) clock.handOffSavesEndedAt = Date.now();
     const handedOff = isReasoningRungHandoff(e) || /reasons before every answer/i.test(reason);
     return {
       ok: false,
       ...(handedOff ? { handedOff: true } : {}),
       filesWritten: salvagedPaths?.length ?? 0,
-      summary: salvagedPaths?.length
-        ? `Simple build timed out after generating ${salvagedPaths.length} file(s) — the full builder continues from them.`
-        : handedOff
-          ? 'Fast lane handed its plan to the full builder: the next engine reasons before every answer, which the lane cannot carry — a planned handoff, not a failure.'
-          : 'Simple build could not produce the app — switching to the full builder.',
+      // Why the lane ended picks the words — "timed out" only about a timeout (Q-939, see laneFallbackSummary).
+      summary: laneFallbackSummary(salvagedPaths?.length ?? 0, handedOff, reason),
       reason,
       outcome: 'BUILD_FAILED',
       salvagedPaths,

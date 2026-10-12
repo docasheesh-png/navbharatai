@@ -94162,3 +94162,13 @@ readers + a critic, fixed in three worktree-isolated groups, each adversarially 
 - **Still open from this autopsy (NOT COMPLETE):**
   - 🟡 waiting on the admin: Q-842, Q-845 (money), Q-846 and Q-860;
   - OPEN: Q-843, Q-861, Q-862, Q-863, Q-864 and Q-865.
+
+### 2026-10-12 — admin decisions on the four 🟡 rows of autopsy 46e2d74b
+
+Admin, verbatim: *"q845- game chal raha hai. mekup lena chaiye!! waki sabhi me apki bat accept"*.
+
+- **Q-845 ✅ RESOLVED (admin decision: keep the markup).** The game's preview ran, so the existing billing law applies: the markup needs a preview that ran, and that condition was met. My recommendation had been (b), a markup only on a playtest that ran. The admin chose (a). Two things that made (b) attractive are now gone: the playtest presses Start (Q-838), and a `[BROKEN / …]` reviewer tag is read (Q-839). No code change.
+- **Q-842 ✅ RESOLVED as not-a-defect.** The admin accepted recommendation (a). Two GLM crawls (30 s) fall within Q-009's accepted bound, and the bench behaved as designed.
+- **Q-860 ✅ RESOLVED (admin decision: keep).** The admin accepted recommendation (a). Vehicles are already seen from behind through the chase camera. The rig's default yaw for non-vehicle cameras is not flipped, because a flip would turn every existing shell game round for users mid-game.
+- **Q-846 → OPEN, to build.** The admin accepted recommendation (a). When a user names a phone that cannot run the app, the reply says so plainly. The build then goes ahead as a light 2D, keypad-first web game.
+- All three closed IDs were appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit.

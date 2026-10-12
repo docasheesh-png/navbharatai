@@ -92,3 +92,20 @@ describe('3 · a feature inside an order is not the task — and a real problem 
     expect(withoutErrorFeaturePhrases('it shows an error message')).toContain('error message');
   });
 });
+
+describe('4 · the telemetry files the tier that DELIVERED, not the band the prompt was sized as', () => {
+  it('🔒 the cost table, the trace and the decision trace read the measured tier', async () => {
+    const { readFileSync } = await import('node:fs');
+    const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    expect(route).toContain('const measuredTier: StartTier = deliveredStartTier(dominantProvider(providerTurns)) ?? deliveredTier;');
+    const telemetry = route.slice(route.indexOf('agentV3CostTelemetry\n        .record({'), route.indexOf('agentV3CostTelemetry\n        .record({') + 1200);
+    expect(telemetry).toContain('startTier: measuredTier,');
+    expect(route).toContain('tier: measuredTier,');
+    expect(route).toContain("decisionTrace.record('model', `${measuredTier} (${dominantProvider(providerTurns) ?? model})`");
+  });
+
+  it('a weak build delivered by GLM or KIMI is the cheap bucket, never a Claude one', async () => {
+    const { deliveredStartTier } = await import('../src/server/routes/agentv3');
+    for (const p of ['GLM', 'KIMI', 'NEMOTRON']) expect(deliveredStartTier(p)).toBe('gemini');
+  });
+});

@@ -26252,6 +26252,11 @@ async function noteBuildOutcome(
       // tier, billed amount, tokens, success, and duration so the savings AND the
       // per-tier quality are MEASURABLE (the P8 cutover gate needs this data). Best-
       // effort — never blocks the run. Recorded for every build, signed-in or not.
+      // 🔴 THE TIER THAT DELIVERED, MEASURED (autopsy 303e8a6f). `deliveredTier` starts as the analyser's PLAN and
+      // was corrected only on the empty-build retry (f5351721), so an agentic weak GLM/KIMI build was filed under
+      // the band its prompt was SIZED as — 'sonnet' for the report's chip. The providers that actually answered
+      // decide; nobody reported ⇒ the old value stands (never an invented tier).
+      const measuredTier: StartTier = deliveredStartTier(dominantProvider(providerTurns)) ?? deliveredTier;
       agentV3CostTelemetry
         .record({
           // A seeded template build is counted as its own kind, so the ETA can learn from it and the
@@ -26261,7 +26266,7 @@ async function noteBuildOutcome(
           taskType: etaKeyForBuild(goldenPreseeded),
           // Record the tier the build was actually DELIVERED on (after any P3 escalation),
           // so per-tier success rates reflect what really ran, not just the start tier.
-          startTier: deliveredTier,
+          startTier: measuredTier,
           // Billing accounting fix: record the ACTUAL charged amount + the WHOLE build's tokens
           // (from the sink), so the cost-ladder measurement reflects real spend, not one runner's turns.
           billedUsd: effectiveBilledUsd,
@@ -26444,7 +26449,7 @@ async function noteBuildOutcome(
           ok: result.ok,
           intent: String(intent),
           framework,
-          tier: deliveredTier,
+          tier: measuredTier,
           files: writtenFiles.size,
           durationMs: Math.max(0, traceEnd - buildStartedAt),
         });
@@ -26455,7 +26460,7 @@ async function noteBuildOutcome(
       // P-AI.9 — record the final model/tier and outcome decisions, then persist the trace. Best-effort.
       try {
         const nowIso = new Date().toISOString();
-        decisionTrace.record('model', `${deliveredTier} (${model})`, onlyOpus ? `pinned tier '${powerLevelReqEffective}' selected` : `analyzer chose ${analysis?.startTier ?? 'default'} start tier`, nowIso);
+        decisionTrace.record('model', `${measuredTier} (${dominantProvider(providerTurns) ?? model})`, onlyOpus ? `pinned tier '${powerLevelReqEffective}' selected` : `analyzer chose ${analysis?.startTier ?? 'default'} start tier`, nowIso);
         decisionTrace.record('outcome', result.ok ? 'success' : 'incomplete', `${writtenFiles.size} file(s) written in ${Math.max(0, Date.now() - buildStartedAt)}ms`, nowIso);
         await persistDecisionTrace(decisionTrace, nowIso);
         // Surface the trace in chat when provider-debug is on (same gate as the trace-id tag), so the

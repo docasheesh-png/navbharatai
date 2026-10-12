@@ -94425,7 +94425,7 @@ Q-955; a chat clock that read 11 s at 23 s, Q-949).
 |---|---|---|---|---|
 | Q-940 | Chip promised a keyless image engine | A capability fact copied as prose with no single source | Every copy (chip, tool schema, "AI needs no key" rules, refusal note, scanner hint, KB, docs); the retired chip text still seeds | chip/tool census |
 | Q-941 | "GLM crawl" — it never answered | One marker for silence and slowness | Silence carries its own mark on every path; waste and failure ledgers file `silent`; time-to-open and first word recorded | `aSilentRungIsNotACrawl` |
-| Q-942 | "Try again" button read as a debugging task (Sonnet band) | A feature of the app read as the task | One clause-anchored reader for the analyser, dialogue phase and change classifier | `aFeatureNamed…` |
+| Q-942 | "Try again" button read as a debugging task (Sonnet band) | A feature of the app read as the task | One clause-anchored reader for the analyser, dialogue phase and change classifier | `aFeatureNamedInAnAppOrderIsNotTheTask` |
 | Q-943 | New build recorded "large/deep · 14 files" | The edit classifier ran on new builds | `classifyNewApp`; the record counts authored files | `aNewAppIsNotARiskyChange` |
 | Q-944 | Security issue against our own template | Analyzer never run over code we ship | Element-lifetime guard; `unsafe-target-blank` LOW (60-second rule, one line to revert); a new app retires old issues | `ourOwnCodePassesOurOwnSecurityScan` |
 | Q-945 | Stop counted as a self-heal | Two expressions decided one fact | `releaseGateRecord` decides severity and closure together | `aStopIsNeitherAProblemNorAHeal` |

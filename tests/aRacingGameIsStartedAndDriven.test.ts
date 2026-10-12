@@ -88,7 +88,9 @@ function start() {
  * toward the camera as it drives). `facesCar`: the camera sits in front of the car looking back, so the ground
  * recedes UP the screen (the 46e2d74b headlights view). `mirrored`: LEFT turns the car right.
  */
-function chase(o: { facesCar?: boolean; mirrored?: boolean } = {}): string {
+function chase(o: { facesCar?: boolean; mirrored?: boolean; everyNth?: number } = {}): string {
+  // `everyNth`: draws only every Nth animation frame and moves N steps per drawn frame — a slow software renderer.
+  const n = o.everyNth ?? 1;
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;background:#000"><script>
 const c = document.createElement('canvas'); c.style.cssText = 'display:block;width:100vw;height:100vh;touch-action:none';
@@ -98,11 +100,15 @@ const held = new Set(); addEventListener('keydown', (e) => held.add(e.code)); ad
 const hills = []; let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 for (let i = 0; i < 40; i++) hills.push({ at: rnd() * 6.283, w: 0.02 + rnd() * 0.08, h: 0.05 + rnd() * 0.2, shade: 60 + Math.floor(rnd() * 150) });
 let speed = 0, dist = 0, heading = 0;
+let tick = 0;
 function frame() {
-  if (held.has('ArrowUp') || held.has('KeyW')) speed = Math.min(speed + 0.004, 0.05); else speed = Math.max(0, speed - 0.002);
-  const turn = (held.has('ArrowLeft') || held.has('KeyA') ? 1 : 0) - (held.has('ArrowRight') || held.has('KeyD') ? 1 : 0);
-  heading += turn * 0.02 * ${o.mirrored ? -1 : 1};
-  dist += speed;
+  if (++tick % ${n}) { requestAnimationFrame(frame); return; }
+  for (let k = 0; k < ${n}; k++) {
+    if (held.has('ArrowUp') || held.has('KeyW')) speed = Math.min(speed + 0.004, 0.05); else speed = Math.max(0, speed - 0.002);
+    const turn = (held.has('ArrowLeft') || held.has('KeyA') ? 1 : 0) - (held.has('ArrowRight') || held.has('KeyD') ? 1 : 0);
+    heading += turn * 0.02 * ${o.mirrored ? -1 : 1};
+    dist += speed;
+  }
   const W = c.width, H = c.height, hz = H * 0.45;
   g.fillStyle = '#7ab'; g.fillRect(0, 0, W, hz);
   for (const h of hills) {
@@ -136,6 +142,10 @@ const PAGES: Record<string, string> = {
   '/chase': chase(),
   '/chase-front': chase({ facesCar: true }),
   '/chase-mirrored': chase({ mirrored: true }),
+  // The same three at ≈20 fps, the way the build sandbox's software renderer draws a 3D game.
+  '/chase-20fps': chase({ everyNth: 3 }),
+  '/chase-front-20fps': chase({ facesCar: true, everyNth: 3 }),
+  '/chase-mirrored-20fps': chase({ mirrored: true, everyNth: 3 }),
 };
 
 const PW = '/opt/node22/lib/node_modules/playwright/index.js';
@@ -230,6 +240,15 @@ describe.skipIf(!haveBrowser)('a racing game behind a "Start Race" title screen 
     expect(v.score!.steeringMirrored).toBe(true);
     expect(v.message).toContain(STEERING_MIRRORED_FIX);
   }, 180_000);
+
+  it('🔒 Q-861 at ≈20 fps (the sandbox\'s software renderer): the same three verdicts, read just as firmly', async () => {
+    const right = await play('/chase-20fps');
+    expect([firmFlow(right.gasFlow), firmFlow(right.steerFlow)]).toEqual([1, 1]);
+    const v = playtestVerdict(right, DRIVING).score!;
+    expect([v.cameraFacesVehicle, v.steeringMirrored]).toEqual([undefined, undefined]);
+    expect(playtestVerdict(await play('/chase-front-20fps'), DRIVING).score!.cameraFacesVehicle).toBe(true);
+    expect(playtestVerdict(await play('/chase-mirrored-20fps'), DRIVING).score!.steeringMirrored).toBe(true);
+  }, 400_000);
 
   it('🔒 Q-861 precision: the top-down racers (a fast road, a slow one, a countdown) get no camera or steering verdict', async () => {
     for (const path of ['/race', '/race-slow', '/race-countdown']) {
@@ -334,6 +353,10 @@ describe('the accelerator probe is precise (scorePlaytest)', () => {
     expect(firmFlow({ total: -5.5, pos: 0, neg: 3, pairs: 4, edge: 9 })).toBe(0);
     expect(firmFlow(null)).toBe(0);
     expect(firmFlow({ total: -9, pos: 0, neg: 6, pairs: 8, edge: 1 })).toBe(-1);
+    // Per strip: most reads too fast voids it; a near strip alone too fast on a dropped frame does not (the full-suite
+    // run under load voided a correct chase view under the old quarter-of-pairs rule).
+    expect(firmFlow({ total: -5.5, pos: 0, neg: 3, pairs: 3, edge: 35, read: 4 })).toBe(0);
+    expect(firmFlow({ total: 18.7, pos: 10, neg: 0, pairs: 13, edge: 9, read: 30 })).toBe(1);
   });
 
   it('a driving game is read from its code: the kit\'s vehicle API, or a vehicle + a speed + an accelerator', () => {

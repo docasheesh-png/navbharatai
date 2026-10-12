@@ -305,7 +305,9 @@ async function sampleFlow(page, axis, ms) {
       if (b.width >= 120 && b.height >= 80 && b.width * b.height > area) { area = b.width * b.height; c = el; }
     }
     if (!c) return null;
-    const W = 160, H = 90, R = 4;
+    // The road's lane marks repeat, so its search stays narrow; the horizon's hills and buildings do not, and a turn on
+    // a slow software renderer (≈20 fps) pans it several pixels a frame, so its search is wider.
+    const W = 160, H = 90, R = axis === 'y' ? 4 : 8;
     const off = document.createElement('canvas'); off.width = W; off.height = H;
     const g = off.getContext('2d', { willReadFrequently: true });
     const frames = [];
@@ -336,12 +338,13 @@ async function sampleFlow(page, axis, ms) {
       }
       return n ? sum / n : 0;
     };
-    // One vote per frame PAIR (its strips summed), never per strip. A pair in which any strip hit the edge of the
-    // search moved faster than this can read — and a repeating texture read past half its period ALIASES, which is
-    // exactly how a correct road can read as backwards — so it is counted as unreadable, and many of those void it.
-    let total = 0, pos = 0, neg = 0, pairs = 0, edge = 0;
+    // One vote per frame PAIR (its readable strips summed), never per strip. A strip that hit the edge of the search
+    // moved faster than this can read — and a repeating texture read past half its period ALIASES, which is exactly
+    // how a correct road can read as backwards — so it is left out and counted (\`edge\`); the slower, farther strips
+    // of the same pair still vote. When most strip reads are too fast, the score voids the whole read.
+    let total = 0, pos = 0, neg = 0, pairs = 0, edge = 0, read = 0;
     for (let i = 1; i < frames.length; i++) {
-      let sum = 0, voted = false, tooFast = false;
+      let sum = 0, voted = false, readable = false, up = false, down = false;
       for (const [y0, y1] of strips) {
         const cs = [];
         for (let d = -R; d <= R; d++) cs.push(cost(frames[i - 1], frames[i], d, y0, y1));
@@ -349,19 +352,25 @@ async function sampleFlow(page, axis, ms) {
         if (still < 0.5) continue;
         let b = 0;
         for (let k = 1; k < cs.length; k++) if (cs[k] < cs[b]) b = k;
-        if (b === 0 || b === cs.length - 1) { tooFast = true; break; }
+        if (b === 0 || b === cs.length - 1) { edge++; continue; }
+        read++;
+        readable = true;
         if ((still - cs[b]) / still < 0.1) continue;
         const den = cs[b - 1] - 2 * cs[b] + cs[b + 1];
-        sum += (b - R) + (den > 0 ? (cs[b - 1] - cs[b + 1]) / (2 * den) : 0);
+        const shift = (b - R) + (den > 0 ? (cs[b - 1] - cs[b + 1]) / (2 * den) : 0);
+        sum += shift;
         voted = true;
+        if (shift > 0.25) down = true; else if (shift < -0.25) up = true;
       }
-      if (tooFast) { edge++; continue; }
+      if (!readable) continue;
       pairs++;
-      if (!voted) continue;
+      // Real motion moves every strip the same way (perspective changes how far, never which way); strips of one pair
+      // that disagree mean one of them aliased, so that pair abstains rather than vote.
+      if (!voted || (up && down)) continue;
       total += sum;
       if (sum > 0.25) pos++; else if (sum < -0.25) neg++;
     }
-    return { total: Math.round(total * 10) / 10, pos, neg, pairs, edge };
+    return { total: Math.round(total * 10) / 10, pos, neg, pairs, edge, read };
   }, [axis, ms]);
 }
 
@@ -621,8 +630,8 @@ try {
 }
 
 /** One flow read (Q-861): the summed sub-pixel shift over consecutive frames at 160×90, how the frame pairs voted,
- *  and how many pairs moved too fast to read (`edge`). */
-export interface FlowRead { total: number; pos: number; neg: number; pairs: number; edge?: number }
+ *  and how many strip reads moved too fast to read (`edge`) against how many could be read (`read`). */
+export interface FlowRead { total: number; pos: number; neg: number; pairs: number; edge?: number; read?: number }
 
 export interface PlaytestRun {
   ok: boolean;
@@ -725,9 +734,10 @@ export const STALLED_VEHICLE_FIX = 'Holding the accelerator (Up / W) moved nothi
  *
  * ⚠️ PRECISION FIRST — a false verdict offers a wrong fix on a working game. Judged only for a DRIVING game, only
  * from consecutive frames (`sampleFlow` — never two screenshots far apart, where repeating lane marks alias), and
- * only when FIRM: at least FLOW_MIN_PX in total, three out of four voting frame pairs agreeing, and no more than a
- * quarter of the pairs faster than the search can read (those may alias — measured: a correct top-down road at full
- * speed read −5.5 px on the two pairs that did not hit the edge). A top-down or side
+ * only when FIRM: at least FLOW_MIN_PX in total, three out of four voting frame pairs agreeing, and no more than half
+ * of the strip reads faster than the search can read (those may alias — measured: a correct top-down road at full
+ * speed read −5.5 px on the two pairs that did not hit the edge; a near strip alone too fast, as on a dropped frame
+ * under load, leaves the farther strips voting — a quarter-of-pairs rule voided a correct chase view that way). A top-down or side
  * view whose camera does not follow the vehicle moves nothing in those bands and gets no verdict; steering is
  * judged only once the camera was proven to look forward. PURE.
  */
@@ -741,9 +751,10 @@ export function firmFlow(f: FlowRead | null | undefined): -1 | 0 | 1 {
   const agree = f.total > 0 ? f.pos : f.neg;
   const voted = (f.pos ?? 0) + (f.neg ?? 0);
   if (agree < 3 || agree < Math.ceil(voted * 0.75)) return 0;
-  // Faster than the search on more than a quarter of the pairs: what was read may be aliased. No verdict.
+  // Most strip reads faster than the search: what was read may be aliased. No verdict. (A near strip alone being too
+  // fast is normal on a slow frame rate — the farther strips of the same pairs still read true.)
   const edge = f.edge ?? 0;
-  if (edge > 0 && edge * 4 > edge + (f.pairs ?? 0)) return 0;
+  if (edge > 0 && edge * 2 > edge + (f.read ?? f.pairs ?? 0)) return 0;
   return f.total > 0 ? 1 : -1;
 }
 

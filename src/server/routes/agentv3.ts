@@ -16916,6 +16916,9 @@ async function noteBuildOutcome(
         // Autopsy 95598899 — wording of the build nudge only, never whether it fires. An established
         // project must never be told to "start by writing the entry file". See nudgeToBuild.ts.
         editingExistingApp: isEditMode,
+        // A GETTER for the same reason `hasExistingFiles` is one: the module is chosen after these opts
+        // are built. The done signal must not tell a module turn it may stop (autopsy 50378049).
+        projectModule: () => projectModuleRef?.name ?? null,
         onNote: (note: { code: string; message: string; detail?: string }) => {
           try { buildDiag.record({ phase: 'build', severity: 'info', code: note.code, message: note.message, detail: note.detail, autoResolved: true }); } catch { /* a note must never fail a build */ }
         },

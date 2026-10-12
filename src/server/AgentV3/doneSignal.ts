@@ -106,10 +106,37 @@ export function shouldCheckDone(p: {
    * the REQUEST is done. Omitted ⇒ a fresh build, the old rule.
    */
   editingExistingApp?: boolean;
+  /**
+   * The project module this turn is building, when it is building one — else null/omitted.
+   *
+   * 🔴 AUTOPSY `50378049` (2026-10-12, Q-906 + Q-907 — ONE root cause, two report lines). BlockWorld
+   * was a Project Mode module turn whose game kit had seeded a complete, working 3D game shell before
+   * the model's first call. At step 10 this check scored the PROJECT 100/100, no blockers, and injected
+   *
+   *     [BUILD CHECKPOINT] … the app is complete and healthy — 100/100, no blockers.
+   *     If everything the user asked for is present, STOP HERE …
+   *
+   * The model ignored it and built the user's game over 62 more steps and 1019 s. **Had it obeyed, the
+   * user would have been handed NavBharatAI's own seeded shell as their voxel game.** The report then
+   * carried both halves of the same mistake: a `READY_BEFORE_END` overrun of 62 steps, and a platform
+   * instruction the model had to disobey to do the right thing.
+   *
+   * 🔑 IT IS THE THIRD TIME THIS EXACT REASONING HAS BEEN ACCEPTED HERE, and the first two did not hunt
+   * this sibling. `editingExistingApp` (autopsy 2b1f845e) states it in full: *"The score measures the
+   * PROJECT's health; on an edit the project was healthy before the turn began, so the score cannot say
+   * whether the REQUEST is done."* `wroteThisRun` (autopsy 1389f0d5) is the same thought one step
+   * earlier. A module turn is the same case again — and `readyOverrunNote` BELOW ALREADY SAYS SO, in its
+   * own words: *"this turn built one project module … not the whole app, so the project score cannot say
+   * when it was done"*. The principle was written down; the guard just never reached this function, so
+   * the line could only ever be printed for a turn that was never judged at all.
+   */
+  projectModule?: string | null;
 }): boolean {
   const { cfg, step, toolUses, alreadySignalled, wroteThisRun } = p;
   if (!cfg.enabled || alreadySignalled) return false;
   if (p.editingExistingApp === true) return false;
+  // A module is not an app. Judging it as one tells the model to stop before the app exists.
+  if (typeof p.projectModule === 'string' && p.projectModule.trim() !== '') return false;
   if (wroteThisRun === false) return false; // the project is exactly what it was — whatever it scores, it is not this run's work
   if (p.lastStepFailed) return false;
   if (toolUses <= 0) return false;      // nothing written yet — nothing can be finished
@@ -211,9 +238,17 @@ export function endOfTurnReadyMark(p: {
   wroteThisRun: boolean;
   step: number;
   elapsedMs: number;
+  /**
+   * Same carve-out as `shouldCheckDone` (autopsy 50378049) — and it is REQUIRED here, not merely
+   * consistent: `readyOverrunNote`'s honest *"Not measured: this turn built one project module"* line
+   * fires only when there is NO mark, so a mark recorded here made that sentence unreachable for every
+   * module turn the end-of-turn gate judged. The guard and the explanation have to agree.
+   */
+  projectModule?: string | null;
 }): ReadyMark | null {
   if (p.existing) return p.existing;
   if (p.editingExistingApp || !p.wroteThisRun) return null;
+  if (typeof p.projectModule === 'string' && p.projectModule.trim() !== '') return null;
   if (p.typeErrors !== null && p.typeErrors > 0) return null;
   if (!appIsDone(p.readiness) || !p.readiness) return null;
   return { step: p.step, elapsedMs: p.elapsedMs, score: p.readiness.score };

@@ -32,7 +32,12 @@ describe('1 · a request that states nothing to size is not sized by a guess', (
     expect(asked).toBe(0);
     expect(d.verdict).toBe('simple');
     expect(d.source).toBe('deterministic');
-    expect(d.reason).toContain('names no features');
+    // Re-anchored (autopsy 9c612cdb, 2026-10-12): the reason used to say "names no features", which was
+    // true of this prompt but not what the counter measures — a request naming three features in prose
+    // got the same sentence. It now states the measured unit; the verdict, source and asked===0 above
+    // are the behaviour, and they are unchanged.
+    expect(d.reason).toContain('states no scope the sizer can read');
+    expect(d.reason).not.toContain('names no features');
   });
 
   it('a request that DOES state a scope still buys the opinion', async () => {

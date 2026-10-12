@@ -33,8 +33,9 @@
 // path, not a new one. A second copy of the selection rule is precisely the drift this repo has paid
 // for repeatedly.
 
-import { lintBuiltApp } from './buildQualityLint';
+import { lintBuiltApp, designLintSummary, type BuildQualityLint } from './buildQualityLint';
 import { unlabelledFieldLines } from '../AppMakerLab/intelligence/A11yLinter';
+import { spacingSnapEnabled } from './spacingSnap';
 
 /**
  * A test file's JSX is a FIXTURE, not a screen — the one place this check must stay quiet.
@@ -58,8 +59,8 @@ const TEST_FILE = /(^|\/)__(tests?|mocks?)__\/|\.(test|spec)\.[jt]sx?$/i;
  * system, so its literals are not a defect of the file being written.
  *
  * What remains is the set a model can act on with the file open in front of it: a missing label, a
- * missing alt, an unnamed control, a page with no `lang`, a positive tabindex, and spacing that is
- * off the grid the prompt already asked for.
+ * missing alt, an unnamed control, a page with no `lang`, and a positive tabindex. (Off-grid spacing
+ * was here too; it moved to `PLATFORM_FIXED_VIOLATIONS` below.)
  */
 export const PER_FILE_VIOLATIONS: ReadonlySet<string> = new Set([
   'input-label',
@@ -67,7 +68,6 @@ export const PER_FILE_VIOLATIONS: ReadonlySet<string> = new Set([
   'control-name',
   'html-lang',
   'positive-tabindex',
-  'off-grid-spacing',
   // A clickable <div>/<span> (autopsy c70bcbb4): added to the linter after this list was written, so the
   // end-of-build check flagged PlayerBar and NowPlayingScreen while neither ever got a note.
   'click-noninteractive',
@@ -75,7 +75,7 @@ export const PER_FILE_VIOLATIONS: ReadonlySet<string> = new Set([
 
 /**
  * The violation types that are judgements about the WHOLE app, never about one file (see above). Every type
- * a linter emits is in exactly one of these two sets — a census test fails on a new type in neither, which
+ * a linter emits is in exactly one of the three sets — a census test fails on a new type in none, which
  * is how `click-noninteractive` was missed for five days.
  */
 export const WHOLE_APP_VIOLATIONS: ReadonlySet<string> = new Set([
@@ -84,6 +84,37 @@ export const WHOLE_APP_VIOLATIONS: ReadonlySet<string> = new Set([
   'hardcoded-colors',
 ]);
 
+/**
+ * The violation types the PLATFORM fixes deterministically, each with the switch of its fixer. While the
+ * fixer is on, no model is told about the type — at the write (`qualityNote`) or in `evaluate`
+ * (`modelDesignLine`). With the fixer switched off, the type is a per-file note again.
+ *
+ * 🔴 WHY (autopsy 9c612cdb, 2026-10-12). `spacingSnap.ts` has done `round(v / 4) * 4` by construction
+ * since 536c8189, and Q-290 took spacing out of the END-OF-TURN hand-back for that reason. The WRITE-TIME
+ * door kept it: that build's model was told "7 spacing values are off the 4px grid — snap to multiples of
+ * 4px … fix it now", arithmetic with one right answer that the snap then did for free at the end. Obeying
+ * would have cost an edit turn on a reasoning engine and risked the 536c8189 hazard (a regex rewrite that
+ * moved on-grid values off the grid). `evaluate` was a third door handing over the same sentence.
+ */
+export const PLATFORM_FIXED_VIOLATIONS: ReadonlyMap<string, { fixerOn: (env: NodeJS.ProcessEnv) => boolean; told: (count: number) => string }> = new Map([
+  ['off-grid-spacing', {
+    fixerOn: spacingSnapEnabled,
+    told: (count: number) => `${count} off-grid spacing value(s): the platform snaps these to the grid when the build ends — leave them as they are.`,
+  }],
+]);
+
+/** Is this violation type the platform's to fix right now (its fixer is on)? PURE. */
+export function platformFixesNow(type: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const fixer = PLATFORM_FIXED_VIOLATIONS.get(type);
+  return fixer !== undefined && fixer.fixerOn(env) === true;
+}
+
+/** Does a write-time note carry this violation type right now? PURE. */
+export function noteCarries(type: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (PER_FILE_VIOLATIONS.has(type)) return true;
+  return PLATFORM_FIXED_VIOLATIONS.has(type) && !platformFixesNow(type, env);
+}
+
 /** Kill switch. `off` restores the pre-2026-09-20 behaviour exactly: no note, ever. */
 export function writeQualityEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_WRITE_QUALITY ?? '').trim().toLowerCase() !== 'off';
@@ -91,6 +122,70 @@ export function writeQualityEnabled(env: NodeJS.ProcessEnv = process.env): boole
 
 /** At most this many violation lines in one note — a wall of text is ignored, which helps nobody. */
 export const MAX_NOTE_LINES = 3;
+
+/**
+ * The violations a write-time note would carry for ONE file, a11y first — `[]` for anything unlintable.
+ * Ignores the note's kill switch on purpose: the end-of-build measurement asks whether a file is STILL in
+ * the state a note describes, whether or not notes were being sent. PURE; never throws.
+ */
+function noteViolations(path: string, content: string, env: NodeJS.ProcessEnv): Array<{ type: string; message: string; count: number }> {
+  if (typeof path !== 'string' || typeof content !== 'string' || !content.trim()) return [];
+  if (TEST_FILE.test(path)) return [];
+  let lint: ReturnType<typeof lintBuiltApp>;
+  try {
+    // One file in, one file judged — and `lintBuiltApp` returning null IS the "not a file we lint"
+    // answer, so the selection rule is never restated here.
+    lint = lintBuiltApp({ [path]: content });
+  } catch {
+    return [];
+  }
+  if (!lint) return [];
+  try {
+    return [...lint.a11y.violations, ...lint.design.violations]
+      .filter((v) => !!v && noteCarries(v.type, env) && v.count > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Of these candidate files, the ones a write-time note would still flag as they are now — the
+ * "still flagged" side of `writeQualitySummary`. PURE.
+ *
+ * 🔴 WHY NOT "every file the end-of-build lint names" (autopsy 9c612cdb). That list carries whole-app rules
+ * (a colour budget) and, since the same autopsy, every file that adds even one off-grid value — none of
+ * which a write-time note ever carries. Counting them would report "never got a note" for files the note
+ * was never meant to reach, which reads as a hole in the write-time check. The question the line answers
+ * is whether a NOTE was ignored, so it is asked in the note's own terms.
+ */
+export function filesANoteStillFlags(
+  files: Record<string, string>,
+  candidates: Iterable<string>,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const out: string[] = [];
+  for (const path of new Set(candidates ?? [])) {
+    const content = files?.[path];
+    if (typeof content === 'string' && noteViolations(path, content, env).length > 0) out.push(path);
+  }
+  return out;
+}
+
+/**
+ * The design-consistency line the `evaluate` tool hands the model — the SAME lint as the build report
+ * (`lintBuiltApp`: one file selection, one comment rule, our own markup excluded), minus any type the
+ * platform is about to fix. Before autopsy 9c612cdb `evaluate` ran its own `lintDesign` over a hand-joined
+ * string: another file selection, comments counted, our badge counted — and it told the model to "snap to
+ * multiples of 4px", which the snap does itself. PURE.
+ */
+export function modelDesignLine(lint: BuildQualityLint | null, env: NodeJS.ProcessEnv = process.env): string {
+  if (!lint) return 'Design consistency: nothing lintable was found.';
+  const handled = lint.design.violations.filter((v) => platformFixesNow(v.type, env));
+  if (handled.length === 0) return designLintSummary(lint);
+  const shown = { ...lint, design: { ...lint.design, violations: lint.design.violations.filter((v) => !platformFixesNow(v.type, env)) } };
+  const told = handled.map((v) => `  ✓ ${PLATFORM_FIXED_VIOLATIONS.get(v.type)?.told(v.count) ?? ''}`);
+  return [designLintSummary(shown), ...told].join('\n');
+}
 
 /**
  * What the linters say about the ONE file just written, as a sentence for the model — or `''`.
@@ -105,22 +200,9 @@ export function qualityNote(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   if (!writeQualityEnabled(env)) return '';
-  if (typeof path !== 'string' || typeof content !== 'string' || !content.trim()) return '';
-  if (TEST_FILE.test(path)) return '';
-  let lint: ReturnType<typeof lintBuiltApp>;
-  try {
-    // One file in, one file judged — and `lintBuiltApp` returning null IS the "not a file we lint"
-    // answer, so the selection rule is never restated here.
-    lint = lintBuiltApp({ [path]: content });
-  } catch {
-    return '';
-  }
-  if (!lint) return '';
-
   const lines: string[] = [];
   try {
-    for (const v of [...lint.a11y.violations, ...lint.design.violations]) {
-      if (!v || !PER_FILE_VIOLATIONS.has(v.type) || !(v.count > 0)) continue;
+    for (const v of noteViolations(path, content, env)) {
       // Where, not only how many (autopsy 981ce4cc): the line numbers of the unlabelled fields.
       const at = v.type === 'input-label' ? unlabelledFieldLines(content) : [];
       lines.push(`  • ${v.message}${at.length ? ` Unlabelled field at line ${at.join(', ')}.` : ''}`);

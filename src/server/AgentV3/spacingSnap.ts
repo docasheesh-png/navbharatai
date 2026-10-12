@@ -31,19 +31,27 @@
 //     (`isCoherentOtherGrid`);
 //   • remove spacing — a value that would snap to 0 goes to 4 instead;
 //   • read or write anything outside a padding/margin/gap declaration: no colours, no font sizes, no
-//     borders, no `width`, and nothing inside a comment.
+//     borders, no `width`, and nothing inside a comment;
+//   • touch NavBharatAI's own markup in an index.html — our badge, our red demo banner, our preview bridge.
+//     They are blanked in the copy the snap MATCHES on and never in the text it WRITES (autopsy 9c612cdb).
+//
+// 🔒 ONE COMMENT RULE, ONE MARKUP RULE — THE LINT'S (autopsy 9c612cdb, 2026-10-12). This file used to keep
+// a private `commentRanges` that read every `//` as a line comment, so `href="https://navbharatai.com"`
+// earlier on a line hid a real `gap:6px` later on it: the lint counted the value and the snap could not
+// reach it. It also ignored `<!-- -->`, so a commented-out HTML value WAS rewritten. Both readers now match
+// on `shippedDesignText`, the lint's own length-preserving copy, and the snap splices into the original at
+// the same offsets — so the two cannot disagree about which values exist.
 //
 // Ties go to the SMALLER multiple (6px → 4px, 10px → 8px): a layout that grows can overflow a phone
 // screen — which `mobileLayoutCheck` then reports — and a layout that tightens cannot.
 //
 // Kill switch: AGENTV3_SPACING_SNAP=off. PURE — the caller writes the files.
 
-import { stripCommentsForMarkup } from './stripCodeComments';
 import {
   SPACING_DECL_RE_SOURCE, SPACING_PX_RE_SOURCE, SPACING_GRID, MAX_OFFGRID,
   extractSpacingPx, offGridSpacing,
 } from '../AppMakerLab/intelligence/DesignLinter';
-import { LINTABLE_DESIGN_FILE, NOT_APP_DESIGN_FILE, GENERATED_FILE } from './buildQualityLint';
+import { LINTABLE_DESIGN_FILE, NOT_APP_DESIGN_FILE, GENERATED_FILE, shippedDesignText } from './buildQualityLint';
 
 /** Kill switch. Default ON. */
 export function spacingSnapEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -114,61 +122,53 @@ export function isCoherentOtherGrid(offGrid: readonly number[], grid: number = S
 
 /**
  * Rewrite one file's off-grid spacing. Returns null when nothing changes, or when the file carries its
- * own rhythm (more off-grid values than on-grid ones — see `otherGrid` above). PURE.
+ * own rhythm (see `isCoherentOtherGrid`). `path` lets an HTML document's own NavBharatAI markup be left
+ * alone; omitted, the text is read as a stylesheet. PURE.
+ *
+ * Declarations are found in `shippedDesignText` — the lint's copy, with comments and our markup blanked
+ * to spaces of the same length — and each moved px value is spliced into the ORIGINAL at the offset it was
+ * found at. A blanked character is a space in the copy and its own self in the original, so a px token
+ * (digits and `px`, no spaces) found in the copy is byte-identical in the original at the same offset.
  */
-export function snapSpacingInSource(source: string, grid: number = SPACING_GRID): { content: string; changes: string[]; snapped: number } | null {
+export function snapSpacingInSource(source: string, grid: number = SPACING_GRID, path: string = ''): { content: string; changes: string[]; snapped: number } | null {
   if (typeof source !== 'string' || source.length === 0) return null;
-  // The lint judges the SHIPPED markup, so a commented-out value is neither counted nor rewritten. The
-  // offsets of a stripped copy do not line up with the original, so the comment ranges are what the
-  // rewrite skips — computed once, from the same helper the lint uses.
-  const stripped = stripCommentsForMarkup(source);
-  const off = offGridSpacing(extractSpacingPx(stripped), grid);
+  const shipped = shippedDesignText(path, source);
+  const off = offGridSpacing(extractSpacingPx(shipped), grid);
   if (off.length === 0) return null;
   if (isCoherentOtherGrid(off, grid)) return null;
 
-  const commented = commentRanges(source);
-  const inComment = (index: number): boolean => commented.some(([a, b]) => index >= a && index < b);
-
   const decl = new RegExp(SPACING_DECL_RE_SOURCE, 'gi');
   const changes: string[] = [];
-  let out = '';
-  let last = 0;
+  const edits: Array<{ at: number; length: number; to: string }> = [];
   let m: RegExpExecArray | null;
-  while ((m = decl.exec(source)) !== null) {
+  while ((m = decl.exec(shipped)) !== null) {
     if (changes.length >= MAX_SNAPS_PER_FILE) break;
     const value = m[1];
     const valueStart = m.index + m[0].length - value.length;
-    if (inComment(m.index)) continue;
     const px = new RegExp(SPACING_PX_RE_SOURCE, 'g');
-    let rewritten = '';
-    let cursor = 0;
     let n: RegExpExecArray | null;
     while ((n = px.exec(value)) !== null) {
       const num = parseFloat(n[1]);
       if (!isOffGrid(num, grid) || changes.length >= MAX_SNAPS_PER_FILE) continue;
       const to = snapToGrid(num, grid);
       if (to === num) continue;
-      rewritten += value.slice(cursor, n.index) + `${to}px`;
-      cursor = n.index + n[0].length;
+      const at = valueStart + n.index;
+      // The copy and the original agree here by construction; a mismatch would mean the copy is not
+      // length-preserving, and then nothing is written rather than something in the wrong place.
+      if (source.slice(at, at + n[0].length) !== n[0]) return null;
+      edits.push({ at, length: n[0].length, to: `${to}px` });
       changes.push(`${n[1]}px → ${to}px`);
     }
-    if (cursor === 0) continue; // nothing in this declaration moved
-    rewritten += value.slice(cursor);
-    out += source.slice(last, valueStart) + rewritten;
-    last = valueStart + value.length;
   }
-  if (changes.length === 0) return null;
+  if (edits.length === 0) return null;
+  let out = '';
+  let last = 0;
+  for (const e of edits) {
+    out += source.slice(last, e.at) + e.to;
+    last = e.at + e.length;
+  }
   out += source.slice(last);
   return { content: out, changes: [...new Set(changes)], snapped: changes.length };
-}
-
-/** `[start, end)` of every block and line comment, so a rewrite can skip them. PURE. */
-function commentRanges(source: string): Array<[number, number]> {
-  const out: Array<[number, number]> = [];
-  const re = /\/\*[\s\S]*?\*\/|\/\/[^\n]*/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(source)) !== null) out.push([m.index, m.index + m[0].length]);
-  return out;
 }
 
 /**
@@ -189,11 +189,11 @@ export function spacingSnapPatches(
     if (!wrote.has(path) || typeof content !== 'string') continue;
     if (!LINTABLE_DESIGN_FILE.test(path) || NOT_APP_DESIGN_FILE.test(path) || GENERATED_FILE.test(path)) continue;
     let off = 0;
-    try { off = offGridSpacing(extractSpacingPx(stripCommentsForMarkup(content)), SPACING_GRID).length; } catch { continue; }
+    try { off = offGridSpacing(extractSpacingPx(shippedDesignText(path, content)), SPACING_GRID).length; } catch { continue; }
     if (off === 0) continue;
     total += off;
     let patch: { content: string; changes: string[]; snapped: number } | null = null;
-    try { patch = snapSpacingInSource(content, SPACING_GRID); } catch { patch = null; }
+    try { patch = snapSpacingInSource(content, SPACING_GRID, path); } catch { patch = null; }
     if (patch && patch.content !== content) candidates.push({ path, content: patch.content, changes: patch.changes, snapped: patch.snapped });
   }
   // THE FINDING'S OWN THRESHOLD: below it the report says nothing, so neither does this.

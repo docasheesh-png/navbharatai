@@ -49,6 +49,10 @@ export const APP_SIGNATURE_CLOSE_LABEL = 'Hide the NavBharatAI badge';
  * what inline styles cannot express (the checked state, the ×, the focus ring), under a selector scoped
  * to the badge so it can never touch the app. No external CSS, JS or fonts. `rel="noopener"` so the
  * opened tab can't touch the opener.
+ *
+ * 📏 Every padding/margin/gap here is on the 4px grid (autopsy 9c612cdb: this badge's `gap:6px` was the
+ * off-grid value the app's own design score was charged for). The design lint no longer reads our badge at
+ * all, but what we put into a user's app follows the rule we hold the app to — a census test enforces it.
  */
 export function appSignatureHtml(): string {
   const scope = `[${APP_SIGNATURE_MARKER}]`;
@@ -67,7 +71,7 @@ export function appSignatureHtml(): string {
     `<a href="${APP_SIGNATURE_URL}" target="_blank" rel="noopener noreferrer" ` +
     `aria-label="${APP_SIGNATURE_LABEL} — open navbharatai.com" ` +
     `style="order:1;display:inline-flex;align-items:center;box-sizing:border-box;min-height:32px;` +
-    `gap:6px;padding:8px 12px;background:#161b22;color:#ffffff;` +
+    `gap:8px;padding:8px 12px;background:#161b22;color:#ffffff;` +
     `font:600 12px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;text-decoration:none;` +
     `border-radius:9999px;box-shadow:0 2px 10px rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.14)">` +
     `<span style="display:inline-block;width:7px;height:7px;border-radius:9999px;background:#6366f1"></span>` +
@@ -127,4 +131,19 @@ const CURRENT_BADGE = new RegExp(`<div\\b[^>]*\\b${APP_SIGNATURE_MARKER}="[^"]*"
 export function withoutAppSignature(html: string): string {
   if (typeof html !== 'string' || !html.includes(APP_SIGNATURE_MARKER)) return html;
   return html.replace(CURRENT_BADGE, '').replace(new RegExp(V1_BADGE.source, 'g'), '');
+}
+
+/**
+ * Where our badge sits in a document, as `[start, end)` offsets — the same two patterns
+ * `withoutAppSignature` removes, for a reader that must keep every other offset where it is (the spacing
+ * snap matches on a blanked copy and writes into the original at the same offsets; autopsy 9c612cdb).
+ * Empty when there is no badge. PURE.
+ */
+export function appSignatureRanges(html: string): Array<[number, number]> {
+  if (typeof html !== 'string' || !html.includes(APP_SIGNATURE_MARKER)) return [];
+  const out: Array<[number, number]> = [];
+  for (const source of [CURRENT_BADGE.source, V1_BADGE.source]) {
+    for (const m of html.matchAll(new RegExp(source, 'g'))) out.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
+  }
+  return out;
 }

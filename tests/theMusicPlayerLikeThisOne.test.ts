@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { analyzeRequest } from '../src/server/AgentV3/RequestAnalyser';
 import { refersToConversation } from '../src/server/AgentV3/conversationReference';
-import { PER_FILE_VIOLATIONS, WHOLE_APP_VIOLATIONS, qualityNote } from '../src/server/AgentV3/writeTimeQualityCheck';
+import { PER_FILE_VIOLATIONS, WHOLE_APP_VIOLATIONS, PLATFORM_FIXED_VIOLATIONS, qualityNote } from '../src/server/AgentV3/writeTimeQualityCheck';
 import { lintBuiltApp, a11yHandBack } from '../src/server/AgentV3/buildQualityLint';
 import { dataEntryEvidence } from '../src/server/AgentV3/journeyDerivation';
 import { ourCommandLabel, OUR_TSBUILDINFO_RE } from '../src/server/AgentV3/commandTiming';
@@ -77,12 +77,15 @@ describe('3 · a clickable div is named while the file is open, and handed back 
     expect(back[0]?.issues.join(' ')).toMatch(/clickable div\/span a keyboard cannot press/);
   });
 
-  it('census: every violation type a linter emits is per-file or whole-app — never neither', () => {
+  // Three sets since autopsy 9c612cdb: a type the platform fixes itself (spacing, by the snap) is neither
+  // told to the model per file nor a whole-app judgement. The census is the same rule — exactly one home.
+  it('census: every violation type a linter emits is per-file, whole-app or platform-fixed — exactly one', () => {
     const src = read('src/server/AppMakerLab/intelligence/A11yLinter.ts') + read('src/server/AppMakerLab/intelligence/DesignLinter.ts');
     const types = [...new Set([...src.matchAll(/type: '([a-z-]+)'/g)].map((m) => m[1]))];
     expect(types.length).toBeGreaterThan(5);
     for (const t of types) {
-      expect(PER_FILE_VIOLATIONS.has(t) !== WHOLE_APP_VIOLATIONS.has(t), `${t} must be in exactly one set`).toBe(true);
+      const homes = [PER_FILE_VIOLATIONS.has(t), WHOLE_APP_VIOLATIONS.has(t), PLATFORM_FIXED_VIOLATIONS.has(t)].filter(Boolean).length;
+      expect(homes, `${t} must be in exactly one set`).toBe(1);
     }
   });
 });

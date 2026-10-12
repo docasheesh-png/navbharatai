@@ -62,3 +62,23 @@ describe('🔒 one answer for which page is the app\'s, on both lanes', () => {
     expect(route).not.toMatch(/const htmlKey = Object\.keys\(full\)\.find\(\(k\) => \/\(\^\|\\\/\)index\\\.html\$\/i/);
   });
 });
+
+// Same census, the REPAIR_OUT_OF_SCOPE row: the scope read only the IMPORTER named before `(l,c)`, so a repair that
+// correctly created the missing module was dropped as "out of scope" — a real fix blocked, and counted as a heal.
+import { pathsNamedInErrors, limitRepairToScope, missingModuleTargets } from '../src/server/AgentV3/SimpleBuilder';
+
+describe('a missing module the error names is in the repair\'s scope', () => {
+  const tsc = "src/App.tsx(3,25): error TS2307: Cannot find module './hooks/useAuth' or its corresponding type declarations.";
+  it('the target is resolved against the importing file', () => {
+    expect(missingModuleTargets(tsc)).toContain('src/hooks/useAuth.ts');
+    expect(missingModuleTargets("src/pages/Home.tsx:4:10 - error TS2307: Cannot find module '../lib/api'")).toContain('src/lib/api.ts');
+    expect(missingModuleTargets('Failed to resolve import "./styles/app.css" from "src/main.tsx". Does the file exist?')).toEqual(['src/styles/app.css']);
+    expect(missingModuleTargets("src/App.tsx(1,1): error TS2307: Cannot find module 'react-router-dom'")).toEqual([]); // a package is not a file
+  });
+
+  it('🔒 the repair that creates it is KEPT', () => {
+    const r = limitRepairToScope([{ path: 'src/hooks/useAuth.ts' }, { path: 'src/login/Login.tsx' }], ['src/App.tsx', ...pathsNamedInErrors(tsc)]);
+    expect(r.kept.map((f) => f.path)).toEqual(['src/hooks/useAuth.ts']);
+    expect(r.dropped).toEqual(['src/login/Login.tsx']); // anything else is still out of scope
+  });
+});

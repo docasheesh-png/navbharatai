@@ -55,23 +55,32 @@ const INDEX_HTML = `<!DOCTYPE html>
 </html>
 `;
 
+// Built with DOM nodes and text, never an HTML string (autopsy 303e8a6f): the platform's own security scan flagged
+// the old `app.innerHTML = \`…${count}…\`` as a medium HTML sink, so every stopped or kept vanilla build opened a
+// phantom security issue against code WE wrote — and the builder learns its first pattern from this file.
 const MAIN_TS = `const app = document.querySelector<HTMLDivElement>('#app')!;
 
 let count = 0;
 
+const card = document.createElement('div');
+card.style.cssText = 'padding: 2rem; font-family: sans-serif;';
+const title = document.createElement('h1');
+title.textContent = 'Hello from Vanilla TS!';
+const label = document.createElement('p');
+const button = document.createElement('button');
+button.id = 'btn';
+button.textContent = 'Increment';
+card.append(title, label, button);
+app.replaceChildren(card);
+
 const render = () => {
-  app.innerHTML = \`
-    <div style="padding: 2rem; font-family: sans-serif;">
-      <h1>Hello from Vanilla TS!</h1>
-      <p>Count: \${count}</p>
-      <button id="btn">Increment</button>
-    </div>
-  \`;
-  document.querySelector<HTMLButtonElement>('#btn')?.addEventListener('click', () => {
-    count++;
-    render();
-  });
+  label.textContent = \`Count: \${count}\`;
 };
+
+button.addEventListener('click', () => {
+  count++;
+  render();
+});
 
 render();
 `;

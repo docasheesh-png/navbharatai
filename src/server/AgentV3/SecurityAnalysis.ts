@@ -32,8 +32,10 @@ interface Rule {
   /**
    * What the guard must be able to SEE beyond the line (autopsy Study-Racer, 2026-09-25). `'tag'`
    * hands `ignore` the whole enclosing JSX/HTML tag, across lines; `'call'` hands it the whole call
-   * expression up to its balancing `)`. A same-line guard on a multi-line construct is the class that
-   * has now produced false findings in three analyzers (8a92e5ed, c847b523, and this rule).
+   * expression up to its balancing `)`; `'element'` hands it what was written for the same DOM element over
+   * its lifetime when the match is element-shaped (`x.target = …`), else the tag. A same-line guard on a
+   * multi-line construct is the class that has now produced false findings in three analyzers (8a92e5ed,
+   * c847b523, and this rule).
    */
   contextual?: 'tag' | 'element' | 'call' | 'following' | 'around';
   /** A hardcoded-CREDENTIAL-VALUE rule (a secret string baked into data), as opposed to a code
@@ -143,8 +145,10 @@ const SECURITY_CONTEXT = /\b(secret|token|password|passwd|otp|nonce|session|salt
 // Namespace / schema URIs (xmlns declarations, XML/SVG/RDF namespaces) just happen to use an
 // http:// form but are IDENTIFIERS, never network endpoints — so http:// in them is not an
 // "insecure endpoint". Excluded from the insecure-http rule to avoid a noisy false positive on
-// every inline SVG (xmlns="http://www.w3.org/2000/svg") and XML namespace declaration.
-const NAMESPACE_HTTP = /\bxmlns(?::\w+)?\s*=|http:\/\/(?:www\.)?(?:w3\.org|xmlns\.com|purl\.org|sodipodi\.sourceforge\.net|inkscape\.org|ns\.adobe\.com|schemas\.[\w.]+)/i;
+// every inline SVG (xmlns="http://www.w3.org/2000/svg") and XML namespace declaration. An
+// `xsi:schemaLocation` value is namespace/location PAIRS, so its first URI is an identifier too — our own
+// Spring Boot starter's pom.xml was the platform's one remaining finding against itself (autopsy 303e8a6f).
+const NAMESPACE_HTTP = /\bxmlns(?::\w+)?\s*=|schemaLocation\s*=|http:\/\/(?:www\.)?(?:w3\.org|xmlns\.com|purl\.org|sodipodi\.sourceforge\.net|inkscape\.org|ns\.adobe\.com|schemas\.[\w.]+)/i;
 
 /**
  * A TAGGED template (`sql\`… ${x}\``, drizzle's `sql`, `Prisma.sql`, `$queryRaw`) hands its values to the
@@ -618,19 +622,26 @@ const RULES: Rule[] = [
   },
   {
     rule: 'unsafe-target-blank',
-    severity: 'medium',
-    // A link opened with target="_blank" but no rel="noopener" lets the opened page
-    // control this tab via window.opener (reverse tabnabbing — it can redirect the
-    // original tab to a phishing page). The `noopener` guard below ignores the safe
-    // form; same-line rel is the common case (a documented precision trade-off).
-    re: /target\s*=\s*['"]_blank['"]/i,
-    message: 'target="_blank" without rel="noopener" — the opened page can hijack this tab (reverse tabnabbing); add rel="noopener noreferrer".',
+    // ⚠️ LOW, NOT MEDIUM, since autopsy 303e8a6f (2026-10-12) — on the evidence this module already recorded in
+    // the rule below: "unlike a modern target=\"_blank\" link", window.open does not imply noopener. The HTML
+    // Standard makes every <a>/<area> with target=_blank — in markup or built in code — open with noopener, and
+    // every evergreen engine does (Chrome/Android WebView 88, Firefox 79, Safari/iOS 12.1). Lighthouse retired
+    // its audit for it. At medium it opened a queued security issue and cost 8 readiness points for a vector
+    // that is closed on the devices our apps run on; as low it is still reported, as advice for very old
+    // browsers. window.open, which really is open, stays medium below.
+    severity: 'low',
+    // The DOM form `x.setAttribute('target', '_blank')` is the same link as `x.target = '_blank'` and was
+    // never matched (the adversarial review of 303e8a6f): both are element-shaped now.
+    re: /target\s*=\s*['"]_blank['"]|\.setAttribute\(\s*['"]target['"]\s*,\s*['"]_blank['"]/i,
+    message: 'target="_blank" without rel="noopener" — modern browsers already open it with noopener, but very old ones (before 2021) let the opened page reach this tab through window.opener; add rel="noopener noreferrer" to be safe everywhere.',
     // The whole TAG, across lines — a same-line read reported two correctly-guarded links as a medium
-    // security issue on two consecutive builds (autopsy Study-Racer, 2026-09-25). And the whole ELEMENT when
-    // there is no tag (autopsy 303e8a6f, 2026-10-12): `link.rel = 'noopener noreferrer';` on the line before
-    // `link.target = '_blank';` — our own image recipe — was a medium finding on correct code, stored in the
-    // user's issue queue where no evidence could ever clear it. `noreferrer` counts too: the HTML Standard
-    // makes it imply noopener (our own portfolio template uses it alone).
+    // security issue on two consecutive builds (autopsy Study-Racer, 2026-09-25). And, for a link built in
+    // code, the ELEMENT (autopsy 303e8a6f): `link.rel = 'noopener noreferrer';` on the line before
+    // `link.target = '_blank';` — our own image recipe — was a finding on correct code, stored in the user's
+    // issue queue where no evidence could ever clear it. The reader is chosen by the SHAPE of the match, never
+    // as a fallback: `enclosingTag` walks back to any `<letter` (a `Promise<void>`), so trying it first let a
+    // bogus pseudo-tag decide. `noreferrer` counts too: the HTML Standard makes it imply noopener (our own
+    // portfolio template uses it alone).
     contextual: 'element',
     ignore: (_m, line, guard) => /\bno(?:opener|referrer)\b/i.test(guard ?? line),
   },
@@ -739,21 +750,114 @@ export function callSpanAt(source: string, offset: number): string | null {
   return null;
 }
 
+/** The element-shaped forms of the target rule: `x.target = '_blank'` and `x.setAttribute('target', '_blank')`. */
+const ELEMENT_TARGET_BLANK = /([\w$]+(?:\.[\w$]+)*)(?:\.target\s*=\s*|\.setAttribute\(\s*['"]target['"]\s*,\s*)['"]_blank['"]/g;
+
+const escapeRe = (s: string) => s.replace(/[$.]/g, (c) => `\\${c}`);
+
+/** The `{` that is still open at `pos`, or -1 at file scope. Braces are counted plainly (strings are not parsed). */
+function openBraceBefore(src: string, pos: number): number {
+  let depth = 0;
+  for (let i = pos - 1; i >= 0; i--) {
+    if (src[i] === '}') depth++;
+    else if (src[i] === '{') { if (depth === 0) return i; depth--; }
+  }
+  return -1;
+}
+
+/** The `}` that closes the block opened at `open` (the file's end for file scope). */
+function closeOfBlock(src: string, open: number): number {
+  if (open < 0) return src.length;
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}' && --depth === 0) return i;
+  }
+  return src.length;
+}
+
+/** Brace depth of `at` relative to `from` (0 = the same block level). */
+function depthFrom(src: string, from: number, at: number): number {
+  let depth = 0;
+  for (let i = from; i < at; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') depth--;
+  }
+  return depth;
+}
+
 /**
- * The `rel` written for the SAME element as a `x.target = '_blank'` assignment, when the link is built in code
- * rather than markup (autopsy 303e8a6f). Returns the rel statement(s) found within 600 characters of the
- * assignment for that identifier — `x.rel = '…'`, `x.setAttribute('rel', '…')`, `x.relList.add(…)` — '' when the
- * element has none (so the finding stands), or null when the line is not that shape (the line then decides).
- * A rel set on a DIFFERENT element never counts. PURE.
+ * Does the block opened at `open` declare `id` in its head — a function/arrow/method/catch parameter, or a
+ * `for (const id of …)` binding? An `if (id)` / `while (id)` head only READS it. PURE.
  */
-export function elementRelGuard(content: string, line: string, lineOffset: number): string | null {
-  const assign = /([\w$]+(?:\.[\w$]+)*)\.target\s*=\s*['"]_blank['"]/.exec(line);
-  if (!assign) return null;
-  const id = assign[1].replace(/[$.]/g, (c) => `\\${c}`);
-  const at = lineOffset + assign.index;
-  const nearby = content.slice(Math.max(0, at - 600), at + 600);
-  const guards = nearby.match(new RegExp(`(?:^|[^\\w$.])${id}\\.(?:rel\\s*=\\s*['"\`][^'"\`]*['"\`]|setAttribute\\(\\s*['"]rel['"]\\s*,\\s*['"\`][^'"\`]*['"\`]|relList\\.add\\([^)]*\\))`, 'g'));
-  return guards ? guards.join(' ') : '';
+function blockHeadDeclares(src: string, open: number, id: string): boolean {
+  const e = escapeRe(id);
+  const head = src.slice(Math.max(0, open - 400), open);
+  const m = /(?:\b([\w$]+)\s*)?\(([^()]*)\)\s*(?::[^{};()]*)?\s*(=>)?\s*$/.exec(head);
+  if (m) {
+    const kw = m[1];
+    if (kw && /^(?:if|while|switch|with)$/.test(kw)) return false;
+    if (kw === 'for') return new RegExp(`\\b(?:const|let|var)\\s+${e}\\b`).test(m[2]!);
+    return new RegExp(`(?:^|[^\\w$.])${e}\\b`).test(m[2]!);
+  }
+  return new RegExp(`(?:^|[^\\w$.])${e}\\s*=>\\s*$`).test(head);
+}
+
+/**
+ * Which ELEMENT the identifier `id` names at `pos`: its nearest declaration visible from `pos` — `const|let|var
+ * id`, `id = document.createElement(…)`, or a parameter of an enclosing function — walking out block by block,
+ * with the span that element lives in. An identifier declared nowhere visible (a global, a property such as
+ * `this.link`) is one binding for the whole file. PURE.
+ */
+function elementBindingAt(src: string, pos: number, id: string): { key: string; start: number; end: number } {
+  const e = escapeRe(id);
+  const decl = new RegExp(`\\b(?:const|let|var)\\s+${e}\\b|(?:^|[^\\w$.])${e}\\s*=\\s*document\\.createElement\\b`, 'g');
+  for (let open = openBraceBefore(src, pos); ; open = openBraceBefore(src, open)) {
+    const from = open + 1;
+    let found = -1;
+    for (const m of src.slice(from, pos).matchAll(decl)) {
+      const at = from + m.index!;
+      if (depthFrom(src, from, at) === 0) found = at;
+    }
+    if (found >= 0) return { key: `decl@${found}`, start: found, end: closeOfBlock(src, open) };
+    if (open < 0) break;
+    if (blockHeadDeclares(src, open, id)) return { key: `param@${open}`, start: from, end: closeOfBlock(src, open) };
+  }
+  return { key: 'free', start: 0, end: src.length };
+}
+
+/**
+ * The `rel` written for the SAME element as an element-shaped target assignment (autopsy 303e8a6f) — the link
+ * is built in code, so there is no tag to read. Returns the guard statement(s) — `x.rel = '…'`,
+ * `x.setAttribute('rel', '…')`, `x.relList.add(…)` — found anywhere in that element's lifetime that name the
+ * same element; '' when there are none (the finding stands); null when the match at `offset` is not
+ * element-shaped (the caller then reads the enclosing tag).
+ *
+ * ⚠️ WHY A LIFETIME AND NOT A WINDOW (adversarial review of 303e8a6f): the first version read ±600 characters
+ * around the assignment, so `openSafe() { link.rel = …; link.target = … }` beside `openUnsafe() { link.target
+ * = … }` hid the unsafe one — a false negative bought to remove a false positive. A rel on a different element,
+ * or on a same-named element in another function, never counts. PURE.
+ */
+export function elementRelGuard(content: string, offset: number): string | null {
+  const lineStart = content.lastIndexOf('\n', offset - 1) + 1;
+  const lineEndRaw = content.indexOf('\n', offset);
+  const line = content.slice(lineStart, lineEndRaw < 0 ? content.length : lineEndRaw);
+  let hit: RegExpMatchArray | null = null;
+  for (const m of line.matchAll(ELEMENT_TARGET_BLANK)) {
+    const a = lineStart + m.index!;
+    if (a <= offset && offset < a + m[0].length) { hit = m; break; }
+  }
+  if (!hit) return null;
+  const id = hit[1]!;
+  const binding = elementBindingAt(content, lineStart + hit.index!, id);
+  const e = escapeRe(id);
+  const guard = new RegExp(`(?:^|[^\\w$.])${e}\\s*(?:\\.rel\\s*=\\s*(['"\`])[^'"\`]*\\1|\\.setAttribute\\(\\s*['"]rel['"]\\s*,\\s*(['"\`])[^'"\`]*\\2|\\.relList\\.add\\([^)]*\\))`, 'g');
+  const found: string[] = [];
+  for (const g of content.slice(binding.start, binding.end).matchAll(guard)) {
+    const at = binding.start + g.index!;
+    if (elementBindingAt(content, at + g[0].indexOf(id), id).key === binding.key) found.push(g[0].trim());
+  }
+  return found.join(' ');
 }
 
 /** Scan one file's content for security findings. Returns [] for non-issues. */
@@ -780,7 +884,7 @@ export function scanSecurity(file: string, content: string): SecurityFinding[] {
       const context = r.contextual === 'tag'
         ? enclosingTag(content, lineStart[i] + m.index) ?? undefined
         : r.contextual === 'element'
-          ? enclosingTag(content, lineStart[i] + m.index) ?? elementRelGuard(content, line, lineStart[i]) ?? undefined
+          ? elementRelGuard(content, lineStart[i] + m.index) ?? enclosingTag(content, lineStart[i] + m.index) ?? undefined
         : r.contextual === 'call'
           ? callSpanAt(content, lineStart[i] + m.index) ?? undefined
           : r.contextual === 'following'

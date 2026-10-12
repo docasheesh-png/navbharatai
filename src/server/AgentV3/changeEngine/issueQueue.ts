@@ -32,7 +32,11 @@
 import { isAppFinding } from '../BuildDiagnostics';
 import type { BuildIssue } from '../BuildDiagnostics';
 
-export type IssueStatus = 'detected' | 'triaged' | 'assigned' | 'fixed' | 'verified';
+/**
+ * `retired`: the app it was found in was replaced by a NEW app (autopsy 303e8a6f). Kept for history like a
+ * verified issue, never shown or handed to the builder; a recurrence in the new app brings it straight back.
+ */
+export type IssueStatus = 'detected' | 'triaged' | 'assigned' | 'fixed' | 'verified' | 'retired';
 
 export interface QueuedIssue {
   /** Stable id: ISS-001. */
@@ -64,7 +68,7 @@ export interface IssueQueue {
 export const EMPTY_QUEUE: IssueQueue = Object.freeze({ issues: [], nextIss: 1 }) as IssueQueue;
 
 export const MAX_OPEN_ISSUES = 150;
-/** Resolved (verified) issues kept for the record. */
+/** Closed (verified or retired) issues kept for the record. */
 export const MAX_CLOSED_ISSUES = 50;
 /** A DETECTED issue that has not recurred for this many check-complete builds ages out. */
 export const DETECTED_AGE_OUT_PASSES = 3;
@@ -83,10 +87,15 @@ export function issueKey(code: string, message: string): string {
 
 const OPEN: ReadonlySet<IssueStatus> = new Set(['detected', 'triaged', 'assigned', 'fixed']);
 
+/** Is the issue still open (anything but verified or retired)? The one definition every count reads. */
+export function isOpenIssue(i: Pick<QueuedIssue, 'status'>): boolean {
+  return OPEN.has(i.status);
+}
+
 export function parseIssueQueue(raw: unknown): IssueQueue {
   if (!raw || typeof raw !== 'object') return { issues: [], nextIss: 1 };
   const r = raw as { issues?: unknown; nextIss?: unknown };
-  const statuses = new Set<IssueStatus>(['detected', 'triaged', 'assigned', 'fixed', 'verified']);
+  const statuses = new Set<IssueStatus>(['detected', 'triaged', 'assigned', 'fixed', 'verified', 'retired']);
   const issues: QueuedIssue[] = [];
   for (const x of Array.isArray(r.issues) ? r.issues : []) {
     if (!x || typeof x !== 'object') continue;
@@ -177,7 +186,8 @@ export function foldBuildFindings(queue: IssueQueue, input: QueueFoldInput): Que
       if (!existing.changes.includes(input.changeId)) existing.changes = [...existing.changes, input.changeId].slice(-5);
       // A recurrence is the evidence that makes it real; an assigned issue stays assigned (still owed).
       if (wasClosed) { existing.status = 'triaged'; reopened.push(existing); }
-      else if (existing.status === 'detected') { existing.status = 'triaged'; triaged.push(existing); }
+      // A retired issue found again is in the NEW app too — shown at once, never re-hidden as a fresh detection.
+      else if (existing.status === 'detected' || existing.status === 'retired') { existing.status = 'triaged'; triaged.push(existing); }
       continue;
     }
     const it: QueuedIssue = {
@@ -202,22 +212,29 @@ export function foldBuildFindings(queue: IssueQueue, input: QueueFoldInput): Que
 
   // Age out one-off detections; keep the closed record bounded; never exceed the open cap.
   const kept = issues.filter((i) => !(i.status === 'detected' && i.cleanPasses >= DETECTED_AGE_OUT_PASSES));
-  const open = kept.filter((i) => i.status !== 'verified');
-  const closed = kept.filter((i) => i.status === 'verified').sort((a, b) => b.lastSeen - a.lastSeen).slice(0, MAX_CLOSED_ISSUES);
+  const open = kept.filter(isOpenIssue);
+  const closed = kept.filter((i) => !isOpenIssue(i)).sort((a, b) => b.lastSeen - a.lastSeen).slice(0, MAX_CLOSED_ISSUES);
   const openSorted = open.sort((a, b) => sevRank(b) - sevRank(a) || b.seenCount - a.seenCount || b.lastSeen - a.lastSeen).slice(0, MAX_OPEN_ISSUES);
   return { queue: { issues: [...openSorted, ...closed], nextIss }, opened, reopened, triaged, fixed, verified };
 }
 
 /**
- * A NEW app replaces the old one, so the old app's OPEN issues go with it (autopsy 303e8a6f). The requirement
- * ledger already retired the old app's items on a new build; the issue queue did not, so an issue about a file
- * of an app that no longer exists stayed open — shown to the user and handed to every edit of the new app — and
- * no check could ever clear it. Closed records stay for history; anything the new app still has is found again by
- * its own checks. Pure.
+ * A NEW app replaces the old one, so the old app's OPEN issues are RETIRED with it (autopsy 303e8a6f). The
+ * requirement ledger already retired the old app's items on a new build; the issue queue did not, so an issue
+ * about a file of an app that no longer exists stayed open — shown to the user and handed to every edit of the
+ * new app — and no check could ever clear it. ⚠️ Marked, never deleted (adversarial review): the history stays,
+ * as a dropped requirement's does, and an issue the new app still has comes straight back as triaged on its first
+ * recurrence instead of hiding for a build as a fresh detection. Pure.
  */
 export function retireOpenIssues(queue: IssueQueue): { queue: IssueQueue; retired: QueuedIssue[] } {
-  const retired = queue.issues.filter((i) => OPEN.has(i.status));
-  return { queue: { nextIss: queue.nextIss, issues: queue.issues.filter((i) => !OPEN.has(i.status)) }, retired };
+  const retired: QueuedIssue[] = [];
+  const issues = queue.issues.map((i) => {
+    if (!isOpenIssue(i)) return i;
+    const r = { ...i, status: 'retired' as const };
+    retired.push(r);
+    return r;
+  });
+  return { queue: { nextIss: queue.nextIss, issues }, retired };
 }
 
 function sevRank(i: QueuedIssue): number {

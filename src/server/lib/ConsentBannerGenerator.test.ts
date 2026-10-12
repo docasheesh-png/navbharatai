@@ -90,6 +90,8 @@ describe('emitted DOM shell — what the visitor sees', () => {
 
   it('🔒 Reject all stands beside Accept all, and only Necessary is pre-checked (disabled, always on)', () => {
     // Built as DOM nodes since autopsy 303e8a6f (no HTML string), so the attributes are read from the builder calls.
+    // The DOM-level lock — the banner serialises byte for byte to the markup the reviewed innerHTML version wrote,
+    // in four scenarios — is in tests/ourOwnCodePassesOurOwnSecurityScan.test.ts §3.
     expect(s).toContain("'data-act': 'reject-all'");
     expect(s).toContain("'data-act': 'accept-all'");
     expect(s).toContain("el('input', { type: 'checkbox', checked: true, disabled: true, id: 'nbc-necessary' })");

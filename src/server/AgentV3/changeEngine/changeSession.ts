@@ -20,7 +20,7 @@ import {
   type ProbeOutcome, type SpecItem, type AppSpec,
 } from './appSpec';
 import {
-  foldBuildFindings, queueableFindings, workableIssues, markAssigned, renderIssuesForBuilder, retireOpenIssues,
+  foldBuildFindings, queueableFindings, workableIssues, markAssigned, renderIssuesForBuilder, retireOpenIssues, isOpenIssue,
   type QueuedIssue,
 } from './issueQueue';
 import { appendChange, chgId, describeChange, type ChangeRecord, type ChangeStatus, type EngineeringMemory } from './changeLog';
@@ -249,7 +249,7 @@ export function foldSettle(mem: EngineeringMemory, session: ChangeSession, input
   const reportLines = [describeChange(record)];
   if (qFold.opened.length || qFold.fixed.length || qFold.verified.length || qFold.reopened.length || qFold.triaged.length || retire.retired.length) {
     reportLines.push(`Issue queue: ${qFold.opened.length} opened, ${qFold.reopened.length} reopened, ${qFold.triaged.length} confirmed (now shown to the user and handed to edits), `
-      + `${qFold.fixed.length} fixed, ${qFold.verified.length} verified${retire.retired.length ? `, ${retire.retired.length} retired with the previous app` : ''} · ${queue.issues.filter((i) => i.status !== 'verified').length} open`);
+      + `${qFold.fixed.length} fixed, ${qFold.verified.length} verified${retire.retired.length ? `, ${retire.retired.length} retired with the previous app` : ''} · ${queue.issues.filter(isOpenIssue).length} open`);
   }
   return { mem: next, result: { record, regressed: probeFold.regressed, reportLines } };
 }

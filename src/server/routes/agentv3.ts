@@ -17119,8 +17119,10 @@ async function noteBuildOutcome(
           autoResolved: true,
         });
       }
+      // On the build's own bus (`events.emit`, which also reaches the user through `emit`), so the report shows the line
+      // the user read — a bare `emit` after `events.subscribe(… buildDiag.ingestEvent …)` never reaches it.
       announceThirdPartyLimit(thirdPartyLimitAsk, thirdPartyPlayersAtStart,
-        (text) => emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),
+        (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),
         (message) => buildDiag.record({ phase: 'plan', severity: 'info', code: 'THIRD_PARTY_LIMIT_TOLD', message, autoResolved: true }));
       // WHICH PREVIEW BROKE (autopsy "Lekhan Sahyak", 2026-09-27): a fix request from the in-browser
       // preview now says so, so the builder does not "fix" our renderer's fault in the user's files.

@@ -53,13 +53,21 @@ export function thirdPartyLimitsEnabled(env: NodeJS.ProcessEnv = process.env): b
 const AD_WORD = String.raw`(?:ads|adds|adverts?|advertisements?|advertising|commercials|pre-?rolls?)`;
 
 /**
+ * The ad word right after a REMOVAL word ("skip", "block", "cut", "hide"). Those are nouns too, and then "adds" is the
+ * verb: "double-tap skip adds 10 seconds", "each block adds a new video", "a skip adds nothing" (adversarial review of
+ * Q-947). "adds" followed by an OBJECT — a number, an article, a pronoun, "new"/"more"/"nothing" — is that verb and is
+ * never read as adverts; "remove adds from YouTube" and "skip the adds" still are.
+ */
+const AD_WORD_AFTER_REMOVAL = String.raw`(?:ads|adds(?!\s+(?:[\d+]|(?:a|an|the|new|more|another|one|it|them|its|their|your|my|our|some|each|every|extra|nothing|something|up)\b))|adverts?|advertisements?|advertising|commercials|pre-?rolls?)`;
+
+/**
  * "No ads", in the ways it is asked. Each alternative needs a NEGATION or a REMOVAL beside the ad word, so
  * the verb "adds" ("the video adds in the app") and "add a link" can never match on their own.
  */
 const AD_REMOVAL_ASKED = new RegExp([
   String.raw`\bad[\s-]?free\b`,
   String.raw`\b(?:no|zero|without(?:\s+any)?|minus)\s+(?:more\s+|annoying\s+)?${AD_WORD}\b`,
-  String.raw`\b(?:skip|block|remove|hide|strip|stop|disable|avoid|bypass|kill|cut)(?:s|ped|ping|ing|d|ed)?\s+(?:out\s+)?(?:all\s+|the\s+|any\s+|those\s+|these\s+)?(?:youtube(?:'s)?\s+|video\s+|annoying\s+)?${AD_WORD}\b`,
+  String.raw`\b(?:skip|block|remove|hide|strip|stop|disable|avoid|bypass|kill|cut)(?:s|ped|ping|ing|d|ed)?\s+(?:out\s+)?(?:all\s+|the\s+|any\s+|those\s+|these\s+)?(?:youtube(?:'s)?\s+|video\s+|annoying\s+)?${AD_WORD_AFTER_REMOVAL}\b`,
   String.raw`\bget\s+rid\s+of\s+(?:all\s+|the\s+)?${AD_WORD}\b`,
   // The complaint after the first build: "ads are still playing", "ads abhi bhi aa rahe hain".
   String.raw`\b${AD_WORD}\s+(?:are\s+|is\s+)?(?:still|abhi\s+bhi|ab\s+bhi|phir\s+bhi)\s+(?:play|show|appear|run|com|aa|chal)\w*`,
@@ -198,7 +206,7 @@ export function thirdPartyLimitsBuilderNote(asked: boolean, players: readonly st
     '- Add no ads of your own, and keep the app\'s own screens free of clutter around the player.',
     '- Never call the app "ad-free" and never say ads are removed, blocked or skipped — not in the UI, the page title, the meta description, the README, a code comment or your reply.',
     '- The FIRST sentence of your reply says plainly that ads inside the video site\'s own player may still play on videos whose owners earn from them, and that the app adds no ads of its own.',
-    '- The user is already told this at the start of the build — do NOT spend a turn explaining it or asking whether to proceed. Build the app now.',
+    '- The user is already told this at the start of the build — do NOT spend a turn explaining it or asking whether to proceed. Go straight to the work the request asks for.',
   ].join('\n');
 }
 
@@ -251,7 +259,8 @@ const AD_FREE_CLAIMED = new RegExp([
   String.raw`\b(?:no|zero)\s+(?:more\s+)?${AD_WORD}\b(?!\s+of\s+(?:its|our|their|your|the\s+app's)\s+own)`,
   String.raw`\bwithout\s+(?:any\s+)?${AD_WORD}\b(?!\s+of\s+(?:its|our|their|your)\s+own)`,
   String.raw`\b${AD_WORD}\s+(?:are\s+|is\s+|get\s+|gets\s+)?(?:removed|blocked|skipped|stripped|hidden|filtered\s+out)\b`,
-  String.raw`\b(?:removes?|blocks?|skips?|strips?|hides?|filters?\s+out)\s+(?:all\s+|the\s+|any\s+)?(?:youtube(?:'s)?\s+|video\s+)?${AD_WORD}\b`,
+  // "Double-tap skip adds 10 seconds." describes a skip control, never an ad claim (AD_WORD_AFTER_REMOVAL).
+  String.raw`\b(?:removes?|blocks?|skips?|strips?|hides?|filters?\s+out)\s+(?:all\s+|the\s+|any\s+)?(?:youtube(?:'s)?\s+|video\s+)?${AD_WORD_AFTER_REMOVAL}\b`,
   String.raw`\bad[\s-]?block(?:er|ing)\b`,
 ].join('|'), 'i');
 
@@ -373,7 +382,8 @@ const AD_FREE_WORDS = new RegExp([
 export function withoutAdFreeWords(text: string | null | undefined): string {
   return String(text ?? '')
     // "an ad-free YouTube player" → "a YouTube player": the article belonged to the word being removed.
-    .replace(/\b(an?)\s+ad[\s-]?free\s+(?=(\S))/gi, (_m: string, art: string, next: string) => {
+    // "an ad-free, fast app" → "a fast app": the comma that followed the removed word goes with it.
+    .replace(/\b(an?)\s+ad[\s-]?free\s*,?\s+(?=(\S))/gi, (_m: string, art: string, next: string) => {
       const an = /^[aeiou]/i.test(next);
       return `${art[0] === 'A' ? (an ? 'An' : 'A') : (an ? 'an' : 'a')} `;
     })

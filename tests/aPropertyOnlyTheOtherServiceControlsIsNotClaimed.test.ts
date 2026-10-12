@@ -126,6 +126,29 @@ describe('what the user asked for — precision-first, pinned on the real prompt
     expect(adRemovalRequested('a contacts app with no address book sync')).toBe(false);
   });
 
+  it('a removal word used as a NOUN before the verb "adds" is never a request, nor an ad claim (adversarial review)', () => {
+    // "skip", "block", "cut", "hide" are controls in a video app; "adds" after them is the same verb the real prompt
+    // used ("the video adds in the app"). Each of these names YouTube, so a match would tell the user about ads they
+    // never asked about — and, in a reply, correct a sentence that describes a skip button.
+    for (const p of [
+      'Build a YouTube player where double-tap skip adds 10 seconds',
+      'a YouTube playlist app where each block adds a new video',
+      'YouTube clone: the stop button stops the video, and cut adds a clip',
+      'paste a YouTube link; hide adds a video to the hidden list',
+      'a YouTube quiz where a correct answer adds points and a skip adds nothing',
+    ]) {
+      expect(adRemovalRequested(p), p).toBe(false);
+      expect(thirdPartyLimitAsked({ prompt: p, newBuild: true }, {}), p).toBe(false);
+    }
+    expect(adFreeClaim('Double-tap skip adds 10 seconds.')).toBeNull();
+    expect(adFreeClaimCorrection('Your player is ready. Double-tap skip adds 10 seconds; each block adds a new video.', ['YouTube'], {})).toBe('');
+    // …while the noun after a removal word still reads as adverts.
+    for (const p of ['remove adds from youtube videos', 'skip the adds', 'block YouTube adds', 'hide all adds']) {
+      expect(adRemovalRequested(p), p).toBe(true);
+    }
+    expect(adFreeClaim('It skips YouTube adds automatically.')).not.toBeNull();
+  });
+
   it('the ways it is really asked, Hinglish and Hindi included', () => {
     for (const p of [
       'bina ads ke YouTube videos chalao', 'an ad-free YouTube player', 'stream videos without ads',
@@ -148,6 +171,10 @@ describe('🔁 the edit turn — the likeliest next message after this report', 
     expect(players).toEqual(['YouTube']);
     expect(thirdPartyLimitAsked({ prompt: 'remove the ads', newBuild: false, projectPlayers: players }, {})).toBe(true);
     expect(thirdPartyLimitsBuilderNote(true, players)).toContain("YouTube's own player");
+    // The same note serves an edit of a finished app, so it never orders a build (adversarial review): "Build the
+    // app now" on "remove the ads" invites a rewrite of an app that already works.
+    expect(thirdPartyLimitsBuilderNote(true, players)).not.toMatch(/build the app/i);
+    expect(thirdPartyLimitsBuilderNote(true, players)).toContain('Go straight to the work the request asks for.');
     // An edit of a Vimeo-only app, or a turn that does not ask about ads, never loads anything or says anything.
     let loaded = 0;
     expect(await editTurnAdServingPlayers('make the header blue', EDIT, async () => { loaded += 1; return REAL_PROJECT; }, {})).toEqual([]);
@@ -273,6 +300,9 @@ describe('the published name and description (appDisplayName.ts)', () => {
     expect(d.name).toBe('YouTube Player');
     expect(d.description).toBe('A YouTube player.');
     expect(withoutAdFreeWords('stream videos with no ads, fast')).toBe('stream videos, fast');
+    // The article follows the word that is left, even past a comma (adversarial review: "An fast YouTube app").
+    expect(withoutAdFreeWords('An ad free, fast YouTube app')).toBe('A fast YouTube app');
+    expect(withoutAdFreeWords('an ad-free, ad-light player')).toBe('an ad-light player');
   });
 
   it('without such a player the words are the user\'s and are kept — and the chosen name is never touched', () => {
@@ -307,6 +337,9 @@ describe('🔒 the wiring (agentv3.ts)', () => {
   it('the edit turn reads the project before the builder starts; the start line is said', () => {
     expect(route).toContain("await editTurnAdServingPlayers(prompt, { editTurn: intent === 'edit_existing', importTurn: isImportTurn }, () => loadWorkspaceFiles(workspaceId))");
     expect(route).toContain('announceThirdPartyLimit(thirdPartyLimitAsk, thirdPartyPlayersAtStart,');
+    // The start line rides the build's own bus, so the build report shows the line the user read (adversarial review:
+    // a bare `emit` after the report subscribes reaches the user and never the report).
+    expect(route).toContain("(text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),");
     expect(route).toContain("{ code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, thirdPartyPlayersAtStart) },");
   });
 

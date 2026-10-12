@@ -14044,6 +14044,9 @@ async function noteBuildOutcome(
           }
         },
       });
+      // 🔒 Every narration the user sees from here on goes through `events`, so it also reaches this report
+      // (autopsy 303e8a6f: the "⚡ Starting from the tested template" line and the database lines went out on
+      // the route's bare `emit` and were missing from the forensic record). Census: aNarrationReachesTheReport.
       events.subscribe((e) => buildDiag.ingestEvent(e), false);
       // Fix 37a (admin: "app kitni baar fail hui yeh bhi likho"): stamp how many earlier builds in
       // THIS workspace's durable history ended not-ok, so a repeat failure is visible in every
@@ -16151,17 +16154,17 @@ async function noteBuildOutcome(
               emit({ type: 'permission_request', agent: 'architect', action: startOfferText(need), callId: requestId, ts: Date.now() });
               const approved = (await waitForUser(requestId, START_OFFER_WAIT_MS)) === 'approved';
               if (!approved) {
-                emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '👍 Building without a database for now — data will be kept on this device. You can connect one any time in Settings → App Settings → Database.' });
+                events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '👍 Building without a database for now — data will be kept on this device. You can connect one any time in Settings → App Settings → Database.' });
                 buildDiag.record({ phase: 'plan', severity: 'info', code: 'DATABASE_OFFER_AT_START', message: `Offered a database at build start (${need.reasons.join(', ')}); the user declined or did not answer.`, autoResolved: true });
               } else {
-                emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
+                events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
                 const made = await provisionDatabaseForUser(userId, { appLabel: prompt.slice(0, 40), workspaceId }).catch(() => null);
                 if (made && made.ok) {
                   vaultSecrets = await loadUserVaultSecrets(userId, workspaceId).catch(() => vaultSecrets);
-                  emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: databaseReadyNarration(made, 'start') });
+                  events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: databaseReadyNarration(made, 'start') });
                   buildDiag.record({ phase: 'plan', severity: 'info', code: 'DATABASE_OFFER_AT_START', message: `${made.reused ? 'Attached the user\'s existing database' : 'Created the user\'s database'} at build start (${need.reasons.join(', ')})${made.asleepNote ? ' — it is ASLEEP (Supabase paused it); the user was told how to wake it' : ''}.`, autoResolved: true });
                 } else {
-                  emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${made && !made.ok ? made.error : 'Your database could not be created just now.'} I will build with data kept on this device for now.` });
+                  events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${made && !made.ok ? made.error : 'Your database could not be created just now.'} I will build with data kept on this device for now.` });
                   buildDiag.record({ phase: 'plan', severity: 'warning', code: 'DATABASE_OFFER_AT_START', message: 'The user approved a database at build start and it could not be created.', detail: made && !made.ok ? made.error : 'provisioning threw', autoResolved: false });
                 }
               }
@@ -16175,7 +16178,7 @@ async function noteBuildOutcome(
             if (!databaseOfferedAtStart && userDatabaseContext(vaultSecrets)) {
               const asleep = await connectedDatabaseAsleepNote(userId, vaultSecrets.VITE_SUPABASE_URL);
               if (asleep) {
-                emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${asleep}` });
+                events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${asleep}` });
                 buildDiag.record({ phase: 'plan', severity: 'warning', code: 'DATABASE_ASLEEP', message: 'The app\'s connected Supabase database is not running (paused, failed or removed); the user was told how to wake it.', detail: asleep, autoResolved: false });
               }
             }
@@ -16313,7 +16316,7 @@ async function noteBuildOutcome(
           if (!token || !token.ok) {
             return { ok: false, message: 'Your Supabase connection has expired. Please connect Supabase again from Settings → App Settings → Database.' };
           }
-          emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '💳 Setting up secure payment checking in your own Supabase project.' });
+          events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '💳 Setting up secure payment checking in your own Supabase project.' });
           const done = await setupSupabasePayments({ token: token.token, projectRef, tables: [table], keyId, keySecret });
           if (!done.ok) {
             buildDiag.record({
@@ -16356,18 +16359,18 @@ async function noteBuildOutcome(
               ts: Date.now(),
             });
             if ((await waitForUser(requestId)) !== 'approved') {
-              emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '👍 No database created. You can connect your own any time in Settings → App Settings → Database.' });
+              events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '👍 No database created. You can connect your own any time in Settings → App Settings → Database.' });
               return null;
             }
-            emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
+            events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
             const result = await provisionDatabaseForUser(userId, { appLabel: prompt.slice(0, 40), workspaceId }).catch(() => null);
             if (!result || !result.ok) {
               // Supabase's own words — a full free plan in particular needs the user's action, not a
               // generic failure line that reads like our bug.
-              emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${result && !result.ok ? result.error : 'Your database could not be created just now.'}` });
+              events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${result && !result.ok ? result.error : 'Your database could not be created just now.'}` });
               return null;
             }
-            emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: databaseReadyNarration(result, 'mid-build') });
+            events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: databaseReadyNarration(result, 'mid-build') });
             return result.env;
           });
         }
@@ -17095,7 +17098,7 @@ async function noteBuildOutcome(
       }
       if (scriptFormAsked && scriptRequestNote) {
         buildPrompt = `${scriptRequestNote}\n\n---\n\n${buildPrompt}`;
-        emit({ type: 'narration', agent: 'architect', text: scriptRequestStartLine(scriptFormAsked, liveDataAsked), ts: Date.now() });
+        events.emit({ type: 'narration', agent: 'architect', text: scriptRequestStartLine(scriptFormAsked, liveDataAsked), ts: Date.now() });
         buildDiag.record({ phase: 'plan', severity: 'info', code: 'SCRIPT_REQUEST_AS_WEB_APP', message: scriptRequestReportNote(scriptFormAsked, liveDataAsked), autoResolved: true });
       }
       if (unsupportedStackAsked) {
@@ -17581,7 +17584,7 @@ async function noteBuildOutcome(
               message: 'The user pasted their own one-file HTML app, so it stays one file: their page is index.html and is improved in place, not rebuilt as a React project.',
               detail: `document ${doc.length} chars · storage names kept: ${keys.length ? keys.join(', ') : 'none found'}`,
             });
-            emit({ type: 'narration', agent: 'architect', text: '📄 Keeping your app as one HTML file, the way you pasted it — improving it in place.', ts: Date.now() });
+            events.emit({ type: 'narration', agent: 'architect', text: '📄 Keeping your app as one HTML file, the way you pasted it — improving it in place.', ts: Date.now() });
           }
         } catch { /* seeding is best-effort — a failure builds as a plain static page from the brief */ }
       }
@@ -18030,7 +18033,7 @@ async function noteBuildOutcome(
               }
               goldenPreseeded = true;
               buildDiag.record({ phase: 'build', severity: 'info', code: 'GOLDEN_SCAFFOLD', message: `Pre-seeded the tested "${golden.label}" template (${Object.keys(goldenFiles).length} files) — the builder verifies & customizes instead of writing from scratch.`, autoResolved: true });
-              emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
+              events.emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
               // HANDOFF FRAMING (same discipline as the fast-lane salvage below): the builder must treat the
               // scaffold as ITS OWN work to verify — never alien clutter to re-plan or rewrite. Tier-aware, and the
               // template's recipe instructions ride along (goldenBuildPrompt, autopsy 303e8a6f).
@@ -18107,7 +18110,7 @@ async function noteBuildOutcome(
               gameKitSkipReason = `the workspace already holds ${existingSrc.length} source file(s) that are not our untouched starter, and the kit is never written over somebody's work`;
             } else {
               const kitThreeD = kitPlan.includes('generate_game_3d');
-              emit({ type: 'narration', agent: 'architect', text: `🎮 Setting up NavBharatAI's game engine first — game loop, controls, sound effects and music${kitThreeD ? ', visual effects, the 3D world and a playable 3D shell' : ''} — so your game is built on it.`, ts: Date.now() });
+              events.emit({ type: 'narration', agent: 'architect', text: `🎮 Setting up NavBharatAI's game engine first — game loop, controls, sound effects and music${kitThreeD ? ', visual effects, the 3D world and a playable 3D shell' : ''} — so your game is built on it.`, ts: Date.now() });
               const writtenBeforeKit = new Map(writtenFiles);
               const kitStartedAt = Date.now();
               const kitResults: GameKitSeedResult[] = [];
@@ -20219,7 +20222,7 @@ async function noteBuildOutcome(
                   try { getWorkspaceMemory(workspaceId).indexFile(cp, cc); } catch { /* index best-effort */ }
                 }
                 await saveWorkspaceFiles(workspaceId, changed).catch(() => {});
-                emit({ type: 'narration', agent: 'architect', text: prunedNarration(outcome.removed), ts: Date.now() });
+                events.emit({ type: 'narration', agent: 'architect', text: prunedNarration(outcome.removed), ts: Date.now() });
               }
               buildDiag.record({
                 phase: 'build', severity: 'info', autoResolved: true,

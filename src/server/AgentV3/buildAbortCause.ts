@@ -81,30 +81,35 @@ export interface AbortSummaryContext {
   /** Did the build actually write files? Decides whether "your work is saved" is TRUE. */
   builtSomething?: boolean;
   /**
-   * Nothing of the build's own was written, BUT the workspace holds files the platform set up for it first —
-   * a tested template, a game kit, the page the user pasted. 🔴 Autopsy 303e8a6f: with only a yes/no, a stop
-   * on a seeded template said "Nothing had been written yet" while the 14-file app sat in the workspace and
-   * on screen. A third state, so the sentence can say what is actually there. Ignored when `builtSomething`.
+   * Nothing of the build's own was written, BUT the workspace holds files the platform set up for it first.
+   * 🔴 Autopsy 303e8a6f: with only a yes/no, a stop on a seeded template said "Nothing had been written yet" while
+   * the 14-file app sat in the workspace and on screen. ⚠️ AND WHICH SEED DECIDES THE WAY ON (adversarial review):
+   * an untouched tested TEMPLATE is "only our starter" to the router, so the next message is a FRESH build — a
+   * promise to "continue from them" would be false; a pasted page or a game kit is not, so the next message IS an
+   * edit of it. The route computes this with the router's own test (`seedStateOf`). Ignored when `builtSomething`.
    */
-  seededOnly?: boolean;
+  seed?: SeedState | null;
 }
 
-/** What a seeded workspace keeps — said wherever the build stopped before changing anything. */
-const SEED_KEPT = "The app's starting files are in your workspace — send a message and I'll continue from them.";
+/** What a seeded workspace holds, as the router will read it on the next message. */
+export type SeedState = 'platform-template' | 'kept-seed';
 
 /**
- * The sentence the user reads.
- *
- * Two rules, both learned from the report this module comes from:
- *   • Never claim the user did something they did not do.
- *   • When work SURVIVED, say so and say how to continue — that is the difference between "you lost
- *     36 minutes" and "your app is saved, one message resumes it". Only claim it when
- *     `builtSomething` is true, or the reassurance becomes its own lie.
+ * What a seeded workspace keeps, and the true way on — one sentence per state, for every ending that can meet it.
+ * PURE.
  */
+export function seedKeptSentence(seed: SeedState): string {
+  return seed === 'platform-template'
+    ? 'The tested starting template is still in your workspace and preview — send your request again to build on it.'
+    : "The starting files are kept in your workspace — send another message and I'll continue from them.";
+}
+
 export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): string {
   const mins = typeof ctx.minutes === 'number' && ctx.minutes > 0 ? ctx.minutes : null;
   const saved = ctx.builtSomething === true;
-  const seededOnly = !saved && ctx.seededOnly === true;
+  const seed = !saved && ctx.seed ? ctx.seed : null;
+  const SEED_KEPT = seed ? seedKeptSentence(seed) : '';
+  const seededOnly = seed !== null;
   const resume = saved
     ? " Your files so far are saved — send another message and I'll continue from here."
     : seededOnly
@@ -175,16 +180,16 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
  * The wall-clock cap reached between turns (not an abort): the same sentence source as every other ending, so
  * the three states can never drift apart again. It used to be an inline copy in AgentRunner. PURE.
  */
-export function timedOutSummary(minutes: number, ctx: Pick<AbortSummaryContext, 'builtSomething' | 'seededOnly'> = {}): string {
+export function timedOutSummary(minutes: number, ctx: Pick<AbortSummaryContext, 'builtSomething' | 'seed'> = {}): string {
   if (ctx.builtSomething === true) return `I stopped after about ${minutes} min to avoid an endless loop. Your files so far are saved — send another message and I'll continue from here.`;
-  if (ctx.seededOnly === true) return `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up), and had not changed anything yet. ${SEED_KEPT}`;
+  if (ctx.seed) return `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up), and had not changed anything yet. ${seedKeptSentence(ctx.seed)}`;
   return `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up). Nothing was lost; try again or rephrase.`;
 }
 
 /** A model call that stalled past its per-turn limit. Same three states. PURE. */
-export function stalledModelSummary(minutes: number, ctx: Pick<AbortSummaryContext, 'builtSomething' | 'seededOnly'> = {}): string {
+export function stalledModelSummary(minutes: number, ctx: Pick<AbortSummaryContext, 'builtSomething' | 'seed'> = {}): string {
   if (ctx.builtSomething === true) return `A model response stalled and was stopped after about ${minutes} min. Your files so far are saved — send another message and I'll continue from here.`;
-  if (ctx.seededOnly === true) return `The model didn't respond in time (stalled after about ${minutes} min), before anything was changed. ${SEED_KEPT}`;
+  if (ctx.seed) return `The model didn't respond in time (stalled after about ${minutes} min), before anything was changed. ${seedKeptSentence(ctx.seed)}`;
   return `The model didn't respond in time (stalled after about ${minutes} min). Nothing was lost — please try again.`;
 }
 

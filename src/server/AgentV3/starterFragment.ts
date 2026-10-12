@@ -154,3 +154,14 @@ export async function srcHoldsOnlyOurStarter(
   const entries = await Promise.all(srcPaths.map(async (p) => [p, await read(p).catch(() => null)] as const));
   return holdsOnlyOurStarter(Object.fromEntries(entries));
 }
+
+/**
+ * What a stopped build's SEEDED workspace is to the router on the next message (adversarial review of autopsy
+ * 303e8a6f): untouched platform files only (a tested template) → 'platform-template', which the next turn treats as
+ * "only our starter" and builds fresh; anything else the platform seeded (a pasted page, a game kit) →
+ * 'kept-seed', which the next turn edits. Null when nothing was written. The same test the router uses. PURE.
+ */
+export function seedStateOf(written: ReadonlyMap<string, string>): 'platform-template' | 'kept-seed' | null {
+  if (written.size === 0) return null;
+  return holdsOnlyOurStarter(Object.fromEntries(written)) ? 'platform-template' : 'kept-seed';
+}

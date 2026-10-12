@@ -28,7 +28,7 @@ import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRe
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
-import { abortCauseOf, abortSummary, timedOutSummary, stalledModelSummary } from './buildAbortCause';
+import { abortCauseOf, abortSummary, timedOutSummary, stalledModelSummary, type SeedState } from './buildAbortCause';
 import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, buildBudgetNarration, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
@@ -187,7 +187,7 @@ export interface AgentRunnerOptions {
    * so an ending can say "the app's starting files are in your workspace" instead of "nothing was written"
    * (autopsy 303e8a6f). Never changes ok/false or what is persisted — only the sentence.
    */
-  hasSeededFiles?: () => boolean;
+  seedState?: () => SeedState | null;
   /**
    * True when this turn is editing a project that ALREADY EXISTS (the route's `isEditMode`).
    *
@@ -584,9 +584,9 @@ export class AgentRunner {
     const builtSomethingNow = (): boolean =>
       producingToolUses > 0 || this.opts.hasExistingFiles?.() === true;
     // The third state every ending can be in (autopsy 303e8a6f): nothing of ours, but the platform's seed is there.
-    const endingContext = (): { builtSomething: boolean; seededOnly: boolean } => {
+    const endingContext = (): { builtSomething: boolean; seed: SeedState | null } => {
       const builtSomething = builtSomethingNow();
-      return { builtSomething, seededOnly: !builtSomething && this.opts.hasSeededFiles?.() === true };
+      return { builtSomething, seed: builtSomething ? null : this.opts.seedState?.() ?? null };
     };
     // How many times we've nudged a build that only NARRATED (described its plan / said it would
     // "assign the frontend expert") without calling a single tool. The model often plans out loud

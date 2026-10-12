@@ -226,7 +226,7 @@ describe('the wiring', () => {
   it('the floor sits AFTER every ₹0 return, so it can never charge for an undelivered build', () => {
     const floorAt = module_.indexOf('const real = money(f.realCostUsd)');
     expect(floorAt).toBeGreaterThan(-1);
-    for (const earlier of ["delivery: 'nothing'", "delivery: 'unverified-edit'", "delivery: 'working-app'"]) {
+    for (const earlier of ["delivery: 'nothing'", "delivery: 'seed-only'", "delivery: 'unverified-edit'", "delivery: 'working-app'"]) {
       expect(module_.indexOf(earlier), earlier).toBeLessThan(floorAt);
     }
   });

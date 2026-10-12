@@ -103,7 +103,7 @@
 // inventing a cost, which this repo's billing law forbids even when the guess flatters us.
 // ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-import type { AbortCause } from './buildAbortCause';
+import { seedKeptSentence, type AbortCause } from './buildAbortCause';
 
 /** What the user is holding at the moment they stopped. */
 /**
@@ -350,8 +350,9 @@ export function freeCancellationMessage(delivery: CancelledDelivery | null): str
     return '🛡️ You stopped this change before it could be checked, so it is FREE — no charge. What it had changed so far is saved; if your app does not work the way it did, send a message and I will fix it.';
   }
   if (delivery === 'seed-only') {
-    // The workspace is NOT as it was: the app's starting files are in it (autopsy 303e8a6f) — say so, and how to go on.
-    return "🛡️ You stopped this build before it changed anything, so it is FREE — no charge. The app's starting files are kept in your workspace — send a message and I'll continue from them.";
+    // The workspace is NOT as it was: our untouched template is in it (autopsy 303e8a6f) — say so, and the way on the
+    // router really takes: an untouched template is "only our starter", so the next message builds fresh.
+    return `🛡️ You stopped this build before it changed anything, so it is FREE — no charge. ${seedKeptSentence('platform-template')}`;
   }
   return '🛡️ You stopped this build before anything was produced, so it is FREE — no charge. Your workspace is exactly as it was.';
 }

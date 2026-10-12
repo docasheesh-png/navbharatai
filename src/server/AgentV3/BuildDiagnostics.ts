@@ -2029,7 +2029,9 @@ export class BuildDiagnostics {
         // 🧾 is our own money notice (autopsy 0311186f): "🧾 I could not confirm your app running here, so you
         // have been charged only…" landed in the problems list as an ERROR, though it states a bill, not a fault.
         const platformNotice = /^\s*(?:ℹ️|🧾)/.test(t);
-        if (statusLike && problemWord && !platformNotice
+        // A line whose fact the route already FILED as its own row is not a second finding (see the `filed` flag).
+        const alreadyFiled = (e as { filed?: boolean }).filed === true;
+        if (statusLike && problemWord && !platformNotice && !alreadyFiled
           && !(remediationIntent && !failureVerb)
           && !(echoesPrompt && !failureVerb)) {
           this.record({ phase: 'build', severity: failureVerb && !narrationIsProbeMiss(tForMatch) ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });

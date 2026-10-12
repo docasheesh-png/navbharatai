@@ -281,7 +281,7 @@ import { shouldAnswerPictureRequest, PICTURE_REQUEST_STEER, pictureRequestFallba
 import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
 import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
 import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
-import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
+import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, seedStateOf, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { deletedFilesNotice, userVisibleDeletions } from '../AgentV3/deletedFilesNotice';
@@ -633,7 +633,7 @@ import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } 
 import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../AgentV3/terminalMeter';
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
-import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict } from '../AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
@@ -16192,7 +16192,7 @@ async function noteBuildOutcome(
               emit({ type: 'permission_request', agent: 'architect', action: startOfferText(need), callId: requestId, ts: Date.now() });
               const approved = (await waitForUser(requestId, START_OFFER_WAIT_MS)) === 'approved';
               if (!approved) {
-                events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '👍 Building without a database for now — data will be kept on this device. You can connect one any time in Settings → App Settings → Database.' });
+                events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: 'Building without a database for now — data will be kept on this device. You can connect one any time in Settings → App Settings → Database.' });
                 buildDiag.record({ phase: 'plan', severity: 'info', code: 'DATABASE_OFFER_AT_START', message: `Offered a database at build start (${need.reasons.join(', ')}); the user declined or did not answer.`, autoResolved: true });
               } else {
                 events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
@@ -16203,7 +16203,7 @@ async function noteBuildOutcome(
                   events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: databaseReadyNarration(made, 'start') });
                   buildDiag.record({ phase: 'plan', severity: 'info', code: 'DATABASE_OFFER_AT_START', message: `${made.reused ? 'Attached the user\'s existing database' : 'Created the user\'s database'} at build start (${need.reasons.join(', ')})${made.asleepNote ? ' — it is ASLEEP (Supabase paused it); the user was told how to wake it' : ''}.`, autoResolved: true });
                 } else {
-                  events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${made && !made.ok ? made.error : 'Your database could not be created just now.'} I will build with data kept on this device for now.` });
+                  events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), filed: true, text: `⚠️ ${made && !made.ok ? made.error : 'Your database could not be created just now.'} I will build with data kept on this device for now.` });
                   buildDiag.record({ phase: 'plan', severity: 'warning', code: 'DATABASE_OFFER_AT_START', message: 'The user approved a database at build start and it could not be created.', detail: made && !made.ok ? made.error : 'provisioning threw', autoResolved: false });
                 }
               }
@@ -16217,7 +16217,7 @@ async function noteBuildOutcome(
             if (!databaseOfferedAtStart && userDatabaseContext(vaultSecrets)) {
               const asleep = await connectedDatabaseAsleepNote(userId, vaultSecrets.VITE_SUPABASE_URL);
               if (asleep) {
-                events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${asleep}` });
+                events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), filed: true, text: `⚠️ ${asleep}` });
                 buildDiag.record({ phase: 'plan', severity: 'warning', code: 'DATABASE_ASLEEP', message: 'The app\'s connected Supabase database is not running (paused, failed or removed); the user was told how to wake it.', detail: asleep, autoResolved: false });
               }
             }
@@ -16388,7 +16388,7 @@ async function noteBuildOutcome(
             if (asked || databaseOfferedAtStart) return null; // one offer per build — never a loop of prompts
             asked = true;
             const requestId = randomUUID();
-            emit({
+            events.emit({
               type: 'narration', agent: 'architect', ts: Date.now(),
               text: '🗄️ Your app needs a database to save data, and a temporary one could not be started here.',
             });
@@ -16402,7 +16402,7 @@ async function noteBuildOutcome(
               ts: Date.now(),
             });
             if ((await waitForUser(requestId)) !== 'approved') {
-              events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '👍 No database created. You can connect your own any time in Settings → App Settings → Database.' });
+              events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: 'No database created. You can connect your own any time in Settings → App Settings → Database.' });
               return null;
             }
             events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
@@ -16975,7 +16975,8 @@ async function noteBuildOutcome(
         hasExistingFiles: () => modelAuthoredPaths(writtenFiles).length > 0,
         // …and the third state (autopsy 303e8a6f): nothing of the build's own, but our seed (template, game kit,
         // pasted page) IS in the workspace — the ending then says so instead of "nothing was written".
-        hasSeededFiles: () => writtenFiles.size > 0,
+        // …and WHICH seed, read with the router's own test, so the way on it names is the one the next turn takes.
+        seedState: () => seedStateOf(writtenFiles),
         // Autopsy 95598899 — wording of the build nudge only, never whether it fires. An established
         // project must never be told to "start by writing the entry file". See nudgeToBuild.ts.
         editingExistingApp: isEditMode,
@@ -19312,7 +19313,9 @@ async function noteBuildOutcome(
       if (expectsArtifacts && builderWroteCount() === 0 && costAfterFirstAttempt > capUsd) {
         events.emit({
           type: 'narration', agent: 'architect',
-          text: `⚠️ Build stopped: session cost ($${costAfterFirstAttempt.toFixed(2)}) reached the $${capUsd.toFixed(0)} cap. No files were produced — you will not be charged. Try again with a simpler prompt or contact support.`,
+          // "No files were produced" was false for a seeded build (a game kit is not counted as the builder's own,
+          // autopsy 303e8a6f's adversarial review) — the seed state says what is there, as every other ending does.
+          text: `⚠️ Build stopped: session cost ($${costAfterFirstAttempt.toFixed(2)}) reached the $${capUsd.toFixed(0)} cap. ${(() => { const seed = seedStateOf(writtenFiles); return seed ? `Nothing of the build's own was produced — you will not be charged. ${seedKeptSentence(seed)}` : 'No files were produced — you will not be charged. Try again with a simpler prompt or contact support.'; })()}`,
           ts: Date.now(),
         });
       }

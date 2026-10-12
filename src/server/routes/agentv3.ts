@@ -61,6 +61,7 @@ import { composeJudgeChain, describeJudgeAttempts, type JudgeCandidate, type Jud
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePowers';
+import { namedNonSmartphone, nonSmartphoneBuildRule, nonSmartphoneUserLine } from '../AgentV3/deviceTarget';
 import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
 import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eAutoScaffold';
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
@@ -17050,6 +17051,11 @@ async function noteBuildOutcome(
       // reconciles to ONE framework before writing features. Applies to any turn on an incoherent workspace;
       // '' (coherent, or flag off) leaves buildPrompt unchanged.
       if (frameworkCoherenceMsg) buildPrompt = `${frameworkCoherenceMsg}\n\n---\n\n${buildPrompt}`;
+      // A KEYPAD PHONE THE USER NAMED (Q-846): the builder is told before it writes, so what it builds fits the keys.
+      try {
+        const keypadPhone = !isImportTurn ? namedNonSmartphone(prompt) : null;
+        if (keypadPhone) buildPrompt = `${nonSmartphoneBuildRule(keypadPhone.device)}\n\n---\n\n${buildPrompt}`;
+      } catch { /* a device note must never break a build */ }
       // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built
       // in React with a types file claiming a "PHP MVC backend"). Told to the builder here, to the user
       // in the ready message — see unsupportedStack.ts.
@@ -24076,6 +24082,16 @@ async function noteBuildOutcome(
               detail: invented.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
             });
           }
+        }
+      } catch { /* the disclosure is best-effort — it must never break the build */ }
+
+      // 📵 …AND A PHONE IT CANNOT RUN ON IS NAMED (Q-846): the user named a keypad phone, so the summary says plainly
+      // that no web app runs there, and what was built instead. Recorded for the admin as an info line.
+      try {
+        const keypadPhone = result.ok && expectsArtifacts && !isImportTurn ? namedNonSmartphone(prompt) : null;
+        if (keypadPhone) {
+          result = { ...result, summary: `${result.summary}${nonSmartphoneUserLine(keypadPhone.device)}` };
+          buildDiag.record({ phase: 'readiness', severity: 'info', code: 'NON_SMARTPHONE_TOLD', autoResolved: true, message: `The request named ${keypadPhone.device}, a keypad phone no web app runs on — the user was told, and the build was steered to a light 2D keys-first version.` });
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 

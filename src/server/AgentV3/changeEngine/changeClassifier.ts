@@ -25,7 +25,7 @@
 // classification is recorded (CHANGE_CLASSIFIED) and sizes the change-engine context, nothing else.
 
 import { countEnumeratedFeatures } from '../enumeratedFeatures';
-import { withoutDescribedFeatures } from '../../lib/describedFeatures';
+import { withoutErrorFeaturePhrases } from '../../lib/describedFeatures';
 
 /**
  * Every kind, in ONE list — the stored-record parser (changeLog.ts) reads this list, so a kind the classifier
@@ -128,9 +128,9 @@ export function classifyChange(request: unknown): ChangeClassification {
   let enumerated = 0;
   try { enumerated = countEnumeratedFeatures(text); } catch { enumerated = 0; }
 
-  // What the request DESCRIBES is not what it asks to change (autopsy 303e8a6f): "show friendly error messages"
-  // is not a bug report and "needs no API key" is not a security change. The rest of the text decides.
-  const asked = withoutDescribedFeatures(text);
+  // Error UI the request ASKS FOR is not a bug report (autopsy 303e8a6f): "add friendly error messages" is a
+  // feature. The rest of the text decides — a negated need ("without login") keeps its reading on purpose.
+  const asked = withoutErrorFeaturePhrases(text);
   const matched = RULES.filter((r) => r.re.test(asked));
   // A colour word inside a long request is not a micro change — drop the micro match when the request
   // is long, and let whatever else it says decide.

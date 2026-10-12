@@ -5,7 +5,9 @@
 //
 // Two causes: the EDIT classifier ran on new builds (where every feature word of the requested app reads as a claim
 // about changing an app that does not exist yet — 39 of 41 starter chips came out "deep"), and words that DESCRIBE
-// the app ("needs no API key", "friendly error messages", "light/dark mode") were read as what is asked. The change
+// the app ("friendly error messages") were read as a bug report. ⚠️ A first version also stripped negated needs ("needs
+// no API key"); the adversarial review showed that turning real edits ("…without login, fix it") into low-risk ones,
+// so it was removed — on a new build the classifier no longer runs, which is what the report needed. The change
 // record also counted the untouched template, which the bill and the review had already learned not to do.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -14,7 +16,7 @@ import { beginChange } from '../src/server/AgentV3/changeEngine/changeSession';
 import { parseEngineeringMemory, emptyMemory } from '../src/server/AgentV3/changeEngine/changeLog';
 import { publicAppMemory } from '../src/server/AgentV3/changeEngine/publicView';
 import { reviewChangedPaths } from '../src/server/AgentV3/ReviewerAgent';
-import { withoutDescribedFeatures, withoutNegatedNeeds } from '../src/server/lib/describedFeatures';
+import { withoutErrorFeaturePhrases } from '../src/server/lib/describedFeatures';
 import { STARTER_TEMPLATES } from '../src/components/agentv3/starterTemplates';
 import { RETIRED_CHIP_PROMPTS } from '../src/server/AgentV3/goldenScaffolds/registry';
 
@@ -58,14 +60,19 @@ describe('2 · a stored new-app record survives, and the user reads "New app"', 
       if (kind !== 'local') expect(publicAppMemory(back).changes[0]!.kind, kind).not.toBe('Change');
     }
   });
+
+  it('🔒 a kind this version does not know is kept as a plain change, never dropped (a rollback keeps History)', () => {
+    const mem = emptyMemory();
+    mem.changes.push({ id: 'CHG-0009', ts: 1, summary: 'from a newer version', kind: 'some-future-kind', risk: 'low', depth: 'light', requirements: [], issues: [], files: [], status: 'completed' } as never);
+    const back = parseEngineeringMemory(JSON.parse(JSON.stringify(mem)));
+    expect(back.changes.map((c) => [c.id, c.kind])).toEqual([['CHG-0009', 'local']]);
+  });
 });
 
-describe('3 · an edit is read by what it ASKS, not by what it describes', () => {
-  it('described features do not make a security change or a bug fix', () => {
-    expect(classifyChange('the app needs no API key, use the free engine').kinds).not.toContain('security');
+describe('3 · an edit is read by what it ASKS, not by the error UI it asks for', () => {
+  it('requested error UI is a feature, not a bug fix', () => {
     expect(classifyChange('add friendly error messages with a Try again button').kind).toBe('feature');
-    expect(withoutNegatedNeeds('use the free image engine that needs no API key')).not.toMatch(/api key/i);
-    expect(withoutDescribedFeatures('show friendly error messages and needs no login')).not.toMatch(/error|login/);
+    expect(withoutErrorFeaturePhrases('add friendly error messages with a Try again button')).not.toMatch(/error/);
   });
 
   it('a real request keeps its reading', () => {
@@ -74,6 +81,24 @@ describe('3 · an edit is read by what it ASKS, not by what it describes', () =>
     expect(classifyChange('fix the error').kind).toBe('bug');
     expect(classifyChange('add dark mode to the app').kind).toBe('cross-cutting');
     expect(classifyChange('add google login').kinds).toContain('integration');
+  });
+
+  // The adversarial review's counterexamples: each lost its real reading under the first version of this fix
+  // (a negated-need strip and "with" as a builder verb). Each must keep it.
+  it('🔒 a negated need in an edit is a real access-control or security request', () => {
+    const open = classifyChange('users can open the admin page without login, fix it');
+    expect(open.kinds).toContain('cross-cutting');
+    expect(open.depth).toBe('deep');
+    expect(classifyChange('make sure the frontend has no api keys in the bundle').kinds).toContain('security');
+  });
+
+  it.each([
+    'the page loads with an error screen instead of the cart',
+    'checkout opens with an error page',
+    "I'm getting an error message when I save",
+  ])('🔒 a bug report that names an error screen stays a bug: %s', (prompt) => {
+    expect(classifyChange(prompt).kinds).toContain('bug');
+    expect(withoutErrorFeaturePhrases(prompt)).toBe(prompt);
   });
 });
 

@@ -149,7 +149,7 @@ export function regressionsSoFar(session: ChangeSession | null): SpecItem[] {
 export interface SettleInput {
   ok: boolean;
   stopped: boolean;
-  /** Paths written by this build. */
+  /** Paths this build AUTHORED — the route passes reviewChangedPaths (template and finishing writes excluded). */
   files: ReadonlyArray<string>;
   /** Release-gate state if the build reached its gate, else undefined. */
   gate?: 'green' | 'yellow' | 'red' | 'unknown';

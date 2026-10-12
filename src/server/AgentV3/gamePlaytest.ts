@@ -249,6 +249,81 @@ const frameCounter = () => {
   });
 };
 
+// READ THE SCENE ITSELF, NOT ONLY ITS PIXELS (Q-869). three.js announces every WebGLRenderer to
+// window.__THREE_DEVTOOLS__ at the end of its constructor; wrapping that renderer's render() hands us the scene and the
+// camera it draws with. Positions are STATE — a loaded machine that draws few frames moves them less, never the wrong
+// way — so where a three.js game is found, the camera and steering verdicts read them first and pixels second.
+const sceneHook = () => {
+  const hub = new EventTarget();
+  const seen = { scene: null, camera: null };
+  hub.addEventListener('observe', (e) => {
+    const o = e && e.detail;
+    if (!o || o.isScene || typeof o.render !== 'function') return;
+    const render = o.render;
+    o.render = function (scene, camera) {
+      if (scene && scene.isScene && camera && camera.isCamera) { seen.scene = scene; seen.camera = camera; }
+      return render.apply(this, arguments);
+    };
+  });
+  try { Object.defineProperty(window, '__THREE_DEVTOOLS__', { value: hub, configurable: true, writable: true }); } catch (e) { /* the page owns it */ }
+  // Every object's horizontal world position, whether it holds a mesh, and whether it rides on the camera.
+  window.__nbSnap = () => {
+    const sc = seen.scene, cam = seen.camera;
+    if (!sc || !cam || !cam.matrixWorld) return null;
+    const objs = [];
+    const walk = (o, depth, underCam) => {
+      if (objs.length > 3000) return false;
+      const isCam = o === cam;
+      let mesh = !!(o.isMesh || o.isInstancedMesh || o.isSkinnedMesh);
+      for (const k of (o.children || [])) { if (walk(k, depth + 1, underCam || isCam)) mesh = true; }
+      if (o !== sc && !isCam && o.matrixWorld) { const m = o.matrixWorld.elements; objs.push([o.uuid, m[12], m[14], depth, mesh ? 1 : 0, (underCam || isCam) ? 1 : 0]); }
+      return mesh;
+    };
+    walk(sc, 0, false);
+    const c = cam.matrixWorld.elements;
+    return { t: performance.now(), cam: [c[12], c[14]], camDir: [-c[8], -c[10]], objs };
+  };
+};
+
+async function snapScene(page) {
+  return page.evaluate(() => (window.__nbSnap ? window.__nbSnap() : null)).catch(() => null);
+}
+
+// Per object, how far it moved between two snapshots, and how fast.
+function sceneMoves(a, b) {
+  if (!a || !b) return null;
+  const before = new Map(a.objs.map((o) => [o[0], o]));
+  const dt = Math.max(1, b.t - a.t) / 1000;
+  const out = new Map();
+  for (const o of b.objs) {
+    const p = before.get(o[0]);
+    if (p) out.set(o[0], { dx: o[1] - p[1], dz: o[2] - p[2], speed: Math.hypot(o[1] - p[1], o[2] - p[2]) / dt, depth: o[3], mesh: o[4], cam: o[5], x: o[1], z: o[2] });
+  }
+  return out;
+}
+
+// The vehicle: the mesh-holding object the accelerator sped up the most over its idle speed (so a traffic car that
+// moves anyway does not win), the outermost of the ones that moved together. null when nothing clearly did.
+function pickVehicle(idle, gas) {
+  if (!gas) return null;
+  let best = 0;
+  const score = new Map();
+  for (const [id, m] of gas) {
+    if (!m.mesh || m.cam) continue;
+    const s = m.speed - ((idle && idle.get(id)) ? idle.get(id).speed : 0);
+    score.set(id, s);
+    if (s > best) best = s;
+  }
+  if (best < 0.5) return null;
+  let pick = null;
+  for (const [id, s] of score) {
+    if (s < best * 0.9) continue;
+    const m = gas.get(id);
+    if (!pick || m.depth < gas.get(pick).depth) pick = id;
+  }
+  return pick;
+}
+
 async function surface(page) {
   return page.evaluate(() => {
     let best = null;
@@ -486,6 +561,7 @@ try {
   // ── DESKTOP: keyboard + mouse ─────────────────────────────────────────────────────────────────────
   const ctx = await browser.newContext({ ...cfg.pageOpts, viewport: { width: 1280, height: 720 } });
   await ctx.addInitScript(frameCounter);
+  await ctx.addInitScript(sceneHook);
   const page = await ctx.newPage();
   watch(page);
   await page.goto(cfg.base, { waitUntil: 'load', timeout: cfg.loadMs });
@@ -505,9 +581,11 @@ try {
   box = (await surface(page)) || box;
 
   const f0 = await page.evaluate(() => ({ ...window.__nb, t: performance.now() }));
+  const sceneIdle0 = await snapScene(page);
   const a = await shot(page, box);
   await page.waitForTimeout(700);
   const b = await shot(page, box);
+  const idleMoves = sceneMoves(sceneIdle0, await snapScene(page));
   const f1 = await page.evaluate(() => ({ ...window.__nb, t: performance.now() }));
   const idle = await compare(page, a, b);
   out.spread = Math.round(idle.spread * 10) / 10;
@@ -530,9 +608,24 @@ try {
   await step('up / W', async () => {
     for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(350);
+    const sg0 = await snapScene(page);
     const g0 = await shot(page, box);
     await page.waitForTimeout(550);
     const g1 = await shot(page, box);
+    const sg1 = await snapScene(page);
+    const gasMoves = sceneMoves(sg0, sg1);
+    const car = pickVehicle(idleMoves, gasMoves);
+    if (car && sg0 && sg1) {
+      // Q-869: where the camera is, relative to where the vehicle is going — read from the scene, not from pixels.
+      const m = gasMoves.get(car);
+      const moved = Math.hypot(m.dx, m.dz);
+      const camMoved = Math.hypot(sg1.cam[0] - sg0.cam[0], sg1.cam[1] - sg0.cam[1]);
+      const rx = sg1.cam[0] - m.x, rz = sg1.cam[1] - m.z, rl = Math.hypot(rx, rz) || 1;
+      const ahead = (rx * m.dx + rz * m.dz) / (rl * (moved || 1));
+      const dl = Math.hypot(sg1.camDir[0], sg1.camDir[1]) || 1;
+      const looks = (sg1.camDir[0] * -rx + sg1.camDir[1] * -rz) / (dl * rl);
+      out.scene = { moved: Math.round(moved * 100) / 100, follows: camMoved >= moved * 0.5, ahead: Math.round(ahead * 100) / 100, looks: Math.round(looks * 100) / 100 };
+    }
     out.gas = Math.round((await compare(page, g0, g1)).change * 100) / 100;
     // Q-861: which way the road moves while the vehicle drives — down the screen under a camera that looks the way
     // it drives, UP under one that sits in front of it looking back (the headlights view).
@@ -577,11 +670,28 @@ try {
   // way the horizon pans: a vehicle that turns to the driver's left pans the world to the RIGHT under any camera
   // that follows it. Only read when the vehicle was seen to move.
   if (out.gas >= cfg.stillBelow) {
-    const steer = ['ArrowUp', 'KeyW', 'ArrowLeft', 'KeyA'];
-    for (const k of steer) await page.keyboard.down(k).catch(() => {});
+    // The accelerator alone first (the direction the vehicle is going), then LEFT with it (the direction it turned to).
+    for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(300);
+    const e0 = await snapScene(page);
+    await page.waitForTimeout(400);
+    const e1 = await snapScene(page);
+    for (const k of ['ArrowLeft', 'KeyA']) await page.keyboard.down(k).catch(() => {});
+    await page.waitForTimeout(300);
+    const s0 = await snapScene(page);
     out.steerFlow = await sampleFlow(page, 'x', 3000).catch(() => null);
-    for (const k of steer) await page.keyboard.up(k).catch(() => {});
+    const s1 = await snapScene(page);
+    for (const k of ['ArrowUp', 'KeyW', 'ArrowLeft', 'KeyA']) await page.keyboard.up(k).catch(() => {});
+    const before = sceneMoves(e0, e1), after = sceneMoves(s0, s1);
+    const car = pickVehicle(idleMoves, before);
+    if (out.scene && car && after && after.get(car)) {
+      const v0 = before.get(car), v1 = after.get(car);
+      if (Math.hypot(v0.dx, v0.dz) >= 0.2 && Math.hypot(v1.dx, v1.dz) >= 0.2) {
+        // + is toward the driver's left: facing +Z, the driver's left is +X (three.js is right-handed, Y up).
+        const left = v1.dx * v0.dz - v1.dz * v0.dx, along = v1.dx * v0.dx + v1.dz * v0.dz;
+        out.scene.turn = Math.round(Math.atan2(left, along) * 180 / Math.PI * 10) / 10;
+      }
+    }
   }
   await ctx.close();
 
@@ -644,6 +754,14 @@ try {
  *  and how many strip reads moved too fast to read (`edge`) against how many could be read (`read`). */
 export interface FlowRead { total: number; pos: number; neg: number; pairs: number; edge?: number; read?: number }
 
+/**
+ * A three.js game read from its scene (Q-869). `moved`: how far the vehicle went under the accelerator (world units);
+ * `follows`: the camera moved with it; `ahead`: cosine between camera-minus-vehicle and the vehicle's motion (+1 = the
+ * camera is straight ahead of where it is going); `looks`: cosine between the camera's view and the way to the vehicle;
+ * `turn`: degrees the vehicle's direction turned with LEFT held, + toward the driver's left.
+ */
+export interface SceneRead { moved: number; follows: boolean; ahead: number; looks: number; turn?: number }
+
 export interface PlaytestRun {
   ok: boolean;
   error?: string;
@@ -669,6 +787,8 @@ export interface PlaytestRun {
   gasFlow?: FlowRead | null;
   /** Which way the horizon band moved while accelerator + LEFT were held — + is right (Q-861). */
   steerFlow?: FlowRead | null;
+  /** Read from a three.js game's own scene (Q-869): see SceneRead. */
+  scene?: SceneRead;
   errors?: string[];
   errorCount?: number;
 }
@@ -766,6 +886,20 @@ export const FLOW_MIN_PX = 3;
 export const CAMERA_FACES_VEHICLE_FIX = 'Driving forward moves the road UP the screen — the camera sits in front of the vehicle looking back at it, so the player sees its headlights and LEFT looks like RIGHT. Put the camera BEHIND the vehicle (offset along its backward direction, looking along its heading); in the kit, ctx.follow(car) does this.';
 export const STEERING_MIRRORED_FIX = 'Holding LEFT turned the view to the RIGHT — the steering is mirrored. LEFT must turn the vehicle to the driver\'s left and RIGHT to the right; in the kit, driveVehicle already does this.';
 
+/**
+ * What a three.js game's own scene says (Q-869): `faces` — the camera sits ahead of the vehicle's motion looking back
+ * at it (true), or behind it (false); `mirrored` — LEFT turned it to the driver's right (true) or left (false). null
+ * when the scene cannot say: no three.js scene, no vehicle the accelerator clearly moved, or a camera that does not
+ * follow it (a fixed camera, or a game that moves the world instead of the car — pixels judge those). PURE.
+ */
+export function sceneVerdict(r: SceneRead | null | undefined): { faces: boolean | null; mirrored: boolean | null } {
+  const none = { faces: null, mirrored: null };
+  if (!r || !r.follows || !(r.moved >= 0.2)) return none;
+  const faces = r.ahead > 0.3 && r.looks > 0.5 ? true : r.ahead < -0.3 ? false : null;
+  const mirrored = typeof r.turn === 'number' && Number.isFinite(r.turn) && Math.abs(r.turn) >= 5 ? r.turn < 0 : null;
+  return { faces, mirrored };
+}
+
 /** Is this flow read firm enough to judge, and which way did it go? 0 when it is not. PURE. */
 export function firmFlow(f: FlowRead | null | undefined): -1 | 0 | 1 {
   if (!f || typeof f.total !== 'number' || !Number.isFinite(f.total) || Math.abs(f.total) < FLOW_MIN_PX) return 0;
@@ -798,9 +932,13 @@ export function scorePlaytest(run: PlaytestRun, replay: GameCodeFacts): Playtest
     && idle < STILL_BELOW && run.gas < STILL_BELOW
     && typeof run.gasLate === 'number' && run.gasLate < STILL_BELOW
     && (run.gasLateMs ?? 0) >= LATE_MIN_MS && (run.gasLateFrames ?? 0) >= LATE_MIN_FRAMES;
+  // The scene first, where there is one (Q-869: positions do not depend on how many frames a loaded machine drew);
+  // pixels only where the scene could not say — and never against a scene that said the opposite.
+  const scene = replay.driving === true && !stalledVehicle ? sceneVerdict(run.scene) : { faces: null, mirrored: null };
   const road = replay.driving === true && !stalledVehicle ? firmFlow(run.gasFlow) : 0;
-  const cameraFacesVehicle = road === -1;
-  const steeringMirrored = road === 1 && firmFlow(run.steerFlow) === -1;
+  const cameraFacesVehicle = scene.faces ?? road === -1;
+  const forwardCamera = scene.faces === false || (scene.faces === null && road === 1);
+  const steeringMirrored = scene.mirrored ?? (forwardCamera && firmFlow(run.steerFlow) === -1);
   const backwards = cameraFacesVehicle || steeringMirrored;
   // A driving game whose accelerator moves nothing cannot score as controllable, whatever else answered — nor one
   // whose controls read backwards to the player.

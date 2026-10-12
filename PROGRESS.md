@@ -94276,3 +94276,31 @@ Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-
 - **Lock:** the four prompts above plus "basic phone app with login" are NEGATIVE cases in `tests/aPhoneTheAppCannotRunOnIsNamed.test.ts`. With the old regex back, five of them fail.
 - Raised as a review comment on #3678 before it merged; the PR merged without it, so this is its own change.
 
+
+### 2026-10-12 — Q-869: the playtest's verdicts no longer depend on frame timing
+
+Another session, gating #3679, reported that under CPU load the full suite flipped two #3678 racing verdicts. Q-865 called a working countdown game stalled. Q-861 missed mirrored steering. The code is mine (#3678), so the row is mine.
+
+**What I could and could not reproduce.**
+- I could not reproduce the exact 4-CPU flip.
+  - Throttling the page's CPU 4× and 8× did not do it.
+  - Three full colour-on suite runs here stayed green.
+- What I did reproduce shows the same class. A WORKING racer with a 9 s "Get ready" countdown was called stalled, because the second accelerator look lasted only 2 s.
+- The class is a verdict read from frame timing. Q-869 names the same class, and it was a real precision hole even on an idle machine.
+
+**The fix, in two parts.**
+- **Part A.** The second look now holds the gas and looks once a second for up to 8 s, stopping as soon as anything moves.
+  - "The car never moves" needs the full look, with at least 40 frames drawn. A page that a loaded machine stopped drawing shows the same picture whatever the car does.
+  - Flow reads now collect 14 drawn frames, with up to 3 s to draw them.
+- **Part B (DNA level, the suggestion in Q-869).** For three.js games, the camera and steering verdicts are read from the SCENE, not from pixels.
+  - three.js announces its renderer to `__THREE_DEVTOOLS__`. Wrapping `render()` gives us the scene and the camera.
+  - Positions are state, so a slow machine moves them less, never the wrong way.
+  - The vehicle is the object the accelerator sped up over its idle speed, so a traffic car is never chosen.
+  - The scene only judges when the camera follows the vehicle. A treadmill world otherwise reads as "camera ahead" — measured, ahead = 1.
+  - Pixels judge only what the scene cannot, and never against it.
+
+**Locks.**
+- Real Chromium and real three.js: chase, front, mirrored and treadmill pages, each with a faster traffic car. Margins: ahead ±1, looks 1, turn ±33–38°.
+- The 9 s countdown and lost-first-key pages.
+- Reverted 5 ways: the long look, the frame guard, the follow guard, the idle subtraction, and the scene's precedence.
+- The KB was updated: the camera check reads a 3D game's scene, and a busy machine is never read as a stalled car.

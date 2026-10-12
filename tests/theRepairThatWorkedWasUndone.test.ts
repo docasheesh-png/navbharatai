@@ -42,7 +42,10 @@ const CSS_REPAIR_REPLY = 'I added the missing CSS rules so the chat interface st
 describe('1 · a repair pass that changed nothing does not say it changed something', () => {
   it('the report\'s sentence is a claim of a change', () => {
     expect(claimsAChange(CSS_REPAIR_REPLY)).toBe(true);
-    expect(claimsAChange('Every screen is now fully styled.')).toBe(false); // says nothing about a change it made
+    // 🔴 Reversed by autopsy db07e0af: this line read "says nothing about a change it made" — and a model that
+    // called no tool answered a hand-back with exactly this sentence, which the user read. "Is now fully styled"
+    // is a state only a change could have produced, so it is a claim; it is withheld only when nothing changed.
+    expect(claimsAChange('Every screen is now fully styled.')).toBe(true);
     expect(claimsAChange('NOT A BUG 1: the sort already reads the edited list')).toBe(false);
   });
   it('withheld only for OUR repair, on its closing turn, when the run wrote nothing', () => {

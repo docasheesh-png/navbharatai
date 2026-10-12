@@ -305,3 +305,39 @@ export function assessBuildInput(prompt: string): InputVerdict {
     message: 'I need a little more to go on. Tell me what the app should do — for example "a shop billing app with GST" — and I will build it right away.',
   };
 }
+
+/**
+ * SHOULD THE TURN ASK WHAT TO BUILD INSTEAD OF BUILDING? (d6d664e6 "Bnao", db07e0af "Banao")
+ *
+ * 🔴 d6d664e6 (2026-09-17): the whole prompt was "Bnao"; the engine built for 29 minutes and named the app
+ * it invented after the word. The admin's ruling: *"mai samjha nahi, puri baat batao"* — ask.
+ *
+ * 🔴 db07e0af (2026-10-12): the whole prompt was "Banao", and the guard that answers d6d664e6 did not
+ * fire. It asked "is the workspace empty?" by COUNTING FILES, and the workspace held our own 11-file
+ * starter, saved there when the Files tab opened the chat five minutes earlier. So the starter answered
+ * "the user already has a project", and a todo app nobody described was built and billed ₹96.93. The same
+ * class autopsy e9b25b08 named for the edit/build decision (`userAppExists`), never hunted to this gate.
+ *
+ * So both questions are asked of what could actually SAY what to build:
+ *   • the workspace — empty, or nothing but untouched files of our own starter, says nothing;
+ *   • the conversation — an earlier message counts only when it names something (a "hi" says nothing).
+ * Everything else is unchanged and still narrows it: an edit intent, an import, an attachment.
+ * PURE.
+ */
+export interface AskWhatToBuildInput {
+  /** The message names nothing to build (the `no-object` reason, or the intention reader said unclear). */
+  namesNothing: boolean;
+  /** The turn reads as an edit of the app that is here — a short order then means "carry on". */
+  editIntent: boolean;
+  /** The workspace is empty or holds only untouched files of our own starter (checked by content). */
+  workspaceHoldsOnlyOurStarter: boolean;
+  /** The user's earlier messages in this chat, newest last. */
+  earlierTurns: readonly string[];
+  importing: boolean;
+  attachments: number;
+}
+
+export function shouldAskWhatToBuild(i: AskWhatToBuildInput): boolean {
+  if (!i.namesNothing || i.editIntent || !i.workspaceHoldsOnlyOurStarter || i.importing || i.attachments > 0) return false;
+  return !i.earlierTurns.some((t) => typeof t === 'string' && assessBuildInput(t).buildable);
+}

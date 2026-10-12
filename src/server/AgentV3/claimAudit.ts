@@ -143,7 +143,7 @@ export interface MeasuredFacts {
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted';
+export type ClaimKind = 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store' | 'size-unmeasured' | 'size-contradicted' | 'kit-feature-claimed';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -154,6 +154,18 @@ export type ClaimKind = 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-
 const VERSIONS_ATTRIBUTED_TO_USER = /\bversions?\s+(?:that\s+)?you\s+(?:specified|asked\s+for|requested|gave|mentioned|wanted|provided)\b|\byour\s+(?:specified|requested)\s+versions?\b/i;
 /** A version number the user could have written: 7.6.9, v5, 18.3.1, @7.5.0. */
 const A_VERSION_NUMBER = /(?:^|[\s@v^~=])\d+\.\d+(?:\.\d+)?\b|\bv\d+\b/i;
+
+/**
+ * A capability of the DESIGN KIT, sold as a feature of the app (autopsy db07e0af). The summary of a todo app read
+ * "the design kit from the scaffold (buttons, fields, empty states, skeleton loading)" — the kit has a skeleton
+ * recipe; the app used none, and had nothing to load. Each entry: the words a summary uses, and the trace any real
+ * use leaves in the app's own source (the kit's class, or the word itself). Narrow on purpose: only kit recipes a
+ * summary can name without the app having them.
+ */
+const KIT_FEATURE_CLAIMS: ReadonlyArray<{ claim: RegExp; used: RegExp; label: string }> = [
+  { claim: /\bskeleton(?:s|\s+(?:loading|loaders?|screens?|states?))?\b/i, used: /skeleton/i, label: 'skeleton loading' },
+  { claim: /\btoasts?(?:\s+(?:notifications?|messages?))?\b/i, used: /toast/i, label: 'toast notifications' },
+];
 
 /** The feature word a summary uses for each fake kind, and what the app really has. */
 const FAKE_FEATURE_CLAIMS: Record<string, { feature: RegExp; label: string; measured: string }> = {
@@ -552,6 +564,18 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
       claimed: 'that you specified the package versions it used',
       measured: 'your request named no versions — NavBharatAI pinned them so the phone build matches',
     });
+  }
+
+  // A kit capability named as the app's (autopsy db07e0af) — judged only against the whole app's own source.
+  if (facts.sourceIsWholeApp !== false && typeof facts.sourceText === 'string' && facts.sourceText.trim()) {
+    for (const k of KIT_FEATURE_CLAIMS) {
+      if (!k.claim.test(text) || k.used.test(facts.sourceText)) continue;
+      out.push({
+        kind: 'kit-feature-claimed',
+        claimed: `that the app has ${k.label}`,
+        measured: `nothing in this app's source uses ${k.label} — the design kit offers it, but this app does not show it`,
+      });
+    }
   }
 
   // A described UI that exists nowhere in the app — judged ONLY against the app itself. When what we

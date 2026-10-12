@@ -16,6 +16,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { realProviderCostUsd, realRateFor, tieredMarkupUsd, type ProviderCostEntry } from '../src/server/AgentV3/providerRates';
 import { applyBuildDiscount } from '../src/server/lib/buildDiscount';
+import { sandboxBillableUsd } from '../src/server/AgentV3/sandboxCost';
 
 /** Env that would move a price or a markup; cleared for the test and put back afterwards. */
 const MOVES_A_PRICE = /^(RATE_|AGENTV3_MARKUP_|E2B_|OPUS_|SONNET_|HAIKU_)/;
@@ -85,5 +86,25 @@ describe('🔒 DOC TRUTH — nothing says cache hits are priced at the miss rate
   it('and the binding doc\'s formula names the sandbox share it bills', () => {
     const doc = readFileSync(join(__dirname, '..', 'docs/claude/ROUTING_AND_BILLING.md'), 'utf8');
     expect(doc.includes('`bill = tieredMarkup( REAL provider cost + sandbox share )`'), 'the formula omits the sandbox share (ENV_REGISTRY.md bills it before the markup)').toBe(true);
+  });
+
+  /**
+   * Adversarial review of this fix: the first corrected text said the share is billed "when
+   * AGENTV3_BILL_SANDBOX=on" — but the code ALSO requires E2B_USD_PER_HOUR to be set, and bills zero on the
+   * flag alone. A money description naming one condition of two is the same class as the cache sentence.
+   */
+  it('and both describe the sandbox share with BOTH conditions the code checks', () => {
+    const cost = { seconds: 600, usd: SANDBOX_USD, estimated: true as const };
+    // The code's own rule, so the premise is measured, not assumed.
+    expect(sandboxBillableUsd(cost, { AGENTV3_BILL_SANDBOX: 'on' } as NodeJS.ProcessEnv)).toBe(0);
+    expect(sandboxBillableUsd(cost, { E2B_USD_PER_HOUR: '0.1' } as NodeJS.ProcessEnv)).toBe(0);
+    expect(sandboxBillableUsd(cost, { AGENTV3_BILL_SANDBOX: 'on', E2B_USD_PER_HOUR: '0.1' } as NodeJS.ProcessEnv)).toBe(SANDBOX_USD);
+    for (const file of FILES) {
+      const text = readFileSync(join(__dirname, '..', file), 'utf8');
+      const sentence = /sandbox(?:'s measured)? share is [^.]*?BEFORE the markup[^.]*\./i.exec(text)?.[0] ?? '';
+      expect(sentence, `${file} has no sentence saying when the sandbox share is billed`).not.toBe('');
+      expect(sentence, `${file}: "${sentence}" must name the flag`).toMatch(/AGENTV3_BILL_SANDBOX=on/);
+      expect(sentence, `${file}: "${sentence}" must name the rate as the second condition`).toMatch(/BOTH[\s\S]*E2B_USD_PER_HOUR[\s\S]*set/);
+    }
   });
 });

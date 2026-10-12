@@ -583,9 +583,11 @@ FAILED build ₹811). The Opus tiers are untouched.
 
 - **Non-Opus tiers (Weak, Normal, Strong):** `bill = tieredMarkup( REAL provider cost + sandbox share )`,
   then the admin's build discount if one is set (never below that real cost — `buildDiscount.ts`).
-  - The sandbox share is the VM's measured time × `E2B_USD_PER_HOUR`, added BEFORE the markup when
-    `AGENTV3_BILL_SANDBOX=on` (`sandboxCost.ts` → `sandboxBillableUsd`; see the sandbox-time entry in
-    `docs/claude/ENV_REGISTRY.md`). Without the flag it is shown to the admin and absorbed, never billed.
+  - The sandbox share is the VM's measured time × `E2B_USD_PER_HOUR`, added BEFORE the markup only when
+    BOTH `AGENTV3_BILL_SANDBOX=on` AND `E2B_USD_PER_HOUR` is explicitly set (`sandboxCost.ts` →
+    `sandboxBillableUsd`; see the sandbox-time entry in `docs/claude/ENV_REGISTRY.md`). The flag without
+    the rate bills ZERO — the code refuses to bill its placeholder rate. Otherwise the share is shown to
+    the admin and absorbed, never billed.
   - REAL provider cost = the EXACT per-provider/model token spend × each provider's own real rate card
     (`src/server/AgentV3/providerRates.ts`), summed. The exact model that ran is captured via
     `TurnResult.model` (Claude/GLM/Kimi/Gemini runners all report it) → a `glm-4.7-flash` turn is FREE,

@@ -24,10 +24,11 @@
 // markup is applied to. (Corrected 2026-10-12, autopsy 9c612cdb: this paragraph said cache hits were
 // "not tracked" and priced at the cache-MISS rate — true before Fix 66, false since. Had it been true,
 // that build would have billed about ₹341, not ₹103.24. This is a DESCRIPTION fix; the billing model is
-// unchanged.) The sandbox's measured share is added to the real cost BEFORE the markup (sandboxCost.ts,
-// docs/claude/ENV_REGISTRY.md). Unknown models fall back to a conservative rate (Sonnet, without its
-// cache lines) so an untracked model never under-bills. All rates are USD per 1,000,000 tokens and
-// env-overridable (track live prices without a deploy).
+// unchanged.) The sandbox's measured share is added to the real cost BEFORE the markup only when BOTH
+// AGENTV3_BILL_SANDBOX=on and E2B_USD_PER_HOUR is explicitly set (sandboxCost.ts → sandboxBillableUsd,
+// docs/claude/ENV_REGISTRY.md); otherwise it is absorbed and shown to the admin only. Unknown models fall
+// back to a conservative rate (Sonnet, without its cache lines) so an untracked model never under-bills.
+// All rates are USD per 1,000,000 tokens and env-overridable (track live prices without a deploy).
 
 import { sonnetRate, opusRate, withClaudeCacheLines, tokenCostUsd, type TokenRate, type BilledUsage } from './pricing';
 

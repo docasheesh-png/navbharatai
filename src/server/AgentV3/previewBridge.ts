@@ -216,12 +216,41 @@ export function previewBridgeSource(source: 'in-browser' | 'live'): string {
     } catch (e) { /* ignore */ }
     return false;
   }
+  // 🌗 THE PANEL'S OWN SWITCH MUST SWITCH TOO (autopsy db07e0af). The design kit follows the device AND obeys a
+  // \`dark\` / \`light\` class on <html>. Reporting only "has the dark class" told a phone set to dark that a dark app
+  // was light, and turning dark OFF only removed a class the media query did not need — the panel's toggle was
+  // the same dead switch the autopsy found in the app. Now the page's real look is reported, and "light" sets
+  // \`light\`, which the kit (and any app styling \`.light\`) honours over the device setting.
+  function looksDark() {
+    try {
+      var root = document.documentElement;
+      if (!root) return false;
+      if (root.classList.contains('dark')) return true;
+      if (root.classList.contains('light')) return false;
+      return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches && hasMediaDarkStyling());
+    } catch (e) { return false; }
+  }
+  function hasMediaDarkStyling() {
+    try {
+      var sheets = document.styleSheets;
+      for (var i = 0; i < sheets.length; i++) {
+        var rules = null;
+        try { rules = sheets[i].cssRules; } catch (e) { continue; }
+        if (!rules) continue;
+        for (var j = 0; j < rules.length && j < 6000; j++) {
+          var media = rules[j] && rules[j].media;
+          if (media && String(media.mediaText || '').indexOf('prefers-color-scheme: dark') >= 0) return true;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
   function reportTheme() {
     try {
       post({
         __nbaiPreviewTheme: true, source: SOURCE,
         canToggle: hasClassDarkStyling(),
-        isDark: !!(document.documentElement && document.documentElement.classList.contains('dark')),
+        isDark: looksDark(),
       });
     } catch (e) { /* ignore */ }
   }
@@ -291,6 +320,7 @@ export function previewBridgeSource(source: 'in-browser' | 'live'): string {
       }
       if (d.__nbaiTheme === 'dark' || d.__nbaiTheme === 'light') {
         document.documentElement.classList.toggle('dark', d.__nbaiTheme === 'dark');
+        document.documentElement.classList.toggle('light', d.__nbaiTheme === 'light');
         reportTheme();
         return;
       }

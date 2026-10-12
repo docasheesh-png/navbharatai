@@ -169,6 +169,10 @@ export const PROCESS_ONLY_CODES = new Set([
   'STYLE_RULES_RESUMED',
   // OUR repair pass's closing claim withheld because the pass changed nothing (repairClaim.ts, autopsy 6cd698cc).
   'REPAIR_CLAIM_WITHHELD',
+  // OUR end-of-turn hand-back answered with no change (repairClaim.ts, autopsy db07e0af): a struggle of the engine.
+  'HANDBACK_IGNORED',
+  // OUR suggest-only review stopped in front of a reasoning engine (autopsy db07e0af) — a fact about OUR routing.
+  'REVIEW_NOT_RUN_REASONING_ENGINE',
   // A reviewer finding OUR evidence refuted (reviewEvidence.ts) is a fact about the reviewer, not the app.
   'REVIEW_REFUTED_BY_EVIDENCE',
   // …and a finding not offered because its file no longer exists (autopsy f496c75b): about the reviewer.
@@ -1719,14 +1723,15 @@ export class BuildDiagnostics {
         code: 'LLM_CALL_STOPPED',
         message: 'A model call was cancelled because the build was stopped — it did not fail, and no provider was at fault.',
         autoResolved: true,
-        detail: rec.provider && rec.provider !== 'unknown' ? `provider=${rec.provider}` : 'no provider had answered yet',
+        detail: `${rec.provider && rec.provider !== 'unknown' ? `provider=${rec.provider}` : 'no provider had answered yet'} · it had been running ${Math.round(Math.max(0, rec.latencyMs ?? 0) / 1000)}s`,
       });
     } else if (handedOff) {
       this.record({
         phase: 'provider',
         severity: 'info',
         code: 'LLM_CALL_HANDED_OFF',
-        message: 'A fast-lane call stopped before a slower reasoning engine and handed its work to the full builder — a planned handoff, not a failure.',
+        // Neutral since db07e0af: the suggest-only review stops the same way, and hands nothing to the full builder.
+        message: 'A budgeted call (the fast lane\'s, or a suggest-only review\'s) stopped in front of a slower reasoning engine instead of spending its budget inside one — a planned stop, not a failure.',
         autoResolved: true,
         detail: String(rec.error ?? '').slice(0, 300),
       });
@@ -1807,6 +1812,19 @@ export class BuildDiagnostics {
    * throws. (A raw non-Haiku Claude call that bypasses provider tracking cannot occur on a weak build:
    * ClaudeClient.runTurn's no-Claude-zone guard refuses it before it runs — see noClaudeZone.ts.)
    */
+  /**
+   * The model that answered this build's most recent successful call — the engine a later call on the same chain
+   * will most likely meet (autopsy db07e0af: the post-build review timed out with no word of which engine it had
+   * waited on). Null when no call has succeeded. Never throws.
+   */
+  lastServedModel(): string | null {
+    for (let i = this.llmCalls.length - 1; i >= 0; i--) {
+      const c = this.llmCalls[i];
+      if (c && c.ok !== false && typeof c.model === 'string' && c.model && c.model !== 'unknown') return c.model;
+    }
+    return null;
+  }
+
   claudeProviderDelivered(): string | null {
     const isViolatingClaude = (name: string): boolean =>
       name === 'CLAUDE' || (isClaudeModel(name) && !/haiku/i.test(name));
@@ -2618,6 +2636,32 @@ export class BuildDiagnostics {
     }
     if (cleared > 0) this.notify();
     return cleared;
+  }
+
+  /**
+   * WITHDRAW A FINDING A LATER STEP MADE FALSE — out of `problems`, kept on the timeline with the reason
+   * (autopsy db07e0af). Returns how many it withdrew.
+   *
+   * 🔴 WHY `resolveOnRecheck` COULD NOT DO THIS. Readiness WARNINGS are recorded already `autoResolved: true`
+   * (they are advisories, never blockers), and `resolveOnRecheck` skips a finding that is already resolved — so
+   * the Q-517 fix (autopsy 39e982bd) that "cleared" "No tests at all" once the end-to-end suite was written
+   * cleared nothing, in any build: report db07e0af carried "No tests at all" beside E2E_SCAFFOLDED, exactly the
+   * contradiction that fix was written for. Its test passed because it recorded the warning by hand, unresolved
+   * — not the way the real recorder does. A sentence that has become false is not "resolved"; it is withdrawn:
+   * severity drops to info (so it leaves `problems` and every count built on it), and `detail` says why.
+   */
+  retract(code: string, messageIncludes: string, why: string): number {
+    let withdrawn = 0;
+    for (const issue of this.issues) {
+      if (issue.code !== code || issue.severity === 'info') continue;
+      if (!String(issue.message ?? '').includes(messageIncludes)) continue;
+      issue.severity = 'info';
+      issue.autoResolved = true;
+      issue.detail = `${issue.detail ? `${issue.detail} · ` : ''}Withdrawn — ${why}`;
+      withdrawn++;
+    }
+    if (withdrawn > 0) this.notify();
+    return withdrawn;
   }
 
   /**
@@ -4070,9 +4114,24 @@ export function deriveRootCause(input: {
         + `unresolved against the app, which is worth reading but did not stop anything: ${problem.message}`;
     }
     const note = ineligibleUnresolvedNote(issues, excluded);
-    return note
-      ? `Build completed successfully. ${note}.`
-      : 'Build completed successfully with no problems recorded.';
+    if (note) return `Build completed successfully. ${note}.`;
+    // 🔴 "NO PROBLEMS RECORDED" BESIDE FOUR RECORDED PROBLEMS (autopsy db07e0af). Every one of them was resolved
+    // or advisory, so none was a CANDIDATE — the same "not a candidate ≠ does not exist" conflation the note
+    // above was written for, in the last sentence still making it. The report's own `problems` list is what
+    // the reader sees beside this line, so it is counted from the same rule (every non-info finding).
+    const listed = issues.filter((i) => i.severity !== 'info');
+    if (listed.length === 0) return 'Build completed successfully with no problems recorded.';
+    const named = (items: readonly BuildIssue[]) => {
+      const codes = [...new Set(items.map((i) => i.code))];
+      return codes.slice(0, 5).join(', ') + (codes.length > 5 ? `, +${codes.length - 5} more` : '');
+    };
+    const ours = listed.filter((i) => i.observation !== true);
+    const observed = listed.filter((i) => i.observation === true);
+    const parts = [
+      ours.length > 0 ? `${ours.length} problem(s) were recorded along the way (${named(ours)}) — each was fixed during the build or is an advisory` : '',
+      observed.length > 0 ? `${observed.length} observation(s) were made about code that was already there (${named(observed)})` : '',
+    ].filter(Boolean);
+    return `Build completed successfully, and nothing recorded is left open against the app. ${parts.join('; ')}. They are listed under problems.`;
   }
   if (problem) return problem.message;
   // No app-level problem was captured, but the sandbox went away mid-build → name the infra honestly

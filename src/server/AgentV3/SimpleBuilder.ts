@@ -377,6 +377,29 @@ export function providedBoilerplate(scaffoldPaths: readonly string[] = []): stri
   return planProvidedFiles(scaffoldPaths);
 }
 
+/**
+ * A planned component that is a SECOND copy of one we provide, under another folder (autopsy db07e0af: the plan
+ * for a todo app listed `src/components/ErrorBoundary.tsx` beside the provided `src/ErrorBoundary.tsx`, which
+ * already wraps the app in main.tsx). The provided-boilerplate filter matched paths exactly, so the twin went
+ * through; the same component name in another folder is the same component. Only component files (`.tsx` /
+ * `.jsx`) are compared — two `index.ts` files are not twins. PURE.
+ */
+export function dropProvidedTwins<T extends { path: string }>(plan: readonly T[], provided: Iterable<string>): { kept: T[]; dropped: Array<{ path: string; provided: string }> } {
+  const byName = new Map<string, string>();
+  for (const p of provided) {
+    if (!/\.(?:tsx|jsx)$/i.test(p)) continue;
+    byName.set(p.split('/').pop()!.toLowerCase(), p);
+  }
+  const dropped: Array<{ path: string; provided: string }> = [];
+  const kept = plan.filter((m) => {
+    const twin = byName.get(String(m.path).split('/').pop()!.toLowerCase());
+    if (!twin || twin === m.path) return true;
+    dropped.push({ path: m.path, provided: twin });
+    return false;
+  });
+  return { kept, dropped };
+}
+
 /** Where the app's entry lives, in words the planner can act on. */
 function entryFilesHint(framework: string): string {
   return /next/i.test(framework)
@@ -438,6 +461,11 @@ export function manifestSystemPrompt(framework: string, scaffoldPaths?: readonly
     // (fileBudgetInstruction); this is the app-agnostic anti-pattern that produces most of the bloat.
     '- One file per REAL unit of the app. Never a separate file for a single tiny helper, type or constant —',
     '  co-locate it with its only user. Fewer, cohesive files beat many thin ones.',
+    // Autopsy db07e0af: a todo app planned a loading spinner (nothing loads), a second error boundary and a
+    // second global stylesheet; the spinner shipped imported by nothing.
+    '- Plan ONLY what a screen of THIS app shows. No speculative pieces: no loading spinner when nothing loads from',
+    '  a network (browser storage is instant), no second error boundary, no second global stylesheet (src/index.css',
+    '  IS the global stylesheet — its rules go there). A file no screen imports is never shown to the user.',
     '- Do NOT list node_modules, lockfiles, or build output.',
     // The persuasion half of the boilerplate fix; SimpleBuilder drops these from the parsed plan
     // regardless, so a model that ignores this line still cannot overwrite them.
@@ -524,6 +552,7 @@ export const DESIGN_KIT_VOCABULARY: string[] = [
   '- A link that acts as a button (`<a class="btn-primary">`) gets the full button shape — no need to restyle it.',
   '- Chat: `.nb-chat` holding `.nb-msg nb-msg-user` / `.nb-msg nb-msg-bot`, with `.nb-composer` at the bottom.',
   '- GAMES: the stage is `.nb-game`; start/pause/game-over screens are `.nb-game-screen` with `h1.nb-game-title` and REAL `<button class="nb-game-btn">` (`nb-game-btn nb-game-btn-secondary` for a second choice) — never a clickable <div>; the score and health sit in `.nb-game-hud` as `.nb-game-stat` and `.nb-game-bar` > `.nb-game-bar-fill` (style="--value: 0.6"); on phones add `.nb-game-pad` > `.nb-game-keys` > `button.nb-game-key`.',
+  '- A light/dark SWITCH sets `data-theme="dark"` / `"light"` (or the class `dark` / `light`) on <html> (`document.documentElement`) — the kit\'s whole palette follows it; with no switch the app follows the device. Any other hook (a class on a wrapper div, `theme-dark`) styles nothing.',
   "- Your own stylesheet ADDS to the kit (your own classes, your own --accent); do not restyle or remove the kit's classes.",
 ];
 
@@ -657,7 +686,13 @@ export function contractSystemPrompt(framework: string): string {
     '',
     'OUTPUT: a single TypeScript code block (no prose, no fences) that declares EVERY cross-file',
     'symbol the app shares, so producers and consumers agree by construction. Include, as applicable:',
-    '  • Every ENUM with its EXACT member names (decide casing ONCE — e.g. `enum MediaType { YouTube, Vimeo }`).',
+    // 🧬 NO ENUM AT ALL (autopsy db07e0af, after f496c75b, 6cd698cc and 120eb52f). An enum is a type AND a value,
+    // and every file that writes `import type { FilterType }` from a module of types breaks it: TS1361, healed at
+    // write time in four builds. Rule and fixer treated the import; this removes the condition. A union is a type
+    // everywhere, so `import type` is always right, and the value is just the string.
+    '  • Every fixed set of options as a string-literal UNION TYPE with its EXACT values, never an `enum`',
+    "    (e.g. `export type MediaType = 'youtube' | 'vimeo';` — decide the spelling ONCE). An ENUM is FORBIDDEN here:",
+    '    it is a value, and a file that imports it with `import type` fails to compile.',
     '  • Every shared TYPE / INTERFACE used by more than one file (e.g. `interface PlayerState { … }`).',
     '  • The EXACT signature of every shared util/helper (e.g. `export function extractEmbedUrl(url: string): string`).',
     // Autopsy 6ae30b33: `data.ts` exported `MOCK_GK_QUESTIONS` while both hooks, written at the same
@@ -688,7 +723,7 @@ export function contractUserPrompt(prompt: string, manifest: SimpleFileSpec[]): 
     '',
     `The complete file list:\n${fileList}`,
     '',
-    'Design the shared contract (enums, shared types/interfaces, util signatures, and EACH',
+    'Design the shared contract (option sets as union types — no enums — shared types/interfaces, util signatures, and EACH',
     "component's props interface) now. Output only the TypeScript declarations.",
   ].join('\n');
 }
@@ -1837,8 +1872,13 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       if (droppedShadow.length) {
         deps.log?.(`Leaving out ${droppedShadow.join(', ')} — in this project the page entry is the root index.html, and a copy in public/ would shadow it.`);
       }
+      // A second copy of a component we provide, in another folder (autopsy db07e0af) — see dropProvidedTwins.
+      const { kept: keptTwins, dropped: droppedTwins } = dropProvidedTwins(kept, provided);
+      if (droppedTwins.length) {
+        deps.log?.(`Leaving out ${droppedTwins.map((d) => d.path).join(', ')} — ${droppedTwins.map((d) => d.provided).join(', ')} is provided and already in the app.`);
+      }
       // The plan must connect what it builds to the screen — see ensureEntryPlanned.
-      const { manifest, injected: injectedEntry } = ensureEntryPlanned(kept, deps.starterEntryPath);
+      const { manifest, injected: injectedEntry } = ensureEntryPlanned(keptTwins, deps.starterEntryPath);
       if (droppedBoilerplate.length) {
         deps.log?.(`Skipping ${droppedBoilerplate.length} file(s) NavBharatAI already provides — they are correct as shipped: ${droppedBoilerplate.join(', ')}.`);
       }

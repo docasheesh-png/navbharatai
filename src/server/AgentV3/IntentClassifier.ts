@@ -1185,6 +1185,18 @@ export interface SmartIntent {
    * reads; this is only its explanation. Optional so a caller building its own SmartIntent compiles.
    */
   readerOutcome?: ReaderOutcome;
+  /**
+   * The reader concluded the user wants a PICTURE drawn — a scene, a person, a place — not software.
+   *
+   * 🔴 THE MISSING SIXTH ANSWER (autopsy 15e69839, 2026-10-12). A Tamil user wrote "like a 17-year-old boy
+   * leaning on a tree, to be made", then "like a man making a GST bill in a shop". Neither names a picture noun,
+   * and no word list reads Tamil, so the reader decided — and its menu had no picture on it: it could only say
+   * chat, build or unclear. The second message became a 25-minute GST billing app build. A scene described in
+   * words is a picture request in every language; only the reader can see that, so it needs the answer.
+   *
+   * 🔒 Like `unclear`, `intent` stays at the keyword result, so a caller that ignores this flag is unchanged.
+   */
+  picture?: boolean;
 }
 
 /** Why the reader's verdict was or was not used — see `SmartIntent.readerOutcome`. */
@@ -1242,24 +1254,30 @@ export async function classifyIntentSmartDetailed(
     // Autopsy 6ae30b33: "Make question" after three chat questions was built as an app.
     'Asking for WRITTEN CONTENT (questions, answers, an essay, notes, a poem, a summary, a letter) is',
     '"chat": the reply writes it. Choose "build" only when they ask for an app or tool that does it.',
-    'Choose exactly one of five categories:',
+    'Choose exactly one of six categories:',
     '  chat    — plain conversation, a greeting, a question, thanks, or asking how something works',
     '  help    — asking how to use NAVBHARATAI ITSELF: where a button is, how to open or see their',
     '            app, how to publish, download, restore or stop (answered, never built)',
     '  build   — create a NEW app / feature / component from scratch',
     '  edit    — fix, modify, add to, or finish something that ALREADY exists',
     '  unclear — they DO want something made, but have not said WHAT to make',
+    '  picture — they want a PICTURE made: an image, drawing or photo of a scene, a person, an animal or a',
+    '            place, described in words — in ANY language — and no app, website or tool is named',
     // The fourth answer, spelled out. Without this the reader must pick one of the other three, and
     // for "make it" / "build an app" it reasonably picks "build" — which is how one word became a
     // 29-minute build for an app nobody described (report d6d664e6).
     'Answer "unclear" when they are asking for something to be made but their message does not say',
     'what: "make it", "build an app", "banao", "kuch bana do". Never guess a product for them —',
     'answering "unclear" lets us ask one short question instead of building the wrong thing.',
+    // Autopsy 15e69839: two Tamil scene descriptions ("like a boy leaning on a tree", "like a man making a
+    // bill in a shop") were read as an app order, because "picture" was not one of the answers.
+    'A DESCRIPTION OF A SCENE — someone doing something, somewhere ("a boy leaning on a tree", "like a man',
+    'making a bill in a shop") — with no app, website or tool named is "picture", not "build" or "unclear".',
     ...(ctxLines.length ? ['', ...ctxLines] : []),
     '',
     `User message: "${message.slice(0, 300)}"`,
     '',
-    'Reply with ONLY one word: chat, help, build, edit, or unclear.',
+    'Reply with ONLY one word: chat, help, build, edit, unclear, or picture.',
   ].join('\n');
 
   let outcome: ReaderOutcome = 'failed';
@@ -1277,6 +1295,8 @@ export async function classifyIntentSmartDetailed(
     // caller that does not read the flag must be byte-identical to before this answer existed.
     // `intent` is the KEYWORD verdict here, not the reader's — so the net must still govern it.
     if (raw === 'unclear') return { intent, unclear: true, readerAnswered: false, readerOutcome: 'unclear' };
+    // The sixth answer: keyword intent kept (see `SmartIntent.picture`); the route answers it as a picture.
+    if (raw === 'picture') return { intent, unclear: false, picture: true, readerAnswered: false, readerOutcome: 'answered' };
   } catch {
     /* LLM call failed — fall through to the honest fallback below */
   }

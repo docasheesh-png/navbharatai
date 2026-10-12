@@ -1,4 +1,5 @@
 import { imagePriceSentence } from './imageAllowance';
+import { PICTURE, MAKE_VERB, indicAlternatives } from '../AgentV3/indicSafetyWords';
 // NavBharatAI Free chat — image-generation intent detection (admin 2026-08-01).
 //
 // The admin wants: if a FREE-chat user's plain text asks to CREATE an image, NavBharatAI Free should just
@@ -9,7 +10,8 @@ import { imagePriceSentence } from './imageAllowance';
 // Precision matters — a false positive turns an ordinary question ("how do I add an image to my app?")
 // into a surprise picture. So a trigger requires a CREATE verb next to an IMAGE noun, or an explicit
 // "<image-noun> of <thing>" / "draw <thing>" shape — and a set of HANDLING verbs (add/upload/resize/…)
-// vetoes it. Bilingual: English + Hindi/Hinglish (Latin and Devanagari).
+// vetoes it. English + Hindi/Hinglish (Latin and Devanagari), and since autopsy 15e69839 (2026-10-12) the
+// nine other Indian scripts too (below).
 
 const CREATE_VERBS = [
   'generate', 'create', 'make', 'draw', 'design', 'render', 'paint', 'sketch', 'illustrate',
@@ -41,6 +43,18 @@ const NOUN_OF = new RegExp(`\\b(${NOUN_RE})\\s+(of|showing|with)\\b`, 'i');
 // "draw/sketch/paint <thing>"  (verb strongly implies an image even without the noun)
 const DRAW_VERB = /\b(draw|sketch|paint|illustrate)\b\s+(me\s+|us\s+|a\s+|an\s+|the\s+)?[a-z0-9]/i;
 const DEV_RE = new RegExp(`(${DEV_IMAGE})[\\s\\S]{0,40}?(${DEV_CREATE})|(${DEV_CREATE})[\\s\\S]{0,40}?(${DEV_IMAGE})`);
+
+/**
+ * 🔴 THE OTHER NINE SCRIPTS (autopsy 15e69839, 2026-10-12). A Tamil user asked for a picture and the request was
+ * built as a GST billing app: this detector read only Latin and Devanagari, so to it Tamil was empty text. The
+ * words already existed — `indicSafetyWords.ts` keeps "picture" and "make" for Bengali, Punjabi, Gujarati, Odia,
+ * Tamil, Telugu, Kannada, Malayalam and Urdu for the safety triage — they were just never read here. One list,
+ * two readers: a word added there now reaches both. Same shape as the Devanagari rule: a picture noun and a make
+ * verb within 40 characters, either order.
+ */
+const INDIC_NOUN = indicAlternatives(PICTURE).join('|');
+const INDIC_MAKE = indicAlternatives(MAKE_VERB).join('|');
+const INDIC_RE = new RegExp(`(?:${INDIC_NOUN})[\\s\\S]{0,40}?(?:${INDIC_MAKE})|(?:${INDIC_MAKE})[\\s\\S]{0,40}?(?:${INDIC_NOUN})`);
 
 const HANDLING_RE = new RegExp(`\\b(${HANDLING_VERBS.map(esc).join('|')})\\b`, 'i');
 
@@ -93,7 +107,8 @@ export function detectImageIntent(message: string): ImageIntent {
   if (HANDLING_RE.test(text) && !hasDraw && !NOUN_OF.test(text)) return { wants: false, prompt: '' };
 
   const wants =
-    EN_VERB_NOUN.test(text) || EN_NOUN_VERB.test(text) || NOUN_OF.test(text) || hasDraw || DEV_RE.test(raw);
+    EN_VERB_NOUN.test(text) || EN_NOUN_VERB.test(text) || NOUN_OF.test(text) || hasDraw || DEV_RE.test(raw)
+    || INDIC_RE.test(raw.normalize('NFC'));
   if (!wants) return { wants: false, prompt: '' };
 
   return { wants: true, prompt: extractImagePrompt(raw) };

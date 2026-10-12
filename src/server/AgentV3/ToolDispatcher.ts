@@ -158,7 +158,8 @@ import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
 import { ensureTsconfigBaseUrl } from './TsconfigGuard';
 import { applyFullStackGuards, dedupeSameModuleImports } from './FullStackGuards';
-import { duplicateModuleTarget } from './ProjectIntegrityChecks';
+import { duplicateModuleTarget, dedupeStylesheetImports, isAppWideStylesheet } from './ProjectIntegrityChecks';
+import { writesAreUnread } from './unreadWrites';
 
 /**
  * Deterministic config backstops applied to EVERY file write (each no-ops for a non-matching path):
@@ -1154,9 +1155,11 @@ export class ToolDispatcher {
     }
     content = this.pinPackageJsonContent(rel, content, existingContent);
     content = this.dedupeImportsForSource(rel, content, opts.agent);
+    const sheetOnce = await this.dropEntryCoveredStylesheet(rel, content);
+    content = sheetOnce.content;
     const kitKeep = kind === 'modify' ? this.keepDesignKit(rel, content, existingContent) : { content, note: '' };
     content = kitKeep.content;
-    const kitNote = kitKeep.note;
+    const kitNote = kitKeep.note + sheetOnce.note;
     if (opts.allowOverwrite === false && kind === 'modify') {
       if (content !== existingContent) {
         refuse(`${rel} already exists — ${opts.source} will not replace it wholesale. Use edit_file, or pass overwrite: true if you really mean to replace it.`);
@@ -1366,9 +1369,9 @@ export class ToolDispatcher {
   private async setUpServerlessPayment(table: string | undefined, agent: AgentRole | undefined): Promise<string> {
     const pending = noServerPaymentGuidance('razorpay');
     if (!isSafeTableName(table)) {
-      return 'generate_payment: this app has no server, but Razorpay payments can be verified in the user\'s own '
+      refuse('generate_payment: this app has no server, but Razorpay payments can be verified in the user\'s own '
         + 'Supabase project. Call generate_payment again with provider = "razorpay" and table = the lower-case name '
-        + 'of the table that stores the orders/bookings (it must already exist and have an "id" primary key).';
+        + 'of the table that stores the orders/bookings (it must already exist and have an "id" primary key).');
     }
     const handler = this.onServerlessPayment!;
     let result = await handler({ table }).catch(() => null);
@@ -4022,6 +4025,39 @@ export class ToolDispatcher {
    * duplicate here so it is never born. Pure + safe (only drops a binding that already exists); emits an
    * honest narration when it fires. Source files only. Kill switch AGENTV3_DUP_IMPORT_GUARD=off.
    */
+  /**
+   * 🔁 A GLOBAL STYLESHEET IS IMPORTED ONCE, AT THE ENTRY — and that is settled AT THE WRITE (autopsy db07e0af).
+   * The architect's `src/App.tsx` imported `./index.css`, which the starter's `src/main.tsx` already imports. The
+   * second line is a no-op for a global sheet, and the end-of-build integrity pass removed it — AFTER the app had
+   * first rendered, as one of eleven post-green writes. The fix has exactly one right answer
+   * (`dedupeStylesheetImports`, autopsy 33812996), so it runs here, before the file lands, and the model is told.
+   * Only an app-wide sheet the entry already imports, only a side-effect import line, never the entry itself.
+   * Kill switch: AGENTV3_DUP_IMPORT_GUARD (the same as the duplicate-import guard above). Never throws.
+   */
+  private async dropEntryCoveredStylesheet(path: string, content: string): Promise<{ content: string; note: string }> {
+    const none = { content, note: '' };
+    try {
+      if (envKillSwitch('AGENTV3_DUP_IMPORT_GUARD')) return none;
+      if (!/\.(tsx?|jsx?)$/i.test(path) || !/import\s+['"][^'"]+\.css['"]/.test(content)) return none;
+      const entries = ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'src/index.jsx', 'main.tsx'];
+      if (entries.includes(path)) return none;
+      let entry: string | null = null;
+      let entryContent = '';
+      for (const p of entries) {
+        try { entryContent = await this.actuator.readFile(this.workspaceId, p); entry = p; break; } catch { /* next */ }
+      }
+      if (!entry) return none;
+      const out = dedupeStylesheetImports({ [entry]: entryContent, [path]: content });
+      const mine = out.removed.filter((r) => r.from === path && isAppWideStylesheet(r.stylesheet.replace(/^\.?\/+/, '')));
+      if (mine.length === 0 || typeof out.files[path] !== 'string') return none;
+      const sheets = mine.map((r) => `\`${r.stylesheet}\``).join(', ');
+      return {
+        content: out.files[path],
+        note: `\n🔧 Removed the import of ${sheets} from ${path} — ${entry} already imports it, and a global stylesheet applies once whoever imports it. Import global styles only in ${entry}.`,
+      };
+    } catch { return none; }
+  }
+
   private dedupeImportsForSource(path: string, content: string, agent: AgentRole): string {
     if (envKillSwitch('AGENTV3_DUP_IMPORT_GUARD')) return content;
     if (!/\.(tsx?|jsx?|mjs|cjs)$/i.test(path || '')) return content;
@@ -4088,6 +4124,12 @@ export class ToolDispatcher {
   private async writeSteeringNotes(files: Record<string, string>): Promise<string> {
     const paths = Object.keys(files ?? {});
     if (paths.length === 0) return '';
+    // A platform writer reads no tool result (unreadWrites.ts, autopsy db07e0af): its packages are still installed
+    // — the app needs them — but no typecheck is run and no once-per-build note is spent on it.
+    if (writesAreUnread()) {
+      try { await this.importedRecipeDependencyNote(files); } catch { /* an install is best-effort here, as at any write */ }
+      return '';
+    }
     const hooks = await this.hookWriteNote(files);
     let imports = '';
     for (const p of paths) {
@@ -4963,7 +5005,7 @@ export class ToolDispatcher {
       case 'write_files_batch': {
         const rawFiles = (input as Record<string, unknown>)?.files;
         if (!Array.isArray(rawFiles) || rawFiles.length === 0) {
-          return 'write_files_batch: files array is empty or missing.';
+          refuse('write_files_batch: files array is empty or missing.');
         }
         const parsedFiles: { path: string; content: string }[] = rawFiles.map((f: unknown) => {
           if (typeof f !== 'object' || f === null) throw new Error('Each file entry must be an object.');
@@ -6520,7 +6562,7 @@ export class ToolDispatcher {
           // HONEST, NOT SILENT. Returning "stopped." with nothing wired would make the model tell the
           // user their build had ended while it carried on — the exact fake-success the second
           // absolute rule forbids.
-          return 'Could not stop this build — stopping is not available here. Tell the user plainly, and keep going or wrap up.';
+          refuse('Could not stop this build — stopping is not available here. Tell the user plainly, and keep going or wrap up.');
         }
         this.stopBuild(reason);
         return 'Stopping this build now. The files written so far are saved; the user can resume with one message.';
@@ -6742,7 +6784,7 @@ export class ToolDispatcher {
       case 'generate_openapi': {
         const rawRoutes = (input as Record<string, unknown>)?.routes;
         if (!Array.isArray(rawRoutes) || rawRoutes.length === 0) {
-          return 'generate_openapi: routes array is empty or missing. Pass the API routes you built: [{ method, path, summary? }].';
+          refuse('generate_openapi: routes array is empty or missing. Pass the API routes you built: [{ method, path, summary? }].');
         }
         const routes: RouteSpec[] = rawRoutes.map((r: unknown) => {
           if (typeof r !== 'object' || r === null) throw new Error('Each route entry must be an object with method + path.');
@@ -6769,7 +6811,7 @@ export class ToolDispatcher {
       case 'generate_api_docs': {
         const rawRoutes = (input as Record<string, unknown>)?.routes;
         if (!Array.isArray(rawRoutes) || rawRoutes.length === 0) {
-          return 'generate_api_docs: routes array is empty or missing. Pass the API routes you built: [{ method, path, description?, auth? }].';
+          refuse('generate_api_docs: routes array is empty or missing. Pass the API routes you built: [{ method, path, description?, auth? }].');
         }
         const routes: RouteDoc[] = rawRoutes.map((r: unknown) => {
           if (typeof r !== 'object' || r === null) throw new Error('Each route entry must be an object with method + path.');
@@ -6796,11 +6838,11 @@ export class ToolDispatcher {
         const path = optStr(input, 'path');
         const modulePath = optStr(input, 'module_path');
         if (!path || !modulePath) {
-          return 'generate_tests: both "path" (output test file) and "module_path" (import specifier) are required.';
+          refuse('generate_tests: both "path" (output test file) and "module_path" (import specifier) are required.');
         }
         const rawFns = (input as Record<string, unknown>)?.functions;
         if (!Array.isArray(rawFns) || rawFns.length === 0) {
-          return 'generate_tests: functions array is empty or missing. Pass the exported functions to scaffold: [{ name, params?, async? }].';
+          refuse('generate_tests: functions array is empty or missing. Pass the exported functions to scaffold: [{ name, params?, async? }].');
         }
         const functions: FunctionDef[] = rawFns.map((f: unknown) => {
           if (typeof f !== 'object' || f === null) throw new Error('Each function entry must be an object with a name.');
@@ -7131,7 +7173,7 @@ export class ToolDispatcher {
         }
         const file = resolveGraphFile(graph, target);
         if (!file) {
-          return `code_graph: "${target}" did not resolve to a single indexed file. Pass an exact workspace path (e.g. src/App.tsx), or use query="defines" for a symbol.`;
+          refuse(`code_graph: "${target}" did not resolve to a single indexed file. Pass an exact workspace path (e.g. src/App.tsx), or use query="defines" for a symbol.`);
         }
         if (q === 'who_imports') {
           const who = whoImports(graph, file);
@@ -7349,7 +7391,7 @@ export class ToolDispatcher {
       case 'generate_seed_data': {
         const rawEntities = (input as Record<string, unknown>)?.entities;
         if (!Array.isArray(rawEntities) || rawEntities.length === 0) {
-          return 'generate_seed_data: entities array is empty or missing. Pass [{ name, fields: [{ name, type? }] }].';
+          refuse('generate_seed_data: entities array is empty or missing. Pass [{ name, fields: [{ name, type? }] }].');
         }
         const entities: EntitySpec[] = rawEntities.map((e: unknown) => {
           if (typeof e !== 'object' || e === null) throw new Error('Each entity must be an object with name + fields.');
@@ -7414,7 +7456,7 @@ export class ToolDispatcher {
       case 'generate_migration': {
         const rawEntities = (input as Record<string, unknown>)?.entities;
         if (!Array.isArray(rawEntities) || rawEntities.length === 0) {
-          return 'generate_migration: entities array is empty or missing. Pass [{ name, fields: [{ name, type? }] }].';
+          refuse('generate_migration: entities array is empty or missing. Pass [{ name, fields: [{ name, type? }] }].');
         }
         const entities: MigrationEntity[] = rawEntities.map((e: unknown) => {
           if (typeof e !== 'object' || e === null) throw new Error('Each entity must be an object with name + fields.');
@@ -7822,7 +7864,7 @@ export class ToolDispatcher {
             : 'No dependencies are declared in package.json yet.';
         }
         if (mdAction !== 'add' && mdAction !== 'remove') {
-          return 'manage_dependency: action must be "add", "remove" or "list".';
+          refuse('manage_dependency: action must be "add", "remove" or "list".');
         }
         const mdResult = mdAction === 'remove' ? removeOneDependency(mdPkg, mdName) : addDependency(mdPkg, mdName, mdVersion);
         if (!mdResult.ok) return `manage_dependency: ${mdResult.message}`;
@@ -8854,7 +8896,7 @@ export class ToolDispatcher {
         if (!this.onSecretsNeeded) {
           // An offer we cannot honour is worse than none: without a verified user there is no vault to
           // save into, so say so instead of showing a popup that would lose the input.
-          return `Cannot ask for keys in this session (no signed-in user). Tell the user to add ${plan.ask.map((a) => a.name).join(', ')} in Settings → Secrets & API Keys. ${notes.join(' ')}`.trim();
+          refuse(`Cannot ask for keys in this session (no signed-in user). Tell the user to add ${plan.ask.map((a) => a.name).join(', ')} in Settings → Secrets & API Keys. ${notes.join(' ')}`.trim());
         }
 
         this.events?.emit({ type: 'narration', agent: 'architect', text: `🔑 ${secretRequestPrompt(plan)}`, ts: Date.now() });
@@ -10852,17 +10894,17 @@ export class ToolDispatcher {
         const symbol = optStr(input, 'symbol');
         const code = typeof (input as Record<string, unknown>)?.code === 'string' ? (input as Record<string, unknown>).code as string : '';
         if (!path || !symbol || !code.trim()) {
-          return 'replace_symbol: "path", "symbol" and "code" are all required.';
+          refuse('replace_symbol: "path", "symbol" and "code" are all required.');
         }
         let current: string;
         try {
           current = await this.actuator.readFile(this.workspaceId, path);
         } catch {
-          return `replace_symbol: file not found: ${path}. Use write_file to create it first.`;
+          refuse(`replace_symbol: file not found: ${path}. Use write_file to create it first.`);
         }
         const result = replaceSymbol(current, symbol, code);
         if (!result.ok || typeof result.content !== 'string') {
-          return result.error || `replace_symbol: could not replace "${symbol}" in ${path}.`;
+          refuse(result.error || `replace_symbol: could not replace "${symbol}" in ${path}.`);
         }
         if (result.content === current) {
           return `replace_symbol: no change — the new code for "${symbol}" is identical.`;
@@ -10890,7 +10932,7 @@ export class ToolDispatcher {
           })
           .filter((x): x is { name: string; kind: IdentifierKind } => x !== null);
         if (files.length === 0 && imports.length === 0 && identifiers.length === 0) {
-          return 'check_conventions: pass at least one of files[], identifiers[], or imports[] to check.';
+          refuse('check_conventions: pass at least one of files[], identifiers[], or imports[] to check.');
         }
         const report = analyzeConventions({ files, identifiers, imports });
         if (report.violationCount === 0) {
@@ -10916,7 +10958,7 @@ export class ToolDispatcher {
         const strArr = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
         const features = strArr(rec.features);
         if (features.length === 0) {
-          return 'generate_release_notes: pass the current "features" array (the app\'s user-visible features).';
+          refuse('generate_release_notes: pass the current "features" array (the app\'s user-visible features).');
         }
         const previousFeatures = strArr(rec.previous_features);
         const note = generateReleaseNote(
@@ -11365,7 +11407,7 @@ export class ToolDispatcher {
         try {
           files = await this.actuator.listFiles(this.workspaceId);
         } catch {
-          return 'codemod_rename: failed to list workspace files.';
+          refuse('codemod_rename: failed to list workspace files.');
         }
         // SCOPED read (default, T3): read code files but KEEP only those referencing the symbol as a
         // whole token, so a repo-wide rename is COMPLETE on 200/1000/5000-file apps — not silently capped
@@ -11407,7 +11449,7 @@ export class ToolDispatcher {
         try {
           files = await this.actuator.listFiles(this.workspaceId);
         } catch {
-          return 'codemod_add_prop: failed to list workspace files.';
+          refuse('codemod_add_prop: failed to list workspace files.');
         }
         // SCOPED read (default, T3): only files referencing the component as a whole token — so adding a
         // prop reaches every definition + call site across a large repo, not a blind first-50. Kill switch

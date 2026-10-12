@@ -158,9 +158,11 @@ describe('📱 the baseline fixes the specific tells, and paints nothing', () =>
     // Decoration must never swallow a tap meant for the content loading underneath it.
     expect(NATIVE_FEEL_CSS).toMatch(/pointer-events:\s*none/);
     // And it stops moving for someone who asked for less motion.
+    // ONE reduced-motion block since autopsy 15e69839 (a repeated block header is an ambiguous edit anchor —
+    // aSeededStylesheetHasNoAmbiguousAnchor), and the skeleton is quieted inside it.
     const reduced = NATIVE_FEEL_CSS.slice(NATIVE_FEEL_CSS.lastIndexOf('prefers-reduced-motion'));
-    expect(NATIVE_FEEL_CSS.match(/@media \(prefers-reduced-motion: reduce\)/g) ?? []).toHaveLength(2);
-    expect(reduced.length).toBeGreaterThan(0);
+    expect(NATIVE_FEEL_CSS.match(/@media \(prefers-reduced-motion: reduce\)/g) ?? []).toHaveLength(1);
+    expect(reduced).toMatch(/\.nb-skeleton \{ animation: none; \}/);
   });
 
   it('⚠️ carries NO backtick — the CSS lives inside a TS template literal', () => {

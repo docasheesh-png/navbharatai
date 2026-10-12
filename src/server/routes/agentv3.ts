@@ -277,11 +277,12 @@ import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMe
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
 import { isPlatformNoticeEcho, platformNoticeEchoReply } from '../AgentV3/platformNoticeEcho';
-import { shouldAnswerPictureRequest, PICTURE_REQUEST_STEER, pictureRequestFallback } from '../AgentV3/pictureRequest';
+import { shouldAnswerPictureRequest, pictureAnswerEnabled, PICTURE_REQUEST_STEER, pictureRequestFallback, CLARIFY_WHAT_TO_MAKE_STEER } from '../AgentV3/pictureRequest';
 import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
 import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
 import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
 import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, seedStateOf, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
+import { runAsUnreadWrites } from '../AgentV3/unreadWrites';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { deletedFilesNotice, userVisibleDeletions } from '../AgentV3/deletedFilesNotice';
@@ -582,7 +583,7 @@ import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshSt
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
 import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, type WasteKind } from '../AgentV3/providerWaste';
 import { readTurnAnswer, answeredWithoutBuilding, modelsOwnWords } from '../AgentV3/turnAnswer';
-import { assessBuildInput } from '../AgentV3/buildableInput';
+import { assessBuildInput, shouldAskWhatToBuild } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { realismIntent } from '../lib/realismIntent';
@@ -595,7 +596,7 @@ import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from 
 import { applyStrictTrial, strictCohort } from '../AgentV3/strictTrial';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, reviewHasUnreadFindings, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, reviewHasUnreadFindings, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths, reviewScopeWords, reviewEngineWords, reviewStoppedAtReasoningRung } from '../AgentV3/ReviewerAgent';
 import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
@@ -10969,24 +10970,34 @@ async function noteBuildOutcome(
      * starter, and the next order was built as an "edit" of it. Read only when it can change the answer
      * (no app of the user's own, an earlier request present); unreadable or slow ⇒ today's behaviour.
      */
-    const earlierRequestLeftAnApp = await (async (): Promise<boolean> => {
-      if (userAppExists || recentRequests.length === 0) return userAppExists || recentRequests.length > 0;
-      if (!Array.isArray(projectFilePaths)) return true;
+    /**
+     * Does the workspace hold NOTHING but untouched files of our own starter (or nothing at all)? Asked by
+     * CONTENT, once, only when a gate needs it — `projectExists` counts files, and our starter is files
+     * (autopsy db07e0af: "Banao" built an invented app because the starter read as the user's project).
+     * Unreadable or slow ⇒ false (somebody's work may be here) — the direction that never refuses a real app.
+     */
+    let starterOnlyMemo: Promise<boolean> | null = null;
+    const workspaceHoldsOnlyOurStarter = (): Promise<boolean> => (starterOnlyMemo ??= (async (): Promise<boolean> => {
+      if (!projectExists) return true;
+      if (userAppExists || !Array.isArray(projectFilePaths)) return false;
       const codePaths = projectFilePaths.filter((p) => couldBeAppCode(p));
-      if (codePaths.length === 0) return false;
-      if (codePaths.length > 24) return true;
+      if (codePaths.length === 0) return true;
+      if (codePaths.length > 24) return false;
       try {
         const got = await raceTimeout(loadWorkspaceFilesByPath(intentWorkspaceId, codePaths), 3_000, 'starterCheck');
         const files: Record<string, string | null> = {};
         for (const p of codePaths) files[p] = typeof got[p] === 'string' ? got[p] : null;
-        return !holdsOnlyOurStarter(files);
-      } catch { return true; }
-    })();
+        return holdsOnlyOurStarter(files);
+      } catch { return false; }
+    })());
+    const earlierRequestLeftAnApp = userAppExists || (recentRequests.length > 0 && !(await workspaceHoldsOnlyOurStarter()));
 
     let intent = classifyIntent(prompt);
     // The reader's fourth answer: "they want something made but have not said WHAT" (report
     // d6d664e6). False unless the reader says so, so every path below is unchanged without it.
     let readerSaysUnclear = false;
+    // The reader's sixth answer: "they want a PICTURE made" (autopsy 15e69839). False unless it says so.
+    let readerSaysPicture = false;
     let readerAnswered = false;
     /** Set when a BUILD order was turned into an edit by the net below — recorded once a report exists. */
     let buildOrderReadAsEdit: { files: number; ownFiles: number; readerRan: boolean } | null = null;
@@ -11018,6 +11029,7 @@ async function noteBuildOutcome(
       );
       intent = smart.intent;
       readerSaysUnclear = smart.unclear;
+      readerSaysPicture = smart.picture === true;
       // Did the READER itself answer, or is this a keyword verdict wearing the reader's return type?
       // The deterministic net below stands in for a reader that did not run; it must not overrule one
       // that did. See `SmartIntent.readerAnswered` (autopsy e9b25b08).
@@ -11059,6 +11071,7 @@ async function noteBuildOutcome(
       intent = 'new_build';
       readerAnswered = false;
       readerSaysUnclear = false;
+      readerSaysPicture = false;
     }
     /**
      * Q-144: the previous turn asked which framework this project should use (its files and its build setup
@@ -11077,6 +11090,18 @@ async function noteBuildOutcome(
       intent = 'edit_existing';
       readerAnswered = false;
       readerSaysUnclear = false;
+      readerSaysPicture = false;
+    }
+    /**
+     * 🎨 THE READER SAW A PICTURE (autopsy 15e69839). A scene described in words, in a script no word list reads,
+     * is answered as a picture request before any offer to build is made — so a "yes" can never build it. Only
+     * where `shouldAnswerPictureRequest` would answer too: no app of the user's here (a "logo" may be for it),
+     * nothing being imported, and the switch on.
+     */
+    const readerPicture = readerSaysPicture && pictureAnswerEnabled() && !userAppExists && !importingThisTurn;
+    if (readerPicture) {
+      console.log('[AGENTV3] the intention reader read a picture request — answering instead of offering a build');
+      intent = 'chat';
     }
     const buildCheck = buildConfirmationEnabled()
       && !offerAccepted
@@ -11193,14 +11218,16 @@ async function noteBuildOutcome(
      */
     const namesNothingToBuild =
       (!inputCheck.buildable && inputCheck.reason === 'no-object') || readerSaysUnclear;
-    const askWhatToBuild =
-      namesNothingToBuild
-      && intent !== 'edit_existing'
-      && !projectExists
-      && recentRequests.length === 0
-      && zipImports.length === 0
-      && !(typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '')
-      && rawAttachments.length === 0;
+    // db07e0af: the workspace is judged by CONTENT (our starter is not a project) and the conversation by
+    // what it names (a "hi" is not a request) — see `shouldAskWhatToBuild`.
+    const askWhatToBuild = namesNothingToBuild && shouldAskWhatToBuild({
+      namesNothing: true,
+      editIntent: intent === 'edit_existing',
+      workspaceHoldsOnlyOurStarter: await workspaceHoldsOnlyOurStarter(),
+      earlierTurns: recentRequests,
+      importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
+      attachments: rawAttachments.length,
+    });
     if (askWhatToBuild) {
       console.log('[AGENTV3] the prompt orders something built but names nothing — asking the user instead of inventing an app');
       intent = 'chat';
@@ -11249,11 +11276,11 @@ async function noteBuildOutcome(
       console.log('[AGENTV3] the prompt asks for a spreadsheet file, not an app — making the file instead of building');
       intent = 'chat';
     }
-    const answerPictureRequest = !echoesPlatformNotice && !answerProjectElsewhere && !answerSpreadsheet && shouldAnswerPictureRequest({
+    const answerPictureRequest = !echoesPlatformNotice && !answerProjectElsewhere && !answerSpreadsheet && (readerPicture || shouldAnswerPictureRequest({
       prompt,
       userAppExists,
       importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
-    });
+    }));
     if (answerPictureRequest) {
       console.log('[AGENTV3] the prompt asks for a picture, not an app — answering instead of building');
       intent = 'chat';
@@ -11556,14 +11583,7 @@ async function noteBuildOutcome(
                 // The SAME constant the architect prompt carries, so a "how do I open it?" that lands
                 // here gets the Preview tab, never `npm run dev`. See NAVBHARATAI_UI_MAP.
                 '\n\n' + NAVBHARATAI_UI_MAP + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +
-                (clarifyWhatToBuild
-                  ? "\n\nThe user has asked for something to be MADE, but their message does not say "
-                    + "WHAT to make. Do NOT guess, and do NOT invent an app or a product name from "
-                    + "their words. Reply in one or two short sentences: say honestly that you did not "
-                    + "understand what to build, and ask them to describe it in a line or two, with one "
-                    + "brief example of the kind of answer that helps (for instance a shop billing app "
-                    + "with GST). Be warm and brief — they are one sentence away from starting."
-                  : '')
+                (clarifyWhatToBuild ? CLARIFY_WHAT_TO_MAKE_STEER : '')
                 + (answerProjectElsewhere ? projectElsewhereSteer(projectElsewhere) : '')
                 + (askUnrelated ? unrelatedRequestSteer(unrelated?.existingHint ?? '', rawAttachments.length > 0) : '')
                 + (answerPictureRequest ? PICTURE_REQUEST_STEER : '')
@@ -18480,7 +18500,7 @@ async function noteBuildOutcome(
           // different files never conflict; the E2B round-trip latency (~150-300ms each) now overlaps.
           // The plan-progress ticker counts writes (order-independent), so completion order is fine.
           await mapWithConcurrency(files, 6, (f, i) =>
-            dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: f.path, content: f.content } }, 'frontend'),
+            runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: f.path, content: f.content } }, 'frontend')),
           );
         };
         // THE WRITE FENCE (autopsy a38c6fef, 2026-09-13). Every fast lane writes through this one
@@ -18538,7 +18558,7 @@ async function noteBuildOutcome(
                 // Route through write_file so each lands in the sandbox AND is recorded in writtenFiles
                 // (the durable store + the reconcile scan below both then see the new package.json).
                 await mapWithConcurrency(Object.entries(foundation.files), 4, ([p, c], i) =>
-                  dispatcher.dispatch({ id: `fast-foundation-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend'),
+                  runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-foundation-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend')),
                 );
               }
             } catch { /* best-effort — a failure here just falls through to the install exactly as before */ }
@@ -18555,7 +18575,7 @@ async function noteBuildOutcome(
                 fastLog(`🩹 Repaired ${ts.fixes.length} tsconfig file(s) that extended an uninstalled base so the dev server can start: ${ts.fixes.map((f) => f.file).join(', ')}`);
                 try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_EXTENDS_REPAIRED', message: `Removed an unresolvable tsconfig extends: ${ts.fixes.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
                 await mapWithConcurrency(Object.entries(ts.patch), 4, ([p, c], i) =>
-                  dispatcher.dispatch({ id: `fast-tsconfig-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend'),
+                  runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-tsconfig-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend')),
                 );
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through to the install as before */ }
@@ -19639,7 +19659,7 @@ async function noteBuildOutcome(
               let current = '';
               try { current = await actuator.readFile(workspaceId, path); } catch { current = ''; }
               if (current !== canonical) {
-                await dispatcher.dispatch({ id: `scaffold-restore-${restored.length}`, name: 'write_file', input: { path, content: canonical } }, 'frontend');
+                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `scaffold-restore-${restored.length}`, name: 'write_file', input: { path, content: canonical } }, 'frontend'));
                 restored.push(path);
               }
             }
@@ -19683,7 +19703,7 @@ async function noteBuildOutcome(
               });
             }
             for (let i = 0; i < fixes.length; i++) {
-              await dispatcher.dispatch({ id: `tscgate-w${i}`, name: 'write_file', input: { path: fixes[i].path, content: fixes[i].content } }, 'frontend');
+              await runAsUnreadWrites(() => dispatcher.dispatch({ id: `tscgate-w${i}`, name: 'write_file', input: { path: fixes[i].path, content: fixes[i].content } }, 'frontend'));
             }
           } catch (e) {
             console.log(`[AGENTV3] agentic tsc-gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19753,7 +19773,7 @@ async function noteBuildOutcome(
               const cssStubs = generateMissingCssModules(fileMapForCss);
               if (cssStubs.length > 0) {
                 for (let i = 0; i < cssStubs.length; i++) {
-                  await dispatcher.dispatch({ id: `cssmod-w${i}`, name: 'write_file', input: { path: cssStubs[i].path, content: cssStubs[i].content } }, 'frontend');
+                  await runAsUnreadWrites(() => dispatcher.dispatch({ id: `cssmod-w${i}`, name: 'write_file', input: { path: cssStubs[i].path, content: cssStubs[i].content } }, 'frontend'));
                 }
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'CSS_MODULES_GENERATED', message: `${cssStubs.length} missing CSS module(s) generated deterministically from component class usage (no repair step spent): ${cssStubs.map((s) => s.path).join(', ')}`, autoResolved: true });
                 events.emit({ type: 'narration', agent: 'architect', text: `🎨 Generated ${cssStubs.length} missing stylesheet(s) from the components' class usage.`, ts: Date.now() });
@@ -19771,7 +19791,7 @@ async function noteBuildOutcome(
               const barrels = await generateMissingBarrels(fileMapForBarrel);
               if (barrels.length > 0) {
                 for (let i = 0; i < barrels.length; i++) {
-                  await dispatcher.dispatch({ id: `barrel-w${i}`, name: 'write_file', input: { path: barrels[i].path, content: barrels[i].content } }, 'frontend');
+                  await runAsUnreadWrites(() => dispatcher.dispatch({ id: `barrel-w${i}`, name: 'write_file', input: { path: barrels[i].path, content: barrels[i].content } }, 'frontend'));
                 }
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'BARRELS_GENERATED', message: `${barrels.length} missing barrel(s) generated deterministically from existing leaf modules (no repair step spent): ${barrels.map((b) => b.path).join(', ')}`, autoResolved: true });
                 events.emit({ type: 'narration', agent: 'architect', text: `📦 Generated ${barrels.length} missing index barrel(s) re-exporting existing modules.`, ts: Date.now() });
@@ -19813,7 +19833,7 @@ async function noteBuildOutcome(
               });
               const created = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
               for (let i = 0; i < created.length; i++) {
-                await dispatcher.dispatch({ id: `missfiles-w${i}`, name: 'write_file', input: { path: created[i].path, content: created[i].content } }, 'frontend');
+                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `missfiles-w${i}`, name: 'write_file', input: { path: created[i].path, content: created[i].content } }, 'frontend'));
               }
             } catch (e) {
               console.log(`[AGENTV3] missing-files gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19880,7 +19900,7 @@ async function noteBuildOutcome(
               recordRepairOutOfScope('syntax', scopedSyntax.dropped);
               const fixed = scopedSyntax.kept;
               for (let i = 0; i < fixed.length; i++) {
-                await dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
+                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend'));
               }
             } catch (e) {
               console.log(`[AGENTV3] syntax gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19952,7 +19972,7 @@ async function noteBuildOutcome(
               recordRepairOutOfScope('missing-export', scopedExport.dropped);
               const fixed = scopedExport.kept;
               for (let i = 0; i < fixed.length; i++) {
-                await dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
+                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend'));
               }
             } catch (e) {
               console.log(`[AGENTV3] missing-export gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -21815,7 +21835,9 @@ async function noteBuildOutcome(
               // Playwright suite 17 seconds later — two codes in one build contradicting, with
               // TEST_SUITE_UNVERIFIED stating the honest end state in the same report. Cleared by its own
               // sentence, never by its code: READINESS_WARNING carries many unrelated facts.
-              buildDiag.resolveOnRecheck('READINESS_WARNING', { messageIncludes: 'No tests at all' });
+              // 🔴 …and `resolveOnRecheck` did nothing here, ever (autopsy db07e0af): readiness warnings are recorded
+              // already resolved, so it skipped them. The sentence is FALSE now, so it is withdrawn, not "resolved".
+              buildDiag.retract('READINESS_WARNING', 'No tests at all', `an end-to-end suite was written into the project afterwards (${added.join(', ')})`);
             }
           } else if (decision.reason) {
             // Recorded even when nothing was written: a silent skip cannot be told from a broken skip.
@@ -24522,6 +24544,11 @@ async function noteBuildOutcome(
             signal: reviewAbort.signal,
             ...(reviewPlan.maxSteps !== undefined ? { maxSteps: reviewPlan.maxSteps } : {}),
             ...(reviewOneCall ? { toolsOverride: [] } : {}),
+            // 🧬 A SUGGESTION IS NOT WORTH A REASONING ENGINE'S MINUTE (autopsy db07e0af). The one-call review has
+            // 45 s; on that build it walked onto an engine that reasons before every answer and the user watched
+            // "running the final checks" for 56 s for nothing. The fast lane already stops in front of such a rung
+            // for exactly this reason (autopsy 33812996); the suggest-only review is the same kind of call.
+            ...(reviewPlan.mode === 'suggest' && reviewOneCall ? { stopAtReasoningRung: true } : {}),
           });
           const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount, { previewGreen: reviewPlan.mode === 'suggest' });
           if (reviewPlan.mode === 'suggest') {
@@ -24582,6 +24609,11 @@ async function noteBuildOutcome(
           }));
           try {
             review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');
+            // It stopped in front of a reasoning engine instead of spending its budget there — said, never silent.
+            const stoppedAt = reviewStoppedAtReasoningRung(reviewerSaid);
+            if (stoppedAt) {
+              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_NOT_RUN_REASONING_ENGINE', autoResolved: true, message: `The suggest-only review was not run: the engine left on the chain (${stoppedAt}) reasons before every answer, and this review gets one ${Math.round(reviewBudget / 1000)} s call — it stopped instead of keeping the user waiting for an answer that would not arrive in time. Its suggestions are not available for this build; "review it" runs a full review on its own.` }); } catch { /* best-effort */ }
+            }
           } catch (e) {
             // Timeout (or a reviewer error): the app is built + compiles + saved — say so HONESTLY
             // instead of silently dropping the completeness check (the empty-`review` report gap).
@@ -24614,7 +24646,7 @@ async function noteBuildOutcome(
               // which is strictly more than the nothing this branch used to deliver.
               events.emit({ type: 'narration', agent: 'architect', text: formatPartialReview(salvaged), ts: Date.now() });
               try { buildDiag.recordReview(formatPartialReview(salvaged, 50)); } catch { /* best-effort */ }
-              try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_PARTIAL', message: `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — but ${salvaged.issues.length} finding(s) it had already reported were RECOVERED from its own narration instead of discarded. Leads from an UNFINISHED review: they cannot fail a build and do not drive the auto-fix.`, autoResolved: false }); } catch { /* best-effort */ }
+              try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_PARTIAL', message: `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${reviewScopeWords(reviewOneCall ? (reviewInline?.files.length ?? 0) : null, rFiles.length)}${reviewEngineWords(buildDiag.lastServedModel())} — but ${salvaged.issues.length} finding(s) it had already reported were RECOVERED from its own narration instead of discarded. Leads from an UNFINISHED review: they cannot fail a build and do not drive the auto-fix.`, autoResolved: false }); } catch { /* best-effort */ }
               review = null;
             } else {
               events.emit({ type: 'narration', agent: 'architect', text: timedOut
@@ -24639,7 +24671,7 @@ async function noteBuildOutcome(
               // it sat in the app's problem list). Where the review could have REPAIRED, it stays a warning.
               const suggestOnly = reviewPlan.mode === 'suggest';
               barrenPhases.add(PHASE_POST_BUILD_REVIEW);
-              try { buildDiag.record({ phase: 'build', severity: suggestOnly ? 'info' : 'warning', code: suggestOnly ? 'REVIEW_SUGGESTIONS_NOT_READY' : 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build` : `Post-build review errored — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build`, autoResolved: suggestOnly }); } catch { /* best-effort */ }
+              try { buildDiag.record({ phase: 'build', severity: suggestOnly ? 'info' : 'warning', code: suggestOnly ? 'REVIEW_SUGGESTIONS_NOT_READY' : 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${reviewScopeWords(reviewOneCall ? (reviewInline?.files.length ?? 0) : null, rFiles.length)}${reviewEngineWords(buildDiag.lastServedModel())} — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build` : `Post-build review errored — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build`, autoResolved: suggestOnly }); } catch { /* best-effort */ }
               review = null;
             }
           } finally {

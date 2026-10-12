@@ -23,6 +23,7 @@ import { withoutPreviewBridge } from './previewBridge';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { GOLDEN_SCAFFOLDS, goldenScaffoldFiles } from './goldenScaffolds/registry';
 import { strictTsconfig } from './strictTrial';
+import { isKnownSeedVersion, type SeedSource } from './seedVersions';
 
 /** More files than this present and it is not a fragment of a starter (a template is a handful). */
 export const MAX_FRAGMENT_FILES = 24;
@@ -76,6 +77,12 @@ export function starterCompletedNote(count: number, presentBefore?: number): str
   return ` · starter=completed ${count} missing template file(s)${had} — the workspace held only a piece of our own starter`;
 }
 
+/**
+ * The two template sets the engine passes around, and the history each one stands for. A caller handing in its
+ * own list (a test, a single template) is answered by that list alone, byte for byte as before.
+ */
+const SEED_HISTORY_OF = new WeakMap<object, SeedSource>();
+
 /** Every template's files, built once — what "our own starter file" means anywhere in the engine. */
 let starterTemplateCache: Array<Record<string, string>> | null = null;
 export function starterTemplates(): Array<Record<string, string>> {
@@ -86,6 +93,7 @@ export function starterTemplates(): Array<Record<string, string>> {
     try { out.push(reg.getProvider(key).getFiles([])); } catch { /* a template that cannot list is skipped */ }
   }
   starterTemplateCache = out;
+  SEED_HISTORY_OF.set(out, 'starter');
   return out;
 }
 
@@ -101,6 +109,7 @@ export function platformSeedTemplates(): Array<Record<string, string>> {
     try { out.push(goldenScaffoldFiles(g)); } catch { /* a template that cannot list is skipped */ }
   }
   seedTemplateCache = out;
+  SEED_HISTORY_OF.set(out, 'any');
   return out;
 }
 
@@ -138,7 +147,11 @@ export function isOurStarterFile(
   templates: ReadonlyArray<Readonly<Record<string, string>>>,
 ): boolean {
   if (typeof content !== 'string' || !content.trim()) return false;
-  return templates.some((t) => typeof t[path] === 'string' && sameFile(path, content, t[path]));
+  if (templates.some((t) => typeof t[path] === 'string' && sameFile(path, content, t[path]))) return true;
+  // 🧬 AN OLDER VERSION OF OUR STARTER IS STILL OURS (autopsy db07e0af). Only TODAY's templates are above, so a
+  // workspace still holding the starter we wrote before the design kit last changed read as somebody's app.
+  const source = SEED_HISTORY_OF.get(templates);
+  return source !== undefined && isKnownSeedVersion(path, content, source);
 }
 
 /**

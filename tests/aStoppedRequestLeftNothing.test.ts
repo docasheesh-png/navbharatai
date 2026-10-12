@@ -38,7 +38,9 @@ describe('an earlier request counts as a project only if it left one', () => {
     const route = strip(read('src/server/routes/agentv3.ts'));
     expect(route).toContain('{ projectExists: earlierRequestLeftAnApp, recentRequests },');
     expect(route).not.toContain('{ projectExists: userAppExists || recentRequests.length > 0, recentRequests },');
-    expect(route).toContain('return !holdsOnlyOurStarter(files);');
+    // Since db07e0af the content check is one memoised helper, shared with the "what should I build?" question.
+    expect(route).toContain('const earlierRequestLeftAnApp = userAppExists || (recentRequests.length > 0 && !(await workspaceHoldsOnlyOurStarter()));');
+    expect(route).toContain('return holdsOnlyOurStarter(files);');
   });
   it('a build order read as a build is sized as an app, not as chat', () => {
     expect(analyzeRequest({ prompt: 'An AI automation app', buildIntent: 'new_build' }).taskType).toBe('app_unsized');

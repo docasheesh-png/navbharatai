@@ -94149,6 +94149,43 @@ readers + a critic, fixed in three worktree-isolated groups, each adversarially 
   - `SERVERLESS_PAYMENT_NOT_SET_UP`: a later setup that worked did not answer the earlier failure. The message now names the table, and a success answers that table only. This matters because batch three gave this code a button.
 - **Tests:** `tests/aDefectTheUserIsShownHasAButton.test.ts` gained two blocks. Each was reverted and seen to fail. The backlog stays at 14: neither code changed home.
 
+### 2026-10-12 — #3677 merged (autopsy 46e2d74b); 26 queue rows closed
+
+- **#3677 merged** on the admin's word ("merge karo"). The final head had `main` (#3676) merged in and was re-gated on that state: vitest 36931 passed / 1 skipped / 0 failed; typecheck, noUnusedImports, native:guard, typecheck:server, build, test:bundle, boot:check and deps:server-gate all rc=0. CI was green.
+- **Closed (✅):** Q-830..Q-841 except Q-842 and Q-843, plus Q-844 and Q-847..Q-859. That is 26 rows, removed from the open table and appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`. The ledger stays in the 2026-10-11 entry above.
+- **What to watch on the next real game build:**
+  - `GAME_KIT_SEEDED` appears before the first model call;
+  - the player's car is seen from behind;
+  - LEFT turns it left on screen;
+  - the playtest presses the Start button and is not reported as `GAME_PLAYTEST_NOT_RUN`;
+  - a `[BROKEN / …]` reviewer tag is counted.
+- **Still open from this autopsy (NOT COMPLETE):**
+  - 🟡 waiting on the admin: Q-842, Q-845 (money), Q-846 and Q-860;
+  - OPEN: Q-843, Q-861, Q-862, Q-863, Q-864 and Q-865.
+
+### 2026-10-12 — admin decisions on the four 🟡 rows of autopsy 46e2d74b
+
+Admin, verbatim: *"q845- game chal raha hai. mekup lena chaiye!! waki sabhi me apki bat accept"*.
+
+- **Q-845 ✅ RESOLVED (admin decision: keep the markup).** The game's preview ran, so the existing billing law applies: the markup needs a preview that ran, and that condition was met. My recommendation had been (b), a markup only on a playtest that ran. The admin chose (a). Two things that made (b) attractive are now gone: the playtest presses Start (Q-838), and a `[BROKEN / …]` reviewer tag is read (Q-839). No code change.
+- **Q-842 ✅ RESOLVED as not-a-defect.** The admin accepted recommendation (a). Two GLM crawls (30 s) fall within Q-009's accepted bound, and the bench behaved as designed.
+- **Q-860 ✅ RESOLVED (admin decision: keep).** The admin accepted recommendation (a). Vehicles are already seen from behind through the chase camera. The rig's default yaw for non-vehicle cameras is not flipped, because a flip would turn every existing shell game round for users mid-game.
+- **Q-846 → OPEN, to build.** The admin accepted recommendation (a). When a user names a phone that cannot run the app, the reply says so plainly. The build then goes ahead as a light 2D, keypad-first web game.
+- All three closed IDs were appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit.
+
+#### 2026-10-12 — Q-846 correction (admin): the phone was the game's ORIGIN, not its target
+
+Admin, verbatim: *"user ne kaha tha, nokia ke phone me jo game tha, woh game banana hai! na ki nokia phone ke liye game banana hai"*.
+
+- **The note above misread Q-846, and so did the autopsy.** "Create an racing game for Nokia c 2-01" asked for the classic racing game that came on that phone. It did not ask for a game meant to run on it.
+- **The withdrawn plan:** the option-(a) design ("say plainly it cannot run there") answered a question the user never asked.
+- **The class:** a classic phone named in a game request names the game's ORIGIN and STYLE, not its platform.
+- **The corrected Q-846:**
+  - a retro 2D recreation with that era's look and mechanic;
+  - playable in any browser, with touch and keys;
+  - an original title, with no brand logo;
+  - one plain line telling the user how the request was read;
+  - no refusal.
 ### 2026-10-12 — #3676 merged; Q-821 built; Q-381 batch six (14 → 0, the backlog is empty)
 
 The admin's instruction: *"rukna hi nahi hai!! sabhi ke liye han hai"* (don't stop; yes to everything).
@@ -94204,6 +94241,33 @@ Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-
 - The playtest line should show no camera or steering verdict on a game the kit built.
 - A "KIT FILES BROUGHT UP TO DATE" note should appear only when an older game is edited.
 
+### 2026-10-12 — #3678 merged; its 10 rows closed
+
+- **#3678 merged** (1af815af8): Q-821, Q-381 batch six (the finding backlog is empty), Q-816, and the seven game rows of 46e2d74b.
+- **Closed** (deleted from `BUILD_REPORT_QUEUE.md`, appended to `BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main`): Q-381 Q-816 Q-821 Q-843 Q-846 Q-861 Q-862 Q-863 Q-864 Q-865. Their ledgers are in the entries above.
+- **Two CI rounds before green, both real, both said in the PR:**
+  - `aGameShipsItsControlsTest` read a child vitest's summary as text, and CI's colour codes split it. The child now runs without colour.
+  - A full local run under load showed that the Q-861 probe voided a correct chase view on a dropped frame. A too-fast strip is now left out, and the farther strips still vote. It holds at about 20 fps, the sandbox renderer's real speed; there are real-Chromium pages for it.
+- **Watch on the next real racing build:**
+  - The playtest line should give no camera or steering verdict on a game the kit built.
+  - Any verdict it does give names the fix.
+- **#3679 (another session) still marks Q-846 as OPEN.** Whichever of the two merges second hits a conflict on that row. The correct resolution is the deletion: Q-846 is resolved and in the closed register.
+#### 2026-10-12 — duplicated work, stopped: Q-843 and Q-861..Q-865 were built twice
+
+- **What happened:** this session started a workflow on Q-846, Q-843 and Q-861..Q-865. Before it started, the open-PR list was checked and was empty.
+- **The other session:** a second session, on `claude/build-report-autopsy-tmn3ov`, was building the same rows at the same time. It merged them as #3678.
+- **What this session did:** it saw #3678 on `main`, stopped its workflow, and threw its duplicate implementations away unmerged. They lived only in local worktrees.
+- **The lesson:** checking the open PRs once, at the start, does not protect work that runs for hours. Re-list open PRs and re-fetch `main` before each long fan-out, and again at every check-in. A row another session can see as OPEN is free to take until a PR names it.
+- **Rows:** Q-843 and Q-861..Q-865 belong to #3678's session. Q-846 stays with this session, under the admin's corrected reading: #3678's user message is the withdrawn "target" reading, and this session reworks it.
+
+#### 2026-10-12 — the corrected Q-846 is re-filed as Q-868; my row Q-866 is renumbered Q-867
+
+- **Why not reopen Q-846:** #3680 (another session) closes Q-846, because the target-device build merged in #3678. A closed ID may not come back (`aClosedQueueRowStaysClosed`). So this branch now leaves the Q-846 line exactly as `main` has it, and the two PRs cannot conflict on it.
+- **What Q-846's closure covers:** only the target-device build. The admin's correction lives in **Q-868**, which records:
+  - the class: a classic phone named in a game request is the game's origin;
+  - that #3678's detector never matched the real prompt `Nokia c 2-01`;
+  - the build this session does next.
+- **Renumbered row:** #3681 (a third session) took **Q-866** for "basic phone" ≠ keypad phone. The heavy-import row this branch had filed as Q-866 is now **Q-867**.
 ### 2026-10-12 — Q-866: "basic phone" is not a keypad phone (found reviewing #3678)
 
 - **The problem:** `deviceTarget.ts` (Q-846, merged in #3678) listed `basic` and `button` as words that name a keypad phone. Both are also app words: "ek basic phone book app banao", "a basic phone directory for my shop", "build a basic phone number validator" and "big button phone dialer" all matched. Each of those users would have been told that no web app can run on their phone, the builder would have been forced to a light 2D keys-first build, and the game kit would have refused three.js.
@@ -94213,6 +94277,33 @@ Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-
 - Raised as a review comment on #3678 before it merged; the PR merged without it, so this is its own change.
 
 
+### 2026-10-12 — Q-869: the playtest's verdicts no longer depend on frame timing
+
+Another session, gating #3679, reported that under CPU load the full suite flipped two #3678 racing verdicts. Q-865 called a working countdown game stalled. Q-861 missed mirrored steering. The code is mine (#3678), so the row is mine.
+
+**What I could and could not reproduce.**
+- I could not reproduce the exact 4-CPU flip.
+  - Throttling the page's CPU 4× and 8× did not do it.
+  - Three full colour-on suite runs here stayed green.
+- What I did reproduce shows the same class. A WORKING racer with a 9 s "Get ready" countdown was called stalled, because the second accelerator look lasted only 2 s.
+- The class is a verdict read from frame timing. Q-869 names the same class, and it was a real precision hole even on an idle machine.
+
+**The fix, in two parts.**
+- **Part A.** The second look now holds the gas and looks once a second for up to 8 s, stopping as soon as anything moves.
+  - "The car never moves" needs the full look, with at least 40 frames drawn. A page that a loaded machine stopped drawing shows the same picture whatever the car does.
+  - Flow reads now collect 14 drawn frames, with up to 3 s to draw them.
+- **Part B (DNA level, the suggestion in Q-869).** For three.js games, the camera and steering verdicts are read from the SCENE, not from pixels.
+  - three.js announces its renderer to `__THREE_DEVTOOLS__`. Wrapping `render()` gives us the scene and the camera.
+  - Positions are state, so a slow machine moves them less, never the wrong way.
+  - The vehicle is the object the accelerator sped up over its idle speed, so a traffic car is never chosen.
+  - The scene only judges when the camera follows the vehicle. A treadmill world otherwise reads as "camera ahead" — measured, ahead = 1.
+  - Pixels judge only what the scene cannot, and never against it.
+
+**Locks.**
+- Real Chromium and real three.js: chase, front, mirrored and treadmill pages, each with a faster traffic car. Margins: ahead ±1, looks 1, turn ±33–38°.
+- The 9 s countdown and lost-first-key pages.
+- Reverted 5 ways: the long look, the frame guard, the follow guard, the idle subtraction, and the scene's precedence.
+- The KB was updated: the camera check reads a 3D game's scene, and a busy machine is never read as a stalled car.
 ### 2026-10-12 — Billing, revenue and profitability audit (audit only — no code changed)
 
 - **Asked by the admin:** a forensic audit of the whole billing path (external brief, adapted under the external-suggestion rule). Report: `docs/billing-audit-2026-10-12.md`. Built on the 2026-09-12 money audit and #3538 rather than redoing them.
@@ -94221,3 +94312,95 @@ Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-
 - **Other findings (Q-881 … Q-894):** FX rate without a sanity band; per-account build lock in memory only; ₹100 free credit per web account and no cap on the real cost of failed builds; store packs not modelling GST; Play purchases acknowledged by the client only; PII in payment logs; raw gateway error to the browser; failed/dropped webhooks answered 400; unencoded redirect param; fail-open amount check; revenue card not net; aux remainder at Sonnet rate; 500-entry ledger cap; coupons without expiry or total cap.
 - **Tests executed:** 101 billing test files, 1,935 passed, 0 failed, 0 skipped.
 - **State:** every finding is a 🟡 row in `BUILD_REPORT_QUEUE.md`, waiting on the admin's approval of the ordered plan in §8 of the report. No fix is implemented until the admin approves.
+
+### 2026-10-12 — Autopsy db07e0af ("Banao", Weak tier, todo app, ₹96.93) — fifth + sixth rule
+
+**The build.** The user typed only "Banao" into a project that held nothing but NavBharatAI's persisted starter. The engine built a todo app nobody asked for and billed ₹96.93. On the way it shipped a dark-mode button that did nothing until a repair half-fixed it, a summary that sold "skeleton loading", and a 56 s wait for a review that never answered.
+
+**Tally (fifth rule).**
+- ✅ self-healed: 3. The enum `import type` heal (TS1361), the dark-mode explorer repair, and the duplicate stylesheet import removed after render.
+- 🔀 worked around: 1. The fast lane handed off before the reasoning rung, and the whole app then ran on that rung.
+- ⏭️ skipped: 2. The unimported-component hand-back was ignored, and the review was abandoned.
+- ❌ shipped imperfect: 4. An app nobody asked for, an unused spinner, a "skeleton loading" claim, and a false "no problems recorded".
+- 🥵 struggled: 5. The GLM crawl (15 s), TS2307 compiled 4× during salvage, the review's 45 + 11 s, first render at 248 s, and the ETA 1.27× over its band.
+
+**Came back before — and why.**
+- "No tests at all" was "fixed" by Q-517 (39e982bd) and never fired. Readiness warnings are recorded already resolved, so `resolveOnRecheck` skipped them, and the test recorded the warning by hand.
+- STYLE_RULES_RESUMED's zero counts were fixed for the a11y part only (68f0a486). The orphan part was missed.
+- The enum heal had fired in f496c75b, 6cd698cc and 120eb52f. Each fix treated the import; nothing removed the enum.
+- A dead theme switch was 8257ca59, fixed by a write-time note only.
+
+**Ledger (problem → root cause → class → siblings → lock).** Every row is in `BUILD_REPORT_QUEUE.md` (Q-915 … Q-929).
+- **Q-915 "Banao" built an app.**
+  - Root cause: the ask-what-to-build guard read a file count, so our starter counted as a project, and a "hi" counted as an earlier request.
+  - Class: a presence check standing in for "is anything here somebody's work".
+  - Lock: `aWordThatNamesNothingIsAskedAbout`.
+- **Q-916 Dead dark-mode switch.**
+  - Root cause: the kit's dark palette lived only in the media query.
+  - Class: a switch hook nothing styles.
+  - Siblings:
+    - kitRestore and rewrites dropping the switch;
+    - the preview panel's own switch, which could not force light;
+    - the architect prompt claiming a `src/theme.tsx` the vite starter lacks;
+    - "ours" meaning byte-equal to today's template.
+  - The last sibling is now `platformSeedHistory`: every starter and chip version since 2026-07-01, a generator, and a census.
+  - Lock: `theDarkModeButtonSwitchesTheKit` (real Chromium, 18 cases) and `anOlderStarterIsStillOurs`.
+- **Q-917 Enum heal.**
+  - Root cause: the contract prompt asked for enums.
+  - Fix: unions in the contract and the architect prompt.
+- **Q-918 Ignored hand-back, parroted claim.**
+  - The example now matches the item handed back.
+  - repairClaim now covers in-run hand-backs, and HANDBACK_IGNORED is recorded.
+  - Lock: a runner replay of this build.
+- **Q-919 "No tests at all".**
+  - Fix: `BuildDiagnostics.retract`, locked through the real `done` recorder.
+- **Q-920 Review on a reasoning engine.**
+  - Fix: `stopAtReasoningRung` is plumbed to the suggest-only one-call review.
+  - Honest timeout lines: what the review was handed, and the last engine.
+- **Q-921 False success sentence and zero counts.**
+  - Fix: count what the report lists.
+- **Q-922 Unread writes.**
+  - Class: platform writers paying for, and spending, the model's steering.
+  - Fix: `unreadWrites`. All 10 route sites are marked, with a census.
+- **Q-924 ETA.** It follows from Q-920 and Q-916.
+- **Q-925 Speculative files.** Planner rules plus `dropProvidedTwins`.
+- **Q-927 Kit claim.** `kit-feature-claimed` in the summary audit.
+- **Q-928 Stylesheet import.** Removed at the write door.
+- **Q-929 Test harness.** It used a missing `.on`; it now uses `subscribe`.
+- **Q-923 GLM crawl.** ✅ not-a-defect by the Q-842 precedent (the admin accepted (a)). Closed.
+- **Q-926 248 s to first render on Weak.** 🟡 BLOCKED on a routing decision (options in the row).
+
+**Proof.** Every fix was reverted and its test failed: 6 ways for the theme/seed work, 2 for the intent work, and 10 for the rest.
+
+**Proactive (sixth step).**
+- The single biggest lever is Q-926. A simple app on Weak spent 4 minutes on a reasoning engine after a 15 s GLM crawl.
+- Measure option (b) on five real builds before touching the ladder.
+
+**Also closed this turn.** Q-869 (#3680 merged).
+---
+
+## 2026-10-12 — Autopsy 15e69839 (Tamil "GST bill" build, weak tier, stopped at 8.4 min)
+
+Admin: *"pahle build report wala kam, bad me!"* Real report: a Tamil user asked "like a 17-year-old boy leaning on a tree,
+to be made", was told we did not understand ("for example, a shop billing app with GST"), wrote "OK, like a man making a GST
+bill in a shop", was offered an app, said "ஆம்", and got a GST billing app. It rendered at 299 s; one KIMI call then ran
+~3 minutes with no answer, and the user pressed Stop at 456 s. Billed ₹97.20.
+
+**Tally:** ✅ self-heal 1 (3 transient TS2307 — by design, see ledger) · 🔀 workaround 1 (complexity second opinion for an
+unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong 1 (an app built for a picture request) · 🥵 struggle 3
+(3-min silent call after green; edit_file not-unique + read + retry; replace_symbol reported success on failure).
+
+| Item | Problem | Root cause → class | Fix (siblings) | Lock (reverted → failed) |
+|---|---|---|---|---|
+| ❌ Intent | Picture request in Tamil built as an app | Picture intent read only Latin/Devanagari; the reader had no "picture" answer; the clarify steer planted an app example | Detector reads the 9 other scripts (the safety triage's own word lists); reader's 6th answer `picture` answered before any offer; steer asks app OR picture, one example each; KB updated. Siblings: free chat, Doctor AI, Professionals use the same detector | `aSceneInAnyLanguageIsAPicture` (11 failed) |
+| 🥵 Stall | 3-min silent call after the app rendered | Reasoning counts as stream activity, so only the 300 s ceiling bounded a call that began no answer; that ceiling was then reported as "build budget reached", which ends the chain without fallback | Answer must begin within the rung's own timeout when a next rung exists; the provider's own ceiling reads as a timeout | `aThinkingRungMustBeginItsAnswer` (2 failed) |
+| Honesty | The stopped call appeared nowhere; `calls=0` | Stop path returned before the recorder | Recorded as LLM_CALL_STOPPED with its running time; waste line names user stops | `theCallRunningAtStopIsOnTheRecord` (4 failed) |
+| Honesty | KIMI told "the image is attached" with no image | Chat Completions format drops images | Gap stated where the image was (tool results and user attachments) | same test |
+| 🥵 replace_symbol | Failure returned as success | A returned string is a successful tool result | 19 returns → `refuse()` | `aFailedToolNeverReadsAsSuccess` (2 failed) |
+| 🥵 edit_file | not unique (2 matches) | Our starter CSS repeated the reduced-motion block — 981ce4cc fixed only the message | Blocks merged (design kit + native feel); census on any repeated `@media` | `aSeededStylesheetHasNoAmbiguousAnchor` (1 failed) |
+| ⚠️ DESIGN_CONSISTENCY | 7 off-grid spacings | Not a defect: the deterministic snap correctly writes nothing after a Stop | — | — |
+| Charge wording | "charged in full" vs "not a full build" | Not a defect: both mean the real cost of the work done, 0% discount | — | — |
+| 💰 Refund | ₹97.20 for a misread picture request | Admin's decision | 🟡 Q-895 (recommend refund) | — |
+
+**What to watch for on the next report:** a reasoning-only KIMI call ends at ~150 s as a timeout and the chain falls to GLM;
+`LLM_CALL_STOPPED` carries "it had been running Ns"; a non-English scene description gets a picture answer, not a build offer.

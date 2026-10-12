@@ -15616,6 +15616,12 @@ async function noteBuildOutcome(
         languageRule: () => appLanguageInstruction(prompt, { editingExistingApp: intent === 'edit_existing' }),
         // The SAME AI-in-app rule the architect reads (autopsy d8ed307a) — the child writes the AI client.
         aiRule: () => aiInAppRule(),
+        // The SAME classic-phone rule the architect's prompt opens with (Q-868): a writing specialist builds the game
+        // too, and until this line only the architect and the fast lane heard which phone the user named.
+        deviceRule: () => {
+          const phone = !isImportTurn ? namedNonSmartphone(prompt) : null;
+          return phone ? nonSmartphoneBuildRule(phone.device) : '';
+        },
         // And the user's own words (autopsy 6db0ff31) — the two lines above derive from them, and a
         // child handed only a thin instruction asked the ARCHITECT "what would you like me to build?".
         // The specialist is handed the request WITH what came with it (autopsy 3f959fde: `planning.text` = the
@@ -17508,6 +17514,7 @@ async function noteBuildOutcome(
       const unknownNameSuffix = (unknownNameNote ? `\n\n${unknownNameNote}` : '') // and the unknown-word note (Q-067)
         + (scriptRequestNote ? `\n\n${scriptRequestNote}` : ''); // and the script-request note (Q-274)
       const requestScopeSuffix = requestScopeText ? `\n\n${requestScopeText}` : ''; // and the request-scope rule (autopsy 70e030bb)
+      const keypadPhoneSuffix = keypadPhoneForBuild ? `\n\n${nonSmartphoneBuildRule(keypadPhoneForBuild.device)}` : ''; // and the classic-phone rule (Q-868)
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -17608,7 +17615,10 @@ async function noteBuildOutcome(
         }
         const todos = state.snapshot().todos;
         if (todos.length > 0) {
-          buildPrompt = `${prompt}\n\nApproved plan:\n${todos.map((t) => `- ${t.title}`).join('\n')}`;
+          // The approved plan is ADDED to the build prompt, never swapped in for it: rebuilt from the bare `prompt`, it
+          // silently dropped every note prepended above (the classic-phone rule, the request scope, the unknown-name and
+          // unsupported-stack notes …) on exactly the builds a user approved by hand (found 2026-10-12, Q-868).
+          buildPrompt = `${buildPrompt}\n\nApproved plan:\n${todos.map((t) => `- ${t.title}`).join('\n')}`;
           // PLAN SYNC: put the spinner on the first item the moment the build starts (before the
           // first file is written), so the plan is never frozen at all-pending.
           state.setTodos(computePlanProgress(todos, 0, false));
@@ -17715,7 +17725,8 @@ async function noteBuildOutcome(
             // The planner decides every module's files before a builder sees the stack note, so it gets the
             // note too — or a Kotlin request is planned as Gradle modules the builder may not write (autopsy
             // 042e472f, 2026-10-01). The plan's goal carries it, so every module turn reads it again.
-            const plannerGoalNotes = [unknownNameNote, scriptRequestNote].filter(Boolean).join('\n\n');
+            // The classic-phone rule rides the planner's goal too (Q-868): the plan decides what gets built.
+            const plannerGoalNotes = [unknownNameNote, scriptRequestNote, keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device) : ''].filter(Boolean).join('\n\n');
             const plannerGoalBase = plannerGoalNotes ? `${plannerGoalNotes}\n\n---\n\n${prompt}` : prompt;
             const plannerGoal = unsupportedStackAsked ? `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${plannerGoalBase}` : plannerGoalBase;
             const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
@@ -18660,7 +18671,7 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           // A planned config file the starter already has is edited, never rewritten blind (isProjectConfigPath).
           readExisting: readExistingProjectFile,
           stopLane: () => (fastLaneReasoningRung
@@ -24029,7 +24040,7 @@ async function noteBuildOutcome(
         const keypadPhone = result.ok && expectsArtifacts && !isImportTurn ? namedNonSmartphone(prompt) : null;
         if (keypadPhone) {
           result = { ...result, summary: `${result.summary}${nonSmartphoneUserLine(keypadPhone.device)}` };
-          buildDiag.record({ phase: 'readiness', severity: 'info', code: 'NON_SMARTPHONE_TOLD', autoResolved: true, message: `The request named ${keypadPhone.device}, a keypad phone no web app runs on — the user was told, and the build was steered to a light 2D keys-first version.` });
+          buildDiag.record({ phase: 'readiness', severity: 'info', code: 'NON_SMARTPHONE_TOLD', autoResolved: true, message: `The request named ${keypadPhone.device}, a classic keypad phone — the build was steered to a light 2D version (touch and keys; for a game, the classic game from that phone unless the request asked otherwise), and the user was told what was built.` });
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 

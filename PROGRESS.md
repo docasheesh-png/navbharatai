@@ -94416,3 +94416,27 @@ unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong
   - No "skeleton loading" is claimed without a skeleton.
 - **Still open:** Q-926 (248 s to first render on Weak). 🟡 BLOCKED on the admin's routing decision; the options are in the row.
 - **Report db07e0af, final count:** 15 items. ✅ 14 (13 fixed by #3687, plus Q-923 not-a-defect). 🟡 1 (Q-926). Remaining 0.
+
+### 2026-10-12 — Q-868 built the simple way (#3689); a 9-round regex reader abandoned
+
+**What the admin asked:** "Create an racing game for Nokia c 2-01" asked for the classic game that came on that phone. It did not ask for a game meant to run on the phone.
+
+**Fix (#3689):** the regex now only detects the phone and leaves the meaning to the builder, which reads language.
+- **Detector:** it uses Q-846's own vocabulary, not widened, and tolerates spaces and dashes. It now matches the real prompt `Nokia c 2-01`, which the merged Q-846 regex never did.
+- **Builder instruction:** the builder is told the likely meaning, the classic game from that phone in a retro 2D look, together with "if the request asks for something else, build what it asks".
+- **User line:** it says only what is true under every reading: what was built and where it plays. It makes no claim about what the user meant and never says "cannot run", which was false for JioPhone and KaiOS.
+- **Every lane gets the rule:** the architect, the fast lane, the writing sub-agents and the planner's goal.
+- **Approved plans keep their notes:** an approved plan no longer rebuilds the build prompt from the bare request, which had dropped every note prepended to it.
+
+**The lesson:** the first attempt tried to read intent with regexes over nine adversarial review rounds: origin vs target, refusals, owners, topics and Hinglish word order.
+- It never converged. Every round found new phrasings.
+- In round 5 it changed the classification of requests that name **no** phone, which is a regression on `main`.
+- It was not merged. About 7M agent tokens went into it.
+- The rule for next time: when the question is "what did the user mean", give the deterministic layer only what is true under every reading, and let the model decide the rest.
+
+**Found while building:**
+- **Q-919:** milestone mode replaces `buildPrompt` and drops every prepended note. The plan-approval sibling of the same bug is fixed here.
+
+**Locks:**
+- `tests/aPhoneTheAppCannotRunOnIsNamed.test.ts`: the real prompt is the fixture. Six guards, R1–R6, each reverted and seen to fail.
+- `theRacingCarShowedItsHeadlights` 1c: the real prompt gets the 2D kit. The 3D guarantees are re-pinned on the same race without the phone.

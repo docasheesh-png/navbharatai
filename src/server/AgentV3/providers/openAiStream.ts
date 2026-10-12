@@ -60,6 +60,12 @@ export type StreamStopCause =
   /** No chunk arrived for the idle bound — the provider went quiet mid-answer. */
   | 'idle'
   /** The caller's own budget/ceiling ran out while chunks were still arriving. */
+  /**
+   * Only REASONING arrived until the rung's own answer bound — no text, no tool call (autopsy 15e69839,
+   * 2026-10-12). Reasoning keeps the idle clock and the crawl floor satisfied, so a rung that thought for
+   * minutes without beginning an answer was held to the 300 s ceiling while the user watched a spinner.
+   */
+  | 'no-answer'
   | 'deadline'
   /**
    * The provider is ANSWERING, and answering so slowly that waiting for it costs more than moving on.

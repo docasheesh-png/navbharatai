@@ -402,7 +402,7 @@ import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/ca
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { shellModuleFor, recordModuleDelivery, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -25146,13 +25146,43 @@ async function noteBuildOutcome(
             settled = rec.plan;
             if (rec.alsoDone.length > 0) events.emit({ type: 'narration', agent: 'architect', text: `🧩 This step also built ${rec.alsoDone.length} more module(s): ${rec.alsoDone.slice(0, 4).join(', ')}${rec.alsoDone.length > 4 ? '…' : ''}.`, ts: Date.now() });
           }
+          // ── 🔴 DID THIS MODULE DELIVER ITS OWN FILES? (Q-905, autopsy 50378049) ───────────────
+          // `result.ok` above means the TURN succeeded, which is not the same claim. BlockWorld's
+          // module 1 owned `src/types/index.ts` + `src/constants/index.ts`, wrote 56 other files, and
+          // was marked done — so the next turn would have been handed its frozen contract as names
+          // that "exist in the workspace". Asked against the PROJECT's real files, not this turn's
+          // writes: a file an earlier turn wrote is delivered. Best-effort and bounded — on any
+          // trouble the plan is saved exactly as it is today, which is the safe direction.
+          let moduleUndelivered: string[] = [];
+          if (result.ok) {
+            try {
+              const projectFiles = await withTimeout(actuator.listFiles(workspaceId), 15_000, 'module-delivery-list');
+              settled = recordModuleDelivery(settled, projectModuleRef.id, projectFiles);
+              moduleUndelivered = settled.modules.find((m) => m.id === projectModuleRef!.id)?.undelivered ?? [];
+            } catch { /* unasked is not undelivered — the plan keeps today's behaviour */ }
+          }
           await saveProjectPlan(workspaceId, settled);
           projectPlanRef = settled;
           state.setTodos(projectPlanTodos(settled));
+          if (moduleUndelivered.length > 0) {
+            try {
+              buildDiag.record({
+                phase: 'plan', severity: 'info', code: 'PROJECT_MODULE_FILES_UNDELIVERED', autoResolved: true,
+                message: `Module "${projectModuleRef.name}" finished without writing ${moduleUndelivered.length} of the `
+                  + `${projectModuleRef.files.length} file(s) it owns (${moduleUndelivered.slice(0, 6).join(', ')}`
+                  + `${moduleUndelivered.length > 6 ? ', …' : ''}). The build delivered the app a different way. Its `
+                  + `frozen contract is no longer handed to later modules as names that exist.`,
+              });
+            } catch { /* diagnostics best-effort */ }
+          }
           if (planComplete(settled)) {
             events.emit({ type: 'narration', agent: 'architect', text: `🏁 All ${settled.modules.length} modules are complete — the project plan is finished.`, ts: Date.now() });
           } else if (result.ok) {
-            events.emit({ type: 'narration', agent: 'architect', text: `✅ Module "${projectModuleRef.name}" done — ${planProgressLine(settled)}. Continuing with the next module…`, ts: Date.now() });
+            // An honest line when the module's own files are not there — the old one said "done" flatly.
+            const builtDifferently = moduleUndelivered.length >= projectModuleRef.files.filter(Boolean).length && projectModuleRef.files.filter(Boolean).length > 0;
+            events.emit({ type: 'narration', agent: 'architect', text: builtDifferently
+              ? `✅ Module "${projectModuleRef.name}" is finished — this step built the app its own way rather than those exact files, so the next step starts from what is really there. ${planProgressLine(settled)}.`
+              : `✅ Module "${projectModuleRef.name}" done — ${planProgressLine(settled)}. Continuing with the next module…`, ts: Date.now() });
           } else if (interruptedModule) {
             events.emit({ type: 'narration', agent: 'architect', text: `⏸️ Module "${projectModuleRef.name}" was stopped before it finished — its files so far are saved. Say "continue" to pick it up again.`, ts: Date.now() });
           } else {

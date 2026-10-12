@@ -54,6 +54,13 @@ export interface ProjectModule {
    * failure → an LLM plan revision). Absent/0 means it has not failed yet.
    */
   attempts?: number;
+  /**
+   * Which of this module's OWN files are still missing from the project after its turn settled
+   * (autopsy `50378049`, Q-905). Absent means the question was never asked; `[]` means everything it
+   * owns is there. Written once, by `recordModuleDelivery`, from the project's real file list — never
+   * inferred from the turn's result, which is exactly the mistake it exists to correct.
+   */
+  undelivered?: string[];
 }
 
 export interface ProjectPlan {
@@ -717,6 +724,76 @@ export function shellModuleFor(plan: ProjectPlan, mod: ProjectModule): ProjectMo
   return plan.modules.find((m) => m.id !== mod.id && m.status !== 'done' && moduleOwnsEntry(m)) ?? null;
 }
 
+// ── A MODULE IS "DONE" WHEN IT DELIVERED ITS FILES, NOT WHEN ITS TURN SUCCEEDED ────────────────
+//
+// 🔴 THE DEFECT (autopsy `50378049`, 2026-10-12, Q-905). BlockWorld's plan made module 1 *"Shared Types
+// & Constants"*, owning `src/types/index.ts` and `src/constants/index.ts`, with the frozen contract later
+// modules would import. The builder ignored the scope and wrote the whole game — 56 files — and **never
+// those two**. The route settled the module with `result.ok ? markModuleStatus(…, 'done')`: *"the turn
+// succeeded"* taken as *"this module delivered its files"*. The plan then read `✅ Module … done — 1/15`.
+//
+// 🔑 THE DAMAGE IS DOWNSTREAM AND CERTAIN. `moduleBuildContext` hands every DONE module's contract to the
+// next turn under the heading *"ALREADY-BUILT MODULES — their files exist in the workspace. Import from
+// them using ONLY these frozen contracts"*. So module 2 is told, in writing, to import exact names from
+// a file that does not exist. That is not a risk; it is a scheduled failure, and the model cannot win it.
+//
+// ⚠️ THE OTHER HALF OF AUTOPSY `8e124182`, WHICH WAS NEVER HUNTED. That autopsy is the mirror image —
+// *"module 1's turn wrote 33 files, the whole app, and the plan still recorded 1 of 14 done"* — and its
+// fix (`reconcilePlanWithWrites`, just above) promotes OTHER modules whose planned paths were all
+// written. It is path-exact by design ("precision over recall"), so when the builder invents its own
+// structure, as here, it matches nothing and the plan stays fiction. One half of the reconciliation was
+// built; this is the half that asks whether the module in progress delivered its own share.
+//
+// 🔒 WHY THIS DOES NOT FAIL THE MODULE. Marking it `failed` would be its own lie — on the reported build
+// the user got a complete, running game. The status is left alone; what changes is that the plan now
+// RECORDS what was not delivered, and a contract nothing backs is never handed forward as a fact.
+
+// Trimmed, because a blank entry is not a file and `.filter(Boolean)` keeps `'  '` (caught by this
+// module's own test, which is why the trim is here and not at the call sites).
+const normOwn = (p: string): string => String(p ?? '').trim().replace(/\\/g, '/').replace(/^\.?\//, '');
+
+/**
+ * Which of this module's own files are missing from the project's real file list. PURE.
+ *
+ * `present` is the PROJECT's files, not the turn's writes: a file an earlier turn wrote is delivered,
+ * and asking only about this turn would call it missing.
+ */
+export function undeliveredOwnFiles(
+  mod: Pick<ProjectModule, 'files'>,
+  present: Iterable<string> | null | undefined,
+): string[] {
+  const have = new Set([...(present ?? [])].map(normOwn));
+  return (mod.files ?? []).map(normOwn).filter(Boolean).filter((f) => !have.has(f));
+}
+
+/**
+ * Record, on one module, which of its own files the project still lacks. Mutates nothing — returns a
+ * new plan, like every other transition here. A module that owns no files gets `[]`: it had nothing to
+ * deliver, so nothing is missing, and it must not be reported as fiction. PURE.
+ */
+export function recordModuleDelivery(
+  plan: ProjectPlan,
+  id: string,
+  present: Iterable<string> | null | undefined,
+): ProjectPlan {
+  if (!plan.modules.some((m) => m.id === id)) return plan;
+  const files = [...(present ?? [])];
+  return {
+    ...plan,
+    modules: plan.modules.map((m) => (m.id === id ? { ...m, undelivered: undeliveredOwnFiles(m, files) } : m)),
+  };
+}
+
+/**
+ * Does this module's frozen contract describe files that are not there? Only true when the module owns
+ * files and EVERY ONE of them is missing — a partially delivered module keeps its contract, because the
+ * names it did write are real and a later module may legitimately import them. PURE.
+ */
+export function contractIsUnbacked(mod: Pick<ProjectModule, 'files' | 'undelivered'>): boolean {
+  const owns = (mod.files ?? []).filter(Boolean).length;
+  return owns > 0 && (mod.undelivered?.length ?? 0) >= owns;
+}
+
 /**
  * May a paused plan be retired after a direct build delivered a working app? Only when not one of its
  * modules is done — then nothing a later module depends on exists, and resuming it would rebuild over
@@ -735,9 +812,20 @@ export function retireUnbuiltPlan(plan: ProjectPlan): boolean {
  */
 export function moduleBuildContext(plan: ProjectPlan, mod: ProjectModule): string {
   const p = planProgress(plan);
-  const doneContracts = plan.modules
-    .filter((m) => m.status === 'done' && m.contracts)
-    .map((m) => `// ── module ${m.id} (${m.name}) — already built, import against these EXACT names ──\n${m.contracts}`);
+  // A DONE module whose own files are all missing has no names to import (Q-905, autopsy 50378049).
+  // Its contract is withheld and the turn is TOLD so, rather than being handed exact names from a file
+  // that does not exist under the heading "their files exist in the workspace".
+  const doneWithContracts = plan.modules.filter((m) => m.status === 'done' && m.contracts);
+  const doneContracts = doneWithContracts
+    .filter((m) => !contractIsUnbacked(m))
+    .map((m) => {
+      const partial = (m.undelivered ?? []).filter(Boolean);
+      const caveat = partial.length > 0
+        ? `\n// ⚠️ not in the project: ${partial.join(', ')} — import only what the other files export.`
+        : '';
+      return `// ── module ${m.id} (${m.name}) — already built, import against these EXACT names ──${caveat}\n${m.contracts}`;
+    });
+  const unbacked = doneWithContracts.filter(contractIsUnbacked);
   // GA-7 coordination: where this module sits in the delivery plan + its specialist role.
   const ms = moduleMilestone(plan, mod.id);
   const role = assignModuleRole(mod);
@@ -757,6 +845,12 @@ export function moduleBuildContext(plan: ProjectPlan, mod: ProjectModule): strin
       : []),
     ...(doneContracts.length > 0
       ? ['', 'ALREADY-BUILT MODULES — their files exist in the workspace. Import from them using ONLY these frozen contracts; do NOT rewrite, re-scaffold, or "improve" their files:', '```ts', doneContracts.join('\n\n'), '```']
+      : []),
+    ...(unbacked.length > 0
+      ? ['', 'ℹ️ EARLIER MODULES THAT DID NOT LEAVE THEIR FILES BEHIND — the previous turn built the app a '
+         + 'different way, so these files are NOT in the project and there is nothing to import from them. '
+         + 'Write whatever you need yourself, in this module\'s own files:',
+         ...unbacked.map((m) => `  - ${m.name} (expected ${m.files.join(', ')})`)]
       : []),
     '',
     'RULES:',

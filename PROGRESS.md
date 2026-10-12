@@ -94312,3 +94312,58 @@ Another session, gating #3679, reported that under CPU load the full suite flipp
 - **Other findings (Q-881 … Q-894):** FX rate without a sanity band; per-account build lock in memory only; ₹100 free credit per web account and no cap on the real cost of failed builds; store packs not modelling GST; Play purchases acknowledged by the client only; PII in payment logs; raw gateway error to the browser; failed/dropped webhooks answered 400; unencoded redirect param; fail-open amount check; revenue card not net; aux remainder at Sonnet rate; 500-entry ledger cap; coupons without expiry or total cap.
 - **Tests executed:** 101 billing test files, 1,935 passed, 0 failed, 0 skipped.
 - **State:** every finding is a 🟡 row in `BUILD_REPORT_QUEUE.md`, waiting on the admin's approval of the ordered plan in §8 of the report. No fix is implemented until the admin approves.
+
+## 2026-10-12 — AUTOPSY `50378049`, Q-905: a module was "done" because its TURN succeeded, not because it delivered its files
+
+Second PR from the BlockWorld autopsy (the first, #3684, fixed Q-900…Q-904 — a plan-time prediction
+outranking a live app).
+
+**The defect.** The plan's module 1 was *"Shared Types & Constants"*, owning `src/types/index.ts` and
+`src/constants/index.ts` and carrying the frozen contract every later module would import. The builder
+ignored the scope, wrote the whole game — 56 files — and **never those two**. The route settled it with
+`result.ok ? markModuleStatus(…, 'done')` (`agentv3.ts:25137`): *"the turn succeeded"* taken as *"this
+module delivered its files"*. The user read `✅ Module … done — 1/15`.
+
+**The damage is downstream and certain.** `moduleBuildContext` hands every DONE module's contract to the
+next turn under the heading *"ALREADY-BUILT MODULES — their files exist in the workspace. Import from
+them using ONLY these frozen contracts"*. Module 2 would be told, in writing, to import exact names from
+a file that does not exist. The model cannot win that turn.
+
+⚠️ **It is the unhunted half of autopsy `8e124182`.** That autopsy is the mirror image — *"module 1's
+turn wrote 33 files, the whole app, and the plan still recorded 1 of 14 done"* — and its fix,
+`reconcilePlanWithWrites`, promotes OTHER modules whose planned paths were all written. It is path-exact
+by design ("precision over recall"), so a builder that invents its own structure matches nothing. One
+half of the reconciliation shipped; this is the half that asks whether the module in progress delivered
+its own share.
+
+**The fix.**
+- `undeliveredOwnFiles(mod, present)` — pure; which of a module's own files the PROJECT still lacks.
+  Asked against `actuator.listFiles`, never the turn's write set: a file an earlier turn wrote is
+  delivered, and asking only about this turn would call it missing.
+- `recordModuleDelivery(plan, id, present)` — records it on the module (`undelivered?: string[]`), so
+  the fact is durable across turns; module 2's turn is a different request.
+- `contractIsUnbacked(mod)` — true only when the module owns files and EVERY one is missing. A
+  partially delivered module keeps its contract: the names it did write are real.
+- `moduleBuildContext` withholds an unbacked contract and tells the turn why, instead of handing it
+  names under a false heading. A partial delivery hands the contract forward with the missing file named.
+- `PROJECT_MODULE_FILES_UNDELIVERED` — an `info` measurement of OUR process, registered in both
+  `BuildDiagnostics.ts` and `buildFindingSuggestions.ts` so it can never become a finding against the
+  user's app. The user's line is honest too: not a flat "done", but *"this step built the app its own way
+  rather than those exact files"*.
+
+🔒 **The status is deliberately NOT `failed`.** On the reported build the user got a complete, running
+game; *"module 1 failed"* would be its own lie. The status is left alone — what changes is that the plan
+RECORDS what is missing and never passes a contract nothing backs.
+
+**Additive by construction:** a plan nobody measured keeps `undelivered` absent, and `contractIsUnbacked`
+is false for an absent record, so behaviour is byte-identical to today. A `listFiles` that fails leaves
+the plan exactly as it is now (*"unasked is not undelivered"*).
+
+**Locked by** `tests/aPlanThatBecameFiction.test.ts` — 19 cases on the reported plan's real shape.
+**Reversion-proven twice:** stop withholding the unbacked contract → 1 fail; ask the turn's writes
+instead of the project → 1 fail. A case also asserts the pre-fix state still hands the fictional contract
+forward, so the reversion lives in the suite rather than in a shell history.
+
+**Still OPEN from the same root (rowed, not forgotten):** the plan's remaining 14 modules are still
+queued and billable on a build whose app already exists. That is `8e124182`'s original damage and it
+needs a decision about money and the plan's lifecycle, so it is not taken silently here.

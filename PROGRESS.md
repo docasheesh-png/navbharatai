@@ -94416,3 +94416,58 @@ unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong
   - No "skeleton loading" is claimed without a skeleton.
 - **Still open:** Q-926 (248 s to first render on Weak). 🟡 BLOCKED on the admin's routing decision; the options are in the row.
 - **Report db07e0af, final count:** 15 items. ✅ 14 (13 fixed by #3687, plus Q-923 not-a-defect). 🟡 1 (Q-926). Remaining 0.
+
+## 2026-10-12 — AUTOPSY `50378049`, Q-909: the builder had to reverse-engineer a file WE wrote
+
+Fifth PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911 · #3690 →
+Q-906+Q-907).
+
+**The defect.** NavBharatAI seeded its game kit before the builder's first call, and the handoff told it
+exactly which functions to call — `<GameCanvas>`, `ctx.follow(vehicle)`, `driveVehicle(…)` — with a
+compiling example. **What it never said was what `ctx` IS.** The example touches three of
+`GameContext`'s nine members, so for the rest the model guessed, and guessed our PRIVATE fields:
+
+| it reached for | what that actually is |
+|---|---|
+| `ctx.canvas` | `private readonly canvas` on `Game` — never on the context |
+| `ctx.followTarget` | `private followTarget` — the state behind `ctx.follow()` |
+| `ctx.crosshairTarget` | nothing at all |
+| `TouchButton` as a string | `{ action: string; label: string }` |
+
+Cost in that one build: **four `read_file` slices of `Game.ts` and two of `touchControls.ts`** — the
+model reverse-engineering a file we wrote — and the repeated-step nudges that followed.
+
+🔑 **The fix is the one this repo already uses for the same problem.** Project Mode freezes a per-module
+CONTRACT precisely so a later turn imports *"against these EXACT names"* instead of guessing. A seeded
+kit is the same situation — code the builder must use and did not write — and it had no contract.
+`src/server/lib/kitTypeContract.ts` builds one, and the shell's instructions carry it.
+
+🔒 **EXTRACTED FROM THE EMITTED SOURCE, NEVER HAND-WRITTEN.** A hand-kept copy of a type is the drift
+this repo has paid for repeatedly (four `safeRelPath`s, two complex-app detectors, five hardcoded model
+ids). `extractExportedDeclaration` reads the declaration out of the very file the recipe writes —
+brace-balanced, comments stripped — so renaming a member updates the contract in the same commit, by
+construction. A **census** asserts that every member of the emitted `GameContext` appears in the block
+the builder reads, so the contract cannot silently fall behind the type.
+
+🔒 **PLACEMENT IS PART OF THE FIX.** `gameKitSeed.compactRecipeResult` clips a recipe's instructions at
+`HANDOFF_RECIPE_CHARS` (6,000), so a contract at the bottom is a contract the builder may never see. It
+goes at the TOP, above the example, and two cases pin that — one of them by running the real
+`compactRecipeResult` and asserting the heading's index is below the clip.
+
+**Locked by** `tests/aKitTypeIsNotGuessed.test.ts` — 12 cases on the REAL emitted kit, including the
+census, the three names the reported build guessed (asserted NOT to be members, so the contract's *"if a
+name is not here, the kit does not have it"* is true), and the extractor's refusals. **Reversion-proven
+three ways:** drop the contract → 2 fails · move it to the bottom → 1 · narrow the covered names so the
+contract falls behind the type → 2 (this is the drift probe, and it is the important one).
+
+⚠️ **A HOLE IN MY OWN TEST, found by probing it.** With the contract removed, the ordering case PASSED —
+`indexOf` returned `-1`, and `-1 < 2000` is true. That is the exact *"-1 < -1 arithmetic"* trap
+`importPreviewOrdering.test.ts` warns about, and I walked into it one file away from the warning. Both
+anchors are now asserted `> 0` before they are compared, and the reason is written in the case. **An
+ordering assertion is only as good as its anchors.**
+
+**🔸 Q-912 is NOT claimed by this.** The report's three *"repeated step that isn't making progress"*
+nudges have at least two causes: the repeated `read_file` of our own kit, which this removes, and a LOOP
+GUARD on `console_errors`, which is a different thing. Calling Q-912 resolved because its biggest cause
+is gone would be the "fixed the instance, not the class" mistake this ledger exists to prevent. It stays
+OPEN, and the next report with a seeded game says whether the read loop is gone.

@@ -179,7 +179,12 @@ describe('3 · a type-only import of an enum is fixed where it is written', () =
     expect(out.files['src/hooks/useTheme.ts']).not.toMatch(/import type \{ Theme \}/);
   });
   it('SOURCE: the write-time typecheck heals before it quotes; the salvage runs the shared fixes', () => {
-    expect(DISPATCHER).toMatch(/const healedTypeOnly = errors\.length > 0 \? await this\.healTypeOnlyImportsAtWrite\(errors, tsPaths, sources\)/);
+    // UPDATED 2026-10-12 (autopsy 9c612cdb, Q-940): the heal now runs ONCE per compile through
+    // `typeOnlyHealForRun`, shared by every writer that joined the run — each joiner used to heal the same
+    // TS1361 itself. Still before the quote, still `healTypeOnlyImportsAtWrite` underneath; the behaviour is
+    // locked in tests/aJoinedWriteSeesTheRunItJoined.test.ts.
+    expect(DISPATCHER).toMatch(/const healedTypeOnly = errors\.length > 0 \? await this\.typeOnlyHealForRun\(run, tsPaths, sources\)/);
+    expect(DISPATCHER).toMatch(/heal = this\.healTypeOnlyImportsAtWrite\(run\.errors \?\? \[\], tsPaths, sources\);/);
     expect(DISPATCHER).toMatch(/return healedNote \+ writeTypecheckNote\(errors, tsPaths, sources\);/);
     const salvage = SIMPLE.slice(SIMPLE.indexOf('const salvage = [...generatedSoFar]'), SIMPLE.indexOf("'simple-build-salvage'"));
     expect(salvage).toContain('await deterministicImportFixes(salvage)');

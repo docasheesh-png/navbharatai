@@ -91,9 +91,22 @@ export class OpenAiStreamAccumulator {
   private chunks = 0;
   /** UTF-8 bytes of everything produced — counted as it arrives, so reading it never rescans. */
   private bytes = 0;
+  /**
+   * When the FIRST produced byte arrived — the provider's time to its first word, as distinct from the time it
+   * took to open the stream (adversarial review of autopsy 303e8a6f: an opened stream that sends nothing is silence
+   * too, and time-to-open cannot size it).
+   */
+  private firstOutputTs: number | null = null;
+
+  constructor(private readonly clock: () => number = Date.now) {}
 
   /** Feed one chunk. Tolerant by construction: an unrecognised chunk advances nothing and throws nothing. */
   push(chunk: OpenAiStreamChunkLike | null | undefined): void {
+    this.read(chunk);
+    if (this.firstOutputTs === null && this.bytes > 0) this.firstOutputTs = this.clock();
+  }
+
+  private read(chunk: OpenAiStreamChunkLike | null | undefined): void {
     if (!chunk || typeof chunk !== 'object') return;
     this.chunks += 1;
     if (typeof chunk.model === 'string' && chunk.model) this.model = chunk.model;
@@ -171,6 +184,11 @@ export class OpenAiStreamAccumulator {
    */
   producedBytes(): number {
     return this.bytes;
+  }
+
+  /** When the first produced byte arrived, or null when nothing has been produced. */
+  firstOutputAt(): number | null {
+    return this.firstOutputTs;
   }
 
   /** Did the provider send anything at all, reasoning included? */

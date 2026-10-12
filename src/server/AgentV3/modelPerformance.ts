@@ -109,6 +109,9 @@ export interface ModelStat {
   openSamples: number;
   medianOpenMs: number | null;
   maxOpenMs: number | null;
+  /** Time to the first produced byte, over the calls that measured it — sizes "opened, then nothing". */
+  firstOutputSamples: number;
+  medianFirstOutputMs: number | null;
 }
 
 /** A provider's failures within ONE build, as the failure ledger recorded them. */
@@ -217,7 +220,7 @@ export function gateStateFromIssues(issues: readonly BuildIssue[] | undefined): 
 
 /** Per-(provider, model) statistics over the SUCCESSFUL calls of one build. */
 export function modelStatsFromCalls(calls: readonly LlmCallRecord[] | undefined): ModelStat[] {
-  const by = new Map<string, ModelStat & { _lat: number[]; _wall: number; _open: number[] }>();
+  const by = new Map<string, ModelStat & { _lat: number[]; _wall: number; _open: number[]; _first: number[] }>();
   for (const c of calls ?? []) {
     if (!c || c.ok !== true) continue; // integrity rule 1
     const model = String(c.model ?? '').trim();
@@ -229,7 +232,7 @@ export function modelStatsFromCalls(calls: readonly LlmCallRecord[] | undefined)
         provider: providerOfModel(model), model, calls: 0, deliveredTurns: 0, truncatedCalls: 0,
         usageReportedCalls: 0, inputTokens: null, outputTokens: null,
         medianLatencyMs: null, totalLatencyMs: null, latencySamples: 0, wallClockLatencySamples: 0,
-        openSamples: 0, medianOpenMs: null, maxOpenMs: null, _lat: [], _wall: 0, _open: [],
+        openSamples: 0, medianOpenMs: null, maxOpenMs: null, firstOutputSamples: 0, medianFirstOutputMs: null, _lat: [], _wall: 0, _open: [], _first: [],
       };
       by.set(key, s);
     }
@@ -249,12 +252,15 @@ export function modelStatsFromCalls(calls: readonly LlmCallRecord[] | undefined)
     if (isNum(c.answerMs)) s._lat.push(c.answerMs);
     else if (isNum(c.latencyMs)) { s._lat.push(c.latencyMs); s._wall += 1; }
     if (isNum(c.openMs)) s._open.push(c.openMs);
+    if (isNum(c.firstOutputMs)) s._first.push(c.firstOutputMs);
   }
-  return [...by.values()].map(({ _lat, _wall, _open, ...rest }) => ({
+  return [...by.values()].map(({ _lat, _wall, _open, _first, ...rest }) => ({
     ...rest,
     openSamples: _open.length,
     medianOpenMs: median(_open),
     maxOpenMs: _open.length ? Math.max(..._open) : null,
+    firstOutputSamples: _first.length,
+    medianFirstOutputMs: median(_first),
     latencySamples: _lat.length,
     wallClockLatencySamples: _wall,
     medianLatencyMs: median(_lat),

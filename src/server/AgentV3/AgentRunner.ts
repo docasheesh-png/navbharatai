@@ -266,6 +266,8 @@ export interface AgentRunnerOptions {
     fallbackMs?: number;
     /** How long it took to open its streamed answer (TurnResult.openedAfterMs). */
     openMs?: number;
+    /** How long until its first produced byte (TurnResult.firstOutputAfterMs). */
+    firstOutputMs?: number;
     ok: boolean;
     error?: string;
   }) => void;

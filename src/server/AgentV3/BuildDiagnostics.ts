@@ -28,7 +28,7 @@ import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
-import { isBudgetEndedError, isReasoningRungHandoff, isSilentAbandon, isSlowStreamAbandon } from './turnDeadline';
+import { isBudgetEndedError, isReasoningRungHandoff, providerNeverAnswered, isSlowStreamAbandon } from './turnDeadline';
 import { typecheckEvidenceFromCommands, commandOutcomeText } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
@@ -570,6 +570,8 @@ export interface LlmCallRecord {
   fallbackMs?: number;
   /** How long the answering provider took to OPEN its streamed response (TurnResult.openedAfterMs). */
   openMs?: number;
+  /** How long until its FIRST produced byte (TurnResult.firstOutputAfterMs) — sizes "opened, then silent". */
+  firstOutputMs?: number;
   ok: boolean;
   error?: string;
 }
@@ -1645,6 +1647,7 @@ export class BuildDiagnostics {
       ...(answerMs !== undefined ? { answerMs } : {}),
       ...(fallbackMs !== undefined ? { fallbackMs } : {}),
       ...(typeof rec.openMs === 'number' && Number.isFinite(rec.openMs) && rec.openMs >= 0 ? { openMs: rec.openMs } : {}),
+      ...(typeof rec.firstOutputMs === 'number' && Number.isFinite(rec.firstOutputMs) && rec.firstOutputMs >= 0 ? { firstOutputMs: rec.firstOutputMs } : {}),
       ok: rec.ok,
       error: rec.error ? rec.error.slice(0, 500) : undefined,
     }, MAX_LLM_CALLS);
@@ -3192,7 +3195,9 @@ export function classifyProviderFailure(reason: unknown): string {
   // OUR walk-away from a provider, before the generic "timed out" test the marker also matches — the same order
   // `wasteKindFor` uses, so the two classifiers of one error agree (autopsy 303e8a6f: this one said 'timeout',
   // the waste ledger said 'crawl', and the event was neither — the provider had not started answering).
-  if (isSilentAbandon(text)) return 'silent';
+  // …and a silence we waited out (a timed-out request that never opened) is silence too — every never-answered
+  // call carries the mark, however we stopped waiting (adversarial review).
+  if (providerNeverAnswered(text)) return 'silent';
   if (isSlowStreamAbandon(text)) return 'crawl';
   if (/timeout|timed out|etimedout|deadline/.test(t)) return 'timeout';
   if (/\b401\b|\b403\b|unauthor|forbidden|invalid api key|authentication/.test(t)) return 'auth';

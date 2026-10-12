@@ -147,6 +147,12 @@ export interface TurnResult {
    * bound is chosen from (autopsy 303e8a6f, admin option (b) for Q-842). Absent where not measured.
    */
   openedAfterMs?: number;
+  /**
+   * How long until the provider's FIRST produced byte, in ms (streaming only) — distinct from opening: a stream
+   * that opens and then sends nothing is silence too, and time-to-open cannot size it (adversarial review of
+   * autopsy 303e8a6f, Q-842 option (b)).
+   */
+  firstOutputAfterMs?: number;
 }
 
 export interface RunTurnParams {

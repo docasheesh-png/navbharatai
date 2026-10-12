@@ -1926,8 +1926,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         } catch (err) {
           contract = '';
           // 🔴 A HAND-OFF DURING THE CONTRACT ENDS THE LANE HERE (autopsy 1219c639), the sibling of the stop
-          // below (31254f9a). The engine crawled and the next one reasons before every answer, so the
-          // provider chain declined to call it — a deliberate hand-off. The lane read it as an empty
+          // below (31254f9a). The first engine failed (it crawled there; silence, a 429 or a timeout leads here
+          // too) and the next one reasons before every answer, so the provider chain declined to call it — a
+          // deliberate hand-off. The lane read it as an empty
           // contract: the report said it "came back with nothing usable, so the files were written without
           // a shared contract", and the user was told "Building 10 file(s)" — then not one file was
           // written, because every file call would have met the same rung. The plan goes to the full

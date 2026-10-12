@@ -512,8 +512,11 @@ export class OpenAiToolRunner implements TurnRunner {
       opened.then((late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } }, () => { /* already failed */ });
       throw e;
     };
+    // A request that did not even OPEN by its first-answer bound is silence too — counted as such, not only when we
+    // were allowed to walk away from it (adversarial review of 303e8a6f: those are the LONGEST silences, and the
+    // silent share left them out). Still "timed out", so the timeout bench, strike and cooldown are unchanged.
     const ordinaryBoundMessage = providerWentSilent
-      ? `OpenAI-compatible call (GLM/Kimi) timed out after ${firstAnswerMs}ms`
+      ? `OpenAI-compatible call (GLM/Kimi) timed out after ${firstAnswerMs}ms — ${SILENT_OPEN_MARK}`
       : clockMessage(firstAnswerMs);
     const raw = await raceStop(
       withTimeout(
@@ -539,6 +542,8 @@ export class OpenAiToolRunner implements TurnRunner {
 
     let completion: OpenAiCompletionLike;
     let streamedText = false;
+    /** When the first produced byte arrived (streaming only) — the time to the provider's first word. */
+    let firstOutputAt: number | null = null;
     if (streaming && isChatStream(raw)) {
       streamedText = true;
       const acc = new OpenAiStreamAccumulator();
@@ -573,8 +578,11 @@ export class OpenAiToolRunner implements TurnRunner {
         throw new Error(`${SLOW_STREAM_MESSAGE} after ${Math.max(0, Date.now() - startedAt)}ms${silent}`);
       }
       if (stop !== 'complete' && !acc.hasAnswer()) {
-        throw new Error(stop === 'deadline' ? BUDGET_REACHED_MESSAGE : clockMessage(idleMs));
+        // An opened stream that went idle WITHOUT a single byte is silence, and says so (adversarial review of
+        // 303e8a6f) — still "timed out", so every routing reader is unchanged. Our own deadline is never marked.
+        throw new Error(stop === 'deadline' ? BUDGET_REACHED_MESSAGE : `${clockMessage(idleMs)}${acc.producedBytes() === 0 ? ` — ${SILENT_OPEN_MARK}` : ''}`);
       }
+      firstOutputAt = acc.firstOutputAt();
       completion = acc.toCompletion(stop);
     } else {
       completion = raw as OpenAiCompletionLike;
@@ -626,6 +634,8 @@ export class OpenAiToolRunner implements TurnRunner {
     // delta by delta, in which case repeating it here would print the answer twice.
     if (!streamedText && params.onText && result.text) params.onText(result.text);
 
-    return streamedText && openedAt !== null ? { ...result, openedAfterMs: Math.max(0, openedAt - startedAt) } : result;
+    return streamedText && openedAt !== null
+      ? { ...result, openedAfterMs: Math.max(0, openedAt - startedAt), ...(firstOutputAt !== null ? { firstOutputAfterMs: Math.max(0, firstOutputAt - startedAt) } : {}) }
+      : result;
   }
 }

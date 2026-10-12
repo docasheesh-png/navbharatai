@@ -91,6 +91,15 @@ export function isReasoningRungHandoff(err: unknown): boolean {
  */
 export const SILENT_OPEN_MARK = 'the provider had not started answering';
 
+/**
+ * Did the provider never answer at all — whether we walked away (a crawl abandon) or waited out its bound (a
+ * timeout)? The silence is the fact about the provider; how we stopped waiting is ours. PURE.
+ */
+export function providerNeverAnswered(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  return message.includes(SILENT_OPEN_MARK);
+}
+
 /** Did we walk away from a provider that had not started answering at all? PURE. */
 export function isSilentAbandon(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err ?? '');

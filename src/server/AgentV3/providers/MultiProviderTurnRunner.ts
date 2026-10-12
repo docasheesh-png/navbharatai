@@ -22,7 +22,7 @@ import { modelAlwaysReasons } from './glmThinking';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
-import { isBudgetEndedError, isSlowStreamAbandon, isSilentAbandon, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
+import { isBudgetEndedError, isSlowStreamAbandon, isSilentAbandon, providerNeverAnswered, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
 import type { WasteKind } from '../providerWaste';
 import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
 import { abandonedTurnUsage } from '../unbilledTurns';
@@ -1067,12 +1067,13 @@ export function makeMultiProviderTurnRunner(
                   reportName,
                   `${chain[i].modelId ? `${chain[i].modelId} ` : ''}`
                   + (isSilentAbandon(err)
-                    ? `had not started answering after ${Math.round(elapsedMs / 1000)}s — given up before its first byte and `
+                    ? `had not started answering after ${Math.round(elapsedMs / 1000)}s — given up before its first word and `
                     : `was answering far below a usable rate after ${Math.round(elapsedMs / 1000)}s — abandoned mid-answer and `)
                   + (Number.isFinite(until)
                     ? `skipped for ${Math.round((until - now()) / 1000)}s, then tried once more, `
                     : abandons >= 2
-                      ? 'skipped for the rest of this build (it crawled again when tried once more), '
+                      // The tail says what the re-probe saw, too — silence is not a crawl (adversarial review).
+                      ? `skipped for the rest of this build (it ${isSilentAbandon(err) ? 'was silent' : 'crawled'} again when tried once more), `
                       : 'skipped for the rest of this build, ')
                   + 'so the ladder can reach the next engine instead of waiting it out',
                 );
@@ -1174,8 +1175,9 @@ export function makeMultiProviderTurnRunner(
  */
 export function wasteKindFor(err: unknown): WasteKind | null {
   if (isBudgetEndedError(err)) return null;
-  // Silence before the crawl test: both carry the crawl marker, and they are different facts (autopsy 303e8a6f).
-  if (isSilentAbandon(err)) return 'silent';
+  // Silence before the crawl and timeout tests: a never-answered call carries the mark whether we walked away or
+  // waited out its bound, and silence is a different fact from a slow answer (autopsy 303e8a6f + its review).
+  if (providerNeverAnswered(err)) return 'silent';
   if (isSlowStreamAbandon(err)) return 'crawl';
   if (isTimeoutProviderError(err)) return 'timeout';
   if (isRateLimitProviderError(err)) return 'rate-limit';

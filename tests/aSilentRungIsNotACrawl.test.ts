@@ -8,12 +8,20 @@
 // had no instrument at all.
 //
 // The CLASS: one routing marker shared by two failure modes, read by every reporter as if it were only one.
+//
+// ⚠️ CORRECTED BY THE ADVERSARIAL REVIEW (§5): the bench sentence's TAIL still said "it crawled again"; a silence
+// we waited out (a timed-out request that never opened, an opened stream idle with zero bytes) was filed as a
+// timeout — the longest silences, left out of the silent share; time-to-open alone could not size "opened, then
+// nothing", so the time to the first word is recorded too; and the classifier census now lists the vocabulary
+// differences on purpose and includes the lane classifier.
 import { describe, it, expect, afterEach } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../src/server/AgentV3/providers/OpenAiToolRunner';
 import { makeMultiProviderTurnRunner, wasteKindFor } from '../src/server/AgentV3/providers/MultiProviderTurnRunner';
-import { SLOW_STREAM_MESSAGE, SILENT_OPEN_MARK, isSilentAbandon, isSlowStreamAbandon, BUDGET_REACHED_MESSAGE } from '../src/server/AgentV3/turnDeadline';
+import { SLOW_STREAM_MESSAGE, SILENT_OPEN_MARK, isSilentAbandon, isSlowStreamAbandon, providerNeverAnswered, BUDGET_REACHED_MESSAGE } from '../src/server/AgentV3/turnDeadline';
+import { classifyLaneFailure } from '../src/server/AgentV3/laneFailure';
+import { answerTimeOf } from '../src/server/AgentV3/answeringModel';
 import { classifyProviderFailure, providerFailuresLookDegraded, BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
 import { emptyWasteLedger, recordWaste, wasteSummary } from '../src/server/AgentV3/providerWaste';
 import { modelStatsFromCalls, providerFailureStats } from '../src/server/AgentV3/modelPerformance';
@@ -84,7 +92,7 @@ describe('2 · the bench sentence says what the provider was doing', () => {
 
   it('silence: "had not started answering", never "mid-answer"', async () => {
     const reason = await benchReasonFor(`${SLOW_STREAM_MESSAGE} after 15000ms — ${SILENT_OPEN_MARK}`);
-    expect(reason).toMatch(/glm-4\.7-flashx had not started answering after \d+s — given up before its first byte/);
+    expect(reason).toMatch(/glm-4\.7-flashx had not started answering after \d+s — given up before its first word/);
     expect(reason).not.toMatch(/answering far below|mid-answer/);
   });
 
@@ -94,15 +102,27 @@ describe('2 · the bench sentence says what the provider was doing', () => {
 });
 
 describe('3 · 🔒 the two classifiers of one error agree', () => {
-  const TABLE: Array<[string, string, ReturnType<typeof wasteKindFor>]> = [
-    [`${SLOW_STREAM_MESSAGE} after 15000ms — ${SILENT_OPEN_MARK}`, 'silent', 'silent'],
-    [`${SLOW_STREAM_MESSAGE} after 17500ms`, 'crawl', 'crawl'],
-    ['OpenAI-compatible call (GLM/Kimi) timed out after 60000ms', 'timeout', 'timeout'],
-    ['429 Too Many Requests', 'rate-limit', 'rate-limit'],
+  // The three string classifiers of one error, side by side. Where their vocabularies differ, the pair is written
+  // out on purpose (a server error is 'server-error' to one and 'error' to the other; our own budget is 'other:'
+  // to the failure ledger and null — not the vendor's waste — to the waste ledger).
+  const TABLE: Array<[string, string, ReturnType<typeof wasteKindFor>, string]> = [
+    [`${SLOW_STREAM_MESSAGE} after 15000ms — ${SILENT_OPEN_MARK}`, 'silent', 'silent', 'provider-degraded'],
+    [`${SLOW_STREAM_MESSAGE} after 17500ms`, 'crawl', 'crawl', 'provider-degraded'],
+    [`OpenAI-compatible call (GLM/Kimi) timed out after 12000ms — ${SILENT_OPEN_MARK}`, 'silent', 'silent', 'provider-degraded'],
+    ['OpenAI-compatible call (GLM/Kimi) timed out after 60000ms', 'timeout', 'timeout', 'provider-degraded'],
+    ['429 Too Many Requests', 'rate-limit', 'rate-limit', 'provider-degraded'],
+    ['500 internal error', 'server-error', 'error', 'unknown'],
   ];
-  it.each(TABLE)('%s', (message, bucket, kind) => {
+  it.each(TABLE)('%s', (message, bucket, kind, lane) => {
     expect(classifyProviderFailure(new Error(message))).toBe(bucket);
     expect(wasteKindFor(new Error(message))).toBe(kind);
+    expect(classifyLaneFailure(message)).toBe(lane);
+  });
+
+  it('our own budget is nobody\'s waste and never silence', () => {
+    expect(wasteKindFor(new Error(BUDGET_REACHED_MESSAGE))).toBeNull();
+    expect(classifyProviderFailure(new Error(BUDGET_REACHED_MESSAGE))).toMatch(/^other:/);
+    expect(providerNeverAnswered(new Error(BUDGET_REACHED_MESSAGE))).toBe(false);
   });
 
   it('our own clock is neither', () => {
@@ -130,13 +150,18 @@ describe('3 · 🔒 the two classifiers of one error agree', () => {
       return out;
     };
     const sites: string[] = [];
+    // EVERY reference in any shape (template, concatenation, bare) outside the module that defines it and import
+    // lines — and the statement around it must DECIDE silence by the mark itself, never by a variable's name.
     for (const f of walk(join(ROOT, 'src'))) {
-      for (const line of readFileSync(f, 'utf8').split('\n')) {
-        if (line.includes('`${SLOW_STREAM_MESSAGE}')) sites.push(`${f.slice(ROOT.length + 1)}: ${line.trim()}`);
-      }
+      if (f.endsWith('turnDeadline.ts')) continue;
+      const lines = readFileSync(f, 'utf8').split('\n');
+      lines.forEach((line, i) => {
+        if (!/\bSLOW_STREAM_MESSAGE\b/.test(line) || /^\s*import\b/.test(line)) return;
+        sites.push(`${f.slice(ROOT.length + 1)}:${i + 1}: ${lines.slice(Math.max(0, i - 2), i + 1).join(' ')}`);
+      });
     }
     expect(sites.length).toBeGreaterThanOrEqual(2);
-    for (const s of sites) expect(s, s).toMatch(/SILENT_OPEN_MARK|\$\{silent\}/);
+    for (const s of sites) expect(s, s).toContain('SILENT_OPEN_MARK');
   });
 });
 
@@ -166,4 +191,77 @@ describe('4 · the reopen line can be measured', () => {
     ]);
     expect(kimi).toMatchObject({ openSamples: 2, medianOpenMs: 1_500, maxOpenMs: 2_100 });
   });
+});
+
+describe('5 · 🔒 the corrections of the adversarial review', () => {
+  it('a rung silent again on its re-probe is said to be silent again — never "crawled again"', async () => {
+    const clock = { t: 0 };
+    const reasons: string[] = [];
+    const answer = { text: 'ok', toolUses: [], stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 }, rawContent: [], model: 'kimi-k2.7-code' };
+    const chain = makeMultiProviderTurnRunner([
+      { name: 'GLM', modelId: 'glm-4.7-flashx', runner: { runTurn: async () => { clock.t += 15_000; throw new Error(`${SLOW_STREAM_MESSAGE} after 15000ms — ${SILENT_OPEN_MARK}`); } } },
+      { name: 'KIMI', modelId: 'kimi-k2.7-code', runner: { runTurn: async () => answer } },
+    ] as never, { now: () => clock.t, onProviderBenched: (_f: string, r: string) => { reasons.push(r); } } as never);
+    await chain.runTurn({ messages: [], tools: [] } as never);
+    clock.t += 60 * 60_000; // long past any crawl-bench window — the rung is tried once more
+    await chain.runTurn({ messages: [], tools: [] } as never);
+    expect(reasons.length).toBeGreaterThanOrEqual(2);
+    for (const r of reasons) expect(r, r).not.toMatch(/crawl|far below|mid-answer/);
+    expect(reasons.at(-1)).toMatch(/it was silent again when tried once more/);
+  });
+
+  it('🔴 a silence we WAITED OUT is silence too — still a timeout to every routing reader', async () => {
+    env();
+    process.env.AGENTV3_STREAM_IDLE_MS = '1500';
+    const noAbandon = { ...params, canAbandonSlowStream: () => false };
+    const err = await new OpenAiToolRunner({ chat: { completions: { create: () => new Promise(() => {}) } } } as never, { model: 'glm-4.7-flashx' })
+      .runTurn(noAbandon as never).then(() => null, (e: unknown) => e as Error);
+    expect(err?.message).toMatch(/timed out after \d+ms — the provider had not started answering$/);
+    expect(isSlowStreamAbandon(err)).toBe(false); // not a walk-away — the crawl bench never sees it
+    expect(providerNeverAnswered(err)).toBe(true);
+    expect(wasteKindFor(err)).toBe('silent');
+    expect(classifyProviderFailure(err)).toBe('silent');
+  }, 20_000);
+
+  it('an opened stream idle with zero bytes is silence; one that answered a little and went idle is not', async () => {
+    env();
+    process.env.AGENTV3_STREAM_IDLE_MS = '1500';
+    const noAbandon = { ...params, canAbandonSlowStream: () => false };
+    const silent = await new OpenAiToolRunner({ chat: { completions: { create: async () => stalledStream(null) } } } as never, { model: 'glm-4.7-flashx' })
+      .runTurn(noAbandon as never).then(() => null, (e: unknown) => e as Error);
+    expect(providerNeverAnswered(silent)).toBe(true);
+    // A stream that said something keeps it (truncated) — it answered, so nothing calls it silence.
+    const spoke = await new OpenAiToolRunner({ chat: { completions: { create: async () => stalledStream('Hel') } } } as never, { model: 'glm-4.7-flashx' })
+      .runTurn(noAbandon as never).then(() => 'answered', (e: unknown) => e as Error);
+    expect(spoke === 'answered' || !providerNeverAnswered(spoke)).toBe(true);
+  }, 20_000);
+
+  it('🔒 time to open AND time to first word ride from the runner, through the chain, into the report', async () => {
+    env();
+    let sent = 0;
+    const stream = {
+      controller: { abort: () => {} },
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => {
+            sent++;
+            if (sent === 1) { await new Promise((r) => setTimeout(r, 30)); return { done: false, value: { choices: [{ index: 0, delta: { content: 'Done.' } }] } }; }
+            if (sent === 2) return { done: false, value: { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 2 } } };
+            return { done: true, value: undefined };
+          },
+        };
+      },
+    };
+    const runner = new OpenAiToolRunner({ chat: { completions: { create: async () => { await new Promise((r) => setTimeout(r, 20)); return stream; } } } } as never, { model: 'kimi-k2.7-code' });
+    const chain = makeMultiProviderTurnRunner([{ name: 'KIMI', modelId: 'kimi-k2.7-code', runner }] as never, {} as never);
+    const t0 = Date.now();
+    const turn = await chain.runTurn({ ...params, model: 'kimi-k2.7-code' } as never);
+    const d = new BuildDiagnostics();
+    d.recordLlmCall({ model: 'kimi-k2.7-code', latencyMs: Date.now() - t0, ...answerTimeOf(turn as never), ok: true } as never);
+    const row = d.report().llmCalls![0]!;
+    expect(row.openMs).toBeGreaterThanOrEqual(15);
+    expect(row.firstOutputMs).toBeGreaterThanOrEqual(row.openMs!);
+    const [m] = modelStatsFromCalls(d.report().llmCalls!);
+    expect(m).toMatchObject({ firstOutputSamples: 1 });
+  }, 20_000);
 });

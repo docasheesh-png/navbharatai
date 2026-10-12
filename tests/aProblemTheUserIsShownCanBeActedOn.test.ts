@@ -199,9 +199,11 @@ describe('a problem the user is shown can be acted on — the census', () => {
 
   it('the backlog is a real, finite list — not a way to switch the census off', () => {
     // A baseline that could grow without limit is not a ratchet. This is the number on the day the
-    // census was written (56), and it is the ceiling: it may fall, never rise.
+    // census was written (56), and it is the ceiling: it may fall, never rise. On 2026-10-12 (Q-381 batch
+    // six) it reached ZERO — every problem a user is shown now has a home — and the ratchet above keeps it
+    // there: a new unclassified code fails CI because it is not in this (empty) list.
+    expect(Array.isArray(baseline)).toBe(true);
     expect(baseline.length).toBeLessThanOrEqual(56);
-    expect(baseline.length).toBeGreaterThan(0);
     expect(new Set(baseline).size).toBe(baseline.length);
   });
 
@@ -316,13 +318,11 @@ describe('Q-381 batch one: nine findings about our own run are no longer charged
     for (const code of OURS) expect(baseline).not.toContain(code);
   });
 
-  it('PLATFORM_SOURCE_WORKSPACE is deliberately still unclassified — it is the ERROR-severity one', () => {
-    // Stated as a test rather than only as a comment, because "left out on purpose" and "forgotten" look
-    // identical in a diff. Every code in the batch above is a WARNING or INFO, so the error count a RED
-    // gate reads cannot change and no build's bill moves. This one is recorded at ERROR severity, so
-    // reclassifying it is money-adjacent and gets its own look.
-    const baseline: string[] = JSON.parse(readFileSync(join(__dirname, 'fixtures/findingClassificationBaseline.json'), 'utf8'));
-    expect(baseline).toContain('PLATFORM_SOURCE_WORKSPACE');
+  it('PLATFORM_SOURCE_WORKSPACE got its own look (batch six): declared, never moved out of the count', () => {
+    // It is recorded at ERROR severity, so moving it to PROCESS_ONLY would change the error count a RED
+    // gate reads — a bill. Batch six (2026-10-12) gave it the home that moves nothing: declared as a
+    // finding with no button (a refusal has nothing to fix), still counted, so a refused turn stays free.
+    expect(APP_FINDINGS_WITHOUT_AN_OFFER.has('PLATFORM_SOURCE_WORKSPACE')).toBe(true);
     expect(PROCESS_ONLY_CODES.has('PLATFORM_SOURCE_WORKSPACE')).toBe(false);
   });
 
@@ -351,12 +351,13 @@ describe('Q-381 batch two: ten more findings about our own run (2026-10-11)', ()
     });
   }
 
-  it('the two left out are still unclassified, on purpose', () => {
-    const baseline: string[] = JSON.parse(readFileSync(join(__dirname, 'fixtures/findingClassificationBaseline.json'), 'utf8'));
-    for (const code of ['STUCK_TOOL', 'REVIEWER_AUTOFIX_INCOMPLETE']) {
-      expect(baseline).toContain(code);
-      expect(PROCESS_ONLY_CODES.has(code)).toBe(false);
-    }
+  it('the two left out got their own look later (batch six) — and neither became "ours"', () => {
+    // STUCK_TOOL is ERROR: declared with no button, still counted, so a hung build stays free (Q-380's rule).
+    // REVIEWER_AUTOFIX_INCOMPLETE says the defect "may still be present in the app": offered through the
+    // review's own button. Neither moved to PROCESS_ONLY.
+    expect(APP_FINDINGS_WITHOUT_AN_OFFER.has('STUCK_TOOL')).toBe(true);
+    expect(OFFERED_THROUGH['REVIEWER_AUTOFIX_INCOMPLETE']).toBe('REVIEW_RECHECK_CRITICALS_REMAIN');
+    for (const code of ['STUCK_TOOL', 'REVIEWER_AUTOFIX_INCOMPLETE']) expect(PROCESS_ONLY_CODES.has(code)).toBe(false);
   });
 
   it('the backlog went from 47 to 37 (and it only shrinks from there)', () => {

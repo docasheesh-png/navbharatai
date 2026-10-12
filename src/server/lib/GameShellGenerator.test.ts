@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { generateGameShell, GAME_SHELL_MODULES } from './GameShellGenerator';
+import { generateGameShell, GAME_SHELL_MODULES, GAME_CONTROLS_TEST_PATH } from './GameShellGenerator';
 import { generateGameRuntime } from './GameRuntimeGenerator';
 import { generateGame3D } from './Game3DGenerator';
 import { generateGameController } from './GameControllerGenerator';
@@ -279,8 +279,11 @@ describe('the pack itself', () => {
     expect(all.dependencies).toEqual([]);
   });
 
-  it('emits every advertised module', () => {
-    expect(Object.keys(all.files)).toHaveLength(GAME_SHELL_MODULES.length);
+  // Every advertised module once, plus the controls test that ships beside Game.ts (Q-843) — not a module of its own.
+  const modulesOf = (files: Record<string, string>) => Object.keys(files).filter((p) => p !== GAME_CONTROLS_TEST_PATH);
+  it('emits every advertised module, and the controls test beside Game.ts', () => {
+    expect(modulesOf(all.files)).toHaveLength(GAME_SHELL_MODULES.length);
+    expect(Object.keys(all.files)).toContain(GAME_CONTROLS_TEST_PATH);
   });
 
   it('a subset that would not compile pulls in what it needs', () => {
@@ -295,7 +298,7 @@ describe('the pack itself', () => {
       expect(() => generateGameShell(bad)).not.toThrow();
       expect(Object.keys(generateGameShell(bad).files).length).toBeGreaterThan(0);
     }
-    expect(Object.keys(generateGameShell(['nope']).files)).toHaveLength(GAME_SHELL_MODULES.length);
+    expect(modulesOf(generateGameShell(['nope']).files)).toHaveLength(GAME_SHELL_MODULES.length);
   });
 
   it('the instructions say what NOT to re-implement', () => {

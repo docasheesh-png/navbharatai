@@ -91,6 +91,47 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     detail: 'Your app opened, but what it showed was the starter page it began from — not the app that was built.',
     prompt: 'When the app opens in a browser it still shows the starter page it began from, not the app that was built. Make the entry file render the real app — its main screen and its navigation — so the starter page never appears, and confirm in the browser that the app itself shows.',
   },
+  // ── Q-381 BATCH SIX (2026-10-12): the last app findings with nothing to press ─────────────────────
+  {
+    // The in-browser preview would not compile (PREVIEW_COMPILE_HEALED answers it when its heal works;
+    // OUTCOME_PREVIEW_COMPILE, the line the build records when it does not, is offered through this one).
+    code: 'PREVIEW_COMPILE_DIVERGENCE',
+    title: 'Fix the preview that will not compile',
+    detail: 'Your app\'s live preview could not compile, so it opens blank in the browser.',
+    prompt: 'The app\'s live preview does not compile in the browser, so it opens blank there even if the project builds. Fix the cause named below — an import the browser cannot load, syntax the preview does not support, a missing file — and confirm the preview opens and renders.',
+    withEvidence: true,
+  },
+  {
+    // The live preview still did not render or run cleanly after the build's own repair attempts.
+    code: 'OUTCOME_PREVIEW_FAILED',
+    title: 'Fix what stops your app running',
+    detail: 'Your app was opened in a browser and it still did not run cleanly after the repairs.',
+    prompt: 'The app was opened in a real browser and it still does not render or run cleanly after the automatic repairs. Fix each problem listed below at its real cause — a crash while loading, an error thrown by a screen, a missing piece — and confirm the app renders and runs without errors.',
+    withEvidence: true,
+  },
+  {
+    // The final look at an app nothing had proven yet: it did not render, or could not tell.
+    code: 'LAST_CHANCE_PROOF',
+    title: 'Make sure your app opens',
+    detail: 'Nothing has proven your app runs yet — the last check did not see it render.',
+    prompt: 'Nothing has proven this app runs yet: the last check of the live preview did not see it render. Open the app, find what stops it rendering cleanly — the entry file, a crash at load, a missing piece — fix the real cause, and confirm in the browser that the app opens.',
+  },
+  {
+    // The app's preview failed after the build, reported by the screen that showed it (the error is the
+    // preview's own words, so it travels with the fix).
+    code: 'PREVIEW_ERROR',
+    title: 'Fix the error your preview hit',
+    detail: 'When your app\'s preview opened, it failed with an error.',
+    prompt: 'When the app\'s preview opened, it failed with the error below. Find its real cause — a file that does not compile, a value that is missing, a crash while loading — fix it, and confirm the preview opens cleanly.',
+    withEvidence: true,
+  },
+  {
+    // The build ran out of time and was stopped. Continuing is the obvious next move.
+    code: 'BUILD_TIMEOUT',
+    title: 'Finish building your app',
+    detail: 'The last build ran out of time before it finished.',
+    prompt: 'The last build ran out of time before it finished. Continue from where it stopped: finish the parts that are not done yet, keep everything that is already there and working, and confirm the app builds and opens.',
+  },
   {
     // The syntax gate's finding when its repair could not clear it (SYNTAX_HEALED answers it otherwise).
     code: 'SYNTAX_ERROR_DETECTED',
@@ -223,6 +264,25 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     title: 'Fix what the review still found',
     detail: 'NavBharatAI\'s review found serious problems in your app that are not confirmed fixed yet.',
     prompt: 'A review of this app found serious problems that are not confirmed fixed — a repair was tried, or there was no time for one. Fix each one listed below at its real cause, keep everything that already works, and confirm the app still builds and runs.',
+    withEvidence: true,
+  },
+  {
+    // The strongest tier delivered the app as a best-effort backstop and its final review did not pass. The
+    // review's own reason travels with the fix, and the fix checks first, because a later pass may have
+    // already dealt with part of it.
+    code: 'BACKSTOP_GATE_FAIL',
+    title: 'Fix what the final review flagged',
+    detail: 'Your app was delivered, but its final quality review did not fully pass.',
+    prompt: 'This app was delivered, but its final quality review did not fully pass (the reason is below). Check each point in the running app first; fix the ones that are really there at their cause, keep everything that already works, and confirm the app builds and runs.',
+    withEvidence: true,
+  },
+  {
+    // A file this build wrote breaks a rule the app was already built on (architectureInvariants). Since
+    // batch six the route re-checks before the release gate and answers every one a later pass fixed.
+    code: 'ARCHITECTURE_INVARIANT_VIOLATED',
+    title: 'Keep your app built the way it was',
+    detail: 'A change broke one of the patterns your app is built on, which can make the parts stop fitting together.',
+    prompt: 'A recent change broke a pattern this app is built on (listed below) — for example how its parts import each other, where its state lives, or which library it uses for something. Bring each listed file back in line with the rest of the app without changing what it does, and confirm the app still builds and runs.',
     withEvidence: true,
   },
   {
@@ -442,6 +502,14 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'The database setup steps in the project I imported did not run. Find out why each one failed, fix the real cause, and confirm the database is set up and the app can read and write it.',
   },
   {
+    // A database command reported success while its output proved the database was never reached
+    // (BuildDiagnostics' silent-DB-failure check). The setup did not run, so this is the next move.
+    code: 'DB_UNREACHABLE',
+    title: 'Connect your app\'s database',
+    detail: 'Your app\'s database could not be reached, so its setup never ran.',
+    prompt: 'A database setup step reported success, but the database was never reached, so nothing was created. Check the database address and credentials the app uses, make sure the database is running and reachable from the app, run the setup again, and confirm the app can read and write its data.',
+  },
+  {
     // The boot log proved a table missing (Q-381 batch four). Answered when the migration retried after the
     // boot runs clean — HEAL_RESOLVES.IMPORT_DB_MIGRATIONS_APPLIED — which is what its own message says
     // the pages are waiting for. What is left open is a missing table nothing created.
@@ -488,6 +556,17 @@ export const APP_FINDINGS_WITHOUT_AN_OFFER = new Set([
   // separately and already carries its own offer, so a second button would duplicate it.
   'OUTCOME_EMPTY_BUILD',
   'OUTCOME_TYPECHECK_FAILED',
+  // The release gate's own "was RED, so the verdict was corrected" line — a roll-up of the blockers it
+  // counted, each recorded on its own line with its own offer (Q-381 batch six).
+  'OUTCOME_RELEASE_GATE_RED',
+  // Counted against the build so it stays FREE, with nothing the user could press — Q-380's rule ("a crashed
+  // build stays free and NavBharatAI absorbs it") applied to its two siblings (Q-381 batch six):
+  //  • STUCK_TOOL — our own tool call hung until the build ended. When the build ran out of time, the
+  //    BUILD_TIMEOUT offer ("Finish building your app") is the move; a button for our hang would be none.
+  //  • PLATFORM_SOURCE_WORKSPACE — a refusal: the workspace holds NavBharatAI's own source, so there is no
+  //    app to build and nothing to fix.
+  'STUCK_TOOL',
+  'PLATFORM_SOURCE_WORKSPACE',
 ]);
 
 /**
@@ -508,6 +587,11 @@ export const OFFERED_THROUGH: Readonly<Record<string, string>> = {
   OUTCOME_MISSING_FILES: 'MISSING_FILES_DETECTED',
   OUTCOME_MISSING_EXPORT: 'MISSING_EXPORT_DETECTED',
   BOOT_KILLING_ENV_GUARD_UNRESOLVED: 'BOOT_KILLING_ENV_GUARD',
+  // Batch six. The preview-compile heal's failure line restates the divergence it could not clear.
+  OUTCOME_PREVIEW_COMPILE: 'PREVIEW_COMPILE_DIVERGENCE',
+  // A reviewer auto-fix that did not complete leaves the same findings the settle lines below carry. Listed
+  // BEFORE them on purpose: the later lines list the findings, so their message is the evidence that wins.
+  REVIEWER_AUTOFIX_INCOMPLETE: 'REVIEW_RECHECK_CRITICALS_REMAIN',
   // Q-381 batch four. The platform tried to start the app itself and nothing served: the app never came up,
   // and nothing later in the build can give it a preview (no preview is set after that proof).
   PLATFORM_PREVIEW_NOT_UP: 'PREVIEW_NEVER_CAME_UP',

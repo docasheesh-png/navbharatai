@@ -221,17 +221,27 @@ export function registerBotRoutes(app: Express): void {
   app.get('/api/bots', async (req: Request, res: Response) => {
     const uid = await verifyFirebaseToken(req);
     if (!uid) return res.status(401).json({ error: 'Please sign in.' });
+    // A failed read is not an empty list (Q-816): "you have no bots" over a failed read hides a live bot.
+    const bots = await botStore.listForUser(uid);
+    if (bots === null) return res.status(502).json({ error: 'Could not read your bots just now — please try again.' });
     // The cut-over date travels with the list so the owner's notice names the real date, not a copy of it.
-    return res.json({ bots: await botStore.listForUser(uid), whatsappSignatureRequiredAfter: whatsappSignatureCutoverIso() });
+    return res.json({ bots, whatsappSignatureRequiredAfter: whatsappSignatureCutoverIso() });
   });
 
+  // Called by Bot Builder's "Your bots" (Q-816). Says what it really did: a failed delete is not a not-found, and
+  // for Telegram whether Telegram confirmed it stopped delivering. WhatsApp's webhook lives in the owner's own
+  // Meta app, which we cannot change, so there is nothing to confirm (null) and the screen says where to remove it.
   app.post('/api/bots/disconnect', async (req: Request, res: Response) => {
     const uid = await verifyFirebaseToken(req);
     if (!uid) return res.status(401).json({ error: 'Please sign in.' });
-    const rec = await botStore.remove(String(req.body?.botId || ''), uid);
+    const botId = String(req.body?.botId || '').trim();
+    if (!isBotId(botId)) return res.status(400).json({ error: 'Bot not found (or not yours).' });
+    const rec = await botStore.remove(botId, uid);
+    if (rec === 'error') return res.status(502).json({ error: 'Could not disconnect it just now — please try again.' });
     if (!rec) return res.status(404).json({ error: 'Bot not found (or not yours).' });
-    if (rec.platform === 'telegram') await tgDeleteWebhook(rec.token);
-    return res.json({ ok: true });
+    let webhookRemoved: boolean | null = null;
+    if (rec.platform === 'telegram') webhookRemoved = (await tgDeleteWebhook(rec.token).catch(() => ({ ok: false }))).ok === true;
+    return res.json({ ok: true, platform: rec.platform, webhookRemoved });
   });
 
   // ——— Admin: the bot ledger — every user's bots, who built them, and whether they are signed ———

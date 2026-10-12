@@ -61,6 +61,7 @@ import { composeJudgeChain, describeJudgeAttempts, type JudgeCandidate, type Jud
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePowers';
+import { namedNonSmartphone, nonSmartphoneBuildRule, nonSmartphoneUserLine } from '../AgentV3/deviceTarget';
 import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
 import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eAutoScaffold';
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
@@ -13331,6 +13332,9 @@ async function noteBuildOutcome(
     // both exits consult it so an unresolved-critical build is honestly NOT-ok (→ free via the existing
     // "working app or free" guard, and resumable on the finalizer path so the next window fixes them).
     let reviewCriticalsUnresolved: string[] = [];
+    // Q-381 batch six: the architecture rules this build broke, re-checkable before the release gate counts
+    // them (set by the integrity pass, read just before the gate).
+    let architectureRecheck: { broken: string[]; still: (files: Record<string, string>) => Set<string> } | null = null;
     // DURABLE FILE CAPTURE, hoisted here (not just inside the build-execution block below) so BOTH the
     // deadline-timeout handler above and the crash catch below — a plain `try{}`/`catch{}` block is its
     // own separate scope from an inner `const` — can see and durably flush it. Records the exact content
@@ -17047,6 +17051,10 @@ async function noteBuildOutcome(
       // reconciles to ONE framework before writing features. Applies to any turn on an incoherent workspace;
       // '' (coherent, or flag off) leaves buildPrompt unchanged.
       if (frameworkCoherenceMsg) buildPrompt = `${frameworkCoherenceMsg}\n\n---\n\n${buildPrompt}`;
+      // A KEYPAD PHONE THE USER NAMED (Q-846): the builder is told before it writes, so what it builds fits the keys.
+      // Pure (deviceTarget.ts never throws), so no best-effort wrapper — like the notes below.
+      const keypadPhoneForBuild = !isImportTurn ? namedNonSmartphone(prompt) : null;
+      if (keypadPhoneForBuild) buildPrompt = `${nonSmartphoneBuildRule(keypadPhoneForBuild.device)}\n\n---\n\n${buildPrompt}`;
       // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built
       // in React with a types file claiming a "PHP MVC backend"). Told to the builder here, to the user
       // in the ready message — see unsupportedStack.ts.
@@ -20422,6 +20430,10 @@ async function noteBuildOutcome(
                     ...obs(`${v.file} breaks how this app is built — ${v.detail}. ${v.rule}`),
                   });
                 }
+                if (broken.length > 0) {
+                  const keyOf = (v: { file: string; detail: string }) => `${v.file} breaks how this app is built — ${v.detail}`;
+                  architectureRecheck = { broken: broken.map(keyOf), still: (files) => new Set(checkInvariants(baseInvariants, files).map(keyOf)) };
+                }
                 if (broken.length === 0) {
                   // Recorded on a clean build too: a check that only ever speaks up when it finds
                   // something leaves no evidence that it ran at all, and an unproven check is exactly
@@ -23378,6 +23390,25 @@ async function noteBuildOutcome(
         // bill (see evidenceLedger.ts / provenFromTimeline.ts).
         try { fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger()); }
         catch { /* evidence recovery is best-effort and must never touch a build */ }
+        // THE EARLY SYNTAX VERDICT IS RE-CHECKED BEFORE THE GATE COUNTS IT (Q-821). A later pass can have made
+        // every file parse since the syntax gate gave up; re-parse the same files and answer the early finding
+        // when they do. Only ever answers — a file that still does not parse keeps its error, and a new break
+        // from a pass after this point is caught by the final re-check below.
+        try {
+          if (writtenFiles.size > 0 && buildDiag.hasOpenSyntaxFinding() && (await findSyntaxErrors(Object.fromEntries(writtenFiles))).length === 0) {
+            buildDiag.answerSyntaxOnCleanParse('before the release gate');
+          }
+        } catch { /* a re-check only ever answers; it must never block the gate */ }
+        // …and the architecture rules the integrity pass found broken (Q-381 batch six): a rule a later pass
+        // brought back is answered, so its "Keep your app built the way it was" button never outlives it.
+        try {
+          if (architectureRecheck) {
+            const still = architectureRecheck.still(Object.fromEntries(writtenFiles));
+            for (const key of architectureRecheck.broken) {
+              if (!still.has(key)) buildDiag.resolveOnRecheck('ARCHITECTURE_INVARIANT_VIOLATED', { messageIncludes: key });
+            }
+          }
+        } catch { /* a re-check only ever answers; it must never block the gate */ }
         const gateFindings = () => ({
           // Counted from what this build actually recorded, so the gate and the report cannot disagree.
           blockers: buildDiag.shippingIssueCount('error'),
@@ -24050,6 +24081,16 @@ async function noteBuildOutcome(
               detail: invented.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
             });
           }
+        }
+      } catch { /* the disclosure is best-effort — it must never break the build */ }
+
+      // 📵 …AND A PHONE IT CANNOT RUN ON IS NAMED (Q-846): the user named a keypad phone, so the summary says plainly
+      // that no web app runs there, and what was built instead. Recorded for the admin as an info line.
+      try {
+        const keypadPhone = result.ok && expectsArtifacts && !isImportTurn ? namedNonSmartphone(prompt) : null;
+        if (keypadPhone) {
+          result = { ...result, summary: `${result.summary}${nonSmartphoneUserLine(keypadPhone.device)}` };
+          buildDiag.record({ phase: 'readiness', severity: 'info', code: 'NON_SMARTPHONE_TOLD', autoResolved: true, message: `The request named ${keypadPhone.device}, a keypad phone no web app runs on — the user was told, and the build was steered to a light 2D keys-first version.` });
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 
@@ -24922,6 +24963,9 @@ async function noteBuildOutcome(
               if (result) result = { ...result, ok: false, summary: finalSyntaxErrorSummary(finalSyntaxErrors.length) };
               if (buildResultRef) buildResultRef = { ...buildResultRef, ok: false };
             }
+          } else if (buildDiag.hasOpenSyntaxFinding()) {
+            // Clean on the final files: an early finding a later pass fixed is answered here too (Q-821).
+            buildDiag.answerSyntaxOnCleanParse('in the final build');
           }
         } catch { /* final syntax re-verify is best-effort — never blocks a build */ }
       }

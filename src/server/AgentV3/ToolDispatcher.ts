@@ -225,7 +225,7 @@ import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
-import { withVitestDeclared, VITEST_RANGE } from './TestGenerationAgent';
+import { withVitestDeclared, recipeShipsVitestTest, VITEST_RANGE } from './TestGenerationAgent';
 import { renderSeenThisBuild } from './renderProof';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { addDependency, removeDependency as removeOneDependency, listDependencies } from './packageEdit';
@@ -338,7 +338,7 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
-import { missingLayerFiles, missingLayersNote, recipeDependenciesNeeded } from '../lib/gameRecipeLayers';
+import { planKitLayers, missingLayersNote, kitVersionNote, kitRefreshable, staleKitReason, recipeFilePool, recipeDependenciesNeeded, type LayerFile } from '../lib/gameRecipeLayers';
 import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
@@ -646,6 +646,11 @@ function paidToolCap(name: string, fallback: number, env: NodeJS.ProcessEnv = pr
   return Math.floor(n);
 }
 
+/** What a lock-aware install did (Q-862): a busy lock is retried, a failure is not. */
+type InstallOutcome = 'installed' | 'busy' | 'failed' | 'skipped';
+/** How many writes may retry an import install that stood down under the background install's lock. */
+export const MAX_DEFERRED_IMPORT_INSTALLS = 6;
+
 export class ToolDispatcher {
   /**
    * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
@@ -708,7 +713,7 @@ export class ToolDispatcher {
   ) {
     this.toolBudget = toolBudget ?? emptyBuildToolBudget();
     this._rawActuator = actuatorRaw;
-    this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); }, (p) => {
+    this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); this.kitCurrentPaths.delete(path); }, (p) => {
       if (!this.internalWriteDepth && process.env.AGENTV3_GUARDED_WRITE_DOOR !== 'off') this.assertWritable(p);
     });
   }
@@ -797,6 +802,7 @@ export class ToolDispatcher {
     let targets: string[];
     try { targets = shellReadBackTargets(command, skip); } catch { return; }
     for (const path of targets) {
+      this.kitCurrentPaths.delete(path); // a shell write is not the kit's current content any more (Q-863)
       try {
         const content = await this.actuator.readFile(this.workspaceId, path);
         if (typeof content === 'string') this.onFileWrite(path, content);
@@ -969,6 +975,8 @@ export class ToolDispatcher {
   private _vehicleShapeNoted = false;
   /** Recipe-known packages a hand-written import already had its one install attempt for (see below). */
   private _importInstallTried = new Set<string>();
+  /** Q-862: imports whose install stood down because the background install held the lock — retried, and how often. */
+  private _importInstallDeferred = new Map<string, number>();
   /** Once per build: an upload read into text, with nowhere proper to keep it (Q-542 — `browserFileStore.ts`). */
   private _uploadStorageNoted = false;
   /** The entry-first hand-back is said once per build (earlyPreview.ts, autopsy 39e982bd). */
@@ -3369,8 +3377,33 @@ export class ToolDispatcher {
    * the controller three more times; every re-run said "Updated" about files it had not changed, and each
    * rewrite undid the previous heal, so the repeat looked like progress).
    */
+  /**
+   * 🧪 A RECIPE THAT SHIPS A TEST SHIPS ITS RUNNER (Q-843). Declares `vitest` in package.json BEFORE the test
+   * lands — the same order `generate_tests` uses, so the write-time typecheck already sees it — whenever a recipe's
+   * output holds a vitest test. Every recipe writer calls it (`tests/aRecipeTestShipsItsRunner` is the census);
+   * already declared, unreadable or no test ⇒ nothing. Returns the line for the tool result.
+   */
+  private async declareVitestForRecipeTests(files: Record<string, string>, agent: AgentRole): Promise<string> {
+    if (!recipeShipsVitestTest(files)) return '';
+    try {
+      const before = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => null);
+      const after = withVitestDeclared(before);
+      if (!after) return '';
+      await this.actuator.writeFile(this.workspaceId, 'package.json', after);
+      this.state?.recordFileChange({ path: 'package.json', kind: 'modify' }, agent);
+      this.onFileWrite?.('package.json', after);
+      return `Added vitest@${VITEST_RANGE} to devDependencies so the test this recipe ships can run (it installs on the next typecheck or \`npm install\`).`;
+    } catch {
+      return '';
+    }
+  }
+
   private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole): Promise<string[]> {
     const lines: string[] = [];
+    const runner = await this.declareVitestForRecipeTests(files, agent);
+    if (runner) lines.push(runner);
+    const refreshed: string[] = [];
+    const refreshFailed: string[] = [];
     for (const [path, content] of Object.entries(files)) {
       let existing: string | null = null;
       let missing = false;
@@ -3383,22 +3416,65 @@ export class ToolDispatcher {
         missing = true;
         existing = null;
       }
-      if (!missing && existing === content) { lines.push(`Unchanged ${path} (already exactly what this recipe writes)`); continue; }
+      if (!missing && existing === content) {
+        this.noteKitCurrent(path, content);
+        lines.push(`Unchanged ${path} (already exactly what this recipe writes)`);
+        continue;
+      }
+      // 🧬 An older kit version nobody edited is brought up to date (Q-863, gameRecipeLayers.ts): the recipe's
+      // instructions describe the CURRENT files, and code written from them against the old file would not compile.
+      if (!missing && existing !== null && kitRefreshable(path, existing, content)) {
+        try {
+          const wrote = await this.guardedWrite(path, content, { agent, source: 'writeRecipeFiles', allowOverwrite: true });
+          this.state?.recordFileChange({ path, kind: 'modify' }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+          this.noteKitCurrent(path, wrote.content);
+          refreshed.push(path);
+          lines.push(`Updated ${path}`);
+        } catch {
+          refreshFailed.push(path);
+          lines.push(`skipped existing ${path}`);
+        }
+        continue;
+      }
       // New files only. No recipe in this tree intentionally patches an existing router or App.tsx.
-      if (!missing) { lines.push(`skipped existing ${path}`); continue; }
+      if (!missing) {
+        const stale = existing !== null && recipeFilePool().has(path) ? staleKitReason(path, existing, content) : null;
+        lines.push(`skipped existing ${path}${stale ? ' — it is not the current kit version (somebody changed it), so it was kept as it is; the instructions below may name functions it does not have' : ''}`);
+        continue;
+      }
       const wrote = await this.guardedWrite(path, content, { agent, source: 'writeRecipeFiles', allowOverwrite: false });
       this.state?.recordFileChange({ path, kind: wrote.kind }, agent);
       getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+      this.noteKitCurrent(path, wrote.content);
       lines.push(`${wrote.kind === 'create' ? 'Created' : 'Updated'} ${path}`);
     }
+    const kitNote = kitVersionNote(refreshed, [], refreshFailed).trim();
+    if (kitNote) lines.push(kitNote);
     return lines;
   }
 
   /**
-   * Write the recipe-owned files a game recipe's output imports and the project does not have — the
-   * 3D layer that `generate_game_shell` and `generate_game_systems` import, when `generate_game_3d` was
-   * never run (autopsy 6a55d939, gameRecipeLayers.ts). Only ABSENT files are written; returns the note
-   * for the tool result. Best-effort: a failure leaves the recipe's own result exactly as it was.
+   * Kit paths this dispatcher wrote with the CURRENT kit content and nothing has written since (the recording actuator
+   * drops a path the moment any write of this dispatcher's reaches it, heals included, and a shell command's read-back
+   * drops what it names). The kit planner treats them as current without reading them — so the
+   * game-kit seed, which writes ~30 files and then plans after every recipe, reads nothing. A shell command that
+   * edits one behind our back can only make the planner skip a refresh or follow that file's imports; a file is
+   * replaced only after it is READ and found to be an older kit version, never on the strength of this set.
+   */
+  private readonly kitCurrentPaths = new Set<string>();
+
+  private noteKitCurrent(path: string, content: string): void {
+    if (recipeFilePool().get(path)?.content === content) this.kitCurrentPaths.add(path);
+  }
+
+  /**
+   * Bring the kit layer the files just written import into line with them — the 3D layer that `generate_game_shell`
+   * and `generate_game_systems` import, when `generate_game_3d` was never run (autopsy 6a55d939), and, since Q-863,
+   * an older kit file nobody edited that the new files need the current version of (gameRecipeLayers.planKitLayers).
+   * Absent files are written; an older untouched version is replaced; anybody's own file is never touched, and
+   * when the new code imports names it lacks the note says which. Returns the note for the tool result.
+   * Best-effort: a failure leaves the recipe's own result exactly as it was.
    */
   private async addMissingRecipeLayers(written: Record<string, string>, agent: AgentRole): Promise<string> {
     let layersNote = '';
@@ -3406,14 +3482,37 @@ export class ToolDispatcher {
     try {
       const listed = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
       const present = new Set(listed.map((f) => String(f).replace(/^\.?\//, '')));
-      const missing = missingLayerFiles(written, present);
-      for (const [path, f] of missing) {
-        await this.actuator.writeFile(this.workspaceId, path, f.content);
+      const pool = recipeFilePool();
+      const existing = new Map<string, string | null>();
+      for (const p of this.kitCurrentPaths) if (present.has(p)) existing.set(p, pool.get(p)!.content);
+      let plan = planKitLayers(written, present, existing, pool);
+      for (let round = 0; plan.unread.length > 0 && round < 10; round++) {
+        for (const p of plan.unread) existing.set(p, await this.actuator.readFile(this.workspaceId, p).catch(() => null));
+        plan = planKitLayers(written, present, existing, pool);
+      }
+      const added = new Map<string, LayerFile>();
+      const failed: string[] = [];
+      for (const [path, f] of plan.add) {
+        try { await this.actuator.writeFile(this.workspaceId, path, f.content); }
+        catch { failed.push(path); continue; } // the write door refused it (an owner's protected path, Green Freeze)
         this.state?.recordFileChange({ path, kind: 'create' }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, f.content);
+        this.noteKitCurrent(path, f.content);
         all[path] = f.content;
+        added.set(path, f);
       }
-      layersNote = missingLayersNote(missing);
+      const refreshed: string[] = [];
+      for (const [path, f] of plan.refresh) {
+        try {
+          const wrote = await this.guardedWrite(path, f.content, { agent, source: 'kitLayers', allowOverwrite: true });
+          this.state?.recordFileChange({ path, kind: 'modify' }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, wrote.content);
+          this.noteKitCurrent(path, wrote.content);
+          all[path] = wrote.content;
+          refreshed.push(path);
+        } catch { failed.push(path); }
+      }
+      layersNote = missingLayersNote(added) + kitVersionNote(refreshed, plan.kept, failed);
     } catch { /* the recipe's own result stands */ }
     return layersNote + await this.installRecipeDependencies(all);
   }
@@ -3426,11 +3525,17 @@ export class ToolDispatcher {
    * package.json is recorded through the one write door, so the saved project lists the package too.
    */
   private async installRecipeDependencies(files: Record<string, string>): Promise<string> {
+    return (await this.installRecipeDependenciesOutcome(files)).note;
+  }
+
+  /** The same install, and what happened — the import path needs to know a busy lock from a done install (Q-862). */
+  private async installRecipeDependenciesOutcome(files: Record<string, string>): Promise<{ note: string; outcome: InstallOutcome }> {
     let pkg: string | null = null;
-    try { pkg = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { return ''; }
+    try { pkg = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { return { note: '', outcome: 'skipped' }; }
     const needed = recipeDependenciesNeeded(files, pkg);
-    if (needed.length === 0) return '';
-    return `\n\n${await this.installDependencies(needed, '')}`;
+    if (needed.length === 0) return { note: '', outcome: 'skipped' };
+    const r = await this.installDependenciesOutcome(needed, '');
+    return { note: `\n\n${r.note}`, outcome: r.outcome };
   }
 
   /**
@@ -3467,9 +3572,13 @@ export class ToolDispatcher {
    * what happened — installed, deferred because another install is running, or failed.
    */
   private async installDependencies(deps: ReadonlyArray<{ name: string; version: string; dev: boolean }>, dir: string): Promise<string> {
+    return (await this.installDependenciesOutcome(deps, dir)).note;
+  }
+
+  private async installDependenciesOutcome(deps: ReadonlyArray<{ name: string; version: string; dev: boolean }>, dir: string): Promise<{ note: string; outcome: InstallOutcome }> {
     const named = deps.map((d) => `${d.name}@${d.version}`).join(', ');
     const base = recipeInstallCommand(deps);
-    if (!base) return `Add the dependency: ${named}`;
+    if (!base) return { note: `Add the dependency: ${named}`, outcome: 'skipped' };
     const cmd = dir ? `cd ${dir} && ${base}` : base;
     const manifest = dir ? `${dir}/package.json` : 'package.json';
     try {
@@ -3477,15 +3586,15 @@ export class ToolDispatcher {
       const r = await withTimeout(this.actuator.runCommand(this.workspaceId, cmd), 150_000, 'recipe-dependencies');
       try { this.onCommand?.({ command: cmd, exitCode: r.exitCode, stdout: r.stdout || '', stderr: r.stderr || '', durationMs: Date.now() - started }); } catch { /* diagnostics are best-effort */ }
       if (String(r.stdout ?? '').includes(RECIPE_DEPS_BUSY_MARKER)) {
-        return `📦 This code needs ${named}. The app's packages are still being installed, so add them when that finishes: npm install ${deps.map((d) => `${d.name}@${d.version}`).join(' ')}${dir ? ` (in ${dir})` : ''}`;
+        return { note: `📦 This code needs ${named}. The app's packages are still being installed, so add them when that finishes: npm install ${deps.map((d) => `${d.name}@${d.version}`).join(' ')}${dir ? ` (in ${dir})` : ''}`, outcome: 'busy' };
       }
       if (r.exitCode !== 0) {
-        return `📦 Installing ${named} failed (npm exit ${r.exitCode}). Install them before you finish — this code does not compile without them.`;
+        return { note: `📦 Installing ${named} failed (npm exit ${r.exitCode}). Install them before you finish — this code does not compile without them.`, outcome: 'failed' };
       }
       try { this.onFileWrite(manifest, await this.actuator.readFile(this.workspaceId, manifest)); } catch { /* the final save's scan still sees it */ }
-      return `📦 Installed ${named} into ${manifest} — this code imports them. Do not install them again.`;
+      return { note: `📦 Installed ${named} into ${manifest} — this code imports them. Do not install them again.`, outcome: 'installed' };
     } catch {
-      return `📦 This code needs ${named} — install them before you finish.`;
+      return { note: `📦 This code needs ${named} — install them before you finish.`, outcome: 'failed' };
     }
   }
 
@@ -4096,9 +4205,11 @@ export class ToolDispatcher {
    * writes. The class is "dependency sync tied to which tool wrote the import"; this ties it to the import.
    *
    * 🔒 Only a package a recipe DECLARES (`recipeDependenciesNeeded` never guesses at an unknown import), only
-   * when package.json does not list it yet, through the same lock-aware install the recipes use, and ONE
-   * attempt per package per build — a busy lock or a failed install is said once in words (the install's own
-   * note), never retried on every write. Best-effort: anything unreadable adds nothing.
+   * when package.json does not list it yet, through the same lock-aware install the recipes use. A FAILED
+   * install is one attempt per package per build, said once. A BUSY lock is not a failure (Q-862): the install
+   * stood down because the background install was still running, so it is said once and retried, silently, on
+   * the next writes until the lock is free — at most MAX_DEFERRED_IMPORT_INSTALLS times — and the write that
+   * finally installs it says so. Best-effort: anything unreadable adds nothing.
    */
   private async importedRecipeDependencyNote(files: Record<string, string>): Promise<string> {
     try {
@@ -4109,8 +4220,18 @@ export class ToolDispatcher {
       // Pure first: a write that imports no recipe-known package costs no read at all.
       const known = recipeDependenciesNeeded(sources, '{}').filter((d) => !this._importInstallTried.has(d.name));
       if (known.length === 0) return '';
+      const r = await this.installRecipeDependenciesOutcome(sources);
+      if (r.outcome === 'busy') {
+        const firstTime = known.some((d) => !this._importInstallDeferred.has(d.name));
+        for (const d of known) {
+          const tries = (this._importInstallDeferred.get(d.name) ?? 0) + 1;
+          this._importInstallDeferred.set(d.name, tries);
+          if (tries >= MAX_DEFERRED_IMPORT_INSTALLS) this._importInstallTried.add(d.name);
+        }
+        return firstTime ? r.note : '';
+      }
       for (const d of known) this._importInstallTried.add(d.name);
-      return await this.installRecipeDependencies(sources);
+      return r.note;
     } catch {
       return '';
     }
@@ -6737,6 +6858,7 @@ export class ToolDispatcher {
           : undefined;
         const itCfg = generateIntegrationTests({ resource: itResource, basePath: itBasePath, fields: itFields });
         const itWritten: string[] = [];
+        { const runner = await this.declareVitestForRecipeTests(itCfg.files, agent); if (runner) itWritten.push(runner); }
         for (const [path, content] of Object.entries(itCfg.files)) {
           let kind: 'create' | 'modify' = 'create';
           try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
@@ -9535,6 +9657,7 @@ export class ToolDispatcher {
         // IFSC/PIN/UPI/mobile, with the REAL GSTIN mod-36 + Aadhaar Verhoeff checksums. Dependency-free.
         const ivcfg = generateIndianValidatorsIntegration();
         const ivWritten: string[] = [];
+        { const runner = await this.declareVitestForRecipeTests(ivcfg.files, agent); if (runner) ivWritten.push(runner); }
         for (const [path, content] of Object.entries(ivcfg.files)) {
           let kind: 'create' | 'modify' = 'create';
           try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
@@ -10030,6 +10153,7 @@ export class ToolDispatcher {
         // lakh/crore grouping + amount-in-words. Pure generator in MoneyFormatGenerator.ts. No env keys.
         const mfcfg = generateMoneyFormatIntegration();
         const mfWritten: string[] = [];
+        { const runner = await this.declareVitestForRecipeTests(mfcfg.files, agent); if (runner) mfWritten.push(runner); }
         for (const [path, content] of Object.entries(mfcfg.files)) {
           let kind: 'create' | 'modify' = 'create';
           try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
@@ -10165,6 +10289,7 @@ export class ToolDispatcher {
         // (node:crypto), constant-time compare. Pure generator in CsrfGenerator.ts. No env keys.
         const csrfcfg = generateCsrfIntegration();
         const csrfWritten: string[] = [];
+        { const runner = await this.declareVitestForRecipeTests(csrfcfg.files, agent); if (runner) csrfWritten.push(runner); }
         for (const [path, content] of Object.entries(csrfcfg.files)) {
           let kind: 'create' | 'modify' = 'create';
           try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
@@ -10269,6 +10394,7 @@ export class ToolDispatcher {
         // Pure generator in UpiGenerator.ts. No env keys.
         const upicfg = generateUpiIntegration();
         const upiWritten: string[] = [];
+        { const runner = await this.declareVitestForRecipeTests(upicfg.files, agent); if (runner) upiWritten.push(runner); }
         for (const [path, content] of Object.entries(upicfg.files)) {
           let kind: 'create' | 'modify' = 'create';
           try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
@@ -10320,6 +10446,7 @@ export class ToolDispatcher {
         // (node:crypto), storage-agnostic. Pure generator in AuditLogGenerator.ts. No env keys.
         const auditcfg = generateAuditLogIntegration();
         const auditWritten: string[] = [];
+        { const runner = await this.declareVitestForRecipeTests(auditcfg.files, agent); if (runner) auditWritten.push(runner); }
         for (const [path, content] of Object.entries(auditcfg.files)) {
           let kind: 'create' | 'modify' = 'create';
           try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }

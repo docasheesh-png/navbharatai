@@ -67,9 +67,10 @@ export interface GameOptions {
   container: HTMLElement;
   lighting?: LightingPresetName;
   /**
-   * 'third-person' (default) for a character on foot; 'chase' for anything driven or ridden — then the
-   * first vehicle given createVehicleState() is chased from BEHIND from the first frame (on foot it
-   * frames the player exactly like 'third-person'). Whatever this says, the vehicle the player drives
+   * 'third-person' (default) for a character on foot; 'chase' for anything driven or ridden — then a game
+   * with ONE vehicle given createVehicleState() has it chased from BEHIND from the first frame (on foot it
+   * frames the player exactly like 'third-person'; with a rival or a parked car, or a game that reads
+   * Use, nothing is guessed — call ctx.follow(car)). Whatever this says, the vehicle the player drives
    * with driveVehicle(…, ctx.input.axis(), …) is chased from behind.
    */
   camera?: CameraKind;
@@ -146,14 +147,22 @@ export class Game {
    * example produced exactly the admin's game. Now the shell sees it itself:
    *   • the vehicle driveVehicle() moves with the PLAYER's own input (the axis ctx.input.axis() returned)
    *     is chased from behind, with no call at all — that is the player's car, whatever else is driven;
-   *   • with camera: 'chase' declared, the first vehicle given a state is chased from the very first
-   *     frame — a start screen included, before the player has touched anything.
+   *   • with camera: 'chase' declared, the ONE vehicle given a state is chased from the very first
+   *     frame — a start screen included, before the player has touched anything (Q-864: never when there
+   *     are two, or when the game reads Use — then it waits for the player's own car).
    * A car the game drives with its OWN axis (an opponent, a bus crossing the road) never takes the
    * camera from a player on foot. ctx.follow() overrides all of it, and a vehicle that leaves the scene
    * (a respawn builds a new car) hands over to the next one.
    */
   private playerVehicle: THREE.Object3D | null = null;
   private firstVehicle: THREE.Object3D | null = null;
+  /**
+   * Every vehicle given a state that is NOT the player's — so the camera: 'chase' guess ("the first vehicle")
+   * is made only when it cannot be the wrong one (Q-864): exactly one such vehicle in the scene, in a game
+   * that does not read the action buttons. A racer whose rival got its state first, or a walk-and-drive game
+   * with a parked car, used to have that car chased from the first frame.
+   */
+  private readonly otherVehicles = new Set<THREE.Object3D>();
   /** Every axis object ctx.input.axis() has handed out — how a driveVehicle() call is known to be the player's. */
   private readonly playerAxes = new WeakSet<object>();
   private setupDone = false;
@@ -312,8 +321,9 @@ export class Game {
     const keep = (current: THREE.Object3D | null) => !!current && current !== vehicle && (!this.setupDone || this.inScene(current));
     if (axis && this.playerAxes.has(axis)) {
       if (vehicle !== this.playerVehicle && !keep(this.playerVehicle)) this.playerVehicle = vehicle;
-    } else if (vehicle !== this.firstVehicle && !keep(this.firstVehicle)) {
-      this.firstVehicle = vehicle;
+    } else {
+      if (this.otherVehicles.size < 64) this.otherVehicles.add(vehicle);
+      if (vehicle !== this.firstVehicle && !keep(this.firstVehicle)) this.firstVehicle = vehicle;
     }
     this.syncTouchLayout();
   }
@@ -325,13 +335,26 @@ export class Game {
 
   /**
    * What the camera chases this frame: the game's own choice (ctx.follow), else the vehicle the player
-   * drives, else — only when the game declared camera: 'chase' — the first vehicle it set up; else nothing.
+   * drives, else — only when the game declared camera: 'chase' AND that guess cannot pick the wrong car — the
+   * one vehicle it set up; else nothing.
+   *
+   * The guess stands down (Q-864) when the game reads an action button — a walk-and-drive game reads Use to get
+   * in and out, so its player starts on foot beside a PARKED car — or when more than one vehicle in the scene
+   * has a state that is not the player's, so a rival given its state first is never chased. Either way the
+   * player's own car takes the camera the moment the game drives it with ctx.input.axis().
    */
   private get chased(): THREE.Object3D | null {
     if (this.followChosen) return this.followTarget;
     if (this.playerVehicle && this.inScene(this.playerVehicle)) return this.playerVehicle;
-    if (this.options.camera === 'chase' && this.firstVehicle && this.inScene(this.firstVehicle)) return this.firstVehicle;
+    if (this.options.camera === 'chase' && this.firstVehicle && this.inScene(this.firstVehicle)
+      && !this.gameReadsButtons && this.vehiclesInScene() === 1) return this.firstVehicle;
     return null;
+  }
+
+  private vehiclesInScene(): number {
+    let n = 0;
+    for (const v of this.otherVehicles) if (this.inScene(v)) n += 1;
+    return n;
   }
 
   /**
@@ -1010,6 +1033,67 @@ export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud
  * Generate the shell. `gamecanvas` renders the HUD and constructs the Game, so a subset that would not
  * compile is completed. Pure; never throws.
  */
+/**
+ * 🧪 THE CONTROLS TEST EVERY 3D GAME SHIPS WITH (Q-843, build 46e2d74b). No game had a behaviour test, so the
+ * readiness gate reported "No tests at all" and nothing a test runner could run ever checked that LEFT turns
+ * left, W accelerates, or that the camera sits behind the car — the two defects the admin found by playing.
+ * It ships beside the shell (the shell is what drives a vehicle), it checks the kit the game drives with, and
+ * the recipe declares vitest so it runs (ToolDispatcher.declareVitestForRecipeTests). Proven against the real
+ * generated kit in tests/aGameShipsItsControlsTest.test.ts, including that it FAILS on a mirrored kit.
+ */
+export const GAME_CONTROLS_TEST_PATH = 'src/game/controls.test.ts';
+export const GAME_CONTROLS_TEST = `// THE CONTROLS DO WHAT THE KEYS SAY — shipped with every 3D game the NavBharatAI kit builds (Q-843).
+// Your test runner runs it (npm test, or vitest run). It checks the kit your game drives with: W speeds the
+// car up and moves it the way its nose points, LEFT turns it to the driver's left, RIGHT to the right, and
+// the chase camera sits BEHIND the car, so the player sees its tail lights. If your game moves a vehicle with
+// its own code instead of driveVehicle(), copy these checks for that code.
+import { describe, it, expect } from 'vitest';
+import { createCar, createVehicleState, driveVehicle } from './three/objects';
+import { CameraRig } from './three/camera';
+
+const UP = { x: 0, y: -1 };           // up / W, as the runtime's input.axis() reports it
+const UP_LEFT = { x: -1, y: -1 };     // up + left / A
+const UP_RIGHT = { x: 1, y: -1 };     // up + right / D
+
+function drive(axis: { x: number; y: number }, seconds: number) {
+  const car = createCar();
+  let state = createVehicleState(car);
+  const startSpeed = state.speed;
+  for (let i = 0; i < Math.round(seconds * 60); i++) state = driveVehicle(car, state, axis, 1 / 60);
+  return { car, state, startSpeed };
+}
+
+describe('the controls do what the keys say', () => {
+  it('W speeds the car up', () => {
+    const { state, startSpeed } = drive(UP, 1);
+    expect(state.speed).toBeGreaterThan(startSpeed);
+  });
+
+  it('W moves the car the way its nose points (+Z)', () => {
+    expect(drive(UP, 1).car.position.z).toBeGreaterThan(0);
+  });
+
+  it("LEFT turns the car to the driver's left (+X)", () => {
+    expect(drive(UP_LEFT, 1).car.position.x).toBeGreaterThan(0);
+  });
+
+  it("RIGHT turns the car to the driver's right (-X)", () => {
+    expect(drive(UP_RIGHT, 1).car.position.x).toBeLessThan(0);
+  });
+
+  it('the chase camera sits BEHIND the car (tail lights toward the player)', () => {
+    // The rig sizes its camera from the window; a test runs without one, so it gets a screen-sized stand-in.
+    const g = globalThis as unknown as { window?: { innerWidth: number; innerHeight: number } };
+    g.window ??= { innerWidth: 800, innerHeight: 600 };
+    const car = createCar();
+    createVehicleState(car);
+    const rig = new CameraRig({ kind: 'chase' });
+    for (let i = 0; i < 120; i++) rig.follow(car, 1 / 60);
+    expect(rig.camera.position.z).toBeLessThan(car.position.z);
+  });
+});
+`;
+
 export function generateGameShell(include?: string[]): GameShellResult {
   const wanted = Array.isArray(include) && include.length
     ? new Set(include.map((s) => String(s || '').trim().toLowerCase()).filter(Boolean))
@@ -1033,6 +1117,8 @@ export function generateGameShell(include?: string[]): GameShellResult {
     if (files['src/game/GameCanvas.tsx']) files['src/game/ui/Hud.tsx'] = FILES['src/game/ui/Hud.tsx'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
+  // The shell drives the vehicle, so it carries the test that the vehicle does what the keys say (Q-843).
+  if (files['src/game/Game.ts']) files[GAME_CONTROLS_TEST_PATH] = GAME_CONTROLS_TEST;
 
   return {
     files,
@@ -1102,8 +1188,9 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '  drive the same Input actions as the keyboard. Choose the buttons with\n' +
       "  touchControls: { buttons: [{ action: 'attack', label: 'Punch' }, …] } — never hand-roll a joystick.\n" +
       "- A CAR THE PLAYER DRIVES with driveVehicle(car, state, ctx.input.axis(), dt) is recognised by the\n" +
-      "  shell: the camera chases it from BEHIND even if you forget ctx.follow (with camera: 'chase', from\n" +
-      '  the first frame), and a phone gets Left/Right bottom-left and Brake/Gas bottom-right, wired to the\n' +
+      "  shell: the camera chases it from BEHIND even if you forget ctx.follow (with camera: 'chase' and a\n" +
+      "  single car, from the first frame; with rivals or a parked car, call ctx.follow(car)), and a phone\n" +
+      '  gets Left/Right bottom-left and Brake/Gas bottom-right, wired to the\n' +
       '  same actions as the arrow keys (a game that reads Attack/Jump/Use/Run itself — Use to get out of\n' +
       '  the car — keeps the joystick and those buttons instead). Never write your own steering pad or chase\n' +
       '  camera — a hand-written one is how LEFT ends up turning RIGHT.\n' +

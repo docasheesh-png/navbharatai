@@ -476,6 +476,8 @@ import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration 
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration, failuresAreOurStarterTests, ourStarterTestFailedNote } from '../AgentV3/TestGenerationAgent';
+import { starterTestsSkipReason, starterTestsSkippedNote } from '../AgentV3/starterTestsSkip';
+import { buildBillingLabel } from '../AgentV3/buildBillingLabel';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
 import { APP_ENTRY_CANDIDATES, resolveAppDisplayName } from '../AgentV3/appDisplayName';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
@@ -13094,16 +13096,18 @@ async function noteBuildOutcome(
           });
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
           buildDiagRef?.setCacheReadInputTokens(billingCtx.cacheReadInputTokens ?? 0);
+          // The label and `charged` come from the ONE rule the settle uses too (buildBillingLabel.ts, autopsy 9c612cdb).
+          const watchdogBilledInr = Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100;
           buildDiagRef?.setBilling({
-            userTier: isAgentV3FreeUser(userId, email)
-              ? 'free-list (admin/tester)'
-              : freeTierBuildActive
-                ? 'free (welcome bonus — cheap engines)'
-                : (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email)
-                  ? 'paid'
-                  : 'billing-off (no charge)',
+            ...buildBillingLabel({
+              freeListed: isAgentV3FreeUser(userId, email),
+              cheapEnginesOnly: freeTierBuildActive,
+              billingActive: (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email),
+              billedUsd: watchdogBilledUsd,
+              billedInr: watchdogBilledInr,
+            }),
             billedUsd: Math.round(watchdogBilledUsd * 1_000_000) / 1_000_000,
-            billedInr: Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100,
+            billedInr: watchdogBilledInr,
             realCostUsd: Math.round(decided.realCostUsd * 1_000_000) / 1_000_000,
             sandboxCostUsd: Math.round(decided.sandboxUsd * 1_000_000) / 1_000_000,
             powerMode: onlyOpus,
@@ -21915,6 +21919,17 @@ async function noteBuildOutcome(
             await saveWorkspaceFiles(workspaceId, Object.fromEntries(scaffolded.map((p) => [p, writtenFiles.get(p) as string]))).catch(() => {});
             events.emit({ type: 'narration', agent: 'architect', text: starterTestsNarration(scaffolded, pkgForTests), ts: Date.now() });
           }
+          // 🔴 A SKIP IS RECORDED WITH ITS REASON, as the end-to-end scaffold's is (autopsy 9c612cdb). On the
+          // default starter this pass writes nothing — no test runner is declared — and it used to say nothing,
+          // while the knowledge base promised a starter test on every build. See starterTestsSkip.ts.
+          const starterSkip = starterTestsSkipReason({ packageJson: pkgForTests, skeletonsSafe, planned: plan.length, written: scaffolded.length });
+          if (starterSkip) {
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'STARTER_TESTS_SKIPPED',
+              message: starterTestsSkippedNote(starterSkip),
+              autoResolved: true,
+            });
+          }
         }
       } catch { /* auto-test scaffolding is best-effort — never affects the build result */ }
       // U-2 — app-scaffold quality defaults BY DEFAULT. After a successful build with an index.html,
@@ -26402,16 +26417,19 @@ async function noteBuildOutcome(
               autoResolved: false,
             });
           }
+          // One rule for the label at both settle paths (buildBillingLabel.ts, autopsy 9c612cdb): a Weak build says
+          // whether it was charged, and no retired programme is ever named as the reason it ran.
+          const settledBilledInr = Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100;
           buildDiag.setBilling({
-            userTier: isAgentV3FreeUser(userId, email)
-              ? 'free-list (admin/tester)'
-              : freeTierBuildActive
-                ? 'free (welcome bonus — cheap engines)'
-                : billingActive
-                  ? 'paid'
-                  : 'billing-off (no charge)',
+            ...buildBillingLabel({
+              freeListed: isAgentV3FreeUser(userId, email),
+              cheapEnginesOnly: freeTierBuildActive,
+              billingActive,
+              billedUsd: effectiveBilledUsd,
+              billedInr: settledBilledInr,
+            }),
             billedUsd: Math.round(effectiveBilledUsd * 1_000_000) / 1_000_000,
-            billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100,
+            billedInr: settledBilledInr,
             realCostUsd: Math.round(decidedRealCostUsd * 1_000_000) / 1_000_000,
             sandboxCostUsd: Math.round(decidedSandboxUsd * 1_000_000) / 1_000_000,
             ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited } : {}),

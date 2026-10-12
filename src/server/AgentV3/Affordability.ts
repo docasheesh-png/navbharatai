@@ -14,8 +14,9 @@
 //     this module never kills a build mid-way (settlement on the ACTUAL cost happens afterwards).
 //   • NO FREE BUILDS AT ZERO BALANCE (admin 2026-07-12, "0 balance par bhi app build ho rahi hai —
 //     mere paise na khaye"): a build spends NavBharatAI's own paid model budget, so a non-free-list user
-//     with NO positive balance is REFUSED. The welcome bonus gives new users a positive balance to spend;
-//     once it (and any top-up) is exhausted they must recharge. The block floor is therefore 0 — a
+//     with NO positive balance is REFUSED. A new wallet starts EMPTY (giftPolicy.ts — the sign-up grant this
+//     line once named was retired on 2026-09-17); the verification rewards or a top-up give a positive balance
+//     to spend, and once that is exhausted the user must recharge. The block floor is therefore 0 — a
 //     balance that is exactly 0 or negative cannot start a new build. This matches the design's own stated
 //     intent ("the account is then blocked for the NEXT build until top-up"); the earlier `-overdraft`
 //     floor was a bug that granted ~₹20 of free full-price builds before blocking. The overdraft tolerance
@@ -60,8 +61,8 @@ export function decideAffordability(input: AffordabilityInput): AffordabilityDec
   if (isFreeUser) return { action: 'proceed', reason: 'free-list' };
 
   // 2. No positive balance → BLOCK. A build spends NavBharatAI's paid budget, so a non-free user with an
-  //    empty (0 or negative) wallet cannot start a new build (admin 2026-07-12). The welcome bonus / a
-  //    top-up gives a positive balance to spend; once exhausted the user must recharge. This is the ONE
+  //    empty (0 or negative) wallet cannot start a new build (admin 2026-07-12). A verification reward / a
+  //    top-up gives a positive balance to spend (a new wallet starts empty); once exhausted the user must recharge. This is the ONE
   //    place a build is refused.
   if (balance <= 0) {
     return {

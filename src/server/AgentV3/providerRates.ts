@@ -6,8 +6,9 @@
 // real cost on a cheap-led build — and it billed a FAILED build ₹811. The admin verified the real
 // provider deductions on the GLM (Z.ai) + Kimi (Moonshot) dashboards and redefined billing:
 //
-//   bill = tieredMarkup( REAL provider cost )        // real cost = exact per-provider/model tokens
-//                                                    //             × each provider's own rate card
+//   bill = tieredMarkup( REAL provider cost          // real cost = exact per-provider/model tokens
+//                        + sandbox share )           //             × each provider's own rate card;
+//                                                    // sandbox = measured VM time (when billed, see below)
 //   tieredMarkup(C):  C ≤ $1  → C × 4                // small builds: 4×
 //                     C  > $1 → $4 + (C − $1) × 3    // first $1 at 4×, the excess at 3× (big builds
 //                                                    //   don't run away — marginal markup eases to 3×)
@@ -16,13 +17,17 @@
 // does NOT run — Weak, Normal, Strong. The two Opus tiers (Powerful = medium, Full Team = max) keep
 // the existing "real Opus × 2" model untouched (see pricing.ts / billedForTier 'opus').
 //
-// HONESTY (rule 5): cache-hit input tokens are NOT tracked separately (the ledger only sees
-// input/output), so cached input is priced at the full cache-MISS rate → the real cost is a slight
-// OVER-estimate. That is deliberately margin-safe (we can only ever over-state our own cost, never
-// under-state it) and honest-conservative; a later slice can capture `cache_read` usage to bill even
-// lower. Unknown models fall back to a conservative rate (Sonnet) so an untracked model never
-// under-bills. All rates are USD per 1,000,000 tokens and env-overridable (track live prices without
-// a deploy).
+// HONESTY (rule 5): CACHE-HIT input tokens are priced at each provider's own CACHE-READ rate where its
+// rate card has one (Fix 66, #1434, 2026-07-16 — `tokenCostUsd` in pricing.ts; Q-343 added Anthropic's
+// cache-WRITE line), and at the full input rate where the card has no cache line. So a Kimi build whose
+// prompt is mostly cache hits costs a fraction of its uncached price, and that real figure is what the
+// markup is applied to. (Corrected 2026-10-12, autopsy 9c612cdb: this paragraph said cache hits were
+// "not tracked" and priced at the cache-MISS rate — true before Fix 66, false since. Had it been true,
+// that build would have billed about ₹341, not ₹103.24. This is a DESCRIPTION fix; the billing model is
+// unchanged.) The sandbox's measured share is added to the real cost BEFORE the markup (sandboxCost.ts,
+// docs/claude/ENV_REGISTRY.md). Unknown models fall back to a conservative rate (Sonnet, without its
+// cache lines) so an untracked model never under-bills. All rates are USD per 1,000,000 tokens and
+// env-overridable (track live prices without a deploy).
 
 import { sonnetRate, opusRate, withClaudeCacheLines, tokenCostUsd, type TokenRate, type BilledUsage } from './pricing';
 

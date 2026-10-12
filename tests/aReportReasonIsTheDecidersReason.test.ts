@@ -29,10 +29,29 @@ describe('1 · the report states the decider\'s own reason', () => {
   });
 
   it('the line for silence says silence; the line for a decline says decline; neither claims an "ask for no"', () => {
-    expect(requestScopeReportLine('names-no-sign-in')).toMatch(/^The request names no sign-in/);
+    expect(requestScopeReportLine('names-no-sign-in')).toMatch(/^The request matched none of the sign-in words this rule looks for/);
     expect(requestScopeReportLine('declines-sign-in')).toMatch(/^The request declines sign-in/);
     for (const r of ['names-no-sign-in', 'declines-sign-in'] as const) {
       expect(requestScopeReportLine(r)).not.toMatch(/\b(?:asks?|asked|requests?|requested|wants?|wanted)\s+(?:for\s+)?no\b/i);
+    }
+  });
+
+  // The adversarial review: the line must never claim more than the detector checked. It credits the word list
+  // and the analyzer's domain features — never "the request names no access word".
+  it.each(['an app where you enter your username to continue', 'a vault that asks for credentials', 'notes with 2FA', 'a diary unlocked with face id', 'a biometric gate before the app'])(
+    '🔒 a gate named by its mechanism is a sign-in request — no note, so no claim at all: %s', (p) => {
+      expect(asksForSignIn(p), p).toBe(true);
+      expect(requestScopeNote({ request: p, newBuild: true, domain: 'general' }, {})).toBe('');
+    });
+
+  it('🔒 whenever the note fires, its report line credits the detector and nothing wider', () => {
+    for (const p of [REPORT_PROMPT, 'a todo app', 'A calculator, no login needed.', 'a weather dashboard']) {
+      const v = verdict(p);
+      if (!v) continue;
+      const line = requestScopeReportLine(v.reason);
+      expect(line).toMatch(/sign-in words this rule looks for/);
+      expect(line).toMatch(/no domain whose features add access control/);
+      expect(line).not.toMatch(/other access word|names no sign-in|\b(?:asks?|asked|requests?|wants?)\s+(?:for\s+)?no\b/i);
     }
   });
 
@@ -41,7 +60,7 @@ describe('1 · the report states the decider\'s own reason', () => {
     expect(route).toMatch(/code: 'REQUEST_SCOPE_NOTE', message: requestScopeReportLine\(requestScopeReason \?\? 'names-no-sign-in'\)/);
   });
 
-  it('🔒 census: no report message anywhere restates an absence as an explicit "asks for no"', () => {
+  it('tripwire: no report message anywhere restates an absence as an explicit "asks for no" or a decline', () => {
     const ROOT = join(__dirname, '..');
     const walk = (d: string, out: string[] = []): string[] => {
       for (const n of readdirSync(d)) {
@@ -55,7 +74,10 @@ describe('1 · the report states the decider\'s own reason', () => {
     for (const f of [...walk(join(ROOT, 'src')), join(ROOT, 'server.ts')]) {
       const src = readFileSync(f, 'utf8');
       for (const m of src.matchAll(/message:\s*(['"`])((?:(?!\1).)*)\1/g)) {
-        if (/\b(?:asks?|asked|requests?|requested|wants?|wanted)\s+(?:for\s+)?no\b/i.test(m[2]!)) hits.push(`${f.slice(ROOT.length + 1)}: ${m[2]!.slice(0, 80)}`);
+        // A TRIPWIRE for the phrasings seen (asks for no …, the request declined / said no / did not want …) — not a
+        // proof: the class lock is the source guard above (the decider owns its sentence). "The user declined" stays
+        // allowed: the database offer records a real answer the user gave in the UI.
+        if (/\b(?:asks?|asked|requests?|requested|wants?|wanted)\s+(?:for\s+)?no\b|\bthe request (?:declined|said no|ruled out|did(?: not|n't) want)\b/i.test(m[2]!)) hits.push(`${f.slice(ROOT.length + 1)}: ${m[2]!.slice(0, 80)}`);
       }
     }
     expect(hits).toEqual([]);

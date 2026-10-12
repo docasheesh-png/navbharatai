@@ -44,7 +44,11 @@ const ASKS_FOR_SIGN_IN = new RegExp([
   String.raw`\bauth\w*\b`, String.raw`\botp\b`, String.raw`\bsso\b`, String.raw`\boauth\b`,
   String.raw`\bprofiles?\b`, String.raw`\broles?\b`, String.raw`\brbac\b`, String.raw`\badmins?\b`,
   String.raw`\bpermissions?\b`, String.raw`\baccess control\b`, String.raw`\bprivate\b`, String.raw`\bsecur\w*\b`,
-  String.raw`\bprotect\w*\b`, String.raw`\block(?:ed)?\b`, String.raw`\bpin\b`,
+  String.raw`\bprotect\w*\b`, String.raw`\b(?:un)?lock(?:ed|s)?\b`, String.raw`\bpin\b`,
+  // A gate named by its MECHANISM (adversarial review of 303e8a6f): each of these read as "no sign-in", so the
+  // builder was told to add no login on a request that asked for one ("a vault that asks for credentials").
+  String.raw`\busernames?\b`, String.raw`\bcredentials?\b`, String.raw`\b(?:2fa|mfa)\b`, String.raw`\btwo[\s-]?factor\b`,
+  String.raw`\b(?:face|touch)[\s-]?id\b`, String.raw`\bfingerprints?\b`, String.raw`\bbiometric\w*\b`,
   String.raw`\b(?:multi|multiple|many|several)[\s-]?users?\b`, String.raw`\b(?:each|every|per)\s+user\b`,
   String.raw`\busers?\s+(?:can|could|should|will|must)\b`, String.raw`\bmembers?\b`, String.raw`\bsubscri\w*\b`,
   String.raw`\bfirebase\b`, String.raw`\bsupabase\b`, String.raw`\bclerk\b`,
@@ -114,8 +118,10 @@ export function requestScopeNote(input: RequestScopeInput, env: NodeJS.ProcessEn
  * false. A false reason sends the next autopsy looking for a phrase that does not exist. PURE.
  */
 export function requestScopeReportLine(reason: RequestScopeReason): string {
+  // ⚠️ Credit the DETECTOR, never the request (adversarial review): "names no … access word" overclaimed — the
+  // rule reads a word list, and a request can name a gate in words it does not hold.
   const why = reason === 'declines-sign-in'
-    ? 'The request declines sign-in in so many words, and names no domain that adds access control'
-    : 'The request names no sign-in, account, password or other access word, and no domain that adds access control';
-  return `${why}, so this new build was told to add no login or accounts and no control for a state the data does not have.`;
+    ? 'The request declines sign-in in so many words (and asks for none of the sign-in words this rule looks for)'
+    : 'The request matched none of the sign-in words this rule looks for (login, sign-in, account, password, OTP, roles, admin, private, PIN, biometric, …)';
+  return `${why}, and the requirement analyzer placed it in no domain whose features add access control, so this new build was told to add no login or accounts and no control for a state the data does not have.`;
 }

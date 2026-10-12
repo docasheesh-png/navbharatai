@@ -3708,7 +3708,10 @@ the flag entries above promise.
   note. (2) A sign-in word the request DECLINES ("no login needed", "without an account", "login ki zarurat nahi")
   is no longer read as a request for sign-in; the note applies and the report says it was declined. The report line
   is the decider's own (`requestScopeReportLine`), never a call-site paraphrase. Test:
-  `tests/aReportReasonIsTheDecidersReason.test.ts`.
+  `tests/aReportReasonIsTheDecidersReason.test.ts`. (3) A gate named by its MECHANISM — username, credentials,
+  2FA / MFA / two-factor, Face ID / Touch ID, fingerprint, biometric, "unlocked" — is read as asking for sign-in
+  (the adversarial review found "a vault that asks for credentials" told to add NO login). The report line credits
+  the word list it checked, never "the request names no access word".
 - **🙋 `AGENTV3_CONFIRM_BUILD` + 📎 `AGENTV3_ATTACHMENT_MEMORY` (admin 2026-10-03, Q-200 / Q-201). ⚠️ NEITHER is set;
   both default ON; `off` reverts each alone.** `buildConfirmation.ts`: see "READ THE MOOD FIRST" above — an unconfirmed
   build is answered and offered, and a "yes" builds the offered request. `lib/attachmentMemory.ts`: the latest

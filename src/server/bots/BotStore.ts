@@ -171,14 +171,19 @@ class BotStore {
     }
   }
 
-  async listForUser(ownerUid: string): Promise<BotMeta[]> {
+  /**
+   * The owner's bots, newest first — or null when they could not be read (Q-816). A failed read used to come
+   * back as [], so the owner was told they had no bots while one was live and answering their customers.
+   */
+  async listForUser(ownerUid: string): Promise<BotMeta[] | null> {
     const db = this.getDb();
-    if (!db || !ownerUid) return [];
+    if (!db) return null;
+    if (!ownerUid) return [];
     try {
       const snap = await db.collection('bots').where('ownerUid', '==', ownerUid).get();
       return snap.docs.map(d => metaOf(d.data() as BotRecord)).sort((a, b) => b.createdAt - a.createdAt);
     } catch {
-      return [];
+      return null;
     }
   }
 
@@ -262,16 +267,21 @@ class BotStore {
   }
 
   /** Delete a bot the caller owns. Returns the record (for webhook teardown) or null. */
-  async remove(botId: string, ownerUid: string): Promise<(BotRecord & { token: string; appSecret: string }) | null> {
+  /**
+   * Delete a bot the caller owns. null = no such bot, or not theirs; 'error' = it could not be deleted (Q-816).
+   * The two used to be one null, so a failed delete told the owner their own bot was "not found (or not yours)".
+   */
+  async remove(botId: string, ownerUid: string): Promise<(BotRecord & { token: string; appSecret: string }) | null | 'error'> {
     const db = this.getDb();
-    if (!db || !botId || !ownerUid) return null;
+    if (!db) return 'error';
+    if (!botId || !ownerUid) return null;
     try {
       const rec = await this.get(botId);
       if (!rec || rec.ownerUid !== ownerUid) return null;
       await db.collection('bots').doc(botId).delete();
       return rec;
     } catch {
-      return null;
+      return 'error';
     }
   }
 

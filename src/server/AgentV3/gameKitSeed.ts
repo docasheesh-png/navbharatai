@@ -49,6 +49,7 @@
 //
 // PURE — no I/O. The route supplies the outcomes; this module plans the run and words the handoff.
 
+import { namedNonSmartphone } from './deviceTarget';
 import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { wantsSceneObjects, heroObjectContract } from '../lib/heroObjectSpec';
 
@@ -113,6 +114,8 @@ const DRAWN_IN_3D = /\b(?:(?<!typing\s{1,3})rac(?:e|es|er|ers|ing)|driv(?:e|es|e
 export function gameKitWants3D(prompt: string | null | undefined): boolean {
   const text = String(prompt ?? '');
   if (!wantsSceneObjects(text)) return false;
+  // A keypad phone the user named (Q-846) has no WebGL: never three.js under its game, whatever else it says.
+  if (namedNonSmartphone(text)) return false;
   if (SAYS_3D.test(text) || DRAWN_IN_3D.test(text)) return true;
   try {
     return heroObjectContract(text).categories.some((c) => c === 'vehicle-land' || c === 'vehicle-water');

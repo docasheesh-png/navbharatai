@@ -268,6 +268,16 @@ export const VITEST_RANGE = '^5.0.3';
  * Returns the new package.json text with `devDependencies.vitest` set, or null when it is already declared
  * (in any section) or the file cannot be read — never a guess written over a file we could not parse. PURE.
  */
+/**
+ * Does this recipe output ship a vitest test? (Q-843's sibling hunt.) Five recipes (audit log, CSRF, Indian
+ * validators, money format, UPI), the integration-test recipe and now the game shell write a `*.test.ts` that
+ * imports `vitest` — and none declared it, so the project's own `tsc --noEmit` reported "Cannot find module
+ * 'vitest'" (the eed79815 class) and `run_tests` found no runner. PURE.
+ */
+export function recipeShipsVitestTest(files: Readonly<Record<string, string>>): boolean {
+  return Object.entries(files ?? {}).some(([p, c]) => /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(p) && /from\s+['"]vitest['"]/.test(String(c ?? '')));
+}
+
 export function withVitestDeclared(packageJson: string | null | undefined): string | null {
   if (packageJson == null) return null;
   let pkg: Record<string, unknown>;

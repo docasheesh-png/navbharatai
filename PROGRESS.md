@@ -94148,3 +94148,58 @@ readers + a critic, fixed in three worktree-isolated groups, each adversarially 
   - `REVIEWER_AUTOFIX_INCOMPLETE`: the reviewer auto-fix retries after a thrown first attempt. When the retry completed, its "Auto-fixed" line sat beside the open "did NOT complete — may still be present" warning. A completed pass now answers it. What is really left is for the Q-157 second review to say.
   - `SERVERLESS_PAYMENT_NOT_SET_UP`: a later setup that worked did not answer the earlier failure. The message now names the table, and a success answers that table only. This matters because batch three gave this code a button.
 - **Tests:** `tests/aDefectTheUserIsShownHasAButton.test.ts` gained two blocks. Each was reverted and seen to fail. The backlog stays at 14: neither code changed home.
+
+### 2026-10-12 — #3676 merged; Q-821 built; Q-381 batch six (14 → 0, the backlog is empty)
+
+The admin's instruction: *"rukna hi nahi hai!! sabhi ke liye han hai"* (don't stop; yes to everything).
+
+- **Q-821 (yes, as recommended):**
+  - The syntax gate records `OUTCOME_SYNTAX_ERROR` (ERROR) when its one repair pass cannot clear a file. Nothing answered that line when a later pass made every file parse.
+  - The release gate runs BEFORE the final syntax re-check and counts every open ERROR, so such a build was turned RED, flipped to NOT ok and left free.
+  - The same files are now re-parsed before the gate counts them, and again at the final re-check. A clean parse answers both the error and its warning (`answerSyntaxOnCleanParse`, timeline line `SYNTAX_RECHECK_CLEAN`). A file that still does not parse keeps its error.
+  - Test: `tests/aFixedSyntaxErrorIsNotCountedAgainstTheApp.test.ts`. The real release gate reads RED before and not RED after. Reverted two ways and seen to fail.
+- **Q-381 batch six (14 → 0):** every problem a user can be shown now has a home.
+  - **8 offers:** preview compile, preview still failing, last-chance proof, preview error, build timeout ("Finish building your app"), database unreachable, backstop review, architecture rule.
+  - The architecture rule is now re-checked before the gate, and answered once a later pass restores it.
+  - **2 roll-ups**, each offered through the finding it restates: `OUTCOME_PREVIEW_COMPILE` and `REVIEWER_AUTOFIX_INCOMPLETE`. The latter sits before the settle lines in the map, so the line that lists the findings is the evidence.
+  - **3 declared with no button and still counted:** the release-gate roll-up, `STUCK_TOOL`, and `PLATFORM_SOURCE_WORKSPACE`. The last two follow Q-380's rule, so those builds stay free.
+  - **1 process-only, a WARNING:** `PREVIEW_SERVER_DOWN`, by its own recording site's words.
+  - **No bill moves.** Not one ERROR code went to PROCESS_ONLY, and a test now fails if one ever does.
+  - **Census tests that encoded "deliberately unclassified"** were updated to the decided homes. The baseline is `[]`, and the ratchet keeps it empty.
+  - Reverted three ways and seen to fail.
+
+### 2026-10-12 — Q-816: a bot you connected can be disconnected
+
+- **The problem:** Bot Builder could connect a Telegram or WhatsApp bot and offered no way to undo it. `POST /api/bots/disconnect` existed and nothing called it, so it sat in the uncalled-route baseline as "undecided".
+- **The class:** a capability the server has and the screen never offers.
+- **Built:**
+  - "Your bots" (`ConnectedBotsPanel`), under the Bot Builder toolbar, lists every connected bot.
+  - Each bot has a Disconnect button that asks first.
+  - The screen says what really happened (`src/lib/connectedBots.ts`): for Telegram, whether Telegram confirmed it stopped delivering; for WhatsApp, where to remove the Callback URL in the user's own Meta app, which we cannot change.
+- **Server honesty, fixed with it:**
+  - `GET /api/bots` answered a failed read with an empty list, "you have no bots", while one was live. It now returns 502, and `BotStore.listForUser` returns null.
+  - `POST /api/bots/disconnect` answered a failed delete with "not found (or not yours)". It now returns 502, and `remove` returns 'error'. It also checks the bot id shape first.
+- **Other changes:** the route left the uncalled-route baseline, and the KB `bot_builder` entry names the new path.
+- **Test:** `tests/aBotYouConnectedCanBeDisconnected.test.ts` drives the real route with a stubbed store. Both honesty guards were reverted and the test failed.
+
+### 2026-10-12 — The game rows of build 46e2d74b (admin: "game wali rows bhi aap hi karo")
+
+Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-caused, its siblings hunted, and locked by a test proven by reversion.
+
+| Row | Problem | Root cause → class | Fix | Lock (reverted ⇒ fails) |
+|---|---|---|---|---|
+| Q-865 | The accelerator probe could call a working game stalled (a "Get ready" countdown; a slow car under a fixed camera) | One 0.55 s look was taken as proof the car never moves | A second, longer look (2 s, after any countdown); no verdict unless both looks agree | real-Chromium `/race-countdown`, `/race-slow` |
+| Q-864 | The kit's chase camera picked a parked car (walk-and-drive) or a rival on the start screen | It guessed "the first vehicle" even where that guess could be wrong | Guess only with one vehicle and no Use button; otherwise follow what the game names | `theCarIsSeenFromBehind` ×3 |
+| Q-862 | Install-on-import gave up for the whole build when the install lock was busy | "Busy" was recorded as "done" | Busy is said once, retried silently, capped | `aHandWrittenImportIsInstalled` (the old test encoded the defect) |
+| Q-846 | "Nokia C2-01" got a 3D touch game | Nothing read a named device | `deviceTarget.ts`, precision-first; light 2D keys-first build; the user is told plainly | `aPhoneTheAppCannotRunOnIsNamed` |
+| Q-843 | "No tests at all" for a game | No recipe shipped a behaviour test. Class: five recipes wrote a vitest test without declaring vitest | The shell ships `controls.test.ts`; every recipe writer declares vitest first | `aGameShipsItsControlsTest` runs it: 5 pass; a mirrored kit gives 2 failed |
+| Q-863 | Old and new kit files mixed would not compile (measured: 7 tsc errors) | Nothing could tell an untouched older kit file from someone's edit | `gameKitHistory.ts` (79 versions, from git). An untouched old file is brought up to date; an edited one is kept and named. Sibling: `platformAuthored` | `aKitFileFromAnOlderVersionIsRecognised` (census + tsc), reverted 5 ways |
+| Q-861 | Hand-written chase cameras were invisible to the write-time scan | The scan reads code shapes; only playing sees the result | The playtest reads it from pixels: the road moving up means the camera faces the car; LEFT panning left means mirrored steering. Consecutive frames, precision-first | real-Chromium chase / front / mirrored / top-down |
+
+**Two things found on the way, and said plainly:**
+- **A read that would have lied.** The first version of the Q-861 probe read a correct top-down road at full speed as "moving backwards" on two frame pairs. The cause was aliasing: lane marks repeat, and the car moved more than half a mark between frames. Only the "three pairs must agree" rule stopped a false verdict, and that is luck, not design. Now any read where more than a quarter of the pairs moved faster than the search can follow gives no verdict at all. A test locks the measured case.
+- **Q-845 was built against the admin's decision, and then dropped before it was pushed.** I took "sabhi ke liye han hai" as option (b), which waives the markup for a game that was never played. Then PR #3679 recorded the admin's specific answer on Q-845: *"game chal raha hai. makeup lena chahiye"*. That decision wins. The commit was removed from this branch, and no billing code changed. #3679 closes Q-842, Q-845 and Q-860.
+
+**Watch on the next real racing build:**
+- The playtest line should show no camera or steering verdict on a game the kit built.
+- A "KIT FILES BROUGHT UP TO DATE" note should appear only when an older game is edited.

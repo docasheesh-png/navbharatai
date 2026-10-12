@@ -56,6 +56,12 @@ export function findingLabel(message: unknown): string {
 }
 
 export const PROCESS_ONLY_CODES = new Set([
+  // Q-381 batch six (2026-10-12). The dev server would not stay up after the platform restarted it. Its own
+  // recording sites say "The app's code was never the problem here — nothing was listening on the preview
+  // port" and call it "an infrastructure finding, not an accusation against the user's code" (autopsy
+  // e628efd4). A WARNING, so the error count a RED gate reads cannot change and no bill moves; the server's
+  // last words stay in the admin report.
+  'PREVIEW_SERVER_DOWN',
   'BUILD_OFFER_ACCEPTED', 'ATTACHMENT_RECALLED',
   // A project import refused because the chat already held an app (Q-733). Nothing about the app is wrong —
   // it was deliberately left untouched — so it is never a problem WITH the user's app.
@@ -2431,6 +2437,33 @@ export class BuildDiagnostics {
     }
     if (cleared > 0) this.notify();
     return cleared;
+  }
+
+  /**
+   * Is the syntax gate's finding still open? (Q-821) — the question asked before paying for a re-parse.
+   */
+  hasOpenSyntaxFinding(): boolean {
+    return this.issues.some((i) => !i.autoResolved && (i.code === 'OUTCOME_SYNTAX_ERROR' || i.code === 'SYNTAX_ERROR_DETECTED'));
+  }
+
+  /**
+   * THE FILES PARSE NOW, SO THE EARLY SYNTAX VERDICT IS ANSWERED (Q-821, admin 2026-10-12: "han").
+   *
+   * The syntax gate's one repair pass records OUTCOME_SYNTAX_ERROR (ERROR) when it cannot clear a file. Later
+   * passes — the endgame repair, the render rescue, the reviewer's fix — can make every file parse, and nothing
+   * answered the early line: a build whose files all parsed was counted RED by the release gate and left free.
+   * Called only after a re-parse of the same files came back clean. Answers both the error and its warning,
+   * and says so on the timeline. Returns how many it answered.
+   */
+  answerSyntaxOnCleanParse(where: string): number {
+    const answered = this.resolveOnRecheck('OUTCOME_SYNTAX_ERROR') + this.resolveOnRecheck('SYNTAX_ERROR_DETECTED');
+    if (answered > 0) {
+      this.record({
+        phase: 'build', severity: 'info', code: 'SYNTAX_RECHECK_CLEAN', autoResolved: true,
+        message: `Every file this build wrote parses now (${where}) — the earlier syntax finding was fixed by a later pass and is answered.`,
+      });
+    }
+    return answered;
   }
 
   recordReadinessRecovery(code: string, message: string): number {

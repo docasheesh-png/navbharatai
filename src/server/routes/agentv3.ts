@@ -12679,7 +12679,7 @@ async function noteBuildOutcome(
         const waited = Math.max(0, Date.now() - startedWait);
         userWait.since = null;
         userWait.totalMs += waited;
-        try { buildDiagRef?.addUserWait(waited); } catch { /* diagnostics are best-effort */ }
+        try { buildDiagRef?.addUserWait(waited, startedWait); } catch { /* diagnostics are best-effort */ }
         try { onUserWaitEnded?.(startedWait, waited); } catch { /* clocks are best-effort */ }
       }
     };
@@ -14879,6 +14879,9 @@ async function noteBuildOutcome(
         // Sandbox create, the npm install inside ensureWorkspace, and the GitHub hydrate that follows all
         // hid behind one sentence, so the largest slice of a short build was the one slice we could not
         // measure. These stamps cost nothing and turn "setup felt slow" into a number worth acting on.
+        // The stretch BEFORE setup (ETA reads, the roadmap save, routing) is a window too — it was the one untimed
+        // segment left (adversarial review of 303e8a6f), and it is closed exactly where setup's own clock starts.
+        try { buildDiag.closeSetupWindow('Routing and ETA'); } catch { /* timing is observation only */ }
         const setupT0 = Date.now();
         const resumeSandboxId = sandboxResumeEnabled()
           ? (await sandboxStore.get(workspaceId).catch(() => null)) ?? undefined

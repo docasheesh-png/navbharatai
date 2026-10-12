@@ -8,12 +8,19 @@
 // timing lines cover the wait. Now (1) every SETUP_TIMING is a span, and windows start where the last span ended, so
 // they tile the wait by construction; (2) the first-call line says how much of the wait was timed and names the
 // largest untimed stretch; (3) the waste found in the window is removed.
+//
+// ⚠️ CORRECTED BY THE ADVERSARIAL REVIEW (§5): a window must not report a model call or the user's own thinking as
+// setup (measured from the recorded calls and waits); the stretch before setup is a window too; the boot hint read
+// its two files in series; two MCP reads of one document became one; and the coverage clause is not said where the
+// window is not preparation.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
 import { createPrepSteps, prepWindowDetail } from '../src/server/AgentV3/prepClock';
 import { GitManager } from '../src/server/AgentV3/GitManager';
+import { fullstackBootHint } from '../src/server/lib/fullstackBootHint';
+import { McpServerStore } from '../src/server/AgentV3/McpServerStore';
 
 const ROUTE = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
 const T0 = 1791817491537; // the report's build start
@@ -83,6 +90,11 @@ describe('2 · the report\'s own timeline: the first-call line says how much was
 });
 
 describe('3 · 🔒 census: every SETUP_TIMING is a span, and the windows are where the wait was', () => {
+  it('the stretch before setup closes exactly where setup\'s clock starts', () => {
+    const at = ROUTE.indexOf("buildDiag.closeSetupWindow('Routing and ETA')");
+    expect(ROUTE.slice(at, ROUTE.indexOf('const setupT0 = Date.now();', at))).not.toMatch(/\bawait\b/);
+  });
+
   it('no hand-written SETUP_TIMING record in the route', () => {
     expect(ROUTE).not.toMatch(/code: 'SETUP_TIMING'/);
     expect((ROUTE.match(/buildDiag\.recordSetupTiming\(\{/g) ?? []).length).toBeGreaterThanOrEqual(5);
@@ -91,6 +103,7 @@ describe('3 · 🔒 census: every SETUP_TIMING is a span, and the windows are wh
   it('the three windows close in order between the build start and the first lane', () => {
     const at = (s: string) => ROUTE.indexOf(s);
     const marks = [
+      "buildDiag.closeSetupWindow('Routing and ETA')",
       'const setupT0 = Date.now();',
       "buildDiag.closeSetupWindow('Build wiring ready', wiringSteps.list())",
       'const contextT0 = Date.now();',
@@ -125,5 +138,52 @@ describe('4 · the waste found in the window is gone', () => {
   it('🔒 git init still runs before the secrets file — both rewrite .gitignore', () => {
     expect(ROUTE.indexOf("wiringSteps.step('git init', () => gm.ensureRepo())")).toBeGreaterThan(0);
     expect(ROUTE.indexOf("wiringSteps.step('git init', () => gm.ensureRepo())")).toBeLessThan(ROUTE.indexOf('dispatcher.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS)'));
+  });
+});
+
+describe('5 · 🔒 the corrections of the adversarial review', () => {
+  it('a model call and a user wait inside a window are named, and are not setup', () => {
+    let now = 1_000;
+    const d = new BuildDiagnostics({ now: () => now } as never);
+    now = 2_000; d.recordSetupTiming({ message: 'Workspace ready in 1s', startMs: 1_000 });
+    // A planner call of 12 s and a plan approval of 40 s happen inside the next window.
+    now = 15_000; d.recordLlmCall({ model: 'kimi-k2.7-code', latencyMs: 12_000, ok: true } as never);
+    d.addUserWait(40_000, 15_500);
+    now = 56_000; d.closeSetupWindow('Prompt context gathered', [{ name: 'memory', ms: 300 }]);
+    const row = d.report().issues.filter((i) => i.code === 'SETUP_TIMING').at(-1)!;
+    expect(row.message).toBe('Prompt context gathered in 2s (plus 12s of model calls and 40s waiting for you — not setup)');
+    expect(row.detail).toContain('model calls (not setup) 12000ms');
+    expect(row.detail).toContain('waiting for you (not setup) 40000ms');
+  });
+
+  it('🔒 the user-wait clock records WHEN it waited, not only how long', () => {
+    expect(ROUTE).toContain('buildDiagRef?.addUserWait(waited, startedWait);');
+  });
+
+  it('the boot hint reads its files together', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const read = async (p: string) => { inFlight++; peak = Math.max(peak, inFlight); await new Promise((r) => setTimeout(r, 5)); inFlight--; return p === 'package.json' ? '{"name":"x"}' : ''; };
+    await fullstackBootHint(['package.json', 'vite.config.ts', 'src/App.tsx'], read);
+    expect(peak).toBe(2);
+  });
+
+  it('two callers asking for the connected services at once share ONE read; a later ask reads again', async () => {
+    let reads = 0;
+    const db = { collection: () => ({ doc: () => ({ get: async () => { reads++; await new Promise((r) => setTimeout(r, 5)); return { exists: false, data: () => undefined }; } }) }) };
+    const store = new McpServerStore(() => db as never);
+    await Promise.all([store.listFull('ws'), store.unreadableIds('ws')]);
+    expect(reads).toBe(1);
+    await store.listFull('ws');
+    expect(reads).toBe(2); // never served stale
+  });
+
+  it('the coverage clause is said only where the window is preparation', () => {
+    let now = 1_000;
+    const d = new BuildDiagnostics({ now: () => now } as never);
+    now = 2_000; d.recordSetupTiming({ message: 'Workspace ready in 1s', startMs: 1_000 });
+    now = 20_000; d.recordLlmCall({ model: 'kimi-k2.7-code', ok: true } as never); // no latency: the upper-bound branch
+    const ttfc = d.report().issues.find((i) => i.code === 'TIME_TO_FIRST_CALL')!.message;
+    expect(ttfc).not.toMatch(/Timed setup steps account for/);
   });
 });

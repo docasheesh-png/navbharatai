@@ -989,6 +989,8 @@ export class BuildDiagnostics {
   private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
   private cacheReadInputTokens?: number;
   private providerWaste?: BuildDiagnosticsReport['providerWaste'];
+  /** When the build waited for the USER ([start, end] ms) — see addUserWait. */
+  private userWaitSpans: Array<{ a: number; b: number }> = [];
   /** Timed setup spans before the first model call ([start, end] ms) — see recordSetupTiming. */
   private readonly setupSpans: Array<{ startMs: number; endMs: number; message: string }> = [];
   private billing?: BuildBillingRecord;
@@ -1567,16 +1569,20 @@ export class BuildDiagnostics {
     // restore and secrets loading", and the timed setup lines covered 4.4 s of an 11.4 s wait. Said whenever a
     // second or a tenth of it sits in no timed step, with the largest such stretch named by what it followed.
     let covered = withGap;
-    try {
-      const callStart = this.now() - (lat ?? 0);
-      const cov = this.setupSpans.length ? this.setupCoverage(this.startedAt, callStart) : null;
-      const prepMs = Math.max(0, callStart - this.startedAt);
-      if (cov && prepMs > 0 && (cov.untimedMs >= 1000 || cov.untimedMs >= prepMs * 0.1)) {
-        const s = (ms: number) => `${Math.round(ms / 100) / 10}s`;
-        covered = `${withGap} Timed setup steps account for ${s(cov.timedMs)} of the ${s(prepMs)}; ${s(cov.untimedMs)} is outside every timed step`
-          + (cov.largest ? ` (largest: ${s(cov.largest.ms)} after "${cov.largest.after}").` : '.');
-      }
-    } catch { /* coverage is observation only */ }
+    // Only where the window IS preparation: with no latency the wait includes the call itself, and when a fast lane
+    // was abandoned in it the window is lane time — a coverage figure there would describe the wrong thing.
+    if (lat !== undefined && !abandoned) {
+      try {
+        const callStart = this.now() - lat;
+        const cov = this.setupSpans.length ? this.setupCoverage(this.startedAt, callStart) : null;
+        const prepMs = Math.max(0, callStart - this.startedAt);
+        if (cov && prepMs > 0 && (cov.untimedMs >= 1000 || cov.untimedMs >= prepMs * 0.1)) {
+          const s = (ms: number) => `${Math.round(ms / 100) / 10}s`;
+          covered = `${withGap} Timed setup steps account for ${s(cov.timedMs)} of the ${s(prepMs)}; ${s(cov.untimedMs)} is outside every timed step`
+            + (cov.largest ? ` (largest: ${s(cov.largest.ms)} after "${cov.largest.after}").` : '.');
+        }
+      } catch { /* coverage is observation only */ }
+    }
     this.record({
       phase: 'plan',
       // Loud past the point where a user starts wondering whether anything is happening. Judged on
@@ -2300,9 +2306,14 @@ export class BuildDiagnostics {
    * whose own work took 1.5 minutes. The estimate predicts the build's work, never how long a person takes
    * to find a key, so `etaAccuracy` takes this off the clock. Never throws.
    */
-  addUserWait(ms: number): void {
+  addUserWait(ms: number, startedAt?: number): void {
     const n = Number(ms);
-    if (Number.isFinite(n) && n > 0) this.userWaitMs += n;
+    if (Number.isFinite(n) && n > 0) {
+      this.userWaitMs += n;
+      // Kept as a span too, so a setup window that contains the wait does not report it as setup (adversarial
+      // review of 303e8a6f: a plan approval of several minutes would have read "Prompt context gathered in 3m").
+      if (Number.isFinite(startedAt)) this.userWaitSpans.push({ a: startedAt as number, b: (startedAt as number) + n });
+    }
   }
 
   setBilling(b: BuildBillingRecord): void {
@@ -2428,8 +2439,25 @@ export class BuildDiagnostics {
     const endMs = this.now();
     const startMs = this.setupSpans.length ? Math.max(...this.setupSpans.map((s) => s.endMs)) : this.startedAt;
     const wallMs = Math.max(0, endMs - startMs);
-    const secs = wallMs >= 1000 ? `${Math.round(wallMs / 100) / 10}s` : `${wallMs}ms`;
-    this.recordSetupTiming({ message: `${title} in ${secs}`, detail: prepWindowDetail(steps, wallMs), startMs, endMs });
+    // ⚠️ MODEL CALLS AND THE USER'S OWN THINKING ARE NOT SETUP (adversarial review of 303e8a6f). A window is
+    // contiguous by construction, so a planner or blueprint call, a project decomposition, or a plan approval inside
+    // it would otherwise be reported as preparation — the class autopsy a38c6fef removed from TIME_TO_FIRST_CALL.
+    // Measured from the recorded calls and waits, never guessed; the window's own number is the rest.
+    const overlap = (spans: Array<{ a: number; b: number }>) => {
+      const clipped = spans.map((x) => ({ a: Math.max(startMs, x.a), b: Math.min(endMs, x.b) })).filter((x) => x.b > x.a).sort((x, y) => x.a - y.a);
+      let total = 0;
+      let cursor = startMs;
+      for (const x of clipped) { if (x.b > cursor) { total += x.b - Math.max(cursor, x.a); cursor = x.b; } }
+      return total;
+    };
+    const modelMs = overlap(this.llmCalls.filter((c) => Number.isFinite(c.latencyMs)).map((c) => ({ a: c.ts - (c.latencyMs as number), b: c.ts })));
+    const userMs = overlap(this.userWaitSpans);
+    const setupMs = Math.max(0, wallMs - modelMs - userMs);
+    const fmt = (ms: number) => (ms >= 1000 ? `${Math.round(ms / 100) / 10}s` : `${Math.round(ms)}ms`);
+    const besides = [modelMs >= 1000 ? `${fmt(modelMs)} of model calls` : '', userMs >= 1000 ? `${fmt(userMs)} waiting for you` : ''].filter(Boolean);
+    const message = `${title} in ${fmt(setupMs)}${besides.length ? ` (plus ${besides.join(' and ')} — not setup)` : ''}`;
+    const notSetup = [...(modelMs > 0 ? [{ name: 'model calls (not setup)', ms: modelMs }] : []), ...(userMs > 0 ? [{ name: 'waiting for you (not setup)', ms: userMs }] : [])];
+    this.recordSetupTiming({ message, detail: prepWindowDetail([...steps, ...notSetup], wallMs), startMs, endMs });
   }
 
   /**

@@ -94446,6 +94446,12 @@ Q-955; a chat clock that read 11 s at 23 s, Q-949).
 | Q-961 | Drain could overwrite a stored app after a failed refill | The Q-740 class | `mayPersistSeededScaffold` | same |
 | Q-962…Q-974 | 13 items needing the admin (routing, product, money, metric, store bundle, logs) | — | 🟡 rows with options and a recommendation in `BUILD_REPORT_QUEUE.md` | — |
 
+**Caught by the final gate (before push):** four source guards pinned the literal text `await f(x)` and failed on correct
+code once setup calls were wrapped in timing steps (Q-955), and one in a fixed 1800-character window. Class: a guard that tests
+spelling instead of the invariant. Fix: the shared `awaitedCallAt` (bare or inside a step, never `-1`) and a structural slice;
+proven by reversion (unawaiting the three calls failed all three guards). The new `src/lib/imageKeyNames.ts` (Q-940) names the
+OWNER's own image providers and is allow-listed in the white-label sweep with that reason.
+
 **Time-series break:** from this PR, a provider that never answered is filed `silent`, not `timeout`/`crawl`. Older weeks
 counted silence as crawls, so the crawl count drops and a `silent` series starts — that is the honest split, not an
 improvement.

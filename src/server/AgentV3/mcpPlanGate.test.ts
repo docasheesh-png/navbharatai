@@ -6,6 +6,7 @@ import {
 } from './mcpPlanGate';
 // Shared anchor — see its own doc comment for why an indexOf on the read is not enough.
 import { buildLoopStart } from './mcpClient.test';
+import { anchorOf } from '../../../tests/helpers/sourceSlice';
 
 /**
  * THE PAID-PLAN GATE ON CONNECTED SERVICES (MCP), admin-mandated 2026-09-12:
@@ -128,7 +129,9 @@ describe('🔒 the wiring — a gate that is not applied is not a gate', () => {
   it('the BUILD loop checks before contacting any service', () => {
     const at = buildLoopStart(routes);
     expect(at).toBeGreaterThan(-1);
-    const body = routes.slice(at, at + 1800);
+    // From the services read to the hand-over — by structure, not a character count (303e8a6f: a comment
+    // added in between pushed the gate past an 1800-character window while it still ran first).
+    const body = routes.slice(at, anchorOf(routes, 'dispatcher.setMcpServers'));
     expect(body).toContain('canRunConnectedServices');
     const gateAt = body.indexOf('canRunConnectedServices');
     const callAt = body.indexOf('listRemoteTools');
@@ -138,7 +141,7 @@ describe('🔒 the wiring — a gate that is not applied is not a gate', () => {
   it('🔒 the build SAYS when it skipped them', () => {
     const at = buildLoopStart(routes);
     expect(at).toBeGreaterThan(-1);
-    expect(routes.slice(at, at + 1800)).toContain('skippedServicesNotice');
+    expect(routes.slice(at, anchorOf(routes, 'dispatcher.setMcpServers'))).toContain('skippedServicesNotice');
   });
 
   it('the LIST route carries the entitlement, so the form is never a dead end', () => {

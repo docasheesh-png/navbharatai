@@ -106,6 +106,7 @@ const ALLOWED: Record<string, string> = {
   'src/components/ide/AIChat.tsx': "the IDE's bring-your-own-key provider picker",
   'src/components/ide/SecurityScan.tsx': "uses the USER'S own key",
   'src/lib/credentialRecipes.ts': "setup recipes for the USER'S own provider accounts",
+  'src/lib/imageKeyNames.ts': "the names of the keys an OWNER saves for their own app's pictures (their own provider accounts); credentialRecipes.ts reads it",
   'src/components/agentv3/AppAiSettingsCard.tsx': "names the provider of the USER'S OWN key (saved by them in Keys & Secrets) — never which engine NavBharatAI uses",
   // Reached only once the walk was widened. This is the bring-your-own-key provider map, and it is
   // the law being OBEYED rather than broken: every user-visible `label` is already white-labelled

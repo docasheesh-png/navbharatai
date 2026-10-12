@@ -310,6 +310,20 @@ describe('🔒 the wiring (agentv3.ts)', () => {
     expect(route).toContain("{ code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, thirdPartyPlayersAtStart) },");
   });
 
+  it('CLASS CENSUS: every fact the claim audit can read is handed to it — an unwired optional fact silently disables its rule', () => {
+    // Generalises the one-field pins in summaryClaimAudit.test.ts (typecheckRan) and aSizeNobodyMeasuredIsNotClaimed
+    // (phoneLayout). A property NavBharatAI learns to measure is only a check once the route passes it in.
+    const audit = readFileSync(join(process.cwd(), 'src/server/AgentV3/claimAudit.ts'), 'utf8');
+    const body = audit.slice(audit.indexOf('export interface MeasuredFacts {'));
+    const block = body.slice(0, body.indexOf('\n}\n'));
+    const fields = [...block.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1]);
+    expect(fields.length).toBeGreaterThanOrEqual(16);
+    const start = route.indexOf('const contradictions = auditSummaryClaims(result.summary, {');
+    const call = route.slice(start, route.indexOf('});', start));
+    const unwired = fields.filter((f) => !new RegExp(String.raw`^\s*${f}:`, 'm').test(call));
+    expect(unwired, 'MeasuredFacts fields the route never passes to auditSummaryClaims').toEqual([]);
+  });
+
   it('the published name is told when the app embeds such a player', () => {
     expect(route).toContain('resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource, adServingPlayer })');
   });

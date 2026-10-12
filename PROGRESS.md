@@ -94241,6 +94241,17 @@ Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-
 - The playtest line should show no camera or steering verdict on a game the kit built.
 - A "KIT FILES BROUGHT UP TO DATE" note should appear only when an older game is edited.
 
+### 2026-10-12 — #3678 merged; its 10 rows closed
+
+- **#3678 merged** (1af815af8): Q-821, Q-381 batch six (the finding backlog is empty), Q-816, and the seven game rows of 46e2d74b.
+- **Closed** (deleted from `BUILD_REPORT_QUEUE.md`, appended to `BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main`): Q-381 Q-816 Q-821 Q-843 Q-846 Q-861 Q-862 Q-863 Q-864 Q-865. Their ledgers are in the entries above.
+- **Two CI rounds before green, both real, both said in the PR:**
+  - `aGameShipsItsControlsTest` read a child vitest's summary as text, and CI's colour codes split it. The child now runs without colour.
+  - A full local run under load showed that the Q-861 probe voided a correct chase view on a dropped frame. A too-fast strip is now left out, and the farther strips still vote. It holds at about 20 fps, the sandbox renderer's real speed; there are real-Chromium pages for it.
+- **Watch on the next real racing build:**
+  - The playtest line should give no camera or steering verdict on a game the kit built.
+  - Any verdict it does give names the fix.
+- **#3679 (another session) still marks Q-846 as OPEN.** Whichever of the two merges second hits a conflict on that row. The correct resolution is the deletion: Q-846 is resolved and in the closed register.
 #### 2026-10-12 — duplicated work, stopped: Q-843 and Q-861..Q-865 were built twice
 
 - **What happened:** this session started a workflow on Q-846, Q-843 and Q-861..Q-865. Before it started, the open-PR list was checked and was empty.
@@ -94266,6 +94277,33 @@ Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-
 - Raised as a review comment on #3678 before it merged; the PR merged without it, so this is its own change.
 
 
+### 2026-10-12 — Q-869: the playtest's verdicts no longer depend on frame timing
+
+Another session, gating #3679, reported that under CPU load the full suite flipped two #3678 racing verdicts. Q-865 called a working countdown game stalled. Q-861 missed mirrored steering. The code is mine (#3678), so the row is mine.
+
+**What I could and could not reproduce.**
+- I could not reproduce the exact 4-CPU flip.
+  - Throttling the page's CPU 4× and 8× did not do it.
+  - Three full colour-on suite runs here stayed green.
+- What I did reproduce shows the same class. A WORKING racer with a 9 s "Get ready" countdown was called stalled, because the second accelerator look lasted only 2 s.
+- The class is a verdict read from frame timing. Q-869 names the same class, and it was a real precision hole even on an idle machine.
+
+**The fix, in two parts.**
+- **Part A.** The second look now holds the gas and looks once a second for up to 8 s, stopping as soon as anything moves.
+  - "The car never moves" needs the full look, with at least 40 frames drawn. A page that a loaded machine stopped drawing shows the same picture whatever the car does.
+  - Flow reads now collect 14 drawn frames, with up to 3 s to draw them.
+- **Part B (DNA level, the suggestion in Q-869).** For three.js games, the camera and steering verdicts are read from the SCENE, not from pixels.
+  - three.js announces its renderer to `__THREE_DEVTOOLS__`. Wrapping `render()` gives us the scene and the camera.
+  - Positions are state, so a slow machine moves them less, never the wrong way.
+  - The vehicle is the object the accelerator sped up over its idle speed, so a traffic car is never chosen.
+  - The scene only judges when the camera follows the vehicle. A treadmill world otherwise reads as "camera ahead" — measured, ahead = 1.
+  - Pixels judge only what the scene cannot, and never against it.
+
+**Locks.**
+- Real Chromium and real three.js: chase, front, mirrored and treadmill pages, each with a faster traffic car. Margins: ahead ±1, looks 1, turn ±33–38°.
+- The 9 s countdown and lost-first-key pages.
+- Reverted 5 ways: the long look, the frame guard, the follow guard, the idle subtraction, and the scene's precedence.
+- The KB was updated: the camera check reads a 3D game's scene, and a busy machine is never read as a stalled car.
 ### 2026-10-12 — Billing, revenue and profitability audit (audit only — no code changed)
 
 - **Asked by the admin:** a forensic audit of the whole billing path (external brief, adapted under the external-suggestion rule). Report: `docs/billing-audit-2026-10-12.md`. Built on the 2026-09-12 money audit and #3538 rather than redoing them.

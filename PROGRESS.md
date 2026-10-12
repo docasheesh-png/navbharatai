@@ -94445,7 +94445,8 @@ Q-955; a chat clock that read 11 s at 23 s, Q-949).
 | Q-960 | Two drifted "file absent?" predicates | Copies | One `isNotFoundError` | same (table) |
 | Q-961 | Drain could overwrite a stored app after a failed refill | The Q-740 class | `mayPersistSeededScaffold` | same |
 | Q-973 | A restore to the turn-start files called "the last version that ran correctly" | That base is chosen exactly when it differs from the last browser-checked snapshot — never seen running | Every producer (narration, summary, admin row) names it "not re-checked"; the scorecard counts it as its own state | `aRestoreClaimsOnlyWhatWasChecked` (6 failed) |
-| Q-962…Q-974 (not Q-973) | 12 items needing the admin (routing, product, money, metric, store bundle, logs) | — | 🟡 rows with options and a recommendation in `BUILD_REPORT_QUEUE.md` | — |
+| Q-969 | An issue in a file the edit deleted stayed open forever | A never-rescanned file cannot clear its issue | The durable forget step's removal (authoritative, no extra I/O) retires issues in removed files | `anIssueGoesWithItsFile` (1 failed) |
+| Q-962…Q-974 (not Q-969, Q-973) | 11 items needing the admin (routing, product, money, metric, store bundle, logs) | — | 🟡 rows with options and a recommendation in `BUILD_REPORT_QUEUE.md` | — |
 
 **Caught by the final gate (before push):** four source guards pinned the literal text `await f(x)` and failed on correct
 code once setup calls were wrapped in timing steps (Q-955), and one in a fixed 1800-character window. Class: a guard that tests
@@ -94467,8 +94468,8 @@ abandoned time, the setup coverage clause accounts for every second before the f
 
 ```
 BUILD REPORT 303e8a6f — RESOLUTION
-Items: 35 · ✅ Resolved: 0 (23 fixed in #3692, ✅ on merge) · 🟡 Blocked: 12 · Remaining: 23
-FINAL: ❌ NOT COMPLETE — remaining: Q-940 … Q-961 and Q-973 (fixed in #3692, awaiting the admin's merge)
+Items: 35 · ✅ Resolved: 0 (24 fixed in #3692, ✅ on merge) · 🟡 Blocked: 11 · Remaining: 24
+FINAL: ❌ NOT COMPLETE — remaining: Q-940 … Q-961, Q-969 and Q-973 (fixed in #3692, awaiting the admin's merge)
 ```
 ### 2026-10-12 — db07e0af rows closed (#3687 merged)
 

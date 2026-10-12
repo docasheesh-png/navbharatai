@@ -16097,6 +16097,9 @@ async function noteBuildOutcome(
       // Every file this build removed, in order — the user is told about the ones their app had
       // (deletedFilesNotice.ts, queue Q-019). The admin line below stays as it was.
       const deletedThisBuild: string[] = [];
+      // Of those, the ones ALSO removed from the saved project — authoritative absence the issue queue may act
+      // on (Q-969). Set only by the durable forget step below, and only when that removal really ran.
+      let removedFromApp: string[] = [];
       // Files the fast lane salvaged into the workspace for the full builder (deadSalvage.ts).
       const salvagedThisBuild: string[] = [];
       // What a shell command removes is checked against these (queue Q-246, shellWriteTargets.ts).
@@ -25624,6 +25627,9 @@ async function noteBuildOutcome(
                 15_000, 'durable-delete',
               );
               if (forgotten > 0) {
+                // A positive count means the store's path list was rewritten without every one of these paths
+                // (removeWorkspaceFiles returns 0 on any failure), so all of them are now absent from the app.
+                removedFromApp = forgetDurably;
                 buildDiag.record({
                   phase: 'build', severity: 'info', code: 'DELETED_FILES_FORGOTTEN', autoResolved: true,
                   message: `${forgotten} file(s) this build deleted were removed from the saved project too, so the next session does not bring them back: ${forgetDurably.slice(0, 8).join(', ')}${forgetDurably.length > 8 ? ` and ${forgetDurably.length - 8} more` : ''}.`,
@@ -26288,6 +26294,7 @@ async function noteBuildOutcome(
             issues: settleIssues,
             security: (() => { try { return getWorkspaceMemory(workspaceId).appSecurityFindings(); } catch { return []; } })(),
             securityScanned: (() => { try { return getWorkspaceMemory(workspaceId).graph().files; } catch { return []; } })(),
+            removedFiles: removedFromApp,
           }), 4_000, 'change-engine-settle').catch(() => null);
           if (settled) {
             for (const line of settled.reportLines) buildDiag.record({ phase: 'build', severity: 'info', code: 'CHANGE_RECORDED', autoResolved: true, message: line });

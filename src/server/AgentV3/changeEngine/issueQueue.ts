@@ -237,6 +237,26 @@ export function retireOpenIssues(queue: IssueQueue): { queue: IssueQueue; retire
   return { queue: { nextIss: queue.nextIss, issues }, retired };
 }
 
+/**
+ * An open issue found in a file this build REMOVED from the app is retired with that file (autopsy 303e8a6f,
+ * Q-969). Absence from a scan cannot close it — a file nobody scanned is unseen, not fixed — so before this an
+ * issue about a deleted file stayed open forever. `removed` must be authoritative: the files the build deleted
+ * that were also removed from the saved project (the route's durable forget step), never a guess from a scan.
+ * Marked, never deleted, exactly as a new app retires the old app's issues; a recurrence brings it back. Pure.
+ */
+export function retireIssuesInRemovedFiles(queue: IssueQueue, removed: ReadonlyArray<string>): { queue: IssueQueue; retired: QueuedIssue[] } {
+  const gone = new Set(removed.map((p) => String(p ?? '').trim().replace(/^\.?\/+/, '')).filter(Boolean));
+  const retired: QueuedIssue[] = [];
+  if (gone.size === 0) return { queue, retired };
+  const issues = queue.issues.map((i) => {
+    if (!isOpenIssue(i) || !i.file || !gone.has(i.file.trim().replace(/^\.?\/+/, ''))) return i;
+    const r = { ...i, status: 'retired' as const };
+    retired.push(r);
+    return r;
+  });
+  return { queue: { nextIss: queue.nextIss, issues }, retired };
+}
+
 function sevRank(i: QueuedIssue): number {
   return i.severity === 'error' ? 1 : 0;
 }

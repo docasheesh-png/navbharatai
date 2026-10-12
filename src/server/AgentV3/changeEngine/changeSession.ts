@@ -20,7 +20,7 @@ import {
   type ProbeOutcome, type SpecItem, type AppSpec,
 } from './appSpec';
 import {
-  foldBuildFindings, queueableFindings, workableIssues, markAssigned, renderIssuesForBuilder, retireOpenIssues, isOpenIssue,
+  foldBuildFindings, queueableFindings, workableIssues, markAssigned, renderIssuesForBuilder, retireOpenIssues, retireIssuesInRemovedFiles, isOpenIssue,
   type QueuedIssue,
 } from './issueQueue';
 import { appendChange, chgId, describeChange, type ChangeRecord, type ChangeStatus, type EngineeringMemory } from './changeLog';
@@ -162,6 +162,11 @@ export interface SettleInput {
   security?: ReadonlyArray<{ severity?: string; message?: string; rule?: string; file?: string }>;
   /** The files the security analysis actually read this build — only these can clear a security issue. */
   securityScanned?: ReadonlyArray<string>;
+  /**
+   * Files this build deleted that were ALSO removed from the saved project — authoritative absence, taken by the
+   * route's durable forget step (never a scan). An open issue in one of them is retired with it (Q-969).
+   */
+  removedFiles?: ReadonlyArray<string>;
 }
 
 /** Security findings as queue findings. High is an error (a leaked key is not a style note). Pure. */
@@ -218,7 +223,9 @@ export function foldSettle(mem: EngineeringMemory, session: ChangeSession, input
 
   // A NEW app retires the previous app's open issues, as it retires its requirements above (autopsy 303e8a6f).
   const retire = session.isEdit ? { queue: mem.queue, retired: [] as QueuedIssue[] } : retireOpenIssues(mem.queue);
-  let queue = markAssigned(retire.queue, session.assignedIssueIds, changeId);
+  // …and an issue whose FILE this build removed goes with that file (Q-969) — a scan can never close it.
+  const retireGone = retireIssuesInRemovedFiles(retire.queue, input.removedFiles ?? []);
+  let queue = markAssigned(retireGone.queue, session.assignedIssueIds, changeId);
   const findings = [...queueableFindings(input.issues), ...securityFindings(input.security)]
     .map((f) => ({ ...f, message: redactProvidersText(redactSecrets(f.message)) }));
   // Checks ran only when the build reached its release gate without being stopped. A stopped or failed
@@ -235,7 +242,7 @@ export function foldSettle(mem: EngineeringMemory, session: ChangeSession, input
   for (const r of session.requested) { const it = spec.items.find((i) => i.feature === r.feature); if (it) reqIds.add(it.id); }
   for (const it of [...probeFold.verified, ...probeFold.regressed, ...probeFold.restored, ...builtNow]) reqIds.add(it.id);
   for (const l of session.requestedLabels ?? []) { const it = spec.items.find((i) => i.feature === labelKey(l)); if (it) reqIds.add(it.id); }
-  const issueIds = [...qFold.opened, ...qFold.reopened, ...qFold.fixed, ...qFold.verified].map((i) => i.id);
+  const issueIds = [...qFold.opened, ...qFold.reopened, ...qFold.fixed, ...qFold.verified, ...retireGone.retired].map((i) => i.id);
 
   const record: ChangeRecord = {
     id: changeId, ts: now, summary: session.summary,
@@ -247,9 +254,10 @@ export function foldSettle(mem: EngineeringMemory, session: ChangeSession, input
   };
   const next: EngineeringMemory = { ...appendChange({ ...mem, spec, queue }, record, changeId), nextChg: mem.nextChg + 1 };
   const reportLines = [describeChange(record)];
-  if (qFold.opened.length || qFold.fixed.length || qFold.verified.length || qFold.reopened.length || qFold.triaged.length || retire.retired.length) {
+  if (qFold.opened.length || qFold.fixed.length || qFold.verified.length || qFold.reopened.length || qFold.triaged.length || retire.retired.length || retireGone.retired.length) {
     reportLines.push(`Issue queue: ${qFold.opened.length} opened, ${qFold.reopened.length} reopened, ${qFold.triaged.length} confirmed (now shown to the user and handed to edits), `
-      + `${qFold.fixed.length} fixed, ${qFold.verified.length} verified${retire.retired.length ? `, ${retire.retired.length} retired with the previous app` : ''} · ${queue.issues.filter(isOpenIssue).length} open`);
+      + `${qFold.fixed.length} fixed, ${qFold.verified.length} verified${retire.retired.length ? `, ${retire.retired.length} retired with the previous app` : ''}`
+      + `${retireGone.retired.length ? `, ${retireGone.retired.length} retired with their removed file(s)` : ''} · ${queue.issues.filter(isOpenIssue).length} open`);
   }
   return { mem: next, result: { record, regressed: probeFold.regressed, reportLines } };
 }

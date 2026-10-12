@@ -16,9 +16,11 @@
 //   3. a measurement: every such turn is counted, and the route reports `TODO_ONLY_TURNS` on every build,
 //      so the next report says whether 1 and 2 worked.
 //
-// 🔒 NEVER STEERED: a run that cannot write. The plan-approval lane offers ONLY update_todo and is told to
-// end its turn after it; the planner roles have no writer tool. Telling either to pair the plan with a write
-// it cannot make would be an instruction it cannot follow — `isTodoOnlyTurn` returns false for them.
+// 🔒 NEVER TOLD, NEVER STEERED: a run that cannot write. The plan-approval lane offers ONLY update_todo and
+// is told to end its turn after it; the planner roles have no writer tool. Telling either to pair the plan
+// with a write it cannot make would be an instruction it cannot follow — and would contradict the one job the
+// plan lane has. So BOTH channels ask the same question, `runCanWrite`: `isTodoOnlyTurn` (the hand-back)
+// returns false for them, and `catalogForTools` (the update_todo CONTRACT they read) leaves the rule out.
 //
 // A LEAF — no runtime imports — so the tool catalog, the prompts and the runner can all read it.
 
@@ -32,13 +34,22 @@ export const TODO_RIDES_WITH_WORK =
 const WRITER_TOOLS: ReadonlySet<string> = new Set(['write_file', 'edit_file']);
 
 /**
+ * Is a run offered these tools a WRITER run — one that could do real work in the same turn as a plan update?
+ * The one answer both the update_todo contract (`catalogForTools`) and the hand-back (`isTodoOnlyTurn`) read,
+ * so the two can never disagree about which lanes the rule is for. PURE.
+ */
+export function runCanWrite(offeredTools: readonly string[]): boolean {
+  return Array.isArray(offeredTools) && offeredTools.some((t) => WRITER_TOOLS.has(t));
+}
+
+/**
  * Did this turn do nothing but update the plan? True only when every tool call of the turn is update_todo
  * AND the run was offered a writer tool (so it could have done real work in the same turn). PURE.
  */
 export function isTodoOnlyTurn(toolNames: readonly string[], offeredTools: readonly string[]): boolean {
   if (!Array.isArray(toolNames) || toolNames.length === 0) return false;
   if (!toolNames.every((n) => n === 'update_todo')) return false;
-  return Array.isArray(offeredTools) && offeredTools.some((t) => WRITER_TOOLS.has(t));
+  return runCanWrite(offeredTools);
 }
 
 /** Appended to the tool result of the FIRST todo-only turn in a run — once, so it never becomes noise. */

@@ -4,7 +4,15 @@ import type { ToolName } from './types';
 import { MAX_FILES_PER_BATCH } from './batchSize';
 import { WORKER_ROLES } from './AgentRegistry';
 import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
-import { TODO_RIDES_WITH_WORK } from './todoOnlyTurn';
+import { TODO_RIDES_WITH_WORK, runCanWrite } from './todoOnlyTurn';
+
+/**
+ * The update_todo contract WITHOUT the "rides with the work" rule (autopsy 9c612cdb, Q-944). A lane that
+ * cannot write — the plan-approval lane, offered ONLY update_todo and told to end its turn after it, and the
+ * planning roles — is given this text by `catalogForTools`: "never as a turn of its own" would contradict the
+ * one job that lane has. Every writer lane gets it with `TODO_RIDES_WITH_WORK` appended.
+ */
+const UPDATE_TODO_CONTRACT = 'Update the ONE running build plan shown to the user. Send the full list with statuses updated and new items appended — never a fresh shorter plan (completed items always stay; the workspace keeps finished work even if you omit it).';
 
 /**
  * ToolCatalog — the native Anthropic tool definitions the v5.0 agent team can
@@ -169,8 +177,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     },
     {
       name: 'update_todo',
-      description: 'Update the ONE running build plan shown to the user. Send the full list with statuses updated and new items appended — never a fresh shorter plan (completed items always stay; the workspace keeps finished work even if you omit it). '
-        + TODO_RIDES_WITH_WORK,
+      description: `${UPDATE_TODO_CONTRACT} ${TODO_RIDES_WITH_WORK}`,
       input_schema: {
         type: 'object',
         properties: {
@@ -3892,5 +3899,9 @@ export function catalogForTools(allowed: ToolName[]): ClaudeToolDef[] {
   if ((allowed as string[]).includes('task')) base.push(taskToolDef());
   if ((allowed as string[]).includes('second_opinion')) base.push(secondOpinionToolDef());
   if ((allowed as string[]).includes('consensus')) base.push(consensusToolDef());
-  return dedupeToolsByName(base);
+  const defs = dedupeToolsByName(base);
+  // A lane that cannot write is not told to pair the plan with work it cannot do (autopsy 9c612cdb, Q-944):
+  // the same `runCanWrite` answer that keeps the runner's hand-back away from it.
+  if (runCanWrite(allowed as string[])) return defs;
+  return defs.map((t) => (t.name === 'update_todo' ? { ...t, description: UPDATE_TODO_CONTRACT } : t));
 }

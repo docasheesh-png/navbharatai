@@ -172,6 +172,29 @@ describe('3 · the first attempt is told — every place a writer is asked to ke
     expect(planSystemPrompt()).not.toContain(TODO_RIDES_WITH_WORK);
     for (const role of ['planner', 'product', 'requirement'] as const) expect(roleConfig(role).system).not.toContain(TODO_RIDES_WITH_WORK);
   });
+
+  // 🔴 REVIEW FINDING (adversarial review of this fix, 2026-10-12): the rule rode the update_todo CONTRACT, and
+  // `catalogForTools(['update_todo'])` — the plan-approval lane, whose prompt says "End your turn after calling
+  // update_todo" — handed that lane "never as a turn of its own". The prompt checks above passed with that
+  // contradiction live, because they never looked at the tool description the lane actually reads.
+  it('🔒 …and not through the update_todo contract either: a non-writer lane reads the plain contract', () => {
+    const todoDesc = (defs: Array<{ name: string; description?: string }>) => defs.find((t) => t.name === 'update_todo')?.description ?? '';
+    // The plan-approval lane is built from exactly this list (source guard below keeps that true).
+    const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    expect(route).toContain("tools: catalogForTools(['update_todo'])");
+    const planLane = todoDesc(catalogForTools(['update_todo']));
+    expect(planLane).toContain('Update the ONE running build plan shown to the user');
+    expect(planLane).not.toContain(TODO_RIDES_WITH_WORK);
+    expect(planLane).not.toMatch(/turn of its own/);
+    // The planning roles, spawned through SubAgent's `catalogForTools(cfg.tools)`.
+    for (const role of ['planner', 'product', 'requirement'] as const) {
+      expect(todoDesc(catalogForTools(roleConfig(role).tools))).not.toContain(TODO_RIDES_WITH_WORK);
+    }
+    // Every writer lane keeps the rule — the contract and the hand-back answer the same question.
+    for (const role of ['architect', 'frontend', 'backend'] as const) {
+      expect(todoDesc(catalogForTools(roleConfig(role).tools)), role).toContain(TODO_RIDES_WITH_WORK);
+    }
+  });
 });
 
 describe('4 · 🔒 CENSUS — a new "keep the plan" instruction cannot be written without the rule', () => {

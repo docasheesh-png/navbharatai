@@ -94203,3 +94203,15 @@ Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-
 **Watch on the next real racing build:**
 - The playtest line should show no camera or steering verdict on a game the kit built.
 - A "KIT FILES BROUGHT UP TO DATE" note should appear only when an older game is edited.
+
+### 2026-10-12 — #3678 merged; its 10 rows closed
+
+- **#3678 merged** (1af815af8): Q-821, Q-381 batch six (the finding backlog is empty), Q-816, and the seven game rows of 46e2d74b.
+- **Closed** (deleted from `BUILD_REPORT_QUEUE.md`, appended to `BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit, on a fresh `main`): Q-381 Q-816 Q-821 Q-843 Q-846 Q-861 Q-862 Q-863 Q-864 Q-865. Their ledgers are in the entries above.
+- **Two CI rounds before green, both real, both said in the PR:**
+  - `aGameShipsItsControlsTest` read a child vitest's summary as text, and CI's colour codes split it. The child now runs without colour.
+  - A full local run under load showed that the Q-861 probe voided a correct chase view on a dropped frame. A too-fast strip is now left out, and the farther strips still vote. It holds at about 20 fps, the sandbox renderer's real speed; there are real-Chromium pages for it.
+- **Watch on the next real racing build:**
+  - The playtest line should give no camera or steering verdict on a game the kit built.
+  - Any verdict it does give names the fix.
+- **#3679 (another session) still marks Q-846 as OPEN.** Whichever of the two merges second hits a conflict on that row. The correct resolution is the deletion: Q-846 is resolved and in the closed register.

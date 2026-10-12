@@ -386,6 +386,56 @@ describe('🔴 the GAME SHELL frames a driven car from behind, on every option a
     game.dispose();
   });
 
+  // 🔒 Q-864 (found by 46e2d74b, admin 2026-10-12: "game wali rows bhi aap hi karo"). camera: 'chase' guessed
+  // "the first vehicle given a state" — right for a one-car racer, wrong for a racer whose RIVAL got its state
+  // first and for a walk-and-drive game with a PARKED car. The guess now stands down when it could be wrong.
+  it("Q-864: camera 'chase' with a rival set up FIRST never chases the rival — the player's car takes the camera when driven", () => {
+    const container = new FakeEl('div');
+    const race = { go: false };
+    let mine!: THREE.Group; let rival!: THREE.Group; let a: any; let b: any;
+    const game = new SHELL.Game({
+      container, camera: 'chase',
+      setup: (ctx: any) => {
+        rival = O.createCar({ detail: 'real' }); rival.position.set(-6, 0, 0); ctx.scene.add(rival); a = O.createVehicleState(rival);
+        mine = O.createCar({ detail: 'real' }); mine.position.set(6, 0, 0); ctx.scene.add(mine); b = O.createVehicleState(mine);
+        return [];
+      },
+      update: (ctx: any, dt: number) => {
+        if (!race.go) return;                                         // the start screen: nothing driven yet
+        a = O.driveVehicle(rival, a, { x: 0.3, y: -1 }, dt);
+        b = O.driveVehicle(mine, b, ctx.input.axis(), dt);
+      },
+    });
+    game.loop.step(240);
+    expect(chasing(game.rig.camera, rival).ok, 'the rival must not be chased on the start screen').toBe(false);
+    race.go = true;
+    game.loop.step(240);
+    const c = chasing(game.rig.camera, mine);
+    expect(c.ok, c.why).toBe(true);
+    game.dispose();
+  });
+
+  it("Q-864: camera 'chase' in a walk-and-drive game (it reads Use) frames the player ON FOOT, not the parked car", () => {
+    const container = new FakeEl('div');
+    let parked!: THREE.Group;
+    const game = new SHELL.Game({
+      container, camera: 'chase',
+      setup: (ctx: any) => { parked = O.createCar({ detail: 'lite' }); parked.position.set(8, 0, 4); ctx.scene.add(parked); O.createVehicleState(parked); return []; },
+      update: (ctx: any) => { ctx.input.wasPressed('interact'); },   // the Use button: get in / out of the car
+    });
+    game.loop.step(240);
+    expect(chasing(game.rig.camera, parked).ok, 'the parked car must not be chased').toBe(false);
+    expect(game.hero.root.visible).toBe(true);
+    game.dispose();
+  });
+
+  it("Q-864: a ONE-car 'chase' game still has its car chased from the very first frame (the guess stands only when it cannot be wrong)", () => {
+    const run = racingGame({ camera: 'chase' });
+    run.game.loop.step(240);
+    expect(chasing(run.game.rig.camera, run.car).ok).toBe(true);
+    run.game.dispose();
+  });
+
   it("the game's own choice wins: ctx.follow(null) puts the camera back on the player on foot", () => {
     const container = new FakeEl('div');
     let car!: THREE.Group; let drive: any;

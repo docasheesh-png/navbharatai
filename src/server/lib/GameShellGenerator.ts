@@ -67,9 +67,10 @@ export interface GameOptions {
   container: HTMLElement;
   lighting?: LightingPresetName;
   /**
-   * 'third-person' (default) for a character on foot; 'chase' for anything driven or ridden — then the
-   * first vehicle given createVehicleState() is chased from BEHIND from the first frame (on foot it
-   * frames the player exactly like 'third-person'). Whatever this says, the vehicle the player drives
+   * 'third-person' (default) for a character on foot; 'chase' for anything driven or ridden — then a game
+   * with ONE vehicle given createVehicleState() has it chased from BEHIND from the first frame (on foot it
+   * frames the player exactly like 'third-person'; with a rival or a parked car, or a game that reads
+   * Use, nothing is guessed — call ctx.follow(car)). Whatever this says, the vehicle the player drives
    * with driveVehicle(…, ctx.input.axis(), …) is chased from behind.
    */
   camera?: CameraKind;
@@ -146,14 +147,22 @@ export class Game {
    * example produced exactly the admin's game. Now the shell sees it itself:
    *   • the vehicle driveVehicle() moves with the PLAYER's own input (the axis ctx.input.axis() returned)
    *     is chased from behind, with no call at all — that is the player's car, whatever else is driven;
-   *   • with camera: 'chase' declared, the first vehicle given a state is chased from the very first
-   *     frame — a start screen included, before the player has touched anything.
+   *   • with camera: 'chase' declared, the ONE vehicle given a state is chased from the very first
+   *     frame — a start screen included, before the player has touched anything (Q-864: never when there
+   *     are two, or when the game reads Use — then it waits for the player's own car).
    * A car the game drives with its OWN axis (an opponent, a bus crossing the road) never takes the
    * camera from a player on foot. ctx.follow() overrides all of it, and a vehicle that leaves the scene
    * (a respawn builds a new car) hands over to the next one.
    */
   private playerVehicle: THREE.Object3D | null = null;
   private firstVehicle: THREE.Object3D | null = null;
+  /**
+   * Every vehicle given a state that is NOT the player's — so the camera: 'chase' guess ("the first vehicle")
+   * is made only when it cannot be the wrong one (Q-864): exactly one such vehicle in the scene, in a game
+   * that does not read the action buttons. A racer whose rival got its state first, or a walk-and-drive game
+   * with a parked car, used to have that car chased from the first frame.
+   */
+  private readonly otherVehicles = new Set<THREE.Object3D>();
   /** Every axis object ctx.input.axis() has handed out — how a driveVehicle() call is known to be the player's. */
   private readonly playerAxes = new WeakSet<object>();
   private setupDone = false;
@@ -312,8 +321,9 @@ export class Game {
     const keep = (current: THREE.Object3D | null) => !!current && current !== vehicle && (!this.setupDone || this.inScene(current));
     if (axis && this.playerAxes.has(axis)) {
       if (vehicle !== this.playerVehicle && !keep(this.playerVehicle)) this.playerVehicle = vehicle;
-    } else if (vehicle !== this.firstVehicle && !keep(this.firstVehicle)) {
-      this.firstVehicle = vehicle;
+    } else {
+      if (this.otherVehicles.size < 64) this.otherVehicles.add(vehicle);
+      if (vehicle !== this.firstVehicle && !keep(this.firstVehicle)) this.firstVehicle = vehicle;
     }
     this.syncTouchLayout();
   }
@@ -325,13 +335,26 @@ export class Game {
 
   /**
    * What the camera chases this frame: the game's own choice (ctx.follow), else the vehicle the player
-   * drives, else — only when the game declared camera: 'chase' — the first vehicle it set up; else nothing.
+   * drives, else — only when the game declared camera: 'chase' AND that guess cannot pick the wrong car — the
+   * one vehicle it set up; else nothing.
+   *
+   * The guess stands down (Q-864) when the game reads an action button — a walk-and-drive game reads Use to get
+   * in and out, so its player starts on foot beside a PARKED car — or when more than one vehicle in the scene
+   * has a state that is not the player's, so a rival given its state first is never chased. Either way the
+   * player's own car takes the camera the moment the game drives it with ctx.input.axis().
    */
   private get chased(): THREE.Object3D | null {
     if (this.followChosen) return this.followTarget;
     if (this.playerVehicle && this.inScene(this.playerVehicle)) return this.playerVehicle;
-    if (this.options.camera === 'chase' && this.firstVehicle && this.inScene(this.firstVehicle)) return this.firstVehicle;
+    if (this.options.camera === 'chase' && this.firstVehicle && this.inScene(this.firstVehicle)
+      && !this.gameReadsButtons && this.vehiclesInScene() === 1) return this.firstVehicle;
     return null;
+  }
+
+  private vehiclesInScene(): number {
+    let n = 0;
+    for (const v of this.otherVehicles) if (this.inScene(v)) n += 1;
+    return n;
   }
 
   /**
@@ -1102,8 +1125,9 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '  drive the same Input actions as the keyboard. Choose the buttons with\n' +
       "  touchControls: { buttons: [{ action: 'attack', label: 'Punch' }, …] } — never hand-roll a joystick.\n" +
       "- A CAR THE PLAYER DRIVES with driveVehicle(car, state, ctx.input.axis(), dt) is recognised by the\n" +
-      "  shell: the camera chases it from BEHIND even if you forget ctx.follow (with camera: 'chase', from\n" +
-      '  the first frame), and a phone gets Left/Right bottom-left and Brake/Gas bottom-right, wired to the\n' +
+      "  shell: the camera chases it from BEHIND even if you forget ctx.follow (with camera: 'chase' and a\n" +
+      "  single car, from the first frame; with rivals or a parked car, call ctx.follow(car)), and a phone\n" +
+      '  gets Left/Right bottom-left and Brake/Gas bottom-right, wired to the\n' +
       '  same actions as the arrow keys (a game that reads Attack/Jump/Use/Run itself — Use to get out of\n' +
       '  the car — keeps the joystick and those buttons instead). Never write your own steering pad or chase\n' +
       '  camera — a hand-written one is how LEFT ends up turning RIGHT.\n' +

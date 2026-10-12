@@ -27,6 +27,12 @@ describe('which phones it names — precision first', () => {
     'mobile shop billing app',
     'smartphone friendly website',
     'a game with buttons for my phone',
+    // A device word that is also an app word (found reviewing #3678): none of these names a keypad phone.
+    'ek basic phone book app banao',
+    'a basic phone directory for my shop',
+    'build a basic phone number validator',
+    'simple app with a big button phone dialer',
+    'basic phone app with login',
     '',
   ])('NEGATIVE: %s is not a keypad phone', (prompt) => {
     expect(namedNonSmartphone(prompt)).toBeNull();

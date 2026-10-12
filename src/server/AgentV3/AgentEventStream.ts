@@ -50,9 +50,16 @@ export class AgentEventStream {
   private readonly listeners = new Set<AgentEventListener>();
   private readonly buffer: AgentEvent[] = [];
   private readonly maxBuffer: number;
+  /**
+   * When the user started waiting — the stream is made as the request arrives, and every runner of the build
+   * shares it. User-visible clocks ("Still working — Ns so far") measure from here, never from the current
+   * model call (autopsy 303e8a6f: a user 23 s in was told 11 s).
+   */
+  readonly startedAt: number;
 
-  constructor(maxBuffer = 500) {
+  constructor(maxBuffer = 500, startedAt = Date.now()) {
     this.maxBuffer = maxBuffer;
+    this.startedAt = startedAt;
   }
 
   /** Broadcast an event to all listeners and append it to the replay buffer. */

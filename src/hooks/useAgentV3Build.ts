@@ -331,6 +331,12 @@ export function stallWatchdogAction(opts: { alive: boolean; sawResult: boolean }
 export function useAgentV3Build(): UseAgentV3Build {
   const [state, setState] = useState<AgentV3ClientState>(initialAgentV3State);
   const [running, setRunning] = useState(false);
+  // ⏱️ The build clock freezes when the build stops running, on THIS device's clock — the same one `startedAt`
+  // was stamped on at Send (autopsy 303e8a6f; see buildClock.ts). One effect covers every way a build ends.
+  useEffect(() => {
+    if (running) return;
+    setState((prev) => (typeof prev.startedAt === 'number' && typeof prev.endedAt !== 'number' ? { ...prev, endedAt: Date.now() } : prev));
+  }, [running]);
   const [serverBuildRunning, setServerBuildRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
@@ -1343,6 +1349,8 @@ export function useAgentV3Build(): UseAgentV3Build {
         workspaceId: prev.workspaceId,
         previewUrl: prev.previewUrl,
         repoUrl: prev.repoUrl,
+        // The moment the user started waiting, on this device — the origin of the build clock (buildClock.ts).
+        startedAt: Date.now(),
       }));
       setError(null);
     setErrorBeforeBuildStarted(false);

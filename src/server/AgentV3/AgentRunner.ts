@@ -9,6 +9,7 @@ import type { ClaudeToolDef, TurnRunner, TurnUsage, ToolUse, TurnResult } from '
 import type { ToolDispatcher, ToolResult } from './ToolDispatcher';
 import type { AgentRole } from './types';
 import { startWorkingHeartbeat, workingLine } from './workingHeartbeat';
+import { WORKING_LINE_ID } from '../../lib/liveStatusLine';
 import type { ConversationStore, ConversationStatus } from './ConversationStore';
 import { compactMessagesForPersist, compactTranscriptForModel } from './SessionTimeline';
 import { billedAmountUsd } from './pricing';
@@ -891,9 +892,11 @@ export class AgentRunner {
           // An elapsed clock is a MEASUREMENT, not an estimate, so it may always be shown; the module
           // it comes from explains why that distinction is the whole justification. It carries a
           // stable `id`, so the surface replaces one line instead of appending a new one every 15 s.
+          // ⏱️ The number is the USER'S wait (the build's stream start), never this call's age — the call only
+          // decides WHEN to speak (autopsy 303e8a6f: 23 s into the build the line said "11s so far").
           const stopWorkingHeartbeat = startWorkingHeartbeat((elapsedMs) => {
-            events.emit({ type: 'narration', agent: agentRole, text: workingLine(elapsedMs), ts: Date.now(), id: 'working' });
-          });
+            events.emit({ type: 'narration', agent: agentRole, text: workingLine(elapsedMs), ts: Date.now(), id: WORKING_LINE_ID });
+          }, { originMs: events.startedAt });
           try {
             turn = turnTimeoutMs > 0
               ? await withTimeout(turnCall, turnTimeoutMs, `model turn ${steps}`)

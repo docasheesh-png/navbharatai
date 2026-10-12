@@ -15,7 +15,7 @@ import { isBuildStoppedError } from './stopSignal';
 import { toolCallDetail } from './toolCallTarget';
 import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
 import { isProjectSummaryNarration } from './ProjectSummary';
-import { isTransientStatusLine } from './workingHeartbeat';
+import { WORKING_LINE_ID } from '../../lib/liveStatusLine';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
 import { redactSecrets } from './SecretRedactor';
@@ -1927,9 +1927,17 @@ export class BuildDiagnostics {
          * tick. `lastActivity` above is still refreshed on every tick, so the still-running detector —
          * which is the one reader that genuinely wants the newest heartbeat — is unaffected.
          */
-        if (isTransientStatusLine(t)) {
+        //
+        // 🔴 …RECOGNISED BY ITS ID, AND FILED AS THE HEARTBEAT IT IS (autopsy 303e8a6f). This read the first
+        // character ('⏳'), which the build-budget steer and the hand-back notice also start with — so after one
+        // tick, "Half the build time is used" and "Not finished yet" never reached the report. And the kept tick
+        // was an AGENT_STEP, which the silence detector counts as activity: a 56 s stall read as 44 s, "right
+        // after: ⏳ Still working". Filed as HEARTBEAT, every timer-chatter reader already sets it aside.
+        if (e.id === WORKING_LINE_ID) {
           if (this.transientStatusRecorded) break;
           this.transientStatusRecorded = true;
+          this.record({ phase: 'build', severity: 'info', code: 'HEARTBEAT', message: t.slice(0, 200), autoResolved: true });
+          break;
         }
         // A problem the agent is talking about (sandbox unavailable, port/preview not responding,
         // errors remaining, retries) is flagged warning/error; everything else is recorded as a

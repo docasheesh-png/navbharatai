@@ -420,7 +420,7 @@ import { appKeepsUploadsInSmallStore } from '../AgentV3/browserFileStore';
 import { signInExploreEnabled, signInScript, signInCandidates, authLivesInTheBrowser, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { unknownNameNoteEnabled, unknownNamesInRequest, unknownNameBuilderNote, unknownNameReportNote } from '../AgentV3/unknownName';
-import { requestScopeNote } from '../AgentV3/requestScope';
+import { requestScopeVerdict, requestScopeReportLine, type RequestScopeReason } from '../AgentV3/requestScope';
 import { bootPythonBackendFirst, backendBootReport, isPythonServerCommand, PYTHON_BOOT_BUDGET_MS } from '../AgentV3/pythonBackendBoot';
 import { scriptRequestNoteEnabled, scriptDeliverableRequested, liveDataRequested, scriptRequestBuilderNote, scriptRequestStartLine, scriptRequestReportNote } from '../AgentV3/scriptRequest';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
@@ -16843,9 +16843,12 @@ async function noteBuildOutcome(
       const unknownNameNote = unknownNameBuilderNote(unknownNamesAsked);
       // A login nobody asked for is a wall in front of the app (autopsy 70e030bb, see requestScope.ts).
       let requestScopeText = '';
+      let requestScopeReason: RequestScopeReason | null = null;
       try {
-        requestScopeText = requestScopeNote({ request: planning.text, newBuild: intent === 'new_build' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain });
-      } catch { requestScopeText = ''; }
+        const scope = requestScopeVerdict({ request: planning.text, newBuild: intent === 'new_build' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain });
+        requestScopeText = scope?.note ?? '';
+        requestScopeReason = scope?.reason ?? null;
+      } catch { requestScopeText = ''; requestScopeReason = null; }
       // A script, a CLI, a Streamlit dashboard or a notebook is built as a web app, and the user hears that
       // BEFORE the build (Q-274, autopsy 241215d1 — a "self-contained Python script" became FastAPI + React
       // with a simulated feed, said nowhere). New builds only, like the two notes above — see scriptRequest.ts.
@@ -17080,7 +17083,8 @@ async function noteBuildOutcome(
       // in the ready message — see unsupportedStack.ts.
       if (requestScopeText) {
         buildPrompt = `${requestScopeText}\n\n---\n\n${buildPrompt}`;
-        buildDiag.record({ phase: 'plan', severity: 'info', code: 'REQUEST_SCOPE_NOTE', message: 'The request asks for no sign-in, so the builder was told to add no login or accounts and no control for a state the data does not have.', autoResolved: true });
+        // The decider's own reason, in its own words (autopsy 303e8a6f) — never a paraphrase written here.
+        buildDiag.record({ phase: 'plan', severity: 'info', code: 'REQUEST_SCOPE_NOTE', message: requestScopeReportLine(requestScopeReason ?? 'names-no-sign-in'), autoResolved: true });
       }
       if (unknownNameNote) {
         buildPrompt = `${unknownNameNote}\n\n---\n\n${buildPrompt}`;

@@ -3687,6 +3687,13 @@ the flag entries above promise.
   dependency and a React app is never "Stack: Vue", a password form is a sign-in journey run signed out
   (`isCredentialForm`), the sign-in explorer reads `passwordHash: hashPassword("demo123")`, and a pruned package takes
   its `@types/` with it. Test: `tests/theNotesAppAutopsy.test.ts`.
+  🔴 **CORRECTED 2026-10-12 (autopsy 303e8a6f).** Two parts of the paragraph above are no longer true. (1) It stands
+  down only for a domain whose implicit feature list ADDS access control (`domainAddsAccessControl`, read from the
+  list itself) — productivity, booking, trading and game add none, so "a todo app" or "a racing game" now gets the
+  note. (2) A sign-in word the request DECLINES ("no login needed", "without an account", "login ki zarurat nahi")
+  is no longer read as a request for sign-in; the note applies and the report says it was declined. The report line
+  is the decider's own (`requestScopeReportLine`), never a call-site paraphrase. Test:
+  `tests/aReportReasonIsTheDecidersReason.test.ts`.
 - **🙋 `AGENTV3_CONFIRM_BUILD` + 📎 `AGENTV3_ATTACHMENT_MEMORY` (admin 2026-10-03, Q-200 / Q-201). ⚠️ NEITHER is set;
   both default ON; `off` reverts each alone.** `buildConfirmation.ts`: see "READ THE MOOD FIRST" above — an unconfirmed
   build is answered and offered, and a "yes" builds the offered request. `lib/attachmentMemory.ts`: the latest

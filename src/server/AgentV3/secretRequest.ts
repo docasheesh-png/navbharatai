@@ -25,6 +25,8 @@
 //
 // PURE — no I/O, so every decision here is tested directly.
 
+import { APP_IMAGE_KEY_OPTIONS, APP_KEYS_PLACE } from '../lib/appImageKeyOptions';
+
 /** A single credential the app needs, as the builder describes it. */
 export interface SecretAsk {
   /** The exact env var the generated code reads — `STRIPE_SECRET_KEY`, not "your Stripe key". */
@@ -97,10 +99,16 @@ export function isAiModelKey(name: string): boolean {
 /** What the builder is told instead of showing the popup for an AI-model key. PURE. */
 export function keylessAiNote(names: readonly string[]): string {
   if (names.length === 0) return '';
-  return `Not asked: ${names.join(', ')}. An AI model needs NO key in this app — call run_recipe with name "generate_ai" `
+  return `Not asked: ${names.join(', ')}. An AI model needs NO key in this app for TEXT — call run_recipe with name "generate_ai" `
     + 'and input { "provider": "navbharat" } and use generateText()/chat() from src/lib/ai.ts. Do not add a server or '
-    + 'an SDK for the AI. In your final message, tell the user the assistant answers after they publish, and that '
-    + 'they can add their own provider key later in Settings → Secrets & API Keys if they want a specific provider.';
+    + 'an SDK for the AI. In your final message, tell the user the assistant already answers in the NavBharatAI preview '
+    + 'and for everyone once they publish, and that they can add their own provider key later in Keys & Secrets if they '
+    + 'want a specific provider. '
+    // Autopsy 303e8a6f: three of the five image-key options are OPENAI_/GEMINI_/XAI_ keys, so a picture app's
+    // builder that asked for one was told "an AI model needs NO key" and pointed at the text recipe.
+    + 'If the key was for AI-made PICTURES, that is different: pictures DO need an image API key. Use run_recipe '
+    + `"generate_image_ai", and in your final message tell the user to save ONE of ${APP_IMAGE_KEY_OPTIONS.map((o) => o.secret).join(', ')} `
+    + `in ${APP_KEYS_PLACE}. Never say the pictures need no key.`;
 }
 
 /** True when this name is one of NavBharatAI's own platform credentials. PURE. */

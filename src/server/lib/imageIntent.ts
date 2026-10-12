@@ -2,7 +2,8 @@ import { imagePriceSentence } from './imageAllowance';
 // NavBharatAI Free chat — image-generation intent detection (admin 2026-08-01).
 //
 // The admin wants: if a FREE-chat user's plain text asks to CREATE an image, NavBharatAI Free should just
-// generate one (free, via Pollinations) inline in the chat — no separate tool trip. This module is the
+// generate one inline in the chat — no separate tool trip. (It was "free, via Pollinations" until 2026-10-05;
+// pictures are now priced by imageAllowance — 5 free a day, then ₹1.) This module is the
 // PURE decision: does this message ask to GENERATE a picture, and if so, what is the image prompt?
 //
 // Precision matters — a false positive turns an ordinary question ("how do I add an image to my app?")

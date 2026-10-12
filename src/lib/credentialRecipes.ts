@@ -56,6 +56,8 @@
 //
 // PURE — no I/O, no LLM call, zero added cost to any build.
 
+import { IMAGE_KEY_NAMES, type AppImageProvider } from './imageKeyNames';
+
 /** One environment variable, annotated with where a human finds its value. */
 export interface RecipeVar {
   /**
@@ -157,6 +159,50 @@ export type KeylessRoute =
  * paymentSetup.ts, AuthSettings.tsx, StorageSettings.tsx) rather than newly invented ones — those have
  * been in front of real users, which is better evidence than a fresh guess.
  */
+/** Where a human gets each image key: the provider as they know it, and the clicks inside its console. */
+const IMAGE_KEY_CONSOLE: Record<AppImageProvider, { provider: string; linkLabel: string; path: string; cost: string; where: string }> = {
+  navbharatai: {
+    provider: 'NavBharatAI API', linkLabel: 'navbharatai.com',
+    path: 'Home → Other AI → Developer Tools → NavBharatAI API → Create key, with the "Images" permission ticked',
+    cost: 'No other account needed: 5 free pictures a day, then ₹1 each from your NavBharatAI wallet, within the daily limit you set on the key.',
+    where: 'Shown ONCE when created — copy it immediately (it starts with nbai_)',
+  },
+  openai: {
+    provider: 'OpenAI', linkLabel: 'platform.openai.com',
+    path: 'API keys → Create new secret key',
+    cost: 'Pay as you go — you must add credit before any picture is made.',
+    where: 'Shown ONCE when created — copy it immediately (it starts with sk-)',
+  },
+  gemini: {
+    provider: 'Google AI Studio', linkLabel: 'aistudio.google.com/apikey',
+    path: 'Create API key',
+    cost: 'Billed by Google to your Google account.',
+    where: 'Create API key → copy the value shown (it starts with AIza)',
+  },
+  xai: {
+    provider: 'xAI', linkLabel: 'console.x.ai',
+    path: 'API Keys → Create API Key',
+    cost: 'Billed by xAI to your xAI account.',
+    where: 'Shown ONCE when created — copy it immediately (it starts with xai-)',
+  },
+  pollinations: {
+    provider: 'Pollinations', linkLabel: 'enter.pollinations.ai',
+    path: 'Sign in → your SECRET key (sk_…), never the publishable pk_ one',
+    cost: 'Billed in Pollinations "pollen".',
+    where: 'The secret key starts with sk_ — a pk_ key is the publishable one and must not be used here',
+  },
+};
+
+/** One image-key option, its name and link taken from IMAGE_KEY_NAMES. PURE. */
+function imageKeyOption(provider: AppImageProvider): CredentialOption {
+  const k = IMAGE_KEY_NAMES.find((x) => x.provider === provider)!;
+  const c = IMAGE_KEY_CONSOLE[provider];
+  return {
+    provider: c.provider, link: k.consoleLink, linkLabel: c.linkLabel, path: c.path, cost: c.cost,
+    vars: [{ name: k.secret, where: c.where, serverOnly: true, valuePrefixes: [...k.valuePrefixes] }],
+  };
+}
+
 export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
     // A REAL login where the build shipped a demo one (fakeFeatureScan.ts, admin 2026-10-04). Supabase
@@ -380,6 +426,15 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         vars: [{ name: 'AI_API_KEY', where: 'Shown ONCE when created — copy it immediately (it starts with nbai_)', serverOnly: true }],
       },
     ],
+  },
+  {
+    // AI-made PICTURES in the user's app (autopsy 303e8a6f). Any ONE of these keys works; the names and links
+    // come from imageKeyNames.ts (the same list the server's owner message reads), so they cannot drift.
+    // There is honestly no keyless route: every image engine needs a key since #3528.
+    id: 'app_image_key',
+    keyless: null,
+    keylessKey: null,
+    options: IMAGE_KEY_NAMES.map((k) => imageKeyOption(k.provider)),
   },
   {
     id: 'storage',

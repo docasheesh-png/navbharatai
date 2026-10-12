@@ -49,10 +49,15 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   // at most) — exactly the shape the weak GLM/Kimi tier ships cleanly.
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
   // FIRST on the picker for everyone (admin 2026-10-01). The picture engine is the `generate_image_ai`
-  // recipe's own tested module, pre-seeded by the golden scaffold, and it needs no key.
+  // recipe's own tested module, pre-seeded by the golden scaffold. It makes pictures through NavBharatAI
+  // with the OWNER's image API key (src/server/lib/appImageKeyOptions.ts) — there is no keyless engine.
+  // 🔴 CORRECTED 2026-10-12 (autopsy 303e8a6f): until then this prompt still ended "use the free image
+  // engine that needs no API key", the opposite of the admin's 2026-10-04 ruling, and it was the first
+  // thing every user read. The old text stays matchable for phone bundles that still send it
+  // (RETIRED_CHIP_PROMPTS in goldenScaffolds/registry.ts), and the builder never reads it.
   {
     id: 'ai-image', label: 'AI image', icon: '🎨', category: 'Personal', tier: 'simple', featured: true, pinOrder: 1,
-    prompt: 'Build an AI image generator app: type a description, choose a shape (square, wide or portrait), press Generate and see a real AI-made picture with a clear progress state, then download it or generate another. Offer a few example ideas to tap, show friendly error messages with a Try again button, and use the free image engine that needs no API key. Mobile-first, light/dark mode.',
+    prompt: 'Build an AI image generator app: type a description, choose a shape (square, wide or portrait), press Generate and see a real AI-made picture with a clear progress state, then download it or generate another. Offer a few example ideas to tap, show friendly error messages with a Try again button. The pictures need an image API key, which I will add in NavBharatAI Pro → More → Keys & Secrets; until I do, the app tells me which keys work and where to add them. Mobile-first, light/dark mode.',
   },
   {
     id: 'todo', label: 'To-do', icon: '✅', category: 'Productivity', tier: 'simple', featured: true, pinOrder: 3,

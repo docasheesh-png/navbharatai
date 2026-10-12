@@ -95,7 +95,8 @@ export const AI_IN_APP_RULE =
  * false and was replaced.
  */
 export const GATEWAY_AI_RULE =
-  'AI INSIDE THE APP — NO KEY NEEDED: if the app itself needs an AI model AND it has no server of its ' +
+  'AI INSIDE THE APP — TEXT (a chat assistant, a summariser, a writer, a classifier) — NO KEY NEEDED: if the app ' +
+  'itself needs an AI model for TEXT AND it has no server of its ' +
   'own (a plain React/Vite or HTML app), do NOT write your own API calls and do NOT ask for an API key. ' +
   'Call run_recipe with name "generate_ai" and input { "provider": "navbharat" }: it writes src/lib/ai.ts, which answers ' +
   'through NavBharatAI with no key. Use generateText()/chat() from it, and show isAiReady() === false as ' +
@@ -110,7 +111,10 @@ export const GATEWAY_AI_RULE =
   'not a key to fetch: still use this keyless route, never add a server just to reach that provider, and ' +
   'never stop the build to ask for an AI key — say in your final message that they can add their own ' +
   'provider key later if they want one. ' +
-  'Only if the app already has, or genuinely needs, a server: follow the server rule below instead.';
+  'Only if the app already has, or genuinely needs, a server: follow the server rule below instead. ' +
+  // Autopsy 303e8a6f: this rule sat directly before the image rule and said "no key" about AI in general, so a
+  // picture app's builder read two "no key" signals against one "key required".
+  'AI-made PICTURES are NOT covered by this rule: they always need an image API key — follow the AI IMAGE rule.';
 
 /** The AI-in-app rule for THIS deployment. Gateway off ⇒ AI_IN_APP_RULE byte-for-byte. */
 export function aiInAppRule(env: NodeJS.ProcessEnv = process.env): string {

@@ -95,14 +95,5 @@ export function shouldRetryImageStatus(status: number): boolean {
   return status === 429 || status === 408 || (status >= 500 && status < 600);
 }
 
-/** The countdown line under a waiting picture. Branded; never names the provider. */
-export function imageWaitMessage(msLeft: number): string {
-  const s = Math.max(0, Math.ceil(msLeft / 1000));
-  return `NavBharatAI’s engine is busy — trying again (${s}s)`;
-}
-
-/**
- * The line under a picture while our server finishes it, after the browser's own try came to nothing
- * (admin 2026-09-30). Branded; never names the provider, and never says "failed" — nothing has.
- */
-export const IMAGE_SERVER_FALLBACK_NOTE = 'Trying another way to make your picture…';
+// The countdown line (`imageWaitMessage`) and the server-fallback line were removed with Free mode (#3547), whose
+// screen was their only reader; autopsy 303e8a6f found them still exported and still described to users.

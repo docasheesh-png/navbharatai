@@ -3012,10 +3012,15 @@ the flag entries above promise.
   user keys na de, to default pollination ai"*).** A recipe (`src/server/lib/ImageAiGenerator.ts`, reached
   through `run_recipe`) writes a modular engine into the USER's app: `ImageGenerationProvider` →
   `PollinationsProvider` / `ServerImageProvider` in `src/lib/imageAi.ts`, plus `useImageGenerator()` for React.
-  - **Default (`server` left out): the page calls Pollinations directly** (`image.pollinations.ai`, `safe=true`,
-    `private=true`). No key exists, so nothing can leak, and it works the same in the preview and after publish.
+  - 🔴 **CORRECTED 2026-10-04 (#3528, autopsy cc3ef776) — this default no longer exists.** The provider began
+    answering 401 to every keyless request, so EVERY image engine now needs an image API key; the page asks
+    NavBharatAI (`window.NavAI.image`) and the server draws with the owner's key. See the 2026-10-04 entry
+    below. The original text, kept as history: *"Default (`server` left out): the page calls Pollinations
+    directly (`image.pollinations.ai`, `safe=true`, `private=true`). No key exists, so nothing can leak, and it
+    works the same in the preview and after publish."*
   - **`server: true`: the page posts to the app's own `/api/generate-image`**, and `server/lib/imageAi.ts` picks
-    the engine on every request from the APP's env: no `IMAGE_API_KEY` ⇒ Pollinations; otherwise `IMAGE_PROVIDER`
+    the engine on every request from the APP's env: ~~no `IMAGE_API_KEY` ⇒ Pollinations~~ (🔴 CORRECTED 2026-10-04: no
+    key ⇒ an honest 503 "needs-key", never an anonymous call); otherwise `IMAGE_PROVIDER`
     = `pollinations` | `openai` (any OpenAI-compatible images API via `IMAGE_BASE_URL`) | `stability`, with
     `IMAGE_MODEL`, and `IMAGE_RATE_PER_MINUTE` (default 10 per visitor). The owner sets them in Settings → App
     Settings → Secrets & API Keys; the vault reaches the app's `.env` at boot (`devSecretsBoot.ts`), so a change
@@ -3030,7 +3035,8 @@ the flag entries above promise.
     policy). The generated code is compiled with the real TypeScript compiler under strict Vite settings and RUN
     against a fake network in `tests/anImageAppMakesRealPictures.test.ts`; the first real build is the first live
     evidence. ⚠️ A published STATIC app has no server, so the own-key path needs the app's server hosted
-    (NavBharat Cloud, which is admin-only today) — the Pollinations default needs nothing.
+    (NavBharat Cloud, which is admin-only today) — ~~the Pollinations default needs nothing~~ (🔴 CORRECTED
+    2026-10-04: there is no keyless default; see above).
 - **`AGENTV3_GREEN_REVIEW_LEAN`** (default ON, set `off` to disable — added 2026-09-18, autopsy b6f88a72) —
   **a suggestion costs a suggestion's price.** `reviewerShouldWrite` (Green Stop) already makes the
   post-build reviewer suggest-only on a proven-green app — no repair, nothing it says can fail the

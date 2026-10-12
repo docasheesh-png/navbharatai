@@ -86,9 +86,10 @@ export const NO_FAKE_FEATURE_RULE =
   'A real OTP or email is sent by a provider — never generated or shown by the page. When the key is missing: ask for it with ' +
   'request_secrets if you have that tool, and until it is saved render a clearly visible RED line in the user\'s own language on ' +
   'that screen — "<Feature> is a demo, not real. Add <KEY NAMES> in NavBharatAI → ⋮ More → Keys & Secrets to make it real." — ' +
-  'and say the same in your final message. Never present a demo as working. AI inside a browser app is the one ' +
+  'and say the same in your final message. Never present a demo as working. AI TEXT inside a browser app is the one ' +
   'exception to "its keys": it goes through NavBharatAI\'s keyless route (src/lib/ai.ts) — never an API key ' +
-  'read, stored or typed in browser code, and never a direct call to an AI provider from the page.';
+  'read, stored or typed in browser code, and never a direct call to an AI provider from the page. AI-made PICTURES ' +
+  'are not that exception: they need the owner\'s image API key, through window.NavAI.image (the generate_image_ai recipe).';
 
 /**
  * NEVER FAKE A FEATURE'S RESULT (autopsy 33812996, 2026-09-30). Asked for a Circle to Search app with

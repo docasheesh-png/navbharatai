@@ -117,6 +117,12 @@ export function browserAiKeyReportLine(findings: readonly BrowserAiKeyFinding[])
   if (!findings.length) return '';
   const where = findings.map((f) => `${f.file}:${f.line} (${f.shape})`).join(', ');
   const pictures = findings.some((f) => f.shape === 'image-host' || PICTURE_CALL_RE.test(f.snippet));
+  // Only a picture service called from the page: say THAT, not "a key the page must hold" — called keyless it
+  // holds no key, and it refuses every picture (adversarial review of 303e8a6f).
+  if (findings.every((f) => f.shape === 'image-host')) {
+    return `Browser code calls an AI picture service directly — ${where}. Without a key it refuses every picture; with one, `
+      + `the key would be readable by every visitor. ${PICTURE_FIX}`;
+  }
   return `Browser code calls an AI provider with a key the page must hold — ${where}. The key would be readable by every visitor `
     + `(and an AI picture service called without one refuses every picture). ${pictures ? PICTURE_FIX : FIX}`;
 }

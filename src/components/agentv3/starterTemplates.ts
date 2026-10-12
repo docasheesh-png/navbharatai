@@ -54,10 +54,13 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   // 🔴 CORRECTED 2026-10-12 (autopsy 303e8a6f): until then this prompt still ended "use the free image
   // engine that needs no API key", the opposite of the admin's 2026-10-04 ruling, and it was the first
   // thing every user read. The old text stays matchable for phone bundles that still send it
-  // (RETIRED_CHIP_PROMPTS in goldenScaffolds/registry.ts), and the builder never reads it.
+  // (RETIRED_CHIP_PROMPTS in goldenScaffolds/registry.ts) and is replaced by today's wording where the request
+  // enters the build, so no builder, reviewer or repair reads it. Kept under 400 characters and free of the word
+  // "add", so the planning and feature-probe verdicts match the text it replaces.
+  // ⚠️ An old phone bundle still SHOWS the old words in its own picker until a new store build ships.
   {
     id: 'ai-image', label: 'AI image', icon: '🎨', category: 'Personal', tier: 'simple', featured: true, pinOrder: 1,
-    prompt: 'Build an AI image generator app: type a description, choose a shape (square, wide or portrait), press Generate and see a real AI-made picture with a clear progress state, then download it or generate another. Offer a few example ideas to tap, show friendly error messages with a Try again button. The pictures need an image API key, which I will add in NavBharatAI Pro → More → Keys & Secrets; until I do, the app tells me which keys work and where to add them. Mobile-first, light/dark mode.',
+    prompt: 'Build an AI image generator app: type a description, choose a shape (square, wide or portrait), press Generate and see a real AI-made picture with a clear progress state, then download it or generate another. Offer a few example ideas to tap, show friendly error messages with a Try again button. The pictures need an image API key I will save in Keys & Secrets. Mobile-first, light/dark mode.',
   },
   {
     id: 'todo', label: 'To-do', icon: '✅', category: 'Productivity', tier: 'simple', featured: true, pinOrder: 3,

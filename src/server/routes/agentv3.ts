@@ -10197,7 +10197,11 @@ async function noteBuildOutcome(
     // "yes" to our offer to build (Q-200): then it becomes the request that was offered, and the typed
     // "yes" is what the chat history keeps.
     const typedPrompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
-    let prompt = typedPrompt;
+    // A starter chip's RETIRED wording (still sent by phone bundles built before the correction) becomes today's
+    // wording HERE, once, so every builder, reviewer and repair reads the same request — not only the first turn
+    // (adversarial review of 303e8a6f: the judge and the repair lanes still read "needs no API key"). The chat
+    // history keeps what was typed (`typedPrompt`).
+    let prompt = chipPromptForBuild(typedPrompt);
     if (!prompt) {
       res.status(400).json({ error: 'A non-empty "prompt" is required.' });
       return;
@@ -17097,7 +17101,7 @@ async function noteBuildOutcome(
 
       // A corrected starter chip's OLD text (an old phone bundle still sends it) reaches the builder as the
       // chip's current text — autopsy 303e8a6f: the old AI-image chip told the builder the pictures need no key.
-      let buildPrompt = chipPromptForBuild(prompt);
+      let buildPrompt = prompt;
       // Cache-prefix mode (see above): the volatile context blocks that were split out of the system
       // prompt ride the user turn instead, so the model still receives every one — just not in the
       // cached system prefix. '' (flag off) leaves buildPrompt exactly as today.

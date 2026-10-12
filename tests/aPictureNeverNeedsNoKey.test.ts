@@ -38,7 +38,12 @@ function strings(value: unknown, where: string, out: Array<[string, string]> = [
 }
 
 const PICTURE = /\b(?:images?|pictures?|photos?|logos?|wallpapers?|avatars?|text-to-image)\b|pollinations/i;
-const KEYLESS = /\bneeds? no (?:api )?key\b|\bno (?:api )?key (?:is )?(?:needed|required)\b|\bwithout (?:an? )?(?:api )?key\b|\bkeyless\b|\bfree image engine\b|\bno signup\b/i;
+// The claim itself, in every wording the review of 303e8a6f tried: "needs no key", "does not / doesn't need an API
+// key", "don't need a key", "no key required", "keys are not needed", "without a key", "keyless", "free image engine".
+const KEYLESS_SOURCE = String.raw`\bneeds? no (?:api )?key\b|\b(?:does|do) ?(?:n't|not) (?:need|require) (?:an? |any )?(?:api )?keys?\b|\bno (?:api )?key (?:is )?(?:needed|required)\b|\bkeys? (?:is|are) not (?:needed|required)\b|\bwithout (?:an? )?(?:api )?key\b|\bkeyless\b|\bfree image engine\b|\bno signup\b`;
+const KEYLESS = new RegExp(KEYLESS_SOURCE, 'i');
+// A clause that NEGATES the claim ("Never say…", "there is no keyless mode", "no longer"). Read with the claim's own
+// words taken out, so the "not" inside "does not need a key" can never excuse it (clause-aware negation).
 const NEGATED = /\b(?:never|no longer|not|isn't|is not|there is no|removed|corrected|superseded|instead of|until)\b/i;
 
 /** Pollinations named as the page's engine or the default — the keyless default #3528 removed. */
@@ -47,7 +52,7 @@ const PAGE_ENGINE = /\bpollinations\b[^\n]*\b(?:from the page|in the page|by def
 /** The clauses that claim pictures need no key. A clause is cut at . ; : and line ends. */
 function keylessPictureClaims(text: string): string[] {
   return text.split(/[.;:\n]+/)
-    .filter((c) => ((PICTURE.test(c) && KEYLESS.test(c)) || PAGE_ENGINE.test(c)) && !NEGATED.test(c))
+    .filter((c) => ((PICTURE.test(c) && KEYLESS.test(c)) || PAGE_ENGINE.test(c)) && !NEGATED.test(c.replace(new RegExp(KEYLESS_SOURCE, 'gi'), ' ')))
     .map((c) => c.trim());
 }
 
@@ -68,7 +73,9 @@ function corpus(): Array<[string, string]> {
     for (const [path, content] of Object.entries(goldenScaffoldFiles(g))) out.push([`scaffold ${g.id} ${path}`, content]);
   }
   for (const server of [false, true]) out.push([`image recipe server=${server}`, generateImageAiIntegration({ server, react: true }).instructions]);
-  APP_KNOWLEDGE_BASE.forEach((f) => strings({ name: f.name, path: f.path, description: f.description, howToUse: f.howToUse }, `KB ${f.id}`, out));
+  // The platform's OWN Image Generator (ai_image_gen) is a different fact — NavBharatAI charges the wallet and the
+  // user needs no key there — so it is left out rather than letting this census forbid true sentences about it.
+  APP_KNOWLEDGE_BASE.filter((f) => f.id !== 'ai_image_gen').forEach((f) => strings({ name: f.name, path: f.path, description: f.description, howToUse: f.howToUse }, `KB ${f.id}`, out));
   strings(CREDENTIAL_RECIPES, 'credentialRecipes', out);
   return out;
 }
@@ -86,6 +93,14 @@ describe('1 · nothing a builder or a user reads says AI pictures need no key', 
     expect(claims[0]).toContain('use the free image engine that needs no API key');
     // The ToolCatalog sentence #3528 left one line below the one it fixed.
     expect(keylessPictureClaims('Leave out (false) for an app with no server — Pollinations AI from the page.')).toHaveLength(1);
+    // …and every paraphrase of the same bug (the review's reversion set), not only the original words.
+    for (const paraphrase of [
+      'Use the free image engine, which does not need an API key.',
+      'The pictures don\'t need a key.',
+      'No key required for the images.',
+      'The images are made without an API key.',
+      'For the AI pictures, keys are not needed.',
+    ]) expect(keylessPictureClaims(paraphrase), paraphrase).toHaveLength(1);
     // A sentence that SAYS the opposite is not a claim.
     expect(keylessPictureClaims('Never say the pictures are free or that no key is needed')).toEqual([]);
     expect(keylessPictureClaims('there is no keyless image engine any more')).toEqual([]);
@@ -134,7 +149,11 @@ describe('2 · the chip the report started from', () => {
       }
     }
     expect(chipPromptForBuild('Build me a cricket score app')).toBe('Build me a cricket score app');
-    expect(read('src/server/routes/agentv3.ts')).toContain('let buildPrompt = chipPromptForBuild(prompt);');
+    // Once, where the request enters the build — so the reviewers and repairs read today's words too; the chat
+    // history keeps what was typed.
+    const route = read('src/server/routes/agentv3.ts');
+    expect(route).toContain('let prompt = chipPromptForBuild(typedPrompt);');
+    expect(route).toContain("{ role: 'user', content: typedPrompt, ts: buildStartedAt }");
   });
 
   it('🔒 the template lane carries the recipe\'s key guidance — the builder hears which keys and where', () => {
@@ -200,6 +219,18 @@ describe('4 · a page that calls a picture service is caught, and told the pictu
     expect(note).toContain('generate_image_ai');
     expect(note).toContain('Pictures always need an image API key');
     expect(note).not.toContain('no key anywhere');
+    // The report line says what it is — a picture service called from the page — not "a key the page must hold".
+    const line = browserAiKeyReportLine(findBrowserAiKeyUse({ 'src/lib/img.ts': page }));
+    expect(line).toMatch(/^Browser code calls an AI picture service directly/);
+    expect(line).not.toContain('a key the page must hold');
+  });
+
+  it('🔒 the one-tap suggestion for a key in the page sends pictures to the picture route', async () => {
+    const { buildFindingSuggestions } = await import('../src/server/AgentV3/buildFindingSuggestions');
+    const s = buildFindingSuggestions([{ code: 'AI_KEY_IN_BROWSER', severity: 'warning', autoResolved: false, message: 'x' }]);
+    const prompt = s.find((x) => x.title === 'Take the AI key out of your app')?.prompt ?? '';
+    expect(prompt).toContain('generate_image_ai');
+    expect(prompt).toContain('pictures are never keyless');
   });
 
   it('an images endpoint on a provider host gets the picture fix, a chat endpoint keeps the text fix', () => {

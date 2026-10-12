@@ -257,7 +257,7 @@ import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
-import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, removablePaths, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage, chooseRestoreBase, greenRestoreTurnStartEnabled, attemptIsHonoured } from '../AgentV3/GreenGuard';
+import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardRestoredRecord, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, removablePaths, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage, chooseRestoreBase, greenRestoreTurnStartEnabled, attemptIsHonoured } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -25583,7 +25583,7 @@ async function noteBuildOutcome(
                 events.emit({ type: 'narration', agent: 'architect', text: greenGuardMessage(plan, chosen.kind), ts: Date.now() });
                 buildDiag.record({
                   phase: 'build', severity: 'warning', code: 'GREEN_GUARD_RESTORED',
-                  message: `Restored the last verified-working version: ${Object.keys(plan.write).length} file(s) put back, ${plan.remove.length} added by the failed attempt removed, ${plan.unchanged} already correct. The attempt itself is kept and was not discarded.`,
+                  ...greenGuardRestoredRecord(plan, chosen.kind), // a turn-start base is never called "verified" (Q-973)
                   autoResolved: true,
                 });
                 // …AND THE USER MUST BE TOLD, IN THE SUMMARY THEY ACTUALLY READ (admin 2026-08-25).
@@ -25595,6 +25595,7 @@ async function noteBuildOutcome(
                   restored: Object.keys(plan.write).length,
                   removed: plan.remove.length,
                   fromThisBuild: chosen.kind === 'green-snapshot' && fromThisBuild,
+                  unchecked: chosen.kind === 'turn-start',
                 };
                 }
               } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {

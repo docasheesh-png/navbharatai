@@ -94444,7 +94444,8 @@ Q-955; a chat clock that read 11 s at 23 s, Q-949).
 | Q-959 | A repair creating a missing module dropped | Scope read only the importer | TS2307 / Vite target in scope | same |
 | Q-960 | Two drifted "file absent?" predicates | Copies | One `isNotFoundError` | same (table) |
 | Q-961 | Drain could overwrite a stored app after a failed refill | The Q-740 class | `mayPersistSeededScaffold` | same |
-| Q-962…Q-974 | 13 items needing the admin (routing, product, money, metric, store bundle, logs) | — | 🟡 rows with options and a recommendation in `BUILD_REPORT_QUEUE.md` | — |
+| Q-973 | A restore to the turn-start files called "the last version that ran correctly" | That base is chosen exactly when it differs from the last browser-checked snapshot — never seen running | Every producer (narration, summary, admin row) names it "not re-checked"; the scorecard counts it as its own state | `aRestoreClaimsOnlyWhatWasChecked` (6 failed) |
+| Q-962…Q-974 (not Q-973) | 12 items needing the admin (routing, product, money, metric, store bundle, logs) | — | 🟡 rows with options and a recommendation in `BUILD_REPORT_QUEUE.md` | — |
 
 **Caught by the final gate (before push):** four source guards pinned the literal text `await f(x)` and failed on correct
 code once setup calls were wrapped in timing steps (Q-955), and one in a fixed 1800-character window. Class: a guard that tests
@@ -94458,14 +94459,16 @@ improvement.
 
 **Proactive (the biggest lever):** Q-963 — a verbatim starter chip should need no model loop at all (seed → install →
 typecheck → dev server → render proof → done). Three reports now show users stopping an app that was already finished.
+Next after it: re-check a turn-start restore in the browser before the build ends, so that state can say "working" again
+(Q-973 made it honest; this would make it verified).
 
 **What to watch for on the next report:** a silent first rung reads "was silent", the first-call line splits answering and
 abandoned time, the setup coverage clause accounts for every second before the first call, and peak memory shows a number.
 
 ```
 BUILD REPORT 303e8a6f — RESOLUTION
-Items: 35 · ✅ Resolved: 0 (22 fixed in the open PR, ✅ on merge) · 🟡 Blocked: 13 · Remaining: 22
-FINAL: ❌ NOT COMPLETE — remaining: Q-940 … Q-961 (fixed, awaiting the admin's merge)
+Items: 35 · ✅ Resolved: 0 (23 fixed in #3692, ✅ on merge) · 🟡 Blocked: 12 · Remaining: 23
+FINAL: ❌ NOT COMPLETE — remaining: Q-940 … Q-961 and Q-973 (fixed in #3692, awaiting the admin's merge)
 ```
 ### 2026-10-12 — db07e0af rows closed (#3687 merged)
 

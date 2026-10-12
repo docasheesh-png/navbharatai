@@ -20,7 +20,8 @@ import {
   type ProbeOutcome, type SpecItem, type AppSpec,
 } from './appSpec';
 import {
-  foldBuildFindings, queueableFindings, workableIssues, markAssigned, renderIssuesForBuilder,
+  foldBuildFindings, queueableFindings, workableIssues, markAssigned, renderIssuesForBuilder, retireOpenIssues,
+  type QueuedIssue,
 } from './issueQueue';
 import { appendChange, chgId, describeChange, type ChangeRecord, type ChangeStatus, type EngineeringMemory } from './changeLog';
 import { loadEngineeringMemory, updateEngineeringMemory } from './engineeringMemoryStore';
@@ -215,7 +216,9 @@ export function foldSettle(mem: EngineeringMemory, session: ChangeSession, input
     builtNow = m.built;
   }
 
-  let queue = markAssigned(mem.queue, session.assignedIssueIds, changeId);
+  // A NEW app retires the previous app's open issues, as it retires its requirements above (autopsy 303e8a6f).
+  const retire = session.isEdit ? { queue: mem.queue, retired: [] as QueuedIssue[] } : retireOpenIssues(mem.queue);
+  let queue = markAssigned(retire.queue, session.assignedIssueIds, changeId);
   const findings = [...queueableFindings(input.issues), ...securityFindings(input.security)]
     .map((f) => ({ ...f, message: redactProvidersText(redactSecrets(f.message)) }));
   // Checks ran only when the build reached its release gate without being stopped. A stopped or failed
@@ -244,8 +247,9 @@ export function foldSettle(mem: EngineeringMemory, session: ChangeSession, input
   };
   const next: EngineeringMemory = { ...appendChange({ ...mem, spec, queue }, record, changeId), nextChg: mem.nextChg + 1 };
   const reportLines = [describeChange(record)];
-  if (qFold.opened.length || qFold.fixed.length || qFold.verified.length || qFold.reopened.length) {
-    reportLines.push(`Issue queue: ${qFold.opened.length} opened, ${qFold.reopened.length} reopened, ${qFold.fixed.length} fixed, ${qFold.verified.length} verified · ${queue.issues.filter((i) => i.status !== 'verified').length} open`);
+  if (qFold.opened.length || qFold.fixed.length || qFold.verified.length || qFold.reopened.length || qFold.triaged.length || retire.retired.length) {
+    reportLines.push(`Issue queue: ${qFold.opened.length} opened, ${qFold.reopened.length} reopened, ${qFold.triaged.length} confirmed (now shown to the user and handed to edits), `
+      + `${qFold.fixed.length} fixed, ${qFold.verified.length} verified${retire.retired.length ? `, ${retire.retired.length} retired with the previous app` : ''} · ${queue.issues.filter((i) => i.status !== 'verified').length} open`);
   }
   return { mem: next, result: { record, regressed: probeFold.regressed, reportLines } };
 }

@@ -89,11 +89,18 @@ describe('emitted DOM shell — what the visitor sees', () => {
   });
 
   it('🔒 Reject all stands beside Accept all, and only Necessary is pre-checked (disabled, always on)', () => {
-    expect(s).toContain('data-act="reject-all"');
-    expect(s).toContain('data-act="accept-all"');
-    expect(s).toContain('<input type="checkbox" checked disabled id="nbc-necessary">');
+    // Built as DOM nodes since autopsy 303e8a6f (no HTML string), so the attributes are read from the builder calls.
+    expect(s).toContain("'data-act': 'reject-all'");
+    expect(s).toContain("'data-act': 'accept-all'");
+    expect(s).toContain("el('input', { type: 'checkbox', checked: true, disabled: true, id: 'nbc-necessary' })");
     // Purpose boxes reflect the saved choice only — never ticked on a fresh visit.
-    expect(s).toContain("(on ? ' checked' : '')");
+    expect(s).toContain("var on = granted.indexOf(p) !== -1;");
+    expect(s).toContain("el('input', { type: 'checkbox', 'data-purpose': p, id: 'nbc-' + p, checked: on })");
+  });
+
+  it('🔒 no HTML string anywhere — every visible word is set as text, so no value can become markup', () => {
+    expect(s).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+    expect(s).toContain('document.createTextNode(');
   });
 
   it('🔒 withdrawal as easy as consent: data-consent-open reopens, and a fallback control exists when the app has none', () => {

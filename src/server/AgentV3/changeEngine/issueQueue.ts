@@ -142,6 +142,11 @@ export interface QueueFold {
   queue: IssueQueue;
   opened: QueuedIssue[];
   reopened: QueuedIssue[];
+  /**
+   * Seen again, so promoted from DETECTED to TRIAGED — the moment an issue starts being shown to the user and
+   * handed to edits (autopsy 303e8a6f: that promotion happened with no report line at all).
+   */
+  triaged: QueuedIssue[];
   fixed: QueuedIssue[];
   verified: QueuedIssue[];
 }
@@ -152,6 +157,7 @@ export function foldBuildFindings(queue: IssueQueue, input: QueueFoldInput): Que
   let nextIss = queue.nextIss;
   const opened: QueuedIssue[] = [];
   const reopened: QueuedIssue[] = [];
+  const triaged: QueuedIssue[] = [];
   const fixed: QueuedIssue[] = [];
   const verified: QueuedIssue[] = [];
   const seenKeys = new Set<string>();
@@ -171,7 +177,7 @@ export function foldBuildFindings(queue: IssueQueue, input: QueueFoldInput): Que
       if (!existing.changes.includes(input.changeId)) existing.changes = [...existing.changes, input.changeId].slice(-5);
       // A recurrence is the evidence that makes it real; an assigned issue stays assigned (still owed).
       if (wasClosed) { existing.status = 'triaged'; reopened.push(existing); }
-      else if (existing.status === 'detected') existing.status = 'triaged';
+      else if (existing.status === 'detected') { existing.status = 'triaged'; triaged.push(existing); }
       continue;
     }
     const it: QueuedIssue = {
@@ -199,7 +205,19 @@ export function foldBuildFindings(queue: IssueQueue, input: QueueFoldInput): Que
   const open = kept.filter((i) => i.status !== 'verified');
   const closed = kept.filter((i) => i.status === 'verified').sort((a, b) => b.lastSeen - a.lastSeen).slice(0, MAX_CLOSED_ISSUES);
   const openSorted = open.sort((a, b) => sevRank(b) - sevRank(a) || b.seenCount - a.seenCount || b.lastSeen - a.lastSeen).slice(0, MAX_OPEN_ISSUES);
-  return { queue: { issues: [...openSorted, ...closed], nextIss }, opened, reopened, fixed, verified };
+  return { queue: { issues: [...openSorted, ...closed], nextIss }, opened, reopened, triaged, fixed, verified };
+}
+
+/**
+ * A NEW app replaces the old one, so the old app's OPEN issues go with it (autopsy 303e8a6f). The requirement
+ * ledger already retired the old app's items on a new build; the issue queue did not, so an issue about a file
+ * of an app that no longer exists stayed open — shown to the user and handed to every edit of the new app — and
+ * no check could ever clear it. Closed records stay for history; anything the new app still has is found again by
+ * its own checks. Pure.
+ */
+export function retireOpenIssues(queue: IssueQueue): { queue: IssueQueue; retired: QueuedIssue[] } {
+  const retired = queue.issues.filter((i) => OPEN.has(i.status));
+  return { queue: { nextIss: queue.nextIss, issues: queue.issues.filter((i) => !OPEN.has(i.status)) }, retired };
 }
 
 function sevRank(i: QueuedIssue): number {

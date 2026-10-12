@@ -35,7 +35,7 @@ interface Rule {
    * expression up to its balancing `)`. A same-line guard on a multi-line construct is the class that
    * has now produced false findings in three analyzers (8a92e5ed, c847b523, and this rule).
    */
-  contextual?: 'tag' | 'call' | 'following' | 'around';
+  contextual?: 'tag' | 'element' | 'call' | 'following' | 'around';
   /** A hardcoded-CREDENTIAL-VALUE rule (a secret string baked into data), as opposed to a code
    *  vulnerability. In an obvious mock/fixture/demo file these are almost always DEMO fixtures, not a
    *  real leak — so they are downgraded to 'low' there (still reported, never a build-failing 'high').
@@ -122,6 +122,18 @@ export function isPlaceholderValue(value: string | undefined | null): boolean {
   return TEMPLATE_FIELD_VALUE.has(v.toLowerCase().replace(/[<>{}$]/g, ''));
 }
 
+/**
+ * Is this value the NAME of an environment variable rather than a credential (autopsy 303e8a6f)? A table of
+ * which secret a feature reads — `{ secret: 'OPENAI_API_KEY' }`, `envVar: 'STRIPE_SECRET_KEY'` — puts a name where
+ * the hardcoded-secret rule expects a value, and our own image-key table was a "high" finding for it. A name is
+ * SCREAMING_SNAKE_CASE ending in what names hold (KEY, SECRET, TOKEN, ID, URL…); a real credential is random and
+ * never looks like that. Deliberately narrow: `'ADMIN_PASSWORD'` as a value could be a real (weak) password and is
+ * still reported. PURE.
+ */
+export function isEnvVarNameValue(value: string | undefined | null): boolean {
+  return /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_(?:API_KEY|KEY|KEYS|SECRET|SECRET_KEY|TOKEN|ID|URL|URI|DSN|SID|PAT)$/.test(String(value ?? '').trim());
+}
+
 // A security-sensitive context: the value being built is a secret/identity token, not a
 // throwaway. Used to keep the "weak randomness / weak hash" rules high-precision — they
 // fire ONLY when one of these words is on the same line, so an ordinary Math.random()
@@ -157,7 +169,7 @@ const RULES: Rule[] = [
     re: /\b(api[_-]?key|secret|password|passwd|access[_-]?token|auth[_-]?token|client[_-]?secret)\b\s*[:=]\s*['"`]([^'"`\s]{8,})['"`]/i,
     message: 'Hardcoded credential — load it from an environment variable instead.',
     contextual: 'around',
-    ignore: (m, _line, around) => isPlaceholderValue(m[2] ?? m[0]) || isFirebaseWebConfigKey(around),
+    ignore: (m, _line, around) => isPlaceholderValue(m[2] ?? m[0]) || isEnvVarNameValue(m[2]) || isFirebaseWebConfigKey(around),
     demoDowngrade: true,
   },
   {
@@ -614,9 +626,13 @@ const RULES: Rule[] = [
     re: /target\s*=\s*['"]_blank['"]/i,
     message: 'target="_blank" without rel="noopener" — the opened page can hijack this tab (reverse tabnabbing); add rel="noopener noreferrer".',
     // The whole TAG, across lines — a same-line read reported two correctly-guarded links as a medium
-    // security issue on two consecutive builds (autopsy Study-Racer, 2026-09-25).
-    contextual: 'tag',
-    ignore: (_m, line, tag) => /noopener/i.test(tag ?? line),
+    // security issue on two consecutive builds (autopsy Study-Racer, 2026-09-25). And the whole ELEMENT when
+    // there is no tag (autopsy 303e8a6f, 2026-10-12): `link.rel = 'noopener noreferrer';` on the line before
+    // `link.target = '_blank';` — our own image recipe — was a medium finding on correct code, stored in the
+    // user's issue queue where no evidence could ever clear it. `noreferrer` counts too: the HTML Standard
+    // makes it imply noopener (our own portfolio template uses it alone).
+    contextual: 'element',
+    ignore: (_m, line, guard) => /\bno(?:opener|referrer)\b/i.test(guard ?? line),
   },
   {
     rule: 'window-open-no-opener',
@@ -629,7 +645,7 @@ const RULES: Rule[] = [
     message: "window.open() without 'noopener' lets the opened page control this tab via window.opener (reverse tabnabbing) — pass 'noopener' in the features argument (or set the returned handle's opener to null).",
     // The whole CALL, across lines — the sibling of the tag rule above, hunted in the same change.
     contextual: 'call',
-    ignore: (_m, line, call) => /noopener/i.test(call ?? line) || /\.opener\s*=\s*null/.test(line),
+    ignore: (_m, line, call) => /\bno(?:opener|referrer)\b/i.test(call ?? line) || /\.opener\s*=\s*null/.test(line),
   },
   {
     rule: 'document-domain-write',
@@ -723,6 +739,23 @@ export function callSpanAt(source: string, offset: number): string | null {
   return null;
 }
 
+/**
+ * The `rel` written for the SAME element as a `x.target = '_blank'` assignment, when the link is built in code
+ * rather than markup (autopsy 303e8a6f). Returns the rel statement(s) found within 600 characters of the
+ * assignment for that identifier — `x.rel = '…'`, `x.setAttribute('rel', '…')`, `x.relList.add(…)` — '' when the
+ * element has none (so the finding stands), or null when the line is not that shape (the line then decides).
+ * A rel set on a DIFFERENT element never counts. PURE.
+ */
+export function elementRelGuard(content: string, line: string, lineOffset: number): string | null {
+  const assign = /([\w$]+(?:\.[\w$]+)*)\.target\s*=\s*['"]_blank['"]/.exec(line);
+  if (!assign) return null;
+  const id = assign[1].replace(/[$.]/g, (c) => `\\${c}`);
+  const at = lineOffset + assign.index;
+  const nearby = content.slice(Math.max(0, at - 600), at + 600);
+  const guards = nearby.match(new RegExp(`(?:^|[^\\w$.])${id}\\.(?:rel\\s*=\\s*['"\`][^'"\`]*['"\`]|setAttribute\\(\\s*['"]rel['"]\\s*,\\s*['"\`][^'"\`]*['"\`]|relList\\.add\\([^)]*\\))`, 'g'));
+  return guards ? guards.join(' ') : '';
+}
+
 /** Scan one file's content for security findings. Returns [] for non-issues. */
 export function scanSecurity(file: string, content: string): SecurityFinding[] {
   const findings: SecurityFinding[] = [];
@@ -746,6 +779,8 @@ export function scanSecurity(file: string, content: string): SecurityFinding[] {
       if (!m) continue;
       const context = r.contextual === 'tag'
         ? enclosingTag(content, lineStart[i] + m.index) ?? undefined
+        : r.contextual === 'element'
+          ? enclosingTag(content, lineStart[i] + m.index) ?? elementRelGuard(content, line, lineStart[i]) ?? undefined
         : r.contextual === 'call'
           ? callSpanAt(content, lineStart[i] + m.index) ?? undefined
           : r.contextual === 'following'

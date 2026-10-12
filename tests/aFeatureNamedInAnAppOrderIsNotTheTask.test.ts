@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { analyzeRequest, aDebugWordNamesAFeature } from '../src/server/AgentV3/RequestAnalyser';
 import { describesWorkAlreadyStarted, withoutControlLabels } from '../src/server/AgentV3/IntentClassifier';
 import { inferPhase } from '../src/server/AgentV3/DialogueStateManager';
-import { withoutErrorFeaturePhrases } from '../src/server/lib/errorFeaturePhrase';
+import { withoutErrorFeaturePhrases } from '../src/server/lib/describedFeatures';
 import { platformFixRequestPrompt } from '../src/lib/platformFixRequest';
 import { STARTER_TEMPLATES } from '../src/components/agentv3/starterTemplates';
 import { RETIRED_CHIP_PROMPTS } from '../src/server/AgentV3/goldenScaffolds/registry';

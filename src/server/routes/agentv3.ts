@@ -26138,7 +26138,10 @@ async function noteBuildOutcome(
           const settled = await withTimeout(settleChange(changeSession, {
             ok: result.ok === true,
             stopped: abort.signal.aborted || buildWasStopped(settleIssues),
-            files: [...writtenFiles.keys()],
+            // What THIS build changed — never our untouched template or our own finishing writes (autopsy
+            // 303e8a6f: a stopped starter chip was recorded as "14 file(s)", every one of them the template).
+            // The bill (2b0a3ed5) and the review (8257ca59) already read the same helper.
+            files: reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden),
             gate: changeGateState,
             issues: settleIssues,
             security: (() => { try { return getWorkspaceMemory(workspaceId).appSecurityFindings(); } catch { return []; } })(),
@@ -26461,7 +26464,7 @@ async function noteBuildOutcome(
       try {
         const nowIso = new Date().toISOString();
         decisionTrace.record('model', `${measuredTier} (${dominantProvider(providerTurns) ?? model})`, onlyOpus ? `pinned tier '${powerLevelReqEffective}' selected` : `analyzer chose ${analysis?.startTier ?? 'default'} start tier`, nowIso);
-        decisionTrace.record('outcome', result.ok ? 'success' : 'incomplete', `${writtenFiles.size} file(s) written in ${Math.max(0, Date.now() - buildStartedAt)}ms`, nowIso);
+        decisionTrace.record('outcome', result.ok ? 'success' : 'incomplete', `${reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden).length} file(s) written in ${Math.max(0, Date.now() - buildStartedAt)}ms`, nowIso);
         await persistDecisionTrace(decisionTrace, nowIso);
         // Surface the trace in chat when provider-debug is on (same gate as the trace-id tag), so the
         // admin can SEE why each choice was made. Normal users see nothing — explainability without noise.

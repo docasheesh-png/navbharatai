@@ -22,7 +22,7 @@ import { userAskedForAnAppToBeBuilt, describesWorkAlreadyStarted, type BuildInte
 import { withoutMachineText } from '../lib/machineText';
 import { requestSubject } from '../lib/appScopeAnalyzer';
 import { isPlatformFixRequest, looksLikeMachineError } from '../../lib/platformFixRequest';
-import { withoutErrorFeaturePhrases } from '../lib/errorFeaturePhrase';
+import { withoutErrorFeaturePhrases } from '../lib/describedFeatures';
 
 export type StartTier = 'gemini' | 'haiku' | 'sonnet' | 'opus';
 

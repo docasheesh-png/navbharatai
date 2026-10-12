@@ -14,7 +14,7 @@
 //
 // PURE.
 
-import type { ChangeKind, ChangeRisk, ChangeDepth } from './changeClassifier';
+import { CHANGE_KINDS, type ChangeKind, type ChangeRisk, type ChangeDepth } from './changeClassifier';
 import { parseAppSpec, type AppSpec } from './appSpec';
 import { parseIssueQueue, type IssueQueue } from './issueQueue';
 
@@ -61,7 +61,8 @@ export function emptyMemory(): EngineeringMemory {
   return { version: 1, spec: { items: [], nextReq: 1 }, queue: { issues: [], nextIss: 1 }, changes: [], nextChg: 1, updatedAt: 0 };
 }
 
-const KINDS = new Set<ChangeKind>(['micro-ui', 'local', 'feature', 'bug', 'refactor', 'cross-cutting', 'data', 'integration', 'security', 'architectural', 'large']);
+// The classifier's own list (autopsy 303e8a6f): a hand-copied set here would drop a new kind from every user's history.
+const KINDS = new Set<ChangeKind>(CHANGE_KINDS);
 
 function strArr(v: unknown, cap: number): string[] {
   return Array.isArray(v) ? (v as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, cap) : [];

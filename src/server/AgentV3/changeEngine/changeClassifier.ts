@@ -25,19 +25,20 @@
 // classification is recorded (CHANGE_CLASSIFIED) and sizes the change-engine context, nothing else.
 
 import { countEnumeratedFeatures } from '../enumeratedFeatures';
+import { withoutDescribedFeatures } from '../../lib/describedFeatures';
 
-export type ChangeKind =
-  | 'micro-ui'
-  | 'local'
-  | 'feature'
-  | 'bug'
-  | 'refactor'
-  | 'cross-cutting'
-  | 'data'
-  | 'integration'
-  | 'security'
-  | 'architectural'
-  | 'large';
+/**
+ * Every kind, in ONE list — the stored-record parser (changeLog.ts) reads this list, so a kind the classifier
+ * emits can never be silently dropped from a user's history on the next load.
+ */
+export const CHANGE_KINDS = [
+  'micro-ui', 'local', 'feature', 'bug', 'refactor', 'cross-cutting', 'data', 'integration', 'security',
+  'architectural', 'large',
+  // A NEW app (autopsy 303e8a6f): there is no earlier app to preserve, so an edit's risk and depth mean nothing.
+  'new-app',
+] as const;
+
+export type ChangeKind = typeof CHANGE_KINDS[number];
 
 export type ChangeRisk = 'low' | 'medium' | 'high';
 export type ChangeDepth = 'light' | 'standard' | 'deep';
@@ -127,7 +128,10 @@ export function classifyChange(request: unknown): ChangeClassification {
   let enumerated = 0;
   try { enumerated = countEnumeratedFeatures(text); } catch { enumerated = 0; }
 
-  const matched = RULES.filter((r) => r.re.test(text));
+  // What the request DESCRIBES is not what it asks to change (autopsy 303e8a6f): "show friendly error messages"
+  // is not a bug report and "needs no API key" is not a security change. The rest of the text decides.
+  const asked = withoutDescribedFeatures(text);
+  const matched = RULES.filter((r) => r.re.test(asked));
   // A colour word inside a long request is not a micro change — drop the micro match when the request
   // is long, and let whatever else it says decide.
   const effective = words > MICRO_MAX_WORDS ? matched.filter((r) => r.kind !== 'micro-ui') : matched;
@@ -159,8 +163,27 @@ export function classifyChange(request: unknown): ChangeClassification {
   return { kind, kinds, risk, depth, reasons };
 }
 
+/**
+ * A NEW build's classification (autopsy 303e8a6f, 2026-10-12). `classifyChange` answers an EDIT's question —
+ * what kind of change is this, and how much of the existing app must be preserved — and it was run on new builds
+ * too, where every feature word of the requested app became a claim about the risk of changing an app that does
+ * not exist yet: 39 of the 41 starter chips came out "risk high, depth deep", and the user's History showed a
+ * stopped starter chip as "Large change". On a new build nothing reads the depth (changeSession gates every use on
+ * `isEdit`), so it gets the module's documented safe middle and says what it is. PURE.
+ */
+export function classifyNewApp(request: unknown): ChangeClassification {
+  const text = typeof request === 'string' ? request : '';
+  let parts = 0;
+  try { parts = countEnumeratedFeatures(text); } catch { parts = 0; }
+  return { kind: 'new-app', kinds: ['new-app'], risk: 'medium', depth: 'standard', reasons: ['new-build', `parts:${parts}`] };
+}
+
 /** One admin-report line. Never user-facing. */
 export function describeChangeClassification(c: ChangeClassification): string {
+  if (c.kind === 'new-app') {
+    const parts = Number((c.reasons.find((r) => r.startsWith('parts:')) ?? 'parts:0').slice(6)) || 0;
+    return `New app (${parts} part(s) named) — no earlier app on record to preserve`;
+  }
   const also = c.kinds.slice(1);
   return `Change classified as ${c.kind} (risk ${c.risk}, depth ${c.depth})${also.length ? `; also ${also.join(', ')}` : ''}`;
 }

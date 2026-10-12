@@ -14,7 +14,7 @@
 // Nothing here can fail a build, block a build, or change which model runs. Every step is best-effort and
 // the whole engine stops at `AGENTV3_CHANGE_ENGINE=off`.
 
-import { classifyChange, describeChangeClassification, type ChangeClassification } from './changeClassifier';
+import { classifyChange, classifyNewApp, describeChangeClassification, type ChangeClassification } from './changeClassifier';
 import {
   foldRequestedFeatures, foldProbeResults, regressionProbeFeatures, renderSpecForBuilder, foldRequestedLabels, markLabelsBuilt, labelKey, dropItems,
   type ProbeOutcome, type SpecItem, type AppSpec,
@@ -81,7 +81,8 @@ export async function beginChange(input: {
   /** The app's import graph (WorkspaceMemory), for the impact set on standard/deep edits. */
   graph?: ProjectGraph | null;
 }): Promise<BeginResult> {
-  const classification = classifyChange(input.prompt);
+  // An edit is classified; a new build is a new app (classifyNewApp — autopsy 303e8a6f).
+  const classification = input.isEdit ? classifyChange(input.prompt) : classifyNewApp(input.prompt);
   const mem = await loadEngineeringMemory(input.workspaceId);
   // A NEW build in a workspace that held another app is a different app: its old requirements are not
   // this app's, so they are neither shown nor re-probed (they are retired at settle, kept for history).

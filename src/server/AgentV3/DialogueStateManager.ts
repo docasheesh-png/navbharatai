@@ -8,7 +8,7 @@
 // feature request. Pure + deterministic → unit-testable; the route wires it additively (no phase ⇒
 // no change), so it can never alter or break an existing turn.
 
-import { withoutErrorFeaturePhrases } from '../lib/errorFeaturePhrase';
+import { withoutErrorFeaturePhrases } from '../lib/describedFeatures';
 
 export type DialoguePhase = 'requirements' | 'planning' | 'building' | 'debugging' | 'deployed';
 

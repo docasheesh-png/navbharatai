@@ -54,6 +54,7 @@ import { couldBeAppCode } from './userProjectFiles';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { seededForms } from './strictTrial';
 import { recipeFilePool, isKnownKitVersion } from '../lib/gameRecipeLayers';
+import { isKnownSeedVersion } from './seedVersions';
 
 /**
  * path → every byte-exact content NavBharatAI itself seeds at that path.
@@ -141,7 +142,12 @@ export function isPlatformSeededFile(path: string | null | undefined, content: s
   // game built before the kit last changed held, byte for byte, the engine we wrote back then — and every reader
   // here graded it as the user's code. `gameKitHistory.ts` holds the hash of every version a recipe ever wrote;
   // still byte-exact, so one changed byte makes it the user's again.
-  try { return isKnownKitVersion(key, content); } catch { return false; }
+  try { if (isKnownKitVersion(key, content)) return true; } catch { /* fall through */ }
+  // 🧬 AN OLDER STARTER IS STILL OUR STARTER (autopsy db07e0af) — the same class for the framework starter and the
+  // starter-chip templates: before the design kit last changed, every workspace was seeded with the kit of the day,
+  // and that untouched `src/index.css` was graded as the user's code. Line endings and the ends of the file are
+  // ignored (seedVersions.ts says why that forgives no edit); every other byte must match a version we wrote.
+  return isKnownSeedVersion(key, content, 'any');
 }
 
 /**

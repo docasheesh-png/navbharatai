@@ -32,7 +32,50 @@
 //   3. RECIPES FOR WHAT PEOPLE ACTUALLY BUILD and the kit did not cover: GAMES (a stage, a title, a
 //      glowing start button, a HUD, touch keys), CHAT (bubbles and a composer), TABS and a TOAST.
 
-export const DESIGN_KIT_CSS = `:root {
+// 🌗 2026-10-12 (autopsy db07e0af). A todo app's light/dark button put the class `dark` on <html>, and nothing
+// happened: the kit's dark palette lived ONLY inside `@media (prefers-color-scheme: dark)`, so the page followed
+// the phone and ignored every switch. The explorer caught it, a repair pass added `:root.dark` — and the app was
+// still half-broken: on a phone set to dark there was no way back to light, because nothing could beat the media
+// query. A switch is what most apps with a theme have, and each one was left to invent a hook the kit never
+// styled (8257ca59 was the same class from the other side). So the kit now styles the two conventions models
+// and developers actually write — the class (`dark` / `light`) and `data-theme="dark" | "light"`, on <html> or
+// <body> — from the SAME palette the media query uses (`withThemeSwitch` below), so they can never drift. No
+// switch set: the page follows the device, exactly as before.
+
+/** The selectors a theme switch sets. Exported so the prompt, the kit and the tests name the same hooks. */
+export const KIT_DARK_SWITCH = ':root.dark, :root[data-theme="dark"], body.dark, body[data-theme="dark"]';
+export const KIT_LIGHT_SWITCH = ':root.light, :root[data-theme="light"], body.light, body[data-theme="light"]';
+
+const declsOf = (body: string): Array<[string, string]> =>
+  [...body.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]);
+
+/**
+ * The kit with its switch blocks written in, right after the system-preference block: the dark switch carries
+ * exactly the media query's tokens, the light switch the `:root` value of each of them. PURE; a kit whose
+ * palette blocks cannot be found is returned unchanged (designKit.test.ts fails on that, loudly).
+ */
+export function withThemeSwitch(css: string): string {
+  const media = /@media \(prefers-color-scheme: dark\) \{\n {2}:root \{\n([\s\S]*?)\n {2}\}\n\}\n/.exec(css);
+  const root = /^:root \{\n([\s\S]*?)\n\}\n/.exec(css);
+  if (!media || !root) return css;
+  const dark = declsOf(media[1]);
+  const lightDecls = declsOf(root[1]);
+  const light = new Map(lightDecls);
+  const switched = new Set(dark.map(([k]) => k));
+  const lightOfDark = dark.flatMap(([k]): Array<[string, string]> => (light.has(k) ? [[k, light.get(k) as string]] : []));
+  // A token computed FROM a switched one (`--ring` mixes `--accent`) is re-declared beside it: a custom property
+  // resolves its var() where it is declared, so on <body> it would otherwise keep the <html> palette.
+  const derived = lightDecls.filter(([k, v]) => !switched.has(k) && [...v.matchAll(/var\(\s*(--[\w-]+)/g)].some((m) => switched.has(m[1])));
+  const block = (selector: string, scheme: string, decls: Array<[string, string]>) =>
+    `${selector} {\n  color-scheme: ${scheme};\n${decls.map(([k, v]) => `  ${k}: ${v};`).join('\n')}\n}\n`;
+  const at = media.index + media[0].length;
+  return `${css.slice(0, at)}
+/* A theme switch beats the device setting: the class or data-theme on <html> or <body>. */
+${block(KIT_DARK_SWITCH, 'dark', [...dark, ...derived])}
+${block(KIT_LIGHT_SWITCH, 'light', [...lightOfDark, ...derived])}${css.slice(at)}`;
+}
+
+export const DESIGN_KIT_CSS = withThemeSwitch(`:root {
   color-scheme: light dark;
   --bg: #f6f7fb;
   --fg: #17171c;
@@ -569,4 +612,4 @@ a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transfor
   .btn-primary:hover, .primary:hover, .nb-game-btn:hover, .nb-product:hover,
   a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transform: none; }
 }
-`;
+`);

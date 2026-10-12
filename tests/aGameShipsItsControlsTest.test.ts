@@ -54,10 +54,14 @@ function writeKit(mirrored: boolean): void {
   writeFileSync(join(DIR, 'package.json'), '{ "name": "game", "type": "module" }\n');
 }
 
+// The child's summary is read as TEXT, so it is run without colour and any colour code left is stripped: on CI
+// (FORCE_COLOR) "Tests  5 passed" arrived as "Tests \x1b[22m \x1b[1m\x1b[32m5 passed…" and matched nothing.
 function runIt(): Promise<string> {
+  const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: '1' };
+  delete env.FORCE_COLOR;
   return new Promise((res) => {
     execFile(process.execPath, [join(process.cwd(), 'node_modules/vitest/vitest.mjs'), 'run', GAME_CONTROLS_TEST_PATH, '--root', DIR],
-      { cwd: DIR, timeout: 120_000 }, (_e, out, err) => res(`${out}\n${err}`));
+      { cwd: DIR, timeout: 120_000, env }, (_e, out, err) => res(`${out}\n${err}`.replace(/\u001b\[[0-9;]*m/g, '')));
   });
 }
 

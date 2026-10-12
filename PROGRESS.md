@@ -94149,6 +94149,43 @@ readers + a critic, fixed in three worktree-isolated groups, each adversarially 
   - `SERVERLESS_PAYMENT_NOT_SET_UP`: a later setup that worked did not answer the earlier failure. The message now names the table, and a success answers that table only. This matters because batch three gave this code a button.
 - **Tests:** `tests/aDefectTheUserIsShownHasAButton.test.ts` gained two blocks. Each was reverted and seen to fail. The backlog stays at 14: neither code changed home.
 
+### 2026-10-12 — #3677 merged (autopsy 46e2d74b); 26 queue rows closed
+
+- **#3677 merged** on the admin's word ("merge karo"). The final head had `main` (#3676) merged in and was re-gated on that state: vitest 36931 passed / 1 skipped / 0 failed; typecheck, noUnusedImports, native:guard, typecheck:server, build, test:bundle, boot:check and deps:server-gate all rc=0. CI was green.
+- **Closed (✅):** Q-830..Q-841 except Q-842 and Q-843, plus Q-844 and Q-847..Q-859. That is 26 rows, removed from the open table and appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`. The ledger stays in the 2026-10-11 entry above.
+- **What to watch on the next real game build:**
+  - `GAME_KIT_SEEDED` appears before the first model call;
+  - the player's car is seen from behind;
+  - LEFT turns it left on screen;
+  - the playtest presses the Start button and is not reported as `GAME_PLAYTEST_NOT_RUN`;
+  - a `[BROKEN / …]` reviewer tag is counted.
+- **Still open from this autopsy (NOT COMPLETE):**
+  - 🟡 waiting on the admin: Q-842, Q-845 (money), Q-846 and Q-860;
+  - OPEN: Q-843, Q-861, Q-862, Q-863, Q-864 and Q-865.
+
+### 2026-10-12 — admin decisions on the four 🟡 rows of autopsy 46e2d74b
+
+Admin, verbatim: *"q845- game chal raha hai. mekup lena chaiye!! waki sabhi me apki bat accept"*.
+
+- **Q-845 ✅ RESOLVED (admin decision: keep the markup).** The game's preview ran, so the existing billing law applies: the markup needs a preview that ran, and that condition was met. My recommendation had been (b), a markup only on a playtest that ran. The admin chose (a). Two things that made (b) attractive are now gone: the playtest presses Start (Q-838), and a `[BROKEN / …]` reviewer tag is read (Q-839). No code change.
+- **Q-842 ✅ RESOLVED as not-a-defect.** The admin accepted recommendation (a). Two GLM crawls (30 s) fall within Q-009's accepted bound, and the bench behaved as designed.
+- **Q-860 ✅ RESOLVED (admin decision: keep).** The admin accepted recommendation (a). Vehicles are already seen from behind through the chase camera. The rig's default yaw for non-vehicle cameras is not flipped, because a flip would turn every existing shell game round for users mid-game.
+- **Q-846 → OPEN, to build.** The admin accepted recommendation (a). When a user names a phone that cannot run the app, the reply says so plainly. The build then goes ahead as a light 2D, keypad-first web game.
+- All three closed IDs were appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit.
+
+#### 2026-10-12 — Q-846 correction (admin): the phone was the game's ORIGIN, not its target
+
+Admin, verbatim: *"user ne kaha tha, nokia ke phone me jo game tha, woh game banana hai! na ki nokia phone ke liye game banana hai"*.
+
+- **The note above misread Q-846, and so did the autopsy.** "Create an racing game for Nokia c 2-01" asked for the classic racing game that came on that phone. It did not ask for a game meant to run on it.
+- **The withdrawn plan:** the option-(a) design ("say plainly it cannot run there") answered a question the user never asked.
+- **The class:** a classic phone named in a game request names the game's ORIGIN and STYLE, not its platform.
+- **The corrected Q-846:**
+  - a retro 2D recreation with that era's look and mechanic;
+  - playable in any browser, with touch and keys;
+  - an original title, with no brand logo;
+  - one plain line telling the user how the request was read;
+  - no refusal.
 ### 2026-10-12 — #3676 merged; Q-821 built; Q-381 batch six (14 → 0, the backlog is empty)
 
 The admin's instruction: *"rukna hi nahi hai!! sabhi ke liye han hai"* (don't stop; yes to everything).
@@ -94204,6 +94241,22 @@ Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-
 - The playtest line should show no camera or steering verdict on a game the kit built.
 - A "KIT FILES BROUGHT UP TO DATE" note should appear only when an older game is edited.
 
+#### 2026-10-12 — duplicated work, stopped: Q-843 and Q-861..Q-865 were built twice
+
+- **What happened:** this session started a workflow on Q-846, Q-843 and Q-861..Q-865. Before it started, the open-PR list was checked and was empty.
+- **The other session:** a second session, on `claude/build-report-autopsy-tmn3ov`, was building the same rows at the same time. It merged them as #3678.
+- **What this session did:** it saw #3678 on `main`, stopped its workflow, and threw its duplicate implementations away unmerged. They lived only in local worktrees.
+- **The lesson:** checking the open PRs once, at the start, does not protect work that runs for hours. Re-list open PRs and re-fetch `main` before each long fan-out, and again at every check-in. A row another session can see as OPEN is free to take until a PR names it.
+- **Rows:** Q-843 and Q-861..Q-865 belong to #3678's session. Q-846 stays with this session, under the admin's corrected reading: #3678's user message is the withdrawn "target" reading, and this session reworks it.
+
+#### 2026-10-12 — the corrected Q-846 is re-filed as Q-868; my row Q-866 is renumbered Q-867
+
+- **Why not reopen Q-846:** #3680 (another session) closes Q-846, because the target-device build merged in #3678. A closed ID may not come back (`aClosedQueueRowStaysClosed`). So this branch now leaves the Q-846 line exactly as `main` has it, and the two PRs cannot conflict on it.
+- **What Q-846's closure covers:** only the target-device build. The admin's correction lives in **Q-868**, which records:
+  - the class: a classic phone named in a game request is the game's origin;
+  - that #3678's detector never matched the real prompt `Nokia c 2-01`;
+  - the build this session does next.
+- **Renumbered row:** #3681 (a third session) took **Q-866** for "basic phone" ≠ keypad phone. The heavy-import row this branch had filed as Q-866 is now **Q-867**.
 ### 2026-10-12 — Q-866: "basic phone" is not a keypad phone (found reviewing #3678)
 
 - **The problem:** `deviceTarget.ts` (Q-846, merged in #3678) listed `basic` and `button` as words that name a keypad phone. Both are also app words: "ek basic phone book app banao", "a basic phone directory for my shop", "build a basic phone number validator" and "big button phone dialer" all matched. Each of those users would have been told that no web app can run on their phone, the builder would have been forced to a light 2D keys-first build, and the game kit would have refused three.js.

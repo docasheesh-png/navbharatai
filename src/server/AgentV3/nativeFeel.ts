@@ -192,13 +192,11 @@ body {
   0%, 100% { opacity: 0.11; }
   50% { opacity: 0.2; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .nb-skeleton { animation: none; }
-}
-
 /* A press that moves must still feel instant, and must not animate for someone who asked it not to. */
 a, button, [role="button"] { transition: transform 90ms ease-out; }
+/* ONE reduced-motion block per file, so an edit anchored on it is never ambiguous (autopsy 15e69839). */
 @media (prefers-reduced-motion: reduce) {
+  .nb-skeleton { animation: none; }
   a, button, [role="button"] { transition: none; }
   a:active, button:active, [role="button"]:active { transform: none; }
 }`;

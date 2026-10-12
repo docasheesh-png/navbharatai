@@ -516,7 +516,7 @@ import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
 import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, fileContentHashes, savedDivergesFromSandbox, type SnapshotTaken, describeDivergence } from '../AgentV3/snapshotIdentity';
 import { sandboxReasonMiddleware } from '../AgentV3/sandboxSessionZone';
-import { PEAK_MEMORY_PROBE, parsePeakMemory, describePeakMemory, describeSession, type SandboxSession } from '../AgentV3/sandboxSessions';
+import { PEAK_MEMORY_PROBE, describePeakMemory, peakProbeOutcome, describeSession, type SandboxSession, type PeakMemory } from '../AgentV3/sandboxSessions';
 import { sandboxRamGb } from '../AgentV3/sandboxRate';
 import { scoreBuildOutcome, shouldAutoReport, autoReportReason, complaintInText } from '../AgentV3/buildOutcomeSignals';
 import { buildOutcomeStore, buildOutcomeTrackingEnabled, watchedMsFrom, type BuildOutcomeRecord } from '../AgentV3/BuildOutcomeStore';
@@ -18013,6 +18013,8 @@ async function noteBuildOutcome(
       // template). Best-effort: any failure just falls through to a normal from-scratch build. Kill switch
       // AGENTV3_GOLDEN_SCAFFOLD=off.
       let goldenPreseeded = false;
+      /** The memory probe at the end of setup (see "THE MACHINE'S MEMORY HIGH-WATER MARK" below). */
+      let peakMemoryAtStart: Promise<PeakMemory | null> = Promise.resolve(null);
       /** The seeded template's tier — files the build under its tier's ETA slice (see SCAFFOLD_PRO_TASK_KEY). */
       let goldenPreseededTier: 'simple' | 'pro' | null = null;
       /** Path → the exact content the platform's own template seeded. See the bill note below. */
@@ -18244,6 +18246,12 @@ async function noteBuildOutcome(
       const packageJsonAtBuildStart: string | null = await finalSteps.step('package.json read', () => actuator.readFile(workspaceId, 'package.json').catch(() => null));
       // The last window before the first model call: project plan, template seed, the reads above (autopsy 303e8a6f).
       try { buildDiag.closeSetupWindow('Final preparation', finalSteps.list()); } catch { /* timing is observation only */ }
+      // 🧠 THE MACHINE'S MEMORY HIGH-WATER MARK BEFORE THIS BUILD'S WORK (adversarial review of 303e8a6f): the counter
+      // cannot be reset and machines are reused, so the end reading alone is the machine's lifetime peak. Started
+      // here, NOT awaited — it never adds to the user's wait — and only on a machine that already exists.
+      peakMemoryAtStart = sandboxSessionOf(actuator, workspaceId)
+        ? withTimeout(actuator.runCommand(workspaceId, PEAK_MEMORY_PROBE), 5_000, 'peak-memory').then((r) => peakProbeOutcome(r).peak, () => null)
+        : Promise.resolve(null);
       const fastLaneWouldRun = !goldenPreseeded && pastedSeed.size === 0 && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
       const fastLaneRung = fastLaneWouldRun
         ? (() => {
@@ -23614,11 +23622,18 @@ async function noteBuildOutcome(
             phase: 'readiness', severity: 'info', code: 'SANDBOX_SESSION', autoResolved: true,
             message: describeSession(session, Date.now()),
           });
-          const probe = await withTimeout(actuator.runCommand(workspaceId, PEAK_MEMORY_PROBE), 5_000, 'peak-memory').catch(() => null);
-          const peak = parsePeakMemory(probe?.stdout);
+          // A measurement never starts a machine: with no live session there is nothing to ask. A failed probe keeps
+          // its KIND (timed out vs failed) — a cause the report states must be one that happened.
+          const end = !session
+            ? { peak: null, failure: { kind: 'no-session' as const } }
+            : await withTimeout(actuator.runCommand(workspaceId, PEAK_MEMORY_PROBE), 5_000, 'peak-memory').then((r) => peakProbeOutcome(r), (e) => peakProbeOutcome(null, e));
+          const start = await withTimeout(peakMemoryAtStart, 1_000, 'peak-memory-start').catch(() => null);
           buildDiag.record({
             phase: 'readiness', severity: 'info', code: 'SANDBOX_PEAK_MEMORY', autoResolved: true,
-            message: describePeakMemory(peak, sandboxRamGb()),
+            message: describePeakMemory(end.peak, sandboxRamGb(), {
+              start, failure: end.failure,
+              sessionAgeMs: session ? Date.now() - session.startedAt : null, sessionOrigin: session?.origin ?? null,
+            }),
           });
         } catch { /* an observation must never affect the verdict it precedes */ }
         buildDiag.record({

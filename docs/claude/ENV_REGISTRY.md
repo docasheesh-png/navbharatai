@@ -145,6 +145,15 @@ the code (it is actually read somewhere) on 2026-07-11.
   and no vCPU reduction at all without a measured speed ratio** — RAM is billed per WALL-CLOCK hour, so
   a slower build is a dearer one (break-even ≈ 1.44× slower for halving cores). `infra/e2b/e2b.toml`
   now carries the per-hour price of each size beside its numbers, and matches `build.mjs` (2 vCPU / 4 GB).
+  🔴 **CORRECTED 2026-10-12 (autopsy 303e8a6f + its adversarial review) — READ THE NUMBER BEFORE ANY RAM
+  DECISION.** Until then the probe read the cgroup ROOT, which has no `memory.peak` on a VM, so every E2B build
+  said "not available". It now reads its OWN cgroup (`/user` on E2B; its own v1 memory cgroup on a hybrid host).
+  What the line means: the counter runs from when the machine came up and cannot be reset on kernel 6.1, and
+  machines are reused, so the probe also runs at the end of setup — "Peak memory during this build" only when
+  the build raised the mark, otherwise "stayed under the machine's earlier high-water mark", and with no start
+  reading "since this machine came up". It is a cache-inclusive UPPER bound measured against the cgroup's OWN
+  limit (envd sets it ~128 MB under the template's RAM), with the reclaim-throttle (`high`) and out-of-memory
+  counts beside it — read all three before deciding RAM. Changing the RAM stays the admin's call.
   From the same forwarded plan, **rejected with reasons**: "route finished apps through
   `renderPreview.ts`" (PR B already frames the REAL `dist/`, strictly more faithful than a babel
   re-render, and the in-browser tab is that renderer for apps without a copy); "target 1,110 → ~300

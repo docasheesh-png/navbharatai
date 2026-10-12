@@ -14,6 +14,7 @@
 // It changes no behaviour. It only makes a number exist that the bill has been implying for a month.
 
 import type { SandboxReason } from './sandboxSessionZone';
+import { ownCgroupMemoryProbe } from '../lib/cgroupSelf';
 
 export interface SandboxSession {
   sandboxId: string;
@@ -135,15 +136,15 @@ export function dayKey(atMs: number): string {
 // that is `/`, so a container reads exactly what it read before.
 
 /**
- * One shell command, read-only. Prints `v2 <bytes> oom_kill=<n> cgroup=<path>`, `v1 <bytes>` or
- * `unavailable cgroup=<path>`. The paths are parameters only so a test can run it against a fixture tree.
+ * The read-only probe that asks a machine for the high-water mark of the cgroup the build's commands run in. Built in
+ * `cgroupSelf.ts` (the one module that knows cgroup file names); the parameters exist for the fixture tests.
+ *
+ * 🔴 AUTOPSY 303e8a6f: the first probe read `/sys/fs/cgroup/memory.peak` — a file the kernel never creates in the
+ * ROOT cgroup — so every E2B build since 2026-09-11 reported "no cgroup accounting exposed". The probe now reads its
+ * OWN cgroup (v2 `/user` on an E2B VM; its own v1 memory cgroup on a hybrid host, never the host's root).
  */
-export function peakMemoryProbe(cgroupRoot = '/sys/fs/cgroup', selfCgroup = '/proc/self/cgroup'): string {
-  const root = cgroupRoot.replace(/\/+$/, '');
-  return `cg=$(sed -n 's/^0:://p' ${selfCgroup} 2>/dev/null | head -n1); d="${root}\${cg%/}"; `
-    + `if [ -r "$d/memory.peak" ]; then echo "v2 $(cat "$d/memory.peak") oom_kill=$(sed -n 's/^oom_kill //p' "$d/memory.events" 2>/dev/null) cgroup=\${cg:-/}"; `
-    + `elif [ -r ${root}/memory/memory.max_usage_in_bytes ]; then echo "v1 $(cat ${root}/memory/memory.max_usage_in_bytes)"; `
-    + `else echo "unavailable cgroup=\${cg:-unknown}"; fi`;
+export function peakMemoryProbe(cgroupRoot?: string, selfCgroup?: string): string {
+  return ownCgroupMemoryProbe(cgroupRoot, selfCgroup);
 }
 
 /** The probe production runs — the tested builder, never a separate string. */
@@ -151,21 +152,38 @@ export const PEAK_MEMORY_PROBE = peakMemoryProbe();
 
 /** What the probe found. `null` from the parser means it gave no readable answer at all. */
 export type PeakMemory =
-  | { kind: 'value'; bytes: number; source: 'cgroup-v2' | 'cgroup-v1'; cgroup?: string; oomKills?: number }
+  | {
+    kind: 'value'; bytes: number; source: 'cgroup-v2' | 'cgroup-v1'; cgroup?: string;
+    /** memory.events: out-of-memory kills, and `high` (reclaim-throttle) events — both counted since the cgroup began. */
+    oomKills?: number; highEvents?: number;
+    /** The cgroup's OWN limit (memory.max) — the real ceiling, which envd sets below the template's RAM. */
+    limitBytes?: number;
+  }
   | { kind: 'unavailable'; cgroup?: string };
 
 /** Parse the probe's output. Anything unexpected is null — the report then says it was not measured. */
 export function parsePeakMemory(stdout: string | null | undefined): PeakMemory | null {
   const text = String(stdout ?? '');
-  const m = /^\s*(v1|v2)\s+(\d+)(?:\s+oom_kill=(\d*))?(?:\s+cgroup=(\S+))?\s*$/m.exec(text);
+  const m = /^\s*(v1|v2)\s+(\d+)((?:\s+[a-z_]+=\S*)*)\s*$/m.exec(text);
   if (m) {
     const bytes = Number(m[2]);
     if (!Number.isFinite(bytes) || bytes <= 0) return null;
-    const oom = m[3] ? Number(m[3]) : NaN;
+    const kv = new Map([...(m[3] ?? '').matchAll(/([a-z_]+)=(\S*)/g)].map((x) => [x[1]!, x[2]!] as [string, string]));
+    const num = (k: string): number | undefined => {
+      const v = kv.get(k);
+      if (v === undefined || v === '' || !/^\d+$/.test(v)) return undefined;
+      return Number(v);
+    };
+    const oom = num('oom_kill');
+    const high = num('high');
+    const limit = num('max');
+    const cgroup = kv.get('cgroup');
     return {
       kind: 'value', bytes, source: m[1] === 'v2' ? 'cgroup-v2' : 'cgroup-v1',
-      ...(m[4] ? { cgroup: m[4] } : {}),
-      ...(Number.isFinite(oom) ? { oomKills: oom } : {}),
+      ...(cgroup ? { cgroup } : {}),
+      ...(oom !== undefined ? { oomKills: oom } : {}),
+      ...(high !== undefined ? { highEvents: high } : {}),
+      ...(limit !== undefined && limit > 0 && limit < 1024 ** 4 ? { limitBytes: limit } : {}),
     };
   }
   const u = /^\s*unavailable(?:\s+cgroup=(\S+))?\s*$/m.exec(text);
@@ -173,21 +191,71 @@ export function parsePeakMemory(stdout: string | null | undefined): PeakMemory |
   return null;
 }
 
+/** Why a probe gave no reading, when it did not: it timed out, or it failed (a dead or unreachable machine). */
+export type PeakProbeFailure = { kind: 'timeout' | 'error' | 'no-session'; reason?: string };
+
+export interface DescribePeakOptions {
+  /** The same probe at the end of setup — the machine's high-water mark BEFORE this build's work began. */
+  start?: PeakMemory | null;
+  /** Why the end probe gave nothing, when it did not. */
+  failure?: PeakProbeFailure | null;
+  /** How long ago this sandbox session started, and how it came up ("created fresh", "resumed", …). */
+  sessionAgeMs?: number | null;
+  sessionOrigin?: string | null;
+}
+
+const gbOf = (bytes: number) => bytes / 1024 ** 3;
+
 /**
- * The report line. Three different facts, three different sentences: a number (with the template's size beside
- * it, so the headroom is visible), a machine that answered "this cgroup keeps no counter", and a probe that never
- * answered. The last two used to share one sentence that blamed the machine for both.
+ * The report line. Each different fact gets its own sentence — and a number says what it is the peak OF.
+ *
+ * ⚠️ THE COUNTER IS THE MACHINE'S, NOT THE BUILD'S (adversarial review of 303e8a6f). `memory.peak` and the
+ * `memory.events` counts run from when the cgroup was created; kernel 6.1 cannot reset them, and our machines are
+ * kept warm, paused and resumed across builds. So the probe also runs at the end of setup: if the end value is
+ * higher, the build raised the mark and it IS this build's peak; if not, the build stayed under an earlier mark
+ * and only that is said. With no start reading, the number is labelled "since this machine came up". The
+ * percentage is of the cgroup's own limit (envd sets it below the template's RAM), never of a number it can't reach.
  */
-export function describePeakMemory(peak: PeakMemory | null, templateGb: number): string {
-  if (!peak) return 'Peak memory: not measured — the probe gave no readable answer (it timed out, failed or printed something unexpected), so nothing is known about memory.';
-  if (peak.kind === 'unavailable') {
-    return `Peak memory: not available — the build's cgroup (${peak.cgroup ?? 'not identified'}) keeps no memory.peak, and there is no cgroup-v1 counter either.`;
+export function describePeakMemory(peak: PeakMemory | null, templateGb: number, opts: DescribePeakOptions = {}): string {
+  if (!peak) {
+    const f = opts.failure;
+    if (f?.kind === 'no-session') return 'Peak memory: not measured — no live sandbox session was left to ask, and a probe would only have started a new machine.';
+    if (f?.kind === 'timeout') return `Peak memory: not measured — the probe did not answer in time${f.reason ? ` (${f.reason})` : ''}, so nothing is known about memory.`;
+    if (f?.kind === 'error') return `Peak memory: not measured — the probe failed${f.reason ? ` (${f.reason})` : ''}, so nothing is known about memory.`;
+    return 'Peak memory: not measured — the probe printed nothing readable, so nothing is known about memory.';
   }
-  const gb = peak.bytes / 1024 ** 3;
-  // memory.peak counts reclaimable file cache too, so this is an UPPER bound on what the build needed; the
-  // out-of-memory kill count is the fact that says whether memory ever actually ran out.
-  const where = peak.cgroup ? ` ${peak.cgroup}` : '';
-  const oom = typeof peak.oomKills === 'number' ? `; ${peak.oomKills} out-of-memory kill${peak.oomKills === 1 ? '' : 's'}` : '';
+  if (peak.kind === 'unavailable') {
+    return `Peak memory: not available — the build's cgroup (${peak.cgroup ?? 'not identified'}) keeps no peak-memory counter (cgroup v2), and there is no cgroup-v1 counter either.`;
+  }
+  const ceilingGb = typeof peak.limitBytes === 'number' ? gbOf(peak.limitBytes) : templateGb;
+  const ceiling = typeof peak.limitBytes === 'number' ? `${ceilingGb.toFixed(2)} GB (the cgroup's own limit; template ${templateGb} GB)` : `${templateGb} GB`;
+  const pct = (bytes: number) => Math.round((gbOf(bytes) / ceilingGb) * 100);
+  const where = `${peak.source}${peak.cgroup ? ` ${peak.cgroup}` : ''}`;
   const bound = peak.source === 'cgroup-v2' ? ' — an upper bound: it includes reclaimable file cache' : '';
-  return `Peak memory: ${gb.toFixed(2)} GB of ${templateGb} GB (${Math.round((gb / templateGb) * 100)}%, ${peak.source}${where}${bound}${oom})`;
+  const start = opts.start && opts.start.kind === 'value' && opts.start.source === peak.source && opts.start.cgroup === peak.cgroup ? opts.start : null;
+  const events = (oom?: number, high?: number, scope = '') => {
+    const parts: string[] = [];
+    if (typeof oom === 'number') parts.push(`${oom} out-of-memory kill${oom === 1 ? '' : 's'}`);
+    if (typeof high === 'number') parts.push(`${high} reclaim-throttle event${high === 1 ? '' : 's'}`);
+    return parts.length ? `; ${parts.join(', ')}${scope}` : '';
+  };
+  const delta = (a?: number, b?: number) => (typeof a === 'number' && typeof b === 'number' ? Math.max(0, a - b) : undefined);
+  if (start) {
+    const ev = events(delta(peak.oomKills, start.oomKills), delta(peak.highEvents, start.highEvents), ' during this build');
+    if (peak.bytes > start.bytes) {
+      return `Peak memory during this build: ${gbOf(peak.bytes).toFixed(2)} GB of ${ceiling} (${pct(peak.bytes)}%, ${where} — the build raised the machine's high-water mark, so this is its own peak${bound ? '; it includes reclaimable file cache' : ''}${ev})`;
+    }
+    return `Peak memory: this build stayed under the machine's earlier high-water mark of ${gbOf(peak.bytes).toFixed(2)} GB of ${ceiling} (${pct(peak.bytes)}%, ${where}; set before this build began — this kernel cannot reset the counter, so the build's own peak is at most that${ev})`;
+  }
+  const age = typeof opts.sessionAgeMs === 'number' && opts.sessionAgeMs >= 0 ? ` (this session started ${Math.max(1, Math.round(opts.sessionAgeMs / 60_000))} min ago${opts.sessionOrigin ? `, ${opts.sessionOrigin}` : ''})` : '';
+  return `Peak memory since this machine came up${age}: ${gbOf(peak.bytes).toFixed(2)} GB of ${ceiling} (${pct(peak.bytes)}%, ${where}${bound}; includes anything that ran on this machine before this build${events(peak.oomKills, peak.highEvents, ' since it came up')})`;
+}
+
+/** A probe outcome turned into a reading and, when there is none, the reason — a timeout is never called a failure. */
+export function peakProbeOutcome(result: { stdout?: string } | null, error?: unknown): { peak: PeakMemory | null; failure: PeakProbeFailure | null } {
+  if (error !== undefined) {
+    const msg = String((error as { message?: unknown })?.message ?? error).slice(0, 120);
+    return { peak: null, failure: /timed out/i.test(msg) ? { kind: 'timeout', reason: msg } : { kind: 'error', reason: msg } };
+  }
+  return { peak: parsePeakMemory(result?.stdout), failure: null };
 }

@@ -32,6 +32,8 @@ dockerfile    = "e2b.Dockerfile"
 # Changing RAM needs the measured peak first — SANDBOX_PEAK_MEMORY in the build report,
 # read from the cgroup the build's commands run in (/sys/fs/cgroup/user under envd), not
 # the mount root, which has no memory.peak on a VM (corrected 2026-10-12, autopsy 303e8a6f).
+# It is a cache-inclusive upper bound against /user's own limit, labelled per build only when the
+# build raised the machine's mark — see the RAM rule in docs/claude/ENV_REGISTRY.md.
 cpu_count = 2
 memory_mb = 4096
 

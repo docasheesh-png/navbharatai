@@ -29,7 +29,7 @@
  * request, and the UI must say so. Presenting it as "the server" would be the same mistake as
  * building a live-sandbox count from one process's memory.
  */
-import { cgroupV2FileCandidates, CGROUP_V2_ROOT, SELF_CGROUP_FILE } from './cgroupSelf';
+import { effectiveMemoryLimitBytes } from './cgroupSelf';
 import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import type { Request, Response, NextFunction } from 'express';
@@ -118,21 +118,10 @@ export function gradeLoad(s: {
  * meaningless and a made-up denominator here would understate a real memory problem.
  */
 export function readMemoryLimitBytes(read: (p: string) => string = (p) => readFileSync(p, 'utf8')): number | null {
-  // The process's OWN cgroup first (autopsy 303e8a6f): `memory.max` exists only in non-root cgroups, so the mount
-  // root is right only under a private cgroup namespace — `cgroupSelf.ts` resolves both, nearest first.
-  let self: string | null = null;
-  try { self = read(SELF_CGROUP_FILE); } catch { /* no /proc here — the root candidates still apply */ }
-  const candidates = [...cgroupV2FileCandidates('memory.max', self), `${CGROUP_V2_ROOT}/memory/memory.limit_in_bytes`];
-  for (const path of candidates) {
-    try {
-      const raw = read(path).trim();
-      if (!raw || raw === 'max') continue;
-      const n = Number(raw);
-      // Anything past ~1 TB is the "no limit" sentinel, not a real container limit.
-      if (Number.isFinite(n) && n > 0 && n < 1024 ** 4) return n;
-    } catch { /* not this cgroup layout, or not a container — try the next */ }
-  }
-  return null;
+  // The process's OWN cgroup and every ancestor, the SMALLEST numeric limit (autopsy 303e8a6f and its adversarial
+  // review): `memory.max` exists only in non-root cgroups, and a leaf can carry a larger number than the ancestor
+  // that really binds it. `cgroupSelf.ts` owns every cgroup file name.
+  return effectiveMemoryLimitBytes(read);
 }
 
 class ServerLoadSampler {

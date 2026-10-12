@@ -1033,6 +1033,67 @@ export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud
  * Generate the shell. `gamecanvas` renders the HUD and constructs the Game, so a subset that would not
  * compile is completed. Pure; never throws.
  */
+/**
+ * 🧪 THE CONTROLS TEST EVERY 3D GAME SHIPS WITH (Q-843, build 46e2d74b). No game had a behaviour test, so the
+ * readiness gate reported "No tests at all" and nothing a test runner could run ever checked that LEFT turns
+ * left, W accelerates, or that the camera sits behind the car — the two defects the admin found by playing.
+ * It ships beside the shell (the shell is what drives a vehicle), it checks the kit the game drives with, and
+ * the recipe declares vitest so it runs (ToolDispatcher.declareVitestForRecipeTests). Proven against the real
+ * generated kit in tests/aGameShipsItsControlsTest.test.ts, including that it FAILS on a mirrored kit.
+ */
+export const GAME_CONTROLS_TEST_PATH = 'src/game/controls.test.ts';
+export const GAME_CONTROLS_TEST = `// THE CONTROLS DO WHAT THE KEYS SAY — shipped with every 3D game the NavBharatAI kit builds (Q-843).
+// Your test runner runs it (npm test, or vitest run). It checks the kit your game drives with: W speeds the
+// car up and moves it the way its nose points, LEFT turns it to the driver's left, RIGHT to the right, and
+// the chase camera sits BEHIND the car, so the player sees its tail lights. If your game moves a vehicle with
+// its own code instead of driveVehicle(), copy these checks for that code.
+import { describe, it, expect } from 'vitest';
+import { createCar, createVehicleState, driveVehicle } from './three/objects';
+import { CameraRig } from './three/camera';
+
+const UP = { x: 0, y: -1 };           // up / W, as the runtime's input.axis() reports it
+const UP_LEFT = { x: -1, y: -1 };     // up + left / A
+const UP_RIGHT = { x: 1, y: -1 };     // up + right / D
+
+function drive(axis: { x: number; y: number }, seconds: number) {
+  const car = createCar();
+  let state = createVehicleState(car);
+  const startSpeed = state.speed;
+  for (let i = 0; i < Math.round(seconds * 60); i++) state = driveVehicle(car, state, axis, 1 / 60);
+  return { car, state, startSpeed };
+}
+
+describe('the controls do what the keys say', () => {
+  it('W speeds the car up', () => {
+    const { state, startSpeed } = drive(UP, 1);
+    expect(state.speed).toBeGreaterThan(startSpeed);
+  });
+
+  it('W moves the car the way its nose points (+Z)', () => {
+    expect(drive(UP, 1).car.position.z).toBeGreaterThan(0);
+  });
+
+  it("LEFT turns the car to the driver's left (+X)", () => {
+    expect(drive(UP_LEFT, 1).car.position.x).toBeGreaterThan(0);
+  });
+
+  it("RIGHT turns the car to the driver's right (-X)", () => {
+    expect(drive(UP_RIGHT, 1).car.position.x).toBeLessThan(0);
+  });
+
+  it('the chase camera sits BEHIND the car (tail lights toward the player)', () => {
+    // The rig sizes its camera from the window; a test runs without one, so it gets a screen-sized stand-in.
+    const g = globalThis as unknown as { window?: { innerWidth: number; innerHeight: number } };
+    g.window ??= { innerWidth: 800, innerHeight: 600 };
+    const car = createCar();
+    createVehicleState(car);
+    const rig = new CameraRig({ kind: 'chase' });
+    for (let i = 0; i < 120; i++) rig.follow(car, 1 / 60);
+    expect(rig.camera.position.z).toBeLessThan(car.position.z);
+  });
+});
+`;
+
 export function generateGameShell(include?: string[]): GameShellResult {
   const wanted = Array.isArray(include) && include.length
     ? new Set(include.map((s) => String(s || '').trim().toLowerCase()).filter(Boolean))
@@ -1056,6 +1117,8 @@ export function generateGameShell(include?: string[]): GameShellResult {
     if (files['src/game/GameCanvas.tsx']) files['src/game/ui/Hud.tsx'] = FILES['src/game/ui/Hud.tsx'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
+  // The shell drives the vehicle, so it carries the test that the vehicle does what the keys say (Q-843).
+  if (files['src/game/Game.ts']) files[GAME_CONTROLS_TEST_PATH] = GAME_CONTROLS_TEST;
 
   return {
     files,

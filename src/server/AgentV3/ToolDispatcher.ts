@@ -225,7 +225,7 @@ import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
-import { withVitestDeclared, VITEST_RANGE } from './TestGenerationAgent';
+import { withVitestDeclared, recipeShipsVitestTest, VITEST_RANGE } from './TestGenerationAgent';
 import { renderSeenThisBuild } from './renderProof';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { addDependency, removeDependency as removeOneDependency, listDependencies } from './packageEdit';
@@ -3376,8 +3376,31 @@ export class ToolDispatcher {
    * the controller three more times; every re-run said "Updated" about files it had not changed, and each
    * rewrite undid the previous heal, so the repeat looked like progress).
    */
+  /**
+   * 🧪 A RECIPE THAT SHIPS A TEST SHIPS ITS RUNNER (Q-843). Declares `vitest` in package.json BEFORE the test
+   * lands — the same order `generate_tests` uses, so the write-time typecheck already sees it — whenever a recipe's
+   * output holds a vitest test. Every recipe writer calls it (`tests/aRecipeTestShipsItsRunner` is the census);
+   * already declared, unreadable or no test ⇒ nothing. Returns the line for the tool result.
+   */
+  private async declareVitestForRecipeTests(files: Record<string, string>, agent: AgentRole): Promise<string> {
+    if (!recipeShipsVitestTest(files)) return '';
+    try {
+      const before = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => null);
+      const after = withVitestDeclared(before);
+      if (!after) return '';
+      await this.actuator.writeFile(this.workspaceId, 'package.json', after);
+      this.state?.recordFileChange({ path: 'package.json', kind: 'modify' }, agent);
+      this.onFileWrite?.('package.json', after);
+      return `Added vitest@${VITEST_RANGE} to devDependencies so the test this recipe ships can run (it installs on the next typecheck or \`npm install\`).`;
+    } catch {
+      return '';
+    }
+  }
+
   private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole): Promise<string[]> {
     const lines: string[] = [];
+    const runner = await this.declareVitestForRecipeTests(files, agent);
+    if (runner) lines.push(runner);
     for (const [path, content] of Object.entries(files)) {
       let existing: string | null = null;
       let missing = false;
@@ -6766,6 +6789,7 @@ export class ToolDispatcher {
           : undefined;
         const itCfg = generateIntegrationTests({ resource: itResource, basePath: itBasePath, fields: itFields });
         const itWritten: string[] = [];
+        { const runner = await this.declareVitestForRecipeTests(itCfg.files, agent); if (runner) itWritten.push(runner); }
         for (const [path, content] of Object.entries(itCfg.files)) {
           let kind: 'create' | 'modify' = 'create';
           try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
@@ -9564,6 +9588,7 @@ export class ToolDispatcher {
         // IFSC/PIN/UPI/mobile, with the REAL GSTIN mod-36 + Aadhaar Verhoeff checksums. Dependency-free.
         const ivcfg = generateIndianValidatorsIntegration();
         const ivWritten: string[] = [];
+        { const runner = await this.declareVitestForRecipeTests(ivcfg.files, agent); if (runner) ivWritten.push(runner); }
         for (const [path, content] of Object.entries(ivcfg.files)) {
           let kind: 'create' | 'modify' = 'create';
           try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
@@ -10059,6 +10084,7 @@ export class ToolDispatcher {
         // lakh/crore grouping + amount-in-words. Pure generator in MoneyFormatGenerator.ts. No env keys.
         const mfcfg = generateMoneyFormatIntegration();
         const mfWritten: string[] = [];
+        { const runner = await this.declareVitestForRecipeTests(mfcfg.files, agent); if (runner) mfWritten.push(runner); }
         for (const [path, content] of Object.entries(mfcfg.files)) {
           let kind: 'create' | 'modify' = 'create';
           try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
@@ -10194,6 +10220,7 @@ export class ToolDispatcher {
         // (node:crypto), constant-time compare. Pure generator in CsrfGenerator.ts. No env keys.
         const csrfcfg = generateCsrfIntegration();
         const csrfWritten: string[] = [];
+        { const runner = await this.declareVitestForRecipeTests(csrfcfg.files, agent); if (runner) csrfWritten.push(runner); }
         for (const [path, content] of Object.entries(csrfcfg.files)) {
           let kind: 'create' | 'modify' = 'create';
           try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
@@ -10298,6 +10325,7 @@ export class ToolDispatcher {
         // Pure generator in UpiGenerator.ts. No env keys.
         const upicfg = generateUpiIntegration();
         const upiWritten: string[] = [];
+        { const runner = await this.declareVitestForRecipeTests(upicfg.files, agent); if (runner) upiWritten.push(runner); }
         for (const [path, content] of Object.entries(upicfg.files)) {
           let kind: 'create' | 'modify' = 'create';
           try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
@@ -10349,6 +10377,7 @@ export class ToolDispatcher {
         // (node:crypto), storage-agnostic. Pure generator in AuditLogGenerator.ts. No env keys.
         const auditcfg = generateAuditLogIntegration();
         const auditWritten: string[] = [];
+        { const runner = await this.declareVitestForRecipeTests(auditcfg.files, agent); if (runner) auditWritten.push(runner); }
         for (const [path, content] of Object.entries(auditcfg.files)) {
           let kind: 'create' | 'modify' = 'create';
           try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }

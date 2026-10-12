@@ -88,10 +88,20 @@ export interface ModelStat {
   /** Summed over the calls that REPORTED usage. `null` when none did — never 0 for "unknown". */
   inputTokens: number | null;
   outputTokens: number | null;
-  /** Median over calls that carried a latency. `null` when none did. */
+  /**
+   * Median over calls that carried a latency. `null` when none did. Each sample is the model's OWN answer
+   * time (`answerMs`) where the call measured it, else the caller's wait (`latencyMs`).
+   */
   medianLatencyMs: number | null;
   totalLatencyMs: number | null;
   latencySamples: number;
+  /**
+   * How many of `latencySamples` are the caller's wait rather than the model's own time — a call recorded
+   * before `answerMs` existed, or one outside a fallback chain. Such a sample MAY include time spent on rungs
+   * that failed before this model answered (autopsy 303e8a6f: KIMI 3.4 s recorded as 18.4 s), so the median
+   * never mixes the two silently.
+   */
+  wallClockLatencySamples: number;
 }
 
 /** A provider's failures within ONE build, as the failure ledger recorded them. */
@@ -193,7 +203,7 @@ export function gateStateFromIssues(issues: readonly BuildIssue[] | undefined): 
 
 /** Per-(provider, model) statistics over the SUCCESSFUL calls of one build. */
 export function modelStatsFromCalls(calls: readonly LlmCallRecord[] | undefined): ModelStat[] {
-  const by = new Map<string, ModelStat & { _lat: number[] }>();
+  const by = new Map<string, ModelStat & { _lat: number[]; _wall: number }>();
   for (const c of calls ?? []) {
     if (!c || c.ok !== true) continue; // integrity rule 1
     const model = String(c.model ?? '').trim();
@@ -204,7 +214,7 @@ export function modelStatsFromCalls(calls: readonly LlmCallRecord[] | undefined)
       s = {
         provider: providerOfModel(model), model, calls: 0, deliveredTurns: 0, truncatedCalls: 0,
         usageReportedCalls: 0, inputTokens: null, outputTokens: null,
-        medianLatencyMs: null, totalLatencyMs: null, latencySamples: 0, _lat: [],
+        medianLatencyMs: null, totalLatencyMs: null, latencySamples: 0, wallClockLatencySamples: 0, _lat: [], _wall: 0,
       };
       by.set(key, s);
     }
@@ -219,11 +229,15 @@ export function modelStatsFromCalls(calls: readonly LlmCallRecord[] | undefined)
       if (hasIn) s.inputTokens = (s.inputTokens ?? 0) + (c.inputTokens as number);
       if (hasOut) s.outputTokens = (s.outputTokens ?? 0) + (c.outputTokens as number);
     }
-    if (isNum(c.latencyMs)) s._lat.push(c.latencyMs);
+    // ⏱️ The row names the model that ANSWERED, so its speed is that model's own time (autopsy 303e8a6f) —
+    // the caller's wait around a fallback chain charged the rescuer with every rung it rescued the call from.
+    if (isNum(c.answerMs)) s._lat.push(c.answerMs);
+    else if (isNum(c.latencyMs)) { s._lat.push(c.latencyMs); s._wall += 1; }
   }
-  return [...by.values()].map(({ _lat, ...rest }) => ({
+  return [...by.values()].map(({ _lat, _wall, ...rest }) => ({
     ...rest,
     latencySamples: _lat.length,
+    wallClockLatencySamples: _wall,
     medianLatencyMs: median(_lat),
     totalLatencyMs: _lat.length ? _lat.reduce((a, b) => a + b, 0) : null,
   })).sort((a, b) => b.calls - a.calls || a.model.localeCompare(b.model));

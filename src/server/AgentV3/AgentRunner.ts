@@ -41,6 +41,7 @@ import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
 import { answerAfterPlanning } from './answerAfterPlanning';
 import { resolveToolAlias, toolAliasNote } from './toolAlias';
+import { answerTimeOf } from './answeringModel';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -249,7 +250,10 @@ export interface AgentRunnerOptions {
     toolCalls: number;
     inputTokens: number;
     outputTokens: number;
+    /** The caller's wait — the whole provider chain, fallbacks included. */
     latencyMs: number;
+    /** The answering model's own time (TurnResult.attemptMs), on a success through a chain. */
+    answerMs?: number;
     ok: boolean;
     error?: string;
   }) => void;
@@ -936,7 +940,9 @@ export class AgentRunner {
             responsePreview: turn.text, responseChars: turn.text.length,
             finishReason: turn.stopReason, toolCalls: turn.toolUses.length,
             inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens,
-            latencyMs: Date.now() - llmStartedAt, ok: true,
+            // The row names the rung that answered, so its own time rides with it (autopsy 303e8a6f); the
+            // caller's wait stays `latencyMs`, which is what preparation is measured against.
+            latencyMs: Date.now() - llmStartedAt, ...answerTimeOf(turn), ok: true,
           });
         } catch { /* diagnostics capture is best-effort */ }
 

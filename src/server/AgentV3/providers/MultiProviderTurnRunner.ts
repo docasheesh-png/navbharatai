@@ -885,6 +885,8 @@ export function makeMultiProviderTurnRunner(
             ...params, canAbandonSlowStream, hasNextRung: i + 1 < chain.length,
             maxTokens: reasoningAwareAsk(params.maxTokens, chain[i].modelId),
           }), params.signal);
+          /** This rung's own time — not the rungs tried, skipped or abandoned before it (see TurnResult.attemptMs). */
+          const answeredInMs = Math.max(0, now() - attemptStartedAt);
           timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
@@ -926,7 +928,7 @@ export function makeMultiProviderTurnRunner(
             const slowKey = slowKeyFor(chain[i]);
             const next = recordSlowSample(slowRungs.get(slowKey) ?? EMPTY_SLOW_RUNG_STATE, {
               outputTokens: result.usage?.outputTokens ?? 0,
-              observedMs: Math.max(0, now() - attemptStartedAt),
+              observedMs: answeredInMs,
               ...(result.usage?.measured === false ? { measured: false as const } : {}),
             });
             slowRungs.set(slowKey, next);
@@ -946,7 +948,11 @@ export function makeMultiProviderTurnRunner(
               }
             }
           } catch { /* throughput bookkeeping must never disturb the build */ }
-          return result;
+          // ⏱️ THE ANSWERER'S OWN CLOCK RIDES OUT WITH ITS ANSWER (autopsy 303e8a6f). Callers time the whole
+          // chain; the row they file is labelled with the rung that answered. Without this, KIMI's 3.4 s was
+          // recorded as 18.4 s — GLM's 15 s crawl charged to the engine that rescued it. `??` keeps the
+          // innermost value when one chain wraps another.
+          return { ...result, attemptMs: result.attemptMs ?? answeredInMs };
         } catch (err) {
           // 🔴 A STOP IS NOT A PROVIDER FAILURE (autopsy 2720e553). Decided FIRST, before any
           // classification below can bench this vendor, count the wait as its waste, or fall to the

@@ -60,3 +60,18 @@ export function looksLikeFamilyLabelOnly(model: string | null | undefined): bool
   if (!s) return true;
   return !/[-.\/]/.test(s);
 }
+
+/**
+ * PURE. The answering model's OWN time, as a spread for a per-call record — `{ answerMs }` when the runner
+ * measured it (`TurnResult.attemptMs`, set by the multi-provider chain), else nothing.
+ *
+ * ⏱️ THE SAME DEFECT, ONE FIELD OVER (autopsy 303e8a6f, 2026-10-12). This module moved each row's MODEL to
+ * the rung that answered; the row's DURATION stayed the caller's stopwatch around the whole chain. So the
+ * report said "kimi-k2.7-code, 18 s" for a call where GLM crawled 15 s and was abandoned and KIMI answered in
+ * 3.4 s — the rescuer charged with the crawl, and every per-model speed comparison inverted. `latencyMs` keeps
+ * meaning the caller's wait (preparation is measured against it); this is the number a per-model speed reads.
+ */
+export function answerTimeOf(turn: { readonly attemptMs?: number } | null | undefined): { answerMs?: number } {
+  const ms = turn?.attemptMs;
+  return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 ? { answerMs: ms } : {};
+}

@@ -550,7 +550,17 @@ export interface LlmCallRecord {
   toolCalls?: number;
   inputTokens?: number;
   outputTokens?: number;
+  /**
+   * The time the CALLER waited, in ms — the whole provider chain, including every rung that was tried, timed
+   * out, rate-limited or abandoned before the one that answered. It is what preparation is subtracted from.
+   */
   latencyMs?: number;
+  /**
+   * The answering model's OWN time, in ms (TurnResult.attemptMs) — present on a successful call through a
+   * fallback chain. `model` names that rung, so a per-model speed reads THIS, never `latencyMs`: autopsy
+   * 303e8a6f's row said "kimi-k2.7-code 18 s" when KIMI answered in 3.4 s after GLM crawled for 15 s.
+   */
+  answerMs?: number;
   ok: boolean;
   error?: string;
 }
@@ -1443,7 +1453,25 @@ export class BuildDiagnostics {
     return { seconds, lanes: marks.length };
   }
 
-  private recordTimeToFirstCall(latencyMs?: number): void {
+  /**
+   * How the first call's own time is told — split when a fallback chain walked past engines first.
+   *
+   * ⏱️ AUTOPSY 303e8a6f: "The first call itself then took 18s; that is model time" described a 15 s crawl on
+   * GLM, abandoned, then 3 s on KIMI. Both numbers are measured (`latencyMs` is the caller's wait, `answerMs`
+   * the answering engine's own), so the sentence now says both; with no split to tell it stays as it was.
+   */
+  private static firstCallTime(lat: number, answerMs: number | undefined): { split: boolean; text: string } {
+    const s = (ms: number): number => Math.round(ms / 1000);
+    if (typeof answerMs === 'number' && Number.isFinite(answerMs) && answerMs >= 0 && lat - answerMs >= 1000) {
+      return {
+        split: true,
+        text: `${s(lat)}s: ${s(lat - answerMs)}s on engine(s) that did not answer and were left behind (see PROVIDER_FALLBACK / PROVIDER_TIME_WASTED), then ${s(answerMs)}s for the engine that answered`,
+      };
+    }
+    return { split: false, text: `${s(lat)}s` };
+  }
+
+  private recordTimeToFirstCall(latencyMs?: number, answerMs?: number): void {
     if (this.llmCalls.length > 0) return; // only the first
     const elapsedMs = Math.max(0, this.now() - this.startedAt);
     // Clamped to the elapsed time: a provider-reported latency longer than the whole build so far is
@@ -1451,7 +1479,11 @@ export class BuildDiagnostics {
     const lat = typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0
       ? Math.min(latencyMs, elapsedMs)
       : undefined;
+    // ⚠️ PREPARATION IS SUBTRACTED FROM THE CALLER'S WAIT, NEVER FROM THE ANSWERER'S TIME. Using `answerMs`
+    // here would turn GLM's abandoned 15 s into "26s of preparation" — blaming setup for a provider crawl,
+    // the misattribution autopsies dukaan and a38c6fef already paid for once.
     const seconds = Math.round((lat === undefined ? elapsedMs : elapsedMs - lat) / 1000);
+    const callTime = lat === undefined ? null : BuildDiagnostics.firstCallTime(lat, answerMs);
     const message = lat === undefined
       // NEVER INVENT THE SPLIT. Without a latency we cannot separate the two, so we say the number is
       // an upper bound rather than repeating the old confident, wrong attribution.
@@ -1462,7 +1494,7 @@ export class BuildDiagnostics {
       // build `npm install` runs in the background boot, CONCURRENT with the build — it does not gate
       // this first call — and a resumed sandbox already carries node_modules. Naming it here sent an
       // autopsy to optimise install when the real cost was the cold sandbox and its round-trips.
-      : `${seconds}s of preparation before the build's first model call began — sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) The first call itself then took ${Math.round(lat / 1000)}s; that is model time, not setup.`;
+      : `${seconds}s of preparation before the build's first model call began — sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) ${callTime!.split ? `The first call then took ${callTime!.text} — provider time, not setup.` : `The first call itself then took ${callTime!.text}; that is model time, not setup.`}`;
     // …UNLESS A FAST LANE ALREADY BURNED THAT WINDOW, IN WHICH CASE NONE OF THE ABOVE IS TRUE
     // (autopsy a38c6fef, 2026-09-13). A lane's model call is not RECORDED until it returns, so a lane
     // that is abandoned at its deadline leaves this window looking like pure setup. In the real report
@@ -1488,7 +1520,7 @@ export class BuildDiagnostics {
         + `${abandoned.seconds}s went to ${abandoned.lanes} fast build lane(s) that were started and then abandoned at their `
         + `deadline. Their model calls are only recorded when they return, so the window looks like preparation and is not. `
         + `Setup itself is measured separately — read the SETUP_TIMING lines for the real number.`
-        + (lat === undefined ? '' : ` The first recorded call then took ${Math.round(lat / 1000)}s.`)
+        + (callTime === null ? '' : ` The first recorded call then took ${callTime.text}.`)
       : message;
     // WHERE THE TIME WENT — see longestSilentGap. Appended rather than replacing the sentence above,
     // because the total and the biggest single stretch answer two different questions, and the second
@@ -1538,7 +1570,11 @@ export class BuildDiagnostics {
   }
 
   recordLlmCall(rec: Omit<LlmCallRecord, 'ts' | 'promptPreview' | 'responsePreview'> & { promptPreview?: string; responsePreview?: string }): void {
-    this.recordTimeToFirstCall(rec.latencyMs);
+    // The answering engine's own time is only ever PART of the caller's wait — never more than it.
+    const answerMs = typeof rec.answerMs === 'number' && Number.isFinite(rec.answerMs) && rec.answerMs >= 0
+      ? (typeof rec.latencyMs === 'number' && Number.isFinite(rec.latencyMs) ? Math.min(rec.answerMs, Math.max(0, rec.latencyMs)) : rec.answerMs)
+      : undefined;
+    this.recordTimeToFirstCall(rec.latencyMs, answerMs);
     this.channelTotals.llmCalls += 1;
     // 🔴 BOTH ENDS, NEVER A PREFIX (2026-09-21). This read `if (this.llmCalls.length < MAX_LLM_CALLS)`,
     // so a build past the cap recorded NO further model calls — and `DiagnosticsStore` then kept the
@@ -1559,6 +1595,7 @@ export class BuildDiagnostics {
       inputTokens: rec.inputTokens,
       outputTokens: rec.outputTokens,
       latencyMs: rec.latencyMs,
+      ...(answerMs !== undefined ? { answerMs } : {}),
       ok: rec.ok,
       error: rec.error ? rec.error.slice(0, 500) : undefined,
     }, MAX_LLM_CALLS);
@@ -4077,7 +4114,11 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
     lines.push('');
     lines.push(`LLM calls (${r.llmCalls.length}):`);
     r.llmCalls.forEach((c, n) => {
-      const lat = c.latencyMs != null ? ` ${Math.round(c.latencyMs / 1000)}s` : '';
+      // The answering engine's own time first; the caller's wait beside it when a fallback walk made them differ.
+      const lat = c.latencyMs == null ? ''
+        : c.answerMs != null && c.latencyMs - c.answerMs >= 1000
+          ? ` ${Math.round(c.answerMs / 1000)}s (${Math.round(c.latencyMs / 1000)}s incl. fallback)`
+          : ` ${Math.round(c.latencyMs / 1000)}s`;
       const tok = (c.inputTokens != null || c.outputTokens != null) ? ` tokens=${c.inputTokens ?? '?'}/${c.outputTokens ?? '?'}` : '';
       lines.push(`${n + 1}. ${c.provider ?? '?'}/${c.model ?? '?'} finish=${c.finishReason ?? '?'}${tok}${lat} ${c.ok ? 'ok' : 'FAILED'}`);
       if (c.error) lines.push(`   error: ${c.error}`);

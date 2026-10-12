@@ -125,6 +125,16 @@ export interface TurnResult {
    * it undefined, which is unchanged behaviour.
    */
   reasoningOnly?: boolean;
+  /**
+   * Wall time of the ONE provider attempt that produced this result, in ms — excluding every earlier rung a
+   * fallback chain tried, skipped or abandoned. Set by the multi-provider chain; absent from a single-provider
+   * runner, where the caller's own stopwatch already is the answer's time.
+   *
+   * ⚠️ A caller's `Date.now() - startedAt` around `runTurn` is the time the CALLER waited (the whole walk).
+   * Filed on a row that names `model` (the answering rung), it charged the rescuer with the crawl it rescued
+   * the build from (autopsy 303e8a6f: GLM crawled 15 s, KIMI answered in 3.4 s, the row said KIMI 18 s).
+   */
+  attemptMs?: number;
 }
 
 export interface RunTurnParams {

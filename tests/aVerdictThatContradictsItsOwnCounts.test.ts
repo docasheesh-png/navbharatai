@@ -70,7 +70,11 @@ describe('a SUCCESSFUL build no longer claims a zero its own counts contradict',
     // `counts.unresolved` excludes observations, so counting one here would contradict the header in
     // the OTHER direction — a verdict claiming problems the header says do not exist.
     const obs = issue({ code: 'INTEGRITY_UNUSED_DEP', observation: true, autoResolved: false });
-    expect(deriveRootCause({ issues: [obs], ok: true })).toBe('Build completed successfully with no problems recorded.');
+    // Since db07e0af it is still not counted as OURS or as open — but it is not denied either: the report lists it.
+    const cause = deriveRootCause({ issues: [obs], ok: true })!;
+    expect(cause).toMatch(/^Build completed successfully, and nothing recorded is left open against the app\. /);
+    expect(cause).toContain('1 observation(s) were made about code that was already there (INTEGRITY_UNUSED_DEP)');
+    expect(cause).not.toContain('problem(s) were recorded');
   });
 });
 

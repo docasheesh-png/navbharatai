@@ -36,7 +36,8 @@ function run(script: unknown[], calls: { n: number }, narrations: string[]) {
       : { tool_use_id: tu.id, content: 'bash was called with an EMPTY command, so nothing ran — this is not a success.', is_error: true }),
   };
   const stream = new AgentEventStream();
-  stream.on?.('event', (e: { type?: string; text?: string }) => { if (e?.type === 'narration' && e.text) narrations.push(e.text); });
+  // `subscribe` — the stream has no `.on`, so the optional call collected nothing (found in autopsy db07e0af).
+  stream.subscribe((e) => { const ev = e as { type?: string; text?: string }; if (ev.type === 'narration' && ev.text) narrations.push(ev.text); });
   return new AgentRunner({
     client: new ClaudeClient(scripted(script, calls)), dispatcher: dispatcher as never, state: new WorkspaceState(stream), events: stream,
     model: 'm', system: 's', tools: defaultToolCatalog(),
@@ -68,6 +69,7 @@ describe('the runner', () => {
     const result = await run(script, calls, narrations);
     expect(result.ok).toBe(false);
     expect(result.summary).toMatch(/kept sending steps that do nothing/);
+    expect(narrations.length).toBeGreaterThan(0); // the collector really collects now
     expect(calls.n).toBeLessThan(15);
     expect(MAX_NO_OP_TURNS_AFTER_FINAL).toBe(3);
   });

@@ -58,6 +58,8 @@ export interface SubAgentDeps {
    * instead of reading them again one call at a time (autopsy bee95692). Absent ⇒ the role's own tools.
    */
   toolsOverride?: ToolName[];
+  /** Stop in front of a reasoning rung rather than spend a small budget inside one (AgentRunnerOptions). */
+  stopAtReasoningRung?: boolean;
   maxBudgetUsd?: number;
   /** Max output tokens per turn. The Architect delegates ALL app code to sub-agents, so the top-level
    *  runner's 32000 cap (buildMaxTokensPerTurn) MUST be passed through — otherwise a sub-agent falls
@@ -351,6 +353,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       powerLevel: deps.powerLevel,
       effort: deps.effort,
       maxSteps: deps.maxSteps ?? 40,
+      ...(deps.stopAtReasoningRung ? { stopAtReasoningRung: true } : {}),
       maxBudgetUsd: deps.maxBudgetUsd,
       maxTokensPerTurn: deps.maxTokensPerTurn,
       agentRole: role,

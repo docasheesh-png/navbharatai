@@ -23378,6 +23378,15 @@ async function noteBuildOutcome(
         // bill (see evidenceLedger.ts / provenFromTimeline.ts).
         try { fillGateFromLedger(gateEvidence, buildDiag.evidenceLedger()); }
         catch { /* evidence recovery is best-effort and must never touch a build */ }
+        // THE EARLY SYNTAX VERDICT IS RE-CHECKED BEFORE THE GATE COUNTS IT (Q-821). A later pass can have made
+        // every file parse since the syntax gate gave up; re-parse the same files and answer the early finding
+        // when they do. Only ever answers — a file that still does not parse keeps its error, and a new break
+        // from a pass after this point is caught by the final re-check below.
+        try {
+          if (writtenFiles.size > 0 && buildDiag.hasOpenSyntaxFinding() && (await findSyntaxErrors(Object.fromEntries(writtenFiles))).length === 0) {
+            buildDiag.answerSyntaxOnCleanParse('before the release gate');
+          }
+        } catch { /* a re-check only ever answers; it must never block the gate */ }
         const gateFindings = () => ({
           // Counted from what this build actually recorded, so the gate and the report cannot disagree.
           blockers: buildDiag.shippingIssueCount('error'),
@@ -24922,6 +24931,9 @@ async function noteBuildOutcome(
               if (result) result = { ...result, ok: false, summary: finalSyntaxErrorSummary(finalSyntaxErrors.length) };
               if (buildResultRef) buildResultRef = { ...buildResultRef, ok: false };
             }
+          } else if (buildDiag.hasOpenSyntaxFinding()) {
+            // Clean on the final files: an early finding a later pass fixed is answered here too (Q-821).
+            buildDiag.answerSyntaxOnCleanParse('in the final build');
           }
         } catch { /* final syntax re-verify is best-effort — never blocks a build */ }
       }

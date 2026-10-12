@@ -2433,6 +2433,33 @@ export class BuildDiagnostics {
     return cleared;
   }
 
+  /**
+   * Is the syntax gate's finding still open? (Q-821) — the question asked before paying for a re-parse.
+   */
+  hasOpenSyntaxFinding(): boolean {
+    return this.issues.some((i) => !i.autoResolved && (i.code === 'OUTCOME_SYNTAX_ERROR' || i.code === 'SYNTAX_ERROR_DETECTED'));
+  }
+
+  /**
+   * THE FILES PARSE NOW, SO THE EARLY SYNTAX VERDICT IS ANSWERED (Q-821, admin 2026-10-12: "han").
+   *
+   * The syntax gate's one repair pass records OUTCOME_SYNTAX_ERROR (ERROR) when it cannot clear a file. Later
+   * passes — the endgame repair, the render rescue, the reviewer's fix — can make every file parse, and nothing
+   * answered the early line: a build whose files all parsed was counted RED by the release gate and left free.
+   * Called only after a re-parse of the same files came back clean. Answers both the error and its warning,
+   * and says so on the timeline. Returns how many it answered.
+   */
+  answerSyntaxOnCleanParse(where: string): number {
+    const answered = this.resolveOnRecheck('OUTCOME_SYNTAX_ERROR') + this.resolveOnRecheck('SYNTAX_ERROR_DETECTED');
+    if (answered > 0) {
+      this.record({
+        phase: 'build', severity: 'info', code: 'SYNTAX_RECHECK_CLEAN', autoResolved: true,
+        message: `Every file this build wrote parses now (${where}) — the earlier syntax finding was fixed by a later pass and is answered.`,
+      });
+    }
+    return answered;
+  }
+
   recordReadinessRecovery(code: string, message: string): number {
     const cleared = this.resolveReadinessBlockersOnRejudge();
     this.record({ phase: 'build', severity: 'info', code, message, autoResolved: true });

@@ -1795,6 +1795,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     );
   };
   /**
+   * Every early save has settled. The lane's LAST write of a file must be its last word, whichever way the
+   * lane ends: the salvage after a hand-off, and (Q-939) the lane's own final write when the decision came
+   * in its last tier and the lane finished anyway. Those writes carry the import fixes and the entry and
+   * stylesheet guards; an early save still in flight would put the unfixed copy back on top of them,
+   * because the workspace writes run concurrently and nothing orders two writes to one path.
+   */
+  const earlySavesSettled = async (): Promise<void> => {
+    if (handOffSaves.length > 0) await withTimeout(Promise.allSettled(handOffSaves), 30_000, 'simple-build-handoff-saves').catch(() => {});
+  };
+  /**
    * 🔴 Q-939 (report 9c612cdb): THE DECISION IS TAKEN WHERE A CALL SETTLES, NOT ONLY WHERE ONE STARTS.
    * The lane learned of a hand-off only by asking `deps.stopLane` when a per-file call STARTED. That
    * report's first tier held three files at concurrency 8, so all three were in flight together: the
@@ -2356,6 +2366,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // ZOMBIE GUARD: if the race was already lost, this closure is an orphan — writing now would dump
       // a second module tree into a workspace the full builder is ALREADY building in (the StudySync
       // catastrophe). Refuse; the catch below has salvaged what was finished.
+      // An early save from a hand-off decision taken in the last tier lands first (see earlySavesSettled),
+      // and the zombie guard is asked after that wait, not before it.
+      await earlySavesSettled();
       if (lapsed) throw new Error('simple-build-cancelled');
       await deps.writeFiles(written);
       // STREAMING FIRST-PAINT (gated by the caller via onFilesReady). The files are final and in the
@@ -2380,7 +2393,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     }
     // The hand-off's early preview saves (Q-422) finish before the final save below, so they can never
     // land on top of it.
-    if (handOffSaves.length > 0) await withTimeout(Promise.allSettled(handOffSaves), 30_000, 'simple-build-handoff-saves').catch(() => {});
+    await earlySavesSettled();
     const reason = e instanceof Error ? e.message : String(e);
     // A STOP IS NOT A HANDOFF. Keep what finished — the user was promised their files are saved — and
     // say nothing about "carrying on": nothing carries on after a stop.

@@ -211,6 +211,100 @@ describe('Q-939 (A): the hand-off is taken when it is decided, whatever the tier
   });
 });
 
+/**
+ * A writer whose FIRST write (the early save) is slow, the way a model-facing workspace write is (it reads
+ * the file, guards it and compiles it). Records when each write starts and ends.
+ */
+function slowFirstWriter(firstWriteMs: number, onStart?: () => void) {
+  const log: Array<{ id: number; at: 'start' | 'end'; paths: string[] }> = [];
+  let n = 0;
+  const writeFiles = async (files: OneShotFile[]) => {
+    const id = ++n;
+    const paths = files.map((f) => f.path);
+    log.push({ id, at: 'start', paths });
+    onStart?.();
+    await new Promise((r) => setTimeout(r, id === 1 ? firstWriteMs : 5));
+    log.push({ id, at: 'end', paths });
+  };
+  /** The lane's LAST write started only after every earlier write had ended. */
+  const lastWriteWaited = (): string | null => {
+    const lastId = n;
+    const lastStart = log.findIndex((e) => e.id === lastId && e.at === 'start');
+    for (let id = 1; id < lastId; id++) {
+      const end = log.findIndex((e) => e.id === id && e.at === 'end');
+      if (end < 0 || end > lastStart) return log.map((e) => `${e.at}#${e.id}:${e.paths.join(',')}`).join(' → ');
+    }
+    return null;
+  };
+  return { writeFiles, log, lastWriteWaited, count: () => n };
+}
+
+describe('Q-939: the lane\'s last write is the last word, however the lane ends', () => {
+  // Workspace writes run concurrently and nothing orders two writes to one path, so an early save still in
+  // flight when the lane's last write starts can land on top of it with the copy from BEFORE the import
+  // fixes and the entry and stylesheet guards. Taking the decision where a call settles means an early save
+  // can now happen in a lane that then FINISHES (the decision came in its last tier), so the lane's own
+  // final write must wait for it exactly as the hand-off's salvage always did.
+  it('🔒 CENSUS: a lane that finishes after a last-tier decision, and a lane that hands off, both write last', async () => {
+    // (1) Finishes: the decision arrives at a success in the last tier, every call already in flight.
+    {
+      let rung: string | null = null;
+      const w = slowFirstWriter(150);
+      const r = await runSimpleBuild({
+        prompt: 'a small app', framework: 'vite-react', scaffoldPaths: ['index.html', 'src/App.tsx', 'src/main.tsx'],
+        concurrency: 8, depOrder: false,
+        generate: async (system: string, user: string) => {
+          if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/components/Card.tsx :: card';
+          if (system.includes('SHARED CONTRACT')) return '';
+          const path = pathOf(user);
+          if (path === 'src/components/Card.tsx') rung = 'kimi-k2.7-code';
+          else await new Promise((res) => setTimeout(res, 20));
+          return block(path, path.endsWith('App.tsx') ? "import Card from './components/Card';\nexport default function App() { return <Card />; }" : 'export default function Card() { return null; }');
+        },
+        stopLane: () => (rung ? `the lane's engine fell to ${rung}, which reasons before every answer` : null),
+        writeFiles: w.writeFiles,
+        maxRepairs: 0,
+      } as never);
+      expect(r.ok).toBe(true);
+      expect(w.count()).toBeGreaterThan(1); // there was an early save to wait for
+      expect(w.lastWriteWaited(), 'the lane\'s final write started while an early save was still landing').toBeNull();
+    }
+    // (2) Hands off: the report's shape, its salvage after the early saves.
+    {
+      let rung: string | null = null;
+      let release!: () => void;
+      const held = new Promise<void>((res) => { release = res; });
+      const safety = setTimeout(() => release(), 3_000);
+      const w = slowFirstWriter(150, () => setTimeout(release, 20));
+      const r = await runSimpleBuild({
+        prompt: PROMPT, framework: 'vite-react', scaffoldPaths: ['index.html', 'src/App.tsx', 'src/main.tsx'],
+        concurrency: 8, depOrder: true,
+        generate: async (system: string, user: string) => {
+          if (user.includes('Plan the file list')) return PLAN;
+          if (system.includes('SHARED CONTRACT')) return CONTRACT;
+          const path = pathOf(user);
+          if (path === 'src/utils/youtube.ts') { await new Promise((res) => setTimeout(res, 30)); rung = 'kimi-k2.7-code'; throw new Error(HAND_OFF_ERROR); }
+          if (path === 'src/hooks/usePlayer.ts') await held;
+          return block(path, "import type { Video } from '../types';\nexport const x: Video | null = null;");
+        },
+        stopLane: () => (rung ? `the lane's engine fell to ${rung}, which reasons before every answer` : null),
+        writeFiles: w.writeFiles,
+        maxRepairs: 0,
+      } as never).finally(() => clearTimeout(safety));
+      expect(r.handedOff).toBe(true);
+      expect(w.count()).toBeGreaterThan(1);
+      expect(w.lastWriteWaited(), 'the salvage started while an early save was still landing').toBeNull();
+    }
+  }, RUN_TIMEOUT);
+
+  it('🔒 one door waits for the early saves, and both of the lane\'s last writes go through it', () => {
+    const src = readFileSync(join(process.cwd(), 'src/server/AgentV3/SimpleBuilder.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(src.match(/Promise\.allSettled\(handOffSaves\)/g)?.length).toBe(1);
+    expect(src.match(/await earlySavesSettled\(\);/g)?.length).toBe(2);
+  });
+});
+
 describe('Q-939 (D): the ledger closes generate at the decision; the wait and the saves are their own phases', () => {
   it('🔴 the report\'s shape: one call in flight at the decision, its wait measured apart from generating', async () => {
     const { p } = run(8, { holdMs: 300 });

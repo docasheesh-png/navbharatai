@@ -553,7 +553,7 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
-import { loadUserVaultSecrets, withheldVaultSecretNames, secretsWithheldNote } from '../lib/secrets';
+import { loadUserVaultSecrets, loadUserVaultForBuild, secretsWithheldNote } from '../lib/secrets';
 import { secretRequestPrompt, postBuildKeyAsks, postBuildKeyPrompt } from '../AgentV3/secretRequest';
 import { connectActions } from '../AgentV3/connectActions';
 import { buildNeedsNotice, type ServerPlanOffer } from '../AgentV3/buildNeeds';
@@ -640,7 +640,8 @@ import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWor
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
 import { gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
-import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration, userOwnedFiles } from '../AgentV3/ManualEditTracker';
+import { recordManualEdits, consumeManualEditsWithOwned, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
+import { createPrepSteps } from '../AgentV3/prepClock';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
 import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
 import {
@@ -1606,10 +1607,15 @@ export async function findWorkspaceConversation(
   workspaceId: string,
 ): Promise<ConversationRecord | null> {
   const owner = userId ?? 'anon';
-  for (const id of conversationIdCandidatesForWorkspace(workspaceId, userId)) {
-    const rec = await (store.getMeta ? store.getMeta(id) : store.get(id)).catch(() => null);
-    if (rec && rec.workspaceId === workspaceId && rec.userId === owner) return rec;
-  }
+  const read = (id: string) => (store.getMeta ? store.getMeta(id) : store.get(id)).catch(() => null);
+  const mine = (rec: ConversationRecord | null): rec is ConversationRecord => !!rec && rec.workspaceId === workspaceId && rec.userId === owner;
+  // ⏱️ The usual hit stays ONE read; on a miss the remaining candidates are read TOGETHER, first in candidate order
+  // wins (autopsy 303e8a6f): a first build missed all three, serially, on the path to the first model call.
+  const [first, ...rest] = conversationIdCandidatesForWorkspace(workspaceId, userId);
+  if (first === undefined) return null;
+  const head = await read(first);
+  if (mine(head)) return head;
+  for (const rec of await Promise.all(rest.map(read))) if (mine(rec)) return rec;
   return null;
 }
 
@@ -14812,6 +14818,13 @@ async function noteBuildOutcome(
       // the build tools will report the real sandbox error only if the user asks
       // to build. This is what makes v5.0 conversational like Claude Code.
       let git: GitManager | undefined;
+      // ⏱️ What happens between "Project checked" and "Personal context" — timed by name (autopsy 303e8a6f: 3.6 s
+      // of untimed awaits sat there). Closed as one window, so anything not named still shows as `other`.
+      const wiringSteps = createPrepSteps();
+      // …and the two windows after the project context: the prompt's context, then the plan, the template and
+      // the last reads before the first model call.
+      const promptSteps = createPrepSteps();
+      const finalSteps = createPrepSteps();
       // Deep-test App #7 (2026-07-13): true when the build sandbox could not be set up (E2B down / quota /
       // template). No file can ever be written, so the build MUST end as a failure — not "✓ Done" over an
       // empty preview. Threaded into the empty-build honesty override below.
@@ -14859,8 +14872,8 @@ async function noteBuildOutcome(
         await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
         const ensureWorkspaceMs = Date.now() - ensureT0;
         try {
-          buildDiag.record({
-            phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+          buildDiag.recordSetupTiming({
+            startMs: setupT0,
             message: `Workspace ready in ${Math.round((Date.now() - setupT0) / 1000)}s`,
             // ⚠️ `resumed=yes` USED TO MEAN "an id existed", NOT "we resumed" — and it was printed as
             // though it were the second. Five real reports (2026-08-24) carried `resumed=yes` with
@@ -15440,8 +15453,8 @@ async function noteBuildOutcome(
             // sandbox scan) — re-materialize them from the durable asset store alongside the files.
             await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
             try {
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+              buildDiag.recordSetupTiming({
+                startMs: restoreT0,
                 message: `Project restored in ${Math.round((Date.now() - restoreT0) / 1000)}s`,
                 detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s), ${durable.status}) · sandbox listing `
                   + `${scanMs}ms · config read ${configMs}ms · wrote ${plan.count} missing file(s) + assets ${Date.now() - writeT0}ms`,
@@ -15467,8 +15480,8 @@ async function noteBuildOutcome(
             // branch would leave the ordinary build exactly as silent as it is today, which is the
             // whole complaint. Recorded at info with no repair language, because nothing was wrong.
             try {
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+              buildDiag.recordSetupTiming({
+                startMs: restoreT0,
                 message: `Project checked in ${Math.round((Date.now() - restoreT0) / 1000)}s — nothing needed restoring`,
                 detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s), ${durable.status}) · sandbox listing ${scanMs}ms · config read ${configMs}ms`,
               });
@@ -15570,8 +15583,9 @@ async function noteBuildOutcome(
         } catch { /* best-effort — the guardian never blocks a build */ }
         // Real git repo → real checkpoints/History/restore (best-effort on
         // sandboxes without a shell).
-        git = new GitManager(actuator, workspaceId);
-        await git.ensureRepo();
+        const gm = new GitManager(actuator, workspaceId);
+        git = gm;
+        await wiringSteps.step('git init', () => gm.ensureRepo());
         // Pass the actuator as the session's command runner so the REAL Code Studio terminal can exec
         // bounded commands in this same warm sandbox.
         registerSession(workspaceId, git, userId ?? undefined, actuator);
@@ -15608,7 +15622,7 @@ async function noteBuildOutcome(
           eps?.slice().reverse().find((e) => e.kind === 'note' && typeof e.text === 'string' && e.text.startsWith('PLAN_STATE'));
         let planSeedNote = findPlanNote(getWorkspaceMemory(workspaceId).snapshot().episodes);
         if (!planSeedNote) {
-          const coldSnap = await loadWorkspaceMemory(workspaceId).catch(() => null);
+          const coldSnap = await wiringSteps.step('plan carry-over', () => loadWorkspaceMemory(workspaceId).catch(() => null));
           planSeedNote = findPlanNote(coldSnap?.episodes);
         }
         const savedPlan = planSeedNote ? parsePlanState(planSeedNote.text) : [];
@@ -16107,7 +16121,7 @@ async function noteBuildOutcome(
       // edits a protected folder during a big refactor, and the user finds out when their live payment
       // flow breaks. The dispatcher refuses the write; the prompt block below only saves wasted turns.
       try {
-        const ignoreRaw = await actuator.readFile(workspaceId, IGNORE_FILE).catch(() => '');
+        const ignoreRaw = await wiringSteps.step('ignore file', () => actuator.readFile(workspaceId, IGNORE_FILE).catch(() => ''));
         ignoreRulesForBuild = parseIgnoreFile(ignoreRaw);
         dispatcher.setIgnoreRules(ignoreRulesForBuild);
       } catch { /* no ignore file is the normal case — the guard stays off */ }
@@ -16122,6 +16136,8 @@ async function noteBuildOutcome(
       // the user's SHARED keys plus the ones tied to THIS app. Keys saved before scoping existed have no
       // workspace, so they count as shared and every existing build behaves exactly as it did.
       let vaultSecrets: Record<string, string> = {};
+      // The names this app did NOT receive — from the SAME vault read as the keys it did (autopsy 303e8a6f).
+      let vaultWithheld: string[] = [];
       // Set when the build-start database offer was put to the user (sharedDataNeed.ts), so the
       // mid-build fallback below never asks the same question twice in one build.
       let databaseOfferedAtStart = false;
@@ -16130,7 +16146,10 @@ async function noteBuildOutcome(
       let mcpTools: SafeMcpTool[] = [];
       try {
         if (userId) {
-          vaultSecrets = await loadUserVaultSecrets(userId, workspaceId);
+          // ONE read and decrypt of the vault for both the keys and the withheld names (it was two, serially).
+          const vault = await wiringSteps.step('vault', () => loadUserVaultForBuild(userId, workspaceId));
+          vaultSecrets = vault.secrets;
+          vaultWithheld = vault.withheld;
           // THE DATABASE, OFFERED BEFORE THE BUILDER DECIDES WHERE DATA LIVES (sharedDataNeed.ts). An app
           // whose request needs shared data (bookings, orders, admissions, accounts) used to be built with
           // that data in the visitor's own browser, and every file-based check then said "no database
@@ -16160,7 +16179,8 @@ async function noteBuildOutcome(
                 events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
                 const made = await provisionDatabaseForUser(userId, { appLabel: prompt.slice(0, 40), workspaceId }).catch(() => null);
                 if (made && made.ok) {
-                  vaultSecrets = await loadUserVaultSecrets(userId, workspaceId).catch(() => vaultSecrets);
+                  const fresh = await loadUserVaultForBuild(userId, workspaceId).catch(() => null);
+                  if (fresh) { vaultSecrets = fresh.secrets; vaultWithheld = fresh.withheld; }
                   events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: databaseReadyNarration(made, 'start') });
                   buildDiag.record({ phase: 'plan', severity: 'info', code: 'DATABASE_OFFER_AT_START', message: `${made.reused ? 'Attached the user\'s existing database' : 'Created the user\'s database'} at build start (${need.reasons.join(', ')})${made.asleepNote ? ' — it is ASLEEP (Supabase paused it); the user was told how to wake it' : ''}.`, autoResolved: true });
                 } else {
@@ -16190,7 +16210,7 @@ async function noteBuildOutcome(
           // WHICH SAVED KEYS THIS APP DID NOT GET (Q-155). Least privilege's own failure mode is "I saved that
           // key — why is it not in my app?"; the build report now answers it by name. Names only, never values.
           try {
-            const withheld = await withheldVaultSecretNames(userId, workspaceId);
+            const withheld = vaultWithheld;
             if (withheld.length > 0) buildDiag.record({ phase: 'plan', severity: 'info', code: 'SECRETS_WITHHELD', message: secretsWithheldNote(withheld), autoResolved: true });
           } catch { /* a report line — never a reason a build changes */ }
           // CONNECTED SERVICES (MCP). Fetched ONCE here, before the loop, so the tool list the model
@@ -16200,7 +16220,7 @@ async function noteBuildOutcome(
           // Wholly best-effort: a service that is slow, down or hostile yields no tools and the build
           // proceeds exactly as it does today. It must never be able to fail or delay a build.
           try {
-            const servers = await mcpServerStore.listFull(workspaceId);
+            const servers = await wiringSteps.step('connected services', () => mcpServerStore.listFull(workspaceId));
             const unreadableServers = mcpServerStore.unreadableIds(workspaceId); // Q-628, read in parallel
             // THE PAID-PLAN GATE (admin 2026-09-12). Checked BEFORE the services are contacted, so a
             // free account costs neither the network calls nor the tokens their descriptions would add
@@ -16209,11 +16229,15 @@ async function noteBuildOutcome(
             // 🔒 More forgiving than the connect gate on ONE case only: a plan we could not READ lets
             // an existing integration keep working, because a billing-lookup blip must not silently
             // change what a paying customer's app can do mid-build. See mcpPlanGate.ts.
-            const mcpFacts = await mcpPlanFacts(req).catch(
-              () => ({ signedIn: false, hasActivePlan: false, planKnown: true, isFreeListed: false }),
-            );
-            const mcpAllowed = canRunConnectedServices(mcpFacts);
-            if (servers.length > 0 && !mcpAllowed) {
+            // ⏱️ Only when there IS a service to gate (autopsy 303e8a6f): a token verify and a plan probe of up to 3 s
+            // ran on every build, for a result read only when `servers.length > 0`.
+            const mcpFacts = servers.length > 0
+              ? await wiringSteps.step('service plan check', () => mcpPlanFacts(req).catch(
+                () => ({ signedIn: false, hasActivePlan: false, planKnown: true, isFreeListed: false }),
+              ))
+              : null;
+            const mcpAllowed = mcpFacts !== null && canRunConnectedServices(mcpFacts);
+            if (servers.length > 0 && mcpFacts && !mcpAllowed) {
               // NEVER SILENT: a build that quietly stopped using a tool the user set up looks like the
               // AI forgetting, which is worse than one plain sentence.
               const notice = skippedServicesNotice(servers.length, mcpFacts);
@@ -16242,7 +16266,7 @@ async function noteBuildOutcome(
           // import turn, the Diagnose button, update_preview — booted the app with NONE of the keys the
           // user saved in Settings. Write them now, before anything can run, so the keys the user entered
           // are genuinely readable by the app v5.0 built. No-op when the vault is empty; best-effort.
-          await dispatcher.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS).catch(() => {});
+          await wiringSteps.step('secrets file', () => dispatcher.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS).catch(() => {}));
         }
       } catch { /* best-effort — a vault-load failure just means the app runs without injected keys */ }
 
@@ -16338,7 +16362,7 @@ async function noteBuildOutcome(
       }
 
       if (userId && vaultSecrets[DB_PROVIDER_MARKER] !== 'supabase') {
-        const connected = await getConnection(userId).catch(() => null);
+        const connected = await wiringSteps.step('database link', () => getConnection(userId).catch(() => null));
         if (connected?.orgId) {
           let asked = false;
           dispatcher.setDatabaseFallback(async () => {
@@ -16454,7 +16478,8 @@ async function noteBuildOutcome(
       // and builds ON TOP of those edits, never reverting them), and acknowledge it to the user in chat.
       // Consuming clears the set so the same edits aren't re-announced next turn. Additive + best-effort.
       try {
-        const manual = await consumeManualEdits(workspaceId);
+        // ONE read of the manual-edit document for the pending set AND the user's own files (it was two).
+        const { manual, owned } = await wiringSteps.step('manual edits', () => consumeManualEditsWithOwned(workspaceId));
         if (manual.count > 0) {
           const note = manualEditContext(manual.paths);
           if (note) architectSystem = `${note}\n\n---\n\n${architectSystem}`;
@@ -16464,7 +16489,6 @@ async function noteBuildOutcome(
         // userFileGuard.ts). The pending set above is cleared every build; `userOwnedFiles` is not,
         // so a page the user added three builds ago is protected exactly like one added a minute ago.
         try {
-          const owned = await userOwnedFiles(workspaceId);
           dispatcher.setUserOwnedFiles([...new Set([...manual.paths, ...owned])], prompt);
           dispatcher.setUserFileRefusalSink((paths) => {
             try {
@@ -16491,6 +16515,8 @@ async function noteBuildOutcome(
       //
       // Each keeps its OWN failure isolation. `allSettled`, not `all`: one unavailable store must leave
       // the other two contexts in the prompt, exactly as three independent try/catches did.
+      // Everything since the project check, as one window — named steps, and the rest as `other`.
+      try { buildDiag.closeSetupWindow('Build wiring ready', wiringSteps.list()); } catch { /* timing is observation only */ }
       const contextT0 = Date.now();
       const [prefSettled, adrSettled, brainSettled] = await Promise.allSettled([
         userPreferenceStore.contextFor(userId),
@@ -16511,8 +16537,8 @@ async function noteBuildOutcome(
       const brainContext = brainSettled.status === 'fulfilled' ? brainSettled.value : '';
       if (brainContext) architectSystem = `${brainContext}\n\n---\n\n${architectSystem}`;
       try {
-        buildDiag.record({
-          phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+        buildDiag.recordSetupTiming({
+          startMs: contextT0, endMs: contextT0 + contextMs,
           message: `Personal context loaded in ${contextMs}ms`,
           detail: `preferences, past decisions and cross-project lessons, fetched concurrently · `
             + `applied: ${[prefContext && 'preferences', adrContext && 'decisions', brainContext && 'lessons']
@@ -17278,8 +17304,8 @@ async function noteBuildOutcome(
         const ctxIndexed = await warmIndexFiles(ctxMem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 200 });
         const ctxT3 = Date.now();
         try {
-          buildDiag.record({
-            phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+          buildDiag.recordSetupTiming({
+            startMs: ctxT0, endMs: ctxT3,
             message: `Project context prepared in ${Math.round((ctxT3 - ctxT0) / 100) / 10}s`,
             detail: `memory restore ${ctxT1 - ctxT0}ms · file listing ${ctxT2 - ctxT1}ms (${tree.length} path(s)) · indexed ${ctxIndexed.length} file(s) in ${ctxT3 - ctxT2}ms`,
           });
@@ -17325,7 +17351,7 @@ async function noteBuildOutcome(
         // port (SERVER's port for single-port, CLIENT's for two-port) from package.json + the server file,
         // and hand it to the builder before it touches the preview. Deterministic; null for a non-fullstack
         // app (a plain client/API is already covered by the framework hint). Reads only a handful of files.
-        const bootHint = await fullstackBootHint(tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''));
+        const bootHint = await promptSteps.step('boot hint', () => fullstackBootHint(tree, (p) => actuator.readFile(workspaceId, p).catch(() => '')));
         if (bootHint) buildPrompt = `${bootHint}\n\n${buildPrompt}`;
         /**
          * REAL OR JUST 3D (admin 2026-08-27: "wording par nahi jana, intension samjhna hai").
@@ -17442,9 +17468,9 @@ async function noteBuildOutcome(
       // turns "continue" from amnesia into a real resume. Best-effort — never blocks the build.
       try {
         const store = getConversationStore();
-        const prior = await findWorkspaceConversation(store, userId, workspaceId);
+        const prior = await promptSteps.step('conversation recap', () => findWorkspaceConversation(store, userId, workspaceId));
         if (prior) {
-          const full = await store.get(prior.id);
+          const full = await promptSteps.step('conversation read', () => store.get(prior.id));
           // MEMORY FIX 6 (long sessions): a ROLLING summary — recent turns verbatim PLUS a condensed
           // digest of everything before them — so the early context (the original ask, what the app
           // is) is not silently dropped once the session grows past the recap window.
@@ -17732,6 +17758,7 @@ async function noteBuildOutcome(
       // The gate is an exact-match allowlist against the SIGN-IN email and used to record nothing at
       // all, so a mistyped domain and a below-threshold prompt produced the identical symptom:
       // silence. Advisory string only — it can never enable, block or slow a build.
+      try { buildDiag.closeSetupWindow('Prompt context gathered', promptSteps.list()); } catch { /* timing is observation only */ }
       try {
         const pmDiag = projectModeDiagnosis({
           flagRaw: process.env.AGENTV3_PROJECT_MODE,
@@ -17750,7 +17777,7 @@ async function noteBuildOutcome(
         // point is withdrawn aloud instead of trailing off (autopsy e706e068).
         let ppDecompositionAnnounced = false;
         try {
-          let pPlan = await loadProjectPlan(workspaceId);
+          let pPlan = await finalSteps.step('project plan', () => loadProjectPlan(workspaceId));
           const planPreExisted = !!pPlan;
           // A single bounded plan-generation LLM call (used by BOTH the initial decomposition and the
           // GA-7 live-replan below). Cheap-floor-first like every other build text call. The outer
@@ -17977,7 +18004,7 @@ async function noteBuildOutcome(
         try {
           const golden = goldenScaffoldForPrompt(prompt);
           if (golden) {
-            const existingSrc = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
+            const existingSrc = (await finalSteps.step('template check', () => actuator.listFiles(workspaceId).catch(() => [] as string[])))
               .filter((p) => p.startsWith('src/'));
             // "Nothing of anybody's is here", not "src/ is empty" — setup writes our own starter into a fresh
             // workspace, so src/ is never empty any more (autopsy 31254f9a; see `holdsOnlyOurStarter`).
@@ -17997,12 +18024,12 @@ async function noteBuildOutcome(
               // TOGETHER, not one after another (autopsy 972acde5): twelve sequential sandbox round trips
               // were ~5 s of the wait before the first model call. A failed write still rejects the whole
               // seed, exactly as the loop did, and the files are recorded only once every write landed.
-              await Promise.all(Object.entries(goldenFiles).map(([gp, gc]) => actuator.writeFile(workspaceId, gp, gc)));
+              await finalSteps.step('template write', () => Promise.all(Object.entries(goldenFiles).map(([gp, gc]) => actuator.writeFile(workspaceId, gp, gc))));
               for (const [gp, gc] of Object.entries(goldenFiles)) {
                 writtenFiles.set(gp, gc);
                 try { getWorkspaceMemory(workspaceId).indexFile(gp, gc); } catch { /* index best-effort */ }
               }
-              await saveWorkspaceFiles(workspaceId, goldenFiles).catch(() => {});
+              await finalSteps.step('template save', () => saveWorkspaceFiles(workspaceId, goldenFiles).catch(() => {}));
               // 🔴 REMEMBERED FOR THE BILL (autopsy 2b0a3ed5). These 12 files go into `writtenFiles`
               // above so the rest of the build treats them as present — but they are OUR template, not
               // the user's app. `decideCancelledBuildBill`'s "nothing delivered, nothing charged" rule
@@ -18195,7 +18222,9 @@ async function noteBuildOutcome(
       // 🧹 THE PACKAGE LIST AS THE BUILDER FOUND IT (unusedDepPrune.ts). Read once, after every platform seed
       // (template, golden scaffold, pasted page) and before the first model call, so a package this build
       // adds can be told from one the user already had. Unreadable ⇒ null ⇒ nothing is ever removed.
-      const packageJsonAtBuildStart: string | null = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
+      const packageJsonAtBuildStart: string | null = await finalSteps.step('package.json read', () => actuator.readFile(workspaceId, 'package.json').catch(() => null));
+      // The last window before the first model call: project plan, template seed, the reads above (autopsy 303e8a6f).
+      try { buildDiag.closeSetupWindow('Final preparation', finalSteps.list()); } catch { /* timing is observation only */ }
       const fastLaneWouldRun = !goldenPreseeded && pastedSeed.size === 0 && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
       const fastLaneRung = fastLaneWouldRun
         ? (() => {

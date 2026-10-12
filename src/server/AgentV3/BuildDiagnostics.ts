@@ -16,6 +16,7 @@ import { toolCallDetail } from './toolCallTarget';
 import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
 import { isProjectSummaryNarration } from './ProjectSummary';
 import { WORKING_LINE_ID } from '../../lib/liveStatusLine';
+import { prepWindowDetail } from './prepClock';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
 import { redactSecrets } from './SecretRedactor';
@@ -982,6 +983,8 @@ export class BuildDiagnostics {
   private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
   private cacheReadInputTokens?: number;
   private providerWaste?: BuildDiagnosticsReport['providerWaste'];
+  /** Timed setup spans before the first model call ([start, end] ms) — see recordSetupTiming. */
+  private readonly setupSpans: Array<{ startMs: number; endMs: number; message: string }> = [];
   private billing?: BuildBillingRecord;
   /** What the user was promised at t=0 — see `etaAccuracy`. Absent on turns that show no ETA. */
   private etaPromise?: EtaPromise;
@@ -1549,6 +1552,20 @@ export class BuildDiagnostics {
           ? `, and ending at: "${gap.until}" — that second line is usually the step that filled it, and is where to look first.`
           : ' — that is where to look first (it names when the silence started, not what caused it).')
       : attributed;
+    // 🧭 HOW MUCH OF THE WAIT WAS TIMED AT ALL (autopsy 303e8a6f). The sentence above names "sandbox setup, project
+    // restore and secrets loading", and the timed setup lines covered 4.4 s of an 11.4 s wait. Said whenever a
+    // second or a tenth of it sits in no timed step, with the largest such stretch named by what it followed.
+    let covered = withGap;
+    try {
+      const callStart = this.now() - (lat ?? 0);
+      const cov = this.setupSpans.length ? this.setupCoverage(this.startedAt, callStart) : null;
+      const prepMs = Math.max(0, callStart - this.startedAt);
+      if (cov && prepMs > 0 && (cov.untimedMs >= 1000 || cov.untimedMs >= prepMs * 0.1)) {
+        const s = (ms: number) => `${Math.round(ms / 100) / 10}s`;
+        covered = `${withGap} Timed setup steps account for ${s(cov.timedMs)} of the ${s(prepMs)}; ${s(cov.untimedMs)} is outside every timed step`
+          + (cov.largest ? ` (largest: ${s(cov.largest.ms)} after "${cov.largest.after}").` : '.');
+      }
+    } catch { /* coverage is observation only */ }
     this.record({
       phase: 'plan',
       // Loud past the point where a user starts wondering whether anything is happening. Judged on
@@ -1556,7 +1573,7 @@ export class BuildDiagnostics {
       // flagging it here sent the reader hunting the wrong subsystem.
       severity: seconds >= 60 ? 'warning' : 'info',
       code: 'TIME_TO_FIRST_CALL',
-      message: withGap,
+      message: covered,
       autoResolved: seconds < 60,
     });
   }
@@ -2374,6 +2391,58 @@ export class BuildDiagnostics {
   /** Fix 37a — stamp how many earlier builds in this workspace ended not-ok (from durable history). */
   setPriorFailedBuilds(n: number): void {
     if (Number.isFinite(n) && n >= 0) this.priorFailedBuilds = Math.floor(n);
+  }
+
+  /**
+   * One timed setup step, recorded as SETUP_TIMING and kept as a SPAN so the first-call line can say how much of
+   * the wait was timed at all (autopsy 303e8a6f: 62% of an 11.4 s wait was in no line). Every SETUP_TIMING goes
+   * through here or `closeSetupWindow` — a census forbids a hand-written one in the route.
+   */
+  recordSetupTiming(t: { message: string; detail?: string; startMs: number; endMs?: number }): void {
+    const endMs = Number.isFinite(t.endMs) ? (t.endMs as number) : this.now();
+    const startMs = Number.isFinite(t.startMs) ? Math.min(t.startMs, endMs) : endMs;
+    this.setupSpans.push({ startMs, endMs, message: t.message });
+    this.record({ phase: 'build', severity: 'info', code: 'SETUP_TIMING', message: t.message, ...(t.detail ? { detail: t.detail } : {}), autoResolved: true });
+  }
+
+  /**
+   * Close a setup WINDOW: from where the last timed span ended (or the build start) to now, so consecutive windows
+   * tile the wait with no gap by construction. `steps` name what happened inside; the rest is said as `other`.
+   */
+  closeSetupWindow(title: string, steps: ReadonlyArray<{ name: string; ms: number }> = []): void {
+    const endMs = this.now();
+    const startMs = this.setupSpans.length ? Math.max(...this.setupSpans.map((s) => s.endMs)) : this.startedAt;
+    const wallMs = Math.max(0, endMs - startMs);
+    const secs = wallMs >= 1000 ? `${Math.round(wallMs / 100) / 10}s` : `${wallMs}ms`;
+    this.recordSetupTiming({ message: `${title} in ${secs}`, detail: prepWindowDetail(steps, wallMs), startMs, endMs });
+  }
+
+  /**
+   * How much of [from, until] no timed setup span covers, and the largest such stretch — named by the span (or the
+   * build start) it followed. PURE over the recorded spans.
+   */
+  setupCoverage(fromMs: number, untilMs: number): { timedMs: number; untimedMs: number; largest: { ms: number; after: string } | null } {
+    const spans = this.setupSpans
+      .map((s) => ({ a: Math.max(fromMs, s.startMs), b: Math.min(untilMs, s.endMs), message: s.message }))
+      .filter((s) => s.b > s.a)
+      .sort((x, y) => x.a - y.a);
+    let timedMs = 0;
+    let cursor = fromMs;
+    let after = 'the start of the build';
+    let largest: { ms: number; after: string } | null = null;
+    for (const s of spans) {
+      if (s.a > cursor) {
+        const gap = s.a - cursor;
+        if (!largest || gap > largest.ms) largest = { ms: gap, after };
+      }
+      if (s.b > cursor) { timedMs += s.b - Math.max(cursor, s.a); cursor = s.b; after = s.message; }
+    }
+    if (untilMs > cursor) {
+      const gap = untilMs - cursor;
+      if (!largest || gap > largest.ms) largest = { ms: gap, after };
+    }
+    const total = Math.max(0, untilMs - fromMs);
+    return { timedMs, untimedMs: Math.max(0, total - timedMs), largest };
   }
 
   /** Stamp the provider-time waste ledger as numbers (see the report field). Best-effort; a bad value is ignored. */

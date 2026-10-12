@@ -77,13 +77,15 @@ describe('the wiring (order matters: the answer must land before the prompt is b
   const offerAt = route.indexOf('const decision = startOfferDecision({');
   it('the offer runs after the vault loads and before the vault is handed to the app and the prompt', () => {
     expect(offerAt).toBeGreaterThan(0);
-    expect(route.indexOf('vaultSecrets = await loadUserVaultSecrets(userId, workspaceId);')).toBeLessThan(offerAt);
+    // One vault read for the keys and the withheld names since 303e8a6f.
+    expect(route.indexOf("const vault = await wiringSteps.step('vault', () => loadUserVaultForBuild(userId, workspaceId));")).toBeLessThan(offerAt);
+    expect(route.indexOf('vaultSecrets = vault.secrets;')).toBeLessThan(offerAt);
     expect(offerAt).toBeLessThan(route.indexOf('dispatcher.setUserSecrets(appEnv);'));
     expect(offerAt).toBeLessThan(route.indexOf('const dbContext = userDatabaseContext(vaultSecrets);'));
   });
   it('an approved database is re-read from the vault, so the builder is told about it', () => {
     const block = route.slice(offerAt, offerAt + 4000);
-    expect(block).toMatch(/provisionDatabaseForUser\(userId[\s\S]*vaultSecrets = await loadUserVaultSecrets\(userId, workspaceId\)/);
+    expect(block).toMatch(/provisionDatabaseForUser\(userId[\s\S]*const fresh = await loadUserVaultForBuild\(userId, workspaceId\)[\s\S]*vaultSecrets = fresh\.secrets/);
     expect(block).toMatch(/waitForUser\(requestId, START_OFFER_WAIT_MS\)/); // the one door that also listens to Stop (autopsy 1219c639)
   });
   it('the mid-build fallback never asks the same question a second time', () => {

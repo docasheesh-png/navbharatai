@@ -56,6 +56,12 @@ export function findingLabel(message: unknown): string {
 }
 
 export const PROCESS_ONLY_CODES = new Set([
+  // Q-381 batch six (2026-10-12). The dev server would not stay up after the platform restarted it. Its own
+  // recording sites say "The app's code was never the problem here — nothing was listening on the preview
+  // port" and call it "an infrastructure finding, not an accusation against the user's code" (autopsy
+  // e628efd4). A WARNING, so the error count a RED gate reads cannot change and no bill moves; the server's
+  // last words stay in the admin report.
+  'PREVIEW_SERVER_DOWN',
   'BUILD_OFFER_ACCEPTED', 'ATTACHMENT_RECALLED',
   // A project import refused because the chat already held an app (Q-733). Nothing about the app is wrong —
   // it was deliberately left untouched — so it is never a problem WITH the user's app.

@@ -13331,6 +13331,9 @@ async function noteBuildOutcome(
     // both exits consult it so an unresolved-critical build is honestly NOT-ok (→ free via the existing
     // "working app or free" guard, and resumable on the finalizer path so the next window fixes them).
     let reviewCriticalsUnresolved: string[] = [];
+    // Q-381 batch six: the architecture rules this build broke, re-checkable before the release gate counts
+    // them (set by the integrity pass, read just before the gate).
+    let architectureRecheck: { broken: string[]; still: (files: Record<string, string>) => Set<string> } | null = null;
     // DURABLE FILE CAPTURE, hoisted here (not just inside the build-execution block below) so BOTH the
     // deadline-timeout handler above and the crash catch below — a plain `try{}`/`catch{}` block is its
     // own separate scope from an inner `const` — can see and durably flush it. Records the exact content
@@ -20422,6 +20425,10 @@ async function noteBuildOutcome(
                     ...obs(`${v.file} breaks how this app is built — ${v.detail}. ${v.rule}`),
                   });
                 }
+                if (broken.length > 0) {
+                  const keyOf = (v: { file: string; detail: string }) => `${v.file} breaks how this app is built — ${v.detail}`;
+                  architectureRecheck = { broken: broken.map(keyOf), still: (files) => new Set(checkInvariants(baseInvariants, files).map(keyOf)) };
+                }
                 if (broken.length === 0) {
                   // Recorded on a clean build too: a check that only ever speaks up when it finds
                   // something leaves no evidence that it ran at all, and an unproven check is exactly
@@ -23385,6 +23392,16 @@ async function noteBuildOutcome(
         try {
           if (writtenFiles.size > 0 && buildDiag.hasOpenSyntaxFinding() && (await findSyntaxErrors(Object.fromEntries(writtenFiles))).length === 0) {
             buildDiag.answerSyntaxOnCleanParse('before the release gate');
+          }
+        } catch { /* a re-check only ever answers; it must never block the gate */ }
+        // …and the architecture rules the integrity pass found broken (Q-381 batch six): a rule a later pass
+        // brought back is answered, so its "Keep your app built the way it was" button never outlives it.
+        try {
+          if (architectureRecheck) {
+            const still = architectureRecheck.still(Object.fromEntries(writtenFiles));
+            for (const key of architectureRecheck.broken) {
+              if (!still.has(key)) buildDiag.resolveOnRecheck('ARCHITECTURE_INVARIANT_VIOLATED', { messageIncludes: key });
+            }
           }
         } catch { /* a re-check only ever answers; it must never block the gate */ }
         const gateFindings = () => ({

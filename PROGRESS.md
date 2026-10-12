@@ -94148,3 +94148,22 @@ readers + a critic, fixed in three worktree-isolated groups, each adversarially 
   - `REVIEWER_AUTOFIX_INCOMPLETE`: the reviewer auto-fix retries after a thrown first attempt. When the retry completed, its "Auto-fixed" line sat beside the open "did NOT complete — may still be present" warning. A completed pass now answers it. What is really left is for the Q-157 second review to say.
   - `SERVERLESS_PAYMENT_NOT_SET_UP`: a later setup that worked did not answer the earlier failure. The message now names the table, and a success answers that table only. This matters because batch three gave this code a button.
 - **Tests:** `tests/aDefectTheUserIsShownHasAButton.test.ts` gained two blocks. Each was reverted and seen to fail. The backlog stays at 14: neither code changed home.
+
+### 2026-10-12 — #3676 merged; Q-821 built; Q-381 batch six (14 → 0, the backlog is empty)
+
+The admin's instruction: *"rukna hi nahi hai!! sabhi ke liye han hai"* (don't stop; yes to everything).
+
+- **Q-821 (yes, as recommended):**
+  - The syntax gate records `OUTCOME_SYNTAX_ERROR` (ERROR) when its one repair pass cannot clear a file. Nothing answered that line when a later pass made every file parse.
+  - The release gate runs BEFORE the final syntax re-check and counts every open ERROR, so such a build was turned RED, flipped to NOT ok and left free.
+  - The same files are now re-parsed before the gate counts them, and again at the final re-check. A clean parse answers both the error and its warning (`answerSyntaxOnCleanParse`, timeline line `SYNTAX_RECHECK_CLEAN`). A file that still does not parse keeps its error.
+  - Test: `tests/aFixedSyntaxErrorIsNotCountedAgainstTheApp.test.ts`. The real release gate reads RED before and not RED after. Reverted two ways and seen to fail.
+- **Q-381 batch six (14 → 0):** every problem a user can be shown now has a home.
+  - **8 offers:** preview compile, preview still failing, last-chance proof, preview error, build timeout ("Finish building your app"), database unreachable, backstop review, architecture rule.
+  - The architecture rule is now re-checked before the gate, and answered once a later pass restores it.
+  - **2 roll-ups**, each offered through the finding it restates: `OUTCOME_PREVIEW_COMPILE` and `REVIEWER_AUTOFIX_INCOMPLETE`. The latter sits before the settle lines in the map, so the line that lists the findings is the evidence.
+  - **3 declared with no button and still counted:** the release-gate roll-up, `STUCK_TOOL`, and `PLATFORM_SOURCE_WORKSPACE`. The last two follow Q-380's rule, so those builds stay free.
+  - **1 process-only, a WARNING:** `PREVIEW_SERVER_DOWN`, by its own recording site's words.
+  - **No bill moves.** Not one ERROR code went to PROCESS_ONLY, and a test now fails if one ever does.
+  - **Census tests that encoded "deliberately unclassified"** were updated to the decided homes. The baseline is `[]`, and the ratchet keeps it empty.
+  - Reverted three ways and seen to fail.

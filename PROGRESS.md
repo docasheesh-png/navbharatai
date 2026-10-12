@@ -94257,3 +94257,11 @@ Seven rows built: Q-843, Q-846, Q-861, Q-862, Q-863, Q-864, Q-865. Each is root-
   - that #3678's detector never matched the real prompt `Nokia c 2-01`;
   - the build this session does next.
 - **Renumbered row:** #3681 (a third session) took **Q-866** for "basic phone" ≠ keypad phone. The heavy-import row this branch had filed as Q-866 is now **Q-867**.
+### 2026-10-12 — Q-866: "basic phone" is not a keypad phone (found reviewing #3678)
+
+- **The problem:** `deviceTarget.ts` (Q-846, merged in #3678) listed `basic` and `button` as words that name a keypad phone. Both are also app words: "ek basic phone book app banao", "a basic phone directory for my shop", "build a basic phone number validator" and "big button phone dialer" all matched. Each of those users would have been told that no web app can run on their phone, the builder would have been forced to a light 2D keys-first build, and the game kit would have refused three.js.
+- **The class:** a device word that is also an app word. A phrase belongs in `KEYPAD_PHRASE` only when it names a device and nothing else.
+- **Fix:** `basic` and `button` removed. "feature phone", "keypad phone", KaiOS, JioPhone and the named Nokia keypad models stay, and every positive case in the test still matches.
+- **Lock:** the four prompts above plus "basic phone app with login" are NEGATIVE cases in `tests/aPhoneTheAppCannotRunOnIsNamed.test.ts`. With the old regex back, five of them fail.
+- Raised as a review comment on #3678 before it merged; the PR merged without it, so this is its own change.
+

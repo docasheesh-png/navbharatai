@@ -17,8 +17,11 @@
 
 /** Named Nokia keypad models: the hyphenated S40 C-series, Asha, and the classic numbers. */
 const NOKIA_KEYPAD = /\bnokia\s*(?:c\d-\d{2}\b|asha\b|(?:105|106|110|130|150|215|220|225|2660|2720|3310|5310|6300|8000|8110)\b)/i;
-/** The phrases that name the KIND of phone, in English and Hinglish. */
-const KEYPAD_PHRASE = /\b(?:feature|keypad|button|basic)\s*-?\s*phones?\b|\bkai\s*-?\s*os\b|\bjio\s*-?\s*phone\b/i;
+/** The phrases that name the KIND of phone, in English and Hinglish. Only the two that cannot mean an ordinary app:
+ *  \"basic phone\" and \"button phone\" were here and matched \"basic phone book app\", \"basic phone directory\" and \"big
+ *  button phone dialer\" (found reviewing #3678, 2026-10-12) — each would have told a smartphone user their app cannot run.
+ *  THE CLASS: a device word that is also an app word. A phrase joins this list only when it names a device and nothing else. */
+const KEYPAD_PHRASE = /\b(?:feature|keypad)\s*-?\s*phones?\b|\bkai\s*-?\s*os\b|\bjio\s*-?\s*phone\b/i;
 
 /** The phone the user named that a web app cannot run on, or null. PURE. */
 export function namedNonSmartphone(prompt: string | null | undefined): { device: string } | null {

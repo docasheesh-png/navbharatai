@@ -94172,3 +94172,17 @@ Admin, verbatim: *"q845- game chal raha hai. mekup lena chaiye!! waki sabhi me a
 - **Q-860 ✅ RESOLVED (admin decision: keep).** The admin accepted recommendation (a). Vehicles are already seen from behind through the chase camera. The rig's default yaw for non-vehicle cameras is not flipped, because a flip would turn every existing shell game round for users mid-game.
 - **Q-846 → OPEN, to build.** The admin accepted recommendation (a). When a user names a phone that cannot run the app, the reply says so plainly. The build then goes ahead as a light 2D, keypad-first web game.
 - All three closed IDs were appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the same commit.
+
+#### 2026-10-12 — Q-846 correction (admin): the phone was the game's ORIGIN, not its target
+
+Admin, verbatim: *"user ne kaha tha, nokia ke phone me jo game tha, woh game banana hai! na ki nokia phone ke liye game banana hai"*.
+
+- **The note above misread Q-846, and so did the autopsy.** "Create an racing game for Nokia c 2-01" asked for the classic racing game that came on that phone. It did not ask for a game meant to run on it.
+- **The withdrawn plan:** the option-(a) design ("say plainly it cannot run there") answered a question the user never asked.
+- **The class:** a classic phone named in a game request names the game's ORIGIN and STYLE, not its platform.
+- **The corrected Q-846:**
+  - a retro 2D recreation with that era's look and mechanic;
+  - playable in any browser, with touch and keys;
+  - an original title, with no brand logo;
+  - one plain line telling the user how the request was read;
+  - no refusal.

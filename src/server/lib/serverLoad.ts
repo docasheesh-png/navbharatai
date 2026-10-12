@@ -29,6 +29,7 @@
  * request, and the UI must say so. Presenting it as "the server" would be the same mistake as
  * building a live-sandbox count from one process's memory.
  */
+import { cgroupV2FileCandidates, CGROUP_V2_ROOT, SELF_CGROUP_FILE } from './cgroupSelf';
 import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import type { Request, Response, NextFunction } from 'express';
@@ -117,7 +118,11 @@ export function gradeLoad(s: {
  * meaningless and a made-up denominator here would understate a real memory problem.
  */
 export function readMemoryLimitBytes(read: (p: string) => string = (p) => readFileSync(p, 'utf8')): number | null {
-  const candidates = ['/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory/memory.limit_in_bytes'];
+  // The process's OWN cgroup first (autopsy 303e8a6f): `memory.max` exists only in non-root cgroups, so the mount
+  // root is right only under a private cgroup namespace — `cgroupSelf.ts` resolves both, nearest first.
+  let self: string | null = null;
+  try { self = read(SELF_CGROUP_FILE); } catch { /* no /proc here — the root candidates still apply */ }
+  const candidates = [...cgroupV2FileCandidates('memory.max', self), `${CGROUP_V2_ROOT}/memory/memory.limit_in_bytes`];
   for (const path of candidates) {
     try {
       const raw = read(path).trim();

@@ -124,33 +124,70 @@ export function dayKey(atMs: number): string {
 // the vCPUs and drop RAM — which is safe only if a real build, WITH the post-build browser gates
 // running, provably fits. This asks the machine's own accounting rather than guessing.
 //
-// cgroup v2 keeps `memory.peak`; v1 keeps `memory.max_usage_in_bytes`. Which one the template's kernel
-// exposes is not knowable from here, so the probe tries both and says `unavailable` if neither exists
-// — an honest gap, never an invented number.
+// cgroup v2 keeps `memory.peak`; v1 keeps `memory.max_usage_in_bytes`. Either may be missing, so the probe tries
+// both and says `unavailable` if neither exists — an honest gap, never an invented number.
+//
+// 🔴 READ IN THE BUILD'S OWN cgroup, NOT AT THE MOUNT ROOT (autopsy 303e8a6f, 2026-10-12). `memory.peak` exists
+// only in non-root cgroups. An E2B sandbox is a VM whose envd runs every build command in `/sys/fs/cgroup/user`,
+// so reading `/sys/fs/cgroup/memory.peak` found nothing on every build since this shipped (2026-09-11) — and the
+// report blamed the machine ("no cgroup accounting exposed") for a file we looked for in the wrong directory.
+// The probe now resolves its own cgroup from /proc/self/cgroup (see cgroupSelf.ts); under a cgroup namespace
+// that is `/`, so a container reads exactly what it read before.
 
-/** One shell command; prints `v2 <bytes>`, `v1 <bytes>` or `unavailable`. Read-only. */
-export const PEAK_MEMORY_PROBE =
-  'if [ -r /sys/fs/cgroup/memory.peak ]; then echo "v2 $(cat /sys/fs/cgroup/memory.peak)"; '
-  + 'elif [ -r /sys/fs/cgroup/memory/memory.max_usage_in_bytes ]; then echo "v1 $(cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes)"; '
-  + 'else echo unavailable; fi';
-
-export interface PeakMemory {
-  bytes: number;
-  source: 'cgroup-v2' | 'cgroup-v1';
+/**
+ * One shell command, read-only. Prints `v2 <bytes> oom_kill=<n> cgroup=<path>`, `v1 <bytes>` or
+ * `unavailable cgroup=<path>`. The paths are parameters only so a test can run it against a fixture tree.
+ */
+export function peakMemoryProbe(cgroupRoot = '/sys/fs/cgroup', selfCgroup = '/proc/self/cgroup'): string {
+  const root = cgroupRoot.replace(/\/+$/, '');
+  return `cg=$(sed -n 's/^0:://p' ${selfCgroup} 2>/dev/null | head -n1); d="${root}\${cg%/}"; `
+    + `if [ -r "$d/memory.peak" ]; then echo "v2 $(cat "$d/memory.peak") oom_kill=$(sed -n 's/^oom_kill //p' "$d/memory.events" 2>/dev/null) cgroup=\${cg:-/}"; `
+    + `elif [ -r ${root}/memory/memory.max_usage_in_bytes ]; then echo "v1 $(cat ${root}/memory/memory.max_usage_in_bytes)"; `
+    + `else echo "unavailable cgroup=\${cg:-unknown}"; fi`;
 }
 
-/** Parse the probe's output. Anything unexpected is null — the report then says "not available". */
+/** The probe production runs — the tested builder, never a separate string. */
+export const PEAK_MEMORY_PROBE = peakMemoryProbe();
+
+/** What the probe found. `null` from the parser means it gave no readable answer at all. */
+export type PeakMemory =
+  | { kind: 'value'; bytes: number; source: 'cgroup-v2' | 'cgroup-v1'; cgroup?: string; oomKills?: number }
+  | { kind: 'unavailable'; cgroup?: string };
+
+/** Parse the probe's output. Anything unexpected is null — the report then says it was not measured. */
 export function parsePeakMemory(stdout: string | null | undefined): PeakMemory | null {
-  const m = /^\s*(v1|v2)\s+(\d+)\s*$/m.exec(String(stdout ?? ''));
-  if (!m) return null;
-  const bytes = Number(m[2]);
-  if (!Number.isFinite(bytes) || bytes <= 0) return null;
-  return { bytes, source: m[1] === 'v2' ? 'cgroup-v2' : 'cgroup-v1' };
+  const text = String(stdout ?? '');
+  const m = /^\s*(v1|v2)\s+(\d+)(?:\s+oom_kill=(\d*))?(?:\s+cgroup=(\S+))?\s*$/m.exec(text);
+  if (m) {
+    const bytes = Number(m[2]);
+    if (!Number.isFinite(bytes) || bytes <= 0) return null;
+    const oom = m[3] ? Number(m[3]) : NaN;
+    return {
+      kind: 'value', bytes, source: m[1] === 'v2' ? 'cgroup-v2' : 'cgroup-v1',
+      ...(m[4] ? { cgroup: m[4] } : {}),
+      ...(Number.isFinite(oom) ? { oomKills: oom } : {}),
+    };
+  }
+  const u = /^\s*unavailable(?:\s+cgroup=(\S+))?\s*$/m.exec(text);
+  if (u) return { kind: 'unavailable', ...(u[1] && u[1] !== 'unknown' ? { cgroup: u[1] } : {}) };
+  return null;
 }
 
-/** The report line. States the template's size beside the peak so the headroom is visible. */
+/**
+ * The report line. Three different facts, three different sentences: a number (with the template's size beside
+ * it, so the headroom is visible), a machine that answered "this cgroup keeps no counter", and a probe that never
+ * answered. The last two used to share one sentence that blamed the machine for both.
+ */
 export function describePeakMemory(peak: PeakMemory | null, templateGb: number): string {
-  if (!peak) return 'Peak memory: not available on this machine (no cgroup accounting exposed)';
+  if (!peak) return 'Peak memory: not measured — the probe gave no readable answer (it timed out, failed or printed something unexpected), so nothing is known about memory.';
+  if (peak.kind === 'unavailable') {
+    return `Peak memory: not available — the build's cgroup (${peak.cgroup ?? 'not identified'}) keeps no memory.peak, and there is no cgroup-v1 counter either.`;
+  }
   const gb = peak.bytes / 1024 ** 3;
-  return `Peak memory: ${gb.toFixed(2)} GB of ${templateGb} GB (${Math.round((gb / templateGb) * 100)}%, ${peak.source})`;
+  // memory.peak counts reclaimable file cache too, so this is an UPPER bound on what the build needed; the
+  // out-of-memory kill count is the fact that says whether memory ever actually ran out.
+  const where = peak.cgroup ? ` ${peak.cgroup}` : '';
+  const oom = typeof peak.oomKills === 'number' ? `; ${peak.oomKills} out-of-memory kill${peak.oomKills === 1 ? '' : 's'}` : '';
+  const bound = peak.source === 'cgroup-v2' ? ' — an upper bound: it includes reclaimable file cache' : '';
+  return `Peak memory: ${gb.toFixed(2)} GB of ${templateGb} GB (${Math.round((gb / templateGb) * 100)}%, ${peak.source}${where}${bound}${oom})`;
 }

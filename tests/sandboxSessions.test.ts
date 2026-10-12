@@ -121,24 +121,37 @@ describe('why machines start', () => {
 });
 
 describe('peak memory — asked of the machine, never invented', () => {
-  it('the probe is read-only and tries v2 then v1 then says so', () => {
-    expect(PEAK_MEMORY_PROBE).toContain('/sys/fs/cgroup/memory.peak');
+  it('the probe is read-only, reads the build\'s OWN cgroup, tries v2 then v1, then says so', () => {
+    // Autopsy 303e8a6f: this asserted the mount-root path — the bug's own shape — and passed while the instrument
+    // never produced a number. The real layouts are executed in tests/cgroupOwnPath.test.ts.
+    expect(PEAK_MEMORY_PROBE).toContain('/proc/self/cgroup');
+    expect(PEAK_MEMORY_PROBE).toContain('$d/memory.peak');
+    expect(PEAK_MEMORY_PROBE).not.toContain('/sys/fs/cgroup/memory.peak');
     expect(PEAK_MEMORY_PROBE).toContain('/sys/fs/cgroup/memory/memory.max_usage_in_bytes');
-    expect(PEAK_MEMORY_PROBE).toContain('echo unavailable');
-    expect(PEAK_MEMORY_PROBE).not.toMatch(/\brm\b|>\s*\//);
+    expect(PEAK_MEMORY_PROBE).toContain('echo "unavailable');
+    // Read-only: no rm, and no redirect anywhere except stderr into /dev/null.
+    expect(PEAK_MEMORY_PROBE.replace(/2>\/dev\/null/g, '')).not.toMatch(/\brm\b|>/);
   });
 
   it('parses both accountings and rejects everything else', () => {
-    expect(parsePeakMemory('v2 1610612736\n')).toEqual({ bytes: 1_610_612_736, source: 'cgroup-v2' });
-    expect(parsePeakMemory('v1 734003200')).toEqual({ bytes: 734_003_200, source: 'cgroup-v1' });
-    for (const bad of ['unavailable', '', null, 'v2 0', 'v3 12', 'v2 abc']) {
+    expect(parsePeakMemory('v2 1610612736\n')).toEqual({ kind: 'value', bytes: 1_610_612_736, source: 'cgroup-v2' });
+    expect(parsePeakMemory('v2 1610612736 oom_kill=0 cgroup=/user')).toEqual({ kind: 'value', bytes: 1_610_612_736, source: 'cgroup-v2', cgroup: '/user', oomKills: 0 });
+    expect(parsePeakMemory('v1 734003200')).toEqual({ kind: 'value', bytes: 734_003_200, source: 'cgroup-v1' });
+    expect(parsePeakMemory('unavailable cgroup=/user')).toEqual({ kind: 'unavailable', cgroup: '/user' });
+    expect(parsePeakMemory('unavailable')).toEqual({ kind: 'unavailable' });
+    for (const bad of ['', null, 'v2 0', 'v3 12', 'v2 abc']) {
       expect(parsePeakMemory(bad as never), String(bad)).toBeNull();
     }
   });
 
-  it('the report line shows headroom against the template, and admits when it cannot', () => {
-    expect(describePeakMemory({ bytes: 1.5 * 1024 ** 3, source: 'cgroup-v2' }, 4)).toBe('Peak memory: 1.50 GB of 4 GB (38%, cgroup-v2)');
-    expect(describePeakMemory(null, 4)).toMatch(/not available/);
+  it('the report line shows headroom against the template, and admits when it cannot — saying which case', () => {
+    expect(describePeakMemory({ kind: 'value', bytes: 1.5 * 1024 ** 3, source: 'cgroup-v1' }, 4)).toBe('Peak memory: 1.50 GB of 4 GB (38%, cgroup-v1)');
+    expect(describePeakMemory({ kind: 'value', bytes: 1.5 * 1024 ** 3, source: 'cgroup-v2', cgroup: '/user', oomKills: 0 }, 4))
+      .toBe('Peak memory: 1.50 GB of 4 GB (38%, cgroup-v2 /user — an upper bound: it includes reclaimable file cache; 0 out-of-memory kills)');
+    expect(describePeakMemory({ kind: 'unavailable', cgroup: '/user' }, 4)).toMatch(/not available — the build's cgroup \(\/user\) keeps no memory\.peak/);
+    expect(describePeakMemory(null, 4)).toMatch(/^Peak memory: not measured — the probe gave no readable answer/);
+    // "No accounting exposed" is a claim about the machine nobody checked — never said again.
+    expect(describePeakMemory(null, 4)).not.toMatch(/no cgroup accounting exposed/);
   });
 });
 

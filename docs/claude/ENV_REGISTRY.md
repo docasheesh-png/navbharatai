@@ -186,6 +186,13 @@ the code (it is actually read somewhere) on 2026-07-11.
   ⚠️ Do not add a second "is the copy current?" rule anywhere — ask that helper. And do not move the
   `snapshot` stream event back to save time: it belongs after the confirmation, or a stale copy gets
   announced as the app.
+  🔴 **CORRECTED 2026-10-12 (autopsy 303e8a6f): the probe never produced a number until then.** It read
+  `/sys/fs/cgroup/memory.peak` at the mount ROOT, where the kernel never creates that file; an E2B sandbox is a VM
+  whose envd runs every build command in `/sys/fs/cgroup/user`. Every "not available (no cgroup accounting
+  exposed)" since 2026-09-11 was the probe looking one directory too high. It now reads the build's OWN cgroup
+  (from `/proc/self/cgroup`, `cgroupSelf.ts`), prints the out-of-memory kill count beside the peak, and calls the
+  number what it is — an UPPER bound (memory.peak includes reclaimable file cache). A probe that never answered
+  is "not measured", never a claim about the machine. Read the RAM decision off the peak AND the OOM-kill count.
 - **📊 WHAT E2B ACTUALLY COSTS — measured, not estimated (admin's own dashboard, 2026-08-11).** The
   knobs above are worth real money, so here is the money. Billing window Jul 14 – Aug 13 2026 (30 days),
   read off the E2B usage dashboard: **1,260 sandboxes started/resumed · 2,078.29 vCPU-hours ·

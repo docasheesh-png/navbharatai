@@ -29,7 +29,9 @@ dockerfile    = "e2b.Dockerfile"
 #   2 vCPU + 2 GB  = $0.1332/h  (−20%)       2 vCPU + 3 GB = $0.1494/h  (−10%)
 # RAM is billed per WALL-CLOCK hour, so anything that makes a build slower costs
 # more; fewer vCPUs are not a saving by default (break-even ≈ 1.44× slower).
-# Changing RAM needs the measured peak first — SANDBOX_PEAK_MEMORY in the build report.
+# Changing RAM needs the measured peak first — SANDBOX_PEAK_MEMORY in the build report,
+# read from the cgroup the build's commands run in (/sys/fs/cgroup/user under envd), not
+# the mount root, which has no memory.peak on a VM (corrected 2026-10-12, autopsy 303e8a6f).
 cpu_count = 2
 memory_mb = 4096
 

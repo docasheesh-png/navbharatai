@@ -87,6 +87,21 @@ export function mergeRestoreSources(
  * has to be reported rather than swallowed — an empty machine that nobody admits is empty is exactly
  * how this became a fifty-attempt bug.
  */
+/**
+ * May the template a FRESH machine was seeded with be written to the durable store (the setup drain)?
+ *
+ * 🔴 Not when the store already held this workspace's files and none of them landed (heal census of autopsy
+ * 303e8a6f, the Q-740 class): the machine was then seeded with our template as if it were new, and the drain —
+ * a merge that OVERWRITES each path — would replace the user's stored `package.json`, `index.html` and configs with
+ * the template's. The store is the truth; a failed refill is never repaired by writing over it. Every other case
+ * is today's behaviour: an empty store, or a refill that landed (then only byte-identical starter pieces are ever
+ * remembered — see `starterFilesToComplete`). PURE.
+ */
+export function mayPersistSeededScaffold(outcome: SandboxRestoreOutcome | null | undefined): boolean {
+  if (!outcome) return true;
+  return !(outcome.durable > 0 && outcome.restored === 0);
+}
+
 export function restoreFailed(outcome: SandboxRestoreOutcome): boolean {
   // A set that was ENTIRELY refused is not a failed restore either: nothing was ever going to be
   // written, and the refusals are deliberate. Only "files were writable and none landed" is the state

@@ -354,6 +354,31 @@ for (const d of DOMAINS) {
   for (const f of d.features) f.re = boundDevanagari(f.re);
 }
 
+/** A feature that controls who may use the app — roles, an admin side, accounts, sign-in. */
+const ACCESS_CONTROL_FEATURE = /\b(?:roles?|rbac|admins?|auth\w*|log\s?-?ins?|sign\s?-?(?:in|up)s?|accounts?|permissions?|2fa)\b/i;
+
+/**
+ * Does this domain's implicit feature list add access control? Read from the list itself, so the answer cannot
+ * drift from what AGENTV3_REQUIREMENT_AWARE actually hands the builder (autopsy 303e8a6f).
+ *
+ * The request-scope rule (requestScope.ts) stood down for EVERY recognised domain, citing this reason — but the
+ * productivity and booking lists name no access control at all, so "a todo app" got no scope note and could be
+ * built behind a login nobody asked for: the 70e030bb class itself. An unknown non-general key stands the rule
+ * down (precision first). PURE.
+ */
+export function domainAddsAccessControl(domain: string | null | undefined): boolean {
+  const key = String(domain ?? '').trim();
+  if (!key || key === 'general') return false;
+  const d = DOMAINS.find((x) => x.key === key);
+  if (!d) return true;
+  return d.features.some((f) => ACCESS_CONTROL_FEATURE.test(f.label));
+}
+
+/** Every recognised domain key, in order. PURE. */
+export function requirementDomainKeys(): string[] {
+  return DOMAINS.map((d) => d.key);
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // ORDINARY ENGLISH IS NOT A DOMAIN (autopsy of buildId 424ecdab, 2026-09-14).

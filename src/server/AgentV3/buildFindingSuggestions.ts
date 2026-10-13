@@ -177,7 +177,7 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     code: 'AI_KEY_IN_BROWSER',
     title: 'Take the AI key out of your app',
     detail: 'Your app calls an AI service straight from the page, so its key would be visible to everyone who opens it.',
-    prompt: 'This app calls an AI provider directly from browser code, so the provider key has to live in the page where every visitor can read and spend it. Replace every such call with NavBharatAI\'s built-in keyless AI helper (generateText / chat), remove any box or setting that asks for an AI key and any key read from storage or the environment in browser code, and keep the feature working. Save the user\'s own data first, then add the AI result when it arrives.',
+    prompt: 'This app calls an AI provider directly from browser code, so the provider key has to live in the page where every visitor can read and spend it. Replace every TEXT call with NavBharatAI\'s built-in keyless AI helper (generateText / chat); for AI PICTURES, use the generate_image_ai recipe, which asks NavBharatAI through the owner\'s own image key saved in Keys & Secrets — pictures are never keyless. Remove any box or setting that asks for an AI key and any key read from storage or the environment in browser code, and keep the feature working. Save the user\'s own data first, then add the AI result when it arrives.',
   },
   {
     // Recorded only on an import turn, where the user asked for no file to change, so the credential-in-logs
@@ -606,7 +606,7 @@ const NEVER_SUGGEST = new Set([
   'BUILD_OFFER_ACCEPTED', 'ATTACHMENT_RECALLED',
   'GOLDEN_SCAFFOLD_SKIPPED', 'LLM_CALL_STOPPED', 'SIMPLE_BUILD_STOPPED', 'DOMAIN_KNOWLEDGE', 'DURABLE_HOLDS_ONLY_STARTER', // autopsy 31254f9a — engine facts
   'GAME_KIT_SEEDED', 'GAME_KIT_NOT_SEEDED', // whether OUR game-kit seed ran (gameKitSeed.ts, build 46e2d74b) — engine facts
-  'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
+  'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_MODULE_FILES_UNDELIVERED', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   'CHECKPOINT_SIGNAL', // our checkpoint heuristic, never a finding (autopsy SignBridge, 2026-09-26)
   'REVIEW_SUGGESTIONS_NOT_READY', // a suggest-only review that ran out of time — nothing for the user to do
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH', 'STRICT_TRIAL', 'SAVED_SOURCE_DIVERGES', 'ATTACHMENTS_READ',

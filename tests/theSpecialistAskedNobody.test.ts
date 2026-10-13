@@ -26,6 +26,7 @@ import {
 import { projectHasUserCode } from '../src/server/AgentV3/platformAuthored';
 import { ViteReactProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/ViteReactProvider';
 import { markupWaiverSettledLine } from '../src/server/AgentV3/previewEarnsMarkup';
+import { releaseGateRecord } from '../src/server/AgentV3/releaseGate';
 import { lintBuiltApp } from '../src/server/AgentV3/buildQualityLint';
 import { DESIGN_KIT_CSS } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/designKit';
 import { analyzeRequest } from '../src/server/AgentV3/RequestAnalyser';
@@ -137,7 +138,10 @@ describe('4 · the report tells one story about a stopped build', () => {
     expect(released).toBeGreaterThan(zeroRule);
   });
   it('a stopped build\'s RED gate is not an error, and its upsell suppression is not a problem', () => {
-    expect(ROUTE).toContain("severity: gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error'");
+    // One helper decides the gate row's severity and its closed flag (autopsy 303e8a6f): a Stop is info + closed.
+    expect(ROUTE).toContain('...releaseGateRecord(gate, {');
+    expect(releaseGateRecord({ state: 'red' }, { buildOk: false, stoppedByUser: true, awaitsShell: false })).toEqual({ severity: 'info', autoResolved: true });
+    expect(releaseGateRecord({ state: 'red' }, { buildOk: false, stoppedByUser: false, awaitsShell: false }).severity).toBe('error');
     expect(ROUTE).toContain("phase: 'build', severity: stopped ? 'info' : 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: stopped,");
   });
 });

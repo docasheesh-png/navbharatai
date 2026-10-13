@@ -68,9 +68,19 @@ export function withClaudeCacheLines(inputPerMTok: number, outputPerMTok: number
   };
 }
 
-/** Claude Opus token rates, USD per 1,000,000 tokens. Override via env. */
+/**
+ * Claude Opus token rates, USD per 1,000,000 tokens. Override via env.
+ *
+ * 🔴 Q-880 (billing audit 2026-10-12). The default was $15 / $75 — Opus 4 / 4.1's price. The Opus this
+ * code calls is `claude-opus-4-8` (`models.ts`), and Anthropic's price for it, verified on
+ * claude.com/pricing on 2026-10-12, is $5 input / $25 output (cache read $0.50, 5-minute cache write
+ * $6.25 — the lines `withClaudeCacheLines` derives). Opus 4.7 is the same price. A provider cost three
+ * times too high was then marked up, so a Strong build that reached its Opus rung was billed on it.
+ * `tests/claudeRatesMatchVerifiedPrices.test.ts` holds the verified table and fails when a default
+ * Claude model id has no verified price, or when this number drifts from it.
+ */
 export function opusRate(): TokenRate {
-  return withClaudeCacheLines(envRate('OPUS_INPUT_PER_MTOK', 15), envRate('OPUS_OUTPUT_PER_MTOK', 75));
+  return withClaudeCacheLines(envRate('OPUS_INPUT_PER_MTOK', 5), envRate('OPUS_OUTPUT_PER_MTOK', 25));
 }
 
 /** Claude Sonnet token rates, USD per 1,000,000 tokens. Override via env. */

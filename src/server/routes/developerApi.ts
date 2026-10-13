@@ -56,7 +56,7 @@ import { usdInrRate } from '../lib/UsdInrRate';
 import { getServerDb } from '../lib/serverDb';
 import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
-import { getConversationStore } from './agentv3';
+import { getConversationStore } from '../AgentV3/sharedConversationStore';
 import { deploymentStore, isLiveDeployment, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 import { effectiveAppName } from '../AgentV3/appName';
 

@@ -48,20 +48,25 @@ const ROUTE = read('src/server/routes/agentv3.ts');
 
 /** The report's own prompt, verbatim. */
 const REPORTED = 'Create an racing game for Nokia c 2-01';
+/** The SAME race without the phone. Q-868 (admin 2026-10-12): a classic Nokia named in a game request means the classic game
+ *  from that phone — a light retro 2D build — so the 3D-kit guarantees below are pinned on the race the phone does not steer,
+ *  and the report's own prompt is pinned 2D in its own test (1c). Until Q-868 the regex missed "c 2-01" (a space after the c),
+ *  which is the only reason the reported prompt ever got the 3D kit. */
+const REPORTED_RACE = 'Create an racing game';
 
 // ── 1 · THE KIT IS LAID DOWN BY THE PLATFORM ─────────────────────────────────────────────────────────
 
 describe('1a · gameKitPlan — which recipes the platform runs, PURE', () => {
   it('the report\'s own prompt is a game, and the plan starts with the runtime', () => {
     expect(analyzeRequirementGaps(REPORTED).domain).toBe('game');
-    const plan = gameKitPlan(REPORTED, 'vite-react');
+    const plan = gameKitPlan(REPORTED_RACE, 'vite-react');
     expect(plan[0]).toBe('generate_game_runtime');
     expect(plan).toContain('generate_game_vfx');
     expect(plan).toContain('generate_melody');
   });
 
   it('the route\'s flat list always wins: the seed never lays the 3D layer or the shell under a game the route calls flat', () => {
-    for (const p of [REPORTED, 'make a 3d racing game', 'make a bike racing game', 'build a car game', 'sudoku game banao', 'a quiz game for kids', '3d snake game', 'Create a candy crush game']) {
+    for (const p of [REPORTED_RACE, 'make a 3d racing game', 'make a bike racing game', 'build a car game', 'sudoku game banao', 'a quiz game for kids', '3d snake game', 'Create a candy crush game']) {
       const plan = gameKitPlan(p, 'vite-react');
       if (!wantsSceneObjects(p)) {
         expect(plan.includes('generate_game_3d'), p).toBe(false);
@@ -86,7 +91,7 @@ describe('1a · gameKitPlan — which recipes the platform runs, PURE', () => {
   });
 
   it('a request that says 3D, or is a racing / driving / vehicle / open-world / village game, gets the 3D kit', () => {
-    for (const p of [REPORTED, 'make a 3d racing game', 'make a bike racing game', 'build a car game', 'a 3d football game',
+    for (const p of [REPORTED_RACE, 'make a 3d racing game', 'make a bike racing game', 'build a car game', 'a 3d football game',
       'open world game like GTA', 'Indian village game', 'truck driving simulator game', '3d snake game']) {
       expect(gameKitWants3D(p), p).toBe(true);
       expect(gameKitPlan(p, 'vite-react'), p).toContain('generate_game_shell');
@@ -97,7 +102,7 @@ describe('1a · gameKitPlan — which recipes the platform runs, PURE', () => {
   it('🔒 a plan without the 3D layer takes only the SOUND half of the effects layer (its particles are three.js)', () => {
     const flat: GameKitRecipe[] = gameKitPlan('make a sudoku game');
     expect(gameKitRecipeInput('generate_game_vfx', flat)).toEqual({ include: ['audio'] });
-    const threeD: GameKitRecipe[] = gameKitPlan(REPORTED);
+    const threeD: GameKitRecipe[] = gameKitPlan(REPORTED_RACE);
     expect(gameKitRecipeInput('generate_game_vfx', threeD)).toBeUndefined();
     for (const r of threeD) if (r !== 'generate_game_vfx') expect(gameKitRecipeInput(r, threeD), r).toBeUndefined();
   });
@@ -178,7 +183,7 @@ describe('1b · the seed through the real dispatcher — what lands, and whose i
   });
 
   it('the report\'s prompt lays down the engine the builder must use: the loop, meta, objects, camera and shell', async () => {
-    const results = await seed(act, gameKitPlan(REPORTED), recorded);
+    const results = await seed(act, gameKitPlan(REPORTED_RACE), recorded);
     expect(results.every((r) => r.ok), JSON.stringify(results.map((r) => [r.recipe, r.content.slice(0, 120)]))).toBe(true);
     for (const p of ['src/game/core/loop.ts', 'src/game/core/meta.ts', 'src/game/three/objects.ts', 'src/game/three/camera.ts', 'src/game/Game.ts', 'src/game/GameCanvas.tsx']) {
       expect(act.files.has(p), p).toBe(true);
@@ -231,13 +236,13 @@ describe('1b · the seed through the real dispatcher — what lands, and whose i
   });
 
   it('a 3D game still gets the whole effects layer, and three installed with the 3D layer', async () => {
-    await seed(act, gameKitPlan(REPORTED), recorded);
+    await seed(act, gameKitPlan(REPORTED_RACE), recorded);
     expect(act.files.has('src/game/fx/particles.ts')).toBe(true);
     expect(act.commands.some((c) => /npm install[^\n]*\bthree@/.test(c))).toBe(true);
   });
 
   it('the handoff states only what is on disk, built from the real recipe results', async () => {
-    const results = await seed(act, gameKitPlan(REPORTED), recorded);
+    const results = await seed(act, gameKitPlan(REPORTED_RACE), recorded);
     const block = gameKitHandoffBlock(results);
     expect(block).toMatch(/^\[BUILD ON THE GAME KIT — IT IS ALREADY IN src\/game\]/);
     expect(block).toContain('NEVER write a second game loop, input system, camera, meta/best-score store');
@@ -529,7 +534,7 @@ describe('3e · one list of 2D games: the 3D gate agrees with the prompt\'s own 
     }
   });
   it('snakes in a scene, a 3D snake game and the racing games stay scenes', () => {
-    for (const p of ['a jungle adventure game with snakes and tigers', '3d snake game', REPORTED, 'make a bike racing game']) {
+    for (const p of ['a jungle adventure game with snakes and tigers', '3d snake game', REPORTED_RACE, 'make a bike racing game']) {
       expect(wantsSceneObjects(p), p).toBe(true);
     }
   });
@@ -591,11 +596,11 @@ describe('4 · L-12: the ETA key is decided before the estimate, and one helper 
   });
 
   it('the reader and the telemetry writer use ONE helper; etaTaskKey is called nowhere else in the route', () => {
-    expect(ROUTE).toContain('etaKeyForBuild(scaffoldWillSeed)');
-    expect(ROUTE).toMatch(/\.record\(\{[\s\S]{0,600}?taskType: etaKeyForBuild\(goldenPreseeded\),/);
+    expect(ROUTE).toContain('etaKeyForBuild(scaffoldWillSeed, seededScaffold?.tier ?? null)');
+    expect(ROUTE).toMatch(/\.record\(\{[\s\S]{0,600}?taskType: etaKeyForBuild\(goldenPreseeded, goldenPreseededTier\),/);
     const calls = [...ROUTE.matchAll(/\betaTaskKey\(/g)];
     expect(calls).toHaveLength(1); // inside `etaKeyForBuild`
-    expect(ROUTE).toContain('etaTaskKey(analysis?.taskType, scaffolded, buildIsComplex, etaKind)');
+    expect(ROUTE).toContain('etaTaskKey(analysis?.taskType, scaffolded, buildIsComplex, etaKind, scaffoldTier)');
   });
 });
 
@@ -656,10 +661,23 @@ describe('7 · the route and the seed agree about 3D', () => {
   it('a racing game gets the 3D object tier; rock paper scissors (a game the seed keeps 2D) does not; a non-game is unchanged', async () => {
     const { wantsSceneDetail, gameKitWants3D } = await import('../src/server/AgentV3/gameKitSeed');
     const { wantsSceneObjects } = await import('../src/server/lib/heroObjectSpec');
-    expect(wantsSceneDetail('Create an racing game for Nokia c 2-01')).toBe(true);
+    expect(wantsSceneDetail(REPORTED_RACE)).toBe(true);
+    expect(wantsSceneDetail(REPORTED)).toBe(false); // Q-868: the classic Nokia game is light 2D
     expect(gameKitWants3D('rock paper scissors game')).toBe(false);
     expect(wantsSceneDetail('rock paper scissors game')).toBe(false);
     for (const p of ['a 3d model viewer website', 'a todo app']) expect(wantsSceneDetail(p)).toBe(wantsSceneObjects(p));
     expect(ROUTE).toContain('if (wantsSceneDetail(prompt)) {');
+  });
+});
+
+describe('1c · Q-868 — the report\'s own prompt names a classic Nokia: the classic game from that phone, light and 2D', () => {
+  it('🔒 the real prompt gets the 2D kit (runtime, never three.js) and no 3D object tier', async () => {
+    const { wantsSceneDetail, gameKitWants3D } = await import('../src/server/AgentV3/gameKitSeed');
+    expect(gameKitWants3D(REPORTED)).toBe(false);
+    expect(gameKitPlan(REPORTED, 'vite-react')).not.toContain('generate_game_3d');
+    expect(gameKitPlan(REPORTED, 'vite-react')[0]).toBe('generate_game_runtime');
+    expect(wantsSceneDetail(REPORTED)).toBe(false);
+    // The same race with no phone named is still 3D — the phone, and only the phone, makes it light.
+    expect(gameKitWants3D(REPORTED_RACE)).toBe(true);
   });
 });

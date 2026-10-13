@@ -26,7 +26,7 @@
 // PURE.
 
 export interface GreenGuardRestoreFacts {
-  /** Files put back to the last verified-working version. */
+  /** Files put back to the base GreenGuard chose (see `unchecked` for which one). */
   restored: number;
   /** Files the failed attempt had added, and which were removed again. */
   removed: number;
@@ -36,6 +36,12 @@ export interface GreenGuardRestoreFacts {
    * delivered, and what was undone is the engine's own later work. A different sentence is owed.
    */
   fromThisBuild?: boolean;
+  /**
+   * The base was the TURN START, which differs from the last browser-checked snapshot (GreenGuard.ts
+   * `chooseRestoreBase`) — so it was never seen running, and "the last version that DID work … nothing is
+   * broken" would claim a check that did not happen (autopsy 303e8a6f, Q-973).
+   */
+  unchecked?: boolean;
 }
 
 /** Did the guard actually undo anything? A restore that changed nothing is not worth saying. */
@@ -67,6 +73,15 @@ export function greenGuardSummaryCorrection(f: GreenGuardRestoreFacts): string {
     return parts.join('\n\n');
   }
   parts.push(GREEN_GUARD_MARK);
+  if (f.unchecked) {
+    parts.push(
+      'The app stopped working with it, so your app was put back exactly as it was before this request — '
+      + `${f.restored} file(s) restored${f.removed > 0 ? ` and ${f.removed} new one(s) removed` : ''}. `
+      + 'That version was not re-checked in the browser after the restore, so if anything looks wrong, tell me what you see.',
+    );
+    parts.push('Asking again the same way will most likely do the same thing. Ask for the change in smaller steps, and I will work from there.');
+    return parts.join('\n\n');
+  }
   parts.push(
     'The app stopped working with it, so the last version that DID work was put back — '
     + `${f.restored} file(s) restored${f.removed > 0 ? ` and ${f.removed} new one(s) removed` : ''}. `

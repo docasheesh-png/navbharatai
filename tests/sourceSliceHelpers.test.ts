@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { braceBlock, enclosingBlock, sectionUntil, anchorOf, codeOnly } from './helpers/sourceSlice';
+import { braceBlock, enclosingBlock, sectionUntil, anchorOf, codeOnly, awaitedCallAt } from './helpers/sourceSlice';
 
 /**
  * 🔴 SEVEN SOURCE-READING GUARDS BROKE ON CORRECT CODE IN ONE DAY (2026-09-17). This file is the
@@ -87,6 +87,26 @@ describe('codeOnly — prose can neither satisfy nor defeat an assertion about c
   it('never throws on junk', () => {
     expect(codeOnly(undefined as never)).toBe('');
     expect(codeOnly('')).toBe('');
+  });
+});
+
+describe('awaitedCallAt — a timing step is not the call going away (303e8a6f)', () => {
+  const call = "readFile(id, 'package.json')";
+
+  it('finds the call awaited bare, and awaited inside a timing step', () => {
+    expect(awaitedCallAt(`const a = await readFile(id, 'package.json');`, call)).toBe(10);
+    expect(awaitedCallAt(`const a = await prep.step('package.json read', () => readFile(id, 'package.json').catch(() => null));`, call)).toBe(10);
+  });
+
+  it('FAILS when the call is not awaited — the invariant the guards protect', () => {
+    expect(() => awaitedCallAt(`const a = readFile(id, 'package.json');`, call)).toThrow(/no awaited/);
+    expect(() => awaitedCallAt(`void prep.step('x', () => readFile(id, 'package.json'));`, call)).toThrow(/no awaited/);
+    expect(() => awaitedCallAt(`const a = await other(); readFile(id, 'package.json');`, call)).toThrow(/no awaited/);
+  });
+
+  it('treats the call as literal text, not a pattern', () => {
+    // An unescaped `.` would match any character here.
+    expect(() => awaitedCallAt(`await readFile(id, 'packageXjson')`, call)).toThrow(/no awaited/);
   });
 });
 

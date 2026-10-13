@@ -58,6 +58,8 @@ export function rawEntries(data: unknown): RawEntry[] {
 
 export class McpServerStore {
   private db: admin.firestore.Firestore | null = null;
+  /** Reads in flight, by workspace — see listOpened. */
+  private readonly inflight = new Map<string, Promise<OpenedMcpServer[]>>();
 
   /** `dbOverride` is for tests: a fake Firestore instead of the real one. */
   constructor(private readonly dbOverride?: () => admin.firestore.Firestore | null) {}
@@ -102,6 +104,17 @@ export class McpServerStore {
 
   /** Every stored server, opened, with whether its key is usable. Server-side only. [] when unreadable. */
   async listOpened(workspaceId: string): Promise<OpenedMcpServer[]> {
+    // ONE read for callers asking at the same moment (adversarial review of autopsy 303e8a6f): a build asks for the
+    // usable servers and the unreadable ids together, and each used to read the same document. The shared promise
+    // lives only while the read is in flight, so nothing is ever served stale.
+    const pending = this.inflight.get(workspaceId);
+    if (pending) return pending;
+    const p = this.readOpened(workspaceId).finally(() => { this.inflight.delete(workspaceId); });
+    this.inflight.set(workspaceId, p);
+    return p;
+  }
+
+  private async readOpened(workspaceId: string): Promise<OpenedMcpServer[]> {
     const db = this.getDb();
     if (!db || !workspaceId) return [];
     try {

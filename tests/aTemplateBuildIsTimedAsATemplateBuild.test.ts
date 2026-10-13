@@ -61,7 +61,8 @@ describe('a seeded template is its own kind of build', () => {
 
   it('the admin line names the kind in words', () => {
     expect(fleetEtaBasisNote(SCAFFOLD_TASK_KEY, 5, 3)).toContain('start from a tested template');
-    expect(fleetEtaBasisNote('complex_app', 19, 5)).toContain('"complex_app" builds');
+    // In words since 303e8a6f (one table, `etaSliceWords`), never the raw key.
+    expect(fleetEtaBasisNote('complex_app', 19, 5)).toContain('complex app builds');
   });
 });
 
@@ -70,14 +71,14 @@ describe('the route asks one question in both places', () => {
     // Since build 46e2d74b (2026-10-11) both sides call ONE route helper, `etaKeyForBuild`, which hands the
     // scaffold fact straight to `etaTaskKey`; the reader still passes the routing's own prediction.
     const decided = route.indexOf('const scaffoldWillSeed =');
-    const asked = route.indexOf('etaKeyForBuild(scaffoldWillSeed)');
-    expect(route).toContain('etaTaskKey(analysis?.taskType, scaffolded, buildIsComplex, etaKind)');
+    const asked = route.indexOf('etaKeyForBuild(scaffoldWillSeed, seededScaffold?.tier ?? null)');
+    expect(route).toContain('etaTaskKey(analysis?.taskType, scaffolded, buildIsComplex, etaKind, scaffoldTier)');
     expect(decided).toBeGreaterThan(0);
     expect(asked).toBeGreaterThan(decided);
     expect(route).toContain('fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, \'eta-fleet\'), etaFleetKey, etaComplexity)');
   });
 
   it('the telemetry counts the build under the template kind when the template was seeded', () => {
-    expect(route).toMatch(/\.record\(\{[\s\S]{0,600}?taskType: etaKeyForBuild\(goldenPreseeded\),/);
+    expect(route).toMatch(/\.record\(\{[\s\S]{0,600}?taskType: etaKeyForBuild\(goldenPreseeded, goldenPreseededTier\),/);
   });
 });

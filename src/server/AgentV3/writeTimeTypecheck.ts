@@ -39,6 +39,7 @@
 import { TSC_BIN, PRIME_NODE_MODULES, NPM_INSTALL_LOCK_FRESH, MANIFEST_CURRENT } from './tscCommand';
 import { suggestedPropertyRenames, type TscError } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote, remedyFileFor } from './tscErrorCause';
+import { isNotFoundError } from './fsErrors';
 
 /** Per-caller incremental cache. Never the one shared path two builds used to clobber (TD-18). */
 export function tsBuildInfoFile(id: string): string {
@@ -333,6 +334,24 @@ export interface WriteTypecheckStats {
   /** The same writes, by WHICH not-ready condition fired (build 46e2d74b) — see `WriteTypecheckNotReadyReason`. */
   notReadyReasons?: Partial<Record<WriteTypecheckNotReadyReason | 'unknown', number>>;
   /**
+   * 🔴 DID A COMPILE EVER COVER THE SKIPPED WRITES? (Q-910, autopsy `50378049`, 2026-10-12.)
+   *
+   * The report said *"9 TypeScript write(s) skipped before the compiler was ready — 9 because
+   * package.json had changed since the last install"*, and that reads as nine files that were never
+   * compiled. **It may mean nothing of the kind.** `writeTypecheckCommand` runs `tsc --noEmit` over the
+   * WHOLE PROJECT, not over the file just written — so ONE clean run after the last skip has already
+   * compiled every skipped file. The two cases are opposite facts about the build:
+   *
+   *   • a later run succeeded ⇒ the skips cost a few seconds of lateness and nothing else;
+   *   • no later run succeeded ⇒ the end-of-build typecheck was those files' FIRST compile, which is
+   *     the most expensive moment to find anything.
+   *
+   * Nothing recorded which, so nobody could tell — the same gap `notReadyReasons` was added to close one
+   * level up. `true` = a clean run followed the last skip. `false` = none did. `null`/absent = the
+   * question was never asked (a stats object from before this existed), never a silent "no".
+   */
+  cleanRunCoveredSkips?: boolean | null;
+  /**
    * How many times the `tsconfig.json` probe THREW rather than answering.
    *
    * Recorded because a throw and a genuine absence are different facts (`probeFailures > 0` with
@@ -423,15 +442,8 @@ export function shouldProbeTsconfig(verdict: TsProjectVerdict, attempts: number)
  * sandbox, a network error, an empty message) stays unknown and is retried. Pure.
  */
 export function isMissingFileError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
-  if (!msg) return false;
-  const m = msg.toLowerCase();
-  // A DEAD SANDBOX CAN SAY "no such file or directory" ABOUT THE WHOLE WORKSPACE — this repo records
-  // exactly that string (`[not_found] lstat /home/user/workspace: no such file or directory`). That is
-  // not a missing tsconfig, it is a missing machine, and treating it as an answer would be the same
-  // mistake one level up. A message naming the workspace root is never a verdict about one file.
-  if (m.includes('/home/user/workspace:') || m.includes('workspace: no such file')) return false;
-  return m.includes('enoent') || m.includes('no such file') || m.includes('not_found') || m.includes('not found');
+  // The one shared predicate (fsErrors.ts) — this copy had drifted from it (heal census of autopsy 303e8a6f).
+  return isNotFoundError(err);
 }
 
 /** The project question is no longer open — either it was answered, or its probe budget is spent. Pure. */
@@ -567,6 +579,14 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
   const notRun = (s.notRunRuns ?? 0) > 0
     ? `, ${s.notRunRuns} where the compiler never ran (it could not be installed or started — nothing was checked)`
     : '';
+  // 🔴 WHAT THE SKIPS ACTUALLY COST (Q-910). `tsc --noEmit` compiles the whole project, so one clean run
+  // AFTER the last skip has already covered every skipped file. Said plainly, because "9 writes skipped"
+  // reads as "9 files never compiled" and that is usually not what happened.
+  const skipsCovered = notReady > 0 && s.cleanRunCoveredSkips === true
+    ? ' — a later check compiled the whole project, so those files were covered, just later than they should have been'
+    : notReady > 0 && s.cleanRunCoveredSkips === false
+      ? ' — and no check succeeded after them, so the end-of-build typecheck was their first compile'
+      : '';
   return `Write-time typecheck: ${s.runs} run(s), ${s.cleanRuns} clean${notRun}, ${s.ownErrorsSurfaced} error(s) quoted back in the file just written, `
     + `${Math.round(s.elapsedMs / 1000)}s total (~${avg}s each)`
     + (s.timeouts ? `, ${s.timeouts} timeout(s)` : '')
@@ -575,7 +595,7 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
     + (s.compiledUnprobed > 0
       ? `, ${s.compiledUnprobed} of them run without the tsconfig.json probe ever answering (${s.probeFailures} failed attempt(s)) — the compiler was asked instead of being switched off`
       : '')
-    + (notReadyNote ? `; ${notReadyNote}` : '')
+    + (notReadyNote ? `; ${notReadyNote}${skipsCovered}` : '')
     + (s.disabledReason ? ` — then stood down: ${s.disabledReason}` : '')
     + '.';
 }

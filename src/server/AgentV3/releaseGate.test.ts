@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  releaseGate, releaseGateSummary, runtimeProven, runtimeRedFlipEnabled,
+  releaseGate, releaseGateRecord, releaseGateSummary, runtimeProven, runtimeRedFlipEnabled,
   type RuntimeEvidence, type StaticFindings,
 } from './releaseGate';
 import { computeBuildConfidence, type BuildConfidenceInput } from './BuildConfidence';
@@ -392,9 +392,13 @@ describe('the gate, as corrected by the first build that used it', () => {
     const routes = require('fs').readFileSync(
       require('path').join(__dirname, '../routes/agentv3.ts'), 'utf8',
     ) as string;
-    // Widened, not weakened (autopsy 6db0ff31): a build the USER stopped is not a failed build either, so
-    // its RED gate is a warning too. A RED that agrees with a genuinely failed build is still an error.
-    expect(routes).toContain("gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error'");
+    // Widened, not weakened (autopsy 6db0ff31): a build the USER stopped is not a failed build either. Since
+    // autopsy 303e8a6f one helper decides severity AND closed together; a RED that agrees with a genuinely
+    // failed build is still an error, a RED on a build that succeeded is still a warning.
+    expect(routes).toContain('...releaseGateRecord(gate, {');
+    expect(releaseGateRecord({ state: 'red' }, { buildOk: true, stoppedByUser: false, awaitsShell: false })).toEqual({ severity: 'warning', autoResolved: false });
+    expect(releaseGateRecord({ state: 'red' }, { buildOk: false, stoppedByUser: false, awaitsShell: false })).toEqual({ severity: 'error', autoResolved: false });
+    expect(releaseGateRecord({ state: 'red' }, { buildOk: false, stoppedByUser: true, awaitsShell: false })).toEqual({ severity: 'info', autoResolved: true });
   });
 });
 

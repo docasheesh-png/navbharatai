@@ -28,7 +28,9 @@ describe('generateCurrencyIntegration — Fixer', () => {
 
   it('computes the EUR-based cross-rate so any pair works', () => {
     const server = c.files['server/lib/currency.ts'];
-    expect(server).toContain('data.fixer.io/api/latest?access_key=');
+    expect(server).toContain('https://data.fixer.io/api/latest?access_key=');
+    expect(server).not.toContain('http://'); // the key is never sent unencrypted (autopsy 303e8a6f census)
+    expect(server).toContain('error?.code === 105');
     expect(server).toContain('return rt / rf;'); // (EUR→to)/(EUR→from) = from→to
     expect(server).toContain('&symbols=');
     expect(server).toContain('FIXER_API_KEY');

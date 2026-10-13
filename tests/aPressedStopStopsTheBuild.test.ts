@@ -272,7 +272,11 @@ describe('5 — the route wires the signal where no call site can forget it', ()
     // A per-turn timeout is combined with the build signal. The fallback is still this.opts.signal,
     // and the any() arm includes it, so Stop cancels the in-flight model call either way.
     const head = call.slice(0, 900);
-    expect(head).toMatch(/AbortSignal\.any\(\[\.\.\.\(this\.opts\.signal \? \[this\.opts\.signal\] : \[\]\), AbortSignal\.timeout\(turnTimeoutMs\)\]\)/);
+    // ⚠️ Since autopsy 9c612cdb the per-turn timeout signal is held in its own binding (`turnTimeoutSignal`), so the
+    // catch can tell that clock firing from a Stop. The composition is the same: the build signal AND the timeout.
+    expect(head).toMatch(/AbortSignal\.any\(\[\.\.\.\(this\.opts\.signal \? \[this\.opts\.signal\] : \[\]\), turnTimeoutSignal\]\)/);
+    const before = runner.slice(0, runner.indexOf('const turnCall = client.runTurn({'));
+    expect(before.slice(before.lastIndexOf('turnTimeoutSignal ='))).toMatch(/^turnTimeoutSignal = [\s\S]{0,200}\? AbortSignal\.timeout\(turnTimeoutMs\)/);
     expect(head).toMatch(/: this\.opts\.signal/);
     // Since autopsy 15e69839 the stopped call is recorded first (theCallRunningAtStopIsOnTheRecord), then the
     // loop still ends as asked.

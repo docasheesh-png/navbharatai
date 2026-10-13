@@ -3345,6 +3345,31 @@ the flag entries above promise.
   itself under that name. The net: `fixTypeImportValueClash` in the shared deterministic pass turns a TS2865
   import type-only (tsc's own fix; a model repair had made it a self-import). Test-locked and
   reversion-proven in `tests/theSalesSampleHadTwoHelperHomes.test.ts`.
+  🧷 **`AGENTV3_CONTRACT_ENUM_AS_CONST` (NOT set; default ON; `off` reverts) — build 9c612cdb, 2026-10-12, Q-984.**
+  The contract declared `export enum VideoSource { YouTube = 'YouTube', … }`; `useVideoList.ts`, written in its
+  own isolated call, wrote `source: 'YouTube'` — TS2322, because a TypeScript string enum is nominal and no quoted
+  value is assignable to it. `stringEnumsAsConstObjects` (`contractEnums.ts`) now rewrites every string enum, and
+  every enum with no initialisers (member-name values — safe because no file has seen the contract yet), to
+  `export const X = {…} as const;` + `export type X = (typeof X)[keyof typeof X];`, and `X.Member` used as a TYPE
+  inside the contract to `typeof X.Member`. Explicit numeric, heterogeneous and computed enums stay as written.
+  It runs in `prepareSharedContract` (`SimpleBuilder.ts`), the ONE door every `contractSystemPrompt` contract
+  passes — the fast lane AND the blueprint step (`AGENTV3_BLUEPRINT`), which before this skipped even the name
+  split. Same change: a literal `as const` + type PAIR named after a component is renamed like a type; a
+  parenthesis inside a string no longer drops an `as const` literal from the contract file; the TS1361 heal in
+  `ImportExportReconcile.fixTypeOnlyValueImports` fires for the pair. ⚠️ Residual: a CONSUMER that writes an enum
+  member as a type in its own file (`type: ActionType.Add`) gets TS2702; and arithmetic on a no-initialiser enum's
+  members no longer compiles (their values are now strings). **What to watch:** no TS2322 `'"x"' is not assignable
+  to type` on a contract type. Test: `tests/aQuotedValueFitsTheContractsEnum.test.ts`.
+  🏷️ **`AGENTV3_CONTRACT_RENAME_HEAL` (NOT set; default ON; `off` reverts the heal only) — same build, Q-985.** The
+  split renamed `VideoList` → `VideoListData` and told only the user; the full builder wrote `VideoList` as a type
+  in App.tsx and met TS2749 with tsc's own wrong suggestion (`typeof VideoList`). Now every rename is (1) one strict
+  header line in the contract file (`// renamed: VideoList -> VideoListData (VideoList is the component in
+  src/components/VideoList.tsx; the data type is VideoListData)` — a pinned protocol, `contractRenames.ts`),
+  (2) a sentence in the fast-lane hand-off and in the blueprint block, (3) ✏️ advice on TS2749 in the write-time
+  typecheck, and (4) a write-door heal in files this build wrote: the old name in a plain type position becomes the
+  new one, imported from the contract module — never inside `ComponentProps<…>` / `ReturnType<…>` and their kin,
+  where `typeof` is right. With the key `off` the advice still appears. **What to watch:** no TS2749 naming a
+  renamed contract type. Test: `tests/theRenamedTypeWasInvisible.test.ts`.
   📦 **AND ITS SHARED CONSTANTS GET ONE OWNER (autopsy 6ae30b33, 2026-09-30; rides `AGENTV3_UTIL_OWNER`, no key
   of its own).** The contract now declares every shared constant (`export declare const gkQuestions:
   GKQuestion[];`), and `valueOwnerFor` pins them to one file (a planned data/constants file, else a new
@@ -3732,6 +3757,25 @@ the flag entries above promise.
   2FA / MFA / two-factor, Face ID / Touch ID, fingerprint, biometric, "unlocked" — is read as asking for sign-in
   (the adversarial review found "a vault that asks for credentials" told to add NO login). The report line credits
   the word list it checked, never "the request names no access word".
+- **📺 `AGENTV3_THIRD_PARTY_LIMITS` — A PROPERTY ONLY THE OTHER SERVICE CONTROLS IS NEVER CLAIMED (Q-990, autopsy
+  9c612cdb, 2026-10-12). ⚠️ NOT set; default ON; `off` turns off all three layers below.** The request asked to "stream
+  the videos with no adds"; the app played every video in YouTube's own embedded player and the reply opened "Your
+  ad-free video player app is ready." That player shows its own ads on videos whose owners earn from them, and a page
+  that embeds it cannot switch them off. `thirdPartyLimits.ts`: (1) a NEW build whose request asks for no ads AND names
+  a third-party video source or a paste-a-link flow, or an EDIT turn asking for no ads ("remove the ads", "ads still
+  play") on a project that already embeds such a player (YouTube, youtube-nocookie, the IFrame API, react-youtube,
+  ReactPlayer with a YouTube link, Dailymotion, Twitch, Facebook video — never Vimeo), gets a builder note in EVERY lane
+  and one start-of-build line; (2) the reply ends with one plain "About ads" line when it did not already say the
+  player's ads may still play; (3) a reply that calls the app "ad-free" over such a player gets NavBharatAI's own
+  correction, judged on the WHOLE project (never an edit turn's slice) right after `claimAudit`. The derived app name
+  and meta description drop "ad-free" over such a player. Nothing calls anything illegal; the circumvention policy
+  (proxies, stream extractors, downloaders) is the admin's open decision. Report codes `THIRD_PARTY_LIMIT_TOLD` (info)
+  and `CLAIM_UNSUPPORTED` (the correction). Same autopsy, no flag (Q-991): every request note (stack, script, unknown
+  name, request scope, keypad phone, third-party limits) now rides ONE list (`requestNotes` in `agentv3.ts`) that the
+  architect, the fast lane, the one-shot lane and the project planner all read, and the fast lane reads it apart from
+  the request (`SimpleBuildDeps.requestNotes`) so its file budget measures the user's words — appended to the request,
+  the no-login note alone had taken 9c612cdb's ceiling from 13 files to 25. Tests:
+  `tests/aPropertyOnlyTheOtherServiceControlsIsNotClaimed.test.ts`, `tests/everyRequestNoteReachesEveryLane.test.ts`.
 - **🙋 `AGENTV3_CONFIRM_BUILD` + 📎 `AGENTV3_ATTACHMENT_MEMORY` (admin 2026-10-03, Q-200 / Q-201). ⚠️ NEITHER is set;
   both default ON; `off` reverts each alone.** `buildConfirmation.ts`: see "READ THE MOOD FIRST" above — an unconfirmed
   build is answered and offered, and a "yes" builds the offered request. `lib/attachmentMemory.ts`: the latest

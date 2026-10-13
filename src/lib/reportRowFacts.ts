@@ -51,7 +51,8 @@ export interface SubmittedRowLike {
   email?: string | null;
   userId?: string | null;
   reportedAt?: number | null;
-  /** How THIS BUILD was billed — e.g. "free (welcome bonus — cheap engines)". Not the account. */
+  /** How THIS BUILD was routed and billed — e.g. "weak (free tier — cheap engines) · charged ₹103.24"
+   *  (buildBillingLabel.ts). Not the account. Older stored reports carry the pre-2026-10-12 wording. */
   userTier?: string | null;
   tier?: string | null;
   /** The ACCOUNT's tier: has this person ever bought tokens with real ₹? */

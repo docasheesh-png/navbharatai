@@ -9,6 +9,7 @@ import { repeatedEditNotice } from './repeatedEdits';
 import { missingMembers, declaredMembers, relativeImports, resolveCandidates, memberListNote, RECIPE_LIBRARY_PATH, type MissingMember } from './typeMembers';
 import { fixNodeModulesTypo } from './nodeModulesTypo';
 import { healWouldOscillate } from './HealLedger';
+import { contractRenamesFromSource, contractRenameHealEnabled, fixRecordedTypeRenames, errorsAfterTypeRenames, typeRenameHealNote, valueUsedAsTypeName, CONTRACT_PATH_CANDIDATES, type ContractRename } from './contractRenames';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
 import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAuditFix';
@@ -96,7 +97,7 @@ import { envNamesFromGrep, detectDatabaseProvider } from './ImportPreview';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
-import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
+import { qualityNote, writeQualityEnabled, modelDesignLine } from './writeTimeQualityCheck';
 import { lintBuiltApp, a11yHandBack } from './buildQualityLint';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { detachedMethodNote } from './detachedMethod';
@@ -104,11 +105,12 @@ import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
 import { pruneGeneratedListing } from './generatedListing';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, leftToTheKit, usesNonKitNbClass } from './kitRestore';
 import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
+import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 import { scopeStyleHandBack } from './stylePolishResume';
 import { orphansToHandBack } from './orphanHandBack';
 import { batchSizeNote } from './batchSize';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
-import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
+import { currentPass, runInPass, inPlatformPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
 import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemovedOperands, removedRecordedPaths } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
@@ -119,6 +121,7 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
   typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
+  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome,
 } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
@@ -407,7 +410,6 @@ import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
-import { lintDesign, designSummary } from '../AppMakerLab/intelligence/DesignLinter';
 import { publishableVerdict, entryPagesOf } from './publishablePayload';
 import { detectServerNeed } from './staticPublishGuard';
 import { PUBLISH_NOT_REQUESTED } from './publishConsent';
@@ -1263,13 +1265,23 @@ export class ToolDispatcher {
       // dependency to a green app's package.json, and the report could only say "a later write").
       // `evaluate-heal` is on no allowlist, so a green app is still left untouched — only the record changes.
       const go = () => this.guardedWrite(file, content, { agent: 'architect', source: 'evaluate-heal', allowOverwrite: true });
-      wrote = await (currentPass() ? go() : runInPass('evaluate-heal', go));
+      wrote = await inPlatformPass('evaluate-heal', go);
     } catch {
       return false; // refused (freeze) or failed — nothing is recorded, indexed or announced
     }
     try { getWorkspaceMemory(this.workspaceId).indexFile(file, wrote.content); } catch { /* best-effort */ }
     try { noteHeal(this.workspaceId, file, wrote.content, before); } catch { /* best-effort */ }
     return true;
+  }
+
+  /**
+   * Run a step the PLATFORM starts on this dispatcher — not a tool call a model asked for — under its own pass name,
+   * unless a pass is already active, whose name (and so whose Green Freeze permission) it keeps: `landHealWrite`'s
+   * idiom. 🔴 Autopsy 9c612cdb: a platform write with no name was reported as "the build loop", i.e. as the model.
+   * These names are on no freeze list, so on a latched app they are refused exactly as no name was — attribution only.
+   */
+  private inPlatformPass<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    return inPlatformPass(name, fn);
   }
 
   private narrate<K extends NarrationId>(id: K, params: NarrationParams[K], agent: AgentRole = 'architect'): void {
@@ -1984,7 +1996,8 @@ export class ToolDispatcher {
         // Reading the actual file tree first makes the gate judge the app that exists.
         // (The seed now runs inside `evaluate` itself, so the model's own call is judged on the same
         // fresh graph — autopsy 4d538ca3.)
-        await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
+        // Named: the platform runs this evaluate, so what it heals (a dependency, a `.gitignore`) is its write, not the model's.
+        await this.inPlatformPass('evaluate-heal', () => this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect'));
         const report = this.lastReadiness;
         if (!report) return unassessedReadinessReport();
         // AN UNTOUCHED SCAFFOLD IS NOT A FINISHED APP (autopsy 31dc61fd). Readiness measures CODE
@@ -2162,7 +2175,7 @@ export class ToolDispatcher {
         if (result.wired.length === 0) return '';
         for (const [path, content] of Object.entries(result.files)) {
           if (files[path] === content) continue; // only the one router file actually changed
-          await this.guardedWrite(path, content, { agent: 'architect', source: 'heal-orphan-pages', allowOverwrite: true });
+          await this.inPlatformPass('heal-orphan-pages', () => this.guardedWrite(path, content, { agent: 'architect', source: 'heal-orphan-pages', allowOverwrite: true }));
           try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
         }
         try { getWorkspaceMemory(this.workspaceId).recordAudit(`orphan-page wiring: routed ${result.wired.join(', ')}.`); } catch { /* audit best-effort */ }
@@ -2191,7 +2204,7 @@ export class ToolDispatcher {
         if (result.redactions.length === 0) return '';
         for (const [path, content] of Object.entries(result.files)) {
           if (files[path] === content) continue; // only the files that actually changed
-          await this.guardedWrite(path, content, { agent: 'architect', source: 'heal-credential-logs', allowOverwrite: true });
+          await this.inPlatformPass('heal-credential-logs', () => this.guardedWrite(path, content, { agent: 'architect', source: 'heal-credential-logs', allowOverwrite: true }));
           try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
         }
         const changed = [...new Set(result.redactions.map((r) => r.file))];
@@ -2209,7 +2222,7 @@ export class ToolDispatcher {
         const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
         const result = injectObservabilityFixes(files);
         if (!result) return '';
-        await this.guardedWrite(result.path, result.newContent, { agent: 'architect', source: 'inject-observability', allowOverwrite: true });
+        await this.inPlatformPass('inject-observability', () => this.guardedWrite(result.path, result.newContent, { agent: 'architect', source: 'inject-observability', allowOverwrite: true }));
         try { this.state?.recordFileChange({ path: result.path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
         const labels: Record<'request-logger' | 'health' | 'error-handler', string> = {
           'request-logger': 'a request logger',
@@ -2387,7 +2400,8 @@ export class ToolDispatcher {
       },
       readFiles: async () => (await collectWorkspaceFiles(this.actuator, this.workspaceId)).files,
       writeFile: async (path: string, content: string) => {
-        await this.actuator.writeFile(this.workspaceId, path, content);
+        // Named: the endgame / error-trend repair is AgentRunner's own step, not a tool call the model made (9c612cdb).
+        await this.inPlatformPass('endgame-repair', () => this.actuator.writeFile(this.workspaceId, path, content));
         try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
         try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
       },
@@ -3226,7 +3240,19 @@ export class ToolDispatcher {
   }
 
   // ── WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068) — see writeTimeTypecheck.ts ──
-  private readonly _writeTypecheckQueue = new WriteTypecheckQueue<import('./EndgameRepair').TscError[] | null>();
+  /**
+   * Every writer that joins a run receives the run's whole OUTCOME — its errors AND how they were obtained
+   * (printed nothing, never ran, not ready). Never bare errors: a writer that joined a run must not judge
+   * the shared answer with its own defaults (autopsy 9c612cdb, Q-983 — see `WriteTypecheckRunOutcome`).
+   */
+  private readonly _writeTypecheckQueue = new WriteTypecheckQueue<WriteTypecheckRunOutcome>();
+  /**
+   * The type-only import heal, ONCE per compile, shared by every writer that joined it. Keyed on the
+   * shared outcome's identity: each joiner used to heal the same TS1361 itself, so one run could land the
+   * same heal write two or three times and the heal ledger read it as a repeat (autopsy 9c612cdb).
+   */
+  private readonly _typeOnlyHealByRun = new WeakMap<WriteTypecheckRunOutcome, Promise<{ healed: Map<string, Set<string>>; files: Record<string, string> }>>();
+  private readonly _typeRenameHealByRun = new WeakMap<WriteTypecheckRunOutcome, Promise<{ errors: TscError[]; added: Record<string, string>; note: string }>>();
   private _writeTypecheckStats: WriteTypecheckStats = emptyWriteTypecheckStats();
   /**
    * Is this a TypeScript project? `unknown` until a probe answers — and a probe that THREW leaves it
@@ -3293,7 +3319,7 @@ export class ToolDispatcher {
           if (String(r?.stdout ?? '').includes(WARMUP_COMPILED_MARKER)) s.warmupMs = Date.now() - startedAt;
           else s.warmupSkipped = true;
         } catch { /* a warm-up that did not finish is only a cold first check, as before */ }
-        return null;
+        return noWriteTypecheckVerdict();
       }).catch(() => undefined);
     } catch { /* never let a warm-up touch the build */ }
   }
@@ -3708,12 +3734,13 @@ export class ToolDispatcher {
         s.skipped += tsPaths.length;
         return '';
       }
-      if (unprobed) s.compiledUnprobed += 1;
-      let silentRun = false; // tsc printed nothing at all — the only output that means "clean"
-      let neverRan = false; // the compiler did not look at the project — neither clean nor failed
-      let notReady = false; // the compiler was not ready (an install running) — the check stood down at once
-      let notReadyWhy: ReturnType<typeof writeTypecheckNotReadyReason> = null; // WHICH condition (build 46e2d74b)
-      let errors = await this._writeTypecheckQueue.run(async () => {
+      // 🔴 EVERY FACT ABOUT A RUN IS A FACT OF THE RUN, NOT OF THE WRITER (autopsy 9c612cdb, Q-983). Writers
+      // that arrive during a compile all share the NEXT one, which runs ONE writer's closure. So the run's
+      // verdict travels in the shared outcome, and every per-RUN counter (`runs`, `cleanRuns`,
+      // `notRunRuns`, `compiledUnprobed`) is counted here, once per execution. Only per-WRITE facts
+      // (`skippedNotReady`, the errors quoted to this writer) are counted by each writer below.
+      const run = await this._writeTypecheckQueue.run(async (): Promise<WriteTypecheckRunOutcome> => {
+        if (unprobed) s.compiledUnprobed += 1;
         const command = writeTypecheckCommand(this.tsBuildInfoId);
         const startedAt = Date.now();
         let r: { stdout: string; stderr: string };
@@ -3727,10 +3754,13 @@ export class ToolDispatcher {
               s.disabledReason = `the incremental compile took over ${Math.round(WRITE_TYPECHECK_TIMEOUT_MS / 1000)}s ${s.timeouts} times in a row`;
             }
           }
-          return null;
+          return noWriteTypecheckVerdict();
         }
         const durationMs = Date.now() - startedAt;
-        if (String(r.stdout ?? '').includes(WRITE_TYPECHECK_NOT_READY_MARKER)) { notReady = true; notReadyWhy = writeTypecheckNotReadyReason(r.stdout); return null; }
+        if (String(r.stdout ?? '').includes(WRITE_TYPECHECK_NOT_READY_MARKER)) {
+          const notReadyWhy = writeTypecheckNotReadyReason(r.stdout); // WHICH condition (build 46e2d74b)
+          return { ...noWriteTypecheckVerdict(), notReady: true, notReadyWhy };
+        }
         s.runs += 1;
         s.elapsedMs += durationMs;
         s.timeouts = 0; // a run that finished resets the consecutive-timeout count
@@ -3739,22 +3769,32 @@ export class ToolDispatcher {
         try { this.onCommand?.({ command, exitCode: null, stdout: r.stdout || '', stderr: r.stderr || '', durationMs }); }
         catch { /* diagnostics are best-effort */ }
         const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
-        silentRun = combined === '';
+        // tsc printed nothing at all — the only output that means "clean".
+        const silent = combined === '';
         // 🔴 AUTOPSY 12c642ed: a missing compiler also parses to zero errors, and was counted as clean.
         const verdict = tscVerdict(combined);
-        neverRan = verdict === 'not-run' || verdict === 'unknown';
+        const neverRan = verdict === 'not-run' || verdict === 'unknown';
         this.noteCompileOutput(combined);
         // A tsc that printed no `error TSxxxx` line is clean; a help page or an install log parses to zero
         // errors too, which is why a clean run here is evidence only through the bridge above, never on its own.
-        return parseTscErrors(combined);
+        const errors = parseTscErrors(combined);
+        if (neverRan) s.notRunRuns += 1;
+        else if (errors.length === 0) {
+          s.cleanRuns += 1;
+          // `tsc --noEmit` is project-wide, so this run covered every file skipped before it (Q-910). A fact of
+          // the RUN, so it is counted here, once, with the run's other counters (Q-983).
+          if ((s.skippedNotReady ?? 0) > 0) s.cleanRunCoveredSkips = true;
+        }
+        return { errors, silent, neverRan, notReady: false, notReadyWhy: null };
       });
+      let errors = run.errors;
       if (errors === null) {
-        if (notReady) {
+        if (run.notReady) {
           s.skipped += tsPaths.length;
           s.skippedNotReady = (s.skippedNotReady ?? 0) + tsPaths.length;
           // Counted by the condition that fired, so the report names it (build 46e2d74b: fourteen writes
           // reported as "still being installed" when the tree had only looked stale).
-          const why = notReadyWhy ?? 'unknown';
+          const why = run.notReadyWhy ?? 'unknown';
           s.notReadyReasons = { ...(s.notReadyReasons ?? {}), [why]: (s.notReadyReasons?.[why] ?? 0) + tsPaths.length };
           // Q-910: a skip puts the question back. Only a clean run AFTER this one answers it, and a
           // clean run BEFORE it compiled a project that did not yet hold these files.
@@ -3762,29 +3802,25 @@ export class ToolDispatcher {
         }
         return '';
       }
-      if (neverRan) {
-        s.notRunRuns += 1;
-        return '';
-      }
-      if (errors.length === 0) {
-        s.cleanRuns += 1;
-        // `tsc --noEmit` is project-wide, so this run covered every file skipped before it (Q-910).
-        if ((s.skippedNotReady ?? 0) > 0) s.cleanRunCoveredSkips = true;
-      }
+      if (run.neverRan) return '';
       // A type-only import of a value is a string edit with one correct form — done here, not asked of the
-      // model (autopsy 6cd698cc, writeTimeTypecheck.ts). Only in files this build wrote.
-      const healedTypeOnly = errors.length > 0 ? await this.healTypeOnlyImportsAtWrite(errors, tsPaths, sources) : null;
-      const healedNote = healedTypeOnly ? typeOnlyHealNote(healedTypeOnly.healed) : '';
+      // model (autopsy 6cd698cc, writeTimeTypecheck.ts). Only in files this build wrote. ONCE per run:
+      // every writer that joined it shares the one heal (autopsy 9c612cdb).
+      const healedTypeOnly = errors.length > 0 ? await this.typeOnlyHealForRun(run, tsPaths, sources) : null;
+      let healedNote = healedTypeOnly ? typeOnlyHealNote(healedTypeOnly.healed) : '';
       if (healedTypeOnly && healedTypeOnly.healed.size > 0) {
         sources = { ...sources, ...healedTypeOnly.files };
         errors = withoutHealedTypeOnly(errors, healedTypeOnly.healed);
         if (errors.length === 0) return healedNote;
       }
-      const own = splitByWrittenFiles(errors, tsPaths).own.length;
-      s.ownErrorsSurfaced += own;
-      if (own > 0) {
-        try { getWorkspaceMemory(this.workspaceId).recordError(`write-typecheck: ${own} error(s) in ${tsPaths.join(', ')}`); } catch { /* audit best-effort */ }
-      }
+      // A contract rename the platform recorded, used as a type (build 9c612cdb, Q-985) — fixed here in files
+      // this build wrote; for the rest the contract joins `sources`, where the note's ✏️ advice reads it. ONCE
+      // per run, like the heal above: only what the heal ADDS is shared, never the first writer's `sources`.
+      const typeRenames = await this.typeRenameHealForRun(run, errors, tsPaths, sources);
+      errors = typeRenames.errors;
+      sources = { ...sources, ...typeRenames.added };
+      healedNote += typeRenames.note;
+      if (typeRenames.note && errors.length === 0) return healedNote;
       // The content just written is passed on: it is the ONLY thing that can tell the two causes of
       // "Property 'props' does not exist on type 'X'" apart (does X extend React.Component?), and it is
       // already in hand — no file is read for this. See tscErrorCause.ts.
@@ -3793,8 +3829,18 @@ export class ToolDispatcher {
       // BottomNav rewritten three times for an export App.tsx lacked). At most two targets' candidates
       // are read, only when such an error exists, and a read that fails is simply not evidence.
       // A clean run is SAID, so the model does not re-run the compiler to find out (autopsy dfd81a3a).
-      if (errors.length === 0) return silentRun ? writeTypecheckCleanNote(tsPaths) : '';
+      if (errors.length === 0) return run.silent ? writeTypecheckCleanNote(tsPaths) : '';
       sources = { ...(await this.exportTargetSources(splitByWrittenFiles(errors, tsPaths).own, sources)), ...sources };
+      // Counted by the SAME split the note makes, after the export targets are in hand (they are what
+      // tells "add the export there" from "fix it here"). An error that waits on a file not written yet is
+      // the entry-first order working as designed: it is reported apart and is not a compile error to
+      // remember (autopsy 9c612cdb, Q-989 — the reviewer reads remembered errors as findings).
+      const { fixHere, waiting } = splitByRemedy(errors, tsPaths, sources);
+      s.ownErrorsSurfaced += fixHere.length;
+      s.waitingErrorsSurfaced = (s.waitingErrorsSurfaced ?? 0) + waiting.length;
+      if (fixHere.length > 0) {
+        try { getWorkspaceMemory(this.workspaceId).recordError(`write-typecheck: ${fixHere.length} error(s) in ${tsPaths.join(', ')}`); } catch { /* audit best-effort */ }
+      }
       // The members of a type the code guessed at (autopsy 0bb437b4) ride after the typecheck's own note.
       const members = await this.missingMemberNote(splitByWrittenFiles(errors, tsPaths).own, sources);
       if (members) return healedNote + writeTypecheckNote(errors, tsPaths, sources) + members;
@@ -3802,6 +3848,41 @@ export class ToolDispatcher {
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence
     }
+  }
+
+  /**
+   * The type-only heal for ONE compile, started by the first writer that reaches it and awaited by every
+   * other writer that joined the same run (autopsy 9c612cdb). The files the joiners wrote are already in
+   * the workspace and in `_writtenPaths` when the run they share starts, so one heal covers them all.
+   */
+  private typeOnlyHealForRun(run: WriteTypecheckRunOutcome, tsPaths: string[], sources: Record<string, string>): Promise<{ healed: Map<string, Set<string>>; files: Record<string, string> }> {
+    let heal = this._typeOnlyHealByRun.get(run);
+    if (!heal) {
+      heal = this.healTypeOnlyImportsAtWrite(run.errors ?? [], tsPaths, sources);
+      this._typeOnlyHealByRun.set(run, heal);
+    }
+    return heal;
+  }
+
+  /**
+   * The recorded-rename heal for ONE compile (build 9c612cdb, Q-985), keyed on the shared run exactly as
+   * `typeOnlyHealForRun` is: the errors it starts from are the run's errors after the type-only heal, which
+   * every joiner holds identically. What is shared is only what the heal ADDS — the contract text and the
+   * healed files, the note, the remaining errors — so a joiner keeps its own `sources` for everything else.
+   */
+  private typeRenameHealForRun(run: WriteTypecheckRunOutcome, errors: TscError[], tsPaths: string[], sources: Record<string, string>): Promise<{
+    errors: TscError[]; added: Record<string, string>; note: string;
+  }> {
+    let heal = this._typeRenameHealByRun.get(run);
+    if (!heal) {
+      heal = this.healRecordedTypeRenamesAtWrite(errors, tsPaths, sources).then((r) => {
+        const added: Record<string, string> = {};
+        for (const [path, text] of Object.entries(r.sources)) if (sources[path] !== text) added[path] = text;
+        return { errors: r.errors, added, note: r.note };
+      });
+      this._typeRenameHealByRun.set(run, heal);
+    }
+    return heal;
   }
 
   /**
@@ -3833,6 +3914,62 @@ export class ToolDispatcher {
         if (await this.landHealWrite(file, after, before[file])) { healed.set(file, names); files[file] = after; }
       }
       return { healed, files };
+    } catch {
+      return none;
+    }
+  }
+
+  /**
+   * TS2749 on a name the PLATFORM renamed (build 9c612cdb, Q-985 — contractRenames.ts). The contract file's
+   * header records each rename (`// renamed: VideoList -> VideoListData (…)`); it is read only when such an
+   * error exists. In files this build wrote, the old name in a plain type position becomes the new one and
+   * is imported from the contract module, through the heal write path; everything else — a user's own file,
+   * `ComponentProps<VideoList>` where `typeof` is right, a record the contract does not back — is left to the
+   * model with the ✏️ advice, which `writeTypecheckNote` reads from the contract this adds to `sources`.
+   * Best-effort: anything that fails returns the errors and sources exactly as they came in.
+   */
+  private async healRecordedTypeRenamesAtWrite(errors: TscError[], tsPaths: string[], sources: Record<string, string>): Promise<{
+    errors: TscError[]; sources: Record<string, string>; note: string;
+  }> {
+    const none = { errors, sources, note: '' };
+    try {
+      if (!errors.some((e) => valueUsedAsTypeName(e) !== null)) return none;
+      let contract: { path: string; source: string } | null = null;
+      for (const path of CONTRACT_PATH_CANDIDATES) {
+        const known = sources[path];
+        const source = typeof known === 'string' ? known
+          : await withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'write-typecheck-contract').catch(() => null);
+        if (typeof source === 'string' && contractRenamesFromSource(source).length > 0) { contract = { path, source }; break; }
+      }
+      if (!contract) return none;
+      const renames: ContractRename[] = contractRenamesFromSource(contract.source);
+      const withContract = { errors, sources: { ...sources, [contract.path]: contract.source }, note: '' };
+      if (!contractRenameHealEnabled()) return withContract;
+      const mine = new Set([...tsPaths, ...this._writtenPaths]);
+      const recorded = new Set(renames.map((r) => r.from));
+      const targetFiles = [...new Set(errors.filter((e) => mine.has(e.file) && recorded.has(valueUsedAsTypeName(e) ?? '')).map((e) => e.file))];
+      if (targetFiles.length === 0) return withContract;
+      const before: Record<string, string> = {};
+      for (const file of targetFiles) {
+        const known = sources[file];
+        const content = typeof known === 'string' ? known : await this.actuator.readFile(this.workspaceId, file).catch(() => null);
+        if (typeof content === 'string') before[file] = content;
+      }
+      const fix = fixRecordedTypeRenames(before, errors.filter((e) => e.file in before), renames, contract);
+      const landed = new Set<string>();
+      const files: Record<string, string> = {};
+      for (const file of new Set(fix.fixed.map((f) => f.file))) {
+        const after = fix.files[file];
+        if (typeof after !== 'string' || after === before[file]) continue;
+        if (healWouldOscillate(this.workspaceId, file, after)) continue;
+        if (await this.landHealWrite(file, after, before[file])) { landed.add(file); files[file] = after; }
+      }
+      if (landed.size === 0) return withContract;
+      return {
+        errors: errorsAfterTypeRenames(errors, fix, landed),
+        sources: { ...withContract.sources, ...files },
+        note: typeRenameHealNote(fix.fixed.filter((f) => landed.has(f.file))),
+      };
     } catch {
       return none;
     }
@@ -6095,7 +6232,9 @@ export class ToolDispatcher {
           const healed = gitignoreWithEnvCoverage(gitignoreContent, secretLeak.exposed);
           if (healed) {
             try {
-              await this.actuator.writeFile(this.workspaceId, '.gitignore', healed);
+              // Named like every other evaluate heal (`landHealWrite`): the model asked evaluate to JUDGE, not to write a
+              // .gitignore, and the reviewer's "read-only" evaluate reaches here too — so it is never the build loop (9c612cdb).
+              await this.inPlatformPass('evaluate-heal', () => this.actuator.writeFile(this.workspaceId, '.gitignore', healed));
               gitignoreContent = healed;
               secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
             } catch {
@@ -6227,13 +6366,16 @@ export class ToolDispatcher {
         // blocker, exactly like SEO): lint the generated style-bearing code for palette/typography/
         // spacing/token consistency so a build reports its visual polish, not just its correctness.
         // Pure + never throws. Not pushed into `extra`, so it can never fail an otherwise-ready build.
-        const DESIGN_EXT = /\.(css|scss|sass|less|tsx|jsx|vue|svelte|html?)$/i;
-        const designCode = snap.sources
-          .filter((s) => DESIGN_EXT.test(s.path))
-          .map((s) => s.content)
-          .join('\n')
-          .slice(0, 400_000);
-        const design = lintDesign(designCode);
+        // 🔒 THE BUILD REPORT'S OWN LINT (autopsy 9c612cdb): this used to be a private `lintDesign` over
+        // a hand-joined string — its own file selection, comments counted, our badge counted — and it told
+        // the model to "snap to multiples of 4px", arithmetic the platform's snap does at the end. One
+        // selection, one comment rule, our markup excluded, and the platform's own fixes left out.
+        let designLine: string;
+        try {
+          designLine = modelDesignLine(lintBuiltApp(Object.fromEntries(snap.sources.map((s) => [s.path, s.content] as const))));
+        } catch {
+          designLine = 'Design consistency: not checked (the lint could not read the files).';
+        }
         // P-PIPE.40 — advisory dependency auto-fix: for each imported-but-undeclared package, suggest an
         // exact `name@^range` when it's a known npm package, else soften to "verify (may be a local
         // alias)". Advisory only — it never mutates package.json or the install path (the builder applies
@@ -6603,7 +6745,7 @@ export class ToolDispatcher {
             return ciWorkflowSummary(analyzeCiWorkflow(map));
           } catch { return ''; }
         })();
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${observabilitySummary(obsIssues)}\n\n${gracefulShutdownSummary(shutdownIssues)}\n\n${securityHeadersSummary(secHeaderIssues)}\n\n${sriSummary(sriIssues)}\n\n${cspSummary(cspIssues)}\n\n${commentLanguageSummary(commentLangIssues)}\n\n${uploadValidationSummary(uploadIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}${outsideAppLine ? `\n\n${outsideAppLine}` : ''}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${observabilitySummary(obsIssues)}\n\n${gracefulShutdownSummary(shutdownIssues)}\n\n${securityHeadersSummary(secHeaderIssues)}\n\n${sriSummary(sriIssues)}\n\n${cspSummary(cspIssues)}\n\n${commentLanguageSummary(commentLangIssues)}\n\n${uploadValidationSummary(uploadIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designLine}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}${outsideAppLine ? `\n\n${outsideAppLine}` : ''}`;
       }
 
       case 'stop_build': {
@@ -11812,7 +11954,7 @@ function nearestEditRegionHeadTail(existing: string, maxChars: number): string {
     + `End of the file:\n\`\`\`\n…\n${existing.slice(existing.length - tailChars)}\n\`\`\`\n`;
 }
 
-export function nearestEditRegion(existing: string, oldStr: string, windowLines = 24, maxChars = 2400): string {
+export function nearestEditRegion(existing: string, oldStr: string, windowLines = 24, maxChars = 2400, opts: { path?: string } = {}): string {
   const lines = existing.split('\n');
   // Distinctive anchors from the intended edit: longest trimmed lines first — a token-bearing line like
   // `const categoryTotals = expenses.reduce(...)` locates the region far better than a bare `}` / `return (`.
@@ -11832,7 +11974,7 @@ export function nearestEditRegion(existing: string, oldStr: string, windowLines 
     const absent = missingCssSelectors(existing, oldStr);
     const absentNote = absent.length > 0
       ? `The rule${absent.length === 1 ? '' : 's'} ${absent.map((x) => `\`${x}\``).join(', ')} ${absent.length === 1 ? 'does' : 'do'} not exist in this file — `
-        + 'there is nothing to edit. To add it, call edit_file with an EMPTY old_string and the full rule as new_string (it appends).\n'
+        + `there is nothing to edit. ${APPEND_WITH_EMPTY_OLD_STRING} Send the full rule as new_string.\n`
       : '';
     if (absentNote) return absentNote + nearestEditRegionHeadTail(existing, maxChars);
     // No anchor located anywhere — the intended text may be entirely gone/hallucinated. Show the head,
@@ -11851,13 +11993,20 @@ export function nearestEditRegion(existing: string, oldStr: string, windowLines 
     const tail = existing.slice(existing.length - tailChars);
     return `Current file content (your target text was not located anywhere). Top of the file:\n\`\`\`\n${head}\n…\n\`\`\`\n`
       + `End of the file:\n\`\`\`\n…\n${tail}\n\`\`\`\n`
-      + 'To ADD content at the end of this file, call edit_file again with an EMPTY old_string and the same new_string — it appends, no anchor needed.\n';
+      + `${APPEND_WITH_EMPTY_OLD_STRING} If adding was what this edit meant, send the same new_string again that way.\n`;
   }
   const from = Math.max(0, hit - windowLines);
   const to = Math.min(lines.length, hit + windowLines + 1);
   let window = lines.slice(from, to).join('\n');
   if (window.length > maxChars) window = window.slice(0, maxChars) + '\n…(truncated — call read_file for more)';
-  return `Current file content around your closest match (lines ${from + 1}-${to}, nearest at line ${hit + 1}):\n\`\`\`\n${window}\n\`\`\`\n`;
+  // 🔴 THE ONE NOT-FOUND BRANCH THAT NEVER SAID HOW TO APPEND (autopsy 9c612cdb, Q-986). An anchor quoted
+  // from a compacted memory of the kit's last lines partly matched (nearest line 526 of 538), so the miss
+  // landed HERE — and this branch, alone of the four, gave no append route: the retry resent 1,964 tokens
+  // of CSS. Said whenever the edit was plausibly an addition: the window reaches the end of the file, or the
+  // file is a stylesheet (where nearly every edit to a sheet the model did not write is an addition).
+  const maybeAddition = to >= lines.length || (opts.path !== undefined && isProjectStylesheet(opts.path));
+  return `Current file content around your closest match (lines ${from + 1}-${to}, nearest at line ${hit + 1}):\n\`\`\`\n${window}\n\`\`\`\n`
+    + (maybeAddition ? `${APPEND_WITH_EMPTY_OLD_STRING}\n` : '');
 }
 
 /** Result of applying a single edit_file replacement. */
@@ -11911,7 +12060,7 @@ export function ambiguousEditRegions(existing: string, offsets: Iterable<number>
   // `@media (prefers-reduced-motion: reduce) {` twice in src/index.css, two failed edits and a read). The
   // not-found error already says how to append; this one did not.
   return `\n${shown.join('\n')}${more}\nAdd a neighbouring line from the match you mean to old_string so it is unique. `
-    + 'To ADD content at the end of the file instead, call edit_file with an EMPTY old_string — it appends, no anchor needed.';
+    + APPEND_WITH_EMPTY_OLD_STRING;
 }
 
 /**
@@ -11965,7 +12114,7 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
     throw new Error(
       `edit_file: old_string not found in ${path}. ` +
         `The string you supplied does not appear verbatim (or close enough) in the current file. ` +
-        `${nearestEditRegion(existing, oldStr)}` +
+        `${nearestEditRegion(existing, oldStr, undefined, undefined, { path })}` +
         `Copy the exact lines you want to change from the content above and retry.`,
     );
   }

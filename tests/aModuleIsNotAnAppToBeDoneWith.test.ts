@@ -78,7 +78,9 @@ describe('a module is not an app to be done with (autopsy 50378049, Q-906 + Q-90
   describe('endOfTurnReadyMark — or the honest report line stays unreachable', () => {
     const base = {
       existing: null, readiness: finished(), typeErrors: 0,
-      editingExistingApp: false, wroteThisRun: true, step: 72, elapsedMs: 1_240_000,
+      // `at` is an epoch (autopsy 9c612cdb, Q-981): the mark and the end are two MOMENTS on one clock, never
+      // an elapsed time from one lane's start subtracted from another's.
+      editingExistingApp: false, wroteThisRun: true, step: 72, at: 1_240_000,
     };
 
     it('🔴 no project-score mark is recorded for a module turn', () => {
@@ -86,7 +88,7 @@ describe('a module is not an app to be done with (autopsy 50378049, Q-906 + Q-90
     });
 
     it('…and a mark IS recorded for a real app turn, exactly as before', () => {
-      expect(endOfTurnReadyMark({ ...base })).toEqual({ step: 72, elapsedMs: 1_240_000, score: 100 });
+      expect(endOfTurnReadyMark({ ...base })).toEqual({ step: 72, at: 1_240_000, score: 100 });
     });
 
     it('🔑 THE TWO MUST AGREE: a mark here made readyOverrunNote\'s module sentence unreachable', () => {

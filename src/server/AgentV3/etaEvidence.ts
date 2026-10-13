@@ -34,8 +34,9 @@
 // PURE — no clock, no I/O, no formatting of anything it was not given.
 
 import type { BuildEstimate } from '../lib/BuildTimeEstimator';
-import { formatEta } from '../lib/BuildTimeEstimator';
-import { formatEtaRange } from './progressEta';
+// `formatEtaRange` from the estimator, not from progressEta.ts: progressEta.ts imports THIS module for the
+// live-line decision (`etaTickLine`, autopsy 9c612cdb), and the two must not import each other.
+import { formatEta, formatEtaRange } from '../lib/BuildTimeEstimator';
 
 /**
  * The band an UNEVIDENCED estimate is shown as — a rough estimate, said to be one.

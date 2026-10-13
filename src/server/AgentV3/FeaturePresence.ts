@@ -48,6 +48,13 @@ export interface FeaturePresenceResult {
   missing: string[];
   /** Labels of requested features whose affordance WAS found. */
   present: string[];
+  /**
+   * Labels of REQUESTED features this check could probe but did not judge — today, the ones a sign-in
+   * page hid (see `judgeProbes`). Absent or empty when every requested probe was judged. Additive: the
+   * heal, the ledger and the repair prompt read only `probes`/`missing`/`present`; the summary line reads
+   * this so it never calls a subset "all" (autopsy 9c612cdb).
+   */
+  notJudged?: string[];
 }
 
 interface FeatureDef {
@@ -492,7 +499,11 @@ function judgeProbes(probes: FeatureProbeResult[], htmlLower: string): FeaturePr
   // held the release gate at YELLOW. Only the sign-in feature can be judged from behind the door.
   if (missingProbes.some((p) => p.feature !== 'auth') && isSignInWall(htmlLower)) {
     const judgeable = probes.filter((p) => p.feature === 'auth');
-    return { probes: judgeable, missing: judgeable.filter((p) => !p.present).map((p) => p.label), present: judgeable.filter((p) => p.present).map((p) => p.label) };
+    // What the door hid is said, not dropped (autopsy 9c612cdb): without this the summary read
+    // "all 1 requested feature(s) are visibly present (Login / authentication)" for a notes app whose
+    // Search and Delete were requested and never looked at.
+    const notJudged = probes.filter((p) => p.feature !== 'auth').map((p) => p.label);
+    return { probes: judgeable, missing: judgeable.filter((p) => !p.present).map((p) => p.label), present: judgeable.filter((p) => p.present).map((p) => p.label), notJudged };
   }
   return {
     probes,
@@ -501,11 +512,27 @@ function judgeProbes(probes: FeatureProbeResult[], htmlLower: string): FeaturePr
   };
 }
 
-/** A short, human/agent-facing summary line for the build report. Empty when nothing was probed. */
+/**
+ * A short, human/agent-facing summary line for the build report. Empty when nothing was probed.
+ *
+ * 🔴 THE ALL-PRESENT LINE SAYS WHAT WAS JUDGED, NOT "ALL" (autopsy 9c612cdb, 2026-10-12). A video-library
+ * request — paste a link to add a video, stream the videos, no ads — was reported as
+ * *"all 1 requested feature(s) are visibly present (Add / create)"*. This check has a fixed table of
+ * probes (`probeableFeatures()`); "Add" was the only one the request triggered, and playback, streaming
+ * and "no ads" are not in the table at all. "All" described the table's reach as if it were the request.
+ * So the line names the controls judged, what a sign-in page hid, and the whole probe vocabulary —
+ * generated from the table, so a new probe joins the sentence by itself.
+ *
+ * ⚠️ The MISSING branch below is unchanged on purpose: its text is copied word for word into the user's
+ * repair prompt ("What was measured: …"), and it already names only what it measured.
+ */
 export function featurePresenceSummary(r: FeaturePresenceResult): string {
   if (r.probes.length === 0) return '';
   if (r.missing.length === 0) {
-    return `Feature coverage: all ${r.present.length} requested feature(s) are visibly present in the running app (${r.present.join(', ')}).`;
+    const hidden = r.notJudged ?? [];
+    return `Feature coverage: the ${r.present.length} requested control(s) judged here are visibly present in the running app (${r.present.join(', ')})`
+      + (hidden.length > 0 ? `; not judged (behind a sign-in page): ${hidden.join(', ')}` : '')
+      + `. This check probes only ${probeableFeatures().map((f) => f.label).join(', ')}; the rest of the request was not judged.`;
   }
   return `Feature coverage: ${r.missing.length} requested feature(s) have NO visible control in the running app — ${r.missing.join(', ')}. Present: ${r.present.join(', ') || 'none'}.`;
 }

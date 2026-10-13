@@ -108,11 +108,16 @@ describe('2 · a data type never shares a component\'s name', () => {
   });
 
   it('🔒 the lane renames right after the contract call, before the contract file is written', () => {
+    // ⚠️ Pin moved deliberately (build 9c612cdb, Q-984/Q-985): the split now runs inside
+    // `prepareSharedContract` — the one door the blueprint lane shares, which before had no split at all —
+    // and the contract file takes the renames to write them into its header. Same order, same guarantee.
     const src = read('src/server/AgentV3/SimpleBuilder.ts');
-    const at = src.indexOf('separateTypeFromComponentNames(contract, manifest)');
+    const at = src.indexOf('prepareSharedContract(contract, manifest)');
     expect(at).toBeGreaterThan(0);
-    expect(at).toBeLessThan(src.indexOf('const mod = contractModule(contract);'));
+    expect(at).toBeLessThan(src.indexOf('const mod = contractModule(contract, contractRenames);'));
     expect(at).toBeGreaterThan(src.indexOf("clock.contractOutcome = contract ? 'written'"));
+    const door = src.slice(src.indexOf('export function prepareSharedContract('));
+    expect(door).toContain('separateTypeFromComponentNames(text, manifest)');
   });
 });
 

@@ -95,6 +95,31 @@ export function formatEta(ms: number): string {
   return `~${m} min`;
 }
 
+/**
+ * Format a low–high band, collapsing to a single figure when the two round to the same thing (a
+ * "2–2 min" range is noise, not precision). Falls back to the point estimate if the band is unusable.
+ *
+ * Lives here, beside `formatEta`, since autopsy 9c612cdb (2026-10-12): it is a formatting primitive, and
+ * keeping it in progressEta.ts made etaEvidence.ts import progressEta.ts — so the one pure function that
+ * now decides the live line (`etaTickLine`, which needs etaEvidence.ts) could not live there without an
+ * import cycle. progressEta.ts re-exports it, so every existing import path still works.
+ */
+export function formatEtaRange(lowMs: number, highMs: number, fallbackMs: number): string {
+  const lo = Number(lowMs);
+  const hi = Number(highMs);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo <= 0 || hi < lo) return formatEta(Number(fallbackMs) || 0);
+  const loTxt = formatEta(lo);
+  const hiTxt = formatEta(hi);
+  if (loTxt === hiTxt) return loTxt;
+  // "~2–4 min" rather than "~2 min–~4 min": one tilde covers the whole band, and the unit is shared
+  // whenever both sides carry the same one.
+  const loBare = loTxt.replace('~', '');
+  const hiBare = hiTxt.replace('~', '');
+  const unit = /min$/.test(loBare) && /min$/.test(hiBare) ? 'min' : null;
+  if (unit) return `~${loBare.replace(/\s*min$/, '')}–${hiBare}`;
+  return `~${loBare}–${hiBare}`;
+}
+
 /** One live-ETA tick: the line to show, plus the (possibly re-baselined) budget for the next tick. */
 export interface EtaTick {
   /** The user-facing status line. */
@@ -105,6 +130,13 @@ export interface EtaTick {
   revised: boolean;
   /** How many times the budget has been re-baselined so far. MUST be carried into the next tick. */
   revisions: number;
+  /**
+   * Which line this is, so a caller that knows WHERE the budget came from can say so (autopsy 9c612cdb:
+   * a countdown to the top of a rough guess must carry the guess's label). `countdown` names a remaining
+   * time; `near-end` is inside the promised band with under a minute of it left, and names none;
+   * `past-estimate` follows a broken promise and names none; `overrun` re-baselined the budget.
+   */
+  kind: 'countdown' | 'near-end' | 'past-estimate' | 'overrun';
 }
 
 /** How far past the estimate we let a tick sit before re-baselining (matches the old 45s threshold). */
@@ -160,6 +192,7 @@ export function liveEtaTick(elapsedMs: number, totalMs: number, baseMs: number, 
         totalMs: total,
         revised: false,
         revisions: done,
+        kind: 'past-estimate',
       };
     }
     return {
@@ -167,6 +200,24 @@ export function liveEtaTick(elapsedMs: number, totalMs: number, baseMs: number, 
       totalMs: total,
       revised: false,
       revisions: done,
+      kind: 'countdown',
+    };
+  }
+
+  // 🔴 NOT AN OVERRUN WHILE THE BUILD IS STILL INSIDE THE BAND IT WAS PROMISED (autopsy 9c612cdb,
+  // 2026-10-12). Q-030 (e49afa97) set the rule "no overrun line before the promised band's high end", but
+  // the overrun branch below opened 45 s BEFORE that end (the wrap threshold): at 361 s of a ~4–6 min
+  // promise (high end 385 s) the line said "this is taking longer than I estimated — about 3 min more to
+  // go", and the 3 min was the floor constant, not a measurement. Inside the band nothing has been
+  // broken, so nothing is re-baselined and no number is named: a "~24s to go" here would be a
+  // seconds-precise claim about the top of a band, which is not a finish time.
+  if (promised > 0 && elapsed <= promised) {
+    return {
+      text: `⏱️ Still building… ${inTxt} in · nearly at the end of my estimate — I'll tell you the moment it's done.`,
+      totalMs: total,
+      revised: false,
+      revisions: done,
+      kind: 'near-end',
     };
   }
 
@@ -193,7 +244,7 @@ export function liveEtaTick(elapsedMs: number, totalMs: number, baseMs: number, 
     // "bigger than expected" at minute 6 of the 6–8 min it had promised, while the app was exactly the
     // size planned and the finishing checks were running. Say what is known: it is taking longer.
     : `⏱️ Still building… ${inTxt} in · this is taking longer than I estimated — about ${formatEta(step).replace('~', '')} more to go`;
-  return { text, totalMs: elapsed + step, revised: true, revisions: next };
+  return { text, totalMs: elapsed + step, revised: true, revisions: next, kind: 'overrun' };
 }
 
 /**

@@ -116,8 +116,9 @@ describe('formats are not services', () => {
 
 describe('the report tells the truth about module turns, stops and write-time checks', () => {
   it('a module turn is "not measured", never "never judged finished"', () => {
-    expect(readyOverrunNote(null, 5, 1000, { projectModule: 'Shared Types' })).toContain('one project module ("Shared Types")');
-    expect(readyOverrunNote(null, 5, 1000)).toBe('The app was never judged finished during the build.');
+    // The third argument is the END EPOCH since autopsy 9c612cdb (was an elapsed time); no mark, so unused.
+    expect(readyOverrunNote(null, 5, Date.now(), { projectModule: 'Shared Types' })).toContain('one project module ("Shared Types")');
+    expect(readyOverrunNote(null, 5, Date.now())).toBe('The app was never judged finished during the build.');
   });
 
   it('a module the user stopped goes back to pending with a paused line, not "failed"', () => {

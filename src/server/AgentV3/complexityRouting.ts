@@ -25,8 +25,8 @@
 
 import { isCheapFlashRung, withoutCheapFlashLead, type LadderRung } from './tierLadder';
 import { signalsCouldNotRead, signalsMatchedNothing } from './RequestAnalyser';
+import { BIG_SOFTWARE_NOUN, countEnumeratedFeatures, MIN_RUN_ITEMS } from './enumeratedFeatures';
 import type { BuildIntent } from './IntentClassifier';
-import { BIG_SOFTWARE_NOUN, countEnumeratedFeatures } from './enumeratedFeatures';
 import { withEnglishReading } from '../lib/devanagariTechTerms';
 
 /**
@@ -164,6 +164,23 @@ export function statesAScope(prompt: string): boolean {
   // The noun is read in English too (Q-104); the count reads the request itself, never the doubled form.
   return BIG_SOFTWARE_NOUN.test(withEnglishReading(text)) || countEnumeratedFeatures(text) >= MIN_STATED_FEATURES;
 }
+
+/**
+ * What `statesAScope` measured when it answered "no", in its own units — generated from the two
+ * constants the counter really uses, so the sentence cannot drift from the code.
+ *
+ * 🔴 WHY (autopsy 9c612cdb, 2026-10-12). The reason used to say the request named no features at all. It was
+ * written for 1be16985 ("Make biology learning app"), where that was true, and it was printed for every
+ * request the counter scores 0. The video-library request that met it named three things in prose —
+ * paste a link to add a video, stream the videos, no ads — and the admin report told the autopsy it
+ * named none. What the code measures is narrower: a LIST it can count (`countEnumeratedFeatures`) or a
+ * big-software noun. A request with one comma, or a single bullet, also scores 0 and also reached this
+ * line, so "no comma, bullet or list" would have been false too. The sentence now says what was counted.
+ */
+export const NO_READABLE_SCOPE =
+  `it states no scope the sizer can read: fewer than ${MIN_STATED_FEATURES} listed features `
+  + `(each bullet or numbered line counts one; inline items count only in a run of ${MIN_RUN_ITEMS} or more short `
+  + `items; features described in a sentence are not counted) and no big-software noun`;
 
 /**
  * PURE. Read a one-word answer from the classifier.
@@ -306,7 +323,7 @@ export async function decideComplexity(
       verdict: unknownFallback,
       source: 'deterministic',
       reason: nothingToSize
-        ? `${why}, and it names no features and no large system, so there is nothing a second opinion `
+        ? `${why}, and ${NO_READABLE_SCOPE}, so there is nothing a second opinion `
           + `could size; this build opens on the cheap rung and the ladder climbs if it has to`
         : couldNotTell
         ? standsOrNot('no second opinion was available')

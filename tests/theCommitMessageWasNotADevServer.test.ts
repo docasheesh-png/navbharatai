@@ -212,8 +212,9 @@ describe('5 · an edit is not judged "complete" by the project score', () => {
   });
 
   it('the report line says the edit was not measured, not "never judged finished"', () => {
-    expect(readyOverrunNote(null, 118, 900_000, { editingExistingApp: true })).toMatch(/^Not measured/);
-    expect(readyOverrunNote(null, 118, 900_000)).toMatch(/never judged finished/);
+    // The third argument is the END EPOCH since autopsy 9c612cdb (was an elapsed time); no mark, so unused.
+    expect(readyOverrunNote(null, 118, Date.now(), { editingExistingApp: true })).toMatch(/^Not measured/);
+    expect(readyOverrunNote(null, 118, Date.now())).toMatch(/never judged finished/);
   });
 
   /**

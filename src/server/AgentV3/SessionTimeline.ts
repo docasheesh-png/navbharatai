@@ -322,6 +322,16 @@ export interface ModelCompactOptions {
 
 const MODEL_OMITTED_IMAGE = '[screenshot from an earlier turn omitted to keep context small — it was already analyzed; take a new screenshot if you need to see the page again]';
 
+/**
+ * 🔴 A SHORTENED VIEW IS NOT A SOURCE TO QUOTE (autopsy 9c612cdb, Q-986). The first whole line of the 30% tail
+ * kept of an old read of the 538-line design kit was kit line 526 — and that line, re-typed with a guessed
+ * rule after it, became an edit_file old_string that missed (28.4 s, 1,952 output tokens). The marker said how
+ * to SEE the hidden part; it now also says the kept part is not an anchor, and that adding needs none.
+ * ⚖️ The marker rides EVERY compacted old result on every turn, so the sentence was added by tightening the
+ * old wording, not by growing it: the whole marker stays within a few dozen characters of its old length.
+ */
+const OLD_VIEW_IS_NOT_AN_ANCHOR = 'or quote an edit_file old_string from this view: to ADD at the end, old_string: "" appends.';
+
 /** Keep the head (70%) and tail (30%) of an oversized old result, with an honest gap note. */
 function headTailTruncate(s: string, max: number): string {
   if (s.length <= max) return s;
@@ -330,7 +340,7 @@ function headTailTruncate(s: string, max: number): string {
   const dropped = s.length - headLen - tailLen;
   return (
     s.slice(0, headLen) +
-    `\n… [${dropped} chars hidden from this VIEW only — the underlying file/output is COMPLETE and intact on disk. To see a hidden section of a file, call read_file with start_line/end_line. NEVER conclude a file is truncated or corrupted from this marker] …\n` +
+    `\n… [${dropped} chars hidden from this VIEW only — the file/output is COMPLETE on disk; to see them, call read_file with start_line/end_line. NEVER conclude a file is truncated or corrupted from this marker, ${OLD_VIEW_IS_NOT_AN_ANCHOR}] …\n` +
     s.slice(s.length - tailLen)
   );
 }

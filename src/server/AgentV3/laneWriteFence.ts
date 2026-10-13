@@ -29,6 +29,8 @@
 // Pure, dependency-free and synchronous in its decision, so it is fully unit-testable and can never
 // itself be the thing that stalls a build.
 
+import type { WriteOutcome } from './writeOutcomes';
+
 /** Thrown when an abandoned lane tries to write. Carries what it tried to do, for the report. */
 export class LaneAbandonedError extends Error {
   readonly lane: string;
@@ -44,8 +46,15 @@ export class LaneAbandonedError extends Error {
   }
 }
 
-/** The shape of every file-writing function in the fast lanes. */
-export type WriteFiles = (files: { path: string; content: string }[]) => Promise<void>;
+/**
+ * The shape of every file-writing function in the fast lanes.
+ *
+ * It answers with one outcome per file (`writeOutcomes.ts`, build report 9c612cdb Q-982): the real writer
+ * dispatches each file through the workspace's write door, which reports a refusal as a result rather than a
+ * throw, so "the promise resolved" never meant "the files are there". A writer that returns nothing is still
+ * accepted and read as "outcome unknown" — the assumption every caller made before outcomes existed.
+ */
+export type WriteFiles = (files: { path: string; content: string }[]) => Promise<WriteOutcome[] | void>;
 
 /** What the fence reports when it refuses a write. This is evidence, so it is never swallowed. */
 export interface RefusedWrite {
@@ -108,7 +117,8 @@ export function createLaneWriteFence(
           try { onRefused?.({ lane, holder: current?.lane ?? null, paths }); } catch { /* evidence is best-effort; the refusal is not */ }
           throw new LaneAbandonedError(lane, paths);
         }
-        await write(files);
+        // The outcome is passed through untouched: the fence decides WHO may write, never what happened.
+        return write(files);
       };
     },
     handoff(): void {

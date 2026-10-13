@@ -19,6 +19,7 @@ import { NO_EVAL_RULE, NO_FAKED_RESULT_RULE, NO_FAKE_FEATURE_RULE } from './noEv
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
 import { packageChoiceRule } from '../lib/unfixablePackages';
 import { stylesheetCarriesKit } from './kitRestore';
+import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 import type { AgentRole, ToolName } from './types';
 
 /**
@@ -223,11 +224,12 @@ export interface SubAgentDeps {
    */
   aiRule?: () => string;
   /**
-   * The classic-phone rule (`nonSmartphoneBuildRule`, Q-868): when the user named an old keypad phone, every lane that
-   * writes the app hears the same LIGHT 2D, touch-and-keys rule and the same likely meaning (for a game, the classic
-   * game from that phone). Only the architect and the fast lane had it. Absent or '' ⇒ nothing is added.
+   * The ONE request-notes list the architect's prompt opens with (Q-991, autopsy 9c612cdb): the classic-phone rule
+   * (Q-868 — every lane that writes the app hears the same LIGHT 2D, touch-and-keys rule), the no-login scope, the
+   * stack we do not build, a name we do not know, a script asked for, a property only a third party controls. Each
+   * note used to reach only the lanes its author remembered. Absent or '' ⇒ nothing is added.
    */
-  deviceRule?: () => string;
+  requestNotesRule?: () => string;
   /**
    * The USER'S OWN REQUEST, verbatim (autopsy 6db0ff31, 2026-09-30). A child was handed only the
    * architect's instruction and never the user's words, so an under-specified instruction had nothing
@@ -430,7 +432,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       // reviewer it named a file — "run_recipe generate_ai … writes src/lib/ai.ts" — that the reviewer then
       // tried to read in an app with no AI at all (autopsy d382b398, a failed read_file).
       (() => { try { return roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools) ? (deps.aiRule?.() ?? '') : ''; } catch { return ''; } })(),
-      (() => { try { return roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools) ? (deps.deviceRule?.() ?? '') : ''; } catch { return ''; } })(),
+      (() => { try { return roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools) ? (deps.requestNotesRule?.() ?? '') : ''; } catch { return ''; } })(),
       (() => { try { return userRequestBlock(deps.userRequest?.(), roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools)); } catch { return ''; } })(),
       (() => { try { return deps.portDigest?.() ?? ''; } catch { return ''; } })(),
     ].filter(Boolean);
@@ -467,7 +469,9 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
         if (typeof raw === 'string' && stylesheetCarriesKit(withoutPreviewBridge('src/index.css', raw))) {
           contextBlocks.push(
             'The design kit is ALREADY in `src/index.css`. Its classes are listed here, so there is no need '
-            + 'to read the stylesheet to find them. Append your app\'s own rules; never replace the file.\n'
+            + 'to read the stylesheet to find them. Append your app\'s own rules; never replace the file. '
+            // How to append, before the first attempt (autopsy 9c612cdb, Q-986) — see appendByEdit.ts.
+            + `${APPEND_WITH_EMPTY_OLD_STRING}\n`
             + DESIGN_KIT_BRIEF.join('\n'),
           );
         }

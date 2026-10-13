@@ -977,7 +977,9 @@ export function makeMultiProviderTurnRunner(
                 }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0, abandoned.usage.cacheCreationInputTokens ?? 0);
               }
             } catch { /* cost attribution must never replace the stop */ }
-            throw new BuildStoppedError();
+            // …and which rung it was on, so a call OUR clock cut off can be recorded against the engine that
+            // was serving it (autopsy 9c612cdb: the report could not say which engine ran the review).
+            throw new BuildStoppedError({ provider: reportName, ...(chain[i].modelId ? { model: chain[i].modelId } : {}) });
           }
           lastError = err;
           fellBackFrom.push(reportName);

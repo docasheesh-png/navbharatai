@@ -309,3 +309,29 @@ describe('the ETA never repeats a promise it has already broken (real report 02b
     expect(huge.totalMs - 60 * 60_000).toBeLessThanOrEqual(15 * 60_000);
   });
 });
+
+// AUTOPSY 9c612cdb (2026-10-12) — "this is taking longer than I estimated — about 3 min more to go" at
+// 361 s of a band promised up to 385 s. The overrun branch opened 45 s BEFORE the top of the promised band
+// (the wrap threshold), so Q-030's rule — no overrun inside the band it promised — was broken at its edge,
+// and the "3 min" was the floor constant. The tests above pass no promise, so their behaviour is unchanged.
+describe('liveEtaTick — nothing inside the promised band is an overrun (autopsy 9c612cdb)', () => {
+  it('🔴 the report: 361.4 s of a ~4–6 min promise (top 385.4 s) is near its end, not over it', () => {
+    const t = liveEtaTick(361_400, 385_427, 290_231, 0, 385_427);
+    expect(t.revised).toBe(false);
+    expect(t.revisions).toBe(0);
+    expect(t.kind).toBe('near-end');
+    expect(t.text).not.toMatch(/taking longer|more to go|\d+s to go/);
+  });
+
+  it('one millisecond past the top, an overrun is an overrun again', () => {
+    const t = liveEtaTick(385_428, 385_427, 290_231, 0, 385_427);
+    expect(t.revised).toBe(true);
+    expect(t.kind).toBe('overrun');
+  });
+
+  it('each branch says which line it is, so a caller can label a countdown built on a guess', () => {
+    expect(liveEtaTick(2 * 60_000, 8 * 60_000, 8 * 60_000).kind).toBe('countdown');
+    expect(liveEtaTick(10 * 60_000, 13 * 60_000, 8 * 60_000, 1).kind).toBe('past-estimate');
+    expect(liveEtaTick(9 * 60_000, 8 * 60_000, 8 * 60_000).kind).toBe('overrun');
+  });
+});

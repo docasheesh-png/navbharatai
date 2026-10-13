@@ -22,6 +22,18 @@ export function stripHonestyBanner(html: string): string {
 }
 
 /**
+ * Where the block sits, as `[start, end)` offsets — the same pattern `stripHonestyBanner` removes, for a
+ * reader that must keep every other offset in place (a design check that must not grade OUR banner as
+ * the user's design, and a rewrite that must leave it byte for byte). Empty when there is none. PURE.
+ */
+export function honestyBannerRanges(html: string | null | undefined): Array<[number, number]> {
+  if (typeof html !== 'string' || !html.includes(HONESTY_BANNER_OPEN)) return [];
+  const out: Array<[number, number]> = [];
+  for (const m of html.matchAll(new RegExp(BLOCK_RE.source, 'g'))) out.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
+  return out;
+}
+
+/**
  * The block itself (markers included), to carry into another document — '' when there is none. A
  * renderer that builds its own <body> instead of reusing the app's would otherwise show a demo login
  * with no red line on it, which is the one screen the user looks at most.

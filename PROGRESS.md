@@ -95322,6 +95322,81 @@ headroom. Each has a behaviour test, reversion-proven. The handler being at the 
 any session's next `if` there turns CI red — so it is now **Q-979** (OPEN, unowned), with a plan to make headroom one
 module at a time. Rows Q-926, Q-976, Q-977 and Q-978 closed (merged in #3698).
 
+
+---
+
+## 2026-10-13 — Autopsy of build report 9c612cdb (YouTube-like link player, Weak, 457.8 s, ₹103.24) — PR from `claude/new-session-gx9294`
+
+The app worked (paste a link, it plays, the list persists). Everything below is about how it got there.
+
+### Five-bucket tally (fifth rule)
+
+- **✅ Self-healed (5):** TS2322 on the contract enum (2 builder edits) · TS2749 on the renamed type (3 turns) · the stylesheet `edit_file` miss, then a full resend · the spacing snap (7 values) · the unused-import sweep (2 files).
+- **🔀 Workarounds (3):** GLM crawled and fell to Kimi twice (32.2 s, 227.4 s) · the fast lane handed its 3 files to the full builder in front of a reasoning engine.
+- **⏭️ Skipped (3):** the suggest-only review produced nothing (REVIEW_SUGGESTIONS_NOT_READY) · the starter-test pass skipped in silence · the e2e suite was written but not run.
+- **❌ Shipped imperfect (user-visible 3, admin-visible 6):** "Your **ad-free** video player app" over YouTube's own player · "send *review it* and I'll run it on its own" (nothing handles it) · "about 3 min more" 11 s after the app rendered; and in the report: READY_BEFORE_END "105s" (truth 39 s), "free (welcome bonus)" on a charged build, "build loop (5 files)" after render (the model had stopped), the sizer's "names no features", FEATURE_COVERAGE "all 1 feature(s)", "No tests at all" left open after the scaffold.
+- **🥵 Struggle (7):** 56 s of review for nothing at the build's end · the hand-off decided at 32.2 s, acted on at 54.3 s, then the same files written twice · 5 of 22 turns only updated the plan (~20 s) · 28.4 s lost on a guessed CSS anchor · 2 edits for one TS2322 · 3 turns for one TS2749 · 7.6 min against a promised ~4.8 min.
+
+### What was missing (Step 2)
+
+Not one subsystem but one habit, seen five times: **a fact recorded at the wrong grain or by absence.** A run's verdict kept per writer (Q-983); a write's outcome dropped by its writer (Q-982); "who wrote it" answered by "nobody named a pass" (Q-1000); a stop's cause never put on the signal (Q-998); each request note threaded into the lanes its author remembered (Q-991). Each fix makes the fact explicit at the one place it is created, and locks it with a census that fails on the next sibling.
+
+### Ledger (sixth rule) — every item, its row
+
+| Item | Row | State |
+|---|---|---|
+| Live ETA after render / step count | Q-1039 | FIX IN PR |
+| READY_BEFORE_END "105s" (two clocks) | Q-981 | ✅ fixed by merged #3698 (Q-976); this report's figures kept as a fixture |
+| ETA band 1.6× | — | ✅ not-a-defect (Q-086 precedent: a labelled rough guess) |
+| "⏳ Still working — 12s" clock with no scope | — | ✅ merged #3692 (`userVisibleClockOrigin`) |
+| GLM crawl ×2 (30 s) | Q-1003 | ✅ not-a-defect under Q-009's 60 s bound (Q-842 precedent); optional measurement 🟡 |
+| PROVIDER_BENCHED "mid-answer" for a silent stream | — | ✅ merged #3692 |
+| Kimi filed at 17.1 s for 56 tokens (chain latency) | — | ✅ merged #3692 (`answerMs` / `fallbackMs`) |
+| Fast-lane hand-off late, double write, refused writes listed, wrong reason words | Q-982 | FIX IN PR (repeated compiles: merged #3687) |
+| A joined write never sees its run's flags | Q-983 | FIX IN PR |
+| Contract enum TS2322 | Q-984 | FIX IN PR |
+| Renamed type told only to the user (TS2749) | Q-985 | FIX IN PR |
+| Guessed CSS anchor | Q-986 | FIX IN PR |
+| Plan-only turns | Q-987 | FIX IN PR |
+| `update_todo` counted as work | Q-988 | FIX IN PR |
+| Entry-first TS2307s counted as errors | Q-989 / Q-1004 | FIX IN PR / 🟡 admin agreement on the order |
+| "ad-free" claim | Q-990 / Q-1005 | FIX IN PR / 🟡 circumvention policy |
+| Request notes reach only some lanes | Q-991 | FIX IN PR |
+| Sizer and FEATURE_COVERAGE over-claim | Q-992 / Q-1006 / Q-1007 | FIX IN PR / 🟡 / 🟡 |
+| Design scored before the snap; our badge graded | Q-993 | FIX IN PR |
+| "No tests at all" left open; silent starter skip | Q-994 / Q-1008 | FIX IN PR / 🟡 |
+| "welcome bonus" on a charged build | Q-995 / Q-1009 | FIX IN PR / 🟡 |
+| Rate-card docs on cache reads | Q-996 | FIX IN PR |
+| "review it" promise | Q-997 | FIX IN PR |
+| A call our clock stopped is invisible | Q-998 / Q-1002 | FIX IN PR / 🟡 money half |
+| Salvage cannot catch a one-call review | Q-999 | FIX IN PR |
+| 56 s review on a reasoning engine | Q-1001 | stop merged in #3687; 🟡 routing choice |
+| "Build completed … no problems recorded" over 5 warnings | — | ✅ merged #3687 |
+| First render at 350 s on Weak | — | ✅ merged #3698 (Q-926, admin-approved) |
+| POST_GREEN_WRITES "build loop (5 files)" | Q-1000 | FIX IN PR |
+| Unused-import sweep | Q-1010 | 🟡 admin agreement (not-a-defect) |
+| Discovered while fixing | Q-1011 … Q-1037 | OPEN / 🟡 (see the queue) |
+
+### Merge notes (the conveyor moved under this PR nine times)
+
+- **READY_BEFORE_END** was fixed in parallel by #3698 (Q-976). Its form (`at` + `endAt`) is kept; this PR's own (Q-981) yields.
+- **The chat handler crossed TS2563** on the merged state. Instead of adding branches, this PR moved its own additions out (`designAfterRepair.ts`, `recordTodoOnlyTurns`, `contractRenameHandoffClause`, `requestNotes.ts`, the ETA guard inside its closure). `main` itself had room for one more `if` at the handler's top — **the handler is at its limit; splitting it is the real fix** (Q-979).
+- **#3701's one fast-lane request (Q-975)** and this PR's one notes list fit together: the request is #3701's (the milestone, the attachment), the notes come from the list (the fast lane reads them apart from the request).
+- **#3689's two device-only lanes** (the plan-first planner, the writing sub-agents) now read the one request-notes list.
+- **#3698's pass names** win where both PRs named the same writer (`architecture-note`, `ambient-shim-cleanup`, `e2e-tsconfig-exclude`); the keep-the-outer-name idiom is now ONE `inPlatformPass` in greenFreeze.ts.
+- The local 4-CPU gate times `routesAdmin` out at 20 s on clean `main` too (an import of ~22 s here); CI is green on it, so it is this machine, not a regression.
+
+### Proactive (sixth step)
+
+1. **Split the chat handler (Q-979, opened by another session).** It is the one file every fix touches, and it now has room for one `if`. Every autopsy from here pays for it in moved code and merge conflicts. Recommended: extract the post-answer pipeline into its own module, behind the same tests.
+2. **Make "which engine serves this call" a first-class plan** (Q-1001 and Q-926 are the same fork): one helper that, before any bounded call, names the rung that will serve it and whether it can finish.
+3. **The moat stays the honesty layer.** This report's three user-visible lies (ad-free, review it, about 3 min more) were all words, not code. A census over every user-facing promise (Q-997's registry) is the kind of guard no competitor ships.
+
+### Closing report
+
+BUILD REPORT 9c612cdb — RESOLUTION (at the time of writing)
+Items: see the ledger · in this PR: Q-982…Q-1000 and Q-1039 (renumbered from Q-980, which #3704 took first) · ✅ elsewhere: Q-981 and five lines fixed by merged #3687/#3692/#3698 · 🟡 BLOCKED with all four fields: Q-1001…Q-1010, Q-1025 · OPEN follow-ups: Q-1011…Q-1037 (being worked in this PR).
+FINAL: ❌ NOT COMPLETE — until this PR merges and the OPEN follow-ups are fixed or blocked.
 ## 2026-10-13 — Q-975 closed (#3701 merged); Q-980 opened: a dark screen is a number, not an argument
 
 - **Q-975 closed.** #3701 merged. The row has been deleted, and its ID is appended to `BUILD_REPORT_QUEUE_CLOSED.txt`.

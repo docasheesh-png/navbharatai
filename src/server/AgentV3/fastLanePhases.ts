@@ -35,6 +35,20 @@ export interface FastLanePhases {
    */
   contractOutcome?: 'written' | 'cut' | 'failed' | 'skipped' | 'stopped' | 'handed-off' | 'not-needed';
   contractCapMs?: number;
+  /**
+   * The lane's hand-off, split out of `generate` (Q-982, report 9c612cdb). That ledger read
+   * `generate 47.1s (87%)` about a lane that decided to hand off 15 s into generating, then waited
+   * 22 s for the one call still in flight and spent 10 s saving the finished files: three different
+   * things in one number, so the hand-off cost nothing on paper.
+   *
+   * `handOffWaitMs` runs from the decision to the moment the lane stopped waiting, with
+   * `handOffInFlight` the number of calls that were still running when the decision was taken.
+   * `handOffSaveMs` runs from there until the finished files were in the workspace. All optional:
+   * a lane that never handed off has none of them, and an older ledger prints exactly as before.
+   */
+  handOffWaitMs?: number;
+  handOffInFlight?: number;
+  handOffSaveMs?: number;
 }
 
 const sec = (ms: number): string => `${Math.round(Math.max(0, ms) / 100) / 10}s`;
@@ -58,6 +72,11 @@ function contractNote(p: FastLanePhases): string {
   return '';
 }
 
+/** Every timed phase, summed — so the printed remainder never counts a measured phase twice. Pure. */
+function measuredMs(p: FastLanePhases): number {
+  return p.planMs + p.contractMs + p.generateMs + (p.handOffWaitMs ?? 0) + (p.handOffSaveMs ?? 0) + p.verifyMs + p.repairMs;
+}
+
 /**
  * The admin-only report line. Names every phase and the share of the lane's clock it took.
  *
@@ -68,12 +87,14 @@ function contractNote(p: FastLanePhases): string {
  */
 export function fastLanePhaseSummary(p: FastLanePhases | undefined): string {
   if (!p) return 'Fast lane: it never started, so there are no phase timings.';
-  const measured = p.planMs + p.contractMs + p.generateMs + p.verifyMs + p.repairMs;
+  const measured = measuredMs(p);
   const other = Math.max(0, p.totalMs - measured);
   const parts = [
     `plan ${sec(p.planMs)}${share(p.planMs, p.totalMs)}`,
     p.contractMs > 0 || p.contractOutcome === 'stopped' || p.contractOutcome === 'handed-off' ? `contract ${sec(p.contractMs)}${share(p.contractMs, p.totalMs)}${contractNote(p)}` : (p.contractOutcome === 'skipped' ? 'contract skipped — no time left for it, so files were written without a shared contract' : p.contractOutcome === 'not-needed' ? 'contract not needed — one component, nothing to share' : ''),
     `generate ${sec(p.generateMs)}${share(p.generateMs, p.totalMs)}`,
+    typeof p.handOffWaitMs === 'number' ? `waiting on ${p.handOffInFlight ?? 0} in-flight call(s) after the hand-off decision ${sec(p.handOffWaitMs)}${share(p.handOffWaitMs, p.totalMs)}` : '',
+    typeof p.handOffSaveMs === 'number' ? `hand-off saves ${sec(p.handOffSaveMs)}${share(p.handOffSaveMs, p.totalMs)}` : '',
     `verify ${sec(p.verifyMs)}${share(p.verifyMs, p.totalMs)} over ${p.verifyRuns} run(s)`,
     `repair ${sec(p.repairMs)}${share(p.repairMs, p.totalMs)} over ${p.repairRuns} round(s)`,
     other > 0 ? `everything else ${sec(other)}${share(other, p.totalMs)}` : '',
@@ -87,9 +108,10 @@ export function fastLanePhaseSummary(p: FastLanePhases | undefined): string {
  */
 export function dominantFastLanePhase(p: FastLanePhases | undefined): string {
   if (!p || !(p.totalMs > 0)) return 'unknown';
-  const measured = p.planMs + p.contractMs + p.generateMs + p.verifyMs + p.repairMs;
+  const measured = measuredMs(p);
   const rows: Array<[string, number]> = [
     ['plan', p.planMs], ['contract', p.contractMs], ['generate', p.generateMs],
+    ['hand-off wait', p.handOffWaitMs ?? 0], ['hand-off saves', p.handOffSaveMs ?? 0],
     ['verify', p.verifyMs], ['repair', p.repairMs], ['other', Math.max(0, p.totalMs - measured)],
   ];
   rows.sort((a, b) => b[1] - a[1]);

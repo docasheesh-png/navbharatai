@@ -227,12 +227,15 @@ describe('§F a login nobody asked for is not built', () => {
     expect(REQUEST_SCOPE_NOTE).not.toMatch(/\b(?:glm|kimi|claude|anthropic|gemini|grok|openai|nemotron)\b/i);
   });
 
-  it('REVERSION GUARD: the architect, the fast lane and the one-shot lane all read it', () => {
+  it('REVERSION GUARD: the architect, the fast lane, the one-shot lane and the planner all read it', () => {
     const src = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
     expect(src).toContain('requestScopeVerdict({ request: planning.text, newBuild: intent === \'new_build\' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain })');
-    expect(src).toContain('buildPrompt = `${requestScopeText}\\n\\n---\\n\\n${buildPrompt}`;');
-    // One request for both fast lanes since Q-975 (fastLaneRequest).
-    expect(src).toContain('unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix;');
-    expect(src).toContain('runOneShot({ prompt: fastLaneRequest,');
+    // PIN UPDATED 2026-10-13 (autopsy 9c612cdb, Q-991; with #3701's one fast-lane request, Q-975): the note joins the
+    // ONE request-notes list, and every lane reads that list — the planner too, which this note used to miss.
+    expect(src).toContain("{ code: 'request-scope', text: requestScopeText },");
+    expect(src).toContain("buildPrompt = [requestNotesText, buildPrompt].filter(Boolean).join('\\n\\n---\\n\\n');");
+    expect(src).toContain('runSimpleBuild({ prompt: fastLaneRequest, requestNotes: requestNotesText,');
+    expect(src).toContain('runOneShot({ prompt: fastLaneRequest + requestNotesSuffix,');
+    expect(src).toContain('const plannerGoal = withRequestNotes(prompt, requestNotesText);');
   });
 });

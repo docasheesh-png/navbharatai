@@ -124,7 +124,10 @@ describe('3 · the census: nothing in the route assembles the request for itself
   });
   it('🔴 before the milestone swap, every note is a PREPEND — the invariant the swap rests on', () => {
     const before = assignments.filter((a) => a.at < swap);
-    const notPrepends = before.filter((a) => !/\$\{buildPrompt\}`$/.test(a.expr) && !/(?:^|\n)\s*buildPrompt,\s*\]\.join\([^)]*\)$/.test(a.expr));
+    // A prepend is any form that puts buildPrompt LAST: a template ending in it, an array joined with it last, or the ONE
+    // request-notes list (autopsy 9c612cdb, Q-991): `[requestNotesText, buildPrompt].filter(Boolean).join(…)`.
+    const notPrepends = before.filter((a) => !/\$\{buildPrompt\}`$/.test(a.expr) && !/(?:^|\n)\s*buildPrompt,\s*\]\.join\([^)]*\)$/.test(a.expr)
+      && !/^\[\w+, buildPrompt\]\.filter\(Boolean\)\.join\([^)]*\)$/.test(a.expr));
     expect(notPrepends.map((a) => `${a.line}: ${a.expr.slice(0, 80)}`)).toEqual([]);
     expect(route.slice(decl, swap)).not.toMatch(/(?<![\w.])buildPrompt\s*\+=/);
   });
@@ -134,8 +137,12 @@ describe('3 · the census: nothing in the route assembles the request for itself
   });
   it('🔴 both fast lanes read ONE request, and it carries the milestone and every lane note', () => {
     const calls = [...route.matchAll(/\b(runSimpleBuild|runOneShot)\(\{ prompt: ([^,]+),/g)].map((m) => `${m[1]}: ${m[2]}`);
-    expect(calls).toEqual(['runSimpleBuild: fastLaneRequest', 'runOneShot: fastLaneRequest']);
-    expect(route).toContain('const fastLaneRequest = milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt)\n        + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix;');
+    // PIN UPDATED 2026-10-13 (merge with autopsy 9c612cdb, Q-991): the request is still ONE for both lanes; the NOTES ride
+    // the one request-notes list — the fast lane reads it apart from the request (its file budget measures the user's
+    // words), the one-shot after it. tests/everyRequestNoteReachesEveryLane.test.ts proves every note is in that list.
+    expect(calls).toEqual(['runSimpleBuild: fastLaneRequest', 'runOneShot: fastLaneRequest + requestNotesSuffix']);
+    expect(route).toContain('runSimpleBuild({ prompt: fastLaneRequest, requestNotes: requestNotesText,');
+    expect(route).toContain('const fastLaneRequest = milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt)\n        + singleHtmlFileSuffix + pastedBriefSuffix;');
   });
   it('the writing specialist is handed the milestone on a milestone build', () => {
     expect(route).toContain('userRequest: () => (milestoneLanePrompt ? milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt) : checksRequest === prompt ? planning.text : checksRequest),');

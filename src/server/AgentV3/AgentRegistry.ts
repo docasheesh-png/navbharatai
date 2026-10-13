@@ -1,4 +1,5 @@
 import type { AgentRole, ToolName } from './types';
+import { TODO_RIDES_WITH_WORK } from './todoOnlyTurn';
 
 /**
  * AgentRegistry — the multi-agent "AI team" (§3.3, Phase 1: Agent Orchestration).
@@ -415,7 +416,7 @@ export function roleConfig(role: AgentRole): RoleConfig {
 export const PLAN_YOURSELF_NOTE =
   'Not delegated: planning is yours. You already hold the files you read and the todo list — record the plan '
   + 'with update_todo directly and start writing files. Delegate BUILDING work (frontend, backend, …) or '
-  + 'checking work (reviewer, qa, …) instead.';
+  + `checking work (reviewer, qa, …) instead. ${TODO_RIDES_WITH_WORK}`;
 
 /** Is this a planning-only role (it writes no code, only a plan)? PURE. */
 export function isPlanningOnlyRole(role: string): boolean {

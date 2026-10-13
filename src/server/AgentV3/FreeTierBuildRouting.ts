@@ -1,5 +1,6 @@
-// Free-tier build routing (admin plan 2026-07-10) — a NEW public user still on their welcome bonus
-// (has never purchased) gets their builds on the CHEAP floor (GLM / Kimi), NEVER on Claude. Rationale
+// Free-tier build routing (admin plan 2026-07-10) — a public user who has NEVER PURCHASED (whatever balance
+// they hold came only from free credit: today the verification rewards; before 2026-09-17 also a sign-up
+// grant, since retired — giftPolicy.ts) gets their builds on the CHEAP floor (GLM / Kimi), NEVER on Claude. Rationale
 // the admin set: NavBharatAI must not spend its expensive Claude budget on a user who has not paid yet.
 // The moment the user recharges (becomes a paying customer) they graduate to the normal Claude-first
 // path — exactly today's behavior.
@@ -25,15 +26,15 @@ export function freeTierCheapEnabled(): boolean {
 
 /** Minimal wallet shape this module reads — only whether the user has ever paid. */
 export interface FreeTierWallet {
-  /** Total ₹ the user has ever spent buying tokens. 0 / absent ⇒ still on the welcome bonus. */
+  /** Total ₹ the user has ever spent buying tokens. 0 / absent ⇒ never purchased (free credit only). */
   totalMoneySpent?: unknown;
   /** The same figure under its other spelling — see `walletLifetime.ts` for why both must be read. */
   total_money_spent?: unknown;
 }
 
 /**
- * A user is on the FREE tier while they have NEVER purchased — i.e. they are still spending the
- * welcome-bonus tokens. Any real purchase (totalMoneySpent > 0) makes them a paying user, who takes
+ * A user is on the FREE tier while they have NEVER purchased — i.e. anything they spend is free credit
+ * (the verification rewards today; the retired sign-up grant on older wallets). Any real purchase (totalMoneySpent > 0) makes them a paying user, who takes
  * the normal Claude-first path. A missing / non-finite / zero value ⇒ free tier (conservative: a
  * user we cannot confirm as paying is treated as not-yet-paying, so we never spend Claude on them).
  */
@@ -55,9 +56,10 @@ export function isFreeTierUser(wallet: FreeTierWallet | null | undefined): boole
  * ⚠️ THIS IS A FACT ABOUT THE ACCOUNT, NOT ABOUT A BUILD, and the two genuinely disagree. A build's
  * `billing.userTier` says how THAT BUILD was routed — and `freeTierBuildActive` is set by feature
  * flags and, at routes/agentv3.ts, by the user simply CHOOSING the Weak tier. So a customer who has
- * paid ₹500 and picks Weak is recorded as *"free (welcome bonus — cheap engines)"* on that build.
- * Asking "is this a paying user?" of that string gives the wrong answer for a real customer, which is
- * why the admin list asks this instead.
+ * paid ₹500 and picks Weak has that build labelled with the free tier's routing ("weak (free tier — cheap
+ * engines) · charged ₹N" since 2026-10-12, `buildBillingLabel.ts`; older reports named a retired sign-up
+ * grant there). Asking "is this a paying user?" of that string gives the wrong answer for a real customer,
+ * which is why the admin list asks this instead.
  *
  * UNKNOWN IS NOT FREE: a caller with no wallet record at all (an anonymous build) gets `null` from
  * `paidTier` below rather than being called free — we have not seen an account, so we have not seen

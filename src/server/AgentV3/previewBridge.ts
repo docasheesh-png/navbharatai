@@ -426,6 +426,21 @@ export function hasPreviewBridge(html: string): boolean {
   return typeof html === 'string' && html.includes(PREVIEW_BRIDGE_MARKER);
 }
 
+/** Our `<script>` (with its leading indentation and trailing line break), as one definition for two readers. */
+const BRIDGE_SCRIPT_RE_SOURCE = `([ \\t]*)<script\\b[^>]*>(?:(?!<\\/script>)[\\s\\S])*?${PREVIEW_BRIDGE_MARKER}(?:(?!<\\/script>)[\\s\\S])*?<\\/script>([ \\t]*\\r?\\n)?`;
+
+/**
+ * Where our script sits, as `[start, end)` offsets — the same pattern `stripPreviewBridge` removes, for a
+ * reader that must keep every other offset in place (autopsy 9c612cdb: the design lint and the spacing
+ * snap read the app's own markup). Empty when the document never carried the bridge. PURE.
+ */
+export function previewBridgeRanges(html: string): Array<[number, number]> {
+  if (typeof html !== 'string' || !html.includes(PREVIEW_BRIDGE_MARKER)) return [];
+  const out: Array<[number, number]> = [];
+  for (const m of html.matchAll(new RegExp(BRIDGE_SCRIPT_RE_SOURCE, 'gi'))) out.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
+  return out;
+}
+
 /**
  * Remove the bridge from a document — the guard that keeps it OUT of the user's real code.
  *
@@ -457,7 +472,7 @@ export function hasPreviewBridge(html: string): boolean {
 export function stripPreviewBridge(html: string): string {
   if (typeof html !== 'string' || !html || !html.includes(PREVIEW_BRIDGE_MARKER)) return html;
   return html.replace(
-    new RegExp(`([ \\t]*)<script\\b[^>]*>(?:(?!<\\/script>)[\\s\\S])*?${PREVIEW_BRIDGE_MARKER}(?:(?!<\\/script>)[\\s\\S])*?<\\/script>([ \\t]*\\r?\\n)?`, 'gi'),
+    new RegExp(BRIDGE_SCRIPT_RE_SOURCE, 'gi'),
     (_match: string, lead: string, trail: string | undefined, offset: number, whole: string) => {
       const atLineStart = offset === 0 || whole[offset - 1] === '\n';
       // Our tag occupied the whole line: drop the line, indentation and break included.

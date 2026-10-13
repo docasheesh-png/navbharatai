@@ -127,11 +127,12 @@ describe('Q-067 — a word we do not know is not a service to connect to', () =>
   it('the route hands it to the builder, the planner and the fast lane, on new builds only', () => {
     const route = read('src/server/routes/agentv3.ts');
     expect(route).toContain("intent === 'new_build' && !isImportTurn && unknownNameNoteEnabled() ? unknownNamesInRequest(prompt) : []");
-    expect(route).toContain('buildPrompt = `${unknownNameNote}');
-    // The planner's goal carries it (since Q-274 beside the script-request note, in one list).
-    expect(route).toContain('const plannerGoalNotes = [unknownNameNote, scriptRequestNote,');
-    expect(route).toContain('const plannerGoalBase = plannerGoalNotes ?');
-    expect(route).toContain('pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix;'); // fastLaneRequest (Q-975)
+    // PIN UPDATED 2026-10-13 (autopsy 9c612cdb, Q-991; with #3701's one fast-lane request, Q-975): the note joins the
+    // ONE request-notes list, and the architect, the planners and both fast lanes read that list.
+    expect(route).toContain("{ code: 'unknown-name', text: unknownNameNote },");
+    expect(route).toContain("buildPrompt = [requestNotesText, buildPrompt].filter(Boolean).join('\\n\\n---\\n\\n');");
+    expect(route).toContain('const plannerGoal = withRequestNotes(prompt, requestNotesText);');
+    expect(route).toContain('runSimpleBuild({ prompt: fastLaneRequest, requestNotes: requestNotesText,');
   });
 });
 

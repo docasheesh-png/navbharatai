@@ -113,36 +113,44 @@ describe('🔒 the wiring — every lane that writes the app hears the same rule
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
   const subAgent = readFileSync('src/server/AgentV3/SubAgent.ts', 'utf8');
   it('the architect: the build prompt opens with the rule, the summary gets the line, from the same reading', () => {
-    expect(route).toContain('if (keypadPhoneForBuild) buildPrompt = `${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}');
+    // PIN UPDATED 2026-10-13 (autopsy 9c612cdb, Q-991 — this rule's first fix reached ONE lane): the rule rides the ONE
+    // request-notes list, so the architect, the fast lane, the one-shot lane and the planner all read the same text.
+    expect(route).toContain("{ code: 'device', text: keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind) : '' },");
+    expect(route).toContain("buildPrompt = [requestNotesText, buildPrompt].filter(Boolean).join('\\n\\n---\\n\\n');");
     expect(route).toContain('summary: `${result.summary}${nonSmartphoneUserLine(keypadPhone.device)}`');
     expect(route).toContain("code: 'NON_SMARTPHONE_TOLD'");
   });
   it('the fast lane: its prompt carries the same rule', () => {
-    expect(route).toContain('const keypadPhoneSuffix = keypadPhoneForBuild ? `\\n\\n${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}`');
-    // Both fast lanes read ONE request since Q-975 — the one-shot never had this rule before it.
-    expect(route).toContain('+ singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix;');
-    expect(route).toContain('runSimpleBuild({ prompt: fastLaneRequest,');
-    expect(route).toContain('runOneShot({ prompt: fastLaneRequest,');
+    // PIN UPDATED 2026-10-13 (Q-991 + Q-975): both fast lanes get ONE request (Q-975, `fastLaneRequest`) and read the
+    // ONE request-notes list (which carries the device entry asserted above) — the fast lane apart from the request, so
+    // its size reader measures the user's words; the one-shot lane after it.
+    expect(route).toContain('runSimpleBuild({ prompt: fastLaneRequest, requestNotes: requestNotesText,');
+    expect(route).toContain('runOneShot({ prompt: fastLaneRequest + requestNotesSuffix,');
   });
-  it('the writing sub-agents: a deviceRule thunk, read only by roles that write files', () => {
-    expect(route).toMatch(/deviceRule: \(\) => \{\s*const phone = !isImportTurn && intent === 'new_build' && !isEditMode \? namedNonSmartphone\(prompt\) : null;\s*return phone \? nonSmartphoneBuildRule\(phone\.device, phone\.kind\) : '';/);
-    expect(subAgent).toContain("roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools) ? (deps.deviceRule?.() ?? '') : ''");
+  it('the writing sub-agents: the request-notes thunk, read only by roles that write files', () => {
+    // PIN UPDATED 2026-10-13 (Q-991): Q-868's device-only thunk became the ONE request-notes list, so a writing specialist
+    // also hears the no-login scope, the stack note and the third-party limits — the same text the architect opens with.
+    expect(route).toContain('requestNotesRule: () => childRequestNotes,');
+    expect(route).toContain('childRequestNotes = requestNotesText;');
+    expect(subAgent).toContain("roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools) ? (deps.requestNotesRule?.() ?? '') : ''");
   });
   it('the planner: its goal carries the same rule', () => {
-    expect(route).toContain("const plannerGoalNotes = [unknownNameNote, scriptRequestNote, keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind) : ''].filter(Boolean)");
+    // PIN UPDATED 2026-10-13 (Q-991): the planner's goal is built from the same request-notes list.
+    expect(route).toContain('const plannerGoal = withRequestNotes(prompt, requestNotesText);');
   });
   it('the plan-first planner: it plans from the rule AND the request, so its todos never contradict the rule', () => {
-    expect(route).toContain('await planRunner.run(keypadPhoneForBuild ? `${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}');
+    // PIN UPDATED 2026-10-13 (Q-991): the plan-first planner reads the whole request-notes list, the device rule included.
+    expect(route).toContain('await planRunner.run(withRequestNotes(prompt, requestNotesText));');
     expect(route).not.toContain('await planRunner.run(prompt);');
   });
   it('🔒 a NEW build only — the rule and the line never touch an edit of an existing (possibly 3D) app', () => {
     const gate = "!isImportTurn && intent === 'new_build' && !isEditMode";
     expect(route).toContain(`const keypadPhoneForBuild = ${gate} ? namedNonSmartphone(prompt) : null;`);
-    expect(route).toContain(`const phone = ${gate} ? namedNonSmartphone(prompt) : null;`);
     expect(route).toContain(`const keypadPhone = result.ok && expectsArtifacts && ${gate} ? namedNonSmartphone(prompt) : null;`);
     // Every call to the detector in the route sits behind that gate (or the import/new-build guard above it).
     const calls = route.match(/namedNonSmartphone\(prompt\)/g) ?? [];
-    expect(calls.length).toBe(3);
+    // 2, not 3, since the sub-agents read the request-notes list (Q-991) instead of re-detecting the phone themselves.
+    expect(calls.length).toBe(2);
   });
   it('an approved plan is ADDED to the build prompt — never rebuilt from the bare request, which dropped every note', () => {
     expect(route).toContain('buildPrompt = `${buildPrompt}\\n\\nApproved plan:\\n');

@@ -20,6 +20,8 @@ import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReady
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
 import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { writerTaskSiblings, SIBLING_TASKS_INPUT_KEY } from './parallelSiblings';
+import { toolNameCouldProduceWork } from './toolWork';
+import { isTodoOnlyTurn, TODO_ONLY_TURN_STEER } from './todoOnlyTurn';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
@@ -28,7 +30,7 @@ import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRe
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
-import { abortCauseOf, abortSummary, timedOutSummary, stalledModelSummary, type SeedState } from './buildAbortCause';
+import { abortCauseOf, abortSummary, timedOutSummary, stalledModelSummary, stoppedCallFields, type SeedState, type AbortCause } from './buildAbortCause';
 import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, buildBudgetNarration, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
@@ -43,6 +45,7 @@ import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
 import { answerAfterPlanning } from './answerAfterPlanning';
 import { resolveToolAlias, toolAliasNote } from './toolAlias';
 import { answerTimeOf } from './answeringModel';
+import { runAsModelToolCall } from './modelToolWrites';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -282,7 +285,17 @@ export interface AgentRunnerOptions {
     firstOutputMs?: number;
     ok: boolean;
     error?: string;
+    /** The provider family that was serving a call a stop cancelled — set only for a stop that was ours. */
+    provider?: string;
+    /** Why a cancelled call was stopped — set only when it was OUR decision (`stoppedCallOwner`). */
+    stopCause?: AbortCause;
   }) => void;
+  /**
+   * Called for every model turn whose only tool calls were update_todo, in a run that could have written
+   * (`isTodoOnlyTurn`, autopsy 9c612cdb). `latencyMs` is that turn's model time. The route sums these into
+   * the build's `TODO_ONLY_TURNS` line. Best-effort; a throw here never breaks the build.
+   */
+  onTodoOnlyTurn?: (turn: { latencyMs: number }) => void;
   /**
    * Build-level token accumulator (billing accounting fix). When provided, EVERY turn's tokens are
    * added here as well as to this runner's own `usage`. The SAME sink is shared across the main
@@ -345,13 +358,18 @@ export function isParallelSafeToolUse(toolUse: ToolUse, opts?: { parallelBuild?:
  * answers *"can this run concurrently?"*, and under `parallelBuild` it calls a `frontend` sub-agent
  * parallel-safe — which WRITES. Negating it would make a real builder's work read as no work at all,
  * on exactly the flag that is switched on in production. Two questions, two predicates.
+ *
+ * 🔴 AND NOT A DENY-LIST (autopsy 9c612cdb, Q-988). 2b0a3ed5 answered "not work" only for the parallel-safe
+ * READS, so update_todo, update_preview, typecheck, screenshot and every new check counted as built work,
+ * and a fresh build stopped after a plan-only turn said its files were saved. Every tool is now classified
+ * on purpose in `toolWork.ts`, whose census fails CI on a tool in neither set.
  */
 export function toolUseCouldProduceWork(toolUse: ToolUse): boolean {
   if (toolUse?.name === 'task') {
     const role = typeof toolUse.input?.role === 'string' ? toolUse.input.role : '';
     return !PARALLEL_SAFE_TASK_ROLES.has(role);
   }
-  return !PARALLEL_SAFE_TOOLS.has(String(toolUse?.name ?? ''));
+  return toolNameCouldProduceWork(String(toolUse?.name ?? ''));
 }
 
 /**
@@ -586,6 +604,9 @@ export class AgentRunner {
     // …and of those, the ones that could have PRODUCED something. A build that only ever read a file
     // has not built anything, however many reads it made — see `toolUseCouldProduceWork`.
     let producingToolUses = 0;
+    // Turns whose only tool calls were update_todo (todoOnlyTurn.ts, autopsy 9c612cdb): every one is reported
+    // through `onTodoOnlyTurn`, and the first is handed back with the rule (once per run).
+    let todoOnlySteered = false;
     // ONE place answering "is there something to resume from", so the four abort/timeout/step-cap
     // exits below can never drift into disagreeing with each other (or with the route's own
     // `writtenFiles`-based billing decision — see `hasExistingFiles`'s doc comment for the report
@@ -870,6 +891,7 @@ export class AgentRunner {
         const promptPreview = `${systemText.slice(0, PROMPT_PREVIEW_HEAD)}${SEPARATOR}${lastMsgText.slice(0, PROMPT_PREVIEW_HEAD)}`;
         const llmStartedAt = Date.now();
         let turn: TurnResult;
+        let turnTimeoutSignal: AbortSignal | undefined;
         try {
           // E4 — cap the model call so a hung provider (socket open, no bytes, no error) can't block
           // the whole build. The wall-clock watchdog only runs BETWEEN turns, so without this a single
@@ -901,6 +923,10 @@ export class AgentRunner {
               }
             } catch { /* the working set is advisory — never blocks a turn */ }
           }
+          // Held in its own binding so the catch below can tell THIS clock firing from a stop (autopsy 9c612cdb).
+          turnTimeoutSignal = turnTimeoutMs > 0 && typeof AbortSignal.any === 'function' && typeof AbortSignal.timeout === 'function'
+            ? AbortSignal.timeout(turnTimeoutMs)
+            : undefined;
           const turnCall = client.runTurn({
             model,
             system,
@@ -912,8 +938,8 @@ export class AgentRunner {
             ...(this.opts.stopAtReasoningRung ? { stopAtReasoningRung: true } : {}),
             // A Stop cancels THIS call, not only the next one (stopSignal.ts). Before this the loop
             // noticed a stop only between turns, after paying for the call already in flight.
-            signal: turnTimeoutMs > 0 && typeof AbortSignal.any === 'function' && typeof AbortSignal.timeout === 'function'
-              ? AbortSignal.any([...(this.opts.signal ? [this.opts.signal] : []), AbortSignal.timeout(turnTimeoutMs)])
+            signal: turnTimeoutSignal
+              ? AbortSignal.any([...(this.opts.signal ? [this.opts.signal] : []), turnTimeoutSignal])
               : this.opts.signal,
             onText: (delta) =>
               events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'text', delta, ts: Date.now() }),
@@ -952,16 +978,36 @@ export class AgentRunner {
           // WAS running, and for how long is the one fact that explains a long silence before the Stop (autopsy
           // 15e69839: the call in flight had run ~3 minutes and appeared nowhere in the report). Recorded as a
           // stopped call — `recordLlmCall` turns it into LLM_CALL_STOPPED, info, never a provider failure.
+          //
+          // 🔴 …AND A STOP IS NOT ALWAYS THE USER'S (autopsy 9c612cdb, Q-998). The post-build review that OUR
+          // 45-second budget cut off took this same path and was recorded as "cancelled because the build was
+          // stopped" — a build nobody stopped — under the nominal model id, so the report could not say which
+          // engine had been running it, or whose clock ended it. Whose decision it was is on the signal
+          // (`abortCauseOf`); `stoppedCallFields` decides how it is recorded, for every cause the code defines:
+          //   the user's Stop and an unknown cause → EXACTLY the record above, key for key;
+          //   our clock → a budget end (LLM_CALL_BUDGET_ENDED), naming the clock and the engine it was on;
+          //   our platform → a stopped call naming the platform event and the engine.
           if (this.opts.signal?.aborted && isBuildStoppedError(err)) {
+            const stop = stoppedCallFields(abortCauseOf(this.opts.signal as AbortSignal), err, model);
             try {
               this.opts.onLlmCall?.({
-                model, promptPreview, promptChars,
+                model: stop.model, promptPreview, promptChars,
                 responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0,
                 inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - llmStartedAt,
-                ok: false, error: err instanceof Error ? err.message : String(err),
+                ok: false, error: stop.error, ...stop.extra,
               });
             } catch { /* diagnostics capture is best-effort */ }
             return endAborted();
+          }
+          // 🔴 OUR PER-TURN STALL GUARD, NOT A STOP (autopsy 9c612cdb, sibling of Q-998). The turn's signal
+          // also carries the per-turn timeout, and a provider chain that honours it ends the call with the
+          // SAME stop error — which is not a stop: nobody stopped this build. Read as one, the stalled turn
+          // was recorded as "cancelled because the build was stopped" and the run ended with "Error: Stopped —
+          // the build was asked to stop", while the honest stall ending below (what was saved, how to carry
+          // on) was unreachable whenever this clock fired a tick before `withTimeout`'s. It is the timeout it
+          // is, worded exactly as `withTimeout` words it, so it takes the same path from here.
+          if (isBuildStoppedError(err) && !this.opts.signal?.aborted && turnTimeoutSignal?.aborted) {
+            err = new Error(`model turn ${steps} timed out after ${turnTimeoutMs}ms`);
           }
           // #4 — capture the FAILED model turn before it propagates (provider error, timeout, …).
           try {
@@ -1338,6 +1384,12 @@ export class AgentRunner {
         }
         totalToolUses += turn.toolUses.length;
         producingToolUses += turn.toolUses.filter(toolUseCouldProduceWork).length;
+        // 📋 A TURN SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-987: five of 22 turns, 20 s of model time).
+        // Measured here, while `llmStartedAt` still times only the model call; handed back below, once.
+        const todoOnlyTurn = isTodoOnlyTurn(turn.toolUses.map((tu) => tu.name), tools.map((t) => t.name));
+        if (todoOnlyTurn) {
+          try { this.opts.onTodoOnlyTurn?.({ latencyMs: Date.now() - llmStartedAt }); } catch { /* a measurement must never fail a build */ }
+        }
 
         // Execute the requested tools and gather results (in the original order, so tool_use
         // ids resolve). Mutating tools (write/edit/bash, builder sub-agents) run SERIALLY and
@@ -1395,9 +1447,13 @@ export class AgentRunner {
             const r = await dispatchWithBudget({ ...tu, name: aliasTo });
             return { ...r, content: `${toolAliasNote(tu.name, aliasTo)}${r.content}` };
           }
-          if (toolTimeoutMs <= 0 || tu.name === 'task') return dispatcher.dispatch(tu, agentRole);
+          // 🔑 A TOOL CALL THE MODEL ASKED FOR IS MARKED AS ONE (modelToolWrites.ts, autopsy 9c612cdb). Every write
+          // it makes is then the model's by evidence, so a platform step that named no pass can no longer be
+          // reported as "the build loop". A repair the platform started is marked as that, not as the build.
+          const asModel = <T>(fn: () => Promise<T>): Promise<T> => runAsModelToolCall(fn, { platformRequest: this.opts.platformRequest === true });
+          if (toolTimeoutMs <= 0 || tu.name === 'task') return asModel(() => dispatcher.dispatch(tu, agentRole));
           try {
-            return await withDeadline((signal) => dispatcher.dispatch(tu, agentRole, { signal }), toolTimeoutMs, `tool ${tu.name}`);
+            return await withDeadline((signal) => asModel(() => dispatcher.dispatch(tu, agentRole, { signal })), toolTimeoutMs, `tool ${tu.name}`);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             const timedOut = /timed out after/.test(msg);
@@ -1433,6 +1489,16 @@ export class AgentRunner {
               content: `This is the same ${turn.toolUses[i].name} call as ${turn.toolUses[first].id} earlier in this turn — its result is above, so it was not run twice.`,
               is_error: false,
             });
+          }
+        }
+        // The FIRST plan-only turn of this run hears the rule on its own tool result — the place the model
+        // reads next. Once per run: a hand-back repeated every turn is noise the model learns to skim.
+        if (todoOnlyTurn && !todoOnlySteered) {
+          const last = resultBlocks.length - 1;
+          const block = resultBlocks[last];
+          if (block && typeof block.content === 'string' && block.is_error !== true) {
+            resultBlocks[last] = { ...block, content: `${block.content}\n\n${TODO_ONLY_TURN_STEER}` };
+            todoOnlySteered = true;
           }
         }
         // TRUNCATION GUARD (ShopKhata autopsy 2026-07-17): a turn cut off at max_tokens can write a

@@ -57,7 +57,9 @@ describe('the wiring — proven by reversion', () => {
     expect(runner).toContain('const offeredToolNames = new Set(tools.map((t) => t.name));');
     expect(runner).toContain('resolveToolAlias(tu.name, tu.input, offeredToolNames)');
     const alias = runner.indexOf('resolveToolAlias(tu.name');
-    const dispatch = runner.indexOf("if (toolTimeoutMs <= 0 || tu.name === 'task') return dispatcher.dispatch(tu, agentRole);");
+    // Anchor updated 2026-10-13 (autopsy 9c612cdb): the dispatch is now made inside `asModel(…)`, which marks it
+    // as a tool call the model asked for (modelToolWrites.ts). The order this test guards is unchanged.
+    const dispatch = runner.indexOf("if (toolTimeoutMs <= 0 || tu.name === 'task') return asModel(() => dispatcher.dispatch(tu, agentRole));");
     expect(alias).toBeGreaterThan(0);
     expect(alias).toBeLessThan(dispatch);
   });

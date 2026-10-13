@@ -3,6 +3,16 @@ import { appAiGatewayEnabled } from '../lib/appAiGateway';
 import type { ToolName } from './types';
 import { MAX_FILES_PER_BATCH } from './batchSize';
 import { WORKER_ROLES } from './AgentRegistry';
+import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
+import { TODO_RIDES_WITH_WORK, runCanWrite } from './todoOnlyTurn';
+
+/**
+ * The update_todo contract WITHOUT the "rides with the work" rule (autopsy 9c612cdb, Q-987). A lane that
+ * cannot write — the plan-approval lane, offered ONLY update_todo and told to end its turn after it, and the
+ * planning roles — is given this text by `catalogForTools`: "never as a turn of its own" would contradict the
+ * one job that lane has. Every writer lane gets it with `TODO_RIDES_WITH_WORK` appended.
+ */
+const UPDATE_TODO_CONTRACT = 'Update the ONE running build plan shown to the user. Send the full list with statuses updated and new items appended — never a fresh shorter plan (completed items always stay; the workspace keeps finished work even if you omit it).';
 
 /**
  * ToolCatalog — the native Anthropic tool definitions the v5.0 agent team can
@@ -39,15 +49,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     },
     {
       name: 'edit_file',
+      // The anchor-free append is part of the CONTRACT, not only of the failure message (autopsy 9c612cdb,
+      // Q-986): a model asked to add rules to a stylesheet it never read had to guess an anchor otherwise.
       description:
         'Replace an exact, unique string in a file with a new string. The ' +
         'old_string must appear exactly once; include surrounding context to ' +
-        'make it unique.',
+        `make it unique. ${APPEND_WITH_EMPTY_OLD_STRING}`,
       input_schema: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'Workspace-relative file path.' },
-          old_string: { type: 'string', description: 'The exact text to replace (must be unique).' },
+          old_string: { type: 'string', description: 'The exact text to replace (must be unique). An EMPTY string ("") appends new_string to the end of the file instead — no anchor needed.' },
           new_string: { type: 'string', description: 'The replacement text.' },
         },
         required: ['path', 'old_string', 'new_string'],
@@ -165,7 +177,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     },
     {
       name: 'update_todo',
-      description: 'Update the ONE running build plan shown to the user. Send the full list with statuses updated and new items appended — never a fresh shorter plan (completed items always stay; the workspace keeps finished work even if you omit it).',
+      description: `${UPDATE_TODO_CONTRACT} ${TODO_RIDES_WITH_WORK}`,
       input_schema: {
         type: 'object',
         properties: {
@@ -3687,7 +3699,7 @@ export function taskToolDef(): ClaudeToolDef {
       'Delegate a focused task to a specialist agent. The agent runs with its own ' +
       'tools and returns a summary of what it did. Use this to parallelise and ' +
       'organise the build across the team. Plan the work yourself with update_todo — ' +
-      'a planning-only role (requirement, planner, product) is not delegated.',
+      `a planning-only role (requirement, planner, product) is not delegated. ${TODO_RIDES_WITH_WORK}`,
     input_schema: {
       type: 'object',
       properties: {
@@ -3887,5 +3899,9 @@ export function catalogForTools(allowed: ToolName[]): ClaudeToolDef[] {
   if ((allowed as string[]).includes('task')) base.push(taskToolDef());
   if ((allowed as string[]).includes('second_opinion')) base.push(secondOpinionToolDef());
   if ((allowed as string[]).includes('consensus')) base.push(consensusToolDef());
-  return dedupeToolsByName(base);
+  const defs = dedupeToolsByName(base);
+  // A lane that cannot write is not told to pair the plan with work it cannot do (autopsy 9c612cdb, Q-987):
+  // the same `runCanWrite` answer that keeps the runner's hand-back away from it.
+  if (runCanWrite(allowed as string[])) return defs;
+  return defs.map((t) => (t.name === 'update_todo' ? { ...t, description: UPDATE_TODO_CONTRACT } : t));
 }

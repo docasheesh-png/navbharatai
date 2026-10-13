@@ -372,7 +372,10 @@ export function withHonestyBanner(html: string | null | undefined, findings: rea
     '    try{if(sessionStorage.getItem("nbai-honesty-hidden")==="1")return;}catch(e){}',
     '    var bar=document.createElement("div");bar.id="nbai-honesty";bar.setAttribute("role","alert");',
     `    bar.setAttribute("lang",${JSON.stringify(lang)});`,
-    '    bar.style.cssText="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#b91c1c;color:#fff;font:600 14px/1.45 system-ui,-apple-system,sans-serif;padding:10px 48px 10px 14px;box-shadow:0 2px 8px rgba(0,0,0,.35);white-space:pre-wrap;word-break:break-word;";',
+    // 📏 On the 4px grid (autopsy 9c612cdb): `10px 48px 10px 14px` put three off-grid values into every
+    // app that carries this banner. The lint no longer grades our markup, but what we inject follows the
+    // rule we hold the app to — a census test (tests/ourMarkupIsNotTheUsersDesign.test.ts) enforces it.
+    '    bar.style.cssText="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#b91c1c;color:#fff;font:600 14px/1.45 system-ui,-apple-system,sans-serif;padding:8px 48px 8px 16px;box-shadow:0 2px 8px rgba(0,0,0,.35);white-space:pre-wrap;word-break:break-word;";',
     '    bar.textContent=lines.join("\\n");',
     '    var x=document.createElement("button");x.type="button";x.setAttribute("aria-label","Close");x.textContent="\\u00d7";',
     '    x.style.cssText="position:absolute;top:4px;right:6px;width:36px;height:36px;background:transparent;border:0;color:#fff;font-size:24px;line-height:36px;cursor:pointer;";',

@@ -48,7 +48,8 @@ describe('"Edit pdf" names a file, not an app', () => {
   });
 
   it('READY_BEFORE_END no longer says the edit was of "an app that already existed"', () => {
-    const note = readyOverrunNote(null, 80, 600_000, { editingExistingApp: true });
+    // The third argument is the END EPOCH since autopsy 9c612cdb (was an elapsed time); no mark, so unused.
+    const note = readyOverrunNote(null, 80, Date.now(), { editingExistingApp: true });
     expect(note).toMatch(/^Not measured/);
     expect(note).not.toMatch(/an app that already existed/);
   });

@@ -44,8 +44,8 @@ import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAutho
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
-import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange, fleetEtaLine, finalChecksEtaLine } from '../AgentV3/progressEta';
-import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
+import { firstEtaLine, formatEtaRange, fleetEtaLine, etaTickLine, etaPhaseLine } from '../AgentV3/progressEta';
+import { estimateIsEvidenced, unevidencedFirstEtaLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity } from '../AgentV3/complexityRouting';
 import { isPortTurn, collectPortSources, portDigest, foreignSourcePaths } from '../AgentV3/portDigest';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
@@ -62,6 +62,7 @@ import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } f
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePowers';
 import { namedNonSmartphone, nonSmartphoneBuildRule, nonSmartphoneUserLine } from '../AgentV3/deviceTarget';
+import { thirdPartyLimitsEnabled, editTurnAdServingPlayers, projectAdServingPlayers, thirdPartyLimitAsked, thirdPartyLimitsBuilderNote, announceThirdPartyLimit, withThirdPartyLimitsEndLine, thirdPartyLimitReportNote, adFreeClaimCorrection, claimReportWithAdFree } from '../AgentV3/thirdPartyLimits';
 import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
 import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eAutoScaffold';
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
@@ -211,10 +212,10 @@ import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderS
 import { visibleAppError, appShowsErrorNote, APP_SHOWS_ERROR_CODE } from '../AgentV3/visibleAppError';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths, greenRepairPrompt, readRepairVerdicts, type RepairVerdicts } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
-import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
+import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, inPlatformPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
 import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict, starterLabelFor } from '../AgentV3/stillTheStarterApp';
-import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
+import { postGreenWritesNote, endVerdictFrom, writerPhrase, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
 import { pastedAppBrief, pastedAppBriefEnabled } from '../AgentV3/pastedAppBrief';
 import { combineScreens, featureProbeScreensEnabled, PROBE_SCREENS_BUDGET_MS, screensReadNote, screensToProbe, screenUrl, type ProbedScreen } from '../AgentV3/featureProbeScreens';
@@ -286,7 +287,7 @@ import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
 import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
 import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
 import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, seedStateOf, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
-import { runAsUnreadWrites } from '../AgentV3/unreadWrites';
+import { writePlatformFiles, readWriteOutcomes, type WriteOutcome } from '../AgentV3/writeOutcomes';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { deletedFilesNotice, userVisibleDeletions } from '../AgentV3/deletedFilesNotice';
@@ -363,6 +364,8 @@ import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoSc
 import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormancy';
 import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
 import { repeatedReadSummary, READ_LOOP_LIMIT } from '../AgentV3/repeatedReads';
+import { recordTodoOnlyTurns } from '../AgentV3/todoOnlyTurn';
+import { APPEND_WITH_EMPTY_OLD_STRING } from '../AgentV3/appendByEdit';
 import { greenGuardUndidWork, withGreenGuardCorrection, type GreenGuardRestoreFacts } from '../AgentV3/greenGuardHonesty';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
 import { planE2eScaffold } from '../AgentV3/e2eScaffold';
@@ -384,7 +387,8 @@ import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
-import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
+import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
+import { contractRenameHandoffClause, salvageWhyClause } from '../AgentV3/handoffRule';
 import { entryFirstHandoffLine, renderWhileBuilding } from '../AgentV3/earlyPreview';
 import { planHandoffText } from '../AgentV3/planHandoff';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, dedupeStylesheetImports, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -412,7 +416,7 @@ import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TI
 import { shellModuleFor, shellStillAwaited, recordModuleDelivery, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
-import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
+import { withTimeout } from '../AgentV3/asyncUtils';
 import { beginChange, observeProbes, regressionsSoFar, settleChange, type ChangeSession } from '../AgentV3/changeEngine/changeSession';
 import type { SpecItem } from '../AgentV3/changeEngine/appSpec';
 import { removedProbeFeatures } from '../AgentV3/changeEngine/requestConsistency';
@@ -473,7 +477,7 @@ import { abortOutcomeFor, ABORT_OUTCOME_CODES } from '../AgentV3/abortOutcome';
 import { sandboxWasUnavailable } from '../AgentV3/sandboxAvailability';
 import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser, buildWasStopped } from '../AgentV3/BuildDiagnostics';
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
-import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity, liveEtaTick } from '../lib/BuildTimeEstimator';
+import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { freeBuildWindow, noteFreeBuildStartDurable, decideFreePauseDurable, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
 import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
@@ -482,6 +486,8 @@ import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration 
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration, failuresAreOurStarterTests, ourStarterTestFailedNote } from '../AgentV3/TestGenerationAgent';
+import { starterTestsSkipReason, starterTestsSkippedNote } from '../AgentV3/starterTestsSkip';
+import { buildBillingLabel } from '../AgentV3/buildBillingLabel';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
 import { APP_ENTRY_CANDIDATES, resolveAppDisplayName } from '../AgentV3/appDisplayName';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
@@ -605,7 +611,7 @@ import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHones
 import { reviewBuild, formatReview, reviewHasUnreadFindings, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths, reviewScopeWords, reviewEngineWords, reviewStoppedAtReasoningRung } from '../AgentV3/ReviewerAgent';
 import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
-import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
+import { salvageReview, formatPartialReview, collectReviewerWords, reviewNotReadyUserLine } from '../AgentV3/partialReview';
 import {
   saveWorkspaceMemoryFor,
   restoreWorkspaceMemory,
@@ -640,7 +646,9 @@ import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } 
 import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../AgentV3/terminalMeter';
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
-import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence } from '../AgentV3/buildAbortCause';
+import { restateDesignAfterRepair } from '../AgentV3/designAfterRepair';
+import { withRequestNotes } from '../AgentV3/requestNotes';
+import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
@@ -678,6 +686,7 @@ import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuator
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
 import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
+import { filesANoteStillFlags } from '../AgentV3/writeTimeQualityCheck';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
 import { buildServiceGraph } from '../AgentV3/serviceGraph';
@@ -13047,16 +13056,18 @@ async function noteBuildOutcome(
           });
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
           buildDiagRef?.setCacheReadInputTokens(billingCtx.cacheReadInputTokens ?? 0);
+          // The label and `charged` come from the ONE rule the settle uses too (buildBillingLabel.ts, autopsy 9c612cdb).
+          const watchdogBilledInr = Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100;
           buildDiagRef?.setBilling({
-            userTier: isAgentV3FreeUser(userId, email)
-              ? 'free-list (admin/tester)'
-              : freeTierBuildActive
-                ? 'free (welcome bonus — cheap engines)'
-                : (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email)
-                  ? 'paid'
-                  : 'billing-off (no charge)',
+            ...buildBillingLabel({
+              freeListed: isAgentV3FreeUser(userId, email),
+              cheapEnginesOnly: freeTierBuildActive,
+              billingActive: (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email),
+              billedUsd: watchdogBilledUsd,
+              billedInr: watchdogBilledInr,
+            }),
             billedUsd: Math.round(watchdogBilledUsd * 1_000_000) / 1_000_000,
-            billedInr: Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100,
+            billedInr: watchdogBilledInr,
             realCostUsd: Math.round(decided.realCostUsd * 1_000_000) / 1_000_000,
             sandboxCostUsd: Math.round(decided.sandboxUsd * 1_000_000) / 1_000_000,
             powerMode: onlyOpus,
@@ -13452,16 +13463,27 @@ async function noteBuildOutcome(
     // user read the prompt-word guess. These three fields carry the architect's OWN plan instead — its
     // length, how many steps are done, and when the first one landed. See progressEta.ts.
     let etaPlannedSteps = 0;
+    // Every plan-step WRITE. ⚠️ Not the ETA's step count any more (autopsy 9c612cdb): it is one of the
+    // futility breaker's three progress signals, and a build busy repairing one file must keep moving it.
     let etaStepsDone = 0;
+    /**
+     * The ETA's OWN step count: the DISTINCT paths written against the plan (autopsy 9c612cdb). Two repair
+     * edits of `src/hooks/useVideoList.ts` five seconds apart counted as two plan steps, so the minute-2
+     * line read "3 of 5 steps done · ~2 min to go" with 5.6 minutes left. A rewrite is repair, not plan
+     * progress. Only the ETA reads this — the plan ticks (PlanProgress) and the futility breaker keep the
+     * write count they have always had.
+     */
+    const etaStepPaths = new Set<string>();
     let etaFirstStepAt = 0;
     /**
      * Record the architect's plan and its progress. Both counters only ever GROW, for the same reason
      * `noteEtaPlannedFiles` does: a plan the model extends mid-build supersedes the shorter one, and a
      * transient shorter snapshot must never walk the measurement backwards.
      */
-    const noteEtaPlanStep = (planLength: number, stepsDone: number): void => {
+    const noteEtaPlanStep = (planLength: number, stepsDone: number, path?: string): void => {
       if (Number.isFinite(planLength) && planLength > etaPlannedSteps) etaPlannedSteps = Math.floor(planLength);
       if (Number.isFinite(stepsDone) && stepsDone > etaStepsDone) etaStepsDone = Math.floor(stepsDone);
+      if (path) etaStepPaths.add(path);
       if (etaFirstStepAt === 0) etaFirstStepAt = Date.now();
     };
     /**
@@ -13476,8 +13498,33 @@ async function noteBuildOutcome(
      * The build loop is over and only the platform's own checks and fixes remain (autopsy de3bb2bb: at
      * minute 12 the line promised "about 7 min more" — the build ended 34 seconds later, inside its final
      * checks). Set at the post-answer pass; the ETA tick then says where the build IS, with no number.
+     * 🔴 And, since autopsy 9c612cdb, also the moment the runner's final result settles: the integrity
+     * pass starts later still, and a tick that fell between the two promised "about 3 min more".
      */
     let etaFinalChecks = false;
+    /**
+     * Epoch ms the app was first PROVEN rendered in a real browser and saved as the working version (the
+     * in-build green). 0 until then. Hoisted here, beside `etaFinalChecks`, because the green's own
+     * `inBuildGreenAt` is block-scoped where the heartbeat cannot see it (autopsy 9c612cdb: rendered at
+     * 350.0 s; the 361.4 s tick still said "about 3 min more to go").
+     */
+    let etaAppRenderedAt = 0;
+    /**
+     * Say the build's PHASE the moment it changes, not at the next even minute (autopsy 9c612cdb): the
+     * heartbeat ticks every two minutes, so a phase line left to it can arrive two minutes late. Only when
+     * the live ETA is running, nobody is being asked a question, and the line would actually change.
+     */
+    const emitEtaPhaseNow = (only?: { unlessStopped: AbortSignal; wrote: () => number }): void => {
+      try {
+        // The caller's own guard lives here, not at the call: the handler sits at TypeScript's control-flow limit
+        // (TS2563), and an `if (a && b)` there is two more branches the checker must walk.
+        if (only && (only.unlessStopped.aborted || only.wrote() <= 0)) return;
+        if (!(etaTotalMs > 0 && etaStartMs > 0) || userWait.since !== null) return;
+        const now = Date.now();
+        const line = etaPhaseLine({ elapsedMs: now - etaStartMs, finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt });
+        if (line && line !== lastEtaShown) events.emit({ type: 'narration', agent: 'architect', text: line, ts: now, id: 'eta-live' });
+      } catch { /* the live line is best-effort — it must never affect a build */ }
+    };
     const emitSettlingPhase = (): void => {
       if (settlingAnnounced) return;
       settlingAnnounced = true;
@@ -13586,76 +13633,33 @@ async function noteBuildOutcome(
         try {
           const now = Date.now();
           const elapsedMs = now - etaStartMs;
-          // MEASUREMENT FIRST (2026-08-23). Once the plan's size is known and enough files have landed
-          // to average, the remaining time is extrapolated from THIS build's own observed pace — on this
-          // provider chain, at this tier, under whatever rate limiting is happening right now. It needs
-          // no calibration constant, so it cannot be wrong about a model nobody benchmarked, and it
-          // fixes the 6x miss at its cause rather than re-tuning the prompt heuristic that produced it.
-          //
-          // It returns null in every case where it would be guessing — no plan, too few files, or the
-          // file phase already over (a repair loop is genuinely unpredictable) — and the honest
-          // re-baselining fallback below then owns the line exactly as it does today.
-          if (etaFinalChecks) {
-            events.emit({ type: 'narration', agent: 'architect', text: finalChecksEtaLine(elapsedMs), ts: now, id: 'eta-live' });
-            return;
-          }
+          // 🔴 THE DECISION IS ONE PURE FUNCTION (`etaTickLine`, progressEta.ts — autopsy 9c612cdb). It
+          // used to be written out here, decided from time budgets alone, and it told a user "about 3 min
+          // more to go" 11 s after their app had rendered. The order — phase first, then measurement,
+          // then the evidence gate, then the budget — is now the function's contract and is tested by
+          // executing it, not by reading this file. This block only gathers the facts and carries the
+          // state forward.
+          // Files done = what was written MINUS what the platform laid down itself (the game-kit seed,
+          // build 46e2d74b): our kit is not progress on the builder's plan.
           const etaFilesDone = Math.max(0, writtenFiles.size - etaPlatformSeededFiles);
-          const measured = measuredRemainingMs({ plannedFiles: etaPlannedFiles, filesDone: etaFilesDone, firstFileAt: etaFirstFileAt, now });
-          if (measured !== null) {
-            // Re-anchor the fallback's budget too, so if measurement later stops applying (the build
-            // enters repair) liveEtaTick continues from the measured total rather than from the stale
-            // prompt guess it was still carrying.
-            etaTotalMs = elapsedMs + measured;
-            // A MEASUREMENT IS EVIDENCE. From here the budget is anchored to this build's own observed
-            // pace, so if measurement later stops applying (the build enters repair) liveEtaTick may
-            // honestly own the line again — it would be continuing from something real rather than
-            // from the prompt guess it was still carrying.
-            etaEvidenced = true;
-            events.emit({ type: 'narration', agent: 'architect', text: measuredEtaText(elapsedMs, measured, etaFilesDone, etaPlannedFiles), ts: now, id: 'eta-live' });
-            return;
-          }
-          // THEN THE PLAN, which is the full builder's only honest measurement (autopsy d11ad529).
-          // Second rather than first on purpose: a file manifest is an exact count of what will be
-          // written, while a plan step is a unit of the architect's own choosing — so where both
-          // exist the file count is the better evidence and keeps today's behaviour exactly.
-          const byStep = measuredRemainingFromSteps({ plannedSteps: etaPlannedSteps, stepsDone: etaStepsDone, firstStepAt: etaFirstStepAt, now });
-          if (byStep !== null) {
-            // Re-anchor the fallback's budget for the same reason the file branch does: if the plan
-            // later saturates, liveEtaTick continues from something measured rather than from the
-            // prompt guess it would otherwise still be carrying.
-            etaTotalMs = elapsedMs + byStep;
-            // A PLAN MEASUREMENT IS EVIDENCE TOO (merge of #2932 and #2934, 2026-09-14). The file
-            // branch above flips this flag for exactly the reason stated there — once a real
-            // measurement has anchored the budget, `liveEtaTick` may honestly own the line again if
-            // measurement later stops applying (the build enters repair). Leaving it unset here
-            // would silently suppress the countdown for the whole rest of a build we HAD measured,
-            // and it would fail nothing — which is the class both PRs warned about.
-            etaEvidenced = true;
-            events.emit({ type: 'narration', agent: 'architect', text: stepEtaText(elapsedMs, byStep, etaStepsDone, etaPlannedSteps), ts: now, id: 'eta-live' });
-            return;
-          }
-          // RE-BASELINING tick (autopsy 2026-08-02): liveEtaTick returns the line AND an extended budget
-          // when the build overruns, so an over-estimate build keeps showing a fresh, honest number
-          // instead of freezing on one "wrapping up (a little longer than estimated)" line for 20+ min.
-          // 🔴 NO EVIDENCE ⇒ NO COUNTDOWN. Without this the fix above would have been half a fix: the
-          // opening number was withheld, and two minutes later this line counted down from the very
-          // estimate we declined to show ("~53s to go" on a build with eight minutes left, autopsy
-          // d11ad529). Elapsed time is still reported — it has already happened, so it promises
-          // nothing — and the moment a real measurement lands the branch above takes over.
-          if (!etaEvidenced) {
-            events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs), ts: now, id: 'eta-live' });
-            return;
-          }
-          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions, etaPromisedHighMs);
-          etaTotalMs = tick.totalMs;
-          // Carry the revision count forward: it is what stops the countdown resuming its "~1 min to
-          // go" promise after the estimate has already been broken (mitrify autopsy 2026-08-04).
-          etaRevisions = tick.revisions;
-          const text = tick.text;
+          const decision = etaTickLine({
+            elapsedMs, now,
+            finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt,
+            plannedFiles: etaPlannedFiles, filesDone: etaFilesDone, firstFileAt: etaFirstFileAt,
+            plannedSteps: etaPlannedSteps, stepsDone: etaStepPaths.size, firstStepAt: etaFirstStepAt,
+            evidenced: etaEvidenced, budgetMs: effectiveBuildSeconds * 1000,
+            roughBand: etaRoughBand, roughHighMs: etaRoughHighMs,
+            totalMs: etaTotalMs, baseMs: etaBaseMs, revisions: etaRevisions, promisedHighMs: etaPromisedHighMs,
+          });
+          // Carry the state: a measurement re-anchors the budget and counts as evidence; an overrun
+          // extends the budget and counts a broken promise (which stops later "~1 min to go" promises).
+          etaTotalMs = decision.totalMs;
+          etaRevisions = decision.revisions;
+          etaEvidenced = decision.evidenced;
           // STABLE id so each ETA tick REPLACES the previous line (the reducer dedupes narration by id)
           // instead of stacking a new "Still building…" bubble every 2 min — and so the client can drop
           // this ONE transient line the moment the build finishes (it is live status, not chat history).
-          events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now(), id: 'eta-live' });
+          events.emit({ type: 'narration', agent: 'architect', text: decision.text, ts: now, id: 'eta-live' });
         } catch { /* ETA is best-effort — never affects the build */ }
       }
     }, 60_000);
@@ -15625,6 +15629,8 @@ async function noteBuildOutcome(
       let dispatcherForSubAgents: ToolDispatcher | undefined;
       // Hoisted (2026-09-18) so the post-build reviewer can be spawned from the SAME deps with a
       // smaller step cap on a proven-green app — see greenReviewPlan. One wiring, two spawns.
+      // The request notes a writing sub-agent reads (see `requestNotesRule` below) — set once the ONE list exists.
+      let childRequestNotes = '';
       const subAgentDeps: SubAgentDeps = {
         ignoreRules: () => ignoreRulesForBuild,
         onFileWrite: (path, content) => onFileWriteForSubAgents?.(path, content),
@@ -15688,12 +15694,10 @@ async function noteBuildOutcome(
         languageRule: () => appLanguageInstruction(prompt, { editingExistingApp: intent === 'edit_existing' }),
         // The SAME AI-in-app rule the architect reads (autopsy d8ed307a) — the child writes the AI client.
         aiRule: () => aiInAppRule(),
-        // The SAME classic-phone rule the architect's prompt opens with (Q-868): a writing specialist builds the game
-        // too, and until this line only the architect and the fast lane heard which phone the user named.
-        deviceRule: () => {
-          const phone = !isImportTurn && intent === 'new_build' && !isEditMode ? namedNonSmartphone(prompt) : null;
-          return phone ? nonSmartphoneBuildRule(phone.device, phone.kind) : '';
-        },
+        // The SAME request notes the architect's prompt opens with (Q-868 gave a writing specialist the classic-phone
+        // rule; Q-991, the whole list — the no-login scope, the stack note, the third-party limits): a specialist
+        // writes the app too. Read at spawn time; '' until the list exists.
+        requestNotesRule: () => childRequestNotes,
         // And the user's own words (autopsy 6db0ff31) — the two lines above derive from them, and a
         // child handed only a thin instruction asked the ARCHITECT "what would you like me to build?".
         // The specialist is handed the request WITH what came with it (autopsy 3f959fde: `planning.text` = the
@@ -15753,7 +15757,7 @@ async function noteBuildOutcome(
       // GREEN FREEZE — record each refused post-green write as an honest, offered-not-applied finding,
       // and collect them so the user is told (via the GREEN STOP suggestion path) rather than left with
       // a silent no-op. Disposed in the finally so nothing leaks between builds.
-      disposeGreenFreezeObserver = setGreenFreezeObserver(({ path, pass }) => {
+      disposeGreenFreezeObserver = setGreenFreezeObserver(({ path, pass, model }) => {
         try {
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'GREEN_FREEZE_DEFERRED',
@@ -15761,7 +15765,9 @@ async function noteBuildOutcome(
             // default files (manifest, robots, icon, service worker, a test), and each ended "Reply if
             // you want this change made" — an invitation about work the user never asked for. A refused
             // post-green write is the engine being held to the freeze, and the line says so.
-            message: `The app was already verified working, so a later write to "${path}"${pass ? ` by the ${pass} pass` : ''} was NOT applied — the working app was left untouched. This is the engine's own follow-up being refused by the freeze, not something the user asked for; nothing to do.`,
+            // The writer is named the way POST_GREEN_WRITES names it (writerPhrase): a pass, the build loop only when a
+            // model asked for the write, otherwise an unnamed platform step — never left blank (autopsy 9c612cdb).
+            message: `The app was already verified working, so a later write to "${path}" by ${writerPhrase({ pass, model })} was NOT applied — the working app was left untouched. This is the engine's own follow-up being refused by the freeze, not something the user asked for; nothing to do.`,
             autoResolved: true,
           });
         } catch { /* best-effort */ }
@@ -15817,8 +15823,9 @@ async function noteBuildOutcome(
             state.setTodos(computePlanProgress(cur, planSteps, false));
             // THE ETA'S ONLY REAL FACT ON THIS PATH. The line above already turns this same counter
             // into the ticks the user watches; handing it to the ETA as well is what lets the
-            // heartbeat measure instead of guess on a build that never planned a file list.
-            noteEtaPlanStep(cur.length, planSteps);
+            // heartbeat measure instead of guess on a build that never planned a file list. The path
+            // goes with it: the ETA counts a file once, however many times it is repaired (9c612cdb).
+            noteEtaPlanStep(cur.length, planSteps, path);
           }
         } catch { /* plan progress is best-effort — never affects the build */ }
         const flushFilesDurably = () => {
@@ -15944,7 +15951,9 @@ async function noteBuildOutcome(
               const st = await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files, { mode: 'replace' });
               if (st === 'saved') {
                 inBuildGreenAt = Date.now();
+                etaAppRenderedAt = inBuildGreenAt; // the ETA stops counting down to an app already on screen (9c612cdb)
                 events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
+                emitEtaPhaseNow();
               } else {
                 try {
                   buildDiag.record({
@@ -15986,8 +15995,8 @@ async function noteBuildOutcome(
       // depends on. Fed by the actuator's write chokepoint, so tool writes, heals, restores and
       // sub-agents are all seen once; only writes AFTER the first proven render are kept.
       const postGreenWrites: PostGreenWrite[] = [];
-      disposeWriteObserver = setWriteObserver(({ path, pass }) => {
-        if (inBuildGreenAt > 0 && postGreenWrites.length < 2000) postGreenWrites.push({ path, pass, at: Date.now() });
+      disposeWriteObserver = setWriteObserver(({ path, pass, model }) => {
+        if (inBuildGreenAt > 0 && postGreenWrites.length < 2000) postGreenWrites.push({ path, pass, model, at: Date.now() });
       }, workspaceId);
 
       clearPreviewGaveUp(workspaceId);
@@ -16000,6 +16009,29 @@ async function noteBuildOutcome(
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
+      /**
+       * Every platform write in this build — the fast lanes and the post-build passes — goes through here: the
+       * model's write door with every guard, no steering note (unreadWrites.ts), and ONE outcome per file back
+       * (writeOutcomes.ts, build report 9c612cdb Q-982). The door reports a refusal as `is_error`, never as a
+       * throw, so a caller that drops this answer is reading "resolved" as "written".
+       */
+      const writePlatform = async (files: { path: string; content: string }[], idPrefix: string, concurrency = 1): Promise<WriteOutcome[]> => {
+        const outcomes = await writePlatformFiles((call) => dispatcher.dispatch(call, 'frontend'), files, { idPrefix, concurrency });
+        // EVIDENCE (rule 5): a file the workspace refused used to vanish without a trace while the pass counted
+        // it, named it to the next builder and announced it. A refusal by the green freeze is already recorded
+        // by its own observer (GREEN_FREEZE_DEFERRED), so it is not said twice.
+        const refused = outcomes.filter((o) => !o.ok);
+        if (refused.length > 0 && !isGreenLatched(workspaceId)) {
+          try {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'PLATFORM_WRITE_REFUSED', autoResolved: false,
+              message: `The workspace refused ${refused.length} of ${outcomes.length} file(s) a NavBharatAI pass wrote: ${refused.slice(0, 8).map((o) => o.path).join(', ')}${refused.length > 8 ? ', …' : ''} — they are not counted, listed or announced as written.`,
+              detail: [`pass: ${idPrefix}`, ...refused.slice(0, 20).map((o) => `${o.path}: ${o.error ?? 'refused'}`)].join('\n'),
+            });
+          } catch { /* diagnostics are best-effort — the outcome itself is not */ }
+        }
+        return outcomes;
+      };
       // The end-of-turn orphan hand-back (Q-202) asks what the BUILD wrote — every lane, our pre-seed left out.
       dispatcher.setBuildWrites(() => modelAuthoredPaths(writtenFiles));
       // Requirement coverage grades the request the builder was given, not only the message that
@@ -16636,8 +16668,10 @@ async function noteBuildOutcome(
           // guess (progressEta.ts). Best-effort — a failure here just leaves the prompt estimate in place.
           try { noteEtaPlannedFiles(manifest.length); } catch { /* ETA is never worth failing a build for */ }
           if (manifest.length >= 2) {
-            const contract = ((await bpGenerate(contractSystemPrompt(framework), contractUserPrompt(prompt, manifest))) || '').trim();
-            const block = blueprintAdvisoryBlock(manifest, contract);
+            // The same door as the fast lane (build 9c612cdb): the name split and the enum normaliser run on
+            // every generated contract before anything reads it, and a rename is named in the block.
+            const prepared = prepareSharedContract(((await bpGenerate(contractSystemPrompt(framework), contractUserPrompt(prompt, manifest))) || '').trim(), manifest);
+            const block = blueprintAdvisoryBlock(manifest, prepared.contract, prepared.renamed);
             if (block) {
               architectSystem = `${block}\n\n---\n\n${architectSystem}`;
               events.emit({ type: 'narration', agent: 'architect', text: 'Sketching a file blueprint & shared contract to keep this larger app consistent…', ts: Date.now() });
@@ -16910,6 +16944,7 @@ async function noteBuildOutcome(
             : {}),
         });
       } catch { /* hooks are optional — a dispatcher without them just refuses the meta tools */ }
+      const todoOnlyTally = { turns: 0, latencyMs: 0 };
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -16999,6 +17034,12 @@ async function noteBuildOutcome(
         // into the build report. Shared by the default build AND every escalated/retry/heal runner.
         onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
           try { buildDiag.recordLlmCall(c); } catch { /* diagnostics are best-effort */ }
+        },
+        // Turns spent only on update_todo (autopsy 9c612cdb, Q-987), summed across the runners that share these
+        // opts and reported once as TODO_ONLY_TURNS after generation (main run, escalation, empty-build retry).
+        onTodoOnlyTurn: (t: { latencyMs: number }) => {
+          todoOnlyTally.turns += 1;
+          todoOnlyTally.latencyMs += Math.max(0, Number(t?.latencyMs) || 0);
         },
       };
       // Hoisted so the fast-lane fallback persistence below (SETTLED section) can reuse the SAME id —
@@ -17100,32 +17141,57 @@ async function noteBuildOutcome(
       // phone is a detail of the request, and telling the builder "never three.js" would break a working 3D game. Every
       // value read here is final: intent and isEditMode are last assigned well above this line.
       const keypadPhoneForBuild = !isImportTurn && intent === 'new_build' && !isEditMode ? namedNonSmartphone(prompt) : null;
-      if (keypadPhoneForBuild) buildPrompt = `${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}\n\n---\n\n${buildPrompt}`;
-      // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built
-      // in React with a types file claiming a "PHP MVC backend"). Told to the builder here, to the user
-      // in the ready message — see unsupportedStack.ts.
+      // NO ADS FROM A PLAYER THAT SHOWS ITS OWN (Q-990, autopsy 9c612cdb — "Your ad-free video player app is
+      // ready." over YouTube's own embedded player). A new build is told when the request names the source; an
+      // edit ("remove the ads") when the WHOLE project already embeds such a player — see thirdPartyLimits.ts.
+      // ⚠️ The conditions live in thirdPartyLimits.ts on purpose: this handler sits at TypeScript's control-flow
+      // limit (TS2563), and every `&&` / `if` written here is one more branch the checker must walk.
+      const thirdPartyPlayersAtStart = await editTurnAdServingPlayers(prompt, { editTurn: intent === 'edit_existing', importTurn: isImportTurn }, () => loadWorkspaceFiles(workspaceId));
+      const thirdPartyLimitAsk = thirdPartyLimitAsked({ prompt, newBuild: intent === 'new_build', importTurn: isImportTurn, projectPlayers: thirdPartyPlayersAtStart });
+      // 🧭 EVERY REQUEST NOTE REACHES EVERY LANE — ONE LIST, READ BY ALL FOUR (Q-991, autopsy 9c612cdb). Each note
+      // used to be threaded into each lane by hand, and each fix reached the lanes its author remembered: the
+      // keypad-phone rule (Q-846) reached the architect only, the stack note missed the fast lane and the one-shot
+      // lane, and the no-login rule missed the planner — while on the weak tier the fast lane writes FIRST. Now a
+      // note joins THIS list, and the architect (just below), the fast lane, the one-shot lane and the project
+      // planner all read it. `tests/everyRequestNoteReachesEveryLane.test.ts` fails on a note threaded any other way.
+      // Order is the architect's reading order, top first (the unchanged order of the old prepends).
+      const requestNotes: ReadonlyArray<{ code: string; text: string }> = [
+        // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built in React
+        // with a types file claiming a "PHP MVC backend"). The user hears it in the ready message — unsupportedStack.ts.
+        { code: 'unsupported-stack', text: unsupportedStackAsked ? unsupportedStackBuilderNote(unsupportedStackAsked, framework) : '' },
+        { code: 'script-request', text: scriptRequestNote },
+        { code: 'unknown-name', text: unknownNameNote },
+        { code: 'request-scope', text: requestScopeText },
+        { code: 'device', text: keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind) : '' },
+        { code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, thirdPartyPlayersAtStart) },
+      ];
+      const requestNotesText = requestNotes.map((n) => n.text.trim()).filter(Boolean).join('\n\n---\n\n');
+      const requestNotesSuffix = requestNotesText ? `\n\n${requestNotesText}` : ''; // the one-shot lane's copy
+      childRequestNotes = requestNotesText; // and every writing sub-agent's
+      buildPrompt = [requestNotesText, buildPrompt].filter(Boolean).join('\n\n---\n\n'); // no notes → unchanged
       if (requestScopeText) {
-        buildPrompt = `${requestScopeText}\n\n---\n\n${buildPrompt}`;
         // The decider's own reason, in its own words (autopsy 303e8a6f) — never a paraphrase written here.
         buildDiag.record({ phase: 'plan', severity: 'info', code: 'REQUEST_SCOPE_NOTE', message: requestScopeReportLine(requestScopeReason ?? 'names-no-sign-in'), autoResolved: true });
       }
       if (unknownNameNote) {
-        buildPrompt = `${unknownNameNote}\n\n---\n\n${buildPrompt}`;
         buildDiag.record({ phase: 'plan', severity: 'info', code: 'UNKNOWN_NAME_IN_REQUEST', message: unknownNameReportNote(unknownNamesAsked), autoResolved: true });
       }
       if (scriptFormAsked && scriptRequestNote) {
-        buildPrompt = `${scriptRequestNote}\n\n---\n\n${buildPrompt}`;
         events.emit({ type: 'narration', agent: 'architect', text: scriptRequestStartLine(scriptFormAsked, liveDataAsked), ts: Date.now() });
         buildDiag.record({ phase: 'plan', severity: 'info', code: 'SCRIPT_REQUEST_AS_WEB_APP', message: scriptRequestReportNote(scriptFormAsked, liveDataAsked), autoResolved: true });
       }
       if (unsupportedStackAsked) {
-        buildPrompt = `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${buildPrompt}`;
         buildDiag.record({
           phase: 'plan', severity: 'info', code: 'UNSUPPORTED_STACK',
           message: `The request names ${unsupportedStackAsked}, which NavBharatAI does not build; built in ${builtWithLabel(framework)} and told the user so.`,
           autoResolved: true,
         });
       }
+      // On the build's own bus (`events.emit`, which also reaches the user through `emit`), so the report shows the line
+      // the user read — a bare `emit` after `events.subscribe(… buildDiag.ingestEvent …)` never reaches it.
+      announceThirdPartyLimit(thirdPartyLimitAsk, thirdPartyPlayersAtStart,
+        (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),
+        (message) => buildDiag.record({ phase: 'plan', severity: 'info', code: 'THIRD_PARTY_LIMIT_TOLD', message, autoResolved: true }));
       // WHICH PREVIEW BROKE (autopsy "Lekhan Sahyak", 2026-09-27): a fix request from the in-browser
       // preview now says so, so the builder does not "fix" our renderer's fault in the user's files.
       // Outside every best-effort try below on purpose — a context-loading fault must not drop it.
@@ -17610,16 +17676,13 @@ async function noteBuildOutcome(
       if (singleHtmlFileRule) buildPrompt = `${singleHtmlFileRule}\n\n${buildPrompt}`;
       const singleHtmlFileSuffix = singleHtmlFileRule ? `\n\n${singleHtmlFileRule}` : ''; // the fast lane's copy of the same rule
       const pastedBriefSuffix = pastedBrief ? `\n\n${pastedBrief}` : ''; // the fast lane reads the pasted app's checklist too
-      const unknownNameSuffix = (unknownNameNote ? `\n\n${unknownNameNote}` : '') // and the unknown-word note (Q-067)
-        + (scriptRequestNote ? `\n\n${scriptRequestNote}` : ''); // and the script-request note (Q-274)
-      const requestScopeSuffix = requestScopeText ? `\n\n${requestScopeText}` : ''; // and the request-scope rule (autopsy 70e030bb)
-      const keypadPhoneSuffix = keypadPhoneForBuild ? `\n\n${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}` : ''; // and the classic-phone rule (Q-868)
-      // ONE REQUEST FOR BOTH FAST LANES (Q-975). Each lane used to add its own pick of the notes above: the one-shot
-      // got two of the five (no classic-phone rule, no one-file rule, no pasted checklist) and the user's bare words
-      // without the attachment. On a milestone build both were handed the WHOLE message while the builder built
-      // milestone 1. tests/aMilestoneKeepsItsNotes.test.ts fails on a lane that composes its own.
+      // ONE REQUEST FOR BOTH FAST LANES (Q-975). Each lane used to add its own pick of the notes: the one-shot got two of
+      // the five and the user's bare words without the attachment; on a milestone build both were handed the WHOLE
+      // message while the builder built milestone 1. tests/aMilestoneKeepsItsNotes.test.ts fails on a lane that composes
+      // its own. The NOTES are not part of it: every lane reads them from the ONE `requestNotes` list (Q-991, autopsy
+      // 9c612cdb), and the fast lane reads them APART from the request so its size reader measures the user's words.
       const fastLaneRequest = milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt)
-        + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix;
+        + singleHtmlFileSuffix + pastedBriefSuffix;
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -17685,9 +17748,10 @@ async function noteBuildOutcome(
           agentRole: 'architect',
           signal: abort.signal,
         });
-        // The plan-first planner hears the classic-phone rule too (Q-868): its todos are appended to the build prompt, and
-        // a plan drawn from the bare request ("3D track") would contradict the rule the builder reads above them.
-        await planRunner.run(keypadPhoneForBuild ? `${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}\n\n---\n\n${prompt}` : prompt);
+        // The plan-first planner hears the request notes too (Q-868 gave it the classic-phone rule; Q-991, the whole
+        // list): its todos are appended to the build prompt, and a plan drawn from the bare request ("3D track", "add a
+        // login screen") would contradict the rules the builder reads above them.
+        await planRunner.run(withRequestNotes(prompt, requestNotesText));
 
         // Strategic Intelligence (Layer 54): review the proposed plan for gaps
         // (no verification step, no setup, missing deploy, under-scoped, vague)
@@ -17830,13 +17894,11 @@ async function noteBuildOutcome(
             ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
-            // The planner decides every module's files before a builder sees the stack note, so it gets the
-            // note too — or a Kotlin request is planned as Gradle modules the builder may not write (autopsy
-            // 042e472f, 2026-10-01). The plan's goal carries it, so every module turn reads it again.
-            // The classic-phone rule rides the planner's goal too (Q-868): the plan decides what gets built.
-            const plannerGoalNotes = [unknownNameNote, scriptRequestNote, keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind) : ''].filter(Boolean).join('\n\n');
-            const plannerGoalBase = plannerGoalNotes ? `${plannerGoalNotes}\n\n---\n\n${prompt}` : prompt;
-            const plannerGoal = unsupportedStackAsked ? `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${plannerGoalBase}` : plannerGoalBase;
+            // The planner decides every module's files before a builder sees the notes, so it gets every one of
+            // them too — or a Kotlin request is planned as Gradle modules the builder may not write (autopsy
+            // 042e472f, 2026-10-01). The plan's goal carries them, so every module turn reads them again. ONE list
+            // (`requestNotes`, Q-991): until 9c612cdb the planner read three of the five notes the architect did.
+            const plannerGoal = withRequestNotes(prompt, requestNotesText);
             const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
             if (modules.length >= MIN_PROJECT_MODULES) {
               pPlan = createProjectPlan(plannerGoal, framework, modules, Date.now());
@@ -18459,14 +18521,14 @@ async function noteBuildOutcome(
           }
           return text;
         };
-        const fastWriteRaw = async (files: { path: string; content: string }[]): Promise<void> => {
+        const fastWriteRaw = async (files: { path: string; content: string }[]): Promise<WriteOutcome[]> => {
           // Write files with bounded concurrency instead of one serial E2B round trip each (SPEED).
           // Paths are distinct by construction (de-duped by path upstream), so concurrent writes to
           // different files never conflict; the E2B round-trip latency (~150-300ms each) now overlaps.
           // The plan-progress ticker counts writes (order-independent), so completion order is fine.
-          await mapWithConcurrency(files, 6, (f, i) =>
-            runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: f.path, content: f.content } }, 'frontend')),
-          );
+          // The per-file outcome goes back to the lane (Q-982): it decides what it counts, lists and announces.
+          // Named (autopsy 9c612cdb): a fast-lane write that lands after a first render is the fast lane's, never the model's.
+          return inPlatformPass('fast-lane', () => writePlatform(files, 'fast-w', 6));
         };
         // THE WRITE FENCE (autopsy a38c6fef, 2026-09-13). Every fast lane writes through this one
         // function, so this is the single place where "is this lane still allowed to touch the
@@ -18489,9 +18551,7 @@ async function noteBuildOutcome(
         });
         // Kept for the route's OWN in-lane writes (the deterministic mispath auto-fix inside fastVerify,
         // and the one-shot's post-success repair). Both run while their lane still owns the workspace.
-        const fastWrite = async (files: { path: string; content: string }[]): Promise<void> => {
-          await fastWriteRaw(files);
-        };
+        const fastWrite = (files: { path: string; content: string }[]): Promise<WriteOutcome[]> => fastWriteRaw(files);
         const fastPreview = async (): Promise<void> => {
           // FOUNDATION GUARANTEE (deep-test Level-1, build 7c56b35a): the file-list planner can OMIT the
           // foundational files a vite-react app needs to install & boot — most damagingly `package.json`.
@@ -18519,12 +18579,12 @@ async function noteBuildOutcome(
                 });
               }
               if (foundation.added.length > 0) {
-                fastLog(`🩹 Added ${foundation.added.length} missing foundational file(s) so the app can install & boot: ${foundation.added.join(', ')}`);
                 // Route through write_file so each lands in the sandbox AND is recorded in writtenFiles
                 // (the durable store + the reconcile scan below both then see the new package.json).
-                await mapWithConcurrency(Object.entries(foundation.files), 4, ([p, c], i) =>
-                  runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-foundation-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend')),
-                );
+                // Said AFTER the write, about what landed (Q-982) — it used to be announced before it was tried.
+                const toAdd = Object.entries(foundation.files).map(([path, content]) => ({ path, content }));
+                const { landed } = readWriteOutcomes(toAdd, await inPlatformPass('fast-lane-foundation', () => writePlatform(toAdd, 'fast-foundation-', 4)));
+                if (landed.length > 0) fastLog(`🩹 Added ${landed.length} missing foundational file(s) so the app can install & boot: ${landed.map((f) => f.path).join(', ')}`);
               }
             } catch { /* best-effort — a failure here just falls through to the install exactly as before */ }
           }
@@ -18537,11 +18597,15 @@ async function noteBuildOutcome(
             try {
               const ts = sanitizeTsconfigExtends(Object.fromEntries(writtenFiles));
               if (ts.fixes.length > 0) {
-                fastLog(`🩹 Repaired ${ts.fixes.length} tsconfig file(s) that extended an uninstalled base so the dev server can start: ${ts.fixes.map((f) => f.file).join(', ')}`);
-                try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_EXTENDS_REPAIRED', message: `Removed an unresolvable tsconfig extends: ${ts.fixes.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
-                await mapWithConcurrency(Object.entries(ts.patch), 4, ([p, c], i) =>
-                  runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-tsconfig-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend')),
-                );
+                // Written first, then said about what landed (Q-982).
+                const patch = Object.entries(ts.patch).map(([path, content]) => ({ path, content }));
+                const { landed } = readWriteOutcomes(patch, await inPlatformPass('fast-lane-foundation', () => writePlatform(patch, 'fast-tsconfig-', 4)));
+                const done = new Set(landed.map((f) => f.path));
+                const repaired = ts.fixes.filter((f) => done.has(f.file));
+                if (repaired.length > 0) {
+                  fastLog(`🩹 Repaired ${repaired.length} tsconfig file(s) that extended an uninstalled base so the dev server can start: ${repaired.map((f) => f.file).join(', ')}`);
+                  try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_EXTENDS_REPAIRED', message: `Removed an unresolvable tsconfig extends: ${repaired.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
+                }
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through to the install as before */ }
           }
@@ -18614,9 +18678,15 @@ async function noteBuildOutcome(
                     .filter((f) => writtenMap[f.importedBy] !== undefined && !seen.has(f.importedBy) && seen.add(f.importedBy))
                     .map((f) => ({ path: f.importedBy, content: fixedFiles[f.importedBy] }));
                   if (toWrite.length > 0) {
-                    await fastWrite(toWrite);
-                    for (const w of toWrite) { writtenFiles.set(w.path, w.content); withScaffold[w.path] = w.content; }
-                    buildDiag.record({ phase: 'build', severity: 'info', code: 'IMPORT_PATH_AUTOFIXED', message: `Auto-fixed ${fixes.length} wrong local import path(s) that pointed at existing files — no rebuild needed.`, autoResolved: true, detail: fixes.map((f) => `${f.importedBy}: "${f.from}" → "${f.to}"`).join('\n') });
+                    // Only what landed is recorded and claimed (Q-982): a refused fix leaves the import broken in
+                    // the workspace, and the check below must go on seeing it broken.
+                    const { landed } = readWriteOutcomes(toWrite, await fastWrite(toWrite));
+                    for (const w of landed) { writtenFiles.set(w.path, w.content); withScaffold[w.path] = w.content; }
+                    const fixedIn = new Set(landed.map((w) => w.path));
+                    const applied = fixes.filter((f) => fixedIn.has(f.importedBy));
+                    if (applied.length > 0) {
+                      buildDiag.record({ phase: 'build', severity: 'info', code: 'IMPORT_PATH_AUTOFIXED', message: `Auto-fixed ${applied.length} wrong local import path(s) that pointed at existing files — no rebuild needed.`, autoResolved: true, detail: applied.map((f) => `${f.importedBy}: "${f.from}" → "${f.to}"`).join('\n') });
+                    }
                     unresolved = findUnresolvedLocalImports(withScaffold).filter((u) => writtenFiles.get(u.importedBy) !== undefined);
                   }
                 } catch { /* auto-fix is best-effort — a failure just falls through to the honest ok:false below */ }
@@ -18696,11 +18766,11 @@ async function noteBuildOutcome(
               }
               // A kit class with no rule has exactly one right rule — the kit's (autopsy e725e002). Put it
               // back here, for free, so a repair round is spent only on classes nobody can know.
+              // Both fixes below are recorded and claimed only for what the workspace took (Q-982).
               let project = { ...sheets, ...written };
               try {
                 const patch = kitRestorePatch(project);
-                if (patch) {
-                  await fastWrite([{ path: patch.path, content: patch.content }]);
+                if (patch && readWriteOutcomes([patch], await fastWrite([{ path: patch.path, content: patch.content }])).landed.length > 0) {
                   writtenFiles.set(patch.path, patch.content);
                   project = { ...project, [patch.path]: patch.content };
                   buildDiag.record({ phase: 'build', severity: 'info', code: 'DESIGN_KIT_RESTORED', message: kitRestoreNote(patch, 'before-repair'), autoResolved: true });
@@ -18713,9 +18783,9 @@ async function noteBuildOutcome(
               try {
                 const snaps = spacingSnapPatches(project, writtenFiles.keys());
                 if (snaps.length > 0) {
-                  await fastWrite(snaps.map((s) => ({ path: s.path, content: s.content })));
-                  for (const s of snaps) { writtenFiles.set(s.path, s.content); project = { ...project, [s.path]: s.content }; }
-                  buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: spacingSnapNote(snaps), autoResolved: true });
+                  const { landed } = readWriteOutcomes(snaps, await fastWrite(snaps));
+                  for (const s of landed) { writtenFiles.set(s.path, s.content); project = { ...project, [s.path]: s.content }; }
+                  if (landed.length > 0) buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: spacingSnapNote(landed), autoResolved: true });
                 }
               } catch { /* deterministic and best-effort — the check below still runs */ }
               const cssErr = cssConsistencyError(project);
@@ -18780,7 +18850,9 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt: fastLaneRequest, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        // Every request note rides `requestNotes`, APART from the request, so the lane's own size reader
+        // measures the user's words and not ours (Q-991: the no-login note alone doubled 9c612cdb's file budget).
+        const sb = await runSimpleBuild({ prompt: fastLaneRequest, requestNotes: requestNotesText, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           // A planned config file the starter already has is edited, never rewritten blind (isProjectConfigPath).
           readExisting: readExistingProjectFile,
           stopLane: () => (fastLaneReasoningRung
@@ -18838,12 +18910,11 @@ async function noteBuildOutcome(
         if (!sb.ok && !sb.stopped && sb.salvagedPaths?.length) {
           salvagedThisBuild.push(...sb.salvagedPaths);
           buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE', message: `Fast lane salvaged ${sb.salvagedPaths.length} finished file(s) into the workspace for the full builder to continue from.`, autoResolved: true, detail: sb.salvagedPaths.join(', ') });
-          // Why the lane stopped decides the first sentence: out of time, or finished but not compiling —
-          // and in the second case the compiler's own words come with it, so the builder starts from the
-          // errors instead of re-running the typecheck to find them (autopsy a9f8d186).
-          const salvageWhy = sb.reason === 'verify_failed'
-            ? 'and they do not compile yet'
-            : 'before running out of time';
+          // Why the lane stopped decides the first sentence — finished but not compiling, a planned hand-off, out
+          // of time, a missing root — and when it did not compile the compiler's own words come with it, so the
+          // builder starts from the errors instead of re-running the typecheck to find them (autopsy a9f8d186).
+          // ONE reason used to stand for every other ending: a hand-off read "before running out of time" (Q-982).
+          const salvageWhy = salvageWhyClause(sb.reason, sb.handedOff);
           const salvageEntryLine = entryFirstHandoffLine(unwrittenEntries((sb.plannedPaths ?? []).map((path) => ({ path, purpose: '' })), sb.salvagedPaths));
           // 🔴 AND WHEN THE LANE NEVER VERIFIED (autopsy c70bcbb4): a lane that timed out or handed off before a
           // reasoning engine runs no typecheck, so the builder met 22 errors in eight salvaged files one write at
@@ -18874,6 +18945,8 @@ async function noteBuildOutcome(
             // 🖥️ The calendar report's first build (earlyPreview.ts): the lane stopped before its entry and
             // the full builder wrote five more leaves and never the entry — five minutes of a starter page.
             (salvageEntryLine ? ` ${salvageEntryLine}` : '') +
+            // 🏷️ Build 9c612cdb (Q-985): a name the lane changed is named to the builder that never saw it.
+            contractRenameHandoffClause(sb.contractRenames) +
             `\n\n---\n\n${buildPrompt}`;
         }
         // 🔴 A PLAN IS WORK TOO — do not make the full builder buy it twice (autopsy f97eb0ec,
@@ -18938,7 +19011,7 @@ async function noteBuildOutcome(
           //    …and gated on what the lane above just MEASURED. See oneShotStillViable: in the dukaan
           //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
           //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
-          const os = await runOneShot({ prompt: fastLaneRequest, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
+          const os = await runOneShot({ prompt: fastLaneRequest + requestNotesSuffix, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) {
             // VERIFY GATE for the one-shot lane too (autopsy 2026-07-07: a NowPlaying.tsx TRUNCATED
@@ -18955,6 +19028,7 @@ async function noteBuildOutcome(
                   fastLog('Found build errors in the one-shot app — fixing them…');
                   const cur = [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
                   const fixed = (await fastRepair(v.errors, cur).catch(() => [])).filter((f) => f && f.path && f.content);
+                  // `fastVerify` re-measures the workspace, so the verdict follows what landed (Q-982).
                   if (fixed.length) { await fastWrite(fixed); v = await fastVerify(); }
                 }
                 // ran:false = the check never executed — "unknown", never a pass (no fake success).
@@ -19457,6 +19531,14 @@ async function noteBuildOutcome(
       // rather than merely say so — and nobody has it today.
       // It is read from the FINAL `result`, after the empty-build retry (autopsy 0473628e): before the retry it
       // described the ABANDONED first attempt ("never judged finished") on a build whose retry finished and shipped.
+      // 🔴 THE END IS A MOMENT, NOT AN ELAPSED TIME (autopsy 9c612cdb). The mark is an epoch (`ReadyMark.at`);
+      // this passed `Date.now() - buildStartedAt` against a mark measured from the RUNNER's start, and so
+      // counted the preparation and the fast lane as overrun — "105s" where the truth was 39 s.
+      // The builder's loop is over here, so the live ETA stops promising minutes now — the integrity pass,
+      // where this used to be set first, starts later (9c612cdb: a tick fell in between). The line is
+      // announced at once only over an app that exists: a stopped or empty build is never told "your app is built".
+      etaFinalChecks = true;
+      emitEtaPhaseNow({ unlessStopped: abort.signal, wrote: builderWroteCount });
       try {
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
@@ -19489,6 +19571,11 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* an advisory finding must never affect a build */ }
+      // 📋 MODEL TURNS SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-987: 5 of 22 turns, 20.2 s). Recorded on
+      // every build, zero included, for the reason the block above states: a missing line reads as "none".
+      // It covers the generation runs above; a heal pass that starts after this line is not in its count.
+      // Info and never a cause — it describes our engine's pace, not the app.
+      recordTodoOnlyTurns(buildDiag, todoOnlyTally);
       // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
       // write time and how many errors were caught while the model still held the file. Reported
       // so the next autopsy can say whether the 7-minute endgame grind actually went away.
@@ -19625,17 +19712,18 @@ async function noteBuildOutcome(
         if (!check.ok && process.env.AGENTV3_SCAFFOLD_RESTORE !== 'off') {
           try {
             const brokenScaffold = scaffoldFilesInTscErrors(check.errors);
-            const restored: string[] = [];
+            const toRestore: { path: string; content: string }[] = [];
             for (const path of brokenScaffold) {
               const canonical = canonicalScaffold(path);
               if (!canonical) continue;
               let current = '';
               try { current = await actuator.readFile(workspaceId, path); } catch { current = ''; }
-              if (current !== canonical) {
-                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `scaffold-restore-${restored.length}`, name: 'write_file', input: { path, content: canonical } }, 'frontend'));
-                restored.push(path);
-              }
+              if (current !== canonical) toRestore.push({ path, content: canonical });
             }
+            // Restored = what the workspace took (Q-982); a refused restore is not claimed.
+            const restored = toRestore.length > 0
+              ? readWriteOutcomes(toRestore, await runInPass('scaffold-restore', () => writePlatform(toRestore, 'scaffold-restore-'))).landed.map((f) => f.path)
+              : [];
             if (restored.length > 0) {
               buildDiag.record({
                 phase: 'build', severity: 'info', code: 'SCAFFOLD_RESTORED',
@@ -19675,9 +19763,8 @@ async function noteBuildOutcome(
                 autoResolved: true,
               });
             }
-            for (let i = 0; i < fixes.length; i++) {
-              await runAsUnreadWrites(() => dispatcher.dispatch({ id: `tscgate-w${i}`, name: 'write_file', input: { path: fixes[i].path, content: fixes[i].content } }, 'frontend'));
-            }
+            // The verdict below re-runs the compiler on the workspace, so it reads what landed, whatever this said.
+            await runInPass('typecheck-gate-repair', () => writePlatform(fixes, 'tscgate-w'));
           } catch (e) {
             console.log(`[AGENTV3] agentic tsc-gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
           }
@@ -19745,11 +19832,12 @@ async function noteBuildOutcome(
               const fileMapForCss: Record<string, string> = { ...Object.fromEntries(scaffoldPaths.map((p) => [p, ''])), ...Object.fromEntries(writtenFiles) };
               const cssStubs = generateMissingCssModules(fileMapForCss);
               if (cssStubs.length > 0) {
-                for (let i = 0; i < cssStubs.length; i++) {
-                  await runAsUnreadWrites(() => dispatcher.dispatch({ id: `cssmod-w${i}`, name: 'write_file', input: { path: cssStubs[i].path, content: cssStubs[i].content } }, 'frontend'));
+                // Claimed only for what the workspace took (Q-982); the re-check below reads the workspace either way.
+                const { landed } = readWriteOutcomes(cssStubs, await runInPass('css-module-stubs', () => writePlatform(cssStubs, 'cssmod-w')));
+                if (landed.length > 0) {
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'CSS_MODULES_GENERATED', message: `${landed.length} missing CSS module(s) generated deterministically from component class usage (no repair step spent): ${landed.map((s) => s.path).join(', ')}`, autoResolved: true });
+                  events.emit({ type: 'narration', agent: 'architect', text: `🎨 Generated ${landed.length} missing stylesheet(s) from the components' class usage.`, ts: Date.now() });
                 }
-                buildDiag.record({ phase: 'build', severity: 'info', code: 'CSS_MODULES_GENERATED', message: `${cssStubs.length} missing CSS module(s) generated deterministically from component class usage (no repair step spent): ${cssStubs.map((s) => s.path).join(', ')}`, autoResolved: true });
-                events.emit({ type: 'narration', agent: 'architect', text: `🎨 Generated ${cssStubs.length} missing stylesheet(s) from the components' class usage.`, ts: Date.now() });
                 missing = findMissing(); // re-check: CSS modules now resolve — only the hard files remain for the LLM pass
               }
             } catch { /* deterministic CSS gen is best-effort — the LLM pass below still handles them */ }
@@ -19763,11 +19851,12 @@ async function noteBuildOutcome(
               const fileMapForBarrel: Record<string, string> = { ...Object.fromEntries(scaffoldPaths.map((p) => [p, ''])), ...Object.fromEntries(writtenFiles) };
               const barrels = await generateMissingBarrels(fileMapForBarrel);
               if (barrels.length > 0) {
-                for (let i = 0; i < barrels.length; i++) {
-                  await runAsUnreadWrites(() => dispatcher.dispatch({ id: `barrel-w${i}`, name: 'write_file', input: { path: barrels[i].path, content: barrels[i].content } }, 'frontend'));
+                // Claimed only for what the workspace took (Q-982); the re-check below reads the workspace either way.
+                const { landed } = readWriteOutcomes(barrels, await runInPass('barrel-stubs', () => writePlatform(barrels, 'barrel-w')));
+                if (landed.length > 0) {
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'BARRELS_GENERATED', message: `${landed.length} missing barrel(s) generated deterministically from existing leaf modules (no repair step spent): ${landed.map((b) => b.path).join(', ')}`, autoResolved: true });
+                  events.emit({ type: 'narration', agent: 'architect', text: `📦 Generated ${landed.length} missing index barrel(s) re-exporting existing modules.`, ts: Date.now() });
                 }
-                buildDiag.record({ phase: 'build', severity: 'info', code: 'BARRELS_GENERATED', message: `${barrels.length} missing barrel(s) generated deterministically from existing leaf modules (no repair step spent): ${barrels.map((b) => b.path).join(', ')}`, autoResolved: true });
-                events.emit({ type: 'narration', agent: 'architect', text: `📦 Generated ${barrels.length} missing index barrel(s) re-exporting existing modules.`, ts: Date.now() });
                 missing = findMissing(); // re-check: barrels now resolve — only the hard files remain
               }
             } catch { /* deterministic barrel gen is best-effort — the LLM pass below still handles them */ }
@@ -19805,9 +19894,9 @@ async function noteBuildOutcome(
                 tools: [], maxTokens: 8000,
               });
               const created = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
-              for (let i = 0; i < created.length; i++) {
-                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `missfiles-w${i}`, name: 'write_file', input: { path: created[i].path, content: created[i].content } }, 'frontend'));
-              }
+              // `findMissing()` below reads `writtenFiles`, which only a write that LANDED fills (the dispatcher's
+              // onFileWrite), so its verdict follows what landed whatever this pass sent.
+              await runInPass('missing-files-repair', () => writePlatform(created, 'missfiles-w'));
             } catch (e) {
               console.log(`[AGENTV3] missing-files gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
             }
@@ -19872,9 +19961,9 @@ async function noteBuildOutcome(
               const scopedSyntax = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), brokenPaths);
               recordRepairOutOfScope('syntax', scopedSyntax.dropped);
               const fixed = scopedSyntax.kept;
-              for (let i = 0; i < fixed.length; i++) {
-                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend'));
-              }
+              // The re-check below parses `writtenFiles`, which only a write that LANDED fills, so its verdict
+              // follows what landed whatever this pass sent.
+              await runInPass('syntax-repair', () => writePlatform(fixed, 'syntax-w'));
             } catch (e) {
               console.log(`[AGENTV3] syntax gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
             }
@@ -19944,9 +20033,9 @@ async function noteBuildOutcome(
               const scopedExport = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), targetFiles.map((f) => f.path));
               recordRepairOutOfScope('missing-export', scopedExport.dropped);
               const fixed = scopedExport.kept;
-              for (let i = 0; i < fixed.length; i++) {
-                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend'));
-              }
+              // `analyzeTargets()` below reads `writtenFiles`, which only a write that LANDED fills, so its verdict
+              // follows what landed whatever this pass sent.
+              await runInPass('missing-export-repair', () => writePlatform(fixed, 'missexport-w'));
             } catch (e) {
               console.log(`[AGENTV3] missing-export gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
             }
@@ -19975,6 +20064,18 @@ async function noteBuildOutcome(
       // and consumed by the route smoke check much further down. Declared here so the two are not
       // forced to share a scope, and so planning cannot pay for a second workspace load.
       let routeSmokePlan: SmokePlan | null = null;
+      // THE WHOLE PROJECT, for facts a claim or a disclosure is judged against (Q-990, autopsy 9c612cdb). Set by
+      // the integrity pass below (durable store + this turn's writes); `integrityFiles` itself is block-scoped.
+      // An edit turn's writes are a slice — the player the first build wrote is in a file this turn never touched.
+      let wholeProjectFiles: Record<string, string> | null = null;
+      // Never throws (a fault is "no player known"), so a caller needs no try of its own.
+      const adServingPlayersNow = async (): Promise<string[]> => {
+        try {
+          if (isImportTurn || !thirdPartyLimitsEnabled()) return [];
+          const base = wholeProjectFiles ?? await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+          return projectAdServingPlayers({ ...base, ...Object.fromEntries(writtenFiles) });
+        } catch { return []; }
+      };
       try {
         // FULL-WORKSPACE view for integrity (FitPulse autopsy 2026-07-17, hardened after the edit-build
         // re-test): `writtenFiles` holds only the files THIS build wrote. On an EDIT build that is 3-4
@@ -20000,6 +20101,7 @@ async function noteBuildOutcome(
         const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
         const storeLoadMs = Date.now() - integrityStartedAt;
         const integrityFiles: Record<string, string> = { ...storeFiles, ...Object.fromEntries(writtenFiles) };
+        wholeProjectFiles = integrityFiles; // the same map, read later by `adServingPlayersNow`
         // The sandbox is read for the files a check reasons from by their ABSENCE (autopsy de3bb2bb): the
         // durable map did not hold the starter's `src/vite-env.d.ts`, so `missingViteEnvTypes` wrote one into
         // a project that already had it and told the user TypeScript had complained — tsc was clean.
@@ -20026,7 +20128,7 @@ async function noteBuildOutcome(
             if (typeof content !== 'string') continue;
             integrityFiles[f] = content;
             if (writtenFiles.has(f) || f !== 'index.html') writtenFiles.set(f, content);
-            try { await actuator.writeFile(workspaceId, f, content); } catch { /* sandbox write best-effort */ }
+            try { await runInPass('import-specifier-normalize', () => actuator.writeFile(workspaceId, f, content)); } catch { /* sandbox write best-effort */ }
           }
           if (norm.rewrites.length > 0) {
             buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_IMPORTS_NORMALIZED', message: `Normalized ${norm.rewrites.length} import specifier(s) so every bundler sees one module instance (prevents duplicate-context "must be used within a Provider" crashes).`, autoResolved: true, detail: norm.rewrites.slice(0, 10).map((r) => `${r.file}: ${r.from} → ${r.to}`).join('; ') });
@@ -20041,7 +20143,7 @@ async function noteBuildOutcome(
           for (const inj of wired.injected) {
             const newEntry = wired.files[inj.entry];
             if (typeof newEntry === 'string') {
-              if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, inj.entry, newEntry))) {
+              if (await writeUnlessFrozen(() => runInPass('stylesheet-import-wire', () => actuator.writeFile(workspaceId, inj.entry, newEntry)))) {
                 integrityFiles[inj.entry] = newEntry;
                 writtenFiles.set(inj.entry, newEntry);
               }
@@ -20083,7 +20185,7 @@ async function noteBuildOutcome(
             const patched = env.files[env.wired.entry];
             if (typeof patched === 'string') {
               const entry = env.wired.entry;
-              if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, entry, patched))) {
+              if (await writeUnlessFrozen(() => runInPass('dotenv-load-wire', () => actuator.writeFile(workspaceId, entry, patched)))) {
                 integrityFiles[entry] = patched;
                 writtenFiles.set(entry, patched);
               }
@@ -20100,7 +20202,7 @@ async function noteBuildOutcome(
         if (process.env.AGENTV3_VITE_ENV_TYPES !== 'off' && !isImportTurn) {
           const dts = missingViteEnvTypes(integrityFiles);
           if (dts) {
-            if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, dts.path, dts.content))) {
+            if (await writeUnlessFrozen(() => runInPass('vite-env-types', () => actuator.writeFile(workspaceId, dts.path, dts.content)))) {
               integrityFiles[dts.path] = dts.content;
               writtenFiles.set(dts.path, dts.content);
               // Said only when it landed — a freeze-refused file was not added.
@@ -20132,7 +20234,7 @@ async function noteBuildOutcome(
             for (const r of redacted.redactions) {
               const newContent = redacted.files[r.file];
               if (typeof newContent !== 'string' || newContent === integrityFiles[r.file]) continue;
-              if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, r.file, newContent))) {
+              if (await writeUnlessFrozen(() => runInPass('credential-log-redact', () => actuator.writeFile(workspaceId, r.file, newContent)))) {
                 integrityFiles[r.file] = newContent;
                 writtenFiles.set(r.file, newContent);
               }
@@ -20299,7 +20401,7 @@ async function noteBuildOutcome(
             if (dead.length > 0) {
               const outcome = await removeDeadSalvage(dead, integrityFiles, hasBuildScript(integrityFiles['package.json'] ?? null), {
                 run: (cmd) => actuator.runCommand(workspaceId, cmd),
-                write: (path, content) => actuator.writeFile(workspaceId, path, content),
+                write: (path, content) => runInPass('dead-salvage-prune', () => actuator.writeFile(workspaceId, path, content)),
               });
               if (outcome.status === 'removed') {
                 for (const p of outcome.removed) { writtenFiles.delete(p); delete integrityFiles[p]; }
@@ -20381,10 +20483,10 @@ async function noteBuildOutcome(
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
-              const healed = await integrityRunner.run(
+              const healed = await runInPass('integrity-repair', () => integrityRunner.run(
                 `The app is built and compiles. Fix ONLY these project-integrity defects — make the smallest ` +
                 `possible edits to the existing files, change nothing else:\n\n${integrityRepairInstruction(integrity)}`,
-              );
+              ));
               if (healed.ok) {
                 // SUMMARY HONESTY (FitPulse autopsy 2026-07-17): the heal run's final narration used to
                 // REPLACE the build summary — a no-op heal shipped "It seems there's a misunderstanding…
@@ -20534,6 +20636,67 @@ async function noteBuildOutcome(
             } catch { /* the design check is advisory — it can never affect a build */ }
           }
 
+          /**
+           * 🔴 THE KIT'S OWN RULES, PUT BACK BY CONSTRUCTION (autopsy e725e002, 2026-09-29). A class a
+           * screen uses that exists in our design kit but not in this app's stylesheet has exactly one
+           * correct rule — the kit's. Adding it is free and deterministic, so it runs BEFORE the check
+           * below decides whether a model repair is needed, and again after any repair (which is told
+           * to reuse the kit, and so can introduce kit classes the app's rewritten stylesheet lacks).
+           */
+          /**
+           * 🔴 SPACING OFF THE 4px GRID, SNAPPED BY CONSTRUCTION (autopsy 536c8189, 2026-10-01). Between
+           * #3458 and that date these values were handed to the MODEL at the end of its turn; the first
+           * real build to meet that hand-back spent three calls writing `node -e` regex scripts over a
+           * 634-line stylesheet and moved ON-grid values OFF the grid. `round(v / 4) * 4` has one right
+           * answer, so it runs here instead — free, deterministic, and only over files THIS build wrote.
+           *
+           * 🔴 AND IT RUNS BEFORE THE LINT, SO DESIGN_CONSISTENCY DESCRIBES WHAT SHIPPED (autopsy 9c612cdb,
+           * 2026-10-12). Both deterministic design writers — the kit restore and this snap — used to run
+           * ~175 lines AFTER `lintBuiltApp`, inside the design-coverage block. So the report's only design
+           * score was the one from BEFORE the snap ("8 spacing values are off the 4px grid … 90/100"), counted
+           * as a warning and then as a heal, while the 100/100 the app actually shipped with was computed by a
+           * re-check and never written down (e3b0ce25's re-check recorded a line only when values REMAINED).
+           * Every other deterministic repair in this block already runs before its own finding
+           * (LABELS_REPAIRED, SCRIPT_INTEGRITY_REPAIRED), and the fast lane already snapped before its check —
+           * so the same CSS was a warning plus a heal in one lane and nothing in the other. The order is
+           * now the precedent's: fix, then judge, and the judgement is recorded whether it is clean or not.
+           * They are defined here, at the top of this pass, because they run twice: before the lint, and
+           * again after the design repair (which writes CSS after the first run).
+           */
+          const snapSpacing = async (files: Record<string, string>, when: 'before-lint' | 'after-repair'): Promise<void> => {
+            try {
+              if (abort.signal.aborted || isImportTurn || !expectsArtifacts) return;
+              const patches = spacingSnapPatches(files, writtenFiles.keys());
+              if (patches.length === 0) return;
+              const landed: SpacingSnapPatch[] = [];
+              for (const patch of patches) {
+                const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
+                if (!wrote) continue;
+                writtenFiles.set(patch.path, patch.content);
+                integrityFiles[patch.path] = patch.content;
+                await mergeWorkspaceFiles(workspaceId, { [patch.path]: patch.content }).catch(() => {});
+                landed.push(patch);
+              }
+              if (landed.length === 0) return;
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: `${when === 'after-repair' ? 'After the design repair: ' : ''}${spacingSnapNote(landed)}`, autoResolved: true });
+            } catch { /* deterministic and best-effort — it can never affect a build */ }
+          };
+          const restoreKitRules = async (files: Record<string, string>, when: 'before-repair' | 'after-repair'): Promise<void> => {
+            try {
+              const patch = kitRestorePatch(files);
+              // Never on a read-only import/survey turn: there, the user's files are theirs, untouched.
+              if (!patch || abort.signal.aborted || isImportTurn || !expectsArtifacts) return;
+              const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
+              if (!wrote) return;
+              writtenFiles.set(patch.path, patch.content);
+              integrityFiles[patch.path] = patch.content;
+              await mergeWorkspaceFiles(workspaceId, { [patch.path]: patch.content }).catch(() => {});
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'DESIGN_KIT_RESTORED', message: kitRestoreNote(patch, when), autoResolved: true });
+            } catch { /* deterministic and best-effort — it can never affect a build */ }
+          };
+          /** The design lint's verdict on the app as it stands after the deterministic writers — what shipped. */
+          let designShipped: ReturnType<typeof lintBuiltApp> = null;
+
           // DESIGN CONSISTENCY + ACCESSIBILITY — two finished linters nothing had ever called.
           //
           // Both are pure, deterministic and unit-tested, and have sat behind HTTP routes no client
@@ -20590,7 +20753,7 @@ async function noteBuildOutcome(
               for (const path of [...writtenFiles.keys()]) {
                 if (!/\.(?:tsx|jsx|html?)$/i.test(path) || typeof integrityFiles[path] !== 'string') continue;
                 const r = labelFieldsFromPlaceholder(integrityFiles[path]);
-                if (r.repaired > 0 && await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, r.code))) {
+                if (r.repaired > 0 && await writeUnlessFrozen(() => runInPass('label-repair', () => actuator.writeFile(workspaceId, path, r.code)))) {
                   integrityFiles[path] = r.code;
                   writtenFiles.set(path, r.code);
                   labelled += r.repaired;
@@ -20601,12 +20764,20 @@ async function noteBuildOutcome(
                   message: `${labelled} form field(s) had no label but a placeholder that named them — the placeholder text is now their accessible name too.` });
               }
             }
+            // The deterministic design writers, BEFORE the lint (autopsy 9c612cdb — see `snapSpacing`).
+            await restoreKitRules({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'before-repair');
+            await snapSpacing({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'before-lint');
             const quality = hasUserApp ? lintBuiltApp(integrityFiles) : null;
+            designShipped = quality;
             // `null` means nothing lintable was found. Recording a perfect score there would claim we
             // checked when we did not — the same lie in the other direction.
             if (quality) {
               if (quality.design.violations.length > 0) {
                 buildDiag.record({ phase: 'build', severity: 'warning', code: 'DESIGN_CONSISTENCY', ...obs(designLintSummary(quality)) });
+              } else {
+                // A clean pass is recorded too (autopsy 9c612cdb): the score the app shipped with was
+                // computed and never written, so the report's only design line was a stale one.
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'DESIGN_CONSISTENCY', message: designLintSummary(quality), autoResolved: true });
               }
               if (quality.a11y.violations.length > 0) {
                 buildDiag.record({ phase: 'build', severity: 'warning', code: 'ACCESSIBILITY', ...obs(a11yLintSummary(quality)) });
@@ -20617,8 +20788,12 @@ async function noteBuildOutcome(
               }
               // DID THE WRITE-TIME NOTE REACH THE FILE, AND WAS IT IGNORED? (autopsy 6bae5835 could not say.)
               try {
-                const flagged = [...new Set(Object.values(quality.offenders ?? {}).flat().map((o) => o.path))];
-                const wq = writeQualitySummary(dispatcher.writeTypecheckStats().qualityNotedFiles ?? [], flagged, modelAuthoredPaths(writtenFiles));
+                // Measured AFTER the snap now (it runs first), and in the note's own terms — a file is "still
+                // flagged" when a write-time note would still describe it, never for a whole-app rule or a
+                // value the platform fixes itself (autopsy 9c612cdb; see filesANoteStillFlags).
+                const noted = dispatcher.writeTypecheckStats().qualityNotedFiles ?? [];
+                const flagged = filesANoteStillFlags(integrityFiles, [...Object.values(quality.offenders ?? {}).flat().map((o) => o.path), ...noted]);
+                const wq = writeQualitySummary(noted, flagged, modelAuthoredPaths(writtenFiles));
                 if (wq) buildDiag.record({ phase: 'build', severity: 'info', code: 'WRITE_TIME_QUALITY', message: wq, autoResolved: true });
               } catch { /* a measurement is best-effort */ }
             }
@@ -20646,7 +20821,7 @@ async function noteBuildOutcome(
                 const repaired = repairLostEscapes(integrityFiles);
                 if (repaired.repairs.length > 0) {
                   for (const [path, content] of Object.entries(repaired.files)) {
-                    if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, content))) {
+                    if (await writeUnlessFrozen(() => runInPass('script-escape-repair', () => actuator.writeFile(workspaceId, path, content)))) {
                       integrityFiles[path] = content;
                       writtenFiles.set(path, content);
                     }
@@ -20713,75 +20888,6 @@ async function noteBuildOutcome(
            * to compare against". Here it reads the WHOLE project (`integrityFiles`), in the lane that
            * builds most apps, and a real mismatch rides the same repair pass as the design findings.
            */
-          /**
-           * 🔴 THE KIT'S OWN RULES, PUT BACK BY CONSTRUCTION (autopsy e725e002, 2026-09-29). A class a
-           * screen uses that exists in our design kit but not in this app's stylesheet has exactly one
-           * correct rule — the kit's. Adding it is free and deterministic, so it runs BEFORE the check
-           * below decides whether a model repair is needed, and again after any repair (which is told
-           * to reuse the kit, and so can introduce kit classes the app's rewritten stylesheet lacks).
-           */
-          /**
-           * 🔴 SPACING OFF THE 4px GRID, SNAPPED BY CONSTRUCTION (autopsy 536c8189, 2026-10-01). Between
-           * #3458 and that date these values were handed to the MODEL at the end of its turn; the first
-           * real build to meet that hand-back spent three calls writing `node -e` regex scripts over a
-           * 634-line stylesheet and moved ON-grid values OFF the grid. `round(v / 4) * 4` has one right
-           * answer, so it runs here instead — free, deterministic, and only over files THIS build wrote.
-           */
-          const snapSpacing = async (files: Record<string, string>): Promise<void> => {
-            try {
-              if (abort.signal.aborted || isImportTurn || !expectsArtifacts) return;
-              const patches = spacingSnapPatches(files, writtenFiles.keys());
-              if (patches.length === 0) return;
-              const landed: SpacingSnapPatch[] = [];
-              for (const patch of patches) {
-                const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
-                if (!wrote) continue;
-                writtenFiles.set(patch.path, patch.content);
-                integrityFiles[patch.path] = patch.content;
-                await mergeWorkspaceFiles(workspaceId, { [patch.path]: patch.content }).catch(() => {});
-                landed.push(patch);
-              }
-              if (landed.length === 0) return;
-              buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: spacingSnapNote(landed), autoResolved: true });
-              // 🔴 THE FINDING DESCRIBED THE APP BEFORE THE SNAP (autopsy e3b0ce25). DESIGN_CONSISTENCY is
-              // recorded before this runs, so the report read "4 spacing values are off the grid" beside
-              // "2 snapped" with no way to tell what remained. The same check runs again over the snapped
-              // files and the old line is replaced by what is true now.
-              try {
-                const after = lintBuiltApp(integrityFiles);
-                if (after && buildDiag.resolveOnRecheck('DESIGN_CONSISTENCY') > 0 && after.design.violations.length > 0) {
-                  buildDiag.record({ phase: 'build', severity: 'warning', code: 'DESIGN_CONSISTENCY', ...obs(`After the spacing snap: ${designLintSummary(after)}`) });
-                }
-                // Q-515 (autopsy 39e982bd): WRITE_TIME_QUALITY is measured before the snap too, so it said
-                // src/theme.css "had been noted and not fixed" while the snap then fixed every value in it,
-                // and the autopsy read that as 21 values left. It stays true about the MODEL; this line says
-                // what is true about the APP now.
-                if (after) {
-                  const stillFlagged = [...new Set(Object.values(after.offenders ?? {}).flat().map((o) => o.path))];
-                  const nowClear = landed.map((p) => p.path).filter((path) => !stillFlagged.includes(path));
-                  if (nowClear.length > 0) {
-                    buildDiag.record({ phase: 'build', severity: 'info', code: 'WRITE_TIME_QUALITY', autoResolved: true,
-                      message: `After the spacing snap: ${nowClear.join(', ')} ${nowClear.length === 1 ? 'is' : 'are'} no longer flagged — any "noted and not fixed" above describes the model's turn, not the app as shipped.` });
-                  }
-                }
-              } catch { /* the earlier finding stands */ }
-            } catch { /* deterministic and best-effort — it can never affect a build */ }
-          };
-          const restoreKitRules = async (files: Record<string, string>, when: 'before-repair' | 'after-repair'): Promise<void> => {
-            try {
-              const patch = kitRestorePatch(files);
-              // Never on a read-only import/survey turn: there, the user's files are theirs, untouched.
-              if (!patch || abort.signal.aborted || isImportTurn || !expectsArtifacts) return;
-              const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
-              if (!wrote) return;
-              writtenFiles.set(patch.path, patch.content);
-              integrityFiles[patch.path] = patch.content;
-              await mergeWorkspaceFiles(workspaceId, { [patch.path]: patch.content }).catch(() => {});
-              buildDiag.record({ phase: 'build', severity: 'info', code: 'DESIGN_KIT_RESTORED', message: kitRestoreNote(patch, when), autoResolved: true });
-            } catch { /* deterministic and best-effort — it can never affect a build */ }
-          };
-          await restoreKitRules({ ...integrityFiles, ...designFiles }, 'before-repair');
-          await snapSpacing({ ...integrityFiles, ...designFiles, ...Object.fromEntries(writtenFiles) });
           const projectForCss = { ...integrityFiles, ...Object.fromEntries(writtenFiles) };
           const cssErr = (() => { try { return cssConsistencyError(projectForCss); } catch { return null; } })();
           if (cssErr) {
@@ -20832,7 +20938,9 @@ async function noteBuildOutcome(
                 const a11yBefore = projectHasUserCode(beforeHeal) ? lintBuiltApp(beforeHeal) : null;
                 const a11yAsk = a11yRepairAddendum(a11yBefore);
                 const designAsk = designRepair ? designRepairInstruction(design) : '';
-                const cssAsk = cssRepair && cssErr ? `\n\n${cssErr}` : '';
+                // `cssConsistencyError` is shared with the fast lane's tool-less whole-file repair, so it cannot
+                // name an edit_file call; THIS consumer has the tool, and is told how to add (autopsy 9c612cdb).
+                const cssAsk = cssRepair && cssErr ? `\n\n${cssErr}\n${APPEND_WITH_EMPTY_OLD_STRING}` : '';
                 const healed = await runInPass('design-consistency-heal', () => designRunner.run(
                   `The app is built and compiles. ${designAsk}${cssAsk}${a11yAsk}`,
                 ));
@@ -20843,7 +20951,9 @@ async function noteBuildOutcome(
                   for (const path of verdict.revert) {
                     const original = beforeHeal[path];
                     if (typeof original !== 'string') continue;
-                    try { await actuator.writeFile(workspaceId, path, original); } catch { /* per-file */ }
+                    // Named for the ledgers only. NOT 'design-consistency-heal' (allowlisted): that would widen what a
+                    // latched app lets through, which is a freeze decision, not an attribution one.
+                    try { await runInPass('design-heal-revert', () => actuator.writeFile(workspaceId, path, original)); } catch { /* per-file */ }
                     writtenFiles.set(path, original);
                   }
                   if (verdict.revert.length) {
@@ -20855,6 +20965,10 @@ async function noteBuildOutcome(
                   }
                 } catch { /* the guard is best-effort — it must never itself break a build */ }
                 await restoreKitRules({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'after-repair');
+                // 🔴 THE REPAIR WRITES CSS AFTER THE ONLY SNAP (autopsy 9c612cdb): snap again, then say what is true
+                // now whenever it differs from what was recorded — a heal only on a clean re-check (designAfterRepair.ts).
+                await snapSpacing({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'after-repair');
+                designShipped = restateDesignAfterRepair({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, designShipped, buildDiag);
                 if (!cssRepair) {
                   // A design-only repair can itself leave classes unstyled (e725e002: four empty states
                   // on `.nb-empty*`). Say so when it does — DESIGN_HEALED alone would claim the pages are fine.
@@ -21030,7 +21144,7 @@ async function noteBuildOutcome(
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
-              const healed = await compileHealRunner.run(previewCompileRepairInstruction(compile.errors));
+              const healed = await runInPass('preview-compile-repair', () => compileHealRunner.run(previewCompileRepairInstruction(compile.errors)));
               if (healed.ok) {
                 result = { ...healed, summary: result.summary }; // keep the REAL build summary; take the heal's edits
                 compile = checkPreviewCompiles(Object.fromEntries(writtenFiles));
@@ -21084,7 +21198,7 @@ async function noteBuildOutcome(
               model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
-            const healed = await hooksHealRunner.run(hooksRepairInstruction(hooksReport));
+            const healed = await runInPass('hooks-repair', () => hooksHealRunner.run(hooksRepairInstruction(hooksReport)));
             if (healed.ok) {
               const after = await analyzeHooksRules(Object.fromEntries(writtenFiles));
               if (after.ok) {
@@ -21139,7 +21253,7 @@ async function noteBuildOutcome(
               model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
-            const healed = await completeRunner.run(authenticityRepairInstruction(stubs));
+            const healed = await runInPass('stub-completion-repair', () => completeRunner.run(authenticityRepairInstruction(stubs)));
             if (healed.ok) {
               // 🔴 THE SAME QUESTION THE INPUT ASKED, and for two months it was not (Q-105's sibling).
               // Unfiltered, one stub in a stray file nothing imports kept this > 0 for ever: the heal
@@ -21238,7 +21352,7 @@ async function noteBuildOutcome(
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
-              const healed = await guardHealRunner.run(bootKillerRepairInstruction(killers));
+              const healed = await runInPass('boot-killer-repair', () => guardHealRunner.run(bootKillerRepairInstruction(killers)));
               // Re-detect over the SAME file set, with the heal's writes layered on (they land in
               // writtenFiles via onFileWrite), so the report states what is actually true now — never
               // "healed" on the healer's own say-so. Re-layering matters for the retroactive sweep: the
@@ -21692,7 +21806,12 @@ async function noteBuildOutcome(
           const savedSweep: Record<string, string> = {};
           for (const [p, c] of Object.entries(cleaned)) {
             try {
-              await actuator.writeFile(workspaceId, p, c);
+              // 🔴 NAMED (autopsy 9c612cdb). This sweep, the E2E scaffold and the ADR note below wrote with no pass
+              // name, and POST_GREEN_WRITES called their five files "build loop" — the model, which had written
+              // nothing after its summary. Every platform write after the answer names its pass; the census in
+              // tests/aPlatformWriterIsNeverTheModel.test.ts fails on one that does not. The names here are on no
+              // Green Freeze list, so on a latched app they are refused exactly as before — attribution only.
+              await runInPass('unused-import-sweep', () => actuator.writeFile(workspaceId, p, c));
               writtenFiles.set(p, c);
               inBuildWriteTick++; // a concurrent in-build proof must not save a tree this write changed
               try { getWorkspaceMemory(workspaceId).indexFile(p, c); } catch { /* index best-effort */ }
@@ -21717,10 +21836,10 @@ async function noteBuildOutcome(
           const cleanIndex = sandboxIndex == null ? null : withoutPreviewBridge('index.html', sandboxIndex);
           const inlined = cleanIndex != null && kitCss != null ? inlineLinkedStylesheet(cleanIndex, 'style.css', kitCss) : null;
           if (inlined) {
-            await actuator.writeFile(
+            await runInPass('single-file-kit-inline', () => actuator.writeFile(
               workspaceId, 'index.html',
               hasPreviewBridge(sandboxIndex ?? '') ? injectPreviewBridge(inlined, 'live') : inlined,
-            );
+            ));
             writtenFiles.set('index.html', inlined);
             inBuildWriteTick++; // the model's own page, not a platform file: the reviewer still reads it
             try { getWorkspaceMemory(workspaceId).indexFile('index.html', inlined); } catch { /* index best-effort */ }
@@ -21971,6 +22090,17 @@ async function noteBuildOutcome(
             await saveWorkspaceFiles(workspaceId, Object.fromEntries(scaffolded.map((p) => [p, writtenFiles.get(p) as string]))).catch(() => {});
             events.emit({ type: 'narration', agent: 'architect', text: starterTestsNarration(scaffolded, pkgForTests), ts: Date.now() });
           }
+          // 🔴 A SKIP IS RECORDED WITH ITS REASON, as the end-to-end scaffold's is (autopsy 9c612cdb). On the
+          // default starter this pass writes nothing — no test runner is declared — and it used to say nothing,
+          // while the knowledge base promised a starter test on every build. See starterTestsSkip.ts.
+          const starterSkip = starterTestsSkipReason({ packageJson: pkgForTests, skeletonsSafe, planned: plan.length, written: scaffolded.length });
+          if (starterSkip) {
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'STARTER_TESTS_SKIPPED',
+              message: starterTestsSkippedNote(starterSkip),
+              autoResolved: true,
+            });
+          }
         }
       } catch { /* auto-test scaffolding is best-effort — never affects the build result */ }
       // U-2 — app-scaffold quality defaults BY DEFAULT. After a successful build with an index.html,
@@ -22016,7 +22146,8 @@ async function noteBuildOutcome(
           for (const p of appSource == null ? APP_ENTRY_CANDIDATES : []) {
             try { appSource = await actuator.readFile(workspaceId, p); break; } catch { /* try next */ }
           }
-          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource });
+          const adServingPlayer = (await adServingPlayersNow()).length > 0;
+          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource, adServingPlayer });
           const appName = display.name;
           const defaults = planAppDefaults(indexHtml, appName, { description: display.description, shortName: display.shortName });
           // ⛔ NO FAKE BUTTON, NO FAKE FEATURE (admin 2026-10-04). The WHOLE project is read — an edit turn's
@@ -22600,7 +22731,7 @@ async function noteBuildOutcome(
               model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
-            const healed = await healRunner.run(repairPrompt);
+            const healed = await runInPass('preview-render-repair', () => healRunner.run(repairPrompt));
             if (healed.ok) result = adoptHealResult(result, healed);
           } catch (e) {
             console.log(`[AGENTV3] preview heal attempt ${attempt + 1} failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -23452,7 +23583,9 @@ async function noteBuildOutcome(
                 buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'TEST_SUITE', message: outcome.summary + (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 8).join(', ')}` : ''), autoResolved: false });
                 break;
               }
-              const healed = await vaxRunner.run(testOutcomeRepairPrompt(outcome));
+              // NOT 'vaccine-repair': that name is allowlisted for the VERIFIED repair above. This unlatched run has no
+              // verify net, so it keeps a name on no freeze list — were it ever reached latched, it is refused as before.
+              const healed = await runInPass('vaccine-repair-unlatched', () => vaxRunner.run(testOutcomeRepairPrompt(outcome)));
               if (healed.ok) result = adoptHealResult(result, healed); else break;
             } catch (e) {
               console.log(`[AGENTV3] vaccine heal failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -23891,7 +24024,7 @@ async function noteBuildOutcome(
                   model: resolveModel(powerLevelReqEffective),
                   persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                 });
-                const healed = await rtRunner.run(fuzzRepairPrompt(findings));
+                const healed = await runInPass('fuzz-hardening', () => rtRunner.run(fuzzRepairPrompt(findings)));
                 if (healed.ok) { result = adoptHealResult(result, healed); buildDiag.record({ phase: 'readiness', severity: 'info', code: 'FUZZ_HARDENED', message: `Hardened ${findings.length} input(s) against hostile input.`, autoResolved: true }); }
               } catch (e) {
                 console.log(`[AGENTV3] red-team heal failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -24157,11 +24290,16 @@ async function noteBuildOutcome(
           // "A beautiful, polished UI" about a page the browser painted as raw HTML (renderStyle.ts).
           renderUnstyled: currentRenderStyle()?.verdict === 'unstyled',
         });
-        if (contradictions.length > 0) {
-          result = { ...result, summary: `${result.summary}${claimCorrection(contradictions)}` };
+        // "Your ad-free video player app is ready." over YouTube's own embedded player (Q-990, autopsy 9c612cdb).
+        // Judged on the WHOLE project's players, never an edit turn's slice; one correction list either way.
+        const auditedSummary = `${result.summary}${claimCorrection(contradictions)}`;
+        const adPlayers = await adServingPlayersNow();
+        const adFreeFix = adFreeClaimCorrection(auditedSummary, adPlayers);
+        if (`${claimCorrection(contradictions)}${adFreeFix}`) {
+          result = { ...result, summary: `${auditedSummary}${adFreeFix}` };
           buildDiag.record({
             phase: 'readiness', severity: 'warning', code: 'CLAIM_UNSUPPORTED',
-            message: claimAuditSummary(contradictions), autoResolved: false,
+            message: claimReportWithAdFree(contradictions.length, claimAuditSummary(contradictions), adFreeFix, adPlayers), autoResolved: false,
           });
         }
       } catch { /* the audit reports on the summary; it must never break the build */ }
@@ -24220,6 +24358,16 @@ async function noteBuildOutcome(
           buildDiag.record({ phase: 'readiness', severity: 'info', code: 'NON_SMARTPHONE_TOLD', autoResolved: true, message: `The request named ${keypadPhone.device}, a classic keypad phone — the build was steered to a light 2D version (touch and keys; for a game, the classic game from that phone unless the request asked otherwise), and the user was given a line saying what was built (light 2D, any modern browser, touch or keys).` });
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
+
+      // 📺 …AND A PLAYER WHOSE ADS THE APP CANNOT SWITCH OFF IS NAMED (Q-990, autopsy 9c612cdb). The user asked for no
+      // ads and the finished project embeds YouTube's (or another site's) own player: one plain line, unless the reply
+      // — or the correction above — already says the player's ads may play. Every lane, the fast lane's
+      // platform-written summary included. Recorded for the admin as an info line, like NON_SMARTPHONE_TOLD.
+      // ⚠️ Every condition lives in `withThirdPartyLimitsEndLine` (a successful build, the kill switch, the request, the
+      // players, already said): this handler sits at TypeScript's control-flow limit (TS2563), and every `&&` / `if`
+      // written here is one more branch the checker must walk. One unconditional assignment costs none, and neither
+      // call can throw (both catch inside), so no try is needed around them.
+      result = withThirdPartyLimitsEndLine(result, prompt, await adServingPlayersNow(), (players) => buildDiag.record({ phase: 'readiness', severity: 'info', code: 'THIRD_PARTY_LIMIT_TOLD', autoResolved: true, message: thirdPartyLimitReportNote(players, 'end') }));
 
       // 🎭 MADE-UP RESULTS ARE DISCLOSED TOO (autopsy 33812996). The sibling of the block above for a
       // feature whose OUTPUT is invented — a random "recognised" song, "[Translated to hi]: …", search
@@ -24540,10 +24688,10 @@ async function noteBuildOutcome(
           // Stop still reaches it — and it is aborted the moment its verdict is conceded, after the grace
           // and the salvage have had their chance. `makeSubAgentSpawn` holds no state of its own, so a
           // per-review spawn over the same deps is the shared one with a different signal.
-          const reviewAbort = new AbortController();
-          const stopReviewWithBuild = (): void => reviewAbort.abort();
-          if (abort.signal.aborted) reviewAbort.abort();
-          else abort.signal.addEventListener('abort', stopReviewWithBuild, { once: true });
+          // `passAbort` (autopsy 9c612cdb): the build's stop reaches the review WITH its cause, and our own
+          // budget ends it as 'review-budget' — so the call it cuts off is on the record as our clock, not as
+          // a build nobody stopped.
+          const reviewAbort = passAbort(abort.signal);
           // What THIS turn changed, and — for a suggest-only review — that code in full. Computed before
           // the spawn because whether the review may read at all depends on it (autopsy bee95692).
           const reviewChanged = reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden);
@@ -24595,11 +24743,13 @@ async function noteBuildOutcome(
            * what the reviewer already said out loud. Costs nothing: no extra call, no extra token —
            * this is money the user has already spent, being collected instead of binned.
            */
-          const reviewerSaid: string[] = [];
-          const stopListening = events.subscribe((e) => {
-            if (e.type === 'narration' && e.agent === 'reviewer' && typeof e.text === 'string') reviewerSaid.push(e.text);
-            else if (e.type === 'agent_done' && e.agent === 'reviewer' && typeof e.summary === 'string') reviewerSaid.push(e.summary);
-          }, false); // no replay — only this review's own words, never an earlier turn's
+          // 🔴 AND EVERY CHANNEL ITS WORDS ARRIVE ON (autopsy 9c612cdb, Q-999). This listener once heard
+          // only narration and agent_done — and since the suggest-only review became ONE call (bee95692), a
+          // call cut off by its budget narrates nothing: its answer had only ever streamed. The collector
+          // (partialReview.ts) also joins the streamed text per turn, without holding the same words twice,
+          // and drops the working clock.
+          const reviewerSaid = collectReviewerWords('reviewer');
+          const stopListening = events.subscribe((e) => reviewerSaid.take(e), false); // no replay — only this review's own words, never an earlier turn's
           // 🔑 THE REVIEWER'S SPEND IS ATTRIBUTED TO THE REVIEWER (admin 2026-09-18, build b6f88a72:
           // 40 calls, 523,374 input tokens = 34.4% of the build, `responseChars: 0` on every one, and
           // then no verdict at all — all of it billed at ×4). The zone is inherited by every awaited
@@ -24627,9 +24777,11 @@ async function noteBuildOutcome(
           try {
             review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');
             // It stopped in front of a reasoning engine instead of spending its budget there — said, never silent.
-            const stoppedAt = reviewStoppedAtReasoningRung(reviewerSaid);
+            const stoppedAt = reviewStoppedAtReasoningRung(reviewerSaid.lines());
             if (stoppedAt) {
-              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_NOT_RUN_REASONING_ENGINE', autoResolved: true, message: `The suggest-only review was not run: the engine left on the chain (${stoppedAt}) reasons before every answer, and this review gets one ${Math.round(reviewBudget / 1000)} s call — it stopped instead of keeping the user waiting for an answer that would not arrive in time. Its suggestions are not available for this build; "review it" runs a full review on its own.` }); } catch { /* best-effort */ }
+              // Admin line. It used to end `"review it" runs a full review on its own` — no such handler exists
+              // (autopsy 9c612cdb, Q-997): a turn that writes nothing never runs the review.
+              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_NOT_RUN_REASONING_ENGINE', autoResolved: true, message: `The suggest-only review was not run: the engine left on the chain (${stoppedAt}) reasons before every answer, and this review gets one ${Math.round(reviewBudget / 1000)} s call — it stopped instead of keeping the user waiting for an answer that would not arrive in time. Its suggestions are not available for this build.` }); } catch { /* best-effort */ }
             }
           } catch (e) {
             // Timeout (or a reviewer error): the app is built + compiles + saved — say so HONESTLY
@@ -24654,7 +24806,7 @@ async function noteBuildOutcome(
               // It landed. Everything downstream — recordReview, the C9 auto-fix, the honesty holder —
               // now runs exactly as it would have on a review that finished inside its budget.
               try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LATE', message: `Post-build review overran its ${reviewBudget}ms budget and was collected within the ${graceMs}ms grace — its findings were kept, not discarded.`, autoResolved: true }); } catch { /* best-effort */ }
-            } else if ((salvaged = salvageReview(reviewerSaid.join('\n'))) !== null) {
+            } else if ((salvaged = salvageReview(reviewerSaid.text())) !== null) {
               // SALVAGE before conceding. Everything the reviewer narrated is already paid for; the
               // only question is whether anyone looks at it. A salvaged verdict can never FAIL the
               // build (see salvageReview's honesty rules) and deliberately does NOT feed the C9
@@ -24666,9 +24818,16 @@ async function noteBuildOutcome(
               try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_PARTIAL', message: `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${reviewScopeWords(reviewOneCall ? (reviewInline?.files.length ?? 0) : null, rFiles.length)}${reviewEngineWords(buildDiag.lastServedModel())} — but ${salvaged.issues.length} finding(s) it had already reported were RECOVERED from its own narration instead of discarded. Leads from an UNFINISHED review: they cannot fail a build and do not drive the auto-fix.`, autoResolved: false }); } catch { /* best-effort */ }
               review = null;
             } else {
-              events.emit({ type: 'narration', agent: 'architect', text: timedOut
-                ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish in the time it had — send "review it" and I\'ll run it on its own.'
-                : '📋 Your app is built and saved (the post-build review could not run this time).', ts: Date.now() });
+              // 🔴 ONE CLASSIFICATION, BOTH AUDIENCES (autopsy 9c612cdb, Q-997). `suggestOnly` used to be
+              // decided BELOW the user's sentence, so the report filed a green app's timed-out suggestions as
+              // process-only — "nothing for the user to do" (REVIEW_SUGGESTIONS_NOT_READY, SignBridge
+              // 2026-09-26) — while the user, on that same green app, was told to send "review it", a command
+              // nothing handles: a turn that writes nothing never runs this review, and "review it" reads as
+              // chat. The decision now comes first and the user's line follows it (reviewNotReadyUserLine):
+              // suggest-only → no line at all; could have repaired → a true sentence that names no command.
+              const suggestOnly = reviewPlan.mode === 'suggest';
+              const notReadyLine = reviewNotReadyUserLine({ suggestOnly, timedOut });
+              if (notReadyLine) events.emit({ type: 'narration', agent: 'architect', text: notReadyLine, ts: Date.now() });
               // HONESTY (rule 5): this used to be recorded `autoResolved: true` — a literal claim that
               // the problem was resolved. Nothing was resolved: the completeness net was DOWN for this
               // build, which is exactly the caveat the health card should carry. It is a warning, not
@@ -24686,7 +24845,7 @@ async function noteBuildOutcome(
               // said was an offer, never a repair. Its timing out is a fact about OUR process, so it is not
               // filed as an unresolved warning against a working app (autopsy SignBridge, 2026-09-26, where
               // it sat in the app's problem list). Where the review could have REPAIRED, it stays a warning.
-              const suggestOnly = reviewPlan.mode === 'suggest';
+              // (`suggestOnly` is decided at the top of this branch — the user's line reads the same decision.)
               barrenPhases.add(PHASE_POST_BUILD_REVIEW);
               try { buildDiag.record({ phase: 'build', severity: suggestOnly ? 'info' : 'warning', code: suggestOnly ? 'REVIEW_SUGGESTIONS_NOT_READY' : 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${reviewScopeWords(reviewOneCall ? (reviewInline?.files.length ?? 0) : null, rFiles.length)}${reviewEngineWords(buildDiag.lastServedModel())} — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build` : `Post-build review errored — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build`, autoResolved: suggestOnly }); } catch { /* best-effort */ }
               review = null;
@@ -24696,9 +24855,10 @@ async function noteBuildOutcome(
             // appending a later turn's reviewer output to this turn's buffer.
             stopListening();
             // Whatever the outcome, nothing reads this reviewer after here — end it (a no-op if it
-            // already finished) and drop the build-abort link so it cannot outlive the build.
-            reviewAbort.abort();
-            abort.signal.removeEventListener('abort', stopReviewWithBuild);
+            // already finished) and drop the build-abort link so it cannot outlive the build. Its cause is
+            // OUR budget, so the call it cuts off is recorded as our clock (autopsy 9c612cdb, Q-998).
+            reviewAbort.abort('review-budget');
+            reviewAbort.dispose();
           }
           // A CLAIM THE COMPILER ALREADY ANSWERED IS NOT A FINDING (autopsy b10aae9a). The reviewer cannot
           // run tsc; the platform did. When it passed, a "TypeScript errors are present" finding is an
@@ -24805,9 +24965,9 @@ async function noteBuildOutcome(
               if (plan.repairMs > 0 && canVerify && !abort.signal.aborted) {
                 armAdvisoryCap(plan.capMs);
                 events.emit({ type: 'narration', agent: 'architect', text: `🔧 Your app works — checking ${greenRepairable.length} problem(s) the review reported and fixing any that are real, then checking it still works…`, ts: Date.now() });
-                const repairAbort = new AbortController();
-                const stopRepairWithBuild = () => repairAbort.abort();
-                abort.signal.addEventListener('abort', stopRepairWithBuild);
+                // The build's stop reaches the repair with its cause; our budget ends it as 'repair-budget'
+                // (passAbort, autopsy 9c612cdb) — never a bare abort that reads as an unexplained stop.
+                const repairAbort = passAbort(abort.signal);
                 let repairOk = false;
                 let repairTimedOut = false;
                 // What the pass really changed, measured against the snapshot — never its own report.
@@ -24847,7 +25007,7 @@ async function noteBuildOutcome(
                         // Stop it, and let it settle before anything is reverted — a runner still writing
                         // while the snapshot goes back would leave a hybrid.
                         repairTimedOut = true;
-                        repairAbort.abort();
+                        repairAbort.abort('repair-budget');
                         await Promise.race([run.catch(() => undefined), new Promise((res) => setTimeout(res, 15_000))]);
                         return;
                       }
@@ -24911,8 +25071,8 @@ async function noteBuildOutcome(
                     });
                   } catch { /* best-effort */ }
                 } finally {
-                  abort.signal.removeEventListener('abort', stopRepairWithBuild);
-                  repairAbort.abort();
+                  repairAbort.dispose();
+                  repairAbort.abort('repair-budget');
                 }
               } else {
                 try {
@@ -24990,7 +25150,7 @@ async function noteBuildOutcome(
               let timedOut = false;
               let fixOk = false;
               try {
-                const fix = await raceTimeout(critFixRunner.run(judgeRepairPrompt(prompt, autoFixItems)), reviewerFixBudgetMs(autoFixItems.length, fixHeadroomMs()), 'reviewer-autofix');
+                const fix = await raceTimeout(runInPass('reviewer-autofix', () => critFixRunner.run(judgeRepairPrompt(prompt, autoFixItems))), reviewerFixBudgetMs(autoFixItems.length, fixHeadroomMs()), 'reviewer-autofix');
                 fixOk = !!fix.ok;
                 // Only a verifiably-COMPLETED repair pass clears the false-success guard. A failed/thrown
                 // pass (below) leaves reviewCriticalsUnresolved set → the build finalizes honestly NOT-ok.
@@ -25021,9 +25181,8 @@ async function noteBuildOutcome(
                   let recheckReview: Awaited<ReturnType<typeof reviewBuild>> | null = null;
                   let recheckWhy = recheckBudget === 0 ? 'the build had no time left for it' : '';
                   if (recheckBudget > 0) {
-                    const recheckAbort = new AbortController();
-                    const stopRecheckWithBuild = (): void => recheckAbort.abort();
-                    abort.signal.addEventListener('abort', stopRecheckWithBuild, { once: true });
+                    // The build's stop reaches it with its cause; our budget ends it as 'recheck-budget' (autopsy 9c612cdb).
+                    const recheckAbort = passAbort(abort.signal);
                     try {
                       const recheckSample = await Promise.all(rFiles.slice(0, 5).map(async (p) => ({
                         path: p,
@@ -25040,8 +25199,8 @@ async function noteBuildOutcome(
                     } catch (e) {
                       recheckWhy = e instanceof Error && /timed out/i.test(e.message) ? 'it ran out of time' : 'it could not finish';
                     } finally {
-                      recheckAbort.abort();
-                      abort.signal.removeEventListener('abort', stopRecheckWithBuild);
+                      recheckAbort.abort('recheck-budget');
+                      recheckAbort.dispose();
                     }
                   }
                   const recheck = postFixRecheckOutcome(recheckReview, recheckWhy);
@@ -26553,16 +26712,19 @@ async function noteBuildOutcome(
               autoResolved: false,
             });
           }
+          // One rule for the label at both settle paths (buildBillingLabel.ts, autopsy 9c612cdb): a Weak build says
+          // whether it was charged, and no retired programme is ever named as the reason it ran.
+          const settledBilledInr = Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100;
           buildDiag.setBilling({
-            userTier: isAgentV3FreeUser(userId, email)
-              ? 'free-list (admin/tester)'
-              : freeTierBuildActive
-                ? 'free (welcome bonus — cheap engines)'
-                : billingActive
-                  ? 'paid'
-                  : 'billing-off (no charge)',
+            ...buildBillingLabel({
+              freeListed: isAgentV3FreeUser(userId, email),
+              cheapEnginesOnly: freeTierBuildActive,
+              billingActive,
+              billedUsd: effectiveBilledUsd,
+              billedInr: settledBilledInr,
+            }),
             billedUsd: Math.round(effectiveBilledUsd * 1_000_000) / 1_000_000,
-            billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100,
+            billedInr: settledBilledInr,
             realCostUsd: Math.round(decidedRealCostUsd * 1_000_000) / 1_000_000,
             sandboxCostUsd: Math.round(decidedSandboxUsd * 1_000_000) / 1_000_000,
             ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited } : {}),
@@ -26795,7 +26957,7 @@ async function noteBuildOutcome(
           if (entryResolved && entrySrc) {
             const deduped = dedupeSameModuleImports(entryResolved, entrySrc);
             if (deduped !== entrySrc) {
-              await actuator.writeFile(workspaceId, entryResolved, deduped);
+              await runInPass('entry-import-dedupe', () => actuator.writeFile(workspaceId, entryResolved, deduped));
               writtenFiles.set(entryResolved, deduped);
               try { getWorkspaceMemory(workspaceId).indexFile(entryResolved, deduped); } catch { /* index best-effort */ }
               await saveWorkspaceFiles(workspaceId, { [entryResolved]: deduped }).catch(() => {});

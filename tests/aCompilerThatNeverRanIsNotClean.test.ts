@@ -79,8 +79,11 @@ describe('the dispatcher counts by verdict, not by error count', () => {
     expect(clean).toBeGreaterThan(-1);
     expect(counted).toBeGreaterThan(neverRan);
     expect(clean).toBeGreaterThan(counted);
-    // …and the never-ran branch still RETURNS, so it can never fall through into the clean count.
-    expect(src.slice(counted, clean)).toContain("return '';");
+    // …and the never-ran branch can never fall through into the clean count. PIN UPDATED 2026-10-13 (autopsy 9c612cdb,
+    // Q-983): the per-RUN counters moved into the shared run's closure, where the two counts are exclusive branches
+    // (`if (neverRan) … else if (errors.length === 0)`); each writer then returns on `run.neverRan` before any note.
+    expect(src.slice(counted, clean)).toMatch(/return '';|\belse\s*$/);
+    expect(src).toContain("if (run.neverRan) return '';");
   });
 });
 

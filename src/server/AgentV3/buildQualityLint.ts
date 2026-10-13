@@ -26,6 +26,7 @@ import {
 } from '../AppMakerLab/intelligence/DesignLinter';
 import { lintA11y, type A11yLintResult } from '../AppMakerLab/intelligence/A11yLinter';
 import { stripCommentsForMarkup } from './stripCodeComments';
+import { blankOurMarkup } from './ourInjectedMarkup';
 
 /** Source files worth linting. Everything else is noise the linters would only mis-read. */
 const LINTABLE = /\.(tsx?|jsx?|css|scss|html)$/i;
@@ -46,6 +47,19 @@ const GENERATED = /(\.min\.(css|js)|\.bundle\.js|-lock\.json)$/i;
  * file selection there is the drifted-copy class this repo has already paid for four times.
  */
 export { LINTABLE as LINTABLE_DESIGN_FILE, NOT_APP_DESIGN as NOT_APP_DESIGN_FILE, GENERATED as GENERATED_FILE };
+
+/**
+ * The text every design/accessibility reader judges, for ONE file: comments blanked (a comment is never
+ * shipped — autopsy 4541f1cf) and NavBharatAI's own injected markup blanked (our badge, our honesty
+ * banner and our preview bridge are not the user's design — autopsy 9c612cdb). Length-preserving, so an
+ * offset in it is an offset in the original: the spacing snap matches here and writes into the original.
+ *
+ * ⚠️ Our markup is blanked BEFORE the comments, because the honesty banner is delimited by HTML comments
+ * (`<!-- nbai-honesty -->`) and blanking those first would hide the block from its own pattern. PURE.
+ */
+export function shippedDesignText(path: string, content: string): string {
+  return stripCommentsForMarkup(blankOurMarkup(path, content));
+}
 
 /**
  * Total characters fed to the linters.
@@ -99,6 +113,11 @@ export interface BuildQualityLint {
    * characters, on a build that has already succeeded.
    */
   offenders: Record<string, FileOffence[]>;
+  /**
+   * Violation `type` → how many files carry it in all, when that is more than `offenders` lists. Lets the
+   * report say "and N more file(s)" instead of letting a short list read as the whole set.
+   */
+  offenderFileCount?: Record<string, number>;
 }
 
 /**
@@ -119,8 +138,9 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
     if (!LINTABLE.test(path) || NOT_APP_DESIGN.test(path) || GENERATED.test(path)) continue;
     if (total + content.length > MAX_LINT_CHARS) { truncated = true; continue; }
     // What a comment says is not what the app shows — neither linter may count it (autopsy 4541f1cf:
-    // a CSS comment naming `<img>` cost every app 8 accessibility points). Length-preserving.
-    const shipped = stripCommentsForMarkup(content);
+    // a CSS comment naming `<img>` cost every app 8 accessibility points) — and neither is the markup WE
+    // injected (autopsy 9c612cdb: our badge's `gap:6px` was the eighth off-grid value). Length-preserving.
+    const shipped = shippedDesignText(path, content);
     parts.push(shipped);
     selected.push([path, shipped]);
     total += content.length;
@@ -133,14 +153,19 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
 
   const joined = parts.join('\n');
   const tokenModuleCode = selected.filter(([p]) => TOKEN_MODULE_PATH.test(p)).map(([, c]) => c).join('\n');
+  const attributed = attributeOffenders(selected);
   return {
     design: lintDesign(joined, { tokenModuleCode }),
     a11y: lintA11y(joined),
     fileCount,
     truncated,
-    offenders: attributeOffenders(selected),
+    offenders: attributed.offenders,
+    ...(Object.keys(attributed.fileCount).length > 0 ? { offenderFileCount: attributed.fileCount } : {}),
   };
 }
+
+/** The spacing rule's violation type — the one rule whose per-file counts SUM to the app-wide count. */
+const OFF_GRID_TYPE = 'off-grid-spacing';
 
 /**
  * Which FILES carry each violation type — the linters re-run over one file at a time.
@@ -150,13 +175,20 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
  * measured for. Total on its inputs: a linter that throws on one file costs that file's attribution,
  * never the whole result.
  */
-function attributeOffenders(selected: ReadonlyArray<readonly [string, string]>): Record<string, FileOffence[]> {
+function attributeOffenders(selected: ReadonlyArray<readonly [string, string]>): { offenders: Record<string, FileOffence[]>; fileCount: Record<string, number> } {
   const byType = new Map<string, FileOffence[]>();
   for (const [path, content] of selected) {
     let found: Array<{ type: string; count: number }> = [];
     try {
       found = [...lintDesign(content, { tokenModuleCode: TOKEN_MODULE_PATH.test(path) ? content : '' }).violations, ...lintA11y(content).violations]
+        .filter((v) => v.type !== OFF_GRID_TYPE)
         .map((v) => ({ type: v.type, count: v.count }));
+      // 🔴 EVERY FILE THAT ADDS TO THE SPACING COUNT IS NAMED (autopsy 9c612cdb). The headline counts
+      // off-grid values across the WHOLE app, but a file was attributed only when its OWN count crossed the
+      // per-file threshold, so "8 spacing values … Worst: src/index.css (7)" hid the eighth, and finding it
+      // took a reproduction. Spacing is a plain count, so the raw per-file numbers sum to the headline.
+      const offGrid = offGridSpacing(extractSpacingPx(content)).length;
+      if (offGrid > 0) found.push({ type: OFF_GRID_TYPE, count: offGrid });
     } catch { continue; }
     for (const { type, count } of found) {
       if (!(count > 0)) continue;
@@ -166,19 +198,25 @@ function attributeOffenders(selected: ReadonlyArray<readonly [string, string]>):
     }
   }
   const out: Record<string, FileOffence[]> = {};
+  const fileCount: Record<string, number> = {};
   for (const [type, list] of byType) {
     // Worst first; ties broken by path so the same app always produces the same sentence.
     list.sort((a, b) => (b.count - a.count) || a.path.localeCompare(b.path));
     out[type] = list.slice(0, OFFENDERS_PER_TYPE);
+    if (list.length > OFFENDERS_PER_TYPE) fileCount[type] = list.length;
   }
-  return out;
+  return { offenders: out, fileCount };
 }
 
-/** " Worst: a.tsx (4), b.tsx (2)." for one violation type, or '' when nothing could be attributed. */
+/**
+ * " Worst: a.tsx (4), b.tsx (2)." for one violation type, or '' when nothing could be attributed. When more
+ * files carry it than are listed, it says how many more, so a short list never reads as the whole set.
+ */
 export function offenderNote(r: BuildQualityLint, type: string): string {
   const files = r.offenders?.[type];
   if (!files || files.length === 0) return '';
-  return ` Worst: ${files.map((o) => `${o.path} (${o.count})`).join(', ')}.`;
+  const more = (r.offenderFileCount?.[type] ?? files.length) - files.length;
+  return ` Worst: ${files.map((o) => `${o.path} (${o.count})`).join(', ')}${more > 0 ? `, and ${more} more file(s)` : ''}.`;
 }
 
 /** One line for the build report — the score plus the count, never a bare grade with no evidence. */

@@ -221,8 +221,14 @@ export interface AdminBuildReportMeta {
 /**
  * Classify a build's raw billing-tier string into paid / free / admin / unknown for the admin list's
  * "free or paid user" column. PURE + exported so the exact mapping is unit-tested. The raw strings come
- * from the billing record (`isAgentV3FreeUser` → 'free-list (admin/tester)', welcome-bonus → 'free …',
- * a real paying user → 'paid', billing disabled → 'billing-off …').
+ * from the billing record, written by `buildBillingLabel` (`isAgentV3FreeUser` → 'free-list (admin/tester)',
+ * the cheap-engine routing → 'weak (free tier — cheap engines) · charged ₹N' or '· not charged', billing
+ * applies → 'paid', billing disabled → 'billing-off …').
+ *
+ * ⚠️ A Weak build is classified 'free' EVEN WHEN IT WAS CHARGED — on purpose: this column names how the build
+ * was ROUTED, the meaning the admin kept on 2026-09-14 (routes/admin.ts). Whether the user pays is the
+ * account's question (`accountTier.ts`); whether THIS build was charged is `billing.charged` / `billedInr`.
+ * Labels stored before 2026-10-12 used an older cheap-tier wording (autopsy 9c612cdb) and still read 'free'.
  */
 export function classifyReportTier(userTier: string | null | undefined): ReportTier {
   const t = String(userTier ?? '').toLowerCase().trim();

@@ -17,6 +17,8 @@
 // any trace of the name being styled anywhere in what was read stands the note down; and the caller passes
 // nothing when it could not read the project, so "unknown" is always silence. PURE.
 
+import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
+
 export interface RootThemeHook {
   kind: 'class' | 'attribute';
   /** The class name, or the attribute name (`data-theme`). */
@@ -98,5 +100,7 @@ export function deadThemeSwitchNote(path: string, code: string, project: Readonl
   return `\nNOTE — ${path} switches ${what} on <html>/<body>, but nothing in this project styles it (no rule for ${rules}`
     + `${dead.some((h) => h.name === 'dark') ? ', no dark: classes' : ''}), so pressing that switch changes nothing on screen. `
     + existingThemeMechanism(project)
-    + 'Fix it now, while the file is open: make the switch set what the styles already use, or add rules that change the colour variables.';
+    + 'Fix it now, while the file is open: make the switch set what the styles already use, or add rules that change the colour variables. '
+    // Adding rules is an addition to the stylesheet — said with HOW (autopsy 9c612cdb, Q-986).
+    + APPEND_WITH_EMPTY_OLD_STRING;
 }

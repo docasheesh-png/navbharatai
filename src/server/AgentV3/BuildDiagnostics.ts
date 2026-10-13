@@ -12,6 +12,7 @@
 
 import { startBandLabel } from './RequestAnalyser';
 import { isBuildStoppedError } from './stopSignal';
+import { stoppedCallCauseWords, type AbortCause } from './buildAbortCause';
 import { toolCallDetail } from './toolCallTarget';
 import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
 import { isProjectSummaryNarration } from './ProjectSummary';
@@ -63,6 +64,10 @@ export const PROCESS_ONLY_CODES = new Set([
   // e628efd4). A WARNING, so the error count a RED gate reads cannot change and no bill moves; the server's
   // last words stay in the admin report.
   'PREVIEW_SERVER_DOWN',
+  // Q-982 (report 9c612cdb, 2026-10-13). The workspace refused a file one of OUR passes wrote (a guard, a sandbox
+  // read that failed). It is evidence about our write, recorded so the refusal is never silent again; whatever
+  // the refused file means for the app is measured by the checks that read the workspace afterwards.
+  'PLATFORM_WRITE_REFUSED',
   'BUILD_OFFER_ACCEPTED', 'ATTACHMENT_RECALLED',
   // A project import refused because the chat already held an app (Q-733). Nothing about the app is wrong —
   // it was deliberately left untouched — so it is never a problem WITH the user's app.
@@ -239,6 +244,9 @@ export const PROCESS_ONLY_CODES = new Set([
   // …and the click explorer's two "did not look" outcomes (clickExplorer.ts): it never reached the app,
   // or found nothing safe to press. Facts about OUR instrument, never about the user's app.
   'EXPLORE_NOT_RUN', 'EXPLORE_NOTHING_TO_PRESS',
+  // …and OUR starter unit-test pass saying why it added none (starterTestsSkip.ts, autopsy 9c612cdb): what our
+  // pass could do in this project, never a defect in the app ("No tests at all" stays the readiness finding).
+  'STARTER_TESTS_SKIPPED',
   // …and the reviewer's own version of that: the judge threw, or answered with something unreadable.
   // It used to be recorded as `CHEAP_REVIEW: PASS`, which is the fake-success class exactly. A review
   // that did not happen says something about OUR instrument, never about the user's app.
@@ -249,6 +257,8 @@ export const PROCESS_ONLY_CODES = new Set([
   // three facts about our engine (autopsy de3bb2bb — REPEATED_READS was one of the two open warnings that
   // held a working app at YELLOW: "2 thing(s) worth a look").
   'REPEATED_READS',
+  // …and how many model turns did nothing but update the plan (todoOnlyTurn.ts, autopsy 9c612cdb).
+  'TODO_ONLY_TURNS',
   'WORKSPACE_SCAN_FAILED',
   'EMPTY_BUILD_RETRY',
   // …and its sibling: our own page-render browser produced nothing (autopsy c6e4c6ff). Same rule —
@@ -642,9 +652,14 @@ export interface PreviewErrorRecord {
  * reached settle (e.g. a pre-stream refusal).
  */
 export interface BuildBillingRecord {
-  /** Who the build ran for: 'free-list (admin/tester)' | 'free (welcome bonus — cheap engines)' |
-   *  'paid' | 'billing-off (no charge)'. */
+  /** Who the build ran for, from `buildBillingLabel` (one rule at both settle paths): 'free-list (admin/tester)' |
+   *  'weak (free tier — cheap engines) · charged ₹N' or '… · not charged' | 'paid' | 'billing-off (no charge)'.
+   *  Reports stored before 2026-10-12 carry the older cheap-tier wording, which named a sign-up grant retired on
+   *  2026-09-17 (autopsy 9c612cdb); `classifyReportTier` still reads both. */
   userTier: string;
+  /** True when this build's bill was set against the user's wallet (billing applies and the bill is above
+   *  zero). The money answer, so nobody has to parse `userTier` for it. Absent before 2026-10-12. */
+  charged?: boolean;
   /** The ACTUAL amount charged (after every zeroing rule). 0 = a free build. */
   billedUsd?: number;
   billedInr?: number;
@@ -1622,7 +1637,15 @@ export class BuildDiagnostics {
     });
   }
 
-  recordLlmCall(rec: Omit<LlmCallRecord, 'ts' | 'promptPreview' | 'responsePreview'> & { promptPreview?: string; responsePreview?: string }): void {
+  recordLlmCall(rec: Omit<LlmCallRecord, 'ts' | 'promptPreview' | 'responsePreview'> & {
+    promptPreview?: string;
+    responsePreview?: string;
+    /**
+     * Why a cancelled call was stopped, when it was OUR decision (AgentRunner, `stoppedCallOwner`) — named in
+     * the stop's detail line (autopsy 9c612cdb). Absent for the user's Stop, whose record is unchanged.
+     */
+    stopCause?: AbortCause;
+  }): void {
     // The answering engine's own time is only ever PART of the caller's wait — never more than it.
     const answerMs = typeof rec.answerMs === 'number' && Number.isFinite(rec.answerMs) && rec.answerMs >= 0
       ? (typeof rec.latencyMs === 'number' && Number.isFinite(rec.latencyMs) ? Math.min(rec.answerMs, Math.max(0, rec.latencyMs)) : rec.answerMs)
@@ -1726,7 +1749,10 @@ export class BuildDiagnostics {
         code: 'LLM_CALL_STOPPED',
         message: 'A model call was cancelled because the build was stopped — it did not fail, and no provider was at fault.',
         autoResolved: true,
-        detail: `${rec.provider && rec.provider !== 'unknown' ? `provider=${rec.provider}` : 'no provider had answered yet'} · it had been running ${Math.round(Math.max(0, rec.latencyMs ?? 0) / 1000)}s`,
+        detail: `${rec.provider && rec.provider !== 'unknown' ? `provider=${rec.provider}` : 'no provider had answered yet'} · it had been running ${Math.round(Math.max(0, rec.latencyMs ?? 0) / 1000)}s`
+          // Who stopped it, when it was us (a deploy drain, a reclaimed lock, the reaper). The user's Stop carries
+          // no cause here, so its detail is exactly what it always was.
+          + (rec.stopCause && stoppedCallCauseWords(rec.stopCause) ? ` · stopped by us: ${stoppedCallCauseWords(rec.stopCause)}` : ''),
       });
     } else if (handedOff) {
       this.record({
@@ -1755,7 +1781,12 @@ export class BuildDiagnostics {
         // stops the commonest such call being started at all.)
         message: `A model call was stopped by one of our own clocks — a budget or step deadline ran out while it was still running, so it did not fail (${rec.model ?? 'model'}).`,
         autoResolved: true,
-        detail: rec.provider ? `provider=${rec.provider}` : undefined,
+        // ⚠️ The comment above holds for a bare `BUDGET_REACHED_MESSAGE`. A call an ABORT cancelled now arrives
+        // with its cause (autopsy 9c612cdb: "which engine ran the review, and for how long?" had no answer), so
+        // for that call the detail names the clock, the engine that was serving it and how long it had run.
+        detail: rec.stopCause && stoppedCallCauseWords(rec.stopCause)
+          ? `${rec.provider ? `provider=${rec.provider} · ` : ''}stopped by ${stoppedCallCauseWords(rec.stopCause)} · it had been running ${Math.round(Math.max(0, rec.latencyMs ?? 0) / 1000)}s`
+          : rec.provider ? `provider=${rec.provider}` : undefined,
       });
     } else if (!rec.ok || truncated) {
       // A TURN that timed out with nothing received is not "<model> failed" — no single provider
@@ -3142,6 +3173,7 @@ const NEVER_ROOT_CAUSE: ReadonlySet<string> = new Set([
   // build's first model call", because this warning is unresolved-but-not-a-failure and got picked as
   // the successful build's cause. Same class as POST_ANSWER_TIMING directly above; it belongs here too.
   'TIME_TO_FIRST_CALL',          // pure setup-timing measurement — the wait, not a cause
+  'TODO_ONLY_TURNS',             // turns spent only on update_todo — our engine's pace, never the app's fault (autopsy 9c612cdb)
   // 🔴 A NOTE ABOUT OUR OWN BILLING DECISION IS NOT A REASON A BUILD FAILED (build b89ba6f8,
   // 2026-09-17). That report's `rootCause` reads, in full: *"Did not ask this user to add credits:
   // the build failed because the engine did not respond…"* — a sentence about what we chose NOT to

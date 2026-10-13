@@ -117,7 +117,9 @@ describe('1 · the app is named, not ordered', () => {
     const tool = codeOnly(readFileSync(join(process.cwd(), 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8'));
     expect(route).not.toMatch(/const appName = deriveTitle\(prompt\)/);
     // Autopsy 6ae30b33 added the app's own screen (`appSource`) as evidence, ahead of the prompt.
-    expect(route).toMatch(/resolveAppDisplayName\(\{ chosenName: chosenAppName, indexHtml, prompt, appSource \}\)/);
+    // PIN UPDATED 2026-10-12 (autopsy 9c612cdb, Q-990): the route also says whether the app embeds a player that shows
+    // its own ads, so the name and description derived from the request never say "ad-free". The name is still resolved.
+    expect(route).toMatch(/resolveAppDisplayName\(\{ chosenName: chosenAppName, indexHtml, prompt, appSource, adServingPlayer \}\)/);
     expect(tool).toMatch(/resolveAppDisplayName\(\{ chosenName: optStr\(input, 'app_name'\), indexHtml, appSource \}\)/);
   });
 });

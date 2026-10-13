@@ -66,7 +66,12 @@ describe('a native mobile stack is named, like any stack we do not build', () =>
     expect(deduped).not.toMatch(/Download APK/);
   });
   it('the project planner gets the note, and so does every module turn (the plan goal)', () => {
-    expect(ROUTE).toMatch(/const plannerGoal = unsupportedStackAsked \? `\$\{unsupportedStackBuilderNote\(unsupportedStackAsked, framework\)\}/);
+    // PIN UPDATED 2026-10-12 (autopsy 9c612cdb, Q-991), invariant unchanged: the stack note now reaches the planner
+    // through the ONE request-notes list every lane reads, instead of a planner-only ternary — so the same note also
+    // reaches the fast lane and the one-shot lane, which it used to miss. tests/everyRequestNoteReachesEveryLane.test.ts
+    // holds the whole matrix; these two lines hold this note's place in it.
+    expect(ROUTE).toContain("{ code: 'unsupported-stack', text: unsupportedStackAsked ? unsupportedStackBuilderNote(unsupportedStackAsked, framework) : '' },");
+    expect(ROUTE).toContain('const plannerGoal = withRequestNotes(prompt, requestNotesText);');
     expect(ROUTE).toMatch(/projectPlanUserPrompt\(plannerGoal, ppScaffold\)/);
     expect(ROUTE).toMatch(/createProjectPlan\(plannerGoal, framework, modules, Date\.now\(\)\)/);
     expect(ROUTE).not.toMatch(/projectPlanUserPrompt\(prompt, ppScaffold\)/);

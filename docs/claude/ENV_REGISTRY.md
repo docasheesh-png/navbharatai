@@ -4253,3 +4253,16 @@ behind `AGENTV3_TOKEN_COMPACT`).
 (`scripts/agentv3-reliability-bench.ts`, 15-prompt smoke set first, `BENCH_CONFIRM=yes` required — it spends
 real money) once with all flags off (baseline) and once with the flag(s) on, then `npm run bench:compare`.
 Turn flags on one or two at a time so a regression has one owner.
+
+## Purchase audit flags (2026-10-13, branch fix/purchase-audit)
+
+All three are **OFF unless set to `on`**. None of them charges anyone or changes a price.
+
+| Key | Default | What it does when `on` |
+|---|---|---|
+| `RESELL_EXPIRY_SWEEP` | off | Every 6 h (exclusive scheduler job `resell-expiry-sweep`): reminds the owner 3 and 1 days before a paid extra server / small database / private database ends; 3 days after expiry takes an **extra server** down (code kept) and marks the row `lapsedAt`. A small database already stops at expiry (data API 402); the owner is now told. A **private database is never deleted** by the sweep — it is listed in the log for the admin. Never debits a wallet. |
+| `RESELL_DUPLICATE_GUARD` | off | Publish → "NavBharatAI database (private)" refuses to create a SECOND Supabase project while an expired, never-removed one exists for the same app, and offers Remove for it instead (the stop route can now find that expired row). |
+| `LAPSE_PAUSE_SERVER_APPS` | off | When a hosting plan lapses, apps that run a server (Cloud Run) are taken offline too, even inside the free 3 — free accounts get 0 servers and the plan terms already say server apps wait offline. Apps with their own paid extra-server add-on still in period are kept. |
+
+**Verify:** `npx vitest run tests/purchaseAudit.test.ts`. On staging, set the flag, create a test add-on row with
+`expiresAt` in the past, and run the job with `scheduler.runNow('resell-expiry-sweep')`.

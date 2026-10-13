@@ -45,10 +45,18 @@ const render = (md: string, withPlugins: boolean): string =>
   );
 
 /** Every chat surface that renders somebody's typed lines. Not the curated legal document. */
+/**
+ * 2026-10-13: the RENDERER was centralised too (`chat/ChatMarkdown.tsx`, the "claude jaisa" redesign),
+ * so the plugin list is wired in exactly one file, and every chat surface renders `<ChatMarkdown>`
+ * rather than its own `<ReactMarkdown>`. The census below holds both halves.
+ */
+const CHAT_RENDERER = 'src/components/chat/ChatMarkdown.tsx';
 const CHAT_SURFACES = [
+  CHAT_RENDERER,
   'src/components/ide/AIChat.tsx',
   'src/components/sda/SDAChat.tsx',
   'src/components/ide/AgentV3MiniChat.tsx',
+  'src/components/professionals/ProfessionalChat.tsx',
 ];
 
 const source = (rel: string): string => readFileSync(join(process.cwd(), rel), 'utf8');
@@ -110,15 +118,22 @@ describe('the table components were dead code', () => {
 });
 
 describe('the class, not the instance', () => {
-  it('🔒 EVERY chat markdown surface passes the SHARED plugin list', () => {
+  it('🔒 the ONE renderer passes the SHARED plugin list to every <ReactMarkdown> it renders', () => {
+    const src = source(CHAT_RENDERER);
+    expect(src).toContain('CHAT_MARKDOWN_PLUGINS');
+    // Every ReactMarkdown must carry them — a second, plugin-less call site is exactly how this bug returns.
+    const calls = (src.match(/<ReactMarkdown/g) || []).length;
+    const wired = (src.match(/remarkPlugins=\{CHAT_MARKDOWN_PLUGINS\}/g) || []).length;
+    expect(calls).toBeGreaterThan(0);
+    expect(wired, `${CHAT_RENDERER}: ${calls} <ReactMarkdown>, ${wired} wired`).toBe(calls);
+  });
+
+  it('🔒 EVERY chat surface renders through that renderer — never a <ReactMarkdown> of its own', () => {
     for (const rel of CHAT_SURFACES) {
+      if (rel === CHAT_RENDERER) continue;
       const src = source(rel);
-      expect(src, `${rel} must import the shared plugins`).toContain('CHAT_MARKDOWN_PLUGINS');
-      // Every ReactMarkdown in a chat surface must carry them — a second, plugin-less call site is
-      // exactly how this bug returns.
-      const calls = (src.match(/<ReactMarkdown/g) || []).length;
-      const wired = (src.match(/remarkPlugins=\{CHAT_MARKDOWN_PLUGINS\}/g) || []).length;
-      expect(wired, `${rel}: ${calls} <ReactMarkdown>, ${wired} wired`).toBe(calls);
+      expect(src, `${rel} must render <ChatMarkdown>`).toContain('<ChatMarkdown');
+      expect(src, `${rel} must not render its own <ReactMarkdown>`).not.toContain('<ReactMarkdown');
     }
   });
 

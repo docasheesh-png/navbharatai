@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Bot } from 'lucide-react';
+import { ArrowUp, Bot } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
-import ReactMarkdown from 'react-markdown';
-import { CHAT_MARKDOWN_PLUGINS } from '../../lib/chatMarkdown';
+import { ChatMarkdown } from '../chat/ChatMarkdown';
+import { USER_TURN_CLASS, ASSISTANT_TURN_CLASS, USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, PLAIN_TEXT_CLASS } from '../chat/conversation';
+import { COMPOSER_SEND_CLASS } from '../chat/ComposerShell';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { getAgentV3SessionId, getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { withoutStaleLiveStatus, lastActivityTs } from '../../lib/liveStatusLine';
@@ -124,26 +125,18 @@ export function AgentV3MiniChat({ userId, email, prefill }: { userId?: string; e
       </div>
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
         {convo.length === 0 && !running && (
-          <div className="text-xs text-faint leading-relaxed px-1">
+          <div className="text-sm text-muted leading-relaxed px-1">
             Ask NavBharatAI Pro to explain, edit, or extend this project — it can read and write your files here,
             exactly like the main NavBharatAI Pro chat.
           </div>
         )}
         {convo.map((m, i) => (
-          <div key={i} className={m.role === 'user' ? 'text-right' : 'text-left'}>
-            <div
-              className={`inline-block max-w-[92%] px-3 py-2 rounded-2xl text-[13px] leading-relaxed text-left ${
-                m.role === 'user' ? 'bg-indigo-600 text-on-accent' : 'bg-raised text-body'
-              }`}
-            >
-              {m.role === 'agent' ? (
-                <div className="prose prose-invert prose-sm max-w-none [&_p]:my-1">
-                  <ReactMarkdown remarkPlugins={CHAT_MARKDOWN_PLUGINS}>{m.text}</ReactMarkdown>
-                </div>
-              ) : (
-                m.text
-              )}
-            </div>
+          <div key={i} className={m.role === 'user' ? USER_TURN_CLASS : ASSISTANT_TURN_CLASS}>
+            {/* The shared conversation design (chat/conversation.ts): a soft container for the user,
+                prose on the page for the reply, through the one markdown renderer. */}
+            {m.role === 'agent'
+              ? <div className={ASSISTANT_MESSAGE_CLASS}><ChatMarkdown text={m.text} /></div>
+              : <div className={`${USER_MESSAGE_CLASS} ${PLAIN_TEXT_CLASS}`}>{m.text}</div>}
           </div>
         ))}
         {running && (
@@ -164,14 +157,15 @@ export function AgentV3MiniChat({ userId, email, prefill }: { userId?: string; e
           }}
           disabled={running}
           placeholder="Message NavBharatAI Pro…"
-          className="flex-1 bg-card border border-line rounded-lg px-3 py-2 text-sm text-ink placeholder-faint disabled:opacity-50 focus:outline-none focus:border-indigo-500/50"
+          className="flex-1 bg-card border border-line rounded-full px-4 py-2.5 text-[15px] text-ink placeholder:text-muted disabled:opacity-50 focus:outline-none focus:border-accent transition-colors"
         />
         <button
           onClick={send}
           disabled={running || !input.trim()}
-          className="p-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-on-accent transition-colors"
+          aria-label="Send"
+          className={COMPOSER_SEND_CLASS}
         >
-          <Send className="w-4 h-4" />
+          <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
         </button>
       </div>
     </div>

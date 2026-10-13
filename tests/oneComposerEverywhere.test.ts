@@ -45,9 +45,11 @@ describe('the free chat IS the shell (2026-09-23: the two-row box)', () => {
     expect(FREE_CHAT).toContain('className={COMPOSER_STOP_CLASS}');
   });
 
-  it('the box keeps the free chat\'s look: rounded, themed, indigo on focus', () => {
-    expect(COMPOSER_BOX_CLASS).toContain('rounded-2xl');
-    expect(COMPOSER_BOX_CLASS).toContain('focus-within:border-indigo-500');
+  it('the box is the one soft pill (2026-10-13 "claude jaisa"): large radius, card surface, accent on focus', () => {
+    expect(COMPOSER_BOX_CLASS).toContain('rounded-[1.5rem]');
+    expect(COMPOSER_BOX_CLASS).toContain('bg-card');
+    expect(COMPOSER_BOX_CLASS).toContain('focus-within:border-accent');
+    expect(COMPOSER_BOX_CLASS).not.toMatch(/indigo/);
   });
 
   it('the text keeps its 16px size (no iOS zoom) and needs no right-hand reserve', () => {
@@ -57,8 +59,11 @@ describe('the free chat IS the shell (2026-09-23: the two-row box)', () => {
     expect(COMPOSER_TEXTAREA_CLASS).not.toMatch(/\bpr-(?:[3-9]\d|\d{3})\b/);
   });
 
-  it('Send and Stop span the box\'s height (admin: "send button ko bhi 2 line me banao")', () => {
-    for (const cls of [COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS]) expect(cls).toContain('h-full');
+  it('Send and Stop are a circle at the bottom-right corner (supersedes the 2026-09-23 tall Send)', () => {
+    for (const cls of [COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS]) {
+      expect(cls).toContain('rounded-full');
+      expect(cls).not.toContain('h-full');
+    }
   });
 });
 

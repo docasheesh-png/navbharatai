@@ -23,6 +23,12 @@
    `on-accent` the text that sits on a solid accent. `scripts/themeColourBaseline.mjs` is the ratchet
    that keeps every literal out of new code and drives the old ones to zero, file by file. */
 @theme inline {
+  /* THE TYPEFACES (admin 2026-10-13, "bilkul claude jaisa"): `font-sans` / `font-serif` utilities read
+     the stacks declared on :root below (`--nb-font-*`). Declared THERE as real custom properties
+     because `@theme inline` emits none, and the html font-family rule below needs one to read.
+     (No braces in this comment: tests/themeTokensOnly.test.ts reads this block up to the first one.) */
+  --font-sans: var(--nb-font-sans);
+  --font-serif: var(--nb-font-serif);
   --color-surface: var(--surface-base);
   --color-card: var(--surface-card);
   --color-raised: var(--surface-raised);
@@ -405,6 +411,18 @@ html.nb-native-shell .nb-selectable {
   .theme-swatch[data-swatch="contrast"] { background-color: #000000; border-color: #ffff00; }
 
   :root {
+    /* THE TWO TYPEFACES (admin 2026-10-13: "navbharatai ke sabhi ai ka font, headline etc bilkul
+       claude jaisa karo"). Claude's own faces are proprietary and cannot be shipped, so these are the
+       closest open ones: Inter (a neutral grotesque) for the UI and every reply, Source Serif 4 (a
+       contemporary text serif) for the greeting headline. Both arrive bundled from npm via main.tsx.
+
+       🔒 EVERY STACK ENDS IN THE DEVANAGARI FALLBACKS, serif included. Neither face carries Devanagari,
+       and a chat in Hindi must never fall to the browser's last-resort box glyphs; these are the same
+       families `src/lib/imageFonts.ts` keeps for the same reason, and
+       tests/theChatReadsLikeOneProduct.test.ts holds both stacks to them. */
+    --nb-font-sans: 'Inter Variable', 'Noto Sans Devanagari', 'Nirmala UI', 'Kohinoor Devanagari', 'Devanagari Sangam MN', 'Mangal', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --nb-font-serif: 'Source Serif 4 Variable', 'Noto Serif Devanagari', 'Noto Sans Devanagari', 'Nirmala UI', 'Kohinoor Devanagari', 'Devanagari Sangam MN', 'Mangal', Georgia, 'Times New Roman', serif;
+
     /* Legacy aliases (kept so the existing var(--theme-*) consumers follow the theme unchanged). */
     --theme-bg: var(--surface-base);
     --theme-text: var(--text-body);
@@ -447,6 +465,12 @@ html.nb-native-shell .nb-selectable {
      The scale is clamped to a layout-safe range [0.9, 1.4] in code. */
   html {
     font-size: calc(100% * var(--nb-font-scale, 1));
+    /* The app's one typeface (see `--nb-font-sans`). Set here, not only through the `font-sans`
+       utility, so every surface — chat, header, settings — reads in the same face by default. */
+    font-family: var(--nb-font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   body, #root {
@@ -499,6 +523,46 @@ html.nb-native-shell .nb-selectable {
   .markdown-body h1 { @apply text-xs; }
   .markdown-body h2 { @apply text-[11px]; }
   .markdown-body h3 { @apply text-[10px]; }
+
+  /* THE CHAT PROSE — what an assistant's reply looks like on every AI surface (admin 2026-10-13,
+     "chat wala ui aur ux ko claude jaisa karo").
+
+     🔴 WHY IT EXISTS: every chat surface styled its markdown with `prose prose-invert prose-xs …`, and
+     the typography plugin those classes belong to was never installed — so they did nothing, on every
+     surface, and Doctor AI's and the mini chat's replies rendered as bare browser defaults. The free
+     chat alone had `.markdown-body` above, sized for an 11px bubble (headings as 10px caps). This is
+     the ONE prose scale, read through `ChatMarkdown.tsx`; the dead classes are gone, and
+     tests/theChatReadsLikeOneProduct.test.ts fails if one comes back.
+
+     The scale is a reading scale, not a chip scale: 15px body at 1.7, real headings, list markers,
+     a quiet code chip. Colours are tokens only. */
+  .nb-prose { @apply break-words; }
+  .nb-prose > :first-child { @apply mt-0; }
+  .nb-prose > :last-child { @apply mb-0; }
+  .nb-prose p { @apply my-3 break-words; }
+  .nb-prose ul, .nb-prose ol { @apply my-3 pl-6 list-outside; }
+  .nb-prose ul { @apply list-disc; }
+  .nb-prose ol { @apply list-decimal; }
+  .nb-prose li { @apply my-1; }
+  .nb-prose li > p { @apply my-1; }
+  .nb-prose a { @apply text-accent-text underline underline-offset-2; }
+  .nb-prose strong { @apply font-semibold text-ink; }
+  .nb-prose code { @apply font-mono text-[0.875em] bg-raised text-ink rounded-md px-1.5 py-0.5; }
+  /* A fenced block is always the shared ChatCodeBlock (ChatMarkdown routes every one there), which draws
+     its own frame — so the only rule for a <pre> here is to undo the inline-code chip on its <code>. */
+  .nb-prose pre code { @apply bg-transparent text-body rounded-none p-0; font-size: inherit; }
+  .nb-prose h1, .nb-prose h2, .nb-prose h3, .nb-prose h4 { @apply font-semibold text-ink mt-6 mb-2 leading-snug; }
+  .nb-prose h1 { @apply text-2xl; }
+  .nb-prose h2 { @apply text-xl; }
+  .nb-prose h3 { @apply text-lg; }
+  .nb-prose h4 { @apply text-base; }
+  .nb-prose blockquote { @apply my-3 border-l-2 border-line pl-4 text-muted; }
+  .nb-prose hr { @apply my-6 border-line; }
+  /* The renderer wraps every table in a scrolling, bordered frame that carries the spacing. */
+  .nb-prose table { @apply w-full text-sm border-collapse; }
+  .nb-prose th { @apply text-left font-semibold text-ink px-3 py-2 border-b border-line; }
+  .nb-prose td { @apply px-3 py-2 border-b border-line align-top; }
+  .nb-prose img { @apply my-3 max-w-full rounded-xl border border-line; }
 
   /* Chat Input Auto-resize Simulation */
   textarea {

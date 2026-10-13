@@ -1,4 +1,5 @@
 import React from 'react';
+import { SURFACE_TITLE_CLASS } from '../chat/conversation';
 import { cn } from '../../lib/utils';
 import { AIChat } from '../ide/AIChat';
 import type { ThemeMode } from '../../lib/theme';
@@ -89,10 +90,10 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
     )}>
       {/* NBI Chat column */}
       <div className="flex-1 flex flex-col h-full min-h-0 max-h-full overflow-hidden min-w-0">
-        <div className="flex items-center justify-between px-3 py-1 bg-indigo-500/10 border-b border-indigo-500/20 text-[9px] font-black uppercase tracking-widest text-muted">
+        {/* A quiet title bar (admin 2026-10-13, "claude jaisa"): the name in the serif, no caps, no ping. */}
+        <div className="flex items-center justify-between px-4 py-2 border-b border-line text-sm text-muted">
           <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shrink-0 text-on-accent" />
-            <span>NAVBHARATAI</span>
+            <span className={SURFACE_TITLE_CLASS}>NavBharatAI</span>
           </div>
           <div className="flex items-center gap-2">
             {/* START A NEW CHAT (admin 2026-08-23: "free me new chat kaise start hogi? koi option
@@ -110,7 +111,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
               <button
                 onClick={onNewChat}
                 title="Start a new chat — this conversation stays saved in History"
-                className="flex items-center gap-1 px-2 py-0.5 rounded border bg-raised border-line text-[8px] font-black uppercase tracking-widest text-faint hover:text-ink hover:border-line transition-all"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full border bg-raised border-line text-xs font-medium text-muted hover:text-ink transition-colors"
               >
                 <span>＋</span>
                 <span className="hidden sm:inline">New</span>
@@ -119,8 +120,8 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
             <button
               onClick={() => setTeachMode(p => !p)}
               title={teachMode ? 'Teaching Mode ON — click to turn off' : 'Teaching Mode OFF — click to enable beginner explanations'}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[8px] font-black uppercase tracking-widest transition-all ${
-                teachMode ? 'bg-amber-500/20 border-amber-500/40 text-warn' : 'bg-raised border-line text-faint hover:text-ink'
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors ${
+                teachMode ? 'bg-amber-500/20 border-amber-500/40 text-warn' : 'bg-raised border-line text-muted hover:text-ink'
               }`}
             >
               <span>{teachMode ? '📚' : '🎓'}</span>
@@ -130,6 +131,8 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
         </div>
         <AIChat
           messages={messages}
+          // The greeting addresses the account by its first name (chat/greeting.ts).
+          userName={user?.displayName ?? null}
           input={input}
           onInputChange={setInput}
           onSend={onSend}

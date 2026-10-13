@@ -167,3 +167,33 @@ is now enforced at the source, by CI.**
   unreviewable and the failures indistinguishable. A file whose class literals an earlier PR
   deliberately left — a status dot whose `bg-emerald-500` a test names, an exit dialog's `bg-white/10` —
   must not be migrated as a side effect of fixing its inline styles.
+
+
+## 🔤 Typography — two faces, one scale, Hindi never lost (admin 2026-10-13: "sabhi ai ka font, headline etc bilkul claude jaisa")
+
+- **Two open typefaces, bundled from npm, never a font CDN.** `Inter Variable` (`@fontsource-variable/inter`) is the
+  app's one sans — the UI and every reply; `Source Serif 4 Variable` (`@fontsource-variable/source-serif-4`) is the
+  serif for a headline (the chat greeting, a surface's title). Both OFL-1.1. They are imported in `src/main.tsx`
+  and reach the phone apps inside the bundle, so no screen depends on a network request for its own letters.
+  Claude's own faces are proprietary; these are the closest open ones, chosen for shape, not copied.
+- **The stacks live in ONE place:** `--nb-font-sans` / `--nb-font-serif` on `:root` in `index.css`, read by
+  `html { font-family }` and by the `font-sans` / `font-serif` utilities (`@theme inline`). Do not write a
+  `font-family` anywhere else in client code.
+- **🔒 Every stack ENDS in the Devanagari fallbacks, the serif too.** Neither face carries Devanagari. The
+  families are the ones `src/lib/imageFonts.ts` keeps for the image editor, and
+  `tests/theChatReadsLikeOneProduct.test.ts` holds both stacks to them — a stack that drops one turns a
+  Hindi chat into boxes, silently.
+- **The chat has one prose scale, `.nb-prose` (index.css), rendered by `chat/ChatMarkdown.tsx`.** The
+  `prose prose-invert prose-xs …` classes that every surface carried belonged to a typography plugin that was
+  never installed — they did nothing. A `prose` class in a chat surface now fails the same test. Reply text is
+  15px at 1.7 with real headings, list markers and a quiet code chip; a fenced block is the shared
+  `ChatCodeBlock`, which draws its own frame.
+- **One conversation design, `chat/conversation.ts`:** the user's message a soft `bg-raised` container on the
+  right, the reply plain prose on the page (no bubble, no border, no shadow), a centred `max-w-3xl` column,
+  ghost action icons under a message (hover on a pointer device, always on touch), no "YOU / NAVBHARATAI"
+  captions, no timestamps under every line, no model badge. Every chat surface reads these classes; the test
+  above fails when one stops.
+- **The composer is one soft pill (`chat/ComposerShell.tsx`):** `rounded-[1.5rem]` on the card surface, a
+  faint shadow, the accent token on focus, and a 36px `rounded-full` Send with an up arrow at the bottom-right.
+  This SUPERSEDES the 2026-09-23 tall Send and the indigo focus border; the layout rules (two rows beside the
+  rail, one line beside the footer, the whole box is the input) are unchanged.

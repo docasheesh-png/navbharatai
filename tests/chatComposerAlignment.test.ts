@@ -95,35 +95,34 @@ describe('nothing is placed by a hand-tuned offset', () => {
 });
 
 describe('the tap targets did not shrink', () => {
-  it('Send and Stop fill their slot and are wider than a 36px control', () => {
+  // 2026-10-13 ("claude jaisa"): Send is a 36px circle at the box's bottom-right corner, not a button as
+  // tall as the box. 36px is the size of every other control in the row (p-2.5 + a 16px icon), so the
+  // thumb target is unchanged; what went is the height, which existed only to fill the two-row box.
+  it('Send and Stop are the same 36px circle as every other control', () => {
     expect(SEND).toContain('className={COMPOSER_SEND_CLASS}');
     expect(SEND).toContain('className={COMPOSER_STOP_CLASS}');
     for (const cls of [COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS]) {
-      expect(cls).toContain('h-full');
-      expect(cls).toContain('min-h-10'); // never below a 40px target, in either layout
-      expect(cls).toContain('w-11'); // 44px
+      expect(cls).toContain('rounded-full');
+      expect(cls).toMatch(/(?:^|\s)h-9(?:\s|$)/); // 36px
+      expect(cls).toMatch(/(?:^|\s)w-9(?:\s|$)/);
+      expect(cls).not.toContain('h-full');
     }
   });
 
-  it('beside the History / Mode column, Send is still at least 72px tall (the two-row box)', () => {
-    // The slot owns the height now (2026-09-24), so the one-line box can exist at all: 84px slot minus
-    // its 6px padding top and bottom leaves 72px for the button, exactly as before.
-    expect(px(SEND_SLOT_CLASS.twoRows.match(/min-h-\[(\d+)px\]/)) - 12).toBeGreaterThanOrEqual(72);
-    expect(SEND_SLOT_CLASS.twoRows).toContain('p-1.5');
-    expect(SEND_SLOT_CLASS.oneLine).not.toMatch(/min-h-\[/);
+  it('in both layouts the slot pins Send to the bottom edge, so a growing message never moves it', () => {
+    expect(SEND_SLOT_CLASS.twoRows).toContain('items-end');
+    expect(SEND_SLOT_CLASS.oneLine).toContain('self-end');
+    for (const slot of Object.values(SEND_SLOT_CLASS)) expect(slot).not.toMatch(/min-h-\[/);
   });
 
-  it('the box at rest is tall enough for the two rail buttons beside it', () => {
-    // The box at rest is the taller of its two columns — text row (min 40) + control row (36 + pb-1),
-    // or the Send slot (min 84) — plus its 1px border top and bottom. The rail is two FIXED buttons
-    // (h-10 = 40px each) and the 6px gap: 86px, exactly the box, so the two line up at rest.
+  it('the box at rest is taller than one rail button, so the rail (self-end) never overhangs it', () => {
+    // Text row (min 40) + control row (36 + pb-1) + the 1px border top and bottom.
     const text = px(COMPOSER_TEXTAREA_CLASS.match(/min-h-\[(\d+)px\]/));
-    const slot = px(SEND_SLOT_CLASS.twoRows.match(/min-h-\[(\d+)px\]/));
     const railStep = RAIL_BUTTON_CLASS.match(/(?:^|\s)h-(\d+)(?:\s|$)/);
     expect(railStep).not.toBeNull();
     const rail = Number(railStep![1]) * 4;
-    const boxAtRest = Math.max(text + 36 + 4, slot) + 2;
-    expect(boxAtRest).toBe(rail * 2 + 6);
+    const boxAtRest = text + 36 + 4 + 2;
+    expect(boxAtRest).toBeGreaterThanOrEqual(rail);
   });
 
   it('the rail buttons have a FIXED height — a growing message never stretches them', () => {

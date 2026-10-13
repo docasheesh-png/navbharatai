@@ -2,6 +2,13 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+// THE TYPEFACES (admin 2026-10-13: "sabhi ai ka font, headline etc bilkul claude jaisa"). Two open
+// faces — Inter for the UI and every reply, Source Serif 4 for the greeting headline — bundled from
+// npm (OFL-1.1), never a font CDN: the phone apps ship this bundle and must not depend on a network
+// request for their own letters. The family stacks, with the Devanagari fallbacks that keep Hindi
+// real, live in index.css (`--nb-font-sans` / `--nb-font-serif`).
+import '@fontsource-variable/inter';
+import '@fontsource-variable/source-serif-4';
 import { installDomTranslateGuard } from './lib/domTranslateGuard';
 import { clampFontScale, FONT_SCALE_STORAGE_KEY } from './lib/a11y';
 import { installZoomLock } from './lib/zoomLock';

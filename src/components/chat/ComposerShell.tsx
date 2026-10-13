@@ -24,14 +24,24 @@
 import React from 'react';
 import { HistoryButton } from './HistoryButton';
 import { ModeButton } from './ModeButton';
+import { CONVERSATION_COLUMN_CLASS } from './conversation';
 
-/** The strip the composer sits on — the free chat's, verbatim. */
-export const COMPOSER_PANEL_CLASS =
-  'px-3 pt-2 pb-2 border-t border-line bg-[var(--theme-card)] backdrop-blur-xl shadow-[0_-12px_40px_rgba(0,0,0,0.5)] shrink-0';
+/**
+ * THE LOOK (admin 2026-10-13, verbatim: *"navbharatai ke sabhi ke chat wala ui aur ux ko claude jaisa
+ * karo!"*). The strip the composer sits on is the page itself — no border, no blur, no shadow strip —
+ * and the box is a large soft pill on the card surface with a faint shadow, so it reads as the one
+ * object on the screen rather than as a bar. The LAYOUT rules below (two rows beside the rail, one
+ * line beside the footer, the whole box is the input) are unchanged: they already match that shape.
+ *
+ * ⚠️ SUPERSEDED, and recorded so nobody restores it from the older quote: the 2026-09-23 tall Send
+ * ("send button ko bhi 2 line me banao") and the indigo focus border. Send is now a circle at the
+ * bottom-right corner, sized as a thumb target (36px), and focus is shown by the accent token.
+ */
+export const COMPOSER_PANEL_CLASS = 'px-3 pt-1 pb-2 bg-surface shrink-0';
 
-/** The rounded message box — the free chat's, verbatim. */
+/** The rounded message box: a soft pill on the card surface; focus lifts the shadow and tints the border. */
 export const COMPOSER_BOX_CLASS =
-  'bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all';
+  'bg-card border border-line rounded-[1.5rem] shadow-[0_2px_16px_rgba(0,0,0,0.06)] focus-within:border-accent focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.10)] transition-all';
 
 /**
  * The textarea: the box's WHOLE top row (admin 2026-09-23, with a phone screenshot of the box squeezed
@@ -42,37 +52,28 @@ export const COMPOSER_BOX_CLASS =
  * zooming the page on focus.
  */
 export const COMPOSER_TEXTAREA_CLASS =
-  'w-full bg-transparent text-[var(--theme-text)] placeholder:text-faint pl-4 pr-2 pt-2.5 pb-1 outline-none transition-all resize-none min-h-[40px] leading-relaxed text-[16px]';
+  'w-full bg-transparent text-ink placeholder:text-muted pl-4 pr-3 pt-3 pb-1 outline-none transition-all resize-none min-h-[40px] leading-relaxed text-[16px]';
 
 /** A quiet icon control in the bottom row (attach, mic, voice, star). 36px. */
 export const COMPOSER_ICON_CLASS =
-  'p-2.5 text-faint hover:text-accent-text transition-colors flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed';
+  'p-2.5 rounded-full text-muted hover:text-ink hover:bg-raised transition-colors flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed';
 
 /**
- * Send — as TALL AS THE BOX on its right (admin 2026-09-23: "send button ko bhi 2 line me banao"). The
- * biggest target in the composer, at the edge the thumb reaches, and set apart from the voice button
- * by the box's own gap so a reach for Send cannot land on a paid control.
- *
- * ⚠️ Its HEIGHT is not decided here. It fills whatever slot the shell gives it (`h-full`), and the shell
- * decides that slot: 72px beside a two-row box, one control's height beside a one-line box (see
- * `SEND_SLOT_CLASS`). It used to carry `min-h-[72px]` itself, which made a one-line box impossible —
- * the button would have forced every box back to two rows' height.
+ * Send — a filled circle at the box's bottom-right corner, an arrow pointing up. 36px, so it stays a
+ * real thumb target, and set apart from the voice button by the box's own gap so a reach for Send
+ * cannot land on a paid control. Its slot (`SEND_SLOT_CLASS`) pins it to the bottom edge in both
+ * layouts, so a message that grows to several lines keeps Send where the thumb already is.
  */
 export const COMPOSER_SEND_CLASS =
-  'h-full min-h-10 w-11 bg-indigo-600 text-on-accent rounded-xl disabled:opacity-20 hover:bg-indigo-700 transition-all flex items-center justify-center shadow-lg active:scale-95';
+  'h-9 w-9 rounded-full bg-accent text-on-accent disabled:opacity-30 disabled:cursor-not-allowed hover:brightness-110 transition-all flex items-center justify-center active:scale-95';
 
-/** The one-tap Stop that replaces Send while a reply loads — the same shape. */
+/** The one-tap Stop that replaces Send while a reply loads — the same circle, in ink. */
 export const COMPOSER_STOP_CLASS =
-  'h-full min-h-10 w-11 bg-red-600 text-on-accent rounded-xl hover:bg-red-500 transition-all flex items-center justify-center shadow-lg active:scale-95';
+  'h-9 w-9 rounded-full bg-ink text-surface hover:opacity-90 transition-all flex items-center justify-center active:scale-95';
 
-/**
- * The slot Send sits in, per layout. In the two-row box it is at least 84px tall, so Send (inside its
- * 6px padding) is at least 72px — the tall button the admin sketched. In the one-line box it is the
- * button's own height and sits at the bottom edge, so a message that grows to several lines keeps
- * Send where the thumb already is.
- */
+/** The slot Send sits in, per layout: at the bottom edge of the box in both. */
 export const SEND_SLOT_CLASS = {
-  twoRows: 'flex p-1.5 pl-0.5 min-h-[84px]',
+  twoRows: 'flex items-end p-1.5 pl-0.5',
   oneLine: 'flex p-1.5 pl-0.5 self-end',
 } as const;
 
@@ -182,7 +183,7 @@ export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, s
   ) : null;
   if (!rail) {
     return (
-      <div className={`${COMPOSER_BOX_CLASS} flex items-stretch cursor-text`} ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick} data-composer-layout="one-line">
+      <div className={`${CONVERSATION_COLUMN_CLASS} ${COMPOSER_BOX_CLASS} flex items-stretch cursor-text`} ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick} data-composer-layout="one-line">
         {/* `[&>textarea]:pb-2.5` evens the textarea's padding out: its shared class keeps a small bottom
             pad for the two-row box, where the control row sits right under it. Alone on a line it
             would sit visibly high.
@@ -197,7 +198,7 @@ export function ComposerShell({ onOpenHistory, onOpenMode, children, controls, s
     );
   }
   return (
-    <div className="flex items-stretch gap-2" data-composer-layout="two-rows">
+    <div className={`${CONVERSATION_COLUMN_CLASS} flex items-stretch gap-2`} data-composer-layout="two-rows">
       {rail}
       <div className={`${COMPOSER_BOX_CLASS} flex-1 min-w-0 flex items-stretch cursor-text`} ref={wholeBox.ref} onMouseDown={wholeBox.onMouseDown} onClick={wholeBox.onClick}>
         <div className="relative flex-1 min-w-0 flex flex-col">

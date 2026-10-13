@@ -13,6 +13,7 @@
 // What they no longer own is the BEHAVIOUR.
 
 import React from 'react';
+import { CONVERSATION_COLUMN_CLASS } from './conversation';
 import { Search, X } from 'lucide-react';
 import {
   sendToggleLabel, sendToggleTitle, toolbarActionsVisible, clearConfirmText, searchResultLabel,
@@ -74,7 +75,8 @@ export function ChatToolbar({
   const closeSearch = () => { onSearchOpenChange(false); onSearchQueryChange(''); };
 
   return (
-    <div className={className}>
+    // The same reading column as the thread and the composer (chat/conversation.ts).
+    <div className={`${CONVERSATION_COLUMN_CLASS} ${className ?? ''}`}>
       {/* The search box sits INSIDE the toolbar rather than at the top of the transcript: it belongs
           to the control that opened it, and on a phone a field 600px away from its button reads as a
           different feature entirely. */}

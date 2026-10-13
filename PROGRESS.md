@@ -95126,3 +95126,31 @@ answer was no. Found and handled now:
 
 The four "not a defect" rows of the first entry (spacing snap after Stop, charge wording, transient TS2307, complexity
 second opinion) are 🟡 too until the admin agrees — a "by design" claim is not ✅ on my word (sixth rule).
+## 2026-10-13 — Q-975: a milestone build keeps its notes, and every lane builds the milestone
+
+**Why this one.** While #3698 ran CI, the queue had one actionable, unclaimed code row: Q-975. The BlockWorld rows
+(Q-905…Q-911) were all merged by another session's PRs, which also own closing them. Q-912/Q-913 have no PR and no
+report data in the repo. Q-914 waits on a decision.
+
+**Correction first.** The row said milestone mode was flag-gated and not user-visible. It is not: `AGENTV3_MEGA_ROADMAP`
+has been ON by default since 2026-08-14 and is only a kill switch. Every milestone build (39e982bd, 728a402d were two)
+ran with the defect.
+
+**The class:** a reader of "what this build is building" that assembles the request for itself. Three were found:
+- **The builder.** `buildPrompt = step1.buildPrompt + …` replaced the whole prompt and threw away every note prepended
+  above the user's words. `milestoneBuildPrompt` (megaRoadmap.ts) now replaces only the user's words — every note is a
+  prepend, so they are the suffix — keeps the notes, adds one line saying a whole-app note does not widen the milestone,
+  and still restates the hard constraints (681bd91b). If the request can ever not be separated, `MILESTONE_NOTES_DROPPED`
+  says so as a warning.
+- **The two fast lanes.** On a milestone build they were handed the WHOLE message, so a fast lane planned the entire app
+  while the builder built milestone 1. And each lane added its own pick of the notes: the one-shot got two of five (no
+  classic-phone rule, no one-file rule, no pasted checklist) from the bare words without the attachment. **So #3689's
+  claim that the Q-868 classic-phone rule "reaches every lane" missed the one-shot.** Now there is ONE `fastLaneRequest`
+  for both lanes.
+- **The writing specialist.** Its `userRequest` was the whole message too; on a milestone build it is now the milestone.
+
+**Locked:** `tests/aMilestoneKeepsItsNotes.test.ts` (13). It checks the behaviour, plus a census: every note before the
+swap is a prepend, no later `buildPrompt =` starts from a bare request, and both lanes pass `fastLaneRequest`. Five
+reversions each fail it (wholesale swap, one-shot composing its own, helper dropping notes, an append before the swap,
+specialist given the whole message). Ten older source guards were updated to the one-request shape, with their intent
+kept (each note still reaches each lane).

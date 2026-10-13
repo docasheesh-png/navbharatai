@@ -31,7 +31,7 @@ import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
 import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
-import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, hardConstraintLines, type MegaRoadmap } from '../lib/megaRoadmap';
+import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
 import { requestForChecks } from '../AgentV3/requestForChecks';
@@ -14478,6 +14478,9 @@ async function noteBuildOutcome(
       let megaRoadmapActive: MegaRoadmap | null = null;
       /** The milestone's brief when a roadmap step is being built — what the feature checks grade. */
       let milestoneRequest: string | null = null;
+      /** The same brief as the builder's, without the builder's notes — what a lane that composes its own prompt is
+       *  handed in place of the user's words (Q-975, `milestoneLaneRequest`). */
+      let milestoneLanePrompt: string | null = null;
       // A pasted one-file app is improved in place, never split into milestones (pastedAppFormat.ts).
       if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode && !pastedFormat.keep) {
         try {
@@ -15696,7 +15699,8 @@ async function noteBuildOutcome(
         // The specialist is handed the request WITH what came with it (autopsy 3f959fde: `planning.text` = the
         // words + the attachment + the earlier requests), and on a "Continue…" turn the request it continues
         // (requestForChecks.ts, autopsy 241215d1).
-        userRequest: () => (checksRequest === prompt ? planning.text : checksRequest),
+        // On a milestone build, the milestone it is building — never the whole message (Q-975).
+        userRequest: () => (milestoneLanePrompt ? milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt) : checksRequest === prompt ? planning.text : checksRequest),
         portDigest: () => portDigestText,
       };
       const spawnSubAgent = makeSubAgentSpawn(subAgentDeps);
@@ -17546,14 +17550,13 @@ async function noteBuildOutcome(
         // not the whole message whose later parts this build is told not to build.
         milestoneRequest = step1.buildPrompt;
         dispatcher.setCoverageRequest(step1.buildPrompt);
-        buildPrompt = `${step1.buildPrompt}\n\n(This is milestone 1 of ${total} for a larger app the user is building step by step: "${step1.title}". Build THIS milestone as a complete, standalone, fully-working and polished app on its own — do NOT stub the later milestones, and do NOT try to build them now. Later milestones will be added in their own separate builds.)`;
-        // 🔴 THE USER'S OWN RULES SURVIVE THE SWAP (build 681bd91b). This line REPLACES the user's words
-        // with the planner's, so "no React, one single file, no fake responses, no placeholder buttons"
-        // reached the builder only if the planner happened to repeat them — and it did not. They are
-        // restated here verbatim, deterministically, so no step can be built in breach of them.
-        const constraints = hardConstraintLines(prompt);
-        if (constraints.length > 0) {
-          buildPrompt += `\n\nNON-NEGOTIABLE CONSTRAINTS from the user's original request — they bind this milestone too:\n${constraints.map((c) => `- ${c}`).join('\n')}`;
+        // The brief replaces the user's words and ONLY them (Q-975): every note prepended above stays, and the
+        // user's hard constraints are restated after it (681bd91b). See milestoneBuildPrompt.
+        const milestone = milestoneBuildPrompt({ buildPrompt, request: prompt, step: step1, total });
+        buildPrompt = milestone.prompt;
+        milestoneLanePrompt = milestoneBuildPrompt({ buildPrompt: prompt, request: prompt, step: step1, total }).prompt;
+        if (milestone.notesDropped) {
+          buildDiag.record({ phase: 'plan', severity: 'warning', code: 'MILESTONE_NOTES_DROPPED', autoResolved: false, message: 'The milestone brief could not be separated from the notes above the request, so this milestone was built without them.' });
         }
       }
 
@@ -17615,6 +17618,12 @@ async function noteBuildOutcome(
         + (scriptRequestNote ? `\n\n${scriptRequestNote}` : ''); // and the script-request note (Q-274)
       const requestScopeSuffix = requestScopeText ? `\n\n${requestScopeText}` : ''; // and the request-scope rule (autopsy 70e030bb)
       const keypadPhoneSuffix = keypadPhoneForBuild ? `\n\n${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}` : ''; // and the classic-phone rule (Q-868)
+      // ONE REQUEST FOR BOTH FAST LANES (Q-975). Each lane used to add its own pick of the notes above: the one-shot
+      // got two of the five (no classic-phone rule, no one-file rule, no pasted checklist) and the user's bare words
+      // without the attachment. On a milestone build both were handed the WHOLE message while the builder built
+      // milestone 1. tests/aMilestoneKeepsItsNotes.test.ts fails on a lane that composes its own.
+      const fastLaneRequest = (milestoneLanePrompt ? milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt) : planning.text)
+        + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix;
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -18775,7 +18784,7 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        const sb = await runSimpleBuild({ prompt: fastLaneRequest, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           // A planned config file the starter already has is edited, never rewritten blind (isProjectConfigPath).
           readExisting: readExistingProjectFile,
           stopLane: () => (fastLaneReasoningRung
@@ -18933,7 +18942,7 @@ async function noteBuildOutcome(
           //    …and gated on what the lane above just MEASURED. See oneShotStillViable: in the dukaan
           //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
           //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
-          const os = await runOneShot({ prompt: prompt + unknownNameSuffix + requestScopeSuffix, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
+          const os = await runOneShot({ prompt: fastLaneRequest, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) {
             // VERIFY GATE for the one-shot lane too (autopsy 2026-07-07: a NowPlaying.tsx TRUNCATED

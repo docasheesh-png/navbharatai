@@ -59,7 +59,9 @@ describe('the route', () => {
   it('checks the disk between planning the foundation and writing it', () => {
     const plan = route.indexOf('const planned = ensureViteReactFoundation(Object.fromEntries(writtenFiles)');
     const check = route.indexOf('foundationFilesStillAbsent(planned,', plan);
-    const write = route.indexOf("name: 'write_file', input: { path: p, content: c } }", plan);
+    // UPDATED 2026-10-13 (build report 9c612cdb, Q-912): the foundation is written through the route's one
+    // platform writer, which returns each file's outcome, instead of dispatching write_file itself.
+    const write = route.indexOf("await writePlatform(toAdd, 'fast-foundation-'", plan);
     expect(plan).toBeGreaterThan(0);
     expect(check).toBeGreaterThan(plan);
     expect(write).toBeGreaterThan(check);

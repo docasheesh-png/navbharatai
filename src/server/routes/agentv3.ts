@@ -287,7 +287,7 @@ import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
 import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
 import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
 import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, seedStateOf, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
-import { runAsUnreadWrites } from '../AgentV3/unreadWrites';
+import { writePlatformFiles, readWriteOutcomes, type WriteOutcome } from '../AgentV3/writeOutcomes';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { deletedFilesNotice, userVisibleDeletions } from '../AgentV3/deletedFilesNotice';
@@ -388,7 +388,7 @@ import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSu
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
-import { contractRenameHandoffClause } from '../AgentV3/handoffRule';
+import { contractRenameHandoffClause, salvageWhyClause } from '../AgentV3/handoffRule';
 import { entryFirstHandoffLine, renderWhileBuilding } from '../AgentV3/earlyPreview';
 import { planHandoffText } from '../AgentV3/planHandoff';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, dedupeStylesheetImports, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -416,7 +416,7 @@ import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TI
 import { shellModuleFor, shellStillAwaited, recordModuleDelivery, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
-import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
+import { withTimeout } from '../AgentV3/asyncUtils';
 import { beginChange, observeProbes, regressionsSoFar, settleChange, type ChangeSession } from '../AgentV3/changeEngine/changeSession';
 import type { SpecItem } from '../AgentV3/changeEngine/appSpec';
 import { removedProbeFeatures } from '../AgentV3/changeEngine/requestConsistency';
@@ -16003,6 +16003,29 @@ async function noteBuildOutcome(
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
+      /**
+       * Every platform write in this build — the fast lanes and the post-build passes — goes through here: the
+       * model's write door with every guard, no steering note (unreadWrites.ts), and ONE outcome per file back
+       * (writeOutcomes.ts, build report 9c612cdb Q-912). The door reports a refusal as `is_error`, never as a
+       * throw, so a caller that drops this answer is reading "resolved" as "written".
+       */
+      const writePlatform = async (files: { path: string; content: string }[], idPrefix: string, concurrency = 1): Promise<WriteOutcome[]> => {
+        const outcomes = await writePlatformFiles((call) => dispatcher.dispatch(call, 'frontend'), files, { idPrefix, concurrency });
+        // EVIDENCE (rule 5): a file the workspace refused used to vanish without a trace while the pass counted
+        // it, named it to the next builder and announced it. A refusal by the green freeze is already recorded
+        // by its own observer (GREEN_FREEZE_DEFERRED), so it is not said twice.
+        const refused = outcomes.filter((o) => !o.ok);
+        if (refused.length > 0 && !isGreenLatched(workspaceId)) {
+          try {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'PLATFORM_WRITE_REFUSED', autoResolved: false,
+              message: `The workspace refused ${refused.length} of ${outcomes.length} file(s) a NavBharatAI pass wrote: ${refused.slice(0, 8).map((o) => o.path).join(', ')}${refused.length > 8 ? ', …' : ''} — they are not counted, listed or announced as written.`,
+              detail: [`pass: ${idPrefix}`, ...refused.slice(0, 20).map((o) => `${o.path}: ${o.error ?? 'refused'}`)].join('\n'),
+            });
+          } catch { /* diagnostics are best-effort — the outcome itself is not */ }
+        }
+        return outcomes;
+      };
       // The end-of-turn orphan hand-back (Q-202) asks what the BUILD wrote — every lane, our pre-seed left out.
       dispatcher.setBuildWrites(() => modelAuthoredPaths(writtenFiles));
       // Requirement coverage grades the request the builder was given, not only the message that
@@ -18490,14 +18513,13 @@ async function noteBuildOutcome(
           }
           return text;
         };
-        const fastWriteRaw = async (files: { path: string; content: string }[]): Promise<void> => {
+        const fastWriteRaw = async (files: { path: string; content: string }[]): Promise<WriteOutcome[]> => {
           // Write files with bounded concurrency instead of one serial E2B round trip each (SPEED).
           // Paths are distinct by construction (de-duped by path upstream), so concurrent writes to
           // different files never conflict; the E2B round-trip latency (~150-300ms each) now overlaps.
           // The plan-progress ticker counts writes (order-independent), so completion order is fine.
-          await mapWithConcurrency(files, 6, (f, i) =>
-            runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: f.path, content: f.content } }, 'frontend')),
-          );
+          // The per-file outcome goes back to the lane (Q-912): it decides what it counts, lists and announces.
+          return writePlatform(files, 'fast-w', 6);
         };
         // THE WRITE FENCE (autopsy a38c6fef, 2026-09-13). Every fast lane writes through this one
         // function, so this is the single place where "is this lane still allowed to touch the
@@ -18520,9 +18542,7 @@ async function noteBuildOutcome(
         });
         // Kept for the route's OWN in-lane writes (the deterministic mispath auto-fix inside fastVerify,
         // and the one-shot's post-success repair). Both run while their lane still owns the workspace.
-        const fastWrite = async (files: { path: string; content: string }[]): Promise<void> => {
-          await fastWriteRaw(files);
-        };
+        const fastWrite = (files: { path: string; content: string }[]): Promise<WriteOutcome[]> => fastWriteRaw(files);
         const fastPreview = async (): Promise<void> => {
           // FOUNDATION GUARANTEE (deep-test Level-1, build 7c56b35a): the file-list planner can OMIT the
           // foundational files a vite-react app needs to install & boot — most damagingly `package.json`.
@@ -18550,12 +18570,12 @@ async function noteBuildOutcome(
                 });
               }
               if (foundation.added.length > 0) {
-                fastLog(`🩹 Added ${foundation.added.length} missing foundational file(s) so the app can install & boot: ${foundation.added.join(', ')}`);
                 // Route through write_file so each lands in the sandbox AND is recorded in writtenFiles
                 // (the durable store + the reconcile scan below both then see the new package.json).
-                await mapWithConcurrency(Object.entries(foundation.files), 4, ([p, c], i) =>
-                  runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-foundation-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend')),
-                );
+                // Said AFTER the write, about what landed (Q-912) — it used to be announced before it was tried.
+                const toAdd = Object.entries(foundation.files).map(([path, content]) => ({ path, content }));
+                const { landed } = readWriteOutcomes(toAdd, await writePlatform(toAdd, 'fast-foundation-', 4));
+                if (landed.length > 0) fastLog(`🩹 Added ${landed.length} missing foundational file(s) so the app can install & boot: ${landed.map((f) => f.path).join(', ')}`);
               }
             } catch { /* best-effort — a failure here just falls through to the install exactly as before */ }
           }
@@ -18568,11 +18588,15 @@ async function noteBuildOutcome(
             try {
               const ts = sanitizeTsconfigExtends(Object.fromEntries(writtenFiles));
               if (ts.fixes.length > 0) {
-                fastLog(`🩹 Repaired ${ts.fixes.length} tsconfig file(s) that extended an uninstalled base so the dev server can start: ${ts.fixes.map((f) => f.file).join(', ')}`);
-                try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_EXTENDS_REPAIRED', message: `Removed an unresolvable tsconfig extends: ${ts.fixes.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
-                await mapWithConcurrency(Object.entries(ts.patch), 4, ([p, c], i) =>
-                  runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-tsconfig-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend')),
-                );
+                // Written first, then said about what landed (Q-912).
+                const patch = Object.entries(ts.patch).map(([path, content]) => ({ path, content }));
+                const { landed } = readWriteOutcomes(patch, await writePlatform(patch, 'fast-tsconfig-', 4));
+                const done = new Set(landed.map((f) => f.path));
+                const repaired = ts.fixes.filter((f) => done.has(f.file));
+                if (repaired.length > 0) {
+                  fastLog(`🩹 Repaired ${repaired.length} tsconfig file(s) that extended an uninstalled base so the dev server can start: ${repaired.map((f) => f.file).join(', ')}`);
+                  try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_EXTENDS_REPAIRED', message: `Removed an unresolvable tsconfig extends: ${repaired.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
+                }
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through to the install as before */ }
           }
@@ -18645,9 +18669,15 @@ async function noteBuildOutcome(
                     .filter((f) => writtenMap[f.importedBy] !== undefined && !seen.has(f.importedBy) && seen.add(f.importedBy))
                     .map((f) => ({ path: f.importedBy, content: fixedFiles[f.importedBy] }));
                   if (toWrite.length > 0) {
-                    await fastWrite(toWrite);
-                    for (const w of toWrite) { writtenFiles.set(w.path, w.content); withScaffold[w.path] = w.content; }
-                    buildDiag.record({ phase: 'build', severity: 'info', code: 'IMPORT_PATH_AUTOFIXED', message: `Auto-fixed ${fixes.length} wrong local import path(s) that pointed at existing files — no rebuild needed.`, autoResolved: true, detail: fixes.map((f) => `${f.importedBy}: "${f.from}" → "${f.to}"`).join('\n') });
+                    // Only what landed is recorded and claimed (Q-912): a refused fix leaves the import broken in
+                    // the workspace, and the check below must go on seeing it broken.
+                    const { landed } = readWriteOutcomes(toWrite, await fastWrite(toWrite));
+                    for (const w of landed) { writtenFiles.set(w.path, w.content); withScaffold[w.path] = w.content; }
+                    const fixedIn = new Set(landed.map((w) => w.path));
+                    const applied = fixes.filter((f) => fixedIn.has(f.importedBy));
+                    if (applied.length > 0) {
+                      buildDiag.record({ phase: 'build', severity: 'info', code: 'IMPORT_PATH_AUTOFIXED', message: `Auto-fixed ${applied.length} wrong local import path(s) that pointed at existing files — no rebuild needed.`, autoResolved: true, detail: applied.map((f) => `${f.importedBy}: "${f.from}" → "${f.to}"`).join('\n') });
+                    }
                     unresolved = findUnresolvedLocalImports(withScaffold).filter((u) => writtenFiles.get(u.importedBy) !== undefined);
                   }
                 } catch { /* auto-fix is best-effort — a failure just falls through to the honest ok:false below */ }
@@ -18727,11 +18757,11 @@ async function noteBuildOutcome(
               }
               // A kit class with no rule has exactly one right rule — the kit's (autopsy e725e002). Put it
               // back here, for free, so a repair round is spent only on classes nobody can know.
+              // Both fixes below are recorded and claimed only for what the workspace took (Q-912).
               let project = { ...sheets, ...written };
               try {
                 const patch = kitRestorePatch(project);
-                if (patch) {
-                  await fastWrite([{ path: patch.path, content: patch.content }]);
+                if (patch && readWriteOutcomes([patch], await fastWrite([{ path: patch.path, content: patch.content }])).landed.length > 0) {
                   writtenFiles.set(patch.path, patch.content);
                   project = { ...project, [patch.path]: patch.content };
                   buildDiag.record({ phase: 'build', severity: 'info', code: 'DESIGN_KIT_RESTORED', message: kitRestoreNote(patch, 'before-repair'), autoResolved: true });
@@ -18744,9 +18774,9 @@ async function noteBuildOutcome(
               try {
                 const snaps = spacingSnapPatches(project, writtenFiles.keys());
                 if (snaps.length > 0) {
-                  await fastWrite(snaps.map((s) => ({ path: s.path, content: s.content })));
-                  for (const s of snaps) { writtenFiles.set(s.path, s.content); project = { ...project, [s.path]: s.content }; }
-                  buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: spacingSnapNote(snaps), autoResolved: true });
+                  const { landed } = readWriteOutcomes(snaps, await fastWrite(snaps));
+                  for (const s of landed) { writtenFiles.set(s.path, s.content); project = { ...project, [s.path]: s.content }; }
+                  if (landed.length > 0) buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: spacingSnapNote(landed), autoResolved: true });
                 }
               } catch { /* deterministic and best-effort — the check below still runs */ }
               const cssErr = cssConsistencyError(project);
@@ -18871,12 +18901,11 @@ async function noteBuildOutcome(
         if (!sb.ok && !sb.stopped && sb.salvagedPaths?.length) {
           salvagedThisBuild.push(...sb.salvagedPaths);
           buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE', message: `Fast lane salvaged ${sb.salvagedPaths.length} finished file(s) into the workspace for the full builder to continue from.`, autoResolved: true, detail: sb.salvagedPaths.join(', ') });
-          // Why the lane stopped decides the first sentence: out of time, or finished but not compiling —
-          // and in the second case the compiler's own words come with it, so the builder starts from the
-          // errors instead of re-running the typecheck to find them (autopsy a9f8d186).
-          const salvageWhy = sb.reason === 'verify_failed'
-            ? 'and they do not compile yet'
-            : 'before running out of time';
+          // Why the lane stopped decides the first sentence — finished but not compiling, a planned hand-off, out
+          // of time, a missing root — and when it did not compile the compiler's own words come with it, so the
+          // builder starts from the errors instead of re-running the typecheck to find them (autopsy a9f8d186).
+          // ONE reason used to stand for every other ending: a hand-off read "before running out of time" (Q-912).
+          const salvageWhy = salvageWhyClause(sb.reason, sb.handedOff);
           const salvageEntryLine = entryFirstHandoffLine(unwrittenEntries((sb.plannedPaths ?? []).map((path) => ({ path, purpose: '' })), sb.salvagedPaths));
           // 🔴 AND WHEN THE LANE NEVER VERIFIED (autopsy c70bcbb4): a lane that timed out or handed off before a
           // reasoning engine runs no typecheck, so the builder met 22 errors in eight salvaged files one write at
@@ -18990,6 +19019,7 @@ async function noteBuildOutcome(
                   fastLog('Found build errors in the one-shot app — fixing them…');
                   const cur = [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
                   const fixed = (await fastRepair(v.errors, cur).catch(() => [])).filter((f) => f && f.path && f.content);
+                  // `fastVerify` re-measures the workspace, so the verdict follows what landed (Q-912).
                   if (fixed.length) { await fastWrite(fixed); v = await fastVerify(); }
                 }
                 // ran:false = the check never executed — "unknown", never a pass (no fake success).
@@ -19673,17 +19703,18 @@ async function noteBuildOutcome(
         if (!check.ok && process.env.AGENTV3_SCAFFOLD_RESTORE !== 'off') {
           try {
             const brokenScaffold = scaffoldFilesInTscErrors(check.errors);
-            const restored: string[] = [];
+            const toRestore: { path: string; content: string }[] = [];
             for (const path of brokenScaffold) {
               const canonical = canonicalScaffold(path);
               if (!canonical) continue;
               let current = '';
               try { current = await actuator.readFile(workspaceId, path); } catch { current = ''; }
-              if (current !== canonical) {
-                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `scaffold-restore-${restored.length}`, name: 'write_file', input: { path, content: canonical } }, 'frontend'));
-                restored.push(path);
-              }
+              if (current !== canonical) toRestore.push({ path, content: canonical });
             }
+            // Restored = what the workspace took (Q-912); a refused restore is not claimed.
+            const restored = toRestore.length > 0
+              ? readWriteOutcomes(toRestore, await writePlatform(toRestore, 'scaffold-restore-')).landed.map((f) => f.path)
+              : [];
             if (restored.length > 0) {
               buildDiag.record({
                 phase: 'build', severity: 'info', code: 'SCAFFOLD_RESTORED',
@@ -19723,9 +19754,8 @@ async function noteBuildOutcome(
                 autoResolved: true,
               });
             }
-            for (let i = 0; i < fixes.length; i++) {
-              await runAsUnreadWrites(() => dispatcher.dispatch({ id: `tscgate-w${i}`, name: 'write_file', input: { path: fixes[i].path, content: fixes[i].content } }, 'frontend'));
-            }
+            // The verdict below re-runs the compiler on the workspace, so it reads what landed, whatever this said.
+            await writePlatform(fixes, 'tscgate-w');
           } catch (e) {
             console.log(`[AGENTV3] agentic tsc-gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
           }
@@ -19793,11 +19823,12 @@ async function noteBuildOutcome(
               const fileMapForCss: Record<string, string> = { ...Object.fromEntries(scaffoldPaths.map((p) => [p, ''])), ...Object.fromEntries(writtenFiles) };
               const cssStubs = generateMissingCssModules(fileMapForCss);
               if (cssStubs.length > 0) {
-                for (let i = 0; i < cssStubs.length; i++) {
-                  await runAsUnreadWrites(() => dispatcher.dispatch({ id: `cssmod-w${i}`, name: 'write_file', input: { path: cssStubs[i].path, content: cssStubs[i].content } }, 'frontend'));
+                // Claimed only for what the workspace took (Q-912); the re-check below reads the workspace either way.
+                const { landed } = readWriteOutcomes(cssStubs, await writePlatform(cssStubs, 'cssmod-w'));
+                if (landed.length > 0) {
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'CSS_MODULES_GENERATED', message: `${landed.length} missing CSS module(s) generated deterministically from component class usage (no repair step spent): ${landed.map((s) => s.path).join(', ')}`, autoResolved: true });
+                  events.emit({ type: 'narration', agent: 'architect', text: `🎨 Generated ${landed.length} missing stylesheet(s) from the components' class usage.`, ts: Date.now() });
                 }
-                buildDiag.record({ phase: 'build', severity: 'info', code: 'CSS_MODULES_GENERATED', message: `${cssStubs.length} missing CSS module(s) generated deterministically from component class usage (no repair step spent): ${cssStubs.map((s) => s.path).join(', ')}`, autoResolved: true });
-                events.emit({ type: 'narration', agent: 'architect', text: `🎨 Generated ${cssStubs.length} missing stylesheet(s) from the components' class usage.`, ts: Date.now() });
                 missing = findMissing(); // re-check: CSS modules now resolve — only the hard files remain for the LLM pass
               }
             } catch { /* deterministic CSS gen is best-effort — the LLM pass below still handles them */ }
@@ -19811,11 +19842,12 @@ async function noteBuildOutcome(
               const fileMapForBarrel: Record<string, string> = { ...Object.fromEntries(scaffoldPaths.map((p) => [p, ''])), ...Object.fromEntries(writtenFiles) };
               const barrels = await generateMissingBarrels(fileMapForBarrel);
               if (barrels.length > 0) {
-                for (let i = 0; i < barrels.length; i++) {
-                  await runAsUnreadWrites(() => dispatcher.dispatch({ id: `barrel-w${i}`, name: 'write_file', input: { path: barrels[i].path, content: barrels[i].content } }, 'frontend'));
+                // Claimed only for what the workspace took (Q-912); the re-check below reads the workspace either way.
+                const { landed } = readWriteOutcomes(barrels, await writePlatform(barrels, 'barrel-w'));
+                if (landed.length > 0) {
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'BARRELS_GENERATED', message: `${landed.length} missing barrel(s) generated deterministically from existing leaf modules (no repair step spent): ${landed.map((b) => b.path).join(', ')}`, autoResolved: true });
+                  events.emit({ type: 'narration', agent: 'architect', text: `📦 Generated ${landed.length} missing index barrel(s) re-exporting existing modules.`, ts: Date.now() });
                 }
-                buildDiag.record({ phase: 'build', severity: 'info', code: 'BARRELS_GENERATED', message: `${barrels.length} missing barrel(s) generated deterministically from existing leaf modules (no repair step spent): ${barrels.map((b) => b.path).join(', ')}`, autoResolved: true });
-                events.emit({ type: 'narration', agent: 'architect', text: `📦 Generated ${barrels.length} missing index barrel(s) re-exporting existing modules.`, ts: Date.now() });
                 missing = findMissing(); // re-check: barrels now resolve — only the hard files remain
               }
             } catch { /* deterministic barrel gen is best-effort — the LLM pass below still handles them */ }
@@ -19853,9 +19885,9 @@ async function noteBuildOutcome(
                 tools: [], maxTokens: 8000,
               });
               const created = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
-              for (let i = 0; i < created.length; i++) {
-                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `missfiles-w${i}`, name: 'write_file', input: { path: created[i].path, content: created[i].content } }, 'frontend'));
-              }
+              // `findMissing()` below reads `writtenFiles`, which only a write that LANDED fills (the dispatcher's
+              // onFileWrite), so its verdict follows what landed whatever this pass sent.
+              await writePlatform(created, 'missfiles-w');
             } catch (e) {
               console.log(`[AGENTV3] missing-files gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
             }
@@ -19920,9 +19952,9 @@ async function noteBuildOutcome(
               const scopedSyntax = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), brokenPaths);
               recordRepairOutOfScope('syntax', scopedSyntax.dropped);
               const fixed = scopedSyntax.kept;
-              for (let i = 0; i < fixed.length; i++) {
-                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend'));
-              }
+              // The re-check below parses `writtenFiles`, which only a write that LANDED fills, so its verdict
+              // follows what landed whatever this pass sent.
+              await writePlatform(fixed, 'syntax-w');
             } catch (e) {
               console.log(`[AGENTV3] syntax gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
             }
@@ -19992,9 +20024,9 @@ async function noteBuildOutcome(
               const scopedExport = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), targetFiles.map((f) => f.path));
               recordRepairOutOfScope('missing-export', scopedExport.dropped);
               const fixed = scopedExport.kept;
-              for (let i = 0; i < fixed.length; i++) {
-                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend'));
-              }
+              // `analyzeTargets()` below reads `writtenFiles`, which only a write that LANDED fills, so its verdict
+              // follows what landed whatever this pass sent.
+              await writePlatform(fixed, 'missexport-w');
             } catch (e) {
               console.log(`[AGENTV3] missing-export gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
             }

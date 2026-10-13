@@ -48,6 +48,7 @@ import { TODO_RIDES_WITH_WORK } from './todoOnlyTurn';
 import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason, mayStayOnReasoningRung, wavesFor } from './FastLaneBudget';
 import { contractEnumAsConstEnabled, stringEnumsAsConstObjects } from './contractEnums';
 import { contractRenameHeaderLine, type ContractRename } from './contractRenames';
+import { readWriteOutcomes, type WriteOutcome } from './writeOutcomes';
 
 
 /**
@@ -73,15 +74,29 @@ export function stoppedLaneSummary(filesSaved: number): string {
  */
 export function laneFallbackSummary(salvaged: number, handedOff: boolean, reason: string): string {
   if (handedOff) {
+    // A lane that DECIDED to hand off can still end on another reason — its root component's call was the one
+    // that carried the decision, or its time ran out while it waited for the calls already running. Both facts
+    // are said: dropping the second hides why the root is missing; dropping the first called a planned
+    // hand-off a lane that could not build the app (report 9c612cdb).
+    const also = handOffAlsoClause(reason);
     return salvaged > 0
-      ? `Fast lane handed ${salvaged} finished file(s) to the full builder: the next engine reasons before every answer, which the lane cannot carry — a planned handoff, not a failure.`
-      : 'Fast lane handed its plan to the full builder: the next engine reasons before every answer, which the lane cannot carry — a planned handoff, not a failure.';
+      ? `Fast lane handed ${salvaged} finished file(s) to the full builder: the next engine reasons before every answer, which the lane cannot carry${also} — a planned handoff, not a failure.`
+      : `Fast lane handed its plan to the full builder: the next engine reasons before every answer, which the lane cannot carry${also} — a planned handoff, not a failure.`;
   }
   if (salvaged === 0) return 'Simple build could not produce the app — switching to the full builder.';
   if (/\btimed out\b/i.test(reason)) return `Simple build timed out after generating ${salvaged} file(s) — the full builder continues from them.`;
   if (/stage\(s\) left would need/i.test(reason)) return `Simple build stopped early after generating ${salvaged} file(s): the stages left could not finish inside its time budget — the full builder continues from them.`;
   if (/root component/i.test(reason)) return `Simple build stopped after generating ${salvaged} file(s): the app's root component was not written — the full builder continues from them.`;
   return `Simple build stopped after generating ${salvaged} file(s) — the full builder continues from them.`;
+}
+
+/** The second fact of a hand-off that ended on another reason, or '' when the reason IS the hand-off. PURE. */
+function handOffAlsoClause(reason: string): string {
+  if (/reasons before every answer/i.test(reason)) return '';
+  if (/root component/i.test(reason)) return ", and the app's root component was not written";
+  if (/\btimed out\b/i.test(reason)) return ', and its time budget ran out before it could finish';
+  if (/stage\(s\) left would need/i.test(reason)) return ', and the stages left could not finish inside its time budget';
+  return '';
 }
 
 export interface SimpleFileSpec {
@@ -1720,8 +1735,13 @@ export interface SimpleBuildDeps {
    * rather than rewritten blind — see `isProjectConfigPath`. Absent → today's behaviour.
    */
   readExisting?: (path: string) => Promise<string | null>;
-  /** Write the generated files (single batch). Throws on a hard failure. */
-  writeFiles: (files: OneShotFile[]) => Promise<void>;
+  /**
+   * Write the generated files (single batch). Throws on a hard failure, and answers with one outcome per file
+   * (Q-912, report 9c612cdb — see writeOutcomes.ts): the workspace reports a refused file as an outcome, not a
+   * throw, so the lane reads the answer instead of trusting the promise. A writer that answers nothing is read
+   * as "every file written", the assumption the lane made before outcomes existed.
+   */
+  writeFiles: (files: OneShotFile[]) => Promise<WriteOutcome[] | void>;
   /** Start the dev server + publish the preview. Best-effort. */
   startPreview?: () => Promise<void>;
   /**
@@ -1818,6 +1838,10 @@ export interface SimpleBuildResult {
    * that were SALVAGED into the workspace before handing off — so the full builder continues from
    * them (its own prior work) instead of rebuilding from an empty tree. Empty/undefined when nothing
    * was salvageable (or the failure wasn't a timeout).
+   *
+   * Only files the workspace HOLDS (Q-912, report 9c612cdb): a file whose every write was refused is never
+   * listed, because the next builder is told these are "in the workspace now". A writer that answers nothing
+   * is taken at its word, as before.
    */
   salvagedPaths?: string[];
   /**
@@ -1961,6 +1985,38 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   }
   const requestNotes = String(deps.requestNotes ?? '').trim();
   if (requestNotes) deps = { ...deps, prompt: `${deps.prompt}\n\n${requestNotes}` };
+  /**
+   * 🔴 Q-912 (report 9c612cdb): WHAT THE WORKSPACE HOLDS FROM THIS LANE, as its writes reported it — path → the
+   * content last written there, and whether the writer CONFIRMED it (a writer that answers nothing is assumed,
+   * as it always was). Every write the lane makes goes through `writeAndLearn`, and two kinds of reader use it:
+   *  • the lane's LAST writes — its final write, the salvage after a hand-off, the save on a stop — skip a file
+   *    whose confirmed copy is already exactly what they would write. The early saves (Q-422, Q-939) had put the
+   *    finished files there and the salvage then wrote every one of them again: that report rewrote the same
+   *    three files from 61.4 s to 64.3 s for nothing. A file whose content changed since (the import fixes) is
+   *    still written, so the last word is still the fixed copy; a file whose early save FAILED was never
+   *    confirmed and is written again — the retry the redundant write used to give it only by accident;
+   *  • every list or count of "written" files — `salvagedPaths`, `filesWritten`, the files a repair is shown,
+   *    the first paint — is read from here, so a file the workspace refused is never named as written.
+   */
+  const inWorkspace = new Map<string, { content: string; confirmed: boolean }>();
+  const writeAndLearn = async (files: OneShotFile[]): Promise<{ landed: OneShotFile[]; failed: string[] }> => {
+    // A copy, so what is written and what is recorded are the same text even if a caller's object changes later.
+    const batch = files.map((f) => ({ path: f.path, content: f.content }));
+    const read = readWriteOutcomes(batch, await deps.writeFiles(batch));
+    for (const f of read.landed) inWorkspace.set(f.path, { content: f.content, confirmed: read.known });
+    return { landed: read.landed, failed: read.failed.map((x) => x.path) };
+  };
+  /** Already in the workspace, CONFIRMED, with exactly this content — writing it again would change nothing. */
+  const alreadyThere = (f: OneShotFile): boolean => {
+    const held = inWorkspace.get(f.path);
+    return !!held && held.confirmed && held.content === f.content;
+  };
+  /** The files the workspace holds, each in the version it holds; a file it never took is left out. */
+  const asInWorkspace = (files: OneShotFile[]): OneShotFile[] => files.flatMap((f) => {
+    const held = inWorkspace.get(f.path);
+    if (!held) return [];
+    return [held.content === f.content ? f : { ...f, content: held.content }];
+  });
   // Q-422 (autopsy 1eaa5f5a, admin chose "wait, but show the finished files"): once the lane has decided
   // to hand off, the tier still waits for the calls already in flight — 67 s there, with nothing on the
   // user's screen. The files finished so far are saved and announced the moment the decision is taken,
@@ -1970,10 +2026,13 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   const handOffSaves: Promise<void>[] = [];
   const saveForPreviewNow = (files: OneShotFile[]): void => {
     if (lapsed || files.length === 0 || !handOffEarlySaveEnabled()) return;
+    // Copied now: the import fixes rewrite these objects later, and the save is of the files as they are now.
+    const batch = files.map((f) => ({ path: f.path, content: f.content }));
     handOffSaves.push(
       Promise.resolve()
-        .then(() => deps.writeFiles(files))
-        .then(() => { if (deps.onFilesReady) void Promise.resolve(deps.onFilesReady(files)).catch(() => {}); })
+        .then(() => writeAndLearn(batch))
+        // Only what landed is announced (Q-912): the first paint shows the workspace, not what was attempted.
+        .then(({ landed }) => { if (deps.onFilesReady && landed.length > 0) void Promise.resolve(deps.onFilesReady(landed)).catch(() => {}); })
         .catch(() => { /* a preview head start never touches the build */ }),
     );
   };
@@ -2576,16 +2635,29 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // and the zombie guard is asked after that wait, not before it.
       await earlySavesSettled();
       if (lapsed) throw new Error('simple-build-cancelled');
-      await deps.writeFiles(written);
+      // 🔴 Q-912 — what an early save already put there, unchanged since, is not written twice; and the answer is
+      // READ. The lane goes on with the files the workspace holds, in the version it holds, so verify, repair,
+      // the counts and the first paint describe the workspace rather than what the lane meant to write.
+      const unsaved = written.filter((f) => !alreadyThere(f));
+      if (unsaved.length > 0) await writeAndLearn(unsaved);
+      const inPlace = asInWorkspace(written);
+      // A refused ROOT component means the page still shows whatever was there before (the starter, most often),
+      // and a compile of that page passes — the "enough files is not an app" lie (autopsy 3ab93068) through a
+      // different door. Ended exactly as a root that was never generated is (below the tier loop), and the
+      // salvage writes the refused file once more on its way to the full builder.
+      const refusedRoots = unwrittenEntries(written.filter((f) => !inWorkspace.has(f.path)).map((f) => ({ path: f.path, purpose: '' })), []);
+      if (refusedRoots.length > 0) {
+        throw new Error(`simple-build fast lane stopped early — the app's root component (${refusedRoots.join(', ')}) could not be written to the workspace, so the files built so far are not connected to the page yet`);
+      }
       // STREAMING FIRST-PAINT (gated by the caller via onFilesReady). The files are final and in the
       // workspace, but the verify+repair loop and the caller's install/dev-server boot (tens of
       // seconds) still lie ahead. Hand the ready files to the caller NOW so it can publish an early
       // in-browser preview — the user sees their real app while the slow infra tax runs. Fire-and-
       // forget + best-effort: a hook throw or slowness can never affect or delay the build.
       if (deps.onFilesReady) {
-        try { void Promise.resolve(deps.onFilesReady(written)).catch(() => {}); } catch { /* a hook failure never touches the build */ }
+        try { void Promise.resolve(deps.onFilesReady(inPlace)).catch(() => {}); } catch { /* a hook failure never touches the build */ }
       }
-      return written;
+      return inPlace;
     })(), laneBudgetMs, 'simple-build');
   } catch (e) {
     lapsed = true; // from this instant the orphaned closure can neither write files nor burn more tokens
@@ -2596,6 +2668,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     if (clock.generateStartedAt && !clock.generateMs) {
       clock.generateMs = Math.max(0, (clock.handOffDecidedAt ?? clock.laneEndedAt) - clock.generateStartedAt);
       if (clock.handOffDecidedAt) clock.handOffWaitEndedAt = clock.laneEndedAt;
+    } else if (clock.generateStartedAt && clock.handOffDecidedAt && !clock.handOffWaitEndedAt) {
+      // The decision came in the LAST tier, generation still finished (its in-flight calls landed), and the
+      // lane ended after it — its root component's call was the one that carried the hand-off, most often.
+      // The loop closed `generate` at its own end, so the wait after the decision sat inside it; it is split
+      // out here exactly as on the tier-boundary path, ending where generation ended.
+      const generationEndedAt = clock.generateStartedAt + clock.generateMs;
+      clock.generateMs = Math.max(0, clock.handOffDecidedAt - clock.generateStartedAt);
+      clock.handOffWaitEndedAt = generationEndedAt;
     }
     // The hand-off's early preview saves (Q-422) finish before the final save below, so they can never
     // land on top of it.
@@ -2607,8 +2687,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const finished = [...generatedSoFar];
       let saved: string[] = [];
       if (finished.length > 0) {
-        try { await withTimeout(deps.writeFiles(finished), 30_000, 'simple-build-stop-save'); saved = finished.map((f) => f.path); }
+        // Q-912 — a file an early save already put there, unchanged, is not written again, and "saved" is what
+        // the workspace holds afterwards, not what was attempted.
+        const unsaved = finished.filter((f) => !alreadyThere(f));
+        try { if (unsaved.length > 0) await withTimeout(writeAndLearn(unsaved), 30_000, 'simple-build-stop-save'); }
         catch { /* best-effort — a failed save leaves the workspace as it was */ }
+        saved = asInWorkspace(finished).map((f) => f.path);
       }
       return {
         ok: false, stopped: true, filesWritten: saved.length,
@@ -2644,9 +2728,17 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           }
         } catch { /* best-effort */ }
       }
+      // 🔴 Q-912 — only what the workspace does not already hold, CONFIRMED, in exactly this version: a file an
+      // early save put there is skipped unless the import fixes above changed it (then this copy is the last
+      // word, as before), and a file whose early save failed is written here once more. `salvagedPaths` names
+      // the finished files the workspace holds afterwards — a file it refused is never handed over as written.
+      const unsaved = salvage.filter((f) => !alreadyThere(f));
       try {
-        await withTimeout(deps.writeFiles(salvage), 30_000, 'simple-build-salvage');
-        salvagedPaths = salvage.map((f) => f.path);
+        if (unsaved.length > 0) await withTimeout(writeAndLearn(unsaved), 30_000, 'simple-build-salvage');
+      } catch { /* salvage is best-effort — what is already there is still handed over below */ }
+      const handedOver = asInWorkspace(salvage).map((f) => f.path);
+      if (handedOver.length > 0) {
+        salvagedPaths = handedOver;
         // 🔴 THIS LINE WAS THE LAST THING A USER SAW BEFORE PRESSING STOP (autopsy `f152c1ab`,
         // 2026-09-20), 2.5 seconds later. It used to read:
         //
@@ -2667,12 +2759,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // What replaces it says the one thing that IS true and does matter: the work so far is kept
         // and the build is still going.
         deps.log?.('Still building your app — your work so far is saved and I am carrying on from it.');
-      } catch { /* salvage is best-effort — on failure the full builder starts from the scaffold as before */ }
+      } // nothing in the workspace — the full builder starts from the scaffold, as before
     }
     // The hand-off saves are done (Q-982): stamped only when there were any, so a lane that failed before
     // writing a file never reports a "hand-off saves 0s" it did not perform.
     if (handOffSaves.length > 0 || salvageAttempted) clock.handOffSavesEndedAt = Date.now();
-    const handedOff = isReasoningRungHandoff(e) || /reasons before every answer/i.test(reason);
+    // A hand-off the lane DECIDED is a hand-off however the lane then ended. In the default shape the call
+    // that carries the decision can be the root component's own, in the last tier: generation then finishes,
+    // the root is missing, and the lane ends on "root component was not written" — which used to drop the
+    // cause, so the report called a planned hand-off a lane that could not build the app.
+    const handedOff = handOffDecision !== null || isReasoningRungHandoff(e) || /reasons before every answer/i.test(reason);
     return {
       ok: false,
       ...(handedOff ? { handedOff: true } : {}),
@@ -2735,10 +2831,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       try {
         const restores = scaffoldRestores(Object.fromEntries([...byPath].map(([p, f]) => [p, f.content])), verdict.errors);
         const restoreFiles = Object.entries(restores).map(([path, content]) => ({ path, content }));
-        if (restoreFiles.length > 0) {
-          await deps.writeFiles(restoreFiles);
-          for (const f of restoreFiles) byPath.set(f.path, f);
-          deps.log?.(`Put ${restoreFiles.length} NavBharatAI-provided file(s) back to their known-good version — no repair pass needed for those.`);
+        // Only what the workspace took is put back in the map and said (Q-912); nothing landed, nothing to re-check.
+        const { landed } = restoreFiles.length > 0 ? await writeAndLearn(restoreFiles) : { landed: [] as OneShotFile[] };
+        if (landed.length > 0) {
+          for (const f of landed) byPath.set(f.path, f);
+          deps.log?.(`Put ${landed.length} NavBharatAI-provided file(s) back to their known-good version — no repair pass needed for those.`);
           verdict = await timedVerify();
         }
       } catch { /* a free restore is best-effort — fall through to the model repair below */ }
@@ -2776,13 +2873,18 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           const det = await endgameDeterministicPass(before, errs);
           if (det.changedPaths.length > 0) {
             const detFiles = det.changedPaths.map((path) => ({ path, content: det.files[path] }));
-            await deps.writeFiles(detFiles);
-            for (const f of detFiles) {
+            // Q-912 — the map follows the workspace: a fix the workspace refused is not in it, and not claimed.
+            const { landed } = await writeAndLearn(detFiles);
+            for (const f of landed) {
               const prev = byPath.get(f.path);
-              byPath.set(f.path, prev ? { ...prev, content: f.content } : (f as OneShotFile));
+              byPath.set(f.path, prev ? { ...prev, content: f.content } : f);
             }
-            deps.log?.(`Fixed ${det.fixes.length} mechanical error(s) directly — no repair pass needed for those: ${det.fixes.slice(0, 3).join('; ')}${det.fixes.length > 3 ? '; …' : ''}`);
-            verdict = await timedVerify();
+            if (landed.length === detFiles.length) {
+              deps.log?.(`Fixed ${det.fixes.length} mechanical error(s) directly — no repair pass needed for those: ${det.fixes.slice(0, 3).join('; ')}${det.fixes.length > 3 ? '; …' : ''}`);
+            } else if (landed.length > 0) {
+              deps.log?.(`Fixed mechanical errors directly in ${landed.length} of ${detFiles.length} file(s) — no repair pass needed for those.`);
+            }
+            if (landed.length > 0) verdict = await timedVerify();
           }
         }
       } catch { /* a free fix is best-effort — fall through to the model repair below */ }
@@ -2847,15 +2949,19 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // repair is a HYPOTHESIS; snapshot what it is about to overwrite so a regression can be undone.
       // See repairAcceptance.ts for why "worse" is a strict error COUNT and nothing more.
       const priorVerdict = verdict;
+      // Sandbox FIRST, then the map (Q-912): a file the workspace refused keeps its prior version in BOTH, is
+      // not counted as created, and is not "reverted" — only what this repair really changed is its to undo.
+      let landedRepair: OneShotFile[];
+      try { ({ landed: landedRepair } = await writeAndLearn(fixed)); } catch { break; }
+      if (landedRepair.length === 0) break; // nothing reached the workspace — the same as a write that threw
       const priorContents: OneShotFile[] = [];
       const createdPaths: string[] = [];
-      for (const f of fixed) {
+      for (const f of landedRepair) {
         const prior = byPath.get(f.path);
         if (prior) priorContents.push({ path: prior.path, content: prior.content });
         else createdPaths.push(f.path);
       }
-      for (const f of fixed) byPath.set(f.path, f);
-      try { await deps.writeFiles(fixed); } catch { break; }
+      for (const f of landedRepair) byPath.set(f.path, f);
       verdict = await timedVerify();
       const judgement = judgeRepair({
         beforeErrors: priorVerdict.errors, afterErrors: verdict.errors,
@@ -2870,8 +2976,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           // Sandbox FIRST, then the map. If the write fails we bail with both still describing the
           // post-repair state — consistent with each other and with reality, rather than a map that
           // claims files the sandbox does not have.
-          try { await deps.writeFiles(priorContents); } catch { break; }
-          for (const f of priorContents) byPath.set(f.path, f);
+          let reverted: OneShotFile[];
+          try { ({ landed: reverted } = await writeAndLearn(priorContents)); } catch { break; }
+          for (const f of reverted) byPath.set(f.path, f);
+          // Part of the undo refused (Q-912): the map matches the workspace file by file, but the verdict
+          // below would describe neither state — measure the one there is, and stop building on it.
+          if (reverted.length < priorContents.length) { verdict = await timedVerify(); break; }
           // Restore the verdict too. Without this the loop's own condition, and the next attempt's
           // prompt, would both still be reasoning from the worse compiler output we just discarded.
           verdict = priorVerdict;

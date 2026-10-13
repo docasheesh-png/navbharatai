@@ -19,6 +19,7 @@ import { explorerRepairFindings, needsAbsentDevice } from '../src/server/AgentV3
 import { NO_FAKED_RESULT_RULE } from '../src/server/AgentV3/noEvalRule';
 import { architectSystemPrompt } from '../src/server/AgentV3/systemPrompt';
 import { runSimpleBuild } from '../src/server/AgentV3/SimpleBuilder';
+import { salvageWhyClause } from '../src/server/AgentV3/handoffRule';
 import type { OneShotFile } from '../src/server/AgentV3/OneShotBuilder';
 import { NATIVE_CAPABILITIES } from '../src/server/AgentV3/nativeCapabilities';
 import { fixReactUmdGlobal } from '../src/server/AgentV3/EndgameRepair';
@@ -117,7 +118,11 @@ describe('the fast lane', () => {
     expect(r.reason).toBe('verify_failed');
     expect(r.salvagedPaths).toEqual(expect.arrayContaining(['src/App.tsx', 'src/TodoList.tsx']));
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(route).toContain("? 'and they do not compile yet'");
+    // UPDATED 2026-10-13 (build report 9c612cdb, Q-912 E): the clause moved out of the route into
+    // `salvageWhyClause`, because the inline ternary gave every other ending one reason ("before running out of
+    // time"), a planned hand-off included. The verify-failed words are unchanged; they are asserted where they live.
+    expect(route).toContain('const salvageWhy = salvageWhyClause(sb.reason, sb.handedOff);');
+    expect(salvageWhyClause('verify_failed', false)).toBe('and they do not compile yet');
     expect(route).toContain("The compiler's errors on them right now:");
   });
 

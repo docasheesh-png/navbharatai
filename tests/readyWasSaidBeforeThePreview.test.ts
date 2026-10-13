@@ -31,7 +31,11 @@ describe('a hand-back after "ready" is corrected in the chat', () => {
 describe('a planned handoff is not a failure in the report', () => {
   it('the lane marks it and the outcome line says so', () => {
     const lane = read('src/server/AgentV3/SimpleBuilder.ts');
-    expect(lane).toContain('const handedOff = isReasoningRungHandoff(e) || /reasons before every answer/i.test(reason);');
+    // UPDATED 2026-10-13 (build report 9c612cdb): a hand-off the lane DECIDED is marked however the lane then
+    // ends — its root component's call can carry the decision, and the lane then ended on "root component was not
+    // written" with the cause dropped. The two older signals still mark it; behaviour locked in
+    // tests/aHandOffWritesEachFileOnce.test.ts.
+    expect(lane).toContain('const handedOff = handOffDecision !== null || isReasoningRungHandoff(e) || /reasons before every answer/i.test(reason);');
     expect(lane).toContain('a planned handoff, not a failure.');
     expect(read('src/server/routes/agentv3.ts')).toContain("sb.handedOff ? 'Fast-lane outcome: handed its plan to the full builder before a reasoning engine — not a failure.'");
   });

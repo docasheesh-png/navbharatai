@@ -63,6 +63,20 @@ export function isValidCashfreeSignature(opts: {
   return [v2, v1Base64, v1Hex].some((expected) => timingSafeStringEqual(signature, expected));
 }
 
+/**
+ * The signature and timestamp a Cashfree webhook arrived with. Cashfree's documented headers are
+ * `x-webhook-signature` / `x-webhook-timestamp`; the older `x-cf-signature` / `x-cf-signature-timestamp`
+ * (and `cf-signature`) are still read so nothing that works today stops working. The documented name
+ * wins when both are present. This only LOCATES the values — `isValidCashfreeSignature` still decides,
+ * against the server's secret, and an absent signature is still a rejection. PURE.
+ */
+export function cashfreeWebhookSignatureHeaders(headers: Record<string, unknown>): { signature: string; timestamp: string } {
+  const one = (v: unknown): string => (Array.isArray(v) ? String(v[0] ?? '') : typeof v === 'string' ? v : '');
+  const signature = one(headers['x-webhook-signature']) || one(headers['x-cf-signature']) || one(headers['cf-signature']);
+  const timestamp = one(headers['x-webhook-timestamp']) || one(headers['x-cf-signature-timestamp']);
+  return { signature, timestamp };
+}
+
 /** Equal-length strings compared in constant time; different lengths are simply unequal. */
 export function timingSafeStringEqual(a: string, b: string): boolean {
   const x = Buffer.from(String(a), 'utf8');
@@ -483,8 +497,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         return res.status(400).json({ error: 'Webhook secret not configured.' });
       }
 
-      const signature = (req.headers['x-cf-signature'] || req.headers['cf-signature'] || '') as string;
-      const ts = (req.headers['x-cf-signature-timestamp'] || '') as string;
+      const { signature, timestamp: ts } = cashfreeWebhookSignatureHeaders(req.headers);
 
       // Accepts Cashfree's v2 (timestamp+rawBody) and legacy v1 (rawBody) formats — all over raw bytes.
       const isSignatureValid = isValidCashfreeSignature({ rawBody, timestamp: ts, signature, secret });

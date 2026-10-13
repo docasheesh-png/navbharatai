@@ -673,6 +673,7 @@ import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuator
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
 import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
+import { filesANoteStillFlags } from '../AgentV3/writeTimeQualityCheck';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
 import { buildServiceGraph } from '../AgentV3/serviceGraph';
@@ -20506,6 +20507,67 @@ async function noteBuildOutcome(
             } catch { /* the design check is advisory — it can never affect a build */ }
           }
 
+          /**
+           * 🔴 THE KIT'S OWN RULES, PUT BACK BY CONSTRUCTION (autopsy e725e002, 2026-09-29). A class a
+           * screen uses that exists in our design kit but not in this app's stylesheet has exactly one
+           * correct rule — the kit's. Adding it is free and deterministic, so it runs BEFORE the check
+           * below decides whether a model repair is needed, and again after any repair (which is told
+           * to reuse the kit, and so can introduce kit classes the app's rewritten stylesheet lacks).
+           */
+          /**
+           * 🔴 SPACING OFF THE 4px GRID, SNAPPED BY CONSTRUCTION (autopsy 536c8189, 2026-10-01). Between
+           * #3458 and that date these values were handed to the MODEL at the end of its turn; the first
+           * real build to meet that hand-back spent three calls writing `node -e` regex scripts over a
+           * 634-line stylesheet and moved ON-grid values OFF the grid. `round(v / 4) * 4` has one right
+           * answer, so it runs here instead — free, deterministic, and only over files THIS build wrote.
+           *
+           * 🔴 AND IT RUNS BEFORE THE LINT, SO DESIGN_CONSISTENCY DESCRIBES WHAT SHIPPED (autopsy 9c612cdb,
+           * 2026-10-12). Both deterministic design writers — the kit restore and this snap — used to run
+           * ~175 lines AFTER `lintBuiltApp`, inside the design-coverage block. So the report's only design
+           * score was the one from BEFORE the snap ("8 spacing values are off the 4px grid … 90/100"), counted
+           * as a warning and then as a heal, while the 100/100 the app actually shipped with was computed by a
+           * re-check and never written down (e3b0ce25's re-check recorded a line only when values REMAINED).
+           * Every other deterministic repair in this block already runs before its own finding
+           * (LABELS_REPAIRED, SCRIPT_INTEGRITY_REPAIRED), and the fast lane already snapped before its check —
+           * so the same CSS was a warning plus a heal in one lane and nothing in the other. The order is
+           * now the precedent's: fix, then judge, and the judgement is recorded whether it is clean or not.
+           * They are defined here, at the top of this pass, because they run twice: before the lint, and
+           * again after the design repair (which writes CSS after the first run).
+           */
+          const snapSpacing = async (files: Record<string, string>, when: 'before-lint' | 'after-repair'): Promise<void> => {
+            try {
+              if (abort.signal.aborted || isImportTurn || !expectsArtifacts) return;
+              const patches = spacingSnapPatches(files, writtenFiles.keys());
+              if (patches.length === 0) return;
+              const landed: SpacingSnapPatch[] = [];
+              for (const patch of patches) {
+                const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
+                if (!wrote) continue;
+                writtenFiles.set(patch.path, patch.content);
+                integrityFiles[patch.path] = patch.content;
+                await mergeWorkspaceFiles(workspaceId, { [patch.path]: patch.content }).catch(() => {});
+                landed.push(patch);
+              }
+              if (landed.length === 0) return;
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: `${when === 'after-repair' ? 'After the design repair: ' : ''}${spacingSnapNote(landed)}`, autoResolved: true });
+            } catch { /* deterministic and best-effort — it can never affect a build */ }
+          };
+          const restoreKitRules = async (files: Record<string, string>, when: 'before-repair' | 'after-repair'): Promise<void> => {
+            try {
+              const patch = kitRestorePatch(files);
+              // Never on a read-only import/survey turn: there, the user's files are theirs, untouched.
+              if (!patch || abort.signal.aborted || isImportTurn || !expectsArtifacts) return;
+              const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
+              if (!wrote) return;
+              writtenFiles.set(patch.path, patch.content);
+              integrityFiles[patch.path] = patch.content;
+              await mergeWorkspaceFiles(workspaceId, { [patch.path]: patch.content }).catch(() => {});
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'DESIGN_KIT_RESTORED', message: kitRestoreNote(patch, when), autoResolved: true });
+            } catch { /* deterministic and best-effort — it can never affect a build */ }
+          };
+          /** The design lint's verdict on the app as it stands after the deterministic writers — what shipped. */
+          let designShipped: ReturnType<typeof lintBuiltApp> = null;
+
           // DESIGN CONSISTENCY + ACCESSIBILITY — two finished linters nothing had ever called.
           //
           // Both are pure, deterministic and unit-tested, and have sat behind HTTP routes no client
@@ -20573,12 +20635,20 @@ async function noteBuildOutcome(
                   message: `${labelled} form field(s) had no label but a placeholder that named them — the placeholder text is now their accessible name too.` });
               }
             }
+            // The deterministic design writers, BEFORE the lint (autopsy 9c612cdb — see `snapSpacing`).
+            await restoreKitRules({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'before-repair');
+            await snapSpacing({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'before-lint');
             const quality = hasUserApp ? lintBuiltApp(integrityFiles) : null;
+            designShipped = quality;
             // `null` means nothing lintable was found. Recording a perfect score there would claim we
             // checked when we did not — the same lie in the other direction.
             if (quality) {
               if (quality.design.violations.length > 0) {
                 buildDiag.record({ phase: 'build', severity: 'warning', code: 'DESIGN_CONSISTENCY', ...obs(designLintSummary(quality)) });
+              } else {
+                // A clean pass is recorded too (autopsy 9c612cdb): the score the app shipped with was
+                // computed and never written, so the report's only design line was a stale one.
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'DESIGN_CONSISTENCY', message: designLintSummary(quality), autoResolved: true });
               }
               if (quality.a11y.violations.length > 0) {
                 buildDiag.record({ phase: 'build', severity: 'warning', code: 'ACCESSIBILITY', ...obs(a11yLintSummary(quality)) });
@@ -20589,8 +20659,12 @@ async function noteBuildOutcome(
               }
               // DID THE WRITE-TIME NOTE REACH THE FILE, AND WAS IT IGNORED? (autopsy 6bae5835 could not say.)
               try {
-                const flagged = [...new Set(Object.values(quality.offenders ?? {}).flat().map((o) => o.path))];
-                const wq = writeQualitySummary(dispatcher.writeTypecheckStats().qualityNotedFiles ?? [], flagged, modelAuthoredPaths(writtenFiles));
+                // Measured AFTER the snap now (it runs first), and in the note's own terms — a file is "still
+                // flagged" when a write-time note would still describe it, never for a whole-app rule or a
+                // value the platform fixes itself (autopsy 9c612cdb; see filesANoteStillFlags).
+                const noted = dispatcher.writeTypecheckStats().qualityNotedFiles ?? [];
+                const flagged = filesANoteStillFlags(integrityFiles, [...Object.values(quality.offenders ?? {}).flat().map((o) => o.path), ...noted]);
+                const wq = writeQualitySummary(noted, flagged, modelAuthoredPaths(writtenFiles));
                 if (wq) buildDiag.record({ phase: 'build', severity: 'info', code: 'WRITE_TIME_QUALITY', message: wq, autoResolved: true });
               } catch { /* a measurement is best-effort */ }
             }
@@ -20685,75 +20759,6 @@ async function noteBuildOutcome(
            * to compare against". Here it reads the WHOLE project (`integrityFiles`), in the lane that
            * builds most apps, and a real mismatch rides the same repair pass as the design findings.
            */
-          /**
-           * 🔴 THE KIT'S OWN RULES, PUT BACK BY CONSTRUCTION (autopsy e725e002, 2026-09-29). A class a
-           * screen uses that exists in our design kit but not in this app's stylesheet has exactly one
-           * correct rule — the kit's. Adding it is free and deterministic, so it runs BEFORE the check
-           * below decides whether a model repair is needed, and again after any repair (which is told
-           * to reuse the kit, and so can introduce kit classes the app's rewritten stylesheet lacks).
-           */
-          /**
-           * 🔴 SPACING OFF THE 4px GRID, SNAPPED BY CONSTRUCTION (autopsy 536c8189, 2026-10-01). Between
-           * #3458 and that date these values were handed to the MODEL at the end of its turn; the first
-           * real build to meet that hand-back spent three calls writing `node -e` regex scripts over a
-           * 634-line stylesheet and moved ON-grid values OFF the grid. `round(v / 4) * 4` has one right
-           * answer, so it runs here instead — free, deterministic, and only over files THIS build wrote.
-           */
-          const snapSpacing = async (files: Record<string, string>): Promise<void> => {
-            try {
-              if (abort.signal.aborted || isImportTurn || !expectsArtifacts) return;
-              const patches = spacingSnapPatches(files, writtenFiles.keys());
-              if (patches.length === 0) return;
-              const landed: SpacingSnapPatch[] = [];
-              for (const patch of patches) {
-                const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
-                if (!wrote) continue;
-                writtenFiles.set(patch.path, patch.content);
-                integrityFiles[patch.path] = patch.content;
-                await mergeWorkspaceFiles(workspaceId, { [patch.path]: patch.content }).catch(() => {});
-                landed.push(patch);
-              }
-              if (landed.length === 0) return;
-              buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: spacingSnapNote(landed), autoResolved: true });
-              // 🔴 THE FINDING DESCRIBED THE APP BEFORE THE SNAP (autopsy e3b0ce25). DESIGN_CONSISTENCY is
-              // recorded before this runs, so the report read "4 spacing values are off the grid" beside
-              // "2 snapped" with no way to tell what remained. The same check runs again over the snapped
-              // files and the old line is replaced by what is true now.
-              try {
-                const after = lintBuiltApp(integrityFiles);
-                if (after && buildDiag.resolveOnRecheck('DESIGN_CONSISTENCY') > 0 && after.design.violations.length > 0) {
-                  buildDiag.record({ phase: 'build', severity: 'warning', code: 'DESIGN_CONSISTENCY', ...obs(`After the spacing snap: ${designLintSummary(after)}`) });
-                }
-                // Q-515 (autopsy 39e982bd): WRITE_TIME_QUALITY is measured before the snap too, so it said
-                // src/theme.css "had been noted and not fixed" while the snap then fixed every value in it,
-                // and the autopsy read that as 21 values left. It stays true about the MODEL; this line says
-                // what is true about the APP now.
-                if (after) {
-                  const stillFlagged = [...new Set(Object.values(after.offenders ?? {}).flat().map((o) => o.path))];
-                  const nowClear = landed.map((p) => p.path).filter((path) => !stillFlagged.includes(path));
-                  if (nowClear.length > 0) {
-                    buildDiag.record({ phase: 'build', severity: 'info', code: 'WRITE_TIME_QUALITY', autoResolved: true,
-                      message: `After the spacing snap: ${nowClear.join(', ')} ${nowClear.length === 1 ? 'is' : 'are'} no longer flagged — any "noted and not fixed" above describes the model's turn, not the app as shipped.` });
-                  }
-                }
-              } catch { /* the earlier finding stands */ }
-            } catch { /* deterministic and best-effort — it can never affect a build */ }
-          };
-          const restoreKitRules = async (files: Record<string, string>, when: 'before-repair' | 'after-repair'): Promise<void> => {
-            try {
-              const patch = kitRestorePatch(files);
-              // Never on a read-only import/survey turn: there, the user's files are theirs, untouched.
-              if (!patch || abort.signal.aborted || isImportTurn || !expectsArtifacts) return;
-              const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
-              if (!wrote) return;
-              writtenFiles.set(patch.path, patch.content);
-              integrityFiles[patch.path] = patch.content;
-              await mergeWorkspaceFiles(workspaceId, { [patch.path]: patch.content }).catch(() => {});
-              buildDiag.record({ phase: 'build', severity: 'info', code: 'DESIGN_KIT_RESTORED', message: kitRestoreNote(patch, when), autoResolved: true });
-            } catch { /* deterministic and best-effort — it can never affect a build */ }
-          };
-          await restoreKitRules({ ...integrityFiles, ...designFiles }, 'before-repair');
-          await snapSpacing({ ...integrityFiles, ...designFiles, ...Object.fromEntries(writtenFiles) });
           const projectForCss = { ...integrityFiles, ...Object.fromEntries(writtenFiles) };
           const cssErr = (() => { try { return cssConsistencyError(projectForCss); } catch { return null; } })();
           if (cssErr) {
@@ -20827,6 +20832,28 @@ async function noteBuildOutcome(
                   }
                 } catch { /* the guard is best-effort — it must never itself break a build */ }
                 await restoreKitRules({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'after-repair');
+                // 🔴 THE REPAIR WRITES CSS AFTER THE ONLY SNAP (autopsy 9c612cdb). The kit restore had its
+                // 'after-repair' run; the snap had none, so an off-grid value the repair wrote shipped, and the
+                // DESIGN_CONSISTENCY line above still described the app before the repair. Snap again, then say
+                // what is true now whenever it differs from what was recorded.
+                await snapSpacing({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'after-repair');
+                try {
+                  const nowFiles = { ...integrityFiles, ...Object.fromEntries(writtenFiles) };
+                  const afterRepair = designShipped && projectHasUserCode(nowFiles) ? lintBuiltApp(nowFiles) : null;
+                  const designOf = (r: NonNullable<typeof afterRepair>) => `${r.design.score}|${r.design.violations.map((v) => v.message).join('|')}`;
+                  if (afterRepair && designShipped && designOf(afterRepair) !== designOf(designShipped)) {
+                    const left = afterRepair.design.violations.length;
+                    // ⚠️ A HEAL ONLY WHEN THE SAME CHECK NOW FINDS NOTHING (`resolveOnRecheck`'s own obligation).
+                    // A repair that changed the violations but left some (or made them worse) healed nothing:
+                    // the earlier sentence is no longer true, so it is WITHDRAWN (out of the heal tally and the
+                    // problem count), and the line below is the one that stands.
+                    if (left === 0) buildDiag.resolveOnRecheck('DESIGN_CONSISTENCY');
+                    else buildDiag.retract('DESIGN_CONSISTENCY', 'Design consistency', 'the design repair changed the app; the "After the design repair" line says what is true now');
+                    buildDiag.record({ phase: 'build', severity: left > 0 ? 'warning' : 'info', code: 'DESIGN_CONSISTENCY',
+                      message: `After the design repair: ${designLintSummary(afterRepair)}`, autoResolved: left === 0 });
+                    designShipped = afterRepair;
+                  }
+                } catch { /* the earlier line stands */ }
                 if (!cssRepair) {
                   // A design-only repair can itself leave classes unstyled (e725e002: four empty states
                   // on `.nb-empty*`). Say so when it does — DESIGN_HEALED alone would claim the pages are fine.

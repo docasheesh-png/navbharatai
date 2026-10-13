@@ -96,7 +96,7 @@ import { envNamesFromGrep, detectDatabaseProvider } from './ImportPreview';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
-import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
+import { qualityNote, writeQualityEnabled, modelDesignLine } from './writeTimeQualityCheck';
 import { lintBuiltApp, a11yHandBack } from './buildQualityLint';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { detachedMethodNote } from './detachedMethod';
@@ -407,7 +407,6 @@ import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
-import { lintDesign, designSummary } from '../AppMakerLab/intelligence/DesignLinter';
 import { publishableVerdict, entryPagesOf } from './publishablePayload';
 import { detectServerNeed } from './staticPublishGuard';
 import { PUBLISH_NOT_REQUESTED } from './publishConsent';
@@ -6177,13 +6176,16 @@ export class ToolDispatcher {
         // blocker, exactly like SEO): lint the generated style-bearing code for palette/typography/
         // spacing/token consistency so a build reports its visual polish, not just its correctness.
         // Pure + never throws. Not pushed into `extra`, so it can never fail an otherwise-ready build.
-        const DESIGN_EXT = /\.(css|scss|sass|less|tsx|jsx|vue|svelte|html?)$/i;
-        const designCode = snap.sources
-          .filter((s) => DESIGN_EXT.test(s.path))
-          .map((s) => s.content)
-          .join('\n')
-          .slice(0, 400_000);
-        const design = lintDesign(designCode);
+        // 🔒 THE BUILD REPORT'S OWN LINT (autopsy 9c612cdb): this used to be a private `lintDesign` over
+        // a hand-joined string — its own file selection, comments counted, our badge counted — and it told
+        // the model to "snap to multiples of 4px", arithmetic the platform's snap does at the end. One
+        // selection, one comment rule, our markup excluded, and the platform's own fixes left out.
+        let designLine: string;
+        try {
+          designLine = modelDesignLine(lintBuiltApp(Object.fromEntries(snap.sources.map((s) => [s.path, s.content] as const))));
+        } catch {
+          designLine = 'Design consistency: not checked (the lint could not read the files).';
+        }
         // P-PIPE.40 — advisory dependency auto-fix: for each imported-but-undeclared package, suggest an
         // exact `name@^range` when it's a known npm package, else soften to "verify (may be a local
         // alias)". Advisory only — it never mutates package.json or the install path (the builder applies
@@ -6553,7 +6555,7 @@ export class ToolDispatcher {
             return ciWorkflowSummary(analyzeCiWorkflow(map));
           } catch { return ''; }
         })();
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${observabilitySummary(obsIssues)}\n\n${gracefulShutdownSummary(shutdownIssues)}\n\n${securityHeadersSummary(secHeaderIssues)}\n\n${sriSummary(sriIssues)}\n\n${cspSummary(cspIssues)}\n\n${commentLanguageSummary(commentLangIssues)}\n\n${uploadValidationSummary(uploadIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}${outsideAppLine ? `\n\n${outsideAppLine}` : ''}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${observabilitySummary(obsIssues)}\n\n${gracefulShutdownSummary(shutdownIssues)}\n\n${securityHeadersSummary(secHeaderIssues)}\n\n${sriSummary(sriIssues)}\n\n${cspSummary(cspIssues)}\n\n${commentLanguageSummary(commentLangIssues)}\n\n${uploadValidationSummary(uploadIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designLine}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}${outsideAppLine ? `\n\n${outsideAppLine}` : ''}`;
       }
 
       case 'stop_build': {

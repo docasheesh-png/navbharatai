@@ -40,13 +40,17 @@ describe('the snap note counts every value it moved', () => {
   });
 });
 
-describe('the write-time line is re-stated after the snap', () => {
-  it('🔒 the route records what is true of the app once the snap cleaned a noted file', () => {
+// Re-anchored (autopsy 9c612cdb, 2026-10-12). The restatement line ("After the spacing snap: X is no
+// longer flagged") existed because WRITE_TIME_QUALITY was measured BEFORE the snap. The snap now runs
+// before the lint, so the one WRITE_TIME_QUALITY line is measured on the snapped app and needs no
+// correction — the contract (the line says what is true of the app as shipped) holds by order.
+describe('the write-time line is measured after the snap', () => {
+  it('🔒 the snap runs before the WRITE_TIME_QUALITY measurement', () => {
     const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
-    const snap = route.indexOf("code: 'SPACING_SNAPPED', message: spacingSnapNote(landed)");
-    const after = route.indexOf('After the spacing snap: ${nowClear.join', snap);
+    const snap = route.indexOf("await snapSpacing({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'before-lint');");
+    const wtq = route.indexOf("code: 'WRITE_TIME_QUALITY', message: wq");
     expect(snap).toBeGreaterThan(-1);
-    expect(after).toBeGreaterThan(snap);
-    expect(route.slice(snap, after)).toContain("code: 'WRITE_TIME_QUALITY'");
+    expect(wtq).toBeGreaterThan(snap);
+    expect(route).not.toContain('After the spacing snap: ${nowClear.join');
   });
 });

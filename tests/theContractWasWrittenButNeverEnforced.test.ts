@@ -23,7 +23,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  qualityNote, writeQualityEnabled, PER_FILE_VIOLATIONS, MAX_NOTE_LINES,
+  qualityNote, writeQualityEnabled, PER_FILE_VIOLATIONS, PLATFORM_FIXED_VIOLATIONS, MAX_NOTE_LINES,
 } from '../src/server/AgentV3/writeTimeQualityCheck';
 import { lintBuiltApp } from '../src/server/AgentV3/buildQualityLint';
 
@@ -38,8 +38,13 @@ describe("🔴 the report's own two defects are now caught at write time", () =>
     expect(note).toContain('src/components/Forum.tsx');
   });
 
-  it('the off-grid spacing — the exact DESIGN_CONSISTENCY finding', () => {
-    expect(qualityNote('src/index.css', OFF_GRID_CSS)).toContain('off the 4px grid');
+  // Re-anchored (autopsy 9c612cdb, 2026-10-12): off-grid spacing is arithmetic the platform's snap does
+  // by construction, so while the snap is on the model is never asked for it (Q-290's class, the second
+  // door). The note still carries it when the snap is switched off — the finding is unchanged, only who
+  // fixes it moved.
+  it('the off-grid spacing — the exact DESIGN_CONSISTENCY finding (only when the platform does not fix it)', () => {
+    expect(qualityNote('src/index.css', OFF_GRID_CSS, { AGENTV3_SPACING_SNAP: 'off' } as NodeJS.ProcessEnv)).toContain('off the 4px grid');
+    expect(qualityNote('src/index.css', OFF_GRID_CSS, {} as NodeJS.ProcessEnv)).toBe('');
   });
 
   it('it says WHEN to fix it, because that is the entire point of the change', () => {
@@ -93,9 +98,12 @@ describe('🔒 THE EXCLUSIONS ARE THE PRECISION — a whole-app judgement is not
   });
 
   it('and the per-file types are all present', () => {
-    for (const perFile of ['input-label', 'img-alt', 'control-name', 'off-grid-spacing']) {
+    for (const perFile of ['input-label', 'img-alt', 'control-name']) {
       expect(PER_FILE_VIOLATIONS.has(perFile)).toBe(true);
     }
+    // Moved, not dropped (autopsy 9c612cdb): spacing is the platform's to fix while its snap is on.
+    expect(PER_FILE_VIOLATIONS.has('off-grid-spacing')).toBe(false);
+    expect(PLATFORM_FIXED_VIOLATIONS.has('off-grid-spacing')).toBe(true);
   });
 });
 

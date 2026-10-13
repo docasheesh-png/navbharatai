@@ -221,10 +221,14 @@ describe('kitRestorePatch — the kit\'s own rules, put back by construction', (
 });
 
 describe('the route — the restore runs in BOTH lanes, before and after the repair', () => {
-  it('the architect lane restores before deciding on a model repair', () => {
-    const i = ROUTE.indexOf("await restoreKitRules({ ...integrityFiles, ...designFiles }, 'before-repair')");
+  // Re-anchored (autopsy 9c612cdb, 2026-10-12): the restore moved further UP, before the design lint, so
+  // DESIGN_CONSISTENCY grades the stylesheet the app ships with. It still precedes the repair decision.
+  it('the architect lane restores before the design lint and before deciding on a model repair', () => {
+    const i = ROUTE.indexOf("await restoreKitRules({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'before-repair')");
+    const lint = ROUTE.indexOf('const quality = hasUserApp ? lintBuiltApp(integrityFiles) : null;');
     const j = ROUTE.indexOf('const cssErr = (() => { try { return cssConsistencyError(projectForCss)');
     expect(i).toBeGreaterThan(0);
+    expect(lint).toBeGreaterThan(i);
     expect(j).toBeGreaterThan(i);
   });
   it('and again after the design repair, which is told to use the kit', () => {

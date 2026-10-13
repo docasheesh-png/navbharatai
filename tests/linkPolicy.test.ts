@@ -57,14 +57,18 @@ describe('every chat surface can RENDER a link (the half that made the prompt us
     expect(read('src/components/agentv3/FoldableMessage.tsx')).toContain('<LinkedText text={text} />');
   });
 
+  // Since 2026-10-13 Doctor AI and the Free chat render their markdown through ONE renderer
+  // (chat/ChatMarkdown.tsx), so the anchor rule is asserted there and each surface is held to it.
   it('Doctor AI opens links in a NEW tab — the default anchor navigated the app away', () => {
-    const sda = read('src/components/sda/SDAChat.tsx');
-    expect(sda).toContain('isSafeHttpUrl');
-    expect(sda).toContain("target=\"_blank\"");
-    expect(sda).toContain('rel="noopener noreferrer"');
+    expect(read('src/components/sda/SDAChat.tsx')).toContain('<ChatMarkdown');
+    const renderer = read('src/components/chat/ChatMarkdown.tsx');
+    expect(renderer).toContain('isSafeHttpUrl');
+    expect(renderer).toContain("target=\"_blank\"");
+    expect(renderer).toContain('rel="noopener noreferrer"');
   });
 
   it('the Free chat keeps its markdown anchors opening in a new tab', () => {
-    expect(read('src/components/ide/AIChat.tsx')).toContain('target="_blank" rel="noopener noreferrer"');
+    expect(read('src/components/ide/AIChat.tsx')).toContain('<ChatMarkdown');
+    expect(read('src/components/chat/ChatMarkdown.tsx')).toContain('target="_blank" rel="noopener noreferrer"');
   });
 });

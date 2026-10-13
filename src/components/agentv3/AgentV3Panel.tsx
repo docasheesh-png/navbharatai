@@ -24,7 +24,7 @@ const VaultManager = lazy(() => import('../SecretManager').then((m) => ({ defaul
 // A2 — the REAL shell. LAZY on purpose: it pulls xterm (~70 KB gz), which must never land on the
 // first-paint path for the many users who never open a terminal.
 const TerminalPanel = lazy(() => import('../ide/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
-import { Bot, Send, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle } from 'lucide-react';
+import { Bot, Square, Loader2, Terminal, ScrollText, Pencil, FileDiff, FolderOpen, History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play, Eye, MessageSquare, Settings, Check, X, FileText, Circle, GitBranch, ChevronRight, ChevronDown, ChevronUp, FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Star, Search, Mic, Camera, Volume2, Key, Puzzle, ArrowUp } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { HostingChooser } from './HostingChooser';
@@ -88,7 +88,8 @@ import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
 import { buildChatBlocks } from './activityTimeline';
 import { ChatToolbar } from '../chat/ChatToolbar';
-import { USER_BUBBLE_TONE, ASSISTANT_BUBBLE_TONE } from '../chat/bubbleTone';
+import { USER_TURN_CLASS, ASSISTANT_TURN_CLASS, USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, PLAIN_TEXT_CLASS, MESSAGE_ACTION_ROW_CLASS, CONVERSATION_COLUMN_CHILDREN_CLASS } from '../chat/conversation';
+import { Greeting } from '../chat/Greeting';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 import { ActionGroupRow } from './ActivityTimelineRow';
@@ -4408,19 +4409,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               — position only, function unchanged). See the mode selector next to the settings button. */}
           {/* Conversation */}
           {/* Admin 2026-07-06: tighter padding (p-3 → px-2 py-2) + smaller gaps so more chat is visible. */}
-          <div ref={scrollRef} className="flex-1 overflow-auto px-2 py-2 space-y-2.5 min-h-0">
+          <div ref={scrollRef} className={`flex-1 overflow-auto px-3 py-3 space-y-3 min-h-0 ${CONVERSATION_COLUMN_CHILDREN_CLASS}`}>
             {(() => {
               const lastUser = [...convo].reverse().find((m) => m.role === 'user');
               return lastUser ? <AppUpdateChatNotice /> : null;
             })()}
             {coldStartVisible && (
-              <div className="text-sm text-faint mt-6 text-center">
-                <Bot className="w-8 h-8 mx-auto mb-2 text-accent-text" />
-                {chatMode === 'planner'
-                  ? <>🧠 <b className="text-muted">Plan</b> — read-only. Describe a goal and I’ll plan it with you (aware of your build); approve the steps into the build queue.</>
-                  : chatMode === 'advisor'
-                  ? <>🔍 <b className="text-muted">Advise</b> — read-only. Ask for an audit, bug/security scan or a comparison; nothing is built. Approve fixes into the queue.</>
-                  : <>Say hi, or describe an app to build —<br />e.g. “build a todo app with categories”.</>}
+              <div className="text-sm text-muted mt-8 text-center">
+                {/* The serif greeting every AI opens with (chat/Greeting.tsx); the mode's own sentence under it. */}
+                <Greeting
+                  name={auth.currentUser?.displayName ?? null}
+                  subline={chatMode === 'planner'
+                    ? <><b className="text-ink font-medium">Plan</b> — read-only. Describe a goal and I’ll plan it with you (aware of your build); approve the steps into the build queue.</>
+                    : chatMode === 'advisor'
+                    ? <><b className="text-ink font-medium">Advise</b> — read-only. Ask for an audit, bug/security scan or a comparison; nothing is built. Approve fixes into the queue.</>
+                    : <>Say hi, or describe an app to build — e.g. “build a todo app with categories”.</>}
+                />
                 {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
                     composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
                 {/* 🔴 ONE CAPSULE, NOT THIRTY (admin 2026-09-19: *"jab user navbharatai pro open kare to
@@ -5596,7 +5600,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 )}
                 <textarea
                   ref={composerRef}
-                  className={`w-full bg-card border border-line rounded-xl pl-3 pr-16 py-1 text-sm resize-none focus:outline-none focus:border-indigo-500 overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}
+                  className={`w-full bg-card border border-line rounded-[1.5rem] shadow-[0_2px_16px_rgba(0,0,0,0.06)] pl-4 pr-20 py-2.5 text-[15px] leading-relaxed text-ink placeholder:text-muted resize-none focus:outline-none focus:border-accent focus:shadow-[0_4px_24px_rgba(0,0,0,0.10)] transition-all overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}
                   rows={1}
                   placeholder={
                     chatMode === 'planner'
@@ -5671,7 +5675,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     type="button"
                     onClick={() => setComposerExpanded((v) => !v)}
                     title={composerExpanded ? 'Minimize' : 'Expand'}
-                    className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-muted hover:text-ink hover:bg-raised`}
+                    className={`absolute right-12 ${composerBtnY} h-8 w-8 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-raised`}
                   >
                     {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                   </button>
@@ -5680,8 +5684,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   // Plan/Advise are read-only lanes: ALWAYS a Send button (even while a build runs) — they
                   // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
                   // own turn is streaming.
-                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-on-accent`}>
-                    {roleBusy ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className={`absolute right-2 ${composerBtnY} h-8 w-8 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
+                    {roleBusy ? <TirangaLoader className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" strokeWidth={2.5} />}
                   </button>
                 ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
                   // Fix 60, ungated to every tier by A1: the composer stays LIVE mid-build — Send
@@ -5693,20 +5697,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   // revert, never silent — which is the trade this switch is for. Do not delete the
                   // branch to tidy up; it is what the gate returns to.
                   <>
-                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-danger hover:text-on-accent hover:bg-red-600/80`}>
-                      <Square className="w-4 h-4" />
+                    <button onClick={stop} title="Stop the running build — your files so far are saved, and you are charged only for the work already done (never for a full build)" className={`absolute right-12 ${composerBtnY} h-8 w-8 flex items-center justify-center rounded-full text-danger hover:bg-raised`}>
+                      <Square className="w-3.5 h-3.5 fill-current" />
                     </button>
-                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-40 rounded-lg text-on-accent shadow-[0_0_12px_rgba(129,80,255,0.45)]`}>
-                      <Send className="w-4 h-4" />
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-8 w-8 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
+                      <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
                     </button>
                   </>
                 ) : running ? (
-                  <button onClick={stop} title="Stop" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-on-accent`}>
-                    <Square className="w-4 h-4" />
+                  <button onClick={stop} title="Stop" className={`absolute right-2 ${composerBtnY} h-8 w-8 flex items-center justify-center bg-ink hover:opacity-90 rounded-full text-surface transition-all`}>
+                    <Square className="w-3.5 h-3.5 fill-current" />
                   </button>
                 ) : (
-                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-on-accent`}>
-                    <Send className="w-4 h-4" />
+                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className={`absolute right-2 ${composerBtnY} h-8 w-8 flex items-center justify-center bg-accent hover:brightness-110 disabled:opacity-30 rounded-full text-on-accent transition-all`}>
+                    <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
                   </button>
                 )}
               </div>
@@ -6836,15 +6840,19 @@ function TypewriterText({ text, streaming }: { text: string; streaming?: boolean
   return <>{streaming ? text.slice(0, Math.min(shown, text.length)) : text}</>;
 }
 
+// The thread's two shapes come from the shared conversation design (chat/conversation.ts, admin
+// 2026-10-13 "claude jaisa"): the user's message is a soft container on the right, the builder's reply
+// is plain prose on the page. The builder's text stays PLAIN (links real via LinkedText, never a
+// markdown pass): its narration names files and commands, which a markdown renderer would re-read.
 function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUnsend?: () => void; onEdit?: () => void; onSaveTemplate?: () => void }) {
   if (msg.role === 'user') {
     return (
-      <div className="group flex flex-col items-end">
-        <div className={`max-w-[85%] ${USER_BUBBLE_TONE} rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words`}>
-          <FoldableMessage text={msg.text} className="whitespace-pre-wrap nb-selectable" />
+      <div className={USER_TURN_CLASS}>
+        <div className={USER_MESSAGE_CLASS}>
+          <FoldableMessage text={msg.text} className={`${PLAIN_TEXT_CLASS} nb-selectable`} />
         </div>
         {/* Copy / fold on every user message; Edit + Unsend attach ONLY to the LAST user message (slice 2). */}
-        <div className="mt-0.5 pr-1 opacity-70 group-hover:opacity-100 transition-opacity">
+        <div className={`${MESSAGE_ACTION_ROW_CLASS} pr-1`}>
           <MessageActions text={msg.text} onUnsend={onUnsend} onEdit={onEdit} onSaveTemplate={onSaveTemplate} />
         </div>
       </div>
@@ -6853,27 +6861,27 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
   const isThinking = msg.kind === 'thinking';
   const cursor = msg.streaming ? <span className="inline-block w-1.5 h-3.5 ml-0.5 align-middle bg-current animate-pulse" /> : null;
   return (
-    <div className="group flex flex-col items-start">
-      <div className="max-w-[90%]">
+    <div className={ASSISTANT_TURN_CLASS}>
+      <div className="w-full">
         {msg.agent && msg.agent !== 'architect' && (
-          <div className="text-[10px] uppercase tracking-wide text-accent-text mb-0.5">{msg.agent}</div>
+          <div className="text-xs font-medium text-accent-text mb-1">{msg.agent}</div>
         )}
         <div
           className={
             isThinking
-              ? 'text-faint italic text-xs px-3 py-2 whitespace-pre-wrap break-words'
-              : `${ASSISTANT_BUBBLE_TONE} rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words`
+              ? `text-muted italic text-sm ${PLAIN_TEXT_CLASS} break-words`
+              : `${ASSISTANT_MESSAGE_CLASS} ${PLAIN_TEXT_CLASS}`
           }
         >
           {/* A finished AI reply folds when long + gets a copy action; while streaming it just types out. */}
           {msg.streaming
             ? <><TypewriterText text={msg.text} streaming={msg.streaming} />{cursor}</>
-            : <FoldableMessage text={msg.text} className="whitespace-pre-wrap nb-selectable" />}
+            : <FoldableMessage text={msg.text} className="nb-selectable" />}
         </div>
         {msg.file && !msg.streaming && <SheetFileCard file={msg.file} />}
       </div>
       {!isThinking && !msg.streaming && (
-        <div className="mt-0.5 pl-1 opacity-70 group-hover:opacity-100 transition-opacity">
+        <div className={MESSAGE_ACTION_ROW_CLASS}>
           <MessageActions text={msg.text} />
         </div>
       )}

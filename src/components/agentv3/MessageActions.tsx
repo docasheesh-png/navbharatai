@@ -4,6 +4,7 @@
 
 import { useState } from 'react';
 import { Copy, Check, ThumbsUp, ThumbsDown, Flag, X, Pencil, Star } from 'lucide-react';
+import { MESSAGE_ACTION_BUTTON_CLASS, MESSAGE_ACTION_ICON_CLASS } from '../chat/conversation';
 
 export type MessageReaction = 'up' | 'down' | 'report';
 
@@ -34,22 +35,24 @@ export function MessageActions({ text, onFeedback, reaction, onUnsend, onEdit, o
       /* clipboard unavailable (blocked / insecure context) — fail silently, never fake success */
     }
   };
-  const btn = 'p-1 rounded text-faint hover:text-body hover:bg-raised transition-colors';
+  // The shared ghost-icon look (conversation.ts), so this row matches every other chat surface's.
+  const btn = MESSAGE_ACTION_BUTTON_CLASS;
+  const icon = MESSAGE_ACTION_ICON_CLASS;
   return (
     <div className="flex items-center gap-0.5">
       <button type="button" onClick={copy} title="Copy" aria-label="Copy message" className={btn}>
-        {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+        {copied ? <Check className={`${icon} text-success`} /> : <Copy className={icon} />}
       </button>
       {onFeedback && (
         <>
           <button type="button" onClick={() => onFeedback('up')} title="Good response" aria-label="Like" aria-pressed={reaction === 'up'} className={`${btn} ${reaction === 'up' ? 'text-success' : ''}`}>
-            <ThumbsUp className="w-3.5 h-3.5" />
+            <ThumbsUp className={icon} />
           </button>
           <button type="button" onClick={() => onFeedback('down')} title="Bad response" aria-label="Dislike" aria-pressed={reaction === 'down'} className={`${btn} ${reaction === 'down' ? 'text-warn' : ''}`}>
-            <ThumbsDown className="w-3.5 h-3.5" />
+            <ThumbsDown className={icon} />
           </button>
           <button type="button" onClick={() => onFeedback('report')} title="Report this message" aria-label="Report" aria-pressed={reaction === 'report'} className={`${btn} ${reaction === 'report' ? 'text-danger' : ''}`}>
-            <Flag className="w-3.5 h-3.5" />
+            <Flag className={icon} />
           </button>
         </>
       )}
@@ -61,17 +64,17 @@ export function MessageActions({ text, onFeedback, reaction, onUnsend, onEdit, o
           aria-label="Save as template"
           className={`${btn} ${saved ? 'text-success' : 'hover:text-warn'}`}
         >
-          {saved ? <Check className="w-3.5 h-3.5" /> : <Star className="w-3.5 h-3.5" />}
+          {saved ? <Check className={icon} /> : <Star className={icon} />}
         </button>
       )}
       {onEdit && (
         <button type="button" onClick={onEdit} title="Edit — take this message back and re-write it" aria-label="Edit" className={`${btn} hover:text-accent-text`}>
-          <Pencil className="w-3.5 h-3.5" />
+          <Pencil className={icon} />
         </button>
       )}
       {onUnsend && (
         <button type="button" onClick={onUnsend} title="Unsend — stop the build and remove this message" aria-label="Unsend" className={`${btn} hover:text-danger`}>
-          <X className="w-3.5 h-3.5" />
+          <X className={icon} />
         </button>
       )}
     </div>

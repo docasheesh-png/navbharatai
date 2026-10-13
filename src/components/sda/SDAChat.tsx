@@ -1,14 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ImageLightbox } from '../chat/ImageLightbox';
-import { Send, AlertTriangle, BookOpen, FileText, User, Stethoscope, ClipboardList, X, Plus, FileSearch, Mic, MicOff, Download, BarChart2, Pill, TestTube, Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2, Wallet } from 'lucide-react';
+import { ArrowUp, Square, AlertTriangle, BookOpen, FileText, User, Stethoscope, ClipboardList, X, Plus, FileSearch, Mic, MicOff, Download, BarChart2, Pill, TestTube, Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2, Wallet } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DoseCalculator } from './DoseCalculator';
 import { loadVials } from '../../lib/vialMemory';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
-import ReactMarkdown from 'react-markdown';
-import { CHAT_MARKDOWN_PLUGINS } from '../../lib/chatMarkdown';
-import { isSafeHttpUrl, openInRealBrowser } from '../../lib/linkify';
+import { ChatMarkdown } from '../chat/ChatMarkdown';
+import { USER_TURN_CLASS, ASSISTANT_TURN_CLASS, USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, MESSAGE_ACTION_ROW_CLASS, MESSAGE_ACTION_BUTTON_CLASS, MESSAGE_ACTION_ICON_CLASS, CONVERSATION_COLUMN_CHILDREN_CLASS, TYPING_DOTS_CLASS, TYPING_DOT_CLASS } from '../chat/conversation';
 import { walletEmptyRefusalMessage, openAddCredit } from '../../lib/walletEmptyRefusal';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -1095,31 +1094,28 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
+        <div className={`flex-1 overflow-y-auto custom-scrollbar px-4 py-6 space-y-6 ${CONVERSATION_COLUMN_CHILDREN_CLASS}`}>
           {(() => {
             // In SDA the USER is the 'doctor' sender; 'sda' is the assistant.
             const lastUser = [...messages].reverse().find(m => m.sender === 'doctor');
             return lastUser ? <AppUpdateChatNotice /> : null;
           })()}
           {filterMessages(messages as any, chatSearchQuery).map((msg: any) => (
-            <div key={msg.id} className={cn("flex", msg.sender === 'doctor' ? "justify-end" : "justify-start")}>
-              {msg.sender === 'sda' && (
-                <div className="w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-700/40 flex items-center justify-center shrink-0 mr-2.5 mt-0.5">
-                  <Stethoscope className="w-3.5 h-3.5 text-success" />
-                </div>
-              )}
+            <div key={msg.id} className={msg.sender === 'doctor' ? USER_TURN_CLASS : ASSISTANT_TURN_CLASS}>
+              {/* The shared conversation design (chat/conversation.ts, admin 2026-10-13 "claude jaisa"):
+                  the doctor's words in a soft container on the right, Doctor AI's reply as prose on the
+                  page. A RED FLAG keeps its own bordered card — a clinical alert must still look like one. */}
               <div className={cn(
-                "max-w-[80%] rounded-2xl px-4 py-3 text-[12px] leading-relaxed",
                 msg.sender === 'sda'
                   ? msg.isRedFlag
-                    ? "bg-red-500/10 border border-red-500/40 text-danger"
-                    : "bg-card border border-line text-body"
-                  : "bg-emerald-500/10 border border-emerald-700/30 text-success"
+                    ? "w-full rounded-2xl border border-danger/40 bg-danger/5 px-4 py-3 text-[15px] leading-[1.7] text-body"
+                    : ASSISTANT_MESSAGE_CLASS
+                  : USER_MESSAGE_CLASS
               )}>
                 {msg.isRedFlag && (
                   <div className="flex items-center gap-1.5 mb-2 pb-2 border-b border-red-500/30">
                     <AlertTriangle className="w-3.5 h-3.5 text-danger" />
-                    <span className="text-[9px] font-black uppercase tracking-widest text-danger">Red Flag Detected</span>
+                    <span className="text-xs font-semibold text-danger">Red flag detected</span>
                   </div>
                 )}
                 {msg.attachedFile && (
@@ -1147,21 +1143,8 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
                     )}
                   </div>
                 )}
-                <div className="prose prose-invert prose-xs max-w-none prose-p:leading-relaxed prose-p:my-1 prose-headings:text-success prose-strong:text-ink prose-li:my-0.5">
-                  {/* The DEFAULT anchor navigates the app's own webview away from NavBharatAI on a
-                      phone (admin 2026-08-25). Every source link opens in a new tab instead, and only
-                      http/https is ever clickable — this text is model-authored. */}
-                  <ReactMarkdown
-                    remarkPlugins={CHAT_MARKDOWN_PLUGINS}
-                    components={{
-                      a: ({ node, href, children, ...props }: any) => (
-                        isSafeHttpUrl(String(href ?? ''))
-                          ? <a {...props} href={href} target="_blank" rel="noopener noreferrer" onClick={openInRealBrowser(String(href ?? ''))} className="text-accent-text underline underline-offset-2 break-all">{children}</a>
-                          : <>{children}</>
-                      ),
-                    }}
-                  >{msg.text}</ReactMarkdown>
-                </div>
+                {/* Links open in a new tab, http(s) only, inside the shared renderer (admin 2026-08-25). */}
+                <ChatMarkdown text={msg.text} />
                 {/* The wallet, not a fault — the one control that actually resolves it. */}
                 {msg.needsCredit && (
                   <button
@@ -1172,32 +1155,26 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
                     <Wallet className="w-3.5 h-3.5" /> Add credit
                   </button>
                 )}
-                <div className="mt-2 flex items-center justify-end gap-2">
-                  {/* REPORT an AI reply (Play AI-Generated Content policy, rejection 2026-09-28). */}
-                  {msg.sender === 'sda' && (
-                    <ReportAiContent
-                      surface="reply"
-                      content={String(msg.text ?? '')}
-                      view="sda_chat"
-                      className="p-0.5 rounded text-faint hover:text-danger opacity-70"
-                      iconClassName="w-2.5 h-2.5"
-                    />
-                  )}
-                  <p className="text-[8px] text-faint text-right">
-                    {msg.timestamp instanceof Date ? msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                  </p>
-                </div>
               </div>
+              {/* REPORT an AI reply (Play AI-Generated Content policy, rejection 2026-09-28). */}
+              {msg.sender === 'sda' && (
+                <div className={MESSAGE_ACTION_ROW_CLASS}>
+                  <ReportAiContent
+                    surface="reply"
+                    content={String(msg.text ?? '')}
+                    view="sda_chat"
+                    className={`${MESSAGE_ACTION_BUTTON_CLASS} hover:text-danger`}
+                    iconClassName={MESSAGE_ACTION_ICON_CLASS}
+                  />
+                </div>
+              )}
               {msg.sender === 'doctor' && (
-                <div className="flex flex-col items-center shrink-0 ml-2.5 mt-0.5 group/msg">
-                  <div className="w-7 h-7 rounded-full bg-indigo-500/10 border border-indigo-700/40 flex items-center justify-center">
-                    <User className="w-3.5 h-3.5 text-accent-text" />
-                  </div>
+                <>
                   {/* DELETE + EDIT on something the doctor already said (admin 2026-08-10). See
                       rewindCase() for why this is safe here and not merely cosmetic. */}
                   {!searchActive(chatSearchQuery) && (
                     <MessageEditActions
-                      className="mt-0.5 opacity-60 md:opacity-0 md:group-hover/msg:opacity-100 transition-opacity"
+                      className={MESSAGE_ACTION_ROW_CLASS}
                       text={String(msg.text ?? '')}
                       disabled={loading}
                       onDelete={() => { rewindCase(deleteMessage(withIds(messages), msg.id)); }}
@@ -1211,24 +1188,19 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
                       }}
                     />
                   )}
-                </div>
+                </>
               )}
             </div>
           ))}
 
           {loading && (
-            <div className="flex justify-start">
-              <div className="w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-700/40 flex items-center justify-center shrink-0 mr-2.5">
-                <Stethoscope className="w-3.5 h-3.5 text-success" />
-              </div>
-              <div className="bg-card border border-line rounded-2xl px-4 py-3 flex items-center gap-2">
-                <div className="flex gap-1">
-                  {[0, 1, 2].map(i => (
-                    <div key={i} className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-bounce text-on-accent" style={{ animationDelay: `${i * 0.15}s` }} />
-                  ))}
-                </div>
-                <span className="text-[10px] text-faint">Analyzing...</span>
-              </div>
+            <div className={`${TYPING_DOTS_CLASS} gap-2 text-sm text-muted`} role="status" aria-live="polite" aria-label="Doctor AI is analysing">
+              <span className="flex gap-1">
+                {[0, 1, 2].map(i => (
+                  <span key={i} className={TYPING_DOT_CLASS} style={{ animationDelay: `${i * 0.15}s` }} />
+                ))}
+              </span>
+              Analysing…
             </div>
           )}
 
@@ -1429,7 +1401,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
                 {/* Send → one-tap STOP while a reply loads (admin 2026-08-13). */}
                 {loading ? (
                   <button onClick={stop} title="Stop" aria-label="Stop the reply" className={COMPOSER_STOP_CLASS}>
-                    <span className="w-4 h-4 flex items-center justify-center font-black text-[11px]">■</span>
+                    <Square className="w-3.5 h-3.5 fill-current" />
                   </button>
                 ) : (
                   <button
@@ -1438,7 +1410,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
                     aria-label="Send"
                     className={COMPOSER_SEND_CLASS}
                   >
-                    <Send className="w-4 h-4" />
+                    <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
                   </button>
                 )}
               </>

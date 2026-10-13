@@ -95235,6 +95235,19 @@ answer was no. Found and handled now:
 The four "not a defect" rows of the first entry (spacing snap after Stop, charge wording, transient TS2307, complexity
 second opinion) are 🟡 too until the admin agrees — a "by design" claim is not ✅ on my word (sixth rule).
 
+### 2026-10-13 — Every AI chat reads like one product: Claude-shaped typography, thread and composer (admin: "sabhi ai ka font, headline etc bilkul claude jaisa … chat wala ui aur ux ko claude jaisa karo")
+
+- **Taken as a shape, not a brand.** Claude's faces, logo and name are proprietary and not ours to ship; what was copied is the shape — a serif greeting, one sans at a reading size, the reply as prose on the page, the user's message a soft container, a centred column, a soft pill composer with a circular up-arrow Send, quiet actions under a message. The brand palette (indigo accent, the three themes) is untouched: Claude's warm cream/terracotta palette would change all 72 screens and is a separate decision for the admin.
+- **Fonts:** `Inter Variable` (UI and replies) + `Source Serif 4 Variable` (headlines), OFL-1.1, bundled from npm via `src/main.tsx` — never a font CDN, so the phone apps carry their own letters. Stacks in `index.css` (`--nb-font-sans` / `--nb-font-serif`), both ending in the Devanagari fallbacks `imageFonts.ts` keeps; `html { font-family }` reads the sans, so the whole app is on one face. The boot splash in `index.html` stays `system-ui` (it paints before any font arrives).
+- **One design, five surfaces:** `chat/conversation.ts` (classes), `chat/Greeting.tsx` + `greetingText.ts` (pure, "Good evening, Asheesh"), `chat/ChatMarkdown.tsx` (the one renderer; safe http links in a new tab, the shared code block, tables, task lists, images), `.nb-prose` in `index.css`. Applied to the free chat (`AIChat.tsx`), the Pro builder thread and composer (`AgentV3Panel.tsx`), the professionals (`ProfessionalChat.tsx`, replies now rendered as markdown), Doctor AI (`SDAChat.tsx`, the red-flag card kept), the IDE mini chat, the image generator's Send, and the free chat's title bar. `bubbleTone.ts` is retired into `conversation.ts`.
+- **🔴 Found on the way, fixed at the root:**
+  1. Every chat surface styled its markdown with `prose prose-invert prose-xs …` — the typography plugin those classes belong to was never installed, so they did nothing; Doctor AI and the mini chat rendered bare browser defaults. Class: a styling promise with no stylesheet behind it. The census in `tests/theChatReadsLikeOneProduct.test.ts` fails on any `prose` className in a chat surface.
+  2. The free chat's reply row had 👍/👎 that only toggled a local colour and a "Submit Report" that ended in `alert('Thank you for your feedback!')` — nothing was sent. A fake feature (second absolute rule). Removed; the real Report (`ReportAiContent`, which reaches NavBharatAI) and Copy/Retry remain in the ghost row.
+  3. The free chat printed `msg.modelUsed` under every reply (a vendor label the White-Label Law never allowed on screen) and "YOU / NAVBHARATAI" captions in 7px capitals. Gone; the test holds `msg.modelUsed` and `activeAgent.toUpperCase()` out of every surface.
+- **Superseded, recorded in `ComposerShell.tsx` and the tests:** the 2026-09-23 tall Send ("send button ko bhi 2 line me banao") and the indigo focus border. Send is a 36px circle at the bottom-right corner — the same size as every other control in the row — pinned to the bottom edge in both layouts; the layout rules themselves (two rows beside the rail, one line beside the footer, the whole box is the input) are unchanged.
+- **Verified in a real Chromium** against the built stylesheet: light and dark, 390px and 1280px — the serif greeting, the prose scale, Hindi in the reply (Devanagari fallback), the table, the code block, the pill composer. (Headless Chromium's minimum window is 500px; the 390px frames were taken inside a 390px iframe.)
+- **Tests:** `tests/theChatReadsLikeOneProduct.test.ts` (fonts bundled and Devanagari-safe, greeting boundaries, the shared classes, the census, the removed fake row, the renderer; reverted three ways — accent fill back → fails, a `prose` class back → fails, a Devanagari fallback dropped → fails). Updated to the new shape: `oneComposerEverywhere`, `chatComposerAlignment`, `oneFocusRingNotTwo`, `theLineBreaksTheModelWrote` (the census now reads the one renderer), `ChatCodeBlock.test`.
+- **Not in this change:** the Pro builder's replies stay PLAIN text (links real via `LinkedText`) — its narration names files and commands a markdown pass would re-read; a markdown reply there is its own decision. The voice widget (`SonicChat.tsx`) and the History/Mode rail buttons are untouched.
 ## 2026-10-13 — BUILD REPORT `50378049`: CLOSED. All 15 rows retired from the queue
 
 #3699 merged, so every PR of this autopsy is on `main`: #3684 · #3686 · #3688 · #3690 · #3693 · #3694 ·
@@ -95332,7 +95345,7 @@ Not one subsystem but one habit, seen five times: **a fact recorded at the wrong
 
 | Item | Row | State |
 |---|---|---|
-| Live ETA after render / step count | Q-980 | FIX IN PR |
+| Live ETA after render / step count | Q-1039 | FIX IN PR |
 | READY_BEFORE_END "105s" (two clocks) | Q-981 | ✅ fixed by merged #3698 (Q-976); this report's figures kept as a fixture |
 | ETA band 1.6× | — | ✅ not-a-defect (Q-086 precedent: a labelled rough guess) |
 | "⏳ Still working — 12s" clock with no scope | — | ✅ merged #3692 (`userVisibleClockOrigin`) |
@@ -95382,5 +95395,23 @@ Not one subsystem but one habit, seen five times: **a fact recorded at the wrong
 ### Closing report
 
 BUILD REPORT 9c612cdb — RESOLUTION (at the time of writing)
-Items: see the ledger · in this PR: Q-980, Q-982…Q-1000 · ✅ elsewhere: Q-981 and five lines fixed by merged #3687/#3692/#3698 · 🟡 BLOCKED with all four fields: Q-1001…Q-1010, Q-1025 · OPEN follow-ups: Q-1011…Q-1037 (being worked in this PR).
+Items: see the ledger · in this PR: Q-982…Q-1000 and Q-1039 (renumbered from Q-980, which #3704 took first) · ✅ elsewhere: Q-981 and five lines fixed by merged #3687/#3692/#3698 · 🟡 BLOCKED with all four fields: Q-1001…Q-1010, Q-1025 · OPEN follow-ups: Q-1011…Q-1037 (being worked in this PR).
 FINAL: ❌ NOT COMPLETE — until this PR merges and the OPEN follow-ups are fixed or blocked.
+## 2026-10-13 — Q-975 closed (#3701 merged); Q-980 opened: a dark screen is a number, not an argument
+
+- **Q-975 closed.** #3701 merged. The row has been deleted, and its ID is appended to `BUILD_REPORT_QUEUE_CLOSED.txt`.
+- **Q-980 (found working Q-913).** #3699, another session's PR, fixed Q-913 itself: the playtest now says when it could
+  not look, so the model's prose no longer stands where a measurement belongs. One gap is left beside it. The playtest's
+  RUNS dimension reads only the brightness SPREAD, so a screen too dark to play still passes if it has a little
+  variation.
+  - **Done:** the playtest now records the picture's mean brightness and prints it, together with the contrast, in its
+    report line. A real-browser case proves the measurement, and removing it makes the case fail.
+  - **Blocked:** the scored "too dark" check waits on two real numbers, one from a too-dark game and one from a
+    legitimately dark game (a space shooter). Detection stays precision-first.
+- **My own miss, recorded so it is not repeated.** I started on Q-913 at about 04:15 without re-listing the open PRs,
+  and #3699 (fixing Q-912 to Q-914) was opened after my last check at 03:04. The rows I had marked BLOCKED were dropped,
+  and that work is not in this PR. From now on, open PRs are listed again before every new item, not once per session.
+- **ID collision, reported to the admin rather than raced (concurrency rule 4).** Draft #3700 (autopsy 303e8a6f
+  follow-up) uses Q-976, Q-977, Q-978 and Q-979 for its own new findings; its branch predates them on `main`. On `main`,
+  Q-976 to Q-978 are this session's closed db07e0af rows, and Q-979 is the open TS2563 row. `aClosedQueueRowStaysClosed`
+  catches a closed ID being re-added, and `theQueueIdsAreUnique` catches a duplicate. #3700 needs to renumber from Q-981.

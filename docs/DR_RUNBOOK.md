@@ -109,3 +109,23 @@ gcloud run services update navbharat-ai-prod --region asia-southeast1 \
    last good revision (`gcloud run services update-traffic navbharat-ai-prod --to-revisions <REV>=100`).
 3. Data loss/corruption → identify the last good backup (§1b), restore (§2).
 4. Verify `/api/ready` 200 + a smoke test of a real build, then resume traffic.
+
+---
+
+## Restore drill (go-live audit 2026-10-13) — OWNER APPROVAL REQUIRED to execute
+
+A backup is only proven by restoring it. `scripts/restoreDrill.mjs` imports an existing export into a
+**scratch** database named `drill-<id>`, lists the collections to count, and deletes the scratch database.
+
+```bash
+# Dry-run (default): prints the plan, runs nothing
+node scripts/restoreDrill.mjs --project gen-lang-client-0866594388 \
+  --export gs://<bucket>/firestore-backups/<TIMESTAMP> --target drill-2026-10-13 --location asia-southeast1
+# Execute (only with owner approval): add --execute --i-have-owner-approval
+```
+
+It refuses every production database id (`(default)`, `navbharat-prod`, `ai-studio-…`) and any name not
+matching `drill-<lowercase-id>`. Prerequisites that are still owner items: `FIRESTORE_BACKUP_BUCKET`, the
+daily Cloud Scheduler job (§1b), and PITR — none of these exist yet, so there is nothing to drill until
+the first export lands. Note: this runbook names database `ai-studio-…`, while `.firebaserc`/CI point at
+`navbharat-prod` (audit DB-26) — confirm which is live before the first export.

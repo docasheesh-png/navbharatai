@@ -164,6 +164,7 @@ import {
   isAgentV3FreeUser,
   isAgentV3PaidPublicEnabled,
   isAgentV3CreditGateEnabled,
+  billingAppliesTo,
   costRoutingActiveFor,
   buildRequiresSignIn,
   estimateBuildCost,
@@ -10474,7 +10475,7 @@ async function noteBuildOutcome(
     // (AGENTV3_CREDIT_GATE) is on. The credit gate lets ₹0-balance accounts be blocked from spending
     // NavBharatAI's model budget without turning on the rest of paid-public (which stays OFF during the
     // security migration). Free-list users (admin/testers) always bypass it.
-    if ((isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email)) {
+    if (billingAppliesTo(userId, email)) {
       // ONE wallet read serves the whole paid-surface gate: the power-mode paid-only check (doc's
       // totalMoneySpent) AND the balance math below (doc's remaining_balance via the same pure reader).
       // An anonymous caller (userId null) has no wallet to read → balance-unknown → fail-open proceed.
@@ -10558,8 +10559,7 @@ async function noteBuildOutcome(
       // on; the older per-feature flag stays honored as a surgical override. Either activates it.
       (freeTierCheapEnabled() || costRoutingActiveFor(userId, email)) &&
       userId &&
-      (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) &&
-      !isAgentV3FreeUser(userId, email) &&
+      billingAppliesTo(userId, email) &&
       cheapBuildFloorRunners().length > 0
     ) {
       const walletDoc = await firestoreWalletReader(getDb())(userId).catch(() => null);
@@ -13062,7 +13062,7 @@ async function noteBuildOutcome(
             ...buildBillingLabel({
               freeListed: isAgentV3FreeUser(userId, email),
               cheapEnginesOnly: freeTierBuildActive,
-              billingActive: (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email),
+              billingActive: billingAppliesTo(userId, email),
               billedUsd: watchdogBilledUsd,
               billedInr: watchdogBilledInr,
             }),
@@ -13172,7 +13172,7 @@ async function noteBuildOutcome(
           userCostStore.record(userId, watchdogBilledUsd).catch(() => {});
           // Only debit with the EXACT buildRef the normal settle uses; without it a ref mismatch could
           // let a race double-charge, so skip the debit rather than risk it (the build stays free — safe).
-          const billingActiveNow = (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email);
+          const billingActiveNow = billingAppliesTo(userId, email);
           if (billingActiveNow && billingCtx.buildStartedAt !== undefined) {
             try {
               const debitRes = await debitWalletForBuild(getDb() as any, userId, {
@@ -14091,7 +14091,7 @@ async function noteBuildOutcome(
       // reach the wallet at all (the settle's own `billingActive`), and could the first-build-free credit
       // zero it? Either "no" ⇒ no figure is ever sent. The discount is read ONCE, up front, so the live
       // number is priced exactly like the final bill; until it has been read nothing is sent.
-      const liveCostCharged = !!userId && (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email);
+      const liveCostCharged = !!userId && billingAppliesTo(userId, email);
       const liveCostOnboarding = freeOnboardingLimit() > 0;
       let liveCostDiscountPct: number | null = null;
       let liveCostLast: { inr: number; at: number } | null = null;
@@ -26462,7 +26462,7 @@ async function noteBuildOutcome(
       // untouched (today's behavior); flag on → chip + estimate gate + debit + block all activate.
       // The display-only monthly cost (userCostStore) still records always — it is an internal
       // estimate surface, not a money movement.
-      const billingActive = (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email);
+      const billingActive = billingAppliesTo(userId, email);
       let walletDebit: { tokensDebited: number; tokenBalance: number } | null = null;
       if (userId && effectiveBilledUsd > 0) {
         userCostStore.record(userId, effectiveBilledUsd).catch(() => {});

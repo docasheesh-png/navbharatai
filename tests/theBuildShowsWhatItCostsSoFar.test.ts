@@ -113,10 +113,13 @@ describe('one price, two readings (source guards — nothing else can see a seco
     expect(live).toContain('floorUsd: d.realCostUsd + d.sandboxUsd');
   });
 
-  it('"who is charged" is the settle\'s own predicate, word for word', () => {
-    const predicate = '(isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email)';
-    expect(route).toContain(`const billingActive = ${predicate};`);
-    expect(route).toContain(`const liveCostCharged = !!userId && ${predicate};`);
+  // Q-1026/Q-1033: this guard used to pin the predicate's TEXT, which is why six copies of it could sit
+  // in this file and still read as "one rule". The rule is now one FUNCTION (`billingAppliesTo`), so the
+  // guard asks the stronger question — do both readings call it, and is there any copy left to drift?
+  it('"who is charged" is the settle\'s own predicate — the one function, not a copy of its text', () => {
+    expect(route).toContain('const billingActive = billingAppliesTo(userId, email);');
+    expect(route).toContain('const liveCostCharged = !!userId && billingAppliesTo(userId, email);');
+    expect(route).not.toContain('isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()');
   });
 
   it('the event carries one number and nothing else', () => {

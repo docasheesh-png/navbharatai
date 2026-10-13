@@ -27,6 +27,9 @@
 // `AbortSignal.reason` carries the cause, so nothing new is threaded through the call graph — the
 // abort sites already have the controller in hand, and the runner already has the signal.
 
+import { BUDGET_REACHED_MESSAGE } from './turnDeadline';
+import { BUILD_STOPPED_MESSAGE, stoppedCallServedBy } from './stopSignal';
+
 /** Why a build's abort signal was fired. */
 export type AbortCause =
   | 'user-stop'      // the user pressed Stop
@@ -37,7 +40,21 @@ export type AbortCause =
   | 'reaper'         // the zombie reaper cleaned up a build that stopped reporting
   | 'cost-cap'       // the build spent past its cost ceiling (buildCostCeiling.ts)
   | 'futile'         // the build produced nothing for the whole window (futilityBreaker.ts)
+  | 'review-budget'  // a post-build review's own time budget ended (a pass's signal, never the build's)
+  | 'recheck-budget' // the post-fix recheck review's own time budget ended (a pass's signal)
+  | 'repair-budget'  // a post-build repair's own time budget ended (green / explorer repair; a pass's signal)
   | 'unknown';       // aborted with no cause recorded — reported as unknown, never guessed
+
+/**
+ * Every cause, once — the list a census walks. A `Record` over the union, so a cause added to the union
+ * above and not here fails to compile, and so does one listed here that the union does not have.
+ */
+const EVERY_CAUSE: Readonly<Record<AbortCause, true>> = Object.freeze({
+  'user-stop': true, watchdog: true, 'advisory-cap': true, 'deploy-drain': true, 'lock-reclaimed': true,
+  reaper: true, 'cost-cap': true, futile: true, 'review-budget': true, 'recheck-budget': true,
+  'repair-budget': true, unknown: true,
+});
+export const ALL_ABORT_CAUSES: readonly AbortCause[] = Object.freeze(Object.keys(EVERY_CAUSE) as AbortCause[]);
 
 const TAG = '__nbaiAbortCause';
 
@@ -169,6 +186,17 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
         : seededOnly
           ? `This build was not getting anywhere — it had not changed anything yet, so I stopped it instead of letting it run on. ${SEED_KEPT} Add a bit more detail about what the app should do.`
           : 'This build was not getting anywhere — nothing had been produced, so I stopped it instead of letting it run on. Nothing was lost. Try again with a bit more detail about what the app should do.';
+    // A PASS'S OWN BUDGET (autopsy 9c612cdb). These never end the build — only the review or repair that
+    // carries its own signal — so they never claim the build stopped. The sentence lands on that pass's
+    // agent card; before these causes existed it read "This build was stopped before it finished", on a
+    // build that went on to finish.
+    case 'review-budget':
+      return 'The final review had used its time, so it was stopped here — your app is not affected.';
+    case 'recheck-budget':
+      return 'The second look after the repair had used its time, so it was stopped here — your app is not affected.';
+    case 'repair-budget':
+      // Both repairs that carry this cause undo an unfinished pass (strictReverify: "unfinished ⇒ undo").
+      return 'This repair had used its time, so it was stopped here; an unfinished repair is never kept.';
     case 'unknown':
     default:
       // Honest about not knowing, rather than picking a plausible culprit.
@@ -191,6 +219,163 @@ export function stalledModelSummary(minutes: number, ctx: Pick<AbortSummaryConte
   if (ctx.builtSomething === true) return `A model response stalled and was stopped after about ${minutes} min. Your files so far are saved — send another message and I'll continue from here.`;
   if (ctx.seed) return `The model didn't respond in time (stalled after about ${minutes} min), before anything was changed. ${seedKeptSentence(ctx.seed)}`;
   return `The model didn't respond in time (stalled after about ${minutes} min). Nothing was lost — please try again.`;
+}
+
+/**
+ * WHOSE DECISION ENDED A MODEL CALL THAT AN ABORT CANCELLED (autopsy 9c612cdb, Q-910-D2).
+ *
+ * The stop path in `AgentRunner` was written for the user's Stop ("a stop is not a provider failure",
+ * autopsy 2720e553) and every other abort took it too. So the review that OUR 45-second budget cut off
+ * was recorded as "cancelled because the build was stopped" — a build nobody stopped — under the nominal
+ * model id, with nothing saying which engine was serving it or whose clock ended it.
+ *
+ *  • `user`         — the user pressed Stop (or typed it). Recorded exactly as it always was.
+ *  • `our-clock`    — one of OUR budgets or deadlines ended it: recorded as a budget end
+ *                     (`LLM_CALL_BUDGET_ENDED`), never as a provider failure and never as the user's Stop.
+ *  • `our-platform` — our infrastructure ended the build (a deploy drain, a reclaimed lock, the reaper):
+ *                     the build really was stopped, by us — recorded as a stopped call that names why.
+ *  • `unknown`      — no cause on the signal. Recorded exactly as it always was: never guessed.
+ *
+ * Exhaustive: a new cause fails to compile here until somebody decides whose it is. PURE.
+ */
+export type StoppedCallOwner = 'user' | 'our-clock' | 'our-platform' | 'unknown';
+
+export function stoppedCallOwner(cause: AbortCause): StoppedCallOwner {
+  switch (cause) {
+    case 'user-stop':
+      return 'user';
+    case 'watchdog':
+    case 'advisory-cap':
+    case 'cost-cap':
+    case 'futile':
+    case 'review-budget':
+    case 'recheck-budget':
+    case 'repair-budget':
+      return 'our-clock';
+    case 'deploy-drain':
+    case 'lock-reclaimed':
+    case 'reaper':
+      return 'our-platform';
+    case 'unknown':
+      return 'unknown';
+    default: {
+      const unreachable: never = cause;
+      return unreachable;
+    }
+  }
+}
+
+/** Which of our clocks a cause names — admin-only report wording, never a user string. */
+const OUR_CLOCK_WORDS: Readonly<Record<string, string>> = Object.freeze({
+  watchdog: "the build's wall-clock cap",
+  'advisory-cap': 'the advisory cap on the post-build checks',
+  'cost-cap': "the build's cost ceiling",
+  futile: 'the futility breaker (no progress for its whole window)',
+  'review-budget': "the post-build review's own time budget",
+  'recheck-budget': "the post-fix recheck review's own time budget",
+  'repair-budget': "a post-build repair's own time budget",
+});
+
+/** The platform event a cause names — admin-only report wording. */
+const OUR_PLATFORM_WORDS: Readonly<Record<string, string>> = Object.freeze({
+  'deploy-drain': 'a deploy drained the build',
+  'lock-reclaimed': 'a newer build reclaimed the lock',
+  reaper: 'the zombie reaper ended the build',
+});
+
+/**
+ * The words naming who stopped a cancelled call, for the report's detail line — '' for the user's Stop and
+ * for an unknown cause, whose records stay exactly as they were. PURE.
+ */
+export function stoppedCallCauseWords(cause: AbortCause): string {
+  return OUR_CLOCK_WORDS[cause] ?? OUR_PLATFORM_WORDS[cause] ?? '';
+}
+
+/**
+ * The error a cancelled call is recorded with.
+ *
+ *  • the user's Stop and an unknown cause → `ownMessage`, the stop error's own words, exactly as recorded
+ *    before this function existed;
+ *  • one of our clocks → worded around `BUDGET_REACHED_MESSAGE`, so `isBudgetEndedError` files it as
+ *    `LLM_CALL_BUDGET_ENDED` — no provider blamed, nothing counted as a provider's wasted time, not the
+ *    user's Stop — and naming WHICH clock;
+ *  • our platform → `BUILD_STOPPED_MESSAGE`, which is true (the build was stopped — by us); the cause
+ *    travels beside it for the detail line. PURE.
+ */
+export function stoppedCallError(cause: AbortCause, ownMessage: string): string {
+  switch (stoppedCallOwner(cause)) {
+    case 'our-clock':
+      return `${BUDGET_REACHED_MESSAGE} — stopped by ${stoppedCallCauseWords(cause)}, not by the user; no provider failed`;
+    case 'our-platform':
+      return BUILD_STOPPED_MESSAGE;
+    case 'user':
+    case 'unknown':
+    default:
+      return ownMessage;
+  }
+}
+
+/**
+ * What a call an abort cancelled is recorded as — the ONE decision `AgentRunner` applies on every stop.
+ *
+ *  • the user's Stop / an unknown cause → `{ model: nominalModel, error: <the stop error's own words> }` and
+ *    nothing extra: the record that existed before this function, key for key;
+ *  • ours (a clock or the platform) → the engine the provider chain was serving (when the stop error carries it),
+ *    the error `stoppedCallError` words, and `provider` / `stopCause` for the report's detail line. PURE.
+ */
+export function stoppedCallFields(cause: AbortCause, err: unknown, nominalModel: string): {
+  model: string;
+  error: string;
+  extra: { provider?: string; stopCause?: AbortCause };
+} {
+  const ownMessage = err instanceof Error ? err.message : String(err);
+  const owner = stoppedCallOwner(cause);
+  if (owner !== 'our-clock' && owner !== 'our-platform') return { model: nominalModel, error: ownMessage, extra: {} };
+  const servedBy = stoppedCallServedBy(err);
+  return {
+    model: servedBy?.model ?? nominalModel,
+    error: stoppedCallError(cause, ownMessage),
+    extra: { ...(servedBy ? { provider: servedBy.provider } : {}), stopCause: cause },
+  };
+}
+
+/**
+ * A pass's own abort, tied to the build's (autopsy 9c612cdb, Q-910-D2).
+ *
+ * Every post-build pass that runs a model on a signal of its own (the review, the post-fix recheck, the
+ * green and explorer repairs) used to wire it by hand: `controller.abort()` on the pass's budget, and
+ * `() => controller.abort()` as the listener on the build's signal. Both are bare — the very state this
+ * module's `abortBuild` exists to remove — so the pass's runner could never say why it stopped: our own
+ * budget read as an unexplained stop, and a USER's Stop that reached it through the link arrived without
+ * its cause and was reported as "unknown".
+ *
+ * Here the link carries the build's own reason across, and the pass's own stop must name its cause —
+ * `abort(cause)` takes no default, so a bare call does not compile. The first stop wins: a pass the build
+ * already stopped is not re-labelled by the budget that fires after it.
+ */
+export interface PassAbort {
+  readonly signal: AbortSignal;
+  /** End the pass for this reason. A no-op once it has been ended. */
+  abort(cause: AbortCause): void;
+  /** Detach from the build's signal. Always call it when the pass is over. */
+  dispose(): void;
+}
+
+export function passAbort(buildSignal: AbortSignal | null | undefined): PassAbort {
+  const controller = new AbortController();
+  const follow = (): void => {
+    if (controller.signal.aborted) return;
+    try { controller.abort(buildSignal?.reason); } catch { try { controller.abort(); } catch { /* already aborted */ } }
+  };
+  if (buildSignal?.aborted) follow();
+  else buildSignal?.addEventListener('abort', follow, { once: true });
+  return {
+    signal: controller.signal,
+    abort: (cause: AbortCause): void => {
+      if (!controller.signal.aborted) abortBuild(controller, cause);
+    },
+    dispose: (): void => { try { buildSignal?.removeEventListener('abort', follow); } catch { /* best-effort */ } },
+  };
 }
 
 /**
@@ -241,6 +426,12 @@ export function interruptedBeforeAnyVerdict(cause: AbortCause): boolean {
     case 'futile':
     case 'cost-cap':
     case 'advisory-cap':
+      return false;
+    // A pass's own budget never reaches the build's signal, so never the upsell; FALSE for the same
+    // reason as `advisory-cap` — the engine was asked, and these only ever follow a build that ran.
+    case 'review-budget':
+    case 'recheck-budget':
+    case 'repair-budget':
       return false;
     default: {
       // Exhaustive: a tenth cause added to `AbortCause` fails to compile here until someone decides

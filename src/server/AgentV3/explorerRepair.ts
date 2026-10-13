@@ -33,6 +33,7 @@ import { pressName, FAILING_VERDICTS, type ExploreRun, type PressResult, type Pr
 import { strictReverify, verifyAfterFix } from './verifyAfterFix';
 import { PLATFORM_CHECKS_THE_FIX } from './repairScope';
 import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
+import { passAbort } from './buildAbortCause';
 
 /** The green-freeze pass name (greenFreeze.ts ALLOWED_PASSES) and the billing phase share this word. */
 export const EXPLORER_REPAIR_PASS = 'explorer-repair';
@@ -295,16 +296,15 @@ export async function runExplorerRepair(targets: PressResult[], before: ExploreR
   const findings = explorerRepairFindings(targets);
   const setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = deps.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
-  const abort = new AbortController();
-  const stopWithBuild = () => abort.abort();
-  deps.buildSignal?.addEventListener('abort', stopWithBuild);
+  // The build's stop reaches the repair WITH its cause, and our own budget ends it as 'repair-budget' — so the call
+  // it cuts off is recorded as our clock, never as an unexplained stop (passAbort, autopsy 9c612cdb).
+  const abort = passAbort(deps.buildSignal);
 
   let finished = false;
   let timedOut = false;
   let changed: number | undefined;
   let judgement: ExplorerRepairJudgement | null = null;
   try {
-    if (deps.buildSignal?.aborted) abort.abort();
     const vr = await verifyAfterFix<Record<string, string>>({
       snapshot: async () => deps.snapshot,
       apply: async () => {
@@ -317,7 +317,7 @@ export async function runExplorerRepair(targets: PressResult[], before: ExploreR
         if (handle !== undefined) clearTimer(handle);
         if (outcome === 'timeout') {
           timedOut = true;
-          abort.abort();
+          abort.abort('repair-budget');
           await Promise.race([run.catch(() => undefined), new Promise((res) => setTimer(() => res(undefined), deps.settleMs ?? 15_000))]);
           return;
         }
@@ -338,8 +338,8 @@ export async function runExplorerRepair(targets: PressResult[], before: ExploreR
     });
     return { kept: vr.kept && finished && changed !== 0, reverted: vr.reverted, timedOut, finished, changed, judgement, targets: targets.length, budgetMs: deps.repairMs };
   } finally {
-    deps.buildSignal?.removeEventListener('abort', stopWithBuild);
-    abort.abort();
+    abort.dispose();
+    abort.abort('repair-budget');
   }
 }
 

@@ -170,7 +170,8 @@ describe('the route wires it the only safe way', () => {
     const block = route.slice(route.lastIndexOf('verifyAfterFix<', at), at + 3000);
     expect(block).toContain('if (!repairOk) return false');
     expect(block).toContain('return v.rendered && !v.inconclusive && !v.serverDown');
-    expect(block).toContain('repairAbort.abort()');
+    // Since autopsy 9c612cdb the repair's stop names its cause (passAbort): our budget, not an unexplained stop.
+    expect(block).toContain("repairAbort.abort('repair-budget')");
   });
 
   it('the advisory cap is re-armed only with the plan\'s finite bound', () => {

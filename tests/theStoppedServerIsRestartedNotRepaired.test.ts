@@ -99,7 +99,8 @@ describe('the wiring in routes/agentv3.ts', () => {
     expect(src).toContain('signal: reviewAbort.signal,');
     const fin = src.indexOf('stopListening();\n            // Whatever the outcome');
     expect(fin).toBeGreaterThan(0);
-    expect(src.slice(fin, fin + 600)).toContain('reviewAbort.abort();');
+    // Since autopsy 9c612cdb the stop names its cause (passAbort): the call it cuts off is recorded as our clock.
+    expect(src.slice(fin, fin + 600)).toContain("reviewAbort.abort('review-budget');");
   });
 
   it('the provider runner decides waste through wasteKindFor', () => {

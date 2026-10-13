@@ -611,7 +611,7 @@ import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHones
 import { reviewBuild, formatReview, reviewHasUnreadFindings, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths, reviewScopeWords, reviewEngineWords, reviewStoppedAtReasoningRung } from '../AgentV3/ReviewerAgent';
 import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
-import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
+import { salvageReview, formatPartialReview, collectReviewerWords, reviewNotReadyUserLine } from '../AgentV3/partialReview';
 import {
   saveWorkspaceMemoryFor,
   restoreWorkspaceMemory,
@@ -648,7 +648,7 @@ import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
 import { restateDesignAfterRepair } from '../AgentV3/designAfterRepair';
 import { withRequestNotes } from '../AgentV3/requestNotes';
-import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence } from '../AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
@@ -24612,10 +24612,10 @@ async function noteBuildOutcome(
           // Stop still reaches it — and it is aborted the moment its verdict is conceded, after the grace
           // and the salvage have had their chance. `makeSubAgentSpawn` holds no state of its own, so a
           // per-review spawn over the same deps is the shared one with a different signal.
-          const reviewAbort = new AbortController();
-          const stopReviewWithBuild = (): void => reviewAbort.abort();
-          if (abort.signal.aborted) reviewAbort.abort();
-          else abort.signal.addEventListener('abort', stopReviewWithBuild, { once: true });
+          // `passAbort` (autopsy 9c612cdb): the build's stop reaches the review WITH its cause, and our own
+          // budget ends it as 'review-budget' — so the call it cuts off is on the record as our clock, not as
+          // a build nobody stopped.
+          const reviewAbort = passAbort(abort.signal);
           // What THIS turn changed, and — for a suggest-only review — that code in full. Computed before
           // the spawn because whether the review may read at all depends on it (autopsy bee95692).
           const reviewChanged = reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden);
@@ -24667,11 +24667,13 @@ async function noteBuildOutcome(
            * what the reviewer already said out loud. Costs nothing: no extra call, no extra token —
            * this is money the user has already spent, being collected instead of binned.
            */
-          const reviewerSaid: string[] = [];
-          const stopListening = events.subscribe((e) => {
-            if (e.type === 'narration' && e.agent === 'reviewer' && typeof e.text === 'string') reviewerSaid.push(e.text);
-            else if (e.type === 'agent_done' && e.agent === 'reviewer' && typeof e.summary === 'string') reviewerSaid.push(e.summary);
-          }, false); // no replay — only this review's own words, never an earlier turn's
+          // 🔴 AND EVERY CHANNEL ITS WORDS ARRIVE ON (autopsy 9c612cdb, Q-910-D3). This listener once heard
+          // only narration and agent_done — and since the suggest-only review became ONE call (bee95692), a
+          // call cut off by its budget narrates nothing: its answer had only ever streamed. The collector
+          // (partialReview.ts) also joins the streamed text per turn, without holding the same words twice,
+          // and drops the working clock.
+          const reviewerSaid = collectReviewerWords('reviewer');
+          const stopListening = events.subscribe((e) => reviewerSaid.take(e), false); // no replay — only this review's own words, never an earlier turn's
           // 🔑 THE REVIEWER'S SPEND IS ATTRIBUTED TO THE REVIEWER (admin 2026-09-18, build b6f88a72:
           // 40 calls, 523,374 input tokens = 34.4% of the build, `responseChars: 0` on every one, and
           // then no verdict at all — all of it billed at ×4). The zone is inherited by every awaited
@@ -24699,9 +24701,11 @@ async function noteBuildOutcome(
           try {
             review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');
             // It stopped in front of a reasoning engine instead of spending its budget there — said, never silent.
-            const stoppedAt = reviewStoppedAtReasoningRung(reviewerSaid);
+            const stoppedAt = reviewStoppedAtReasoningRung(reviewerSaid.lines());
             if (stoppedAt) {
-              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_NOT_RUN_REASONING_ENGINE', autoResolved: true, message: `The suggest-only review was not run: the engine left on the chain (${stoppedAt}) reasons before every answer, and this review gets one ${Math.round(reviewBudget / 1000)} s call — it stopped instead of keeping the user waiting for an answer that would not arrive in time. Its suggestions are not available for this build; "review it" runs a full review on its own.` }); } catch { /* best-effort */ }
+              // Admin line. It used to end `"review it" runs a full review on its own` — no such handler exists
+              // (autopsy 9c612cdb, Q-910-D1): a turn that writes nothing never runs the review.
+              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_NOT_RUN_REASONING_ENGINE', autoResolved: true, message: `The suggest-only review was not run: the engine left on the chain (${stoppedAt}) reasons before every answer, and this review gets one ${Math.round(reviewBudget / 1000)} s call — it stopped instead of keeping the user waiting for an answer that would not arrive in time. Its suggestions are not available for this build.` }); } catch { /* best-effort */ }
             }
           } catch (e) {
             // Timeout (or a reviewer error): the app is built + compiles + saved — say so HONESTLY
@@ -24726,7 +24730,7 @@ async function noteBuildOutcome(
               // It landed. Everything downstream — recordReview, the C9 auto-fix, the honesty holder —
               // now runs exactly as it would have on a review that finished inside its budget.
               try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LATE', message: `Post-build review overran its ${reviewBudget}ms budget and was collected within the ${graceMs}ms grace — its findings were kept, not discarded.`, autoResolved: true }); } catch { /* best-effort */ }
-            } else if ((salvaged = salvageReview(reviewerSaid.join('\n'))) !== null) {
+            } else if ((salvaged = salvageReview(reviewerSaid.text())) !== null) {
               // SALVAGE before conceding. Everything the reviewer narrated is already paid for; the
               // only question is whether anyone looks at it. A salvaged verdict can never FAIL the
               // build (see salvageReview's honesty rules) and deliberately does NOT feed the C9
@@ -24738,9 +24742,16 @@ async function noteBuildOutcome(
               try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_PARTIAL', message: `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${reviewScopeWords(reviewOneCall ? (reviewInline?.files.length ?? 0) : null, rFiles.length)}${reviewEngineWords(buildDiag.lastServedModel())} — but ${salvaged.issues.length} finding(s) it had already reported were RECOVERED from its own narration instead of discarded. Leads from an UNFINISHED review: they cannot fail a build and do not drive the auto-fix.`, autoResolved: false }); } catch { /* best-effort */ }
               review = null;
             } else {
-              events.emit({ type: 'narration', agent: 'architect', text: timedOut
-                ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish in the time it had — send "review it" and I\'ll run it on its own.'
-                : '📋 Your app is built and saved (the post-build review could not run this time).', ts: Date.now() });
+              // 🔴 ONE CLASSIFICATION, BOTH AUDIENCES (autopsy 9c612cdb, Q-910-D1). `suggestOnly` used to be
+              // decided BELOW the user's sentence, so the report filed a green app's timed-out suggestions as
+              // process-only — "nothing for the user to do" (REVIEW_SUGGESTIONS_NOT_READY, SignBridge
+              // 2026-09-26) — while the user, on that same green app, was told to send "review it", a command
+              // nothing handles: a turn that writes nothing never runs this review, and "review it" reads as
+              // chat. The decision now comes first and the user's line follows it (reviewNotReadyUserLine):
+              // suggest-only → no line at all; could have repaired → a true sentence that names no command.
+              const suggestOnly = reviewPlan.mode === 'suggest';
+              const notReadyLine = reviewNotReadyUserLine({ suggestOnly, timedOut });
+              if (notReadyLine) events.emit({ type: 'narration', agent: 'architect', text: notReadyLine, ts: Date.now() });
               // HONESTY (rule 5): this used to be recorded `autoResolved: true` — a literal claim that
               // the problem was resolved. Nothing was resolved: the completeness net was DOWN for this
               // build, which is exactly the caveat the health card should carry. It is a warning, not
@@ -24758,7 +24769,7 @@ async function noteBuildOutcome(
               // said was an offer, never a repair. Its timing out is a fact about OUR process, so it is not
               // filed as an unresolved warning against a working app (autopsy SignBridge, 2026-09-26, where
               // it sat in the app's problem list). Where the review could have REPAIRED, it stays a warning.
-              const suggestOnly = reviewPlan.mode === 'suggest';
+              // (`suggestOnly` is decided at the top of this branch — the user's line reads the same decision.)
               barrenPhases.add(PHASE_POST_BUILD_REVIEW);
               try { buildDiag.record({ phase: 'build', severity: suggestOnly ? 'info' : 'warning', code: suggestOnly ? 'REVIEW_SUGGESTIONS_NOT_READY' : 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${reviewScopeWords(reviewOneCall ? (reviewInline?.files.length ?? 0) : null, rFiles.length)}${reviewEngineWords(buildDiag.lastServedModel())} — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build` : `Post-build review errored — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build`, autoResolved: suggestOnly }); } catch { /* best-effort */ }
               review = null;
@@ -24768,9 +24779,10 @@ async function noteBuildOutcome(
             // appending a later turn's reviewer output to this turn's buffer.
             stopListening();
             // Whatever the outcome, nothing reads this reviewer after here — end it (a no-op if it
-            // already finished) and drop the build-abort link so it cannot outlive the build.
-            reviewAbort.abort();
-            abort.signal.removeEventListener('abort', stopReviewWithBuild);
+            // already finished) and drop the build-abort link so it cannot outlive the build. Its cause is
+            // OUR budget, so the call it cuts off is recorded as our clock (autopsy 9c612cdb, Q-910-D2).
+            reviewAbort.abort('review-budget');
+            reviewAbort.dispose();
           }
           // A CLAIM THE COMPILER ALREADY ANSWERED IS NOT A FINDING (autopsy b10aae9a). The reviewer cannot
           // run tsc; the platform did. When it passed, a "TypeScript errors are present" finding is an
@@ -24877,9 +24889,9 @@ async function noteBuildOutcome(
               if (plan.repairMs > 0 && canVerify && !abort.signal.aborted) {
                 armAdvisoryCap(plan.capMs);
                 events.emit({ type: 'narration', agent: 'architect', text: `🔧 Your app works — checking ${greenRepairable.length} problem(s) the review reported and fixing any that are real, then checking it still works…`, ts: Date.now() });
-                const repairAbort = new AbortController();
-                const stopRepairWithBuild = () => repairAbort.abort();
-                abort.signal.addEventListener('abort', stopRepairWithBuild);
+                // The build's stop reaches the repair with its cause; our budget ends it as 'repair-budget'
+                // (passAbort, autopsy 9c612cdb) — never a bare abort that reads as an unexplained stop.
+                const repairAbort = passAbort(abort.signal);
                 let repairOk = false;
                 let repairTimedOut = false;
                 // What the pass really changed, measured against the snapshot — never its own report.
@@ -24919,7 +24931,7 @@ async function noteBuildOutcome(
                         // Stop it, and let it settle before anything is reverted — a runner still writing
                         // while the snapshot goes back would leave a hybrid.
                         repairTimedOut = true;
-                        repairAbort.abort();
+                        repairAbort.abort('repair-budget');
                         await Promise.race([run.catch(() => undefined), new Promise((res) => setTimeout(res, 15_000))]);
                         return;
                       }
@@ -24983,8 +24995,8 @@ async function noteBuildOutcome(
                     });
                   } catch { /* best-effort */ }
                 } finally {
-                  abort.signal.removeEventListener('abort', stopRepairWithBuild);
-                  repairAbort.abort();
+                  repairAbort.dispose();
+                  repairAbort.abort('repair-budget');
                 }
               } else {
                 try {
@@ -25093,9 +25105,8 @@ async function noteBuildOutcome(
                   let recheckReview: Awaited<ReturnType<typeof reviewBuild>> | null = null;
                   let recheckWhy = recheckBudget === 0 ? 'the build had no time left for it' : '';
                   if (recheckBudget > 0) {
-                    const recheckAbort = new AbortController();
-                    const stopRecheckWithBuild = (): void => recheckAbort.abort();
-                    abort.signal.addEventListener('abort', stopRecheckWithBuild, { once: true });
+                    // The build's stop reaches it with its cause; our budget ends it as 'recheck-budget' (autopsy 9c612cdb).
+                    const recheckAbort = passAbort(abort.signal);
                     try {
                       const recheckSample = await Promise.all(rFiles.slice(0, 5).map(async (p) => ({
                         path: p,
@@ -25112,8 +25123,8 @@ async function noteBuildOutcome(
                     } catch (e) {
                       recheckWhy = e instanceof Error && /timed out/i.test(e.message) ? 'it ran out of time' : 'it could not finish';
                     } finally {
-                      recheckAbort.abort();
-                      abort.signal.removeEventListener('abort', stopRecheckWithBuild);
+                      recheckAbort.abort('recheck-budget');
+                      recheckAbort.dispose();
                     }
                   }
                   const recheck = postFixRecheckOutcome(recheckReview, recheckWhy);

@@ -127,7 +127,7 @@ describe('Q-067 — a word we do not know is not a service to connect to', () =>
   it('the route hands it to the builder, the planner and the fast lane, on new builds only', () => {
     const route = read('src/server/routes/agentv3.ts');
     expect(route).toContain("intent === 'new_build' && !isImportTurn && unknownNameNoteEnabled() ? unknownNamesInRequest(prompt) : []");
-    // PIN UPDATED 2026-10-12 (autopsy 9c612cdb, Q-948): the note joins the ONE request-notes list (since Q-274 it
+    // PIN UPDATED 2026-10-12 (autopsy 9c612cdb, Q-991): the note joins the ONE request-notes list (since Q-274 it
     // shared a planner-only list with the script note), and the architect, the planner and the fast lane all read
     // that list. Same three lanes as before, plus the one-shot lane; see tests/everyRequestNoteReachesEveryLane.test.ts.
     expect(route).toContain("{ code: 'unknown-name', text: unknownNameNote },");

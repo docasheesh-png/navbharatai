@@ -1,4 +1,4 @@
-// Autopsy 9c612cdb (2026-10-12), Q-945 — found while tracing Q-944: update_todo counted as built work.
+// Autopsy 9c612cdb (2026-10-12), Q-988 — found while tracing Q-987: update_todo counted as built work.
 //
 // `builtSomethingNow()` decides whether a stopped or timed-out build says "Your files so far are saved — send
 // another message and I'll continue from here" or "Nothing had been written yet, so nothing was lost". It

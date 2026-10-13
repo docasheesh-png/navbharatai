@@ -17002,7 +17002,7 @@ async function noteBuildOutcome(
         onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
           try { buildDiag.recordLlmCall(c); } catch { /* diagnostics are best-effort */ }
         },
-        // Turns spent only on update_todo (autopsy 9c612cdb, Q-944), summed across the runners that share these
+        // Turns spent only on update_todo (autopsy 9c612cdb, Q-987), summed across the runners that share these
         // opts and reported once as TODO_ONLY_TURNS after generation (main run, escalation, empty-build retry).
         onTodoOnlyTurn: (t: { latencyMs: number }) => {
           todoOnlyTally.turns += 1;
@@ -17103,14 +17103,14 @@ async function noteBuildOutcome(
       // A KEYPAD PHONE THE USER NAMED (Q-846): the builder is told before it writes, so what it builds fits the keys.
       // Pure (deviceTarget.ts never throws), so no best-effort wrapper — like the notes below.
       const keypadPhoneForBuild = !isImportTurn ? namedNonSmartphone(prompt) : null;
-      // NO ADS FROM A PLAYER THAT SHOWS ITS OWN (Q-947, autopsy 9c612cdb — "Your ad-free video player app is
+      // NO ADS FROM A PLAYER THAT SHOWS ITS OWN (Q-990, autopsy 9c612cdb — "Your ad-free video player app is
       // ready." over YouTube's own embedded player). A new build is told when the request names the source; an
       // edit ("remove the ads") when the WHOLE project already embeds such a player — see thirdPartyLimits.ts.
       // ⚠️ The conditions live in thirdPartyLimits.ts on purpose: this handler sits at TypeScript's control-flow
       // limit (TS2563), and every `&&` / `if` written here is one more branch the checker must walk.
       const thirdPartyPlayersAtStart = await editTurnAdServingPlayers(prompt, { editTurn: intent === 'edit_existing', importTurn: isImportTurn }, () => loadWorkspaceFiles(workspaceId));
       const thirdPartyLimitAsk = thirdPartyLimitAsked({ prompt, newBuild: intent === 'new_build', importTurn: isImportTurn, projectPlayers: thirdPartyPlayersAtStart });
-      // 🧭 EVERY REQUEST NOTE REACHES EVERY LANE — ONE LIST, READ BY ALL FOUR (Q-948, autopsy 9c612cdb). Each note
+      // 🧭 EVERY REQUEST NOTE REACHES EVERY LANE — ONE LIST, READ BY ALL FOUR (Q-991, autopsy 9c612cdb). Each note
       // used to be threaded into each lane by hand, and each fix reached the lanes its author remembered: the
       // keypad-phone rule (Q-846) reached the architect only, the stack note missed the fast lane and the one-shot
       // lane, and the no-login rule missed the planner — while on the weak tier the fast lane writes FIRST. Now a
@@ -17848,7 +17848,7 @@ async function noteBuildOutcome(
             // The planner decides every module's files before a builder sees the notes, so it gets every one of
             // them too — or a Kotlin request is planned as Gradle modules the builder may not write (autopsy
             // 042e472f, 2026-10-01). The plan's goal carries them, so every module turn reads them again. ONE list
-            // (`requestNotes`, Q-948): until 9c612cdb the planner read three of the five notes the architect did.
+            // (`requestNotes`, Q-991): until 9c612cdb the planner read three of the five notes the architect did.
             const plannerGoal = requestNotesText ? `${requestNotesText}\n\n---\n\n${prompt}` : prompt;
             const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
             if (modules.length >= MIN_PROJECT_MODULES) {
@@ -18793,7 +18793,7 @@ async function noteBuildOutcome(
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
         // Every request note rides `requestNotes`, APART from the request, so the lane's own size reader
-        // measures the user's words and not ours (Q-948: the no-login note alone doubled 9c612cdb's file budget).
+        // measures the user's words and not ours (Q-991: the no-login note alone doubled 9c612cdb's file budget).
         const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix, requestNotes: requestNotesText, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           // A planned config file the starter already has is edited, never rewritten blind (isProjectConfigPath).
           readExisting: readExistingProjectFile,
@@ -18886,7 +18886,7 @@ async function noteBuildOutcome(
             // 🖥️ The calendar report's first build (earlyPreview.ts): the lane stopped before its entry and
             // the full builder wrote five more leaves and never the entry — five minutes of a starter page.
             (salvageEntryLine ? ` ${salvageEntryLine}` : '') +
-            // 🏷️ Build 9c612cdb (Q-942): a name the lane changed is named to the builder that never saw it.
+            // 🏷️ Build 9c612cdb (Q-985): a name the lane changed is named to the builder that never saw it.
             (sb.contractRenames?.length ? ` ${contractRenameHandoffLine(sb.contractRenames)}` : '') +
             `\n\n---\n\n${buildPrompt}`;
         }
@@ -19503,7 +19503,7 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* an advisory finding must never affect a build */ }
-      // 📋 MODEL TURNS SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-944: 5 of 22 turns, 20.2 s). Recorded on
+      // 📋 MODEL TURNS SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-987: 5 of 22 turns, 20.2 s). Recorded on
       // every build, zero included, for the reason the block above states: a missing line reads as "none".
       // It covers the generation runs above; a heal pass that starts after this line is not in its count.
       // Info and never a cause — it describes our engine's pace, not the app.
@@ -20000,7 +20000,7 @@ async function noteBuildOutcome(
       // and consumed by the route smoke check much further down. Declared here so the two are not
       // forced to share a scope, and so planning cannot pay for a second workspace load.
       let routeSmokePlan: SmokePlan | null = null;
-      // THE WHOLE PROJECT, for facts a claim or a disclosure is judged against (Q-947, autopsy 9c612cdb). Set by
+      // THE WHOLE PROJECT, for facts a claim or a disclosure is judged against (Q-990, autopsy 9c612cdb). Set by
       // the integrity pass below (durable store + this turn's writes); `integrityFiles` itself is block-scoped.
       // An edit turn's writes are a slice — the player the first build wrote is in a file this turn never touched.
       let wholeProjectFiles: Record<string, string> | null = null;
@@ -24192,7 +24192,7 @@ async function noteBuildOutcome(
           // "A beautiful, polished UI" about a page the browser painted as raw HTML (renderStyle.ts).
           renderUnstyled: currentRenderStyle()?.verdict === 'unstyled',
         });
-        // "Your ad-free video player app is ready." over YouTube's own embedded player (Q-947, autopsy 9c612cdb).
+        // "Your ad-free video player app is ready." over YouTube's own embedded player (Q-990, autopsy 9c612cdb).
         // Judged on the WHOLE project's players, never an edit turn's slice; one correction list either way.
         const auditedSummary = `${result.summary}${claimCorrection(contradictions)}`;
         const adPlayers = await adServingPlayersNow();
@@ -24260,7 +24260,7 @@ async function noteBuildOutcome(
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 
-      // 📺 …AND A PLAYER WHOSE ADS THE APP CANNOT SWITCH OFF IS NAMED (Q-947, autopsy 9c612cdb). The user asked for no
+      // 📺 …AND A PLAYER WHOSE ADS THE APP CANNOT SWITCH OFF IS NAMED (Q-990, autopsy 9c612cdb). The user asked for no
       // ads and the finished project embeds YouTube's (or another site's) own player: one plain line, unless the reply
       // — or the correction above — already says the player's ads may play. Every lane, the fast lane's
       // platform-written summary included. Recorded for the admin as an info line, like NON_SMARTPHONE_TOLD.

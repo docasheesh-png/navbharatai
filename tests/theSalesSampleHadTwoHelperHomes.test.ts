@@ -108,7 +108,7 @@ describe('2 · a data type never shares a component\'s name', () => {
   });
 
   it('🔒 the lane renames right after the contract call, before the contract file is written', () => {
-    // ⚠️ Pin moved deliberately (build 9c612cdb, Q-941/Q-942): the split now runs inside
+    // ⚠️ Pin moved deliberately (build 9c612cdb, Q-984/Q-985): the split now runs inside
     // `prepareSharedContract` — the one door the blueprint lane shares, which before had no split at all —
     // and the contract file takes the renames to write them into its header. Same order, same guarantee.
     const src = read('src/server/AgentV3/SimpleBuilder.ts');

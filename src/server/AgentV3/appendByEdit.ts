@@ -1,7 +1,7 @@
 // AgentV3 — ADDING TO THE END OF A FILE NEEDS NO ANCHOR, and every instruction that asks for an addition
 // says so up front.
 //
-// 🔴 WHY (autopsy 9c612cdb, 2026-10-12, Q-943). The builder was told to "add the rules to src/index.css now"
+// 🔴 WHY (autopsy 9c612cdb, 2026-10-12, Q-986). The builder was told to "add the rules to src/index.css now"
 // and to extend the design kit "by APPENDING (edit_file, new rules at the end)". Nothing it could see before
 // its first attempt said HOW to append: the edit_file contract read "old_string must appear exactly once",
 // and the one anchor-free form — an EMPTY old_string, which `applyEdit` has appended since 2026-07-21 — was

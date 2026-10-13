@@ -1,5 +1,5 @@
 /**
- * AUTOPSY 9c612cdb (2026-10-12) — Q-952. The report said:
+ * AUTOPSY 9c612cdb (2026-10-12) — Q-993. The report said:
  *
  *   DESIGN_CONSISTENCY warning "Design consistency 90/100 (A) across 14 file(s). 8 spacing values are off the
  *     4px grid — snap to multiples of 4px for rhythm. Worst: src/index.css (7)."

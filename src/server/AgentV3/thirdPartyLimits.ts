@@ -1,6 +1,6 @@
 /**
  * 📺 A PROPERTY ONLY THE OTHER SERVICE CONTROLS IS NEVER CLAIMED — AND THE USER IS TOLD WHO CONTROLS IT
- * (Q-947, autopsy 9c612cdb, 2026-10-12).
+ * (Q-990, autopsy 9c612cdb, 2026-10-12).
  *
  * The request: *"… similar to youtube … an option for paste link … There we could also stream the videos
  * with no adds"*. The app plays every video in YouTube's own embedded player (`youtube.com/embed/<id>`),
@@ -55,7 +55,7 @@ const AD_WORD = String.raw`(?:ads|adds|adverts?|advertisements?|advertising|comm
 /**
  * The ad word right after a REMOVAL word ("skip", "block", "cut", "hide"). Those are nouns too, and then "adds" is the
  * verb: "double-tap skip adds 10 seconds", "each block adds a new video", "a skip adds nothing" (adversarial review of
- * Q-947). "adds" followed by an OBJECT — a number, an article, a pronoun, "new"/"more"/"nothing" — is that verb and is
+ * Q-990). "adds" followed by an OBJECT — a number, an article, a pronoun, "new"/"more"/"nothing" — is that verb and is
  * never read as adverts; "remove adds from YouTube" and "skip the adds" still are.
  */
 const AD_WORD_AFTER_REMOVAL = String.raw`(?:ads|adds(?!\s+(?:[\d+]|(?:a|an|the|new|more|another|one|it|them|its|their|your|my|our|some|each|every|extra|nothing|something|up)\b))|adverts?|advertisements?|advertising|commercials|pre-?rolls?)`;

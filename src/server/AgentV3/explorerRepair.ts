@@ -116,7 +116,7 @@ export function explorerRepairFindings(targets: PressResult[]): string[] {
             // search box's instruction above, so a dead light/dark switch was told to "filter the list".
             : p.expects === 'view'
               ? 'Make it open what its name says — a details screen, a panel or a dialog with the real item\'s information — using data the app already has.'
-              // Adding theme rules is an addition to the stylesheet — said with HOW (autopsy 9c612cdb, Q-943).
+              // Adding theme rules is an addition to the stylesheet — said with HOW (autopsy 9c612cdb, Q-986).
               : `Make the switch really change the app's colours: set the theme the stylesheet already styles (for example data-theme on <html>), or add the rules for the one it sets. ${APPEND_WITH_EMPTY_OLD_STRING}`)
         : p.verdict === 'covered'
           ? 'Fix the stacking so the control sits ABOVE whatever is over it and can be clicked: give the menu or overlay that holds it a higher z-index than the element on top, and make sure a full-screen canvas, image or backdrop does not sit over the controls (or does not receive pointer events) while they are meant to be used.'

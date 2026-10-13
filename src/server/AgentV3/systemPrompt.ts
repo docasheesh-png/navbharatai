@@ -384,7 +384,7 @@ export function editModePrefix(fileTree: string[] = []): string {
     '   If edit_file reports "old_string not found", it will show you the current',
     '   file content — copy the exact lines from that output and retry. Do NOT',
     '   fall back to write_file on an existing file just because edit_file failed.',
-    // Adding is not changing: no anchor to guess, so none to miss (autopsy 9c612cdb, Q-943).
+    // Adding is not changing: no anchor to guess, so none to miss (autopsy 9c612cdb, Q-986).
     `   ${APPEND_WITH_EMPTY_OLD_STRING}`,
     '',
     '4. MINIMUM CHANGES: alter only what the user asked for. Do not restructure',
@@ -789,7 +789,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  text is NOT a label. Do this as you write the field, never as a later pass.',
     ...DESIGN_KIT_BRIEF,
     '  🔴 NEVER REPLACE `src/index.css` WHOLESALE — it IS the kit. Add your app\'s styles by APPENDING',
-    // HOW to append is said here, before the first attempt (autopsy 9c612cdb, Q-943): the kit is 500+ lines
+    // HOW to append is said here, before the first attempt (autopsy 9c612cdb, Q-986): the kit is 500+ lines
     // the builder is told it need not read, so an anchor quoted from memory of it is a guess.
     `  new rules at the end: ${APPEND_WITH_EMPTY_OLD_STRING} To restyle a kit class, write your own rule for it below the`,
     '  kit. A rewrite that drops kit rules has them put back automatically, so replacing the file gains',
@@ -1119,7 +1119,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  that allows everyone, which is the hole with extra steps.',
     '- Begin by calling update_todo to lay out a short, concrete plan, together with the first tool calls',
     '  of that turn. Keep it updated as you progress (mark items in_progress / done).',
-    // When, not only whether (autopsy 9c612cdb, Q-944: five of 22 turns were update_todo and nothing else).
+    // When, not only whether (autopsy 9c612cdb, Q-987: five of 22 turns were update_todo and nothing else).
     `  ${TODO_RIDES_WITH_WORK}`,
     '- ONE PLAN for the whole request: the todo list is a single running plan the user watches',
     '  from 0/N to N/N. Never abandon it for a fresh, shorter list mid-build — resend the SAME',

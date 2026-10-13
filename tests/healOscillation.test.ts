@@ -103,7 +103,7 @@ describe('every heal write site is guarded — one left out and the loop survive
     // the test and a wrong one here would eventually be "fixed" by loosening it.
     // Five since autopsy f496c75b (2026-09-30): the type-only VALUE import heal is guarded like the rest.
     // Six since autopsy 6cd698cc (2026-10-01): the same heal at the write door is guarded too.
-    // Seven since build 9c612cdb (2026-10-12, Q-942): the recorded contract-rename heal at the write door.
+    // Seven since build 9c612cdb (2026-10-12, Q-985): the recorded contract-rename heal at the write door.
     expect((src.match(/healWouldOscillate\(/g) ?? []).length).toBe(7);
     expect(src).toContain("import { healWouldOscillate } from './HealLedger';");
   });

@@ -1,5 +1,5 @@
 /**
- * THE BILL OF REPORT 9c612cdb, TO THE CENT — and the two documents that described it wrongly (Q-956).
+ * THE BILL OF REPORT 9c612cdb, TO THE CENT — and the two documents that described it wrongly (Q-996).
  *
  * The bill was right: real provider cost $0.274781 (Kimi's 896,000 cache-read tokens at Kimi's $0.19 cache
  * rate, the fast lane's GLM counted once) + sandbox $0.020972, × the Weak 4× markup = $1.183010 (₹114.71),

@@ -36,7 +36,7 @@ export interface FastLanePhases {
   contractOutcome?: 'written' | 'cut' | 'failed' | 'skipped' | 'stopped' | 'handed-off' | 'not-needed';
   contractCapMs?: number;
   /**
-   * The lane's hand-off, split out of `generate` (Q-939, report 9c612cdb). That ledger read
+   * The lane's hand-off, split out of `generate` (Q-982, report 9c612cdb). That ledger read
    * `generate 47.1s (87%)` about a lane that decided to hand off 15 s into generating, then waited
    * 22 s for the one call still in flight and spent 10 s saving the finished files: three different
    * things in one number, so the hand-off cost nothing on paper.

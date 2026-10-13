@@ -230,7 +230,7 @@ describe('§F a login nobody asked for is not built', () => {
   it('REVERSION GUARD: the architect, the fast lane, the one-shot lane and the planner all read it', () => {
     const src = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
     expect(src).toContain('requestScopeNote({ request: planning.text, newBuild: intent === \'new_build\' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain })');
-    // PIN UPDATED 2026-10-12 (autopsy 9c612cdb, Q-948): the note joins the ONE request-notes list, and every lane
+    // PIN UPDATED 2026-10-12 (autopsy 9c612cdb, Q-991): the note joins the ONE request-notes list, and every lane
     // reads that list — the planner too, which this note used to miss. The invariant is the same, one lane wider.
     expect(src).toContain("{ code: 'request-scope', text: requestScopeText },");
     expect(src).toContain("buildPrompt = [requestNotesText, buildPrompt].filter(Boolean).join('\\n\\n---\\n\\n');");

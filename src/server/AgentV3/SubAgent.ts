@@ -462,7 +462,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
           contextBlocks.push(
             'The design kit is ALREADY in `src/index.css`. Its classes are listed here, so there is no need '
             + 'to read the stylesheet to find them. Append your app\'s own rules; never replace the file. '
-            // How to append, before the first attempt (autopsy 9c612cdb, Q-943) — see appendByEdit.ts.
+            // How to append, before the first attempt (autopsy 9c612cdb, Q-986) — see appendByEdit.ts.
             + `${APPEND_WITH_EMPTY_OLD_STRING}\n`
             + DESIGN_KIT_BRIEF.join('\n'),
           );

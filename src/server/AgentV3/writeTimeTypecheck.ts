@@ -174,7 +174,7 @@ export function splitByWrittenFiles(errors: TscError[], written: string[]): { ow
  * file has not got yet — autopsy 2a7fa4b0); `fixHere` = every other error in the file(s) just written;
  * `others` = errors in files this write did not touch.
  *
- * 🔴 AUTOPSY 9c612cdb (2026-10-12, Q-946). The full builder wrote `src/App.tsx` before the three
+ * 🔴 AUTOPSY 9c612cdb (2026-10-12, Q-989). The full builder wrote `src/App.tsx` before the three
  * components it imports — the admin's entry-first order for an early preview (`earlyPreview.ts`) — and
  * the note correctly said "⏳ … fixed in ANOTHER file … Do NOT rewrite src/App.tsx". App.tsx was never
  * rewritten for them. But the counter beside the note added those three errors to `ownErrorsSurfaced`
@@ -276,7 +276,7 @@ export function writeTypecheckNote(
         : `Also ${others.length} error(s) elsewhere (${named}${more}).`,
     );
   }
-  // A NAME THE PLATFORM CHANGED (build 9c612cdb, Q-942 — contractRenames.ts). TS2749 on a recorded rename
+  // A NAME THE PLATFORM CHANGED (build 9c612cdb, Q-985 — contractRenames.ts). TS2749 on a recorded rename
   // carries tsc's own `typeof X` suggestion, which is wrong for the data; said for the written file's errors
   // AND the ones elsewhere, because in that build the error sat in the 'elsewhere' bucket for two writes.
   parts.push(...typeRenameAdvice(suggestedTypeRenames([...own, ...others], renames)));
@@ -326,7 +326,7 @@ export class WriteTypecheckQueue<R> {
  * ONE COMPILE'S VERDICT TOGETHER WITH HOW IT WAS OBTAINED — the value every writer that joined the run
  * receives. The dispatcher's queue is `WriteTypecheckQueue<WriteTypecheckRunOutcome>`.
  *
- * 🔴 AUTOPSY 9c612cdb (2026-10-12, Q-940). The queue above hands every writer that arrived during a run
+ * 🔴 AUTOPSY 9c612cdb (2026-10-12, Q-983). The queue above hands every writer that arrived during a run
  * the SAME result, produced by ONE writer's closure. The facts about that result — the compiler printed
  * nothing, never ran, or was not ready — were locals of each writer, set only inside the closure that
  * actually ran. So every writer that JOINED a run judged the shared errors with its own defaults:
@@ -381,7 +381,7 @@ export interface WriteTypecheckStats {
    * Errors in the written file(s) whose remedy is in ANOTHER file not written yet — a module or an export
    * the next writes add, which is what the admin's entry-first order produces by design (`earlyPreview.ts`).
    * Quoted to the model as "⏳ fixed in ANOTHER file", never as its own error, and reported apart so the
-   * report does not show a planned step as a struggle (autopsy 9c612cdb, Q-946). See `splitByRemedy`.
+   * report does not show a planned step as a struggle (autopsy 9c612cdb, Q-989). See `splitByRemedy`.
    */
   waitingErrorsSurfaced: number;
   /** Sandbox time spent, in total. */
@@ -647,7 +647,7 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
   const notRun = (s.notRunRuns ?? 0) > 0
     ? `, ${s.notRunRuns} where the compiler never ran (it could not be installed or started — nothing was checked)`
     : '';
-  // A designed wait is not a builder error (autopsy 9c612cdb, Q-946): the entry written before its parts
+  // A designed wait is not a builder error (autopsy 9c612cdb, Q-989): the entry written before its parts
   // is the admin's early-preview order, and its "cannot find module" errors are named apart.
   const waitingErrors = s.waitingErrorsSurfaced ?? 0;
   const waiting = waitingErrors > 0

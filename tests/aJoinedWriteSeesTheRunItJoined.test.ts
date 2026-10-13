@@ -1,8 +1,8 @@
 /**
  * A WRITE THAT JOINS A SHARED COMPILE SEES THAT COMPILE'S WHOLE VERDICT — and a designed wait is not a
- * builder error (autopsy 9c612cdb, 2026-10-12: Q-940 and Q-946).
+ * builder error (autopsy 9c612cdb, 2026-10-12: Q-983 and Q-989).
  *
- * Q-940 — THE CLASS: a coalesced operation shared its RESULT but not the facts about how the result was
+ * Q-983 — THE CLASS: a coalesced operation shared its RESULT but not the facts about how the result was
  * obtained. `WriteTypecheckQueue` hands every writer that arrives during a compile the NEXT compile's
  * result, produced by ONE writer's closure. "tsc printed nothing", "the compiler never ran" and "the
  * compiler was not ready" were locals of each writer, set only inside the closure that ran, so every
@@ -14,7 +14,7 @@
  * The probe that found it, three writes against a never-ran compiler: "w1: never-ran / w2: never-ran /
  * w3: clean", stats {runs: 2, cleanRuns: 1, notRunRuns: 2}.
  *
- * Q-946 — the full builder wrote `src/App.tsx` before the three components it imports (the admin's
+ * Q-989 — the full builder wrote `src/App.tsx` before the three components it imports (the admin's
  * entry-first order for an early preview, `earlyPreview.ts`). The note said "⏳ fixed in ANOTHER file …
  * Do NOT rewrite src/App.tsx" and App.tsx was never rewritten for them — but the counter added the three
  * errors to "error(s) quoted back in the file just written" and remembered them as compile errors, so the
@@ -80,7 +80,7 @@ async function threeAtOnce(d: ToolDispatcher): Promise<string[]> {
   ]);
 }
 
-describe('Q-940 · every writer that joins a compile gets that compile\'s verdict', () => {
+describe('Q-983 · every writer that joins a compile gets that compile\'s verdict', () => {
   it('🔴 a compiler that never ran is never counted clean — not for the writer that joined it either', async () => {
     const box = new SlowCompileSandbox(() => 'sh: 1: node_modules/.bin/tsc: No such file or directory\n');
     const { d } = dispatcherOn(box);
@@ -202,7 +202,7 @@ const APP = [
   '',
 ].join('\n');
 
-describe('Q-946 · an error that waits on a file not written yet is reported apart from the builder\'s own', () => {
+describe('Q-989 · an error that waits on a file not written yet is reported apart from the builder\'s own', () => {
   it('the split: the report\'s three TS2307 are all waiting, none is the file\'s own to fix', () => {
     const { fixHere, waiting, others } = splitByRemedy(parseTscErrors(REPORT_147_4), ['src/App.tsx'], { 'src/App.tsx': APP });
     expect(waiting).toHaveLength(3);

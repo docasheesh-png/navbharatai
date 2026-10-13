@@ -7,7 +7,7 @@ import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 import { TODO_RIDES_WITH_WORK, runCanWrite } from './todoOnlyTurn';
 
 /**
- * The update_todo contract WITHOUT the "rides with the work" rule (autopsy 9c612cdb, Q-944). A lane that
+ * The update_todo contract WITHOUT the "rides with the work" rule (autopsy 9c612cdb, Q-987). A lane that
  * cannot write — the plan-approval lane, offered ONLY update_todo and told to end its turn after it, and the
  * planning roles — is given this text by `catalogForTools`: "never as a turn of its own" would contradict the
  * one job that lane has. Every writer lane gets it with `TODO_RIDES_WITH_WORK` appended.
@@ -50,7 +50,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'edit_file',
       // The anchor-free append is part of the CONTRACT, not only of the failure message (autopsy 9c612cdb,
-      // Q-943): a model asked to add rules to a stylesheet it never read had to guess an anchor otherwise.
+      // Q-986): a model asked to add rules to a stylesheet it never read had to guess an anchor otherwise.
       description:
         'Replace an exact, unique string in a file with a new string. The ' +
         'old_string must appear exactly once; include surrounding context to ' +
@@ -3900,7 +3900,7 @@ export function catalogForTools(allowed: ToolName[]): ClaudeToolDef[] {
   if ((allowed as string[]).includes('second_opinion')) base.push(secondOpinionToolDef());
   if ((allowed as string[]).includes('consensus')) base.push(consensusToolDef());
   const defs = dedupeToolsByName(base);
-  // A lane that cannot write is not told to pair the plan with work it cannot do (autopsy 9c612cdb, Q-944):
+  // A lane that cannot write is not told to pair the plan with work it cannot do (autopsy 9c612cdb, Q-987):
   // the same `runCanWrite` answer that keeps the runner's hand-back away from it.
   if (runCanWrite(allowed as string[])) return defs;
   return defs.map((t) => (t.name === 'update_todo' ? { ...t, description: UPDATE_TODO_CONTRACT } : t));

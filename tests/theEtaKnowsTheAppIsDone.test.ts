@@ -1,6 +1,6 @@
 // Autopsy 9c612cdb (admin, 2026-10-12) — "similar to youtube … paste link" video app, weak tier, 457.8 s.
 //
-// Q-933: the live ETA line decided from TIME BUDGETS ONLY. The app was answered at 348.4 s, rendered in a
+// Q-980: the live ETA line decided from TIME BUDGETS ONLY. The app was answered at 348.4 s, rendered in a
 // real browser and protected at 350.0 s, and the minute-6 tick at 361.4 s still said "this is taking
 // longer than I estimated — about 3 min more to go": the 3 min was the overrun floor constant, the tick
 // sat INSIDE the promised band (361 s < 385 s, a 45 s pre-overrun window), and the only phase flag the
@@ -8,7 +8,7 @@
 // with no label ("~2 min to go"), and at 121 s two repair edits of one file had counted as two plan
 // steps ("3 of 5 steps done · ~2 min to go" with 5.6 min left).
 //
-// Q-934: READY_BEFORE_END said "ran 2 more step(s) over 105s". The ready mark was an elapsed time on the
+// Q-981: READY_BEFORE_END said "ran 2 more step(s) over 105s". The ready mark was an elapsed time on the
 // RUNNER's clock (the runner started 65.9 s into the build, after the fast lane) and the route subtracted
 // it from the BUILD's elapsed time. The real figure was 39 s.
 //
@@ -62,7 +62,7 @@ describe('the report\'s numbers are the real ones', () => {
   });
 });
 
-describe('Q-933 · A — the app is running, so the line says so and names no number', () => {
+describe('Q-980 · A — the app is running, so the line says so and names no number', () => {
   it('🔴 the report: at 361.4 s, with the app rendered at 350.0 s, the tick says where the build is', () => {
     const d = etaTickLine(state({ appRenderedAt: T0 + 350_000 }));
     expect(d.kind).toBe('app-running');
@@ -103,7 +103,7 @@ describe('Q-933 · A — the app is running, so the line says so and names no nu
   });
 });
 
-describe('Q-933 · B — a guess keeps its label, and nothing inside the promised band is an overrun', () => {
+describe('Q-980 · B — a guess keeps its label, and nothing inside the promised band is an overrun', () => {
   it('🔴 the report: at 241.4 s the countdown to the top of the rough band says it is a guess', () => {
     const d = etaTickLine(state({ elapsedMs: 241_400 }));
     expect(d.kind).toBe('rough-countdown');
@@ -169,7 +169,7 @@ describe('Q-933 · B — a guess keeps its label, and nothing inside the promise
   });
 });
 
-describe('Q-933 · the ETA counts a file once, however often it is repaired', () => {
+describe('Q-980 · the ETA counts a file once, however often it is repaired', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
   const PLAN = 5;
   // The report's writes between the plan (85.4 s) and the minute-2 tick (121.4 s).
@@ -194,7 +194,7 @@ describe('Q-933 · the ETA counts a file once, however often it is repaired', ()
   });
 });
 
-describe('Q-933 · the wiring — one decision, fed every fact, told the moment a phase begins', () => {
+describe('Q-980 · the wiring — one decision, fed every fact, told the moment a phase begins', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
   const code = route.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
@@ -241,7 +241,7 @@ describe('Q-933 · the wiring — one decision, fed every fact, told the moment 
   });
 });
 
-describe('Q-934 · C — READY_BEFORE_END subtracts two moments, never two clocks', () => {
+describe('Q-981 · C — READY_BEFORE_END subtracts two moments, never two clocks', () => {
   const report = (score: number): ReadinessReport => ({ score, ready: true, blockers: [], warnings: [], tier: 'production' });
 
   it('🔴 the report: runner started at 65.9 s, judged finished at 322.8 s, ended at 361.9 s → over 39s', () => {

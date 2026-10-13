@@ -25,7 +25,7 @@ import { turnAskedTheUser, turnDeclined } from './nudgeToBuild';
 import { DEFECT_TEXT, type DesignDefect } from './DesignCoverage';
 import { undefinedClassesInFile } from './CssConsistency';
 import { orphanInstruction } from './orphanHandBack';
-// The one append sentence every "add rules" instruction carries (autopsy 9c612cdb, Q-943 — appendByEdit.ts).
+// The one append sentence every "add rules" instruction carries (autopsy 9c612cdb, Q-986 — appendByEdit.ts).
 import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 
 export const MAX_STYLE_RESUMES = 1;

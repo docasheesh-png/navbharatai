@@ -137,7 +137,7 @@ describe('wiring — every deterministic heal reports, and the route turns it in
     // four file heals above plus the package.json dependency sync — and, since autopsy f496c75b
     // (2026-09-30), the type-only VALUE import heal (an enum imported with `import type`) — and, since
     // autopsy 6cd698cc (2026-10-01), the same heal at the write door, run by the write-time typecheck —
-    // and, since build 9c612cdb (2026-10-12, Q-942), the recorded contract-rename heal at the write door
+    // and, since build 9c612cdb (2026-10-12, Q-985), the recorded contract-rename heal at the write door
     // (`healRecordedTypeRenamesAtWrite`), which lands through the same helper.
     expect((dispatcher.match(/noteHeal\(this\.workspaceId,/g) || []).length).toBe(1);
     expect((dispatcher.match(/await this\.landHealWrite\(/g) || []).length).toBe(8);
@@ -151,7 +151,7 @@ describe('wiring — every deterministic heal reports, and the route turns it in
     expect(note[0].split(',').length).toBeGreaterThanOrEqual(4);
     // …and every call site hands the helper what it READ as its third argument.
     const calls = dispatcher.match(/await this\.landHealWrite\([^)]*\)/g) || [];
-    expect(calls).toHaveLength(8); // 8 since build 9c612cdb (Q-942) — see the test above
+    expect(calls).toHaveLength(8); // 8 since build 9c612cdb (Q-985) — see the test above
     for (const call of calls) expect(call.split(',').length).toBe(3);
   });
 

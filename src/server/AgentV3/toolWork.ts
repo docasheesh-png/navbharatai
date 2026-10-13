@@ -1,6 +1,6 @@
 // AgentV3 — DID THIS TOOL CALL PRODUCE WORK? Every tool is classified, explicitly, in one place.
 //
-// 🔴 WHY (autopsy 9c612cdb, 2026-10-12, Q-945 — the part of 2b0a3ed5 that fix missed). `builtSomethingNow()`
+// 🔴 WHY (autopsy 9c612cdb, 2026-10-12, Q-988 — the part of 2b0a3ed5 that fix missed). `builtSomethingNow()`
 // decides whether a stopped or timed-out build tells the user "Your files so far are saved — send another
 // message and I'll continue from here" or "Nothing had been written yet, so nothing was lost". It counted a
 // tool call as work unless its name was on a short list of READS (read_file, grep, glob, recall, …). That is

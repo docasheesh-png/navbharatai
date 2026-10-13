@@ -3205,7 +3205,7 @@ export class ToolDispatcher {
   /**
    * Every writer that joins a run receives the run's whole OUTCOME — its errors AND how they were obtained
    * (printed nothing, never ran, not ready). Never bare errors: a writer that joined a run must not judge
-   * the shared answer with its own defaults (autopsy 9c612cdb, Q-940 — see `WriteTypecheckRunOutcome`).
+   * the shared answer with its own defaults (autopsy 9c612cdb, Q-983 — see `WriteTypecheckRunOutcome`).
    */
   private readonly _writeTypecheckQueue = new WriteTypecheckQueue<WriteTypecheckRunOutcome>();
   /**
@@ -3696,7 +3696,7 @@ export class ToolDispatcher {
         s.skipped += tsPaths.length;
         return '';
       }
-      // 🔴 EVERY FACT ABOUT A RUN IS A FACT OF THE RUN, NOT OF THE WRITER (autopsy 9c612cdb, Q-940). Writers
+      // 🔴 EVERY FACT ABOUT A RUN IS A FACT OF THE RUN, NOT OF THE WRITER (autopsy 9c612cdb, Q-983). Writers
       // that arrive during a compile all share the NEXT one, which runs ONE writer's closure. So the run's
       // verdict travels in the shared outcome, and every per-RUN counter (`runs`, `cleanRuns`,
       // `notRunRuns`, `compiledUnprobed`) is counted here, once per execution. Only per-WRITE facts
@@ -3767,7 +3767,7 @@ export class ToolDispatcher {
         errors = withoutHealedTypeOnly(errors, healedTypeOnly.healed);
         if (errors.length === 0) return healedNote;
       }
-      // A contract rename the platform recorded, used as a type (build 9c612cdb, Q-942) — fixed here in files
+      // A contract rename the platform recorded, used as a type (build 9c612cdb, Q-985) — fixed here in files
       // this build wrote; for the rest the contract joins `sources`, where the note's ✏️ advice reads it. ONCE
       // per run, like the heal above: only what the heal ADDS is shared, never the first writer's `sources`.
       const typeRenames = await this.typeRenameHealForRun(run, errors, tsPaths, sources);
@@ -3788,7 +3788,7 @@ export class ToolDispatcher {
       // Counted by the SAME split the note makes, after the export targets are in hand (they are what
       // tells "add the export there" from "fix it here"). An error that waits on a file not written yet is
       // the entry-first order working as designed: it is reported apart and is not a compile error to
-      // remember (autopsy 9c612cdb, Q-946 — the reviewer reads remembered errors as findings).
+      // remember (autopsy 9c612cdb, Q-989 — the reviewer reads remembered errors as findings).
       const { fixHere, waiting } = splitByRemedy(errors, tsPaths, sources);
       s.ownErrorsSurfaced += fixHere.length;
       s.waitingErrorsSurfaced = (s.waitingErrorsSurfaced ?? 0) + waiting.length;
@@ -3819,7 +3819,7 @@ export class ToolDispatcher {
   }
 
   /**
-   * The recorded-rename heal for ONE compile (build 9c612cdb, Q-942), keyed on the shared run exactly as
+   * The recorded-rename heal for ONE compile (build 9c612cdb, Q-985), keyed on the shared run exactly as
    * `typeOnlyHealForRun` is: the errors it starts from are the run's errors after the type-only heal, which
    * every joiner holds identically. What is shared is only what the heal ADDS — the contract text and the
    * healed files, the note, the remaining errors — so a joiner keeps its own `sources` for everything else.
@@ -3874,7 +3874,7 @@ export class ToolDispatcher {
   }
 
   /**
-   * TS2749 on a name the PLATFORM renamed (build 9c612cdb, Q-942 — contractRenames.ts). The contract file's
+   * TS2749 on a name the PLATFORM renamed (build 9c612cdb, Q-985 — contractRenames.ts). The contract file's
    * header records each rename (`// renamed: VideoList -> VideoListData (…)`); it is read only when such an
    * error exists. In files this build wrote, the old name in a plain type position becomes the new one and
    * is imported from the contract module, through the heal write path; everything else — a user's own file,
@@ -11934,7 +11934,7 @@ export function nearestEditRegion(existing: string, oldStr: string, windowLines 
   const to = Math.min(lines.length, hit + windowLines + 1);
   let window = lines.slice(from, to).join('\n');
   if (window.length > maxChars) window = window.slice(0, maxChars) + '\n…(truncated — call read_file for more)';
-  // 🔴 THE ONE NOT-FOUND BRANCH THAT NEVER SAID HOW TO APPEND (autopsy 9c612cdb, Q-943). An anchor quoted
+  // 🔴 THE ONE NOT-FOUND BRANCH THAT NEVER SAID HOW TO APPEND (autopsy 9c612cdb, Q-986). An anchor quoted
   // from a compacted memory of the kit's last lines partly matched (nearest line 526 of 538), so the miss
   // landed HERE — and this branch, alone of the four, gave no append route: the retry resent 1,964 tokens
   // of CSS. Said whenever the edit was plausibly an addition: the window reaches the end of the file, or the

@@ -1,9 +1,9 @@
-// AUTOPSY 9c612cdb (2026-10-12), Q-948 — A NOTE ABOUT THE REQUEST REACHED THE LANES ITS AUTHOR REMEMBERED.
+// AUTOPSY 9c612cdb (2026-10-12), Q-991 — A NOTE ABOUT THE REQUEST REACHED THE LANES ITS AUTHOR REMEMBERED.
 //
 // NavBharatAI tells its builders things about the request before they write: a stack it does not build
 // (unsupportedStack.ts), a script built as a web app (scriptRequest.ts), a word it does not know (unknownName.ts),
 // "no sign-in was asked" (requestScope.ts), a keypad phone (deviceTarget.ts, Q-846), and now a video player whose
-// ads the app cannot switch off (thirdPartyLimits.ts, Q-947). Four lanes build apps: the architect, the fast lane,
+// ads the app cannot switch off (thirdPartyLimits.ts, Q-990). Four lanes build apps: the architect, the fast lane,
 // the one-shot lane and the project planner. Each note was threaded into each lane BY HAND, and on main 377d915:
 //
 //                      architect  fast lane  one-shot  planner

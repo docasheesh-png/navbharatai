@@ -1,4 +1,4 @@
-// Build report 9c612cdb (admin, 2026-10-12), Q-941 — the shared contract's string enum rejected a quoted value.
+// Build report 9c612cdb (admin, 2026-10-12), Q-984 — the shared contract's string enum rejected a quoted value.
 //
 // The fast lane's contract call returned `export enum VideoSource { YouTube = 'YouTube', Vimeo = 'Vimeo' }`.
 // `src/hooks/useVideoList.ts`, written in its own isolated call, imported only `Video, VideoListData` and wrote
@@ -239,7 +239,7 @@ describe('3 · the siblings the conversion leans on', () => {
     expect(r).toContain('YouTube');
   });
 
-  // Review of Q-941 (2026-10-12): reading `as const` objects as enums first took ANY flat exported object and
+  // Review of Q-984 (2026-10-12): reading `as const` objects as enums first took ANY flat exported object and
   // only the keys a regex could see. A drift line is an ORDER to the repair model ("fix these exact
   // mismatches"), so each case below was a new instruction to break correct code — none existed before.
   it('🔒 the drift map never invents a member drift line: only the enum PAIR counts, and only a fully written key set', () => {

@@ -3312,7 +3312,7 @@ the flag entries above promise.
   itself under that name. The net: `fixTypeImportValueClash` in the shared deterministic pass turns a TS2865
   import type-only (tsc's own fix; a model repair had made it a self-import). Test-locked and
   reversion-proven in `tests/theSalesSampleHadTwoHelperHomes.test.ts`.
-  🧷 **`AGENTV3_CONTRACT_ENUM_AS_CONST` (NOT set; default ON; `off` reverts) — build 9c612cdb, 2026-10-12, Q-941.**
+  🧷 **`AGENTV3_CONTRACT_ENUM_AS_CONST` (NOT set; default ON; `off` reverts) — build 9c612cdb, 2026-10-12, Q-984.**
   The contract declared `export enum VideoSource { YouTube = 'YouTube', … }`; `useVideoList.ts`, written in its
   own isolated call, wrote `source: 'YouTube'` — TS2322, because a TypeScript string enum is nominal and no quoted
   value is assignable to it. `stringEnumsAsConstObjects` (`contractEnums.ts`) now rewrites every string enum, and
@@ -3327,7 +3327,7 @@ the flag entries above promise.
   member as a type in its own file (`type: ActionType.Add`) gets TS2702; and arithmetic on a no-initialiser enum's
   members no longer compiles (their values are now strings). **What to watch:** no TS2322 `'"x"' is not assignable
   to type` on a contract type. Test: `tests/aQuotedValueFitsTheContractsEnum.test.ts`.
-  🏷️ **`AGENTV3_CONTRACT_RENAME_HEAL` (NOT set; default ON; `off` reverts the heal only) — same build, Q-942.** The
+  🏷️ **`AGENTV3_CONTRACT_RENAME_HEAL` (NOT set; default ON; `off` reverts the heal only) — same build, Q-985.** The
   split renamed `VideoList` → `VideoListData` and told only the user; the full builder wrote `VideoList` as a type
   in App.tsx and met TS2749 with tsc's own wrong suggestion (`typeof VideoList`). Now every rename is (1) one strict
   header line in the contract file (`// renamed: VideoList -> VideoListData (VideoList is the component in
@@ -3706,7 +3706,7 @@ the flag entries above promise.
   dependency and a React app is never "Stack: Vue", a password form is a sign-in journey run signed out
   (`isCredentialForm`), the sign-in explorer reads `passwordHash: hashPassword("demo123")`, and a pruned package takes
   its `@types/` with it. Test: `tests/theNotesAppAutopsy.test.ts`.
-- **📺 `AGENTV3_THIRD_PARTY_LIMITS` — A PROPERTY ONLY THE OTHER SERVICE CONTROLS IS NEVER CLAIMED (Q-947, autopsy
+- **📺 `AGENTV3_THIRD_PARTY_LIMITS` — A PROPERTY ONLY THE OTHER SERVICE CONTROLS IS NEVER CLAIMED (Q-990, autopsy
   9c612cdb, 2026-10-12). ⚠️ NOT set; default ON; `off` turns off all three layers below.** The request asked to "stream
   the videos with no adds"; the app played every video in YouTube's own embedded player and the reply opened "Your
   ad-free video player app is ready." That player shows its own ads on videos whose owners earn from them, and a page
@@ -3719,7 +3719,7 @@ the flag entries above promise.
   correction, judged on the WHOLE project (never an edit turn's slice) right after `claimAudit`. The derived app name
   and meta description drop "ad-free" over such a player. Nothing calls anything illegal; the circumvention policy
   (proxies, stream extractors, downloaders) is the admin's open decision. Report codes `THIRD_PARTY_LIMIT_TOLD` (info)
-  and `CLAIM_UNSUPPORTED` (the correction). Same autopsy, no flag (Q-948): every request note (stack, script, unknown
+  and `CLAIM_UNSUPPORTED` (the correction). Same autopsy, no flag (Q-991): every request note (stack, script, unknown
   name, request scope, keypad phone, third-party limits) now rides ONE list (`requestNotes` in `agentv3.ts`) that the
   architect, the fast lane, the one-shot lane and the project planner all read, and the fast lane reads it apart from
   the request (`SimpleBuildDeps.requestNotes`) so its file budget measures the user's words — appended to the request,

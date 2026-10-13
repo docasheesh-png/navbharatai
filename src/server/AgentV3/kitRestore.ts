@@ -430,7 +430,7 @@ export function kitKeepToolNote(path: string, keep: KitKeep): string {
   return `\nℹ️ DESIGN KIT KEPT: this rewrite of ${path} dropped the design kit's rules for ${keep.kept.length} class(es) `
     + `(${shown}${more}) without restyling them, so they were appended after your content unchanged — screens `
     + 'that use them stay styled. Your own rules come first and were not altered. To restyle a kit class, write '
-    // "append" named the goal and not the call (autopsy 9c612cdb, Q-943) — the call is now spelled out.
+    // "append" named the goal and not the call (autopsy 9c612cdb, Q-986) — the call is now spelled out.
     + `your own rule for it; to add styles, append rather than rewriting this file. ${APPEND_WITH_EMPTY_OLD_STRING}`;
 }
 

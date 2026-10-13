@@ -336,7 +336,7 @@ export function isParallelSafeToolUse(toolUse: ToolUse, opts?: { parallelBuild?:
  * parallel-safe — which WRITES. Negating it would make a real builder's work read as no work at all,
  * on exactly the flag that is switched on in production. Two questions, two predicates.
  *
- * 🔴 AND NOT A DENY-LIST (autopsy 9c612cdb, Q-945). 2b0a3ed5 answered "not work" only for the parallel-safe
+ * 🔴 AND NOT A DENY-LIST (autopsy 9c612cdb, Q-988). 2b0a3ed5 answered "not work" only for the parallel-safe
  * READS, so update_todo, update_preview, typecheck, screenshot and every new check counted as built work,
  * and a fresh build stopped after a plan-only turn said its files were saved. Every tool is now classified
  * on purpose in `toolWork.ts`, whose census fails CI on a tool in neither set.
@@ -1329,7 +1329,7 @@ export class AgentRunner {
         }
         totalToolUses += turn.toolUses.length;
         producingToolUses += turn.toolUses.filter(toolUseCouldProduceWork).length;
-        // 📋 A TURN SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-944: five of 22 turns, 20 s of model time).
+        // 📋 A TURN SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-987: five of 22 turns, 20 s of model time).
         // Measured here, while `llmStartedAt` still times only the model call; handed back below, once.
         const todoOnlyTurn = isTodoOnlyTurn(turn.toolUses.map((tu) => tu.name), tools.map((t) => t.name));
         if (todoOnlyTurn) {

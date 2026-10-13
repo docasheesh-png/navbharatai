@@ -101,6 +101,6 @@ export function deadThemeSwitchNote(path: string, code: string, project: Readonl
     + `${dead.some((h) => h.name === 'dark') ? ', no dark: classes' : ''}), so pressing that switch changes nothing on screen. `
     + existingThemeMechanism(project)
     + 'Fix it now, while the file is open: make the switch set what the styles already use, or add rules that change the colour variables. '
-    // Adding rules is an addition to the stylesheet — said with HOW (autopsy 9c612cdb, Q-943).
+    // Adding rules is an addition to the stylesheet — said with HOW (autopsy 9c612cdb, Q-986).
     + APPEND_WITH_EMPTY_OLD_STRING;
 }

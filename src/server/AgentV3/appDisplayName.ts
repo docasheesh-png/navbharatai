@@ -206,7 +206,7 @@ export function resolveAppDisplayName(opts: {
   appSource?: string | null;
   /**
    * The project embeds a player that shows its own ads (`thirdPartyLimits.ts` → `projectAdServingPlayers`).
-   * Then the name and description WE derive from the request never carry "ad-free" (autopsy 9c612cdb, Q-947):
+   * Then the name and description WE derive from the request never carry "ad-free" (autopsy 9c612cdb, Q-990):
    * "Build an ad-free YouTube player." would otherwise publish og:title "Ad-Free YouTube Player" over
    * YouTube's own player, whose ads the app cannot switch off. The user's chosen name is theirs and kept.
    */

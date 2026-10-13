@@ -64,7 +64,7 @@ export function stoppedLaneSummary(filesSaved: number): string {
 /**
  * The SIMPLE_BUILD_FALLBACK line: why the lane ended, in the words of the reason it ended for. PURE.
  *
- * 🔴 Q-939 (report 9c612cdb). It read "Simple build timed out after generating 3 file(s)" about a lane
+ * 🔴 Q-982 (report 9c612cdb). It read "Simple build timed out after generating 3 file(s)" about a lane
  * that never ran out of time: it handed off on purpose, 32 s into a 240 s budget, because its next
  * engine reasons before every answer. The wording was picked by ONE question — were files salvaged? —
  * so every lane that salvaged anything "timed out": the hand-off, the budget projection that stopped
@@ -1152,7 +1152,7 @@ const PLAIN_STRING_LITERAL = /'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\$
 /**
  * The name a literal `as const` statement declares, or null. PURE.
  *
- * 🔴 BUILD 9c612cdb (Q-941). The old test was "no `(` anywhere in the literal", so `{ Other: 'Other (specify)' }
+ * 🔴 BUILD 9c612cdb (Q-984). The old test was "no `(` anywhere in the literal", so `{ Other: 'Other (specify)' }
  * as const` was DROPPED from the contract file while its `type X = (typeof X)[…]` was kept — the type then
  * named a value that existed nowhere and the types file did not compile (the 120eb52f class, one branch
  * left open). A parenthesis inside a string is text, not a call, so strings are blanked before the check; a
@@ -1258,7 +1258,7 @@ export function contractImport(statement: string): string | null {
 }
 
 /**
- * `renamed` — the renames `prepareSharedContract` made (build 9c612cdb, Q-942): each becomes ONE strict header
+ * `renamed` — the renames `prepareSharedContract` made (build 9c612cdb, Q-985): each becomes ONE strict header
  * line (`contractRenameHeaderLine`), because this file is what the hand-off says to read first and what every
  * later turn reads. The write-time heal reads those lines back, so their format is a pinned protocol.
  */
@@ -1335,7 +1335,7 @@ export function contractNameSplitEnabled(env: NodeJS.ProcessEnv = process.env): 
  * whole-word use in the contract, so `XProps` and other compounds are untouched. Only PascalCase `.tsx`/`.jsx`
  * files count as components; nothing else is renamed.
  *
- * 🔴 A LITERAL `as const` OBJECT IS DATA, NOT THE COMPONENT (build 9c612cdb, Q-941). Any top-level `const X`
+ * 🔴 A LITERAL `as const` OBJECT IS DATA, NOT THE COMPONENT (build 9c612cdb, Q-984). Any top-level `const X`
  * used to count as "the contract declares the component itself", so the enum-as-data pair
  * `const VideoList = { … } as const` + `type VideoList = (typeof VideoList)[…]` beside `VideoList.tsx` was
  * never split — and that pair is exactly the shape the contract now asks for. A literal the contract wrote out
@@ -1382,7 +1382,7 @@ export function separateTypeFromComponentNames(
 /** A contract after `prepareSharedContract`: the text every reader gets, and what was changed in it. */
 export interface PreparedContract {
   contract: string;
-  /** Types renamed off a planned component's name — each must reach every later reader (Q-942). */
+  /** Types renamed off a planned component's name — each must reach every later reader (Q-985). */
   renamed: ContractRename[];
   /** Enums rewritten as `as const` objects (contractEnums.ts). */
   enumsAsConst: string[];
@@ -1391,7 +1391,7 @@ export interface PreparedContract {
 /**
  * THE ONE DOOR EVERY GENERATED CONTRACT PASSES THROUGH before anything reads it. PURE.
  *
- * 🔴 WHY ONE DOOR (build 9c612cdb, Q-941/Q-942). Two lanes ask `contractSystemPrompt` for a contract — the fast
+ * 🔴 WHY ONE DOOR (build 9c612cdb, Q-984/Q-985). Two lanes ask `contractSystemPrompt` for a contract — the fast
  * lane and the blueprint step of a deep agentic build — and only the fast lane split type names from
  * component names (9762f589); the blueprint lane handed the architect the raw text, so the TS2865 class it
  * fixed was still live there. A post-processing step each lane must remember is a step one lane forgets.
@@ -1436,7 +1436,7 @@ export function prepareSharedContract(
  * paths + shared symbol names is what avoids the mismatched-import / missing-file drift that breaks
  * large apps. Returns '' when there is no manifest. Pure.
  *
- * `renamed` (Q-942): a type `prepareSharedContract` moved off a component's name is NAMED here, so the
+ * `renamed` (Q-985): a type `prepareSharedContract` moved off a component's name is NAMED here, so the
  * architect never writes the component's name where it means the data.
  */
 export function blueprintAdvisoryBlock(manifest: SimpleFileSpec[], contract?: string, renamed: readonly ContractRename[] = []): string {
@@ -1447,7 +1447,7 @@ export function blueprintAdvisoryBlock(manifest: SimpleFileSpec[], contract?: st
     'larger app internally consistent. Treat it as a starting point you may refine as you build; you',
     'still own the plan (update_todo). It is NOT frozen — but reusing these exact file paths and shared',
     'symbol names avoids the mismatched-import / missing-file drift that breaks big apps.',
-    // Owning the plan is not a turn of its own (autopsy 9c612cdb, Q-944) — todoOnlyTurn.ts.
+    // Owning the plan is not a turn of its own (autopsy 9c612cdb, Q-987) — todoOnlyTurn.ts.
     TODO_RIDES_WITH_WORK,
     '',
     `Proposed files:\n${fileList}`,
@@ -1645,7 +1645,7 @@ export interface SimpleBuildDeps {
   prompt: string;
   /**
    * NavBharatAI's own notes about the request — request scope, device, stack, third-party player limits —
-   * kept APART from `prompt` (autopsy 9c612cdb, Q-948). Every model call the lane makes reads them, appended
+   * kept APART from `prompt` (autopsy 9c612cdb, Q-991). Every model call the lane makes reads them, appended
    * to the request; what MEASURES the request (the file budget, the in-app-AI detector) reads only `prompt`.
    * Appended to the request instead, the no-login note alone took that build's file ceiling from 13 to 25,
    * and a stack or device note took any app to the 32-file maximum.
@@ -1663,7 +1663,7 @@ export interface SimpleBuildDeps {
    */
   generate: (system: string, user: string, opts?: { deadlineAt?: number }) => Promise<string>;
   /**
-   * Asked before every per-file call starts, and again whenever one returns a file or fails (Q-939 —
+   * Asked before every per-file call starts, and again whenever one returns a file or fails (Q-982 —
    * the call that carries the decision is usually the one in flight), plus before every repair round:
    * should the lane stop NOW and hand what it has to the full builder? Returns the reason, or null to
    * carry on. Generation asks it through ONE door, `noteHandOffDecision`, which also saves the finished
@@ -1800,7 +1800,7 @@ export interface SimpleBuildResult {
   plannedPaths?: string[];
   /**
    * The shared types the lane RENAMED off a planned component's name (`prepareSharedContract`), so the
-   * hand-off can name them to the full builder — which never saw the contract call (build 9c612cdb, Q-942:
+   * hand-off can name them to the full builder — which never saw the contract call (build 9c612cdb, Q-985:
    * it wrote `VideoList` as a type after the contract had made it `VideoListData`). Absent when none.
    */
   contractRenames?: ContractRename[];
@@ -1898,7 +1898,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     ? {
       planMs: clock.planMs, contractMs: clock.contractMs, generateMs: generateMsNow(),
       ...(clock.contractOutcome ? { contractOutcome: clock.contractOutcome, contractCapMs: clock.contractCapMs } : {}),
-      // Q-939 — the hand-off, out of `generate`: the wait for the calls still running, then the saves.
+      // Q-982 — the hand-off, out of `generate`: the wait for the calls still running, then the saves.
       ...(clock.handOffDecidedAt && clock.handOffWaitEndedAt ? { handOffWaitMs: Math.max(0, clock.handOffWaitEndedAt - clock.handOffDecidedAt), handOffInFlight: clock.handOffInFlight ?? 0 } : {}),
       ...(clock.laneEndedAt && clock.handOffSavesEndedAt ? { handOffSaveMs: Math.max(0, clock.handOffSavesEndedAt - clock.laneEndedAt) } : {}),
       verifyMs: clock.verifyMs, repairMs: clock.repairMs,
@@ -1914,7 +1914,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // ask. A measurement that only survives success answers the wrong question.
   const clock: {
     startedAt: number; planMs: number; contractMs: number; generateMs: number; generateStartedAt?: number; verifyMs: number; repairMs: number; verifyRuns: number; repairRuns: number; contractOutcome?: FastLanePhases['contractOutcome']; contractCapMs?: number;
-    // Q-939 — the hand-off's own instants: the decision, how many calls were still running then, the
+    // Q-982 — the hand-off's own instants: the decision, how many calls were still running then, the
     // moment the lane stopped waiting for them, and the moment its hand-off saves were done.
     handOffDecidedAt?: number; handOffInFlight?: number; handOffWaitEndedAt?: number; laneEndedAt?: number; handOffSavesEndedAt?: number;
   } = { startedAt: 0, planMs: 0, contractMs: 0, generateMs: 0, verifyMs: 0, repairMs: 0, verifyRuns: 0, repairRuns: 0 };
@@ -1936,7 +1936,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // user's screen. The files finished so far are saved and announced the moment the decision is taken,
   // and each in-flight file as it lands, so the preview fills in while the wait runs. The catch below
   // waits for these saves before its own salvage write, so its import-fixed copy is always the last word.
-  // "The moment the decision is taken" is wherever a call learns of it — see `noteHandOffDecision` (Q-939).
+  // "The moment the decision is taken" is wherever a call learns of it — see `noteHandOffDecision` (Q-982).
   const handOffSaves: Promise<void>[] = [];
   const saveForPreviewNow = (files: OneShotFile[]): void => {
     if (lapsed || files.length === 0 || !handOffEarlySaveEnabled()) return;
@@ -1949,7 +1949,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   };
   /**
    * Every early save has settled. The lane's LAST write of a file must be its last word, whichever way the
-   * lane ends: the salvage after a hand-off, and (Q-939) the lane's own final write when the decision came
+   * lane ends: the salvage after a hand-off, and (Q-982) the lane's own final write when the decision came
    * in its last tier and the lane finished anyway. Those writes carry the import fixes and the entry and
    * stylesheet guards; an early save still in flight would put the unfixed copy back on top of them,
    * because the workspace writes run concurrently and nothing orders two writes to one path.
@@ -1958,7 +1958,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     if (handOffSaves.length > 0) await withTimeout(Promise.allSettled(handOffSaves), 30_000, 'simple-build-handoff-saves').catch(() => {});
   };
   /**
-   * 🔴 Q-939 (report 9c612cdb): THE DECISION IS TAKEN WHERE A CALL SETTLES, NOT ONLY WHERE ONE STARTS.
+   * 🔴 Q-982 (report 9c612cdb): THE DECISION IS TAKEN WHERE A CALL SETTLES, NOT ONLY WHERE ONE STARTS.
    * The lane learned of a hand-off only by asking `deps.stopLane` when a per-file call STARTED. That
    * report's first tier held three files at concurrency 8, so all three were in flight together: the
    * decision was made at 32.2 s inside one of them, nothing started after it, and Q-422's "the files
@@ -2005,7 +2005,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
    * the PLAN. `plannedFiles` already existed and is only a count, so the list itself had no home.
    */
   let plannedPaths: string[] = [];
-  // The contract renames (Q-942) — hoisted for the same reason as `plannedPaths`: the hand-off needs them
+  // The contract renames (Q-985) — hoisted for the same reason as `plannedPaths`: the hand-off needs them
   // after the closure is gone.
   let contractRenames: ContractRename[] = [];
   try {
@@ -2307,7 +2307,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             : null;
           if (lapsed) return null;
           let text: string;
-          callsInFlight += 1; // what the hand-off decision reports as still running when it is taken (Q-939)
+          callsInFlight += 1; // what the hand-off decision reports as still running when it is taken (Q-982)
           try {
             text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock, contractPath || undefined, existing), { deadlineAt: laneStartedAt + overallMs });
           } finally {
@@ -2328,7 +2328,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           else noteHandOffDecision();
           return file;
         } catch {
-          // The call that carries the hand-off is the one that fails: take the decision here (Q-939).
+          // The call that carries the hand-off is the one that fails: take the decision here (Q-982).
           noteHandOffDecision();
           return null; // a single file's call failing must not kill the whole build
         }
@@ -2546,7 +2546,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     })(), laneBudgetMs, 'simple-build');
   } catch (e) {
     lapsed = true; // from this instant the orphaned closure can neither write files nor burn more tokens
-    // Q-939 — the ledger. Generation that did not finish ends at the hand-off decision when one was taken
+    // Q-982 — the ledger. Generation that did not finish ends at the hand-off decision when one was taken
     // (the wait for the calls still running after it is its own phase), and otherwise here. What follows
     // (the hand-off saves) is measured from this instant, never folded into `generate`.
     clock.laneEndedAt = Date.now();
@@ -2626,7 +2626,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         deps.log?.('Still building your app — your work so far is saved and I am carrying on from it.');
       } catch { /* salvage is best-effort — on failure the full builder starts from the scaffold as before */ }
     }
-    // The hand-off saves are done (Q-939): stamped only when there were any, so a lane that failed before
+    // The hand-off saves are done (Q-982): stamped only when there were any, so a lane that failed before
     // writing a file never reports a "hand-off saves 0s" it did not perform.
     if (handOffSaves.length > 0 || salvageAttempted) clock.handOffSavesEndedAt = Date.now();
     const handedOff = isReasoningRungHandoff(e) || /reasons before every answer/i.test(reason);
@@ -2634,7 +2634,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       ok: false,
       ...(handedOff ? { handedOff: true } : {}),
       filesWritten: salvagedPaths?.length ?? 0,
-      // Why the lane ended picks the words — "timed out" only about a timeout (Q-939, see laneFallbackSummary).
+      // Why the lane ended picks the words — "timed out" only about a timeout (Q-982, see laneFallbackSummary).
       summary: laneFallbackSummary(salvagedPaths?.length ?? 0, handedOff, reason),
       reason,
       outcome: 'BUILD_FAILED',

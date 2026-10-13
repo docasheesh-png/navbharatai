@@ -192,7 +192,7 @@ describe('§4 a config file the starter already has is edited, never rewritten b
     const src = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
     expect(src).toContain('readExisting: readExistingProjectFile,');
     expect(src).toContain('framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile,');
-    // PIN UPDATED 2026-10-12 (autopsy 9c612cdb, Q-948): the one-shot lane's notes are now the ONE request-notes
+    // PIN UPDATED 2026-10-12 (autopsy 9c612cdb, Q-991): the one-shot lane's notes are now the ONE request-notes
     // list every lane reads (it used to carry two of the six). What this guard holds is unchanged: the lane runs.
     expect(src).toContain('runOneShot({ prompt: prompt + requestNotesSuffix,');
     expect(src).toMatch(/withoutPreviewBridge\(p, raw\)/);

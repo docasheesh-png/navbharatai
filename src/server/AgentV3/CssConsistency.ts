@@ -256,7 +256,7 @@ export function undefinedClassesWriteNote(path: string, missing: readonly string
   const more = missing.length > 8 ? ` and ${missing.length - 8} more` : '';
   return `\n⚠️ ${path} uses ${shown}${more} — no stylesheet in this project defines ${missing.length === 1 ? 'it' : 'them'}, so those elements render UNSTYLED. `
     + `Add the rules to ${sheet} now (or use a class the stylesheet already has) — not at the end of the build. `
-    // HOW, not only WHAT (autopsy 9c612cdb, Q-943: this exact note was followed by a guessed anchor that missed).
+    // HOW, not only WHAT (autopsy 9c612cdb, Q-986: this exact note was followed by a guessed anchor that missed).
     + APPEND_WITH_EMPTY_OLD_STRING;
 }
 

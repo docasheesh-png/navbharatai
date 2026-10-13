@@ -1,6 +1,6 @@
 /**
  * A NAME THE PLATFORM CHANGES TRAVELS WITH THE CODE, NOT ONLY IN NARRATION (build report 9c612cdb,
- * 2026-10-12, Q-942).
+ * 2026-10-12, Q-985).
  *
  * 🔴 THE FAILURE. Since build 9762f589, `separateTypeFromComponentNames` renames a contract type that shares a
  * planned component's name — here `VideoList` (the data, `Video[]`) became `VideoListData`, because

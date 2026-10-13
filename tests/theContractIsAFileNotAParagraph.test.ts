@@ -247,7 +247,7 @@ describe('runSimpleBuild — the contract file is written FIRST and every file i
     expect(r.ok).toBe(true);
     const types = written.find((f) => f.path === 'src/types.ts');
     expect(types).toBeTruthy();
-    // ⚠️ Was `export enum GameStatus` until build 9c612cdb (Q-941): a contract string enum is now written as an
+    // ⚠️ Was `export enum GameStatus` until build 9c612cdb (Q-984): a contract string enum is now written as an
     // `as const` object + its value-union type before any file sees it, so an isolated file's plain
     // 'MENU' compiles too. The explicit numeric RoadDirection stays an enum (its values would change).
     expect(types!.content).toContain('export const GameStatus = {');
@@ -293,7 +293,7 @@ describe('runSimpleBuild — the contract file is written FIRST and every file i
     });
     await runSimpleBuild(d);
     expect(written.filter((f) => f.path === 'src/types.ts')).toHaveLength(1);
-    // The contract's form since build 9c612cdb (Q-941) — see the test above; this one pins "written once".
+    // The contract's form since build 9c612cdb (Q-984) — see the test above; this one pins "written once".
     expect(written.find((f) => f.path === 'src/types.ts')!.content).toContain('export const GameStatus = {');
     expect(filePrompts.some((p) => /write THIS file in full:\s*\n\s*src\/types\.ts/.test(p))).toBe(false);
   });

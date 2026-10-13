@@ -323,7 +323,7 @@ export interface ModelCompactOptions {
 const MODEL_OMITTED_IMAGE = '[screenshot from an earlier turn omitted to keep context small — it was already analyzed; take a new screenshot if you need to see the page again]';
 
 /**
- * 🔴 A SHORTENED VIEW IS NOT A SOURCE TO QUOTE (autopsy 9c612cdb, Q-943). The first whole line of the 30% tail
+ * 🔴 A SHORTENED VIEW IS NOT A SOURCE TO QUOTE (autopsy 9c612cdb, Q-986). The first whole line of the 30% tail
  * kept of an old read of the 538-line design kit was kit line 526 — and that line, re-typed with a guessed
  * rule after it, became an edit_file old_string that missed (28.4 s, 1,952 output tokens). The marker said how
  * to SEE the hidden part; it now also says the kept part is not an anchor, and that adding needs none.

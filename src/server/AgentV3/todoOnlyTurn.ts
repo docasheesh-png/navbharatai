@@ -1,6 +1,6 @@
 // AgentV3 — A MODEL TURN THAT ONLY UPDATES THE PLAN.
 //
-// 🔴 WHY (autopsy 9c612cdb, 2026-10-12, Q-944). Five of the full builder's 22 turns called update_todo and
+// 🔴 WHY (autopsy 9c612cdb, 2026-10-12, Q-987). Five of the full builder's 22 turns called update_todo and
 // nothing else — 20.2 s of model time and a full ~40k-token prompt each, for a list the platform already
 // advances by itself as files land (PlanProgress.ts). The architect prompt said "Begin by calling update_todo
 // … keep it updated as you progress", and neither it nor the tool's own description said WHEN: a model that

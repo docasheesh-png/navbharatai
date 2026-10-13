@@ -1,4 +1,4 @@
-// Autopsy 9c612cdb (2026-10-12), Q-943 — the stylesheet append guessed an anchor.
+// Autopsy 9c612cdb (2026-10-12), Q-986 — the stylesheet append guessed an anchor.
 //
 // The builder was told "Add the rules to src/index.css now" and, in its prompt, to extend the design kit "by
 // APPENDING (edit_file, new rules at the end)". Nothing it could see BEFORE its first attempt said how to

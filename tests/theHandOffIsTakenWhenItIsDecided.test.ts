@@ -1,4 +1,4 @@
-// Q-939 (build report 9c612cdb, 2026-10-12, the ad-free video player). The fast lane's chain fell to a
+// Q-982 (build report 9c612cdb, 2026-10-12, the ad-free video player). The fast lane's chain fell to a
 // reasoning engine at 32.2 s, inside the call for src/utils/youtube.ts, and the lane decided to hand off
 // there. Nothing reached the workspace until 54.3 s, when the in-flight src/hooks/usePlayer.ts landed and
 // the NEXT tier's first call asked the question the lane only ever asked when a call STARTED. The first
@@ -116,7 +116,7 @@ function run(concurrency: number, opts: { holdMs?: number } = {}) {
   return { p: p.finally(() => clearTimeout(safety)), events, writes };
 }
 
-describe('Q-939 (A): the hand-off is taken when it is decided, whatever the tier shape', () => {
+describe('Q-982 (A): the hand-off is taken when it is decided, whatever the tier shape', () => {
   it('🔴 the report\'s shape (concurrency 8, a first tier of 3): the first write lands BEFORE usePlayer.ts, with the contract and useVideoList.ts', async () => {
     const { p, writes } = run(8);
     const r = await p;
@@ -239,7 +239,7 @@ function slowFirstWriter(firstWriteMs: number, onStart?: () => void) {
   return { writeFiles, log, lastWriteWaited, count: () => n };
 }
 
-describe('Q-939: the lane\'s last write is the last word, however the lane ends', () => {
+describe('Q-982: the lane\'s last write is the last word, however the lane ends', () => {
   // Workspace writes run concurrently and nothing orders two writes to one path, so an early save still in
   // flight when the lane's last write starts can land on top of it with the copy from BEFORE the import
   // fixes and the entry and stylesheet guards. Taking the decision where a call settles means an early save
@@ -305,7 +305,7 @@ describe('Q-939: the lane\'s last write is the last word, however the lane ends'
   });
 });
 
-describe('Q-939 (D): the ledger closes generate at the decision; the wait and the saves are their own phases', () => {
+describe('Q-982 (D): the ledger closes generate at the decision; the wait and the saves are their own phases', () => {
   it('🔴 the report\'s shape: one call in flight at the decision, its wait measured apart from generating', async () => {
     const { p } = run(8, { holdMs: 300 });
     const r = await p;
@@ -336,7 +336,7 @@ describe('Q-939 (D): the ledger closes generate at the decision; the wait and th
   });
 });
 
-describe('Q-939 (E): the fallback line names the reason the lane ended', () => {
+describe('Q-982 (E): the fallback line names the reason the lane ended', () => {
   it('🔴 the report\'s hand-off with three salvaged files does not say "timed out"', async () => {
     const { p } = run(8, { holdMs: 20 });
     const r = await p;

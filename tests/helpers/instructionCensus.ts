@@ -1,7 +1,7 @@
 // A census of model-facing INSTRUCTIONS in source: every prose unit that matches a class of instruction must
 // carry a named shared constant, or be on an allowlist that says why it does not need to.
 //
-// Written for autopsy 9c612cdb (Q-943, Q-944), where two instructions — "add the rules to the stylesheet" and
+// Written for autopsy 9c612cdb (Q-986, Q-987), where two instructions — "add the rules to the stylesheet" and
 // "keep the plan updated" — had each been written in several places without the one sentence that makes the
 // first attempt right. A census over the source is what keeps a NEW copy of such an instruction from being
 // written without it: a fix to the known copies alone is a fix to today's instances, not to the class.

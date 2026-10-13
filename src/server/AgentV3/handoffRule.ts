@@ -40,7 +40,7 @@ export const HANDOFF_NOTE_FIX_LINE =
  * The hand-off sentence that names every shared type the faster lane renamed off a component's name. '' when
  * there is none. PURE.
  *
- * 🔴 BUILD 9c612cdb (Q-942). The lane renamed `VideoList` (the data) to `VideoListData` because
+ * 🔴 BUILD 9c612cdb (Q-985). The lane renamed `VideoList` (the data) to `VideoListData` because
  * `src/components/VideoList.tsx` is the component, and said so only to the user. This note said "keep their
  * types and export names", so the builder — which never saw the contract call — wrote `VideoList` as a type in
  * App.tsx and met TS2749 with the compiler's own wrong suggestion (`typeof VideoList`). The rename is a fact

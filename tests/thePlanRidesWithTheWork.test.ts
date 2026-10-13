@@ -1,4 +1,4 @@
-// Autopsy 9c612cdb (2026-10-12), Q-944 — five of the full builder's 22 turns did nothing but update_todo.
+// Autopsy 9c612cdb (2026-10-12), Q-987 — five of the full builder's 22 turns did nothing but update_todo.
 //
 // 20.2 s of model time and a ~40k-token prompt each, for a plan the platform already advances as files land.
 // The prompt said "Begin by calling update_todo … keep it updated as you progress" and nothing said WHEN, so
@@ -41,7 +41,7 @@ const REPORT_TURNS: string[][] = [
   ['edit_file'],          // 208.0
   ['edit_file'],          // 229.5
   ['update_todo'],        // 236.6
-  ['edit_file'],          // 265.2 — the index.css miss (Q-943)
+  ['edit_file'],          // 265.2 — the index.css miss (Q-986)
   ['edit_file'],          // 292.1
   ['update_todo'],        // 298.4
   ['bash'],               // 300.3

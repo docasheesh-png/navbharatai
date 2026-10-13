@@ -65,7 +65,7 @@ describe('what it changes', () => {
 describe('🔒 the wiring', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
   it('the build prompt gets the rule, and the summary gets the line, from the same reading of the request', () => {
-    // PIN UPDATED 2026-10-12 (autopsy 9c612cdb, Q-948 — this rule's first fix reached ONE lane): the rule now rides
+    // PIN UPDATED 2026-10-12 (autopsy 9c612cdb, Q-991 — this rule's first fix reached ONE lane): the rule now rides
     // the ONE request-notes list, so the architect, the fast lane, the one-shot lane and the planner all read it.
     // On the weak tier the fast lane writes first; it used to build for a touch screen without ever seeing the rule.
     expect(route).toContain("{ code: 'device', text: keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device) : '' },");

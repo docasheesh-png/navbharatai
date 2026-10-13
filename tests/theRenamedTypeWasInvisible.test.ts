@@ -1,4 +1,4 @@
-// Build report 9c612cdb (admin, 2026-10-12), Q-942 — NavBharatAI renamed a contract type and told only the user.
+// Build report 9c612cdb (admin, 2026-10-12), Q-985 — NavBharatAI renamed a contract type and told only the user.
 //
 // The fast lane's name split (build 9762f589) renamed the contract's data type `VideoList` (= `Video[]`) to
 // `VideoListData`, because `src/components/VideoList.tsx` is the component. The ONLY reader told was the user:

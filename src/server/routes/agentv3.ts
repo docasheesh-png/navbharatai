@@ -62,6 +62,7 @@ import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } f
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePowers';
 import { namedNonSmartphone, nonSmartphoneBuildRule, nonSmartphoneUserLine } from '../AgentV3/deviceTarget';
+import { thirdPartyLimitsEnabled, editTurnAdServingPlayers, projectAdServingPlayers, thirdPartyLimitAsked, thirdPartyLimitsBuilderNote, announceThirdPartyLimit, withThirdPartyLimitsEndLine, thirdPartyLimitReportNote, adFreeClaimCorrection, claimReportWithAdFree } from '../AgentV3/thirdPartyLimits';
 import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
 import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eAutoScaffold';
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
@@ -17094,31 +17095,55 @@ async function noteBuildOutcome(
       // A KEYPAD PHONE THE USER NAMED (Q-846): the builder is told before it writes, so what it builds fits the keys.
       // Pure (deviceTarget.ts never throws), so no best-effort wrapper — like the notes below.
       const keypadPhoneForBuild = !isImportTurn ? namedNonSmartphone(prompt) : null;
-      if (keypadPhoneForBuild) buildPrompt = `${nonSmartphoneBuildRule(keypadPhoneForBuild.device)}\n\n---\n\n${buildPrompt}`;
-      // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built
-      // in React with a types file claiming a "PHP MVC backend"). Told to the builder here, to the user
-      // in the ready message — see unsupportedStack.ts.
+      // NO ADS FROM A PLAYER THAT SHOWS ITS OWN (Q-947, autopsy 9c612cdb — "Your ad-free video player app is
+      // ready." over YouTube's own embedded player). A new build is told when the request names the source; an
+      // edit ("remove the ads") when the WHOLE project already embeds such a player — see thirdPartyLimits.ts.
+      // ⚠️ The conditions live in thirdPartyLimits.ts on purpose: this handler sits at TypeScript's control-flow
+      // limit (TS2563), and every `&&` / `if` written here is one more branch the checker must walk.
+      const thirdPartyPlayersAtStart = await editTurnAdServingPlayers(prompt, { editTurn: intent === 'edit_existing', importTurn: isImportTurn }, () => loadWorkspaceFiles(workspaceId));
+      const thirdPartyLimitAsk = thirdPartyLimitAsked({ prompt, newBuild: intent === 'new_build', importTurn: isImportTurn, projectPlayers: thirdPartyPlayersAtStart });
+      // 🧭 EVERY REQUEST NOTE REACHES EVERY LANE — ONE LIST, READ BY ALL FOUR (Q-948, autopsy 9c612cdb). Each note
+      // used to be threaded into each lane by hand, and each fix reached the lanes its author remembered: the
+      // keypad-phone rule (Q-846) reached the architect only, the stack note missed the fast lane and the one-shot
+      // lane, and the no-login rule missed the planner — while on the weak tier the fast lane writes FIRST. Now a
+      // note joins THIS list, and the architect (just below), the fast lane, the one-shot lane and the project
+      // planner all read it. `tests/everyRequestNoteReachesEveryLane.test.ts` fails on a note threaded any other way.
+      // Order is the architect's reading order, top first (the unchanged order of the old prepends).
+      const requestNotes: ReadonlyArray<{ code: string; text: string }> = [
+        // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built in React
+        // with a types file claiming a "PHP MVC backend"). The user hears it in the ready message — unsupportedStack.ts.
+        { code: 'unsupported-stack', text: unsupportedStackAsked ? unsupportedStackBuilderNote(unsupportedStackAsked, framework) : '' },
+        { code: 'script-request', text: scriptRequestNote },
+        { code: 'unknown-name', text: unknownNameNote },
+        { code: 'request-scope', text: requestScopeText },
+        { code: 'device', text: keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device) : '' },
+        { code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, thirdPartyPlayersAtStart) },
+      ];
+      const requestNotesText = requestNotes.map((n) => n.text.trim()).filter(Boolean).join('\n\n---\n\n');
+      const requestNotesSuffix = requestNotesText ? `\n\n${requestNotesText}` : ''; // the one-shot lane's copy
+      buildPrompt = [requestNotesText, buildPrompt].filter(Boolean).join('\n\n---\n\n'); // no notes → unchanged
       if (requestScopeText) {
-        buildPrompt = `${requestScopeText}\n\n---\n\n${buildPrompt}`;
         buildDiag.record({ phase: 'plan', severity: 'info', code: 'REQUEST_SCOPE_NOTE', message: 'The request asks for no sign-in, so the builder was told to add no login or accounts and no control for a state the data does not have.', autoResolved: true });
       }
       if (unknownNameNote) {
-        buildPrompt = `${unknownNameNote}\n\n---\n\n${buildPrompt}`;
         buildDiag.record({ phase: 'plan', severity: 'info', code: 'UNKNOWN_NAME_IN_REQUEST', message: unknownNameReportNote(unknownNamesAsked), autoResolved: true });
       }
       if (scriptFormAsked && scriptRequestNote) {
-        buildPrompt = `${scriptRequestNote}\n\n---\n\n${buildPrompt}`;
         emit({ type: 'narration', agent: 'architect', text: scriptRequestStartLine(scriptFormAsked, liveDataAsked), ts: Date.now() });
         buildDiag.record({ phase: 'plan', severity: 'info', code: 'SCRIPT_REQUEST_AS_WEB_APP', message: scriptRequestReportNote(scriptFormAsked, liveDataAsked), autoResolved: true });
       }
       if (unsupportedStackAsked) {
-        buildPrompt = `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${buildPrompt}`;
         buildDiag.record({
           phase: 'plan', severity: 'info', code: 'UNSUPPORTED_STACK',
           message: `The request names ${unsupportedStackAsked}, which NavBharatAI does not build; built in ${builtWithLabel(framework)} and told the user so.`,
           autoResolved: true,
         });
       }
+      // On the build's own bus (`events.emit`, which also reaches the user through `emit`), so the report shows the line
+      // the user read — a bare `emit` after `events.subscribe(… buildDiag.ingestEvent …)` never reaches it.
+      announceThirdPartyLimit(thirdPartyLimitAsk, thirdPartyPlayersAtStart,
+        (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),
+        (message) => buildDiag.record({ phase: 'plan', severity: 'info', code: 'THIRD_PARTY_LIMIT_TOLD', message, autoResolved: true }));
       // WHICH PREVIEW BROKE (autopsy "Lekhan Sahyak", 2026-09-27): a fix request from the in-browser
       // preview now says so, so the builder does not "fix" our renderer's fault in the user's files.
       // Outside every best-effort try below on purpose — a context-loading fault must not drop it.
@@ -17608,9 +17633,6 @@ async function noteBuildOutcome(
       if (singleHtmlFileRule) buildPrompt = `${singleHtmlFileRule}\n\n${buildPrompt}`;
       const singleHtmlFileSuffix = singleHtmlFileRule ? `\n\n${singleHtmlFileRule}` : ''; // the fast lane's copy of the same rule
       const pastedBriefSuffix = pastedBrief ? `\n\n${pastedBrief}` : ''; // the fast lane reads the pasted app's checklist too
-      const unknownNameSuffix = (unknownNameNote ? `\n\n${unknownNameNote}` : '') // and the unknown-word note (Q-067)
-        + (scriptRequestNote ? `\n\n${scriptRequestNote}` : ''); // and the script-request note (Q-274)
-      const requestScopeSuffix = requestScopeText ? `\n\n${requestScopeText}` : ''; // and the request-scope rule (autopsy 70e030bb)
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -17815,12 +17837,11 @@ async function noteBuildOutcome(
             ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
-            // The planner decides every module's files before a builder sees the stack note, so it gets the
-            // note too — or a Kotlin request is planned as Gradle modules the builder may not write (autopsy
-            // 042e472f, 2026-10-01). The plan's goal carries it, so every module turn reads it again.
-            const plannerGoalNotes = [unknownNameNote, scriptRequestNote].filter(Boolean).join('\n\n');
-            const plannerGoalBase = plannerGoalNotes ? `${plannerGoalNotes}\n\n---\n\n${prompt}` : prompt;
-            const plannerGoal = unsupportedStackAsked ? `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${plannerGoalBase}` : plannerGoalBase;
+            // The planner decides every module's files before a builder sees the notes, so it gets every one of
+            // them too — or a Kotlin request is planned as Gradle modules the builder may not write (autopsy
+            // 042e472f, 2026-10-01). The plan's goal carries them, so every module turn reads them again. ONE list
+            // (`requestNotes`, Q-948): until 9c612cdb the planner read three of the five notes the architect did.
+            const plannerGoal = requestNotesText ? `${requestNotesText}\n\n---\n\n${prompt}` : prompt;
             const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
             if (modules.length >= MIN_PROJECT_MODULES) {
               pPlan = createProjectPlan(plannerGoal, framework, modules, Date.now());
@@ -18763,7 +18784,9 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        // Every request note rides `requestNotes`, APART from the request, so the lane's own size reader
+        // measures the user's words and not ours (Q-948: the no-login note alone doubled 9c612cdb's file budget).
+        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix, requestNotes: requestNotesText, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           // A planned config file the starter already has is edited, never rewritten blind (isProjectConfigPath).
           readExisting: readExistingProjectFile,
           stopLane: () => (fastLaneReasoningRung
@@ -18919,7 +18942,7 @@ async function noteBuildOutcome(
           //    …and gated on what the lane above just MEASURED. See oneShotStillViable: in the dukaan
           //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
           //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
-          const os = await runOneShot({ prompt: prompt + unknownNameSuffix + requestScopeSuffix, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
+          const os = await runOneShot({ prompt: prompt + requestNotesSuffix, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) {
             // VERIFY GATE for the one-shot lane too (autopsy 2026-07-07: a NowPlaying.tsx TRUNCATED
@@ -19948,6 +19971,18 @@ async function noteBuildOutcome(
       // and consumed by the route smoke check much further down. Declared here so the two are not
       // forced to share a scope, and so planning cannot pay for a second workspace load.
       let routeSmokePlan: SmokePlan | null = null;
+      // THE WHOLE PROJECT, for facts a claim or a disclosure is judged against (Q-947, autopsy 9c612cdb). Set by
+      // the integrity pass below (durable store + this turn's writes); `integrityFiles` itself is block-scoped.
+      // An edit turn's writes are a slice — the player the first build wrote is in a file this turn never touched.
+      let wholeProjectFiles: Record<string, string> | null = null;
+      // Never throws (a fault is "no player known"), so a caller needs no try of its own.
+      const adServingPlayersNow = async (): Promise<string[]> => {
+        try {
+          if (isImportTurn || !thirdPartyLimitsEnabled()) return [];
+          const base = wholeProjectFiles ?? await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+          return projectAdServingPlayers({ ...base, ...Object.fromEntries(writtenFiles) });
+        } catch { return []; }
+      };
       try {
         // FULL-WORKSPACE view for integrity (FitPulse autopsy 2026-07-17, hardened after the edit-build
         // re-test): `writtenFiles` holds only the files THIS build wrote. On an EDIT build that is 3-4
@@ -19973,6 +20008,7 @@ async function noteBuildOutcome(
         const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
         const storeLoadMs = Date.now() - integrityStartedAt;
         const integrityFiles: Record<string, string> = { ...storeFiles, ...Object.fromEntries(writtenFiles) };
+        wholeProjectFiles = integrityFiles; // the same map, read later by `adServingPlayersNow`
         // The sandbox is read for the files a check reasons from by their ABSENCE (autopsy de3bb2bb): the
         // durable map did not hold the starter's `src/vite-env.d.ts`, so `missingViteEnvTypes` wrote one into
         // a project that already had it and told the user TypeScript had complained — tsc was clean.
@@ -22022,7 +22058,8 @@ async function noteBuildOutcome(
           for (const p of appSource == null ? APP_ENTRY_CANDIDATES : []) {
             try { appSource = await actuator.readFile(workspaceId, p); break; } catch { /* try next */ }
           }
-          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource });
+          const adServingPlayer = (await adServingPlayersNow()).length > 0;
+          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource, adServingPlayer });
           const appName = display.name;
           const defaults = planAppDefaults(indexHtml, appName, { description: display.description, shortName: display.shortName });
           // ⛔ NO FAKE BUTTON, NO FAKE FEATURE (admin 2026-10-04). The WHOLE project is read — an edit turn's
@@ -24124,11 +24161,16 @@ async function noteBuildOutcome(
           // "A beautiful, polished UI" about a page the browser painted as raw HTML (renderStyle.ts).
           renderUnstyled: currentRenderStyle()?.verdict === 'unstyled',
         });
-        if (contradictions.length > 0) {
-          result = { ...result, summary: `${result.summary}${claimCorrection(contradictions)}` };
+        // "Your ad-free video player app is ready." over YouTube's own embedded player (Q-947, autopsy 9c612cdb).
+        // Judged on the WHOLE project's players, never an edit turn's slice; one correction list either way.
+        const auditedSummary = `${result.summary}${claimCorrection(contradictions)}`;
+        const adPlayers = await adServingPlayersNow();
+        const adFreeFix = adFreeClaimCorrection(auditedSummary, adPlayers);
+        if (`${claimCorrection(contradictions)}${adFreeFix}`) {
+          result = { ...result, summary: `${auditedSummary}${adFreeFix}` };
           buildDiag.record({
             phase: 'readiness', severity: 'warning', code: 'CLAIM_UNSUPPORTED',
-            message: claimAuditSummary(contradictions), autoResolved: false,
+            message: claimReportWithAdFree(contradictions.length, claimAuditSummary(contradictions), adFreeFix, adPlayers), autoResolved: false,
           });
         }
       } catch { /* the audit reports on the summary; it must never break the build */ }
@@ -24186,6 +24228,16 @@ async function noteBuildOutcome(
           buildDiag.record({ phase: 'readiness', severity: 'info', code: 'NON_SMARTPHONE_TOLD', autoResolved: true, message: `The request named ${keypadPhone.device}, a keypad phone no web app runs on — the user was told, and the build was steered to a light 2D keys-first version.` });
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
+
+      // 📺 …AND A PLAYER WHOSE ADS THE APP CANNOT SWITCH OFF IS NAMED (Q-947, autopsy 9c612cdb). The user asked for no
+      // ads and the finished project embeds YouTube's (or another site's) own player: one plain line, unless the reply
+      // — or the correction above — already says the player's ads may play. Every lane, the fast lane's
+      // platform-written summary included. Recorded for the admin as an info line, like NON_SMARTPHONE_TOLD.
+      // ⚠️ Every condition lives in `withThirdPartyLimitsEndLine` (a successful build, the kill switch, the request, the
+      // players, already said): this handler sits at TypeScript's control-flow limit (TS2563), and every `&&` / `if`
+      // written here is one more branch the checker must walk. One unconditional assignment costs none, and neither
+      // call can throw (both catch inside), so no try is needed around them.
+      result = withThirdPartyLimitsEndLine(result, prompt, await adServingPlayersNow(), (players) => buildDiag.record({ phase: 'readiness', severity: 'info', code: 'THIRD_PARTY_LIMIT_TOLD', autoResolved: true, message: thirdPartyLimitReportNote(players, 'end') }));
 
       // 🎭 MADE-UP RESULTS ARE DISCLOSED TOO (autopsy 33812996). The sibling of the block above for a
       // feature whose OUTPUT is invented — a random "recognised" song, "[Translated to hi]: …", search

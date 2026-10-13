@@ -3681,6 +3681,25 @@ the flag entries above promise.
   dependency and a React app is never "Stack: Vue", a password form is a sign-in journey run signed out
   (`isCredentialForm`), the sign-in explorer reads `passwordHash: hashPassword("demo123")`, and a pruned package takes
   its `@types/` with it. Test: `tests/theNotesAppAutopsy.test.ts`.
+- **📺 `AGENTV3_THIRD_PARTY_LIMITS` — A PROPERTY ONLY THE OTHER SERVICE CONTROLS IS NEVER CLAIMED (Q-947, autopsy
+  9c612cdb, 2026-10-12). ⚠️ NOT set; default ON; `off` turns off all three layers below.** The request asked to "stream
+  the videos with no adds"; the app played every video in YouTube's own embedded player and the reply opened "Your
+  ad-free video player app is ready." That player shows its own ads on videos whose owners earn from them, and a page
+  that embeds it cannot switch them off. `thirdPartyLimits.ts`: (1) a NEW build whose request asks for no ads AND names
+  a third-party video source or a paste-a-link flow, or an EDIT turn asking for no ads ("remove the ads", "ads still
+  play") on a project that already embeds such a player (YouTube, youtube-nocookie, the IFrame API, react-youtube,
+  ReactPlayer with a YouTube link, Dailymotion, Twitch, Facebook video — never Vimeo), gets a builder note in EVERY lane
+  and one start-of-build line; (2) the reply ends with one plain "About ads" line when it did not already say the
+  player's ads may still play; (3) a reply that calls the app "ad-free" over such a player gets NavBharatAI's own
+  correction, judged on the WHOLE project (never an edit turn's slice) right after `claimAudit`. The derived app name
+  and meta description drop "ad-free" over such a player. Nothing calls anything illegal; the circumvention policy
+  (proxies, stream extractors, downloaders) is the admin's open decision. Report codes `THIRD_PARTY_LIMIT_TOLD` (info)
+  and `CLAIM_UNSUPPORTED` (the correction). Same autopsy, no flag (Q-948): every request note (stack, script, unknown
+  name, request scope, keypad phone, third-party limits) now rides ONE list (`requestNotes` in `agentv3.ts`) that the
+  architect, the fast lane, the one-shot lane and the project planner all read, and the fast lane reads it apart from
+  the request (`SimpleBuildDeps.requestNotes`) so its file budget measures the user's words — appended to the request,
+  the no-login note alone had taken 9c612cdb's ceiling from 13 files to 25. Tests:
+  `tests/aPropertyOnlyTheOtherServiceControlsIsNotClaimed.test.ts`, `tests/everyRequestNoteReachesEveryLane.test.ts`.
 - **🙋 `AGENTV3_CONFIRM_BUILD` + 📎 `AGENTV3_ATTACHMENT_MEMORY` (admin 2026-10-03, Q-200 / Q-201). ⚠️ NEITHER is set;
   both default ON; `off` reverts each alone.** `buildConfirmation.ts`: see "READ THE MOOD FIRST" above — an unconfirmed
   build is answered and offered, and a "yes" builds the offered request. `lib/attachmentMemory.ts`: the latest

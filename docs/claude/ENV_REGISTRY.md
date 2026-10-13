@@ -4253,3 +4253,45 @@ behind `AGENTV3_TOKEN_COMPACT`).
 (`scripts/agentv3-reliability-bench.ts`, 15-prompt smoke set first, `BENCH_CONFIRM=yes` required — it spends
 real money) once with all flags off (baseline) and once with the flag(s) on, then `npm run bench:compare`.
 Turn flags on one or two at a time so a regression has one owner.
+
+---
+
+## `AGENTV3_BUG_HUNT_ASK` — the deep bug hunt is OFFERED, not assumed (admin 2026-10-13)
+
+**Default ON (absent or anything but `off`).** `off` restores the behaviour this flag replaced: the
+post-build reviewer runs on every build without asking, exactly as it did before.
+
+**What the flag turns off is the QUESTION, never the review.** `bugHuntAskEnabled() === false` means the
+hunt runs unasked — it does NOT mean the hunt is skipped. A kill switch that silently removed the app's
+deepest check would be worse than the thing it was switching off, so the module is written so the only
+way to reach "the review does not run" is a user saying so. A test (`aBugHuntIsOfferedNotAssumed`) holds
+that distinction, and a reversion that made `off` skip the review failed it.
+
+**Admin decisions this implements, verbatim-sourced (2026-10-13):**
+
+1. **No amount is shown on the button.** The admin: *"paise kitna lagega yeh show mat karo… real build me
+   x₹ lagte hai, helper 4x₹ leta hai"*. It is also the only honest option — the cost is metered per token,
+   so any figure printed before the hunt runs would be a fabricated quote, which `NO_FAKE_FEATURE_RULE`
+   forbids. What IS said up front: it spends credits, from the wallet, and free/gift credits count. The
+   real figure reaches the user in the bill, priced by the settle's own function, as today.
+2. **A "no" is scoped to ONE build.** The admin: *"sirf isi build ke liye no, next edit ne wapas same
+   question!"*. Implemented by storing nothing at all — the offer is turn-local, so there is nothing to
+   forget and nothing to reset. A test asserts the module touches no store.
+3. **Today's free checks stay free.** The admin: *"user ke wallet se charge free/gift token se bhi chal
+   jaye"*. The deterministic end-of-build checks (tsc gate, lint, readiness, playtest, fake-feature scan,
+   journeys, the app's own tests) spend no model tokens, sit in no billing phase, and are the EVIDENCE the
+   app was built — the second absolute rule requires them, so they are never put behind a payment. Only
+   the model-driven hunt is offered.
+
+**Why it was needed, from the code's own record.** The route's comment beside the reviewer call, autopsy
+b6f88a722: *"40 calls, 523,374 input tokens = 34.4% of the build, `responseChars: 0` on every one, and
+then no verdict at all — all of it billed at ×4"*. The user already paid for that, on every build,
+silently. This flag's feature does not add a charge; it shows an existing one to the person paying it.
+
+**Still open, and it is the real defect (admin's own instinct).** The admin asked whether the helper could
+run on the cheap tier — *"aap help ko glm se chalo to sayad sasta chale?"*. That is the cure; hiding the
+price is not. Recorded as a queue row, not done here.
+
+| Key | Values | Default | Owner |
+|---|---|---|---|
+| `AGENTV3_BUG_HUNT_ASK` | `off` disables the QUESTION (the hunt then runs unasked, as before). Anything else / absent = ask. | ask | `src/server/AgentV3/optionalBugHunt.ts` |

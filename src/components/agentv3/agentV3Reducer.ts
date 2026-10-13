@@ -325,10 +325,19 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       return { ...state, pendingSecrets: { callId: event.callId, prompt: event.prompt, secrets: event.secrets } };
 
     case 'permission_request':
+      // The gate's own words are carried through verbatim when it gave them (admin 2026-10-13); a gate
+      // that gave none keeps today's shape exactly, so nothing downstream has to know which it was.
       return {
         ...state,
-        pendingPermission: { callId: event.callId, action: event.action },
-        agents: touchAgent(state.agents, event.agent, `awaiting permission: ${event.action}`, true, event.ts),
+        pendingPermission: {
+          callId: event.callId,
+          action: event.action,
+          ...(event.title ? { title: event.title } : {}),
+          ...(event.why ? { why: event.why } : {}),
+          ...(event.approveLabel ? { approveLabel: event.approveLabel } : {}),
+          ...(event.denyLabel ? { denyLabel: event.denyLabel } : {}),
+        },
+        agents: touchAgent(state.agents, event.agent, `awaiting permission: ${event.title || event.action}`, true, event.ts),
       };
 
     case 'done':

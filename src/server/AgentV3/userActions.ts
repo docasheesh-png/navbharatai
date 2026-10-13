@@ -95,6 +95,12 @@ export interface UserAction {
   envName?: string;
   /** The pending gate this row answers, when a build is waiting on it. */
   callId?: string;
+  /**
+   * What this gate's buttons say, when it is not a build approval. Absent ⇒ the tray's fixed
+   * "Approve & build" / "Reject" (admin 2026-10-13: a gate that does not build must not offer to).
+   */
+  approveLabel?: string;
+  denyLabel?: string;
   /** TRUE only while a build is genuinely stopped waiting for it. */
   blocking: boolean;
   /** The build that raised it — a later build may re-open an unverified close, the same one may not. */
@@ -356,25 +362,38 @@ export function secretActions(
   return out;
 }
 
-/** The one ask that genuinely stops a build until the user answers. */
+/**
+ * The one ask that genuinely stops a build until the user answers.
+ *
+ * `detail` is what the gate chose to say about itself — a short title, the line under it, and real
+ * button labels (admin 2026-10-13). Absent, the whole question becomes the title and the tray's fixed
+ * buttons are used: today's behaviour, unchanged.
+ */
 export function approveAction(
   callId: string,
   action: unknown,
   buildId: string,
   now: number,
+  detail?: { title?: unknown; why?: unknown; approveLabel?: unknown; denyLabel?: unknown },
 ): UserAction | null {
-  const title = collapse(action);
+  const asked = collapse(action);
+  const title = collapse(detail?.title) || asked;
   if (!title) return null;
+  const why = collapse(detail?.why);
+  const approveLabel = collapse(detail?.approveLabel);
+  const denyLabel = collapse(detail?.denyLabel);
   return {
     id: actionKey('approve', title),
     kind: 'approve',
     title,
-    why: '',
+    why,
     callId,
     blocking: true,
     buildId,
     status: 'open',
     createdAt: now,
+    ...(approveLabel ? { approveLabel } : {}),
+    ...(denyLabel ? { denyLabel } : {}),
   };
 }
 
@@ -419,6 +438,11 @@ export interface UserActionSourceEvent {
   prompt?: unknown;
   secrets?: unknown;
   questions?: unknown;
+  /** What a `permission_request` chose to say about itself — see `approveAction`'s `detail`. */
+  title?: unknown;
+  why?: unknown;
+  approveLabel?: unknown;
+  denyLabel?: unknown;
 }
 
 /**
@@ -441,7 +465,7 @@ export function actionsFromEvent(
         now,
       );
     case 'permission_request': {
-      const one = approveAction(collapse(event.callId), event.action, buildId, now);
+      const one = approveAction(collapse(event.callId), event.action, buildId, now, event);
       return one ? [one] : [];
     }
     case 'clarify':

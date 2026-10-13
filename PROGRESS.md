@@ -94313,6 +94313,16 @@ Another session, gating #3679, reported that under CPU load the full suite flipp
 - **Tests executed:** 101 billing test files, 1,935 passed, 0 failed, 0 skipped.
 - **State:** every finding is a 🟡 row in `BUILD_REPORT_QUEUE.md`, waiting on the admin's approval of the ordered plan in §8 of the report. No fix is implemented until the admin approves.
 
+### 2026-10-12 — Q-880: Opus is priced at its real $5/$25 (admin chose "A: rate theek karo")
+
+- **The problem:** the Opus rate card defaulted to $15 / $75 — Opus 4 / 4.1's price. The Opus this code calls is `claude-opus-4-8` (Strong's last rung), and Anthropic's price for it, verified on claude.com/pricing on 2026-10-12, is $5 input / $25 output, cache read $0.50, 5-minute cache write $6.25. Opus 4.7 is the same.
+- **What it did:** a Strong build that reached its Opus rung was marked up on a provider cost three times too high. The $5 cost ceiling paused such a build at about $1.67 of real spend. A build whose preview was never confirmed was told "charged only what this build actually cost to run" while paying three times that cost.
+- **The class:** hand-typed provider prices with no source or date, and a test that pinned the constant (`pricing.test.ts:67`) instead of the provider's price — so 1,935 green billing tests never saw it.
+- **Fix:** `opusRate()` defaults $5 / $25 (env overrides kept). The `CLAUDE_OPUS` label now prices at the Opus rate — an Opus call with no model id fell to the Sonnet price without cache lines. Eight expectations that pinned $15 / $75 were updated.
+- **Lock:** `tests/claudeRatesMatchVerifiedPrices.test.ts` holds the verified table with its source and date. It fails when a default Claude model id (`models.ts`) has no verified price, or when the rate card drifts from it. Proven by reversion: the old rate fails 2 tests, the missing label fails 1.
+- **Unchanged:** the customer rule (real provider cost × tiered markup, 100 wallet tokens per ₹). The admin was told plainly that the brief's "₹1 = 200 output tokens, input free" rule does not exist in this code.
+- **Watch after merge:** `OPUS_INPUT_PER_MTOK` / `OPUS_OUTPUT_PER_MTOK` must not be set in Cloud Run, or the env value stays in force. The next Strong build that reaches Opus should show its real cost at $5 / $25.
+- **Open (admin):** whether past Strong-Opus overcharges are refunded.
 ## 2026-10-12 — AUTOPSY `50378049`, Q-905: a module was "done" because its TURN succeeded, not because it delivered its files
 
 Second PR from the BlockWorld autopsy (the first, #3684, fixed Q-900…Q-904 — a plan-time prediction
@@ -94722,6 +94732,196 @@ reader of this fact could be forgotten; it caught the fix itself going missing.
   - **The plan-first planner now hears the rule.**
 
   The stale "📵 no web app runs there" comment is gone.
+## 2026-10-12 — AUTOPSY `50378049`, Q-908: the one mechanism built to catch an abandoned kit was switched off by a prediction
+
+Seventh PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911 · #3690 →
+Q-906+Q-907 · #3693 → Q-909 · #3694 → Q-910).
+
+**The defect.** The game kit seeded 24 files under `src/game/**`. The builder then wrote its own game
+structure and used none of them, and `READINESS_WARNING` noted it had removed the only import of
+`GameCanvas.tsx`. The orphan hand-back (Q-202, autopsy 3f959fde) exists for exactly that — a component
+this build wrote that nothing imports — and it **named nothing**, because the turn was a project-mode
+module and `starterExpected` was set.
+
+🔑 **IT IS THE SAME CLASS AS Q-900, in the sibling I named in that PR's ledger and did not fix there.** A
+plan-time PREDICTION disabled a mechanism, and the prediction was false.
+
+**Two holes, and either one alone reproduces the report.**
+
+1. **The carve-out outlived its premise.** It is excused because *"a component is wired in by a later
+   module by design"* — and the thing that wires components in is the app's **ENTRY**. The moment THIS
+   turn writes the entry, no later module is coming, so the premise is dead and the orphans are real.
+   `wroteTheAppEntry(written)` is that fact: pure, local, read from the turn's own write set, with no new
+   plumbing and no dependency on #3684's helper (deliberately — stacking is what I had to undo twice
+   today).
+   🔒 It is unreachable on an HONEST module turn, which is worth stating: a module that owns the entry
+   makes `shellModuleFor` return null, so `starterExpected` is never set. It can only fire when the
+   builder went OUT of its module's scope — exactly the reported build.
+2. **Fixing (1) alone would have traded one problem for another.** The route's write set holds every kit
+   file the seed wrote, so with the carve-out lifted the hand-back would have named OUR OWN untouched kit
+   and told the model to wire in or delete 24 files it never wrote. `isPlatformSeededFile` is byte-exact
+   and knows every kit version (Q-863) and every starter version (db07e0af), so platform files are
+   excluded **inside `orphansToHandBack`** rather than at the call site — no caller can forget it. One
+   edited byte makes a file the model's again, and nameable; a case proves both directions.
+
+**Locked by** `tests/anAbandonedKitIsNotInvisible.test.ts` — 11 cases. **Reversion-proven twice:** restore
+the unconditional carve-out → 3 fails · drop the platform-seeded exclusion → 1.
+
+⚠️ **MY FIRST FIXTURE PROVED NOTHING, AND THE TEST SAID SO.** I handed it the whole real kit, and
+`unreferencedComponents` is deliberately precise: it names nothing unless an entry exists AND every
+relative import resolves to a file it was given. The kit's `Game.ts` imports seventeen files from four
+OTHER recipes, so the graph refused and the answer was empty **for the wrong reason** — a green test would
+have proved the opposite of what I wanted. The fixture is now the reported SHAPE with its imports closed,
+and it uses the kit's REAL BYTES for `GameCanvas.tsx`, the one file the report names. **A fixture that
+cannot fail is not evidence.**
+
+⚠️ **AND I DELETED A CASE OF MY OWN THAT WAS FAKE.** One case asserted a local lambda standing in for the
+old behaviour (`asItWas = (i) => i.starterExpected ? [] : […]`) — it could never fail whatever the code
+did. The reversion probes do that job honestly; a test that exercises a copy of the code instead of the
+code is worse than no test, because it reports confidence it has not earned.
+
+⚠️ **AND THE Q-202 TEST THAT OWNS THIS CARVE-OUT FAILED — correctly, on a fixture that could not happen.**
+Two of its cases passed a write set containing `src/App.tsx` while also setting `starterExpected: true`.
+**The engine never produces that pair:** a module that owns an entry file makes `shellModuleFor` return
+null, so `starterExpected` is never set for it. So those cases asserted the carve-out on a state that
+cannot occur, and in doing so hid the state that DOES occur when a builder leaves its module's scope —
+the reported build. Both now use a write set without the entry (the real state, still excused), and each
+has gained a sibling asserting the new behaviour with the entry present. **One case became two, and the
+pair is stronger than the one it replaces.**
+## 2026-10-12 — AUTOPSY `50378049`, Q-910: "9 writes skipped" is not "9 files never compiled", and nothing recorded which
+
+Sixth PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911 · #3690 →
+Q-906+Q-907 · #3693 → Q-909).
+
+**What the report said, verbatim:** *"9 TypeScript write(s) skipped before the compiler was ready — 9
+because package.json had changed since the last install (a dependency may be missing until one runs)"*.
+That reads as nine files that went unchecked.
+
+**It may mean nothing of the kind.** `writeTypecheckCommand` runs `tsc --noEmit` over the WHOLE PROJECT,
+not over the file just written — so ONE clean run after the last skip has already compiled every skipped
+file. The two readings are opposite facts about the build:
+
+| | what it cost |
+|---|---|
+| a later run succeeded | the skips cost a few seconds of lateness and nothing else |
+| no later run succeeded | the end-of-build typecheck was those files' FIRST compile — the most expensive moment to find anything |
+
+**Nothing recorded which, so nobody could tell.** That is the same gap `notReadyReasons` was added to
+close one level up (build 46e2d74b: fourteen writes reported as *"still being installed"* when the tree
+had only looked stale) — one sentence standing in for facts that mean different things.
+
+🔒 **THE DEFERRAL ITSELF IS NOT THE DEFECT AND IS NOT TOUCHED.** Autopsy Sur Taal established that the
+write-time check must never install and never wait: three such waits burned 90 s of a free build's clock
+while the model sat holding a file. Making it wait again would trade this report's item for that one.
+What is fixed is what the report SAYS about the skips — the fourth rule's fifth step.
+
+**The fix.** `WriteTypecheckStats.cleanRunCoveredSkips` — `true` when a clean run followed the last skip,
+`false` when none did, `null`/absent when the question was never asked (never a silent "no"). Order is
+the whole answer: a skip sets it back to `false`, because a clean run BEFORE the skip compiled a project
+that did not yet hold these files; only a clean run after it may set `true`, and only when something was
+actually skipped. The report then says either *"a later check compiled the whole project, so those files
+were covered, just later than they should have been"* or *"no check succeeded after them, so the
+end-of-build typecheck was their first compile"*.
+
+**Locked by** `tests/aSkippedCheckIsNotAnUncheckedFile.test.ts` — 10 cases, including the premise itself
+(the command carries no per-file argument, so a project-wide run really does cover the skips), both new
+sentences, the absent case saying nothing extra, and a recorder guard asserting the write sits inside the
+CLEAN-RUN branch — a compiler that never ran covers nothing (autopsy 12c642ed's class). **Reversion-proven
+three ways:** stop putting the question back on a skip → 1 fail · stop answering it on a clean run → 1 ·
+never print the sentence → 2.
+
+⚠️ **A GUARD OF MINE MEASURED THE WRONG THING, and the fix is the repo's own rule.** The recorder case
+first looked back 260 characters for the enclosing branch and failed on the `neverRan` branch that
+legitimately sits just above. **A byte window measures distance; the claim was about NESTING.** This repo
+has paid for byte-window guards before (`slice(0, 6000)`), and the rule is to anchor on syntax — it now
+asserts that nothing intervenes between `if (errors.length === 0) {` and the write, and that the branch
+has not closed before it.
+
+⚠️ **AND AN EXISTING GUARD BROKE ON ITS ANCHOR, EXACTLY THE SAME WAY** —
+`tests/aCompilerThatNeverRanIsNotClean.test.ts` pinned the literal one-liner
+`if (errors.length === 0) s.cleanRuns += 1;`, which became a BLOCK when that branch gained the Q-910
+line. **Found by the full suite, not by me**, and the invariant it protects was never in danger: the
+`if (neverRan) { s.notRunRuns += 1; return ''; }` branch still returns before the clean count, so a
+compiler that never ran can never set `cleanRunCoveredSkips`. Re-anchored on the branch opener, which
+survives a statement being added and still breaks on a REORDERING — proven by letting the never-ran
+branch fall through and watching it fail. Its own `-1` hole is closed in the same edit (only one of its
+three anchors was asserted present, so a rename would have read as a reordering).
+
+**That is three anchor re-pins in this autopsy** (`theCommitMessageWasNotADevServer`, my own ordering
+case in `aKitTypeIsNotGuessed`, and this one), and the lesson is one sentence: **a guard that pins a
+LINE breaks when the line grows; a guard that pins the SYNTAX it is really about does not.** The
+underlying invariants were correct every time — only the instruments were brittle.
+
+### 🔸 Q-914 advanced, not fixed — what the evidence actually supports
+
+Investigated in the same session and recorded rather than guessed:
+- **The rule is already in the prompt, unconditionally.** `architectSystemPrompt` carries *"Define CSS
+  variables on :root for a real palette"* with no game carve-out, so the build did receive it. This is
+  not a missing instruction.
+- **The scanner is not inflating the count.** `DesignLinter.allColors` matches `/#[0-9a-fA-F]{3,8}\b/`
+  only — `0x`-form three.js material colours are NOT counted, so the 45 are real CSS-shaped colours.
+- **The finding needs BOTH conditions:** `allColors.length > 8 && !hasTokens`. It fired, so the app had
+  **no token layer at all** — the finding is true, not a false positive.
+
+So Q-914 is a prompt-ADHERENCE failure on a game's UI panels, and the honest fix is a decision, not a
+one-liner: mandate tokens for a game's UI in the kit's own contract (cheap, preventive), or add a pass
+that rewrites them (risky — a voxel game's block colours are DATA, not theme, and a rewriter cannot tell
+them apart from `Hud.tsx`'s). It stays OPEN with this analysis, and what would settle it is the built
+app's own files from one game report.
+## 2026-10-12 — AUTOPSY `50378049`, Q-909: the builder had to reverse-engineer a file WE wrote
+
+Fifth PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911 · #3690 →
+Q-906+Q-907).
+
+**The defect.** NavBharatAI seeded its game kit before the builder's first call, and the handoff told it
+exactly which functions to call — `<GameCanvas>`, `ctx.follow(vehicle)`, `driveVehicle(…)` — with a
+compiling example. **What it never said was what `ctx` IS.** The example touches three of
+`GameContext`'s nine members, so for the rest the model guessed, and guessed our PRIVATE fields:
+
+| it reached for | what that actually is |
+|---|---|
+| `ctx.canvas` | `private readonly canvas` on `Game` — never on the context |
+| `ctx.followTarget` | `private followTarget` — the state behind `ctx.follow()` |
+| `ctx.crosshairTarget` | nothing at all |
+| `TouchButton` as a string | `{ action: string; label: string }` |
+
+Cost in that one build: **four `read_file` slices of `Game.ts` and two of `touchControls.ts`** — the
+model reverse-engineering a file we wrote — and the repeated-step nudges that followed.
+
+🔑 **The fix is the one this repo already uses for the same problem.** Project Mode freezes a per-module
+CONTRACT precisely so a later turn imports *"against these EXACT names"* instead of guessing. A seeded
+kit is the same situation — code the builder must use and did not write — and it had no contract.
+`src/server/lib/kitTypeContract.ts` builds one, and the shell's instructions carry it.
+
+🔒 **EXTRACTED FROM THE EMITTED SOURCE, NEVER HAND-WRITTEN.** A hand-kept copy of a type is the drift
+this repo has paid for repeatedly (four `safeRelPath`s, two complex-app detectors, five hardcoded model
+ids). `extractExportedDeclaration` reads the declaration out of the very file the recipe writes —
+brace-balanced, comments stripped — so renaming a member updates the contract in the same commit, by
+construction. A **census** asserts that every member of the emitted `GameContext` appears in the block
+the builder reads, so the contract cannot silently fall behind the type.
+
+🔒 **PLACEMENT IS PART OF THE FIX.** `gameKitSeed.compactRecipeResult` clips a recipe's instructions at
+`HANDOFF_RECIPE_CHARS` (6,000), so a contract at the bottom is a contract the builder may never see. It
+goes at the TOP, above the example, and two cases pin that — one of them by running the real
+`compactRecipeResult` and asserting the heading's index is below the clip.
+
+**Locked by** `tests/aKitTypeIsNotGuessed.test.ts` — 12 cases on the REAL emitted kit, including the
+census, the three names the reported build guessed (asserted NOT to be members, so the contract's *"if a
+name is not here, the kit does not have it"* is true), and the extractor's refusals. **Reversion-proven
+three ways:** drop the contract → 2 fails · move it to the bottom → 1 · narrow the covered names so the
+contract falls behind the type → 2 (this is the drift probe, and it is the important one).
+
+⚠️ **A HOLE IN MY OWN TEST, found by probing it.** With the contract removed, the ordering case PASSED —
+`indexOf` returned `-1`, and `-1 < 2000` is true. That is the exact *"-1 < -1 arithmetic"* trap
+`importPreviewOrdering.test.ts` warns about, and I walked into it one file away from the warning. Both
+anchors are now asserted `> 0` before they are compared, and the reason is written in the case. **An
+ordering assertion is only as good as its anchors.**
+
+**🔸 Q-912 is NOT claimed by this.** The report's three *"repeated step that isn't making progress"*
+nudges have at least two causes: the repeated `read_file` of our own kit, which this removes, and a LOOP
+GUARD on `console_errors`, which is a different thing. Calling Q-912 resolved because its biggest cause
+is gone would be the "fixed the instance, not the class" mistake this ledger exists to prevent. It stays
+OPEN, and the next report with a seeded game says whether the read loop is gone.
 ## 2026-10-12 — NATIVE FEEL, ROUND 3: round 1 fixed the reader and left the source — fourteen viewports, not one with the token
 
 The admin's standing instruction (*"navbharatai jo app banaye aur navbharatai khud dono ko real netiv app

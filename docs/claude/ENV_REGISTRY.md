@@ -2992,6 +2992,17 @@ the flag entries above promise.
   (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers
   directly, so on `kimi-k2.7-code` it spent the whole cap thinking and handed over nothing.
   `fastLaneRungDecision` in `fastLaneRung.ts`; report code `FAST_LANE_SKIPPED_REASONING_RUNG`.
+- **`AGENTV3_FASTLANE_REASONING_STAY`** (default ON, `off` reverts — added 2026-10-13, Q-926, autopsy db07e0af;
+  the admin approved option (b): *"han, apka suggestion ke anusar banao"*).
+  - **The rule.** When the chain falls onto a rung that reasons before every answer during the lane's per-file
+    calls, the lane no longer hands off at once. It stays when the files left are at most 20 and the lane's
+    remaining budget can carry their waves at 45 s each.
+  - **What still stops.** Plan, contract and repair calls still stop in front of the rung, and the measured early
+    bail (`canFinishRemainingTiers`) still hands off on a slow tier.
+  - **Where.** `mayStayOnReasoningRung` in `FastLaneBudget.ts`.
+  - **The measurement.** Report code `FAST_LANE_STAYED_ON_REASONING_RUNG`, with call count, median and slowest
+    call, and how the lane ended. Read it on the next Weak builds; set `off` if staying is slower than the
+    hand-off.
 - **`AGENTV3_HANDOFF_EARLY_SAVE`** (NOT set; default ON; `off` restores the old wait-then-save — Q-422, autopsy
   1eaa5f5a, admin chose "wait, but show the finished files" 2026-10-04). When the fast lane decides mid-tier to hand
   off (`stopLane`), the tier still waits for the calls in flight (67 s there, nothing on screen, the user pressed

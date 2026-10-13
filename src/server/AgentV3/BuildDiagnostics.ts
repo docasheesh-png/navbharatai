@@ -216,6 +216,7 @@ export const PROCESS_ONLY_CODES = new Set([
   'FAST_LANE_SKIPPED_IMAGE_APP',
   // …and the lane HANDING OFF because its chain fell to such a rung mid-lane (autopsy Study-Racer).
   'FAST_LANE_FELL_TO_REASONING_RUNG',
+  'FAST_LANE_STAYED_ON_REASONING_RUNG', // Q-926: the lane's stay on a reasoning rung, measured — a fact about OUR routing
   // …and each per-file call that handoff stopped (autopsy d382b398) — a planned handoff, not a failure.
   'LLM_CALL_HANDED_OFF',
   // An observation about OUR checkpoint heuristic (autopsy SignBridge, 2026-09-26) — never the app.

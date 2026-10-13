@@ -216,3 +216,72 @@ export function earlyBailReason(p: TierProgress): string {
   const budgetS = Math.round(p.overallMs / 1000);
   return `fast lane stopped early — ${p.tiersRemaining} stage(s) left would need about ${projectedS}s against a ${budgetS}s budget`;
 }
+
+// ─── Q-926 (autopsy db07e0af, admin 2026-10-13: "han, apka suggestion ke anusar banao") ──────────────────────────
+//
+// 🔴 THE HAND-OFF MOVED THE WHOLE BUILD ONTO THE RUNG IT WAS RUNNING FROM. A todo app on Weak: the lane's opener
+// (GLM flash) crawled on one file call, the chain's next rung (kimi) reasons before every answer, and the lane
+// stopped in front of it and handed three files to the full builder — which then built the rest of the app on that
+// SAME reasoning engine, one sequential step at a time: 68 s before its first write, nine calls of 10–25 s, the
+// first render at 248 s. The lane would have paid the reasoning price once per file, eight files at a time.
+//
+// The stop exists for a real reason (autopsy Study-Racer: one per-file call on that rung took 123 s, and the lane
+// handed off anyway with 3 of 13 files; autopsy 33812996: a repair call spent 497 s there). So the lane stays only
+// when what is LEFT is small and its own budget can carry it at a pessimistic per-wave price; the measured early
+// bail (`canFinishRemainingTiers`) still hands off the moment a real tier proves slower. Plan, contract and repair
+// calls still stop in front of the rung. Every stay is measured in the report (FAST_LANE_STAYED_ON_REASONING_RUNG),
+// so the next builds decide whether this stays on.
+
+/** `AGENTV3_FASTLANE_REASONING_STAY=off` restores the hand-off at the first reasoning rung exactly. */
+export function reasoningStayEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_FASTLANE_REASONING_STAY ?? '').trim().toLowerCase() !== 'off';
+}
+
+/**
+ * More files than this left to write and the lane hands off as before. The proposal to the admin said 12; the
+ * very todo app that raised Q-926 planned 17 (four waves ≈ 180 s, inside a 240 s lane), so 12 would have left the
+ * case it was approved for exactly as it was. The real guard is the time check below; this bounds the class.
+ */
+export const REASONING_STAY_MAX_FILES = 20;
+
+/**
+ * The price assumed for one wave of per-file calls on a rung that reasons before every answer. Measured in
+ * db07e0af: 10–25 s per call for files of up to 4 KB; 45 s leaves room for a slow one without assuming the
+ * Study-Racer outlier (123 s), which the measured early bail exists to catch.
+ */
+export const REASONING_WAVE_MS = 45_000;
+
+export interface ReasoningStayInput {
+  /** Files the lane still has to generate (this tier and every later one). */
+  remainingFiles: number;
+  /** Waves those files need at the lane's concurrency, tier by tier. */
+  remainingWaves: number;
+  elapsedMs: number;
+  overallMs: number;
+}
+
+/** May this tier's per-file calls continue onto a reasoning rung instead of handing off? PURE. */
+export function mayStayOnReasoningRung(p: ReasoningStayInput, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!reasoningStayEnabled(env)) return false;
+  if (!(p.remainingFiles > 0) || p.remainingFiles > REASONING_STAY_MAX_FILES) return false;
+  return p.elapsedMs + Math.max(1, p.remainingWaves) * REASONING_WAVE_MS <= p.overallMs;
+}
+
+/** The waves `sizes` (files per remaining tier) need at `concurrency`. PURE. */
+export function wavesFor(sizes: readonly number[], concurrency: number): number {
+  const c = Math.max(1, Math.floor(concurrency) || 1);
+  return sizes.reduce((n, s) => n + (s > 0 ? Math.ceil(s / c) : 0), 0);
+}
+
+/**
+ * The report line for the stays this lane made — the measurement the admin asked for before the change is kept.
+ * '' when the lane never stayed. PURE.
+ */
+export function reasoningStayNote(calls: ReadonlyArray<{ model: string; ms: number }>, outcome: string): string {
+  if (calls.length === 0) return '';
+  const ms = calls.map((c) => c.ms).sort((a, b) => a - b);
+  const median = ms[Math.floor((ms.length - 1) / 2)];
+  const models = [...new Set(calls.map((c) => c.model))].join(', ');
+  return `The fast lane stayed on ${models}, which reasons before every answer, instead of handing off (Q-926): `
+    + `${calls.length} file call(s), median ${Math.round(median / 1000)}s, slowest ${Math.round(ms[ms.length - 1] / 1000)}s. ${outcome}`;
+}

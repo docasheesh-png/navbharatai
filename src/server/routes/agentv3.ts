@@ -379,6 +379,7 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
+import { reasoningStayNote } from '../AgentV3/FastLaneBudget';
 import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
@@ -18219,7 +18220,9 @@ async function noteBuildOutcome(
         // The model that served the lane's LAST call reasons before every answer — the lane stops at
         // the next boundary and hands off (SimpleBuildDeps.stopLane; autopsy Study-Racer, 2026-09-25).
         let fastLaneReasoningRung: string | null = null;
-        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
+        /** Q-926: the per-file calls a reasoning rung answered while the lane stayed on it — the measurement. */
+        const laneReasoningStays: Array<{ model: string; ms: number }> = [];
+        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number, mayReason = false): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
           // blind spot — a truncated (max_tokens) per-file generation is exactly what produces broken
@@ -18259,7 +18262,8 @@ async function noteBuildOutcome(
               deadlineAt,
               // The walk stops BEFORE a rung that reasons before every answer, rather than spending the
               // lane's clock inside one (autopsy 33812996: 497 s of one repair call on two such rungs).
-              stopAtReasoningRung: fastLaneReasoningGateEnabled(),
+              // …except a per-file call the lane decided may carry on there (Q-926, FastLaneBudget.mayStayOnReasoningRung).
+              stopAtReasoningRung: fastLaneReasoningGateEnabled() && !mayReason,
               // Stop cancels this call and every later one (stopSignal.ts). The lane never read the
               // build's signal before autopsy 2720e553, so a pressed Stop ran on for minutes.
               signal: abort.signal,
@@ -18290,7 +18294,10 @@ async function noteBuildOutcome(
           }
           const servedBy = fastLaneCallIdentity(providerReported, usedProvider, fbModel, t.model);
           try { buildDiag.recordLlmCall({ model: servedBy.model, provider: servedBy.provider, promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true }); } catch { /* diagnostics best-effort */ }
-          if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {
+          if (mayReason && modelAlwaysReasons(servedBy.model)) {
+            // The lane chose to stay (Q-926): measured, and the lane is NOT told to stop.
+            laneReasoningStays.push({ model: servedBy.model, ms: Date.now() - startedAt });
+          } else if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {
             fastLaneReasoningRung = servedBy.model;
             try {
               buildDiag.record({
@@ -18320,8 +18327,8 @@ async function noteBuildOutcome(
         // on text we discarded. Continuing is provider-cap-agnostic (raising max_tokens only moves the
         // ceiling and can 400 on a provider whose real cap is lower), bounded to MAX_CONTINUATIONS, and
         // a continuation that FAILS never loses the work already produced — we keep what we have.
-        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number }): Promise<string> => {
-          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt);
+        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number; mayReason?: boolean }): Promise<string> => {
+          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt, genOpts?.mayReason === true);
           let text = first.text;
           let stopReason = first.stopReason;
           // The call whose reply ends the text — the one a dropped half-written file came from (Q-166).
@@ -18337,7 +18344,7 @@ async function noteBuildOutcome(
               // A CONTINUATION FACES THE SAME DEADLINE AS THE CALL IT CONTINUES. It is a fresh provider
               // call, so without this the budget would bound only the first one and the continuation
               // ladder would walk straight past it — the same gap the Claude retry loop had.
-              next = await fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt);
+              next = await fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt, genOpts?.mayReason === true);
             } catch (err) {
               // A failed continuation must never discard the complete files we already have.
               buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_CONTINUATION_FAILED', message: `A continuation of a truncated generation failed after ${attempts - 1} successful continuation(s) — keeping the files produced so far.`, autoResolved: false, detail: err instanceof Error ? err.message : String(err) });
@@ -18704,6 +18711,13 @@ async function noteBuildOutcome(
           signal: abort.signal });
         // A STOP IS NOT A FALLBACK (autopsy 31254f9a): nothing is handed to the full builder after a Stop.
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : sb.stopped ? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
+        // Q-926 — the measurement the admin approved the change on: every stay, its price, and how the lane ended.
+        {
+          const stayLine = reasoningStayNote(laneReasoningStays, sb.ok
+            ? `The lane finished the app itself (${sb.salvagedPaths?.length ?? 0} file(s) were left for the full builder).`
+            : sb.stopped ? 'The lane was stopped by the user.' : `The lane still handed off (${sb.reason ?? 'no reason recorded'}), with ${sb.salvagedPaths?.length ?? 0} finished file(s).`);
+          if (stayLine) buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_STAYED_ON_REASONING_RUNG', message: stayLine, autoResolved: true });
+        }
         // The lane's FILE PLAN is not the plan of record once it hands off (autopsy de3bb2bb): the full builder
         // plans its own files, so "9 of 10 files written · ~1 min to go" at minute 4 counted against a list
         // nobody was following any more. Forget it; the architect's own plan steps drive the ETA from here.

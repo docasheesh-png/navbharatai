@@ -95429,3 +95429,55 @@ FINAL: ❌ NOT COMPLETE — until this PR merges and the OPEN follow-ups are fix
   counts them). Not fixed in the chat PR: the playtest module was mid-flight in #3701 / #3704.
 - **Renumbered on rebase.** This note was filed as Q-1039. #3705 had already taken Q-1039 for the live-ETA row and opened
   the same flake as Q-1038 ("find the probe's time window"). The root cause is now on Q-1038. No second row.
+
+## 2026-10-13 — Q-1038: a frame-driven simulation sampled by a stopwatch
+
+The flake that gated report 9c612cdb's PR and then #3703. The row's diagnosis was right about the class
+and wrong about the place, and the difference only showed up because the fix was **measured under load
+instead of reasoned about**.
+
+**What the row said to fix:** the steering leg — `hold(page, ['ArrowLeft','KeyA'], 500)` and the
+`waitForTimeout(400)` interval the turn is read across. True, and insufficient: with that leg frame-gated
+the test **still failed** under three CPU hogs.
+
+**Where it actually lives:** the ACCELERATOR probe's `waitForTimeout(550)`. `out.scene` — `moved`,
+`follows`, `ahead`, `looks` — is read across that one interval, and *both* `sceneVerdict` fields sit
+behind its `moved >= 0.2` guard. So a page starved there nulls the camera reading and, through the guard,
+the steering reading as well. Frame-gating the steering leg could never have been enough, and the row
+could not have known: it reasoned from the symptom's name ("mirrored: null") to the probe that computes
+`turn`.
+
+🧬 **It is Q-869's class, in the place that fix did not reach.** Q-869 removed exactly this dependence
+from the PIXEL verdicts — a page a loaded machine stops drawing shows the same picture whatever the car
+does, so those looks record `gasLateFrames` and are believed only when the page was drawing. The scene
+probes, in the same file, kept their stopwatch. The instance was fixed; the class was not.
+
+**The fix, both halves:** both windows wait for DRAWN frames (`waitFrames`, with a wall-clock cap so a
+dead raf loop cannot hang the probe); the WEAKEST leg sets `probeFrames`, because one starved interval is
+enough to null a reading; and a starved probe is NAMED — *"page starved: 3 frames in 2500 ms"* — instead
+of returning a null that reads identically to the real finding "this game does not steer". That is
+`playtestNotRunVerdict`'s own stated principle one level down: **a check that could not look is not a
+check that passed.** It changes no score: the probe failing to look is our instrument's problem, not the
+app's, exactly as the not-run warning says.
+
+**Evidence, because "it should be fine now" is not evidence:** 6/6 unloaded; 3/3 on the previously-failing
+case under three CPU hogs (load 3.5 on 4 cores) — the same conditions under which the partial fix failed.
+
+🔴 **Two bugs this change's own tests caught in it, both worth recording as classes:**
+
+1. **A bare TypeScript constant inside the browser script.** The accelerator fix was first written
+   `waitFrames(page, PROBE_MIN_FRAMES, PROBE_CAP_MS)` — no `${…}`. Inside the template literal that is
+   not the constant, it is an identifier the BROWSER must resolve, and it would have thrown a
+   ReferenceError in the accelerator step, left `out.scene` unset, and nulled every scene verdict —
+   turning an intermittent flake into a permanent one. **It survived a full typecheck**, because a
+   template literal's contents are text, and no browser test had run since that edit. Only a source
+   assertion noticed. Guarded now.
+2. **An unescaped backtick in a script comment ends the template literal** — three times in this one
+   change. The compiler does catch it, but TS1005 points at the next line that fails to parse, twenty
+   lines past the cause. The guard names the line; it is a diagnostics fix, not a new safety net, and
+   that is what its comment says rather than overclaiming it.
+
+**Proof.** 17 tests (`tests/aStarvedPageIsSaidNotGuessed.test.ts`) and **7 reversions**. Two of those
+reversions found holes in the lock itself: removing the accelerator frame-gate left all thirteen other
+tests green, and the bare-constant bug was invisible until a source assertion existed. A reversion that
+passes is the test telling you it is not watching.

@@ -556,6 +556,37 @@ async function hold(page, keys, ms) {
   for (const k of keys) await page.keyboard.up(k).catch(() => {});
 }
 
+// A FRAME-DRIVEN SIMULATION IS SAMPLED IN FRAMES, NOT MILLISECONDS (Q-1038 — Q-869's class again).
+//
+// Q-869 removed this dependence from the PIXEL verdicts: a page a loaded machine stops drawing shows the
+// same picture whatever the car does, so those looks record how many frames were drawn. The STEERING
+// probe below kept measuring in wall-clock: it held a key for a fixed interval and read the turn from the
+// vehicle's velocity before and after. The fixture turns 0.03 rad PER FRAME, so a page starved of frames
+// moves it too little to clear the 0.2 speed floor, the turn is never computed, and the verdict is a
+// silent null. No false claim — and a flake that gated two PRs, because a null is indistinguishable from
+// "this game does not steer".
+async function drawn(page) {
+  return await page.evaluate(() => (window.__nb && window.__nb.frames) || 0).catch(() => 0);
+}
+
+/**
+ * Wait until the page has DRAWN n frames, or capMs has passed — whichever comes first.
+ *
+ * The cap is what keeps this bounded on a page that has stopped drawing altogether; without it a dead
+ * raf loop would hang the probe for the whole playtest budget. Returns what really happened, so the
+ * caller can say "the page was starved" instead of reporting nothing.
+ */
+async function waitFrames(page, n, capMs) {
+  const t0 = Date.now();
+  const f0 = await drawn(page);
+  let got = 0;
+  while (got < n && Date.now() - t0 < capMs) {
+    await page.waitForTimeout(16);
+    got = (await drawn(page)) - f0;
+  }
+  return { frames: got, ms: Date.now() - t0, starved: got < n };
+}
+
 const browser = await chromium.launch();
 const out = { ok: true };
 try {
@@ -612,7 +643,12 @@ try {
     await page.waitForTimeout(350);
     const sg0 = await snapScene(page);
     const g0 = await shot(page, box);
-    await page.waitForTimeout(550);
+    // 🔴 THE INTERVAL EVERY SCENE VERDICT DEPENDS ON (Q-1038). This was waitForTimeout(550). Both
+    // sceneVerdict fields sit behind its moved >= 0.2 guard, so a page starved here nulls the camera
+    // AND the steering reading — which is why frame-gating the steering leg alone did not stop the flake.
+    // It also makes the gas reading more trustworthy, never less: a stalled car's picture does not
+    // change however long you look at it, while a moving one gets the frames it needs to prove it.
+    const legGas = await waitFrames(page, ${PROBE_MIN_FRAMES}, ${PROBE_CAP_MS});
     const g1 = await shot(page, box);
     const sg1 = await snapScene(page);
     const gasMoves = sceneMoves(sg0, sg1);
@@ -626,7 +662,13 @@ try {
       const ahead = (rx * m.dx + rz * m.dz) / (rl * (moved || 1));
       const dl = Math.hypot(sg1.camDir[0], sg1.camDir[1]) || 1;
       const looks = (sg1.camDir[0] * -rx + sg1.camDir[1] * -rz) / (dl * rl);
-      out.scene = { moved: Math.round(moved * 100) / 100, follows: camMoved >= moved * 0.5, ahead: Math.round(ahead * 100) / 100, looks: Math.round(looks * 100) / 100 };
+      out.scene = {
+        moved: Math.round(moved * 100) / 100, follows: camMoved >= moved * 0.5,
+        ahead: Math.round(ahead * 100) / 100, looks: Math.round(looks * 100) / 100,
+        // The frames this read actually got. Recorded here because this is the window the whole scene
+        // read depends on; the steering probe narrows it to the weakest leg below.
+        probeFrames: legGas.frames, probeMs: legGas.ms,
+      };
     }
     out.gas = Math.round((await compare(page, g0, g1)).change * 100) / 100;
     // Q-861: which way the road moves while the vehicle drives — down the screen under a camera that looks the way
@@ -676,16 +718,33 @@ try {
     for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(300);
     const e0 = await snapScene(page);
-    await page.waitForTimeout(400);
+    // THE FRAGILE LEG (Q-1038). This was waitForTimeout(400) — about 24 frames on an idle machine and
+    // about two on a loaded one, and two frames of travel do not clear the 0.2 speed floor that
+    // sceneVerdict needs before it will read a turn at all.
+    const legStraight = await waitFrames(page, ${PROBE_MIN_FRAMES}, ${PROBE_CAP_MS});
     const e1 = await snapScene(page);
     for (const k of ['ArrowLeft', 'KeyA']) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(300);
     const s0 = await snapScene(page);
+    // The turning leg's length is sampleFlow's own 3 s, which is generous in frames even when loaded —
+    // but it is counted too, so the probe reports the frames it really saw rather than assuming them.
+    const turnFrom = await drawn(page);
     out.steerFlow = await sampleFlow(page, 'x', 3000).catch(() => null);
+    const legTurn = { frames: (await drawn(page)) - turnFrom };
     const s1 = await snapScene(page);
     for (const k of ['ArrowUp', 'KeyW', 'ArrowLeft', 'KeyA']) await page.keyboard.up(k).catch(() => {});
     const before = sceneMoves(e0, e1), after = sceneMoves(s0, s1);
     const car = pickVehicle(idleMoves, before);
+    if (out.scene) {
+      // Recorded WHETHER OR NOT a turn is computed below — that is the whole point: a null turn beside
+      // "3 frames in 2500 ms" is a starved page, and a null turn beside 180 frames is a game that does
+      // not steer. Without this they read identically.
+      //
+      // The WEAKEST leg decides, because any one starved interval is enough to null a reading: the
+      // accelerator window above set this, and the two steering legs can only lower it.
+      out.scene.probeFrames = Math.min(out.scene.probeFrames ?? Infinity, legStraight.frames, legTurn.frames);
+      out.scene.probeMs = Math.max(out.scene.probeMs ?? 0, legStraight.ms);
+    }
     if (out.scene && car && after && after.get(car)) {
       const v0 = before.get(car), v1 = after.get(car);
       if (Math.hypot(v0.dx, v0.dz) >= 0.2 && Math.hypot(v1.dx, v1.dz) >= 0.2) {
@@ -762,7 +821,62 @@ export interface FlowRead { total: number; pos: number; neg: number; pairs: numb
  * camera is straight ahead of where it is going); `looks`: cosine between the camera's view and the way to the vehicle;
  * `turn`: degrees the vehicle's direction turned with LEFT held, + toward the driver's left.
  */
-export interface SceneRead { moved: number; follows: boolean; ahead: number; looks: number; turn?: number }
+/**
+ * How many frames the steering probe must see DRAWN before its reading is evidence of anything (Q-1038).
+ *
+ * The fixture turns 0.03 rad — about 1.7° — per frame, and `sceneVerdict` will not read a turn below 5°,
+ * so three frames of turning is the arithmetic floor. Twelve is that floor with room: it is a fifth of a
+ * second on an idle machine and still reachable on a loaded one, and it clears the 0.2 speed floor by a
+ * margin rather than by luck. The sibling constant for the PIXEL looks is `LATE_MIN_FRAMES` (Q-869).
+ */
+export const PROBE_MIN_FRAMES = 12;
+
+/**
+ * How long the probe will wait for those frames before giving up and SAYING SO.
+ *
+ * Twelve frames is 200 ms at 60 fps and 2.4 s at 5 fps, so this covers a badly loaded machine. The cap
+ * exists because a page whose raf loop has died would otherwise hold the probe for the whole playtest
+ * budget — a hang is a worse outcome than an honest "starved".
+ */
+export const PROBE_CAP_MS = 2500;
+
+export interface SceneRead {
+  moved: number;
+  follows: boolean;
+  ahead: number;
+  looks: number;
+  turn?: number;
+  /** Frames the page DREW during the steering probe's shortest leg (Q-1038). Absent on an older run. */
+  probeFrames?: number;
+  /** Wall-clock the probe spent collecting them, so "starved" can be stated with both numbers. */
+  probeMs?: number;
+}
+
+/**
+ * Was the steering probe starved of frames, so that a null turn says nothing about the game? PURE.
+ *
+ * 🔴 WHY THIS IS NOT "just a flaky test". A null turn had two indistinguishable causes: this game does
+ * not steer, and this machine did not draw. The first is a finding; the second is noise. Reporting them
+ * identically is what let a real finding and a CPU spike look the same, and it gated two PRs
+ * (report 9c612cdb's, then #3703) before anybody traced it.
+ *
+ * `undefined` probeFrames means the run predates this measurement — that is NOT starvation, and
+ * claiming it would turn every old run into a false alarm.
+ */
+export function probeStarved(r: SceneRead | null | undefined, min = PROBE_MIN_FRAMES): boolean {
+  return !!r && typeof r.probeFrames === 'number' && r.probeFrames < min;
+}
+
+/**
+ * The line to print instead of a silent null, or null when the probe was not starved. PURE.
+ *
+ * Both numbers are in it on purpose: "3 frames in 2500 ms" is a starved page, and the same null beside
+ * 180 frames is a game that really does not steer. One of those is worth an autopsy.
+ */
+export function probeStarvedNote(r: SceneRead | null | undefined, min = PROBE_MIN_FRAMES): string | null {
+  if (!probeStarved(r, min)) return null;
+  return `page starved: ${r!.probeFrames} frames in ${r!.probeMs ?? 0} ms — the steering could not be read`;
+}
 
 export interface PlaytestRun {
   ok: boolean;
@@ -1070,7 +1184,17 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
   const errNote = run.errorCount ? `; ${run.errorCount} error(s) while playing: ${(run.errors ?? [])[0] ?? ''}` : '';
   const anyZero = (Object.keys(score.dimensions) as Dimension[]).some((d) => score.dimensions[d] === 0 && d !== 'replay');
   const ok = score.overall >= PLAYABLE_SCORE && !anyZero && !score.stalledVehicle && !score.cameraFacesVehicle && !score.steeringMirrored;
-  const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.`;
+  /**
+   * 🔴 A PROBE THAT COULD NOT LOOK DOES NOT READ AS A PASS (Q-1038) — `playtestNotRunVerdict`'s own
+   * principle, one level down. When the page was starved of frames the steering verdict is null, and a
+   * null used to be indistinguishable in the report from "this game steers correctly". It is appended to
+   * the head rather than changing the score: the probe not running is OUR instrument's problem, not the
+   * app's, exactly as the not-run warning says — it costs the app no points and no money, and it can no
+   * longer read as fine.
+   */
+  const starved = probeStarvedNote(run.scene);
+  const starvedNote = starved ? ` Steering was not read — ${starved}.` : '';
+  const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.${starvedNote}`;
   if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: head };
   const fix = score.stalledVehicle ? STALLED_VEHICLE_FIX
     : score.cameraFacesVehicle ? CAMERA_FACES_VEHICLE_FIX

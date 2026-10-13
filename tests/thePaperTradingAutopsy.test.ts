@@ -170,7 +170,7 @@ describe('5 · the checks grade the request a "continue" continues', () => {
     expect(ROUTE).toContain('userRequest: checksRequest,');
     // Siblings: the post-build reviewer and every sub-agent read the same request.
     expect(ROUTE).toContain('userRequest: milestoneRequest ?? checksRequest,');
-    expect(ROUTE).toContain('userRequest: () => (checksRequest === prompt ? planning.text : checksRequest),'); // merged with #3475 (planning.text for the specialist)
+    expect(ROUTE).toContain(': checksRequest === prompt ? planning.text : checksRequest),'); // merged with #3475 (planning.text for the specialist)
   });
 });
 

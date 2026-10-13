@@ -121,9 +121,11 @@ describe('🔒 the wiring — every lane that writes the app hears the same rule
     expect(route).toContain("code: 'NON_SMARTPHONE_TOLD'");
   });
   it('the fast lane: its prompt carries the same rule', () => {
-    // PIN UPDATED 2026-10-13 (Q-991): the fast lane reads the ONE request-notes list (which carries the device entry
-    // asserted above) apart from the request, so its size reader measures the user's words and not ours.
-    expect(route).toContain('pastedBriefSuffix, requestNotes: requestNotesText, framework');
+    // PIN UPDATED 2026-10-13 (Q-991 + Q-975): both fast lanes get ONE request (Q-975, `fastLaneRequest`) and read the
+    // ONE request-notes list (which carries the device entry asserted above) — the fast lane apart from the request, so
+    // its size reader measures the user's words; the one-shot lane after it.
+    expect(route).toContain('runSimpleBuild({ prompt: fastLaneRequest, requestNotes: requestNotesText,');
+    expect(route).toContain('runOneShot({ prompt: fastLaneRequest + requestNotesSuffix,');
   });
   it('the writing sub-agents: the request-notes thunk, read only by roles that write files', () => {
     // PIN UPDATED 2026-10-13 (Q-991): Q-868's device-only thunk became the ONE request-notes list, so a writing specialist

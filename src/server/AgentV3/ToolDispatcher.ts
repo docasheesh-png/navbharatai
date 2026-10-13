@@ -4541,7 +4541,7 @@ export class ToolDispatcher {
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
    * name a class as undefined because the file that defines it was not read.
    */
-  async undefinedClassesNow(opts: { onlyWritten?: boolean } = {}): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }>; orphans?: string[] }> {
+  async undefinedClassesNow(opts: { onlyWritten?: boolean } = {}): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }>; orphans?: string[]; noTokens?: { colours: number; files?: string[] } }> {
     try {
       let listing: string[] = [];
       try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
@@ -4574,7 +4574,21 @@ export class ToolDispatcher {
       // 6461025c: noted at write time, ignored, shipped). The SAME linter the end-of-build ACCESSIBILITY
       // line uses, over the same files already read here, so the two can never disagree.
       let a11y: Array<{ file: string; issues: string[] }> = [];
-      try { a11y = a11yHandBack(lintBuiltApp(project)); } catch { a11y = []; }
+      // 🔑 ONE LINT, READ TWICE (Q-914, autopsy 50378049). This result already carried the answer to
+      // "does this app have a token layer at all" — `design.stats.hasTokens` and a counted
+      // `hardcoded-colors` with its worst files — and every bit of it but the a11y half was thrown
+      // away. So the engine measured 45 colour literals and no CSS variables, scored the app 60/100,
+      // told the USER, and never once asked the MODEL to fix it. A finding with nowhere to go is a
+      // grade, not a fix. Same object, no second pass, no extra reads.
+      let noTokens: { colours: number; files?: string[] } | undefined;
+      try {
+        const lint = lintBuiltApp(project);
+        a11y = a11yHandBack(lint);
+        const colours = lint?.design.violations.find((v) => v.type === 'hardcoded-colors')?.count ?? 0;
+        if (lint && lint.design.stats.hasTokens === false && colours > 0) {
+          noTokens = { colours, files: (lint.offenders['hardcoded-colors'] ?? []).map((o) => o.path) };
+        }
+      } catch { a11y = []; }
       // 🔴 SPACING IS NO LONGER HANDED BACK TO THE MODEL (autopsy 536c8189, 2026-10-01). It was, from
       // #3458 until this date — `offGridHandBack` fed the `DESIGN_CONSISTENCY` values into the end-of-turn
       // message with "change each to the nearest multiple of 4px". The first real build to meet it answered
@@ -4595,7 +4609,10 @@ export class ToolDispatcher {
         try { buildWrites = this._buildWrites ? [...this._buildWrites()] : []; } catch { buildWrites = []; }
         orphans = orphansToHandBack({ project, written: [...this._writtenPaths, ...buildWrites], starterExpected: this._starterExpected });
       } catch { orphans = []; }
-      return { missing, sheet, pages, a11y, orphans };
+      // 🔒 A WHOLE-APP JUDGEMENT NEVER GOES TO A SPECIALIST (Q-066's principle, same as `orphans`): the
+      // `onlyWritten` return above is taken before this point, so a sub-agent is never handed the whole
+      // app's palette to re-judge while its siblings are still writing screens.
+      return { missing, sheet, pages, a11y, orphans, ...(noTokens ? { noTokens } : {}) };
     } catch {
       return { missing: [], pages: [] };
     }

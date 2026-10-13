@@ -104,7 +104,9 @@ describe('the route — every sizer reads planning.sizing, every model reads pla
     ['complexity routing', /\{ prompt: planning\.sizing, score: analysis\?\.complexityScore/],
     // Since Q-138 (2026-10-11) APP_SCOPE and project mode read ONE verdict, sized once from planning.sizing.
     ['scope verdict (APP_SCOPE, roadmap and project mode)', /const appScope = scopeVerdict\(planning\.sizing, \{ complex: buildIsComplex \}\)/],
-    ['fast lane', /runSimpleBuild\(\{ prompt: planning\.text/],
+    // Since Q-975 (2026-10-13) both fast lanes read ONE request built from planning.text (the milestone's brief in
+    // place of the words on a milestone build); the one-shot read the bare message before it.
+    ['fast lanes', /const fastLaneRequest = milestoneLaneRequest\(planning\.text, prompt, milestoneLanePrompt\)/],
   ])('%s', (_name, re) => {
     expect(ROUTE).toMatch(re);
   });

@@ -50,7 +50,10 @@ describe('1 · a single-file HTML ask is built as plain HTML', () => {
     expect(SINGLE_HTML_FILE_RULE).toMatch(/index\.html/);
     expect(route).toContain("framework === 'static' && wantsSingleHtmlFile(prompt) ? SINGLE_HTML_FILE_RULE : ''");
     expect(route).toContain('buildPrompt = `${singleHtmlFileRule}\\n\\n${buildPrompt}`');
-    expect(route).toContain('runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix');
+    // One request for both fast lanes since Q-975 (fastLaneRequest); the rule is still in it. (The NOTES ride the one
+    // request-notes list since the merge with autopsy 9c612cdb, Q-991 — this rule is part of the request, not a note.)
+    expect(route).toContain('const fastLaneRequest = milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt)\n        + singleHtmlFileSuffix + pastedBriefSuffix;');
+    expect(route).toContain('runSimpleBuild({ prompt: fastLaneRequest,');
     expect(route).toContain("const singleHtmlFileSuffix = singleHtmlFileRule ? `\\n\\n${singleHtmlFileRule}` : '';");
   });
 });

@@ -149,7 +149,8 @@ describe('5 · the builder is handed the pasted app as a checklist', () => {
     const route = src('src/server/routes/agentv3.ts');
     expect(route).toMatch(/pastedBrief = pastedAppBriefEnabled\(\) \? pastedAppBrief\(prompt\) : ''/);
     expect(route).toContain('buildPrompt = `${pastedBrief}');
-    expect(route).toContain('planning.text + singleHtmlFileSuffix + pastedBriefSuffix');
+    expect(route).toContain('+ singleHtmlFileSuffix + pastedBriefSuffix'); // in fastLaneRequest, both lanes' one request (Q-975)
+    expect(route).toContain('runSimpleBuild({ prompt: fastLaneRequest,');
   });
 });
 

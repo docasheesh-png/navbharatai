@@ -86,10 +86,18 @@ describe('4 · the hand-back note counts what it hands back', () => {
     expect(styleResumeNote(3, 1)).toContain('3 class name(s) had no style rule, 1 page(s) fell short');
   });
 
+  /**
+   * ⚠️ RE-ANCHORED 2026-10-13 (Q-914). This pinned each `styleResumeNote(...)` call's FULL argument
+   * list, so adding a fifth count (the colour literals) broke it while the thing it protects — both
+   * runners passing the accessibility count — was never in question. It now asserts that.
+   */
   it('both runners pass the accessibility count', () => {
     const runner = read('src/server/AgentV3/AgentRunner.ts');
-    expect(runner).toContain('styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0, style.a11y?.length ?? 0)');
-    expect(runner).toContain('styleResumeNote(style.missing.length, style.pages.length, 0, style.a11y?.length ?? 0)');
+    const calls = [...runner.matchAll(/styleResumeNote\([^)]*\)/g)].map((m) => m[0]);
+    expect(calls.length).toBe(2);
+    for (const c of calls) expect(c).toContain('style.a11y?.length ?? 0');
+    // One of the two is the specialist's, which has no orphans to count — that stays a literal 0.
+    expect(calls.filter((c) => c.includes('style.orphans?.length ?? 0')).length).toBe(1);
   });
 });
 

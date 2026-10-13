@@ -112,7 +112,8 @@ describe('🧭 the census: every request note reaches every lane through ONE lis
   it('the one-shot lane reads the list — every call to it', () => {
     const calls = [...ROUTE.matchAll(/runOneShot\(\{[^\n]*/g)].map((m) => m[0]);
     expect(calls.length).toBeGreaterThan(0);
-    for (const c of calls) expect(c, c).toContain('prompt: prompt + requestNotesSuffix');
+    // Its request is #3701's ONE fast-lane request (Q-975: the milestone, the attachment); the notes follow it.
+    for (const c of calls) expect(c, c).toContain('prompt: fastLaneRequest + requestNotesSuffix');
     expect(ROUTE).toContain('const requestNotesSuffix = requestNotesText ? `\\n\\n${requestNotesText}` : \'\';');
   });
 

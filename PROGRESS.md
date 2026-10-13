@@ -95077,6 +95077,114 @@ template hand-write its viewport again → **3** · remove the `dvh` override �
   starter, and Q-908's brand-new platform-seeded exclusion would stop recognising it. **A genuine
   fix-A-create-X, caught by a guard another session built.** Regenerated: 76 starter paths · 35 golden
   paths · 455 versions, 55 new.
+
+## 2026-10-13 — AUTOPSY `50378049`: THE LAST THREE. Q-912, Q-913, Q-914 — and I was wrong to have held them
+
+The admin, verbatim: *"maine kaha tha: build report ki sabhi problem ko ek ek kar ke solve karna hai, dna
+level par, jab tak sabhi ke root cause fix na ho jaye tab tak rukna nahi hai! toh sab ho gaya??"*
+
+**The honest answer was NO** — 12 of 15, with three held as "needs a decision / needs evidence". That was
+wrong. Each of the three had a real root cause reachable from the code, and digging found it in every
+case. What follows is what was actually there.
+
+### 🔴 Q-914 — the app was graded for a token system nobody asked it for
+
+`DESIGN_CONSISTENCY 60/100`, *"45 hardcoded colours and no CSS variables"*, **unresolved**. Checked one
+layer at a time: the rule IS in the prompt unconditionally; the scanner is honest (`#rrggbb` only, so a
+three.js `0x…` colour is never counted); the finding needs `> 8 colours` AND `!hasTokens` and it fired,
+so the app really had no token layer. **The finding was true.**
+
+🔑 So the engine MEASURED it, SCORED it, told the USER — and **never once asked the MODEL to fix it.**
+`hardcoded-colors` lives in `WHOLE_APP_VIOLATIONS`, correctly kept out of the per-file write-time note
+because it is a whole-app judgement — and then it reached no hand-back either. **A finding with nowhere
+to go is a grade, not a fix.**
+
+It belongs in the end-of-turn hand-back by that module's OWN rule, written there in advance: *"a hand-back
+is for what only a model can JUDGE … never for arithmetic with one answer."* Which literals are the same
+semantic colour, and what to call them, is exactly that — unlike `round(v / 4) * 4`, which is why spacing
+was moved OUT of the hand-back into `spacingSnap.ts` (autopsy 536c8189).
+
+🔑 **AND THE DATA WAS ALREADY IN HAND AND THROWN AWAY.** `undefinedClassesNow` already calls
+`lintBuiltApp(project)` for its a11y half; that one result carries `design.stats.hasTokens` and a counted
+`hardcoded-colors` with its worst files, and every bit but a11y was discarded. One lint, read twice — no
+second pass, no extra reads. Bounded to ONE stylesheet edit, fired only when the app has NO tokens
+whatsoever (never on partial adoption), and never handed to a sub-agent (Q-066's rule, same as `orphans`).
+
+### 🔴 Q-913 — the measurement existed; nothing said it had not run
+
+The dark screen's only account in the report was the MODEL's prose — *"normal for a sandbox game, players
+can move and dig to daylight"*. **The engine's own measurement for exactly that already existed:**
+`scorePlaytest`'s `runs` dimension reads the brightness SPREAD of a 48×27 sample (the standard deviation
+of luminance, zero for any flat colour) and scores **0** — *"The game screen is blank or a single colour"*.
+
+It never ran, because the preview address had been discarded (Q-900). **And nothing said so.** The route's
+playtest gate is one long `if (…)` **with no `else`**, so a canvas game the route could not play was
+SILENTLY skipped — while `playtestNotRunVerdict` promises, in its own words, *"one sentence for every way
+it is reached (the runner's own answer, and the route's timeout or crash)"*. The THIRD way — the route
+never calling it — had no sentence.
+
+`playtestSkipReason` is that sentence, and it keeps the two facts apart: a project with no canvas game, an
+import turn, a stopped build, a failed build and the kill switch are NOT APPLICABLE and stay silent; a
+canvas game with no preview address, a module turn awaiting its shell, no command channel or no time left
+is COULD NOT LOOK and gets the open warning that already existed.
+
+🔒 **I did NOT add a second dark-screen detector**, and that was deliberate: `browseUrl` returns no pixels,
+so a check there would have been a weaker copy of a tested one — the drifted-copy class this repo has paid
+for four times.
+
+### 🔴 Q-912 — a check after a fix is a new question, not a repeat
+
+The report's `LOOP GUARD` fired on `console_errors`. That call reads the LIVE app's console, so after an
+edit it is a **new question with the same spelling** — check, fix, check again. The guard counted it as a
+non-progressing repeat, nagged, and because `console_errors` is in `PROBE_TOOLS` it would eventually have
+**refused the model's only way of telling whether its own fix had worked.**
+
+🔑 This module already makes the argument one tool over: `bash` is excluded because a repeated
+`tsc --noEmit` *"looks identical to a loop and is usually a build legitimately converging — check, fix,
+check again"*. `console_errors`, `screenshot`, `evaluate` and `browser_action` have the same shape and
+were bannable anyway.
+
+🔒 **The discriminator is not the TOOL, it is whether anything CHANGED.** A signature's count now resets
+when the build has mutated since that signature was last seen. The original autopsy's loop — six identical
+`grep`s with nothing written between them — is **still caught**, because nothing mutated during it; a case
+proves that, and another proves a ban must be earned again after a change.
+
+⚠️ **AND MY FIRST VERSION RE-BROKE Q-738 WITHIN THE HOUR.** It counted every `bash` as a mutation, so the
+SEVEN empty `bash` calls of autopsy `d0b2fcd6` each reset the count: FINAL was never reached,
+`MAX_NO_OP_TURNS_AFTER_FINAL` never applied, and a run doing nothing forever would never end.
+`tests/aRunThatOnlyDoesNothingEnds` caught it immediately. `isEmptyCommandCall` already recognised that
+call — the dispatcher refuses it before the shell — so an empty command no longer counts as a change, and
+a reversion probe shows BOTH that test and mine failing when it does.
+
+### Proof
+
+Three new files, 40 cases: `anAppGradedForTokensItNeverGot` (13) · `aGameNobodyPlayedSaysSo` (15) ·
+`aCheckAfterAFixIsANewQuestion` (12). **Reversion-proven nine ways**, three per item.
+
+⚠️ **The SERVER typecheck caught one the frontend one missed:** `undefinedClassesNow`'s inline return type
+did not declare `noTokens`, so the runner's read of it would not compile. Both typechecks are in the gate
+for exactly this, and only one of them saw it.
+
+⚠️ **AND THREE MORE GUARDS BROKE ON THEIR ANCHORS — the sixth, seventh and eighth of this autopsy.** All
+three pinned a field's POSITION in an argument list (`'a11y: style.a11y, orphans: style.orphans,
+resumesUsed: styleResumes'`; a full `styleResumeNote(...)` call; the one-liner
+`a11yHandBack(lintBuiltApp(project))`), so inserting a fifth hand-back part broke them without touching
+anything they protect. Each now asserts its intent — the architect's call carries the orphans and the
+specialist's does not; both runners pass the a11y count; the lint is taken exactly once — and each was
+re-probed to prove it still fails on a REAL break (drop the a11y field: fails; lint twice: fails).
+
+🔑 **Eight anchor re-pins in one autopsy is itself a finding, and the lesson is one line:** a guard that
+pins a LINE, a BYTE WINDOW, or a field's POSITION breaks when the code around it grows; a guard that pins
+the SYNTAX or the RELATIONSHIP it is really about does not. Every one of the eight underlying invariants
+was correct — only the instruments were brittle. `tests/theQueueQ002`'s title (*"from the same read"*) is
+now MORE true than when it was written, which is the shape a good re-anchor takes.
+
+### BUILD REPORT 50378049 — RESOLUTION
+
+**Items: 15 · ✅ Resolved: 15 · 🟡 Blocked: 0 · Remaining: 0.**
+
+Q-900…Q-911 in #3684 (merged), #3686, #3688 (merged), #3690, #3693, #3694, #3695. Q-912, Q-913, Q-914
+here. Every one has a root cause named, a class fix, siblings hunted, and a test proven by reversion.
 ### 2026-10-13 — Autopsy db07e0af, part two: Q-926 built (admin: "han"), and three items the first ledger missed
 
 **The admin asked "sab ho gaya??" The honest answer was no.**
@@ -95126,3 +95234,77 @@ answer was no. Found and handled now:
 
 The four "not a defect" rows of the first entry (spacing snap after Stop, charge wording, transient TS2307, complexity
 second opinion) are 🟡 too until the admin agrees — a "by design" claim is not ✅ on my word (sixth rule).
+
+## 2026-10-13 — BUILD REPORT `50378049`: CLOSED. All 15 rows retired from the queue
+
+#3699 merged, so every PR of this autopsy is on `main`: #3684 · #3686 · #3688 · #3690 · #3693 · #3694 ·
+#3695 · #3699 (plus #3696, native feel round 3, which came out of the same session's standing task).
+
+Per the sixth absolute rule, Q-900…Q-914 leave the open table only now — their PRs are merged — and all
+fifteen IDs are appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` **in the same commit**, on a
+FRESH `main`. That ordering is not bookkeeping: #3543 rebuilt the queue from an older copy on 2026-10-06
+and silently reopened closed rows, which is why `tests/aClosedQueueRowStaysClosed` exists. It passes here,
+as does `theQueueIdsAreUnique` and all 32 files that read these two documents.
+
+```
+BUILD REPORT 50378049 — RESOLUTION
+Items: 15 · ✅ Resolved: 15 · 🟡 Blocked: 0 · Remaining: 0
+FINAL: ✅ COMPLETE
+```
+
+### The one sentence worth keeping from this autopsy
+
+**Three of the fifteen were the same mistake wearing different clothes: a PREDICTION allowed to outrank
+an OBSERVATION.** Q-900 (the plan said nothing was openable, so a live address was discarded), Q-906/907
+(the project score said the app was finished, so the model was told to stop ten steps in), Q-908 (the plan
+said a later module would wire the components in, so an abandoned kit stayed invisible). Each fix is the
+same shape — the prediction yields to what actually happened — and that is the missing subsystem this
+report exposed.
+
+**Four more were the same mistake one level up: a finding with nowhere to go.** Q-901 and Q-910 (the report
+said something untrue, or said something true that read as worse than it was), Q-913 (a measurement that
+never ran and nothing said so), Q-914 (a grade the model was never asked to act on). A measurement nobody
+is accountable to is decoration.
+
+**And the engine's own tests were the most reliable reviewer in the room.** Eight guards broke on brittle
+anchors, and every one of the eight invariants underneath was correct; three existing tests caught real
+fix-A-create-X mistakes of mine (`anOlderStarterIsStillOurs` on the seed history, `aRunThatOnlyDoesNothingEnds`
+on Q-738, `aRecipeExampleCompiles` on a fenced type contract); and the server typecheck caught a return
+type the frontend one could not see. Every one of those is in this file with its own note.
+## 2026-10-13 — Q-975: a milestone build keeps its notes, and every lane builds the milestone
+
+**Why this one.** While #3698 ran CI, the queue had one actionable, unclaimed code row: Q-975. The BlockWorld rows
+(Q-905…Q-911) were all merged by another session's PRs, which also own closing them. Q-912/Q-913 have no PR and no
+report data in the repo. Q-914 waits on a decision.
+
+**Correction first.** The row said milestone mode was flag-gated and not user-visible. It is not: `AGENTV3_MEGA_ROADMAP`
+has been ON by default since 2026-08-14 and is only a kill switch. Every milestone build (39e982bd, 728a402d were two)
+ran with the defect.
+
+**The class:** a reader of "what this build is building" that assembles the request for itself. Three were found:
+- **The builder.** `buildPrompt = step1.buildPrompt + …` replaced the whole prompt and threw away every note prepended
+  above the user's words. `milestoneBuildPrompt` (megaRoadmap.ts) now replaces only the user's words — every note is a
+  prepend, so they are the suffix — keeps the notes, adds one line saying a whole-app note does not widen the milestone,
+  and still restates the hard constraints (681bd91b). If the request can ever not be separated, `MILESTONE_NOTES_DROPPED`
+  says so as a warning.
+- **The two fast lanes.** On a milestone build they were handed the WHOLE message, so a fast lane planned the entire app
+  while the builder built milestone 1. And each lane added its own pick of the notes: the one-shot got two of five (no
+  classic-phone rule, no one-file rule, no pasted checklist) from the bare words without the attachment. **So #3689's
+  claim that the Q-868 classic-phone rule "reaches every lane" missed the one-shot.** Now there is ONE `fastLaneRequest`
+  for both lanes.
+- **The writing specialist.** Its `userRequest` was the whole message too; on a milestone build it is now the milestone.
+
+**Locked:** `tests/aMilestoneKeepsItsNotes.test.ts` (14). It checks the behaviour, plus a census: every note before the
+swap is a prepend, no later `buildPrompt =` starts from a bare request, and both lanes pass `fastLaneRequest`. Five
+reversions each fail it (wholesale swap, one-shot composing its own, helper dropping notes, an append before the swap,
+specialist given the whole message). Ten older source guards were updated to the one-request shape, with their intent
+kept (each note still reaches each lane).
+
+**After #3698 merged (2026-10-13), and Q-979 opened.** On top of #3692, `typecheck:server` failed with TS2563 in the
+`/build` handler: TypeScript's control-flow limit. The merging session fixed #3698's share while landing it (the
+leftover-net guard moved into `applyLeftoverNetAfterBuild`). This PR, rebuilt on that `main`, adds zero branches to the
+handler: the milestone's dropped-notes record lives in `milestoneBuildPrompt`, "not a milestone" is a `null` that
+`milestoneLaneRequest` handles, and the existing stay record moved into `recordReasoningStays` (FastLaneBudget) for
+headroom. Each has a behaviour test, reversion-proven. The handler being at the limit is a defect in its own right —
+any session's next `if` there turns CI red — so it is now **Q-979** (OPEN, unowned), with a plan to make headroom one
+module at a time. Rows Q-926, Q-976, Q-977 and Q-978 closed (merged in #3698).

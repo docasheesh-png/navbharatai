@@ -224,6 +224,7 @@ export const PROCESS_ONLY_CODES = new Set([
   'FAST_LANE_FELL_TO_REASONING_RUNG',
   'FAST_LANE_STAYED_ON_REASONING_RUNG', // Q-926: the lane's stay on a reasoning rung, measured — a fact about OUR routing
   'LEFTOVER_COMPONENTS', // our net removed (or kept) components nothing imports (leftoverComponents.ts, db07e0af)
+  'MILESTONE_NOTES_DROPPED', // Q-975: OUR prompt assembly could not keep the notes on a milestone build — never the user's app
   // …and each per-file call that handoff stopped (autopsy d382b398) — a planned handoff, not a failure.
   'LLM_CALL_HANDED_OFF',
   // An observation about OUR checkpoint heuristic (autopsy SignBridge, 2026-09-26) — never the app.

@@ -334,6 +334,7 @@ import { firestoreDeployStore } from '../AgentV3/hostedDeployments';
 import { runServerPublish, type ServerPublishDeps } from '../AgentV3/serverPublish';
 import { registerResellHostingRoutes } from './resellHosting';
 import { registerAppDataRoutes } from './appData';
+import { registerResellExpirySweep } from '../lib/resellLifecycleJob';
 import { registerBrandApplyRoutes } from './brandApply';
 import { removeHostedServers } from '../AgentV3/hostedAppLifecycle';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
@@ -4154,6 +4155,13 @@ export function registerAgentV3Routes(app: Express): void {
       if (removed.ok) await deploymentStore.setStatus(workspaceId, 'unpublished').catch(() => false);
       return { ok: removed.ok };
     },
+  });
+  // RESELL_EXPIRY_SWEEP (default OFF): remind before a paid server/database ends, take an expired
+  // extra server down after 3 days' grace. Never charges. See resellLifecycle.ts.
+  registerResellExpirySweep(async (workspaceId) => {
+    const removed = await removeHostedServers(workspaceId, { providerId: NAVBHARAT_CLOUD_PROVIDER, service: '' });
+    if (removed.ok) await deploymentStore.setStatus(workspaceId, 'unpublished').catch(() => false);
+    return { ok: removed.ok };
   });
   // WHY WAS THIS SANDBOX STARTED? One zone per request, opened before every route below, so a create
   // or resume deep inside any handler can name its cause (sandboxSessionZone.ts). Decides nothing.

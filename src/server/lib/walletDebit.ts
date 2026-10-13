@@ -3,6 +3,7 @@ import { inrToDebitTokens, TOKENS_PER_RUPEE } from './payments';
 import { giftAfterSpend, giftRemaining, paidSpendableTokens } from './giftSpend';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
 import { WALLET_OPS, walletOpId } from './walletOps';
+import { withLedgerV2 } from './ledgerV2';
 
 // BILLING PHASE 1 (admin plan 2026-07-10) — the missing HALF of the money path.
 //
@@ -553,7 +554,7 @@ export async function debitWalletForBuild(
       const result = computeDebitedWallet(current, { ...tx, floorInr: tx.floorInr ?? overdraftFloorInr() }, new Date().toISOString());
       // `applied`, not `tokensDebited > 0`: a charge under one whole token debits nothing now but
       // moves the carried remainder, and losing that write would quietly forgive the charge.
-      if (result.applied) t.set(walletRef, result.wallet);
+      if (result.applied) t.set(walletRef, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? snap.data() : null, result.wallet, 'wallet-debit'));
       if (result.applied && opRef) t.set(opRef, { kind: 'build', ownerId, ref: tx.buildRef, at: new Date().toISOString() });
       return result;
     });
@@ -597,7 +598,7 @@ export async function debitWalletRolledUp(
       const snap = await t.get(walletRef);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
       const result = computeRolledUpDebit(current, { ...tx, floorInr: tx.floorInr ?? overdraftFloorInr() }, new Date().toISOString());
-      if (result.applied) t.set(walletRef, result.wallet);
+      if (result.applied) t.set(walletRef, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? snap.data() : null, result.wallet, 'wallet-debit'));
       return result;
     });
     if (debited.applied) recordFeatureSpend(tx, userId);
@@ -653,7 +654,7 @@ export async function holdWalletRolledUp(
       const snap = await t.get(walletRef);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
       const result = computeRolledUpDebit(current, { ...tx, floorInr: 0, allOrNothing: true }, new Date().toISOString());
-      if (result.applied) t.set(walletRef, result.wallet);
+      if (result.applied) t.set(walletRef, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? snap.data() : null, result.wallet, 'wallet-debit'));
       return result;
     });
     const tokenBalance = typeof held.wallet.tokenBalance === 'number' ? held.wallet.tokenBalance : 0;
@@ -687,7 +688,7 @@ export async function releaseWalletHold(
       const snap = await t.get(walletRef);
       if (!snap.exists()) return { applied: false, tokensReturned: 0 };
       const result = computeRolledUpRelease(snap.data(), tx, new Date().toISOString());
-      if (result.applied) t.set(walletRef, result.wallet);
+      if (result.applied) t.set(walletRef, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? snap.data() : null, result.wallet, 'wallet-debit'));
       return { applied: result.applied, tokensReturned: result.tokensReturned };
     });
     return { ok: true, released: out.applied, tokensReturned: out.tokensReturned };
@@ -717,7 +718,7 @@ export async function settleWalletHold(
       const snap = await t.get(walletRef);
       if (!snap.exists()) return false;
       const result = computeRolledUpSettle(snap.data(), tx, new Date().toISOString());
-      if (result.applied) t.set(walletRef, result.wallet);
+      if (result.applied) t.set(walletRef, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? snap.data() : null, result.wallet, 'wallet-debit'));
       return result.applied;
     });
     return { ok: true, settled };

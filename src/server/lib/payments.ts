@@ -6,6 +6,7 @@ import { appendLedgerEntry, LEDGER_OPENING_FIELD, LEDGER_DROPPED_FIELD } from '.
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
 import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
 import { cashfreeOrderClosedUnpaid } from './pendingOrders';
+import { withLedgerV2 } from './ledgerV2';
 import { cashfreePaymentsAvailability } from './cashfreeCredentials';
 import { mintCodeForOrder } from './giftCodeStore';
 import { recordedReversedInr, settleRecordedReversalAtCredit } from './paymentReversal';
@@ -368,7 +369,7 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
         const reversal = settleRecordedReversalAtCredit(creditedWallet, fresh, orderCreditedTokens(fresh), orderId, nowIso);
         const wallet = reversal ? reversal.wallet : creditedWallet;
         tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef, ...(reversal ? reversal.txPatch : {}) });
-        tx.set(walletRef, wallet);
+        tx.set(walletRef, withLedgerV2(tx, (c, i) => doc(db, c, i), String(walletRef.id ?? txData.userId), walletSnap.exists() ? walletSnap.data() : null, wallet, `cashfree:${orderId}`));
         return wallet;
       });
       if (!credited) {

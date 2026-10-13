@@ -167,7 +167,10 @@ describe('4 · an unevidenced ETA is shown as a rough estimate and says so', () 
     const route = strip(src('src/server/routes/agentv3.ts'));
     expect(route).toContain('unevidencedFirstEtaLine(est)');
     expect(route).toContain('etaRoughBand = etaEvidenced ? null : roughEstimateBand(est);');
-    expect(route).toContain('unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs)');
+    // UPDATED DELIBERATELY (autopsy 9c612cdb): the tick's decision moved into the pure `etaTickLine`
+    // (progressEta.ts); the route hands it the band, and it hands the band to the unevidenced line.
+    expect(route).toContain('roughBand: etaRoughBand, roughHighMs: etaRoughHighMs,');
+    expect(strip(src('src/server/AgentV3/progressEta.ts'))).toContain('unevidencedEtaTickLine(elapsedMs, s.budgetMs, s.roughBand, s.roughHighMs)');
     const bd = strip(src('src/server/AgentV3/BuildDiagnostics.ts'));
     expect(bd).toContain('The user was shown a ROUGH ESTIMATE, labelled a guess (unevidenced)');
   });

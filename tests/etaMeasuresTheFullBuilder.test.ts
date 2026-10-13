@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   measuredRemainingFromSteps, observedPerStepMs, stepEtaText,
-  measuredRemainingMs, MIN_STEPS_FOR_MEASUREMENT, FINISH_ALLOWANCE_MS,
+  measuredRemainingMs, MIN_STEPS_FOR_MEASUREMENT, FINISH_ALLOWANCE_MS, etaTickLine,
 } from '../src/server/AgentV3/progressEta';
 
 const MIN = 60_000;
@@ -104,16 +104,24 @@ describe('the wiring — every piece of which fails NOTHING if dropped', () => {
   // None of this can break a build, a typecheck or any other test: losing a line here simply returns
   // the ETA to guessing, silently, which is exactly how the 2026-08-23 fix came to be unreachable for
   // three weeks without one failure anywhere.
-  it('the producer sits with the plan-progress recompute, fed by the SAME counter', () => {
+  // UPDATED DELIBERATELY (autopsy 9c612cdb, 2026-10-12). The producer now also hands the PATH, because the
+  // ETA counts each file once: two repair edits of one file had read as two plan steps ("3 of 5 steps
+  // done · ~2 min to go" with 5.6 min left). The plan ticks keep the same write counter they always had.
+  // The heartbeat's decision moved into the pure `etaTickLine` (progressEta.ts), so its order and its
+  // re-anchoring are asserted there — by source order and by executing it.
+  it('the producer sits with the plan-progress recompute, fed by the SAME counter (and the path)', () => {
     const at = route.indexOf('computePlanProgress(cur, planSteps, false)');
     expect(at).toBeGreaterThan(-1);
-    const near = route.slice(at, at + 500);
-    expect(near).toContain('noteEtaPlanStep(cur.length, planSteps)');
+    const near = route.slice(at, at + 700);
+    expect(near).toContain('noteEtaPlanStep(cur.length, planSteps, path)');
+    expect(route).toContain('stepsDone: etaStepPaths.size');
   });
 
   it('the heartbeat consumes it, and only AFTER the exact file measurement', () => {
-    const file = route.indexOf('measuredRemainingMs({ plannedFiles');
-    const step = route.indexOf('measuredRemainingFromSteps({ plannedSteps');
+    const eta = readFileSync(resolve(__dirname, '../src/server/AgentV3/progressEta.ts'), 'utf8');
+    const fn = eta.slice(eta.indexOf('export function etaTickLine('));
+    const file = fn.indexOf('measuredRemainingMs({ plannedFiles');
+    const step = fn.indexOf('measuredRemainingFromSteps({ plannedSteps');
     expect(file).toBeGreaterThan(-1);
     expect(step).toBeGreaterThan(-1);
     // A file manifest is an exact count of what will be written; a plan step is a unit of the
@@ -123,18 +131,19 @@ describe('the wiring — every piece of which fails NOTHING if dropped', () => {
   });
 
   it('the step branch re-anchors the budget AND counts as evidence, as the file branch does', () => {
-    // Bounded by the branch's own closing `return;` rather than a byte count — a comment added later
-    // must not be able to push an assertion out of the window and turn a real guard into a pass.
-    const at = route.indexOf('measuredRemainingFromSteps({ plannedSteps');
-    expect(at).toBeGreaterThan(-1);
-    const end = route.indexOf('return;', at);
-    expect(end).toBeGreaterThan(at);
-    const branch = route.slice(at, end);
-    expect(branch).toContain('etaTotalMs = elapsedMs + byStep');
-    expect(branch).toContain('stepEtaText(');
+    // Executed, not read: a guard on a byte window can be pushed out of range by a comment.
+    const d = etaTickLine({
+      elapsedMs: 5 * MIN, now: 5 * MIN, finalChecks: false, appRenderedAt: 0,
+      plannedFiles: 0, filesDone: 0, firstFileAt: 0, plannedSteps: 8, stepsDone: 4, firstStepAt: 1 * MIN,
+      evidenced: false, budgetMs: 0, roughBand: null, roughHighMs: null, totalMs: 3 * MIN, baseMs: 3 * MIN, revisions: 0, promisedHighMs: 0,
+    });
+    const byStep = measuredRemainingFromSteps({ plannedSteps: 8, stepsDone: 4, firstStepAt: 1 * MIN, now: 5 * MIN })!;
+    expect(d.kind).toBe('measured-steps');
+    expect(d.totalMs).toBe(5 * MIN + byStep);
+    expect(d.text).toBe(stepEtaText(5 * MIN, byStep, 4, 8));
     // 🔴 Added on the #2932 / #2934 merge. Their file branch sets this; leaving it unset here would
     // silently suppress the countdown for the rest of a build we HAD measured — and fail nothing.
-    expect(branch).toContain('etaEvidenced = true');
+    expect(d.evidenced).toBe(true);
   });
 
   it('both counters only ever grow, so a shorter snapshot cannot walk the estimate backwards', () => {

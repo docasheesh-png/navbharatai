@@ -12,7 +12,7 @@ import { BuildDiagnostics, HEAL_RESOLVES, isAppFinding } from '../src/server/Age
 import { viteEnvTypesNote } from '../src/server/AgentV3/viteEnvTypes';
 import { NEVER_PRESS, WRITE_VERBS } from '../src/server/AgentV3/clickExplorer';
 import { SIGN_IN_NEVER, signInModule } from '../src/server/AgentV3/signInExplore';
-import { finalChecksEtaLine } from '../src/server/AgentV3/progressEta';
+import { finalChecksEtaLine, etaTickLine } from '../src/server/AgentV3/progressEta';
 
 const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
 
@@ -259,15 +259,31 @@ describe('9 · the ETA line in the final checks, and after a hand-off', () => {
     expect(line).toMatch(/your app is built — running the final checks/);
     expect(line).not.toMatch(/to go|more to go/);
   });
-  it('the route switches to it at the post-answer pass, before any measured countdown (source guard)', () => {
-    const set = route.indexOf('etaFinalChecks = true;');
+  // REWRITTEN DELIBERATELY (autopsy 9c612cdb, 2026-10-12). This pinned the FIRST `etaFinalChecks = true`
+  // to sit beside `integrityStartedAt`. That anchor was too late: the runner returned at 361.9 s, the
+  // integrity pass began at ~364 s, and a tick in between promised "about 3 min more". The flag is now set
+  // as soon as the runner's final result settles (beside READY_BEFORE_END) as well. The rule this test
+  // keeps is the one that matters: no assignment before the builder's loop is over, and the integrity
+  // pass still sets it. The order "final checks before any measured countdown" moved into the pure
+  // `etaTickLine` (progressEta.ts) and is asserted by executing it.
+  it('the route switches to it once the loop is over — never before the runner\'s result exists (source guard)', () => {
+    const settled = route.indexOf('if (!result) result = await runner.run(buildPrompt);');
+    expect(settled).toBeGreaterThan(0);
+    const sets = [...route.matchAll(/etaFinalChecks = true;/g)].map((m) => m.index as number);
+    expect(sets.length).toBeGreaterThanOrEqual(2);
+    for (const at of sets) expect(at).toBeGreaterThan(settled);
+    expect(sets[0]).toBeLessThan(route.indexOf("code: 'READY_BEFORE_END'"));
     const post = route.indexOf('const integrityStartedAt = Date.now();');
-    expect(set).toBeGreaterThan(post);
-    expect(set - post).toBeLessThan(200);
-    const check = route.indexOf('if (etaFinalChecks) {');
-    const measured = route.indexOf('const measured = measuredRemainingMs(');
-    expect(check).toBeGreaterThan(0);
-    expect(check).toBeLessThan(measured);
+    expect(sets.some((at) => at > post && at - post < 200)).toBe(true);
+  });
+  it('the final-checks line outranks a measured countdown (executed)', () => {
+    const d = etaTickLine({
+      elapsedMs: 12 * 60_000, now: 1_000_000 + 12 * 60_000, finalChecks: true, appRenderedAt: 0,
+      plannedFiles: 19, filesDone: 12, firstFileAt: 1_000_000, plannedSteps: 0, stepsDone: 0, firstStepAt: 0,
+      evidenced: true, budgetMs: 0, roughBand: null, roughHighMs: null, totalMs: 15 * 60_000, baseMs: 10 * 60_000, revisions: 0, promisedHighMs: 0,
+    });
+    expect(d.kind).toBe('final-checks');
+    expect(d.text).toBe(finalChecksEtaLine(12 * 60_000));
   });
   it('🔴 the report: a hand-off forgets the lane’s file plan ("9 of 10 files" counted a list nobody followed)', () => {
     const at = route.indexOf("code: sb.ok ? 'SIMPLE_BUILD_SUCCESS'");

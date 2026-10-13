@@ -182,8 +182,10 @@ describe('§4 a Stop is reported as a Stop', () => {
     expect(route).toMatch(/sb\.ok \? 'SIMPLE_BUILD_SUCCESS' : sb\.stopped \? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK'/);
     expect(route).toMatch(/if \(sb\.outcome && !sb\.stopped\) \{/);
     // A module turn's not-yet-due gate is closed too (autopsy 0311186f); since 303e8a6f one helper decides
-    // severity and closed together, and the route hands it the Stop and the module-turn facts.
-    expect(route).toMatch(/\.\.\.releaseGateRecord\(gate, \{\s*buildOk: result\.ok === true,\s*stoppedByUser: gateEvidence\.stoppedByUser === true,\s*awaitsShell: !!moduleAwaitsShell,\s*\}\)/);
+    // severity and closed together, and the route hands it the Stop and the module-turn facts. Since autopsy
+    // 50378049 the module-turn fact is `gateEvidence.awaitingShell`, which the route sets from the CORRECTED
+    // prediction — so a module turn with a live address is not excused as "not yet due".
+    expect(route).toMatch(/\.\.\.releaseGateRecord\(gate, \{\s*buildOk: result\.ok === true,\s*stoppedByUser: gateEvidence\.stoppedByUser === true,\s*(?:\/\/[^\n]*\n\s*)?awaitsShell: !!gateEvidence\.awaitingShell,\s*\}\)/);
     expect(releaseGateRecord({ state: 'red' }, { buildOk: false, stoppedByUser: true, awaitsShell: false }).autoResolved).toBe(true);
     expect(releaseGateRecord({ state: 'unknown' }, { buildOk: true, stoppedByUser: false, awaitsShell: true })).toEqual({ severity: 'info', autoResolved: true });
   });

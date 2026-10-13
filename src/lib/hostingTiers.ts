@@ -20,7 +20,7 @@
 //
 // PURE. No env, no clock, no I/O — so the browser and the server read the identical catalogue.
 
-export type HostingTierId = 'starter' | 'growth';
+export type HostingTierId = 'starter' | 'growth' | 'pro';
 
 /**
  * The plan id written on wallets before tiers existed (₹99 "Custom Domain").
@@ -204,10 +204,39 @@ export const HOSTING_TIERS: readonly HostingTier[] = [
   },
 ];
 
+/**
+ * Go-live PR 18 — Pro (O-1: Free → Pro → add-ons). NOT in HOSTING_TIERS, so nothing that lists
+ * tiers shows it; it is offered only by PLAN_MODEL_PRO (server) and its price is set there
+ * (planModel.proPriceInr, default ₹499). Entitlements: OWNER TO CONFIRM.
+ */
+export const PRO_TIER: HostingTier = {
+  id: 'pro',
+  name: 'Pro',
+  priceInr: 499,
+  days: 30,
+  domains: 1,
+  includedBackendGb: 8,
+  includedFrontendGb: 30,
+  backendApps: 15,
+  bundledCreditInr: 0,
+  publishedApps: 15,
+  tagline: 'Everything you need to go live. Add more only when you need it.',
+  includes: [
+    'Connect 1 domain of your own',
+    'Keep up to 15 apps published (free accounts get 3)',
+    'Up to 15 of them can run a real server',
+    'No "Made with NavBharatAI" badge',
+    '30 GB of visitor traffic each month, and 8 GB for your server apps',
+    'Add more apps, domains or a database any time',
+  ],
+};
+
 /** The tier a plan id grants, or null. The legacy ₹99 plan grants Starter's entitlements. */
 export function tierForPlanId(planId: string | null | undefined): HostingTier | null {
   const id = String(planId ?? '');
   if (id === LEGACY_HOSTING_PLAN_ID) return HOSTING_TIERS[0];
+  // A bought Pro keeps its entitlements whatever PLAN_MODEL_PRO says later.
+  if (id === 'pro') return PRO_TIER;
   return HOSTING_TIERS.find((t) => t.id === id) ?? null;
 }
 
@@ -217,7 +246,8 @@ export function isKnownPlanId(planId: string | null | undefined): boolean {
 }
 
 /** A tier by id, for a purchase request. The legacy id is NOT purchasable — it is only honoured. */
-export function purchasableTier(tierId: string | null | undefined): HostingTier | null {
+export function purchasableTier(tierId: string | null | undefined, opts: { proEnabled?: boolean } = {}): HostingTier | null {
+  if (String(tierId ?? '') === 'pro') return opts.proEnabled === true ? PRO_TIER : null;
   return HOSTING_TIERS.find((t) => t.id === String(tierId ?? '')) ?? null;
 }
 
@@ -228,6 +258,9 @@ export function purchasableTier(tierId: string | null | undefined): HostingTier 
 export function tierRank(planId: string | null | undefined): number {
   const t = tierForPlanId(planId);
   if (!t) return -1;
+  // Pro sits between Starter and Growth: Starter → Pro is an upgrade (unused days credited), and a
+  // live Growth plan is never replaced by the cheaper Pro mid-period.
+  if (t.id === 'pro') return 0.5;
   return HOSTING_TIERS.findIndex((x) => x.id === t.id);
 }
 

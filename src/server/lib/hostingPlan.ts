@@ -42,6 +42,12 @@ import {
   tierForPlanId, tierRank, HOSTING_OVERAGE_INR_PER_GB, type HostingTier, type HostingTierId,
 } from '../../lib/hostingTiers';
 import { activeAddonCount } from '../../lib/hostingAddons';
+import { proPlan, proPriceInr } from '../../lib/planModel';
+
+/** Go-live PR 18: is Pro offered to buyers right now? Default OFF. */
+function proOffered(): boolean {
+  return envFlag('PLAN_MODEL_PRO');
+}
 
 /**
  * TWO TIERS SINCE 2026-09-10 (admin: "do tier banao, credit bundle karo, 20 GB theek hai").
@@ -86,6 +92,7 @@ export function legacyPlanPriceInr(): number {
 /** The price THIS plan id costs per period — the legacy one at its own price, tiers at theirs. */
 export function planPriceInr(planId: string | null | undefined): number {
   if (String(planId ?? '') === LEGACY_HOSTING_PLAN_ID) return legacyPlanPriceInr();
+  if (String(planId ?? '') === 'pro') return proPriceInr(process.env);
   return tierForPlanId(planId)?.priceInr ?? hostingPlanPriceInr();
 }
 
@@ -231,7 +238,10 @@ export function computePlanPurchase(
   opts: { agreedToTerms?: boolean; autoRenew?: boolean } = {},
 ): PlanPurchaseOutcome {
   if (!hostingPlansEnabled()) return { ok: false, reason: 'disabled' };
-  const tier = purchasableTier(tierId);
+  // Pro only while PLAN_MODEL_PRO is on, at its configured price. Starter/Growth stay purchasable
+  // either way, so an existing subscriber's renewal and upgrade paths never change under the flag.
+  const listed = purchasableTier(tierId, { proEnabled: proOffered() });
+  const tier = listed?.id === 'pro' ? proPlan(process.env) : listed;
   if (!tier) return { ok: false, reason: 'unknown_tier' };
   if (!opts.agreedToTerms) return { ok: false, reason: 'agreement_required' };
 
@@ -607,7 +617,8 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
   const base: HostingPlanStatus = {
     enabled: hostingPlansEnabled(), active: false, plan: null,
     priceInr: hostingPlanPriceInr(), days: HOSTING_PLAN_DAYS,
-    tiers: HOSTING_TIERS, tier: null, renewalPriceInr: hostingPlanPriceInr(),
+    // PLAN_MODEL_PRO on ⇒ new buyers are shown Pro; off ⇒ exactly today's list.
+    tiers: proOffered() ? [proPlan(process.env)] : HOSTING_TIERS, tier: null, renewalPriceInr: hostingPlanPriceInr(),
     overageInrPerGb: HOSTING_OVERAGE_INR_PER_GB,
     extraSites: 0,
     extraDomains: 0,
@@ -637,6 +648,8 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
       active: hostingPlanActive(wallet, Number.isFinite(nowMs as number) ? (nowMs as number) : undefined),
       plan: plan && isKnownPlanId(plan.id) ? plan : null,
       tier: heldTier,
+      // A Starter/Growth subscriber keeps seeing their own plan (to renew) next to Pro.
+      ...(proOffered() && heldTier && heldTier.id !== 'pro' ? { tiers: [heldTier, proPlan(process.env)] } : {}),
       renewalPriceInr: plan && isKnownPlanId(plan.id) ? planPriceInr(plan.id) : hostingPlanPriceInr(),
       extraSites: activeAddonCount(wallet, 'extra_site', clock),
       extraDomains: activeAddonCount(wallet, 'extra_domain', clock),

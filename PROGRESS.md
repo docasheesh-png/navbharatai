@@ -95234,3 +95234,40 @@ answer was no. Found and handled now:
 
 The four "not a defect" rows of the first entry (spacing snap after Stop, charge wording, transient TS2307, complexity
 second opinion) are 🟡 too until the admin agrees — a "by design" claim is not ✅ on my word (sixth rule).
+
+## 2026-10-13 — BUILD REPORT `50378049`: CLOSED. All 15 rows retired from the queue
+
+#3699 merged, so every PR of this autopsy is on `main`: #3684 · #3686 · #3688 · #3690 · #3693 · #3694 ·
+#3695 · #3699 (plus #3696, native feel round 3, which came out of the same session's standing task).
+
+Per the sixth absolute rule, Q-900…Q-914 leave the open table only now — their PRs are merged — and all
+fifteen IDs are appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` **in the same commit**, on a
+FRESH `main`. That ordering is not bookkeeping: #3543 rebuilt the queue from an older copy on 2026-10-06
+and silently reopened closed rows, which is why `tests/aClosedQueueRowStaysClosed` exists. It passes here,
+as does `theQueueIdsAreUnique` and all 32 files that read these two documents.
+
+```
+BUILD REPORT 50378049 — RESOLUTION
+Items: 15 · ✅ Resolved: 15 · 🟡 Blocked: 0 · Remaining: 0
+FINAL: ✅ COMPLETE
+```
+
+### The one sentence worth keeping from this autopsy
+
+**Three of the fifteen were the same mistake wearing different clothes: a PREDICTION allowed to outrank
+an OBSERVATION.** Q-900 (the plan said nothing was openable, so a live address was discarded), Q-906/907
+(the project score said the app was finished, so the model was told to stop ten steps in), Q-908 (the plan
+said a later module would wire the components in, so an abandoned kit stayed invisible). Each fix is the
+same shape — the prediction yields to what actually happened — and that is the missing subsystem this
+report exposed.
+
+**Four more were the same mistake one level up: a finding with nowhere to go.** Q-901 and Q-910 (the report
+said something untrue, or said something true that read as worse than it was), Q-913 (a measurement that
+never ran and nothing said so), Q-914 (a grade the model was never asked to act on). A measurement nobody
+is accountable to is decoration.
+
+**And the engine's own tests were the most reliable reviewer in the room.** Eight guards broke on brittle
+anchors, and every one of the eight invariants underneath was correct; three existing tests caught real
+fix-A-create-X mistakes of mine (`anOlderStarterIsStillOurs` on the seed history, `aRunThatOnlyDoesNothingEnds`
+on Q-738, `aRecipeExampleCompiles` on a fenced type contract); and the server typecheck caught a return
+type the frontend one could not see. Every one of those is in this file with its own note.

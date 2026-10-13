@@ -485,7 +485,7 @@ import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
-import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
+import { DecisionTrace, persistDecisionTrace, getDecisionTrace, decisionTraceForViewer } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration, failuresAreOurStarterTests, ourStarterTestFailedNote } from '../AgentV3/TestGenerationAgent';
 import { starterTestsSkipReason, starterTestsSkippedNote } from '../AgentV3/starterTestsSkip';
 import { buildBillingLabel } from '../AgentV3/buildBillingLabel';
@@ -5223,13 +5223,17 @@ async function noteBuildOutcome(
     // SECURITY Phase 3.2 (IDOR) — the decision trace reveals a build's intent/model/outcome and is
     // owner-private. This route had NO ownership check; add the STRICT verified-owner read gate
     // (anon-capability preserved — an agentv3-anon-* workspace is reachable by its unguessable id).
-    if (!verifiedWorkspaceReadOk(await verifyFirebaseToken(req), workspaceId)) {
+    const verifiedTraceUid = await verifyFirebaseToken(req);
+    if (!verifiedWorkspaceReadOk(verifiedTraceUid, workspaceId)) {
       res.status(403).json({ error: 'This decision trace belongs to another account.' });
       return;
     }
     const decisions = await getDecisionTrace(workspaceId);
     if (!decisions || decisions.length === 0) { res.status(404).json({ error: 'No decision trace yet — run a build first.' }); return; }
-    res.json({ decisions });
+    // White-Label Law (Q-978): only the ADMIN sees provider/model names. The same verified-email check the
+    // diagnostics route uses (`showProviderDetail`), failing CLOSED — no email or a failed lookup ⇒ redacted.
+    const showTraceProviders = isReportAdmin(await resolveGrantEmail(verifiedTraceUid ?? '').catch(() => null));
+    res.json({ decisions: decisionTraceForViewer(decisions, showTraceProviders) });
   });
 
   // Capture a PREVIEW failure (in-browser srcdoc / live runtime) reported by the client into the

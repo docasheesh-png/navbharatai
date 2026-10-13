@@ -10,6 +10,7 @@
 
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
+import { redactProvidersText } from '../lib/providerRedaction';
 
 export interface Decision {
   stage: string;
@@ -47,6 +48,29 @@ export class DecisionTrace {
     if (this.decisions.length === 0) return 'No decisions recorded.';
     return this.decisions.map((d, i) => `${i + 1}. [${d.stage}] ${d.decision} — ${d.reason}`).join('\n');
   }
+}
+
+/**
+ * The decision trace as a given VIEWER may see it — White-Label Law (Q-978, found while root-causing Q-970).
+ *
+ * 🔴 THE LEAK. `GET /api/agentv3/decision-trace` is gated to the workspace OWNER, not the admin, and the
+ * trace records the engine choice in vendor terms — `haiku (GLM)`, `sonnet (claude-sonnet-4-6)`, and a
+ * reason like "analyzer chose sonnet start tier". So any owner who opened the URL learned which third-party
+ * models built their app, which the law forbids on every surface a normal user can reach. The diagnostics
+ * route had closed the same hole long ago (`showProviderDetail`, Fix 68); this route was its sibling.
+ *
+ * The admin gets the decisions exactly as recorded. Anyone else gets every text field through the ONE
+ * shared scrubber (`redactProvidersText`), so this view can never disagree with the build report's.
+ * PURE — never mutates its input.
+ */
+export function decisionTraceForViewer(decisions: readonly Decision[], isAdmin: boolean): Decision[] {
+  if (isAdmin) return decisions.map((d) => ({ ...d }));
+  return decisions.map((d) => ({
+    stage: redactProvidersText(d.stage),
+    decision: redactProvidersText(d.decision),
+    reason: redactProvidersText(d.reason),
+    at: d.at,
+  }));
 }
 
 /** Last-trace-per-workspace cache (per instance) so the endpoint can return without a Firestore read. */

@@ -94479,3 +94479,93 @@ unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong
   - No "skeleton loading" is claimed without a skeleton.
 - **Still open:** Q-926 (248 s to first render on Weak). 🟡 BLOCKED on the admin's routing decision; the options are in the row.
 - **Report db07e0af, final count:** 15 items. ✅ 14 (13 fixed by #3687, plus Q-923 not-a-defect). 🟡 1 (Q-926). Remaining 0.
+
+## 2026-10-12 — NATIVE FEEL, ROUND 3: round 1 fixed the reader and left the source — fourteen viewports, not one with the token
+
+The admin's standing instruction (*"navbharatai jo app banaye aur navbharatai khud dono ko real netiv app
+feel aye aisa banao! aur bhi jyada micro polish karo"*). Rounds 1 (#3669) and 2 (#3671) are merged.
+
+### Measured first, and three of four candidates were already done
+
+Before adding anything, the obvious round-3 ideas were checked against the code rather than assumed:
+
+| candidate | state |
+|---|---|
+| iOS input zoom (<16px focus zoom) | ✅ already handled, BOTH sides (`nativeFeel.ts:158`, `index.css:468`) |
+| tap highlight, overscroll, touch-action, user-select | ✅ round 1 |
+| safe-area variables, Apple meta tags | ✅ round 1 |
+| **our own app's `100vh`** | ✅ **already correct** — its three `index.css` sites use the `100vh` → `100dvh` fallback pattern, with the reasons written down |
+
+So the honest answer for NavBharatAI itself was *nothing to fix*, and saying that beats churn. **Both real
+gaps were on the apps-we-build side.**
+
+### 🔴 GAP 1 — round 1 fixed the READER and left the SOURCE
+
+`withViewportFitCover` PATCHES a user's `index.html` at build time, so an AgentV3 build gets
+`viewport-fit=cover` and its `env(safe-area-inset-*)` stops reading 0px. Measured afterwards: **not one
+of the fourteen viewport tags in the scaffold templates carried the token.** Thirteen provider templates
+(`ViteReactProviderContents`, `Vue`, `Svelte`, `SvelteKit`, `Astro`×2, `Angular`, `Preact`, `Solid`,
+`Lit`, `Vanilla`, `Remix`, `Alpine`, `Static`) each hand-wrote their own string — so there was nowhere to
+add it once, and **any lane that does not pass through `appDefaults` shipped the exact defect round 1 was
+written for.**
+
+🔑 **This repo's headline class, in its own words:** an instance fixed at one reader, the source left
+alone, and the siblings never hunted. `APP_VIEWPORT_CONTENT` / `APP_VIEWPORT_META` now live in
+`nativeFeel.ts` beside the reason, and the templates import them. `withViewportFitCover` stays as defence
+in depth: it returns a document untouched once the token is present, so a correct template makes it a
+no-op instead of a rescue — a case asserts both directions.
+
+🔒 No `maximum-scale` / `user-scalable=no`: pinch-zoom is an accessibility right and blocking it fails a
+store review. The native feel comes from the safe area, not from forbidding zoom.
+
+🔒 **What is deliberately OUT, with the reason in the test** — the email generator (mail clients ignore
+`viewport-fit` and some choke on unknown tokens) and the three preview runtimes (they RENDER an app, they
+do not ship one; changing them changes what we show, not what the user gets). Recorded so the exclusion
+is a decision rather than an oversight, and so nobody "finishes the job" by adding the token to an email.
+
+### 🔴 GAP 2 — a full-height app must end where the SCREEN ends
+
+`100vh` on a phone is the LARGE viewport: it includes the collapsing address bar, so a `height: 100vh`
+layout is cut off by exactly the toolbar height and the page scrolls when it should not. That is the
+clearest "web page, not app" tell left once the safe area is handled, and the built-app baseline had
+**no `dvh` at all**. Added: `--app-height` (plain `100vh` first, then `@supports (height: 100dvh)`), an
+`html` min-height with the same two-line pattern, and a build-rule line that NAMES the variable instead
+of merely forbidding `100vh` — round 2's lesson that a rule naming no primitive is aspirational.
+
+### Proof
+
+`tests/aViewportEveryLaneWrites.test.ts` — **38 cases**. It GENERATES every one of the thirteen
+frameworks and reads the document the provider really emits, so the token is proven in the output, not in
+the diff. Plus a **CENSUS**: no file in the template directory may hand-write a viewport, every user of
+the constant must import it, and the out-of-scope list is pinned with its reasons.
+
+**Reversion-proven three ways:** drop the token from the shared constant → **15 fails** · let one
+template hand-write its viewport again → **3** · remove the `dvh` override → **1**.
+
+### ⚠️ Three mistakes of mine, all caught by a guard
+
+- **The backtick trap, a THIRD time in one session** (#3671, #3693, here) — a CSS comment inside
+  `NATIVE_FEEL_CSS`, which is a TS template literal. `tsc` passed and the TEST LOADER caught it (`oxc`
+  parse error). The file now says in its own text that it may not contain backticks.
+- **My filter could return nothing, and did.** `htmlOf` missed `.astro` entirely, so the astro case
+  asserted against an empty string — a case that fails for the wrong reason is one edit away from a case
+  that PASSES for the wrong reason. Every case now asserts the document is non-empty first.
+- **A blanket assertion was wrong.** `expect(html).not.toContain('${')` failed on Remix's `root.tsx`,
+  which is generated code that legitimately contains its own template literals. It now asserts the
+  specific literal cannot ship — the precise claim instead of the broad one.
+
+### ⚠️ And two EXISTING guards caught consequences I had not thought of
+
+- **`aBuiltAppFeelsNative`'s "chooses no colour" rule read `#3671` as a hex colour.** Writing the PR
+  references as a hash plus four hex digits inside the stylesheet matched its
+  `/#[0-9a-f]{3,8}\b/i` exactly. **The guard was right** — and notably STRONGER than the colour check I
+  wrote in my own new test, which only extracts `background`/`color`/`border-color` declarations and
+  would never have seen a bare hex. The comment now says both of its own rules (no backticks, no hash
+  before a number) so the next editor does not rediscover either.
+- **`anOlderStarterIsStillOurs` failed because I changed what the templates write.** That census (autopsy
+  `db07e0af`) requires every file a template emits TODAY to be in the seed history — which is what lets
+  `isPlatformSeededFile` recognise an untouched starter as OURS. Changing fourteen viewport tags without
+  it would have made every new `index.html` read as the USER's code: the quality lint would grade our own
+  starter, and Q-908's brand-new platform-seeded exclusion would stop recognising it. **A genuine
+  fix-A-create-X, caught by a guard another session built.** Regenerated: 76 starter paths · 35 golden
+  paths · 455 versions, 55 new.

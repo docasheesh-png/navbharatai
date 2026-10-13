@@ -1,4 +1,5 @@
 import { DESIGN_KIT_CSS } from './designKit';
+import { APP_VIEWPORT_META } from '../../../../nativeFeel';
 import { ITemplateProvider } from './ViteReactProvider';
 
 const PKG = JSON.stringify({
@@ -16,7 +17,7 @@ const INDEX_HTML = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    ${APP_VIEWPORT_META}
     <title>My Static Site</title>
     <link rel="stylesheet" href="style.css" />
   </head>

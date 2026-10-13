@@ -179,7 +179,7 @@ export function unevidencedEtaTickLine(
  * states which of the two the user actually saw and why — a number, or the reason there wasn't one.
  */
 export function etaEvidenceNote(
-  est: Pick<BuildEstimate, 'historyWeight' | 'basis'> & Partial<Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'>>,
+  est: Pick<BuildEstimate, 'historyWeight' | 'basis'> & Partial<Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs' | 'evidenceMeanMs'>>,
   /**
    * Whose past builds taught it. 🔴 Autopsy 19641ab5: an app with NO builds of its own was estimated from
    * the platform's recent average, and this line still said "this workspace's own past builds" beside a
@@ -187,11 +187,16 @@ export function etaEvidenceNote(
    */
   source: 'workspace' | 'platform' = 'workspace',
 ): string {
+  // The measured mean, said beside the band (Q-967): a reader could not see a band that excluded its own builds.
+  const mean = Number(est?.evidenceMeanMs);
+  const reaches = Number.isFinite(mean) && mean > 0
+    ? ` The measured builds it learned from averaged ${formatEta(mean).replace('~', '')}; the band shown reaches them.`
+    : '';
   if (estimateIsEvidenced(est)) {
     const whose = source === 'platform'
       ? 'NavBharatAI\'s recent builds of this kind (this app has none of its own yet)'
       : 'this workspace\'s own past builds';
-    return `Shown as a number: ${Math.round(Number(est.historyWeight) * 100)}% of it comes from ${whose} (basis ${est.basis}).`;
+    return `Shown as a number: ${Math.round(Number(est.historyWeight) * 100)}% of it comes from ${whose} (basis ${est.basis}).${reaches}`;
   }
   const w = Number(est?.historyWeight);
   const band = roughEstimateBand(est as Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'>);
@@ -202,5 +207,5 @@ export function etaEvidenceNote(
     // basis line beside this one says which slice was read and why it was empty (autopsy 303e8a6f).
     return `${shown}: no past builds of this kind were measured, and the heuristic alone is not evidence (it scores short, ambitious prompts smallest).`;
   }
-  return `${shown}: only ${Math.round(w * 100)}% of the estimate comes from real past builds, so the prompt-word heuristic still dominates it.`;
+  return `${shown}: only ${Math.round(w * 100)}% of the estimate comes from real past builds, so the prompt-word heuristic still dominates it.${reaches}`;
 }

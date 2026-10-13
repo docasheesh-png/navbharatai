@@ -130,7 +130,10 @@ export interface FleetTelemetryDayLike {
   byTaskType?: Record<string, { builds?: number; durationMs?: number; okBuilds?: number; okDurationMs?: number; okDurationSqSec?: number } | undefined>;
 }
 
-/** Fewer builds of a kind on one day than this, and that day's mean is noise, not a measurement. */
+/**
+ * An entry is the mean of at least this many finished builds — from one day, or from sparse days pooled
+ * (autopsy 303e8a6f, Q-967). One build is not an average.
+ */
 export const FLEET_MIN_BUILDS_PER_DAY = 2;
 
 /**
@@ -162,6 +165,24 @@ export function fleetHistoryFromTelemetry(
   let seenOk = 0;
   const window = (days ?? []).slice(0, maxDays);
   if (!taskType) return { history, builds, days: 0, seenOk, daysRead: window.length };
+  // 🔴 SPARSE DAYS ARE POOLED, NOT DROPPED (autopsy 303e8a6f, Q-967). A day with one finished build was thrown
+  // away, so a slice the platform used once or twice a day — a NEW slice like `scaffold_pro`, or a quiet template
+  // — never taught anything and its ETA was priced from the chip's wording for a whole week. Such days are summed
+  // until together they hold FLEET_MIN_BUILDS_PER_DAY builds, and then become ONE entry. Only days that carry the
+  // successful-build fields are pooled; a legacy day keeps its old rule.
+  let taughtDays = 0;
+  const pool = { n: 0, ms: 0, sq: 0, sqKnown: true, days: 0 };
+  const emitPool = () => {
+    const mean = pool.ms / pool.n;
+    if (mean >= MIN_SANE_BUILD_MS && mean <= MAX_SANE_BUILD_MS) {
+      const meanSec = mean / 1000;
+      const sd = pool.sqKnown && pool.sq > 0 ? Math.sqrt(Math.max(0, pool.sq / pool.n - meanSec * meanSec)) * 1000 : 0;
+      history.push({ complexity: currentComplexity, durationMs: Math.round(mean), ...(sd > 0 ? { sdMs: Math.round(sd) } : {}) });
+      builds += pool.n;
+      taughtDays += pool.days;
+    }
+    Object.assign(pool, { n: 0, ms: 0, sq: 0, sqKnown: true, days: 0 });
+  };
   for (const d of window) {
     const slice = d?.byTaskType?.[taskType];
     const finished = Number(slice?.okBuilds);
@@ -175,6 +196,15 @@ export function fleetHistoryFromTelemetry(
     const hasOk = Number.isFinite(okN) && Number.isFinite(okMs) && okN > 0 && okMs > 0;
     const n = hasOk ? okN : (slice?.okDurationMs === undefined ? Number(slice?.builds) : NaN);
     const ms = hasOk ? okMs : Number(slice?.durationMs);
+    if (hasOk && okN < FLEET_MIN_BUILDS_PER_DAY) {
+      const daySq = Number(slice?.okDurationSqSec);
+      pool.n += okN;
+      pool.ms += okMs;
+      if (Number.isFinite(daySq) && daySq > 0) pool.sq += daySq; else pool.sqKnown = false;
+      pool.days += 1;
+      if (pool.n >= FLEET_MIN_BUILDS_PER_DAY) emitPool();
+      continue;
+    }
     if (!Number.isFinite(n) || !Number.isFinite(ms) || n < FLEET_MIN_BUILDS_PER_DAY || ms <= 0) continue;
     const mean = ms / n;
     if (!(mean >= MIN_SANE_BUILD_MS && mean <= MAX_SANE_BUILD_MS)) continue;
@@ -187,8 +217,11 @@ export function fleetHistoryFromTelemetry(
       : 0;
     history.push({ complexity: currentComplexity, durationMs: Math.round(mean), ...(daySd > 0 ? { sdMs: Math.round(daySd) } : {}) });
     builds += n;
+    taughtDays += 1;
   }
-  return { history, builds, days: history.length, seenOk, daysRead: window.length };
+  // A leftover pool under FLEET_MIN_BUILDS_PER_DAY builds is not emitted: one build is not an average.
+  // `days` counts the CALENDAR days that taught (a pooled entry spans several), not the entries.
+  return { history, builds, days: taughtDays, seenOk, daysRead: window.length };
 }
 
 /**
@@ -307,8 +340,12 @@ export function fleetEmptyBasisNote(taskType: string, seenOk: number, daysRead: 
   if (seenOk <= 0) {
     return `No past builds of this app, and none of NavBharatAI's ${kind} finished in ${window} — this is the heuristic alone.`;
   }
-  return `No past builds of this app. NavBharatAI finished ${seenOk} of its ${kind} in ${window}, but never ${FLEET_MIN_BUILDS_PER_DAY} on one day — `
-    + `a day's average needs at least ${FLEET_MIN_BUILDS_PER_DAY}, so this is the heuristic alone.`;
+  // Sparse days are pooled (Q-967), so "never 2 on one day" is no longer a reason the slice is empty.
+  if (seenOk < FLEET_MIN_BUILDS_PER_DAY) {
+    return `No past builds of this app. NavBharatAI finished only ${seenOk} of its ${kind} in ${window} — one build is not an average, so this is the heuristic alone.`;
+  }
+  return `No past builds of this app. NavBharatAI finished ${seenOk} of its ${kind} in ${window}, but none gave a usable average `
+    + `(a mean outside 5 s – 45 min, or no duration recorded) — this is the heuristic alone.`;
 }
 
 /**

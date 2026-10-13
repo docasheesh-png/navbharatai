@@ -420,6 +420,9 @@ export function keepKitOnRewrite(path: string, before: string, after: string, en
   return { content, kept, tokens: tokenList };
 }
 
+// Imported beside its two readers below (the same pattern as ContextReranker.ts and MistakeLedger.ts).
+import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
+
 /** What the model is told when its rewrite had kit rules put back. PURE. */
 export function kitKeepToolNote(path: string, keep: KitKeep): string {
   const shown = keep.kept.slice(0, 10).map((c) => `.${c}`).join(', ');
@@ -427,7 +430,8 @@ export function kitKeepToolNote(path: string, keep: KitKeep): string {
   return `\nℹ️ DESIGN KIT KEPT: this rewrite of ${path} dropped the design kit's rules for ${keep.kept.length} class(es) `
     + `(${shown}${more}) without restyling them, so they were appended after your content unchanged — screens `
     + 'that use them stay styled. Your own rules come first and were not altered. To restyle a kit class, write '
-    + 'your own rule for it; to add styles, prefer edit_file and append rather than rewriting this file.';
+    // "append" named the goal and not the call (autopsy 9c612cdb, Q-943) — the call is now spelled out.
+    + `your own rule for it; to add styles, append rather than rewriting this file. ${APPEND_WITH_EMPTY_OLD_STRING}`;
 }
 
 /** The admin line for `DESIGN_KIT_RESTORED`. PURE. */
@@ -493,7 +497,8 @@ export function inventedKitClassNote(path: string, invented: readonly string[]):
     return real ? `.${c} (the kit has .${real})` : `.${c}`;
   }).join(', ');
   return `\n⚠️ ${path} uses ${shown} — these look like design-kit classes but the kit does not define them, and no stylesheet does either, so those elements render UNSTYLED. `
-    + 'Switch to the kit class named beside each one, or add their rules to src/index.css now. The kit\'s own classes include .nb-shell, .nb-sidebar, .nb-nav-item, .nb-topbar, .nb-hero, .nb-empty, .card, .btn-primary, and for a game .nb-game, .nb-game-hud, .nb-game-stat, .nb-game-btn, .nb-game-screen.';
+    + `Switch to the kit class named beside each one, or add their rules to src/index.css now (${APPEND_WITH_EMPTY_OLD_STRING}) `
+    + 'The kit\'s own classes include .nb-shell, .nb-sidebar, .nb-nav-item, .nb-topbar, .nb-hero, .nb-empty, .card, .btn-primary, and for a game .nb-game, .nb-game-hud, .nb-game-stat, .nb-game-btn, .nb-game-screen.';
 }
 
 /**

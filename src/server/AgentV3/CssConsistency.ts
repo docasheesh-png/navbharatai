@@ -17,7 +17,9 @@
 //   • requires the project to actually HAVE a .css file with selectors, and a threshold of misses,
 //     before reporting — so a matched stylesheet (or a CSS-in-JS app) is never flagged.
 //
-// Pure + dependency-free → fully unit-testable.
+// Pure + dependency-free → fully unit-testable. (Its one import is a constant from a leaf module.)
+
+import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 
 const SRC_RE = /\.(t|j)sx?$/;
 /** A file whose markup names classes: a component, a script that builds HTML, or an HTML page. */
@@ -253,7 +255,9 @@ export function undefinedClassesWriteNote(path: string, missing: readonly string
   const shown = missing.slice(0, 8).map((c) => `.${c}`).join(', ');
   const more = missing.length > 8 ? ` and ${missing.length - 8} more` : '';
   return `\n⚠️ ${path} uses ${shown}${more} — no stylesheet in this project defines ${missing.length === 1 ? 'it' : 'them'}, so those elements render UNSTYLED. `
-    + `Add the rules to ${sheet} now (or use a class the stylesheet already has) — not at the end of the build.`;
+    + `Add the rules to ${sheet} now (or use a class the stylesheet already has) — not at the end of the build. `
+    // HOW, not only WHAT (autopsy 9c612cdb, Q-943: this exact note was followed by a guessed anchor that missed).
+    + APPEND_WITH_EMPTY_OLD_STRING;
 }
 
 /** `a/b/../c` → `a/c`, with no leading `./`. PURE. */
@@ -389,7 +393,7 @@ export function stylesheetClassBrief(sheets: Record<string, string>): string {
   if (names.length === 0) return '';
   const shown = names.slice(0, BRIEF_MAX_CLASSES).map((c) => `.${c}`).join(' ');
   const more = names.length > BRIEF_MAX_CLASSES ? ` (+${names.length - BRIEF_MAX_CLASSES} more)` : '';
-  return `[STYLESHEET CLASSES — already defined in ${paths.join(', ')}; use these directly. Do not read the stylesheet to find them, and never use a class that is not here without adding its rule.]\n${shown}${more}`;
+  return `[STYLESHEET CLASSES — already defined in ${paths.join(', ')}; use these directly. Do not read the stylesheet to find them, and never use a class that is not here without adding its rule. ${APPEND_WITH_EMPTY_OLD_STRING}]\n${shown}${more}`;
 }
 
 /**
@@ -463,7 +467,8 @@ export function undefinedClassWriteNote(
     wroteSheet
       ? `Style check after this write: ${scope.length} class name(s) the screens use still have no rule in any stylesheet, so those parts render unstyled: ${shown}${more}.`
       : `Style check after this write: ${scope.length} class name(s) in this file have no rule in any stylesheet yet: ${shown}${more}.`,
-    'Define each one in the global stylesheet with the palette variables, or use a class that already exists, before you finish.',
+    'Define each one in the global stylesheet with the palette variables, or use a class that already exists, before you finish. '
+      + APPEND_WITH_EMPTY_OLD_STRING,
   ].join('\n');
 }
 

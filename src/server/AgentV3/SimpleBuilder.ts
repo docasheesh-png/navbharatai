@@ -44,6 +44,7 @@ import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport, dedupeStylesheetImports } from './ProjectIntegrityChecks';
 import { frameworkShipsDesignKit } from './designKitReach';
 import { kitClasses } from './kitRestore';
+import { TODO_RIDES_WITH_WORK } from './todoOnlyTurn';
 import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
 import { contractEnumAsConstEnabled, stringEnumsAsConstObjects } from './contractEnums';
 import { contractRenameHeaderLine, type ContractRename } from './contractRenames';
@@ -1423,6 +1424,8 @@ export function blueprintAdvisoryBlock(manifest: SimpleFileSpec[], contract?: st
     'larger app internally consistent. Treat it as a starting point you may refine as you build; you',
     'still own the plan (update_todo). It is NOT frozen — but reusing these exact file paths and shared',
     'symbol names avoids the mismatched-import / missing-file drift that breaks big apps.',
+    // Owning the plan is not a turn of its own (autopsy 9c612cdb, Q-944) — todoOnlyTurn.ts.
+    TODO_RIDES_WITH_WORK,
     '',
     `Proposed files:\n${fileList}`,
   ];

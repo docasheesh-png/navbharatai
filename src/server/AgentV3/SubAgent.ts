@@ -19,6 +19,7 @@ import { NO_EVAL_RULE, NO_FAKED_RESULT_RULE, NO_FAKE_FEATURE_RULE } from './noEv
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
 import { packageChoiceRule } from '../lib/unfixablePackages';
 import { stylesheetCarriesKit } from './kitRestore';
+import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 import type { AgentRole, ToolName } from './types';
 
 /**
@@ -460,7 +461,9 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
         if (typeof raw === 'string' && stylesheetCarriesKit(withoutPreviewBridge('src/index.css', raw))) {
           contextBlocks.push(
             'The design kit is ALREADY in `src/index.css`. Its classes are listed here, so there is no need '
-            + 'to read the stylesheet to find them. Append your app\'s own rules; never replace the file.\n'
+            + 'to read the stylesheet to find them. Append your app\'s own rules; never replace the file. '
+            // How to append, before the first attempt (autopsy 9c612cdb, Q-943) — see appendByEdit.ts.
+            + `${APPEND_WITH_EMPTY_OLD_STRING}\n`
             + DESIGN_KIT_BRIEF.join('\n'),
           );
         }

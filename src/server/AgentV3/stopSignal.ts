@@ -32,7 +32,7 @@ export interface StoppedCallServer {
 export class BuildStoppedError extends Error {
   readonly buildStopped = true;
   /**
-   * The rung the provider chain was waiting on when it stopped (autopsy 9c612cdb, Q-910-D2): the report
+   * The rung the provider chain was waiting on when it stopped (autopsy 9c612cdb, Q-998): the report
    * could not say which engine a review we cut off had been running on. Absent when the stop came before
    * any rung was asked, or from a runner that is not a chain. The message is unchanged either way.
    */

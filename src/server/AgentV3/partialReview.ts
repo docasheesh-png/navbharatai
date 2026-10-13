@@ -109,7 +109,7 @@ export function salvageReview(text: unknown): SalvagedReview | null {
  * Names no provider and no model (white-label law) and claims nothing about completeness. PURE.
  */
 export function formatPartialReview(review: SalvagedReview, maxIssues = 5): string {
-  // 🔴 NO PROMISE WITHOUT A HANDLER (autopsy 9c612cdb, Q-910-D1). This line used to end `Send "review it" for a
+  // 🔴 NO PROMISE WITHOUT A HANDLER (autopsy 9c612cdb, Q-997). This line used to end `Send "review it" for a
   // full pass.` Nothing runs a review on its own: the post-build review needs files written in that turn
   // (`reviewerShouldRun`), and "review it" classifies as chat. The sentence now says only what is true;
   // tests/aPromiseToTheUserHasAHandler.test.ts fails on any follow-up the user is told to send without a handler.
@@ -125,7 +125,7 @@ export function formatPartialReview(review: SalvagedReview, maxIssues = 5): stri
  * What the USER is told when the post-build review produced nothing usable (it timed out and nothing was
  * salvaged, or it errored) — or `null` when they are told nothing.
  *
- * 🔴 AUTOPSY 9c612cdb (Q-910-D1). On a GREEN app the user read *"The deeper completeness review didn't finish in
+ * 🔴 AUTOPSY 9c612cdb (Q-997). On a GREEN app the user read *"The deeper completeness review didn't finish in
  * the time it had — send "review it" and I'll run it on its own."* Two things were wrong, and both were the same
  * defect — a user sentence that outlived the decision behind it:
  *   1. The report had already classified exactly this as process-only, "nothing for the user to do"
@@ -147,7 +147,7 @@ export function reviewNotReadyUserLine(o: { suggestOnly: boolean; timedOut: bool
 
 /**
  * WHAT THE REVIEWER HAS SAID SO FAR — from EVERY channel its words reach the stream through (autopsy 9c612cdb,
- * Q-910-D3).
+ * Q-999).
  *
  * 🔴 THE NET THAT A LATER FIX SWITCHED OFF. The "listen while it works" salvage (admin report 2026-09-01) heard
  * only `narration` and `agent_done` from the reviewer — right for the multi-step reviewer it was built for,

@@ -1,5 +1,5 @@
-// Q-912 (build report 9c612cdb, 2026-10-12, the ad-free video player). The fast lane handed off before a
-// reasoning engine. Its early saves (Q-422 / Q-939) put the three finished files in the workspace, and the
+// Q-982 (build report 9c612cdb, 2026-10-12, the ad-free video player). The fast lane handed off before a
+// reasoning engine. Its early saves (Q-422 / Q-982) put the three finished files in the workspace, and the
 // salvage after the lane ended then wrote all three AGAIN — 61.4 s → 64.3 s of the report spent rewriting files
 // that were already there. Neither writer knew what the other had written.
 //
@@ -150,7 +150,7 @@ function reportRun(ws: ReturnType<typeof workspace>, opts: { useVideoList?: stri
 const sorted = (xs: readonly string[] | undefined) => [...(xs ?? [])].sort();
 const THREE = ['src/hooks/usePlayer.ts', 'src/hooks/useVideoList.ts', 'src/types.ts'];
 
-describe('Q-912 (1): no file is written again once the workspace has it — the census over whole runs', () => {
+describe('Q-982 (1): no file is written again once the workspace has it — the census over whole runs', () => {
   it('🔴 the report\'s hand-off: each finished file lands once, and salvagedPaths names all three', async () => {
     const ws = workspace();
     const r = await reportRun(ws);
@@ -208,7 +208,7 @@ describe('Q-912 (1): no file is written again once the workspace has it — the 
   }, RUN_TIMEOUT);
 });
 
-describe('Q-912 (2): a file is named as written only when the workspace took it', () => {
+describe('Q-982 (2): a file is named as written only when the workspace took it', () => {
   it('🔴 a FAILED early save is written again by the salvage, and listed once it lands', async () => {
     const ws = workspace((path, n) => path === 'src/hooks/useVideoList.ts' && n === 1);
     const r = await reportRun(ws);
@@ -325,7 +325,7 @@ describe('Q-912 (2): a file is named as written only when the workspace took it'
   }, RUN_TIMEOUT);
 });
 
-describe('Q-912 (3): a hand-off the lane decided is a hand-off however the lane ends', () => {
+describe('Q-982 (3): a hand-off the lane decided is a hand-off however the lane ends', () => {
   /** The decision is carried by the ROOT component's own call, in the last tier, while a page call is still in flight. */
   function rootCarriesTheHandOff() {
     let rung: string | null = null;
@@ -382,12 +382,12 @@ describe('Q-912 (3): a hand-off the lane decided is a hand-off however the lane 
     const root = "simple-build fast lane stopped early — the app's root component (src/App.tsx) was not written, so the files built so far are not connected to the page yet";
     expect(laneFallbackSummary(2, true, root)).toBe("Fast lane handed 2 finished file(s) to the full builder: the next engine reasons before every answer, which the lane cannot carry, and the app's root component was not written — a planned handoff, not a failure.");
     expect(laneFallbackSummary(2, true, 'simple-build timed out after 240000ms')).toContain('and its time budget ran out before it could finish');
-    // Without a decision, every ending keeps its own words (Q-939).
+    // Without a decision, every ending keeps its own words (Q-982).
     expect(laneFallbackSummary(2, false, root)).toBe("Simple build stopped after generating 2 file(s): the app's root component was not written — the full builder continues from them.");
   });
 });
 
-describe('Q-912: one door for every lane write, so the census above covers them all', () => {
+describe('Q-982: one door for every lane write, so the census above covers them all', () => {
   const src = readFileSync(join(process.cwd(), 'src/server/AgentV3/SimpleBuilder.ts'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 

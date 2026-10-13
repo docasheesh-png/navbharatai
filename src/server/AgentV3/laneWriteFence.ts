@@ -49,7 +49,7 @@ export class LaneAbandonedError extends Error {
 /**
  * The shape of every file-writing function in the fast lanes.
  *
- * It answers with one outcome per file (`writeOutcomes.ts`, build report 9c612cdb Q-912): the real writer
+ * It answers with one outcome per file (`writeOutcomes.ts`, build report 9c612cdb Q-982): the real writer
  * dispatches each file through the workspace's write door, which reports a refusal as a result rather than a
  * throw, so "the promise resolved" never meant "the files are there". A writer that returns nothing is still
  * accepted and read as "outcome unknown" — the assumption every caller made before outcomes existed.

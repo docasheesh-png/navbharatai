@@ -247,7 +247,7 @@ describe('P8 · a write nobody reads the answer to is not steered', () => {
     expect(lane.act.files.get(file.path)).toBe(file.content); // the write itself landed
   });
   it('every platform write in the route is marked — a new one fails here', () => {
-    // UPDATED 2026-10-13 (build report 9c612cdb, Q-912). The route's ten platform writes each dispatched
+    // UPDATED 2026-10-13 (build report 9c612cdb, Q-982). The route's ten platform writes each dispatched
     // `write_file` themselves, each wrapped in `runAsUnreadWrites`, and each threw the per-file answer away. They
     // now all go through ONE writer, `writePlatformFiles` (writeOutcomes.ts), which marks every write unread AND
     // returns its outcome — so the lock moved with the code: no write_file is dispatched in the route at all, the

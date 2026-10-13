@@ -1,4 +1,4 @@
-// AgentV3 — a platform write says WHICH files it wrote (build report 9c612cdb, Q-912).
+// AgentV3 — a platform write says WHICH files it wrote (build report 9c612cdb, Q-982).
 //
 // 🔴 WHAT HAPPENED. The fast lane writes through the model's own write door (`write_file`), one dispatch per
 // file. `ToolDispatcher.dispatch` catches every failure and hands it back as `{ is_error: true }` — a guard

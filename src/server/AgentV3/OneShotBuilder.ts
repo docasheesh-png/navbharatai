@@ -27,7 +27,7 @@ import { isProjectConfigPath, existingConfigsBlock } from './existingConfig';
 import { planProvidedFiles } from './scaffoldBoilerplate';
 import { readWriteOutcomes, type WriteOutcome } from './writeOutcomes';
 
-/** The one-shot's files reached the model but not the workspace (Q-912) — never "could not generate". */
+/** The one-shot's files reached the model but not the workspace (Q-982) — never "could not generate". */
 const ONE_SHOT_FILES_REFUSED = 'files_not_written';
 
 /** Whether this build should TRY the OneShot lane. Simple/medium tiers (gemini/haiku) → yes;
@@ -257,7 +257,7 @@ export interface OneShotDeps {
   generate: (system: string, user: string) => Promise<string>;
   /**
    * Write the generated files (single batch). Throws on a hard failure, and answers with one outcome per
-   * file (Q-912 — see writeOutcomes.ts); a writer that answers nothing is read as "all written", as before.
+   * file (Q-982 — see writeOutcomes.ts); a writer that answers nothing is read as "all written", as before.
    */
   writeFiles: (files: OneShotFile[]) => Promise<WriteOutcome[] | void>;
   /** Start the dev server + publish the preview. Best-effort — a failure does not fail OneShot. */
@@ -336,7 +336,7 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
         .map((f) => ({ ...f, content: ensureReactValueImport(f.path, f.content) }));
       if (parsed.length < minFiles) throw new Error('no_files_parsed');
       if (lapsed) throw new Error('one-shot-cancelled');
-      // 🔴 Q-912 (report 9c612cdb): the workspace reports a refused file as an outcome, not a throw, so a
+      // 🔴 Q-982 (report 9c612cdb): the workspace reports a refused file as an outcome, not a throw, so a
       // resolved write is not a written app. The count and the success are what actually landed; a lane whose
       // files were refused did not build the app, however well it generated it.
       const { landed } = readWriteOutcomes(parsed, await deps.writeFiles(parsed));

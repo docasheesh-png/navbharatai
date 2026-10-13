@@ -4,7 +4,7 @@
 // finished files at once. So the files done when the decision is taken are saved and announced
 // immediately, each in-flight file as it lands, and the final salvage still writes last.
 //
-// UPDATED 2026-10-13 (build report 9c612cdb, Q-912): the salvage no longer writes everything again. The writer here
+// UPDATED 2026-10-13 (build report 9c612cdb, Q-982): the salvage no longer writes everything again. The writer here
 // now answers per file, as the route's does (writeOutcomes.ts), so the lane knows the early saves landed and the
 // salvage writes only what is missing or changed — here nothing, so the early saves ARE the last word. The old
 // expectation ("the salvage writes everything last") pinned the double write itself; a writer that answers
@@ -44,7 +44,7 @@ function run(env: Record<string, string | undefined> = {}, opts: { answers?: boo
       events.push(`${betaReleased ? 'after' : 'before'}:${files.map((f) => f.path.split('/').pop()).join(',')}`);
       // Beta is held until the early save has been seen, so the test proves the save did not wait for it.
       if (!betaReleased) setTimeout(releaseBeta, 0);
-      // The route's writer answers per file (Q-912); `answers: false` is a writer that answers nothing.
+      // The route's writer answers per file (Q-982); `answers: false` is a writer that answers nothing.
       return answers ? files.map((f) => ({ path: f.path, ok: true })) : undefined;
     },
     onFilesReady: (files: OneShotFile[]) => { ready.push(files.map((f) => f.path.split('/').pop()!)); },
@@ -65,7 +65,7 @@ describe('Q-422: the finished files are saved when the hand-off is decided', () 
 
   it('the in-flight file is saved as it lands, and the salvage writes only what is not there yet — here nothing', async () => {
     // Was: `expect(events[events.length - 1]).toBe('after:Alpha.tsx,Beta.tsx')` — the salvage rewriting both files
-    // the early saves had just written. Changed deliberately (Q-912): that second write was the double write.
+    // the early saves had just written. Changed deliberately (Q-982): that second write was the double write.
     const { p, events, ready } = run();
     const r = await p;
     expect(events).toContain('after:Beta.tsx');

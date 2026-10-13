@@ -69,11 +69,11 @@ export function contractRenameHandoffClause(renames: ReadonlyArray<{ from: strin
  * Why the faster lane's files are being handed over — the clause after "A faster build lane already generated N
  * file(s) of THIS app" in the CONTINUE note. PURE.
  *
- * 🔴 BUILD 9c612cdb (Q-912). It was picked by ONE question — did the lane fail its compile? — so every other
+ * 🔴 BUILD 9c612cdb (Q-982). It was picked by ONE question — did the lane fail its compile? — so every other
  * ending said "before running out of time", including that build's hand-off: the lane stopped ON PURPOSE 32 s
  * into a 240 s budget, because its next engine reasons before every answer. The next builder was told a
  * deadline had cut the work short, which invites it to treat the files as unfinished. The same one-reason-for-
- * every-ending class `laneFallbackSummary` fixed for the report's own line (Q-939), here in the note the model
+ * every-ending class `laneFallbackSummary` fixed for the report's own line (Q-982), here in the note the model
  * reads. The reason the lane ended now picks the words, and "running out of time" is said only about time.
  */
 export function salvageWhyClause(reason: string | undefined, handedOff: boolean | undefined): string {

@@ -64,7 +64,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // e628efd4). A WARNING, so the error count a RED gate reads cannot change and no bill moves; the server's
   // last words stay in the admin report.
   'PREVIEW_SERVER_DOWN',
-  // Q-912 (report 9c612cdb, 2026-10-13). The workspace refused a file one of OUR passes wrote (a guard, a sandbox
+  // Q-982 (report 9c612cdb, 2026-10-13). The workspace refused a file one of OUR passes wrote (a guard, a sandbox
   // read that failed). It is evidence about our write, recorded so the refusal is never silent again; whatever
   // the refused file means for the app is measured by the checks that read the workspace afterwards.
   'PLATFORM_WRITE_REFUSED',

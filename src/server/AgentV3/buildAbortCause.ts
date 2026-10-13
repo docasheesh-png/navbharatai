@@ -222,7 +222,7 @@ export function stalledModelSummary(minutes: number, ctx: Pick<AbortSummaryConte
 }
 
 /**
- * WHOSE DECISION ENDED A MODEL CALL THAT AN ABORT CANCELLED (autopsy 9c612cdb, Q-910-D2).
+ * WHOSE DECISION ENDED A MODEL CALL THAT AN ABORT CANCELLED (autopsy 9c612cdb, Q-998).
  *
  * The stop path in `AgentRunner` was written for the user's Stop ("a stop is not a provider failure",
  * autopsy 2720e553) and every other abort took it too. So the review that OUR 45-second budget cut off
@@ -340,7 +340,7 @@ export function stoppedCallFields(cause: AbortCause, err: unknown, nominalModel:
 }
 
 /**
- * A pass's own abort, tied to the build's (autopsy 9c612cdb, Q-910-D2).
+ * A pass's own abort, tied to the build's (autopsy 9c612cdb, Q-998).
  *
  * Every post-build pass that runs a model on a signal of its own (the review, the post-fix recheck, the
  * green and explorer repairs) used to wire it by hand: `controller.abort()` on the pass's budget, and

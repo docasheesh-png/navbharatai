@@ -118,7 +118,7 @@ describe('the fast lane', () => {
     expect(r.reason).toBe('verify_failed');
     expect(r.salvagedPaths).toEqual(expect.arrayContaining(['src/App.tsx', 'src/TodoList.tsx']));
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    // UPDATED 2026-10-13 (build report 9c612cdb, Q-912 E): the clause moved out of the route into
+    // UPDATED 2026-10-13 (build report 9c612cdb, Q-982 E): the clause moved out of the route into
     // `salvageWhyClause`, because the inline ternary gave every other ending one reason ("before running out of
     // time"), a planned hand-off included. The verify-failed words are unchanged; they are asserted where they live.
     expect(route).toContain('const salvageWhy = salvageWhyClause(sb.reason, sb.handedOff);');

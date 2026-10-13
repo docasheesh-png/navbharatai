@@ -979,7 +979,7 @@ export class AgentRunner {
           // 15e69839: the call in flight had run ~3 minutes and appeared nowhere in the report). Recorded as a
           // stopped call — `recordLlmCall` turns it into LLM_CALL_STOPPED, info, never a provider failure.
           //
-          // 🔴 …AND A STOP IS NOT ALWAYS THE USER'S (autopsy 9c612cdb, Q-910-D2). The post-build review that OUR
+          // 🔴 …AND A STOP IS NOT ALWAYS THE USER'S (autopsy 9c612cdb, Q-998). The post-build review that OUR
           // 45-second budget cut off took this same path and was recorded as "cancelled because the build was
           // stopped" — a build nobody stopped — under the nominal model id, so the report could not say which
           // engine had been running it, or whose clock ended it. Whose decision it was is on the signal
@@ -999,7 +999,7 @@ export class AgentRunner {
             } catch { /* diagnostics capture is best-effort */ }
             return endAborted();
           }
-          // 🔴 OUR PER-TURN STALL GUARD, NOT A STOP (autopsy 9c612cdb, sibling of Q-910-D2). The turn's signal
+          // 🔴 OUR PER-TURN STALL GUARD, NOT A STOP (autopsy 9c612cdb, sibling of Q-998). The turn's signal
           // also carries the per-turn timeout, and a provider chain that honours it ends the call with the
           // SAME stop error — which is not a stop: nobody stopped this build. Read as one, the stalled turn
           // was recorded as "cancelled because the build was stopped" and the run ended with "Error: Stopped —

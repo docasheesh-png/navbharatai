@@ -16008,7 +16008,7 @@ async function noteBuildOutcome(
       /**
        * Every platform write in this build — the fast lanes and the post-build passes — goes through here: the
        * model's write door with every guard, no steering note (unreadWrites.ts), and ONE outcome per file back
-       * (writeOutcomes.ts, build report 9c612cdb Q-912). The door reports a refusal as `is_error`, never as a
+       * (writeOutcomes.ts, build report 9c612cdb Q-982). The door reports a refusal as `is_error`, never as a
        * throw, so a caller that drops this answer is reading "resolved" as "written".
        */
       const writePlatform = async (files: { path: string; content: string }[], idPrefix: string, concurrency = 1): Promise<WriteOutcome[]> => {
@@ -18520,7 +18520,7 @@ async function noteBuildOutcome(
           // Paths are distinct by construction (de-duped by path upstream), so concurrent writes to
           // different files never conflict; the E2B round-trip latency (~150-300ms each) now overlaps.
           // The plan-progress ticker counts writes (order-independent), so completion order is fine.
-          // The per-file outcome goes back to the lane (Q-912): it decides what it counts, lists and announces.
+          // The per-file outcome goes back to the lane (Q-982): it decides what it counts, lists and announces.
           // Named (autopsy 9c612cdb): a fast-lane write that lands after a first render is the fast lane's, never the model's.
           return inPlatformPass('fast-lane', () => writePlatform(files, 'fast-w', 6));
         };
@@ -18575,7 +18575,7 @@ async function noteBuildOutcome(
               if (foundation.added.length > 0) {
                 // Route through write_file so each lands in the sandbox AND is recorded in writtenFiles
                 // (the durable store + the reconcile scan below both then see the new package.json).
-                // Said AFTER the write, about what landed (Q-912) — it used to be announced before it was tried.
+                // Said AFTER the write, about what landed (Q-982) — it used to be announced before it was tried.
                 const toAdd = Object.entries(foundation.files).map(([path, content]) => ({ path, content }));
                 const { landed } = readWriteOutcomes(toAdd, await inPlatformPass('fast-lane-foundation', () => writePlatform(toAdd, 'fast-foundation-', 4)));
                 if (landed.length > 0) fastLog(`🩹 Added ${landed.length} missing foundational file(s) so the app can install & boot: ${landed.map((f) => f.path).join(', ')}`);
@@ -18591,7 +18591,7 @@ async function noteBuildOutcome(
             try {
               const ts = sanitizeTsconfigExtends(Object.fromEntries(writtenFiles));
               if (ts.fixes.length > 0) {
-                // Written first, then said about what landed (Q-912).
+                // Written first, then said about what landed (Q-982).
                 const patch = Object.entries(ts.patch).map(([path, content]) => ({ path, content }));
                 const { landed } = readWriteOutcomes(patch, await inPlatformPass('fast-lane-foundation', () => writePlatform(patch, 'fast-tsconfig-', 4)));
                 const done = new Set(landed.map((f) => f.path));
@@ -18672,7 +18672,7 @@ async function noteBuildOutcome(
                     .filter((f) => writtenMap[f.importedBy] !== undefined && !seen.has(f.importedBy) && seen.add(f.importedBy))
                     .map((f) => ({ path: f.importedBy, content: fixedFiles[f.importedBy] }));
                   if (toWrite.length > 0) {
-                    // Only what landed is recorded and claimed (Q-912): a refused fix leaves the import broken in
+                    // Only what landed is recorded and claimed (Q-982): a refused fix leaves the import broken in
                     // the workspace, and the check below must go on seeing it broken.
                     const { landed } = readWriteOutcomes(toWrite, await fastWrite(toWrite));
                     for (const w of landed) { writtenFiles.set(w.path, w.content); withScaffold[w.path] = w.content; }
@@ -18760,7 +18760,7 @@ async function noteBuildOutcome(
               }
               // A kit class with no rule has exactly one right rule — the kit's (autopsy e725e002). Put it
               // back here, for free, so a repair round is spent only on classes nobody can know.
-              // Both fixes below are recorded and claimed only for what the workspace took (Q-912).
+              // Both fixes below are recorded and claimed only for what the workspace took (Q-982).
               let project = { ...sheets, ...written };
               try {
                 const patch = kitRestorePatch(project);
@@ -18907,7 +18907,7 @@ async function noteBuildOutcome(
           // Why the lane stopped decides the first sentence — finished but not compiling, a planned hand-off, out
           // of time, a missing root — and when it did not compile the compiler's own words come with it, so the
           // builder starts from the errors instead of re-running the typecheck to find them (autopsy a9f8d186).
-          // ONE reason used to stand for every other ending: a hand-off read "before running out of time" (Q-912).
+          // ONE reason used to stand for every other ending: a hand-off read "before running out of time" (Q-982).
           const salvageWhy = salvageWhyClause(sb.reason, sb.handedOff);
           const salvageEntryLine = entryFirstHandoffLine(unwrittenEntries((sb.plannedPaths ?? []).map((path) => ({ path, purpose: '' })), sb.salvagedPaths));
           // 🔴 AND WHEN THE LANE NEVER VERIFIED (autopsy c70bcbb4): a lane that timed out or handed off before a
@@ -19022,7 +19022,7 @@ async function noteBuildOutcome(
                   fastLog('Found build errors in the one-shot app — fixing them…');
                   const cur = [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
                   const fixed = (await fastRepair(v.errors, cur).catch(() => [])).filter((f) => f && f.path && f.content);
-                  // `fastVerify` re-measures the workspace, so the verdict follows what landed (Q-912).
+                  // `fastVerify` re-measures the workspace, so the verdict follows what landed (Q-982).
                   if (fixed.length) { await fastWrite(fixed); v = await fastVerify(); }
                 }
                 // ran:false = the check never executed — "unknown", never a pass (no fake success).
@@ -19714,7 +19714,7 @@ async function noteBuildOutcome(
               try { current = await actuator.readFile(workspaceId, path); } catch { current = ''; }
               if (current !== canonical) toRestore.push({ path, content: canonical });
             }
-            // Restored = what the workspace took (Q-912); a refused restore is not claimed.
+            // Restored = what the workspace took (Q-982); a refused restore is not claimed.
             const restored = toRestore.length > 0
               ? readWriteOutcomes(toRestore, await runInPass('scaffold-restore', () => writePlatform(toRestore, 'scaffold-restore-'))).landed.map((f) => f.path)
               : [];
@@ -19826,7 +19826,7 @@ async function noteBuildOutcome(
               const fileMapForCss: Record<string, string> = { ...Object.fromEntries(scaffoldPaths.map((p) => [p, ''])), ...Object.fromEntries(writtenFiles) };
               const cssStubs = generateMissingCssModules(fileMapForCss);
               if (cssStubs.length > 0) {
-                // Claimed only for what the workspace took (Q-912); the re-check below reads the workspace either way.
+                // Claimed only for what the workspace took (Q-982); the re-check below reads the workspace either way.
                 const { landed } = readWriteOutcomes(cssStubs, await runInPass('css-module-stubs', () => writePlatform(cssStubs, 'cssmod-w')));
                 if (landed.length > 0) {
                   buildDiag.record({ phase: 'build', severity: 'info', code: 'CSS_MODULES_GENERATED', message: `${landed.length} missing CSS module(s) generated deterministically from component class usage (no repair step spent): ${landed.map((s) => s.path).join(', ')}`, autoResolved: true });
@@ -19845,7 +19845,7 @@ async function noteBuildOutcome(
               const fileMapForBarrel: Record<string, string> = { ...Object.fromEntries(scaffoldPaths.map((p) => [p, ''])), ...Object.fromEntries(writtenFiles) };
               const barrels = await generateMissingBarrels(fileMapForBarrel);
               if (barrels.length > 0) {
-                // Claimed only for what the workspace took (Q-912); the re-check below reads the workspace either way.
+                // Claimed only for what the workspace took (Q-982); the re-check below reads the workspace either way.
                 const { landed } = readWriteOutcomes(barrels, await runInPass('barrel-stubs', () => writePlatform(barrels, 'barrel-w')));
                 if (landed.length > 0) {
                   buildDiag.record({ phase: 'build', severity: 'info', code: 'BARRELS_GENERATED', message: `${landed.length} missing barrel(s) generated deterministically from existing leaf modules (no repair step spent): ${landed.map((b) => b.path).join(', ')}`, autoResolved: true });
@@ -24711,7 +24711,7 @@ async function noteBuildOutcome(
            * what the reviewer already said out loud. Costs nothing: no extra call, no extra token —
            * this is money the user has already spent, being collected instead of binned.
            */
-          // 🔴 AND EVERY CHANNEL ITS WORDS ARRIVE ON (autopsy 9c612cdb, Q-910-D3). This listener once heard
+          // 🔴 AND EVERY CHANNEL ITS WORDS ARRIVE ON (autopsy 9c612cdb, Q-999). This listener once heard
           // only narration and agent_done — and since the suggest-only review became ONE call (bee95692), a
           // call cut off by its budget narrates nothing: its answer had only ever streamed. The collector
           // (partialReview.ts) also joins the streamed text per turn, without holding the same words twice,
@@ -24748,7 +24748,7 @@ async function noteBuildOutcome(
             const stoppedAt = reviewStoppedAtReasoningRung(reviewerSaid.lines());
             if (stoppedAt) {
               // Admin line. It used to end `"review it" runs a full review on its own` — no such handler exists
-              // (autopsy 9c612cdb, Q-910-D1): a turn that writes nothing never runs the review.
+              // (autopsy 9c612cdb, Q-997): a turn that writes nothing never runs the review.
               try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_NOT_RUN_REASONING_ENGINE', autoResolved: true, message: `The suggest-only review was not run: the engine left on the chain (${stoppedAt}) reasons before every answer, and this review gets one ${Math.round(reviewBudget / 1000)} s call — it stopped instead of keeping the user waiting for an answer that would not arrive in time. Its suggestions are not available for this build.` }); } catch { /* best-effort */ }
             }
           } catch (e) {
@@ -24786,7 +24786,7 @@ async function noteBuildOutcome(
               try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_PARTIAL', message: `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${reviewScopeWords(reviewOneCall ? (reviewInline?.files.length ?? 0) : null, rFiles.length)}${reviewEngineWords(buildDiag.lastServedModel())} — but ${salvaged.issues.length} finding(s) it had already reported were RECOVERED from its own narration instead of discarded. Leads from an UNFINISHED review: they cannot fail a build and do not drive the auto-fix.`, autoResolved: false }); } catch { /* best-effort */ }
               review = null;
             } else {
-              // 🔴 ONE CLASSIFICATION, BOTH AUDIENCES (autopsy 9c612cdb, Q-910-D1). `suggestOnly` used to be
+              // 🔴 ONE CLASSIFICATION, BOTH AUDIENCES (autopsy 9c612cdb, Q-997). `suggestOnly` used to be
               // decided BELOW the user's sentence, so the report filed a green app's timed-out suggestions as
               // process-only — "nothing for the user to do" (REVIEW_SUGGESTIONS_NOT_READY, SignBridge
               // 2026-09-26) — while the user, on that same green app, was told to send "review it", a command
@@ -24824,7 +24824,7 @@ async function noteBuildOutcome(
             stopListening();
             // Whatever the outcome, nothing reads this reviewer after here — end it (a no-op if it
             // already finished) and drop the build-abort link so it cannot outlive the build. Its cause is
-            // OUR budget, so the call it cuts off is recorded as our clock (autopsy 9c612cdb, Q-910-D2).
+            // OUR budget, so the call it cuts off is recorded as our clock (autopsy 9c612cdb, Q-998).
             reviewAbort.abort('review-budget');
             reviewAbort.dispose();
           }

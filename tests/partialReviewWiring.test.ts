@@ -21,7 +21,7 @@ import { collectReviewerWords, salvageReview } from '../src/server/AgentV3/parti
  * exercised in a unit test, and extracting the whole post-build path to test one subscription would be
  * a far larger change than it protects. Same trade, and the same reasoning, as cachePrefixWiring.
  *
- * ⚠️ 2026-10-13 (autopsy 9c612cdb, Q-910-D3): the route no longer filters events itself. It hands EVERY event
+ * ⚠️ 2026-10-13 (autopsy 9c612cdb, Q-999): the route no longer filters events itself. It hands EVERY event
  * to `collectReviewerWords` (partialReview.ts), which decides what is the reviewer's own words — because the
  * old in-route filter heard only `narration` and `agent_done`, and a one-call review cut off by its budget
  * says nothing on either. So the first two pins below moved from source text to BEHAVIOUR (stronger: they
@@ -82,7 +82,7 @@ describe('the reviewer is listened to while it works, so a timeout cannot bin it
   });
 });
 
-// ── Autopsy 9c612cdb (Q-910-D3) · a ONE-CALL review that its budget cuts off can still be salvaged ──────────
+// ── Autopsy 9c612cdb (Q-999) · a ONE-CALL review that its budget cuts off can still be salvaged ──────────
 //
 // The real build's lean review was one call with no tools (REVIEW_LEAN: "one call, no tools, handed all 10
 // changed file(s) in full, 45s budget") and was conceded as REVIEW_SUGGESTIONS_NOT_READY at 453.1 s. A single
@@ -124,7 +124,7 @@ async function oneCallReviewCutOffByItsBudget(streamed: string[]): Promise<strin
   return words.text();
 }
 
-describe('Q-910-D3 · the salvage net reaches a one-call review', () => {
+describe('Q-999 · the salvage net reaches a one-call review', () => {
   it('🔴 a finding that only ever streamed is recovered — REVIEW_PARTIAL, not REVIEW_SUGGESTIONS_NOT_READY', async () => {
     const said = await oneCallReviewCutOffByItsBudget(['## Review\n', '[WARNING] [BROKEN] The remove button never calls ', 'removeVideo, so a deleted video comes back after refresh\n', '[SUGG']);
     const salvaged = salvageReview(said);

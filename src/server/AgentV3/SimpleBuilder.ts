@@ -1737,7 +1737,7 @@ export interface SimpleBuildDeps {
   readExisting?: (path: string) => Promise<string | null>;
   /**
    * Write the generated files (single batch). Throws on a hard failure, and answers with one outcome per file
-   * (Q-912, report 9c612cdb — see writeOutcomes.ts): the workspace reports a refused file as an outcome, not a
+   * (Q-982, report 9c612cdb — see writeOutcomes.ts): the workspace reports a refused file as an outcome, not a
    * throw, so the lane reads the answer instead of trusting the promise. A writer that answers nothing is read
    * as "every file written", the assumption the lane made before outcomes existed.
    */
@@ -1839,7 +1839,7 @@ export interface SimpleBuildResult {
    * them (its own prior work) instead of rebuilding from an empty tree. Empty/undefined when nothing
    * was salvageable (or the failure wasn't a timeout).
    *
-   * Only files the workspace HOLDS (Q-912, report 9c612cdb): a file whose every write was refused is never
+   * Only files the workspace HOLDS (Q-982, report 9c612cdb): a file whose every write was refused is never
    * listed, because the next builder is told these are "in the workspace now". A writer that answers nothing
    * is taken at its word, as before.
    */
@@ -1986,11 +1986,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   const requestNotes = String(deps.requestNotes ?? '').trim();
   if (requestNotes) deps = { ...deps, prompt: `${deps.prompt}\n\n${requestNotes}` };
   /**
-   * 🔴 Q-912 (report 9c612cdb): WHAT THE WORKSPACE HOLDS FROM THIS LANE, as its writes reported it — path → the
+   * 🔴 Q-982 (report 9c612cdb): WHAT THE WORKSPACE HOLDS FROM THIS LANE, as its writes reported it — path → the
    * content last written there, and whether the writer CONFIRMED it (a writer that answers nothing is assumed,
    * as it always was). Every write the lane makes goes through `writeAndLearn`, and two kinds of reader use it:
    *  • the lane's LAST writes — its final write, the salvage after a hand-off, the save on a stop — skip a file
-   *    whose confirmed copy is already exactly what they would write. The early saves (Q-422, Q-939) had put the
+   *    whose confirmed copy is already exactly what they would write. The early saves (Q-422, Q-982) had put the
    *    finished files there and the salvage then wrote every one of them again: that report rewrote the same
    *    three files from 61.4 s to 64.3 s for nothing. A file whose content changed since (the import fixes) is
    *    still written, so the last word is still the fixed copy; a file whose early save FAILED was never
@@ -2031,7 +2031,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     handOffSaves.push(
       Promise.resolve()
         .then(() => writeAndLearn(batch))
-        // Only what landed is announced (Q-912): the first paint shows the workspace, not what was attempted.
+        // Only what landed is announced (Q-982): the first paint shows the workspace, not what was attempted.
         .then(({ landed }) => { if (deps.onFilesReady && landed.length > 0) void Promise.resolve(deps.onFilesReady(landed)).catch(() => {}); })
         .catch(() => { /* a preview head start never touches the build */ }),
     );
@@ -2635,7 +2635,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // and the zombie guard is asked after that wait, not before it.
       await earlySavesSettled();
       if (lapsed) throw new Error('simple-build-cancelled');
-      // 🔴 Q-912 — what an early save already put there, unchanged since, is not written twice; and the answer is
+      // 🔴 Q-982 — what an early save already put there, unchanged since, is not written twice; and the answer is
       // READ. The lane goes on with the files the workspace holds, in the version it holds, so verify, repair,
       // the counts and the first paint describe the workspace rather than what the lane meant to write.
       const unsaved = written.filter((f) => !alreadyThere(f));
@@ -2687,7 +2687,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const finished = [...generatedSoFar];
       let saved: string[] = [];
       if (finished.length > 0) {
-        // Q-912 — a file an early save already put there, unchanged, is not written again, and "saved" is what
+        // Q-982 — a file an early save already put there, unchanged, is not written again, and "saved" is what
         // the workspace holds afterwards, not what was attempted.
         const unsaved = finished.filter((f) => !alreadyThere(f));
         try { if (unsaved.length > 0) await withTimeout(writeAndLearn(unsaved), 30_000, 'simple-build-stop-save'); }
@@ -2728,7 +2728,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           }
         } catch { /* best-effort */ }
       }
-      // 🔴 Q-912 — only what the workspace does not already hold, CONFIRMED, in exactly this version: a file an
+      // 🔴 Q-982 — only what the workspace does not already hold, CONFIRMED, in exactly this version: a file an
       // early save put there is skipped unless the import fixes above changed it (then this copy is the last
       // word, as before), and a file whose early save failed is written here once more. `salvagedPaths` names
       // the finished files the workspace holds afterwards — a file it refused is never handed over as written.
@@ -2831,7 +2831,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       try {
         const restores = scaffoldRestores(Object.fromEntries([...byPath].map(([p, f]) => [p, f.content])), verdict.errors);
         const restoreFiles = Object.entries(restores).map(([path, content]) => ({ path, content }));
-        // Only what the workspace took is put back in the map and said (Q-912); nothing landed, nothing to re-check.
+        // Only what the workspace took is put back in the map and said (Q-982); nothing landed, nothing to re-check.
         const { landed } = restoreFiles.length > 0 ? await writeAndLearn(restoreFiles) : { landed: [] as OneShotFile[] };
         if (landed.length > 0) {
           for (const f of landed) byPath.set(f.path, f);
@@ -2873,7 +2873,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           const det = await endgameDeterministicPass(before, errs);
           if (det.changedPaths.length > 0) {
             const detFiles = det.changedPaths.map((path) => ({ path, content: det.files[path] }));
-            // Q-912 — the map follows the workspace: a fix the workspace refused is not in it, and not claimed.
+            // Q-982 — the map follows the workspace: a fix the workspace refused is not in it, and not claimed.
             const { landed } = await writeAndLearn(detFiles);
             for (const f of landed) {
               const prev = byPath.get(f.path);
@@ -2949,7 +2949,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // repair is a HYPOTHESIS; snapshot what it is about to overwrite so a regression can be undone.
       // See repairAcceptance.ts for why "worse" is a strict error COUNT and nothing more.
       const priorVerdict = verdict;
-      // Sandbox FIRST, then the map (Q-912): a file the workspace refused keeps its prior version in BOTH, is
+      // Sandbox FIRST, then the map (Q-982): a file the workspace refused keeps its prior version in BOTH, is
       // not counted as created, and is not "reverted" — only what this repair really changed is its to undo.
       let landedRepair: OneShotFile[];
       try { ({ landed: landedRepair } = await writeAndLearn(fixed)); } catch { break; }
@@ -2979,7 +2979,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           let reverted: OneShotFile[];
           try { ({ landed: reverted } = await writeAndLearn(priorContents)); } catch { break; }
           for (const f of reverted) byPath.set(f.path, f);
-          // Part of the undo refused (Q-912): the map matches the workspace file by file, but the verdict
+          // Part of the undo refused (Q-982): the map matches the workspace file by file, but the verdict
           // below would describe neither state — measure the one there is, and stop building on it.
           if (reverted.length < priorContents.length) { verdict = await timedVerify(); break; }
           // Restore the verdict too. Without this the loop's own condition, and the next attempt's

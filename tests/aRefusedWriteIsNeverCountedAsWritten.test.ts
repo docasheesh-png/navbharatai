@@ -1,4 +1,4 @@
-// Q-912 (build report 9c612cdb) — the half of the item every lane shares: a platform write's per-file answer.
+// Q-982 (build report 9c612cdb) — the half of the item every lane shares: a platform write's per-file answer.
 //
 // The workspace's write door (`ToolDispatcher.dispatch('write_file')`) reports a refusal as `{ is_error: true }`,
 // never as a throw. Every platform writer in the route dropped that answer, so "the promise resolved" was read as
@@ -6,7 +6,7 @@
 // post-build passes that announce "generated N file(s)". One writer now returns one outcome per file, the lanes
 // and passes count and name only what landed, and a writer that answers nothing keeps the old assumption.
 //
-// The CONTINUE note's opening clause is the same report's other honesty defect (Q-912 E): one reason, "before
+// The CONTINUE note's opening clause is the same report's other honesty defect (Q-982 E): one reason, "before
 // running out of time", stood for every ending but a failed compile — including that build's planned hand-off.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
@@ -106,7 +106,7 @@ describe('the one-shot lane counts what landed', () => {
   });
 });
 
-describe('Q-912 (E): the CONTINUE note says why the lane stopped', () => {
+describe('Q-982 (E): the CONTINUE note says why the lane stopped', () => {
   // The report's own ending: the route's stopLane wording, thrown at the tier boundary.
   const REPORT_REASON = "simple-build fast lane stopped early — the lane's engine fell to kimi-k2.7-code, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now";
 

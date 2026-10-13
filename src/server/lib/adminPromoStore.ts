@@ -6,6 +6,7 @@
 // transaction; this one does not need to repeat that, because it was written after the money audit.
 
 import { doc, runTransaction, type ServerTransaction } from './serverDb';
+import { creditWalletId } from './walletCreditTarget';
 import { mirroredCreditPatch } from './walletMirror';
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import {
@@ -65,7 +66,7 @@ export async function redeemAdminPromo(
 ): Promise<RedeemResult> {
   const promoRef = doc(db, ADMIN_PROMO_COLLECTION, code);
   const claimRef = doc(db, 'payment_transactions', promoClaimId(code, user.userId));
-  const walletRef = doc(db, 'user_token_wallets', user.userId);
+  const walletRef = doc(db, 'user_token_wallets', await creditWalletId(db, user.userId));
   return runTransaction(db, async (tx: ServerTransaction): Promise<RedeemResult> => {
     // Every read before any write — Firestore's rule, and what makes the three facts consistent.
     const promo = await tx.get(promoRef);

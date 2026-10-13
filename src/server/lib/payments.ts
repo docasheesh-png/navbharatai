@@ -1,4 +1,5 @@
 import { randomBytes } from 'crypto';
+import { creditWalletId } from './walletCreditTarget';
 import axios from 'axios';
 import { appendLedgerEntry, LEDGER_OPENING_FIELD, LEDGER_DROPPED_FIELD } from './walletStatement';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Credits user_token_wallets /
@@ -339,7 +340,7 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       // writes commit together or not at all, so a retry always finds the order still PENDING and finishes
       // it. Exactly-once is unchanged: a concurrent caller re-reads SUCCESS inside its own transaction.
       // (SECURITY C4: tokens still derive from the VERIFIED paid amount inside computeCreditedWallet.)
-      const walletRef = doc(db, 'user_token_wallets', txData.userId);
+      const walletRef = doc(db, 'user_token_wallets', await creditWalletId(db, txData.userId));
       const credited = await runTransaction(db, async (tx: any) => {
         const snap = await tx.get(txRef);
         if (!snap.exists() || snap.data().paymentStatus === 'SUCCESS') return null; // claimed by a concurrent call

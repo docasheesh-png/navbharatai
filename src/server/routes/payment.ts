@@ -5,6 +5,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. The server writes payment_transactions
 // / user_token_wallets which navbharat-prod's rules mark `allow write: if false` (server-only); the old
 // unauthenticated CLIENT SDK was rejected with PERMISSION_DENIED. Same modular API, admin-backed.
+import { creditWalletId } from '../lib/walletCreditTarget';
 import { doc, getDoc, setDoc, updateDoc, runTransaction, collection, query, where, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
 import { mirroredCreditPatch, rupeesToTokens } from '../lib/walletMirror';
 import { ordersToReconcile, reconcileMessage, type PendingOrderRecord } from '../lib/pendingOrders';
@@ -643,7 +644,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       // failure between them burned the one redemption this person gets with nothing credited. Claim and
       // credit are now ONE transaction — both happen or neither does.
       const txRef = doc(db, 'payment_transactions', redemptionId);
-      const walletRef = doc(db, 'user_token_wallets', userId);
+      const walletRef = doc(db, 'user_token_wallets', await creditWalletId(db, userId));
       const newBalance = await runTransaction(db, async (tx: any): Promise<number | null> => {
         // Every read before any write — a Firestore transaction requires it.
         const snap = await tx.get(txRef);
@@ -821,6 +822,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         createdAt: nowIso,
       };
 
+      const creditOwner = await creditWalletId(db, userId);
       const wallet = await runTransaction(db, async (tx: any) => {
         // 🔴 MONEY AUDIT 2026-09-12 — THE IDEMPOTENCY CHECK MUST BE INSIDE THE TRANSACTION.
         // The `existing` read above is a cheap fast path, but it is OUTSIDE, and the transaction used
@@ -832,7 +834,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         // receipt part of the conflict set, so the second one sees SUCCESS and credits nothing.
         const already = await tx.get(txRef);
         if (already.exists() && already.data()?.paymentStatus === 'SUCCESS') return null;
-        const walletRef = doc(db, 'user_token_wallets', userId);
+        const walletRef = doc(db, 'user_token_wallets', creditOwner);
         const walletSnap = await tx.get(walletRef);
         const walletData = walletSnap.exists() ? walletSnap.data() : { userId, tokenBalance: 0, totalTokensPurchased: 0, totalTokensUsed: 0, totalMoneySpent: 0, walletLedger: [], remaining_balance: 0, total_balance: 0 };
         const { wallet: credited } = computeCreditedWallet(walletData, txData as any, nowIso);

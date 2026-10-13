@@ -20,13 +20,38 @@
 /** The wording every stopped wait reports. Deliberately names no provider — none failed. */
 export const BUILD_STOPPED_MESSAGE = 'Stopped — the build was asked to stop. No provider failed.';
 
+/** Which engine was serving a call when a stop cancelled it — for the admin report only (White-Label). */
+export interface StoppedCallServer {
+  /** The provider family the chain was on, as the report names it ('KIMI', 'GLM', …). */
+  provider: string;
+  /** The model id of that rung, when the chain knows it. */
+  model?: string;
+}
+
 /** Thrown by any wait the build's own signal ended. */
 export class BuildStoppedError extends Error {
   readonly buildStopped = true;
-  constructor() {
+  /**
+   * The rung the provider chain was waiting on when it stopped (autopsy 9c612cdb, Q-910-D2): the report
+   * could not say which engine a review we cut off had been running on. Absent when the stop came before
+   * any rung was asked, or from a runner that is not a chain. The message is unchanged either way.
+   */
+  readonly servedBy?: StoppedCallServer;
+  constructor(servedBy?: StoppedCallServer) {
     super(BUILD_STOPPED_MESSAGE);
     this.name = 'BuildStoppedError';
+    if (servedBy && typeof servedBy.provider === 'string' && servedBy.provider) this.servedBy = servedBy;
   }
+}
+
+/** The engine a stopped call had been running on, when the error carries it. PURE. */
+export function stoppedCallServedBy(err: unknown): StoppedCallServer | undefined {
+  const s = err && typeof err === 'object' ? (err as { servedBy?: unknown }).servedBy : undefined;
+  if (!s || typeof s !== 'object') return undefined;
+  const provider = (s as { provider?: unknown }).provider;
+  const model = (s as { model?: unknown }).model;
+  if (typeof provider !== 'string' || !provider) return undefined;
+  return { provider, ...(typeof model === 'string' && model ? { model } : {}) };
 }
 
 /** Did this error come from a stop, rather than from anything that went wrong? */

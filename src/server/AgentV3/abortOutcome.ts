@@ -94,6 +94,13 @@ export function abortOutcomeFor(cause: AbortCause, opts: { platformComposed?: bo
       // `finalizeOnDeadline` records these itself (OUTCOME_STOPPED / OUTCOME_ADVISORY_CAPPED), with the
       // cap's real minutes in hand. A second record here would be the same ending written twice.
       return null;
+    case 'review-budget':
+    case 'recheck-budget':
+    case 'repair-budget':
+      // A pass's own budget (autopsy 9c612cdb): it ends that pass, never the build, so it is never the
+      // build's outcome. The pass records its own line (REVIEW_SUGGESTIONS_NOT_READY / REVIEW_INCOMPLETE,
+      // the recheck's outcome, REVIEW_FUNCTIONAL_REPAIR_* / EXPLORE_REPAIR_*).
+      return null;
     case 'user-stop':
       return opts.platformComposed === true
         ? {

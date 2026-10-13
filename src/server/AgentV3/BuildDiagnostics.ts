@@ -12,6 +12,7 @@
 
 import { startBandLabel } from './RequestAnalyser';
 import { isBuildStoppedError } from './stopSignal';
+import { stoppedCallCauseWords, type AbortCause } from './buildAbortCause';
 import { toolCallDetail } from './toolCallTarget';
 import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
 import { isProjectSummaryNarration } from './ProjectSummary';
@@ -1551,7 +1552,15 @@ export class BuildDiagnostics {
     });
   }
 
-  recordLlmCall(rec: Omit<LlmCallRecord, 'ts' | 'promptPreview' | 'responsePreview'> & { promptPreview?: string; responsePreview?: string }): void {
+  recordLlmCall(rec: Omit<LlmCallRecord, 'ts' | 'promptPreview' | 'responsePreview'> & {
+    promptPreview?: string;
+    responsePreview?: string;
+    /**
+     * Why a cancelled call was stopped, when it was OUR decision (AgentRunner, `stoppedCallOwner`) — named in
+     * the stop's detail line (autopsy 9c612cdb). Absent for the user's Stop, whose record is unchanged.
+     */
+    stopCause?: AbortCause;
+  }): void {
     this.recordTimeToFirstCall(rec.latencyMs);
     this.channelTotals.llmCalls += 1;
     // 🔴 BOTH ENDS, NEVER A PREFIX (2026-09-21). This read `if (this.llmCalls.length < MAX_LLM_CALLS)`,
@@ -1644,7 +1653,10 @@ export class BuildDiagnostics {
         code: 'LLM_CALL_STOPPED',
         message: 'A model call was cancelled because the build was stopped — it did not fail, and no provider was at fault.',
         autoResolved: true,
-        detail: `${rec.provider && rec.provider !== 'unknown' ? `provider=${rec.provider}` : 'no provider had answered yet'} · it had been running ${Math.round(Math.max(0, rec.latencyMs ?? 0) / 1000)}s`,
+        detail: `${rec.provider && rec.provider !== 'unknown' ? `provider=${rec.provider}` : 'no provider had answered yet'} · it had been running ${Math.round(Math.max(0, rec.latencyMs ?? 0) / 1000)}s`
+          // Who stopped it, when it was us (a deploy drain, a reclaimed lock, the reaper). The user's Stop carries
+          // no cause here, so its detail is exactly what it always was.
+          + (rec.stopCause && stoppedCallCauseWords(rec.stopCause) ? ` · stopped by us: ${stoppedCallCauseWords(rec.stopCause)}` : ''),
       });
     } else if (handedOff) {
       this.record({
@@ -1673,7 +1685,12 @@ export class BuildDiagnostics {
         // stops the commonest such call being started at all.)
         message: `A model call was stopped by one of our own clocks — a budget or step deadline ran out while it was still running, so it did not fail (${rec.model ?? 'model'}).`,
         autoResolved: true,
-        detail: rec.provider ? `provider=${rec.provider}` : undefined,
+        // ⚠️ The comment above holds for a bare `BUDGET_REACHED_MESSAGE`. A call an ABORT cancelled now arrives
+        // with its cause (autopsy 9c612cdb: "which engine ran the review, and for how long?" had no answer), so
+        // for that call the detail names the clock, the engine that was serving it and how long it had run.
+        detail: rec.stopCause && stoppedCallCauseWords(rec.stopCause)
+          ? `${rec.provider ? `provider=${rec.provider} · ` : ''}stopped by ${stoppedCallCauseWords(rec.stopCause)} · it had been running ${Math.round(Math.max(0, rec.latencyMs ?? 0) / 1000)}s`
+          : rec.provider ? `provider=${rec.provider}` : undefined,
       });
     } else if (!rec.ok || truncated) {
       // A TURN that timed out with nothing received is not "<model> failed" — no single provider

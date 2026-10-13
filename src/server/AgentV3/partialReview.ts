@@ -27,6 +27,7 @@
 // unit-testable against real reviewer output.
 
 import { parseReviewOutput, readLabelledFinding, readLeadingTags, type ReviewResult } from './ReviewerAgent';
+import { isTransientStatusLine } from './workingHeartbeat';
 
 /** Reviewer text captured from the live event stream while the review was still running. */
 export interface SalvagedReview extends ReviewResult {
@@ -108,10 +109,107 @@ export function salvageReview(text: unknown): SalvagedReview | null {
  * Names no provider and no model (white-label law) and claims nothing about completeness. PURE.
  */
 export function formatPartialReview(review: SalvagedReview, maxIssues = 5): string {
+  // 🔴 NO PROMISE WITHOUT A HANDLER (autopsy 9c612cdb, Q-910-D1). This line used to end `Send "review it" for a
+  // full pass.` Nothing runs a review on its own: the post-build review needs files written in that turn
+  // (`reviewerShouldRun`), and "review it" classifies as chat. The sentence now says only what is true;
+  // tests/aPromiseToTheUserHasAHandler.test.ts fails on any follow-up the user is told to send without a handler.
   const head = '📋 Partial review — the deeper completeness check ran out of time, '
-    + 'but here is what it had already found. Send "review it" for a full pass.';
+    + 'but here is what it had already found. These are leads from an unfinished check, not a verdict.';
   const lines = review.issues.slice(0, Math.max(1, maxIssues)).map((i) =>
     `  ${i.severity === 'critical' ? '🚨' : i.severity === 'warning' ? '⚠️' : '💡'} ${i.message}`);
   const more = review.issues.length > maxIssues ? [`  …and ${review.issues.length - maxIssues} more.`] : [];
   return [head, ...lines, ...more].join('\n');
+}
+
+/**
+ * What the USER is told when the post-build review produced nothing usable (it timed out and nothing was
+ * salvaged, or it errored) — or `null` when they are told nothing.
+ *
+ * 🔴 AUTOPSY 9c612cdb (Q-910-D1). On a GREEN app the user read *"The deeper completeness review didn't finish in
+ * the time it had — send "review it" and I'll run it on its own."* Two things were wrong, and both were the same
+ * defect — a user sentence that outlived the decision behind it:
+ *   1. The report had already classified exactly this as process-only, "nothing for the user to do"
+ *      (REVIEW_SUGGESTIONS_NOT_READY, SignBridge 2026-09-26). That fix changed the report code three lines below
+ *      the narration and never reached the narration.
+ *   2. Nothing handles "review it". The review runs only on a turn that wrote files (`reviewerShouldRun`), and the
+ *      intent classifier reads "review it" as chat. A promised action that is not wired breaks the second
+ *      absolute rule.
+ *
+ * So: a suggest-only review (the app is proven green; whatever it said was an offer) → nothing at all. A review
+ * that could have repaired → one true sentence that names no command. PURE.
+ */
+export function reviewNotReadyUserLine(o: { suggestOnly: boolean; timedOut: boolean }): string | null {
+  if (o.suggestOnly) return null;
+  return o.timedOut
+    ? '📋 Your app is built and saved. The final completeness check did not finish in the time it had, so it was not applied this time.'
+    : '📋 Your app is built and saved (the post-build review could not run this time).';
+}
+
+/**
+ * WHAT THE REVIEWER HAS SAID SO FAR — from EVERY channel its words reach the stream through (autopsy 9c612cdb,
+ * Q-910-D3).
+ *
+ * 🔴 THE NET THAT A LATER FIX SWITCHED OFF. The "listen while it works" salvage (admin report 2026-09-01) heard
+ * only `narration` and `agent_done` from the reviewer — right for the multi-step reviewer it was built for,
+ * which narrated between tool steps. On 2026-09-30 (autopsy bee95692) a suggest-only review became ONE call
+ * with no tools. A single turn narrates only when it RETURNS, which is exactly what a call cut off by its
+ * budget never does; its answer arrives meanwhile as `stream_delta` text, and nobody collected it. So in
+ * one-call mode `salvageReview` was unreachable by construction, and a review that had already written
+ * "[WARNING] [BROKEN] …" lines was conceded as REVIEW_SUGGESTIONS_NOT_READY.
+ *
+ * The rules, each one a way the old buffer was wrong or could become wrong:
+ *   • a turn's streamed text is joined, in order, under that turn's id;
+ *   • when the same turn later narrates its final text, that REPLACES the streamed copy — never both;
+ *   • an `agent_done` summary that repeats words already held is not added again;
+ *   • the working clock ("⏳ Still working — 12s so far", id 'working') is not the reviewer's words — dropped;
+ *   • reasoning deltas (`kind: 'thinking'`) are not its answer — dropped.
+ *
+ * PURE — the subscription stays at the call site; this only decides what an event adds.
+ */
+export interface ReviewerWords {
+  /** Feed one stream event. Anything that is not this agent's own words is ignored. */
+  take(event: unknown): void;
+  /** Each segment the reviewer said, in the order it began (for one-line readers). */
+  lines(): string[];
+  /** All of it, for `salvageReview`. */
+  text(): string;
+}
+
+/** The id the working clock's narration carries (AgentRunner's heartbeat). */
+const WORKING_LINE_ID = 'working';
+
+export function collectReviewerWords(agent = 'reviewer'): ReviewerWords {
+  const segments: Array<{ text: string }> = [];
+  const byKey = new Map<string, { text: string }>();
+  let said = 0;
+  const segmentFor = (key: string): { text: string } => {
+    let seg = byKey.get(key);
+    if (!seg) { seg = { text: '' }; byKey.set(key, seg); segments.push(seg); }
+    return seg;
+  };
+  const held = (): string[] => segments.map((s) => s.text).filter((t) => t.trim() !== '');
+  return {
+    take(event: unknown): void {
+      if (!event || typeof event !== 'object') return;
+      const e = event as { type?: unknown; agent?: unknown; id?: unknown; kind?: unknown; delta?: unknown; text?: unknown; summary?: unknown };
+      if (e.agent !== agent) return;
+      if (e.type === 'stream_delta') {
+        if ((e.kind ?? 'text') !== 'text' || typeof e.delta !== 'string' || typeof e.id !== 'string' || !e.id) return;
+        segmentFor(`turn:${e.id}`).text += e.delta;
+      } else if (e.type === 'narration') {
+        if (typeof e.text !== 'string') return;
+        if (e.id === WORKING_LINE_ID || isTransientStatusLine(e.text)) return;
+        // The turn's final text replaces its streamed copy (same id) — the same words are never held twice.
+        if (typeof e.id === 'string' && e.id) segmentFor(`turn:${e.id}`).text = e.text;
+        else segmentFor(`said:${said++}`).text = e.text;
+      } else if (e.type === 'agent_done') {
+        if (typeof e.summary !== 'string' || !e.summary.trim()) return;
+        const summary = e.summary.trim();
+        if (segments.some((s) => s.text.includes(summary))) return;
+        segmentFor(`said:${said++}`).text = e.summary;
+      }
+    },
+    lines: held,
+    text: () => held().join('\n'),
+  };
 }

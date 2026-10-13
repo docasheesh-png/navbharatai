@@ -29,8 +29,8 @@ import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRe
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
-import { abortCauseOf, abortSummary } from './buildAbortCause';
-import { isBuildStoppedError } from './stopSignal';
+import { abortCauseOf, abortSummary, stoppedCallError, stoppedCallOwner, type AbortCause } from './buildAbortCause';
+import { isBuildStoppedError, stoppedCallServedBy } from './stopSignal';
 import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
@@ -260,6 +260,10 @@ export interface AgentRunnerOptions {
     latencyMs: number;
     ok: boolean;
     error?: string;
+    /** The provider family that was serving a call a stop cancelled — set only for a stop that was ours. */
+    provider?: string;
+    /** Why a cancelled call was stopped — set only when it was OUR decision (`stoppedCallOwner`). */
+    stopCause?: AbortCause;
   }) => void;
   /**
    * Called for every model turn whose only tool calls were update_todo, in a run that could have written
@@ -858,6 +862,7 @@ export class AgentRunner {
         const promptPreview = `${systemText.slice(0, PROMPT_PREVIEW_HEAD)}${SEPARATOR}${lastMsgText.slice(0, PROMPT_PREVIEW_HEAD)}`;
         const llmStartedAt = Date.now();
         let turn: TurnResult;
+        let turnTimeoutSignal: AbortSignal | undefined;
         try {
           // E4 — cap the model call so a hung provider (socket open, no bytes, no error) can't block
           // the whole build. The wall-clock watchdog only runs BETWEEN turns, so without this a single
@@ -889,6 +894,10 @@ export class AgentRunner {
               }
             } catch { /* the working set is advisory — never blocks a turn */ }
           }
+          // Held in its own binding so the catch below can tell THIS clock firing from a stop (autopsy 9c612cdb).
+          turnTimeoutSignal = turnTimeoutMs > 0 && typeof AbortSignal.any === 'function' && typeof AbortSignal.timeout === 'function'
+            ? AbortSignal.timeout(turnTimeoutMs)
+            : undefined;
           const turnCall = client.runTurn({
             model,
             system,
@@ -900,8 +909,8 @@ export class AgentRunner {
             ...(this.opts.stopAtReasoningRung ? { stopAtReasoningRung: true } : {}),
             // A Stop cancels THIS call, not only the next one (stopSignal.ts). Before this the loop
             // noticed a stop only between turns, after paying for the call already in flight.
-            signal: turnTimeoutMs > 0 && typeof AbortSignal.any === 'function' && typeof AbortSignal.timeout === 'function'
-              ? AbortSignal.any([...(this.opts.signal ? [this.opts.signal] : []), AbortSignal.timeout(turnTimeoutMs)])
+            signal: turnTimeoutSignal
+              ? AbortSignal.any([...(this.opts.signal ? [this.opts.signal] : []), turnTimeoutSignal])
               : this.opts.signal,
             onText: (delta) =>
               events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'text', delta, ts: Date.now() }),
@@ -938,16 +947,42 @@ export class AgentRunner {
           // WAS running, and for how long is the one fact that explains a long silence before the Stop (autopsy
           // 15e69839: the call in flight had run ~3 minutes and appeared nowhere in the report). Recorded as a
           // stopped call — `recordLlmCall` turns it into LLM_CALL_STOPPED, info, never a provider failure.
+          //
+          // 🔴 …AND A STOP IS NOT ALWAYS THE USER'S (autopsy 9c612cdb, Q-910-D2). The post-build review that OUR
+          // 45-second budget cut off took this same path and was recorded as "cancelled because the build was
+          // stopped" — a build nobody stopped — under the nominal model id, so the report could not say which
+          // engine had been running it, or whose clock ended it. Whose decision it was is on the signal
+          // (`abortCauseOf`); `stoppedCallOwner` decides how it is recorded, for every cause the code defines:
+          //   the user's Stop and an unknown cause → EXACTLY the record above, byte for byte;
+          //   our clock → a budget end (LLM_CALL_BUDGET_ENDED), naming the clock and the engine it was on;
+          //   our platform → a stopped call naming the platform event and the engine.
           if (this.opts.signal?.aborted && isBuildStoppedError(err)) {
+            const cause = abortCauseOf(this.opts.signal as AbortSignal);
+            const owner = stoppedCallOwner(cause);
+            const ours = owner === 'our-clock' || owner === 'our-platform';
+            const servedBy = ours ? stoppedCallServedBy(err) : undefined;
+            const ownMessage = err instanceof Error ? err.message : String(err);
             try {
               this.opts.onLlmCall?.({
-                model, promptPreview, promptChars,
+                model: servedBy?.model ?? model, promptPreview, promptChars,
                 responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0,
                 inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - llmStartedAt,
-                ok: false, error: err instanceof Error ? err.message : String(err),
+                ok: false, error: stoppedCallError(cause, ownMessage),
+                ...(servedBy ? { provider: servedBy.provider } : {}),
+                ...(ours ? { stopCause: cause } : {}),
               });
             } catch { /* diagnostics capture is best-effort */ }
             return endAborted();
+          }
+          // 🔴 OUR PER-TURN STALL GUARD, NOT A STOP (autopsy 9c612cdb, sibling of Q-910-D2). The turn's signal
+          // also carries the per-turn timeout, and a provider chain that honours it ends the call with the
+          // SAME stop error — which is not a stop: nobody stopped this build. Read as one, the stalled turn
+          // was recorded as "cancelled because the build was stopped" and the run ended with "Error: Stopped —
+          // the build was asked to stop", while the honest stall ending below (what was saved, how to carry
+          // on) was unreachable whenever this clock fired a tick before `withTimeout`'s. It is the timeout it
+          // is, worded exactly as `withTimeout` words it, so it takes the same path from here.
+          if (isBuildStoppedError(err) && !this.opts.signal?.aborted && turnTimeoutSignal?.aborted) {
+            err = new Error(`model turn ${steps} timed out after ${turnTimeoutMs}ms`);
           }
           // #4 — capture the FAILED model turn before it propagates (provider error, timeout, …).
           try {

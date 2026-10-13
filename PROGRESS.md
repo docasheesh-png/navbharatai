@@ -94685,6 +94685,86 @@ reader of this fact could be forgotten; it caught the fix itself going missing.
 - **Still open:** Q-926 (248 s to first render on Weak). 🟡 BLOCKED on the admin's routing decision; the options are in the row.
 - **Report db07e0af, final count:** 15 items. ✅ 14 (13 fixed by #3687, plus Q-923 not-a-defect). 🟡 1 (Q-926). Remaining 0.
 
+## 2026-10-12 — AUTOPSY `50378049`, Q-910: "9 writes skipped" is not "9 files never compiled", and nothing recorded which
+
+Sixth PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911 · #3690 →
+Q-906+Q-907 · #3693 → Q-909).
+
+**What the report said, verbatim:** *"9 TypeScript write(s) skipped before the compiler was ready — 9
+because package.json had changed since the last install (a dependency may be missing until one runs)"*.
+That reads as nine files that went unchecked.
+
+**It may mean nothing of the kind.** `writeTypecheckCommand` runs `tsc --noEmit` over the WHOLE PROJECT,
+not over the file just written — so ONE clean run after the last skip has already compiled every skipped
+file. The two readings are opposite facts about the build:
+
+| | what it cost |
+|---|---|
+| a later run succeeded | the skips cost a few seconds of lateness and nothing else |
+| no later run succeeded | the end-of-build typecheck was those files' FIRST compile — the most expensive moment to find anything |
+
+**Nothing recorded which, so nobody could tell.** That is the same gap `notReadyReasons` was added to
+close one level up (build 46e2d74b: fourteen writes reported as *"still being installed"* when the tree
+had only looked stale) — one sentence standing in for facts that mean different things.
+
+🔒 **THE DEFERRAL ITSELF IS NOT THE DEFECT AND IS NOT TOUCHED.** Autopsy Sur Taal established that the
+write-time check must never install and never wait: three such waits burned 90 s of a free build's clock
+while the model sat holding a file. Making it wait again would trade this report's item for that one.
+What is fixed is what the report SAYS about the skips — the fourth rule's fifth step.
+
+**The fix.** `WriteTypecheckStats.cleanRunCoveredSkips` — `true` when a clean run followed the last skip,
+`false` when none did, `null`/absent when the question was never asked (never a silent "no"). Order is
+the whole answer: a skip sets it back to `false`, because a clean run BEFORE the skip compiled a project
+that did not yet hold these files; only a clean run after it may set `true`, and only when something was
+actually skipped. The report then says either *"a later check compiled the whole project, so those files
+were covered, just later than they should have been"* or *"no check succeeded after them, so the
+end-of-build typecheck was their first compile"*.
+
+**Locked by** `tests/aSkippedCheckIsNotAnUncheckedFile.test.ts` — 10 cases, including the premise itself
+(the command carries no per-file argument, so a project-wide run really does cover the skips), both new
+sentences, the absent case saying nothing extra, and a recorder guard asserting the write sits inside the
+CLEAN-RUN branch — a compiler that never ran covers nothing (autopsy 12c642ed's class). **Reversion-proven
+three ways:** stop putting the question back on a skip → 1 fail · stop answering it on a clean run → 1 ·
+never print the sentence → 2.
+
+⚠️ **A GUARD OF MINE MEASURED THE WRONG THING, and the fix is the repo's own rule.** The recorder case
+first looked back 260 characters for the enclosing branch and failed on the `neverRan` branch that
+legitimately sits just above. **A byte window measures distance; the claim was about NESTING.** This repo
+has paid for byte-window guards before (`slice(0, 6000)`), and the rule is to anchor on syntax — it now
+asserts that nothing intervenes between `if (errors.length === 0) {` and the write, and that the branch
+has not closed before it.
+
+⚠️ **AND AN EXISTING GUARD BROKE ON ITS ANCHOR, EXACTLY THE SAME WAY** —
+`tests/aCompilerThatNeverRanIsNotClean.test.ts` pinned the literal one-liner
+`if (errors.length === 0) s.cleanRuns += 1;`, which became a BLOCK when that branch gained the Q-910
+line. **Found by the full suite, not by me**, and the invariant it protects was never in danger: the
+`if (neverRan) { s.notRunRuns += 1; return ''; }` branch still returns before the clean count, so a
+compiler that never ran can never set `cleanRunCoveredSkips`. Re-anchored on the branch opener, which
+survives a statement being added and still breaks on a REORDERING — proven by letting the never-ran
+branch fall through and watching it fail. Its own `-1` hole is closed in the same edit (only one of its
+three anchors was asserted present, so a rename would have read as a reordering).
+
+**That is three anchor re-pins in this autopsy** (`theCommitMessageWasNotADevServer`, my own ordering
+case in `aKitTypeIsNotGuessed`, and this one), and the lesson is one sentence: **a guard that pins a
+LINE breaks when the line grows; a guard that pins the SYNTAX it is really about does not.** The
+underlying invariants were correct every time — only the instruments were brittle.
+
+### 🔸 Q-914 advanced, not fixed — what the evidence actually supports
+
+Investigated in the same session and recorded rather than guessed:
+- **The rule is already in the prompt, unconditionally.** `architectSystemPrompt` carries *"Define CSS
+  variables on :root for a real palette"* with no game carve-out, so the build did receive it. This is
+  not a missing instruction.
+- **The scanner is not inflating the count.** `DesignLinter.allColors` matches `/#[0-9a-fA-F]{3,8}\b/`
+  only — `0x`-form three.js material colours are NOT counted, so the 45 are real CSS-shaped colours.
+- **The finding needs BOTH conditions:** `allColors.length > 8 && !hasTokens`. It fired, so the app had
+  **no token layer at all** — the finding is true, not a false positive.
+
+So Q-914 is a prompt-ADHERENCE failure on a game's UI panels, and the honest fix is a decision, not a
+one-liner: mandate tokens for a game's UI in the kit's own contract (cheap, preventive), or add a pass
+that rewrites them (risky — a voxel game's block colours are DATA, not theme, and a rewriter cannot tell
+them apart from `Hud.tsx`'s). It stays OPEN with this analysis, and what would settle it is the built
+app's own files from one game report.
 ## 2026-10-12 — AUTOPSY `50378049`, Q-909: the builder had to reverse-engineer a file WE wrote
 
 Fifth PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911 · #3690 →

@@ -62,7 +62,9 @@ describe('2 · provider silence is never reported as OUR budget', () => {
 
   it('the runner picks the wording from that comparison', () => {
     expect(runner).toContain('const providerWentSilent = streaming && firstAnswerMs < timeoutMs;');
-    expect(runner).toContain('? `OpenAI-compatible call (GLM/Kimi) timed out after ${firstAnswerMs}ms`');
+    // Since 303e8a6f's review the silence is also MARKED as silence; the "timed out" words — what benches a dead
+    // rung and keeps it off our budget — are unchanged.
+    expect(runner).toContain('? `OpenAI-compatible call (GLM/Kimi) timed out after ${firstAnswerMs}ms — ${SILENT_OPEN_MARK}`');
     // Held in `ordinaryBoundMessage` since autopsy d382b398 (the silent bound may ride on to it); with no
     // silent bound `initialBoundMs === firstAnswerMs`, so the wording is unchanged.
     expect(runner).toContain(': clockMessage(firstAnswerMs);');

@@ -20,6 +20,9 @@ import { withEnglishReading } from '../lib/devanagariTechTerms';
 import { isComplexAppPrompt, namesBusinessDomain, namesHeavyGame, namesPersonalTool, SIMPLE_APP_SIGNAL } from '../lib/appComplexitySignals';
 import { userAskedForAnAppToBeBuilt, describesWorkAlreadyStarted, type BuildIntent } from './IntentClassifier';
 import { withoutMachineText } from '../lib/machineText';
+import { requestSubject } from '../lib/appScopeAnalyzer';
+import { isPlatformFixRequest, looksLikeMachineError } from '../../lib/platformFixRequest';
+import { withoutErrorFeaturePhrases } from '../lib/describedFeatures';
 
 export type StartTier = 'gemini' | 'haiku' | 'sonnet' | 'opus';
 
@@ -206,7 +209,41 @@ const RE = {
  */
 const ORDERS_A_BUILD = /\b(?:create|build|make|develop|design|generate|code|banao|bana\s*do|banado|banaiye|bnao|bna\s*do|ban(?:a|aa)\s*kar|bnakar|bana\s*ke|bnake)\b[^.?!\n]{0,60}?\b(?:app|apps|application|website|web\s*app|site|tool|platform|extension|game|dashboard|portal)\b/i;
 
-function classify(raw: string): { type: TaskType; matched: boolean } {
+/**
+ * 🔴 A DEBUG WORD IN A NEW APP'S FEATURE LIST IS NOT A DEBUGGING TASK (autopsy 303e8a6f, 2026-10-12).
+ *
+ * The first starter chip — *"Build an AI image generator app: … show friendly error messages with a Try
+ * again button …"* — was filed `taskType: 'debugging'`, score 50, start band "sonnet", off the word "error"
+ * in its feature list. On a weak build that gave it the complex-app 150-step ceiling and filed its cost and
+ * ETA under the wrong bucket; on a prompt without a seeded template the same clause crosses the complexity
+ * line and loses the one-shot lane. Autopsy 33812996 had fixed this class for "translation" and "summary"
+ * two checks below, and never hunted the debugging check.
+ *
+ * TRUE only when ALL hold — the module's usual AND-lock:
+ *   • the platform is starting a NEW app (`buildIntent === 'new_build'`): an existing app can be debugged,
+ *     a new one has no code yet (DialogueStateManager already encodes this with `hasExistingFiles`);
+ *   • it is not our own Fix-error message nor a pasted machine error (those ARE bug reports);
+ *   • the request's SUBJECT (its first line, cut where the feature list starts — Q-398's `requestSubject`)
+ *     carries no debug word, so the debug word lives in the feature list;
+ *   • and the subject orders something to be built.
+ * Without the intent the answer is `false`, so every caller that does not pass one keeps today's verdict.
+ * PURE.
+ */
+export function aDebugWordNamesAFeature(raw: string, buildIntent?: BuildIntent, env: NodeJS.ProcessEnv = process.env): boolean {
+  // Kill switch, the convention for a classifier change that moves routing (AGENTV3_SIZE_EDIT_TURNS, …).
+  if (String(env.AGENTV3_ORDER_FEATURE_WORDS ?? '').trim().toLowerCase() === 'off') return false;
+  if (buildIntent !== 'new_build') return false;
+  const text = String(raw ?? '');
+  if (isPlatformFixRequest(text) || looksLikeMachineError(text)) return false;
+  // A problem report is a problem report even on a fresh workspace ("Make the app work, it is broken" — the
+  // adversarial review of 303e8a6f; filing it as an app order brought back the 31dc61fd class).
+  if (describesWorkAlreadyStarted(text)) return false;
+  const subject = withEnglishReading(requestSubject(text)).toLowerCase();
+  if (!subject || RE.debugging.test(subject)) return false;
+  return ORDERS_A_BUILD.test(subject) || userAskedForAnAppToBeBuilt(subject);
+}
+
+function classify(raw: string, buildIntent?: BuildIntent): { type: TaskType; matched: boolean } {
   // A link is not words: `translate.google.com` is not an order to translate (a9f8d186 / 33812996). Two sessions
   // fixed this class in parallel — `withoutUrls` (promptUrls.ts) and the shared `withoutMachineText`
   // (lib/machineText.ts); both run so neither PR's guarantee is weakened.
@@ -219,7 +256,9 @@ function classify(raw: string): { type: TaskType; matched: boolean } {
   // two can never route the same prompt two different ways). Page-deliverable-aware: a category THEME
   // word on a one-page ask ("SaaS landing page") no longer forces complex_app — the 29-min bug.
   if (isComplexAppPrompt(p)) return { type: 'complex_app', matched: true };
-  if (RE.debugging.test(p)) return { type: 'debugging', matched: true };
+  // An error message the user ASKS FOR ("add a friendly error message", "show friendly error messages") is a
+  // feature on any turn; the rest of the text still decides (withoutErrorFeaturePhrases, autopsy 303e8a6f).
+  if (RE.debugging.test(withoutErrorFeaturePhrases(p)) && !aDebugWordNamesAFeature(raw, buildIntent)) return { type: 'debugging', matched: true };
   // A personal tool (reminder, planner, habit tracker…) is the todo family, named by the domain
   // analyser rather than a keyword here — see PERSONAL_TOOL_DOMAINS (autopsy d829b523).
   if (RE.simpleApp.test(p) || namesPersonalTool(p)) return { type: 'simple_app', matched: true };
@@ -240,7 +279,9 @@ function classify(raw: string): { type: TaskType; matched: boolean } {
   // A heavy game that mentions a technology ("single file html … 3d fight game") is a game, not a
   // snippet — see `namesHeavyGame` (autopsy f496c75b).
   if (namesHeavyGame(p)) return { type: 'complex_app', matched: true };
-  if (RE.coding.test(p)) return { type: 'coding', matched: true };
+  // A technology named in an APP order ("… app in React", "a reusable card component") describes how the app is
+  // made, not a coding task — the same lock as summary/translate above (autopsy 303e8a6f, sibling of 33812996).
+  if (RE.coding.test(p) && !ordersAnApp) return { type: 'coding', matched: true };
   // 🔴 A GREETING WORD INSIDE AN APP ORDER IS NOT A GREETING (autopsy c70bcbb4, 2026-10-04). "Mujhe esa hi
   // music player bnakar do" — "esa hi" is Hindi for "just like this" — was filed `chat`, score 5, and the
   // ETA was taken from chat turns (4–6 min for a 9-minute build). "hi, build me a todo app" is the same: the
@@ -260,8 +301,8 @@ function classify(raw: string): { type: TaskType; matched: boolean } {
   return { type: 'chat', matched: false };
 }
 
-function detectTaskType(p: string): TaskType {
-  return classify(p).type;
+function detectTaskType(p: string, buildIntent?: BuildIntent): TaskType {
+  return classify(p, buildIntent).type;
 }
 
 /**
@@ -332,7 +373,7 @@ export function anAppWasOrderedButNotRecognised(prompt: string, buildIntent?: Bu
   // complexity verdict); `signalsMatchedNothing` and its letter bar still decide every purchase.
   if (buildIntent === 'new_build' && !describesWorkAlreadyStarted(text)) {
     const p = text.toLowerCase();
-    if (p.trim() && !RE.greeting.test(p) && detectTaskType(p) === 'chat') return true;
+    if (p.trim() && !RE.greeting.test(p) && detectTaskType(p, buildIntent) === 'chat') return true;
   }
   if (!signalsMatchedNothing(text)) return false;
   // The platform's OWN decision, when the caller has it, beats a second reading of the same prompt.
@@ -423,7 +464,7 @@ export function anEditTurnThatCouldNotBeSized(prompt: string, buildIntent?: Buil
  *
  * A GREETING IS NOT "unrecognised" — it matched, and "hi" must not buy a model call.
  */
-export function signalsMatchedNothing(prompt: string): boolean {
+export function signalsMatchedNothing(prompt: string, buildIntent?: BuildIntent): boolean {
   const p = String(prompt ?? '').toLowerCase();
   if (!p.trim()) return false;
   // 💸 A SCRAP IS NOT AN UNRECOGNISED REQUEST — it is a scrap, and it must not buy a model call.
@@ -437,7 +478,9 @@ export function signalsMatchedNothing(prompt: string): boolean {
   const letters = p.match(/\p{L}/gu) ?? [];
   if (letters.length < MIN_LETTERS_TO_JUDGE_SCRIPT) return false;
   if (RE.greeting.test(p)) return false;
-  return detectTaskType(p) === 'chat';
+  // The SAME reading the analysis made, intent included — so the router and the analyser cannot disagree about
+  // whether the request was recognised (the adversarial review of 303e8a6f found them split on exactly this).
+  return detectTaskType(p, buildIntent) === 'chat';
 }
 
 /** Base complexity by task type (before feature adjustments). */
@@ -692,7 +735,8 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
   // Read without machine text: a pasted link is neither request size nor request words (autopsy 33812996).
   const prompt = withoutMachineText((input?.prompt ?? '').toString(), { drop: true, keepPasted: true });
   const p = prompt.toLowerCase();
-  const detected = detectTaskType(p);
+  // The platform's own intent decides whether a debug word can name a feature (aDebugWordNamesAFeature).
+  const detected = detectTaskType(p, input?.buildIntent);
   /**
    * 🔴 An app was ordered and nothing here recognised it — see `anAppWasOrderedButNotRecognised`.
    * Relabelled BEFORE the pinned-tier return below, because a pinned build records `taskType` too and

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { awaitedCallAt } from './helpers/sourceSlice';
 import { firstPaintEvents, makeFirstPaintHandler } from '../src/server/AgentV3/streamingFirstPaint';
 
 /**
@@ -88,6 +89,7 @@ describe('🔴 the pre-seeded scaffold is shown the moment it exists', () => {
   });
 
   it('the scaffold still keeps its own awaited durable save — this adds, never replaces', () => {
-    expect(routeCode).toContain('await saveWorkspaceFiles(workspaceId, goldenFiles)');
+    // Awaited — bare, or inside its setup timing step (303e8a6f), which awaits the call it is handed.
+    expect(awaitedCallAt(routeCode, 'saveWorkspaceFiles(workspaceId, goldenFiles)')).toBeGreaterThan(-1);
   });
 });

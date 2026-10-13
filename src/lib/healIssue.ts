@@ -64,6 +64,13 @@ export const WORKAROUND_CODES: ReadonlySet<string> = new Set([
   'SIMPLE_BUILD_FALLBACK',
   'ONESHOT_FALLBACK',
   'SIMPLE_BUILD_OUTCOME',
+  // HEAL_RULE 3 (autopsy 303e8a6f's heal census, each verdict checked by a second reviewer): each is recorded
+  // WARNING + closed when the engine went AROUND something, and each was counted as a self-heal.
+  'GOLDEN_SCAFFOLD_SKIPPED', // the tested template was not seeded; the build wrote the app from scratch instead
+  'NO_CLAUDE_BLOCKED', // the Weak-tier guard refused a Claude call; the chain fell to another rung
+  'ONESHOT_VERIFY_FAILED', // the one-shot app did not compile after its one repair; handed to the full builder
+  'SIMPLE_BUILD_VERIFY_ERROR', // the fast lane could not make its files compile; handed to the full builder
+  'GREEN_GUARD_RESTORED', // a rollback threw the turn's work away rather than fixing it
 ]);
 
 /**
@@ -94,6 +101,31 @@ export const NOT_A_REPAIR_CODES: ReadonlySet<string> = new Set([
   // A repair that was UNDONE: the defect it targeted is still there.
   'RUNTIME_FIX_REGRESSED',
   'DESIGN_HEAL_REVERTED',
+  // HEAL_RULE 3 (autopsy 303e8a6f's heal census): reported, never corrected — still true when the build ends.
+  'FILE_BUDGET_EXCEEDED', // the plan exceeded its file ceiling and was built in full; nothing trimmed
+  'GROUNDING_COST', // a lopsided or over-budget grounding block; the cap working, not a repair
+  'TIER_LADDER', // a misread ladder setting or an all-keyless ladder; reported, left as it is
+]);
+
+/**
+ * What a self-heal is, positively: the codes recorded WARNING + closed because the engine really fixed or prevented
+ * something (each checked by the heal census of autopsy 303e8a6f). With WORKAROUND_CODES and NOT_A_REPAIR_CODES it
+ * makes the classification guilty until listed: a census fails when a NEW code is recorded warning + closed and is
+ * in none of the three, so "counted as a heal by default" can never happen silently again.
+ */
+export const REPAIR_CODES: ReadonlySet<string> = new Set([
+  'DATA_LOSS_EVENT', // lost project files were written back from the durable store
+  'REPAIR_OUT_OF_SCOPE', // a repair's out-of-scope files were blocked before they reached disk
+  'ZOMBIE_WRITE_REFUSED', // a stale lane was stopped from writing over the live app
+  'DEP_RECONCILE_GUARDED', // a dependency drop was undone before package.json was written
+  'HTML_ENTRY_REPAIRED', // index.html got back the script/mount that boots the app
+  'DANGLING_STYLESHEET_IMPORT_REMOVED', // an import of a stylesheet that does not exist was removed
+]);
+
+/** The codes HEAL_RULE 3 moved out of the heal count — older reports counted them as repairs. */
+const RULE_3_RECLASSIFIED: ReadonlySet<string> = new Set([
+  'GOLDEN_SCAFFOLD_SKIPPED', 'NO_CLAUDE_BLOCKED', 'ONESHOT_VERIFY_FAILED', 'SIMPLE_BUILD_VERIFY_ERROR', 'GREEN_GUARD_RESTORED',
+  'FILE_BUDGET_EXCEEDED', 'GROUNDING_COST', 'TIER_LADDER',
 ]);
 
 /**
@@ -101,7 +133,7 @@ export const NOT_A_REPAIR_CODES: ReadonlySet<string> = new Set([
  * before 2026-09-30 carry no `counts.healRule`, and their `autoResolved` still includes the rows
  * NOT_A_REPAIR_CODES now excludes — `healCountOf` corrects for that.
  */
-export const HEAL_RULE = 2;
+export const HEAL_RULE = 3;
 
 /**
  * The engine REPEATING a sentence, never a measurement (autopsy 586295b7, 2026-09-20). Excluded from
@@ -194,7 +226,13 @@ export function isTimelineComplete(report: HealReportLike | null | undefined): b
  */
 export function workaroundCountOf(report: HealReportLike | null | undefined): number | null {
   const recorded = report?.counts?.workarounds;
-  if (typeof recorded === 'number' && Number.isFinite(recorded) && recorded >= 0) return Math.floor(recorded);
+  if (typeof recorded === 'number' && Number.isFinite(recorded) && recorded >= 0) {
+    const rule = finiteCount(report?.counts?.healRule);
+    if (rule !== null && rule >= HEAL_RULE) return Math.floor(recorded);
+    // An older report did not count the HEAL_RULE 3 workaround codes — add the ones its timeline shows.
+    const added = (Array.isArray(report?.issues) ? report!.issues! : []).filter((i) => RULE_3_RECLASSIFIED.has(codeOf(i)) && isWorkaroundIssue(i)).length;
+    return Math.floor(recorded) + added;
+  }
   if (!isTimelineComplete(report)) return null;
   return (report!.issues ?? []).filter(isWorkaroundIssue).length;
 }
@@ -215,6 +253,13 @@ export function healCountOf(report: HealReportLike | null | undefined): number |
   if (recorded === null) return null;
   const rule = finiteCount(report?.counts?.healRule);
   if (rule !== null && rule >= HEAL_RULE) return recorded;
-  const visibleOpen = (Array.isArray(report?.issues) ? report!.issues! : []).filter(isLeftOpen).length;
-  return Math.max(0, recorded - visibleOpen);
+  const issues = Array.isArray(report?.issues) ? report!.issues! : [];
+  // Rows an older rule counted as heals and the current one does not — subtracted once each, by the rule the
+  // report WAS computed with, so a rule-2 report is not charged twice for the left-open rows rule 2 already excluded.
+  const countedThen = (i: HealIssueLike | null | undefined) => !!i && i.autoResolved === true && i.observation !== true && i.severity !== 'info' && !isNarrationIssue(i);
+  const reclassified = issues.filter((i) => countedThen(i) && RULE_3_RECLASSIFIED.has(codeOf(i))).length;
+  const leftOpenBeforeRule2 = rule === null || rule < 2
+    ? issues.filter((i) => isLeftOpen(i) && !RULE_3_RECLASSIFIED.has(codeOf(i))).length
+    : 0;
+  return Math.max(0, recorded - reclassified - leftOpenBeforeRule2);
 }

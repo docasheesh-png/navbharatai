@@ -177,7 +177,7 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     code: 'AI_KEY_IN_BROWSER',
     title: 'Take the AI key out of your app',
     detail: 'Your app calls an AI service straight from the page, so its key would be visible to everyone who opens it.',
-    prompt: 'This app calls an AI provider directly from browser code, so the provider key has to live in the page where every visitor can read and spend it. Replace every such call with NavBharatAI\'s built-in keyless AI helper (generateText / chat), remove any box or setting that asks for an AI key and any key read from storage or the environment in browser code, and keep the feature working. Save the user\'s own data first, then add the AI result when it arrives.',
+    prompt: 'This app calls an AI provider directly from browser code, so the provider key has to live in the page where every visitor can read and spend it. Replace every TEXT call with NavBharatAI\'s built-in keyless AI helper (generateText / chat); for AI PICTURES, use the generate_image_ai recipe, which asks NavBharatAI through the owner\'s own image key saved in Keys & Secrets — pictures are never keyless. Remove any box or setting that asks for an AI key and any key read from storage or the environment in browser code, and keep the feature working. Save the user\'s own data first, then add the AI result when it arrives.',
   },
   {
     // Recorded only on an import turn, where the user asked for no file to change, so the credential-in-logs

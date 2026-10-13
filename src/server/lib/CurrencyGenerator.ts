@@ -43,17 +43,24 @@ export async function convert(amount: number, from: string, to: string): Promise
 `;
 
 // ── Fixer (EUR-base on the free tier → we compute the cross-rate) ─────────────────────────────────────────
+// ⚠️ HTTPS ONLY (autopsy 303e8a6f's census of our own recipes, 2026-10-12): this recipe called
+// `http://data.fixer.io/…?access_key=KEY`, so every rate lookup sent the user's key across the network
+// unencrypted — the platform's one remaining security finding against code it ships. Fixer's free plan refuses
+// HTTPS (error 105); the generated code says so in plain words instead of falling back to plain HTTP.
 const FIXER_SERVER = `// Bring-Your-Own Fixer key — fixer.io. Pasted into .env as FIXER_API_KEY. The free tier quotes everything
 // against EUR, so getRate() fetches both currencies vs EUR and computes the cross-rate (to / from) — this
-// works for ANY pair regardless of the base. Server secret.
+// works for ANY pair regardless of the base. Server secret, and only ever sent over HTTPS.
 const KEY = process.env.FIXER_API_KEY as string;
 
 // Latest exchange rate FROM → TO (e.g. getRate('USD', 'INR')), via the EUR-based cross-rate.
 export async function getRate(from: string, to: string): Promise<number> {
-  const r = await fetch('http://data.fixer.io/api/latest?access_key=' + KEY + '&symbols=' + from + ',' + to);
+  const r = await fetch('https://data.fixer.io/api/latest?access_key=' + KEY + '&symbols=' + from + ',' + to);
   const data = await r.json();
   const rf = data?.rates?.[from];
   const rt = data?.rates?.[to];
+  if (data?.error?.code === 105) {
+    throw new Error('Exchange rate lookup failed: this Fixer plan does not allow HTTPS, and the key is never sent unencrypted. Use a paid Fixer plan, or ExchangeRate-API (free over HTTPS).');
+  }
   if (!data?.success || typeof rf !== 'number' || typeof rt !== 'number') {
     throw new Error('Exchange rate lookup failed: ' + (data?.error?.info ?? 'unknown'));
   }
@@ -76,7 +83,8 @@ const FIXER_INSTRUCTIONS =
   'Fixer currency conversion wired. Paste your key into .env as FIXER_API_KEY — NavBharatAI never stores it. ' +
   "Import getRate(from, to) / convert(amount, from, to). Fixer's free tier quotes against EUR, so the recipe " +
   'computes the cross-rate automatically (works for any pair). The key stays server-side — convert on your ' +
-  'backend, never the browser.';
+  "backend, never the browser. Requests go over HTTPS only, which Fixer's free plan does not allow: on a free " +
+  'Fixer key, choose ExchangeRate-API instead (free over HTTPS).';
 
 export function generateCurrencyIntegration(provider: CurrencyProvider): CurrencyConfig {
   if (provider === 'exchangerate') {

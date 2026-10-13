@@ -21,10 +21,11 @@ import {
 } from '../src/server/AgentV3/providers/openAiStream';
 import { isSlowStreamAbandon, SLOW_STREAM_MESSAGE } from '../src/server/AgentV3/turnDeadline';
 import {
-  formatElapsed, workingLine, isTransientStatusLine, startWorkingHeartbeat,
+  formatElapsed, workingLine, startWorkingHeartbeat,
   WORKING_FIRST_MS, WORKING_INTERVAL_MS, WORKING_MARKER,
 } from '../src/server/AgentV3/workingHeartbeat';
 import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
+import { isLiveStatusLine, WORKING_LINE_ID } from '../src/lib/liveStatusLine';
 
 const savedEnv = { ...process.env };
 afterEach(() => { process.env = { ...savedEnv }; vi.useRealTimers(); });
@@ -121,12 +122,14 @@ describe('🔴 2 · the elapsed clock — a measurement, never an estimate', () 
     expect(formatElapsed(NaN)).toBe('0s');
   });
 
-  it('the marker is what both readers recognise it by', () => {
-    expect(isTransientStatusLine(workingLine(1000))).toBe(true);
-    expect(isTransientStatusLine(`  ${WORKING_MARKER} padded`)).toBe(true);
-    expect(isTransientStatusLine('Setting up your workspace…')).toBe(false);
-    expect(isTransientStatusLine('⏱ Planning your app…')).toBe(false); // the ETA line is a different one
-    expect(isTransientStatusLine(null)).toBe(false);
+  it('the line is recognised by its ID — the marker is shared with real progress (autopsy 303e8a6f)', () => {
+    expect(isLiveStatusLine({ id: WORKING_LINE_ID, text: workingLine(1000) })).toBe(true);
+    // Real progress that happens to start with the same emoji is NOT live status — it is history.
+    expect(isLiveStatusLine({ text: `${WORKING_MARKER} Half the build time is used — finishing what is started.` })).toBe(false);
+    expect(isLiveStatusLine({ text: 'Setting up your workspace…' })).toBe(false);
+    // A transcript saved before the id existed is still recognised by the line's own words.
+    expect(isLiveStatusLine({ text: workingLine(1000) })).toBe(true);
+    expect(isLiveStatusLine(null)).toBe(false);
   });
 
   it('⚠️ stays silent through an ordinary turn, then ticks', () => {
@@ -134,7 +137,7 @@ describe('🔴 2 · the elapsed clock — a measurement, never an estimate', () 
     // every call and teach the user to ignore it.
     vi.useFakeTimers();
     const seen: number[] = [];
-    const stop = startWorkingHeartbeat((ms) => seen.push(ms));
+    const stop = startWorkingHeartbeat((ms) => seen.push(ms), { originMs: Date.now() });
     vi.advanceTimersByTime(WORKING_FIRST_MS - 1);
     expect(seen).toEqual([]);
     vi.advanceTimersByTime(1);
@@ -148,7 +151,7 @@ describe('🔴 2 · the elapsed clock — a measurement, never an estimate', () 
 
   it('a throwing listener can never break a build', () => {
     vi.useFakeTimers();
-    const stop = startWorkingHeartbeat(() => { throw new Error('surface blew up'); });
+    const stop = startWorkingHeartbeat(() => { throw new Error('surface blew up'); }, { originMs: Date.now() });
     expect(() => vi.advanceTimersByTime(WORKING_FIRST_MS + WORKING_INTERVAL_MS)).not.toThrow();
     stop();
   });
@@ -158,10 +161,12 @@ describe('🔴 2 · the elapsed clock — a measurement, never an estimate', () 
     // timeline it exists to sit beside.
     const diag = new BuildDiagnostics();
     for (let i = 1; i <= 20; i++) {
-      diag.ingestEvent({ type: 'narration', agent: 'architect', text: workingLine(i * 15_000), ts: i } as never);
+      diag.ingestEvent({ type: 'narration', agent: 'architect', text: workingLine(i * 15_000), ts: i, id: WORKING_LINE_ID } as never);
     }
-    const rows = diag.report().issues.filter((x) => isTransientStatusLine(x.message));
+    const rows = diag.report().issues.filter((x) => x.message.startsWith(WORKING_MARKER));
     expect(rows.length).toBe(1);
+    // Filed as the heartbeat it is, so the silence detector and the saved transcript set it aside.
+    expect(rows[0]!.code).toBe('HEARTBEAT');
   });
 
   it('…and real build progress is still recorded every time', () => {
@@ -219,6 +224,7 @@ describe('the wiring — each half reaches the place that was blank', () => {
     expect(agentRunner).toContain('stopWorkingHeartbeat();');
     // In a `finally`, so a thrown turn can never leave a timer emitting into a dead build.
     expect(agentRunner).toMatch(/\}\s*finally\s*\{\s*\n\s*stopWorkingHeartbeat\(\);/);
-    expect(agentRunner).toContain("id: 'working'");
+    expect(agentRunner).toContain('id: WORKING_LINE_ID');
+    expect(agentRunner).toContain('{ originMs: events.startedAt }');
   });
 });

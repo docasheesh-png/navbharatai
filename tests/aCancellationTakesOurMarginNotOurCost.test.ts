@@ -134,7 +134,8 @@ describe('🔒 the three ₹0 outcomes are UNTOUCHED — a floor under them woul
   it('only the platform template, untouched, stays free (autopsy 2b0a3ed5)', () => {
     const b = decideCancelledBuildBill(facts({ filesWritten: 12, preseededUnchanged: 12, ...REAL }));
     expect(b.billedUsd).toBe(0);
-    expect(b.delivery).toBe('nothing');
+    // Its own state since 303e8a6f: free exactly as before, but the template IS there — not "nothing".
+    expect(b.delivery).toBe('seed-only');
   });
 
   it('an unverified EDIT of a working app stays free (autopsy 95598899)', () => {
@@ -225,7 +226,7 @@ describe('the wiring', () => {
   it('the floor sits AFTER every ₹0 return, so it can never charge for an undelivered build', () => {
     const floorAt = module_.indexOf('const real = money(f.realCostUsd)');
     expect(floorAt).toBeGreaterThan(-1);
-    for (const earlier of ["delivery: 'nothing'", "delivery: 'unverified-edit'", "delivery: 'working-app'"]) {
+    for (const earlier of ["delivery: 'nothing'", "delivery: 'seed-only'", "delivery: 'unverified-edit'", "delivery: 'working-app'"]) {
       expect(module_.indexOf(earlier), earlier).toBeLessThan(floorAt);
     }
   });

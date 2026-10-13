@@ -8,6 +8,8 @@
 // feature request. Pure + deterministic → unit-testable; the route wires it additively (no phase ⇒
 // no change), so it can never alter or break an existing turn.
 
+import { withoutErrorFeaturePhrases } from '../lib/describedFeatures';
+
 export type DialoguePhase = 'requirements' | 'planning' | 'building' | 'debugging' | 'deployed';
 
 /** Signals the route already computes, passed in so this module stays pure (no I/O). */
@@ -21,6 +23,7 @@ export interface DialogueSignals {
   /** Whether plan-mode is active for this turn. */
   planning?: boolean;
 }
+
 
 // Words that mark a DEBUGGING turn — the user is reporting something broken, not asking for a feature.
 const DEBUG_RE =
@@ -42,7 +45,8 @@ export function inferPhase(signals: DialogueSignals): DialoguePhase {
   const prompt = String(signals.prompt || '');
 
   // A reported failure is DEBUGGING regardless of new/edit (only meaningful once a project exists).
-  if (signals.hasExistingFiles && DEBUG_RE.test(prompt)) return 'debugging';
+  // An error message the user ASKS FOR is a feature request, not a report (autopsy 303e8a6f) — read the rest.
+  if (signals.hasExistingFiles && DEBUG_RE.test(withoutErrorFeaturePhrases(prompt))) return 'debugging';
 
   // An explicit ship request is DEPLOYED.
   if (DEPLOY_RE.test(prompt)) return 'deployed';

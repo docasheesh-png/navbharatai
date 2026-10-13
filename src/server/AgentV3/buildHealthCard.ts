@@ -9,7 +9,7 @@
 // PURE: reads the finished BuildDiagnosticsReport + the honest ok verdict. No I/O.
 
 import type { BuildHealth } from './types';
-import { isAppFinding, type BuildDiagnosticsReport, type BuildIssue } from './BuildDiagnostics';
+import { isAppFinding, outcomeCodeOf, type BuildDiagnosticsReport, type BuildIssue } from './BuildDiagnostics';
 import { redactProvidersText } from '../lib/providerRedaction';
 
 const MAX_LISTED = 6;
@@ -69,8 +69,16 @@ export function buildHealthFromDiagnostics(report: BuildDiagnosticsReport | unde
    * real browser and rendered. So its ABSENCE means "not proven", and an unproven build is capped
    * below perfect and says why. It is deliberately NOT marked not-ready: we did not see it work, and
    * we did not see it fail either, and claiming breakage would be the opposite lie.
+   *
+   * 🔴 READ FROM `issues`, AND THE LAST OUTCOME WINS (found working autopsy 303e8a6f). This read
+   * `problems`, which is the report MINUS every info row — and `OUTCOME_BUILD_SUCCESS` is always info.
+   * So the proof could never be found: every build the browser had proven still showed the user
+   * "READY (not verified) · 85/100" and "The app was not seen running". The unit test hid it with a
+   * hand-made report whose `problems` kept info rows, which the real recorder never does. It now reads
+   * the build's own final outcome the way every other reader does (`outcomeCodeOf`), so a later
+   * failure after an early success is not mistaken for proof either.
    */
-  const provenRunning = problems.some((p) => p.code === 'OUTCOME_BUILD_SUCCESS');
+  const provenRunning = outcomeCodeOf(report?.issues) === 'OUTCOME_BUILD_SUCCESS';
   const UNPROVEN_CAP = 85;
   const raw = (ok ? 100 : 45) - 25 * blockers.length - 6 * warnings.length;
   const score = clamp(provenRunning ? raw : Math.min(raw, UNPROVEN_CAP));

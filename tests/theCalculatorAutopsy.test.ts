@@ -118,7 +118,8 @@ describe('a review finding on a working app is proven before the app is edited',
 describe('the template lands in one round trip, not twelve', () => {
   it('writes the seed concurrently (source guard)', () => {
     const route = read('src/server/routes/agentv3.ts');
-    expect(route).toContain('await Promise.all(Object.entries(goldenFiles).map(([gp, gc]) => actuator.writeFile(workspaceId, gp, gc)));');
+    // Still concurrent; timed as a named setup step since 303e8a6f.
+    expect(route).toContain("await finalSteps.step('template write', () => Promise.all(Object.entries(goldenFiles).map(([gp, gc]) => actuator.writeFile(workspaceId, gp, gc))));");
   });
 });
 

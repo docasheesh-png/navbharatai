@@ -1,5 +1,6 @@
 import { plainCommand, plainFileName } from './toolLabels';
 import { isAppEntryPath } from './earlyPreviewCue';
+import { isLiveStatusId } from '../../lib/liveStatusLine';
 import type { ActivityEntry, AgentCard, AgentRole, AgentV3ClientState, AgentV3WireEvent, FileChange, NarrationLine } from './agentV3Types';
 
 // Pure reducer: folds each NDJSON wire event into the client state that drives
@@ -154,7 +155,16 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
           event.id != null
             ? state.narration.findIndex((line) => line.id === event.id && (line.kind ?? 'text') === 'text')
             : -1;
-        if (idx >= 0) {
+        if (idx >= 0 && isLiveStatusId(event.id)) {
+          // ⏱️ LIVE STATUS MOVES TO NOW (autopsy 303e8a6f). The "still working" clock and the ETA line say what is
+          // happening NOW; replaced in place they kept their FIRST timestamp, so a tick from a later turn rewrote
+          // a bubble far above the fold. Only these ids move — a streamed reply is finalized by its turn id in
+          // place below, and moving it would reorder the real answers.
+          narration = [
+            ...state.narration.filter((_, i) => i !== idx),
+            { agent: event.agent, text: event.text, ts: event.ts, id: event.id },
+          ];
+        } else if (idx >= 0) {
           narration = state.narration.map((line, i) =>
             i === idx ? { ...line, text: event.text, streaming: false, ...(event.file ? { file: event.file } : {}) } : line,
           );

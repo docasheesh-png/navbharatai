@@ -51,7 +51,9 @@ function contractNote(p: FastLanePhases): string {
   const cap = p.contractCapMs && p.contractCapMs > 0 ? ` at its own ${sec(p.contractCapMs)} cap` : '';
   if (p.contractOutcome === 'cut') return ` — stopped${cap}, so the files were written without a shared contract`;
   if (p.contractOutcome === 'stopped') return ' — the build was stopped while it ran, so no file was written';
-  if (p.contractOutcome === 'handed-off') return ' — the engine was too slow and the next one reasons before every answer, so the lane handed its plan to the full builder before writing any file';
+  // Any failure of the first engine (silence, a crawl, a 429, a 5xx, a timeout) leads here — the note names the
+  // hand-off, never one guessed cause (adversarial review of autopsy 303e8a6f: it said "too slow" of silence).
+  if (p.contractOutcome === 'handed-off') return ' — the first engine did not answer in time and the next one reasons before every answer, so the lane handed its plan to the full builder before writing any file';
   if (p.contractOutcome === 'failed') return ' — came back with nothing usable, so the files were written without a shared contract';
   return '';
 }

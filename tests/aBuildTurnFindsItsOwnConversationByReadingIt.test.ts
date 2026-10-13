@@ -69,6 +69,7 @@ describe('findWorkspaceConversation', () => {
   it('the build path calls it, not listByUser', () => {
     const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
     expect(src).not.toMatch(/store\.listByUser\(userId \?\? 'anon', 10\)/);
-    expect((src.match(/await findWorkspaceConversation\(store, userId, workspaceId\)/g) ?? []).length).toBe(2);
+    // One of the two is timed as a setup step since 303e8a6f (`promptSteps.step(…, () => findWorkspaceConversation(…))`).
+    expect((src.match(/findWorkspaceConversation\(store, userId, workspaceId\)/g) ?? []).length).toBe(2);
   });
 });

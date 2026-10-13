@@ -1413,7 +1413,37 @@ export function pathsNamedInErrors(errors: string): string[] {
     const p = m[2].replace(/^\.\//, '');
     if (!seen.has(p)) { seen.add(p); out.push(p); }
   }
+  // …and the file a "cannot find module" error is ABOUT (heal census of autopsy 303e8a6f): the error names the
+  // importer, so the repair that correctly CREATED the missing module was dropped as out of scope — a real fix
+  // blocked, and counted as a heal (REPAIR_OUT_OF_SCOPE). The target is resolved against the importing file.
+  for (const t of missingModuleTargets(errors)) if (!seen.has(t)) { seen.add(t); out.push(t); }
   return out;
+}
+
+/**
+ * The files a "cannot find module" error asks for, resolved against the importing file (tsc TS2307, Vite's
+ * "Failed to resolve import"). A spec without an extension yields the module and index candidates. Relative
+ * specs only — a package is not a file the repair may write. PURE.
+ */
+export function missingModuleTargets(errors: string): string[] {
+  if (!errors || typeof errors !== 'string') return [];
+  const out = new Set<string>();
+  const add = (importer: string, spec: string) => {
+    if (!/^\.{1,2}\//.test(spec)) return;
+    const dir = importer.replace(/^\.\//, '').split('/').slice(0, -1);
+    const parts = [...dir];
+    for (const seg of spec.split('/')) {
+      if (seg === '.' || seg === '') continue;
+      if (seg === '..') { if (!parts.length) return; parts.pop(); } else parts.push(seg);
+    }
+    const base = parts.join('/');
+    if (!base) return;
+    if (/\.[a-z0-9]{1,5}$/i.test(base)) { out.add(base); return; }
+    for (const ext of ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx']) out.add(`${base}${ext}`);
+  };
+  for (const m of errors.matchAll(/([\w./-]+\.[a-zA-Z]{1,5})(?:\(\d+,\d+\)|:\d+:\d+)[^\n]*?error TS2307: Cannot find module ['"]([^'"]+)['"]/g)) add(m[1]!, m[2]!);
+  for (const m of errors.matchAll(/Failed to resolve import ["']([^"']+)["'] from ["']([^"']+)["']/g)) add(m[2]!, m[1]!);
+  return [...out];
 }
 
 /**
@@ -1966,8 +1996,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         } catch (err) {
           contract = '';
           // 🔴 A HAND-OFF DURING THE CONTRACT ENDS THE LANE HERE (autopsy 1219c639), the sibling of the stop
-          // below (31254f9a). The engine crawled and the next one reasons before every answer, so the
-          // provider chain declined to call it — a deliberate hand-off. The lane read it as an empty
+          // below (31254f9a). The first engine failed (it crawled there; silence, a 429 or a timeout leads here
+          // too) and the next one reasons before every answer, so the provider chain declined to call it — a
+          // deliberate hand-off. The lane read it as an empty
           // contract: the report said it "came back with nothing usable, so the files were written without
           // a shared contract", and the user was told "Building 10 file(s)" — then not one file was
           // written, because every file call would have met the same rung. The plan goes to the full

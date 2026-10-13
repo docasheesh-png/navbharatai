@@ -282,6 +282,7 @@ import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
 import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
 import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
 import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
+import { runAsUnreadWrites } from '../AgentV3/unreadWrites';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { deletedFilesNotice, userVisibleDeletions } from '../AgentV3/deletedFilesNotice';
@@ -402,7 +403,7 @@ import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/ca
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { shellModuleFor, shellStillAwaited, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -582,7 +583,7 @@ import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshSt
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
 import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, type WasteKind } from '../AgentV3/providerWaste';
 import { readTurnAnswer, answeredWithoutBuilding, modelsOwnWords } from '../AgentV3/turnAnswer';
-import { assessBuildInput } from '../AgentV3/buildableInput';
+import { assessBuildInput, shouldAskWhatToBuild } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { realismIntent } from '../lib/realismIntent';
@@ -595,7 +596,7 @@ import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from 
 import { applyStrictTrial, strictCohort } from '../AgentV3/strictTrial';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, reviewHasUnreadFindings, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, reviewHasUnreadFindings, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths, reviewScopeWords, reviewEngineWords, reviewStoppedAtReasoningRung } from '../AgentV3/ReviewerAgent';
 import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
@@ -10945,19 +10946,27 @@ async function noteBuildOutcome(
      * starter, and the next order was built as an "edit" of it. Read only when it can change the answer
      * (no app of the user's own, an earlier request present); unreadable or slow ⇒ today's behaviour.
      */
-    const earlierRequestLeftAnApp = await (async (): Promise<boolean> => {
-      if (userAppExists || recentRequests.length === 0) return userAppExists || recentRequests.length > 0;
-      if (!Array.isArray(projectFilePaths)) return true;
+    /**
+     * Does the workspace hold NOTHING but untouched files of our own starter (or nothing at all)? Asked by
+     * CONTENT, once, only when a gate needs it — `projectExists` counts files, and our starter is files
+     * (autopsy db07e0af: "Banao" built an invented app because the starter read as the user's project).
+     * Unreadable or slow ⇒ false (somebody's work may be here) — the direction that never refuses a real app.
+     */
+    let starterOnlyMemo: Promise<boolean> | null = null;
+    const workspaceHoldsOnlyOurStarter = (): Promise<boolean> => (starterOnlyMemo ??= (async (): Promise<boolean> => {
+      if (!projectExists) return true;
+      if (userAppExists || !Array.isArray(projectFilePaths)) return false;
       const codePaths = projectFilePaths.filter((p) => couldBeAppCode(p));
-      if (codePaths.length === 0) return false;
-      if (codePaths.length > 24) return true;
+      if (codePaths.length === 0) return true;
+      if (codePaths.length > 24) return false;
       try {
         const got = await raceTimeout(loadWorkspaceFilesByPath(intentWorkspaceId, codePaths), 3_000, 'starterCheck');
         const files: Record<string, string | null> = {};
         for (const p of codePaths) files[p] = typeof got[p] === 'string' ? got[p] : null;
-        return !holdsOnlyOurStarter(files);
-      } catch { return true; }
-    })();
+        return holdsOnlyOurStarter(files);
+      } catch { return false; }
+    })());
+    const earlierRequestLeftAnApp = userAppExists || (recentRequests.length > 0 && !(await workspaceHoldsOnlyOurStarter()));
 
     let intent = classifyIntent(prompt);
     // The reader's fourth answer: "they want something made but have not said WHAT" (report
@@ -11185,14 +11194,16 @@ async function noteBuildOutcome(
      */
     const namesNothingToBuild =
       (!inputCheck.buildable && inputCheck.reason === 'no-object') || readerSaysUnclear;
-    const askWhatToBuild =
-      namesNothingToBuild
-      && intent !== 'edit_existing'
-      && !projectExists
-      && recentRequests.length === 0
-      && zipImports.length === 0
-      && !(typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '')
-      && rawAttachments.length === 0;
+    // db07e0af: the workspace is judged by CONTENT (our starter is not a project) and the conversation by
+    // what it names (a "hi" is not a request) — see `shouldAskWhatToBuild`.
+    const askWhatToBuild = namesNothingToBuild && shouldAskWhatToBuild({
+      namesNothing: true,
+      editIntent: intent === 'edit_existing',
+      workspaceHoldsOnlyOurStarter: await workspaceHoldsOnlyOurStarter(),
+      earlierTurns: recentRequests,
+      importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
+      attachments: rawAttachments.length,
+    });
     if (askWhatToBuild) {
       console.log('[AGENTV3] the prompt orders something built but names nothing — asking the user instead of inventing an app');
       intent = 'chat';
@@ -12676,10 +12687,25 @@ async function noteBuildOutcome(
     // actually open the running app in a browser and verify it rendered.
     let lastPreviewUrl = '';
     // Set when this turn builds a Project Mode module that a LATER module assembles (ProjectPlan.ts
-    // `shellModuleFor`). There is no app to prove yet, so a preview published anyway is not adopted as
-    // this build's preview — every proof below is gated on `lastPreviewUrl` (autopsy 6a5fb04b).
+    // `shellModuleFor`). There is no app to prove YET, so this turn is judged on its own files and the
+    // typecheck — no starter verdict (autopsy 6a5fb04b).
+    //
+    // 🔴 IT IS A PREDICTION, AND IT USED TO OUTRANK THE OBSERVATION (autopsy 50378049, 2026-10-12).
+    // This line read `&& !moduleAwaitsShell`, so an address the builder really published was DISCARDED
+    // and six verdicts then swore no preview had ever existed — about a game that was live and
+    // rendering. Keep the fact: the address is recorded whatever the plan predicted, and every reader
+    // of the prediction asks `awaitsShellNow()` below, which yields to it. See `shellStillAwaited`.
     let moduleAwaitsShell: string | null = null;
-    events.subscribe((e) => { if ((e as { type?: string }).type === 'preview' && !moduleAwaitsShell) { const u = (e as { url?: unknown }).url; if (typeof u === 'string' && u) lastPreviewUrl = u; } }, false);
+    events.subscribe((e) => { if ((e as { type?: string }).type === 'preview') { const u = (e as { url?: unknown }).url; if (typeof u === 'string' && u) lastPreviewUrl = u; } }, false);
+    /**
+     * The shell prediction, CORRECTED BY WHAT ACTUALLY HAPPENED — the one question every reader asks.
+     *
+     * Null the moment an address for this build is up, because "there is nothing to open" and "this
+     * address is open" cannot both be true. The raw `moduleAwaitsShell` is read directly in exactly
+     * two deliberate places (the assignment, and the platform delivery proof that must still stand
+     * down), and `tests/aPredictionOutrankedTheApp.test.ts` fails the build on a third.
+     */
+    const awaitsShellNow = (): string | null => shellStillAwaited(moduleAwaitsShell, lastPreviewUrl);
     // Every chat line the user has already SEEN — so the end of a successful build can show only what
     // the platform added to the reply (summaryAdditions.ts). Short status blips are not kept.
     const narratedTexts: string[] = [];
@@ -13037,7 +13063,7 @@ async function noteBuildOutcome(
             // Absent ⇒ false ⇒ the rule stands down, which is the direction that cannot over-charge.
             expectsArtifacts: billingCtx.expectsArtifacts === true,
             enabled: markupNeedsPreview(),
-            awaitingShell: moduleAwaitsShell,
+            awaitingShell: awaitsShellNow(),
           });
           watchdogBilledUsd = wdMarkup.billedUsd;
           if (!wdMarkup.markupApplied) {
@@ -16916,6 +16942,9 @@ async function noteBuildOutcome(
         // Autopsy 95598899 — wording of the build nudge only, never whether it fires. An established
         // project must never be told to "start by writing the entry file". See nudgeToBuild.ts.
         editingExistingApp: isEditMode,
+        // A GETTER for the same reason `hasExistingFiles` is one: the module is chosen after these opts
+        // are built. The done signal must not tell a module turn it may stop (autopsy 50378049).
+        projectModule: () => projectModuleRef?.name ?? null,
         onNote: (note: { code: string; message: string; detail?: string }) => {
           try { buildDiag.record({ phase: 'build', severity: 'info', code: note.code, message: note.message, detail: note.detail, autoResolved: true }); } catch { /* a note must never fail a build */ }
         },
@@ -18417,7 +18446,7 @@ async function noteBuildOutcome(
           // different files never conflict; the E2B round-trip latency (~150-300ms each) now overlaps.
           // The plan-progress ticker counts writes (order-independent), so completion order is fine.
           await mapWithConcurrency(files, 6, (f, i) =>
-            dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: f.path, content: f.content } }, 'frontend'),
+            runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: f.path, content: f.content } }, 'frontend')),
           );
         };
         // THE WRITE FENCE (autopsy a38c6fef, 2026-09-13). Every fast lane writes through this one
@@ -18475,7 +18504,7 @@ async function noteBuildOutcome(
                 // Route through write_file so each lands in the sandbox AND is recorded in writtenFiles
                 // (the durable store + the reconcile scan below both then see the new package.json).
                 await mapWithConcurrency(Object.entries(foundation.files), 4, ([p, c], i) =>
-                  dispatcher.dispatch({ id: `fast-foundation-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend'),
+                  runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-foundation-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend')),
                 );
               }
             } catch { /* best-effort — a failure here just falls through to the install exactly as before */ }
@@ -18492,7 +18521,7 @@ async function noteBuildOutcome(
                 fastLog(`🩹 Repaired ${ts.fixes.length} tsconfig file(s) that extended an uninstalled base so the dev server can start: ${ts.fixes.map((f) => f.file).join(', ')}`);
                 try { buildDiag.record({ phase: 'build', severity: 'info', code: 'TSCONFIG_EXTENDS_REPAIRED', message: `Removed an unresolvable tsconfig extends: ${ts.fixes.map((f) => `${f.file} (${f.removed.join(', ')})`).join('; ')}`.slice(0, 400), autoResolved: true }); } catch { /* diagnostics best-effort */ }
                 await mapWithConcurrency(Object.entries(ts.patch), 4, ([p, c], i) =>
-                  dispatcher.dispatch({ id: `fast-tsconfig-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend'),
+                  runAsUnreadWrites(() => dispatcher.dispatch({ id: `fast-tsconfig-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend')),
                 );
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through to the install as before */ }
@@ -19574,7 +19603,7 @@ async function noteBuildOutcome(
               let current = '';
               try { current = await actuator.readFile(workspaceId, path); } catch { current = ''; }
               if (current !== canonical) {
-                await dispatcher.dispatch({ id: `scaffold-restore-${restored.length}`, name: 'write_file', input: { path, content: canonical } }, 'frontend');
+                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `scaffold-restore-${restored.length}`, name: 'write_file', input: { path, content: canonical } }, 'frontend'));
                 restored.push(path);
               }
             }
@@ -19618,7 +19647,7 @@ async function noteBuildOutcome(
               });
             }
             for (let i = 0; i < fixes.length; i++) {
-              await dispatcher.dispatch({ id: `tscgate-w${i}`, name: 'write_file', input: { path: fixes[i].path, content: fixes[i].content } }, 'frontend');
+              await runAsUnreadWrites(() => dispatcher.dispatch({ id: `tscgate-w${i}`, name: 'write_file', input: { path: fixes[i].path, content: fixes[i].content } }, 'frontend'));
             }
           } catch (e) {
             console.log(`[AGENTV3] agentic tsc-gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19688,7 +19717,7 @@ async function noteBuildOutcome(
               const cssStubs = generateMissingCssModules(fileMapForCss);
               if (cssStubs.length > 0) {
                 for (let i = 0; i < cssStubs.length; i++) {
-                  await dispatcher.dispatch({ id: `cssmod-w${i}`, name: 'write_file', input: { path: cssStubs[i].path, content: cssStubs[i].content } }, 'frontend');
+                  await runAsUnreadWrites(() => dispatcher.dispatch({ id: `cssmod-w${i}`, name: 'write_file', input: { path: cssStubs[i].path, content: cssStubs[i].content } }, 'frontend'));
                 }
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'CSS_MODULES_GENERATED', message: `${cssStubs.length} missing CSS module(s) generated deterministically from component class usage (no repair step spent): ${cssStubs.map((s) => s.path).join(', ')}`, autoResolved: true });
                 events.emit({ type: 'narration', agent: 'architect', text: `🎨 Generated ${cssStubs.length} missing stylesheet(s) from the components' class usage.`, ts: Date.now() });
@@ -19706,7 +19735,7 @@ async function noteBuildOutcome(
               const barrels = await generateMissingBarrels(fileMapForBarrel);
               if (barrels.length > 0) {
                 for (let i = 0; i < barrels.length; i++) {
-                  await dispatcher.dispatch({ id: `barrel-w${i}`, name: 'write_file', input: { path: barrels[i].path, content: barrels[i].content } }, 'frontend');
+                  await runAsUnreadWrites(() => dispatcher.dispatch({ id: `barrel-w${i}`, name: 'write_file', input: { path: barrels[i].path, content: barrels[i].content } }, 'frontend'));
                 }
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'BARRELS_GENERATED', message: `${barrels.length} missing barrel(s) generated deterministically from existing leaf modules (no repair step spent): ${barrels.map((b) => b.path).join(', ')}`, autoResolved: true });
                 events.emit({ type: 'narration', agent: 'architect', text: `📦 Generated ${barrels.length} missing index barrel(s) re-exporting existing modules.`, ts: Date.now() });
@@ -19748,7 +19777,7 @@ async function noteBuildOutcome(
               });
               const created = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
               for (let i = 0; i < created.length; i++) {
-                await dispatcher.dispatch({ id: `missfiles-w${i}`, name: 'write_file', input: { path: created[i].path, content: created[i].content } }, 'frontend');
+                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `missfiles-w${i}`, name: 'write_file', input: { path: created[i].path, content: created[i].content } }, 'frontend'));
               }
             } catch (e) {
               console.log(`[AGENTV3] missing-files gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19815,7 +19844,7 @@ async function noteBuildOutcome(
               recordRepairOutOfScope('syntax', scopedSyntax.dropped);
               const fixed = scopedSyntax.kept;
               for (let i = 0; i < fixed.length; i++) {
-                await dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
+                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend'));
               }
             } catch (e) {
               console.log(`[AGENTV3] syntax gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19887,7 +19916,7 @@ async function noteBuildOutcome(
               recordRepairOutOfScope('missing-export', scopedExport.dropped);
               const fixed = scopedExport.kept;
               for (let i = 0; i < fixed.length; i++) {
-                await dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
+                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend'));
               }
             } catch (e) {
               console.log(`[AGENTV3] missing-export gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -21523,6 +21552,11 @@ async function noteBuildOutcome(
           appFiles: presentFiles.length,
           hasPackageJson: presentFiles.some((f) => /(^|\/)package\.json$/.test(String(f))),
           remainingMs: remainingForProof,
+          // 🔒 DELIBERATELY THE RAW PREDICTION, not `awaitsShellNow()`. This decides whether the PLATFORM
+          // starts the app itself; a module turn was told not to publish one, and forcing a preview it was
+          // told not to produce is not the honesty fix (autopsy 50378049). Everything that REPORTS on the
+          // prediction yields to an address that is up; this, which would CREATE one, does not. (The two
+          // agree here anyway: `hasPreviewUrl` above already stands this down once an address exists.)
           awaitingShell: moduleAwaitsShell,
         });
         if (proofDecision.attempt) {
@@ -21747,7 +21781,9 @@ async function noteBuildOutcome(
               // Playwright suite 17 seconds later — two codes in one build contradicting, with
               // TEST_SUITE_UNVERIFIED stating the honest end state in the same report. Cleared by its own
               // sentence, never by its code: READINESS_WARNING carries many unrelated facts.
-              buildDiag.resolveOnRecheck('READINESS_WARNING', { messageIncludes: 'No tests at all' });
+              // 🔴 …and `resolveOnRecheck` did nothing here, ever (autopsy db07e0af): readiness warnings are recorded
+              // already resolved, so it skipped them. The sentence is FALSE now, so it is withdrawn, not "resolved".
+              buildDiag.retract('READINESS_WARNING', 'No tests at all', `an end-to-end suite was written into the project afterwards (${added.join(', ')})`);
             }
           } else if (decision.reason) {
             // Recorded even when nothing was written: a silent skip cannot be told from a broken skip.
@@ -22812,7 +22848,7 @@ async function noteBuildOutcome(
       // offer to the user. Kill switch AGENTV3_MOBILE_LAYOUT=off.
       if (
         mobileLayoutCheckEnabled() && result.ok && lastPreviewUrl && actuator.runCommand
-        && !isImportTurn && !abort.signal.aborted && !moduleAwaitsShell
+        && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
       ) {
         try {
@@ -22851,7 +22887,7 @@ async function noteBuildOutcome(
         const playtestFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
         if (
           gamePlaytestEnabled() && result?.ok && lastPreviewUrl && actuator.runCommand
-          && !isImportTurn && !abort.signal.aborted && !moduleAwaitsShell
+          && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()
           && isCanvasGameProject(playtestFiles)
           && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
         ) {
@@ -23035,7 +23071,7 @@ async function noteBuildOutcome(
       // `PREVIEW_ERROR` already exists, but it fires only when a preview ATTEMPT reports an error. A
       // preview that was never produced at all raised nothing. This is that gap, and it is deliberately
       // a WARNING on the build itself rather than a note buried in another check's explanation.
-      if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted && !moduleAwaitsShell) {
+      if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted && !awaitsShellNow()) {
         try {
           buildDiag.record({
             phase: 'preview', severity: 'warning', code: 'PREVIEW_NEVER_CAME_UP',
@@ -23384,7 +23420,16 @@ async function noteBuildOutcome(
         // still keys off previewVerifiedFailed, which this line does not touch.
         gateEvidence.previewServerDown = previewServerDown && !previewRenderFailed;
         // Only changes the WORDING of an unproven preview, never the verdict — see previewUrlPublished.
-        gateEvidence.previewUrlPublished = Boolean(lastPreviewUrl);
+        //
+        // 🔴 IT ASSERTS ONLY THE POSITIVE, AND THAT IS THE WHOLE POINT (autopsy 50378049, 2026-10-12).
+        // This line read `= Boolean(lastPreviewUrl)`, so a build with no local URL wrote an explicit
+        // `false` — and `fillGateFromLedger`, ten lines below, fills a field only when it is
+        // `undefined`. An explicit `false` is not `undefined`, so the evidence ledger's own record of
+        // `PREVIEW_PUBLISHED` could NEVER correct it, and the gate printed "no live preview was ever
+        // available" about an address its own timeline showed going up. One local variable's ignorance
+        // outranked a recorded fact. A negative nobody can contradict is not evidence: leave the field
+        // unset when this build never saw a URL and let the ledger answer.
+        if (lastPreviewUrl) gateEvidence.previewUrlPublished = true;
         // THE SAME FALLBACK THE TYPECHECK ALREADY HAS, FOR THE SIBLING IT LEFT BEHIND (autopsy
         // 697b38ee). `gateEvidence.tests` is written ONLY by the vaccine pass — flag-gated,
         // percentage-gated, and skipped entirely on a build not yet marked `ok` — so an agent that ran
@@ -23433,7 +23478,7 @@ async function noteBuildOutcome(
         try { gateEvidence.stoppedByUser = stoppedByUser(buildDiag.report().issues); }
         catch { /* the honest wording is best-effort; the verdict itself is unaffected */ }
         // A project module that does not own the app's entry has nothing to run yet (autopsy 0311186f).
-        if (moduleAwaitsShell) gateEvidence.awaitingShell = moduleAwaitsShell;
+        { const awaited = awaitsShellNow(); if (awaited) gateEvidence.awaitingShell = awaited; }
         let gate = releaseGate(gateEvidence, gateFindings(), gateQuality);
 
         // ── THE BUDGET LEDGER: where this build's clock actually went ────────────────────────────
@@ -23581,12 +23626,12 @@ async function noteBuildOutcome(
           // 🧩 …AND A MODULE TURN WHOSE APP IS PUT TOGETHER LATER IS NOT UNPROVEN, IT IS NOT DUE (autopsy 0311186f):
           // two module turns each carried three "nothing proven to run" warnings about an app that did not exist yet.
           severity: gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error'
-            : gate.state === 'green' || (gate.state === 'unknown' && !!moduleAwaitsShell) ? 'info' : 'warning',
+            : gate.state === 'green' || (gate.state === 'unknown' && !!gateEvidence.awaitingShell) ? 'info' : 'warning',
           code: 'RELEASE_GATE',
           message: releaseGateSummary(gate),
           // A STOPPED build's RED is the user's own decision, not an item anyone must act on — leaving it open
           // made a clean Stop end with "2 unresolved" problems (autopsy 31254f9a). The verdict stays RED.
-          autoResolved: gate.state === 'green' || gateEvidence.stoppedByUser === true || (gate.state === 'unknown' && !!moduleAwaitsShell),
+          autoResolved: gate.state === 'green' || gateEvidence.stoppedByUser === true || (gate.state === 'unknown' && !!gateEvidence.awaitingShell),
         });
         changeGateState = gate.state;
 
@@ -23700,7 +23745,7 @@ async function noteBuildOutcome(
         // ships unproven, because nothing counted it. `RELEASE_GATE_UNPROVEN` is a first-class finding,
         // so the admin Failure Category panel can answer that from real builds — and only then is there
         // evidence to justify a stronger rule.
-        if (gate.state === 'unknown' && result.ok && !moduleAwaitsShell) {
+        if (gate.state === 'unknown' && result.ok && !awaitsShellNow()) {
           buildDiag.record({
             phase: 'readiness', severity: 'warning', code: 'RELEASE_GATE_UNPROVEN',
             // NOT auto-resolved: nothing resolved it. The build simply ended without proof.
@@ -23973,7 +24018,7 @@ async function noteBuildOutcome(
               pageConsoleEvidence?.errors ?? [],
               { previewRendered: renderProvenNow() },
             );
-            buildDiag.record(fromPages ?? runtimeUncheckedRecord({ previewRendered: renderProvenNow(), awaitingShell: moduleAwaitsShell }));
+            buildDiag.record(fromPages ?? runtimeUncheckedRecord({ previewRendered: renderProvenNow(), awaitingShell: awaitsShellNow() }));
           } else {
             buildDiag.record(runtimeVerifiedRecord());
           }
@@ -24328,7 +24373,7 @@ async function noteBuildOutcome(
           // files this turn authored, by the reviewer's own rule (`reviewChangedPaths`); a fresh build's
           // headline names no count, so it keeps reading the whole map.
           const summaryPaths = isEditMode ? reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden) : [...writtenFiles.keys()];
-          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: summaryPaths.length, editMode: isEditMode, changedPaths: summaryPaths, platformAdded: isEditMode ? writtenFiles.size - summaryPaths.length : 0, awaitingShell: moduleAwaitsShell });
+          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: summaryPaths.length, editMode: isEditMode, changedPaths: summaryPaths, platformAdded: isEditMode ? writtenFiles.size - summaryPaths.length : 0, awaitingShell: awaitsShellNow() });
           if (summaryText) events.emit({ type: 'narration', agent: 'architect', text: summaryText, ts: Date.now() });
         } catch { /* summary is best-effort — never affects the build */ }
       }
@@ -24375,13 +24420,14 @@ async function noteBuildOutcome(
       // A Project Mode module that a later module assembles is not reviewed as an app: the reviewer would
       // read a half-built project and report the starter page as the product. The shell turn reviews the
       // assembled app (autopsy 6a5fb04b).
-      if (result.ok && reviewHeadroomOk && reviewerAllowed && moduleAwaitsShell) {
+      const reviewDeferredToShell = awaitsShellNow();
+      if (result.ok && reviewHeadroomOk && reviewerAllowed && reviewDeferredToShell) {
         try {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_DEFERRED_TO_SHELL', autoResolved: true,
-            message: `Post-build review deferred: this turn built one project module, and the app is reviewed once "${moduleAwaitsShell}" assembles it.` });
+            message: `Post-build review deferred: this turn built one project module, and the app is reviewed once "${reviewDeferredToShell}" assembles it.` });
         } catch { /* diagnostics best-effort */ }
       }
-      if (result.ok && reviewHeadroomOk && reviewerAllowed && !moduleAwaitsShell) {
+      if (result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
           // The REAL project size, captured before the fallback below can shrink rFiles to just this
@@ -24442,6 +24488,11 @@ async function noteBuildOutcome(
             signal: reviewAbort.signal,
             ...(reviewPlan.maxSteps !== undefined ? { maxSteps: reviewPlan.maxSteps } : {}),
             ...(reviewOneCall ? { toolsOverride: [] } : {}),
+            // 🧬 A SUGGESTION IS NOT WORTH A REASONING ENGINE'S MINUTE (autopsy db07e0af). The one-call review has
+            // 45 s; on that build it walked onto an engine that reasons before every answer and the user watched
+            // "running the final checks" for 56 s for nothing. The fast lane already stops in front of such a rung
+            // for exactly this reason (autopsy 33812996); the suggest-only review is the same kind of call.
+            ...(reviewPlan.mode === 'suggest' && reviewOneCall ? { stopAtReasoningRung: true } : {}),
           });
           const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount, { previewGreen: reviewPlan.mode === 'suggest' });
           if (reviewPlan.mode === 'suggest') {
@@ -24502,6 +24553,11 @@ async function noteBuildOutcome(
           }));
           try {
             review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');
+            // It stopped in front of a reasoning engine instead of spending its budget there — said, never silent.
+            const stoppedAt = reviewStoppedAtReasoningRung(reviewerSaid);
+            if (stoppedAt) {
+              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_NOT_RUN_REASONING_ENGINE', autoResolved: true, message: `The suggest-only review was not run: the engine left on the chain (${stoppedAt}) reasons before every answer, and this review gets one ${Math.round(reviewBudget / 1000)} s call — it stopped instead of keeping the user waiting for an answer that would not arrive in time. Its suggestions are not available for this build; "review it" runs a full review on its own.` }); } catch { /* best-effort */ }
+            }
           } catch (e) {
             // Timeout (or a reviewer error): the app is built + compiles + saved — say so HONESTLY
             // instead of silently dropping the completeness check (the empty-`review` report gap).
@@ -24534,7 +24590,7 @@ async function noteBuildOutcome(
               // which is strictly more than the nothing this branch used to deliver.
               events.emit({ type: 'narration', agent: 'architect', text: formatPartialReview(salvaged), ts: Date.now() });
               try { buildDiag.recordReview(formatPartialReview(salvaged, 50)); } catch { /* best-effort */ }
-              try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_PARTIAL', message: `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — but ${salvaged.issues.length} finding(s) it had already reported were RECOVERED from its own narration instead of discarded. Leads from an UNFINISHED review: they cannot fail a build and do not drive the auto-fix.`, autoResolved: false }); } catch { /* best-effort */ }
+              try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_PARTIAL', message: `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${reviewScopeWords(reviewOneCall ? (reviewInline?.files.length ?? 0) : null, rFiles.length)}${reviewEngineWords(buildDiag.lastServedModel())} — but ${salvaged.issues.length} finding(s) it had already reported were RECOVERED from its own narration instead of discarded. Leads from an UNFINISHED review: they cannot fail a build and do not drive the auto-fix.`, autoResolved: false }); } catch { /* best-effort */ }
               review = null;
             } else {
               events.emit({ type: 'narration', agent: 'architect', text: timedOut
@@ -24559,7 +24615,7 @@ async function noteBuildOutcome(
               // it sat in the app's problem list). Where the review could have REPAIRED, it stays a warning.
               const suggestOnly = reviewPlan.mode === 'suggest';
               barrenPhases.add(PHASE_POST_BUILD_REVIEW);
-              try { buildDiag.record({ phase: 'build', severity: suggestOnly ? 'info' : 'warning', code: suggestOnly ? 'REVIEW_SUGGESTIONS_NOT_READY' : 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build` : `Post-build review errored — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build`, autoResolved: suggestOnly }); } catch { /* best-effort */ }
+              try { buildDiag.record({ phase: 'build', severity: suggestOnly ? 'info' : 'warning', code: suggestOnly ? 'REVIEW_SUGGESTIONS_NOT_READY' : 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${reviewScopeWords(reviewOneCall ? (reviewInline?.files.length ?? 0) : null, rFiles.length)}${reviewEngineWords(buildDiag.lastServedModel())} — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build` : `Post-build review errored — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build`, autoResolved: suggestOnly }); } catch { /* best-effort */ }
               review = null;
             }
           } finally {
@@ -25795,7 +25851,7 @@ async function noteBuildOutcome(
         previewProven: appSeenRunningForBill,
         expectsArtifacts,
         enabled: markupNeedsPreview(),
-        awaitingShell: moduleAwaitsShell,
+        awaitingShell: awaitsShellNow(),
       });
       /**
        * 🔴 A MONEY STATEMENT IS MADE ONCE, AFTER THE MONEY IS FINAL (autopsy 586295b7, 2026-09-20).

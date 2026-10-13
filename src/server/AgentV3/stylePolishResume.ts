@@ -117,9 +117,24 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
       // the reply to this message — "Done — I added all the missing CSS rules to src/index.css" — became the
       // build's summary). Keep the closing words about the APP, short, with no class or file names.
       + 'The user did not see this message and has already read your description of the app. When you finish, '
-      + 'reply with ONE short sentence about the app (for example "Every screen is now fully styled.") — do not '
-      + 'repeat the summary, and do not mention class names, stylesheets or file names.',
+      + `reply with ONE short sentence about what you changed in the app (for example "${closingExample({ missing, pages, a11y, orphans })}") — `
+      + 'if you changed nothing, say so plainly; do not repeat the summary, and do not mention class names, '
+      + 'stylesheets or file names.',
   };
+}
+
+/**
+ * 🔴 THE EXAMPLE IS ABOUT WHAT WAS HANDED BACK (autopsy db07e0af, 2026-10-12). The message's only item was a
+ * component nothing imported; its closing example still said "Every screen is now fully styled." The model —
+ * a weak rung — made no tool call and answered with exactly that sentence, which the user read as a step of
+ * their build. An example is copied as often as it is followed, so it must be true of the work it asks for,
+ * and the reply is checked against the work anyway (repairClaim.ts). PURE.
+ */
+export function closingExample(h: { missing: readonly string[]; pages: readonly unknown[]; a11y: readonly unknown[]; orphans: readonly string[] }): string {
+  if (h.missing.length > 0) return 'Every screen is now fully styled.';
+  if (h.pages.length > 0) return 'Every page now shows a clear message when it has nothing to list.';
+  if (h.a11y.length > 0) return 'Every button now says what it does.';
+  return 'Every part of the app I built is now on screen.';
 }
 
 /** The instruction that names undefined classes and how to add them in one edit. PURE. */
@@ -151,19 +166,20 @@ export function doneStyleNote(missing: readonly string[], sheet: string | undefi
 export function styleResumeNote(missingCount: number, pageCount = 0, orphanCount = 0, a11yCount = 0): string {
   // 🔴 The count of what was handed back, never a sentence about two of its four parts (autopsy 68f0a486:
   // "0 class name(s) … 0 page(s)" headed a hand-back whose only item was an unlabelled upload field).
+  // 🔴 …and the orphan-only sibling it missed (autopsy db07e0af): with nothing but unimported components handed
+  // back, the fallback still printed "0 class name(s) had no style rule and 0 page(s) fell short" and then
+  // "handed them". Every part is listed by what it is; nothing is ever reported as a count of zero.
   const parts = [
     missingCount > 0 ? `${missingCount} class name(s) had no style rule` : '',
     pageCount > 0 ? `${pageCount} page(s) fell short of the design standard` : '',
     a11yCount > 0 ? `${a11yCount} file(s) had controls a keyboard or screen reader cannot use` : '',
+    orphanCount > 0 ? `${orphanCount} component file(s) this build wrote and nothing imports were left over (Q-202)` : '',
   ].filter(Boolean);
-  const what = parts.length > 0 ? parts.join(', ') : `${missingCount} class name(s) had no style rule and ${pageCount} page(s) fell short of the design standard`;
+  const what = parts.length > 0 ? parts.join(', ') : 'nothing was listed';
   return `The model ended its turn while ${what}, `
     + 'so it was handed them and told to fix them before finishing (once). Before '
     + '2026-10-01 the turn ended here and a separate end-of-build repair pass, in a fresh context, fixed them. '
-    + 'Spacing off the 4px grid is NOT handed back (autopsy 536c8189) — it is snapped deterministically instead.'
-    + (orphanCount > 0
-      ? ` ${orphanCount} component file(s) this build wrote and nothing imports were handed back in the same message (Q-202).`
-      : '');
+    + 'Spacing off the 4px grid is NOT handed back (autopsy 536c8189) — it is snapped deterministically instead.';
 }
 
 /** What `undefinedClassesNow` returns, as this module reads it. */

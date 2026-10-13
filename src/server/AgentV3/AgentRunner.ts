@@ -36,7 +36,7 @@ import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResume
 import { decideStyleResume, doneStyleNote, styleResumeEnabled, styleResumeNote } from './stylePolishResume';
 import { handBackNotice } from './handBackNotice';
 import { asPlatformRequest } from './platformRequest';
-import { repairClaimWithoutChange, repairClaimNote, NO_CHANGE_LINE } from './repairClaim';
+import { repairClaimWithoutChange, repairClaimNote, NO_CHANGE_LINE, handBackIgnoredNote } from './repairClaim';
 import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
 import { answerAfterPlanning } from './answerAfterPlanning';
@@ -73,6 +73,12 @@ export interface AgentRunnerOptions {
   tools: ClaudeToolDef[];
   /** Max model turns before the loop stops (backstop). Default 50. */
   maxSteps?: number;
+  /**
+   * Stop the provider walk in front of a rung that reasons before every answer instead of spending this run's
+   * small budget inside one (`RunTurnParams.stopAtReasoningRung`). Set for a suggest-only one-call review
+   * (autopsy db07e0af: 45 s + 11 s spent waiting on a reasoning engine, for nothing). Absent ⇒ walk the chain.
+   */
+  stopAtReasoningRung?: boolean;
   maxTokensPerTurn?: number;
   /** AP-4 (flag-gated, default off): allow frontend/backend WRITER sub-agents to run in parallel. Safe
    *  only when the actuator is wrapped with the per-path write lock (lockedActuator) — the caller pairs
@@ -192,6 +198,12 @@ export interface AgentRunnerOptions {
    * is zero at nudge time by construction. "Is there an app here already?" is a different question.
    */
   editingExistingApp?: boolean;
+  /**
+   * The Project Mode module this turn is building, read at CHECK TIME — a getter, because the route
+   * decides the module after `baseRunnerOpts` is built (the same reason `hasExistingFiles` is one).
+   * Keeps the done signal from telling a module turn it may stop (autopsy 50378049, Q-906 + Q-907).
+   */
+  projectModule?: () => string | null;
   /**
    * Admin-only note from inside the loop (autopsy 95598899). Called when the loop declines to
    * override the model — the one decision that otherwise leaves no trace at all, since a turn that
@@ -590,6 +602,19 @@ export class AgentRunner {
     if (typeof dispatcher.beginConversation === 'function') dispatcher.beginConversation();
     /** Changes the dispatcher had made before this run — so a repair pass can ask about ITSELF (repairClaim.ts). */
     const changesAtRunStart = typeof dispatcher.changeCount === 'function' ? dispatcher.changeCount() : 0;
+    /**
+     * The dispatcher's change count when OUR last end-of-turn hand-back (style / unfinished) was pushed, and which
+     * one it was — so its reply can be checked against what it really did (autopsy db07e0af, repairClaim.ts).
+     */
+    let changesAtHandBack: number | null = null;
+    let handBackKind: 'style' | 'unfinished' = 'style';
+    let handBackIgnoredNoted = false;
+    const markHandBack = (kind: 'style' | 'unfinished'): void => {
+      if (typeof dispatcher.changeCount !== 'function') return;
+      changesAtHandBack = dispatcher.changeCount();
+      handBackKind = kind;
+      handBackIgnoredNoted = false;
+    };
     // Wall-clock CREATION time of each message, parallel to `messages` (which stays exactly the
     // Claude-API shape — never mutated). Persisted copies are stamped from this so a reopened
     // session interleaves prose with the timeline in the LIVE order: the assistant message is
@@ -862,6 +887,7 @@ export class AgentRunner {
             maxTokens: maxTokensPerTurn,
             thinking,
             effort,
+            ...(this.opts.stopAtReasoningRung ? { stopAtReasoningRung: true } : {}),
             // A Stop cancels THIS call, not only the next one (stopSignal.ts). Before this the loop
             // noticed a stop only between turns, after paying for the call already in flight.
             signal: turnTimeoutMs > 0 && typeof AbortSignal.any === 'function' && typeof AbortSignal.timeout === 'function'
@@ -987,11 +1013,20 @@ export class AgentRunner {
           cacheCreationInputTokens: turn.usage.cacheCreationInputTokens,
         });
 
+        const changesSinceHandBack = changesAtHandBack !== null && typeof dispatcher.changeCount === 'function'
+          ? dispatcher.changeCount() - changesAtHandBack
+          : null;
+        if (changesSinceHandBack === 0 && turn.toolUses.length === 0 && !handBackIgnoredNoted) {
+          // A hand-back answered with no change at all is a struggle the report must show (autopsy db07e0af).
+          handBackIgnoredNoted = true;
+          try { this.opts.onNote?.({ code: 'HANDBACK_IGNORED', message: handBackIgnoredNote(handBackKind, turn.text) }); } catch { /* a note must never fail a build */ }
+        }
         if (turn.text.trim()) {
           // A repair pass that changed nothing may not tell the user it changed something (autopsy 6cd698cc —
-          // "The stylesheet now defines every one of the 29 classes", with not one file written).
+          // "The stylesheet now defines every one of the 29 classes", with not one file written). Nor may the
+          // reply to an in-run hand-back (autopsy db07e0af — "Every screen is now fully styled.", no tool called).
           const changesThisRun = typeof dispatcher.changeCount === 'function' ? dispatcher.changeCount() - changesAtRunStart : 1;
-          if (repairClaimWithoutChange({ platformRequest: this.opts.platformRequest === true, finalTurn: turn.toolUses.length === 0, changesThisRun, text: turn.text })) {
+          if (repairClaimWithoutChange({ platformRequest: this.opts.platformRequest === true, finalTurn: turn.toolUses.length === 0, changesThisRun, changesSinceHandBack, text: turn.text })) {
             try { this.opts.onNote?.({ code: 'REPAIR_CLAIM_WITHHELD', message: repairClaimNote(turn.text) }); } catch { /* a note must never fail a build */ }
             events.emit({ type: 'narration', agent: agentRole, text: NO_CHANGE_LINE, ts: Date.now(), id: turnId });
           } else {
@@ -1123,6 +1158,7 @@ export class AgentRunner {
                   existing: readyMark, readiness,
                   typeErrors: typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null,
                   editingExistingApp: this.opts.editingExistingApp === true, wroteThisRun: dispatcher.wroteAnything(),
+                  projectModule: this.opts.projectModule?.() ?? null,
                   step: steps, elapsedMs: Date.now() - buildStartMs,
                 });
               } catch { /* a measurement must never touch a build */ }
@@ -1140,6 +1176,7 @@ export class AgentRunner {
                   if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
                   try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0, style.a11y?.length ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`)].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
+                  markHandBack('style');
                   continue;
                 }
               }
@@ -1164,6 +1201,7 @@ export class AgentRunner {
                   if (unfinishedNotice) events.emit({ type: 'narration', agent: agentRole, text: unfinishedNotice, ts: Date.now() });
                   try { this.opts.onNote?.({ code: 'UNFINISHED_BUILD_RESUMED', message: unfinishedResumeNote(unfinishedResumes, readiness.blockers.length), detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(resume.message);
+                  markHandBack('unfinished');
                   continue;
                 }
                 ok = false;
@@ -1216,6 +1254,7 @@ export class AgentRunner {
                 if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
                 try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}:${styleResumeNote(style.missing.length, style.pages.length, 0, style.a11y?.length ?? 0)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
                 pushPlatformTurn(decision.message);
+                markHandBack('style');
                 continue;
               }
             } catch { /* the style read is advisory — a specialist's turn ends exactly as before */ }
@@ -1452,9 +1491,9 @@ export class AgentRunner {
         let doneText: string | null = null;
         try {
           const lastStepFailed = resultBlocks.some((b) => (b as { is_error?: boolean }).is_error === true);
-          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true });
+          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null });
           if (doneDue && lastStepFailed) doneMissedAt = doneMissedAt ?? steps;
-          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true })) {
+          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null })) {
             doneMissedAt = undefined;
             const readiness = await dispatcher.assessBuildReadiness();
             // Never "complete and healthy" over a compile that just failed (autopsy 33812996).

@@ -61,6 +61,31 @@ export const NATIVE_FEEL_MARKER = 'nbai-native-feel';
 export const NATIVE_FEEL_HREF = '/nbai-native.css';
 
 /**
+ * 🔴 THE VIEWPORT EVERY LANE THAT SHIPS A USER'S `index.html` MUST WRITE — round 3, 2026-10-12.
+ *
+ * ⚠️ ROUND 1 FIXED THE READER AND LEFT THE SOURCE, which is this repo's headline class.
+ * `withViewportFitCover` below PATCHES the tag at build time, so an AgentV3 build gets the token — and
+ * **not one of the fourteen viewport tags in the scaffold templates carried it.** Measured, not guessed:
+ * every provider template (`ViteReactProviderContents`, `Vue`, `Svelte`, `SvelteKit`, `Astro`, `Angular`,
+ * `Preact`, `Solid`, `Lit`, `Vanilla`, `Remix`, `Alpine`, `Static`) hand-wrote its own string, so there
+ * was nowhere for the token to be added once, and any lane that does not pass through `appDefaults`
+ * shipped an app whose `env(safe-area-inset-*)` is 0px on every device — the exact defect round 1 was
+ * written for.
+ *
+ * So the string lives HERE, next to the reason, and the templates import it. `withViewportFitCover`
+ * stays as defence in depth: it returns a document untouched once the token is present, so a template
+ * using this constant simply makes it a no-op instead of a rescue.
+ *
+ * 🔒 `initial-scale=1.0` and NO `maximum-scale` / `user-scalable=no`: pinch-zoom is an accessibility
+ * right, and an app that blocks it fails a store review as well as a user. The native feel comes from
+ * the safe area, not from forbidding zoom.
+ */
+export const APP_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
+
+/** The whole tag, for a template that writes a `<head>`. PURE. */
+export const APP_VIEWPORT_META = `<meta name="viewport" content="${APP_VIEWPORT_CONTENT}" />`;
+
+/**
  * Add `viewport-fit=cover` to a viewport that lacks it. PURE.
  *
  * This is the whole reason the module exists: `appDefaults`'s presence test sees Vite's existing viewport
@@ -127,11 +152,29 @@ export const NATIVE_FEEL_CSS = `/* ${NATIVE_FEEL_MARKER}: native-feel baseline f
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+  /* THE HEIGHT OF THE SCREEN THE USER CAN ACTUALLY SEE (round 3, 2026-10-12).
+     100vh on a phone is the LARGE viewport — it includes the browser's collapsing address bar — so a
+     height:100vh layout is cut off by exactly the toolbar height, and the page scrolls when it should
+     not. That is the clearest "web page, not app" tell left after the safe area. dvh tracks the real
+     visible height. The plain value first, so a browser without dvh still gets a full-height layout;
+     this platform's own stylesheet uses the same two-line pattern for the same reason.
+     TWO RULES FOR THIS COMMENT BLOCK, both learned the hard way in one session:
+     NO BACKTICKS — this is a TS template literal, so one ends the string (three times: PR 3671, PR 3693,
+     and here; the compiler and the test loader caught each).
+     AND NO '#' BEFORE A NUMBER — aBuiltAppFeelsNative asserts this stylesheet matches no /#[0-9a-f]{3,8}/,
+     and a PR reference written as a hash plus four hex digits IS that pattern. The guard was right. */
+  --app-height: 100vh;
+}
+@supports (height: 100dvh) {
+  :root { --app-height: 100dvh; }
 }
 html {
   /* Rotating the phone must not resize text (iOS "text autosizing"). */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  /* A full-height app ends where the screen ends, not where the large viewport does. */
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 body {
   /* The grey/blue flash on every tap is the single most recognisable "this is a website" signal. */
@@ -242,5 +285,8 @@ export function nativeFeelBuildRule(env: NodeJS.ProcessEnv = process.env): strin
     '        half-way down, or a list that forgets where you were, is the clearest "this is a web page"',
     '        signal left once the rest of this list is handled.',
     '      – Lists scroll; they do not paginate with tiny numbered links.',
+    '      – A FULL-HEIGHT layout uses `var(--app-height)` (or `100dvh`), NEVER `100vh`. On a phone',
+    '        `100vh` includes the browser\'s collapsing address bar, so a `100vh` screen is cut off by',
+    '        exactly the toolbar height and scrolls when it should not. The variable is already defined.',
   ];
 }

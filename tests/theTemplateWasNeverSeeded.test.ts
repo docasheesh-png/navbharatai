@@ -181,7 +181,9 @@ describe('§4 a Stop is reported as a Stop', () => {
     expect(route).toMatch(/sb\.ok \? 'SIMPLE_BUILD_SUCCESS' : sb\.stopped \? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK'/);
     expect(route).toMatch(/if \(sb\.outcome && !sb\.stopped\) \{/);
     // A module turn's not-yet-due gate is closed too (autopsy 0311186f); the Stop clause is unchanged.
-    expect(route).toMatch(/autoResolved: gate\.state === 'green' \|\| gateEvidence\.stoppedByUser === true(?: \|\| \(gate\.state === 'unknown' && !!moduleAwaitsShell\))?,/);
+    // Since autopsy 50378049 it reads `gateEvidence.awaitingShell`, which the route sets from the
+    // CORRECTED prediction — so a module turn with a live address is not excused as "not yet due".
+    expect(route).toMatch(/autoResolved: gate\.state === 'green' \|\| gateEvidence\.stoppedByUser === true(?: \|\| \(gate\.state === 'unknown' && !!gateEvidence\.awaitingShell\))?,/);
   });
 
   it('the ladder line describes routing, never how much was built', () => {

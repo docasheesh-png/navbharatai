@@ -132,6 +132,9 @@ export type AgentV3WireEvent =
   // the encrypted vault by the client and never travels on this stream (see secretRequest.ts).
   | { type: 'secret_request'; agent: AgentRole; callId: string; prompt: string; secrets: Array<{ name: string; why: string }>; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
+  // Go-live PR 13 (AGENTV3_SERVICE_RECO, default off): services this app needs, as Buy/Connect choices.
+  // White-label: names and prices only, never a provider.
+  | { type: 'service_recommendation'; recommendations: ServiceRecommendationItem[]; ts: number }
   // B8 — how full the conversation's context is. Percentage + plain words ONLY: the window size differs
   // per engine, so sending it would leak which engine ran (White-Label Law).
   | { type: 'context_usage'; pct: number; level: 'ok' | 'high' | 'critical'; note: string; ts: number }
@@ -252,6 +255,7 @@ export interface AgentV3ClientState {
   checkpoints: GitCheckpoint[];
   /** B8 — latest context reading, or null while nothing has been measured. Never a guess. */
   contextUsage: { pct: number; level: 'ok' | 'high' | 'critical'; note: string } | null;
+  serviceRecommendations: ServiceRecommendationItem[];
   /** Plan-mode text. */
   plan: string;
   /**
@@ -379,10 +383,19 @@ export function initialAgentV3State(): AgentV3ClientState {
     terminal: [],
     checkpoints: [],
     contextUsage: null,
+    serviceRecommendations: [],
     plan: '',
     buildPhase: 'idle',
     agents: {},
     pendingBash: {},
     done: false,
   };
+}
+
+export interface ServiceRecommendationItem {
+  skuId: string;
+  kind: 'buy' | 'connect';
+  name: string;
+  priceLabel: string;
+  reason: string;
 }

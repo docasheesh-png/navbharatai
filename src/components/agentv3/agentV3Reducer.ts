@@ -269,6 +269,10 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'plan_updated':
       return { ...state, plan: event.plan };
 
+    // Go-live PR 13: latest reading replaces the old one (the needs of the app, not a log).
+    case 'service_recommendation':
+      return { ...state, serviceRecommendations: event.recommendations };
+
     case 'checkpoint':
       return { ...state, checkpoints: [...state.checkpoints, event.checkpoint] };
 

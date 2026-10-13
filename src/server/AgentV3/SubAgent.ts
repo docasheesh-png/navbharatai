@@ -223,6 +223,12 @@ export interface SubAgentDeps {
    */
   aiRule?: () => string;
   /**
+   * The classic-phone rule (`nonSmartphoneBuildRule`, Q-868): when the user named an old keypad phone, every lane that
+   * writes the app hears the same LIGHT 2D, touch-and-keys rule and the same likely meaning (for a game, the classic
+   * game from that phone). Only the architect and the fast lane had it. Absent or '' ⇒ nothing is added.
+   */
+  deviceRule?: () => string;
+  /**
    * The USER'S OWN REQUEST, verbatim (autopsy 6db0ff31, 2026-09-30). A child was handed only the
    * architect's instruction and never the user's words, so an under-specified instruction had nothing
    * behind it: the Frontend specialist read the fresh scaffold and replied *"What would you like me to
@@ -424,6 +430,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       // reviewer it named a file — "run_recipe generate_ai … writes src/lib/ai.ts" — that the reviewer then
       // tried to read in an app with no AI at all (autopsy d382b398, a failed read_file).
       (() => { try { return roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools) ? (deps.aiRule?.() ?? '') : ''; } catch { return ''; } })(),
+      (() => { try { return roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools) ? (deps.deviceRule?.() ?? '') : ''; } catch { return ''; } })(),
       (() => { try { return userRequestBlock(deps.userRequest?.(), roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools)); } catch { return ''; } })(),
       (() => { try { return deps.portDigest?.() ?? ''; } catch { return ''; } })(),
     ].filter(Boolean);

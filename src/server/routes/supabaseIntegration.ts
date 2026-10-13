@@ -49,7 +49,7 @@ import {
 import { projectRefsInVault } from '../lib/supabasePauseWatch';
 import { provisionDatabaseForUser, freshAccessToken } from '../lib/supabaseProvisionFlow';
 import { reusedDatabaseNote } from '../lib/databaseReuse';
-import { getConversationStore } from './agentv3';
+import { getConversationStore } from '../AgentV3/sharedConversationStore';
 import { runPostgresQuery, isPostgresUrl } from '../lib/postgresQuery';
 import { dbProvider } from '../../lib/dbProviders';
 

@@ -241,7 +241,6 @@ import { deadlinePauseMessage } from '../AgentV3/DeadlinePause';
 import { flushDecision } from '../AgentV3/DurableFlush';
 import { enqueue as enqueueCommand, cancelItem as cancelQueueItem, claimNext as claimNextQueued, completeRunning as completeQueuedRunning, pendingItems as pendingQueueItems, runningItem as runningQueueItem, queueSummary, type QueueItem, type QueueItemSource } from '../AgentV3/BuildQueue';
 import {
-  InMemoryConversationStore,
   deriveTitle,
   upsertConversationTurn,
   type ConversationStore,
@@ -264,7 +263,12 @@ import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffe
 import { appLanguageInstruction } from '../AgentV3/LanguageDetect';
 import { findScriptedAssistant, scriptedAssistantNotice } from '../AgentV3/scriptedAssistant';
 import { decidePublishConsent } from '../AgentV3/publishConsent';
-import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
+// MOVED OUT (Q-867, 2026-10-12) — the conversation-store singleton and the running-build registry each
+// live in a small module of their own, because four routes needed one of them and imported this whole
+// file to get it (~22 s per import under vitest). Re-exported below so every existing importer keeps
+// working, and imported — never redeclared — so there is still ONE store and ONE registry per process.
+import { getConversationStore } from '../AgentV3/sharedConversationStore';
+import { runningBuilds, runningBuildCount, __setRunningBuildForTest, type RunningBuild, type BuildSubscriber } from '../AgentV3/runningBuildRegistry';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
@@ -448,7 +452,7 @@ import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII, redactEventForUser } from '../AgentV3/SecretRedactor';
 import { audit } from '../lib/audit';
-import { notePersistenceFailure, persistenceHealth } from '../lib/persistenceHealth';
+import { persistenceHealth } from '../lib/persistenceHealth';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { adrStore, renderAdrMarkdown } from '../AgentV3/adrMemory';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
@@ -869,42 +873,9 @@ export async function resolveReadIdentity(req: Request): Promise<{ userId: strin
 }
 
 // ── Conversation persistence (D7) ──────────────────────────────────────────────
-let sharedConversationStore: ConversationStore | null = null;
-/**
- * The durable transcript store: Firestore when explicitly enabled (real cross-instance
- * durability in Cloud Run), otherwise the in-memory store (dev/CI, and a safe default so a
- * missing-credentials environment never errors). Singleton. Gated on AGENTV3_PERSIST_FIRESTORE
- * so CI/local stay on the in-memory store, matching the cautious v5.0 flag-gating.
- */
-/**
- * EXPORTED (2026-09-07) so other routes read the SAME singleton rather than constructing a second
- * one. Two stores in one process would each hold their own Firestore client and, worse, their own
- * in-memory fallback — so a fact written through one would be invisible through the other, which is
- * exactly the drift this codebase keeps having to unlearn.
- */
-export function getConversationStore(): ConversationStore {
-  if (sharedConversationStore) return sharedConversationStore;
-  // Durable chat history by DEFAULT — it survives a process restart, a redeploy, and
-  // horizontal scaling across Cloud Run instances. Previously this was OFF unless
-  // AGENTV3_PERSIST_FIRESTORE='true' was set, so the store fell back to IN-MEMORY: a
-  // reload that landed on a different instance — or any redeploy — lost the whole
-  // conversation ("reload pe data gayab"). Now Firestore is the default; opt out with
-  // AGENTV3_PERSIST_FIRESTORE=false. Unit tests (VITEST) always use the in-memory store.
-  const useFirestore = process.env.AGENTV3_PERSIST_FIRESTORE !== 'false' && !process.env.VITEST;
-  if (useFirestore) {
-    try {
-      sharedConversationStore = new FirestoreConversationStore();
-    } catch (e) {
-      // Durable chat history is UNAVAILABLE — the in-memory fallback means transcripts vanish on any
-      // redeploy / instance rotation. Surface it (throttled) so this isn't a silent prod degradation.
-      notePersistenceFailure('conversation_store', 'init', e);
-      sharedConversationStore = new InMemoryConversationStore();
-    }
-  } else {
-    sharedConversationStore = new InMemoryConversationStore();
-  }
-  return sharedConversationStore;
-}
+// The singleton lives in AgentV3/sharedConversationStore (Q-867) — other routes read it from there
+// without loading this file. Re-exported so `getConversationStore` keeps its old address too.
+export { getConversationStore };
 
 /**
  * Access decision for fetching a single conversation. PURE & testable: a build is only
@@ -2391,65 +2362,11 @@ const PAID_OVERDRAFT_INR = (() => {
 // A running BUILD's events are buffered and fanned out to subscribers, so the user can
 // (a) RE-ATTACH to a build whose original connection was lost ("Resume"), and
 // (b) actually STOP it server-side ("Stop") — not just abort their own local fetch.
-interface BuildSubscriber { write: (e: unknown) => void; end: () => void; }
-export interface RunningBuild {
-  abort: AbortController;
-  buffer: unknown[];
-  subscribers: Set<BuildSubscriber>;
-  ended: boolean;
-  startedTs: number;
-  /** Full Team steering (Fix 60): user messages sent MID-BUILD ('max' tier only). The AgentRunner
-   *  drains this between turns and injects each as a REAL user turn, so the very next model call
-   *  acts on it — the Claude-Code-style "talk to the team while it builds" experience. */
-  steerQueue?: string[];
-  /** The build's resolved power level — gates mid-build steering to the Full Team ('max') tier. */
-  powerLevel?: string;
-  /** The channel key (userId) — used to mirror events to the cross-device LiveChannel. Stays the
-   *  ACCOUNT key even under per-workspace locking, so the cross-device mirror is unchanged. */
-  key?: string;
-  /** The owning account (userId ?? 'anon') — lets the per-account concurrency cap count this account's
-   *  live builds even when the registry Map is keyed by workspace (per-workspace locking). */
-  userId?: string | null;
-  /** Which v5.0 session/project this build belongs to (agentv3-{uid}-{sessionId}). One account can
-   *  have several DIFFERENT chat sessions; `runningBuilds` is keyed by userId only (one account can
-   *  only build one thing at a time), but the auto-resume/attach and live-mirror paths must still
-   *  verify the running build is actually the CALLER's session before replaying/mirroring it — else a
-   *  build genuinely still running in session A silently bleeds into a freshly-opened session B under
-   *  the same account (root-caused 2026-07-01: "+ New chat" showing an unrelated build's progress). */
-  workspaceId?: string;
-  /** Stamped by broadcastBuild on every event — the liveness signal isSilentlyStale() reads. */
-  lastEventTs?: number;
-  /** True once the build handler's own code has finished (its `finally` ran) — see stoppingBuild.ts. */
-  exited?: boolean;
-  /** When the user pressed Stop on it. */
-  stoppedAt?: number;
-  /** Woken when the build exits. */
-  exitWaiters?: Array<() => void>;
-}
-const runningBuilds = new Map<string, RunningBuild>();
-
-/**
- * How many builds this INSTANCE is running right now.
- *
- * Exported for the admin load board, whose "Build load" tile read `unknown` because nothing exposed
- * this — a ceiling nobody can see is a hope, not a trigger. Per-instance by nature: no process can
- * count its siblings' builds, and the tile says so rather than presenting one instance's number as
- * the platform's.
- */
-export function runningBuildCount(): number {
-  return runningBuilds.size;
-}
-
-/**
- * TEST-ONLY seam (VITEST): register/clear a running build under a key so the /stop and /attach identity
- * guards (T0-9 — match by VERIFIED uid, never a claimed body.userId) can be regression-tested;
- * `runningBuilds` is module-internal. A hard no-op outside tests, so it can never affect production.
- */
-export function __setRunningBuildForTest(key: string, rb: RunningBuild | null): void {
-  if (!process.env.VITEST) return;
-  if (rb) runningBuilds.set(key, rb);
-  else runningBuilds.delete(key);
-}
+// The registry (`runningBuilds`, `RunningBuild`, `runningBuildCount`) lives in
+// AgentV3/runningBuildRegistry (Q-867): the admin load board reads the count from there without
+// loading this file. This file is still the registry's only WRITER, and it uses that one Map.
+export { runningBuildCount, __setRunningBuildForTest };
+export type { RunningBuild };
 
 const MAX_BUILD_BUFFER = 4000;
 /** The most recent build's diagnostics report per build key (userId) — for download/endpoint. */
@@ -15714,6 +15631,12 @@ async function noteBuildOutcome(
         languageRule: () => appLanguageInstruction(prompt, { editingExistingApp: intent === 'edit_existing' }),
         // The SAME AI-in-app rule the architect reads (autopsy d8ed307a) — the child writes the AI client.
         aiRule: () => aiInAppRule(),
+        // The SAME classic-phone rule the architect's prompt opens with (Q-868): a writing specialist builds the game
+        // too, and until this line only the architect and the fast lane heard which phone the user named.
+        deviceRule: () => {
+          const phone = !isImportTurn && intent === 'new_build' && !isEditMode ? namedNonSmartphone(prompt) : null;
+          return phone ? nonSmartphoneBuildRule(phone.device, phone.kind) : '';
+        },
         // And the user's own words (autopsy 6db0ff31) — the two lines above derive from them, and a
         // child handed only a thin instruction asked the ARCHITECT "what would you like me to build?".
         // The specialist is handed the request WITH what came with it (autopsy 3f959fde: `planning.text` = the
@@ -17091,8 +17014,11 @@ async function noteBuildOutcome(
       if (frameworkCoherenceMsg) buildPrompt = `${frameworkCoherenceMsg}\n\n---\n\n${buildPrompt}`;
       // A KEYPAD PHONE THE USER NAMED (Q-846): the builder is told before it writes, so what it builds fits the keys.
       // Pure (deviceTarget.ts never throws), so no best-effort wrapper — like the notes below.
-      const keypadPhoneForBuild = !isImportTurn ? namedNonSmartphone(prompt) : null;
-      if (keypadPhoneForBuild) buildPrompt = `${nonSmartphoneBuildRule(keypadPhoneForBuild.device)}\n\n---\n\n${buildPrompt}`;
+      // A NEW BUILD only (Q-868): on an edit of an existing app — "add a Nokia 3310 as a pickup in my 3D city game" — the
+      // phone is a detail of the request, and telling the builder "never three.js" would break a working 3D game. Every
+      // value read here is final: intent and isEditMode are last assigned well above this line.
+      const keypadPhoneForBuild = !isImportTurn && intent === 'new_build' && !isEditMode ? namedNonSmartphone(prompt) : null;
+      if (keypadPhoneForBuild) buildPrompt = `${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}\n\n---\n\n${buildPrompt}`;
       // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built
       // in React with a types file claiming a "PHP MVC backend"). Told to the builder here, to the user
       // in the ready message — see unsupportedStack.ts.
@@ -17609,6 +17535,7 @@ async function noteBuildOutcome(
       const unknownNameSuffix = (unknownNameNote ? `\n\n${unknownNameNote}` : '') // and the unknown-word note (Q-067)
         + (scriptRequestNote ? `\n\n${scriptRequestNote}` : ''); // and the script-request note (Q-274)
       const requestScopeSuffix = requestScopeText ? `\n\n${requestScopeText}` : ''; // and the request-scope rule (autopsy 70e030bb)
+      const keypadPhoneSuffix = keypadPhoneForBuild ? `\n\n${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}` : ''; // and the classic-phone rule (Q-868)
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -17674,7 +17601,9 @@ async function noteBuildOutcome(
           agentRole: 'architect',
           signal: abort.signal,
         });
-        await planRunner.run(prompt);
+        // The plan-first planner hears the classic-phone rule too (Q-868): its todos are appended to the build prompt, and
+        // a plan drawn from the bare request ("3D track") would contradict the rule the builder reads above them.
+        await planRunner.run(keypadPhoneForBuild ? `${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}\n\n---\n\n${prompt}` : prompt);
 
         // Strategic Intelligence (Layer 54): review the proposed plan for gaps
         // (no verification step, no setup, missing deploy, under-scoped, vague)
@@ -17709,7 +17638,10 @@ async function noteBuildOutcome(
         }
         const todos = state.snapshot().todos;
         if (todos.length > 0) {
-          buildPrompt = `${prompt}\n\nApproved plan:\n${todos.map((t) => `- ${t.title}`).join('\n')}`;
+          // The approved plan is ADDED to the build prompt, never swapped in for it: rebuilt from the bare `prompt`, it
+          // silently dropped every note prepended above (the classic-phone rule, the request scope, the unknown-name and
+          // unsupported-stack notes …) on exactly the builds a user approved by hand (found 2026-10-12, Q-868).
+          buildPrompt = `${buildPrompt}\n\nApproved plan:\n${todos.map((t) => `- ${t.title}`).join('\n')}`;
           // PLAN SYNC: put the spinner on the first item the moment the build starts (before the
           // first file is written), so the plan is never frozen at all-pending.
           state.setTodos(computePlanProgress(todos, 0, false));
@@ -17816,7 +17748,8 @@ async function noteBuildOutcome(
             // The planner decides every module's files before a builder sees the stack note, so it gets the
             // note too — or a Kotlin request is planned as Gradle modules the builder may not write (autopsy
             // 042e472f, 2026-10-01). The plan's goal carries it, so every module turn reads it again.
-            const plannerGoalNotes = [unknownNameNote, scriptRequestNote].filter(Boolean).join('\n\n');
+            // The classic-phone rule rides the planner's goal too (Q-868): the plan decides what gets built.
+            const plannerGoalNotes = [unknownNameNote, scriptRequestNote, keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind) : ''].filter(Boolean).join('\n\n');
             const plannerGoalBase = plannerGoalNotes ? `${plannerGoalNotes}\n\n---\n\n${prompt}` : prompt;
             const plannerGoal = unsupportedStackAsked ? `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${plannerGoalBase}` : plannerGoalBase;
             const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
@@ -18761,7 +18694,7 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           // A planned config file the starter already has is edited, never rewritten blind (isProjectConfigPath).
           readExisting: readExistingProjectFile,
           stopLane: () => (fastLaneReasoningRung
@@ -24138,13 +24071,14 @@ async function noteBuildOutcome(
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 
-      // 📵 …AND A PHONE IT CANNOT RUN ON IS NAMED (Q-846): the user named a keypad phone, so the summary says plainly
-      // that no web app runs there, and what was built instead. Recorded for the admin as an info line.
+      // 📱 …AND A KEYPAD PHONE THE USER NAMED (Q-846 → Q-868): the summary says what was built and where it plays —
+      // light 2D, any modern browser, touch or keys — and nothing about what the user meant (the admin corrected Q-846's
+      // "no web app runs there" reading on 2026-10-12). Same new-build gate as the rule. Recorded for the admin as info.
       try {
-        const keypadPhone = result.ok && expectsArtifacts && !isImportTurn ? namedNonSmartphone(prompt) : null;
+        const keypadPhone = result.ok && expectsArtifacts && !isImportTurn && intent === 'new_build' && !isEditMode ? namedNonSmartphone(prompt) : null;
         if (keypadPhone) {
           result = { ...result, summary: `${result.summary}${nonSmartphoneUserLine(keypadPhone.device)}` };
-          buildDiag.record({ phase: 'readiness', severity: 'info', code: 'NON_SMARTPHONE_TOLD', autoResolved: true, message: `The request named ${keypadPhone.device}, a keypad phone no web app runs on — the user was told, and the build was steered to a light 2D keys-first version.` });
+          buildDiag.record({ phase: 'readiness', severity: 'info', code: 'NON_SMARTPHONE_TOLD', autoResolved: true, message: `The request named ${keypadPhone.device}, a classic keypad phone — the build was steered to a light 2D version (touch and keys; for a game, the classic game from that phone unless the request asked otherwise), and the user was given a line saying what was built (light 2D, any modern browser, touch or keys).` });
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 

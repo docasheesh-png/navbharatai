@@ -76,7 +76,7 @@ import { freeListLabelForStoredEmail } from '../AgentV3/featureFlag';
 import { sandboxStore } from '../AgentV3/SandboxStore';
 import { liveSandboxNote, type LiveSandboxCount } from '../AgentV3/liveSandboxCount';
 import { buildActuator } from './actuatorFactory';
-import { runningBuildCount } from './agentv3';
+import { runningBuildCount } from '../AgentV3/runningBuildRegistry';
 import { tallyHandover, projectHandover, handoverHeadline, handoverSample } from '../AgentV3/sandboxHandover';
 import { tallyPauseCauses } from '../AgentV3/sandboxLifetime';
 import { tallyMinutes, tallyStarts } from '../AgentV3/sandboxSessions';

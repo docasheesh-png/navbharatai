@@ -3730,6 +3730,9 @@ export class ToolDispatcher {
           // reported as "still being installed" when the tree had only looked stale).
           const why = notReadyWhy ?? 'unknown';
           s.notReadyReasons = { ...(s.notReadyReasons ?? {}), [why]: (s.notReadyReasons?.[why] ?? 0) + tsPaths.length };
+          // Q-910: a skip puts the question back. Only a clean run AFTER this one answers it, and a
+          // clean run BEFORE it compiled a project that did not yet hold these files.
+          s.cleanRunCoveredSkips = false;
         }
         return '';
       }
@@ -3737,7 +3740,11 @@ export class ToolDispatcher {
         s.notRunRuns += 1;
         return '';
       }
-      if (errors.length === 0) s.cleanRuns += 1;
+      if (errors.length === 0) {
+        s.cleanRuns += 1;
+        // `tsc --noEmit` is project-wide, so this run covered every file skipped before it (Q-910).
+        if ((s.skippedNotReady ?? 0) > 0) s.cleanRunCoveredSkips = true;
+      }
       // A type-only import of a value is a string edit with one correct form — done here, not asked of the
       // model (autopsy 6cd698cc, writeTimeTypecheck.ts). Only in files this build wrote.
       const healedTypeOnly = errors.length > 0 ? await this.healTypeOnlyImportsAtWrite(errors, tsPaths, sources) : null;

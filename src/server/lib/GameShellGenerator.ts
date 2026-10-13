@@ -26,6 +26,8 @@
 //
 // PURE builder → the caller writes the files.
 
+import { kitTypeContract } from './kitTypeContract';
+
 export interface GameShellResult {
   files: Record<string, string>;
   dependencies: Array<{ name: string; version: string }>;
@@ -1043,7 +1045,7 @@ export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud
  */
 export const GAME_CONTROLS_TEST_PATH = 'src/game/controls.test.ts';
 export const GAME_CONTROLS_TEST = `// THE CONTROLS DO WHAT THE KEYS SAY — shipped with every 3D game the NavBharatAI kit builds (Q-843).
-// Your test runner runs it (npm test, or vitest run). It checks the kit your game drives with: W speeds the
+// Run it with "npm test" (or "npx vitest run"). It checks the kit your game drives with: W speeds the
 // car up and moves it the way its nose points, LEFT turns it to the driver's left, RIGHT to the right, and
 // the chase camera sits BEHIND the car, so the player sees its tail lights. If your game moves a vehicle with
 // its own code instead of driveVehicle(), copy these checks for that code.
@@ -1130,6 +1132,14 @@ export function generateGameShell(include?: string[]): GameShellResult {
     instructions:
       `Added the game shell (${Object.keys(files).length} files). This COMPOSES the runtime, 3D, ` +
       'controller and VFX layers — render it and you have a running game.\n' +
+      // 🔴 THE TYPES FIRST, AND FIRST ON PURPOSE (Q-909, autopsy 50378049). The example below touches
+      // three of GameContext's nine members, so for the rest the reported build GUESSED — ctx.canvas,
+      // ctx.followTarget (both private fields of Game) and ctx.crosshairTarget (nothing at all) — and
+      // paid four read_file slices of Game.ts to find out. It also passed TouchButton as a string.
+      // The block is extracted from the files just written, so it cannot drift from them, and it sits
+      // ABOVE the example because the handoff clips a recipe's instructions at HANDOFF_RECIPE_CHARS
+      // (gameKitSeed.ts) — a contract at the bottom is a contract the builder may never see.
+      `${kitTypeContract(files)}\n` +
       '```tsx\n' +
       "import { GameCanvas } from './game/GameCanvas';\n" +
       "import { createTerrain } from './game/three/world';\n" +

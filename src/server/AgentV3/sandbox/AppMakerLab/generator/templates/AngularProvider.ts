@@ -1,4 +1,5 @@
 import { DESIGN_KIT_CSS } from './designKit';
+import { APP_VIEWPORT_META } from '../../../../nativeFeel';
 import { ITemplateProvider } from './ViteReactProvider';
 
 const PKG = JSON.stringify({
@@ -145,7 +146,7 @@ const INDEX_HTML = `<!doctype html>
   <meta charset="utf-8">
   <title>My Angular App</title>
   <base href="/">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${APP_VIEWPORT_META}
   <link rel="icon" type="image/x-icon" href="favicon.ico">
 </head>
 <body>

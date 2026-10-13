@@ -113,7 +113,7 @@ export const PROCESS_ONLY_CODES = new Set([
   // 2026-10-11, build 46e2d74b). A failed seed is a warning about our preparation; the app is judged
   // by what the builder then made, so it is never a mark against the user's game.
   'GAME_KIT_SEEDED', 'GAME_KIT_NOT_SEEDED',
-  'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
+  'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_MODULE_FILES_UNDELIVERED', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   // The game playtest (gamePlaytest.ts): a pass, or a run that could not look, is never a defect of the app.
   'GAME_PLAYTEST_NOT_RUN', 'GAME_PLAYTEST_OK',
   // A repair's out-of-scope answer that OUR guard refused to write (autopsy eed79815): engine housekeeping.

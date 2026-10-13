@@ -58,13 +58,29 @@ describe('the write-time summary', () => {
 
 describe('the dispatcher counts by verdict, not by error count', () => {
   const src = readFileSync(join(__dirname, '../src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
+  /**
+   * ⚠️ RE-ANCHORED 2026-10-12 (Q-910, autopsy `50378049`). The clean-count anchor was the exact
+   * one-liner `if (errors.length === 0) s.cleanRuns += 1;`, which became a BLOCK when that branch
+   * gained the Q-910 line recording that a project-wide run covers the writes skipped before it. The
+   * invariant this case protects is unchanged — a never-ran verdict is counted and RETURNS before the
+   * clean count — so it is now anchored on the branch opener, which survives the branch gaining a
+   * statement and still breaks if the ORDER changes.
+   *
+   * Its own `-1` hole is closed in the same edit: only `neverRan` was asserted present, so a renamed
+   * clean branch would have made `clean` `-1` and the comparison would have failed for the wrong
+   * reason — readable as a reordering when it was a rename. All three anchors are asserted now.
+   */
   it('a never-ran run is counted and returns before the clean count', () => {
     const neverRan = src.indexOf("neverRan = verdict === 'not-run' || verdict === 'unknown';");
     const counted = src.indexOf('s.notRunRuns += 1;');
-    const clean = src.indexOf('if (errors.length === 0) s.cleanRuns += 1;');
+    const clean = src.indexOf('if (errors.length === 0)');
     expect(neverRan).toBeGreaterThan(-1);
+    expect(counted).toBeGreaterThan(-1);
+    expect(clean).toBeGreaterThan(-1);
     expect(counted).toBeGreaterThan(neverRan);
     expect(clean).toBeGreaterThan(counted);
+    // …and the never-ran branch still RETURNS, so it can never fall through into the clean count.
+    expect(src.slice(counted, clean)).toContain("return '';");
   });
 });
 

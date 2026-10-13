@@ -1,4 +1,5 @@
 import { DESIGN_KIT_CSS } from './designKit';
+import { APP_VIEWPORT_META } from '../../../../nativeFeel';
 import { ITemplateProvider } from './ViteReactProvider';
 
 const PKG = JSON.stringify({
@@ -49,7 +50,7 @@ const APP_HTML = `<!doctype html>
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    ${APP_VIEWPORT_META}
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

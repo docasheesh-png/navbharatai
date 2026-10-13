@@ -208,6 +208,12 @@ export interface AgentRunnerOptions {
    */
   editingExistingApp?: boolean;
   /**
+   * The Project Mode module this turn is building, read at CHECK TIME — a getter, because the route
+   * decides the module after `baseRunnerOpts` is built (the same reason `hasExistingFiles` is one).
+   * Keeps the done signal from telling a module turn it may stop (autopsy 50378049, Q-906 + Q-907).
+   */
+  projectModule?: () => string | null;
+  /**
    * Admin-only note from inside the loop (autopsy 95598899). Called when the loop declines to
    * override the model — the one decision that otherwise leaves no trace at all, since a turn that
    * was NOT nudged looks identical to a turn where the nudge never applied. Best-effort and never
@@ -1177,6 +1183,7 @@ export class AgentRunner {
                   existing: readyMark, readiness,
                   typeErrors: typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null,
                   editingExistingApp: this.opts.editingExistingApp === true, wroteThisRun: dispatcher.wroteAnything(),
+                  projectModule: this.opts.projectModule?.() ?? null,
                   step: steps, elapsedMs: Date.now() - buildStartMs,
                 });
               } catch { /* a measurement must never touch a build */ }
@@ -1515,9 +1522,9 @@ export class AgentRunner {
         let doneText: string | null = null;
         try {
           const lastStepFailed = resultBlocks.some((b) => (b as { is_error?: boolean }).is_error === true);
-          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true });
+          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null });
           if (doneDue && lastStepFailed) doneMissedAt = doneMissedAt ?? steps;
-          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true })) {
+          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true, projectModule: this.opts.projectModule?.() ?? null })) {
             doneMissedAt = undefined;
             const readiness = await dispatcher.assessBuildReadiness();
             // Never "complete and healthy" over a compile that just failed (autopsy 33812996).

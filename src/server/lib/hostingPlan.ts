@@ -35,6 +35,7 @@ import { checkPlanPayable, giftRemaining, paidSpendableTokens } from './giftSpen
 import { inrToDebitTokens, inrToWalletTokens, TOKENS_PER_RUPEE } from './payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
 import { WALLET_OPS, validRequestId, walletOpId } from './walletOps';
+import { withLedgerV2 } from './ledgerV2';
 import { envFlag } from './envFlag';
 import {
   HOSTING_TIERS, LEGACY_HOSTING_PLAN_ID, hostingAgreementTerms, isKnownPlanId, purchasableTier,
@@ -699,7 +700,7 @@ export async function purchaseHostingPlan(
         }
       }
       const result = computePlanPurchase(current, nowIso ?? new Date().toISOString(), tierId, opts);
-      if (result.ok) t.set(ref, result.wallet);
+      if (result.ok) t.set(ref, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? current : null, result.wallet, `plan:${String(tierId)}`));
       if (result.ok && opRef) t.set(opRef, { kind: 'plan', ownerId, tierId: String(tierId), at: new Date().toISOString() });
       return result;
     });

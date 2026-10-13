@@ -795,6 +795,54 @@ export function contractIsUnbacked(mod: Pick<ProjectModule, 'files' | 'undeliver
 }
 
 /**
+ * 🔴 A PREDICTION THAT NOTHING IS OPENABLE CANNOT OUTLIVE AN ADDRESS THAT IS OPEN
+ * (autopsy `50378049`, 2026-10-12 — BlockWorld, a voxel game).
+ *
+ * `shellModuleFor` above is a PLAN-TIME PREDICTION: *"this module does not own the entry, so a later
+ * one assembles the app, so there is nothing to open this turn."* The module prompt even says it out
+ * loud — *"do NOT start or publish a preview this turn"*. Everything downstream then treated that
+ * prediction as a FACT ABOUT WHAT HAPPENED, and nothing ever re-checked it.
+ *
+ * On the reported build the prediction was false. The plan's module 1 was *"Shared Types &
+ * Constants"* (`src/types/index.ts`, `src/constants/index.ts`); the builder ignored the scope and
+ * wrote the WHOLE GAME — 56 files — published a real address with `update_preview`
+ * (`PREVIEW_PUBLISHED`, `https://5173-….e2b.app`) and `RUNTIME_VERIFIED` recorded that it ran in a
+ * browser with no actionable console errors. The platform's answer to that, in the same report:
+ *
+ *   • the preview subscriber DISCARDED the address, because the prediction said to;
+ *   • `RELEASE_GATE: UNKNOWN` — *"no live preview was ever available, so nothing here was proven to
+ *     RUN"*, which was flatly untrue and is the SECOND appearance of that exact false sentence
+ *     (see `releaseGate.ts`'s `previewUrlPublished`, Fight 3D, 2026-08-27 — that fix corrected the
+ *     READER and left the SOURCE suppressible, so the class came back);
+ *   • `E2E_SCAFFOLD_SKIPPED`, `LAST_CHANCE_PROOF_SKIPPED` — *"No preview URL was ever available"*;
+ *   • `MARKUP_WAIVED_NO_PREVIEW` — the render proof could not be collected, so the margin was waived
+ *     on a build whose app was live (₹129.6 against the admin's own standing rule that a preview
+ *     which ran earns the margin);
+ *   • and the user was told, about a running game, **"There is nothing to open yet"**.
+ *
+ * 🔑 THE FIX IS THE DIRECTION OF AUTHORITY, not a new check: an OBSERVATION outranks a PREDICTION.
+ * An address that went up for this build is an observation. So the prediction is void the moment one
+ * exists, and every reader asks this one function instead of the raw variable.
+ *
+ * 🔒 WHY THIS CANNOT BREAK THE CASE THE PREDICTION EXISTS FOR (autopsy `6a5fb04b`). When a module
+ * turn really has nothing openable, no address is published — the prompt forbids it and the platform's
+ * own delivery proof stands down on `awaitingShell` — so this returns the prediction unchanged and
+ * behaviour is identical to before. The ONLY turns it changes are the ones that published a live
+ * address, which is exactly the case that was lying. The starter-page protection does not depend on
+ * this either way: it is `ToolDispatcher.setStarterExpected`, a separate mechanism.
+ *
+ * PURE.
+ */
+export function shellStillAwaited(
+  awaitsShell: string | null | undefined,
+  previewUrl: string | null | undefined,
+): string | null {
+  const awaited = typeof awaitsShell === 'string' ? awaitsShell : '';
+  if (!awaited) return null;
+  return String(previewUrl ?? '').trim() ? null : awaited;
+}
+
+/**
  * May a paused plan be retired after a direct build delivered a working app? Only when not one of its
  * modules is done — then nothing a later module depends on exists, and resuming it would rebuild over
  * the user's app from module 1 (autopsy dfd81a3a). The caller supplies the "working app" proof. PURE.

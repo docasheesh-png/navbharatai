@@ -165,8 +165,9 @@ describe('the consumers', () => {
     const near = ROUTE.slice(at, at + 700);
     expect(near).toContain('renderProvenInLedger(buildDiag.evidenceLedger())');
     expect(ROUTE).toContain('{ previewRendered: renderProvenNow() }');
-    // A module turn also passes the shell it awaits (autopsy 0311186f); the render question is unchanged.
-    expect(ROUTE).toMatch(/runtimeUncheckedRecord\(\{ previewRendered: renderProvenNow\(\)(?:, awaitingShell: moduleAwaitsShell)? \}\)/);
+    // A module turn also passes the shell it awaits (autopsy 0311186f) — as the CORRECTED prediction
+    // since autopsy 50378049; the render question itself is unchanged either way.
+    expect(ROUTE).toMatch(/runtimeUncheckedRecord\(\{ previewRendered: renderProvenNow\(\)(?:, awaitingShell: awaitsShellNow\(\))? \}\)/);
   });
 
   it('WHAT THE MISSING COPY COST: the failure card needs `appRendered` true to stand down', () => {

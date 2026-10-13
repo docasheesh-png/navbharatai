@@ -379,7 +379,8 @@ import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame }
 import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
-import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
+import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
+import { contractRenameHandoffLine } from '../AgentV3/handoffRule';
 import { entryFirstHandoffLine, renderWhileBuilding } from '../AgentV3/earlyPreview';
 import { planHandoffText } from '../AgentV3/planHandoff';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, dedupeStylesheetImports, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -16646,8 +16647,10 @@ async function noteBuildOutcome(
           // guess (progressEta.ts). Best-effort — a failure here just leaves the prompt estimate in place.
           try { noteEtaPlannedFiles(manifest.length); } catch { /* ETA is never worth failing a build for */ }
           if (manifest.length >= 2) {
-            const contract = ((await bpGenerate(contractSystemPrompt(framework), contractUserPrompt(prompt, manifest))) || '').trim();
-            const block = blueprintAdvisoryBlock(manifest, contract);
+            // The same door as the fast lane (build 9c612cdb): the name split and the enum normaliser run on
+            // every generated contract before anything reads it, and a rename is named in the block.
+            const prepared = prepareSharedContract(((await bpGenerate(contractSystemPrompt(framework), contractUserPrompt(prompt, manifest))) || '').trim(), manifest);
+            const block = blueprintAdvisoryBlock(manifest, prepared.contract, prepared.renamed);
             if (block) {
               architectSystem = `${block}\n\n---\n\n${architectSystem}`;
               events.emit({ type: 'narration', agent: 'architect', text: 'Sketching a file blueprint & shared contract to keep this larger app consistent…', ts: Date.now() });
@@ -18878,6 +18881,8 @@ async function noteBuildOutcome(
             // 🖥️ The calendar report's first build (earlyPreview.ts): the lane stopped before its entry and
             // the full builder wrote five more leaves and never the entry — five minutes of a starter page.
             (salvageEntryLine ? ` ${salvageEntryLine}` : '') +
+            // 🏷️ Build 9c612cdb (Q-942): a name the lane changed is named to the builder that never saw it.
+            (sb.contractRenames?.length ? ` ${contractRenameHandoffLine(sb.contractRenames)}` : '') +
             `\n\n---\n\n${buildPrompt}`;
         }
         // 🔴 A PLAN IS WORK TOO — do not make the full builder buy it twice (autopsy f97eb0ec,

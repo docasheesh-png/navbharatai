@@ -39,6 +39,7 @@
 import { TSC_BIN, PRIME_NODE_MODULES, NPM_INSTALL_LOCK_FRESH, MANIFEST_CURRENT } from './tscCommand';
 import { suggestedPropertyRenames, type TscError } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote, remedyFileFor } from './tscErrorCause';
+import { suggestedTypeRenames, typeRenameAdvice, contractRenamesInSources, type ContractRename } from './contractRenames';
 
 /** Per-caller incremental cache. Never the one shared path two builds used to clobber (TD-18). */
 export function tsBuildInfoFile(id: string): string {
@@ -190,11 +191,15 @@ export function writeTypecheckCleanNote(written: string[]): string {
  * The written file's errors are quoted in full (they are the ones the model can fix while it still
  * holds the file); errors elsewhere are counted and a few named, so an old problem never floods the
  * result of an unrelated write. Plain instructions, in the order the model should act. Pure.
+ *
+ * `renames` — the platform's recorded contract renames (contractRenames.ts); by default read from the
+ * contract file's header when that file is among `sources` (the write door adds it when a TS2749 needs it).
  */
 export function writeTypecheckNote(
   errors: TscError[],
   written: string[],
   sources: Readonly<Record<string, string>> = {},
+  renames: readonly ContractRename[] = contractRenamesInSources(sources),
 ): string {
   const { own, others } = splitByWrittenFiles(errors, written);
   if (own.length === 0 && others.length === 0) return '';
@@ -244,6 +249,10 @@ export function writeTypecheckNote(
         : `Also ${others.length} error(s) elsewhere (${named}${more}).`,
     );
   }
+  // A NAME THE PLATFORM CHANGED (build 9c612cdb, Q-942 — contractRenames.ts). TS2749 on a recorded rename
+  // carries tsc's own `typeof X` suggestion, which is wrong for the data; said for the written file's errors
+  // AND the ones elsewhere, because in that build the error sat in the 'elsewhere' bucket for two writes.
+  parts.push(...typeRenameAdvice(suggestedTypeRenames([...own, ...others], renames)));
   // WHAT THE ERROR MEANS, not just what it says (autopsy baa0b3c7). A missing-declaration error points
   // at the file where the symbol is USED, so its remedy appears nowhere in the message and the code under
   // the cursor looks broken — which is how a correct file gets rewritten six times. Diagnosed here, at the

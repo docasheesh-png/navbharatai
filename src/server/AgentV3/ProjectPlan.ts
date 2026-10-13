@@ -26,6 +26,7 @@ import { countEnumeratedFeatures, sectionedSpecSize, BIG_SOFTWARE_NOUN, SPEC_FEA
 import { withEnglishReading } from '../lib/devanagariTechTerms';
 import { withoutMachineText } from '../lib/machineText';
 import { STARTER_ENTRY_PATHS } from './stillTheStarterApp';
+import { CONTRACT_FIXED_VALUES_RULE } from './contractEnums';
 
 export type ModuleStatus = 'pending' | 'in_progress' | 'done' | 'failed';
 
@@ -990,6 +991,7 @@ export function projectPlanSystemPrompt(framework: string): string {
     '- dependsOn must reference EARLIER modules only — no cycles, no forward references.',
     '- contracts: exact exported names, types, and signatures — frozen; later modules import these',
     '  verbatim. A module with nothing importable uses "" (e.g. a pure pages module).',
+    `- ${CONTRACT_FIXED_VALUES_RULE}`,
     '- Keep contracts COMPACT: declarations only, one line per export, never an implementation or a',
     '  comment. The whole answer must fit in one reply — a plan cut off mid-list cannot be used at all.',
     '- files: relative paths from the project root; each file belongs to exactly ONE module.',

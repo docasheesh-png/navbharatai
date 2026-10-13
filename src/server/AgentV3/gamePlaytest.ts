@@ -570,17 +570,28 @@ async function drawn(page) {
 }
 
 /**
- * Wait until the page has DRAWN n frames, or capMs has passed — whichever comes first.
+ * Wait for BOTH: at least minMs of wall clock AND n DRAWN frames — giving up at capMs.
  *
- * The cap is what keeps this bounded on a page that has stopped drawing altogether; without it a dead
- * raf loop would hang the probe for the whole playtest budget. Returns what really happened, so the
- * caller can report the starvation instead of reporting nothing at all.
+ * 🔴 THE FRAME COUNT IS A FLOOR ADDED TO THE TIME, NOT A REPLACEMENT FOR IT, and getting that wrong
+ * broke a passing test. The first version waited for frames ALONE, which on a fast machine is SHORTER
+ * than the interval it replaced: twelve frames is about 200 ms at 60 fps, against the 550 ms the
+ * accelerator window used to run for. The picture then changed less between the two shots, out.gas fell
+ * under the still threshold, the gas optical-flow sample was never taken at all, and Q-861's steering
+ * test went from a firm reading to no reading. A fix that shortens the measurement it was protecting is
+ * not a fix.
+ *
+ * So the slow machine gets its frames and the fast machine keeps its milliseconds. The cap bounds both,
+ * because a page whose raf loop has died would otherwise hold the probe for the whole playtest budget.
+ * Returns what really happened, so the caller can report the starvation instead of nothing at all.
  */
-async function waitFrames(page, n, capMs) {
+async function waitFrames(page, n, capMs, minMs) {
   const t0 = Date.now();
   const f0 = await drawn(page);
   let got = 0;
-  while (got < n && Date.now() - t0 < capMs) {
+  for (;;) {
+    const waited = Date.now() - t0;
+    if (waited >= capMs) break;
+    if (got >= n && waited >= minMs) break;
     await page.waitForTimeout(16);
     got = (await drawn(page)) - f0;
   }
@@ -648,7 +659,7 @@ try {
     // AND the steering reading — which is why frame-gating the steering leg alone did not stop the flake.
     // It also makes the gas reading more trustworthy, never less: a stalled car's picture does not
     // change however long you look at it, while a moving one gets the frames it needs to prove it.
-    const legGas = await waitFrames(page, ${PROBE_MIN_FRAMES}, ${PROBE_CAP_MS});
+    const legGas = await waitFrames(page, ${PROBE_MIN_FRAMES}, ${PROBE_CAP_MS}, 550);
     const g1 = await shot(page, box);
     const sg1 = await snapScene(page);
     const gasMoves = sceneMoves(sg0, sg1);
@@ -721,7 +732,7 @@ try {
     // THE FRAGILE LEG (Q-1038). This was waitForTimeout(400) — about 24 frames on an idle machine and
     // about two on a loaded one, and two frames of travel do not clear the 0.2 speed floor that
     // sceneVerdict needs before it will read a turn at all.
-    const legStraight = await waitFrames(page, ${PROBE_MIN_FRAMES}, ${PROBE_CAP_MS});
+    const legStraight = await waitFrames(page, ${PROBE_MIN_FRAMES}, ${PROBE_CAP_MS}, 400);
     const e1 = await snapScene(page);
     for (const k of ['ArrowLeft', 'KeyA']) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(300);

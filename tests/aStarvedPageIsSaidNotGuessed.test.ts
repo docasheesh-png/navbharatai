@@ -86,10 +86,29 @@ describe('Q-1038 — the probe really waits on frames, and the report really say
      * (which is where the queue row pointed) left the camera reading, and through the guard the steering
      * reading too, still on the clock. The test under load still failed. Measuring beat reading the row.
      */
-    expect(SRC).toMatch(/const legGas = await waitFrames\(page, \$\{PROBE_MIN_FRAMES\}, \$\{PROBE_CAP_MS\}\);/);
+    expect(SRC).toMatch(/const legGas = await waitFrames\(page, \$\{PROBE_MIN_FRAMES\}, \$\{PROBE_CAP_MS\}, 550\);/);
     expect(SRC).not.toMatch(/const g0 = await shot\(page, box\);\s*\n\s*await page\.waitForTimeout\(550\);/);
     // And its frames reach the scene read, or `probeStarved` would be blind to the window that matters.
     expect(SRC).toMatch(/probeFrames: legGas\.frames, probeMs: legGas\.ms,/);
+  });
+
+  it('🔴 the frame count is a FLOOR ON TOP OF the original time, not a replacement', () => {
+    /**
+     * A REGRESSION THIS CHANGE CAUSED AND THE FULL SUITE CAUGHT. The first version waited for frames
+     * ALONE — and on a fast machine twelve frames is about 200 ms, against the 550 ms the accelerator
+     * window had always run for. The picture changed less between the two shots, `out.gas` fell under the
+     * still threshold, the gas optical-flow sample was never taken, and Q-861's steering test
+     * (`aRacingGameIsStartedAndDriven`) went from a firm reading to no reading at all.
+     *
+     * A fix that SHORTENS the measurement it was protecting is not a fix. The slow machine gets its
+     * frames; the fast machine keeps its milliseconds; the cap bounds both.
+     */
+    expect(SRC).toMatch(/async function waitFrames\(page, n, capMs, minMs\)/);
+    // Both conditions must hold before it returns — frames AND the floor.
+    expect(SRC).toMatch(/if \(got >= n && waited >= minMs\) break;/);
+    // And each call site passes the duration that interval used to run for, not a shorter one.
+    expect(SRC).toMatch(/legGas = await waitFrames\(page, \$\{PROBE_MIN_FRAMES\}, \$\{PROBE_CAP_MS\}, 550\)/);
+    expect(SRC).toMatch(/legStraight = await waitFrames\(page, \$\{PROBE_MIN_FRAMES\}, \$\{PROBE_CAP_MS\}, 400\)/);
   });
 
   it('🔒 the WEAKEST leg decides, because one starved interval is enough', () => {
@@ -101,13 +120,13 @@ describe('Q-1038 — the probe really waits on frames, and the report really say
   it('🔒 the steering leg waits for DRAWN frames, not a bare timeout', () => {
     // The exact line that was `waitForTimeout(400)`. Script-side code is inside a template literal, so a
     // source assertion is how this repo locks it (the same way the Q-745 and Q-869 wiring is locked).
-    expect(SRC).toMatch(/const legStraight = await waitFrames\(page, \$\{PROBE_MIN_FRAMES\}, \$\{PROBE_CAP_MS\}\);/);
+    expect(SRC).toMatch(/const legStraight = await waitFrames\(page, \$\{PROBE_MIN_FRAMES\}, \$\{PROBE_CAP_MS\}, 400\);/);
     expect(SRC).not.toMatch(/const e0 = await snapScene\(page\);\s*\n\s*await page\.waitForTimeout\(400\);/);
   });
 
   it('🔒 the wait is CAPPED — a dead raf loop must not hang the playtest', () => {
     const fn = SRC.slice(SRC.indexOf('async function waitFrames'), SRC.indexOf('async function waitFrames') + 500);
-    expect(fn).toMatch(/Date\.now\(\) - t0 < capMs/);
+    expect(fn).toMatch(/if \(waited >= capMs\) break;/);
     expect(fn).toMatch(/starved: got < n/);
   });
 

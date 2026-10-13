@@ -95463,7 +95463,7 @@ app's, exactly as the not-run warning says.
 **Evidence, because "it should be fine now" is not evidence:** 6/6 unloaded; 3/3 on the previously-failing
 case under three CPU hogs (load 3.5 on 4 cores) — the same conditions under which the partial fix failed.
 
-🔴 **Two bugs this change's own tests caught in it, both worth recording as classes:**
+🔴 **Three bugs this change caught in itself, all worth recording as classes:**
 
 1. **A bare TypeScript constant inside the browser script.** The accelerator fix was first written
    `waitFrames(page, PROBE_MIN_FRAMES, PROBE_CAP_MS)` — no `${…}`. Inside the template literal that is
@@ -95477,7 +95477,19 @@ case under three CPU hogs (load 3.5 on 4 cores) — the same conditions under wh
    lines past the cause. The guard names the line; it is a diagnostics fix, not a new safety net, and
    that is what its comment says rather than overclaiming it.
 
-**Proof.** 17 tests (`tests/aStarvedPageIsSaidNotGuessed.test.ts`) and **7 reversions**. Two of those
+🔴 **AND A THIRD BUG, WHICH THE FULL SUITE CAUGHT AFTER THE FIX "WORKED".** The first version waited for
+frames ALONE — and on a fast machine twelve frames is about 200 ms, against the **550 ms** the accelerator
+window had always run for. So on the machine where there was never a problem, the window got SHORTER: the
+picture changed less between the two shots, `out.gas` fell under the still threshold, the gas optical-flow
+sample was never taken at all, and Q-861's steering test (`aRacingGameIsStartedAndDriven`) went from a firm
+reading to no reading. **A fix that shortens the measurement it was protecting is not a fix.**
+
+The frame count is a FLOOR ADDED TO the original duration, not a replacement for it: the slow machine gets
+its frames, the fast machine keeps its milliseconds, and the cap bounds both. It is the "never trade one
+problem for another" rule, and it was caught only because the suite ran on the final state — the two
+browser suites now pass 32/32 together.
+
+**Proof.** 18 tests (`tests/aStarvedPageIsSaidNotGuessed.test.ts`) and **9 reversions**. Two of those
 reversions found holes in the lock itself: removing the accelerator frame-gate left all thirteen other
 tests green, and the bare-constant bug was invisible until a source assertion existed. A reversion that
 passes is the test telling you it is not watching.

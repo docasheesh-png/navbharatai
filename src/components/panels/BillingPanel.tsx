@@ -1016,7 +1016,7 @@ export function BillingPanel(props: BillingPanelProps) {
               again. Default OFF, so a user who never ticked it sees the card exactly as before. */}
           <div id="wallet-buy-services" />
           {preselected && (
-            <div className="rounded-2xl border border-orange-500/40 bg-orange-500/10 px-4 py-3 text-sm text-ink" data-testid="wallet-preselected">
+            <div className="rounded-2xl border border-line bg-raised px-4 py-3 text-sm text-ink" data-testid="wallet-preselected">
               You picked <span className="font-semibold">{preselected.name}</span>. {preselected.summary}
             </div>
           )}

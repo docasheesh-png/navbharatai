@@ -137,14 +137,17 @@ describe('🔒 the route counts and names only what landed', () => {
 
   it('no platform write dispatches write_file itself; the fast lane\'s writer returns the outcomes', () => {
     expect(route.split('\n').filter((l) => /name: 'write_file'/.test(l))).toEqual([]);
-    expect(route).toContain("return writePlatform(files, 'fast-w', 6);");
+    // Named since the post-green attribution (autopsy 9c612cdb): the fast lane's writes carry their pass name.
+    expect(route).toContain("return inPlatformPass('fast-lane', () => writePlatform(files, 'fast-w', 6));");
     expect(route).toMatch(/const fastWriteRaw = async \(files: \{ path: string; content: string \}\[\]\): Promise<WriteOutcome\[\]> =>/);
   });
 
   it('every pass that ANNOUNCES or RECORDS a write reads the outcome first', () => {
     // A pass whose verdict re-measures the workspace may ignore the answer; one that says "generated N" may not.
     for (const prefix of ['fast-foundation-', 'fast-tsconfig-', 'scaffold-restore-', 'cssmod-w', 'barrel-w']) {
-      expect(route, prefix).toMatch(new RegExp(`readWriteOutcomes\\([^;]*await writePlatform\\([^;]*'${prefix}'`));
+      // A pass name may wrap the write (`runInPass('scaffold-restore', () => writePlatform(…))`, the post-green
+      // attribution of this same autopsy); the outcome is still read before anything is announced.
+      expect(route, prefix).toMatch(new RegExp(`readWriteOutcomes\\([^;]*await (?:(?:runInPass|inPlatformPass)\\('[\\w-]+', \\(\\) => )?writePlatform\\([^;]*'${prefix}'`));
     }
     for (const site of ['await fastWrite(toWrite)', 'await fastWrite([{ path: patch.path', 'await fastWrite(snaps)']) {
       const at = route.indexOf(site);

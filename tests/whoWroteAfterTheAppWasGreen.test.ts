@@ -5,6 +5,7 @@ import {
   postGreenWritesNote,
   endVerdictFrom,
   BUILD_LOOP_LABEL,
+  UNNAMED_PLATFORM_LABEL,
   MAX_NAMED_PASSES,
 } from '../src/server/AgentV3/postGreenWrites';
 import {
@@ -30,10 +31,14 @@ import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
 const T0 = 1_700_000_000_000;
 
 describe('the ledger groups writes by who made them', () => {
-  it('names the build loop for writes outside any pass, most files first', () => {
+  // Pin changed 2026-10-13 (autopsy 9c612cdb): "outside any pass" alone is no longer the build loop — that default
+  // is what blamed the model for five platform files. The build loop's writes now carry `model: 'build'` (a tool call
+  // the model asked for, modelToolWrites.ts), and the same grouping is asserted on that evidence. A write with no pass
+  // AND no model is an unnamed platform step: asserted below so the old default cannot come back.
+  it('names the build loop for the model\'s own writes outside any pass, most files first', () => {
     const g = groupPostGreenWrites([
-      { path: 'src/App.tsx', pass: null, at: T0 },
-      { path: 'src/App.tsx', pass: null, at: T0 + 1 }, // same file twice → one file
+      { path: 'src/App.tsx', pass: null, model: 'build', at: T0 },
+      { path: 'src/App.tsx', pass: null, model: 'build', at: T0 + 1 }, // same file twice → one file
       { path: 'src/x.ts', pass: 'design-consistency-heal', at: T0 + 2 },
       { path: 'src/y.ts', pass: 'design-consistency-heal', at: T0 + 3 },
       { path: 'src/z.ts', pass: 'design-consistency-heal', at: T0 + 4 },
@@ -41,14 +46,19 @@ describe('the ledger groups writes by who made them', () => {
     expect(g[0]).toEqual({ pass: 'design-consistency-heal', files: 3, paths: ['src/x.ts', 'src/y.ts', 'src/z.ts'] });
     expect(g[1]).toEqual({ pass: BUILD_LOOP_LABEL, files: 1, paths: ['src/App.tsx'] });
   });
+  it('🔴 a write with no pass and no model is NOT the build loop (autopsy 9c612cdb)', () => {
+    const g = groupPostGreenWrites([{ path: 'e2e/smoke.spec.ts', pass: null, at: T0 }]);
+    expect(g).toEqual([{ pass: UNNAMED_PLATFORM_LABEL, files: 1, paths: ['e2e/smoke.spec.ts'] }]);
+  });
   it('is empty for no writes', () => {
     expect(groupPostGreenWrites([])).toEqual([]);
   });
 });
 
 describe('the one line an autopsy reads — its SEVERITY is the finding', () => {
+  // `model: 'build'` added 2026-10-13 (autopsy 9c612cdb): the build loop is named only on that evidence now.
   const writes = [
-    { path: 'src/App.tsx', pass: null, at: T0 + 200_000 },
+    { path: 'src/App.tsx', pass: null, model: 'build' as const, at: T0 + 200_000 },
     { path: 'src/a.css', pass: 'css-import-guard', at: T0 + 250_000 },
   ];
   it('nothing wrote after green → info, said plainly', () => {
@@ -97,7 +107,7 @@ describe('the write observer sits at the ONE chokepoint every write passes', () 
   let dispose: (() => void) | null = null;
   afterEach(() => { dispose?.(); dispose = null; clearGreenLatch(WS); });
 
-  it('sees an allowed write with the pass that made it, and the build loop as null', async () => {
+  it('sees an allowed write with the pass that made it, and a write outside any pass as null', async () => {
     const seen: Array<{ path: string; pass: string | null }> = [];
     dispose = setWriteObserver(({ path, pass }) => seen.push({ path, pass }));
     assertWriteAllowed(WS, 'src/App.tsx');
@@ -106,6 +116,12 @@ describe('the write observer sits at the ONE chokepoint every write passes', () 
       { path: 'src/App.tsx', pass: null },
       { path: 'src/Form.tsx', pass: 'feature-presence-heal' },
     ]);
+  });
+  it('…and a null pass alone says nothing about the model: that fact travels separately (autopsy 9c612cdb)', () => {
+    const seen: Array<unknown> = [];
+    dispose = setWriteObserver(({ pass, model }) => seen.push({ pass, model }));
+    assertWriteAllowed(WS, 'src/App.tsx');
+    expect(seen).toEqual([{ pass: null, model: null }]);
   });
   it('🔒 never counts infrastructure paths — node_modules and build output are not the app', () => {
     const seen: string[] = [];

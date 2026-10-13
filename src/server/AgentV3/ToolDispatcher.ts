@@ -110,7 +110,7 @@ import { scopeStyleHandBack } from './stylePolishResume';
 import { orphansToHandBack } from './orphanHandBack';
 import { batchSizeNote } from './batchSize';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
-import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
+import { currentPass, runInPass, inPlatformPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
 import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemovedOperands, removedRecordedPaths } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
@@ -1265,13 +1265,23 @@ export class ToolDispatcher {
       // dependency to a green app's package.json, and the report could only say "a later write").
       // `evaluate-heal` is on no allowlist, so a green app is still left untouched — only the record changes.
       const go = () => this.guardedWrite(file, content, { agent: 'architect', source: 'evaluate-heal', allowOverwrite: true });
-      wrote = await (currentPass() ? go() : runInPass('evaluate-heal', go));
+      wrote = await inPlatformPass('evaluate-heal', go);
     } catch {
       return false; // refused (freeze) or failed — nothing is recorded, indexed or announced
     }
     try { getWorkspaceMemory(this.workspaceId).indexFile(file, wrote.content); } catch { /* best-effort */ }
     try { noteHeal(this.workspaceId, file, wrote.content, before); } catch { /* best-effort */ }
     return true;
+  }
+
+  /**
+   * Run a step the PLATFORM starts on this dispatcher — not a tool call a model asked for — under its own pass name,
+   * unless a pass is already active, whose name (and so whose Green Freeze permission) it keeps: `landHealWrite`'s
+   * idiom. 🔴 Autopsy 9c612cdb: a platform write with no name was reported as "the build loop", i.e. as the model.
+   * These names are on no freeze list, so on a latched app they are refused exactly as no name was — attribution only.
+   */
+  private inPlatformPass<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    return inPlatformPass(name, fn);
   }
 
   private narrate<K extends NarrationId>(id: K, params: NarrationParams[K], agent: AgentRole = 'architect'): void {
@@ -1986,7 +1996,8 @@ export class ToolDispatcher {
         // Reading the actual file tree first makes the gate judge the app that exists.
         // (The seed now runs inside `evaluate` itself, so the model's own call is judged on the same
         // fresh graph — autopsy 4d538ca3.)
-        await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
+        // Named: the platform runs this evaluate, so what it heals (a dependency, a `.gitignore`) is its write, not the model's.
+        await this.inPlatformPass('evaluate-heal', () => this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect'));
         const report = this.lastReadiness;
         if (!report) return unassessedReadinessReport();
         // AN UNTOUCHED SCAFFOLD IS NOT A FINISHED APP (autopsy 31dc61fd). Readiness measures CODE
@@ -2164,7 +2175,7 @@ export class ToolDispatcher {
         if (result.wired.length === 0) return '';
         for (const [path, content] of Object.entries(result.files)) {
           if (files[path] === content) continue; // only the one router file actually changed
-          await this.guardedWrite(path, content, { agent: 'architect', source: 'heal-orphan-pages', allowOverwrite: true });
+          await this.inPlatformPass('heal-orphan-pages', () => this.guardedWrite(path, content, { agent: 'architect', source: 'heal-orphan-pages', allowOverwrite: true }));
           try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
         }
         try { getWorkspaceMemory(this.workspaceId).recordAudit(`orphan-page wiring: routed ${result.wired.join(', ')}.`); } catch { /* audit best-effort */ }
@@ -2193,7 +2204,7 @@ export class ToolDispatcher {
         if (result.redactions.length === 0) return '';
         for (const [path, content] of Object.entries(result.files)) {
           if (files[path] === content) continue; // only the files that actually changed
-          await this.guardedWrite(path, content, { agent: 'architect', source: 'heal-credential-logs', allowOverwrite: true });
+          await this.inPlatformPass('heal-credential-logs', () => this.guardedWrite(path, content, { agent: 'architect', source: 'heal-credential-logs', allowOverwrite: true }));
           try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
         }
         const changed = [...new Set(result.redactions.map((r) => r.file))];
@@ -2211,7 +2222,7 @@ export class ToolDispatcher {
         const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
         const result = injectObservabilityFixes(files);
         if (!result) return '';
-        await this.guardedWrite(result.path, result.newContent, { agent: 'architect', source: 'inject-observability', allowOverwrite: true });
+        await this.inPlatformPass('inject-observability', () => this.guardedWrite(result.path, result.newContent, { agent: 'architect', source: 'inject-observability', allowOverwrite: true }));
         try { this.state?.recordFileChange({ path: result.path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
         const labels: Record<'request-logger' | 'health' | 'error-handler', string> = {
           'request-logger': 'a request logger',
@@ -2389,7 +2400,8 @@ export class ToolDispatcher {
       },
       readFiles: async () => (await collectWorkspaceFiles(this.actuator, this.workspaceId)).files,
       writeFile: async (path: string, content: string) => {
-        await this.actuator.writeFile(this.workspaceId, path, content);
+        // Named: the endgame / error-trend repair is AgentRunner's own step, not a tool call the model made (9c612cdb).
+        await this.inPlatformPass('endgame-repair', () => this.actuator.writeFile(this.workspaceId, path, content));
         try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
         try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
       },
@@ -6203,7 +6215,9 @@ export class ToolDispatcher {
           const healed = gitignoreWithEnvCoverage(gitignoreContent, secretLeak.exposed);
           if (healed) {
             try {
-              await this.actuator.writeFile(this.workspaceId, '.gitignore', healed);
+              // Named like every other evaluate heal (`landHealWrite`): the model asked evaluate to JUDGE, not to write a
+              // .gitignore, and the reviewer's "read-only" evaluate reaches here too — so it is never the build loop (9c612cdb).
+              await this.inPlatformPass('evaluate-heal', () => this.actuator.writeFile(this.workspaceId, '.gitignore', healed));
               gitignoreContent = healed;
               secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
             } catch {

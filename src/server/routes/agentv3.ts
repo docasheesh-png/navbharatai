@@ -640,7 +640,7 @@ import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
-import { gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
+import { gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration, userOwnedFiles } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
 import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
@@ -22901,6 +22901,32 @@ async function noteBuildOutcome(
               buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
             } catch { /* best-effort */ }
           }
+        } else {
+          // 🔴 THE THIRD WAY THIS CHECK IS REACHED, AND IT HAD NO SENTENCE (Q-913, autopsy 50378049).
+          // The gate above is one long `if` with no `else`, so a canvas game the route could not play was
+          // SILENTLY skipped — and on the reported build that left the model's own prose ("normal for a
+          // sandbox game") as the only account of a screen that stayed dark, while the engine's own
+          // measurement for exactly that (scorePlaytest's `runs`, 0 for "blank or a single colour") never
+          // ran. `playtestSkipReason` tells "could not look" from "not applicable": a project with no
+          // canvas game, an import turn, a stopped or failed build and the kill switch stay silent.
+          try {
+            const why = playtestSkipReason({
+              enabled: gamePlaytestEnabled(),
+              buildOk: result?.ok === true,
+              isCanvasGame: isCanvasGameProject(playtestFiles),
+              isImportTurn,
+              aborted: abort.signal.aborted,
+              hasRunCommand: !!actuator.runCommand,
+              hasPreviewUrl: !!lastPreviewUrl,
+              awaitsShell: !!awaitsShellNow(),
+              timeLeft: effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000,
+            });
+            if (why) {
+              const notRun = playtestNotRunVerdict(why);
+              buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
+              gameProof = { outcome: playtestOutcome(notRun.code), score: null };
+            }
+          } catch { /* an honest line is best-effort and must never touch a build */ }
         }
       };
       // The journey above drives ONE form. Nothing pressed the rest of the app, so the commonest

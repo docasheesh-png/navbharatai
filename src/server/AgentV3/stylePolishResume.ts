@@ -60,6 +60,34 @@ export interface StyleResumeInput {
   /** Component files this build wrote that nothing imports (Q-202, `orphanHandBack.ts`) — handed back in the same message. */
   orphans?: ReadonlyArray<string>;
   /**
+   * 🔴 THE APP WAS GRADED FOR A TOKEN SYSTEM NOBODY ASKED IT FOR (Q-914, autopsy `50378049`, 2026-10-12).
+   *
+   * BlockWorld shipped with `DESIGN_CONSISTENCY 60/100` — *"45 hardcoded colours and no CSS variables"* —
+   * **unresolved**. Checked one layer at a time rather than assumed:
+   *
+   *  - the rule IS in the prompt, unconditionally (*"Define CSS variables on :root for a real palette"*),
+   *    so this is not a missing instruction;
+   *  - the scanner is honest — it matches `#rrggbb` only, so a three.js `0x…` material colour is never
+   *    counted, and the 45 were real CSS-shaped colours;
+   *  - the finding needs BOTH `> 8 colours` AND `!hasTokens`, and it fired, so the app had **no token
+   *    layer at all**. The finding was true.
+   *
+   * 🔑 So the engine MEASURED it, SCORED it, told the user about it — and **never once asked the model to
+   * fix it.** `hardcoded-colors` sits in `WHOLE_APP_VIOLATIONS`
+   * (`writeTimeQualityCheck.ts`), correctly kept out of the per-file write-time note because it is a
+   * judgement about the whole app — and then it reached no hand-back either. A finding with nowhere to go
+   * is a grade, not a fix.
+   *
+   * 🔒 IT BELONGS HERE BY THIS MODULE'S OWN RULE, stated just above: a hand-back is for what only a model
+   * can JUDGE. Which literals are the same semantic colour, and what to name them, is exactly that — it is
+   * not `round(v / 4) * 4`, so `spacingSnap`'s treatment does not apply.
+   *
+   * 🔒 AND IT IS BOUNDED, which is what 536c8189 actually warns about: ONE edit to ONE stylesheet, fired
+   * only when the app has NO tokens whatsoever — never on partial adoption, where the model would be sent
+   * to re-judge 45 scattered literals it had already half-organised.
+   */
+  noTokens?: { colours: number; files?: ReadonlyArray<string> };
+  /**
    * 🔴 SPACING IS NOT HANDED BACK HERE (autopsy 536c8189, 2026-10-01). It was, from #3458 until that date:
    * `offGrid` carried the `DESIGN_CONSISTENCY` values and the message said "change each to the nearest
    * multiple of 4px". The first real build to meet it answered with three `node -e` regex scripts over a
@@ -86,7 +114,9 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
   const pages = (input.pages ?? []).filter((p) => p && p.file && p.defects?.length).slice(0, MAX_PAGES_LISTED);
   const a11y = (input.a11y ?? []).filter((a) => a && a.file && a.issues?.length);
   const orphans = [...new Set((input.orphans ?? []).map((p) => String(p ?? '').trim()).filter(Boolean))];
-  if (missing.length === 0 && pages.length === 0 && a11y.length === 0 && orphans.length === 0) return { resume: false, message: '', standDown: 'nothing-missing' };
+  // Only the all-or-nothing case, and only with a real count behind it (Q-914).
+  const noTokens = input.noTokens && input.noTokens.colours > 0 ? input.noTokens : null;
+  if (missing.length === 0 && pages.length === 0 && a11y.length === 0 && orphans.length === 0 && !noTokens) return { resume: false, message: '', standDown: 'nothing-missing' };
   if (input.resumesUsed >= MAX_STYLE_RESUMES) return { resume: false, message: '', standDown: 'limit' };
   if (turnDeclined(input.text)) return { resume: false, message: '', standDown: 'declined' };
   if (!input.producedFiles && turnAskedTheUser(input.text)) return { resume: false, message: '', standDown: 'asked-the-user' };
@@ -108,6 +138,7 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
     );
   }
   if (orphans.length) parts.push(orphanInstruction(orphans));
+  if (noTokens) parts.push(noTokensInstruction(noTokens, sheet));
   return {
     resume: true,
     message:
@@ -117,10 +148,30 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
       // the reply to this message — "Done — I added all the missing CSS rules to src/index.css" — became the
       // build's summary). Keep the closing words about the APP, short, with no class or file names.
       + 'The user did not see this message and has already read your description of the app. When you finish, '
-      + `reply with ONE short sentence about what you changed in the app (for example "${closingExample({ missing, pages, a11y, orphans })}") — `
+      + `reply with ONE short sentence about what you changed in the app (for example "${closingExample({ missing, pages, a11y, orphans, noTokens: !!noTokens })}") — `
       + 'if you changed nothing, say so plainly; do not repeat the summary, and do not mention class names, '
       + 'stylesheets or file names.',
   };
+}
+
+/**
+ * The one bounded ask for an app with no token layer (Q-914). PURE.
+ *
+ * 🔒 It names the STYLESHEET and asks for ONE block, not 45 edits: the colours the app already uses are
+ * grouped into a palette and the literals point at it. The worst files are named so the model knows
+ * where the weight is, never as a list to work through one by one — that shape is what autopsy 536c8189
+ * showed produces flailing.
+ */
+export function noTokensInstruction(n: { colours: number; files?: ReadonlyArray<string> }, sheet: string): string {
+  const worst = [...new Set((n.files ?? []).map((f) => String(f ?? '').trim()).filter(Boolean))].slice(0, 3);
+  return `This app uses ${n.colours} colour literals and defines no CSS variables at all, so its colours `
+    + 'cannot be themed and the same grey drifts into four different values.'
+    + (worst.length ? ` Most of them are in ${worst.join(', ')}.` : '')
+    + `
+Add ONE \`:root\` block to ${sheet} with the palette this app actually uses — a brand/accent, `
+    + 'background, surface, text, muted, border, and success/danger/warning — then use `var(--…)` for those '
+    + 'colours instead of the literals. One stylesheet edit plus the swaps; do not restyle anything, and do '
+    + 'not change how the app looks.';
 }
 
 /**
@@ -130,9 +181,10 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
  * their build. An example is copied as often as it is followed, so it must be true of the work it asks for,
  * and the reply is checked against the work anyway (repairClaim.ts). PURE.
  */
-export function closingExample(h: { missing: readonly string[]; pages: readonly unknown[]; a11y: readonly unknown[]; orphans: readonly string[] }): string {
+export function closingExample(h: { missing: readonly string[]; pages: readonly unknown[]; a11y: readonly unknown[]; orphans: readonly string[]; noTokens?: boolean }): string {
   if (h.missing.length > 0) return 'Every screen is now fully styled.';
   if (h.pages.length > 0) return 'Every page now shows a clear message when it has nothing to list.';
+  if (h.noTokens) return 'The app now uses one colour palette throughout.';
   if (h.a11y.length > 0) return 'Every button now says what it does.';
   return 'Every part of the app I built is now on screen.';
 }
@@ -163,7 +215,7 @@ export function doneStyleNote(missing: readonly string[], sheet: string | undefi
 }
 
 /** One sentence for the admin report — never user-facing, so it may name the mechanism. */
-export function styleResumeNote(missingCount: number, pageCount = 0, orphanCount = 0, a11yCount = 0): string {
+export function styleResumeNote(missingCount: number, pageCount = 0, orphanCount = 0, a11yCount = 0, noTokenColours = 0): string {
   // 🔴 The count of what was handed back, never a sentence about two of its four parts (autopsy 68f0a486:
   // "0 class name(s) … 0 page(s)" headed a hand-back whose only item was an unlabelled upload field).
   // 🔴 …and the orphan-only sibling it missed (autopsy db07e0af): with nothing but unimported components handed
@@ -174,6 +226,7 @@ export function styleResumeNote(missingCount: number, pageCount = 0, orphanCount
     pageCount > 0 ? `${pageCount} page(s) fell short of the design standard` : '',
     a11yCount > 0 ? `${a11yCount} file(s) had controls a keyboard or screen reader cannot use` : '',
     orphanCount > 0 ? `${orphanCount} component file(s) this build wrote and nothing imports were left over (Q-202)` : '',
+    noTokenColours > 0 ? `${noTokenColours} colour literal(s) stood with no CSS variables at all (Q-914)` : '',
   ].filter(Boolean);
   const what = parts.length > 0 ? parts.join(', ') : 'nothing was listed';
   return `The model ended its turn while ${what}, `
@@ -190,6 +243,8 @@ export interface StyleHandBack {
   a11y?: Array<{ file: string; issues: string[] }>;
   /** Component files this build wrote that nothing imports (top-level turn only; `orphanHandBack.ts`). */
   orphans?: string[];
+  /** The app has no CSS variables at all, and this many colour literals (Q-914). Top-level turn only. */
+  noTokens?: { colours: number; files?: string[] };
 }
 
 /**

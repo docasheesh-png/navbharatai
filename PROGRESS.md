@@ -94569,3 +94569,111 @@ template hand-write its viewport again → **3** · remove the `dvh` override �
   starter, and Q-908's brand-new platform-seeded exclusion would stop recognising it. **A genuine
   fix-A-create-X, caught by a guard another session built.** Regenerated: 76 starter paths · 35 golden
   paths · 455 versions, 55 new.
+
+## 2026-10-13 — AUTOPSY `50378049`: THE LAST THREE. Q-912, Q-913, Q-914 — and I was wrong to have held them
+
+The admin, verbatim: *"maine kaha tha: build report ki sabhi problem ko ek ek kar ke solve karna hai, dna
+level par, jab tak sabhi ke root cause fix na ho jaye tab tak rukna nahi hai! toh sab ho gaya??"*
+
+**The honest answer was NO** — 12 of 15, with three held as "needs a decision / needs evidence". That was
+wrong. Each of the three had a real root cause reachable from the code, and digging found it in every
+case. What follows is what was actually there.
+
+### 🔴 Q-914 — the app was graded for a token system nobody asked it for
+
+`DESIGN_CONSISTENCY 60/100`, *"45 hardcoded colours and no CSS variables"*, **unresolved**. Checked one
+layer at a time: the rule IS in the prompt unconditionally; the scanner is honest (`#rrggbb` only, so a
+three.js `0x…` colour is never counted); the finding needs `> 8 colours` AND `!hasTokens` and it fired,
+so the app really had no token layer. **The finding was true.**
+
+🔑 So the engine MEASURED it, SCORED it, told the USER — and **never once asked the MODEL to fix it.**
+`hardcoded-colors` lives in `WHOLE_APP_VIOLATIONS`, correctly kept out of the per-file write-time note
+because it is a whole-app judgement — and then it reached no hand-back either. **A finding with nowhere
+to go is a grade, not a fix.**
+
+It belongs in the end-of-turn hand-back by that module's OWN rule, written there in advance: *"a hand-back
+is for what only a model can JUDGE … never for arithmetic with one answer."* Which literals are the same
+semantic colour, and what to call them, is exactly that — unlike `round(v / 4) * 4`, which is why spacing
+was moved OUT of the hand-back into `spacingSnap.ts` (autopsy 536c8189).
+
+🔑 **AND THE DATA WAS ALREADY IN HAND AND THROWN AWAY.** `undefinedClassesNow` already calls
+`lintBuiltApp(project)` for its a11y half; that one result carries `design.stats.hasTokens` and a counted
+`hardcoded-colors` with its worst files, and every bit but a11y was discarded. One lint, read twice — no
+second pass, no extra reads. Bounded to ONE stylesheet edit, fired only when the app has NO tokens
+whatsoever (never on partial adoption), and never handed to a sub-agent (Q-066's rule, same as `orphans`).
+
+### 🔴 Q-913 — the measurement existed; nothing said it had not run
+
+The dark screen's only account in the report was the MODEL's prose — *"normal for a sandbox game, players
+can move and dig to daylight"*. **The engine's own measurement for exactly that already existed:**
+`scorePlaytest`'s `runs` dimension reads the brightness SPREAD of a 48×27 sample (the standard deviation
+of luminance, zero for any flat colour) and scores **0** — *"The game screen is blank or a single colour"*.
+
+It never ran, because the preview address had been discarded (Q-900). **And nothing said so.** The route's
+playtest gate is one long `if (…)` **with no `else`**, so a canvas game the route could not play was
+SILENTLY skipped — while `playtestNotRunVerdict` promises, in its own words, *"one sentence for every way
+it is reached (the runner's own answer, and the route's timeout or crash)"*. The THIRD way — the route
+never calling it — had no sentence.
+
+`playtestSkipReason` is that sentence, and it keeps the two facts apart: a project with no canvas game, an
+import turn, a stopped build, a failed build and the kill switch are NOT APPLICABLE and stay silent; a
+canvas game with no preview address, a module turn awaiting its shell, no command channel or no time left
+is COULD NOT LOOK and gets the open warning that already existed.
+
+🔒 **I did NOT add a second dark-screen detector**, and that was deliberate: `browseUrl` returns no pixels,
+so a check there would have been a weaker copy of a tested one — the drifted-copy class this repo has paid
+for four times.
+
+### 🔴 Q-912 — a check after a fix is a new question, not a repeat
+
+The report's `LOOP GUARD` fired on `console_errors`. That call reads the LIVE app's console, so after an
+edit it is a **new question with the same spelling** — check, fix, check again. The guard counted it as a
+non-progressing repeat, nagged, and because `console_errors` is in `PROBE_TOOLS` it would eventually have
+**refused the model's only way of telling whether its own fix had worked.**
+
+🔑 This module already makes the argument one tool over: `bash` is excluded because a repeated
+`tsc --noEmit` *"looks identical to a loop and is usually a build legitimately converging — check, fix,
+check again"*. `console_errors`, `screenshot`, `evaluate` and `browser_action` have the same shape and
+were bannable anyway.
+
+🔒 **The discriminator is not the TOOL, it is whether anything CHANGED.** A signature's count now resets
+when the build has mutated since that signature was last seen. The original autopsy's loop — six identical
+`grep`s with nothing written between them — is **still caught**, because nothing mutated during it; a case
+proves that, and another proves a ban must be earned again after a change.
+
+⚠️ **AND MY FIRST VERSION RE-BROKE Q-738 WITHIN THE HOUR.** It counted every `bash` as a mutation, so the
+SEVEN empty `bash` calls of autopsy `d0b2fcd6` each reset the count: FINAL was never reached,
+`MAX_NO_OP_TURNS_AFTER_FINAL` never applied, and a run doing nothing forever would never end.
+`tests/aRunThatOnlyDoesNothingEnds` caught it immediately. `isEmptyCommandCall` already recognised that
+call — the dispatcher refuses it before the shell — so an empty command no longer counts as a change, and
+a reversion probe shows BOTH that test and mine failing when it does.
+
+### Proof
+
+Three new files, 40 cases: `anAppGradedForTokensItNeverGot` (13) · `aGameNobodyPlayedSaysSo` (15) ·
+`aCheckAfterAFixIsANewQuestion` (12). **Reversion-proven nine ways**, three per item.
+
+⚠️ **The SERVER typecheck caught one the frontend one missed:** `undefinedClassesNow`'s inline return type
+did not declare `noTokens`, so the runner's read of it would not compile. Both typechecks are in the gate
+for exactly this, and only one of them saw it.
+
+⚠️ **AND THREE MORE GUARDS BROKE ON THEIR ANCHORS — the sixth, seventh and eighth of this autopsy.** All
+three pinned a field's POSITION in an argument list (`'a11y: style.a11y, orphans: style.orphans,
+resumesUsed: styleResumes'`; a full `styleResumeNote(...)` call; the one-liner
+`a11yHandBack(lintBuiltApp(project))`), so inserting a fifth hand-back part broke them without touching
+anything they protect. Each now asserts its intent — the architect's call carries the orphans and the
+specialist's does not; both runners pass the a11y count; the lint is taken exactly once — and each was
+re-probed to prove it still fails on a REAL break (drop the a11y field: fails; lint twice: fails).
+
+🔑 **Eight anchor re-pins in one autopsy is itself a finding, and the lesson is one line:** a guard that
+pins a LINE, a BYTE WINDOW, or a field's POSITION breaks when the code around it grows; a guard that pins
+the SYNTAX or the RELATIONSHIP it is really about does not. Every one of the eight underlying invariants
+was correct — only the instruments were brittle. `tests/theQueueQ002`'s title (*"from the same read"*) is
+now MORE true than when it was written, which is the shape a good re-anchor takes.
+
+### BUILD REPORT 50378049 — RESOLUTION
+
+**Items: 15 · ✅ Resolved: 15 · 🟡 Blocked: 0 · Remaining: 0.**
+
+Q-900…Q-911 in #3684 (merged), #3686, #3688 (merged), #3690, #3693, #3694, #3695. Q-912, Q-913, Q-914
+here. Every one has a root cause named, a class fix, siblings hunted, and a test proven by reversion.

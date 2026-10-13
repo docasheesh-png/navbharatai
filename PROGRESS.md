@@ -95308,3 +95308,22 @@ handler: the milestone's dropped-notes record lives in `milestoneBuildPrompt`, "
 headroom. Each has a behaviour test, reversion-proven. The handler being at the limit is a defect in its own right —
 any session's next `if` there turns CI red — so it is now **Q-979** (OPEN, unowned), with a plan to make headroom one
 module at a time. Rows Q-926, Q-976, Q-977 and Q-978 closed (merged in #3698).
+
+## 2026-10-13 — Q-975 closed (#3701 merged); Q-980 opened: a dark screen is a number, not an argument
+
+- **Q-975 closed.** #3701 merged. The row has been deleted, and its ID is appended to `BUILD_REPORT_QUEUE_CLOSED.txt`.
+- **Q-980 (found working Q-913).** #3699, another session's PR, fixed Q-913 itself: the playtest now says when it could
+  not look, so the model's prose no longer stands where a measurement belongs. One gap is left beside it. The playtest's
+  RUNS dimension reads only the brightness SPREAD, so a screen too dark to play still passes if it has a little
+  variation.
+  - **Done:** the playtest now records the picture's mean brightness and prints it, together with the contrast, in its
+    report line. A real-browser case proves the measurement, and removing it makes the case fail.
+  - **Blocked:** the scored "too dark" check waits on two real numbers, one from a too-dark game and one from a
+    legitimately dark game (a space shooter). Detection stays precision-first.
+- **My own miss, recorded so it is not repeated.** I started on Q-913 at about 04:15 without re-listing the open PRs,
+  and #3699 (fixing Q-912 to Q-914) was opened after my last check at 03:04. The rows I had marked BLOCKED were dropped,
+  and that work is not in this PR. From now on, open PRs are listed again before every new item, not once per session.
+- **ID collision, reported to the admin rather than raced (concurrency rule 4).** Draft #3700 (autopsy 303e8a6f
+  follow-up) uses Q-976, Q-977, Q-978 and Q-979 for its own new findings; its branch predates them on `main`. On `main`,
+  Q-976 to Q-978 are this session's closed db07e0af rows, and Q-979 is the open TS2563 row. `aClosedQueueRowStaysClosed`
+  catches a closed ID being re-added, and `theQueueIdsAreUnique` catches a duplicate. #3700 needs to renumber from Q-981.

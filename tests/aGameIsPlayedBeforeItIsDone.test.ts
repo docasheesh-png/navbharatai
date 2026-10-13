@@ -82,6 +82,15 @@ describe.skipIf(!haveBrowser)('the playtest, in a real browser, against games bu
     return runs[path];
   }
 
+  it('Q-980: the picture\'s brightness is MEASURED and reaches the report line — a dark screen is a number, not an argument', async () => {
+    const good = await play('/good');
+    const blank = await play('/blank');
+    // '/blank' paints #123 (luminance ≈ 31); '/good' a blue-to-green sky with a white sun.
+    expect(blank.brightness).toBeGreaterThanOrEqual(27);
+    expect(blank.brightness).toBeLessThanOrEqual(35);
+    expect(good.brightness!).toBeGreaterThan(blank.brightness! + 40);
+    expect(playtestVerdict(blank, REPLAY_WIRED).message).toContain(`picture brightness ${blank.brightness}/255, contrast ${blank.spread}`);
+  }, 300_000);
   it('a game that works scores as playable: it runs, moves, answers the keys, a drag and a thumb', async () => {
     const run = await play('/good');
     const v = playtestVerdict(run, REPLAY_WIRED);

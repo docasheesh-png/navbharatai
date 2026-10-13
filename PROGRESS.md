@@ -94467,6 +94467,90 @@ unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong
 
 **What to watch for on the next report:** a reasoning-only KIMI call ends at ~150 s as a timeout and the chain falls to GLM;
 `LLM_CALL_STOPPED` carries "it had been running Ns"; a non-English scene description gets a picture answer, not a build offer.
+**The fix.**
+- `undeliveredOwnFiles(mod, present)` — pure; which of a module's own files the PROJECT still lacks.
+  Asked against `actuator.listFiles`, never the turn's write set: a file an earlier turn wrote is
+  delivered, and asking only about this turn would call it missing.
+- `recordModuleDelivery(plan, id, present)` — records it on the module (`undelivered?: string[]`), so
+  the fact is durable across turns; module 2's turn is a different request.
+- `contractIsUnbacked(mod)` — true only when the module owns files and EVERY one is missing. A
+  partially delivered module keeps its contract: the names it did write are real.
+- `moduleBuildContext` withholds an unbacked contract and tells the turn why, instead of handing it
+  names under a false heading. A partial delivery hands the contract forward with the missing file named.
+- `PROJECT_MODULE_FILES_UNDELIVERED` — an `info` measurement of OUR process, registered in both
+  `BuildDiagnostics.ts` and `buildFindingSuggestions.ts` so it can never become a finding against the
+  user's app. The user's line is honest too: not a flat "done", but *"this step built the app its own way
+  rather than those exact files"*.
+
+🔒 **The status is deliberately NOT `failed`.** On the reported build the user got a complete, running
+game; *"module 1 failed"* would be its own lie. The status is left alone — what changes is that the plan
+RECORDS what is missing and never passes a contract nothing backs.
+
+**Additive by construction:** a plan nobody measured keeps `undelivered` absent, and `contractIsUnbacked`
+is false for an absent record, so behaviour is byte-identical to today. A `listFiles` that fails leaves
+the plan exactly as it is now (*"unasked is not undelivered"*).
+
+**Locked by** `tests/aPlanThatBecameFiction.test.ts` — 19 cases on the reported plan's real shape.
+**Reversion-proven twice:** stop withholding the unbacked contract → 1 fail; ask the turn's writes
+instead of the project → 1 fail. A case also asserts the pre-fix state still hands the fictional contract
+forward, so the reversion lives in the suite rather than in a shell history.
+
+**Still OPEN from the same root (rowed, not forgotten):** the plan's remaining 14 modules are still
+queued and billable on a build whose app already exists. That is `8e124182`'s original damage and it
+needs a decision about money and the plan's lifecycle, so it is not taken silently here.
+
+## 2026-10-12 — AUTOPSY `50378049`, Q-911: we shipped a test into the user's app and told them to run a command their app did not have
+
+Third PR from the BlockWorld autopsy (#3684 → Q-900…Q-904; #3686 → Q-905).
+
+**The defect, and it is a second-absolute-rule one.** Every 3D game NavBharatAI builds ships
+`src/game/controls.test.ts`, and that file — in the USER's own project — said *"Your test runner runs it
+(npm test, or vitest run)"*. The default Vite scaffold's `package.json`
+(`ViteReactProviderContents.ts`) defines exactly three scripts: `dev`, `build`, `preview`. **There is no
+`test` script.** So `npm test` in that app answers `npm error Missing script: "test"`. We wrote the
+test, we wrote the instruction, and the instruction did not work. `AppKnowledgeBase` repeated the claim
+to every AI in the product: *"…that the project's own test command runs"*.
+
+**Root cause: the script-writing lived in a CALLER instead of in the shared helper.** `withVitestDeclared`
+declared the dependency and stopped there — and `declared` is not `runnable`. Two of the three paths that
+ship a test had worked around that in their own code (`projectKit.ts` added `test: 'vitest run'` with its
+own copy of the string; `e2eScaffold.ts` adds `test:e2e` before telling anyone to run it). The game kit,
+which reaches the helper through `run_recipe → writeRecipeFiles → declareVitestForRecipeTests`, had no
+such copy — so it was the one path that shipped the instruction without the script. Q-843 built the
+dependency half three days ago and this was the half its sibling hunt did not reach.
+
+**The fix (the class, not the instance).**
+- `withVitestDeclared` now ensures BOTH: the devDependency and a real `test` script. Its condition
+  changed from *"is vitest declared?"* to *"can the shipped test be run?"*, so a project that already
+  declares vitest but has no script is no longer skipped.
+- `PLATFORM_TEST_SCRIPT` is exported once — the string two places wrote and a third was missing.
+- `projectKit.ts`'s private copy is deleted; it is now one call, so no future caller can forget.
+- An author's own `test` script is never overwritten. The npm-init placeholder (`no test specified`) is,
+  because `testRunner` already refuses to treat it as a suite.
+- The shipped test's own comment and the KB sentence now name a command that works, and the KB records
+  what was false before it (the system's honesty, fifth step of the fourth rule).
+
+🔒 **WHY ADDING THE SCRIPT CANNOT BRING BACK A KNOWN FAILURE — checked, not assumed.**
+`testRunner.detectTestPlan` prefers a project's own `test` script, so apps now take that branch instead
+of the inferred-vitest one. A bare script there would have lost the `--exclude 'e2e/**'` that stops
+vitest collecting our unrun Playwright starter — the 2026-08-25 false `vitest: FAIL` that the release
+gate escalated to "Not shippable" for a game the admin was playing. **Autopsy `9cca1fd5` (2026-09-17)
+already closed that hole on the script branch**, forwarding the same exclusion through the package
+manager's `--` passthrough. A case in the new test pins that guard, because this fix's safety rests on it,
+and a note in `testRunner.ts` records the check so nobody re-derives the worry.
+
+**Locked by** `tests/aShippedTestCanActuallyBeRun.test.ts` — 11 cases, including a CENSUS of the paths
+that ship a vitest test, the real Vite scaffold's actual script list as the premise, and the 9cca1fd5
+guard. `theEventBookingAutopsy.test.ts`'s *"nothing is written when it is already declared"* case was
+**widened, not weakened**: declared AND runnable is now the condition for doing nothing, with the reason
+recorded in place. **Reversion-proven three ways:** stop adding the script → 8 fails · go back to
+"declared is enough" → 2 · restore `projectKit`'s private copy → 1.
+
+⚠️ **I hit the backtick-inside-a-template-literal trap TWICE in this one change** — in
+`GAME_CONTROLS_TEST` and again in the `AppKnowledgeBase` string — the same trap #3671 recorded. Both
+surfaced as parse errors away from the edit (`TS1128` at `AppKnowledgeBase.ts:3785`, and an oxc parse
+error that made the test file report "no tests"). Fixed with quotes, and the note is in the test file
+rather than in a session's memory.
 
 ### 2026-10-12 — db07e0af rows closed (#3687 merged)
 

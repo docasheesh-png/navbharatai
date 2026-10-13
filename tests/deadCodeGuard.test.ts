@@ -96,6 +96,8 @@ const KNOWN_UNREACHABLE = new Set([
   'src/server/lib/orphanReport.ts',
   // Go-live PR 18: Pro plan model, read by the plans card/purchase route behind PLAN_MODEL_PRO in a follow-up. Remove then.
   'src/lib/planModel.ts',
+  // Go-live marketplace building block, merged ahead of its caller behind a default-off flag. Remove when wired.
+  'src/lib/catalogue/index.ts',
   'src/server/providers/index.ts',
   // Go-live marketplace building block, merged ahead of its caller behind a default-off flag. Remove when wired.
   'src/server/providers/types.ts',

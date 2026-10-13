@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { makeTempDir } from './helpers/tempDir';
 import {
   gamePlaytestModule, gamePlaytestConfig, parsePlaytest, playtestVerdict, sceneVerdict,
-  CAMERA_FACES_VEHICLE_FIX, STEERING_MIRRORED_FIX, type PlaytestRun,
+  CAMERA_FACES_VEHICLE_FIX, STEERING_MIRRORED_FIX, type PlaytestRun, probeStarved, probeStarvedNote,
 } from '../src/server/AgentV3/gamePlaytest';
 
 /** A three.js racer. `cam`: behind the car, in front of it, or fixed; `treadmill`: the car stays and the world moves. */
@@ -110,9 +110,36 @@ describe.skipIf(!haveBrowser)('a three.js racer is read from its own scene, in a
   }
 
   it('a chase camera done right: the scene says the camera is BEHIND and LEFT turns left — no verdict', async () => {
+    /**
+     * 🔴 THIS ASSERTION WAS THE FLAKE (Q-1038), and the fix is in two halves — the probe's and this one's.
+     *
+     * It demanded an unconditional reading from a measurement taken over a fixed interval of a
+     * frame-driven simulation. A page starved of frames by a loaded machine moves the car too little to
+     * clear sceneVerdict's 0.2 speed floor, so the reading is `null` — never a FALSE claim, and
+     * indistinguishable from the true finding "this game does not steer". It passed alone and failed
+     * under load, gating report 9c612cdb's PR and then #3703.
+     *
+     * Lengthening the hold to collect frames is NOT the answer: measured under three CPU hogs, it drove
+     * the car four times further and broke `aRacingGameIsStartedAndDriven` instead (see
+     * `tests/aStarvedPageIsSaidNotGuessed.test.ts`). So the probe now REPORTS starvation, and this test
+     * asserts the real contract rather than a reading no machine can promise:
+     *
+     *   · never a WRONG claim — this fixture's camera is behind and its steering is correct, so neither
+     *     field may EVER read `true`. A genuinely mirrored game still fails here, which is the whole
+     *     finding power of the test;
+     *   · when the page WAS drawing, the exact verdict, as before;
+     *   · when it was not, the starvation must be SAID — a null on its own is not an acceptable outcome.
+     */
     const run = await play('/three-chase');
     expect(run.ok).toBe(true);
-    expect(sceneVerdict(run.scene)).toEqual({ faces: false, mirrored: false });
+    const v = sceneVerdict(run.scene);
+    expect(v.faces, 'the camera is behind the car in this fixture').not.toBe(true);
+    expect(v.mirrored, 'this fixture steers correctly').not.toBe(true);
+    if (probeStarved(run.scene)) {
+      expect(probeStarvedNote(run.scene), 'a starved probe must say so, never return a bare null').toMatch(/page starved/);
+    } else {
+      expect(v).toEqual({ faces: false, mirrored: false });
+    }
     const s = playtestVerdict(run, DRIVING).score!;
     expect([s.cameraFacesVehicle, s.steeringMirrored]).toEqual([undefined, undefined]);
   }, 200_000);

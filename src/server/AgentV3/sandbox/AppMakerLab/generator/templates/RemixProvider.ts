@@ -1,4 +1,5 @@
 import { ITemplateProvider } from './ViteReactProvider';
+import { APP_VIEWPORT_META } from '../../../../nativeFeel';
 
 const PKG = JSON.stringify({
   name: 'my-remix-app',
@@ -71,7 +72,7 @@ export default function App() {
     <html lang="en">
       <head>
         <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        ${APP_VIEWPORT_META}
         <Meta />
         <Links />
       </head>

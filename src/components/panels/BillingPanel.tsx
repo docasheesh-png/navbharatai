@@ -8,8 +8,12 @@
  * Pure render — all state and side effects stay in App.tsx and are threaded in
  * via explicit typed props. No behavior change.
  */
+import { useCallback, useEffect, useState } from 'react';
 import { cn } from '../../lib/utils';
 import { HostingPlanCard } from './HostingPlanCard';
+import { WalletDoors } from './WalletDoors';
+import type { WalletDoor, WalletIntent } from '../../lib/walletIntent';
+import { skuById } from '../../lib/catalogue';
 import { HostingAddonCard } from './HostingAddonCard';
 import { ReferralPanel } from './ReferralPanel';
 import { WalletStatementPanel } from './WalletStatementPanel';
@@ -94,6 +98,13 @@ export interface BillingPanelProps {
   lastGiftCode?: GiftCodeRow | null;
   onCreateGiftOrder?: (faceInr: number) => void;
   onToast: (message: string, type?: ToastType) => void;
+  /**
+   * Go-live PR 14 (WALLET_V2_UI, default OFF): when true the three capsules become the three
+   * doors (Add Money, Buy Services, Usage & Bills), and `walletIntent` opens the right one with a
+   * service pre-selected. False/absent ⇒ this panel renders exactly as before.
+   */
+  walletV2Ui?: boolean;
+  walletIntent?: WalletIntent | null;
   /** Phase 4.2 — current month's AI cost accumulated from Pro builds. */
   monthlyAiCost?: { totalBuilds: number; totalCostUsd: number; month: string } | null;
 }
@@ -123,6 +134,22 @@ export function BillingPanel(props: BillingPanelProps) {
    */
   const giftPrice = giftPriceAtPct(Math.floor(Number(giftFaceInput) || 0), platformFeePct);
   const { monthlyAiCost } = props;
+  const walletV2Ui = props.walletV2Ui === true;
+  const intent = props.walletIntent ?? null;
+  const [door, setDoor] = useState<WalletDoor>(intent?.door ?? 'add_money');
+  const selectDoor = useCallback((d: WalletDoor) => {
+    setDoor(d);
+    if (d === 'add_money') onSetActiveBillingDetailTab('purchase');
+    else if (d === 'usage_bills') onSetActiveBillingDetailTab('remaining');
+    else document.getElementById('wallet-buy-services')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [onSetActiveBillingDetailTab]);
+  useEffect(() => {
+    if (!walletV2Ui || !intent) return;
+    selectDoor(intent.door);
+    if (intent.door === 'add_money' && intent.amountInr) onSetBuyAmountInput(String(intent.amountInr));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletV2Ui, intent]);
+  const preselected = walletV2Ui && intent?.skuId ? skuById(intent.skuId) : null;
 
   // THE LAST TWO STEPS OF THE TOP-UP TRAIL (admin 2026-09-22: "☰ → wallet and billing → buy token →
   // purchage wallet token par ek red dot"). The same predicate the ☰ button and the sidebar row use,
@@ -207,6 +234,9 @@ export function BillingPanel(props: BillingPanelProps) {
             fill (`text-on-accent` is legitimate only on a solid fill); the two data capsules keep the
             card surface with a hue border and a solid icon chip.
           */}
+          {walletV2Ui ? (
+            <WalletDoors active={door} onSelect={selectDoor} />
+          ) : (
           <div className="flex items-stretch gap-2 sm:gap-3 overflow-x-auto no-scrollbar -mx-1 px-1 py-1">
 
             {/* CAPSULE 1 — BUY TOKENS. The only action, so the only solid fill. */}
@@ -297,6 +327,7 @@ export function BillingPanel(props: BillingPanelProps) {
             </div>
 
           </div>
+          )}
 
           {/* Integrated Sub-Panel Details Module */}
           <div className="bg-card border border-line rounded-[2.5rem] p-6 sm:p-8 shadow-3xl text-left space-y-6">
@@ -983,6 +1014,12 @@ export function BillingPanel(props: BillingPanelProps) {
           {/* 🔒 APP LOCK — "Subscription & plans" (admin 2026-09-13). This card IS the subscription surface:
               buying a plan spends the wallet, and the auto-renew switch decides whether it is charged
               again. Default OFF, so a user who never ticked it sees the card exactly as before. */}
+          <div id="wallet-buy-services" />
+          {preselected && (
+            <div className="rounded-2xl border border-orange-500/40 bg-orange-500/10 px-4 py-3 text-sm text-ink" data-testid="wallet-preselected">
+              You picked <span className="font-semibold">{preselected.name}</span>. {preselected.summary}
+            </div>
+          )}
           <AppLockGate
             userId={user.uid}
             area="subscription"

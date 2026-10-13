@@ -94606,6 +94606,73 @@ surfaced as parse errors away from the edit (`TS1128` at `AppKnowledgeBase.ts:37
 error that made the test file report "no tests"). Fixed with quotes, and the note is in the test file
 rather than in a session's memory.
 
+## 2026-10-12 — AUTOPSY `50378049`, Q-906 **and** Q-907: one root cause, two report lines — the engine told a module turn its app was finished at step 10
+
+Fourth PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911).
+
+**The two report lines turned out to be the same mistake.** `READY_BEFORE_END` said the app was judged
+finished at step 10 (100/100) and the build then ran **62 more steps over 1019 s**; separately, a
+`[BUILD CHECKPOINT]` told the model to STOP after one file and the model **correctly overrode it twice**.
+Tracing the checkpoint's text found it: that message IS `doneSignal.doneSteer`, injected because
+`appIsDone` scored the project 100/100 at the first check (`minStep` 8, `everyN` 10 → step 10).
+
+**Why the score was 100 on an app that did not exist yet.** The build was a Project Mode module turn
+(module 1, *"Shared Types & Constants"*) AND the game kit had seeded a complete, working 3D game shell
+before the model's first call (`GAME_KIT_SEEDED`). `assessBuildReadiness` measures the PROJECT, so it
+scored **our own seed**, said "complete and healthy", and the engine told the model:
+
+>     [BUILD CHECKPOINT] … the app is complete and healthy — 100/100, no blockers.
+>     If everything the user asked for is present, STOP HERE: write your summary and hand the app over.
+
+🔴 **Had the model obeyed, the user would have been handed NavBharatAI's own seeded shell as their voxel
+game.** The 62 "overrun" steps were not an overrun at all — they were the user's game being built.
+
+**It is the THIRD time this reasoning has been accepted in `doneSignal.ts`, and the first two never hunted
+this sibling.** `wroteThisRun` (autopsy 1389f0d5) and `editingExistingApp` (autopsy 2b1f845e) are the same
+thought; 2b1f845e states it in full: *"The score measures the PROJECT's health; on an edit the project was
+healthy before the turn began, so the score cannot say whether the REQUEST is done."* And
+`readyOverrunNote` ALREADY carried the module case in its own words — *"this turn built one project module
+… not the whole app, so the project score cannot say when it was done"*. **The sentence was written; the
+guard never reached `shouldCheckDone`.** The explanation and the behaviour disagreed, and the explanation
+was right.
+
+**The fix.** `shouldCheckDone` and `endOfTurnReadyMark` both take `projectModule` and stand down for a
+module turn. `AgentRunner` passes it as a **getter** (`projectModule?: () => string | null`) for the same
+reason `hasExistingFiles` is one: the route chooses the module long after `baseRunnerOpts` is built, so a
+value would always be null.
+
+🔑 **Both guards were required, not just the steer.** `readyOverrunNote`'s honest *"Not measured: this turn
+built one project module"* line fires only when there is NO mark — so a mark recorded by the end-of-turn
+gate made that sentence **unreachable** for every module turn it judged, and the admin instead read a
+62-step overrun of a finished app. A test asserts both directions.
+
+**Locked by** `tests/aModuleIsNotAnAppToBeDoneWith.test.ts` — 11 cases on the reported build's own numbers,
+including that the steer is unchanged for the builds it is for, and the wiring census (both
+`shouldCheckDone` call sites plus the mark). **Reversion-proven three ways:** drop the steer carve-out → 1
+fail · drop the mark carve-out → 2 · pass the route's value instead of a getter → 1.
+
+**🔸 THE OPEN HALF, recorded rather than guessed.** The same collision can happen on a NON-module build: the
+game kit seeds a working app, the model writes a few files, and the done check scores OUR seed 100/100. The
+module carve-out does not cover that, and the honest fix needs a measured threshold for "enough of the
+BUILDER's own work to judge" (`gameKitSeed.builderWrittenCount` is the input). Inventing that number from
+one report is exactly what the fourth rule forbids, and this module's own discipline is measure-first — so
+it is an OPEN root cause awaiting a report where a seeded, non-module build gets the checkpoint early. It
+becomes a `BUILD_REPORT_QUEUE.md` row when #3684 (which holds this autopsy's rows) merges.
+
+**One existing guard was RE-ANCHORED, not weakened** (`theCommitMessageWasNotADevServer.test.ts`). It
+counted the literal `editingExistingApp: … === true })` — the flag followed immediately by the closing
+brace — so it was really asserting that the flag is the LAST property in the call, and adding a property
+after it broke the guard without touching anything it protects. It now asserts the intent directly (every
+`shouldCheckDone` call contains the flag), which a reordering cannot break and a removal still can —
+proven by dropping the flag from one call and watching it fail.
+
+⚠️ **A PROCESS SLIP WORTH RECORDING, because the gate is what caught it.** After moving this work onto its
+own branch I ran a reversion probe without re-staging, so `git checkout -- AgentRunner.ts` restored that
+file to HEAD and **silently discarded the whole runner half of the fix**. `typecheck` and the targeted
+tests had already passed — on the tree *before* the probes — and the first full-suite run on the branch
+then failed on exactly one case: the wiring census. Two of safeguard #5's rules did their job together:
+*stage before you probe*, and *run the gate LAST, on the final state*. The census existed because a
+reader of this fact could be forgotten; it caught the fix itself going missing.
 ### 2026-10-12 — db07e0af rows closed (#3687 merged)
 
 - **Closed (✅), on a fresh `main` (377d915):** Q-915 … Q-922, Q-924, Q-925, Q-927, Q-928 and Q-929 — 13 rows. They are removed from the open table and appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`. The ledger stays in the autopsy entry above.

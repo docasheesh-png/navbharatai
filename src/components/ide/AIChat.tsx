@@ -284,7 +284,7 @@ interface AIChatProps {
   buildProgress?: BuildProgressState | null;
   onBuildStepToggle?: (index: number) => void;
   onLanguagePick?: (lang: string) => void;
-  /** What the account calls itself — the greeting addresses its first name (chat/greeting.ts). */
+  /** What the account calls itself — the greeting addresses its first name (chat/greetingText.ts). */
   userName?: string | null;
   onDownloadZip?: (files: Record<string, string>, appName: string) => void;
   onSendSuggestion?: (text: string) => void;

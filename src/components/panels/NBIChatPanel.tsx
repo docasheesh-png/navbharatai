@@ -131,7 +131,7 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
         </div>
         <AIChat
           messages={messages}
-          // The greeting addresses the account by its first name (chat/greeting.ts).
+          // The greeting addresses the account by its first name (chat/greetingText.ts).
           userName={user?.displayName ?? null}
           input={input}
           onInputChange={setInput}

@@ -2,9 +2,9 @@
 // a serif "Good evening, Asheesh" with a small accent mark, and one quiet line under it. Rendered by
 // every AI surface's empty state, so the first thing a user sees is the same on all of them.
 //
-// The words come from the pure `greeting.ts`; this file is only the picture.
+// The words come from the pure `greetingText.ts`; this file is only the picture.
 import { Sparkles } from 'lucide-react';
-import { greetingFor } from './greeting';
+import { greetingFor } from './greetingText';
 import { GREETING_CLASS, GREETING_SUBLINE_CLASS } from './conversation';
 
 export interface GreetingProps {

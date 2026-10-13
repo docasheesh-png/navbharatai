@@ -25,7 +25,7 @@ import { join } from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { DEVANAGARI_STACK } from '../src/lib/imageFonts';
-import { dayPartFor, greetingFor, greetingName } from '../src/components/chat/greeting';
+import { dayPartFor, greetingFor, greetingName } from '../src/components/chat/greetingText';
 import { Greeting } from '../src/components/chat/Greeting';
 import { ChatMarkdown } from '../src/components/chat/ChatMarkdown';
 import {

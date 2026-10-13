@@ -17,6 +17,7 @@ import { MANIFEST_V2_RULES, cleanPurpose, fastLaneDepsChars, fastLaneMaxFiles, f
 import { dropShadowingEntries } from './entryShadow';
 import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE } from './noEvalRule';
 import { posix } from 'node:path';
+import { contractFilePath, contractImportSpecifier } from './contractLocation';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
 import { generateAiIntegration } from '../lib/AiGenerator';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
@@ -895,17 +896,9 @@ export function frameworkSupportsContractFile(framework: string | undefined): bo
   return /react|vite|next|remix|gatsby|vue|nuxt|svelte|astro|solid|qwik|angular|typescript|\bts\b/.test(fw);
 }
 
-/** Where the contract module lives: beside the app's sources when they are under `src/`. Pure. */
-export function contractFilePath(manifest: ReadonlyArray<{ path: string }>): string {
-  return manifest.some((f) => f.path.startsWith('src/')) ? 'src/types.ts' : 'types.ts';
-}
-
-/** The relative import specifier for `contractPath` from inside `fromPath` (no extension). Pure. */
-export function contractImportSpecifier(fromPath: string, contractPath: string): string {
-  let rel = posix.relative(posix.dirname(fromPath), contractPath).replace(/\.tsx?$/, '');
-  if (!rel.startsWith('.')) rel = `./${rel}`;
-  return rel;
-}
+// The contract's home (`contractFilePath`) and its import form (`contractImportSpecifier`) are imported
+// from `contractLocation.ts`, their ONE home. This file held a second copy of both until Q-1026, and
+// `contractRenames.ts` a third of the specifier; nothing made the copies agree.
 
 /**
  * The utility functions the contract declares WITHOUT a body (`export function calculate(a: number): number;`).

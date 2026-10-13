@@ -91,14 +91,21 @@ describe('Q-1038 — the probe really waits on frames, and the report really say
      * the pixel looks longer, it recorded the frames drawn during them and refused to believe a verdict
      * taken while the page was not drawing. The intervals here keep their exact original lengths.
      */
-    expect(SRC).toMatch(/const legGas = await framesOver\(page, 550\);/);
-    expect(SRC).toMatch(/const legStraight = await framesOver\(page, 400\);/);
-    // framesOver adds NO waiting of its own beyond the interval it was given.
-    const fn = SRC.slice(SRC.indexOf('async function framesOver'), SRC.indexOf('async function framesOver') + 300);
-    expect(fn).toMatch(/await page\.waitForTimeout\(ms\);/);
-    expect(fn).not.toMatch(/while|for \(/);
-    // And the rejected design is gone, not merely unused.
-    expect(SRC).not.toMatch(/waitFrames/);
+    // The windows are the ORIGINAL bare waits, with nothing of ours inside them.
+    expect(SRC).toMatch(/const g0 = await shot\(page, box\);\n\s*await page\.waitForTimeout\(550\);\n\s*const g1 = await shot\(page, box\);/);
+    expect(SRC).toMatch(/const e0 = await snapScene\(page\);\n\s*await page\.waitForTimeout\(400\);\n\s*const e1 = await snapScene\(page\);/);
+    // The counter is read BEFORE the first shot and AFTER the last, never between them: an earlier
+    // version put a page.evaluate round-trip inside the window, which on a contended machine is not
+    // noise — the measured window stopped being the window it used to be.
+    expect(SRC).toMatch(/const fGas0 = await drawn\(page\);\n\s*const sg0 = await snapScene/);
+    expect(SRC).toMatch(/const legGas = framesBetween\(fGas0, await drawn\(page\), 550\);/);
+    expect(SRC).toMatch(/const legStraight = framesBetween\(fStraight0, await drawn\(page\), 400\);/);
+    // framesBetween is PURE arithmetic — it cannot wait, so it cannot perturb anything.
+    const at = SRC.indexOf('function framesBetween');
+    const fn = SRC.slice(at, SRC.indexOf('\n}', at));
+    expect(fn).not.toMatch(/await|waitForTimeout/);
+    // And both rejected designs are gone, not merely unused.
+    expect(SRC).not.toMatch(/waitFrames|framesOver/);
   });
 
   it('🔒 the frames are recorded WHETHER OR NOT a turn was computed', () => {

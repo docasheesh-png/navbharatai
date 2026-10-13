@@ -585,11 +585,15 @@ async function drawn(page) {
  * counted, and a reading taken across too few of them is reported as starved instead of returned as a
  * null that reads exactly like the real finding "this game does not steer".
  */
-async function framesOver(page, ms) {
-  const f0 = await drawn(page);
-  const t0 = Date.now();
-  await page.waitForTimeout(ms);
-  return { frames: (await drawn(page)) - f0, ms: Date.now() - t0 };
+/**
+ * 🔒 AND THE COUNTER IS READ OUTSIDE THE WINDOW, NOT INSIDE IT. An earlier version wrapped the interval
+ * in two page.evaluate round-trips, which put one of them BETWEEN the first screenshot and the wait — so
+ * the measured window was no longer the window it used to be. On an idle machine that is noise; under
+ * full-suite contention a round-trip is not. The sequence between the two shots is now byte-for-byte
+ * what it always was, and the frame count is taken from before the first shot to after the last.
+ */
+function framesBetween(before, after, ms) {
+  return { frames: Math.max(0, after - before), ms };
 }
 
 const browser = await chromium.launch();
@@ -646,15 +650,18 @@ try {
   await step('up / W', async () => {
     for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(350);
+    // 🔴 THE INTERVAL EVERY SCENE VERDICT DEPENDS ON (Q-1038). Both sceneVerdict fields sit behind its
+    // moved >= 0.2 guard, so a page starved here nulls the camera AND, through the guard, the steering
+    // reading. The frames are counted so that is SAYABLE — and the window between the two shots is
+    // UNTOUCHED: not stretched (that drove the car somewhere else) and not interrupted by a round-trip
+    // of our own (see framesBetween).
+    const fGas0 = await drawn(page);
     const sg0 = await snapScene(page);
     const g0 = await shot(page, box);
-    // 🔴 THE INTERVAL EVERY SCENE VERDICT DEPENDS ON (Q-1038). 550 ms, unchanged. Both sceneVerdict
-    // fields sit behind its moved >= 0.2 guard, so a page starved here nulls the camera AND, through the
-    // guard, the steering reading. The frames are counted so that is SAYABLE; the interval is not
-    // stretched, because stretching it drove the car somewhere else (see framesOver).
-    const legGas = await framesOver(page, 550);
+    await page.waitForTimeout(550);
     const g1 = await shot(page, box);
     const sg1 = await snapScene(page);
+    const legGas = framesBetween(fGas0, await drawn(page), 550);
     const gasMoves = sceneMoves(sg0, sg1);
     const car = pickVehicle(idleMoves, gasMoves);
     if (car && sg0 && sg1) {
@@ -721,13 +728,15 @@ try {
     // The accelerator alone first (the direction the vehicle is going), then LEFT with it (the direction it turned to).
     for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(300);
+    // The turn's own interval: 400 ms, exactly as before, and nothing of ours inside it either. Two
+    // frames of travel do not clear the 0.2 speed floor sceneVerdict needs, so the reading is null; what
+    // changes is that the frames are counted, so that null can be told apart from a game that genuinely
+    // does not steer.
+    const fStraight0 = await drawn(page);
     const e0 = await snapScene(page);
-    // The turn's own interval: 400 ms, exactly as before — about 24 frames on an idle machine and about
-    // two on a loaded one. Two frames of travel do not clear the 0.2 speed floor sceneVerdict needs, so
-    // the reading is null; what changes is that the frames are now counted, so that null can be told
-    // apart from a game that genuinely does not steer.
-    const legStraight = await framesOver(page, 400);
+    await page.waitForTimeout(400);
     const e1 = await snapScene(page);
+    const legStraight = framesBetween(fStraight0, await drawn(page), 400);
     for (const k of ['ArrowLeft', 'KeyA']) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(300);
     const s0 = await snapScene(page);

@@ -87,6 +87,9 @@ const isTest = (p: string) => p.includes('.test.') || p.includes('.spec.');
 const KNOWN_UNREACHABLE = new Set([
   // Go-live marketplace building block, merged ahead of its caller behind a default-off flag. Remove when wired.
   'src/lib/catalogue/index.ts',
+  'src/server/providers/index.ts',
+  // Go-live marketplace building block, merged ahead of its caller behind a default-off flag. Remove when wired.
+  'src/server/providers/types.ts',
   // Its only caller was the legacy Engineer AI actuator, removed 2026-09-25. Kept on purpose: it is an
   // npm-install safety scan the LIVE actuator does not run yet, so the right move is to wire it in, not
   // to delete a working check. Remove this entry in the change that wires it.

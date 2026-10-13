@@ -13,7 +13,7 @@ export function WalletDoors({ active, onSelect }: { active: WalletDoor; onSelect
           type="button"
           role="tab"
           aria-selected={d === active}
-          className={`rounded-lg px-3 py-2 text-sm font-medium ${d === active ? 'bg-orange-500 text-white' : 'bg-white/5 hover:bg-white/10'}`}
+          className={`rounded-lg px-3 py-2 text-sm font-medium ${d === active ? 'bg-accent text-on-accent' : 'bg-raised text-ink hover:bg-card'}`}
           onClick={() => onSelect(d)}
         >
           {WALLET_DOOR_LABEL[d]}

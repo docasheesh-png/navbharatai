@@ -570,32 +570,26 @@ async function drawn(page) {
 }
 
 /**
- * Wait for BOTH: at least minMs of wall clock AND n DRAWN frames — giving up at capMs.
+ * Run an interval of EXACTLY the length it always was, and report how many frames the page drew in it.
  *
- * 🔴 THE FRAME COUNT IS A FLOOR ADDED TO THE TIME, NOT A REPLACEMENT FOR IT, and getting that wrong
- * broke a passing test. The first version waited for frames ALONE, which on a fast machine is SHORTER
- * than the interval it replaced: twelve frames is about 200 ms at 60 fps, against the 550 ms the
- * accelerator window used to run for. The picture then changed less between the two shots, out.gas fell
- * under the still threshold, the gas optical-flow sample was never taken at all, and Q-861's steering
- * test went from a firm reading to no reading. A fix that shortens the measurement it was protecting is
- * not a fix.
+ * 🔴 WHY THIS ONLY MEASURES, AND DOES NOT WAIT LONGER — measured, not reasoned. The first version of this
+ * fix held the key until twelve frames had been drawn (what Q-1038's row prescribed). On a loaded machine
+ * that stretched a 550 ms accelerator hold to as much as 2500 ms, and the car does not politely wait: it
+ * drives four times further, into a wall, off the road, or past the turn the next sample was going to
+ * read. Under three CPU hogs aRacingGameIsStartedAndDriven went from 7/7 passing on main to 1 and then
+ * 3 failures on that branch. Gathering more frames CHANGED WHAT THERE WAS TO MEASURE.
  *
- * So the slow machine gets its frames and the fast machine keeps its milliseconds. The cap bounds both,
- * because a page whose raf loop has died would otherwise hold the probe for the whole playtest budget.
- * Returns what really happened, so the caller can report the starvation instead of nothing at all.
+ * 🧬 So this follows what Q-869 actually did, rather than what it looked like it did. Q-869 did not make
+ * the pixel looks longer; it RECORDED how many frames the page drew during them and refused to believe a
+ * verdict taken while the page was not drawing. Same here: the interval is untouched, the frames are
+ * counted, and a reading taken across too few of them is reported as starved instead of returned as a
+ * null that reads exactly like the real finding "this game does not steer".
  */
-async function waitFrames(page, n, capMs, minMs) {
-  const t0 = Date.now();
+async function framesOver(page, ms) {
   const f0 = await drawn(page);
-  let got = 0;
-  for (;;) {
-    const waited = Date.now() - t0;
-    if (waited >= capMs) break;
-    if (got >= n && waited >= minMs) break;
-    await page.waitForTimeout(16);
-    got = (await drawn(page)) - f0;
-  }
-  return { frames: got, ms: Date.now() - t0, starved: got < n };
+  const t0 = Date.now();
+  await page.waitForTimeout(ms);
+  return { frames: (await drawn(page)) - f0, ms: Date.now() - t0 };
 }
 
 const browser = await chromium.launch();
@@ -654,12 +648,11 @@ try {
     await page.waitForTimeout(350);
     const sg0 = await snapScene(page);
     const g0 = await shot(page, box);
-    // 🔴 THE INTERVAL EVERY SCENE VERDICT DEPENDS ON (Q-1038). This was waitForTimeout(550). Both
-    // sceneVerdict fields sit behind its moved >= 0.2 guard, so a page starved here nulls the camera
-    // AND the steering reading — which is why frame-gating the steering leg alone did not stop the flake.
-    // It also makes the gas reading more trustworthy, never less: a stalled car's picture does not
-    // change however long you look at it, while a moving one gets the frames it needs to prove it.
-    const legGas = await waitFrames(page, ${PROBE_MIN_FRAMES}, ${PROBE_CAP_MS}, 550);
+    // 🔴 THE INTERVAL EVERY SCENE VERDICT DEPENDS ON (Q-1038). 550 ms, unchanged. Both sceneVerdict
+    // fields sit behind its moved >= 0.2 guard, so a page starved here nulls the camera AND, through the
+    // guard, the steering reading. The frames are counted so that is SAYABLE; the interval is not
+    // stretched, because stretching it drove the car somewhere else (see framesOver).
+    const legGas = await framesOver(page, 550);
     const g1 = await shot(page, box);
     const sg1 = await snapScene(page);
     const gasMoves = sceneMoves(sg0, sg1);
@@ -729,10 +722,11 @@ try {
     for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(300);
     const e0 = await snapScene(page);
-    // THE FRAGILE LEG (Q-1038). This was waitForTimeout(400) — about 24 frames on an idle machine and
-    // about two on a loaded one, and two frames of travel do not clear the 0.2 speed floor that
-    // sceneVerdict needs before it will read a turn at all.
-    const legStraight = await waitFrames(page, ${PROBE_MIN_FRAMES}, ${PROBE_CAP_MS}, 400);
+    // The turn's own interval: 400 ms, exactly as before — about 24 frames on an idle machine and about
+    // two on a loaded one. Two frames of travel do not clear the 0.2 speed floor sceneVerdict needs, so
+    // the reading is null; what changes is that the frames are now counted, so that null can be told
+    // apart from a game that genuinely does not steer.
+    const legStraight = await framesOver(page, 400);
     const e1 = await snapScene(page);
     for (const k of ['ArrowLeft', 'KeyA']) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(300);
@@ -841,15 +835,6 @@ export interface FlowRead { total: number; pos: number; neg: number; pairs: numb
  * margin rather than by luck. The sibling constant for the PIXEL looks is `LATE_MIN_FRAMES` (Q-869).
  */
 export const PROBE_MIN_FRAMES = 12;
-
-/**
- * How long the probe will wait for those frames before giving up and SAYING SO.
- *
- * Twelve frames is 200 ms at 60 fps and 2.4 s at 5 fps, so this covers a badly loaded machine. The cap
- * exists because a page whose raf loop has died would otherwise hold the probe for the whole playtest
- * budget — a hang is a worse outcome than an honest "starved".
- */
-export const PROBE_CAP_MS = 2500;
 
 export interface SceneRead {
   moved: number;

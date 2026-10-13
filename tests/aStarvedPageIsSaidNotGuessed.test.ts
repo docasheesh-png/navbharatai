@@ -28,7 +28,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   probeStarved, probeStarvedNote, sceneVerdict, playtestVerdict,
-  PROBE_MIN_FRAMES, PROBE_CAP_MS, type SceneRead,
+  PROBE_MIN_FRAMES, type SceneRead,
 } from '../src/server/AgentV3/gamePlaytest';
 
 const SRC = readFileSync(resolve(__dirname, '../src/server/AgentV3/gamePlaytest.ts'), 'utf8');
@@ -72,62 +72,33 @@ describe('Q-1038 — a starved page is reported, never guessed at', () => {
     // 1.7° per frame against sceneVerdict's 5° floor is a 3-frame floor; 12 is that with room.
     expect(PROBE_MIN_FRAMES).toBeGreaterThanOrEqual(3);
     expect(PROBE_MIN_FRAMES).toBe(12);
-    // 12 frames is 2.4 s at 5 fps, so the cap must clear that or the cap always wins on a loaded machine.
-    expect(PROBE_CAP_MS).toBeGreaterThan((PROBE_MIN_FRAMES / 5) * 1000);
+    // There is no cap to check any more: nothing waits. PROBE_MIN_FRAMES is only the floor BELOW which a
+    // reading is reported as starved — it never changes how long the probe runs.
   });
 });
 
 describe('Q-1038 — the probe really waits on frames, and the report really says it', () => {
-  it('🔴 the ACCELERATOR window waits for drawn frames — the interval every verdict depends on', () => {
+  it('🔴 the intervals are NOT stretched — they are MEASURED', () => {
     /**
-     * This is the half that actually stopped the flake, and it had NO guard until a reversion proved it:
-     * removing it left all thirteen other tests green. `out.scene` is read across this interval, and BOTH
-     * sceneVerdict fields sit behind its `moved >= 0.2` guard — so frame-gating the steering leg alone
-     * (which is where the queue row pointed) left the camera reading, and through the guard the steering
-     * reading too, still on the clock. The test under load still failed. Measuring beat reading the row.
-     */
-    expect(SRC).toMatch(/const legGas = await waitFrames\(page, \$\{PROBE_MIN_FRAMES\}, \$\{PROBE_CAP_MS\}, 550\);/);
-    expect(SRC).not.toMatch(/const g0 = await shot\(page, box\);\s*\n\s*await page\.waitForTimeout\(550\);/);
-    // And its frames reach the scene read, or `probeStarved` would be blind to the window that matters.
-    expect(SRC).toMatch(/probeFrames: legGas\.frames, probeMs: legGas\.ms,/);
-  });
-
-  it('🔴 the frame count is a FLOOR ON TOP OF the original time, not a replacement', () => {
-    /**
-     * A REGRESSION THIS CHANGE CAUSED AND THE FULL SUITE CAUGHT. The first version waited for frames
-     * ALONE — and on a fast machine twelve frames is about 200 ms, against the 550 ms the accelerator
-     * window had always run for. The picture changed less between the two shots, `out.gas` fell under the
-     * still threshold, the gas optical-flow sample was never taken, and Q-861's steering test
-     * (`aRacingGameIsStartedAndDriven`) went from a firm reading to no reading at all.
+     * 🔴 THE ROW'S PRESCRIBED FIX WAS HARMFUL, AND THIS IS THE EVIDENCE. Q-1038 said to "hold LEFT until
+     * N rendered frames … with a wall-clock cap". That was implemented, and on a loaded machine it
+     * stretched a 550 ms accelerator hold to as much as 2500 ms — and the car does not politely wait. It
+     * drives four times further: into a wall, off the road, or past the turn the next sample meant to
+     * read. Under three CPU hogs `aRacingGameIsStartedAndDriven` went 7/7 → 7/7 on main and 1-failed →
+     * 3-failed on that branch, twice each. **Gathering more frames changed what there was to measure.**
      *
-     * A fix that SHORTENS the measurement it was protecting is not a fix. The slow machine gets its
-     * frames; the fast machine keeps its milliseconds; the cap bounds both.
+     * 🧬 So this does what Q-869 ACTUALLY did rather than what it looked like it did: Q-869 did not make
+     * the pixel looks longer, it recorded the frames drawn during them and refused to believe a verdict
+     * taken while the page was not drawing. The intervals here keep their exact original lengths.
      */
-    expect(SRC).toMatch(/async function waitFrames\(page, n, capMs, minMs\)/);
-    // Both conditions must hold before it returns — frames AND the floor.
-    expect(SRC).toMatch(/if \(got >= n && waited >= minMs\) break;/);
-    // And each call site passes the duration that interval used to run for, not a shorter one.
-    expect(SRC).toMatch(/legGas = await waitFrames\(page, \$\{PROBE_MIN_FRAMES\}, \$\{PROBE_CAP_MS\}, 550\)/);
-    expect(SRC).toMatch(/legStraight = await waitFrames\(page, \$\{PROBE_MIN_FRAMES\}, \$\{PROBE_CAP_MS\}, 400\)/);
-  });
-
-  it('🔒 the WEAKEST leg decides, because one starved interval is enough', () => {
-    // The accelerator window sets it; the steering legs can only lower it. A max, or overwriting it,
-    // would let a good leg hide a starved one.
-    expect(SRC).toMatch(/out\.scene\.probeFrames = Math\.min\(out\.scene\.probeFrames \?\? Infinity, legStraight\.frames, legTurn\.frames\);/);
-  });
-
-  it('🔒 the steering leg waits for DRAWN frames, not a bare timeout', () => {
-    // The exact line that was `waitForTimeout(400)`. Script-side code is inside a template literal, so a
-    // source assertion is how this repo locks it (the same way the Q-745 and Q-869 wiring is locked).
-    expect(SRC).toMatch(/const legStraight = await waitFrames\(page, \$\{PROBE_MIN_FRAMES\}, \$\{PROBE_CAP_MS\}, 400\);/);
-    expect(SRC).not.toMatch(/const e0 = await snapScene\(page\);\s*\n\s*await page\.waitForTimeout\(400\);/);
-  });
-
-  it('🔒 the wait is CAPPED — a dead raf loop must not hang the playtest', () => {
-    const fn = SRC.slice(SRC.indexOf('async function waitFrames'), SRC.indexOf('async function waitFrames') + 500);
-    expect(fn).toMatch(/if \(waited >= capMs\) break;/);
-    expect(fn).toMatch(/starved: got < n/);
+    expect(SRC).toMatch(/const legGas = await framesOver\(page, 550\);/);
+    expect(SRC).toMatch(/const legStraight = await framesOver\(page, 400\);/);
+    // framesOver adds NO waiting of its own beyond the interval it was given.
+    const fn = SRC.slice(SRC.indexOf('async function framesOver'), SRC.indexOf('async function framesOver') + 300);
+    expect(fn).toMatch(/await page\.waitForTimeout\(ms\);/);
+    expect(fn).not.toMatch(/while|for \(/);
+    // And the rejected design is gone, not merely unused.
+    expect(SRC).not.toMatch(/waitFrames/);
   });
 
   it('🔒 the frames are recorded WHETHER OR NOT a turn was computed', () => {

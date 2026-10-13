@@ -95463,7 +95463,7 @@ app's, exactly as the not-run warning says.
 **Evidence, because "it should be fine now" is not evidence:** 6/6 unloaded; 3/3 on the previously-failing
 case under three CPU hogs (load 3.5 on 4 cores) — the same conditions under which the partial fix failed.
 
-🔴 **Three bugs this change caught in itself, all worth recording as classes:**
+🔴 **Bugs this change caught in itself, all worth recording as classes:**
 
 1. **A bare TypeScript constant inside the browser script.** The accelerator fix was first written
    `waitFrames(page, PROBE_MIN_FRAMES, PROBE_CAP_MS)` — no `${…}`. Inside the template literal that is
@@ -95477,19 +95477,31 @@ case under three CPU hogs (load 3.5 on 4 cores) — the same conditions under wh
    lines past the cause. The guard names the line; it is a diagnostics fix, not a new safety net, and
    that is what its comment says rather than overclaiming it.
 
-🔴 **AND A THIRD BUG, WHICH THE FULL SUITE CAUGHT AFTER THE FIX "WORKED".** The first version waited for
-frames ALONE — and on a fast machine twelve frames is about 200 ms, against the **550 ms** the accelerator
-window had always run for. So on the machine where there was never a problem, the window got SHORTER: the
-picture changed less between the two shots, `out.gas` fell under the still threshold, the gas optical-flow
-sample was never taken at all, and Q-861's steering test (`aRacingGameIsStartedAndDriven`) went from a firm
-reading to no reading. **A fix that shortens the measurement it was protecting is not a fix.**
+🔴 **AND THEN THE MEASUREMENT SAID THE ROW'S PRESCRIBED FIX WAS HARMFUL.** The row said to *"hold LEFT
+until N rendered frames … with a wall-clock cap"*. That was built — and it made things worse, twice over:
 
-The frame count is a FLOOR ADDED TO the original duration, not a replacement for it: the slow machine gets
-its frames, the fast machine keeps its milliseconds, and the cap bounds both. It is the "never trade one
-problem for another" rule, and it was caught only because the suite ran on the final state — the two
-browser suites now pass 32/32 together.
+1. Waiting for frames ALONE is SHORTER than the interval it replaced on a fast machine: twelve frames is
+   about 200 ms against 550 ms, so `out.gas` saw less change, fell under the still threshold, and the gas
+   optical-flow sample was never taken. Adding the original duration back as a floor fixed that.
+2. But the floor exposed the real objection. On a loaded machine the hold stretched to as much as
+   2500 ms — and **the car does not politely wait.** It drives four times further: into a wall, off the
+   road, or past the turn the next sample meant to read. Under three CPU hogs,
+   `aRacingGameIsStartedAndDriven` passed **7/7 twice on main** and failed **1 then 3** on that branch.
+   Gathering more frames CHANGED WHAT THERE WAS TO MEASURE.
 
-**Proof.** 18 tests (`tests/aStarvedPageIsSaidNotGuessed.test.ts`) and **9 reversions**. Two of those
+🧬 **So the fix became what Q-869 ACTUALLY did, rather than what it looked like it did.** Q-869 did not
+make the pixel looks longer. It RECORDED how many frames the page drew during them and refused to believe
+a verdict taken while the page was not drawing. The intervals here keep their exact original lengths —
+550 ms and 400 ms, untouched — the frames drawn in them are counted, and a reading taken across too few
+is reported as starved instead of returned as a null that reads exactly like the real finding "this game
+does not steer". After the rework: **7/7 twice under the same load**, matching main.
+
+⚠️ **The lesson is not "the row was wrong", it is that a prescribed fix on a SIMULATION needs measuring
+before it is believed.** The row's author reasoned correctly from the symptom and could not have known
+that lengthening a hold moves the car; only running it under load showed that. The row's second half —
+*print "page starved" instead of a silent null* — was right all along, and is the whole fix now.
+
+**Proof.** 14 tests (`tests/aStarvedPageIsSaidNotGuessed.test.ts`), the two real-browser suites green together (32/32), and the regression case 7/7 twice under three CPU hogs. The rejected design is asserted GONE, not merely unused, so it cannot creep back as an optimisation. Two of those
 reversions found holes in the lock itself: removing the accelerator frame-gate left all thirteen other
 tests green, and the bare-constant bug was invisible until a source assertion existed. A reversion that
 passes is the test telling you it is not watching.

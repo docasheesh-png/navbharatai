@@ -81,6 +81,6 @@ describe('the composer relies on this: the textarea opts out, the box is the ind
 
   it('the textarea carries outline-none and the box carries focus-within', () => {
     expect(SHELL).toMatch(/COMPOSER_TEXTAREA_CLASS =\s*\n?\s*'[^']*\boutline-none\b/);
-    expect(SHELL).toMatch(/COMPOSER_BOX_CLASS =\s*\n?\s*'[^']*\bfocus-within:border-indigo-500\b/);
+    expect(SHELL).toMatch(/COMPOSER_BOX_CLASS =\s*\n?\s*'[^']*\bfocus-within:border-accent\b/);
   });
 });

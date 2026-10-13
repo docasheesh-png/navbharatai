@@ -5,20 +5,19 @@ import { ImageLightbox } from '../chat/ImageLightbox';
 import { ComposerShell, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS } from '../chat/ComposerShell';
 import { playTapTone } from '../../lib/tapTone';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
-import { Bot, User, Send, Sparkles, Zap, CheckCircle2, Save, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
+import { Zap, CheckCircle2, Save, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2, ArrowUp, Square, RotateCcw } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { stripChatMarkers } from '../../lib/chatMarkers';
 import { motion, AnimatePresence } from 'motion/react';
-import ReactMarkdown from 'react-markdown';
-import { CHAT_MARKDOWN_PLUGINS } from '../../lib/chatMarkdown';
 import { AttachMenu } from '../AttachMenu';
 import { saveSecret } from '../../lib/secretsApi';
 import { useSpeechInput } from '../../hooks/useSpeechInput';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
-import { ChatCodeBlock } from '../chat/ChatCodeBlock';
-import { USER_BUBBLE_TONE, ASSISTANT_BUBBLE_TONE } from '../chat/bubbleTone';
+import { ChatMarkdown } from '../chat/ChatMarkdown';
+import { Greeting } from '../chat/Greeting';
+import { USER_TURN_CLASS, ASSISTANT_TURN_CLASS, USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, MESSAGE_ACTION_ROW_CLASS, MESSAGE_ACTION_BUTTON_CLASS, MESSAGE_ACTION_ICON_CLASS, CONVERSATION_COLUMN_CHILDREN_CLASS, TYPING_DOTS_CLASS, TYPING_DOT_CLASS } from '../chat/conversation';
 import { MessageEditActions } from '../chat/MessageEditActions';
 import { ReportAiContent } from '../chat/ReportAiContent';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
@@ -285,6 +284,8 @@ interface AIChatProps {
   buildProgress?: BuildProgressState | null;
   onBuildStepToggle?: (index: number) => void;
   onLanguagePick?: (lang: string) => void;
+  /** What the account calls itself — the greeting addresses its first name (chat/greetingText.ts). */
+  userName?: string | null;
   onDownloadZip?: (files: Record<string, string>, appName: string) => void;
   onSendSuggestion?: (text: string) => void;
   /**
@@ -333,6 +334,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   buildProgress = null,
   onBuildStepToggle,
   onLanguagePick,
+  userName = null,
   onDownloadZip,
   onSendSuggestion,
   onMessagesChange,
@@ -447,10 +449,6 @@ export const AIChat: React.FC<AIChatProps> = ({
   const [reportedMsgIds, setReportedMsgIds] = useState<ReadonlySet<string>>(() => new Set());
   // B9: Edit user message — fill input with message text for re-editing
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
-  const [liked, setLiked] = useState<Record<string, boolean>>({});
-  const [disliked, setDisliked] = useState<Record<string, boolean>>({});
-  const [showReport, setShowReport] = useState<Record<string, boolean>>({});
-  const [reportText, setReportText] = useState<Record<string, string>>({});
   const [progressCollapsed, setProgressCollapsed] = useState(false);
   // D20: keep build widget visible after completion until user dismisses it
   const [buildProgressDismissed, setBuildProgressDismissed] = useState(false);
@@ -483,7 +481,6 @@ export const AIChat: React.FC<AIChatProps> = ({
   const [guiderInput, setGuiderInput] = useState('');
 
   // The per-message Copy button's "copied" tick.
-  const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   // B30: send on Enter preference
   const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => localStorage.getItem('chat_sendOnEnter') !== 'false');
@@ -510,13 +507,6 @@ export const AIChat: React.FC<AIChatProps> = ({
     return () => document.removeEventListener('keydown', handler);
   }, []);
 
-
-  const formatMsgTime = (ts: Date | string | undefined): string => {
-    if (!ts) return '';
-    const d = ts instanceof Date ? ts : new Date(ts);
-    if (isNaN(d.getTime())) return '';
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
 
   /**
    * 🔴 A BADGE WHOSE INPUT IS FROZEN, SO IT WAS DELETED AND NOT SHOWN (Q-600's sweep, 2026-10-09).
@@ -581,55 +571,12 @@ export const AIChat: React.FC<AIChatProps> = ({
       <div className="space-y-3">
         {isAI && hasSources && (
           <div className="flex items-center gap-1.5 mb-1 opacity-80">
-            <CheckCircle2 className="w-3 h-3 text-accent-text" />
-            <span className="text-[8px] font-black uppercase tracking-widest text-muted">Based on verified sources</span>
+            <CheckCircle2 className="w-3.5 h-3.5 text-accent-text" />
+            <span className="text-xs text-muted">Based on verified sources</span>
           </div>
         )}
-        <div className={cn("markdown-body prose prose-invert prose-xs max-w-none prose-p:leading-relaxed prose-a:text-accent-text prose-a:no-underline hover:prose-a:underline", !isAI && "prose-p:text-ink")}>
-          <ReactMarkdown
-            remarkPlugins={CHAT_MARKDOWN_PLUGINS}
-            components={{
-              a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5" />,
-              // B10/B12: Code blocks with language header and copy button
-              code: ({ node, className, children, ...props }: any) => {
-                const isInline = !className;
-                if (isInline) {
-                  return <code className="bg-raised px-1 py-0.5 rounded text-[11px] font-mono text-accent-text" {...props}>{children}</code>;
-                }
-                const lang = (className || '').replace('language-', '');
-                const code = String(children).replace(/\n$/, '');
-                return <ChatCodeBlock lang={lang} code={code} />;
-              },
-              pre: ({ node, children, ...props }: any) => <>{children}</>,
-              // B19: Styled markdown tables
-              table: ({ node, children, ...props }: any) => (
-                <div className="overflow-x-auto my-2 rounded-xl border border-line">
-                  <table className="w-full text-[11px] border-collapse" {...props}>{children}</table>
-                </div>
-              ),
-              thead: ({ node, children, ...props }: any) => <thead className="bg-surface" {...props}>{children}</thead>,
-              th: ({ node, children, ...props }: any) => <th className="px-3 py-2 text-left font-black text-muted uppercase tracking-widest text-[9px] border-b border-line" {...props}>{children}</th>,
-              td: ({ node, children, ...props }: any) => <td className="px-3 py-2 border-b border-line text-body" {...props}>{children}</td>,
-              // B20: Task list checkboxes (GFM - [ ] / [x])
-              input: ({ node, ...props }: any) => (
-                <input {...props} disabled className="mr-1.5 align-middle accent-indigo-500 cursor-default" />
-              ),
-              // B22: Inline image rendering
-              img: ({ node, src, alt, ...props }: any) => (
-                <img
-                  src={src}
-                  alt={alt || ''}
-                  className="max-w-full rounded-xl my-2 border border-line"
-                  loading="lazy"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  {...props}
-                />
-              ),
-            }}
-          >
-            {cleanText || ""}
-          </ReactMarkdown>
-        </div>
+        {/* ONE renderer for every surface (chat/ChatMarkdown.tsx): the prose scale, safe links, the shared code block. */}
+        <ChatMarkdown text={cleanText || ''} className={isAI ? '' : 'text-ink'} />
 
         {/* ── Language picker buttons ── */}
         {isAI && (msg as any).meta?.type === 'language-picker' && onLanguagePick && (
@@ -643,7 +590,7 @@ export const AIChat: React.FC<AIChatProps> = ({
               <button
                 key={opt.value}
                 onClick={() => onLanguagePick(opt.value)}
-                className="px-4 py-2 rounded-xl text-[12px] font-bold border border-indigo-500/40 bg-indigo-500/10 text-accent-text hover:bg-indigo-500/25 hover:border-indigo-400 transition-all active:scale-95"
+                className="px-4 py-2 rounded-full text-sm font-medium border border-line bg-raised text-ink hover:bg-raised-hover transition-colors active:scale-95"
               >
                 {opt.label}
               </button>
@@ -656,7 +603,7 @@ export const AIChat: React.FC<AIChatProps> = ({
           <div className="mt-3 pt-3 border-t border-line">
             <button
               onClick={onPreviewClick}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-[12px] uppercase tracking-wider transition-all active:scale-95 hover:brightness-110 border border-line"
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-2xl font-medium text-sm transition-all active:scale-95 hover:brightness-110"
               style={{ background: 'var(--accent)', color: 'var(--on-accent)' }}
             >
               View Live Preview
@@ -668,23 +615,23 @@ export const AIChat: React.FC<AIChatProps> = ({
         {/* Deploy — the same reply, with the files it built (Q-781). */}
         {build.built && deployFiles && onDownloadZip && (
           <div className="mt-3 pt-3 border-t border-line">
-            <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">{COPY.chat.deployHeading}</p>
+            <p className="text-xs font-medium text-muted mb-2">{COPY.chat.deployHeading}</p>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => onDownloadZip(deployFiles, deployAppName || 'NavBharatAI-App')}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/30 text-success text-[10px] font-bold rounded-xl transition-all active:scale-95"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/30 text-success text-sm font-medium rounded-full transition-all active:scale-95"
               >
                 📦 Download ZIP
               </button>
               <button
                 onClick={() => window.open('https://app.netlify.com/drop', '_blank')}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600/15 hover:bg-teal-600/25 border border-teal-500/25 text-success text-[10px] font-bold rounded-xl transition-all active:scale-95"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600/15 hover:bg-teal-600/25 border border-teal-500/25 text-success text-sm font-medium rounded-full transition-all active:scale-95"
               >
                 ⬆ Netlify Drop
               </button>
               <button
                 onClick={() => window.open('https://pages.github.com', '_blank')}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-raised hover:bg-raised-hover border border-line text-muted text-[10px] font-bold rounded-xl transition-all active:scale-95"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-raised hover:bg-raised-hover border border-line text-muted text-sm font-medium rounded-full transition-all active:scale-95"
               >
                 🐙 GitHub Pages
               </button>
@@ -695,13 +642,13 @@ export const AIChat: React.FC<AIChatProps> = ({
         {/* Smart Follow-Up Suggestions */}
         {suggestions && suggestions.length > 0 && onSendSuggestion && (
           <div className="mt-3 pt-3 border-t border-line">
-            <p className="text-[9px] font-black uppercase tracking-widest text-faint mb-2">{COPY.chat.nextHeading}</p>
+            <p className="text-xs font-medium text-muted mb-2">{COPY.chat.nextHeading}</p>
             <div className="flex overflow-x-auto no-scrollbar gap-2 pb-1">
               {suggestions.map((s, i) => (
                 <button
                   key={i}
                   onClick={() => onSendSuggestion(s)}
-                  className="flex shrink-0 items-center gap-1 px-2.5 py-1.5 bg-indigo-600/15 hover:bg-indigo-600/30 border border-indigo-500/25 text-accent-text text-[10px] font-medium rounded-full transition-all active:scale-95"
+                  className="flex shrink-0 items-center gap-1 px-3 py-1.5 bg-raised hover:bg-raised-hover border border-line text-ink text-sm font-medium rounded-full transition-colors active:scale-95"
                 >
                   <span className="text-accent-text">+</span> {s}
                 </button>
@@ -710,28 +657,10 @@ export const AIChat: React.FC<AIChatProps> = ({
           </div>
         )}
 
-        {/* Interaction Controls */}
-        <div className="flex gap-2 mt-3 pt-2 border-t border-line items-center">
-            <button onClick={() => { navigator.clipboard.writeText(cleanText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-1 hover:bg-raised rounded text-faint hover:text-ink" title="Copy">
-                {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
-            </button>
-            {isAI && (
-                <>
-                    <button onClick={() => setLiked({...liked, [msg.id]: !liked[msg.id]})} className={cn("p-1 hover:bg-raised rounded", liked[msg.id] ? "text-success" : "text-faint hover:text-ink")} title="Helpful">
-                        <ThumbsUp className="w-3 h-3" />
-                    </button>
-                    <button onClick={() => { setDisliked({...disliked, [msg.id]: !disliked[msg.id]}); setShowReport({...showReport, [msg.id]: !showReport[msg.id]})}} className={cn("p-1 hover:bg-raised rounded", disliked[msg.id] ? "text-danger" : "text-faint hover:text-ink")} title="Not helpful">
-                        <ThumbsDown className="w-3 h-3" />
-                    </button>
-                </>
-            )}
-            {showReport[msg.id] && (
-                <div className="mt-1 flex flex-col gap-1 w-full p-2 bg-well border border-line rounded-xl animate-in fade-in duration-200">
-                    <input value={reportText[msg.id] || ''} onChange={(e) => setReportText({...reportText, [msg.id]: e.target.value})} className="bg-transparent border border-line p-1.5 rounded text-[10px] text-ink outline-none w-full" placeholder="What was wrong?" />
-                    <button onClick={() => { setShowReport({...showReport, [msg.id]: false}); alert('Thank you for your feedback!'); }} className="text-[9px] text-danger font-bold uppercase tracking-widest pt-1 border-t border-line mt-1 hover:text-danger">Submit Report</button>
-                </div>
-            )}
-        </div>
+        {/* The like / dislike / "Submit Report" row that sat here was REMOVED (2026-10-13): the thumbs
+            only toggled a local colour and the report ended in an alert() — nothing was ever sent. A
+            button that does nothing is a fake feature (the second absolute rule). The REAL actions
+            — Copy, Report (which reaches NavBharatAI), Retry — are the ghost row under every reply. */}
       </div>
     );
   };
@@ -747,7 +676,7 @@ export const AIChat: React.FC<AIChatProps> = ({
       )}
       {/* B9: Editing message indicator */}
       {editingMsgId && (
-        <div className="shrink-0 bg-indigo-600/20 border-b border-indigo-500/30 px-3 py-1 flex items-center justify-between gap-2 text-[9px] font-black uppercase tracking-widest text-accent-text">
+        <div className="shrink-0 bg-raised border-b border-line px-4 py-1.5 flex items-center justify-between gap-2 text-xs font-medium text-accent-text">
           <span className="flex items-center gap-1.5"><MessageSquare className="w-3 h-3" /> Editing message — modify and send</span>
           <button onClick={() => { setEditingMsgId(null); onInputChange(''); }} className="text-accent-text hover:text-ink transition-colors"><X className="w-3 h-3" /></button>
         </div>
@@ -758,10 +687,10 @@ export const AIChat: React.FC<AIChatProps> = ({
       {isExpanded && (
         <div className="fixed inset-0 z-[100] bg-[var(--theme-bg)] flex flex-col p-4 md:p-6 animate-in fade-in zoom-in-95 duration-200">
           <div className="flex justify-between items-center mb-4">
-            <span className="text-[12px] font-black uppercase tracking-widest text-ink">Full Screen Composer</span>
+            <span className="text-sm font-medium text-ink">Write a longer message</span>
             <button
               onClick={() => setIsExpanded(false)}
-              className="px-4 py-1.5 bg-raised hover:bg-raised-hover rounded-lg text-ink text-[10px] font-black uppercase tracking-widest"
+              className="px-3 py-1.5 bg-raised hover:bg-raised-hover rounded-full text-ink text-xs font-medium"
             >
               <div className="flex items-center gap-1.5">
                 <Minimize2 className="w-3.5 h-3.5" />
@@ -772,14 +701,14 @@ export const AIChat: React.FC<AIChatProps> = ({
           <textarea
             value={input}
             onChange={(e) => onInputChange(e.target.value)}
-            className="flex-1 w-full bg-surface border border-line rounded-2xl p-4 text-[14px] text-ink outline-none focus:border-indigo-500 resize-none font-mono"
+            className="flex-1 w-full bg-card border border-line rounded-2xl p-4 text-[15px] leading-relaxed text-ink outline-none focus:border-accent resize-none"
             placeholder="Ask navBharatAI..."
           />
           <div className="mt-4 flex justify-end gap-2">
             <button
               onClick={() => { onSend([]); setIsExpanded(false); }}
               disabled={!input.trim() || isLoading}
-              className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-xl text-[11px] font-black uppercase tracking-widest disabled:opacity-35 transition-all shadow-lg active:scale-95"
+              className="px-6 py-2.5 bg-accent hover:brightness-110 text-on-accent rounded-full text-sm font-medium disabled:opacity-35 transition-all active:scale-95"
             >
               Send
             </button>
@@ -819,7 +748,7 @@ export const AIChat: React.FC<AIChatProps> = ({
           opened it sat down by the composer — on a phone the two are a screen apart and read as
           unrelated features. It now renders inside <ChatToolbar/>, next to its own button. */}
 
-      <div className={cn("flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar overflow-x-hidden")} ref={scrollRef}>
+      <div className={cn("flex-1 overflow-y-auto px-4 py-6 space-y-6 no-scrollbar overflow-x-hidden", CONVERSATION_COLUMN_CHILDREN_CLASS)} ref={scrollRef}>
         {/* App-update notice — first message once the user has chatted, in their language (native app,
             update available). See AppUpdateChatNotice; renders nothing otherwise. */}
         {(() => {
@@ -828,12 +757,10 @@ export const AIChat: React.FC<AIChatProps> = ({
         })()}
         {messages.length === 0 && (
           <>
-              <div className="flex flex-col items-center justify-center p-6 space-y-2 opacity-50">
-              <div className="w-10 h-10 bg-indigo-600/10 rounded-2xl flex items-center justify-center mb-2">
-                <Sparkles className="w-5 h-5 text-accent-text" />
+              {/* The serif greeting every AI opens with (chat/Greeting.tsx), centred where the thread will be. */}
+              <div className="flex items-center justify-center min-h-[40vh]">
+                <Greeting name={userName} subline="Ask me anything." />
               </div>
-              <p className={cn("text-[10px] font-black uppercase tracking-widest text-muted")}>Ask me anything.</p>
-            </div>
 
             {/* NO CODE-TOOL TILES HERE (admin 2026-09-23: "navbharatai free me jab koi chat nahi hoti hai
                 to yeh tiles dikhti hai … yeh function free me hai hi nahi"). This component has ONE caller,
@@ -861,23 +788,18 @@ export const AIChat: React.FC<AIChatProps> = ({
             return (
               <motion.div
                 layout
-                initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
                 key={msg.id}
-                className={cn(
-                  "flex flex-col space-y-2 group/msg",
-                  msg.sender === 'user' ? "items-end" : "items-start"
-                )}
+                className={msg.sender === 'user' ? USER_TURN_CLASS : ASSISTANT_TURN_CLASS}
               >
+                {/* The shared conversation design (chat/conversation.ts, admin 2026-10-13 "claude jaisa"):
+                    the user's message in a soft container on the right, the reply as prose on the page.
+                    An error reply keeps a quiet card so it reads as a notice, not as an answer. */}
                 <div className={cn(
-                  "max-w-[90%] p-3.5 rounded-2xl text-[11px] font-medium leading-relaxed shadow-sm break-words select-text",
-                  msg.sender === 'user'
-                    ? `${USER_BUBBLE_TONE} rounded-tr-none`
-                    : isNetworkError
-                      ? "bg-red-500/10 text-body border border-red-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
-                      : isAIError
-                        ? "bg-amber-500/10 text-body border border-amber-500/30 rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
-                        : `${ASSISTANT_BUBBLE_TONE} border border-line rounded-tl-none shadow-[0_4px_12px_rgba(0,0,0,0.2)]`
+                  "select-text",
+                  msg.sender === 'user' ? USER_MESSAGE_CLASS : ASSISTANT_MESSAGE_CLASS,
+                  (isNetworkError || isAIError) && "rounded-2xl border border-line bg-raised px-4 py-3"
                 )}>
                   {/* Attachment image previews — compact grid */}
                   {msg.attachments && msg.attachments.length > 0 && (
@@ -917,14 +839,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                       </div>
                       <button
                         onClick={() => setExpandedMessages(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
-                        className={cn(
-                          "mt-2 text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center gap-1 cursor-pointer",
-                          msg.sender === 'user'
-                            ? "text-accent-text hover:text-ink"
-                            : "text-info hover:text-info font-extrabold"
-                        )}
+                        className="mt-2 text-xs font-medium text-accent-text hover:underline flex items-center gap-1 cursor-pointer"
                       >
-                        {expandedMessages[msg.id] ? "See Less ▲" : "See More ▼"}
+                        {expandedMessages[msg.id] ? "Show less" : "Show more"}
                       </button>
                     </div>
                   ) : (
@@ -935,51 +852,38 @@ export const AIChat: React.FC<AIChatProps> = ({
                 
 
 
-                <div className="flex items-center gap-2 px-1">
-                  {msg.sender === 'ai' && <Bot className="w-2.5 h-2.5 text-accent-text" />}
-                  <span className="text-[7px] font-black text-faint uppercase tracking-widest">
-                    {msg.sender === 'user' ? 'YOU' : activeAgent.toUpperCase().replace('_', ' ')}
-                  </span>
-                  {/* F2: error type badge for visual distinction */}
-                  {isNetworkError && <span className="text-[7px] font-black uppercase tracking-widest text-danger bg-red-500/10 border border-red-500/20 rounded px-1 py-px">Network Error</span>}
-                  {isAIError && <span className="text-[7px] font-black uppercase tracking-widest text-warn bg-amber-500/10 border border-amber-500/20 rounded px-1 py-px">AI Service</span>}
-                  {/* B7: Model badge on AI messages */}
-                  {msg.sender === 'ai' && msg.modelUsed && (
-                    <span className="text-[7px] font-mono text-accent-text bg-indigo-500/10 border border-indigo-800/30 rounded px-1 py-px">
-                      {msg.modelUsed}
-                    </span>
-                  )}
-                  {msg.timestamp && (
-                    <span className="text-[7px] text-faint font-mono">{formatMsgTime(msg.timestamp)}</span>
-                  )}
-                  {msg.sender === 'user' && <User className="w-2.5 h-2.5 text-accent-text" />}
+                {/* THE ACTION ROW (chat/conversation.ts): quiet ghost icons under the message — Copy,
+                    Report and Retry under a reply; Edit and Delete under the user's own. No "YOU /
+                    NAVBHARATAI" captions, no timestamp, no model badge: the thread reads as a conversation,
+                    and the White-Label Law never allowed a model name on screen anyway. Shown on hover on a
+                    pointer device, always on touch — and always while Unsend is live, because that one is
+                    time-sensitive (admin 2026-08-14). */}
+                {(() => {
+                  const showUnsend = !!onUnsend && msg.sender === 'user' && isLoading && messages.filter((m: any) => m?.sender === 'user').at(-1)?.id === msg.id;
+                  return (
+                <div className={showUnsend ? 'mt-1 flex items-center gap-0.5' : MESSAGE_ACTION_ROW_CLASS}>
+                  {isNetworkError && <span className="mr-1 text-xs text-danger">Network error</span>}
+                  {isAIError && <span className="mr-1 text-xs text-warn">Service busy</span>}
                   {/* UNSEND — on the LAST sent message, shown ONLY while the reply is still coming (admin
                       2026-08-14: "unsend last message par ho, AI response aane se pehle"). Take it back
                       before the AI answers a wrong query: stops the reply + removes this exchange + puts the
-                      text back in the box. It disappears the moment the AI response arrives (the user
-                      message is no longer the last one). Clearly visible (not hover-only) — it is
-                      time-sensitive. */}
-                  {onUnsend && msg.sender === 'user' && isLoading && messages.filter((m: any) => m?.sender === 'user').at(-1)?.id === msg.id && (
+                      text back in the box. It disappears the moment the AI response arrives. */}
+                  {showUnsend && (
                     <button
-                      onClick={() => onUnsend()}
+                      onClick={() => onUnsend?.()}
                       title="Unsend — take this message back before the reply arrives"
-                      className="flex items-center gap-1 text-[8px] font-black uppercase tracking-widest text-warn hover:text-warn bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 rounded px-1.5 py-0.5 transition-colors active:scale-95"
+                      className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-warn hover:bg-raised transition-colors active:scale-95"
                     >
-                      <span className="text-[11px] leading-none">↩</span> Unsend
+                      <span className="text-sm leading-none">↩</span> Unsend
                     </button>
                   )}
                   {/* EDIT + DELETE on a sent message (admin 2026-08-10: "delete kar sake, saath me
-                      edit bhi — WhatsApp ke tarah").
-                      The old "edit" here only COPIED the text into the composer and left the original
-                      message and its answers sitting in the thread — so re-sending produced the same
-                      question twice with two different answers under it. That is not an edit, it is a
-                      duplicate. It now rewinds to that point (shared rule, chatMessageActions) so the
-                      AI answers the question the user actually meant. */}
+                      edit bhi — WhatsApp ke tarah"). The edit rewinds to that point (shared rule,
+                      chatMessageActions) so the AI answers the question the user actually meant. */}
                   {msg.sender === 'user' && onMessagesChange && !searchActive(chatSearchQuery) && (
                     <MessageEditActions
                       text={String(msg.text ?? '')}
                       disabled={isLoading}
-                      className="opacity-60 md:opacity-0 md:group-hover/msg:opacity-100 transition-opacity"
                       onDelete={() => onMessagesChange(deleteMessage(messages as any, msg.id) as any)}
                       onEdit={(next) => {
                         const r = editMessage(messages as any, msg.id, next);
@@ -994,7 +898,6 @@ export const AIChat: React.FC<AIChatProps> = ({
                       }}
                     />
                   )}
-                  {/* Copy message button — appears on hover */}
                   <button
                     onClick={() => {
                       const t = msg.text || '';
@@ -1003,33 +906,36 @@ export const AIChat: React.FC<AIChatProps> = ({
                       setTimeout(() => setCopiedMsgId(null), 1500);
                     }}
                     title="Copy message"
-                    className="opacity-0 group-hover/msg:opacity-100 transition-opacity p-0.5 hover:bg-raised rounded text-faint hover:text-ink"
+                    aria-label="Copy message"
+                    className={MESSAGE_ACTION_BUTTON_CLASS}
                   >
-                    {copiedMsgId === msg.id ? <Check className="w-2.5 h-2.5 text-success" /> : <Copy className="w-2.5 h-2.5" />}
+                    {copiedMsgId === msg.id ? <Check className={`${MESSAGE_ACTION_ICON_CLASS} text-success`} /> : <Copy className={MESSAGE_ACTION_ICON_CLASS} />}
                   </button>
-                  {/* REPORT an AI reply (Play AI-Generated Content policy, rejection 2026-09-28). Always
-                      visible, unlike Copy: a phone has no hover, and a flag nobody can see is no flag. */}
+                  {/* REPORT an AI reply (Play AI-Generated Content policy, rejection 2026-09-28). */}
                   {msg.sender === 'ai' && !reportedMsgIds.has(msg.id) && (
                     <ReportAiContent
                       surface="reply"
                       content={String(msg.text ?? '')}
                       onReported={() => setReportedMsgIds((prev) => new Set(prev).add(msg.id))}
                       view="chat"
-                      className="p-0.5 rounded text-faint hover:text-danger opacity-70"
-                      iconClassName="w-2.5 h-2.5"
+                      className={`${MESSAGE_ACTION_BUTTON_CLASS} hover:text-danger`}
+                      iconClassName={MESSAGE_ACTION_ICON_CLASS}
                     />
                   )}
+                  {/* Retry: only on the last AI message. */}
+                  {isLastAI && onSendSuggestion && (
+                    <button
+                      onClick={() => { if (messages.length > 0) onSendSuggestion(messages.filter(m => m.sender === 'user').at(-1)?.text || '__REGENERATE__'); }}
+                      title="Retry"
+                      aria-label="Retry this reply"
+                      className={MESSAGE_ACTION_BUTTON_CLASS}
+                    >
+                      <RotateCcw className={MESSAGE_ACTION_ICON_CLASS} />
+                    </button>
+                  )}
                 </div>
-                {/* B3 — Regenerate: only on the last AI message */}
-                {isLastAI && onSendSuggestion && (
-                  <button
-                    onClick={() => { if (messages.length > 0) onSendSuggestion(messages.filter(m => m.sender === 'user').at(-1)?.text || '__REGENERATE__'); }}
-                    title="Regenerate response"
-                    className="flex items-center gap-1 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest rounded-lg bg-raised hover:bg-raised-hover text-faint hover:text-ink border border-line transition-all"
-                  >
-                    ↺ Retry
-                  </button>
-                )}
+                  );
+                })()}
               </motion.div>
             );
           })}
@@ -1041,15 +947,12 @@ export const AIChat: React.FC<AIChatProps> = ({
             role="status"
             aria-busy="true"
             aria-label="AI is generating a response"
-            className="flex items-start gap-2 animate-in fade-in slide-in-from-left-2 duration-300"
+            className="flex items-start animate-in fade-in duration-300"
           >
-            <div className="w-6 h-6 rounded-full bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
-              <Bot className="w-3 h-3 text-accent-text" />
-            </div>
-            <div className="bg-card border border-line rounded-2xl rounded-tl-none px-3 py-2.5 shadow-sm flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+            <div className={TYPING_DOTS_CLASS}>
+              <span className={TYPING_DOT_CLASS} style={{ animationDelay: '0ms' }} />
+              <span className={TYPING_DOT_CLASS} style={{ animationDelay: '150ms' }} />
+              <span className={TYPING_DOT_CLASS} style={{ animationDelay: '300ms' }} />
             </div>
           </div>
         )}
@@ -1338,7 +1241,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                         onClick={() => setIsExpanded(true)}
                         title="Expand"
                         aria-label="Expand the message box"
-                        className="p-2.5 text-faint hover:text-ink transition-colors flex items-center justify-center"
+                        className="p-2.5 rounded-full text-muted hover:text-ink hover:bg-raised transition-colors flex items-center justify-center"
                       >
                         <Maximize2 className="w-4 h-4" />
                       </button>
@@ -1348,7 +1251,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                       fileAccept="image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.txt,.md,.csv,.json,.html,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.zip,.js,.ts,.tsx,.jsx,.py,.css,.xml,.yaml,.yml,.go,.java,.php,.sql,.rs,.kt,.swift,.rb,.sh,.env,.toml,.ini"
                       badge={attachments.length}
                       title="Attach (photo, gallery, or file)"
-                      buttonClassName="p-2.5 text-faint hover:text-accent-text transition-colors"
+                      buttonClassName="p-2.5 rounded-full text-muted hover:text-ink hover:bg-raised transition-colors"
                     />
                     {voiceSupported && (
                       <button
@@ -1356,7 +1259,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                         onClick={() => toggleVoice(input)}
                         title={isListening ? 'Stop voice input' : 'Voice input'}
                         aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
-                        className={`p-2.5 transition-colors ${isListening ? 'text-danger animate-pulse' : 'text-faint hover:text-info'}`}
+                        className={`p-2.5 rounded-full transition-colors ${isListening ? 'text-danger animate-pulse' : 'text-muted hover:text-ink hover:bg-raised'}`}
                       >
                         {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                       </button>
@@ -1369,7 +1272,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                         the server and the user is signed in. */}
                     <ProfessionalVoiceButton
                       title="Talk to NavBharatAI by voice"
-                      className="p-2.5 text-faint hover:text-success transition-colors flex items-center justify-center"
+                      className="p-2.5 rounded-full text-muted hover:text-ink hover:bg-raised transition-colors flex items-center justify-center"
                       icon={<Volume2 className="w-4 h-4" />}
                       getHistory={() => messages
                         .filter((m: any) => (m?.text || '').trim())
@@ -1394,7 +1297,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                         title="Stop"
                         className={COMPOSER_STOP_CLASS}
                       >
-                        <span className="w-4 h-4 flex items-center justify-center font-black text-[11px]">■</span>
+                        <Square className="w-3.5 h-3.5 fill-current" />
                       </button>
                     ) : (
                       <button
@@ -1409,7 +1312,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                         disabled={(!input.trim() && attachments.length === 0) || isLoading}
                         className={COMPOSER_SEND_CLASS}
                       >
-                        <Send className="w-4 h-4" />
+                        <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
                       </button>
                     )}
                 </>

@@ -5,7 +5,7 @@ import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTA
 import { usePagedList } from '../../hooks/usePagedList';
 import { feedFor } from '../../lib/imageFeed';
 import { LoadMore } from '../../components/common/LoadMore';
-import { Send, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move } from 'lucide-react';
+import { Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move, ArrowUp } from 'lucide-react';
 import { ImageOptionSelect, type ImageOption } from './ImageOptionSelect';
 import { CustomSizeFields } from './CustomSizeFields';
 import { ImageResizeEditor } from './ImageResizeEditor';
@@ -1042,7 +1042,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
                     title={promptLimit.over ? 'Too long to send — please shorten it' : undefined}
                     className={COMPOSER_SEND_CLASS}
                   >
-                    {isLoading ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                    {isLoading ? <TirangaLoader className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" strokeWidth={2.5} />}
                   </button>
                 </>
               )}

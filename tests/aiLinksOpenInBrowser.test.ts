@@ -68,17 +68,21 @@ describe('🔒 every AI surface, including the one that does NOT use LinkedText'
     }
   });
 
-  it('🔴 Doctor AI does NOT — it has its own markdown anchor, and it carried the same defect', () => {
-    // Found by checking rather than assuming: SDAChat imports only `isSafeHttpUrl` and renders model
-    // text through ReactMarkdown with a custom `a` component. Its links are MEDICAL SOURCES, so being
-    // stranded in a chromeless WebView matters most exactly there.
+  it('🔴 Doctor AI does NOT — its markdown anchor is the shared renderer\'s, and that carried the same defect', () => {
+    // Found by checking rather than assuming: SDAChat used to render model text through ReactMarkdown
+    // with a custom `a` component of its own. Its links are MEDICAL SOURCES, so being stranded in a
+    // chromeless WebView matters most exactly there. Since 2026-10-13 every markdown surface renders
+    // through ONE renderer (chat/ChatMarkdown.tsx), so the handler is asserted there, and Doctor AI is
+    // held to rendering through it.
     const sda = readFileSync('src/components/sda/SDAChat.tsx', 'utf8');
     expect(sda).not.toMatch(/LinkedText/);
-    expect(sda).toContain('openInRealBrowser');
+    expect(sda).toContain('<ChatMarkdown');
+    expect(sda).not.toContain('<ReactMarkdown');
+    expect(readFileSync('src/components/chat/ChatMarkdown.tsx', 'utf8')).toContain('onClick={openInRealBrowser(url)}');
   });
 
   it('…and it uses the SAME handler, not a second copy that would drift', () => {
-    expect(readFileSync('src/components/sda/SDAChat.tsx', 'utf8'))
+    expect(readFileSync('src/components/chat/ChatMarkdown.tsx', 'utf8'))
       .toContain("from '../../lib/linkify'");
     expect(code).toContain('export function openInRealBrowser');
   });

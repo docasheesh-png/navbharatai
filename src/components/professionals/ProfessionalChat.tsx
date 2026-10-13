@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Sparkles, X, FileText, Clock, LogIn, Wallet, GraduationCap, Volume2 } from 'lucide-react';
+import { ArrowUp, Square, Sparkles, X, FileText, Clock, LogIn, Wallet, GraduationCap, Volume2 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { AttachMenu } from '../AttachMenu';
@@ -12,6 +12,8 @@ import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { ExamMode } from './ExamMode';
 import { MessageEditActions } from '../chat/MessageEditActions';
+import { ChatMarkdown } from '../chat/ChatMarkdown';
+import { USER_TURN_CLASS, ASSISTANT_TURN_CLASS, USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, PLAIN_TEXT_CLASS, MESSAGE_ACTION_ROW_CLASS, MESSAGE_ACTION_BUTTON_CLASS, MESSAGE_ACTION_ICON_CLASS, CONVERSATION_COLUMN_CHILDREN_CLASS, SURFACE_TITLE_CLASS } from '../chat/conversation';
 import { ReportAiContent } from '../chat/ReportAiContent';
 import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage, editedLabel } from '../../lib/chatMessageActions';
@@ -300,7 +302,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
           the three the user never interacts with. Every row it gives back is a row of conversation. */}
       <div className="px-4 py-2 border-b border-line flex items-center gap-2 shrink-0">
         <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-accent-text flex items-center justify-center shrink-0"><Sparkles className="w-3.5 h-3.5" /></div>
-        <span className="font-bold text-sm truncate min-w-0">{config.name}</span>
+        <span className={`${SURFACE_TITLE_CLASS} truncate min-w-0`}>{config.name}</span>
         {/* Free-allowance chip — only when the daily gate is on for a signed-in user. It is a COUNTER
             now, not an upsell: it used to be a button that opened a Pass paywall, and there is nothing
             left to sell. Unlimited accounts show nothing at all rather than a crown they cannot act on. */}
@@ -322,31 +324,42 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
+      <div className={`flex-1 overflow-y-auto custom-scrollbar px-4 py-6 space-y-6 ${CONVERSATION_COLUMN_CHILDREN_CLASS}`}>
         {(() => {
           const lastUser = [...messages].reverse().find((m) => m.role === 'user');
           return lastUser ? <AppUpdateChatNotice /> : null;
         })()}
         {filterMessages(messages as any, chatSearchQuery).map((m: any, i: number) => (
-          <div key={i} className={`group/msg ${m.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'}`}>
-            <div className={`nb-selectable max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-on-accent' : 'bg-card border border-line text-body'}`}>
-              {/* Real, tappable source links (admin 2026-08-25). The bubble stays plain text —
-                  LinkedText emits only strings and anchors, so wrapping is unchanged. */}
-              {m.role !== 'user' && reported.has(String(m.content ?? ''))
-                ? <span className="text-[12px] text-muted">You reported this reply. It is hidden and has been sent to NavBharatAI for review.</span>
-                : <LinkedText text={String(m.content ?? '')} />}
-              {m.edited && <span className="ml-2 text-[10px] opacity-60 align-middle">{editedLabel()}</span>}
-            </div>
+          <div key={i} className={m.role === 'user' ? USER_TURN_CLASS : ASSISTANT_TURN_CLASS}>
+            {/* The shared conversation design (chat/conversation.ts, admin 2026-10-13 "claude jaisa"):
+                the user's words in a soft container on the right (plain text, links real via
+                LinkedText), the professional's reply as prose on the page through the one markdown
+                renderer — headings, lists and tables the way the model wrote them. */}
+            {m.role === 'user' ? (
+              <div className={`nb-selectable ${USER_MESSAGE_CLASS} ${PLAIN_TEXT_CLASS}`}>
+                <LinkedText text={String(m.content ?? '')} />
+                {m.edited && <span className="ml-2 text-xs text-muted align-middle">{editedLabel()}</span>}
+              </div>
+            ) : reported.has(String(m.content ?? '')) ? (
+              <p className="text-sm text-muted">You reported this reply. It is hidden and has been sent to NavBharatAI for review.</p>
+            ) : (
+              <div className={`nb-selectable ${ASSISTANT_MESSAGE_CLASS}`}>
+                <ChatMarkdown text={String(m.content ?? '')} />
+                {m.edited && <span className="text-xs text-muted">{editedLabel()}</span>}
+              </div>
+            )}
             {/* REPORT an AI reply (Play AI-Generated Content policy, rejection 2026-09-28). */}
             {m.role !== 'user' && String(m.content ?? '').trim() && !reported.has(String(m.content ?? '')) && (
-              <ReportAiContent
-                surface="reply"
-                content={String(m.content ?? '')}
-                onReported={() => setReported((prev) => new Set(prev).add(String(m.content ?? '')))}
-                view={config.id}
-                className="mt-0.5 p-1 rounded text-faint hover:text-danger opacity-70"
-                iconClassName="w-3 h-3"
-              />
+              <div className={MESSAGE_ACTION_ROW_CLASS}>
+                <ReportAiContent
+                  surface="reply"
+                  content={String(m.content ?? '')}
+                  onReported={() => setReported((prev) => new Set(prev).add(String(m.content ?? '')))}
+                  view={config.id}
+                  className={`${MESSAGE_ACTION_BUTTON_CLASS} hover:text-danger`}
+                  iconClassName={MESSAGE_ACTION_ICON_CLASS}
+                />
+              </div>
             )}
             {/* DELETE + EDIT on a sent message (admin 2026-08-10). Only the user's own, and only while
                 no answer is in flight — rewinding under a running turn is not a state we could honestly
@@ -354,7 +367,7 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
                 where there is no hover to reveal them with. */}
             {m.role === 'user' && !searchActive(chatSearchQuery) && (
               <MessageEditActions
-                className="mt-0.5 opacity-60 md:opacity-0 md:group-hover/msg:opacity-100 transition-opacity"
+                className={MESSAGE_ACTION_ROW_CLASS}
                 text={String(m.content ?? '')}
                 disabled={loading}
                 onDelete={() => setMessages(fromIds(deleteMessage(withIds(messages), msgId(i))))}
@@ -371,12 +384,12 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
           </div>
         ))}
         {loading && (
-          <div className="flex justify-start"><div className="bg-card border border-line rounded-2xl px-4 py-2.5"><TirangaLoader className="w-4 h-4 text-accent-text" /></div></div>
+          <div className="flex items-center gap-2 px-1 py-2 text-sm text-muted" role="status" aria-live="polite"><TirangaLoader className="w-4 h-4 text-accent-text" /> Thinking…</div>
         )}
         {showQuick && (
           <div className="flex flex-wrap gap-2 pt-2">
             {config.quickPrompts!.map((q, i) => (
-              <button key={i} onClick={() => send(q)} className="text-[12px] px-3 py-1.5 rounded-full bg-raised hover:bg-raised-hover border border-line text-body">{q}</button>
+              <button key={i} onClick={() => send(q)} className="text-sm px-3.5 py-1.5 rounded-full bg-raised hover:bg-raised-hover border border-line text-body transition-colors">{q}</button>
             ))}
           </div>
         )}
@@ -461,11 +474,11 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
                 {/* Send → one-tap STOP while a reply loads (admin 2026-08-13), so a wrong query can be cancelled. */}
                 {loading ? (
                   <button onClick={stop} title="Stop" aria-label="Stop the reply" className={COMPOSER_STOP_CLASS}>
-                    <span className="w-4 h-4 flex items-center justify-center font-black text-[11px]">■</span>
+                    <Square className="w-3.5 h-3.5 fill-current" />
                   </button>
                 ) : (
                   <button onClick={() => { send(); dismissKeyboardOnMobile(composerRef.current); }} disabled={!input.trim() && files.length === 0} aria-label="Send" className={COMPOSER_SEND_CLASS}>
-                    <Send className="w-4 h-4" />
+                    <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
                   </button>
                 )}
               </>

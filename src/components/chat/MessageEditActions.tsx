@@ -15,6 +15,7 @@
 
 import { useState } from 'react';
 import { Pencil, Trash2, Check, X } from 'lucide-react';
+import { MESSAGE_ACTION_BUTTON_CLASS, MESSAGE_ACTION_ICON_CLASS } from './conversation';
 
 export interface MessageEditActionsProps {
   /** Current text, used to prefill the inline editor. */
@@ -54,14 +55,14 @@ export function MessageEditActions({ text, onDelete, onEdit, disabled, className
             if (e.key === 'Escape') { e.preventDefault(); cancel(); }
           }}
           rows={2}
-          className="w-full resize-none rounded-lg bg-well border border-indigo-500/40 px-2 py-1.5 text-[12px] text-ink outline-none focus:border-indigo-400"
+          className="w-full resize-none rounded-2xl bg-card border border-line px-3 py-2 text-[15px] leading-relaxed text-ink outline-none focus:border-accent"
         />
         <div className="mt-1 flex items-center gap-1.5">
           <button
             type="button"
             onClick={commit}
             title="Save and ask again"
-            className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-indigo-600/20 text-accent-text hover:bg-indigo-600/30"
+            className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg bg-accent text-on-accent hover:brightness-110"
           >
             <Check className="w-3 h-3" /> Save
           </button>
@@ -69,17 +70,18 @@ export function MessageEditActions({ text, onDelete, onEdit, disabled, className
             type="button"
             onClick={cancel}
             title="Cancel"
-            className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-raised text-muted hover:text-ink hover:bg-raised-hover"
+            className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-lg bg-raised text-muted hover:text-ink hover:bg-raised-hover"
           >
             <X className="w-3 h-3" /> Cancel
           </button>
-          <span className="text-[9px] text-faint">Everything after this is replaced by the new answer</span>
+          <span className="text-xs text-muted">Everything after this is replaced by the new answer</span>
         </div>
       </div>
     );
   }
 
-  const btn = 'p-1 rounded text-faint transition-colors';
+  // The shared ghost-icon look (conversation.ts), so Edit and Delete sit beside Copy as one row.
+  const btn = MESSAGE_ACTION_BUTTON_CLASS;
   return (
     <div className={`flex items-center gap-0.5 ${className ?? ''}`}>
       <button
@@ -89,7 +91,7 @@ export function MessageEditActions({ text, onDelete, onEdit, disabled, className
         aria-label="Edit message"
         className={`${btn} hover:text-accent-text hover:bg-raised`}
       >
-        <Pencil className="w-3 h-3" />
+        <Pencil className={MESSAGE_ACTION_ICON_CLASS} />
       </button>
       <button
         type="button"
@@ -100,7 +102,7 @@ export function MessageEditActions({ text, onDelete, onEdit, disabled, className
         aria-label="Delete message"
         className={`${btn} hover:text-danger hover:bg-raised`}
       >
-        <Trash2 className="w-3 h-3" />
+        <Trash2 className={MESSAGE_ACTION_ICON_CLASS} />
       </button>
     </div>
   );

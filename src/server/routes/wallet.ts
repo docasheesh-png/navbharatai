@@ -8,7 +8,10 @@ import { requireUserMatch } from '../lib/authMiddleware';
 import { appLockBlocks } from '../lib/appLockEnforce';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
-import { readHostingPlanStatus, purchaseHostingPlan, setHostingPlanAutoRenew } from '../lib/hostingPlan';
+import { readHostingPlanStatus, purchaseHostingPlan, setHostingPlanAutoRenew, planDays } from '../lib/hostingPlan';
+import { hostingPeriodUsageStore } from '../AgentV3/HostingPeriodUsageStore';
+import { periodStartFrom } from '../lib/hostingOverage';
+import { edgeMeterEnabled } from '../AgentV3/edgeTrafficMeter';
 import { readHostingAddons, purchaseHostingAddon, removeHostingAddon } from '../lib/hostingAddonLedger';
 import { HOSTING_TIERS } from '../../lib/hostingTiers';
 import { publishedAppCapForTier, liveAppCount } from '../lib/HostingQuota';
@@ -105,7 +108,19 @@ export function registerWalletRoutes(app: Express): void {
 
   app.get('/api/wallet/:userId/hosting-plan', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      const status = await readHostingPlanStatus(getDb() as any, routeParam(req.params.userId));
+      const status: any = await readHostingPlanStatus(getDb() as any, routeParam(req.params.userId));
+      // FRONTEND_TRAFFIC_METER: this period's visitor traffic, for the Billing card. Absent when off.
+      if (edgeMeterEnabled() && status?.active && status?.plan?.expiresAt) {
+        const ps = periodStartFrom(status.plan.expiresAt, planDays(status.plan.id));
+        const rec = await hostingPeriodUsageStore.read(routeParam(req.params.userId), ps).catch(() => null);
+        status.trafficUsage = {
+          periodStart: ps,
+          frontendGb: Math.round((Number(rec?.frontendGb) || 0) * 1000) / 1000,
+          frontendGbBilled: Math.round((Number(rec?.frontendGbBilled) || 0) * 1000) / 1000,
+          frontendInrBilled: Math.round((Number(rec?.frontendInrBilled) || 0) * 100) / 100,
+          includedFrontendGb: status.tier?.includedFrontendGb ?? null,
+        };
+      }
       return res.json(status);
     } catch (err: any) {
       return sendSafeError(res, 500, 'Unable to load your plan right now. Please try again.', err, 'hosting plan status');

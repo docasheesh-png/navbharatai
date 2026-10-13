@@ -181,6 +181,16 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
               )}
             </div>
           </div>
+          {active && (status as any).trafficUsage && (status as any).trafficUsage.includedFrontendGb != null && (() => {
+            const u = (status as any).trafficUsage as { frontendGb: number; includedFrontendGb: number; frontendGbBilled: number; frontendInrBilled: number };
+            const pct = u.includedFrontendGb > 0 ? Math.min(100, Math.round((u.frontendGb / u.includedFrontendGb) * 100)) : 0;
+            return (
+              <p className="text-[11px] text-muted mt-0.5 w-full" data-testid="frontend-traffic-usage">
+                Visitor traffic this period: {u.frontendGb} GB of {u.includedFrontendGb} GB ({pct}%).
+                {u.frontendGbBilled > 0 ? ` Extra ${u.frontendGbBilled} GB charged at ₹20/GB (₹${u.frontendInrBilled}).` : ' Beyond the allowance: ₹20/GB.'}
+              </p>
+            );
+          })()}
           {active && (
             <button
               onClick={toggleAutoRenew}

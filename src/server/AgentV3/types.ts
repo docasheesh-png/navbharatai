@@ -194,7 +194,24 @@ export type AgentEvent =
   // that is how a specialist hitting its own 40-step cap overwrote the top-level summary with
   // "Step limit reached (40)" while the Architect (cap 80) was still running.
   | { type: 'agent_done'; agent: AgentRole; ok: boolean; summary: string; ts: number }
-  | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
+  /**
+   * An ask the user must answer before the build goes on.
+   *
+   * `action` is the whole question as ONE string, which the tray prints as its bold title with no
+   * detail line and two fixed buttons ("Approve & build" / "Reject"). That is why `startOfferText` has
+   * to spell "Approve = ... Deny = ..." inside its own sentence — the buttons could not be labelled —
+   * and why a gate that does not build still offers to "Approve & build" (admin 2026-10-13, the
+   * optional bug hunt). The four optional fields below let a gate say what it actually is. ALL
+   * OPTIONAL: an event without them renders exactly as it does today, byte for byte.
+   */
+  | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number;
+      /** A short question for the bold line. Falls back to `action`. */
+      title?: string;
+      /** The detail under it — what happens, and what it costs. */
+      why?: string;
+      /** Real button labels. Fall back to "Approve & build" / "Reject". */
+      approveLabel?: string;
+      denyLabel?: string }
   // The build needs credentials from the user. Carries NAMES ONLY — the value is written straight to
   // the encrypted vault by the client and never travels on this stream (see secretRequest.ts).
   | { type: 'secret_request'; agent: AgentRole; callId: string; prompt: string; secrets: Array<{ name: string; why: string }>; ts: number }

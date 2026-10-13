@@ -95505,3 +95505,74 @@ that lengthening a hold moves the car; only running it under load showed that. T
 reversions found holes in the lock itself: removing the accelerator frame-gate left all thirteen other
 tests green, and the bare-constant bug was invisible until a source assertion existed. A reversion that
 passes is the test telling you it is not watching.
+
+---
+
+## 2026-10-13 — Q-1040/Q-1041/Q-1042: the deep bug hunt is offered, not assumed
+
+Admin instruction, verbatim: *"helper, verifier jo app banne ke bad last me check karta hai, ko optional
+kar do"* — a ❓ question in the chat, Yes runs the helper that already exists, No means the build is
+complete as it stands.
+
+**The investigation came first, and its result changed the framing.** Nine searches (60 commits, the
+user-facing strings, the flags, filenames, the queue, `PROGRESS.md`, `CLAUDE.md`, `docs/claude/`,
+Hindi/Hinglish phrasings, 12 open and recent PRs, all 1,435 remote branches) found no trace of this
+feature and **no record of the instruction anywhere** — reported to the admin as *"I could not find it"*,
+never as "it does not exist", because only one of those two is a verified claim.
+
+What the search DID find is the thing that mattered: **the helper is not a free check being made paid.
+It is a PAID check being made optional.** The route's own comment beside the reviewer call records the
+size, autopsy b6f88a72: *"40 calls, 523,374 input tokens = 34.4% of the build, `responseChars: 0` on
+every one, and then no verdict at all — all of it billed at ×4"*. The user already paid for that, on
+every build, silently. The admin's own words — the real build costs x, the helper takes 4x — are
+corroborated by the code. So this change does not introduce a charge; it shows an existing one to the
+person paying it.
+
+**What stays free, and why that is the point.** The deterministic end-of-build checks — the tsc gate,
+lint, readiness, the playtest, the fake-feature scan, the journeys, the app's own tests — spend no model
+tokens and sit in no billing phase. They are the EVIDENCE that the app was built at all, which the
+second absolute rule requires, so putting them behind a payment would make a free build mean "it
+probably works". They are untouched.
+
+**Three admin decisions, implemented as given.** (1) No amount on the button — and that is the only
+honest option anyway: a token-metered cost has no true number before it runs, so a figure there would be
+a fabricated quote. (2) A "no" is scoped to ONE build, implemented by storing *nothing* — the offer is
+turn-local, so there is nothing to forget and nothing to reset. (3) Free and gift credits pay for it.
+
+🔴 **One admin instruction was NOT followed, and raised instead (third absolute rule).** The admin asked
+for the question in the user's language. `narrationCatalogue.ts` carries the admin's own 2026-08-11 rule
+— a status line is the PLATFORM speaking, not the AI, and an earlier Hindi table there was removed as
+wrong and unmaintainable ("22 hand-written translations per line") — and on 2026-09-14 the admin saw a
+voice-chat **price** in Devanagari and asked *"south india wale kaise padhenge isko??"*, superseding
+three modules' "user's language" behaviour. This offer IS a price. Building it translated would
+re-create exactly what they stopped, so it is professional English and the admin was told, with the
+reasoning, rather than quietly obeyed.
+
+🔴 **Q-979's ceiling was hit live, by this feature.** The first version put its `let`, its nested `if`s
+and its two `try`s inline in the `/build` handler, and `tsc` answered **TS2563: the containing function
+or module body is too large for control flow analysis** — the exact row draft #3700 owns. Rather than
+touch that row (it is taken), the whole flow moved into `optionalBugHunt.ts` with its effects injected
+(`ask` / `wait` / `say` / `record`), leaving the handler at ONE call and one `await`. A source guard
+asserts no branch, no `let` and no second `await` inside it, and says why: in that handler, the cost of
+a branch is the whole file. This is the better design regardless — every branch is now unit-testable
+without a server, a user or a clock.
+
+**Q-1041, found while building.** `permission_request` carried the whole question as one string, which
+the tray printed as a bold title with an empty detail line and two *fixed* buttons. That is why
+`startOfferText` has to spell "Approve = … Deny = …" inside its own sentence — the buttons could not be
+labelled — and why a gate that builds nothing still offered to "Approve & build". The event gained four
+optional fields, threaded through to the tray; **a gate that names none of them renders byte-for-byte as
+before**, which a test asserts on the fallbacks themselves.
+
+**Q-1042, the honest leftover.** The admin's instinct — run the helper on the cheap tier — is the actual
+cure; hiding the price treats the symptom. Recorded as an open row with what it needs: the cheap rung
+must be measured against the Sonnet judge before it becomes the default, because a cheaper hunt that
+misses real bugs is worse than an honest "not run".
+
+**Proof.** `tests/aBugHuntIsOfferedNotAssumed.test.ts`, 24 tests. Eight reversions, each failing the
+right test: silence counted as consent; a declined hunt reported as passed; a made-up rupee figure on
+the button; the fail-open flipped to fail-closed; the kill switch turning the review off instead of the
+ask; the wait bypassing `waitForUser` (the one door, autopsy 1219c639); the button offering to "build"
+again; and the tray ignoring a gate's own labels. The 130 tests across every module this touched
+(`whatTheUserMustDo`, `theTrayKnowsWhatIsNotConnected`, `everyPopupClearsTheChrome`, `buildNeeds`) pass
+unchanged.

@@ -110,7 +110,24 @@ export type AgentV3WireEvent =
   | { type: 'plan_updated'; plan: string; ts: number }
   | { type: 'agent_spawned'; agent: AgentRole; task: string; ts: number }
   | { type: 'agent_done'; agent: AgentRole; ok: boolean; summary: string; ts: number }
-  | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
+  /**
+   * An ask the user must answer before the build goes on.
+   *
+   * `action` is the whole question as ONE string, which the tray prints as its bold title with no
+   * detail line and two fixed buttons ("Approve & build" / "Reject"). That is why `startOfferText` has
+   * to spell "Approve = ... Deny = ..." inside its own sentence — the buttons could not be labelled —
+   * and why a gate that does not build still offers to "Approve & build" (admin 2026-10-13, the
+   * optional bug hunt). The four optional fields below let a gate say what it actually is. ALL
+   * OPTIONAL: an event without them renders exactly as it does today, byte for byte.
+   */
+  | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number;
+      /** A short question for the bold line. Falls back to `action`. */
+      title?: string;
+      /** The detail under it — what happens, and what it costs. */
+      why?: string;
+      /** Real button labels. Fall back to "Approve & build" / "Reject". */
+      approveLabel?: string;
+      denyLabel?: string }
   // The build needs credentials from the user. Carries NAMES ONLY — the value is written straight to
   // the encrypted vault by the client and never travels on this stream (see secretRequest.ts).
   | { type: 'secret_request'; agent: AgentRole; callId: string; prompt: string; secrets: Array<{ name: string; why: string }>; ts: number }
@@ -271,7 +288,8 @@ export interface AgentV3ClientState {
   /** When THIS build first wrote the app's entry (earlyPreviewCue.ts) — the app is on screen from here. Cleared when a new build begins. */
   entryWrittenAt?: number;
   /** A pending plan/permission gate awaiting the user's Approve/Reject (P4). */
-  pendingPermission?: { callId: string; action: string };
+  /** The gate the build is stopped on. The last four are present only when the gate named them. */
+  pendingPermission?: { callId: string; action: string; title?: string; why?: string; approveLabel?: string; denyLabel?: string };
   /** The build is waiting on credentials the user must type. Names only — values go straight to the vault. */
   pendingSecrets?: { callId: string; prompt: string; secrets: Array<{ name: string; why: string }> };
   /** The framework the SERVER detected for this workspace, once it has told us (see the event).

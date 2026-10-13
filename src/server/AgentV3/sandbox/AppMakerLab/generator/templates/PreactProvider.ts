@@ -1,4 +1,5 @@
 import { DESIGN_KIT_CSS } from './designKit';
+import { APP_VIEWPORT_META } from '../../../../nativeFeel';
 import { ITemplateProvider } from './ViteReactProvider';
 
 // Preact + Vite scaffold. Preact is a ~3KB React-compatible UI library — same JSX + hooks API as React
@@ -60,7 +61,7 @@ const INDEX_HTML = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    ${APP_VIEWPORT_META}
     <title>My Preact App</title>
   </head>
   <body>

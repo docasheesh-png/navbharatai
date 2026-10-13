@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { milestoneBuildPrompt, milestoneLaneRequest, MILESTONE_NOTES_SCOPE_LINE } from '../src/server/lib/megaRoadmap';
 import { nonSmartphoneBuildRule } from '../src/server/AgentV3/deviceTarget';
+import { PROCESS_ONLY_CODES } from '../src/server/AgentV3/BuildDiagnostics';
 
 const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
 
@@ -64,6 +65,7 @@ describe('1 · the builder: the brief replaces the request, never the notes', ()
     const r = milestoneBuildPrompt({ buildPrompt: appended, request: REQUEST, step: STEP, total: 4, report: { record: (i) => { rows.push(i); } } });
     expect(r.notesDropped).toBe(true);
     expect(rows).toEqual([expect.objectContaining({ code: 'MILESTONE_NOTES_DROPPED', severity: 'warning' })]);
+    expect(PROCESS_ONLY_CODES.has('MILESTONE_NOTES_DROPPED'), 'a fact about our prompt assembly, never the user\'s app').toBe(true);
     expect(m.notesDropped).toBe(false);
   });
 });

@@ -146,7 +146,7 @@ describe('🔒 the route counts and names only what landed', () => {
     for (const prefix of ['fast-foundation-', 'fast-tsconfig-', 'scaffold-restore-', 'cssmod-w', 'barrel-w']) {
       expect(route, prefix).toMatch(new RegExp(`readWriteOutcomes\\([^;]*await writePlatform\\([^;]*'${prefix}'`));
     }
-    for (const site of ['await fastWrite(toWrite)', 'await fastWrite([{ path: patch.path', 'await fastWrite(snaps.map(']) {
+    for (const site of ['await fastWrite(toWrite)', 'await fastWrite([{ path: patch.path', 'await fastWrite(snaps)']) {
       const at = route.indexOf(site);
       expect(at, site).toBeGreaterThan(0);
       expect(route.slice(at - 60, at), site).toContain('readWriteOutcomes(');

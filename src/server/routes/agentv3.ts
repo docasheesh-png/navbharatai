@@ -18735,10 +18735,10 @@ async function noteBuildOutcome(
               }
               // A kit class with no rule has exactly one right rule — the kit's (autopsy e725e002). Put it
               // back here, for free, so a repair round is spent only on classes nobody can know.
+              // Both fixes below are recorded and claimed only for what the workspace took (Q-912).
               let project = { ...sheets, ...written };
               try {
                 const patch = kitRestorePatch(project);
-                // Recorded and claimed only when the workspace took it (Q-912).
                 if (patch && readWriteOutcomes([patch], await fastWrite([{ path: patch.path, content: patch.content }])).landed.length > 0) {
                   writtenFiles.set(patch.path, patch.content);
                   project = { ...project, [patch.path]: patch.content };
@@ -18752,8 +18752,7 @@ async function noteBuildOutcome(
               try {
                 const snaps = spacingSnapPatches(project, writtenFiles.keys());
                 if (snaps.length > 0) {
-                  // Only the snaps the workspace took are recorded and counted (Q-912).
-                  const { landed } = readWriteOutcomes(snaps, await fastWrite(snaps.map((s) => ({ path: s.path, content: s.content }))));
+                  const { landed } = readWriteOutcomes(snaps, await fastWrite(snaps));
                   for (const s of landed) { writtenFiles.set(s.path, s.content); project = { ...project, [s.path]: s.content }; }
                   if (landed.length > 0) buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: spacingSnapNote(landed), autoResolved: true });
                 }

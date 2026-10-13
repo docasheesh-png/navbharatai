@@ -1808,6 +1808,10 @@ export interface SimpleBuildResult {
    * that were SALVAGED into the workspace before handing off — so the full builder continues from
    * them (its own prior work) instead of rebuilding from an empty tree. Empty/undefined when nothing
    * was salvageable (or the failure wasn't a timeout).
+   *
+   * Only files the workspace HOLDS (Q-912, report 9c612cdb): a file whose every write was refused is never
+   * listed, because the next builder is told these are "in the workspace now". A writer that answers nothing
+   * is taken at its word, as before.
    */
   salvagedPaths?: string[];
   /**

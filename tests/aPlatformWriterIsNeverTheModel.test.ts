@@ -268,6 +268,17 @@ describe('the dispatcher\'s platform-started heals name themselves — and keep 
     expect(seen).toEqual(['feature-presence-heal']);
     expect(actuator.files.get('src/hooks/useAuth.ts')).not.toBe(LEAK); // allowed, exactly as before
   });
+  it('the evaluate tool\'s own .gitignore heal is the evaluate heal — even when a model (or the reviewer) called evaluate', async () => {
+    const { actuator, dispatcher } = rig(WS);
+    actuator.files.set('.env', 'API_KEY=live-secret\n');
+    actuator.files.set('package.json', '{"name":"x","dependencies":{}}');
+    actuator.files.set('index.html', '<!doctype html><div id="root"></div>');
+    const seen: Array<{ path: string; pass: string | null; model: ModelToolOrigin | null }> = [];
+    dispose = setWriteObserver(({ path, pass, model }) => seen.push({ path, pass, model }), WS);
+    await runAsModelToolCall(() => dispatcher.dispatch({ id: 'ev1', name: 'evaluate', input: {} }, 'reviewer'));
+    expect(actuator.files.get('.gitignore')).toMatch(/\.env/);
+    expect(seen.filter((s) => s.path === '.gitignore')).toEqual([{ path: '.gitignore', pass: 'evaluate-heal', model: 'build' }]);
+  });
   it('with no outer pass on a latched app it is refused, exactly as the unnamed write was', async () => {
     const { actuator, dispatcher } = rig(WS);
     actuator.files.set('src/hooks/useAuth.ts', LEAK);

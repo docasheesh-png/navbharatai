@@ -6057,7 +6057,9 @@ export class ToolDispatcher {
           const healed = gitignoreWithEnvCoverage(gitignoreContent, secretLeak.exposed);
           if (healed) {
             try {
-              await this.actuator.writeFile(this.workspaceId, '.gitignore', healed);
+              // Named like every other evaluate heal (`landHealWrite`): the model asked evaluate to JUDGE, not to write a
+              // .gitignore, and the reviewer's "read-only" evaluate reaches here too — so it is never the build loop (9c612cdb).
+              await this.inPlatformPass('evaluate-heal', () => this.actuator.writeFile(this.workspaceId, '.gitignore', healed));
               gitignoreContent = healed;
               secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
             } catch {

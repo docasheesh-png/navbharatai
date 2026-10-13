@@ -343,8 +343,9 @@ async function shot(page, box) {
   return buf.toString('base64');
 }
 
-// Decode both screenshots IN THE BROWSER and compare them at 48×27. Returns the mean change (0–100) and
-// the second image's spread of brightness (a single flat colour has none).
+// Decode both screenshots IN THE BROWSER and compare them at 48×27. Returns the mean change (0–100), the second
+// image's spread of brightness (a single flat colour has none) and its mean brightness (0–255) — recorded so a
+// picture too dark to play can be measured, not argued about (Q-980, found beside Q-913).
 async function compare(page, a, b) {
   return page.evaluate(async ([a, b]) => {
     const px = async (b64) => {
@@ -362,7 +363,7 @@ async function compare(page, a, b) {
       sum += l; sum2 += l * l; n++;
     }
     const mean = sum / n;
-    return { change: (diff / (n * 3 * 255)) * 100, spread: Math.sqrt(Math.max(0, sum2 / n - mean * mean)) };
+    return { change: (diff / (n * 3 * 255)) * 100, spread: Math.sqrt(Math.max(0, sum2 / n - mean * mean)), brightness: mean };
   }, [a, b]);
 }
 
@@ -589,6 +590,7 @@ try {
   const f1 = await page.evaluate(() => ({ ...window.__nb, t: performance.now() }));
   const idle = await compare(page, a, b);
   out.spread = Math.round(idle.spread * 10) / 10;
+  out.brightness = Math.round(idle.brightness);
   out.idle = Math.round(idle.change * 100) / 100;
   out.fps = Math.round(((f1.frames - f0.frames) * 1000) / Math.max(1, f1.t - f0.t));
   out.longFrames = f1.long - f0.long;
@@ -768,6 +770,11 @@ export interface PlaytestRun {
   diagnostic?: string | null;
   started?: string | null;
   spread?: number;
+  /** Mean brightness of the idle picture, 0–255 (Q-980, found beside Q-913). Recorded, not yet scored: BlockWorld
+   *  (50378049) shipped a screen too dark to play, and `spread` alone passes a dark world with a little variation
+   *  (Q-913 itself — the playtest never running — is fixed by playtestSkipReason). A threshold needs real numbers from
+   *  a dark game AND a legitimately dark one (a space shooter), so it is measured and printed first. */
+  brightness?: number;
   idle?: number;
   fps?: number;
   longFrames?: number;
@@ -1059,10 +1066,11 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
   const card = (Object.keys(DIMENSION_WEIGHTS) as Dimension[]).map((d) => `${LABEL[d]} ${score.dimensions[d]}`).join(' · ');
   const played = score.respondedTo.length ? `it responded to ${score.respondedTo.join(', ')}` : 'it did not respond to the arrows/WASD, Space or a drag';
   const fpsNote = typeof run.fps === 'number' ? `; ${run.fps} fps in the build sandbox's software renderer (a phone's GPU is faster)` : '';
+  const pictureNote = typeof run.brightness === 'number' ? `; picture brightness ${run.brightness}/255, contrast ${run.spread ?? 0}` : '';
   const errNote = run.errorCount ? `; ${run.errorCount} error(s) while playing: ${(run.errors ?? [])[0] ?? ''}` : '';
   const anyZero = (Object.keys(score.dimensions) as Dimension[]).some((d) => score.dimensions[d] === 0 && d !== 'replay');
   const ok = score.overall >= PLAYABLE_SCORE && !anyZero && !score.stalledVehicle && !score.cameraFacesVehicle && !score.steeringMirrored;
-  const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${errNote}.`;
+  const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.`;
   if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: head };
   const fix = score.stalledVehicle ? STALLED_VEHICLE_FIX
     : score.cameraFacesVehicle ? CAMERA_FACES_VEHICLE_FIX

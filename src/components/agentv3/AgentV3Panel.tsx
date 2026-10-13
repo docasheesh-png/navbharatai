@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ServiceRecommendationCard } from './ServiceRecommendationCard';
 import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
 import { stopVersionPreview } from '../../lib/versionPreviewStop';
@@ -5552,6 +5553,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   charCount={prompt.length}
                 />
               </div>
+              {/* Go-live PR 13: Buy/Connect card. Empty unless the server sent service_recommendation,
+                  which it does only with AGENTV3_SERVICE_RECO on. Opens Wallet & Billing on the right door. */}
+              {!running && state.serviceRecommendations.length > 0 && (
+                <div className="mx-3 my-2">
+                  <ServiceRecommendationCard
+                    items={state.serviceRecommendations}
+                    onBuy={(skuId) => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing', walletIntent: { door: 'buy_services', skuId } } }))}
+                    onConnect={(skuId) => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing', walletIntent: { door: 'buy_services', skuId } } }))}
+                  />
+                </div>
+              )}
               {/* B8 — CONTEXT METER. Compaction already runs silently; without this the user only sees the
                   SYMPTOM (the AI forgetting things they said an hour ago) and concludes the product got
                   worse. Shown ONLY once there is something true to say — a meter that always talks

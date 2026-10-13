@@ -64,13 +64,14 @@ describe('pricing — rates & equivalents', () => {
 
   it('default Opus and Sonnet rates', () => {
     // …with Anthropic's prompt-cache lines derived from the input rate: read 0.1×, write 1.25× (Q-343).
-    expect(opusRate()).toEqual({ inputPerMTok: 15, outputPerMTok: 75, cacheReadPerMTok: 1.5, cacheWritePerMTok: 18.75 });
+    // Opus 4.8's price, verified on claude.com/pricing 2026-10-12 (Q-880); it was Opus 4.1's $15 / $75.
+    expect(opusRate()).toEqual({ inputPerMTok: 5, outputPerMTok: 25, cacheReadPerMTok: 0.5, cacheWritePerMTok: 6.25 });
     expect(sonnetRate()).toEqual({ inputPerMTok: 3, outputPerMTok: 15, cacheReadPerMTok: 0.3, cacheWritePerMTok: 3.75 });
   });
 
   it('opusEquivalentUsd / sonnetEquivalentUsd price tokens at the right rate', () => {
-    // 1M in + 1M out → Opus 15+75 = 90; Sonnet 3+15 = 18.
-    expect(opusEquivalentUsd(usage)).toBeCloseTo(90, 6);
+    // 1M in + 1M out → Opus 5+25 = 30; Sonnet 3+15 = 18.
+    expect(opusEquivalentUsd(usage)).toBeCloseTo(30, 6);
     expect(sonnetEquivalentUsd(usage)).toBeCloseTo(18, 6);
   });
 
@@ -95,10 +96,10 @@ describe('pricing — billed amount (the admin model, 2026-07-05)', () => {
   });
 
   it('billedForTier: cheap → Sonnet×1.2, sonnet → Sonnet×3, opus → real Opus×2', () => {
-    // Sonnet-equivalent = 18, real Opus = 90.
+    // Sonnet-equivalent = 18, real Opus = 30.
     expect(billedForTier(usage, 'cheap')).toBeCloseTo(18 * 1.2, 6);  // 21.6
     expect(billedForTier(usage, 'sonnet')).toBeCloseTo(18 * 3, 6);   // 54
-    expect(billedForTier(usage, 'opus')).toBeCloseTo(90 * 2, 6);     // 180
+    expect(billedForTier(usage, 'opus')).toBeCloseTo(30 * 2, 6);     // 60
   });
 
   it('NORMAL mode (power off) bills the CHEAP tier: Sonnet-equivalent × 1.2', () => {
@@ -107,9 +108,9 @@ describe('pricing — billed amount (the admin model, 2026-07-05)', () => {
   });
 
   it('billing follows the pinned model (admin 2026-07-13): Opus tiers × 2, Strong = Sonnet × 3, off/weak = cheap', () => {
-    expect(billedAmountUsd(usage, true)).toBeCloseTo(90 * 2, 6);   // legacy boolean → Opus tier (180)
-    expect(billedAmountUsd(usage, 'medium')).toBeCloseTo(180, 6);  // Powerful → real Opus × 2
-    expect(billedAmountUsd(usage, 'max')).toBeCloseTo(180, 6);     // Full Team → real Opus × 2
+    expect(billedAmountUsd(usage, true)).toBeCloseTo(30 * 2, 6);   // legacy boolean → Opus tier (60)
+    expect(billedAmountUsd(usage, 'medium')).toBeCloseTo(60, 6);   // Powerful → real Opus × 2
+    expect(billedAmountUsd(usage, 'max')).toBeCloseTo(60, 6);      // Full Team → real Opus × 2
     // Strong ('mini') pins SONNET 100% — it must bill Sonnet-equivalent × 3 (54), NEVER Opus rates
     // for Sonnet work (the old mapping billed 180 here: a ~3.3× overcharge).
     expect(billedAmountUsd(usage, 'mini')).toBeCloseTo(18 * 3, 6); // 54
@@ -126,12 +127,12 @@ describe('pricing — billed amount (the admin model, 2026-07-05)', () => {
     expect(billedForTier(usage, 'cheap')).toBeGreaterThan(sonnetEquivalentUsd(usage));
     // Sonnet: billed 54 ≥ real Sonnet 18.
     expect(billedForTier(usage, 'sonnet')).toBeGreaterThan(sonnetEquivalentUsd(usage));
-    // Opus: billed 180 ≥ real Opus 90.
+    // Opus: billed 60 ≥ real Opus 30.
     expect(billedForTier(usage, 'opus')).toBeGreaterThan(opusEquivalentUsd(usage));
   });
 
   it('INR billing scales by the USD→INR rate', () => {
-    expect(billedAmountInr(usage, 'max', 85)).toBeCloseTo(180 * 85, 4);
+    expect(billedAmountInr(usage, 'max', 85)).toBeCloseTo(60 * 85, 4);
     expect(billedAmountInr(usage, 'off', 85)).toBeCloseTo(21.6 * 85, 4);
   });
 });
@@ -139,7 +140,7 @@ describe('pricing — billed amount (the admin model, 2026-07-05)', () => {
 describe('pricing — INR conversion', () => {
   it('billedAmountInr = billedAmountUsd × the USD→INR rate', () => {
     expect(billedAmountInr(usage, false, 85)).toBeCloseTo(21.6 * 85, 4); // normal (cheap × 1.2)
-    expect(billedAmountInr(usage, true, 85)).toBeCloseTo(180 * 85, 4);   // power (Opus × 2)
+    expect(billedAmountInr(usage, true, 85)).toBeCloseTo(60 * 85, 4);    // power (Opus × 2)
   });
 
   it('clamps a negative rate to zero', () => {

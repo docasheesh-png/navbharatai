@@ -94313,6 +94313,16 @@ Another session, gating #3679, reported that under CPU load the full suite flipp
 - **Tests executed:** 101 billing test files, 1,935 passed, 0 failed, 0 skipped.
 - **State:** every finding is a 🟡 row in `BUILD_REPORT_QUEUE.md`, waiting on the admin's approval of the ordered plan in §8 of the report. No fix is implemented until the admin approves.
 
+### 2026-10-12 — Q-880: Opus is priced at its real $5/$25 (admin chose "A: rate theek karo")
+
+- **The problem:** the Opus rate card defaulted to $15 / $75 — Opus 4 / 4.1's price. The Opus this code calls is `claude-opus-4-8` (Strong's last rung), and Anthropic's price for it, verified on claude.com/pricing on 2026-10-12, is $5 input / $25 output, cache read $0.50, 5-minute cache write $6.25. Opus 4.7 is the same.
+- **What it did:** a Strong build that reached its Opus rung was marked up on a provider cost three times too high. The $5 cost ceiling paused such a build at about $1.67 of real spend. A build whose preview was never confirmed was told "charged only what this build actually cost to run" while paying three times that cost.
+- **The class:** hand-typed provider prices with no source or date, and a test that pinned the constant (`pricing.test.ts:67`) instead of the provider's price — so 1,935 green billing tests never saw it.
+- **Fix:** `opusRate()` defaults $5 / $25 (env overrides kept). The `CLAUDE_OPUS` label now prices at the Opus rate — an Opus call with no model id fell to the Sonnet price without cache lines. Eight expectations that pinned $15 / $75 were updated.
+- **Lock:** `tests/claudeRatesMatchVerifiedPrices.test.ts` holds the verified table with its source and date. It fails when a default Claude model id (`models.ts`) has no verified price, or when the rate card drifts from it. Proven by reversion: the old rate fails 2 tests, the missing label fails 1.
+- **Unchanged:** the customer rule (real provider cost × tiered markup, 100 wallet tokens per ₹). The admin was told plainly that the brief's "₹1 = 200 output tokens, input free" rule does not exist in this code.
+- **Watch after merge:** `OPUS_INPUT_PER_MTOK` / `OPUS_OUTPUT_PER_MTOK` must not be set in Cloud Run, or the env value stays in force. The next Strong build that reaches Opus should show its real cost at $5 / $25.
+- **Open (admin):** whether past Strong-Opus overcharges are refunded.
 ## 2026-10-12 — AUTOPSY `50378049`, Q-905: a module was "done" because its TURN succeeded, not because it delivered its files
 
 Second PR from the BlockWorld autopsy (the first, #3684, fixed Q-900…Q-904 — a plan-time prediction

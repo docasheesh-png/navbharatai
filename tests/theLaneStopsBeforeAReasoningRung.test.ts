@@ -116,8 +116,8 @@ describe('the repair loop asks the same question generation asks', () => {
 
 describe('the route wires both halves under the one kill switch', () => {
   const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
-  it('every lane call asks the walk to stop before a reasoning rung', () => {
-    expect(route).toContain('stopAtReasoningRung: fastLaneReasoningGateEnabled(),');
+  it('every lane call asks the walk to stop before a reasoning rung — except a per-file call the lane decided may stay (Q-926)', () => {
+    expect(route).toContain('stopAtReasoningRung: fastLaneReasoningGateEnabled() && !mayReason,');
   });
   it('a stop is turned into the lane\'s hand-off reason and recorded', () => {
     expect(route).toContain('if (isReasoningRungStop(err) && !fastLaneReasoningRung) {');

@@ -95077,6 +95077,39 @@ template hand-write its viewport again → **3** · remove the `dvh` override �
   starter, and Q-908's brand-new platform-seeded exclusion would stop recognising it. **A genuine
   fix-A-create-X, caught by a guard another session built.** Regenerated: 76 starter paths · 35 golden
   paths · 455 versions, 55 new.
+### 2026-10-13 — Autopsy db07e0af, part two: Q-926 built (admin: "han"), and three items the first ledger missed
+
+**The admin asked "sab ho gaya??" The honest answer was no.**
+- Q-926 was waiting on the admin's decision.
+- Reading the report again line by line turned up three items the first ledger never listed. That was my miss, and these three rows record it.
+
+**Q-926: option (b), built.**
+- A per-file call may now continue onto a rung that reasons before every answer, instead of the lane handing off. This holds while what is left is small: at most 20 files, and the lane's remaining budget covers their waves at 45 s each. It is decided per tier.
+- Plan, contract and repair calls still stop in front of that rung (the 33812996 / Study-Racer protections).
+- The measured early bail still hands off on a slow tier.
+- The proposal said ≤ 12 files. This very app planned 17, so I raised the cap to 20 and said so in the row.
+- **Measurement:** `FAST_LANE_STAYED_ON_REASONING_RUNG` records the calls, the median, the slowest call and how the lane ended. Read it on the next Weak builds. `AGENTV3_FASTLANE_REASONING_STAY=off` reverts it.
+
+**Q-976: READY_BEFORE_END measured on two clocks.**
+- The ready mark counted from the RUNNER's start; the end was counted from the BUILD's start. So the setup and the fast lane (~45 s) were reported as 56 s of work after the app was finished. About 11 s really ran.
+- **Fix:** `ReadyMark.at` (an absolute instant). The overrun is now `endAt − at`.
+
+**Q-977: our own finishing files were filed under "build loop" (the model).**
+- Four finishing passes wrote without naming themselves: the e2e scaffold, the ambient-shim cleanup, the e2e tsconfig exclude, and the architecture note.
+- **Fix:** each now runs inside a named `runInPass`. A census fails on any new unnamed finishing write.
+- The remaining post-green writes are the designed production-defaults pass, and the app still rendered. `postGreenWrites.ts` records that as info by design.
+
+**Q-978: a net under the orphan hand-back (layer two of the 50/50 law).**
+- After the build loop, a component is removed when all three hold: this build wrote it, the import graph proves nothing reaches it, and its name shares no word with the request. Removal goes through the same confirm-and-forget path as the model's own deletes.
+- The readiness line that counted exactly those files is withdrawn.
+- A component the request names is kept, and its warning stays.
+- Kill switch: `AGENTV3_LEFTOVER_REMOVE=off`.
+
+**Also.** The route handler is now close to TypeScript's control-flow-analysis size limit (TS2563 appeared while wiring Q-978). The net was moved into `leftoverComponents.applyLeftoverNet` so the handler stays under it. Future additions to that handler should go into modules.
+
+**Proof.** Every fix was reverted and its test failed: Q-926 three ways, the part-two items four ways.
+
+**db07e0af count:** 18 items. 14 resolved (13 by merged PR #3687, plus Q-923 as not-a-defect). Q-926, Q-976, Q-977 and Q-978 are FIX IN PR in this branch.
 
 ### 2026-10-13 — Autopsy 15e69839, continued: the sibling I deferred, and the items I left unledgered
 

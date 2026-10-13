@@ -461,7 +461,7 @@ export interface AgentRunResult {
    * needs the answer — whether the loop should END itself here rather than merely say so — must not
    * be taken on a belief. Absent means "never judged finished", which is NOT an overrun of zero.
    */
-  readyAt?: { step: number; elapsedMs: number; score: number };
+  readyAt?: { step: number; elapsedMs: number; score: number; at?: number };
   /** T1-budget-ux: the run stopped ONLY because it hit the per-build budget cap (work is saved and the
    *  build can be continued — a fresh run gets a fresh budget window). Lets the client show an honest
    *  "budget reached — continue" state instead of a hard failure. */
@@ -1184,7 +1184,7 @@ export class AgentRunner {
                   typeErrors: typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null,
                   editingExistingApp: this.opts.editingExistingApp === true, wroteThisRun: dispatcher.wroteAnything(),
                   projectModule: this.opts.projectModule?.() ?? null,
-                  step: steps, elapsedMs: Date.now() - buildStartMs,
+                  step: steps, elapsedMs: Date.now() - buildStartMs, at: Date.now(),
                 });
               } catch { /* a measurement must never touch a build */ }
               if (readiness.ready && styleResumes === 0 && !this.opts.focusedRepair && !this.opts.signal?.aborted) {
@@ -1530,7 +1530,7 @@ export class AgentRunner {
             // Never "complete and healthy" over a compile that just failed (autopsy 33812996).
             const typeErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;
             if (appIsDone(readiness) && !(typeErrors !== null && typeErrors > 0)) {
-              if (!readyMark) readyMark = { step: steps, elapsedMs: Date.now() - buildStartMs, score: readiness.score };
+              if (!readyMark) readyMark = { step: steps, elapsedMs: Date.now() - buildStartMs, score: readiness.score, at: Date.now() };
               doneText = doneSteer(readiness);
               if (doneText) {
                 doneSignalled = true;

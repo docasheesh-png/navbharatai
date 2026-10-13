@@ -379,6 +379,8 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
+import { reasoningStayNote, laneOutcomeWords } from '../AgentV3/FastLaneBudget';
+import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
@@ -18292,7 +18294,9 @@ async function noteBuildOutcome(
         // The model that served the lane's LAST call reasons before every answer — the lane stops at
         // the next boundary and hands off (SimpleBuildDeps.stopLane; autopsy Study-Racer, 2026-09-25).
         let fastLaneReasoningRung: string | null = null;
-        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
+        /** Q-926: the per-file calls a reasoning rung answered while the lane stayed on it — the measurement. */
+        const laneReasoningStays: Array<{ model: string; ms: number }> = [];
+        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number, mayReason = false): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
           // blind spot — a truncated (max_tokens) per-file generation is exactly what produces broken
@@ -18332,7 +18336,8 @@ async function noteBuildOutcome(
               deadlineAt,
               // The walk stops BEFORE a rung that reasons before every answer, rather than spending the
               // lane's clock inside one (autopsy 33812996: 497 s of one repair call on two such rungs).
-              stopAtReasoningRung: fastLaneReasoningGateEnabled(),
+              // …except a per-file call the lane decided may carry on there (Q-926, FastLaneBudget.mayStayOnReasoningRung).
+              stopAtReasoningRung: fastLaneReasoningGateEnabled() && !mayReason,
               // Stop cancels this call and every later one (stopSignal.ts). The lane never read the
               // build's signal before autopsy 2720e553, so a pressed Stop ran on for minutes.
               signal: abort.signal,
@@ -18363,7 +18368,10 @@ async function noteBuildOutcome(
           }
           const servedBy = fastLaneCallIdentity(providerReported, usedProvider, fbModel, t.model);
           try { buildDiag.recordLlmCall({ model: servedBy.model, provider: servedBy.provider, promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true }); } catch { /* diagnostics best-effort */ }
-          if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {
+          if (mayReason && modelAlwaysReasons(servedBy.model)) {
+            // The lane chose to stay (Q-926): measured, and the lane is NOT told to stop.
+            laneReasoningStays.push({ model: servedBy.model, ms: Date.now() - startedAt });
+          } else if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {
             fastLaneReasoningRung = servedBy.model;
             try {
               buildDiag.record({
@@ -18393,8 +18401,8 @@ async function noteBuildOutcome(
         // on text we discarded. Continuing is provider-cap-agnostic (raising max_tokens only moves the
         // ceiling and can 400 on a provider whose real cap is lower), bounded to MAX_CONTINUATIONS, and
         // a continuation that FAILS never loses the work already produced — we keep what we have.
-        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number }): Promise<string> => {
-          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt);
+        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number; mayReason?: boolean }): Promise<string> => {
+          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt, genOpts?.mayReason === true);
           let text = first.text;
           let stopReason = first.stopReason;
           // The call whose reply ends the text — the one a dropped half-written file came from (Q-166).
@@ -18410,7 +18418,7 @@ async function noteBuildOutcome(
               // A CONTINUATION FACES THE SAME DEADLINE AS THE CALL IT CONTINUES. It is a fresh provider
               // call, so without this the budget would bound only the first one and the continuation
               // ladder would walk straight past it — the same gap the Claude retry loop had.
-              next = await fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt);
+              next = await fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt, genOpts?.mayReason === true);
             } catch (err) {
               // A failed continuation must never discard the complete files we already have.
               buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_CONTINUATION_FAILED', message: `A continuation of a truncated generation failed after ${attempts - 1} successful continuation(s) — keeping the files produced so far.`, autoResolved: false, detail: err instanceof Error ? err.message : String(err) });
@@ -18781,6 +18789,8 @@ async function noteBuildOutcome(
         // plans its own files, so "9 of 10 files written · ~1 min to go" at minute 4 counted against a list
         // nobody was following any more. Forget it; the architect's own plan steps drive the ETA from here.
         if (!sb.ok) { etaPlannedFiles = 0; etaFirstFileAt = 0; }
+        // Q-926 — the measurement the admin approved the change on: every stay, its price, and how the lane ended.
+        if (laneReasoningStays.length > 0) buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_STAYED_ON_REASONING_RUNG', message: reasoningStayNote(laneReasoningStays, laneOutcomeWords(sb)), autoResolved: true });
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
         // needs explaining, and a check only ever visible when it complains cannot be told apart from
@@ -19445,10 +19455,16 @@ async function noteBuildOutcome(
       try {
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
-          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode, projectModule: projectModuleRef?.name ?? null }),
+          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode, projectModule: projectModuleRef?.name ?? null, endAt: Date.now() }),
           autoResolved: true,
         });
       } catch { /* an advisory line must never affect a build */ }
+      // 🧹 THE NET UNDER THE ORPHAN HAND-BACK (autopsy db07e0af): a component this build wrote, that the import graph
+      // proves nothing reaches and the request never named, is removed instead of shipped — the model was handed it
+      // and left it. One the request may name stays, and so does its warning. See leftoverComponents.ts.
+      // The guard lives in leftoverComponents.ts: this handler is at TypeScript's control-flow limit (TS2563), and one
+      // more `if (a && b && c && d)` here crossed it once #3692 landed (merge of #3698, 2026-10-13).
+      await applyLeftoverNetAfterBuild({ ok: result.ok === true, importTurn: isImportTurn, editMode: isEditMode, aborted: abort.signal.aborted }, dispatcher, buildDiag, checksRequest);
       // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
       // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
       // worked: a behavioural fix nobody measures is a hope.
@@ -21755,7 +21771,8 @@ async function noteBuildOutcome(
               let exists = false;
               try { await actuator.readFile(workspaceId, path); exists = true; } catch { exists = false; }
               if (exists) continue;
-              await actuator.writeFile(workspaceId, path, content);
+              // Named, so the post-green ledger says who wrote it (db07e0af: our suite was filed under "build loop").
+              await runInPass('e2e-scaffold', () => actuator.writeFile(workspaceId, path, content));
               writtenFiles.set(path, content);
               noteFinishingWrite(path);
               added.push(path);
@@ -21774,7 +21791,7 @@ async function noteBuildOutcome(
               try { await actuator.readFile(workspaceId, AUTH_SPEC_PATH); authExists = true; } catch { authExists = false; }
               if (!authExists) {
                 const spec = buildAuthFlowSpec(auth);
-                await actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec);
+                await runInPass('e2e-scaffold', () => actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec));
                 writtenFiles.set(AUTH_SPEC_PATH, spec);
                 noteFinishingWrite(AUTH_SPEC_PATH);
                 added.push(AUTH_SPEC_PATH);
@@ -21846,7 +21863,7 @@ async function noteBuildOutcome(
             for (const path of fixedPaths) {
               const stripped = stripCollidingAmbientShims(projectNow[path]);
               if (stripped.source === projectNow[path]) continue;
-              if (!(await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, stripped.source)))) continue;
+              if (!(await writeUnlessFrozen(() => runInPass('ambient-shim-cleanup', () => actuator.writeFile(workspaceId, path, stripped.source))))) continue;
               projectNow[path] = stripped.source;
               writtenFiles.set(path, stripped.source);
               noteFinishingWrite(path);
@@ -21866,7 +21883,7 @@ async function noteBuildOutcome(
             if (tsconfigRaw) {
               const excluded = withE2eExcluded(tsconfigRaw);
               if (excluded.changed) {
-                await actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text);
+                await runInPass('e2e-tsconfig-exclude', () => actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text));
                 writtenFiles.set('tsconfig.json', excluded.text);
                 noteFinishingWrite('tsconfig.json');
                 buildDiag.record({
@@ -21899,7 +21916,7 @@ async function noteBuildOutcome(
               // refusal and then calls onFileWrite would record a file the sandbox never received
               // (adversarial review 2026-08-12). Record-only-on-success keeps the two in step.
               let adrWritten = false;
-              try { await actuator.writeFile(workspaceId, path, content); adrWritten = true; } catch { /* refused or failed */ }
+              try { await runInPass('architecture-note', () => actuator.writeFile(workspaceId, path, content)); adrWritten = true; } catch { /* refused or failed */ }
               if (adrWritten) onFileWrite?.(path, content);
               if (adrWritten) finishingPaths.add(path);
             }

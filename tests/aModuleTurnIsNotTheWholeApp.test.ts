@@ -62,12 +62,16 @@ describe('a module turn is judged as a module', () => {
 
   it('the route threads the module fact into every one of these readers', () => {
     const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
-    expect(route).toMatch(/if \(moduleAwaitsShell\) gateEvidence\.awaitingShell = moduleAwaitsShell;/);
-    expect(route).toMatch(/if \(gate\.state === 'unknown' && result\.ok && !moduleAwaitsShell\) \{/);
-    expect(route).toMatch(/runtimeUncheckedRecord\(\{ previewRendered: renderProvenNow\(\), awaitingShell: moduleAwaitsShell \}\)/);
-    expect(route).toMatch(/const summaryText = summarizeProject\([^\n]*awaitingShell: moduleAwaitsShell \}\)/);
+    // ⚠️ UPDATED 2026-10-12 (autopsy 50378049): the readers are threaded the CORRECTED prediction,
+    // `awaitsShellNow()`, which is null the moment this build has a live address. The census is the
+    // same census — only its subject changed, from a raw variable to the one question that yields to
+    // an observed fact. `aPredictionOutrankedTheApp.test.ts` holds the reason and the reversion.
+    expect(route).toMatch(/\{ const awaited = awaitsShellNow\(\); if \(awaited\) gateEvidence\.awaitingShell = awaited; \}/);
+    expect(route).toMatch(/if \(gate\.state === 'unknown' && result\.ok && !awaitsShellNow\(\)\) \{/);
+    expect(route).toMatch(/runtimeUncheckedRecord\(\{ previewRendered: renderProvenNow\(\), awaitingShell: awaitsShellNow\(\) \}\)/);
+    expect(route).toMatch(/const summaryText = summarizeProject\([^\n]*awaitingShell: awaitsShellNow\(\) \}\)/);
     const billCalls = route.match(/decideMarkupOnProof\(\{[\s\S]*?\}\);/g) || [];
     expect(billCalls.length).toBe(2); // the settle and the deadline finalizer
-    for (const c of billCalls) expect(c).toMatch(/awaitingShell: moduleAwaitsShell/);
+    for (const c of billCalls) expect(c).toMatch(/awaitingShell: awaitsShellNow\(\)/);
   });
 });

@@ -1,4 +1,5 @@
 import { ITemplateProvider } from './ViteReactProvider';
+import { APP_VIEWPORT_META } from '../../../../nativeFeel';
 
 // Lit + Vite scaffold. Lit is Google's small, standards-based library for building fast Web Components
 // (reactive properties + declarative templates, no virtual DOM). It compiles with Vite's built-in esbuild
@@ -54,7 +55,7 @@ const INDEX_HTML = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    ${APP_VIEWPORT_META}
     <title>My Lit App</title>
   </head>
   <body>

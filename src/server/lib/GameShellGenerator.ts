@@ -1045,7 +1045,7 @@ export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud
  */
 export const GAME_CONTROLS_TEST_PATH = 'src/game/controls.test.ts';
 export const GAME_CONTROLS_TEST = `// THE CONTROLS DO WHAT THE KEYS SAY — shipped with every 3D game the NavBharatAI kit builds (Q-843).
-// Your test runner runs it (npm test, or vitest run). It checks the kit your game drives with: W speeds the
+// Run it with "npm test" (or "npx vitest run"). It checks the kit your game drives with: W speeds the
 // car up and moves it the way its nose points, LEFT turns it to the driver's left, RIGHT to the right, and
 // the chase camera sits BEHIND the car, so the player sees its tail lights. If your game moves a vehicle with
 // its own code instead of driveVehicle(), copy these checks for that code.

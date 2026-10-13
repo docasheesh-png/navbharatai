@@ -287,6 +287,11 @@ export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPl
     // other branch: forward `--exclude 'e2e/**'` through the package manager's `--` passthrough, which
     // every one of npm/yarn/pnpm/bun honours for a `run <script>` invocation.
     const exclude = framework === 'vitest' && playwrightOwnsE2e(files) ? " -- --exclude 'e2e/**'" : '';
+    // 🔎 Q-911 note, so nobody re-derives a worry that was checked: since `withVitestDeclared` now writes
+    // `"test": "vitest run"` into an app that had no test script, apps reach THIS branch that used to
+    // reach step 2. The exclusion above is why that is safe — it is the same guard, forwarded through the
+    // package manager, from autopsy 9cca1fd5. A plain script here would have brought back the 2026-08-25
+    // false `vitest: FAIL` on our own unrun Playwright starter.
     return {
       framework,
       command: `${pmRun(pm, 'test')}${exclude}`,

@@ -1,4 +1,5 @@
 import { ITemplateProvider } from './ViteReactProvider';
+import { APP_VIEWPORT_META } from '../../../../nativeFeel';
 
 const PKG = JSON.stringify({
   name: 'my-astro-app',
@@ -29,7 +30,7 @@ const title = 'Hello from Astro!';
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    ${APP_VIEWPORT_META}
     <title>{title}</title>
   </head>
   <body style="padding: 2rem; font-family: sans-serif;">
@@ -47,7 +48,7 @@ const NOT_FOUND_ASTRO = `---
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    ${APP_VIEWPORT_META}
     <title>404 — Not Found</title>
   </head>
   <body style="padding: 2rem; font-family: sans-serif;">

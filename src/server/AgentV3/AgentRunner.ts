@@ -29,8 +29,8 @@ import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRe
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
-import { abortCauseOf, abortSummary, stoppedCallError, stoppedCallOwner, type AbortCause } from './buildAbortCause';
-import { isBuildStoppedError, stoppedCallServedBy } from './stopSignal';
+import { abortCauseOf, abortSummary, stoppedCallFields, type AbortCause } from './buildAbortCause';
+import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
@@ -952,24 +952,18 @@ export class AgentRunner {
           // 45-second budget cut off took this same path and was recorded as "cancelled because the build was
           // stopped" — a build nobody stopped — under the nominal model id, so the report could not say which
           // engine had been running it, or whose clock ended it. Whose decision it was is on the signal
-          // (`abortCauseOf`); `stoppedCallOwner` decides how it is recorded, for every cause the code defines:
-          //   the user's Stop and an unknown cause → EXACTLY the record above, byte for byte;
+          // (`abortCauseOf`); `stoppedCallFields` decides how it is recorded, for every cause the code defines:
+          //   the user's Stop and an unknown cause → EXACTLY the record above, key for key;
           //   our clock → a budget end (LLM_CALL_BUDGET_ENDED), naming the clock and the engine it was on;
           //   our platform → a stopped call naming the platform event and the engine.
           if (this.opts.signal?.aborted && isBuildStoppedError(err)) {
-            const cause = abortCauseOf(this.opts.signal as AbortSignal);
-            const owner = stoppedCallOwner(cause);
-            const ours = owner === 'our-clock' || owner === 'our-platform';
-            const servedBy = ours ? stoppedCallServedBy(err) : undefined;
-            const ownMessage = err instanceof Error ? err.message : String(err);
+            const stop = stoppedCallFields(abortCauseOf(this.opts.signal as AbortSignal), err, model);
             try {
               this.opts.onLlmCall?.({
-                model: servedBy?.model ?? model, promptPreview, promptChars,
+                model: stop.model, promptPreview, promptChars,
                 responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0,
                 inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - llmStartedAt,
-                ok: false, error: stoppedCallError(cause, ownMessage),
-                ...(servedBy ? { provider: servedBy.provider } : {}),
-                ...(ours ? { stopCause: cause } : {}),
+                ok: false, error: stop.error, ...stop.extra,
               });
             } catch { /* diagnostics capture is best-effort */ }
             return endAborted();

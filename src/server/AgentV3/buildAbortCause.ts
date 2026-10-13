@@ -28,7 +28,7 @@
 // abort sites already have the controller in hand, and the runner already has the signal.
 
 import { BUDGET_REACHED_MESSAGE } from './turnDeadline';
-import { BUILD_STOPPED_MESSAGE } from './stopSignal';
+import { BUILD_STOPPED_MESSAGE, stoppedCallServedBy } from './stopSignal';
 
 /** Why a build's abort signal was fired. */
 export type AbortCause =
@@ -272,6 +272,30 @@ export function stoppedCallError(cause: AbortCause, ownMessage: string): string 
     default:
       return ownMessage;
   }
+}
+
+/**
+ * What a call an abort cancelled is recorded as — the ONE decision `AgentRunner` applies on every stop.
+ *
+ *  • the user's Stop / an unknown cause → `{ model: nominalModel, error: <the stop error's own words> }` and
+ *    nothing extra: the record that existed before this function, key for key;
+ *  • ours (a clock or the platform) → the engine the provider chain was serving (when the stop error carries it),
+ *    the error `stoppedCallError` words, and `provider` / `stopCause` for the report's detail line. PURE.
+ */
+export function stoppedCallFields(cause: AbortCause, err: unknown, nominalModel: string): {
+  model: string;
+  error: string;
+  extra: { provider?: string; stopCause?: AbortCause };
+} {
+  const ownMessage = err instanceof Error ? err.message : String(err);
+  const owner = stoppedCallOwner(cause);
+  if (owner !== 'our-clock' && owner !== 'our-platform') return { model: nominalModel, error: ownMessage, extra: {} };
+  const servedBy = stoppedCallServedBy(err);
+  return {
+    model: servedBy?.model ?? nominalModel,
+    error: stoppedCallError(cause, ownMessage),
+    extra: { ...(servedBy ? { provider: servedBy.provider } : {}), stopCause: cause },
+  };
 }
 
 /**

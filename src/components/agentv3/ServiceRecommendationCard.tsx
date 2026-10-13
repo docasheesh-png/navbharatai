@@ -15,18 +15,18 @@ export interface ServiceRecommendationCardProps {
 export function ServiceRecommendationCard({ items, onBuy, onConnect }: ServiceRecommendationCardProps) {
   if (items.length === 0) return null;
   return (
-    <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm" data-testid="service-reco-card">
+    <div className="rounded-lg border border-line bg-card p-3 text-sm text-ink" data-testid="service-reco-card">
       <div className="mb-2 font-medium">Your app needs these to run</div>
       <ul className="space-y-2">
         {items.map((it) => (
           <li key={it.skuId} className="flex items-center justify-between gap-3">
             <div>
-              <div className="font-medium">{it.name} <span className="opacity-70">· {it.priceLabel}</span></div>
-              <div className="opacity-70">{it.reason}</div>
+              <div className="font-medium">{it.name} <span className="text-muted">· {it.priceLabel}</span></div>
+              <div className="text-muted">{it.reason}</div>
             </div>
             <button
               type="button"
-              className="shrink-0 rounded-md bg-orange-500 px-3 py-1 text-white hover:bg-orange-600"
+              className="shrink-0 rounded-md bg-accent px-3 py-1 text-on-accent hover:bg-accent-hover"
               onClick={() => (it.kind === 'buy' ? onBuy(it.skuId) : onConnect(it.skuId))}
             >
               {it.kind === 'buy' ? 'Buy' : 'Connect'}

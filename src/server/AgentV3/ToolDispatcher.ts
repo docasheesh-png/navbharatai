@@ -120,6 +120,7 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
   typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
+  splitByRemedy, noWriteTypecheckVerdict, type WriteTypecheckRunOutcome,
 } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
@@ -3200,7 +3201,19 @@ export class ToolDispatcher {
   }
 
   // ── WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068) — see writeTimeTypecheck.ts ──
-  private readonly _writeTypecheckQueue = new WriteTypecheckQueue<import('./EndgameRepair').TscError[] | null>();
+  /**
+   * Every writer that joins a run receives the run's whole OUTCOME — its errors AND how they were obtained
+   * (printed nothing, never ran, not ready). Never bare errors: a writer that joined a run must not judge
+   * the shared answer with its own defaults (autopsy 9c612cdb, Q-940 — see `WriteTypecheckRunOutcome`).
+   */
+  private readonly _writeTypecheckQueue = new WriteTypecheckQueue<WriteTypecheckRunOutcome>();
+  /**
+   * The type-only import heal, ONCE per compile, shared by every writer that joined it. Keyed on the
+   * shared outcome's identity: each joiner used to heal the same TS1361 itself, so one run could land the
+   * same heal write two or three times and the heal ledger read it as a repeat (autopsy 9c612cdb).
+   */
+  private readonly _typeOnlyHealByRun = new WeakMap<WriteTypecheckRunOutcome, Promise<{ healed: Map<string, Set<string>>; files: Record<string, string> }>>();
+  private readonly _typeRenameHealByRun = new WeakMap<WriteTypecheckRunOutcome, Promise<{ errors: TscError[]; added: Record<string, string>; note: string }>>();
   private _writeTypecheckStats: WriteTypecheckStats = emptyWriteTypecheckStats();
   /**
    * Is this a TypeScript project? `unknown` until a probe answers — and a probe that THREW leaves it
@@ -3267,7 +3280,7 @@ export class ToolDispatcher {
           if (String(r?.stdout ?? '').includes(WARMUP_COMPILED_MARKER)) s.warmupMs = Date.now() - startedAt;
           else s.warmupSkipped = true;
         } catch { /* a warm-up that did not finish is only a cold first check, as before */ }
-        return null;
+        return noWriteTypecheckVerdict();
       }).catch(() => undefined);
     } catch { /* never let a warm-up touch the build */ }
   }
@@ -3682,12 +3695,13 @@ export class ToolDispatcher {
         s.skipped += tsPaths.length;
         return '';
       }
-      if (unprobed) s.compiledUnprobed += 1;
-      let silentRun = false; // tsc printed nothing at all — the only output that means "clean"
-      let neverRan = false; // the compiler did not look at the project — neither clean nor failed
-      let notReady = false; // the compiler was not ready (an install running) — the check stood down at once
-      let notReadyWhy: ReturnType<typeof writeTypecheckNotReadyReason> = null; // WHICH condition (build 46e2d74b)
-      let errors = await this._writeTypecheckQueue.run(async () => {
+      // 🔴 EVERY FACT ABOUT A RUN IS A FACT OF THE RUN, NOT OF THE WRITER (autopsy 9c612cdb, Q-940). Writers
+      // that arrive during a compile all share the NEXT one, which runs ONE writer's closure. So the run's
+      // verdict travels in the shared outcome, and every per-RUN counter (`runs`, `cleanRuns`,
+      // `notRunRuns`, `compiledUnprobed`) is counted here, once per execution. Only per-WRITE facts
+      // (`skippedNotReady`, the errors quoted to this writer) are counted by each writer below.
+      const run = await this._writeTypecheckQueue.run(async (): Promise<WriteTypecheckRunOutcome> => {
+        if (unprobed) s.compiledUnprobed += 1;
         const command = writeTypecheckCommand(this.tsBuildInfoId);
         const startedAt = Date.now();
         let r: { stdout: string; stderr: string };
@@ -3701,10 +3715,13 @@ export class ToolDispatcher {
               s.disabledReason = `the incremental compile took over ${Math.round(WRITE_TYPECHECK_TIMEOUT_MS / 1000)}s ${s.timeouts} times in a row`;
             }
           }
-          return null;
+          return noWriteTypecheckVerdict();
         }
         const durationMs = Date.now() - startedAt;
-        if (String(r.stdout ?? '').includes(WRITE_TYPECHECK_NOT_READY_MARKER)) { notReady = true; notReadyWhy = writeTypecheckNotReadyReason(r.stdout); return null; }
+        if (String(r.stdout ?? '').includes(WRITE_TYPECHECK_NOT_READY_MARKER)) {
+          const notReadyWhy = writeTypecheckNotReadyReason(r.stdout); // WHICH condition (build 46e2d74b)
+          return { ...noWriteTypecheckVerdict(), notReady: true, notReadyWhy };
+        }
         s.runs += 1;
         s.elapsedMs += durationMs;
         s.timeouts = 0; // a run that finished resets the consecutive-timeout count
@@ -3713,34 +3730,36 @@ export class ToolDispatcher {
         try { this.onCommand?.({ command, exitCode: null, stdout: r.stdout || '', stderr: r.stderr || '', durationMs }); }
         catch { /* diagnostics are best-effort */ }
         const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
-        silentRun = combined === '';
+        // tsc printed nothing at all — the only output that means "clean".
+        const silent = combined === '';
         // 🔴 AUTOPSY 12c642ed: a missing compiler also parses to zero errors, and was counted as clean.
         const verdict = tscVerdict(combined);
-        neverRan = verdict === 'not-run' || verdict === 'unknown';
+        const neverRan = verdict === 'not-run' || verdict === 'unknown';
         this.noteCompileOutput(combined);
         // A tsc that printed no `error TSxxxx` line is clean; a help page or an install log parses to zero
         // errors too, which is why a clean run here is evidence only through the bridge above, never on its own.
-        return parseTscErrors(combined);
+        const errors = parseTscErrors(combined);
+        if (neverRan) s.notRunRuns += 1;
+        else if (errors.length === 0) s.cleanRuns += 1;
+        return { errors, silent, neverRan, notReady: false, notReadyWhy: null };
       });
+      let errors = run.errors;
       if (errors === null) {
-        if (notReady) {
+        if (run.notReady) {
           s.skipped += tsPaths.length;
           s.skippedNotReady = (s.skippedNotReady ?? 0) + tsPaths.length;
           // Counted by the condition that fired, so the report names it (build 46e2d74b: fourteen writes
           // reported as "still being installed" when the tree had only looked stale).
-          const why = notReadyWhy ?? 'unknown';
+          const why = run.notReadyWhy ?? 'unknown';
           s.notReadyReasons = { ...(s.notReadyReasons ?? {}), [why]: (s.notReadyReasons?.[why] ?? 0) + tsPaths.length };
         }
         return '';
       }
-      if (neverRan) {
-        s.notRunRuns += 1;
-        return '';
-      }
-      if (errors.length === 0) s.cleanRuns += 1;
+      if (run.neverRan) return '';
       // A type-only import of a value is a string edit with one correct form — done here, not asked of the
-      // model (autopsy 6cd698cc, writeTimeTypecheck.ts). Only in files this build wrote.
-      const healedTypeOnly = errors.length > 0 ? await this.healTypeOnlyImportsAtWrite(errors, tsPaths, sources) : null;
+      // model (autopsy 6cd698cc, writeTimeTypecheck.ts). Only in files this build wrote. ONCE per run:
+      // every writer that joined it shares the one heal (autopsy 9c612cdb).
+      const healedTypeOnly = errors.length > 0 ? await this.typeOnlyHealForRun(run, tsPaths, sources) : null;
       let healedNote = healedTypeOnly ? typeOnlyHealNote(healedTypeOnly.healed) : '';
       if (healedTypeOnly && healedTypeOnly.healed.size > 0) {
         sources = { ...sources, ...healedTypeOnly.files };
@@ -3748,16 +3767,13 @@ export class ToolDispatcher {
         if (errors.length === 0) return healedNote;
       }
       // A contract rename the platform recorded, used as a type (build 9c612cdb, Q-942) — fixed here in files
-      // this build wrote; for the rest the contract joins `sources`, where the note's ✏️ advice reads it.
-      const typeRenames = await this.healRecordedTypeRenamesAtWrite(errors, tsPaths, sources);
-      ({ errors, sources } = typeRenames);
+      // this build wrote; for the rest the contract joins `sources`, where the note's ✏️ advice reads it. ONCE
+      // per run, like the heal above: only what the heal ADDS is shared, never the first writer's `sources`.
+      const typeRenames = await this.typeRenameHealForRun(run, errors, tsPaths, sources);
+      errors = typeRenames.errors;
+      sources = { ...sources, ...typeRenames.added };
       healedNote += typeRenames.note;
       if (typeRenames.note && errors.length === 0) return healedNote;
-      const own = splitByWrittenFiles(errors, tsPaths).own.length;
-      s.ownErrorsSurfaced += own;
-      if (own > 0) {
-        try { getWorkspaceMemory(this.workspaceId).recordError(`write-typecheck: ${own} error(s) in ${tsPaths.join(', ')}`); } catch { /* audit best-effort */ }
-      }
       // The content just written is passed on: it is the ONLY thing that can tell the two causes of
       // "Property 'props' does not exist on type 'X'" apart (does X extend React.Component?), and it is
       // already in hand — no file is read for this. See tscErrorCause.ts.
@@ -3766,8 +3782,18 @@ export class ToolDispatcher {
       // BottomNav rewritten three times for an export App.tsx lacked). At most two targets' candidates
       // are read, only when such an error exists, and a read that fails is simply not evidence.
       // A clean run is SAID, so the model does not re-run the compiler to find out (autopsy dfd81a3a).
-      if (errors.length === 0) return silentRun ? writeTypecheckCleanNote(tsPaths) : '';
+      if (errors.length === 0) return run.silent ? writeTypecheckCleanNote(tsPaths) : '';
       sources = { ...(await this.exportTargetSources(splitByWrittenFiles(errors, tsPaths).own, sources)), ...sources };
+      // Counted by the SAME split the note makes, after the export targets are in hand (they are what
+      // tells "add the export there" from "fix it here"). An error that waits on a file not written yet is
+      // the entry-first order working as designed: it is reported apart and is not a compile error to
+      // remember (autopsy 9c612cdb, Q-946 — the reviewer reads remembered errors as findings).
+      const { fixHere, waiting } = splitByRemedy(errors, tsPaths, sources);
+      s.ownErrorsSurfaced += fixHere.length;
+      s.waitingErrorsSurfaced = (s.waitingErrorsSurfaced ?? 0) + waiting.length;
+      if (fixHere.length > 0) {
+        try { getWorkspaceMemory(this.workspaceId).recordError(`write-typecheck: ${fixHere.length} error(s) in ${tsPaths.join(', ')}`); } catch { /* audit best-effort */ }
+      }
       // The members of a type the code guessed at (autopsy 0bb437b4) ride after the typecheck's own note.
       const members = await this.missingMemberNote(splitByWrittenFiles(errors, tsPaths).own, sources);
       if (members) return healedNote + writeTypecheckNote(errors, tsPaths, sources) + members;
@@ -3775,6 +3801,41 @@ export class ToolDispatcher {
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence
     }
+  }
+
+  /**
+   * The type-only heal for ONE compile, started by the first writer that reaches it and awaited by every
+   * other writer that joined the same run (autopsy 9c612cdb). The files the joiners wrote are already in
+   * the workspace and in `_writtenPaths` when the run they share starts, so one heal covers them all.
+   */
+  private typeOnlyHealForRun(run: WriteTypecheckRunOutcome, tsPaths: string[], sources: Record<string, string>): Promise<{ healed: Map<string, Set<string>>; files: Record<string, string> }> {
+    let heal = this._typeOnlyHealByRun.get(run);
+    if (!heal) {
+      heal = this.healTypeOnlyImportsAtWrite(run.errors ?? [], tsPaths, sources);
+      this._typeOnlyHealByRun.set(run, heal);
+    }
+    return heal;
+  }
+
+  /**
+   * The recorded-rename heal for ONE compile (build 9c612cdb, Q-942), keyed on the shared run exactly as
+   * `typeOnlyHealForRun` is: the errors it starts from are the run's errors after the type-only heal, which
+   * every joiner holds identically. What is shared is only what the heal ADDS — the contract text and the
+   * healed files, the note, the remaining errors — so a joiner keeps its own `sources` for everything else.
+   */
+  private typeRenameHealForRun(run: WriteTypecheckRunOutcome, errors: TscError[], tsPaths: string[], sources: Record<string, string>): Promise<{
+    errors: TscError[]; added: Record<string, string>; note: string;
+  }> {
+    let heal = this._typeRenameHealByRun.get(run);
+    if (!heal) {
+      heal = this.healRecordedTypeRenamesAtWrite(errors, tsPaths, sources).then((r) => {
+        const added: Record<string, string> = {};
+        for (const [path, text] of Object.entries(r.sources)) if (sources[path] !== text) added[path] = text;
+        return { errors: r.errors, added, note: r.note };
+      });
+      this._typeRenameHealByRun.set(run, heal);
+    }
+    return heal;
   }
 
   /**

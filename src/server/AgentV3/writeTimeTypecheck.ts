@@ -166,6 +166,34 @@ export function splitByWrittenFiles(errors: TscError[], written: string[]): { ow
   return { own, others };
 }
 
+/**
+ * The written file(s)' errors split by WHERE THEIR REMEDY LIVES — the one test both the note and the
+ * build report's counters use. PURE.
+ *
+ * `waiting` = an error in the file just written whose fix is in ANOTHER file (a module or an export that
+ * file has not got yet — autopsy 2a7fa4b0); `fixHere` = every other error in the file(s) just written;
+ * `others` = errors in files this write did not touch.
+ *
+ * 🔴 AUTOPSY 9c612cdb (2026-10-12, Q-946). The full builder wrote `src/App.tsx` before the three
+ * components it imports — the admin's entry-first order for an early preview (`earlyPreview.ts`) — and
+ * the note correctly said "⏳ … fixed in ANOTHER file … Do NOT rewrite src/App.tsx". App.tsx was never
+ * rewritten for them. But the counter beside the note added those three errors to `ownErrorsSurfaced`
+ * and recorded them in workspace memory as compile errors, so the report read "7 error(s) quoted back
+ * in the file just written" and the autopsy read a planned step as a struggle. The note and the counter
+ * judged the same errors with two different tests; now they share this one.
+ */
+export function splitByRemedy(
+  errors: TscError[],
+  written: string[],
+  sources: Readonly<Record<string, string>> = {},
+): { own: TscError[]; fixHere: TscError[]; waiting: TscError[]; others: TscError[] } {
+  const { own, others } = splitByWrittenFiles(errors, written);
+  const fixHere: TscError[] = [];
+  const waiting: TscError[] = [];
+  for (const e of own) (remedyFileFor(e, sources) !== null ? waiting : fixHere).push(e);
+  return { own, fixHere, waiting, others };
+}
+
 const fmt = (e: TscError) => `${e.file}(${e.line},${e.col}): ${e.code} ${e.message}`;
 
 /**
@@ -201,16 +229,15 @@ export function writeTypecheckNote(
   sources: Readonly<Record<string, string>> = {},
   renames: readonly ContractRename[] = contractRenamesInSources(sources),
 ): string {
-  const { own, others } = splitByWrittenFiles(errors, written);
-  if (own.length === 0 && others.length === 0) return '';
-  const files = written.map(normalizePath).join(', ');
-  const parts: string[] = [];
   // 🔴 AN ERROR IN THIS FILE IS NOT ALWAYS AN ERROR OF THIS FILE (autopsy 2a7fa4b0). `BottomNav.tsx`
   // imported `Screen` from `../App` before App.tsx was rewritten to export it, and this note told the
   // model to fix it "before writing the next file" — when the next file WAS the fix. It rewrote BottomNav
   // three times. An error whose remedy lives in another file is now said to wait on that file, by name.
-  const waiting = own.filter((e) => remedyFileFor(e, sources) !== null);
-  const fixHere = own.filter((e) => remedyFileFor(e, sources) === null);
+  // The split is `splitByRemedy`, shared with the report's counters (autopsy 9c612cdb).
+  const { own, fixHere, waiting, others } = splitByRemedy(errors, written, sources);
+  if (own.length === 0 && others.length === 0) return '';
+  const files = written.map(normalizePath).join(', ');
+  const parts: string[] = [];
   if (fixHere.length > 0) {
     const quoted = fixHere.slice(0, MAX_OWN_ERRORS_QUOTED).map(fmt);
     const more = fixHere.length > MAX_OWN_ERRORS_QUOTED ? `\n…and ${fixHere.length - MAX_OWN_ERRORS_QUOTED} more in the same file(s).` : '';
@@ -295,6 +322,40 @@ export class WriteTypecheckQueue<R> {
   }
 }
 
+/**
+ * ONE COMPILE'S VERDICT TOGETHER WITH HOW IT WAS OBTAINED — the value every writer that joined the run
+ * receives. The dispatcher's queue is `WriteTypecheckQueue<WriteTypecheckRunOutcome>`.
+ *
+ * 🔴 AUTOPSY 9c612cdb (2026-10-12, Q-940). The queue above hands every writer that arrived during a run
+ * the SAME result, produced by ONE writer's closure. The facts about that result — the compiler printed
+ * nothing, never ran, or was not ready — were locals of each writer, set only inside the closure that
+ * actually ran. So every writer that JOINED a run judged the shared errors with its own defaults:
+ * - a compiler that never ran parsed to zero errors and was counted CLEAN (the autopsy 12c642ed class,
+ *   back through the coalesced door);
+ * - a not-ready run was skipped without being counted, so the report under-stated not-ready writes;
+ * - a clean run returned no note, so the writer was never told "✓ compiles" (the autopsy dfd81a3a class:
+ *   the model runs tsc itself to find out).
+ * Both earlier fixes assumed one writer per run. The facts now travel WITH the errors, so a writer
+ * cannot read the shared answer without them.
+ */
+export interface WriteTypecheckRunOutcome {
+  /** The compiler's errors; `null` when the run gave no verdict at all (timed out, not ready, a warm-up). */
+  errors: TscError[] | null;
+  /** tsc printed nothing at all — the only output that means "clean" (autopsy dfd81a3a). */
+  silent: boolean;
+  /** The compiler never looked at the project — neither clean nor failed (autopsy 12c642ed). */
+  neverRan: boolean;
+  /** The compiler was not ready (an install running) — the check stood down at once. */
+  notReady: boolean;
+  /** WHICH not-ready condition fired (build 46e2d74b). */
+  notReadyWhy: WriteTypecheckNotReadyReason | 'unknown' | null;
+}
+
+/** A run that produced no verdict (timed out, failed, or a warm-up). PURE. */
+export function noWriteTypecheckVerdict(): WriteTypecheckRunOutcome {
+  return { errors: null, silent: false, neverRan: false, notReady: false, notReadyWhy: null };
+}
+
 export interface WriteTypecheckStats {
   /**
    * Files that were handed a write-time label/design note (writeTimeQualityCheck.ts), across every lane
@@ -311,8 +372,18 @@ export interface WriteTypecheckStats {
    * — autopsy 12c642ed, where four such runs were reported as "4 clean". Neither clean nor failed.
    */
   notRunRuns: number;
-  /** Errors quoted back to the model in the written file(s), summed over runs. */
+  /**
+   * Errors quoted back to the model in the written file(s) as ITS to fix, summed over writes. An error
+   * whose remedy lives in another file is counted in `waitingErrorsSurfaced` instead (autopsy 9c612cdb).
+   */
   ownErrorsSurfaced: number;
+  /**
+   * Errors in the written file(s) whose remedy is in ANOTHER file not written yet — a module or an export
+   * the next writes add, which is what the admin's entry-first order produces by design (`earlyPreview.ts`).
+   * Quoted to the model as "⏳ fixed in ANOTHER file", never as its own error, and reported apart so the
+   * report does not show a planned step as a struggle (autopsy 9c612cdb, Q-946). See `splitByRemedy`.
+   */
+  waitingErrorsSurfaced: number;
   /** Sandbox time spent, in total. */
   elapsedMs: number;
   timeouts: number;
@@ -388,7 +459,7 @@ export interface WriteTypecheckStats {
 
 export function emptyWriteTypecheckStats(): WriteTypecheckStats {
   return {
-    runs: 0, cleanRuns: 0, notRunRuns: 0, ownErrorsSurfaced: 0, elapsedMs: 0, timeouts: 0,
+    runs: 0, cleanRuns: 0, notRunRuns: 0, ownErrorsSurfaced: 0, waitingErrorsSurfaced: 0, elapsedMs: 0, timeouts: 0,
     skipped: 0, skippedNotTs: 0, skippedNoTsconfig: 0, probeFailures: 0,
     compiledUnprobed: 0, projectVerdict: null, disabledReason: null, qualityNotedFiles: [],
     warmupStarted: false, warmupMs: null, warmupSkipped: false,
@@ -576,7 +647,13 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
   const notRun = (s.notRunRuns ?? 0) > 0
     ? `, ${s.notRunRuns} where the compiler never ran (it could not be installed or started — nothing was checked)`
     : '';
-  return `Write-time typecheck: ${s.runs} run(s), ${s.cleanRuns} clean${notRun}, ${s.ownErrorsSurfaced} error(s) quoted back in the file just written, `
+  // A designed wait is not a builder error (autopsy 9c612cdb, Q-946): the entry written before its parts
+  // is the admin's early-preview order, and its "cannot find module" errors are named apart.
+  const waitingErrors = s.waitingErrorsSurfaced ?? 0;
+  const waiting = waitingErrors > 0
+    ? `, ${waitingErrors} waiting on files not written yet (a module or an export the next writes add — entry-first, expected)`
+    : '';
+  return `Write-time typecheck: ${s.runs} run(s), ${s.cleanRuns} clean${notRun}, ${s.ownErrorsSurfaced} error(s) quoted back in the file just written${waiting}, `
     + `${Math.round(s.elapsedMs / 1000)}s total (~${avg}s each)`
     + (s.timeouts ? `, ${s.timeouts} timeout(s)` : '')
     + (s.warmupMs !== null ? `; the cache was warmed at build start in ${Math.round(s.warmupMs / 1000)}s, before the first write`

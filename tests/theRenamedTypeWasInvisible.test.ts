@@ -368,9 +368,13 @@ describe('6 · CENSUS — a door that renames forwards the renames to every read
   it('🔒 the dispatcher heals before it quotes, and the note reads the contract the heal put in hand', () => {
     const dispatcher = readFileSync(join(ROOT, 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
     const body = dispatcher.slice(dispatcher.indexOf('private async writeTypecheckNote('), dispatcher.indexOf('private async healTypeOnlyImportsAtWrite('));
-    const heal = body.indexOf('await this.healRecordedTypeRenamesAtWrite(errors, tsPaths, sources)');
+    // Keyed on the shared run (aJoinedWriteSeesTheRunItJoined's census): one heal per compile, however many
+    // writers joined it — and the helper it goes through is the rename heal itself.
+    const heal = body.indexOf('await this.typeRenameHealForRun(run, errors, tsPaths, sources)');
     expect(heal).toBeGreaterThan(0);
     expect(heal).toBeLessThan(body.indexOf('return healedNote + writeTypecheckNote(errors, tsPaths, sources);'));
-    expect(body).toContain('({ errors, sources } = typeRenames);');
+    expect(body).toContain('errors = typeRenames.errors;');
+    expect(body).toContain('sources = { ...sources, ...typeRenames.added };');
+    expect(body).toContain('this.healRecordedTypeRenamesAtWrite(errors, tsPaths, sources).then(');
   });
 });

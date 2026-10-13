@@ -6,6 +6,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // / user_token_wallets which navbharat-prod's rules mark `allow write: if false` (server-only); the old
 // unauthenticated CLIENT SDK was rejected with PERMISSION_DENIED. Same modular API, admin-backed.
 import { creditWalletId } from '../lib/walletCreditTarget';
+import { listEqNewestFirst, epochMillis, INDEX_SAFE_FETCH_CAP } from '../lib/firestoreIndexSafe';
 import { doc, getDoc, setDoc, updateDoc, runTransaction, collection, query, where, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
 import { mirroredCreditPatch, rupeesToTokens } from '../lib/walletMirror';
 import { ordersToReconcile, reconcileMessage, type PendingOrderRecord } from '../lib/pendingOrders';
@@ -419,10 +420,12 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     if (!userId) return res.status(401).json({ error: 'Please sign in first.' });
 
     try {
-      const txRef = collection(db, 'payment_transactions');
-      const q = query(txRef, where('userId', '==', userId), where('paymentStatus', '==', 'PENDING'), limit(50));
-      const snap = await getDocs(q);
-      const records = snap.docs.map((d: any) => d.data() as PendingOrderRecord);
+      // DB-5: newest PENDING orders first. The old unordered limit(50) returned the 50 OLDEST ids, so a
+      // user with 50 abandoned checkouts never had a new paid order swept. Index-free helper, bounded scan.
+      const records = await listEqNewestFirst<PendingOrderRecord & { _at: number }>(
+        db.collection('payment_transactions'), [['userId', userId], ['paymentStatus', 'PENDING']], '_at', 50, INDEX_SAFE_FETCH_CAP,
+        (_id, data) => ({ ...(data as PendingOrderRecord), _at: epochMillis(data.createdAt) }),
+      );
       const orderIds = ordersToReconcile(records, Date.now());
 
       let creditedInr = 0;

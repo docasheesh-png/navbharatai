@@ -23,6 +23,7 @@
  * Kill switch: `AGENTV3_ASK_UNRELATED=off` restores the old edit-always behaviour.
  */
 import { SCAFFOLD_PATHS, couldBeAppCode } from './userProjectFiles';
+import { textWords } from './textWords';
 
 export function askUnrelatedEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_ASK_UNRELATED ?? '').trim().toLowerCase() !== 'off';
@@ -77,10 +78,7 @@ const STOP = new Set([
 
 /** The four-letter stems of the subject words in a text. PURE. */
 export function subjectStems(text: string): Set<string> {
-  const words = String(text ?? '')
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .toLowerCase()
-    .split(/[^a-z0-9ऀ-ॿ]+/)
+  const words = textWords(String(text ?? '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase())
     .filter((w) => w.length >= 4 && !STOP.has(w) && !/^\d+$/.test(w));
   return new Set(words.map((w) => w.slice(0, 4)));
 }

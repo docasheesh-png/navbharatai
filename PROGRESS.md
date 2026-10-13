@@ -95077,3 +95077,19 @@ template hand-write its viewport again → **3** · remove the `dvh` override �
   starter, and Q-908's brand-new platform-seeded exclusion would stop recognising it. **A genuine
   fix-A-create-X, caught by a guard another session built.** Regenerated: 76 starter paths · 35 golden
   paths · 455 versions, 55 new.
+
+### 2026-10-13 — Autopsy 15e69839, continued: the sibling I deferred, and the items I left unledgered
+
+**Correction to my own reply on #3685.** I named "every intent list that reads only Latin/Devanagari" as the next
+lever instead of hunting it as a sibling of the picture-intent class. The admin asked "sab ho gaya??" and the honest
+answer was no. Found and handled now:
+
+| Item | Finding | State |
+|---|---|---|
+| Sibling: user-text tokenizer | Three private copies split on `[^a-z0-9ऀ-ॿ]`; a Tamil request read as `["17"]` (no domain lookup, no subject for the unrelated-request check, no name for the off-topic summary check) | ✅ one `textWords` (`\p{L}\p{M}\p{N}`), census `oneWordSplitterForEveryScript` (reverted → 2 failed) |
+| Sibling: `buildConfirmation` | A Tamil app order is not confirmed by the message, so it is offered first (one extra "ஆம்") | 🟡 deliberately unchanged: adding Indic app nouns without Indic question words would build on a Tamil QUESTION ("how is an app made") — the costly direction the asymmetry rule forbids. Needs the admin's agreement |
+| Unledgered: ETA line at minute 8 | "past my rough estimate … too low" while a call stalled | 🟡 not a defect: the sentence is true; the stall itself is now bounded |
+| Unledgered: `startBand: cheapest` beside `COMPLEX` | Score from an unreadable script vs the second opinion | 🟡 not a defect: the report already says `signalsCouldNotRead: true` and the routing line names the second opinion |
+
+The four "not a defect" rows of the first entry (spacing snap after Stop, charge wording, transient TS2307, complexity
+second opinion) are 🟡 too until the admin agrees — a "by design" claim is not ✅ on my word (sixth rule).

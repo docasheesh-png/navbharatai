@@ -94313,6 +94313,69 @@ Another session, gating #3679, reported that under CPU load the full suite flipp
 - **Tests executed:** 101 billing test files, 1,935 passed, 0 failed, 0 skipped.
 - **State:** every finding is a 🟡 row in `BUILD_REPORT_QUEUE.md`, waiting on the admin's approval of the ordered plan in §8 of the report. No fix is implemented until the admin approves.
 
+## 2026-10-12 — AUTOPSY `50378049` (BlockWorld, a voxel game): a plan-time PREDICTION outranked an OBSERVED fact, and six verdicts lied at once
+
+**The report.** Weak tier, free, ~20.7 min, `ok: true`, 368 items, 0 errors, 5 warnings, 1 unresolved,
+`RELEASE_GATE: UNKNOWN`, billed ₹129.6 / $1.3366.
+
+**The contradiction, in the report's own words.** The timeline carried `PREVIEW_PUBLISHED` — *"Preview
+address is live at https://5173-i6p2mx9hgq3xqukkl2q3o.e2b.app"* — and `RUNTIME_VERIFIED` — *"the app ran
+in the browser with no actionable console errors"*. In the same report: `RELEASE_GATE: UNKNOWN` (*"no live
+preview was ever available, so nothing here was proven to RUN"*), `E2E_SCAFFOLD_SKIPPED`,
+`LAST_CHANCE_PROOF_SKIPPED` (*"No preview URL was ever available"*), `MARKUP_WAIVED_NO_PREVIEW` ($1.3366
+instead of $5.0098) — and the user was told, about a running game, **"There is nothing to open yet"**.
+
+**Root cause, traced in code, not guessed.** Project Mode's module 1 was *"Shared Types & Constants"*,
+which does not own the app's entry, so `shellModuleFor` predicted a later module would assemble the app
+(`moduleAwaitsShell`), and the module prompt told the builder *"do NOT start or publish a preview this
+turn"*. The builder ignored the scope and wrote the WHOLE GAME — 56 files — and published a real address.
+`routes/agentv3.ts`'s preview subscriber read `type === 'preview' && !moduleAwaitsShell`, so it
+**discarded the address**, and every proof in the engine is gated on `lastPreviewUrl`. One prediction
+disarmed six verdicts.
+
+**A SECOND, independent root cause on the same sentence.** `gateEvidence.previewUrlPublished =
+Boolean(lastPreviewUrl)` wrote an explicit `false`, and `fillGateFromLedger` fills a field only when it
+is `undefined` — so the evidence ledger's own `PREVIEW_PUBLISHED` record could never correct it. Either
+cause alone reproduces the report.
+
+🔴 **SECOND APPEARANCE — the earlier fix was incomplete, and saying so is the point.** `releaseGate.ts`'s
+`previewUrlPublished` field exists for this exact false sentence, from the Fight 3D report (`5e2de8c4`,
+2026-08-27). That fix corrected the READER and left the SOURCE suppressible. Seven weeks later the class
+came back through a route nobody had hunted.
+
+**The fix (the direction of authority, not a new check).** An OBSERVATION outranks a PREDICTION:
+- `ProjectPlan.shellStillAwaited(awaitsShell, previewUrl)` — pure; null the moment an address is up.
+- The subscriber keeps the address whatever the plan predicted; `awaitsShellNow()` is the one question
+  every reader asks (the recap, the markup notice, the runtime record, the gate's excuse, the
+  `RELEASE_GATE` severity, the unproven measurement, the mobile + playtest proofs, the review deferral).
+- The gate asserts only the POSITIVE for `previewUrlPublished`, so the ledger can still answer.
+- `shouldAttemptPlatformPreview` deliberately keeps the RAW prediction: it decides whether to CREATE a
+  preview the module was told not to publish, which is not the honesty fix.
+
+**Why it cannot break autopsy `6a5fb04b`, which the prediction exists for:** a module turn that really
+has nothing openable publishes no address, so the prediction is returned unchanged and behaviour is
+identical. The only turns that change are the ones that published a live address — the lying case. The
+starter-page protection is `ToolDispatcher.setStarterExpected`, a separate mechanism, and
+`_blockIfStillTheStarterApp` re-checks the entry itself (verified, not assumed).
+
+**Locked by** `tests/aPredictionOutrankedTheApp.test.ts` — the truth table, a CENSUS pinning the raw
+variable at 4 code sites so a new reader fails the build, the subscriber's condition, the positive-only
+assertion, the end-to-end ledger→gate read on the report's real codes, and a REVERSION case that asserts
+the old explicit `false` still prints the false sentence. Reverted both bugs: 3 of 13 failed.
+
+**Ledger: 15 items, Q-900…Q-914.** ✅ 5 resolved here (Q-900 the root, Q-901 the gate's false sentence,
+Q-902 "nothing to open yet", Q-903 the two skipped proofs, Q-904 the waived margin). 🔸 10 OPEN and rowed
+in `BUILD_REPORT_QUEUE.md`: Q-905 a module marked `done` having delivered none of its own files · Q-906
+`READY_BEFORE_END` then 62 more steps over 1019 s · Q-907 a `[BUILD CHECKPOINT]` the model had to disobey
+twice · Q-908 24 abandoned recipe files with the orphan hand-back disabled by `starterExpected` · Q-909
+the recipe shell's API guessed wrong six times · Q-910 9 TypeScript writes skipped after a `package.json`
+change · Q-911 a recipe shipped a test whose runner was not installed · Q-912 three no-progress nudges and
+a `console_errors` LOOP GUARD · Q-913 the dark screen rationalised rather than verified · Q-914
+`DESIGN_CONSISTENCY` 60/100 shipped (45 hardcoded colours).
+
+**Honest limit of this entry:** one item from the first pass — an `edit_file` ambiguous-match failure —
+could not be re-verified against the report text and is therefore NOT counted. It is not in the ledger
+rather than in it unproven.
 ### 2026-10-12 — Autopsy db07e0af ("Banao", Weak tier, todo app, ₹96.93) — fifth + sixth rule
 
 **The build.** The user typed only "Banao" into a project that held nothing but NavBharatAI's persisted starter. The engine built a todo app nobody asked for and billed ₹96.93. On the way it shipped a dark-mode button that did nothing until a repair half-fixed it, a summary that sold "skeleton loading", and a 56 s wait for a review that never answered.
@@ -94404,7 +94467,158 @@ unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong
 
 **What to watch for on the next report:** a reasoning-only KIMI call ends at ~150 s as a timeout and the chain falls to GLM;
 `LLM_CALL_STOPPED` carries "it had been running Ns"; a non-English scene description gets a picture answer, not a build offer.
+**The fix.**
+- `undeliveredOwnFiles(mod, present)` — pure; which of a module's own files the PROJECT still lacks.
+  Asked against `actuator.listFiles`, never the turn's write set: a file an earlier turn wrote is
+  delivered, and asking only about this turn would call it missing.
+- `recordModuleDelivery(plan, id, present)` — records it on the module (`undelivered?: string[]`), so
+  the fact is durable across turns; module 2's turn is a different request.
+- `contractIsUnbacked(mod)` — true only when the module owns files and EVERY one is missing. A
+  partially delivered module keeps its contract: the names it did write are real.
+- `moduleBuildContext` withholds an unbacked contract and tells the turn why, instead of handing it
+  names under a false heading. A partial delivery hands the contract forward with the missing file named.
+- `PROJECT_MODULE_FILES_UNDELIVERED` — an `info` measurement of OUR process, registered in both
+  `BuildDiagnostics.ts` and `buildFindingSuggestions.ts` so it can never become a finding against the
+  user's app. The user's line is honest too: not a flat "done", but *"this step built the app its own way
+  rather than those exact files"*.
 
+🔒 **The status is deliberately NOT `failed`.** On the reported build the user got a complete, running
+game; *"module 1 failed"* would be its own lie. The status is left alone — what changes is that the plan
+RECORDS what is missing and never passes a contract nothing backs.
+
+**Additive by construction:** a plan nobody measured keeps `undelivered` absent, and `contractIsUnbacked`
+is false for an absent record, so behaviour is byte-identical to today. A `listFiles` that fails leaves
+the plan exactly as it is now (*"unasked is not undelivered"*).
+
+**Locked by** `tests/aPlanThatBecameFiction.test.ts` — 19 cases on the reported plan's real shape.
+**Reversion-proven twice:** stop withholding the unbacked contract → 1 fail; ask the turn's writes
+instead of the project → 1 fail. A case also asserts the pre-fix state still hands the fictional contract
+forward, so the reversion lives in the suite rather than in a shell history.
+
+**Still OPEN from the same root (rowed, not forgotten):** the plan's remaining 14 modules are still
+queued and billable on a build whose app already exists. That is `8e124182`'s original damage and it
+needs a decision about money and the plan's lifecycle, so it is not taken silently here.
+
+## 2026-10-12 — AUTOPSY `50378049`, Q-911: we shipped a test into the user's app and told them to run a command their app did not have
+
+Third PR from the BlockWorld autopsy (#3684 → Q-900…Q-904; #3686 → Q-905).
+
+**The defect, and it is a second-absolute-rule one.** Every 3D game NavBharatAI builds ships
+`src/game/controls.test.ts`, and that file — in the USER's own project — said *"Your test runner runs it
+(npm test, or vitest run)"*. The default Vite scaffold's `package.json`
+(`ViteReactProviderContents.ts`) defines exactly three scripts: `dev`, `build`, `preview`. **There is no
+`test` script.** So `npm test` in that app answers `npm error Missing script: "test"`. We wrote the
+test, we wrote the instruction, and the instruction did not work. `AppKnowledgeBase` repeated the claim
+to every AI in the product: *"…that the project's own test command runs"*.
+
+**Root cause: the script-writing lived in a CALLER instead of in the shared helper.** `withVitestDeclared`
+declared the dependency and stopped there — and `declared` is not `runnable`. Two of the three paths that
+ship a test had worked around that in their own code (`projectKit.ts` added `test: 'vitest run'` with its
+own copy of the string; `e2eScaffold.ts` adds `test:e2e` before telling anyone to run it). The game kit,
+which reaches the helper through `run_recipe → writeRecipeFiles → declareVitestForRecipeTests`, had no
+such copy — so it was the one path that shipped the instruction without the script. Q-843 built the
+dependency half three days ago and this was the half its sibling hunt did not reach.
+
+**The fix (the class, not the instance).**
+- `withVitestDeclared` now ensures BOTH: the devDependency and a real `test` script. Its condition
+  changed from *"is vitest declared?"* to *"can the shipped test be run?"*, so a project that already
+  declares vitest but has no script is no longer skipped.
+- `PLATFORM_TEST_SCRIPT` is exported once — the string two places wrote and a third was missing.
+- `projectKit.ts`'s private copy is deleted; it is now one call, so no future caller can forget.
+- An author's own `test` script is never overwritten. The npm-init placeholder (`no test specified`) is,
+  because `testRunner` already refuses to treat it as a suite.
+- The shipped test's own comment and the KB sentence now name a command that works, and the KB records
+  what was false before it (the system's honesty, fifth step of the fourth rule).
+
+🔒 **WHY ADDING THE SCRIPT CANNOT BRING BACK A KNOWN FAILURE — checked, not assumed.**
+`testRunner.detectTestPlan` prefers a project's own `test` script, so apps now take that branch instead
+of the inferred-vitest one. A bare script there would have lost the `--exclude 'e2e/**'` that stops
+vitest collecting our unrun Playwright starter — the 2026-08-25 false `vitest: FAIL` that the release
+gate escalated to "Not shippable" for a game the admin was playing. **Autopsy `9cca1fd5` (2026-09-17)
+already closed that hole on the script branch**, forwarding the same exclusion through the package
+manager's `--` passthrough. A case in the new test pins that guard, because this fix's safety rests on it,
+and a note in `testRunner.ts` records the check so nobody re-derives the worry.
+
+**Locked by** `tests/aShippedTestCanActuallyBeRun.test.ts` — 11 cases, including a CENSUS of the paths
+that ship a vitest test, the real Vite scaffold's actual script list as the premise, and the 9cca1fd5
+guard. `theEventBookingAutopsy.test.ts`'s *"nothing is written when it is already declared"* case was
+**widened, not weakened**: declared AND runnable is now the condition for doing nothing, with the reason
+recorded in place. **Reversion-proven three ways:** stop adding the script → 8 fails · go back to
+"declared is enough" → 2 · restore `projectKit`'s private copy → 1.
+
+⚠️ **I hit the backtick-inside-a-template-literal trap TWICE in this one change** — in
+`GAME_CONTROLS_TEST` and again in the `AppKnowledgeBase` string — the same trap #3671 recorded. Both
+surfaced as parse errors away from the edit (`TS1128` at `AppKnowledgeBase.ts:3785`, and an oxc parse
+error that made the test file report "no tests"). Fixed with quotes, and the note is in the test file
+rather than in a session's memory.
+
+## 2026-10-12 — AUTOPSY `50378049`, Q-906 **and** Q-907: one root cause, two report lines — the engine told a module turn its app was finished at step 10
+
+Fourth PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911).
+
+**The two report lines turned out to be the same mistake.** `READY_BEFORE_END` said the app was judged
+finished at step 10 (100/100) and the build then ran **62 more steps over 1019 s**; separately, a
+`[BUILD CHECKPOINT]` told the model to STOP after one file and the model **correctly overrode it twice**.
+Tracing the checkpoint's text found it: that message IS `doneSignal.doneSteer`, injected because
+`appIsDone` scored the project 100/100 at the first check (`minStep` 8, `everyN` 10 → step 10).
+
+**Why the score was 100 on an app that did not exist yet.** The build was a Project Mode module turn
+(module 1, *"Shared Types & Constants"*) AND the game kit had seeded a complete, working 3D game shell
+before the model's first call (`GAME_KIT_SEEDED`). `assessBuildReadiness` measures the PROJECT, so it
+scored **our own seed**, said "complete and healthy", and the engine told the model:
+
+>     [BUILD CHECKPOINT] … the app is complete and healthy — 100/100, no blockers.
+>     If everything the user asked for is present, STOP HERE: write your summary and hand the app over.
+
+🔴 **Had the model obeyed, the user would have been handed NavBharatAI's own seeded shell as their voxel
+game.** The 62 "overrun" steps were not an overrun at all — they were the user's game being built.
+
+**It is the THIRD time this reasoning has been accepted in `doneSignal.ts`, and the first two never hunted
+this sibling.** `wroteThisRun` (autopsy 1389f0d5) and `editingExistingApp` (autopsy 2b1f845e) are the same
+thought; 2b1f845e states it in full: *"The score measures the PROJECT's health; on an edit the project was
+healthy before the turn began, so the score cannot say whether the REQUEST is done."* And
+`readyOverrunNote` ALREADY carried the module case in its own words — *"this turn built one project module
+… not the whole app, so the project score cannot say when it was done"*. **The sentence was written; the
+guard never reached `shouldCheckDone`.** The explanation and the behaviour disagreed, and the explanation
+was right.
+
+**The fix.** `shouldCheckDone` and `endOfTurnReadyMark` both take `projectModule` and stand down for a
+module turn. `AgentRunner` passes it as a **getter** (`projectModule?: () => string | null`) for the same
+reason `hasExistingFiles` is one: the route chooses the module long after `baseRunnerOpts` is built, so a
+value would always be null.
+
+🔑 **Both guards were required, not just the steer.** `readyOverrunNote`'s honest *"Not measured: this turn
+built one project module"* line fires only when there is NO mark — so a mark recorded by the end-of-turn
+gate made that sentence **unreachable** for every module turn it judged, and the admin instead read a
+62-step overrun of a finished app. A test asserts both directions.
+
+**Locked by** `tests/aModuleIsNotAnAppToBeDoneWith.test.ts` — 11 cases on the reported build's own numbers,
+including that the steer is unchanged for the builds it is for, and the wiring census (both
+`shouldCheckDone` call sites plus the mark). **Reversion-proven three ways:** drop the steer carve-out → 1
+fail · drop the mark carve-out → 2 · pass the route's value instead of a getter → 1.
+
+**🔸 THE OPEN HALF, recorded rather than guessed.** The same collision can happen on a NON-module build: the
+game kit seeds a working app, the model writes a few files, and the done check scores OUR seed 100/100. The
+module carve-out does not cover that, and the honest fix needs a measured threshold for "enough of the
+BUILDER's own work to judge" (`gameKitSeed.builderWrittenCount` is the input). Inventing that number from
+one report is exactly what the fourth rule forbids, and this module's own discipline is measure-first — so
+it is an OPEN root cause awaiting a report where a seeded, non-module build gets the checkpoint early. It
+becomes a `BUILD_REPORT_QUEUE.md` row when #3684 (which holds this autopsy's rows) merges.
+
+**One existing guard was RE-ANCHORED, not weakened** (`theCommitMessageWasNotADevServer.test.ts`). It
+counted the literal `editingExistingApp: … === true })` — the flag followed immediately by the closing
+brace — so it was really asserting that the flag is the LAST property in the call, and adding a property
+after it broke the guard without touching anything it protects. It now asserts the intent directly (every
+`shouldCheckDone` call contains the flag), which a reordering cannot break and a removal still can —
+proven by dropping the flag from one call and watching it fail.
+
+⚠️ **A PROCESS SLIP WORTH RECORDING, because the gate is what caught it.** After moving this work onto its
+own branch I ran a reversion probe without re-staging, so `git checkout -- AgentRunner.ts` restored that
+file to HEAD and **silently discarded the whole runner half of the fix**. `typecheck` and the targeted
+tests had already passed — on the tree *before* the probes — and the first full-suite run on the branch
+then failed on exactly one case: the wiring census. Two of safeguard #5's rules did their job together:
+*stage before you probe*, and *run the gate LAST, on the final state*. The census existed because a
+reader of this fact could be forgotten; it caught the fix itself going missing.
 ### 2026-10-12 — db07e0af rows closed (#3687 merged)
 
 - **Closed (✅), on a fresh `main` (377d915):** Q-915 … Q-922, Q-924, Q-925, Q-927, Q-928 and Q-929 — 13 rows. They are removed from the open table and appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt`. The ledger stays in the autopsy entry above.
@@ -94497,3 +94711,92 @@ one-liner: mandate tokens for a game's UI in the kit's own contract (cheap, prev
 that rewrites them (risky — a voxel game's block colours are DATA, not theme, and a rewriter cannot tell
 them apart from `Hud.tsx`'s). It stays OPEN with this analysis, and what would settle it is the built
 app's own files from one game report.
+## 2026-10-12 — NATIVE FEEL, ROUND 3: round 1 fixed the reader and left the source — fourteen viewports, not one with the token
+
+The admin's standing instruction (*"navbharatai jo app banaye aur navbharatai khud dono ko real netiv app
+feel aye aisa banao! aur bhi jyada micro polish karo"*). Rounds 1 (#3669) and 2 (#3671) are merged.
+
+### Measured first, and three of four candidates were already done
+
+Before adding anything, the obvious round-3 ideas were checked against the code rather than assumed:
+
+| candidate | state |
+|---|---|
+| iOS input zoom (<16px focus zoom) | ✅ already handled, BOTH sides (`nativeFeel.ts:158`, `index.css:468`) |
+| tap highlight, overscroll, touch-action, user-select | ✅ round 1 |
+| safe-area variables, Apple meta tags | ✅ round 1 |
+| **our own app's `100vh`** | ✅ **already correct** — its three `index.css` sites use the `100vh` → `100dvh` fallback pattern, with the reasons written down |
+
+So the honest answer for NavBharatAI itself was *nothing to fix*, and saying that beats churn. **Both real
+gaps were on the apps-we-build side.**
+
+### 🔴 GAP 1 — round 1 fixed the READER and left the SOURCE
+
+`withViewportFitCover` PATCHES a user's `index.html` at build time, so an AgentV3 build gets
+`viewport-fit=cover` and its `env(safe-area-inset-*)` stops reading 0px. Measured afterwards: **not one
+of the fourteen viewport tags in the scaffold templates carried the token.** Thirteen provider templates
+(`ViteReactProviderContents`, `Vue`, `Svelte`, `SvelteKit`, `Astro`×2, `Angular`, `Preact`, `Solid`,
+`Lit`, `Vanilla`, `Remix`, `Alpine`, `Static`) each hand-wrote their own string — so there was nowhere to
+add it once, and **any lane that does not pass through `appDefaults` shipped the exact defect round 1 was
+written for.**
+
+🔑 **This repo's headline class, in its own words:** an instance fixed at one reader, the source left
+alone, and the siblings never hunted. `APP_VIEWPORT_CONTENT` / `APP_VIEWPORT_META` now live in
+`nativeFeel.ts` beside the reason, and the templates import them. `withViewportFitCover` stays as defence
+in depth: it returns a document untouched once the token is present, so a correct template makes it a
+no-op instead of a rescue — a case asserts both directions.
+
+🔒 No `maximum-scale` / `user-scalable=no`: pinch-zoom is an accessibility right and blocking it fails a
+store review. The native feel comes from the safe area, not from forbidding zoom.
+
+🔒 **What is deliberately OUT, with the reason in the test** — the email generator (mail clients ignore
+`viewport-fit` and some choke on unknown tokens) and the three preview runtimes (they RENDER an app, they
+do not ship one; changing them changes what we show, not what the user gets). Recorded so the exclusion
+is a decision rather than an oversight, and so nobody "finishes the job" by adding the token to an email.
+
+### 🔴 GAP 2 — a full-height app must end where the SCREEN ends
+
+`100vh` on a phone is the LARGE viewport: it includes the collapsing address bar, so a `height: 100vh`
+layout is cut off by exactly the toolbar height and the page scrolls when it should not. That is the
+clearest "web page, not app" tell left once the safe area is handled, and the built-app baseline had
+**no `dvh` at all**. Added: `--app-height` (plain `100vh` first, then `@supports (height: 100dvh)`), an
+`html` min-height with the same two-line pattern, and a build-rule line that NAMES the variable instead
+of merely forbidding `100vh` — round 2's lesson that a rule naming no primitive is aspirational.
+
+### Proof
+
+`tests/aViewportEveryLaneWrites.test.ts` — **38 cases**. It GENERATES every one of the thirteen
+frameworks and reads the document the provider really emits, so the token is proven in the output, not in
+the diff. Plus a **CENSUS**: no file in the template directory may hand-write a viewport, every user of
+the constant must import it, and the out-of-scope list is pinned with its reasons.
+
+**Reversion-proven three ways:** drop the token from the shared constant → **15 fails** · let one
+template hand-write its viewport again → **3** · remove the `dvh` override → **1**.
+
+### ⚠️ Three mistakes of mine, all caught by a guard
+
+- **The backtick trap, a THIRD time in one session** (#3671, #3693, here) — a CSS comment inside
+  `NATIVE_FEEL_CSS`, which is a TS template literal. `tsc` passed and the TEST LOADER caught it (`oxc`
+  parse error). The file now says in its own text that it may not contain backticks.
+- **My filter could return nothing, and did.** `htmlOf` missed `.astro` entirely, so the astro case
+  asserted against an empty string — a case that fails for the wrong reason is one edit away from a case
+  that PASSES for the wrong reason. Every case now asserts the document is non-empty first.
+- **A blanket assertion was wrong.** `expect(html).not.toContain('${')` failed on Remix's `root.tsx`,
+  which is generated code that legitimately contains its own template literals. It now asserts the
+  specific literal cannot ship — the precise claim instead of the broad one.
+
+### ⚠️ And two EXISTING guards caught consequences I had not thought of
+
+- **`aBuiltAppFeelsNative`'s "chooses no colour" rule read `#3671` as a hex colour.** Writing the PR
+  references as a hash plus four hex digits inside the stylesheet matched its
+  `/#[0-9a-f]{3,8}\b/i` exactly. **The guard was right** — and notably STRONGER than the colour check I
+  wrote in my own new test, which only extracts `background`/`color`/`border-color` declarations and
+  would never have seen a bare hex. The comment now says both of its own rules (no backticks, no hash
+  before a number) so the next editor does not rediscover either.
+- **`anOlderStarterIsStillOurs` failed because I changed what the templates write.** That census (autopsy
+  `db07e0af`) requires every file a template emits TODAY to be in the seed history — which is what lets
+  `isPlatformSeededFile` recognise an untouched starter as OURS. Changing fourteen viewport tags without
+  it would have made every new `index.html` read as the USER's code: the quality lint would grade our own
+  starter, and Q-908's brand-new platform-seeded exclusion would stop recognising it. **A genuine
+  fix-A-create-X, caught by a guard another session built.** Regenerated: 76 starter paths · 35 golden
+  paths · 455 versions, 55 new.

@@ -42,11 +42,44 @@ describe('2 · a test the builder asks for can run', () => {
     const out = JSON.parse(withVitestDeclared(pkg)!);
     expect(out.devDependencies).toEqual({ vite: '^8.3.0', vitest: VITEST_RANGE });
   });
-  it('nothing is written when it is already declared anywhere, or the file cannot be read', () => {
-    expect(withVitestDeclared(JSON.stringify({ dependencies: { vitest: '^1' } }))).toBeNull();
-    expect(withVitestDeclared(JSON.stringify({ devDependencies: { vitest: '^1' } }))).toBeNull();
+  /**
+   * ⚠️ WIDENED 2026-10-12 BY Q-911 (autopsy `50378049`), and the case is STRONGER than it was.
+   *
+   * It used to assert `null` whenever vitest was declared ANYWHERE — treating "declared" as "nothing
+   * left to do". It is not: the default Vite scaffold defines only `dev`, `build` and `preview`, so a
+   * shipped test was unrunnable by the `npm test` the test file itself tells the user to run. Declared
+   * AND runnable is the condition for doing nothing; declared alone still needs the script.
+   */
+  it('nothing is written only when the runner is declared AND a real test script exists', () => {
+    expect(withVitestDeclared(JSON.stringify({ dependencies: { vitest: '^1' }, scripts: { test: 'vitest run' } }))).toBeNull();
+    expect(withVitestDeclared(JSON.stringify({ devDependencies: { vitest: '^1' }, scripts: { test: 'jest' } }))).toBeNull();
     expect(withVitestDeclared('{ not json')).toBeNull();
     expect(withVitestDeclared(null)).toBeNull();
+  });
+
+  it('🔴 declared but with NO test script still gets the script — that was the Q-911 defect', () => {
+    const out = JSON.parse(withVitestDeclared(JSON.stringify({ devDependencies: { vitest: '^1' } }))!);
+    expect(out.scripts.test).toBe('vitest run');
+    expect(out.devDependencies).toEqual({ vitest: '^1' }); // the declared range is left exactly alone
+  });
+
+  it('the npm-init placeholder is not a test command, so it is replaced', () => {
+    const placeholder = JSON.stringify({ devDependencies: { vitest: '^1' }, scripts: { test: 'echo "Error: no test specified" && exit 1' } });
+    expect(JSON.parse(withVitestDeclared(placeholder)!).scripts.test).toBe('vitest run');
+  });
+
+  it("an author's OWN test script is never overwritten", () => {
+    const mine = JSON.stringify({ scripts: { test: 'vitest run --coverage' } });
+    const out = JSON.parse(withVitestDeclared(mine)!);
+    expect(out.scripts.test).toBe('vitest run --coverage');
+    expect(out.devDependencies.vitest).toBe(VITEST_RANGE); // the runner it needs is still declared
+  });
+
+  it('🔴 THE REPORTED SHAPE: the real Vite scaffold has no test script, and gets one', () => {
+    const scaffold = JSON.stringify({ name: 'project', type: 'module', scripts: { dev: 'vite', build: 'tsc && vite build', preview: 'vite preview' } });
+    const out = JSON.parse(withVitestDeclared(scaffold)!);
+    expect(out.scripts).toEqual({ dev: 'vite', build: 'tsc && vite build', preview: 'vite preview', test: 'vitest run' });
+    expect(out.devDependencies.vitest).toBe(VITEST_RANGE);
   });
   it('the pinned range is the one this repository actually runs, on a Vite major it supports', () => {
     const root = JSON.parse(readFileSync('package.json', 'utf8'));

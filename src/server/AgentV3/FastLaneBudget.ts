@@ -285,3 +285,10 @@ export function reasoningStayNote(calls: ReadonlyArray<{ model: string; ms: numb
   return `The fast lane stayed on ${models}, which reasons before every answer, instead of handing off (Q-926): `
     + `${calls.length} file call(s), median ${Math.round(median / 1000)}s, slowest ${Math.round(ms[ms.length - 1] / 1000)}s. ${outcome}`;
 }
+
+/** How the lane ended, in the words the stay line closes with. PURE. */
+export function laneOutcomeWords(sb: { ok: boolean; stopped?: boolean; reason?: string | null; salvagedPaths?: readonly string[] }): string {
+  if (sb.ok) return 'The lane finished the app itself.';
+  if (sb.stopped) return 'The lane was stopped by the user.';
+  return `The lane still handed off (${sb.reason || 'no reason recorded'}), with ${sb.salvagedPaths?.length ?? 0} finished file(s).`;
+}

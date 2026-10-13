@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  mayStayOnReasoningRung, wavesFor, reasoningStayNote, reasoningStayEnabled, REASONING_STAY_MAX_FILES, REASONING_WAVE_MS,
+  mayStayOnReasoningRung, wavesFor, reasoningStayNote, reasoningStayEnabled, REASONING_STAY_MAX_FILES, REASONING_WAVE_MS, laneOutcomeWords,
 } from '../src/server/AgentV3/FastLaneBudget';
 import { runSimpleBuild } from '../src/server/AgentV3/SimpleBuilder';
 import { PROCESS_ONLY_CODES } from '../src/server/AgentV3/BuildDiagnostics';
@@ -41,6 +41,11 @@ describe('1 · the decision', () => {
     expect(reasoningStayEnabled(off)).toBe(false);
     expect(mayStayOnReasoningRung({ remainingFiles: 5, remainingWaves: 1, elapsedMs: 0, overallMs: 240_000 }, off)).toBe(false);
     expect(reasoningStayEnabled({} as NodeJS.ProcessEnv)).toBe(true);
+  });
+  it('how the lane ended is said in plain words', () => {
+    expect(laneOutcomeWords({ ok: true })).toBe('The lane finished the app itself.');
+    expect(laneOutcomeWords({ ok: false, stopped: true })).toBe('The lane was stopped by the user.');
+    expect(laneOutcomeWords({ ok: false, reason: 'verify_failed', salvagedPaths: ['a', 'b'] })).toBe('The lane still handed off (verify_failed), with 2 finished file(s).');
   });
   it('the report line measures every stay', () => {
     expect(reasoningStayNote([], 'x')).toBe('');

@@ -1059,6 +1059,32 @@ export class ToolDispatcher {
     if (w?.recorded) this.setRecordedPaths(w.recorded);
   }
 
+  /**
+   * Remove files the route has decided are leftovers (`leftoverComponents.ts`, autopsy db07e0af), through the same
+   * `rm` + confirm + project-map path the model's own deletes take — so the durable store, the UI count and the
+   * report all learn of it. Only safe relative paths; returns the paths confirmed gone.
+   */
+  async removeLeftoverFiles(paths: readonly string[]): Promise<string[]> {
+    const safe = [...new Set(paths.map((p) => String(p || '').replace(/\\/g, '/')))]
+      .filter((p) => /^[A-Za-z0-9._/-]+$/.test(p) && !p.split('/').includes('..') && !p.startsWith('/'));
+    const ran: string[] = [];
+    for (const p of safe) {
+      const rm = await this.actuator.runCommand(this.workspaceId, `rm -f -- '${p}'`).catch(() => ({ exitCode: -1, stdout: '', stderr: '' }));
+      if (rm.exitCode === 0) ran.push(p);
+    }
+    const gone: string[] = [];
+    for (const p of ran) {
+      let still = false;
+      try { await this.actuator.readFile(this.workspaceId, p); still = true; } catch { still = false; }
+      if (!still) {
+        gone.push(p);
+        try { this.state?.recordFileChange({ path: p, kind: 'delete' }, 'architect'); } catch { /* UI count is best-effort */ }
+      }
+    }
+    await this.reconcileDeletions(gone);
+    return gone;
+  }
+
   /** Told when a delete of the user's own file is refused, so the build report says so. */
   private userFileRefusalSink?: (paths: string[]) => void;
   setUserFileRefusalSink(sink: (paths: string[]) => void): void {

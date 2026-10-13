@@ -337,6 +337,18 @@ describe('🔒 every attribution-only pass name is refused EXACTLY as no name is
     expect(none.some(Boolean)).toBe(true); // the latch really refuses something, so equality below means something
     for (const n of names) expect({ n, d: await decide(n) }).toEqual({ n, d: none });
   });
+  it('the model-tool zone never changes a freeze decision either — it is read by the ledgers only', async () => {
+    latchGreen(WS, ['src/App.tsx', '.env']);
+    const outside = PATHS.map((p) => writeRefused(WS, p));
+    for (const platformRequest of [false, true]) {
+      const inside = await runAsModelToolCall(async () => PATHS.map((p) => writeRefused(WS, p)), { platformRequest });
+      expect(inside).toEqual(outside);
+    }
+    const freeze = read('src/server/AgentV3/greenFreeze.ts');
+    const decision = freeze.slice(freeze.indexOf('export function writeRefused'), freeze.indexOf('export function assertWriteAllowed'));
+    expect(decision.length).toBeGreaterThan(200);
+    expect(decision).not.toContain('modelToolOrigin');
+  });
 });
 
 // ── The census: a NEW platform writer that names no pass fails here ─────────────────────────────────────────────

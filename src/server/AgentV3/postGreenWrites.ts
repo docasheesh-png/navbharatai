@@ -101,8 +101,9 @@ export function postGreenWritesNote(input: {
   const named = groups.slice(0, MAX_NAMED_PASSES).map((g) => `${g.pass} (${g.files} file${g.files === 1 ? '' : 's'})`).join(', ');
   const more = groups.length > MAX_NAMED_PASSES ? ` and ${groups.length - MAX_NAMED_PASSES} more` : '';
   // An unnamed bucket may hold several steps, so the count of writers is a floor there, and the reader is told why.
-  const unnamed = groups.some((g) => g.pass === UNNAMED_PLATFORM_LABEL || g.pass === UNNAMED_MODEL_REPAIR_LABEL)
-    ? ` The ${[UNNAMED_PLATFORM_LABEL, UNNAMED_MODEL_REPAIR_LABEL].filter((l) => groups.some((g) => g.pass === l)).map((l) => `"${l}"`).join(' and ')} writes came from platform code that named no pass, so which step made them is not known; they were not the build loop.`
+  const unnamedLabels = [UNNAMED_PLATFORM_LABEL, UNNAMED_MODEL_REPAIR_LABEL].filter((l) => groups.some((g) => g.pass === l));
+  const unnamed = unnamedLabels.length > 0
+    ? ` The ${unnamedLabels.map((l) => `"${l}"`).join(' and ')} writes came from platform code that named no pass, so which step made them is not known; they were not the build loop.`
     : '';
   const who = `After the app first rendered ${secs}s in, ${files} file(s) were written by ${groups.length} writer(s): ${named}${more}.${unnamed}`;
   switch (input.end) {

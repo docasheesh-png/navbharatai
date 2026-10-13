@@ -33,6 +33,27 @@ export function readPreviewAiImageAsk(data: unknown): { id: string; prompt: stri
 }
 export interface PreviewAiAnswer { [PREVIEW_AI_ANSWER]: true; id: string; ok: boolean; text?: string; message?: string }
 
+// "CAN PICTURES BE MADE HERE YET?" (Q-966, autopsy 303e8a6f) — asked by the page BEFORE anyone presses Generate,
+// so a missing image key is said on the app's own screen first, not after a press has failed. The same relay:
+// the page asks its parent, the parent asks our server with the owner's login, and the page gets back only
+// `ready` and, when not ready, the owner's own message (which keys work and where to paste them).
+export const PREVIEW_AI_IMAGE_READY_ASK = '__nbaiAiImageReadyAsk';
+export const PREVIEW_AI_IMAGE_READY_ANSWER = '__nbaiAiImageReadyAnswer';
+/**
+ * How long the page waits for a readiness answer. A phone app bundled before this existed never answers, so
+ * the page gives up after this and treats readiness as unknown — exactly today's behaviour (no line, Generate on).
+ */
+export const PREVIEW_AI_IMAGE_READY_TIMEOUT_MS = 15_000;
+export interface PreviewAiImageReadyAnswer { [PREVIEW_AI_IMAGE_READY_ANSWER]: true; id: string; ok: boolean; ready?: boolean; message?: string }
+
+/** Read a readiness question from a message, or null. Pure. */
+export function readPreviewAiImageReadyAsk(data: unknown): { id: string } | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (d[PREVIEW_AI_IMAGE_READY_ASK] !== true || typeof d.id !== 'string' || !d.id || d.id.length > 64) return null;
+  return { id: d.id };
+}
+
 /** Read an ask from a message, or null. Pure. */
 export function readPreviewAiAsk(data: unknown): { id: string; prompt: string; system: string } | null {
   if (!data || typeof data !== 'object') return null;
@@ -51,6 +72,7 @@ export function previewAiShimSource(): string {
   return `(function () {
   if (window.NavAI) return;
   var seq = 0, waiting = {};
+  var NO_PARENT_PICTURES = 'Open this app inside NavBharatAI to make pictures before publishing.';
   function hasParent() { try { return window.parent && window.parent !== window; } catch (e) { return false; } }
   window.addEventListener('message', function (e) {
     if (e.source !== window.parent && e.source !== window.top) return;
@@ -73,7 +95,7 @@ export function previewAiShimSource(): string {
   });
   function image(prompt, opts) {
     return new Promise(function (resolve, reject) {
-      if (!hasParent()) { reject(new Error('Open this app inside NavBharatAI to make pictures before publishing.')); return; }
+      if (!hasParent()) { reject(new Error(NO_PARENT_PICTURES)); return; }
       var id = 'i' + (++seq) + '_' + Date.now();
       pics[id] = { resolve: resolve, reject: reject };
       try {
@@ -85,11 +107,38 @@ export function previewAiShimSource(): string {
       }, ${PREVIEW_AI_IMAGE_TIMEOUT_MS});
     });
   }
+  // Q-966: "can pictures be made here yet?" — answered before anyone presses Generate. Resolves { ready, message }
+  // from the owner's panel; with no parent it says so at once and asks nobody (here: false). A refusal or no
+  // answer at all (a phone app bundled before this existed) REJECTS, and the page reads that as "unknown".
+  var readies = {};
+  window.addEventListener('message', function (e) {
+    if (e.source !== window.parent && e.source !== window.top) return;
+    var d = e && e.data;
+    if (!d || typeof d !== 'object' || d.${PREVIEW_AI_IMAGE_READY_ANSWER} !== true) return;
+    var w = readies[d.id]; if (!w) return;
+    delete readies[d.id];
+    if (d.ok && typeof d.ready === 'boolean') w.resolve({ ready: d.ready, message: typeof d.message === 'string' ? d.message : '' });
+    else w.reject(new Error(String(d.message || 'The picture maker is not available right now.')));
+  });
+  function imageReady() {
+    return new Promise(function (resolve, reject) {
+      if (!hasParent()) { resolve({ ready: false, here: false, message: NO_PARENT_PICTURES }); return; }
+      var id = 'r' + (++seq) + '_' + Date.now();
+      readies[id] = { resolve: resolve, reject: reject };
+      try {
+        (window.parent || window.top).postMessage({ ${PREVIEW_AI_IMAGE_READY_ASK}: true, id: id }, '*');
+      } catch (err) { delete readies[id]; reject(new Error('The picture maker is not available right now.')); return; }
+      setTimeout(function () {
+        var w = readies[id];
+        if (w) { delete readies[id]; w.reject(new Error('No answer about pictures yet.')); }
+      }, ${PREVIEW_AI_IMAGE_READY_TIMEOUT_MS});
+    });
+  }
   // 🔴 available says whether ask() CAN answer here (build b4745cb1, 2026-10-06). It was hard-coded true, so a
   // page opened at the top level — the build's own verification browser, or the preview link in a new tab —
   // showed "AI ready" while every ask() rejected at once. The finance app awaited that rejection before
   // saving, so nothing ever saved, and the builder spent five minutes looking for the bug in the app.
-  window.NavAI = { app: 'preview', available: hasParent(), preview: true, image: image, ask: function (prompt, opts) {
+  window.NavAI = { app: 'preview', available: hasParent(), preview: true, image: image, imageReady: imageReady, ask: function (prompt, opts) {
     return new Promise(function (resolve, reject) {
       if (!hasParent()) { reject(new Error('Open this app inside NavBharatAI to try its assistant before publishing.')); return; }
       var id = 'a' + (++seq) + '_' + Date.now();

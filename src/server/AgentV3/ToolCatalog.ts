@@ -3080,7 +3080,9 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         'the image key the owner saves in Keys & Secrets (NAVBHARATAI_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, ' +
         'XAI_API_KEY or POLLINATIONS_API_KEY) — in the preview and after publishing (src/lib/imageAi.ts: ' +
         'generateImage, downloadImage; plus useImageGenerator() for React). Handles empty prompts, a missing ' +
-        'key, timeouts, rate limits, network failures and cancellation. Pass server: true only when the app has ' +
+        'key, timeouts, rate limits, network failures and cancellation; useImageGenerator().readiness (or ' +
+        'imageReadiness()) says BEFORE the first Generate whether an image key is saved, so the screen shows a ' +
+        'missing key in red up front. Pass server: true only when the app has ' +
         'its own server: the page then calls the app\'s /api/generate-image route and the server reads the same ' +
         'key names (or IMAGE_PROVIDER + IMAGE_API_KEY), so the key never reaches the browser and can be changed ' +
         'at any time without a code change. The result tells you exactly what to say to the user about keys. ' +

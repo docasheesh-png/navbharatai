@@ -142,6 +142,8 @@ export const SMALL_BODY_ROUTES: readonly SmallBodyRoute[] = [
   { path: '/api/app-ai/image', limit: '16kb', why: 'public gateway for published apps: one picture prompt (appAi.ts)' },
   { path: '/api/app-ai/preview-ask', limit: '16kb', why: 'the owner\'s preview of the same gateway (appAiOwner.ts)' },
   { path: '/api/app-ai/preview-image', limit: '16kb', why: 'the owner\'s preview of the picture gateway (appAiOwner.ts)' },
+  { path: '/api/app-ai/image-ready', limit: '4kb', why: 'public: one app token, "can this app make pictures yet?" (appAi.ts)' },
+  { path: '/api/app-ai/preview-image-ready', limit: '4kb', why: 'the owner\'s preview: one workspace id (appAiOwner.ts)' },
   { path: '/api/app-ai/settings', limit: '4kb', why: 'two switches and a cap (appAiOwner.ts)' },
 ];
 

@@ -6,8 +6,8 @@
 // build never writes — so the preview looked permanently "disconnected" from the v5.0 engine.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { readPreviewAiAsk, readPreviewAiImageAsk } from '../../lib/previewAiProtocol';
-import { answerPreviewAiAsk, answerPreviewAiImage } from './previewAiRelay';
+import { readPreviewAiAsk, readPreviewAiImageAsk, readPreviewAiImageReadyAsk } from '../../lib/previewAiProtocol';
+import { answerPreviewAiAsk, answerPreviewAiImage, answerPreviewAiImageReady } from './previewAiRelay';
 import { RotateCcw, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles, ChevronLeft, ChevronRight, Sun, Moon } from 'lucide-react';
 import { canOfferRestart, restartStatusLine } from './previewRestart';
 import { nextDoorUrl } from './previewDoorClient';
@@ -1187,14 +1187,18 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
       if (!isFromOurPreviewFrame(e, [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow])) return;
       const ask = readPreviewAiAsk(e.data);
       const pic = ask ? null : readPreviewAiImageAsk(e.data);
-      if (!ask && !pic) return;
+      // Q-966: "can pictures be made yet?", asked before anyone presses Generate — the same relay and reply path.
+      const readyAsk = ask || pic ? null : readPreviewAiImageReadyAsk(e.data);
+      if (!ask && !pic && !readyAsk) return;
       const reply = e.source as Window;
       const liveWin = liveIframeRef.current?.contentWindow;
       const kind = reply === liveWin ? 'live' : 'inbrowser';
       const frameEl = kind === 'live' ? liveIframeRef.current : inBrowserIframeRef.current;
       const replyTarget = targetFor(kind, frameEl);
       // A picture is the same relay: the owner's login asks, the page receives only the result.
-      const pending = ask ? answerPreviewAiAsk(ask, workspaceId) : answerPreviewAiImage(pic!, workspaceId);
+      const pending: Promise<unknown> = ask ? answerPreviewAiAsk(ask, workspaceId)
+        : pic ? answerPreviewAiImage(pic, workspaceId)
+        : answerPreviewAiImageReady(readyAsk!, workspaceId);
       void pending.then((answer) => {
         try { reply.postMessage(answer, replyTarget); } catch { /* the frame went away */ }
       });

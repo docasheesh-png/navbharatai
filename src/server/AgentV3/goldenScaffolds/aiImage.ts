@@ -42,9 +42,14 @@ const IDEAS = [
 function App() {
   const [prompt, setPrompt] = useState('');
   const [shapeId, setShapeId] = useState(SQUARE.id);
-  const { status, image, error, attempt, isGenerating, generate, retry, again, cancel } = useImageGenerator();
+  const { status, image, error, attempt, readiness, isGenerating, generate, retry, again, cancel } = useImageGenerator();
   const shape = SHAPES.find((s) => s.id === shapeId) ?? SQUARE;
-  const ready = prompt.trim().length > 0 && !isGenerating;
+  // Said BEFORE anyone presses Generate: until an image key is saved, a red line says so. The app's owner (in
+  // their own preview) reads which keys work and where to paste them, and keeps Generate on to try again; a
+  // visitor reads only that pictures are not set up yet, and Generate stays off until they are.
+  const notice = readiness.state === 'needs-key' || readiness.state === 'unavailable' ? readiness.message : '';
+  const blocked = readiness.state === 'needs-key' && !readiness.owner;
+  const ready = prompt.trim().length > 0 && !isGenerating && !blocked;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -58,6 +63,12 @@ function App() {
         <h1 style={{ margin: 0 }}>AI Image Generator</h1>
         <ThemeToggle />
       </div>
+
+      {notice && (
+        <div className="alert alert-danger" role="status" style={{ marginBottom: 16, whiteSpace: 'pre-line', color: 'var(--danger-ink)', fontWeight: 600 }}>
+          {notice}
+        </div>
+      )}
 
       <form className="card stack" onSubmit={submit}>
         <div className="field">
@@ -109,7 +120,7 @@ function App() {
         </div>
       )}
 
-      {error && !isGenerating && (
+      {error && !isGenerating && error !== notice && (
         <div className="alert alert-danger stack" role="alert" style={{ marginTop: 16 }}>
           <span style={{ whiteSpace: 'pre-line' }}>{error}</span>
           <button type="button" onClick={retry}>Try again</button>

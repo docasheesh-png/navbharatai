@@ -14,6 +14,9 @@
 //   4. A NavBharatAI API key is checked and charged through the Developer API's own path (apiKeyImage.ts);
 //      any other key draws on the owner's provider account and costs NavBharatAI nothing.
 //   5. A refused key is reported, never silently replaced by NavBharatAI's engine.
+//
+// Step 3's lookup is also the answer to "can this app make pictures?" (appImageReadiness, Q-966), which the
+// page asks BEFORE anyone presses Generate — one function decides it for both.
 
 import { loadUserVaultSecrets } from './secrets';
 import { triagePrompt, blockMessage } from './promptSafety';
@@ -21,7 +24,7 @@ import { scanPollinationsPrompt, POLLINATIONS_BLOCK_MESSAGE } from './pollinatio
 import { appAiUsageStore } from './AppAiUsageStore';
 import {
   appImageKeyFromSecrets, drawWithOwnImageKey, ownImageKeyMessage, needsImageKeyMessage,
-  VISITOR_IMAGE_UNAVAILABLE, APP_KEYS_PLACE, type AppImageProvider,
+  VISITOR_IMAGE_UNAVAILABLE, APP_KEYS_PLACE, type AppImageProvider, type AppImageKey,
 } from './appImageKeys';
 import { resolveApiKey, imageForApiKey } from './apiKeyImage';
 import type { ImagePixels } from './navbharatImageEngine';
@@ -61,6 +64,39 @@ export function readAppImagePrompt(body: unknown): { ok: true; prompt: string } 
   return { ok: true, prompt };
 }
 
+/**
+ * THE ONE PLACE "has the owner saved an image key?" is decided (Q-966). Both the picture path below and the
+ * readiness question an app asks BEFORE anyone presses Generate read it here, so the two can never disagree.
+ * An unreadable vault counts as no key — the honest answer, never a guess that a key exists.
+ */
+async function ownerImageKey(ownerId: string, workspaceId: string): Promise<AppImageKey | null> {
+  let secrets: Record<string, string> = {};
+  try { secrets = await loadUserVaultSecrets(ownerId, workspaceId); } catch { secrets = {}; }
+  return appImageKeyFromSecrets(secrets);
+}
+
+/** The "no key yet" answer, in the owner's words and in a visitor's. One definition for both callers. */
+const NEEDS_KEY_ANSWER = () => ({ code: 'needs-key' as const, owner: needsImageKeyMessage(), visitor: VISITOR_IMAGE_UNAVAILABLE });
+
+export type AppImageReadiness =
+  | { ready: true }
+  | { ready: false; code: 'needs-key'; owner: string; visitor: string };
+
+/**
+ * CAN THIS APP MAKE PICTURES? — asked by the app's page BEFORE anyone presses Generate (Q-966, autopsy
+ * 303e8a6f). Before it, the page had only "make a picture", so a missing key could be shown only after a
+ * press had already failed — and NO_FAKE_FEATURE_RULE asks for the red line BEFORE.
+ *
+ * ⚠️ "ready" means "an image key is SAVED", not "the key works". Proving a key works would mean calling the
+ * provider — the owner's money, every page load. A saved key that is then refused is reported precisely, in
+ * the owner's words, when Generate is pressed (step 5 of imageForApp). No counter, no wallet, no provider is
+ * touched here.
+ */
+export async function appImageReadiness(ownerId: string, workspaceId: string): Promise<AppImageReadiness> {
+  const own = await ownerImageKey(ownerId, workspaceId);
+  return own ? { ready: true } : { ready: false, ...NEEDS_KEY_ANSWER() };
+}
+
 export async function imageForApp(ask: AppImageAsk): Promise<AppImageAnswer> {
   // 1. The words, before anything else.
   try {
@@ -85,10 +121,8 @@ export async function imageForApp(ask: AppImageAsk): Promise<AppImageAnswer> {
   if (!counted.known) console.warn(`[APP_IMAGE] ${ask.counter.appId}: picture counters unreadable — this one was allowed without a limit check.`);
 
   // 3. The owner's key.
-  let secrets: Record<string, string> = {};
-  try { secrets = await loadUserVaultSecrets(ask.ownerId, ask.workspaceId); } catch { secrets = {}; }
-  const own = appImageKeyFromSecrets(secrets);
-  if (!own) return { ok: false, code: 'needs-key', owner: needsImageKeyMessage(), visitor: VISITOR_IMAGE_UNAVAILABLE };
+  const own = await ownerImageKey(ask.ownerId, ask.workspaceId);
+  if (!own) return { ok: false, ...NEEDS_KEY_ANSWER() };
 
   // 4. NavBharatAI's own key: the Developer API's checks and charge, on the account that owns the key.
   if (own.provider === 'navbharatai') {

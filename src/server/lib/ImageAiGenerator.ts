@@ -187,6 +187,95 @@ const NOT_CONNECTED = 'Pictures are made through NavBharatAI. Open this app in t
 
 interface NavAIPictures {
   image?: (prompt: string, options: { width: number; height: number }) => Promise<string>;
+  /** "Can pictures be made here yet?" — a NavBharatAI page from before this question existed has no such method. */
+  imageReady?: () => Promise<{ ready?: unknown; here?: unknown; message?: unknown }>;
+  /** True only in the app owner's own NavBharatAI preview. */
+  preview?: boolean;
+}
+
+/**
+ * Can this app make pictures right now? Asked BEFORE anyone presses Generate, so a missing image key is said on
+ * the screen first instead of after a failed press.
+ *   checking    — still asking: show nothing yet.
+ *   ready       — an image key is saved. (A saved key the image service then refuses is reported when Generate
+ *                 is pressed; checking a key would mean making a picture, which costs the owner money.)
+ *   needs-key   — no image key is saved yet. Show message in red above Generate. owner is true in the owner's
+ *                 own preview, where the message lists the keys that work and Generate stays on; for anyone else
+ *                 turn Generate off until the key is saved.
+ *   unavailable — pictures cannot be made on this page at all (opened outside NavBharatAI): show message.
+ *   unknown     — no clear answer (an older page, a slow network): show nothing and keep Generate on.
+ */
+export type ImageReadiness =
+  | { state: 'checking' }
+  | { state: 'ready' }
+  | { state: 'needs-key'; message: string; owner: boolean }
+  | { state: 'unavailable'; message: string }
+  | { state: 'unknown' };
+
+const READINESS_TIMEOUT_MS = 15000;
+
+function navAI(): NavAIPictures | undefined {
+  return (globalThis as unknown as { NavAI?: NavAIPictures }).NavAI;
+}
+
+function inOwnerPreview(): boolean {
+  const nav = navAI();
+  return !!nav && nav.preview === true;
+}
+
+/** Wait for an answer, but never longer than READINESS_TIMEOUT_MS. */
+function withinReadinessTime<T>(work: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('No answer about pictures yet.')), READINESS_TIMEOUT_MS);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+/** An answer is read only when it has the right shape; anything else is 'unknown', never 'ready'. */
+function readinessFrom(answer: unknown): ImageReadiness {
+  if (!answer || typeof answer !== 'object') return { state: 'unknown' };
+  const a = answer as { ready?: unknown; here?: unknown; message?: unknown };
+  if (a.ready === true) return { state: 'ready' };
+  if (a.ready !== false) return { state: 'unknown' };
+  const message = typeof a.message === 'string' ? a.message.trim() : '';
+  if (a.here === false) return { state: 'unavailable', message: message || NOT_CONNECTED };
+  return message ? { state: 'needs-key', message, owner: inOwnerPreview() } : { state: 'unknown' };
+}
+
+/** Can this app make pictures right now? Never throws; a missing, refused or slow answer is 'unknown'. */
+export async function imageReadiness(): Promise<ImageReadiness> {
+  if (SERVER_ENDPOINT) {
+    try {
+      const res = await withinReadinessTime(fetch(SERVER_ENDPOINT, { method: 'GET', headers: { Accept: 'application/json' } }));
+      if (!res.ok) return { state: 'unknown' };
+      return readinessFrom(await withinReadinessTime(res.json() as Promise<unknown>));
+    } catch {
+      return { state: 'unknown' };
+    }
+  }
+  const nav = navAI();
+  if (!nav || typeof nav.image !== 'function') return { state: 'unavailable', message: NOT_CONNECTED };
+  if (typeof nav.imageReady !== 'function') return { state: 'unknown' };
+  try {
+    return readinessFrom(await withinReadinessTime(nav.imageReady()));
+  } catch {
+    return { state: 'unknown' };
+  }
+}
+
+/** What a failed picture says about readiness: a 'needs-key' failure means no key is saved yet; anything else, nothing. */
+export function readinessAfterError(error: unknown): ImageReadiness | null {
+  if (!(error instanceof ImageGenError) || error.code !== 'needs-key') return null;
+  return { state: 'needs-key', message: error.message, owner: inOwnerPreview() };
 }
 
 /** Turn a data: URL into a Blob, so the picture can be downloaded and its memory freed. */
@@ -209,7 +298,7 @@ function dataUrlToBlob(url: string): Blob | null {
 export class NavAIImageProvider implements ImageGenerationProvider {
   readonly name = 'NavBharatAI';
   generate(job: ImageJob, signal: AbortSignal): Promise<GeneratedImage> {
-    const nav = (globalThis as unknown as { NavAI?: NavAIPictures }).NavAI;
+    const nav = navAI();
     const make = nav && typeof nav.image === 'function' ? nav.image : null;
     if (!make) return Promise.reject(new ImageGenError('needs-key', NOT_CONNECTED, false));
     const name = this.name;
@@ -385,10 +474,11 @@ export function releaseImage(image: GeneratedImage | null | undefined): void {
 }
 
 // ── React hook: src/lib/useImageGenerator.ts ────────────────────────────────────────────────────────
-const REACT_HOOK = `// React state for making pictures: status, the current picture, errors, retry and cancel.
+const REACT_HOOK = `// React state for making pictures: status, the current picture, errors, retry and cancel — and readiness,
+// which says BEFORE the first Generate whether this app can make pictures yet (see ImageReadiness in imageAi.ts).
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { describeImageError, generateImage, releaseImage } from './imageAi';
-import type { GeneratedImage, ImageRequest } from './imageAi';
+import { describeImageError, generateImage, imageReadiness, readinessAfterError, releaseImage } from './imageAi';
+import type { GeneratedImage, ImageReadiness, ImageRequest } from './imageAi';
 
 export type ImageStatus = 'idle' | 'generating' | 'done' | 'error';
 
@@ -398,14 +488,40 @@ export function useImageGenerator() {
   const [error, setError] = useState<string | null>(null);
   /** 0 on the first try; 1, 2, ... while retrying after a busy or slow answer. */
   const [attempt, setAttempt] = useState(0);
+  const [readiness, setReadinessState] = useState<ImageReadiness>({ state: 'checking' });
   const controller = useRef<AbortController | null>(null);
   const current = useRef<GeneratedImage | null>(null);
   const last = useRef<ImageRequest | null>(null);
+  const readinessNow = useRef<ImageReadiness>({ state: 'checking' });
+
+  const setReadiness = useCallback((next: ImageReadiness) => {
+    readinessNow.current = next;
+    setReadinessState(next);
+  }, []);
 
   useEffect(() => () => {
     controller.current?.abort();
     releaseImage(current.current);
   }, []);
+
+  // Ask once on load; while no key is saved yet, ask again each time the page comes back into view.
+  useEffect(() => {
+    let alive = true;
+    const check = () => {
+      void imageReadiness().then((next) => {
+        if (alive) setReadiness(next);
+      });
+    };
+    check();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && readinessNow.current.state === 'needs-key') check();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      alive = false;
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [setReadiness]);
 
   const generate = useCallback(async (request: ImageRequest) => {
     controller.current?.abort();
@@ -425,12 +541,15 @@ export function useImageGenerator() {
       current.current = made;
       setImage(made);
       setStatus('done');
+      setReadiness({ state: 'ready' });
     } catch (err) {
       if (ctl.signal.aborted) return;
       setError(describeImageError(err));
       setStatus('error');
+      const after = readinessAfterError(err);
+      if (after && readinessNow.current.state !== 'unavailable') setReadiness(after);
     }
-  }, []);
+  }, [setReadiness]);
 
   /** Try the last description again. */
   const retry = useCallback(() => {
@@ -451,7 +570,7 @@ export function useImageGenerator() {
     setStatus(current.current ? 'done' : 'idle');
   }, []);
 
-  return { status, image, error, attempt, isGenerating: status === 'generating', generate, retry, again, cancel };
+  return { status, image, error, attempt, readiness, isGenerating: status === 'generating', generate, retry, again, cancel };
 }
 `;
 
@@ -474,6 +593,7 @@ const SERVER_MODULE = `// AI image generation on this app's server. The engine i
 // here, on the server, and is never sent to the browser or written into a response.
 //
 // Mount it:  app.post('/api/generate-image', express.json({ limit: '16kb' }), imageRoute());
+//            app.get('/api/generate-image', imageReadyRoute());   // "can this app make pictures yet?"
 
 export interface ImageJob {
   prompt: string;
@@ -736,13 +856,15 @@ function providerFromKeyShape(key: string): string {
   return '';
 }
 
-/** The engine for this request, from this server's settings. No key means an honest error, never a guess. */
-export function chooseImageProvider(env: Env = process.env): ImageGenerationProvider {
+const ENGINES = ['navbharatai', 'pollinations', 'openai', 'gemini', 'xai', 'stability'];
+const NOT_CONFIGURED = 'Image generation is not set up correctly on this server.';
+
+/** Which key this server would use, and for whom, from its settings alone. PURE: no log, no network. */
+function findImageKey(env: Env): { provider: string; key: string } {
   let key = setting(env, 'IMAGE_API_KEY');
   let provider = setting(env, 'IMAGE_PROVIDER').toLowerCase();
   if (provider === 'grok') provider = 'xai';
   if (provider === 'chatgpt') provider = 'openai';
-  const model = setting(env, 'IMAGE_MODEL');
   if (!key) {
     const named = NAMED_KEYS.find(([p, name]) => setting(env, name) !== '' && (provider === '' || provider === p));
     if (named) {
@@ -750,11 +872,30 @@ export function chooseImageProvider(env: Env = process.env): ImageGenerationProv
       key = setting(env, named[1]);
     }
   }
+  if (key && !provider) provider = providerFromKeyShape(key);
+  return { provider, key };
+}
+
+/**
+ * Can this server make pictures yet? Read from its settings only — nothing is sent anywhere and the key never
+ * leaves this function. A set key counts as ready; one the provider then refuses is reported when a picture
+ * is asked for (checking it here would mean making a picture on every page load).
+ */
+export function imageKeyReady(env: Env = process.env): { ready: boolean; code?: string; message?: string } {
+  const found = findImageKey(env);
+  if (!found.key) return { ready: false, code: 'needs-key', message: NEEDS_KEY };
+  if (ENGINES.indexOf(found.provider) < 0) return { ready: false, code: 'not-configured', message: NOT_CONFIGURED };
+  return { ready: true };
+}
+
+/** The engine for this request, from this server's settings. No key means an honest error, never a guess. */
+export function chooseImageProvider(env: Env = process.env): ImageGenerationProvider {
+  const { provider, key } = findImageKey(env);
+  const model = setting(env, 'IMAGE_MODEL');
   if (!key) {
     console.error('[image] no image API key is set — save one of: ' + NAMED_KEYS.map(([, n]) => n).join(', ') + '.');
     throw new ImageServiceError(503, 'needs-key', NEEDS_KEY);
   }
-  if (!provider) provider = providerFromKeyShape(key);
   if (provider === 'navbharatai') return navbharatai(key, setting(env, 'IMAGE_BASE_URL'));
   if (provider === 'pollinations') return pollinations(key, model);
   if (provider === 'openai') return openAiImages(key, model, setting(env, 'IMAGE_BASE_URL'));
@@ -763,7 +904,7 @@ export function chooseImageProvider(env: Env = process.env): ImageGenerationProv
   if (provider === 'stability') return stability(key, model);
   // A key is set but we cannot tell whose it is: sending it to the wrong company would leak it.
   console.error('[image] IMAGE_API_KEY is set but IMAGE_PROVIDER is "' + provider + '" — use navbharatai, openai, gemini, xai, pollinations or stability.');
-  throw new ImageServiceError(500, 'not-configured', 'Image generation is not set up correctly on this server.');
+  throw new ImageServiceError(500, 'not-configured', NOT_CONFIGURED);
 }
 
 const visitors = new Map<string, { start: number; count: number }>();
@@ -856,14 +997,40 @@ export function imageRoute() {
     else res.json(out.body);
   };
 }
+
+/**
+ * An Express-style handler for GET /api/generate-image: "can this app make pictures yet?" The page asks it
+ * before anyone presses Generate, so a missing key is shown on screen first. Answers { ready, code?, message? }.
+ */
+export function imageReadyRoute() {
+  return (_req: RequestLike, res: ResponseLike): void => {
+    res.status(200);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(imageKeyReady());
+  };
+}
 `;
+
+/**
+ * Q-966 (autopsy 303e8a6f): the screen says whether pictures are set up BEFORE anyone presses Generate.
+ * Without it a missing key could only be shown after a press had failed — and NO_FAKE_FEATURE_RULE asks for
+ * the red line before. The builder reads it in this recipe's instructions; IMAGE_IN_APP_RULE says the same in
+ * one sentence, so a builder that never runs the recipe still hears it.
+ */
+const READINESS_UI =
+  'BEFORE the first Generate, show readiness (useImageGenerator().readiness in React, or await imageReadiness() ' +
+  'from src/lib/imageAi.ts): when its state is "needs-key", show readiness.message in a clearly visible red line ' +
+  'above Generate (className "alert alert-danger", color var(--danger-ink), white-space pre-line) and disable ' +
+  'Generate when readiness.owner is false; when "unavailable", show its message the same way; "checking" and ' +
+  '"unknown" show nothing. Never show the same message twice — hide the error box when it says what the red ' +
+  'line already says.';
 
 const BROWSER_UI =
   'Build the screen with: a prompt box (and optional size choice), a Generate button disabled while a ' +
   'picture is being made, a visible progress state (say "Trying again..." when attempt > 0), the picture ' +
   'in an <img> with alt set to the prompt, a Download button (downloadImage), a "Generate another" button, ' +
   'and errors shown in words (describeImageError) with a Retry button. Never show a placeholder, stock or ' +
-  'random photo as a result.';
+  'random photo as a result. ' + READINESS_UI;
 
 /**
  * What the builder must tell the user, every time (admin 2026-10-04): an image API key is REQUIRED, which
@@ -880,7 +1047,7 @@ export function generateImageAiIntegration(opts: ImageAiOptions): ImageAiConfig 
   if (opts.react) files['src/lib/useImageGenerator.ts'] = REACT_HOOK;
   const hook = opts.react
     ? ' In React use useImageGenerator() from src/lib/useImageGenerator.ts (status, image, error, attempt, ' +
-      'generate, retry, again, cancel).'
+      'readiness, generate, retry, again, cancel).'
     : '';
   if (!opts.server) {
     return {
@@ -903,7 +1070,8 @@ export function generateImageAiIntegration(opts: ImageAiOptions): ImageAiConfig 
     instructions:
       'AI image generation wired through this app\'s server. Mount the route on the app\'s server (add a ' +
       'small Express server if the app has none): app.post(\'' + IMAGE_ENDPOINT + '\', express.json({ limit: ' +
-      '\'16kb\' }), imageRoute()) with imageRoute from server/lib/imageAi.ts, and make sure the dev setup ' +
+      '\'16kb\' }), imageRoute()) AND app.get(\'' + IMAGE_ENDPOINT + '\', imageReadyRoute()) — the GET answers ' +
+      'readiness — with both from server/lib/imageAi.ts, and make sure the dev setup ' +
       'sends ' + IMAGE_ENDPOINT + ' to that server (for Vite, a server.proxy entry for /api). The browser ' +
       'calls generateImage({ prompt, width, height }) from src/lib/imageAi.ts, which posts to that route.' + hook +
       ' ' + BROWSER_UI + ' The server reads the image key by its name (or IMAGE_PROVIDER + IMAGE_API_KEY, and ' +

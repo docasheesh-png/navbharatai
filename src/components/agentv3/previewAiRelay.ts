@@ -2,7 +2,10 @@
 // preview posts a question; this asks our server WITH THE OWNER'S OWN LOGIN and returns the answer. The page
 // in the preview never sees a token, a key, or anything else it could reuse.
 import { authJsonHeaders } from '../../lib/authHeaders';
-import { PREVIEW_AI_ANSWER, PREVIEW_AI_IMAGE_ANSWER, type PreviewAiAnswer, type PreviewAiImageAnswer } from '../../lib/previewAiProtocol';
+import {
+  PREVIEW_AI_ANSWER, PREVIEW_AI_IMAGE_ANSWER, PREVIEW_AI_IMAGE_READY_ANSWER,
+  type PreviewAiAnswer, type PreviewAiImageAnswer, type PreviewAiImageReadyAnswer,
+} from '../../lib/previewAiProtocol';
 
 export async function answerPreviewAiAsk(
   ask: { id: string; prompt: string; system: string },
@@ -50,5 +53,36 @@ export async function answerPreviewAiImage(
     return fail(typeof j?.message === 'string' && j.message ? j.message : 'The picture maker is not available right now.', typeof j?.code === 'string' ? j.code : '');
   } catch {
     return fail('The picture maker could not be reached. Please try again.');
+  }
+}
+
+/**
+ * "CAN THIS APP MAKE PICTURES YET?" for the app in the preview (Q-966): asked before anyone presses Generate,
+ * answered with the owner's login. The page receives only `ready` and, when not ready, the owner's own message
+ * (which image keys work, where to get each, where to paste it).
+ *
+ * 🔒 A server body is not the answer until it is checked: only `{ ok: true, ready: <boolean> }` becomes an
+ * answer. Anything else — a sign-in refusal, an older server without this route, a body that is not JSON, no
+ * network — is `ok: false`, which the page reads as "unknown": no line, Generate stays on, exactly as before.
+ */
+export async function answerPreviewAiImageReady(
+  ask: { id: string },
+  workspaceId: string | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<PreviewAiImageReadyAnswer> {
+  const fail = (): PreviewAiImageReadyAnswer => ({ [PREVIEW_AI_IMAGE_READY_ANSWER]: true, id: ask.id, ok: false });
+  if (!workspaceId) return fail();
+  try {
+    const res = await fetchImpl('/api/app-ai/preview-image-ready', {
+      method: 'POST',
+      headers: await authJsonHeaders(),
+      body: JSON.stringify({ workspaceId }),
+    });
+    const j = (await res.json().catch(() => null)) as { ok?: unknown; ready?: unknown; message?: unknown } | null;
+    if (!j || j.ok !== true || typeof j.ready !== 'boolean') return fail();
+    const message = !j.ready && typeof j.message === 'string' ? j.message : '';
+    return { [PREVIEW_AI_IMAGE_READY_ANSWER]: true, id: ask.id, ok: true, ready: j.ready, ...(message ? { message } : {}) };
+  } catch {
+    return fail();
   }
 }

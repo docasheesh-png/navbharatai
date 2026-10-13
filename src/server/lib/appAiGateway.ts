@@ -243,6 +243,11 @@ export function readGatewayRequest(body: unknown): RequestVerdict {
 export const GATEWAY_PATH = '/api/app-ai/ask';
 /** Where a published app asks for a PICTURE (admin 2026-10-04) — same token, same checks, the owner's image key. */
 export const IMAGE_GATEWAY_PATH = '/api/app-ai/image';
+/**
+ * Where a published app asks "can you make pictures for me yet?" BEFORE a visitor presses Generate (Q-966).
+ * Same token, same gate as a picture; the answer is only "set up or not", never the owner's setup.
+ */
+export const IMAGE_READY_GATEWAY_PATH = '/api/app-ai/image-ready';
 
 /** Marks the injected snippet, so a re-publish replaces rather than stacks. Mirrors the beacon's. */
 export const APP_AI_MARKER = 'data-nbai-ai';
@@ -275,9 +280,13 @@ export function rotateNonce(existing: AppNoncePair | null | undefined, fresh: st
 /**
  * The snippet stamped into every published HTML page.
  *
- * Dependency-free and deliberately small. It exposes ONE thing — `window.NavAI.ask(prompt, opts)` —
- * which resolves to the answer's text and rejects with a branded message. Generated app code calls
- * that and nothing else, so the wire format can change without touching a single published app.
+ * Dependency-free and deliberately small. It exposes `window.NavAI.ask(prompt, opts)`, which resolves to
+ * the answer's text and rejects with a branded message, `image(prompt, opts)` for a picture, and
+ * `imageReady()` — "can pictures be made here yet?", asked before a visitor presses Generate (Q-966). It
+ * resolves `{ ready, message }` only for a well-formed answer; ANY other outcome (no network, a body that
+ * is not JSON, a refusal, a timeout) REJECTS, and the page reads a rejection as "unknown" — never as ready.
+ * Generated app code calls these and nothing else, so the wire format can change without touching a single
+ * published app.
  *
  * 🔒 EVERY FAILURE PATH ENDS IN BRANDED TEXT. A `fetch` that throws, a body that is not JSON, a
  * refusal — all of them surface `visitorFacingMessage`-shaped wording, never a status code, never a
@@ -288,10 +297,11 @@ export function gatewayScriptHtml(appId: string, token: string, origin: string):
   const base = String(origin ?? '').replace(/\/+$/, '');
   const url = `${base}${GATEWAY_PATH}`;
   const imageUrl = `${base}${IMAGE_GATEWAY_PATH}`;
+  const imageReadyUrl = `${base}${IMAGE_READY_GATEWAY_PATH}`;
   const fallback = visitorFacingMessage('disabled');
   const imageFallback = 'The picture maker in this app is not available right now. Please try again later.';
   return `<script ${APP_AI_MARKER}="1">(function(){try{
-var U=${JSON.stringify(url)},I=${JSON.stringify(imageUrl)},T=${JSON.stringify(token)},F=${JSON.stringify(fallback)},G=${JSON.stringify(imageFallback)};
+var U=${JSON.stringify(url)},I=${JSON.stringify(imageUrl)},R=${JSON.stringify(imageReadyUrl)},T=${JSON.stringify(token)},F=${JSON.stringify(fallback)},G=${JSON.stringify(imageFallback)};
 function S(ms){try{if(typeof AbortController!=="function")return undefined;var c=new AbortController();setTimeout(function(){c.abort();},ms);return c.signal;}catch(e){return undefined;}}
 window.NavAI={app:${JSON.stringify(appId)},available:true,ask:function(p,o){
 return fetch(U,{method:"POST",signal:S(90000),headers:{"Content-Type":"application/json"},body:JSON.stringify({token:T,prompt:String(p==null?"":p),system:(o&&o.system)||""})})
@@ -303,6 +313,10 @@ return fetch(I,{method:"POST",signal:S(150000),headers:{"Content-Type":"applicat
 .then(function(r){return r.json().catch(function(){return{ok:false,message:G};});})
 .catch(function(){return{ok:false,message:G};})
 .then(function(d){if(d&&d.ok&&typeof d.image==="string")return d.image;throw new Error((d&&d.message)||G);});
+},imageReady:function(){
+return fetch(R,{method:"POST",signal:S(15000),headers:{"Content-Type":"application/json"},body:JSON.stringify({token:T})})
+.then(function(r){return r.json();})
+.then(function(d){if(d&&d.ok===true&&typeof d.ready==="boolean")return{ready:d.ready,message:typeof d.message==="string"?d.message:""};throw new Error(G);});
 }};
 }catch(e){}})();</script>`;
 }

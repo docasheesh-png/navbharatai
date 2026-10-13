@@ -94313,6 +94313,60 @@ Another session, gating #3679, reported that under CPU load the full suite flipp
 - **Tests executed:** 101 billing test files, 1,935 passed, 0 failed, 0 skipped.
 - **State:** every finding is a 🟡 row in `BUILD_REPORT_QUEUE.md`, waiting on the admin's approval of the ordered plan in §8 of the report. No fix is implemented until the admin approves.
 
+## 2026-10-12 — AUTOPSY `50378049`, Q-905: a module was "done" because its TURN succeeded, not because it delivered its files
+
+Second PR from the BlockWorld autopsy (the first, #3684, fixed Q-900…Q-904 — a plan-time prediction
+outranking a live app).
+
+**The defect.** The plan's module 1 was *"Shared Types & Constants"*, owning `src/types/index.ts` and
+`src/constants/index.ts` and carrying the frozen contract every later module would import. The builder
+ignored the scope, wrote the whole game — 56 files — and **never those two**. The route settled it with
+`result.ok ? markModuleStatus(…, 'done')` (`agentv3.ts:25137`): *"the turn succeeded"* taken as *"this
+module delivered its files"*. The user read `✅ Module … done — 1/15`.
+
+**The damage is downstream and certain.** `moduleBuildContext` hands every DONE module's contract to the
+next turn under the heading *"ALREADY-BUILT MODULES — their files exist in the workspace. Import from
+them using ONLY these frozen contracts"*. Module 2 would be told, in writing, to import exact names from
+a file that does not exist. The model cannot win that turn.
+
+⚠️ **It is the unhunted half of autopsy `8e124182`.** That autopsy is the mirror image — *"module 1's
+turn wrote 33 files, the whole app, and the plan still recorded 1 of 14 done"* — and its fix,
+`reconcilePlanWithWrites`, promotes OTHER modules whose planned paths were all written. It is path-exact
+by design ("precision over recall"), so a builder that invents its own structure matches nothing. One
+half of the reconciliation shipped; this is the half that asks whether the module in progress delivered
+its own share.
+
+**The fix.**
+- `undeliveredOwnFiles(mod, present)` — pure; which of a module's own files the PROJECT still lacks.
+  Asked against `actuator.listFiles`, never the turn's write set: a file an earlier turn wrote is
+  delivered, and asking only about this turn would call it missing.
+- `recordModuleDelivery(plan, id, present)` — records it on the module (`undelivered?: string[]`), so
+  the fact is durable across turns; module 2's turn is a different request.
+- `contractIsUnbacked(mod)` — true only when the module owns files and EVERY one is missing. A
+  partially delivered module keeps its contract: the names it did write are real.
+- `moduleBuildContext` withholds an unbacked contract and tells the turn why, instead of handing it
+  names under a false heading. A partial delivery hands the contract forward with the missing file named.
+- `PROJECT_MODULE_FILES_UNDELIVERED` — an `info` measurement of OUR process, registered in both
+  `BuildDiagnostics.ts` and `buildFindingSuggestions.ts` so it can never become a finding against the
+  user's app. The user's line is honest too: not a flat "done", but *"this step built the app its own way
+  rather than those exact files"*.
+
+🔒 **The status is deliberately NOT `failed`.** On the reported build the user got a complete, running
+game; *"module 1 failed"* would be its own lie. The status is left alone — what changes is that the plan
+RECORDS what is missing and never passes a contract nothing backs.
+
+**Additive by construction:** a plan nobody measured keeps `undelivered` absent, and `contractIsUnbacked`
+is false for an absent record, so behaviour is byte-identical to today. A `listFiles` that fails leaves
+the plan exactly as it is now (*"unasked is not undelivered"*).
+
+**Locked by** `tests/aPlanThatBecameFiction.test.ts` — 19 cases on the reported plan's real shape.
+**Reversion-proven twice:** stop withholding the unbacked contract → 1 fail; ask the turn's writes
+instead of the project → 1 fail. A case also asserts the pre-fix state still hands the fictional contract
+forward, so the reversion lives in the suite rather than in a shell history.
+
+**Still OPEN from the same root (rowed, not forgotten):** the plan's remaining 14 modules are still
+queued and billable on a build whose app already exists. That is `8e124182`'s original damage and it
+needs a decision about money and the plan's lifecycle, so it is not taken silently here.
 ## 2026-10-12 — AUTOPSY `50378049` (BlockWorld, a voxel game): a plan-time PREDICTION outranked an OBSERVED fact, and six verdicts lied at once
 
 **The report.** Weak tier, free, ~20.7 min, `ok: true`, 368 items, 0 errors, 5 warnings, 1 unresolved,
@@ -94711,6 +94765,60 @@ one-liner: mandate tokens for a game's UI in the kit's own contract (cheap, prev
 that rewrites them (risky — a voxel game's block colours are DATA, not theme, and a rewriter cannot tell
 them apart from `Hud.tsx`'s). It stays OPEN with this analysis, and what would settle it is the built
 app's own files from one game report.
+## 2026-10-12 — AUTOPSY `50378049`, Q-909: the builder had to reverse-engineer a file WE wrote
+
+Fifth PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911 · #3690 →
+Q-906+Q-907).
+
+**The defect.** NavBharatAI seeded its game kit before the builder's first call, and the handoff told it
+exactly which functions to call — `<GameCanvas>`, `ctx.follow(vehicle)`, `driveVehicle(…)` — with a
+compiling example. **What it never said was what `ctx` IS.** The example touches three of
+`GameContext`'s nine members, so for the rest the model guessed, and guessed our PRIVATE fields:
+
+| it reached for | what that actually is |
+|---|---|
+| `ctx.canvas` | `private readonly canvas` on `Game` — never on the context |
+| `ctx.followTarget` | `private followTarget` — the state behind `ctx.follow()` |
+| `ctx.crosshairTarget` | nothing at all |
+| `TouchButton` as a string | `{ action: string; label: string }` |
+
+Cost in that one build: **four `read_file` slices of `Game.ts` and two of `touchControls.ts`** — the
+model reverse-engineering a file we wrote — and the repeated-step nudges that followed.
+
+🔑 **The fix is the one this repo already uses for the same problem.** Project Mode freezes a per-module
+CONTRACT precisely so a later turn imports *"against these EXACT names"* instead of guessing. A seeded
+kit is the same situation — code the builder must use and did not write — and it had no contract.
+`src/server/lib/kitTypeContract.ts` builds one, and the shell's instructions carry it.
+
+🔒 **EXTRACTED FROM THE EMITTED SOURCE, NEVER HAND-WRITTEN.** A hand-kept copy of a type is the drift
+this repo has paid for repeatedly (four `safeRelPath`s, two complex-app detectors, five hardcoded model
+ids). `extractExportedDeclaration` reads the declaration out of the very file the recipe writes —
+brace-balanced, comments stripped — so renaming a member updates the contract in the same commit, by
+construction. A **census** asserts that every member of the emitted `GameContext` appears in the block
+the builder reads, so the contract cannot silently fall behind the type.
+
+🔒 **PLACEMENT IS PART OF THE FIX.** `gameKitSeed.compactRecipeResult` clips a recipe's instructions at
+`HANDOFF_RECIPE_CHARS` (6,000), so a contract at the bottom is a contract the builder may never see. It
+goes at the TOP, above the example, and two cases pin that — one of them by running the real
+`compactRecipeResult` and asserting the heading's index is below the clip.
+
+**Locked by** `tests/aKitTypeIsNotGuessed.test.ts` — 12 cases on the REAL emitted kit, including the
+census, the three names the reported build guessed (asserted NOT to be members, so the contract's *"if a
+name is not here, the kit does not have it"* is true), and the extractor's refusals. **Reversion-proven
+three ways:** drop the contract → 2 fails · move it to the bottom → 1 · narrow the covered names so the
+contract falls behind the type → 2 (this is the drift probe, and it is the important one).
+
+⚠️ **A HOLE IN MY OWN TEST, found by probing it.** With the contract removed, the ordering case PASSED —
+`indexOf` returned `-1`, and `-1 < 2000` is true. That is the exact *"-1 < -1 arithmetic"* trap
+`importPreviewOrdering.test.ts` warns about, and I walked into it one file away from the warning. Both
+anchors are now asserted `> 0` before they are compared, and the reason is written in the case. **An
+ordering assertion is only as good as its anchors.**
+
+**🔸 Q-912 is NOT claimed by this.** The report's three *"repeated step that isn't making progress"*
+nudges have at least two causes: the repeated `read_file` of our own kit, which this removes, and a LOOP
+GUARD on `console_errors`, which is a different thing. Calling Q-912 resolved because its biggest cause
+is gone would be the "fixed the instance, not the class" mistake this ledger exists to prevent. It stays
+OPEN, and the next report with a seeded game says whether the read loop is gone.
 ## 2026-10-12 — NATIVE FEEL, ROUND 3: round 1 fixed the reader and left the source — fourteen viewports, not one with the token
 
 The admin's standing instruction (*"navbharatai jo app banaye aur navbharatai khud dono ko real netiv app

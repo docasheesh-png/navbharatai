@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readyOverrunNote, endOfTurnReadyMark } from '../src/server/AgentV3/doneSignal';
-import { nameWords, leftoversToRemove, leftoverNote, applyLeftoverNet } from '../src/server/AgentV3/leftoverComponents';
+import { nameWords, leftoversToRemove, leftoverNote, applyLeftoverNet, applyLeftoverNetAfterBuild } from '../src/server/AgentV3/leftoverComponents';
 import { BuildDiagnostics, PROCESS_ONLY_CODES } from '../src/server/AgentV3/BuildDiagnostics';
 import { ToolDispatcher } from '../src/server/AgentV3/ToolDispatcher';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
@@ -140,6 +140,18 @@ describe('Q-978 · a component nobody asked for and nothing shows is removed, no
     expect(gone).toEqual(['src/components/LoadingSpinner.tsx']);
   });
   it('the route runs it once, after the build loop, on a new app only', () => {
-    expect(read('src/server/routes/agentv3.ts')).toContain('if (result.ok && !isImportTurn && !isEditMode && !abort.signal.aborted) await applyLeftoverNet(dispatcher, buildDiag, checksRequest);');
+    // The guard moved into leftoverComponents.ts when #3698 was merged after #3692 (2026-10-13): the route handler is at
+    // TypeScript's control-flow limit (TS2563) and one more `if (a && b && c && d)` crossed it. The facts still travel.
+    expect(read('src/server/routes/agentv3.ts')).toContain('await applyLeftoverNetAfterBuild({ ok: result.ok === true, importTurn: isImportTurn, editMode: isEditMode, aborted: abort.signal.aborted }, dispatcher, buildDiag, checksRequest);');
   });
+  it('the guard runs the net only for a finished, un-stopped NEW build (the condition that left the route)', async () => {
+    const deps = { undefinedClassesNow: async () => ({ orphans: ['src/components/LoadingSpinner.tsx'] }), removeLeftoverFiles: async (p: readonly string[]) => [...p] };
+    const report = { record: () => {}, retract: () => 0 };
+    const ok = { ok: true, importTurn: false, editMode: false, aborted: false };
+    expect(await applyLeftoverNetAfterBuild(ok, deps, report, 'todo app', {})).toEqual(['src/components/LoadingSpinner.tsx']);
+    for (const facts of [{ ...ok, ok: false }, { ...ok, importTurn: true }, { ...ok, editMode: true }, { ...ok, aborted: true }]) {
+      expect(await applyLeftoverNetAfterBuild(facts, deps, report, 'todo app', {})).toEqual([]);
+    }
+  });
+
 });

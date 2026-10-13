@@ -380,7 +380,7 @@ import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/lane
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
 import { reasoningStayNote, laneOutcomeWords } from '../AgentV3/FastLaneBudget';
-import { applyLeftoverNet } from '../AgentV3/leftoverComponents';
+import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
@@ -19462,7 +19462,9 @@ async function noteBuildOutcome(
       // 🧹 THE NET UNDER THE ORPHAN HAND-BACK (autopsy db07e0af): a component this build wrote, that the import graph
       // proves nothing reaches and the request never named, is removed instead of shipped — the model was handed it
       // and left it. One the request may name stays, and so does its warning. See leftoverComponents.ts.
-      if (result.ok && !isImportTurn && !isEditMode && !abort.signal.aborted) await applyLeftoverNet(dispatcher, buildDiag, checksRequest);
+      // The guard lives in leftoverComponents.ts: this handler is at TypeScript's control-flow limit (TS2563), and one
+      // more `if (a && b && c && d)` here crossed it once #3692 landed (merge of #3698, 2026-10-13).
+      await applyLeftoverNetAfterBuild({ ok: result.ok === true, importTurn: isImportTurn, editMode: isEditMode, aborted: abort.signal.aborted }, dispatcher, buildDiag, checksRequest);
       // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
       // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
       // worked: a behavioural fix nobody measures is a hope.

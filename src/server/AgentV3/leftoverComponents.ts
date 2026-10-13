@@ -97,3 +97,17 @@ export async function applyLeftoverNet(dispatcher: LeftoverNetDeps, report: Left
     return [];
   }
 }
+
+/**
+ * The route's guard around `applyLeftoverNet`, kept OUT of the handler on purpose: `/api/agentv3/chat` sits at
+ * TypeScript's control-flow limit (TS2563, "too large for control flow analysis"), and one more `if (a && b && c && d)`
+ * in it — this one, once #3692's branches had landed — pushed it over. Facts in, decision here. The net runs only
+ * for a finished, un-stopped NEW build: never an import, never an edit of the user's own files, never after a Stop.
+ */
+export async function applyLeftoverNetAfterBuild(
+  facts: { ok: boolean; importTurn: boolean; editMode: boolean; aborted: boolean },
+  dispatcher: LeftoverNetDeps, report: LeftoverNetReport, request: string, env: NodeJS.ProcessEnv = process.env,
+): Promise<string[]> {
+  if (!facts.ok || facts.importTurn || facts.editMode || facts.aborted) return [];
+  return applyLeftoverNet(dispatcher, report, request, env);
+}

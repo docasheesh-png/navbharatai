@@ -94521,6 +94521,90 @@ unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong
 
 **What to watch for on the next report:** a reasoning-only KIMI call ends at ~150 s as a timeout and the chain falls to GLM;
 `LLM_CALL_STOPPED` carries "it had been running Ns"; a non-English scene description gets a picture answer, not a build offer.
+**The fix.**
+- `undeliveredOwnFiles(mod, present)` — pure; which of a module's own files the PROJECT still lacks.
+  Asked against `actuator.listFiles`, never the turn's write set: a file an earlier turn wrote is
+  delivered, and asking only about this turn would call it missing.
+- `recordModuleDelivery(plan, id, present)` — records it on the module (`undelivered?: string[]`), so
+  the fact is durable across turns; module 2's turn is a different request.
+- `contractIsUnbacked(mod)` — true only when the module owns files and EVERY one is missing. A
+  partially delivered module keeps its contract: the names it did write are real.
+- `moduleBuildContext` withholds an unbacked contract and tells the turn why, instead of handing it
+  names under a false heading. A partial delivery hands the contract forward with the missing file named.
+- `PROJECT_MODULE_FILES_UNDELIVERED` — an `info` measurement of OUR process, registered in both
+  `BuildDiagnostics.ts` and `buildFindingSuggestions.ts` so it can never become a finding against the
+  user's app. The user's line is honest too: not a flat "done", but *"this step built the app its own way
+  rather than those exact files"*.
+
+🔒 **The status is deliberately NOT `failed`.** On the reported build the user got a complete, running
+game; *"module 1 failed"* would be its own lie. The status is left alone — what changes is that the plan
+RECORDS what is missing and never passes a contract nothing backs.
+
+**Additive by construction:** a plan nobody measured keeps `undelivered` absent, and `contractIsUnbacked`
+is false for an absent record, so behaviour is byte-identical to today. A `listFiles` that fails leaves
+the plan exactly as it is now (*"unasked is not undelivered"*).
+
+**Locked by** `tests/aPlanThatBecameFiction.test.ts` — 19 cases on the reported plan's real shape.
+**Reversion-proven twice:** stop withholding the unbacked contract → 1 fail; ask the turn's writes
+instead of the project → 1 fail. A case also asserts the pre-fix state still hands the fictional contract
+forward, so the reversion lives in the suite rather than in a shell history.
+
+**Still OPEN from the same root (rowed, not forgotten):** the plan's remaining 14 modules are still
+queued and billable on a build whose app already exists. That is `8e124182`'s original damage and it
+needs a decision about money and the plan's lifecycle, so it is not taken silently here.
+
+## 2026-10-12 — AUTOPSY `50378049`, Q-911: we shipped a test into the user's app and told them to run a command their app did not have
+
+Third PR from the BlockWorld autopsy (#3684 → Q-900…Q-904; #3686 → Q-905).
+
+**The defect, and it is a second-absolute-rule one.** Every 3D game NavBharatAI builds ships
+`src/game/controls.test.ts`, and that file — in the USER's own project — said *"Your test runner runs it
+(npm test, or vitest run)"*. The default Vite scaffold's `package.json`
+(`ViteReactProviderContents.ts`) defines exactly three scripts: `dev`, `build`, `preview`. **There is no
+`test` script.** So `npm test` in that app answers `npm error Missing script: "test"`. We wrote the
+test, we wrote the instruction, and the instruction did not work. `AppKnowledgeBase` repeated the claim
+to every AI in the product: *"…that the project's own test command runs"*.
+
+**Root cause: the script-writing lived in a CALLER instead of in the shared helper.** `withVitestDeclared`
+declared the dependency and stopped there — and `declared` is not `runnable`. Two of the three paths that
+ship a test had worked around that in their own code (`projectKit.ts` added `test: 'vitest run'` with its
+own copy of the string; `e2eScaffold.ts` adds `test:e2e` before telling anyone to run it). The game kit,
+which reaches the helper through `run_recipe → writeRecipeFiles → declareVitestForRecipeTests`, had no
+such copy — so it was the one path that shipped the instruction without the script. Q-843 built the
+dependency half three days ago and this was the half its sibling hunt did not reach.
+
+**The fix (the class, not the instance).**
+- `withVitestDeclared` now ensures BOTH: the devDependency and a real `test` script. Its condition
+  changed from *"is vitest declared?"* to *"can the shipped test be run?"*, so a project that already
+  declares vitest but has no script is no longer skipped.
+- `PLATFORM_TEST_SCRIPT` is exported once — the string two places wrote and a third was missing.
+- `projectKit.ts`'s private copy is deleted; it is now one call, so no future caller can forget.
+- An author's own `test` script is never overwritten. The npm-init placeholder (`no test specified`) is,
+  because `testRunner` already refuses to treat it as a suite.
+- The shipped test's own comment and the KB sentence now name a command that works, and the KB records
+  what was false before it (the system's honesty, fifth step of the fourth rule).
+
+🔒 **WHY ADDING THE SCRIPT CANNOT BRING BACK A KNOWN FAILURE — checked, not assumed.**
+`testRunner.detectTestPlan` prefers a project's own `test` script, so apps now take that branch instead
+of the inferred-vitest one. A bare script there would have lost the `--exclude 'e2e/**'` that stops
+vitest collecting our unrun Playwright starter — the 2026-08-25 false `vitest: FAIL` that the release
+gate escalated to "Not shippable" for a game the admin was playing. **Autopsy `9cca1fd5` (2026-09-17)
+already closed that hole on the script branch**, forwarding the same exclusion through the package
+manager's `--` passthrough. A case in the new test pins that guard, because this fix's safety rests on it,
+and a note in `testRunner.ts` records the check so nobody re-derives the worry.
+
+**Locked by** `tests/aShippedTestCanActuallyBeRun.test.ts` — 11 cases, including a CENSUS of the paths
+that ship a vitest test, the real Vite scaffold's actual script list as the premise, and the 9cca1fd5
+guard. `theEventBookingAutopsy.test.ts`'s *"nothing is written when it is already declared"* case was
+**widened, not weakened**: declared AND runnable is now the condition for doing nothing, with the reason
+recorded in place. **Reversion-proven three ways:** stop adding the script → 8 fails · go back to
+"declared is enough" → 2 · restore `projectKit`'s private copy → 1.
+
+⚠️ **I hit the backtick-inside-a-template-literal trap TWICE in this one change** — in
+`GAME_CONTROLS_TEST` and again in the `AppKnowledgeBase` string — the same trap #3671 recorded. Both
+surfaced as parse errors away from the edit (`TS1128` at `AppKnowledgeBase.ts:3785`, and an oxc parse
+error that made the test file report "no tests"). Fixed with quotes, and the note is in the test file
+rather than in a session's memory.
 
 ### 2026-10-12 — db07e0af rows closed (#3687 merged)
 
@@ -94533,3 +94617,93 @@ unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong
   - No "skeleton loading" is claimed without a skeleton.
 - **Still open:** Q-926 (248 s to first render on Weak). 🟡 BLOCKED on the admin's routing decision; the options are in the row.
 - **Report db07e0af, final count:** 15 items. ✅ 14 (13 fixed by #3687, plus Q-923 not-a-defect). 🟡 1 (Q-926). Remaining 0.
+
+## 2026-10-12 — NATIVE FEEL, ROUND 3: round 1 fixed the reader and left the source — fourteen viewports, not one with the token
+
+The admin's standing instruction (*"navbharatai jo app banaye aur navbharatai khud dono ko real netiv app
+feel aye aisa banao! aur bhi jyada micro polish karo"*). Rounds 1 (#3669) and 2 (#3671) are merged.
+
+### Measured first, and three of four candidates were already done
+
+Before adding anything, the obvious round-3 ideas were checked against the code rather than assumed:
+
+| candidate | state |
+|---|---|
+| iOS input zoom (<16px focus zoom) | ✅ already handled, BOTH sides (`nativeFeel.ts:158`, `index.css:468`) |
+| tap highlight, overscroll, touch-action, user-select | ✅ round 1 |
+| safe-area variables, Apple meta tags | ✅ round 1 |
+| **our own app's `100vh`** | ✅ **already correct** — its three `index.css` sites use the `100vh` → `100dvh` fallback pattern, with the reasons written down |
+
+So the honest answer for NavBharatAI itself was *nothing to fix*, and saying that beats churn. **Both real
+gaps were on the apps-we-build side.**
+
+### 🔴 GAP 1 — round 1 fixed the READER and left the SOURCE
+
+`withViewportFitCover` PATCHES a user's `index.html` at build time, so an AgentV3 build gets
+`viewport-fit=cover` and its `env(safe-area-inset-*)` stops reading 0px. Measured afterwards: **not one
+of the fourteen viewport tags in the scaffold templates carried the token.** Thirteen provider templates
+(`ViteReactProviderContents`, `Vue`, `Svelte`, `SvelteKit`, `Astro`×2, `Angular`, `Preact`, `Solid`,
+`Lit`, `Vanilla`, `Remix`, `Alpine`, `Static`) each hand-wrote their own string — so there was nowhere to
+add it once, and **any lane that does not pass through `appDefaults` shipped the exact defect round 1 was
+written for.**
+
+🔑 **This repo's headline class, in its own words:** an instance fixed at one reader, the source left
+alone, and the siblings never hunted. `APP_VIEWPORT_CONTENT` / `APP_VIEWPORT_META` now live in
+`nativeFeel.ts` beside the reason, and the templates import them. `withViewportFitCover` stays as defence
+in depth: it returns a document untouched once the token is present, so a correct template makes it a
+no-op instead of a rescue — a case asserts both directions.
+
+🔒 No `maximum-scale` / `user-scalable=no`: pinch-zoom is an accessibility right and blocking it fails a
+store review. The native feel comes from the safe area, not from forbidding zoom.
+
+🔒 **What is deliberately OUT, with the reason in the test** — the email generator (mail clients ignore
+`viewport-fit` and some choke on unknown tokens) and the three preview runtimes (they RENDER an app, they
+do not ship one; changing them changes what we show, not what the user gets). Recorded so the exclusion
+is a decision rather than an oversight, and so nobody "finishes the job" by adding the token to an email.
+
+### 🔴 GAP 2 — a full-height app must end where the SCREEN ends
+
+`100vh` on a phone is the LARGE viewport: it includes the collapsing address bar, so a `height: 100vh`
+layout is cut off by exactly the toolbar height and the page scrolls when it should not. That is the
+clearest "web page, not app" tell left once the safe area is handled, and the built-app baseline had
+**no `dvh` at all**. Added: `--app-height` (plain `100vh` first, then `@supports (height: 100dvh)`), an
+`html` min-height with the same two-line pattern, and a build-rule line that NAMES the variable instead
+of merely forbidding `100vh` — round 2's lesson that a rule naming no primitive is aspirational.
+
+### Proof
+
+`tests/aViewportEveryLaneWrites.test.ts` — **38 cases**. It GENERATES every one of the thirteen
+frameworks and reads the document the provider really emits, so the token is proven in the output, not in
+the diff. Plus a **CENSUS**: no file in the template directory may hand-write a viewport, every user of
+the constant must import it, and the out-of-scope list is pinned with its reasons.
+
+**Reversion-proven three ways:** drop the token from the shared constant → **15 fails** · let one
+template hand-write its viewport again → **3** · remove the `dvh` override → **1**.
+
+### ⚠️ Three mistakes of mine, all caught by a guard
+
+- **The backtick trap, a THIRD time in one session** (#3671, #3693, here) — a CSS comment inside
+  `NATIVE_FEEL_CSS`, which is a TS template literal. `tsc` passed and the TEST LOADER caught it (`oxc`
+  parse error). The file now says in its own text that it may not contain backticks.
+- **My filter could return nothing, and did.** `htmlOf` missed `.astro` entirely, so the astro case
+  asserted against an empty string — a case that fails for the wrong reason is one edit away from a case
+  that PASSES for the wrong reason. Every case now asserts the document is non-empty first.
+- **A blanket assertion was wrong.** `expect(html).not.toContain('${')` failed on Remix's `root.tsx`,
+  which is generated code that legitimately contains its own template literals. It now asserts the
+  specific literal cannot ship — the precise claim instead of the broad one.
+
+### ⚠️ And two EXISTING guards caught consequences I had not thought of
+
+- **`aBuiltAppFeelsNative`'s "chooses no colour" rule read `#3671` as a hex colour.** Writing the PR
+  references as a hash plus four hex digits inside the stylesheet matched its
+  `/#[0-9a-f]{3,8}\b/i` exactly. **The guard was right** — and notably STRONGER than the colour check I
+  wrote in my own new test, which only extracts `background`/`color`/`border-color` declarations and
+  would never have seen a bare hex. The comment now says both of its own rules (no backticks, no hash
+  before a number) so the next editor does not rediscover either.
+- **`anOlderStarterIsStillOurs` failed because I changed what the templates write.** That census (autopsy
+  `db07e0af`) requires every file a template emits TODAY to be in the seed history — which is what lets
+  `isPlatformSeededFile` recognise an untouched starter as OURS. Changing fourteen viewport tags without
+  it would have made every new `index.html` read as the USER's code: the quality lint would grade our own
+  starter, and Q-908's brand-new platform-seeded exclusion would stop recognising it. **A genuine
+  fix-A-create-X, caught by a guard another session built.** Regenerated: 76 starter paths · 35 golden
+  paths · 455 versions, 55 new.

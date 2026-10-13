@@ -5,6 +5,7 @@ import { appendLedgerEntry, LEDGER_OPENING_FIELD, LEDGER_DROPPED_FIELD } from '.
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Credits user_token_wallets /
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
 import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
+import { cashfreeOrderClosedUnpaid } from './pendingOrders';
 import { cashfreePaymentsAvailability } from './cashfreeCredentials';
 import { mintCodeForOrder } from './giftCodeStore';
 import { recordedReversedInr, settleRecordedReversalAtCredit } from './paymentReversal';
@@ -312,7 +313,8 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
           'x-client-id': clientId,
           'x-client-secret': clientSecret,
           'x-api-version': '2023-08-01'
-        }
+        },
+        timeout: 15_000, // DB-16: a hung provider call must not block the sweep
       });
 
       const orderDetails = response.data;
@@ -328,6 +330,17 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
         }
         isPaid = true;
         cfOrderIdRef = orderDetails.cf_order_id || 'cf_' + orderId;
+      } else if (cashfreeOrderClosedUnpaid(orderDetails.order_status)) {
+        // DB-5 (go-live audit 2026-10-13): Cashfree says this order can never be paid. Settle it as
+        // EXPIRED so it stops sitting in PENDING forever and crowding real payments out of the sweep.
+        // Only a PENDING order is flipped, inside a transaction — a concurrent PAID credit always wins.
+        await runTransaction(db, async (tx: any) => {
+          const snap = await tx.get(txRef);
+          if (snap.exists() && snap.data().paymentStatus === 'PENDING') {
+            tx.update(txRef, { paymentStatus: 'EXPIRED', expiredAt: new Date().toISOString(), providerOrderStatus: String(orderDetails.order_status) });
+          }
+        });
+        return { success: false, error: 'This payment was not completed.' };
       }
     }
 

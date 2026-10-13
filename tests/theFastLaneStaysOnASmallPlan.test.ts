@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  mayStayOnReasoningRung, wavesFor, reasoningStayNote, reasoningStayEnabled, REASONING_STAY_MAX_FILES, REASONING_WAVE_MS, laneOutcomeWords,
+  mayStayOnReasoningRung, wavesFor, reasoningStayNote, reasoningStayEnabled, REASONING_STAY_MAX_FILES, REASONING_WAVE_MS, laneOutcomeWords, recordReasoningStays,
 } from '../src/server/AgentV3/FastLaneBudget';
 import { runSimpleBuild } from '../src/server/AgentV3/SimpleBuilder';
 import { PROCESS_ONLY_CODES } from '../src/server/AgentV3/BuildDiagnostics';
@@ -105,7 +105,17 @@ describe('3 · in the route: the call is let through, the lane keeps going, the 
   });
   it('continuations carry the same decision, and the measurement reaches the report as an engine fact', () => {
     expect(route).toContain('fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt, genOpts?.mayReason === true)');
-    expect(route).toContain("code: 'FAST_LANE_STAYED_ON_REASONING_RUNG'");
+    expect(route).toContain('recordReasoningStays(buildDiag, laneReasoningStays, sb);');
     expect(PROCESS_ONLY_CODES.has('FAST_LANE_STAYED_ON_REASONING_RUNG')).toBe(true);
+  });
+  it('the record: one engine fact when the lane stayed, nothing when it did not', () => {
+    const rows: Array<{ code: string; message: string }> = [];
+    const report = { record: (i: { code: string; message: string }) => { rows.push(i); } };
+    recordReasoningStays(report, [], { ok: true });
+    expect(rows).toEqual([]);
+    recordReasoningStays(report, [{ model: 'kimi-k2.7-code', ms: 21_000 }], { ok: true });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].code).toBe('FAST_LANE_STAYED_ON_REASONING_RUNG');
+    expect(rows[0].message).toContain('The lane finished the app itself.');
   });
 });

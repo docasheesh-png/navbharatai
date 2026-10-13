@@ -95149,8 +95149,17 @@ ran with the defect.
   for both lanes.
 - **The writing specialist.** Its `userRequest` was the whole message too; on a milestone build it is now the milestone.
 
-**Locked:** `tests/aMilestoneKeepsItsNotes.test.ts` (13). It checks the behaviour, plus a census: every note before the
+**Locked:** `tests/aMilestoneKeepsItsNotes.test.ts` (14). It checks the behaviour, plus a census: every note before the
 swap is a prepend, no later `buildPrompt =` starts from a bare request, and both lanes pass `fastLaneRequest`. Five
 reversions each fail it (wholesale swap, one-shot composing its own, helper dropping notes, an append before the swap,
 specialist given the whole message). Ten older source guards were updated to the one-request shape, with their intent
 kept (each note still reaches each lane).
+
+**After #3698 merged (2026-10-13), and Q-979 opened.** On top of #3692, `typecheck:server` failed with TS2563 in the
+`/build` handler: TypeScript's control-flow limit. The merging session fixed #3698's share while landing it (the
+leftover-net guard moved into `applyLeftoverNetAfterBuild`). This PR, rebuilt on that `main`, adds zero branches to the
+handler: the milestone's dropped-notes record lives in `milestoneBuildPrompt`, "not a milestone" is a `null` that
+`milestoneLaneRequest` handles, and the existing stay record moved into `recordReasoningStays` (FastLaneBudget) for
+headroom. Each has a behaviour test, reversion-proven. The handler being at the limit is a defect in its own right —
+any session's next `if` there turns CI red — so it is now **Q-979** (OPEN, unowned), with a plan to make headroom one
+module at a time. Rows Q-926, Q-976, Q-977 and Q-978 closed (merged in #3698).

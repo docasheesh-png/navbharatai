@@ -379,7 +379,7 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
-import { reasoningStayNote, laneOutcomeWords } from '../AgentV3/FastLaneBudget';
+import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
 import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
@@ -17552,12 +17552,8 @@ async function noteBuildOutcome(
         dispatcher.setCoverageRequest(step1.buildPrompt);
         // The brief replaces the user's words and ONLY them (Q-975): every note prepended above stays, and the
         // user's hard constraints are restated after it (681bd91b). See milestoneBuildPrompt.
-        const milestone = milestoneBuildPrompt({ buildPrompt, request: prompt, step: step1, total });
-        buildPrompt = milestone.prompt;
+        buildPrompt = milestoneBuildPrompt({ buildPrompt, request: prompt, step: step1, total, report: buildDiag }).prompt;
         milestoneLanePrompt = milestoneBuildPrompt({ buildPrompt: prompt, request: prompt, step: step1, total }).prompt;
-        if (milestone.notesDropped) {
-          buildDiag.record({ phase: 'plan', severity: 'warning', code: 'MILESTONE_NOTES_DROPPED', autoResolved: false, message: 'The milestone brief could not be separated from the notes above the request, so this milestone was built without them.' });
-        }
       }
 
       // 📄 THE USER'S OWN PAGE IS THE STARTING FILE (pastedAppFormat.ts). The pasted document is written as
@@ -17622,7 +17618,7 @@ async function noteBuildOutcome(
       // got two of the five (no classic-phone rule, no one-file rule, no pasted checklist) and the user's bare words
       // without the attachment. On a milestone build both were handed the WHOLE message while the builder built
       // milestone 1. tests/aMilestoneKeepsItsNotes.test.ts fails on a lane that composes its own.
-      const fastLaneRequest = (milestoneLanePrompt ? milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt) : planning.text)
+      const fastLaneRequest = milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt)
         + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix;
 
       // Universal Language (Layer 73): build in the user's language. If the
@@ -18799,7 +18795,7 @@ async function noteBuildOutcome(
         // nobody was following any more. Forget it; the architect's own plan steps drive the ETA from here.
         if (!sb.ok) { etaPlannedFiles = 0; etaFirstFileAt = 0; }
         // Q-926 — the measurement the admin approved the change on: every stay, its price, and how the lane ended.
-        if (laneReasoningStays.length > 0) buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_STAYED_ON_REASONING_RUNG', message: reasoningStayNote(laneReasoningStays, laneOutcomeWords(sb)), autoResolved: true });
+        recordReasoningStays(buildDiag, laneReasoningStays, sb);
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
         // needs explaining, and a check only ever visible when it complains cannot be told apart from

@@ -472,6 +472,8 @@ export function milestoneBuildPrompt(input: {
   request: string;
   step: Pick<RoadmapStep, 'buildPrompt' | 'title'>;
   total: number;
+  /** The build report: a dropped-notes swap is recorded there as a warning, never passed in silence. */
+  report?: { record(issue: { phase: 'plan'; severity: 'warning'; code: string; message: string; autoResolved: boolean }): void };
 }): MilestoneBuildPrompt {
   const full = String(input.buildPrompt ?? '');
   const request = String(input.request ?? '');
@@ -486,17 +488,25 @@ export function milestoneBuildPrompt(input: {
   if (constraints.length > 0) {
     prompt += `\n\nNON-NEGOTIABLE CONSTRAINTS from the user's original request — they bind this milestone too:\n${constraints.map((c) => `- ${c}`).join('\n')}`;
   }
-  return { prompt, notesKept, notesDropped: !separable && full.trim() !== request.trim() };
+  const notesDropped = !separable && full.trim() !== request.trim();
+  if (notesDropped) {
+    try {
+      input.report?.record({ phase: 'plan', severity: 'warning', code: 'MILESTONE_NOTES_DROPPED', autoResolved: false, message: 'The milestone brief could not be separated from the notes above the request, so this milestone was built without them.' });
+    } catch { /* the report is best-effort; the prompt is still returned */ }
+  }
+  return { prompt, notesKept, notesDropped };
 }
 
 /**
  * The request a lane that composes its OWN prompt (the two fast lanes, a writing specialist) is handed on a
  * milestone build (Q-975): the milestone's brief in place of the user's words, and whatever the planning request
  * carried after them (the attachment, the earlier requests) kept. Before this, those lanes were handed the WHOLE
- * message while the builder was told to build milestone 1, so a fast lane planned the entire app. PURE.
+ * message while the builder was told to build milestone 1, so a fast lane planned the entire app. With no milestone
+ * (`null`) it returns the planning text unchanged, so the route reads one expression either way. PURE.
  */
-export function milestoneLaneRequest(planningText: string, request: string, milestonePrompt: string): string {
+export function milestoneLaneRequest(planningText: string, request: string, milestonePrompt: string | null): string {
   const text = String(planningText ?? '');
+  if (!milestonePrompt) return text; // not a milestone build: the planning request as it is
   const req = String(request ?? '');
   return req && text.startsWith(req) ? `${milestonePrompt}${text.slice(req.length)}` : milestonePrompt;
 }

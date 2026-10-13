@@ -58,11 +58,13 @@ describe('1 · the builder: the brief replaces the request, never the notes', ()
     expect(bare.prompt.startsWith(STEP.buildPrompt)).toBe(true);
     expect(bare.prompt).not.toContain(MILESTONE_NOTES_SCOPE_LINE);
   });
-  it('a prompt whose request cannot be found at its end says so (the route reports it), never passes in silence', () => {
+  it('a prompt whose request cannot be found at its end says so in the report, never passes in silence', () => {
     const appended = `${REQUEST}\n\nApproved plan:\n- chats`;
-    const r = milestoneBuildPrompt({ buildPrompt: appended, request: REQUEST, step: STEP, total: 4 });
+    const rows: Array<{ code: string; severity: string }> = [];
+    const r = milestoneBuildPrompt({ buildPrompt: appended, request: REQUEST, step: STEP, total: 4, report: { record: (i) => { rows.push(i); } } });
     expect(r.notesDropped).toBe(true);
-    expect(route).toContain("code: 'MILESTONE_NOTES_DROPPED'");
+    expect(rows).toEqual([expect.objectContaining({ code: 'MILESTONE_NOTES_DROPPED', severity: 'warning' })]);
+    expect(m.notesDropped).toBe(false);
   });
 });
 
@@ -77,6 +79,9 @@ describe('2 · a lane that composes its own prompt gets the milestone too', () =
   });
   it('a planning text that does not open with the words gets the brief alone — never the whole message', () => {
     expect(milestoneLaneRequest('something else entirely', REQUEST, brief)).toBe(brief);
+  });
+  it('not a milestone build: the planning text unchanged', () => {
+    expect(milestoneLaneRequest(`${REQUEST}\n\nmore`, REQUEST, null)).toBe(`${REQUEST}\n\nmore`);
   });
 });
 
@@ -105,7 +110,7 @@ describe('3 · the census: nothing in the route assembles the request for itself
     return src.slice(start);
   }
   const decl = route.indexOf('let buildPrompt = prompt;');
-  const swap = route.indexOf('const milestone = milestoneBuildPrompt({ buildPrompt, request: prompt, step: step1, total });');
+  const swap = route.indexOf('buildPrompt = milestoneBuildPrompt({ buildPrompt, request: prompt, step: step1, total, report: buildDiag }).prompt;');
   const assignments = [...route.matchAll(/(?<![\w.])buildPrompt\s*=(?!=)/g)]
     .filter((m) => m.index! > decl + 'let buildPrompt'.length) // not the declaration itself
     .map((m) => ({ at: m.index!, line: route.slice(0, m.index!).split('\n').length, expr: exprAt(route, m.index! + m[0].length).trim() }));
@@ -122,15 +127,13 @@ describe('3 · the census: nothing in the route assembles the request for itself
     expect(route.slice(decl, swap)).not.toMatch(/(?<![\w.])buildPrompt\s*\+=/);
   });
   it('🔴 no assignment after the notes starts from a bare request — each one builds on buildPrompt', () => {
-    const bare = assignments.filter((a) => !/(?<![\w.])buildPrompt\b/.test(a.expr) && a.expr !== 'milestone.prompt');
+    const bare = assignments.filter((a) => !/(?<![\w.])buildPrompt\b/.test(a.expr));
     expect(bare.map((a) => `${a.line}: ${a.expr.slice(0, 80)}`)).toEqual([]);
-    // The one swap is the helper's output, computed from buildPrompt on the line above.
-    expect(assignments.filter((a) => a.expr === 'milestone.prompt')).toHaveLength(1);
   });
   it('🔴 both fast lanes read ONE request, and it carries the milestone and every lane note', () => {
     const calls = [...route.matchAll(/\b(runSimpleBuild|runOneShot)\(\{ prompt: ([^,]+),/g)].map((m) => `${m[1]}: ${m[2]}`);
     expect(calls).toEqual(['runSimpleBuild: fastLaneRequest', 'runOneShot: fastLaneRequest']);
-    expect(route).toContain('const fastLaneRequest = (milestoneLanePrompt ? milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt) : planning.text)\n        + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix;');
+    expect(route).toContain('const fastLaneRequest = milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt)\n        + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix;');
   });
   it('the writing specialist is handed the milestone on a milestone build', () => {
     expect(route).toContain('userRequest: () => (milestoneLanePrompt ? milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt) : checksRequest === prompt ? planning.text : checksRequest),');

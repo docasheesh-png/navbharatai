@@ -15,6 +15,7 @@
 // to the rupee — and refusing AFTER a payment has succeeded would be far worse than a small overshoot.
 
 import { doc, getDoc, runTransaction } from './serverDb';
+import { creditWalletId } from './walletCreditTarget';
 import { GIFT_CODE_COLLECTION, mintGiftCode, decideGiftRedemption, type GiftCodeRecord } from './giftCodes';
 import { mirroredCreditPatch, rupeesToTokens } from './walletMirror';
 
@@ -154,7 +155,7 @@ export async function redeemGiftCode(
   nowMs: number,
 ): Promise<GiftRedeemResult> {
   const codeRef = doc(db, GIFT_CODE_COLLECTION, code);
-  const walletRef = doc(db, 'user_token_wallets', redeemer.uid);
+  const walletRef = doc(db, 'user_token_wallets', await creditWalletId(db, redeemer.uid));
   const historyRef = doc(db, 'payment_transactions', `gift_${code}`);
   return runTransaction(db, async (tx: any) => {
     // Every read before any write — a Firestore transaction requires it.

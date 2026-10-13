@@ -156,9 +156,19 @@ describe('wiring', () => {
     expect(read('src/server/routes/agentv3.ts')).toContain('dispatcher.setBuildWrites(() => modelAuthoredPaths(writtenFiles));');
   });
 
+  /**
+   * ⚠️ RE-ANCHORED 2026-10-13 (Q-914). This pinned `'a11y: style.a11y, orphans: style.orphans,
+   * resumesUsed: styleResumes'` — the three fields ADJACENT, in that order — so adding a fifth
+   * hand-back part between them broke it without touching what it protects. The invariant is that the
+   * architect's call carries the orphans and the specialist's does not; it now asserts that directly.
+   */
   it('the architect\'s end-of-turn hand-back carries them; the specialist\'s does not', () => {
     const runner = read('src/server/AgentV3/AgentRunner.ts');
-    expect(runner).toContain('a11y: style.a11y, orphans: style.orphans, resumesUsed: styleResumes');
+    const calls = [...runner.matchAll(/decideStyleResume\(\{[^}]*\}\)/g)].map((m) => m[0]);
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    // The architect's is the one that carries the orphans; both carry the a11y half.
+    expect(calls.filter((c) => c.includes('orphans: style.orphans')).length).toBe(1);
+    for (const c of calls) expect(c).toContain('a11y: style.a11y');
     const specialist = runner.slice(runner.indexOf("undefinedClassesNow({ onlyWritten: true })"));
     expect(specialist.slice(0, 400)).not.toContain('orphans');
   });

@@ -49,10 +49,64 @@ export interface RepeatProbeState {
    * only for read-only probes, so a ban can never stop a build from finishing.
    */
   banned: Set<string>;
+  /**
+   * 🔴 HOW MANY TIMES THE BUILD HAS CHANGED SOMETHING (Q-912, autopsy `50378049`, 2026-10-12).
+   *
+   * BlockWorld's report carried a LOOP GUARD on `console_errors`. That call reads the LIVE app's console,
+   * so **after an edit it is a new question with the same spelling** — check, fix, check again. The guard
+   * counted it as a non-progressing repeat, nagged, and (because `console_errors` is in `PROBE_TOOLS`)
+   * would eventually have REFUSED the model's way of telling whether its own fix had worked.
+   *
+   * 🔑 THIS MODULE ALREADY MAKES THE ARGUMENT, one tool over. `PROBE_TOOLS`' safety note says a repeated
+   * `tsc --noEmit` *"looks identical to a loop and is usually a build legitimately converging — check,
+   * fix, check again"*, and excludes it for exactly that reason. `console_errors`, `screenshot`,
+   * `evaluate` and `browser_action` have the same shape and were in the bannable set anyway.
+   *
+   * 🔒 BUT THE DISCRIMINATOR IS NOT THE TOOL — it is whether anything CHANGED in between. Six identical
+   * `grep`s with no write between them is the loop this guard was written for, and it stays caught. The
+   * same `grep` after an edit is a fresh question about a changed tree. So a signature's count resets
+   * when the build has mutated since that signature was last seen, and the original autopsy's loop is
+   * unaffected because nothing mutated during it.
+   */
+  mutations: number;
+  /** signature → the `mutations` value when it was last counted. Absent ⇒ never seen. */
+  seenAt: Map<string, number>;
+}
+
+/**
+ * Tools that CHANGE something — a later identical probe is asking about a different world. PURE data.
+ *
+ * Deliberately generous: anything that can write, run or drive the app counts. A guard that under-counts
+ * mutations goes back to nagging a converging build, which is the defect this exists for.
+ */
+export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
+  'write_file', 'edit_file', 'append_file', 'delete_file', 'bash', 'run_recipe',
+  'generate_tests', 'generate_integration_tests', 'update_preview', 'install_deps', 'task',
+]);
+
+/**
+ * Note every state-changing call in a turn, so a later identical probe is not read as a repeat. PURE.
+ *
+ * 🔴 A CALL THAT CANNOT DO ANYTHING IS NOT A CHANGE, and missing that re-broke Q-738 within the hour.
+ * The first version of this counted every `bash`, so the SEVEN empty `bash` calls of autopsy `d0b2fcd6`
+ * each reset the repeat count — the FINAL steer was never reached, `MAX_NO_OP_TURNS_AFTER_FINAL` never
+ * applied, and a run that does nothing forever would never end. `isEmptyCommandCall` already recognises
+ * exactly that call (the dispatcher refuses it before the shell), and
+ * `tests/aRunThatOnlyDoesNothingEnds` caught it immediately.
+ */
+export function noteMutations(
+  state: RepeatProbeState,
+  toolUses: ReadonlyArray<{ name?: unknown; input?: unknown }>,
+): void {
+  for (const tu of toolUses) {
+    if (typeof tu?.name !== 'string' || !MUTATING_TOOLS.has(tu.name)) continue;
+    if (isEmptyCommandCall(tu)) continue; // it changed nothing, so nothing is a new question
+    state.mutations += 1;
+  }
 }
 
 export function newRepeatProbeState(): RepeatProbeState {
-  return { counts: new Map(), steerAt: new Map(), banned: new Set() };
+  return { counts: new Map(), steerAt: new Map(), banned: new Set(), mutations: 0, seenAt: new Map() };
 }
 
 export function loopGuardEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -103,6 +157,14 @@ export function recordAndCheckRepeat(
   threshold = 3,
 ): string | null {
   const sig = probeSignature(toolName, input);
+  // Q-912: a repeat only counts while NOTHING has changed. The build mutated since this signature was
+  // last seen ⇒ the same call is a new question (check, fix, check again), so its count starts over and
+  // any steer it had earned is rescheduled from the threshold again.
+  const mutations = state.mutations ?? 0;
+  const lastSeen = state.seenAt?.get(sig);
+  const fresh = lastSeen !== undefined && mutations > lastSeen;
+  if (fresh) { state.counts.set(sig, 0); state.steerAt.delete(sig); state.banned.delete(sig); }
+  state.seenAt?.set(sig, mutations);
   const n = (state.counts.get(sig) ?? 0) + 1;
   state.counts.set(sig, n);
   const due = state.steerAt.get(sig) ?? threshold;

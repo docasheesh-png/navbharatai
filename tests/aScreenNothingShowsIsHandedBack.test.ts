@@ -39,8 +39,31 @@ describe('which files are handed back', () => {
     expect(orphansToHandBack({ project: holed, written: WRITTEN })).toEqual([]);
   });
 
+  /**
+   * ⚠️ CORRECTED 2026-10-12 (Q-908, autopsy `50378049`), and the pair below is STRONGER than the single
+   * case it replaces.
+   *
+   * The old case passed `WRITTEN`, which includes `src/App.tsx` — a turn that wrote the app's ENTRY. That
+   * combination cannot occur in the engine: a module that owns an entry file makes `shellModuleFor`
+   * return null, so `starterExpected` is never set for it. So the case asserted the carve-out on a state
+   * the engine does not produce, and it hid the state the engine DOES produce when a builder goes out of
+   * its module's scope — which is what cost the reported build its abandoned-kit hand-back.
+   *
+   * The carve-out's premise is *"a later module wires it in"*, and the thing that wires components in is
+   * the entry. Write set without the entry ⇒ still excused. With it ⇒ nothing is coming, so the orphans
+   * are real.
+   */
   it('a project-mode module waiting for its shell is left alone (a later module wires it in)', () => {
-    expect(orphansToHandBack({ project: PROJECT, written: WRITTEN, starterExpected: true })).toEqual([]);
+    const noEntry = WRITTEN.filter((p) => p !== 'src/App.tsx');
+    expect(orphansToHandBack({ project: PROJECT, written: noEntry, starterExpected: true })).toEqual([]);
+  });
+
+  it('🔴 …but a module turn that wrote the ENTRY itself is NOT excused — nothing is coming (Q-908)', () => {
+    expect(WRITTEN).toContain('src/App.tsx');
+    expect(orphansToHandBack({ project: PROJECT, written: WRITTEN, starterExpected: true })).toEqual([
+      'src/components/AlgorithmSuggestions.tsx',
+      'src/components/DataPreview.tsx',
+    ]);
   });
 
   it('tests, stories and UI-kit parts are not screens the app must show', () => {
@@ -113,9 +136,18 @@ describe('the end-of-turn read', () => {
 
   it('a module turn that awaits its shell is not', async () => {
     const d = make();
-    d.setBuildWrites(() => WRITTEN);
+    // Without the entry among its writes — the state the engine really produces for such a turn
+    // (Q-908: with the entry, `shellModuleFor` returns null and `starterExpected` is never set).
+    d.setBuildWrites(() => WRITTEN.filter((p) => p !== 'src/App.tsx'));
     d.setStarterExpected(true);
     expect((await d.undefinedClassesNow()).orphans).toEqual([]);
+  });
+
+  it('🔴 …but one that wrote the entry itself IS read, even with starterExpected (Q-908)', async () => {
+    const d = make();
+    d.setBuildWrites(() => WRITTEN);
+    d.setStarterExpected(true);
+    expect((await d.undefinedClassesNow()).orphans ?? []).toContain('src/components/DataPreview.tsx');
   });
 });
 

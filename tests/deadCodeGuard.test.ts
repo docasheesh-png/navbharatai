@@ -85,6 +85,8 @@ const isTest = (p: string) => p.includes('.test.') || p.includes('.spec.');
  * becomes a place to hide the next dead engine.
  */
 const KNOWN_UNREACHABLE = new Set([
+  // Go-live PR 12: analyzer, called by the chat card behind AGENTV3_SERVICE_RECO. Remove when wired.
+  'src/server/analyzer/requirements.ts',
   // Go-live marketplace building block, merged ahead of its caller behind a default-off flag. Remove when wired.
   'src/lib/catalogue/index.ts',
   'src/server/providers/index.ts',

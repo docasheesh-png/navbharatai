@@ -28,7 +28,7 @@ const awaitSites = [...route.matchAll(/await raceTimeout\(importPreviewBoot,/g)]
 /** The first post-build check that cannot run without a preview URL. */
 const firstPreviewGatedCheck = route.indexOf('process.env.AGENTV3_RENDER_RESCUE !==');
 /** The verdict that told the user their working preview never existed. */
-const releaseGate = route.indexOf('gateEvidence.previewUrlPublished = Boolean(lastPreviewUrl)');
+const releaseGate = route.indexOf('gateEvidence.previewUrlPublished = true');
 /** The recap line that claimed the preview had not started. */
 const recapSummary = route.indexOf('const summaryText = summarizeProject(');
 

@@ -139,14 +139,37 @@ describe('the wiring', () => {
     expect(route).toContain("code: 'PROJECT_MODULE_AWAITS_SHELL'");
   });
 
-  it('a preview published during such a turn is not adopted, and the platform is told to stand down', () => {
-    expect(route).toContain("if ((e as { type?: string }).type === 'preview' && !moduleAwaitsShell)");
+  /**
+   * ⚠️ SUPERSEDED 2026-10-12 BY AUTOPSY `50378049`, and the case is now the OPPOSITE of what it was.
+   *
+   * It used to assert that a preview published during such a turn **is not adopted**
+   * (`type === 'preview' && !moduleAwaitsShell`). That was wrong, and a report proved it: the builder
+   * ignored a types-and-constants module, wrote a whole voxel game, published a live address and had it
+   * verified in a browser — and because the address was discarded, the gate told the user *"no live
+   * preview was ever available"*, two proofs stood down, the margin was waived, and the recap said
+   * *"There is nothing to open yet"* about a running game.
+   *
+   * 🔑 Discarding the address was never one of 6a5fb04b's protections — it was the mechanism that made
+   * the platform lie. The protections that case actually needs are all still here and still pinned:
+   * the module prompt, `setStarterExpected`, `gateEvidence.awaitingShell`, and
+   * `shouldAttemptPlatformPreview` standing down. A PREDICTION cannot outrank an OBSERVATION.
+   */
+  it('a preview published during such a turn IS adopted — and the turn is still not judged as an app', () => {
+    // The fact is kept, whatever the plan predicted.
+    expect(route).toContain("if ((e as { type?: string }).type === 'preview') {");
+    expect(route).not.toContain("type === 'preview' && !moduleAwaitsShell");
+    // …and every reader of the prediction yields to it (`shellStillAwaited`).
+    expect(route).toContain('const awaitsShellNow = (): string | null => shellStillAwaited(moduleAwaitsShell, lastPreviewUrl);');
+    expect(route).toContain('!isImportTurn && !abort.signal.aborted && !awaitsShellNow()) {');
+    // The platform still does NOT start a preview the module was told not to publish.
     expect(route).toContain('awaitingShell: moduleAwaitsShell,');
-    expect(route).toContain('!isImportTurn && !abort.signal.aborted && !moduleAwaitsShell) {');
   });
 
   it('the reviewer waits for the assembled app, and a plan that built nothing is retired after a proven app', () => {
-    expect(route).toContain('if (result.ok && reviewHeadroomOk && reviewerAllowed && !moduleAwaitsShell) {');
+    // `reviewDeferredToShell` is `awaitsShellNow()` — so a module turn that DID deliver a running app
+    // gets reviewed, instead of being deferred to a shell its own build already made redundant.
+    expect(route).toContain('const reviewDeferredToShell = awaitsShellNow();');
+    expect(route).toContain('if (result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell) {');
     expect(route).toMatch(/if \(pausedPlanRef && !projectModuleRef && result\.ok && runProof\(\)\.proven && retireUnbuiltPlan\(pausedPlanRef\)\)/);
   });
 

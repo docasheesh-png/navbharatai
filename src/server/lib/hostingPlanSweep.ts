@@ -40,7 +40,7 @@ import { scheduler } from './ScheduledJobs';
 import {
   decidePlanSweepStep, hostingPlansEnabled, planPriceInr, planDays,
   invalidatePlanCache, type PlanSweepAction, type HostingPlanRecord,
-  appsToPauseOnLapse, type PausableApp,
+  appsToPauseOnLapse, serverAppsToPauseOnLapse, type PausableApp,
 } from './hostingPlan';
 import { LEGACY_HOSTING_PLAN_ID, isKnownPlanId, tierForPlanId } from '../../lib/hostingTiers';
 import { saveNotification } from './AdminNotificationStore';
@@ -49,7 +49,9 @@ import { deleteCustomDomain, attachCustomDomain } from './firebaseCustomDomain';
 import { publishedAppCap } from './HostingQuota';
 import { deploymentStore } from '../AgentV3/DeploymentStore';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
-import { takeAppOffline } from '../AgentV3/hostedAppLifecycle';
+import { takeAppOffline, recordHasHostedServer } from '../AgentV3/hostedAppLifecycle';
+import { lapsePausesServerAppsEnabled } from './purchaseAuditFlags';
+import { activeAddonRows } from '../../lib/hostingAddons';
 
 export interface SweepDeps {
   notify: (userId: string, message: string) => Promise<unknown>;
@@ -196,12 +198,17 @@ export async function sweepOneWallet(db: any, walletDocId: string): Promise<Plan
     const ref = doc(db, 'user_token_wallets', walletDocId);
     const outcome = await runTransaction(db, async (t: any) => {
       const snap = await t.get(ref);
-      if (!snap.exists()) return { action: null as PlanSweepAction, userId: walletDocId, expiresAt: '', planId: null as string | null };
+      if (!snap.exists()) return { action: null as PlanSweepAction, userId: walletDocId, expiresAt: '', planId: null as string | null, paidServerWs: [] as string[] };
       const current = snap.data();
       const step = decidePlanSweepStep(current, _deps.now().toISOString());
       if (step.applied) t.set(ref, step.wallet);
       const plan = step.wallet.hostingPlan as HostingPlanRecord | undefined;
-      return { action: step.action, userId: (current.userId as string) || walletDocId, expiresAt: plan?.expiresAt ?? '', planId: plan?.id ?? null };
+      // Workspaces holding their own paid extra-server add-on (still in period) are not plan servers.
+      const paidServerWs = activeAddonRows(current, Date.parse(_deps.now().toISOString()))
+        .filter((r) => r.addonId === 'server')
+        .map((r) => (/^ws:([^:]{8,}):/.exec(String(r.proof || '')) || [])[1])
+        .filter((x): x is string => !!x);
+      return { action: step.action, userId: (current.userId as string) || walletDocId, expiresAt: plan?.expiresAt ?? '', planId: plan?.id ?? null, paidServerWs };
     });
     const { action, userId } = outcome;
     if (!action) return null;
@@ -238,7 +245,12 @@ export async function sweepOneWallet(db: any, walletDocId: string): Promise<Plan
       try {
         const apps = await _deps.appsForUser(userId);
         const domainOwners = links.map((l) => l.workspaceId);
-        for (const workspaceId of appsToPauseOnLapse(apps, publishedAppCap(), domainOwners)) {
+        const toPause = appsToPauseOnLapse(apps, publishedAppCap(), domainOwners);
+        // LAPSE_PAUSE_SERVER_APPS: server apps inside the free allowance go offline too (default OFF).
+        if (lapsePausesServerAppsEnabled()) {
+          toPause.push(...serverAppsToPauseOnLapse(apps, toPause, outcome.paidServerWs, (a) => recordHasHostedServer(a)));
+        }
+        for (const workspaceId of toPause) {
           try {
             await _deps.pauseApp(workspaceId);
             pausedIds.push(workspaceId);

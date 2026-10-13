@@ -37,6 +37,7 @@ import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletRes
 import { WALLET_OPS, validRequestId, walletOpId } from './walletOps';
 import { withLedgerV2 } from './ledgerV2';
 import { envFlag } from './envFlag';
+import { issueBillOfSupply } from './receiptStore';
 import {
   HOSTING_TIERS, LEGACY_HOSTING_PLAN_ID, hostingAgreementTerms, isKnownPlanId, purchasableTier,
   tierForPlanId, tierRank, HOSTING_OVERAGE_INR_PER_GB, type HostingTier, type HostingTierId,
@@ -745,6 +746,19 @@ export async function purchaseHostingPlan(
       return { ok: false, error: 'Hosting plans are not available right now.', reason: 'disabled' };
     }
     invalidatePlanCache(userId);
+    // Go-live PR 15 (METERING_V1, default OFF ⇒ issueBillOfSupply returns at once): a Bill of Supply
+    // for a CHARGED, non-replayed purchase. Idempotent per period; never fails the purchase.
+    if (outcome.charged && !(outcome as any).replay) {
+      const billed = Math.round(Number((outcome.plan as any)?.billedInr ?? 0) * 100);
+      if (billed > 0) {
+        const name = tierForPlanId(outcome.plan?.id)?.name ?? 'Hosting plan';
+        await issueBillOfSupply(db, {
+          ownerId, sourceRef: `plan_${outcome.plan.id}_${outcome.plan.expiresAt}`,
+          customer: { id: ownerId, name: null, email: null },
+          lines: [{ description: `${name} plan`, quantity: 1, unit: '30 days', unitPaise: billed, amountPaise: billed }],
+        });
+      }
+    }
     return {
       ok: true, plan: outcome.plan, charged: outcome.charged,
       creditedInr: outcome.creditedInr, bundledCreditInr: outcome.bundledCreditInr,

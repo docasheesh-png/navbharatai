@@ -85,10 +85,6 @@ const isTest = (p: string) => p.includes('.test.') || p.includes('.spec.');
  * becomes a place to hide the next dead engine.
  */
 const KNOWN_UNREACHABLE = new Set([
-  // Go-live PR 15: metering + Bill of Supply, called from purchase/usage paths behind METERING_V1. Remove when wired.
-  'src/server/lib/billOfSupply.ts',
-  // Go-live marketplace building block, merged ahead of its caller behind a default-off flag. Remove when wired.
-  'src/lib/catalogue/index.ts',
   'src/server/providers/index.ts',
   // Go-live marketplace building block, merged ahead of its caller behind a default-off flag. Remove when wired.
   'src/server/providers/types.ts',

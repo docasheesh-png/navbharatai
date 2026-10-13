@@ -16,6 +16,8 @@ interface ResellSide {
   canStart: boolean;
   stopRef: string | null;
   terms?: readonly string[];
+  /** RESELL_AUTO_RENEW: set on a paid row — whether it renews, so the switch can be shown. */
+  autoRenew?: { on: boolean; ref: string; expiresAt: string };
 }
 
 interface ResellOptions {
@@ -23,6 +25,8 @@ interface ResellOptions {
   database: ResellSide;
   dedicated?: ResellSide;
   own?: { hosting?: string; database?: string };
+  /** RESELL_AUTO_RENEW on the server: the last term of each side is the renewal sentence. */
+  autoRenewAvailable?: boolean;
 }
 
 export interface ResellHostingChoiceProps {
@@ -68,7 +72,8 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
       const res = await authedFetch(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId, agreedToTerms: true }),
+        // Auto-renew is part of the terms the user just ticked (shown under the box when it applies).
+        body: JSON.stringify({ workspaceId, agreedToTerms: true, autoRenew: true }),
       }, timeout);
       const data = await res.json().catch(() => null);
       setNote(data?.message || data?.error || 'That did not finish. If you were charged, it will show in your wallet.');
@@ -87,6 +92,50 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
     } finally {
       setWorking(null);
     }
+  };
+
+  const toggleRenew = async (side: ResellSide, on: boolean) => {
+    if (!authedFetch || !workspaceId || !side.autoRenew) return;
+    setNote(null);
+    try {
+      const res = await authedFetch('/api/agentv3/resell/auto-renew', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Switching it back ON re-accepts the renewal sentence shown right beside the switch.
+        body: JSON.stringify({ workspaceId, ref: side.autoRenew.ref, autoRenew: on, agreedToTerms: on }),
+      });
+      const data = await res.json().catch(() => null);
+      setNote(data?.message || data?.error || 'Auto-renew was not changed.');
+      if (res.ok) {
+        const again = await authedFetch(`/api/agentv3/resell/options?workspaceId=${encodeURIComponent(workspaceId)}`);
+        const data = await again.json().catch(() => null);
+        if (data && 'server' in data && 'database' in data) setOptions(data as ResellOptions);
+      }
+    } catch {
+      setNote('Auto-renew was not changed. Please try again.');
+    }
+  };
+
+  /** The renewal sentence under a buy box, and the on/off switch on a paid row. */
+  const renewBits = (side: ResellSide | undefined) => {
+    if (!side || !options?.autoRenewAvailable) return null;
+    const term = side.terms && side.terms.length > 0 ? side.terms[side.terms.length - 1] : null;
+    return (
+      <>
+        {side.canStart && term && <p className="text-[11px] text-muted leading-relaxed pl-5">{term}</p>}
+        {side.autoRenew && (
+          <label className="flex items-start gap-2 text-[11.5px] text-muted leading-relaxed">
+            <input type="checkbox" checked={side.autoRenew.on} disabled={working !== null}
+              onChange={(e) => void toggleRenew(side, e.target.checked)} className="mt-0.5" />
+            <span>
+              {side.autoRenew.on
+                ? `Auto-renew is on — renews every 30 days from your wallet on ${side.autoRenew.expiresAt.slice(0, 10)}. Untick to cancel; it then ends on that date.`
+                : `Auto-renew is off — it ends on ${side.autoRenew.expiresAt.slice(0, 10)}. Tick to renew it from your wallet every 30 days (reminders 5, 3 and 1 day before).`}
+            </span>
+          </label>
+        )}
+      </>
+    );
   };
 
   const stop = async (kind: 'server' | 'database' | 'dedicated', ref: string) => {
@@ -126,7 +175,7 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
         You can host it yourself, and you can connect your own database. Both stay free from us.
         A database and API from NavBharatAI is ₹{DB_PRICE} for 30 days — both together, on the servers we already run, not a new machine.
         A custom server, once your plan's servers are full, is ₹{SERVER_PRICE}, taken only after it is live.
-        Neither is sold from the add-on list.
+        Neither is sold from the add-on list. When auto-renew is shown, they renew every 30 days from your wallet until you switch it off here.
       </p>
       {options?.server && (
         <p className="text-[11.5px] text-body leading-relaxed">{options.server.reason}</p>
@@ -137,6 +186,7 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
           <span>{options.server.terms?.[0] || `₹${options.server.priceInr} from the money I added, only after the server is live.`}</span>
         </label>
       )}
+      {renewBits(options?.server)}
       {options?.server.canStart && (
         <button
           type="button"
@@ -166,6 +216,7 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
           <span>{options.database.terms?.[0] || `₹${options.database.priceInr} from the money I added, only after the database is ready.`}</span>
         </label>
       )}
+      {renewBits(options?.database)}
       {options?.database.canStart && (
         <button
           type="button"
@@ -196,6 +247,7 @@ export function ResellHostingChoice({ workspaceId, authedFetch, onOpenDatabaseSe
           <span>{options.dedicated.terms?.[0] || `₹${options.dedicated.priceInr} from the money I added, only after the private database is ready.`}</span>
         </label>
       )}
+      {renewBits(options?.dedicated)}
       {options?.dedicated?.canStart && (
         <button
           type="button"

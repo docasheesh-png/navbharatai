@@ -245,6 +245,25 @@ export async function deleteProject(
   return classifyStatus(res.status, await res.text().catch(() => ''), 'read');
 }
 
+/**
+ * Pause a project we created (PRIVATE_DB_EXPIRY_POLICY with PRIVATE_DB_ORG_PAUSABLE). Supabase
+ * refuses this on a paid-plan org, which the caller treats as "not paused" and keeps the row.
+ */
+export async function pauseProject(
+  token: string,
+  projectRef: string,
+  fetchImpl: Fetch = globalThis.fetch,
+): Promise<{ ok: boolean }> {
+  const ref = String(projectRef ?? '').trim();
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(ref)) return { ok: false };
+  try {
+    const res = await fetchImpl(`${SUPABASE_API}/v1/projects/${ref}/pause`, { method: 'POST', headers: authHeaders(token) });
+    return { ok: res.ok };
+  } catch {
+    return { ok: false };
+  }
+}
+
 /** The only status that means "you can connect to it now". */
 export const PROJECT_READY_STATUS = 'ACTIVE_HEALTHY';
 

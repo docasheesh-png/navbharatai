@@ -136,6 +136,30 @@ export async function markSharedReady(db: SharedDb, workspaceId: string, nowMs: 
   }
 }
 
+/**
+ * RESELL_AUTO_RENEW: a renewed small database gets its new period on the data API itself, and a
+ * fresh operations allowance (the cap is per 30 days). The key does not change, so the published
+ * app keeps working with no republish. Records are untouched.
+ */
+export async function extendSharedDatabase(db: SharedDb, workspaceId: string, expiresAtMs: number, nowMs: number): Promise<boolean> {
+  try {
+    await db.runTransaction(async (tx) => {
+      const ref = metaRef(db, workspaceId);
+      const snap = await tx.get(ref);
+      const current = snap.exists ? asMeta(snap.data()) : null;
+      if (!current) throw new Error('missing');
+      const curExp = Date.parse(current.expiresAt);
+      // Never shortens a period (a replay of an older renewal is a no-op).
+      if (Number.isFinite(curExp) && curExp >= expiresAtMs) return;
+      tx.set(ref, { ...current, expiresAt: new Date(expiresAtMs).toISOString(), updatedAt: new Date(nowMs).toISOString() });
+      for (let i = 0; i < SHARED_DATA_SHARDS; i++) tx.set(shardRef(db, workspaceId, i), { n: 0 });
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function destroySharedDatabase(db: SharedDb, workspaceId: string): Promise<{ ok: boolean }> {
   try {
     const records = db.collection(`nbai_app_data/${workspaceId}/records`);

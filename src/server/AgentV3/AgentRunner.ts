@@ -41,6 +41,7 @@ import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
 import { answerAfterPlanning } from './answerAfterPlanning';
 import { resolveToolAlias, toolAliasNote } from './toolAlias';
+import { runAsModelToolCall } from './modelToolWrites';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -1363,9 +1364,13 @@ export class AgentRunner {
             const r = await dispatchWithBudget({ ...tu, name: aliasTo });
             return { ...r, content: `${toolAliasNote(tu.name, aliasTo)}${r.content}` };
           }
-          if (toolTimeoutMs <= 0 || tu.name === 'task') return dispatcher.dispatch(tu, agentRole);
+          // 🔑 A TOOL CALL THE MODEL ASKED FOR IS MARKED AS ONE (modelToolWrites.ts, autopsy 9c612cdb). Every write
+          // it makes is then the model's by evidence, so a platform step that named no pass can no longer be
+          // reported as "the build loop". A repair the platform started is marked as that, not as the build.
+          const asModel = <T>(fn: () => Promise<T>): Promise<T> => runAsModelToolCall(fn, { platformRequest: this.opts.platformRequest === true });
+          if (toolTimeoutMs <= 0 || tu.name === 'task') return asModel(() => dispatcher.dispatch(tu, agentRole));
           try {
-            return await withDeadline((signal) => dispatcher.dispatch(tu, agentRole, { signal }), toolTimeoutMs, `tool ${tu.name}`);
+            return await withDeadline((signal) => asModel(() => dispatcher.dispatch(tu, agentRole, { signal })), toolTimeoutMs, `tool ${tu.name}`);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             const timedOut = /timed out after/.test(msg);

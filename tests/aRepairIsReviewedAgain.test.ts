@@ -72,7 +72,9 @@ describe('what the second look decides', () => {
 
 describe('🔒 the wiring', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-  const loop = route.slice(route.indexOf("const fix = await raceTimeout(critFixRunner.run(judgeRepairPrompt(prompt, autoFixItems))"), route.indexOf("if (fixOk || abort.signal.aborted || !reviewerFixShouldRetry("));
+  // Anchor updated 2026-10-13 (autopsy 9c612cdb): the repair now runs inside its named pass, `reviewer-autofix`,
+  // so its writes are attributed to it instead of to the build loop. The region this test reads is unchanged.
+  const loop = route.slice(route.indexOf("const fix = await raceTimeout(runInPass('reviewer-autofix', () => critFixRunner.run(judgeRepairPrompt(prompt, autoFixItems)))"), route.indexOf("if (fixOk || abort.signal.aborted || !reviewerFixShouldRetry("));
 
   it('only after an applied fix, with its own abort, spawn and billing phase', () => {
     expect(loop).toContain('if (fix.ok && !abort.signal.aborted) {');

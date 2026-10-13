@@ -51,6 +51,7 @@
 // the pass's own try/catch swallows it. Pure Node built-in; no deps.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { modelToolOrigin, type ModelToolOrigin } from './modelToolWrites';
 
 /** Kill switch. Default ON — this is the fix the admin approved. `off` restores today's behaviour. */
 export function greenFreezeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -180,7 +181,13 @@ const latches = new Map<string, GreenLatch>();
 /** The pass currently executing, propagated to every awaited descendant. */
 const passZone = new AsyncLocalStorage<{ name: string }>();
 
-type WriteInfo = { workspaceId: string; path: string; pass: string | null };
+/**
+ * What the write choke point knows about one write. `pass` is the named pass (`runInPass`), and `model` says
+ * whether a MODEL asked for it (a tool call `AgentRunner` dispatched — modelToolWrites.ts). A write with neither
+ * is a platform step that named no pass: it is reported as exactly that, never as the model (autopsy 9c612cdb).
+ * `model` is attribution only — `writeRefused` never reads it.
+ */
+type WriteInfo = { workspaceId: string; path: string; pass: string | null; model: ModelToolOrigin | null };
 type Observer = { fn: (info: WriteInfo) => void; workspaceId?: string };
 
 /**
@@ -279,7 +286,15 @@ export function isGreenLatched(workspaceId: string): boolean {
   return latches.has(workspaceId);
 }
 
-/** Run `fn` inside a named pass, so writes it performs are attributed to `name` for the freeze decision. */
+/**
+ * Run `fn` inside a named pass, so writes it performs are attributed to `name` — for the freeze decision AND for
+ * every ledger that names a writer (POST_GREEN_WRITES, GREEN_FREEZE_DEFERRED).
+ *
+ * 🔒 A NAME IS ATTRIBUTION UNLESS IT IS ON A LIST ABOVE. `writeRefused` treats a name in none of
+ * `ALLOWED_PASSES` / `CREATE_ONLY_PASSES` / `SECRET_FILE_DENIED_PASSES` / 'vaccine-repair' exactly as it treats
+ * no name: refused on a latched workspace. So naming a platform step can never widen what it may write; only a
+ * deliberate entry on one of those lists does (tests/aPlatformWriterIsNeverTheModel.test.ts locks this).
+ */
 export function runInPass<T>(name: string, fn: () => Promise<T>): Promise<T> {
   return passZone.run({ name }, fn);
 }
@@ -328,10 +343,10 @@ export function writeRefused(workspaceId: string, path: string, env: NodeJS.Proc
  */
 export function assertWriteAllowed(workspaceId: string, path: string, env: NodeJS.ProcessEnv = process.env): void {
   if (!writeRefused(workspaceId, path, env)) {
-    if (!isInfraPath(path)) notify(writeObservers, { workspaceId, path: norm(path), pass: currentPass() });
+    if (!isInfraPath(path)) notify(writeObservers, { workspaceId, path: norm(path), pass: currentPass(), model: modelToolOrigin() });
     return;
   }
   const pass = currentPass();
-  notify(deferredObservers, { workspaceId, path: norm(path), pass });
+  notify(deferredObservers, { workspaceId, path: norm(path), pass, model: modelToolOrigin() });
   throw new GreenFreezeError(norm(path), pass);
 }

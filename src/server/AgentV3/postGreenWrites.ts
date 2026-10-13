@@ -11,19 +11,53 @@
 // PR #3084 found the same thing for the build loop and shipped `READY_BEFORE_END` first. This is the
 // render-side sibling: one number for "when did it first work", one ledger for "who touched it after".
 //
+// 🔴 "BUILD LOOP" WAS THE DEFAULT, AND THE DEFAULT LIED (autopsy 9c612cdb, 2026-10-12). Every write with no pass name
+// was labelled the build loop. That report read "build loop (5 files)" for a model that had written nothing after its
+// final summary: the five were the unused-import sweep (2), the end-to-end scaffold (2) and the architecture note (1),
+// platform steps that named no pass. The label is now earned: "build loop" means a tool call the model asked for in
+// the user's own build (modelToolWrites.ts). A write that is neither named nor the model's is said to be an UNNAMED
+// platform step — a defect in attribution, reported as such, never blamed on the model.
+//
 // PURE — the route owns the clock, the observer and the timeline.
+import type { ModelToolOrigin } from './modelToolWrites';
 
 export interface PostGreenWrite {
   path: string;
-  /** The named pass that wrote (greenFreeze.runInPass), or null for the build loop itself. */
+  /** The named pass that wrote (greenFreeze.runInPass), or null when the writer named none. */
   pass: string | null;
+  /**
+   * Whether a model asked for the write (modelToolWrites.ts): 'build' for the user's own build, 'platform-repair'
+   * for a repair run the platform started. Absent or null means NO model did — never assumed to be the build loop.
+   */
+  model?: ModelToolOrigin | null;
   at: number;
 }
 
 export type EndVerdict = 'rendered' | 'broken' | 'unchecked';
 
-/** The label a null pass gets — the architect and its sub-agents write outside any named pass. */
+/** A write inside a tool call the model made in the user's own build — the architect and the sub-agents it delegates to. */
 export const BUILD_LOOP_LABEL = 'build loop';
+
+/** A write inside a tool call made by a repair run the platform started, where the run named no pass. */
+export const UNNAMED_MODEL_REPAIR_LABEL = 'unnamed model repair';
+
+/** A write no model asked for, by platform code that named no pass. Which step it was is not known. */
+export const UNNAMED_PLATFORM_LABEL = 'unnamed platform step';
+
+/** Who made one write, as every ledger names it. A pass name wins; "build loop" only on positive evidence. PURE. */
+export function writerLabel(w: { pass: string | null; model?: ModelToolOrigin | null }): string {
+  if (w.pass) return w.pass;
+  if (w.model === 'build') return BUILD_LOOP_LABEL;
+  if (w.model === 'platform-repair') return UNNAMED_MODEL_REPAIR_LABEL;
+  return UNNAMED_PLATFORM_LABEL;
+}
+
+/** The same writer as a phrase inside a sentence ("… by the e2e-scaffold pass", "… by the build loop"). PURE. */
+export function writerPhrase(w: { pass: string | null; model?: ModelToolOrigin | null }): string {
+  if (w.pass) return `the ${w.pass} pass`;
+  if (w.model === 'build') return `the ${BUILD_LOOP_LABEL}`;
+  return `an ${writerLabel(w)}`;
+}
 
 /** How many distinct passes are named in the summary before "and N more". */
 export const MAX_NAMED_PASSES = 6;
@@ -32,7 +66,7 @@ export const MAX_NAMED_PASSES = 6;
 export function groupPostGreenWrites(writes: ReadonlyArray<PostGreenWrite>): Array<{ pass: string; files: number; paths: string[] }> {
   const by = new Map<string, Set<string>>();
   for (const w of writes) {
-    const key = w.pass ?? BUILD_LOOP_LABEL;
+    const key = writerLabel(w);
     if (!by.has(key)) by.set(key, new Set());
     by.get(key)!.add(w.path);
   }
@@ -66,7 +100,11 @@ export function postGreenWritesNote(input: {
   }
   const named = groups.slice(0, MAX_NAMED_PASSES).map((g) => `${g.pass} (${g.files} file${g.files === 1 ? '' : 's'})`).join(', ');
   const more = groups.length > MAX_NAMED_PASSES ? ` and ${groups.length - MAX_NAMED_PASSES} more` : '';
-  const who = `After the app first rendered ${secs}s in, ${files} file(s) were written by ${groups.length} writer(s): ${named}${more}.`;
+  // An unnamed bucket may hold several steps, so the count of writers is a floor there, and the reader is told why.
+  const unnamed = groups.some((g) => g.pass === UNNAMED_PLATFORM_LABEL || g.pass === UNNAMED_MODEL_REPAIR_LABEL)
+    ? ` The ${[UNNAMED_PLATFORM_LABEL, UNNAMED_MODEL_REPAIR_LABEL].filter((l) => groups.some((g) => g.pass === l)).map((l) => `"${l}"`).join(' and ')} writes came from platform code that named no pass, so which step made them is not known; they were not the build loop.`
+    : '';
+  const who = `After the app first rendered ${secs}s in, ${files} file(s) were written by ${groups.length} writer(s): ${named}${more}.${unnamed}`;
   switch (input.end) {
     case 'rendered':
       return { code: 'POST_GREEN_WRITES', severity: 'info', autoResolved: true, message: `${who} At the end the app still rendered.` };

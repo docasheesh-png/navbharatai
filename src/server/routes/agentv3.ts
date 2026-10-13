@@ -214,7 +214,7 @@ import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
 import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict, starterLabelFor } from '../AgentV3/stillTheStarterApp';
-import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
+import { postGreenWritesNote, endVerdictFrom, writerPhrase, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
 import { pastedAppBrief, pastedAppBriefEnabled } from '../AgentV3/pastedAppBrief';
 import { combineScreens, featureProbeScreensEnabled, PROBE_SCREENS_BUDGET_MS, screensReadNote, screensToProbe, screenUrl, type ProbedScreen } from '../AgentV3/featureProbeScreens';
@@ -15772,7 +15772,7 @@ async function noteBuildOutcome(
       // GREEN FREEZE — record each refused post-green write as an honest, offered-not-applied finding,
       // and collect them so the user is told (via the GREEN STOP suggestion path) rather than left with
       // a silent no-op. Disposed in the finally so nothing leaks between builds.
-      disposeGreenFreezeObserver = setGreenFreezeObserver(({ path, pass }) => {
+      disposeGreenFreezeObserver = setGreenFreezeObserver(({ path, pass, model }) => {
         try {
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'GREEN_FREEZE_DEFERRED',
@@ -15780,7 +15780,9 @@ async function noteBuildOutcome(
             // default files (manifest, robots, icon, service worker, a test), and each ended "Reply if
             // you want this change made" — an invitation about work the user never asked for. A refused
             // post-green write is the engine being held to the freeze, and the line says so.
-            message: `The app was already verified working, so a later write to "${path}"${pass ? ` by the ${pass} pass` : ''} was NOT applied — the working app was left untouched. This is the engine's own follow-up being refused by the freeze, not something the user asked for; nothing to do.`,
+            // The writer is named the way POST_GREEN_WRITES names it (writerPhrase): a pass, the build loop only when a
+            // model asked for the write, otherwise an unnamed platform step — never left blank (autopsy 9c612cdb).
+            message: `The app was already verified working, so a later write to "${path}" by ${writerPhrase({ pass, model })} was NOT applied — the working app was left untouched. This is the engine's own follow-up being refused by the freeze, not something the user asked for; nothing to do.`,
             autoResolved: true,
           });
         } catch { /* best-effort */ }
@@ -16005,8 +16007,8 @@ async function noteBuildOutcome(
       // depends on. Fed by the actuator's write chokepoint, so tool writes, heals, restores and
       // sub-agents are all seen once; only writes AFTER the first proven render are kept.
       const postGreenWrites: PostGreenWrite[] = [];
-      disposeWriteObserver = setWriteObserver(({ path, pass }) => {
-        if (inBuildGreenAt > 0 && postGreenWrites.length < 2000) postGreenWrites.push({ path, pass, at: Date.now() });
+      disposeWriteObserver = setWriteObserver(({ path, pass, model }) => {
+        if (inBuildGreenAt > 0 && postGreenWrites.length < 2000) postGreenWrites.push({ path, pass, model, at: Date.now() });
       }, workspaceId);
 
       clearPreviewGaveUp(workspaceId);
@@ -19600,7 +19602,7 @@ async function noteBuildOutcome(
               let current = '';
               try { current = await actuator.readFile(workspaceId, path); } catch { current = ''; }
               if (current !== canonical) {
-                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `scaffold-restore-${restored.length}`, name: 'write_file', input: { path, content: canonical } }, 'frontend'));
+                await runInPass('scaffold-restore', () => runAsUnreadWrites(() => dispatcher.dispatch({ id: `scaffold-restore-${restored.length}`, name: 'write_file', input: { path, content: canonical } }, 'frontend')));
                 restored.push(path);
               }
             }
@@ -19644,7 +19646,7 @@ async function noteBuildOutcome(
               });
             }
             for (let i = 0; i < fixes.length; i++) {
-              await runAsUnreadWrites(() => dispatcher.dispatch({ id: `tscgate-w${i}`, name: 'write_file', input: { path: fixes[i].path, content: fixes[i].content } }, 'frontend'));
+              await runInPass('typecheck-gate-repair', () => runAsUnreadWrites(() => dispatcher.dispatch({ id: `tscgate-w${i}`, name: 'write_file', input: { path: fixes[i].path, content: fixes[i].content } }, 'frontend')));
             }
           } catch (e) {
             console.log(`[AGENTV3] agentic tsc-gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19714,7 +19716,7 @@ async function noteBuildOutcome(
               const cssStubs = generateMissingCssModules(fileMapForCss);
               if (cssStubs.length > 0) {
                 for (let i = 0; i < cssStubs.length; i++) {
-                  await runAsUnreadWrites(() => dispatcher.dispatch({ id: `cssmod-w${i}`, name: 'write_file', input: { path: cssStubs[i].path, content: cssStubs[i].content } }, 'frontend'));
+                  await runInPass('css-module-stubs', () => runAsUnreadWrites(() => dispatcher.dispatch({ id: `cssmod-w${i}`, name: 'write_file', input: { path: cssStubs[i].path, content: cssStubs[i].content } }, 'frontend')));
                 }
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'CSS_MODULES_GENERATED', message: `${cssStubs.length} missing CSS module(s) generated deterministically from component class usage (no repair step spent): ${cssStubs.map((s) => s.path).join(', ')}`, autoResolved: true });
                 events.emit({ type: 'narration', agent: 'architect', text: `🎨 Generated ${cssStubs.length} missing stylesheet(s) from the components' class usage.`, ts: Date.now() });
@@ -19732,7 +19734,7 @@ async function noteBuildOutcome(
               const barrels = await generateMissingBarrels(fileMapForBarrel);
               if (barrels.length > 0) {
                 for (let i = 0; i < barrels.length; i++) {
-                  await runAsUnreadWrites(() => dispatcher.dispatch({ id: `barrel-w${i}`, name: 'write_file', input: { path: barrels[i].path, content: barrels[i].content } }, 'frontend'));
+                  await runInPass('barrel-stubs', () => runAsUnreadWrites(() => dispatcher.dispatch({ id: `barrel-w${i}`, name: 'write_file', input: { path: barrels[i].path, content: barrels[i].content } }, 'frontend')));
                 }
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'BARRELS_GENERATED', message: `${barrels.length} missing barrel(s) generated deterministically from existing leaf modules (no repair step spent): ${barrels.map((b) => b.path).join(', ')}`, autoResolved: true });
                 events.emit({ type: 'narration', agent: 'architect', text: `📦 Generated ${barrels.length} missing index barrel(s) re-exporting existing modules.`, ts: Date.now() });
@@ -19774,7 +19776,7 @@ async function noteBuildOutcome(
               });
               const created = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
               for (let i = 0; i < created.length; i++) {
-                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `missfiles-w${i}`, name: 'write_file', input: { path: created[i].path, content: created[i].content } }, 'frontend'));
+                await runInPass('missing-files-repair', () => runAsUnreadWrites(() => dispatcher.dispatch({ id: `missfiles-w${i}`, name: 'write_file', input: { path: created[i].path, content: created[i].content } }, 'frontend')));
               }
             } catch (e) {
               console.log(`[AGENTV3] missing-files gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19841,7 +19843,7 @@ async function noteBuildOutcome(
               recordRepairOutOfScope('syntax', scopedSyntax.dropped);
               const fixed = scopedSyntax.kept;
               for (let i = 0; i < fixed.length; i++) {
-                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend'));
+                await runInPass('syntax-repair', () => runAsUnreadWrites(() => dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend')));
               }
             } catch (e) {
               console.log(`[AGENTV3] syntax gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19913,7 +19915,7 @@ async function noteBuildOutcome(
               recordRepairOutOfScope('missing-export', scopedExport.dropped);
               const fixed = scopedExport.kept;
               for (let i = 0; i < fixed.length; i++) {
-                await runAsUnreadWrites(() => dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend'));
+                await runInPass('missing-export-repair', () => runAsUnreadWrites(() => dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend')));
               }
             } catch (e) {
               console.log(`[AGENTV3] missing-export gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -19994,7 +19996,7 @@ async function noteBuildOutcome(
             if (typeof content !== 'string') continue;
             integrityFiles[f] = content;
             if (writtenFiles.has(f) || f !== 'index.html') writtenFiles.set(f, content);
-            try { await actuator.writeFile(workspaceId, f, content); } catch { /* sandbox write best-effort */ }
+            try { await runInPass('import-specifier-normalize', () => actuator.writeFile(workspaceId, f, content)); } catch { /* sandbox write best-effort */ }
           }
           if (norm.rewrites.length > 0) {
             buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_IMPORTS_NORMALIZED', message: `Normalized ${norm.rewrites.length} import specifier(s) so every bundler sees one module instance (prevents duplicate-context "must be used within a Provider" crashes).`, autoResolved: true, detail: norm.rewrites.slice(0, 10).map((r) => `${r.file}: ${r.from} → ${r.to}`).join('; ') });
@@ -20009,7 +20011,7 @@ async function noteBuildOutcome(
           for (const inj of wired.injected) {
             const newEntry = wired.files[inj.entry];
             if (typeof newEntry === 'string') {
-              if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, inj.entry, newEntry))) {
+              if (await writeUnlessFrozen(() => runInPass('stylesheet-import-wire', () => actuator.writeFile(workspaceId, inj.entry, newEntry)))) {
                 integrityFiles[inj.entry] = newEntry;
                 writtenFiles.set(inj.entry, newEntry);
               }
@@ -20051,7 +20053,7 @@ async function noteBuildOutcome(
             const patched = env.files[env.wired.entry];
             if (typeof patched === 'string') {
               const entry = env.wired.entry;
-              if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, entry, patched))) {
+              if (await writeUnlessFrozen(() => runInPass('dotenv-load-wire', () => actuator.writeFile(workspaceId, entry, patched)))) {
                 integrityFiles[entry] = patched;
                 writtenFiles.set(entry, patched);
               }
@@ -20068,7 +20070,7 @@ async function noteBuildOutcome(
         if (process.env.AGENTV3_VITE_ENV_TYPES !== 'off' && !isImportTurn) {
           const dts = missingViteEnvTypes(integrityFiles);
           if (dts) {
-            if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, dts.path, dts.content))) {
+            if (await writeUnlessFrozen(() => runInPass('vite-env-types', () => actuator.writeFile(workspaceId, dts.path, dts.content)))) {
               integrityFiles[dts.path] = dts.content;
               writtenFiles.set(dts.path, dts.content);
               // Said only when it landed — a freeze-refused file was not added.
@@ -20100,7 +20102,7 @@ async function noteBuildOutcome(
             for (const r of redacted.redactions) {
               const newContent = redacted.files[r.file];
               if (typeof newContent !== 'string' || newContent === integrityFiles[r.file]) continue;
-              if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, r.file, newContent))) {
+              if (await writeUnlessFrozen(() => runInPass('credential-log-redact', () => actuator.writeFile(workspaceId, r.file, newContent)))) {
                 integrityFiles[r.file] = newContent;
                 writtenFiles.set(r.file, newContent);
               }
@@ -20267,7 +20269,7 @@ async function noteBuildOutcome(
             if (dead.length > 0) {
               const outcome = await removeDeadSalvage(dead, integrityFiles, hasBuildScript(integrityFiles['package.json'] ?? null), {
                 run: (cmd) => actuator.runCommand(workspaceId, cmd),
-                write: (path, content) => actuator.writeFile(workspaceId, path, content),
+                write: (path, content) => runInPass('dead-salvage-prune', () => actuator.writeFile(workspaceId, path, content)),
               });
               if (outcome.status === 'removed') {
                 for (const p of outcome.removed) { writtenFiles.delete(p); delete integrityFiles[p]; }
@@ -20349,10 +20351,10 @@ async function noteBuildOutcome(
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
-              const healed = await integrityRunner.run(
+              const healed = await runInPass('integrity-repair', () => integrityRunner.run(
                 `The app is built and compiles. Fix ONLY these project-integrity defects — make the smallest ` +
                 `possible edits to the existing files, change nothing else:\n\n${integrityRepairInstruction(integrity)}`,
-              );
+              ));
               if (healed.ok) {
                 // SUMMARY HONESTY (FitPulse autopsy 2026-07-17): the heal run's final narration used to
                 // REPLACE the build summary — a no-op heal shipped "It seems there's a misunderstanding…
@@ -20558,7 +20560,7 @@ async function noteBuildOutcome(
               for (const path of [...writtenFiles.keys()]) {
                 if (!/\.(?:tsx|jsx|html?)$/i.test(path) || typeof integrityFiles[path] !== 'string') continue;
                 const r = labelFieldsFromPlaceholder(integrityFiles[path]);
-                if (r.repaired > 0 && await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, r.code))) {
+                if (r.repaired > 0 && await writeUnlessFrozen(() => runInPass('label-repair', () => actuator.writeFile(workspaceId, path, r.code)))) {
                   integrityFiles[path] = r.code;
                   writtenFiles.set(path, r.code);
                   labelled += r.repaired;
@@ -20614,7 +20616,7 @@ async function noteBuildOutcome(
                 const repaired = repairLostEscapes(integrityFiles);
                 if (repaired.repairs.length > 0) {
                   for (const [path, content] of Object.entries(repaired.files)) {
-                    if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, content))) {
+                    if (await writeUnlessFrozen(() => runInPass('script-escape-repair', () => actuator.writeFile(workspaceId, path, content)))) {
                       integrityFiles[path] = content;
                       writtenFiles.set(path, content);
                     }
@@ -20811,7 +20813,9 @@ async function noteBuildOutcome(
                   for (const path of verdict.revert) {
                     const original = beforeHeal[path];
                     if (typeof original !== 'string') continue;
-                    try { await actuator.writeFile(workspaceId, path, original); } catch { /* per-file */ }
+                    // Named for the ledgers only. NOT 'design-consistency-heal' (allowlisted): that would widen what a
+                    // latched app lets through, which is a freeze decision, not an attribution one.
+                    try { await runInPass('design-heal-revert', () => actuator.writeFile(workspaceId, path, original)); } catch { /* per-file */ }
                     writtenFiles.set(path, original);
                   }
                   if (verdict.revert.length) {
@@ -20998,7 +21002,7 @@ async function noteBuildOutcome(
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
-              const healed = await compileHealRunner.run(previewCompileRepairInstruction(compile.errors));
+              const healed = await runInPass('preview-compile-repair', () => compileHealRunner.run(previewCompileRepairInstruction(compile.errors)));
               if (healed.ok) {
                 result = { ...healed, summary: result.summary }; // keep the REAL build summary; take the heal's edits
                 compile = checkPreviewCompiles(Object.fromEntries(writtenFiles));
@@ -21052,7 +21056,7 @@ async function noteBuildOutcome(
               model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
-            const healed = await hooksHealRunner.run(hooksRepairInstruction(hooksReport));
+            const healed = await runInPass('hooks-repair', () => hooksHealRunner.run(hooksRepairInstruction(hooksReport)));
             if (healed.ok) {
               const after = await analyzeHooksRules(Object.fromEntries(writtenFiles));
               if (after.ok) {
@@ -21107,7 +21111,7 @@ async function noteBuildOutcome(
               model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
-            const healed = await completeRunner.run(authenticityRepairInstruction(stubs));
+            const healed = await runInPass('stub-completion-repair', () => completeRunner.run(authenticityRepairInstruction(stubs)));
             if (healed.ok) {
               // 🔴 THE SAME QUESTION THE INPUT ASKED, and for two months it was not (Q-105's sibling).
               // Unfiltered, one stub in a stray file nothing imports kept this > 0 for ever: the heal
@@ -21206,7 +21210,7 @@ async function noteBuildOutcome(
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
-              const healed = await guardHealRunner.run(bootKillerRepairInstruction(killers));
+              const healed = await runInPass('boot-killer-repair', () => guardHealRunner.run(bootKillerRepairInstruction(killers)));
               // Re-detect over the SAME file set, with the heal's writes layered on (they land in
               // writtenFiles via onFileWrite), so the report states what is actually true now — never
               // "healed" on the healer's own say-so. Re-layering matters for the retroactive sweep: the
@@ -21657,7 +21661,12 @@ async function noteBuildOutcome(
           const savedSweep: Record<string, string> = {};
           for (const [p, c] of Object.entries(cleaned)) {
             try {
-              await actuator.writeFile(workspaceId, p, c);
+              // 🔴 NAMED (autopsy 9c612cdb). This sweep, the E2E scaffold and the ADR note below wrote with no pass
+              // name, and POST_GREEN_WRITES called their five files "build loop" — the model, which had written
+              // nothing after its summary. Every platform write after the answer names its pass; the census in
+              // tests/aPlatformWriterIsNeverTheModel.test.ts fails on one that does not. The names here are on no
+              // Green Freeze list, so on a latched app they are refused exactly as before — attribution only.
+              await runInPass('unused-import-sweep', () => actuator.writeFile(workspaceId, p, c));
               writtenFiles.set(p, c);
               inBuildWriteTick++; // a concurrent in-build proof must not save a tree this write changed
               try { getWorkspaceMemory(workspaceId).indexFile(p, c); } catch { /* index best-effort */ }
@@ -21682,10 +21691,10 @@ async function noteBuildOutcome(
           const cleanIndex = sandboxIndex == null ? null : withoutPreviewBridge('index.html', sandboxIndex);
           const inlined = cleanIndex != null && kitCss != null ? inlineLinkedStylesheet(cleanIndex, 'style.css', kitCss) : null;
           if (inlined) {
-            await actuator.writeFile(
+            await runInPass('single-file-kit-inline', () => actuator.writeFile(
               workspaceId, 'index.html',
               hasPreviewBridge(sandboxIndex ?? '') ? injectPreviewBridge(inlined, 'live') : inlined,
-            );
+            ));
             writtenFiles.set('index.html', inlined);
             inBuildWriteTick++; // the model's own page, not a platform file: the reviewer still reads it
             try { getWorkspaceMemory(workspaceId).indexFile('index.html', inlined); } catch { /* index best-effort */ }
@@ -21741,7 +21750,7 @@ async function noteBuildOutcome(
               let exists = false;
               try { await actuator.readFile(workspaceId, path); exists = true; } catch { exists = false; }
               if (exists) continue;
-              await actuator.writeFile(workspaceId, path, content);
+              await runInPass('e2e-scaffold', () => actuator.writeFile(workspaceId, path, content));
               writtenFiles.set(path, content);
               noteFinishingWrite(path);
               added.push(path);
@@ -21760,7 +21769,7 @@ async function noteBuildOutcome(
               try { await actuator.readFile(workspaceId, AUTH_SPEC_PATH); authExists = true; } catch { authExists = false; }
               if (!authExists) {
                 const spec = buildAuthFlowSpec(auth);
-                await actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec);
+                await runInPass('e2e-scaffold', () => actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec));
                 writtenFiles.set(AUTH_SPEC_PATH, spec);
                 noteFinishingWrite(AUTH_SPEC_PATH);
                 added.push(AUTH_SPEC_PATH);
@@ -21832,7 +21841,7 @@ async function noteBuildOutcome(
             for (const path of fixedPaths) {
               const stripped = stripCollidingAmbientShims(projectNow[path]);
               if (stripped.source === projectNow[path]) continue;
-              if (!(await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, stripped.source)))) continue;
+              if (!(await writeUnlessFrozen(() => runInPass('ambient-shim-strip', () => actuator.writeFile(workspaceId, path, stripped.source))))) continue;
               projectNow[path] = stripped.source;
               writtenFiles.set(path, stripped.source);
               noteFinishingWrite(path);
@@ -21852,7 +21861,7 @@ async function noteBuildOutcome(
             if (tsconfigRaw) {
               const excluded = withE2eExcluded(tsconfigRaw);
               if (excluded.changed) {
-                await actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text);
+                await runInPass('e2e-build-exclude', () => actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text));
                 writtenFiles.set('tsconfig.json', excluded.text);
                 noteFinishingWrite('tsconfig.json');
                 buildDiag.record({
@@ -21885,7 +21894,7 @@ async function noteBuildOutcome(
               // refusal and then calls onFileWrite would record a file the sandbox never received
               // (adversarial review 2026-08-12). Record-only-on-success keeps the two in step.
               let adrWritten = false;
-              try { await actuator.writeFile(workspaceId, path, content); adrWritten = true; } catch { /* refused or failed */ }
+              try { await runInPass('adr-note', () => actuator.writeFile(workspaceId, path, content)); adrWritten = true; } catch { /* refused or failed */ }
               if (adrWritten) onFileWrite?.(path, content);
               if (adrWritten) finishingPaths.add(path);
             }
@@ -22564,7 +22573,7 @@ async function noteBuildOutcome(
               model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
-            const healed = await healRunner.run(repairPrompt);
+            const healed = await runInPass('preview-render-repair', () => healRunner.run(repairPrompt));
             if (healed.ok) result = adoptHealResult(result, healed);
           } catch (e) {
             console.log(`[AGENTV3] preview heal attempt ${attempt + 1} failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -23390,7 +23399,9 @@ async function noteBuildOutcome(
                 buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'TEST_SUITE', message: outcome.summary + (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 8).join(', ')}` : ''), autoResolved: false });
                 break;
               }
-              const healed = await vaxRunner.run(testOutcomeRepairPrompt(outcome));
+              // NOT 'vaccine-repair': that name is allowlisted for the VERIFIED repair above. This unlatched run has no
+              // verify net, so it keeps a name on no freeze list — were it ever reached latched, it is refused as before.
+              const healed = await runInPass('vaccine-repair-unlatched', () => vaxRunner.run(testOutcomeRepairPrompt(outcome)));
               if (healed.ok) result = adoptHealResult(result, healed); else break;
             } catch (e) {
               console.log(`[AGENTV3] vaccine heal failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -23816,7 +23827,7 @@ async function noteBuildOutcome(
                   model: resolveModel(powerLevelReqEffective),
                   persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                 });
-                const healed = await rtRunner.run(fuzzRepairPrompt(findings));
+                const healed = await runInPass('fuzz-hardening', () => rtRunner.run(fuzzRepairPrompt(findings)));
                 if (healed.ok) { result = adoptHealResult(result, healed); buildDiag.record({ phase: 'readiness', severity: 'info', code: 'FUZZ_HARDENED', message: `Hardened ${findings.length} input(s) against hostile input.`, autoResolved: true }); }
               } catch (e) {
                 console.log(`[AGENTV3] red-team heal failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -24914,7 +24925,7 @@ async function noteBuildOutcome(
               let timedOut = false;
               let fixOk = false;
               try {
-                const fix = await raceTimeout(critFixRunner.run(judgeRepairPrompt(prompt, autoFixItems)), reviewerFixBudgetMs(autoFixItems.length, fixHeadroomMs()), 'reviewer-autofix');
+                const fix = await raceTimeout(runInPass('reviewer-autofix', () => critFixRunner.run(judgeRepairPrompt(prompt, autoFixItems))), reviewerFixBudgetMs(autoFixItems.length, fixHeadroomMs()), 'reviewer-autofix');
                 fixOk = !!fix.ok;
                 // Only a verifiably-COMPLETED repair pass clears the false-success guard. A failed/thrown
                 // pass (below) leaves reviewCriticalsUnresolved set → the build finalizes honestly NOT-ok.
@@ -26671,7 +26682,7 @@ async function noteBuildOutcome(
           if (entryResolved && entrySrc) {
             const deduped = dedupeSameModuleImports(entryResolved, entrySrc);
             if (deduped !== entrySrc) {
-              await actuator.writeFile(workspaceId, entryResolved, deduped);
+              await runInPass('entry-import-dedupe', () => actuator.writeFile(workspaceId, entryResolved, deduped));
               writtenFiles.set(entryResolved, deduped);
               try { getWorkspaceMemory(workspaceId).indexFile(entryResolved, deduped); } catch { /* index best-effort */ }
               await saveWorkspaceFiles(workspaceId, { [entryResolved]: deduped }).catch(() => {});

@@ -24,7 +24,7 @@ import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
 import { lostTruncatedOutput, truncationRecoverySteer, truncationRecoveryNarration, truncationSteeredPaths } from './TruncationRecovery';
-import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
+import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRepeatProbeSteer, noteMutations, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
@@ -1191,7 +1191,7 @@ export class AgentRunner {
                 // SCREENS THAT USE CLASSES NO STYLESHEET DEFINES ARE HANDED BACK ONCE, while the model still
                 // holds them (autopsy 1be16985 — 63 undefined classes, then a 174 s fresh-context repair).
                 const style = await dispatcher.undefinedClassesNow();
-                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, orphans: style.orphans, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
+                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, orphans: style.orphans, noTokens: style.noTokens, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
                 if (decision.resume) {
                   styleResumes++;
                   summaryBeforeStyleResume = turn.text.trim() || null;
@@ -1199,7 +1199,7 @@ export class AgentRunner {
                   // (autopsy 536c8189 — it is snapped deterministically in `spacingSnap.ts`).
                   const styleNotice = handBackNotice('style', turn.text);
                   if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
-                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0, style.a11y?.length ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0, style.a11y?.length ?? 0, style.noTokens?.colours ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`), ...(style.noTokens ? [`${style.noTokens.colours}-colours:no-tokens`] : [])].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
                   markHandBack('style');
                   continue;
@@ -1471,6 +1471,13 @@ export class AgentRunner {
           } catch { /* the guard is best-effort — it must never break a build */ }
         }
         // LOOP BREAKER — steer the model off a repeated non-progressing call (best-effort; never blocks).
+        // 🔑 MUTATIONS ARE NOTED FIRST (Q-912, autopsy 50378049). A probe repeated after the build changed
+        // something is a NEW question with the same spelling — `console_errors` after a fix is the model
+        // checking whether its own fix worked, which is the "check, fix, check again" shape this module
+        // already excludes `tsc` for. Noting this turn's writes BEFORE counting its probes is what lets
+        // the same call in a LATER turn start over, while the original six-identical-greps loop — which
+        // mutated nothing — is still caught.
+        if (loopGuardOn) { try { noteMutations(repeatProbe, turn.toolUses); } catch { /* never break a build */ } }
         const loopSteer = loopGuardOn ? collectRepeatProbeSteer(repeatProbe, turn.toolUses, loopThreshold) : null;
         if (loopSteer) {
           // Honest narration per severity: the FINAL steer means the model ignored an earlier nudge and

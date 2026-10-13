@@ -216,6 +216,9 @@ export type AgentEvent =
   // the encrypted vault by the client and never travels on this stream (see secretRequest.ts).
   | { type: 'secret_request'; agent: AgentRole; callId: string; prompt: string; secrets: Array<{ name: string; why: string }>; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
+  // Go-live PR 13 (AGENTV3_SERVICE_RECO, default off): services this app needs, as Buy/Connect choices.
+  // White-label: names and prices only, never a provider.
+  | { type: 'service_recommendation'; recommendations: ServiceRecommendationItem[]; ts: number }
   // B8 — how full the conversation's context is. Carries a PERCENTAGE and plain words only: the window
   // size differs per engine, so sending it would leak which engine ran (White-Label Law). Emitted only
   // when the reading meaningfully CHANGES, never once per turn.
@@ -285,4 +288,12 @@ export interface WorkspaceSnapshot {
   plan: string;
   checkpoints: GitCheckpoint[];
   terminalLines: string[];
+}
+
+export interface ServiceRecommendationItem {
+  skuId: string;
+  kind: 'buy' | 'connect';
+  name: string;
+  priceLabel: string;
+  reason: string;
 }

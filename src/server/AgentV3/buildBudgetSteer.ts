@@ -61,6 +61,34 @@ export function minutesLeft(elapsedMs: number, totalMs: number): number {
   return Math.max(0, Math.round((totalMs - elapsedMs) / 60_000));
 }
 
+/**
+ * The line the USER reads at each stage — one per BUILD, measured on the build's own clock.
+ *
+ * ⚠️ NOT THE RUNNER'S CLOCK (adversarial review of autopsy 303e8a6f). A retry or escalation runner starts with
+ * the budget REMAINING, so its own "half" falls at ~75% of the real build: after the main runner had already
+ * said "Time is short", the user was told "Half the build time is used". The model's text stays runner-relative
+ * (it is about this runner's remaining time); what the user is told is about the build, once.
+ */
+export const BUDGET_NARRATION: Readonly<Record<BudgetStage, string>> = {
+  half: '⏳ Half the build time is used — focusing on making the app work, and leaving extras out.',
+  wrapping: '⏳ Time is short — wrapping up so you get a working app rather than an unfinished one.',
+  final: '⏳ Out of time — saving your app and summarising what was done.',
+};
+
+/**
+ * The user-facing budget line due now, or null — on the BUILD's clock, each stage once per build. `said` is the
+ * build-wide set (shared by every runner of the build); a later stage already said silences an earlier one. PURE
+ * apart from adding to `said`.
+ */
+export function buildBudgetNarration(buildElapsedMs: number, buildTotalMs: number, said: Set<string>): string | null {
+  const stage = budgetStage(buildElapsedMs, buildTotalMs);
+  if (!stage || said.has(stage)) return null;
+  const at = STAGE_ORDER.indexOf(stage);
+  if (STAGE_ORDER.slice(at + 1).some((later) => said.has(later))) return null;
+  said.add(stage);
+  return BUDGET_NARRATION[stage];
+}
+
 export interface BudgetSteer {
   stage: BudgetStage;
   /** The text appended to the model's next turn. */
@@ -92,7 +120,7 @@ export function budgetSteer(
   if (stage === 'half') {
     return {
       stage,
-      narration: `⏳ Half the build time is used — focusing on making the app work, and leaving extras out.`,
+      narration: BUDGET_NARRATION.half,
       text:
         `[TIME BUDGET] Half of this build's time is gone and ${left} remain.\n`
         + 'From here, spend the remaining time ONLY on what makes the app actually work for what the user '
@@ -109,7 +137,7 @@ export function budgetSteer(
   if (stage === 'wrapping') {
     return {
       stage,
-      narration: `⏳ Time is short — wrapping up so you get a working app rather than an unfinished one.`,
+      narration: BUDGET_NARRATION.wrapping,
       text:
         `[TIME BUDGET] Only ${left} of this build's time remain — a quarter of it.\n`
         + 'Stop exploring and stop improving. Do exactly this, in order: (1) make sure the app builds and '
@@ -120,7 +148,7 @@ export function budgetSteer(
 
   return {
     stage,
-    narration: `⏳ Out of time — saving your app and summarising what was done.`,
+    narration: BUDGET_NARRATION.final,
     text:
       `[TIME BUDGET] ${left === 'under a minute' ? 'Under a minute' : left.replace('about ', 'About ')} of this build's time remain.\n`
       + 'Stop all work now except saving what you have and writing an honest summary. Do not start, edit '

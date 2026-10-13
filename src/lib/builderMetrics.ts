@@ -68,6 +68,12 @@ export interface BuildMetricInput {
    */
   restoredToGreen?: boolean | null;
   /**
+   * GreenGuard put back the files as they were at the start of the turn — never seen running (Q-973).
+   * Its own state: the failed attempt is gone, but "the last working version" would claim a check that
+   * did not happen.
+   */
+  restoredUnchecked?: boolean;
+  /**
    * Did the USER stop this build (the store's `stoppedByUser` read of the timeline)? Such a build is
    * neither a success nor a failure — the failure panel's rule (`isUserStoppedBuild`), which this
    * scorecard did not share until 2026-09-30, so a person's own Stop was counted as a failed build and
@@ -104,6 +110,8 @@ export interface EditSurvival {
    * whether a real person is looking at a broken screen.
    */
   restoredToGreen: number;
+  /** Of those, how many were put back to the turn-start files, which were never re-checked (Q-973). */
+  restoredUnchecked: number;
   /** Of those, how many the reports cannot say either way about (a legacy row with no timeline). */
   restoredUnknown: number;
   /**
@@ -127,6 +135,8 @@ export interface StuckProject {
   /** How many builds this project has in the window at all. */
   builds: number;
   restoredToGreen: boolean | null;
+  /** Present only when the restore's base was the unchecked turn start (Q-973). */
+  restoredUnchecked?: true;
   rootCause: string | null;
   prompt: string | null;
 }
@@ -163,6 +173,7 @@ export function editSurvival(builds: readonly BuildMetricInput[]): EditSurvival 
   let longestStreak = 0;
   let currentlyBroken = 0;
   let restoredToGreen = 0;
+  let restoredUnchecked = 0;
   let restoredUnknown = 0;
   const broken: StuckProject[] = [];
 
@@ -188,8 +199,10 @@ export function editSurvival(builds: readonly BuildMetricInput[]): EditSurvival 
     if (last.ok === false) {
       currentlyBroken += 1;
       const restored = typeof last.restoredToGreen === 'boolean' ? last.restoredToGreen : null;
+      const unchecked = restored !== true && last.restoredUnchecked === true;
       if (restored === true) restoredToGreen += 1;
-      if (restored === null) restoredUnknown += 1;
+      else if (unchecked) restoredUnchecked += 1;
+      else if (restored === null) restoredUnknown += 1;
       let failedInARow = 0;
       for (let i = ordered.length - 1; i >= 0 && ordered[i].ok === false; i--) failedInARow += 1;
       broken.push({
@@ -198,6 +211,7 @@ export function editSurvival(builds: readonly BuildMetricInput[]): EditSurvival 
         failedInARow,
         builds: ordered.length,
         restoredToGreen: restored,
+        ...(unchecked ? { restoredUnchecked: true as const } : {}),
         rootCause: typeof last.rootCause === 'string' && last.rootCause.trim() ? last.rootCause.trim() : null,
         prompt: typeof last.prompt === 'string' && last.prompt.trim() ? last.prompt.trim() : null,
       });
@@ -215,6 +229,7 @@ export function editSurvival(builds: readonly BuildMetricInput[]): EditSurvival 
     longestStreak,
     currentlyBroken,
     restoredToGreen,
+    restoredUnchecked,
     restoredUnknown,
     broken: broken.slice(0, STUCK_PROJECTS_SHOWN),
     skipped: all.length - usable.length - all.filter(wasStoppedByUser).length,
@@ -542,7 +557,8 @@ export function scorecardHeadline(card: BuilderScorecard): string {
     const s = card.survival;
     const restoredNote = s.currentlyBroken > 0
       ? ` — ${s.restoredToGreen} restored to the last working version, `
-        + `${s.currentlyBroken - s.restoredToGreen - s.restoredUnknown} left on the failed attempt`
+        + (s.restoredUnchecked > 0 ? `${s.restoredUnchecked} put back to the pre-request version (not re-checked), ` : '')
+        + `${s.currentlyBroken - s.restoredToGreen - s.restoredUnchecked - s.restoredUnknown} left on the failed attempt`
         + (s.restoredUnknown > 0 ? `, ${s.restoredUnknown} unknown` : '')
         + (s.broken.length > 0 ? `; named below` : '')
       : '';

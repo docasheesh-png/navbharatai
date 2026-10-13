@@ -3088,7 +3088,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: {
         type: 'object',
         properties: {
-          server: { type: 'boolean', description: 'true: route through the app\'s server so the owner can use their own provider key. Leave out (false) for an app with no server — Pollinations AI from the page.' },
+          server: { type: 'boolean', description: 'true only when the app already has its own server: the page calls the app\'s /api/generate-image route and that server reads the owner\'s image key. Leave out (false) for an app with no server: the page asks NavBharatAI (window.NavAI.image), which uses the image key the owner saves in Keys & Secrets. Either way an image API key is required.' },
         },
       },
     },

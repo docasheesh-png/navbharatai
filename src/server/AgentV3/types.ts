@@ -165,7 +165,11 @@ export type AgentEvent =
    * `file` — a spreadsheet the engine made for this reply (spreadsheetTurn.ts): the chat line shows its
    * Download buttons. Carries the file's name and shape only, never its rows.
    */
-  | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string; file?: SheetFileRef }
+  /**
+   * `filed`: the line restates a row the route ALREADY recorded in the build report (its own code and severity), so
+   * the report files it as a plain step, never a second warning/error (adversarial review of autopsy 303e8a6f).
+   */
+  | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string; file?: SheetFileRef; filed?: boolean }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
   | { type: 'stream_delta'; agent: AgentRole; id: string; kind: 'text' | 'thinking'; delta: string; ts: number }
   | { type: 'tool_call'; agent: AgentRole; tool: ToolName; input: unknown; callId: string; ts: number }

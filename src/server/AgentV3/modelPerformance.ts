@@ -88,10 +88,30 @@ export interface ModelStat {
   /** Summed over the calls that REPORTED usage. `null` when none did — never 0 for "unknown". */
   inputTokens: number | null;
   outputTokens: number | null;
-  /** Median over calls that carried a latency. `null` when none did. */
+  /**
+   * Median over calls that carried a latency. `null` when none did. Each sample is the model's OWN answer
+   * time (`answerMs`) where the call measured it, else the caller's wait (`latencyMs`).
+   */
   medianLatencyMs: number | null;
   totalLatencyMs: number | null;
   latencySamples: number;
+  /**
+   * How many of `latencySamples` are the caller's wait rather than the model's own time — a call recorded
+   * before `answerMs` existed, or one outside a fallback chain. Such a sample MAY include time spent on rungs
+   * that failed before this model answered (autopsy 303e8a6f: KIMI 3.4 s recorded as 18.4 s), so the median
+   * never mixes the two silently.
+   */
+  wallClockLatencySamples: number;
+  /**
+   * Time-to-OPEN of this model's answered, streamed calls (autopsy 303e8a6f): the data a shorter "has it started
+   * yet?" bound for the first rung would be chosen from (Q-842 option (b)). `null` when none was measured.
+   */
+  openSamples: number;
+  medianOpenMs: number | null;
+  maxOpenMs: number | null;
+  /** Time to the first produced byte, over the calls that measured it — sizes "opened, then nothing". */
+  firstOutputSamples: number;
+  medianFirstOutputMs: number | null;
 }
 
 /** A provider's failures within ONE build, as the failure ledger recorded them. */
@@ -110,9 +130,16 @@ export interface ProviderFailureStat {
    * raw line is here so nothing is ever destroyed by the convenience.
    */
   raw: string;
-  /** Convenience projections of the two buckets the routing question turns on. */
+  /** Convenience projections of the buckets the routing question turns on. */
   starvedCalls: number;
   timeoutCalls: number;
+  /**
+   * Walk-aways, by what the provider was doing (autopsy 303e8a6f): `silent` had not started answering, `crawl`
+   * was answering too slowly. Both were filed under `timeout` before, so the GLM-vs-KIMI comparison could not
+   * see that the dominant event on the cheap rung is a provider that never answered at all.
+   */
+  silentCalls: number;
+  crawlCalls: number;
 }
 
 /** What a build's own clock and verdict say, for correlating model choice with outcome. */
@@ -193,7 +220,7 @@ export function gateStateFromIssues(issues: readonly BuildIssue[] | undefined): 
 
 /** Per-(provider, model) statistics over the SUCCESSFUL calls of one build. */
 export function modelStatsFromCalls(calls: readonly LlmCallRecord[] | undefined): ModelStat[] {
-  const by = new Map<string, ModelStat & { _lat: number[] }>();
+  const by = new Map<string, ModelStat & { _lat: number[]; _wall: number; _open: number[]; _first: number[] }>();
   for (const c of calls ?? []) {
     if (!c || c.ok !== true) continue; // integrity rule 1
     const model = String(c.model ?? '').trim();
@@ -204,7 +231,8 @@ export function modelStatsFromCalls(calls: readonly LlmCallRecord[] | undefined)
       s = {
         provider: providerOfModel(model), model, calls: 0, deliveredTurns: 0, truncatedCalls: 0,
         usageReportedCalls: 0, inputTokens: null, outputTokens: null,
-        medianLatencyMs: null, totalLatencyMs: null, latencySamples: 0, _lat: [],
+        medianLatencyMs: null, totalLatencyMs: null, latencySamples: 0, wallClockLatencySamples: 0,
+        openSamples: 0, medianOpenMs: null, maxOpenMs: null, firstOutputSamples: 0, medianFirstOutputMs: null, _lat: [], _wall: 0, _open: [], _first: [],
       };
       by.set(key, s);
     }
@@ -219,11 +247,22 @@ export function modelStatsFromCalls(calls: readonly LlmCallRecord[] | undefined)
       if (hasIn) s.inputTokens = (s.inputTokens ?? 0) + (c.inputTokens as number);
       if (hasOut) s.outputTokens = (s.outputTokens ?? 0) + (c.outputTokens as number);
     }
-    if (isNum(c.latencyMs)) s._lat.push(c.latencyMs);
+    // ⏱️ The row names the model that ANSWERED, so its speed is that model's own time (autopsy 303e8a6f) —
+    // the caller's wait around a fallback chain charged the rescuer with every rung it rescued the call from.
+    if (isNum(c.answerMs)) s._lat.push(c.answerMs);
+    else if (isNum(c.latencyMs)) { s._lat.push(c.latencyMs); s._wall += 1; }
+    if (isNum(c.openMs)) s._open.push(c.openMs);
+    if (isNum(c.firstOutputMs)) s._first.push(c.firstOutputMs);
   }
-  return [...by.values()].map(({ _lat, ...rest }) => ({
+  return [...by.values()].map(({ _lat, _wall, _open, _first, ...rest }) => ({
     ...rest,
+    openSamples: _open.length,
+    medianOpenMs: median(_open),
+    maxOpenMs: _open.length ? Math.max(..._open) : null,
+    firstOutputSamples: _first.length,
+    medianFirstOutputMs: median(_first),
     latencySamples: _lat.length,
+    wallClockLatencySamples: _wall,
     medianLatencyMs: median(_lat),
     totalLatencyMs: _lat.length ? _lat.reduce((a, b) => a + b, 0) : null,
   })).sort((a, b) => b.calls - a.calls || a.model.localeCompare(b.model));
@@ -250,6 +289,8 @@ export function providerFailureStats(r: Pick<BuildDiagnosticsReport, 'providerFa
       raw: String(reasonsRaw[provider] ?? ''),
       starvedCalls: byReason['output-budget'] ?? 0,
       timeoutCalls: byReason['timeout'] ?? 0,
+      silentCalls: byReason['silent'] ?? 0,
+      crawlCalls: byReason['crawl'] ?? 0,
     });
   }
   return out.sort((a, b) => b.failures - a.failures || a.provider.localeCompare(b.provider));

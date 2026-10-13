@@ -230,55 +230,38 @@ describe('Q-980 · the wiring — one decision, fed every fact, told the moment 
     expect(set).toBeGreaterThan(settled);
     expect(set).toBeLessThan(ready);
     // Announced at once — but only over an app that exists (never 'your app is built' after a Stop or an empty build).
-    expect(code.slice(set, set + 160)).toContain('if (!abort.signal.aborted && builderWroteCount() > 0) emitEtaPhaseNow();');
+    // PIN UPDATED 2026-10-13: the guard moved INTO the emitter (the chat handler is at TypeScript's control-flow limit,
+    // TS2563, and an `if (a && b)` at the call was two more branches); the next test asserts the guard's body.
+    expect(code.slice(set, set + 160)).toContain('emitEtaPhaseNow({ unlessStopped: abort.signal, wrote: builderWroteCount });');
   });
 
   it('the transition emitter speaks only while the live ETA runs and nobody is being asked', () => {
-    const at = code.indexOf('const emitEtaPhaseNow = (): void => {');
+    const at = code.indexOf('const emitEtaPhaseNow = (only?: { unlessStopped: AbortSignal; wrote: () => number }): void => {');
+    expect(at).toBeGreaterThan(-1);
     const body = code.slice(at, code.indexOf('};', at));
+    // Never "your app is built" after a Stop or over an empty build (the guard the settle call used to carry).
+    expect(body).toContain('if (only && (only.unlessStopped.aborted || only.wrote() <= 0)) return;');
     expect(body).toContain('if (!(etaTotalMs > 0 && etaStartMs > 0) || userWait.since !== null) return;');
     expect(body).toContain("id: 'eta-live'");
   });
 });
 
-describe('Q-981 · C — READY_BEFORE_END subtracts two moments, never two clocks', () => {
+describe('Q-981 · READY_BEFORE_END on one clock — fixed by #3698 (Q-976); this report\'s real numbers, through it', () => {
+  // The root (a mark timed from the RUNNER's start, subtracted from the BUILD's clock) was fixed twice in parallel; the
+  // merged form is #3698's (`at` + `endAt`, tests/theBanaoTodoAppMissedItems.test.ts), and this PR keeps it. What stays
+  // here is 9c612cdb's own figure, so the report that found it is the fixture that proves it.
   const report = (score: number): ReadinessReport => ({ score, ready: true, blockers: [], warnings: [], tier: 'production' });
 
-  it('🔴 the report: runner started at 65.9 s, judged finished at 322.8 s, ended at 361.9 s → over 39s', () => {
-    const RUNNER_START = T0 + 65_900; // after the fast lane handed off — the origin that used to leak in
-    expect(RUNNER_START).toBeGreaterThan(T0);
+  it('🔴 the report: runner started at 65.9 s, judged finished at 322.8 s, ended at 361.9 s → over 39s, never 105s', () => {
+    const RUNNER_START_MS = 65_900; // after the fast lane handed off — the origin that used to leak in
     const mark = endOfTurnReadyMark({
       existing: null, readiness: report(92), typeErrors: 0, editingExistingApp: false, wroteThisRun: true,
-      step: 20, at: T0 + 322_800,
+      step: 20, elapsedMs: 322_800 - RUNNER_START_MS, at: T0 + 322_800,
     });
-    expect(mark).toEqual({ step: 20, at: T0 + 322_800, score: 92 });
-    const note = readyOverrunNote(mark, 22, T0 + 361_900);
+    const note = readyOverrunNote(mark, 22, 361_900, { endAt: T0 + 361_900 });
     expect(note).toContain('ran 2 more step(s) over 39s');
     expect(note).not.toContain('105s');
     // The old pairing, for the record: (361.9 − (322.8 − 65.9)) = 105 s.
-    expect(Math.round((361_900 - (322_800 - 65_900)) / 1000)).toBe(105);
-  });
-
-  it('🔒 census: no ready mark in the runner is measured from the runner\'s own start', () => {
-    const runner = readFileSync('src/server/AgentV3/AgentRunner.ts', 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    const uses = runner.split('\n').filter((l) => /\bbuildStartMs\b/.test(l) && !/const buildStartMs = Date\.now\(\)/.test(l));
-    expect(uses.length).toBeGreaterThan(0);
-    for (const l of uses) {
-      // The runner's own start is right for ITS OWN budget (the route passes the remaining budget in).
-      expect(l, l.trim()).toMatch(/buildTimedOut\(buildStartMs,|budgetSteer\(Date\.now\(\) - buildStartMs,/);
-    }
-    expect(runner).toContain('readyMark = { step: steps, at: Date.now(), score: readiness.score }');
-    expect(runner).toMatch(/step: steps, at: Date\.now\(\),\s*\}\);/);
-  });
-
-  it('🔒 census: the route hands READY_BEFORE_END an end MOMENT, never an elapsed time', () => {
-    const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    const calls = [...route.matchAll(/readyOverrunNote\(([^;]*)\)/g)].map((m) => m[1]);
-    expect(calls.length).toBeGreaterThan(0);
-    for (const c of calls) {
-      expect(c).not.toMatch(/buildStartedAt|etaStartMs|- \w*Start/);
-      expect(c).toMatch(/result\.steps, Date\.now\(\),/);
-    }
+    expect(Math.round((361_900 - (322_800 - RUNNER_START_MS)) / 1000)).toBe(105);
   });
 });

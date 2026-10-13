@@ -38,7 +38,7 @@ import { planDeployment, domainPublishBlockNote } from '../AgentV3/deployPlan';
 import { loadWorkspaceFilesByPath, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { analyzeApiWiring } from '../AgentV3/apiWiring';
 import { isBackendPointed, backendPointedRefusal, backendPointedStage } from '../AgentV3/domainPointing';
-import { getConversationStore } from './agentv3';
+import { getConversationStore } from '../AgentV3/sharedConversationStore';
 
 /**
  * Firebase-NATIVE custom-domain routes (Slice 2) — connect a user's own domain directly to their

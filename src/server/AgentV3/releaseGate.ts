@@ -510,6 +510,39 @@ export function releaseGateSummary(v: GateVerdict): string {
 }
 
 /**
+ * How the RELEASE_GATE row is filed — its severity AND whether it is closed — from ONE decision: is this
+ * verdict OWED to anyone? (Autopsy 303e8a6f.)
+ *
+ * The two used to be separate expressions at the record site, and each earlier fix moved one of them: 6db0ff31
+ * took a user's Stop out of the error branch, 31254f9a closed the row on a Stop — and the severity stayed
+ * WARNING. A closed warning is exactly what the shared heal predicate (`isSelfHeal`) counts as a repair, so
+ * every stopped build reported "1 self-heal" (the user's own Stop) plus a warning nobody had to act on.
+ *
+ * NOT OWED — filed as information, closed: the gate is green (proven), the build was ended by the user's own
+ * Stop (the verdict stays RED — nothing was proven — but it is their decision, not a defect), or a module
+ * turn's UNKNOWN whose app the shell puts together later (not due yet). OWED — open: RED on a build that
+ * failed is an error; anything else (RED on a build that succeeded, YELLOW, UNKNOWN) is a warning.
+ *
+ * ⚠️ Invariant, locked by tests/aStopIsNeitherAProblemNorAHeal.test.ts: a closed row is always info, so a
+ * gate row can never be counted as a repair.
+ *
+ * ⚠️ The late-stop edge (adversarial review): a Stop that lands after the build already returned ok, on a RED
+ * gate with real shipping blockers, files this row at info + closed while its message still reads "RED — Not
+ * shippable". Nothing is lost: the blockers stay open as their own error rows, and the OUTCOME_RELEASE_GATE_RED
+ * flip still fires — this row only stops claiming that the user's Stop is owed to anyone.
+ */
+export function releaseGateRecord(
+  gate: Pick<GateVerdict, 'state'>,
+  ctx: { buildOk: boolean; stoppedByUser: boolean; awaitsShell: boolean },
+): { severity: 'info' | 'warning' | 'error'; autoResolved: boolean } {
+  const notOwed = gate.state === 'green'
+    || ctx.stoppedByUser === true
+    || (gate.state === 'unknown' && ctx.awaitsShell === true);
+  if (notOwed) return { severity: 'info', autoResolved: true };
+  return { severity: gate.state === 'red' && ctx.buildOk !== true ? 'error' : 'warning', autoResolved: false };
+}
+
+/**
  * Is there positive proof the app ran?
  *
  * Exported because the confidence score needs the same answer, and two modules computing "did it run"

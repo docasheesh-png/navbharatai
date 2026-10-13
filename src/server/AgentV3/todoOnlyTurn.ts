@@ -66,3 +66,17 @@ export function todoOnlyTurnsNote(turns: number, latencyMs: number): string {
     + 'that built nothing. The first one in each run was handed back with the rule to send update_todo together with '
     + 'the next step\'s tool calls (autopsy 9c612cdb).';
 }
+
+/**
+ * Record `TODO_ONLY_TURNS` on the build report — every build, zero included, because a missing line reads as
+ * "none". Its own try lives here, not in the route: the chat handler sits at TypeScript's control-flow limit
+ * (TS2563), and a try block there is more branches the checker must walk. Info, never a cause.
+ */
+export function recordTodoOnlyTurns(
+  diag: { record(r: { phase: 'build'; severity: 'info'; code: string; message: string; autoResolved: boolean }): unknown },
+  tally: { turns: number; latencyMs: number },
+): void {
+  try {
+    diag.record({ phase: 'build', severity: 'info', code: 'TODO_ONLY_TURNS', message: todoOnlyTurnsNote(tally.turns, tally.latencyMs), autoResolved: true });
+  } catch { /* an advisory line must never affect a build */ }
+}

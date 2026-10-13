@@ -30,6 +30,7 @@ import { invoicingAppTsx, bookingsAppTsx, kanbanAppTsx } from './proAppsC';
 import { notesAppTsx, expenseAppTsx, fitnessAppTsx, portfolioAppTsx } from './proAppsD';
 import { communityAppTsx, eventsAppTsx, lmsAppTsx } from './proAppsE';
 import { aiImageAppTsx, aiImageEngineFiles } from './aiImage';
+import { KEY_GUIDANCE } from '../../lib/ImageAiGenerator';
 
 export interface GoldenScaffold {
   /** Must equal the matching StarterTemplate id (the CI lockstep test enforces this). */
@@ -51,6 +52,13 @@ export interface GoldenScaffold {
    * it asks — never a whole book in one read.
    */
   files?: Record<string, string>;
+  /**
+   * What the builder must also be told when it finishes this template — the instructions of the recipe whose
+   * files the scaffold seeds (autopsy 303e8a6f). The template lane seeds a recipe's FILES without running the
+   * recipe, so without this its instructions never reached the builder: the AI-image template was the one
+   * lane where the builder was never told that the pictures need an image API key.
+   */
+  finishNote?: string;
 }
 
 /**
@@ -67,7 +75,7 @@ const PRO_SHARED_FILES: Record<string, string> = {
 
 export const GOLDEN_SCAFFOLDS: readonly GoldenScaffold[] = [
   // ── SIMPLE tier: the scaffold IS the app ──
-  { id: 'ai-image', label: 'AI image generator', title: 'AI Image Generator', appTsx: aiImageAppTsx, tier: 'simple', files: aiImageEngineFiles() },
+  { id: 'ai-image', label: 'AI image generator', title: 'AI Image Generator', appTsx: aiImageAppTsx, tier: 'simple', files: aiImageEngineFiles(), finishNote: KEY_GUIDANCE },
   { id: 'todo', label: 'To-do list', title: 'To-do List', appTsx: todoAppTsx, tier: 'simple' },
   { id: 'calculator', label: 'Calculator', title: 'Calculator', appTsx: calculatorAppTsx, tier: 'simple' },
   { id: 'stopwatch', label: 'Stopwatch & timer', title: 'Stopwatch & Timer', appTsx: stopwatchAppTsx, tier: 'simple' },
@@ -198,9 +206,69 @@ export function goldenScaffoldForPrompt(prompt: string): GoldenScaffold | null {
   for (const t of STARTER_TEMPLATES) {
     // Any tier may have a scaffold now; a chip WITHOUT one simply falls through to a normal build,
     // which is why this looks the scaffold up rather than assuming one exists.
-    if (norm(t.prompt) === p) {
+    if (norm(t.prompt) === p || (RETIRED_CHIP_PROMPTS[t.id] ?? []).some((old) => norm(old) === p)) {
       return GOLDEN_SCAFFOLDS.find((g) => g.id === t.id) ?? null;
     }
   }
   return bareTemplateRequestFor(prompt);
+}
+
+/**
+ * Chip texts that were CORRECTED, kept so a phone app still sending the old text keeps its template.
+ *
+ * The phone apps are BUNDLED (capacitor.config.ts serves `dist/`), so a chip's text in an installed app only
+ * changes with a new store release, while the server changes on every merge. Without this, correcting a
+ * chip's text would quietly turn every old-bundle tap into a from-scratch build. Each entry is the old text,
+ * verbatim, and why it was retired.
+ */
+export const RETIRED_CHIP_PROMPTS: Readonly<Record<string, readonly string[]>> = {
+  // Autopsy 303e8a6f (2026-10-12): it told the user and the builder the pictures need no key — false since
+  // #3528 (2026-10-04), when every image engine started needing the owner's image API key.
+  'ai-image': [
+    'Build an AI image generator app: type a description, choose a shape (square, wide or portrait), press Generate and see a real AI-made picture with a clear progress state, then download it or generate another. Offer a few example ideas to tap, show friendly error messages with a Try again button, and use the free image engine that needs no API key. Mobile-first, light/dark mode.',
+  ],
+};
+
+/**
+ * The text the BUILDER reads for a build prompt: a retired chip text becomes that chip's current text, so a
+ * correction reaches the builder even from an old phone bundle; anything else is returned as it is. The
+ * user's own message and every analyser keep reading what the user sent. PURE.
+ */
+export function chipPromptForBuild(prompt: string): string {
+  const p = norm(prompt);
+  if (!p) return prompt;
+  for (const t of STARTER_TEMPLATES) {
+    if ((RETIRED_CHIP_PROMPTS[t.id] ?? []).some((old) => norm(old) === p)) return t.prompt;
+  }
+  return prompt;
+}
+
+/**
+ * The builder's instruction for a pre-seeded template, around the build prompt. One place, so the note a
+ * template's builder reads is testable (it used to be assembled inline in the build route).
+ *
+ * TIER-AWARE, and this distinction is load-bearing. A SIMPLE scaffold IS the finished app, so "polish and
+ * finish" is the truth. A PRO scaffold is a compile-proven ARCHITECTURE covering part of a much larger request
+ * ("…activity history, tasks, and a dashboard of pipeline value") — telling the builder it "fully implements
+ * the request" would make it ship a skeleton and declare success, which is exactly the fake-completion the
+ * real-features rule forbids. So pro gets an EXTEND instruction instead of a FINISH one.
+ *
+ * A scaffold's `finishNote` (the instructions of the recipe it seeds) is appended to both. PURE.
+ */
+export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string): string {
+  const head = golden.tier === 'pro'
+    ? `[EXTEND THIS WORKING FOUNDATION — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested "${golden.label}" foundation. ` +
+      `It already compiles and runs: src/lib/ui.tsx holds the shared components (Shell, Card, StatTile, Badge, Button, Field, Select, Modal, Empty), ` +
+      `src/lib/store.ts holds persistent state (useCollection, inr, shortDate), and src/App.tsx has the working screens. ` +
+      `READ all three FIRST. It is a STARTING POINT, not the finished app — BUILD OUT everything the request below asks for that is not there yet, ` +
+      `reusing those existing components and the useCollection pattern rather than inventing a second set. Add new screens as their own files under src/. ` +
+      `Do NOT rewrite what already works, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.`
+    : `[VERIFY & FINISH — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested, working "${golden.label}" app template. ` +
+      `It already compiles cleanly and fully implements the request below. READ src/App.tsx first. If the request matches the template (it should — the prompt is the template's own), ` +
+      `make at most SMALL polish edits and finish quickly. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists. ` +
+      // Autopsy 8257ca59: a polish step replaced the template's working light/dark switch with a
+      // hand-rolled one that set a class no stylesheet styles, and a repair pass had to put it back.
+      `KEEP the template's own working controls — above all its light/dark switch (ThemeToggle in src/theme.tsx, which cycles Auto → Light → Dark through the data-theme attribute the styles use); improve one in place if you must, never replace it with a hand-rolled copy.`;
+  const note = golden.finishNote ? `\n\n${golden.finishNote}` : '';
+  return `${head}${note}\n\n---\n\n${buildPrompt}`;
 }

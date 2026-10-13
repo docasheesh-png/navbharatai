@@ -94313,6 +94313,70 @@ Another session, gating #3679, reported that under CPU load the full suite flipp
 - **Tests executed:** 101 billing test files, 1,935 passed, 0 failed, 0 skipped.
 - **State:** every finding is a 🟡 row in `BUILD_REPORT_QUEUE.md`, waiting on the admin's approval of the ordered plan in §8 of the report. No fix is implemented until the admin approves.
 
+### 2026-10-12 — Q-880: Opus is priced at its real $5/$25 (admin chose "A: rate theek karo")
+
+- **The problem:** the Opus rate card defaulted to $15 / $75 — Opus 4 / 4.1's price. The Opus this code calls is `claude-opus-4-8` (Strong's last rung), and Anthropic's price for it, verified on claude.com/pricing on 2026-10-12, is $5 input / $25 output, cache read $0.50, 5-minute cache write $6.25. Opus 4.7 is the same.
+- **What it did:** a Strong build that reached its Opus rung was marked up on a provider cost three times too high. The $5 cost ceiling paused such a build at about $1.67 of real spend. A build whose preview was never confirmed was told "charged only what this build actually cost to run" while paying three times that cost.
+- **The class:** hand-typed provider prices with no source or date, and a test that pinned the constant (`pricing.test.ts:67`) instead of the provider's price — so 1,935 green billing tests never saw it.
+- **Fix:** `opusRate()` defaults $5 / $25 (env overrides kept). The `CLAUDE_OPUS` label now prices at the Opus rate — an Opus call with no model id fell to the Sonnet price without cache lines. Eight expectations that pinned $15 / $75 were updated.
+- **Lock:** `tests/claudeRatesMatchVerifiedPrices.test.ts` holds the verified table with its source and date. It fails when a default Claude model id (`models.ts`) has no verified price, or when the rate card drifts from it. Proven by reversion: the old rate fails 2 tests, the missing label fails 1.
+- **Unchanged:** the customer rule (real provider cost × tiered markup, 100 wallet tokens per ₹). The admin was told plainly that the brief's "₹1 = 200 output tokens, input free" rule does not exist in this code.
+- **Watch after merge:** `OPUS_INPUT_PER_MTOK` / `OPUS_OUTPUT_PER_MTOK` must not be set in Cloud Run, or the env value stays in force. The next Strong build that reaches Opus should show its real cost at $5 / $25.
+- **Open (admin):** whether past Strong-Opus overcharges are refunded.
+## 2026-10-12 — AUTOPSY `50378049`, Q-905: a module was "done" because its TURN succeeded, not because it delivered its files
+
+Second PR from the BlockWorld autopsy (the first, #3684, fixed Q-900…Q-904 — a plan-time prediction
+outranking a live app).
+
+**The defect.** The plan's module 1 was *"Shared Types & Constants"*, owning `src/types/index.ts` and
+`src/constants/index.ts` and carrying the frozen contract every later module would import. The builder
+ignored the scope, wrote the whole game — 56 files — and **never those two**. The route settled it with
+`result.ok ? markModuleStatus(…, 'done')` (`agentv3.ts:25137`): *"the turn succeeded"* taken as *"this
+module delivered its files"*. The user read `✅ Module … done — 1/15`.
+
+**The damage is downstream and certain.** `moduleBuildContext` hands every DONE module's contract to the
+next turn under the heading *"ALREADY-BUILT MODULES — their files exist in the workspace. Import from
+them using ONLY these frozen contracts"*. Module 2 would be told, in writing, to import exact names from
+a file that does not exist. The model cannot win that turn.
+
+⚠️ **It is the unhunted half of autopsy `8e124182`.** That autopsy is the mirror image — *"module 1's
+turn wrote 33 files, the whole app, and the plan still recorded 1 of 14 done"* — and its fix,
+`reconcilePlanWithWrites`, promotes OTHER modules whose planned paths were all written. It is path-exact
+by design ("precision over recall"), so a builder that invents its own structure matches nothing. One
+half of the reconciliation shipped; this is the half that asks whether the module in progress delivered
+its own share.
+
+**The fix.**
+- `undeliveredOwnFiles(mod, present)` — pure; which of a module's own files the PROJECT still lacks.
+  Asked against `actuator.listFiles`, never the turn's write set: a file an earlier turn wrote is
+  delivered, and asking only about this turn would call it missing.
+- `recordModuleDelivery(plan, id, present)` — records it on the module (`undelivered?: string[]`), so
+  the fact is durable across turns; module 2's turn is a different request.
+- `contractIsUnbacked(mod)` — true only when the module owns files and EVERY one is missing. A
+  partially delivered module keeps its contract: the names it did write are real.
+- `moduleBuildContext` withholds an unbacked contract and tells the turn why, instead of handing it
+  names under a false heading. A partial delivery hands the contract forward with the missing file named.
+- `PROJECT_MODULE_FILES_UNDELIVERED` — an `info` measurement of OUR process, registered in both
+  `BuildDiagnostics.ts` and `buildFindingSuggestions.ts` so it can never become a finding against the
+  user's app. The user's line is honest too: not a flat "done", but *"this step built the app its own way
+  rather than those exact files"*.
+
+🔒 **The status is deliberately NOT `failed`.** On the reported build the user got a complete, running
+game; *"module 1 failed"* would be its own lie. The status is left alone — what changes is that the plan
+RECORDS what is missing and never passes a contract nothing backs.
+
+**Additive by construction:** a plan nobody measured keeps `undelivered` absent, and `contractIsUnbacked`
+is false for an absent record, so behaviour is byte-identical to today. A `listFiles` that fails leaves
+the plan exactly as it is now (*"unasked is not undelivered"*).
+
+**Locked by** `tests/aPlanThatBecameFiction.test.ts` — 19 cases on the reported plan's real shape.
+**Reversion-proven twice:** stop withholding the unbacked contract → 1 fail; ask the turn's writes
+instead of the project → 1 fail. A case also asserts the pre-fix state still hands the fictional contract
+forward, so the reversion lives in the suite rather than in a shell history.
+
+**Still OPEN from the same root (rowed, not forgotten):** the plan's remaining 14 modules are still
+queued and billable on a build whose app already exists. That is `8e124182`'s original damage and it
+needs a decision about money and the plan's lifecycle, so it is not taken silently here.
 ## 2026-10-12 — AUTOPSY `50378049` (BlockWorld, a voxel game): a plan-time PREDICTION outranked an OBSERVED fact, and six verdicts lied at once
 
 **The report.** Weak tier, free, ~20.7 min, `ok: true`, 368 items, 0 errors, 5 warnings, 1 unresolved,
@@ -94482,6 +94546,72 @@ unreadable script — designed resilience) · ⏭️ skip 0 · ❌ shipped wrong
   user's app. The user's line is honest too: not a flat "done", but *"this step built the app its own way
   rather than those exact files"*.
 
+## 2026-10-12 — Autopsy 303e8a6f (AI-image starter chip, Weak tier, user stopped at 36 s)
+
+Admin: *"build report ki sabhi problem ko ek ek kar ke solve karna hai, dna level par, jab tak sabhi ke root cause fix na
+ho jaye tab tak rukna nahi hai!"* Real report: the first starter chip ("AI image generator… free image engine that needs no
+API key") was seeded from our image template on a Weak build. The first rung (GLM) never answered, KIMI answered in 3.4 s,
+the template was on screen at ~11 s, and the user pressed Stop at 36 s. The report then told the user nothing had been
+written, counted the Stop as a self-heal, and opened a security issue against our own template.
+
+**Tally (as the report recorded it → what was true):** ✅ self-heal 1 → 0 (it was the user's Stop, Q-945; the heal census
+then found 8 more codes wrongly counted as heals, Q-947) · 🔀 workaround 1 (GLM benched, KIMI answered — a SILENT rung,
+not the "crawl" the report named, Q-941) · ⏭️ skip 1 (a security issue against our own template left open, Q-944) · ❌ shipped
+wrong 4 (a chip promising a keyless engine that no longer exists, Q-940; "nothing had been written" beside our 14-file app,
+Q-951; every browser-proven build shown "READY (not verified)", Q-946; a request told "no sign-in" that never mentioned
+sign-in, Q-954) · 🥵 struggle 3 (15 s on a silent rung, Q-941/Q-948; 11.4 s before the first call with 4.4 s accounted for,
+Q-955; a chat clock that read 11 s at 23 s, Q-949).
+
+| ID | Problem | Root cause → class | Fix (siblings) | Lock (reverted → failed) |
+|---|---|---|---|---|
+| Q-940 | Chip promised a keyless image engine | A capability fact copied as prose with no single source | Every copy (chip, tool schema, "AI needs no key" rules, refusal note, scanner hint, KB, docs); the retired chip text still seeds | chip/tool census |
+| Q-941 | "GLM crawl" — it never answered | One marker for silence and slowness | Silence carries its own mark on every path; waste and failure ledgers file `silent`; time-to-open and first word recorded | `aSilentRungIsNotACrawl` |
+| Q-942 | "Try again" button read as a debugging task (Sonnet band) | A feature of the app read as the task | One clause-anchored reader for the analyser, dialogue phase and change classifier | `aFeatureNamedInAnAppOrderIsNotTheTask` |
+| Q-943 | New build recorded "large/deep · 14 files" | The edit classifier ran on new builds | `classifyNewApp`; the record counts authored files | `aNewAppIsNotARiskyChange` |
+| Q-944 | Security issue against our own template | Analyzer never run over code we ship | Element-lifetime guard; `unsafe-target-blank` LOW (60-second rule, one line to revert); a new app retires old issues | `ourOwnCodePassesOurOwnSecurityScan` |
+| Q-945 | Stop counted as a self-heal | Two expressions decided one fact | `releaseGateRecord` decides severity and closure together | `aStopIsNeitherAProblemNorAHeal` |
+| Q-946 | "READY (not verified)" on proven builds | Card looked for an info row where info never lives | Reads the recorder's outcome | same §4 |
+| Q-947 | 8 codes counted as heals that repaired nothing | Deny-list made "heal" the default | Every warning+closed code classified (CI census); HEAL_RULE 3 | `aClosedWarningIsClassifiedOrItFails` |
+| Q-948 | Rescuer charged with the silent rung's 15 s | One stopwatch round a fallback chain | Answering time and fallback time measured separately | `aChainsClockIsNotItsAnswerersClock` |
+| Q-949 | Chat clock 11 s at 23 s | Origin was first activity, not request arrival | Request-arrival origin; re-attach gets a duration; stale status hides | `userVisibleClockOrigin` |
+| Q-950 | Template ETA from the chip's wording; "No past builds" | Empty slice unnamed; seeded slice not split by tier | Slice named; scaffold / scaffold_pro; ETA in main chat (constant removed on review) | ETA pins |
+| Q-951 | "Nothing had been written" after the Stop | A yes/no for a three-state question | `seedStateOf` in every ending (stop, watchdog, stall, cost cap, bill) | `aStopSaysWhatTheWorkspaceHolds` |
+| Q-952 | 15 narrations outside the report bus | Narration bypassed `events` | All through `events`; `filed` flag | `aNarrationReachesTheReport` |
+| Q-953 | "Peak memory: not available" on every E2B build | Probe read the cgroup root | Own v2/v1 cgroup, start + end probes, own limit | `cgroupOwnPath` |
+| Q-954 / Q-957 | "No sign-in" reason invented; vault/2FA/Face ID missed | The decider did not own its sentence; word list missed mechanisms | Decider's sentence; mechanism words | `aReportReasonIsTheDecidersReason` |
+| Q-955 | 7 s of the first 11.4 s unaccounted | Unmeasured serial awaits | Contiguous windows; waste removed (git, vault, MCP, boot reads) | `everySecondBeforeTheFirstCallIsInAWindow` |
+| Q-956 | Our code failed our scan (starter innerHTML, Fixer over HTTP, schemaLocation) | Found by Q-944's census | DOM nodes; HTTPS; namespace | Q-944 census |
+| Q-958 | False HTML entry repairs | Guard read a fixed id and `main` entry | Reads the entry's own mount id; one `appEntryHtmlKey` | `aBootingPageIsNotRepaired` |
+| Q-959 | A repair creating a missing module dropped | Scope read only the importer | TS2307 / Vite target in scope | same |
+| Q-960 | Two drifted "file absent?" predicates | Copies | One `isNotFoundError` | same (table) |
+| Q-961 | Drain could overwrite a stored app after a failed refill | The Q-740 class | `mayPersistSeededScaffold` | same |
+| Q-973 | A restore to the turn-start files called "the last version that ran correctly" | That base is chosen exactly when it differs from the last browser-checked snapshot — never seen running | Every producer (narration, summary, admin row) names it "not re-checked"; the scorecard counts it as its own state | `aRestoreClaimsOnlyWhatWasChecked` (6 failed) |
+| Q-969 | An issue in a file the edit deleted stayed open forever | A never-rescanned file cannot clear its issue | The durable forget step's removal (authoritative, no extra I/O) retires issues in removed files | `anIssueGoesWithItsFile` (1 failed) |
+| Q-962…Q-974 (not Q-969, Q-973) | 11 items needing the admin (routing, product, money, metric, store bundle, logs) | — | 🟡 rows with options and a recommendation in `BUILD_REPORT_QUEUE.md` | — |
+
+**Caught by the final gate (before push):** four source guards pinned the literal text `await f(x)` and failed on correct
+code once setup calls were wrapped in timing steps (Q-955), and one in a fixed 1800-character window. Class: a guard that tests
+spelling instead of the invariant. Fix: the shared `awaitedCallAt` (bare or inside a step, never `-1`) and a structural slice;
+proven by reversion (unawaiting the three calls failed all three guards). The new `src/lib/imageKeyNames.ts` (Q-940) names the
+OWNER's own image providers and is allow-listed in the white-label sweep with that reason.
+
+**Time-series break:** from this PR, a provider that never answered is filed `silent`, not `timeout`/`crawl`. Older weeks
+counted silence as crawls, so the crawl count drops and a `silent` series starts — that is the honest split, not an
+improvement.
+
+**Proactive (the biggest lever):** Q-963 — a verbatim starter chip should need no model loop at all (seed → install →
+typecheck → dev server → render proof → done). Three reports now show users stopping an app that was already finished.
+Next after it: re-check a turn-start restore in the browser before the build ends, so that state can say "working" again
+(Q-973 made it honest; this would make it verified).
+
+**What to watch for on the next report:** a silent first rung reads "was silent", the first-call line splits answering and
+abandoned time, the setup coverage clause accounts for every second before the first call, and peak memory shows a number.
+
+```
+BUILD REPORT 303e8a6f — RESOLUTION
+Items: 35 · ✅ Resolved: 0 (24 fixed in #3692, ✅ on merge) · 🟡 Blocked: 11 · Remaining: 24
+FINAL: ❌ NOT COMPLETE — remaining: Q-940 … Q-961, Q-969 and Q-973 (fixed in #3692, awaiting the admin's merge)
+```
 🔒 **The status is deliberately NOT `failed`.** On the reported build the user got a complete, running
 game; *"module 1 failed"* would be its own lie. The status is left alone — what changes is that the plan
 RECORDS what is missing and never passes a contract nothing backs.
@@ -94631,6 +94761,233 @@ reader of this fact could be forgotten; it caught the fix itself going missing.
 - **Still open:** Q-926 (248 s to first render on Weak). 🟡 BLOCKED on the admin's routing decision; the options are in the row.
 - **Report db07e0af, final count:** 15 items. ✅ 14 (13 fixed by #3687, plus Q-923 not-a-defect). 🟡 1 (Q-926). Remaining 0.
 
+### 2026-10-12 — Q-868 built the simple way (#3689); a 9-round regex reader abandoned
+
+**What the admin asked:** "Create an racing game for Nokia c 2-01" asked for the classic game that came on that phone. It did not ask for a game meant to run on the phone.
+
+**Fix (#3689):** the regex now only detects the phone and leaves the meaning to the builder, which reads language.
+- **Detector:** it uses Q-846's own vocabulary, not widened, and tolerates spaces and dashes. It now matches the real prompt `Nokia c 2-01`, which the merged Q-846 regex never did.
+- **Builder instruction:** the builder is told the likely meaning, the classic game from that phone in a retro 2D look, together with "if the request asks for something else, build what it asks".
+- **User line:** it says only what is true under every reading: what was built and where it plays. It makes no claim about what the user meant and never says "cannot run", which was false for JioPhone and KaiOS.
+- **Every lane gets the rule:** the architect, the fast lane, the writing sub-agents and the planner's goal.
+- **Approved plans keep their notes:** an approved plan no longer rebuilds the build prompt from the bare request, which had dropped every note prepended to it.
+
+**The lesson:** the first attempt tried to read intent with regexes over nine adversarial review rounds: origin vs target, refusals, owners, topics and Hinglish word order.
+- It never converged. Every round found new phrasings.
+- In round 5 it changed the classification of requests that name **no** phone, which is a regression on `main`.
+- It was not merged. About 7M agent tokens went into it.
+- The rule for next time: when the question is "what did the user mean", give the deterministic layer only what is true under every reading, and let the model decide the rest.
+
+**Found while building:**
+- **Q-975:** milestone mode replaces `buildPrompt` and drops every prepended note. The plan-approval sibling of the same bug is fixed here.
+
+**Locks:**
+- `tests/aPhoneTheAppCannotRunOnIsNamed.test.ts`: the real prompt is the fixture. Six guards, R1–R6, each reverted and seen to fail.
+- `theRacingCarShowedItsHeadlights` 1c: the real prompt gets the 2D kit. The 3D guarantees are re-pinned on the same race without the phone.
+- **Same day, harm-based review of the simple Q-868.** Four checks passed:
+  - requests that name no phone behave as on `main` across 118,906 strings;
+  - there are no new false positives;
+  - the real prompt is detected;
+  - all 551 related test files pass.
+
+  One check failed, on the user line and the rule, and was fixed in the same PR:
+  - **"any phone browser"** was false, because the Vite build targets modern browsers. The line now says "any **modern** phone or computer browser", and that an old keypad phone's own browser may not open it.
+  - **The rule offered 3D while also saying "never three.js".** 3D is no longer offered.
+  - **An edit turn got the rule.** An edit such as "add a Nokia 3310 pickup to my 3D city game" would have been told "never three.js". The rule now applies to a new build only.
+  - **JioPhone, KaiOS and keypad phones are worded separately.** They are no longer told "the game that came on that phone".
+  - **The plan-first planner now hears the rule.**
+
+  The stale "📵 no web app runs there" comment is gone.
+## 2026-10-12 — AUTOPSY `50378049`, Q-908: the one mechanism built to catch an abandoned kit was switched off by a prediction
+
+Seventh PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911 · #3690 →
+Q-906+Q-907 · #3693 → Q-909 · #3694 → Q-910).
+
+**The defect.** The game kit seeded 24 files under `src/game/**`. The builder then wrote its own game
+structure and used none of them, and `READINESS_WARNING` noted it had removed the only import of
+`GameCanvas.tsx`. The orphan hand-back (Q-202, autopsy 3f959fde) exists for exactly that — a component
+this build wrote that nothing imports — and it **named nothing**, because the turn was a project-mode
+module and `starterExpected` was set.
+
+🔑 **IT IS THE SAME CLASS AS Q-900, in the sibling I named in that PR's ledger and did not fix there.** A
+plan-time PREDICTION disabled a mechanism, and the prediction was false.
+
+**Two holes, and either one alone reproduces the report.**
+
+1. **The carve-out outlived its premise.** It is excused because *"a component is wired in by a later
+   module by design"* — and the thing that wires components in is the app's **ENTRY**. The moment THIS
+   turn writes the entry, no later module is coming, so the premise is dead and the orphans are real.
+   `wroteTheAppEntry(written)` is that fact: pure, local, read from the turn's own write set, with no new
+   plumbing and no dependency on #3684's helper (deliberately — stacking is what I had to undo twice
+   today).
+   🔒 It is unreachable on an HONEST module turn, which is worth stating: a module that owns the entry
+   makes `shellModuleFor` return null, so `starterExpected` is never set. It can only fire when the
+   builder went OUT of its module's scope — exactly the reported build.
+2. **Fixing (1) alone would have traded one problem for another.** The route's write set holds every kit
+   file the seed wrote, so with the carve-out lifted the hand-back would have named OUR OWN untouched kit
+   and told the model to wire in or delete 24 files it never wrote. `isPlatformSeededFile` is byte-exact
+   and knows every kit version (Q-863) and every starter version (db07e0af), so platform files are
+   excluded **inside `orphansToHandBack`** rather than at the call site — no caller can forget it. One
+   edited byte makes a file the model's again, and nameable; a case proves both directions.
+
+**Locked by** `tests/anAbandonedKitIsNotInvisible.test.ts` — 11 cases. **Reversion-proven twice:** restore
+the unconditional carve-out → 3 fails · drop the platform-seeded exclusion → 1.
+
+⚠️ **MY FIRST FIXTURE PROVED NOTHING, AND THE TEST SAID SO.** I handed it the whole real kit, and
+`unreferencedComponents` is deliberately precise: it names nothing unless an entry exists AND every
+relative import resolves to a file it was given. The kit's `Game.ts` imports seventeen files from four
+OTHER recipes, so the graph refused and the answer was empty **for the wrong reason** — a green test would
+have proved the opposite of what I wanted. The fixture is now the reported SHAPE with its imports closed,
+and it uses the kit's REAL BYTES for `GameCanvas.tsx`, the one file the report names. **A fixture that
+cannot fail is not evidence.**
+
+⚠️ **AND I DELETED A CASE OF MY OWN THAT WAS FAKE.** One case asserted a local lambda standing in for the
+old behaviour (`asItWas = (i) => i.starterExpected ? [] : […]`) — it could never fail whatever the code
+did. The reversion probes do that job honestly; a test that exercises a copy of the code instead of the
+code is worse than no test, because it reports confidence it has not earned.
+
+⚠️ **AND THE Q-202 TEST THAT OWNS THIS CARVE-OUT FAILED — correctly, on a fixture that could not happen.**
+Two of its cases passed a write set containing `src/App.tsx` while also setting `starterExpected: true`.
+**The engine never produces that pair:** a module that owns an entry file makes `shellModuleFor` return
+null, so `starterExpected` is never set for it. So those cases asserted the carve-out on a state that
+cannot occur, and in doing so hid the state that DOES occur when a builder leaves its module's scope —
+the reported build. Both now use a write set without the entry (the real state, still excused), and each
+has gained a sibling asserting the new behaviour with the entry present. **One case became two, and the
+pair is stronger than the one it replaces.**
+## 2026-10-12 — AUTOPSY `50378049`, Q-910: "9 writes skipped" is not "9 files never compiled", and nothing recorded which
+
+Sixth PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911 · #3690 →
+Q-906+Q-907 · #3693 → Q-909).
+
+**What the report said, verbatim:** *"9 TypeScript write(s) skipped before the compiler was ready — 9
+because package.json had changed since the last install (a dependency may be missing until one runs)"*.
+That reads as nine files that went unchecked.
+
+**It may mean nothing of the kind.** `writeTypecheckCommand` runs `tsc --noEmit` over the WHOLE PROJECT,
+not over the file just written — so ONE clean run after the last skip has already compiled every skipped
+file. The two readings are opposite facts about the build:
+
+| | what it cost |
+|---|---|
+| a later run succeeded | the skips cost a few seconds of lateness and nothing else |
+| no later run succeeded | the end-of-build typecheck was those files' FIRST compile — the most expensive moment to find anything |
+
+**Nothing recorded which, so nobody could tell.** That is the same gap `notReadyReasons` was added to
+close one level up (build 46e2d74b: fourteen writes reported as *"still being installed"* when the tree
+had only looked stale) — one sentence standing in for facts that mean different things.
+
+🔒 **THE DEFERRAL ITSELF IS NOT THE DEFECT AND IS NOT TOUCHED.** Autopsy Sur Taal established that the
+write-time check must never install and never wait: three such waits burned 90 s of a free build's clock
+while the model sat holding a file. Making it wait again would trade this report's item for that one.
+What is fixed is what the report SAYS about the skips — the fourth rule's fifth step.
+
+**The fix.** `WriteTypecheckStats.cleanRunCoveredSkips` — `true` when a clean run followed the last skip,
+`false` when none did, `null`/absent when the question was never asked (never a silent "no"). Order is
+the whole answer: a skip sets it back to `false`, because a clean run BEFORE the skip compiled a project
+that did not yet hold these files; only a clean run after it may set `true`, and only when something was
+actually skipped. The report then says either *"a later check compiled the whole project, so those files
+were covered, just later than they should have been"* or *"no check succeeded after them, so the
+end-of-build typecheck was their first compile"*.
+
+**Locked by** `tests/aSkippedCheckIsNotAnUncheckedFile.test.ts` — 10 cases, including the premise itself
+(the command carries no per-file argument, so a project-wide run really does cover the skips), both new
+sentences, the absent case saying nothing extra, and a recorder guard asserting the write sits inside the
+CLEAN-RUN branch — a compiler that never ran covers nothing (autopsy 12c642ed's class). **Reversion-proven
+three ways:** stop putting the question back on a skip → 1 fail · stop answering it on a clean run → 1 ·
+never print the sentence → 2.
+
+⚠️ **A GUARD OF MINE MEASURED THE WRONG THING, and the fix is the repo's own rule.** The recorder case
+first looked back 260 characters for the enclosing branch and failed on the `neverRan` branch that
+legitimately sits just above. **A byte window measures distance; the claim was about NESTING.** This repo
+has paid for byte-window guards before (`slice(0, 6000)`), and the rule is to anchor on syntax — it now
+asserts that nothing intervenes between `if (errors.length === 0) {` and the write, and that the branch
+has not closed before it.
+
+⚠️ **AND AN EXISTING GUARD BROKE ON ITS ANCHOR, EXACTLY THE SAME WAY** —
+`tests/aCompilerThatNeverRanIsNotClean.test.ts` pinned the literal one-liner
+`if (errors.length === 0) s.cleanRuns += 1;`, which became a BLOCK when that branch gained the Q-910
+line. **Found by the full suite, not by me**, and the invariant it protects was never in danger: the
+`if (neverRan) { s.notRunRuns += 1; return ''; }` branch still returns before the clean count, so a
+compiler that never ran can never set `cleanRunCoveredSkips`. Re-anchored on the branch opener, which
+survives a statement being added and still breaks on a REORDERING — proven by letting the never-ran
+branch fall through and watching it fail. Its own `-1` hole is closed in the same edit (only one of its
+three anchors was asserted present, so a rename would have read as a reordering).
+
+**That is three anchor re-pins in this autopsy** (`theCommitMessageWasNotADevServer`, my own ordering
+case in `aKitTypeIsNotGuessed`, and this one), and the lesson is one sentence: **a guard that pins a
+LINE breaks when the line grows; a guard that pins the SYNTAX it is really about does not.** The
+underlying invariants were correct every time — only the instruments were brittle.
+
+### 🔸 Q-914 advanced, not fixed — what the evidence actually supports
+
+Investigated in the same session and recorded rather than guessed:
+- **The rule is already in the prompt, unconditionally.** `architectSystemPrompt` carries *"Define CSS
+  variables on :root for a real palette"* with no game carve-out, so the build did receive it. This is
+  not a missing instruction.
+- **The scanner is not inflating the count.** `DesignLinter.allColors` matches `/#[0-9a-fA-F]{3,8}\b/`
+  only — `0x`-form three.js material colours are NOT counted, so the 45 are real CSS-shaped colours.
+- **The finding needs BOTH conditions:** `allColors.length > 8 && !hasTokens`. It fired, so the app had
+  **no token layer at all** — the finding is true, not a false positive.
+
+So Q-914 is a prompt-ADHERENCE failure on a game's UI panels, and the honest fix is a decision, not a
+one-liner: mandate tokens for a game's UI in the kit's own contract (cheap, preventive), or add a pass
+that rewrites them (risky — a voxel game's block colours are DATA, not theme, and a rewriter cannot tell
+them apart from `Hud.tsx`'s). It stays OPEN with this analysis, and what would settle it is the built
+app's own files from one game report.
+## 2026-10-12 — AUTOPSY `50378049`, Q-909: the builder had to reverse-engineer a file WE wrote
+
+Fifth PR from the BlockWorld autopsy (#3684 → Q-900…Q-904 · #3686 → Q-905 · #3688 → Q-911 · #3690 →
+Q-906+Q-907).
+
+**The defect.** NavBharatAI seeded its game kit before the builder's first call, and the handoff told it
+exactly which functions to call — `<GameCanvas>`, `ctx.follow(vehicle)`, `driveVehicle(…)` — with a
+compiling example. **What it never said was what `ctx` IS.** The example touches three of
+`GameContext`'s nine members, so for the rest the model guessed, and guessed our PRIVATE fields:
+
+| it reached for | what that actually is |
+|---|---|
+| `ctx.canvas` | `private readonly canvas` on `Game` — never on the context |
+| `ctx.followTarget` | `private followTarget` — the state behind `ctx.follow()` |
+| `ctx.crosshairTarget` | nothing at all |
+| `TouchButton` as a string | `{ action: string; label: string }` |
+
+Cost in that one build: **four `read_file` slices of `Game.ts` and two of `touchControls.ts`** — the
+model reverse-engineering a file we wrote — and the repeated-step nudges that followed.
+
+🔑 **The fix is the one this repo already uses for the same problem.** Project Mode freezes a per-module
+CONTRACT precisely so a later turn imports *"against these EXACT names"* instead of guessing. A seeded
+kit is the same situation — code the builder must use and did not write — and it had no contract.
+`src/server/lib/kitTypeContract.ts` builds one, and the shell's instructions carry it.
+
+🔒 **EXTRACTED FROM THE EMITTED SOURCE, NEVER HAND-WRITTEN.** A hand-kept copy of a type is the drift
+this repo has paid for repeatedly (four `safeRelPath`s, two complex-app detectors, five hardcoded model
+ids). `extractExportedDeclaration` reads the declaration out of the very file the recipe writes —
+brace-balanced, comments stripped — so renaming a member updates the contract in the same commit, by
+construction. A **census** asserts that every member of the emitted `GameContext` appears in the block
+the builder reads, so the contract cannot silently fall behind the type.
+
+🔒 **PLACEMENT IS PART OF THE FIX.** `gameKitSeed.compactRecipeResult` clips a recipe's instructions at
+`HANDOFF_RECIPE_CHARS` (6,000), so a contract at the bottom is a contract the builder may never see. It
+goes at the TOP, above the example, and two cases pin that — one of them by running the real
+`compactRecipeResult` and asserting the heading's index is below the clip.
+
+**Locked by** `tests/aKitTypeIsNotGuessed.test.ts` — 12 cases on the REAL emitted kit, including the
+census, the three names the reported build guessed (asserted NOT to be members, so the contract's *"if a
+name is not here, the kit does not have it"* is true), and the extractor's refusals. **Reversion-proven
+three ways:** drop the contract → 2 fails · move it to the bottom → 1 · narrow the covered names so the
+contract falls behind the type → 2 (this is the drift probe, and it is the important one).
+
+⚠️ **A HOLE IN MY OWN TEST, found by probing it.** With the contract removed, the ordering case PASSED —
+`indexOf` returned `-1`, and `-1 < 2000` is true. That is the exact *"-1 < -1 arithmetic"* trap
+`importPreviewOrdering.test.ts` warns about, and I walked into it one file away from the warning. Both
+anchors are now asserted `> 0` before they are compared, and the reason is written in the case. **An
+ordering assertion is only as good as its anchors.**
+
+**🔸 Q-912 is NOT claimed by this.** The report's three *"repeated step that isn't making progress"*
+nudges have at least two causes: the repeated `read_file` of our own kit, which this removes, and a LOOP
+GUARD on `console_errors`, which is a different thing. Calling Q-912 resolved because its biggest cause
+is gone would be the "fixed the instance, not the class" mistake this ledger exists to prevent. It stays
+OPEN, and the next report with a seeded game says whether the read loop is gone.
 ## 2026-10-12 — NATIVE FEEL, ROUND 3: round 1 fixed the reader and left the source — fourteen viewports, not one with the token
 
 The admin's standing instruction (*"navbharatai jo app banaye aur navbharatai khud dono ko real netiv app
@@ -94720,3 +95077,52 @@ template hand-write its viewport again → **3** · remove the `dvh` override �
   starter, and Q-908's brand-new platform-seeded exclusion would stop recognising it. **A genuine
   fix-A-create-X, caught by a guard another session built.** Regenerated: 76 starter paths · 35 golden
   paths · 455 versions, 55 new.
+### 2026-10-13 — Autopsy db07e0af, part two: Q-926 built (admin: "han"), and three items the first ledger missed
+
+**The admin asked "sab ho gaya??" The honest answer was no.**
+- Q-926 was waiting on the admin's decision.
+- Reading the report again line by line turned up three items the first ledger never listed. That was my miss, and these three rows record it.
+
+**Q-926: option (b), built.**
+- A per-file call may now continue onto a rung that reasons before every answer, instead of the lane handing off. This holds while what is left is small: at most 20 files, and the lane's remaining budget covers their waves at 45 s each. It is decided per tier.
+- Plan, contract and repair calls still stop in front of that rung (the 33812996 / Study-Racer protections).
+- The measured early bail still hands off on a slow tier.
+- The proposal said ≤ 12 files. This very app planned 17, so I raised the cap to 20 and said so in the row.
+- **Measurement:** `FAST_LANE_STAYED_ON_REASONING_RUNG` records the calls, the median, the slowest call and how the lane ended. Read it on the next Weak builds. `AGENTV3_FASTLANE_REASONING_STAY=off` reverts it.
+
+**Q-976: READY_BEFORE_END measured on two clocks.**
+- The ready mark counted from the RUNNER's start; the end was counted from the BUILD's start. So the setup and the fast lane (~45 s) were reported as 56 s of work after the app was finished. About 11 s really ran.
+- **Fix:** `ReadyMark.at` (an absolute instant). The overrun is now `endAt − at`.
+
+**Q-977: our own finishing files were filed under "build loop" (the model).**
+- Four finishing passes wrote without naming themselves: the e2e scaffold, the ambient-shim cleanup, the e2e tsconfig exclude, and the architecture note.
+- **Fix:** each now runs inside a named `runInPass`. A census fails on any new unnamed finishing write.
+- The remaining post-green writes are the designed production-defaults pass, and the app still rendered. `postGreenWrites.ts` records that as info by design.
+
+**Q-978: a net under the orphan hand-back (layer two of the 50/50 law).**
+- After the build loop, a component is removed when all three hold: this build wrote it, the import graph proves nothing reaches it, and its name shares no word with the request. Removal goes through the same confirm-and-forget path as the model's own deletes.
+- The readiness line that counted exactly those files is withdrawn.
+- A component the request names is kept, and its warning stays.
+- Kill switch: `AGENTV3_LEFTOVER_REMOVE=off`.
+
+**Also.** The route handler is now close to TypeScript's control-flow-analysis size limit (TS2563 appeared while wiring Q-978). The net was moved into `leftoverComponents.applyLeftoverNet` so the handler stays under it. Future additions to that handler should go into modules.
+
+**Proof.** Every fix was reverted and its test failed: Q-926 three ways, the part-two items four ways.
+
+**db07e0af count:** 18 items. 14 resolved (13 by merged PR #3687, plus Q-923 as not-a-defect). Q-926, Q-976, Q-977 and Q-978 are FIX IN PR in this branch.
+
+### 2026-10-13 — Autopsy 15e69839, continued: the sibling I deferred, and the items I left unledgered
+
+**Correction to my own reply on #3685.** I named "every intent list that reads only Latin/Devanagari" as the next
+lever instead of hunting it as a sibling of the picture-intent class. The admin asked "sab ho gaya??" and the honest
+answer was no. Found and handled now:
+
+| Item | Finding | State |
+|---|---|---|
+| Sibling: user-text tokenizer | Three private copies split on `[^a-z0-9ऀ-ॿ]`; a Tamil request read as `["17"]` (no domain lookup, no subject for the unrelated-request check, no name for the off-topic summary check) | ✅ one `textWords` (`\p{L}\p{M}\p{N}`), census `oneWordSplitterForEveryScript` (reverted → 2 failed) |
+| Sibling: `buildConfirmation` | A Tamil app order is not confirmed by the message, so it is offered first (one extra "ஆம்") | 🟡 deliberately unchanged: adding Indic app nouns without Indic question words would build on a Tamil QUESTION ("how is an app made") — the costly direction the asymmetry rule forbids. Needs the admin's agreement |
+| Unledgered: ETA line at minute 8 | "past my rough estimate … too low" while a call stalled | 🟡 not a defect: the sentence is true; the stall itself is now bounded |
+| Unledgered: `startBand: cheapest` beside `COMPLEX` | Score from an unreadable script vs the second opinion | 🟡 not a defect: the report already says `signalsCouldNotRead: true` and the routing line names the second opinion |
+
+The four "not a defect" rows of the first entry (spacing snap after Stop, charge wording, transient TS2307, complexity
+second opinion) are 🟡 too until the admin agrees — a "by design" claim is not ✅ on my word (sixth rule).

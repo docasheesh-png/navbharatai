@@ -296,6 +296,9 @@ export function realRateFor(provider: string, model?: string): TokenRate {
     case 'KIMI': return card.kimi;
     case 'CLAUDE_HAIKU': return card.haiku;
     case 'CLAUDE': return card.sonnet;
+    // The Opus rung's own label. Without it, an Opus call that reported no model id fell to the
+    // default below — the Sonnet price, without Anthropic's cache lines (Q-880).
+    case 'CLAUDE_OPUS': return opusRate();
     case 'VERTEX':
     case 'GEMINI': return card.gemini;
     case 'GROK': return card.grok;

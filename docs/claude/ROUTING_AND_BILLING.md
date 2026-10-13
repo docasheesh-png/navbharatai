@@ -431,6 +431,15 @@ rung only when it is the known-weak 4.7-flash.
   par"): fidelity is to the MODE, not to one model id. Billing is unchanged — `powerToTier('mini')` is not
   the Opus tier, so Strong bills real cost + tiered markup, and an Opus rung that ran is priced at its real
   Opus rate inside that. A stored 'medium'/'max' maps UP to 'mini' (never down to Normal).
+- **🔴 THE CLAUDE PRICES ARE VERIFIED, DATED AND TEST-LOCKED (Q-880, billing audit 2026-10-12, admin chose
+  "A: rate theek karo").** The Opus default was $15 / $75 — Opus 4 / 4.1's price — while the Opus that runs
+  is `claude-opus-4-8` at **$5 / $25** (cache read $0.50, 5-minute write $6.25; claude.com/pricing,
+  2026-10-12). So "real Opus rate" above was three times the real rate, and a Strong build that reached its
+  Opus rung was marked up on it. `tests/claudeRatesMatchVerifiedPrices.test.ts` now holds the verified table
+  with its source and date; it fails when a default Claude model id (`models.ts`) has no verified price, or
+  when the rate card drifts from it. **A Claude model bump brings its verified price in the same change.**
+  `OPUS_INPUT_PER_MTOK` / `OPUS_OUTPUT_PER_MTOK` still override the default — if either is set in Cloud
+  Run, IT is the price in force, not the code.
 - **🟢 NVIDIA NEMOTRON — `NEMOTRON_API_KEY` SET, and `AGENTV3_NEMOTRON` set by the admin 2026-09-20.**
   Recorded hand-to-hand per this registry's own rule. The key alone reaches only the **ladder rung**
   (Weak/Normal, in FRONT of the Claude backstop, keyed rather than flagged); the **judge** and **plan**

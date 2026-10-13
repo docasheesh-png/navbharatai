@@ -169,7 +169,8 @@ describe('REVERSION GUARD — derived from detectTaskType, never a second copy o
   const body = src.slice(src.indexOf('export function signalsMatchedNothing'), src.indexOf('/** Base complexity by task type'));
 
   it('asks the real function rather than re-listing the regexes', () => {
-    expect(body).toContain('detectTaskType(p)');
+    // With the build's intent since 303e8a6f, so the router reads a request exactly as the analysis did.
+    expect(body).toContain('detectTaskType(p, buildIntent)');
     expect(body).toContain('RE.greeting');
     // A re-listed pattern set is the drift this repo has already paid for twice.
     expect(body).not.toContain('COMPLEX_APP_SIGNAL');

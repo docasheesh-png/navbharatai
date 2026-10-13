@@ -132,7 +132,7 @@ describe('Q-067 — a word we do not know is not a service to connect to', () =>
     // that list. Same three lanes as before, plus the one-shot lane; see tests/everyRequestNoteReachesEveryLane.test.ts.
     expect(route).toContain("{ code: 'unknown-name', text: unknownNameNote },");
     expect(route).toContain("buildPrompt = [requestNotesText, buildPrompt].filter(Boolean).join('\\n\\n---\\n\\n');");
-    expect(route).toContain('const plannerGoal = requestNotesText ?');
+    expect(route).toContain('const plannerGoal = withRequestNotes(prompt, requestNotesText);');
     expect(route).toContain('pastedBriefSuffix, requestNotes: requestNotesText, framework');
   });
 });

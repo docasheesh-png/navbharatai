@@ -403,8 +403,8 @@ export function isValidImageGenRequest(body: unknown): body is ImageGenRequest {
   return true;
 }
 
-/** True when ANY image provider is available — the free Pollinations provider (no key), OR a Gemini key,
- *  OR an xAI/Grok key. With Pollinations on (the default), image generation is always configured. */
+/** True when ANY image provider is available — Pollinations WITH our account key, Cloudflare, a Gemini key, or
+ *  an xAI/Grok key. There is no keyless provider since 2026-10-05, so with no key at all nothing is configured. */
 export function imageGenConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
   // The free provider counts only WITH our account key: its anonymous door answers 402 to everyone
   // (2026-10-05), and the route no longer uses it, so a key-less provider is no engine at all.

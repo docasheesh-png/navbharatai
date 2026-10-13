@@ -9,6 +9,7 @@ import type { ClaudeToolDef, TurnRunner, TurnUsage, ToolUse, TurnResult } from '
 import type { ToolDispatcher, ToolResult } from './ToolDispatcher';
 import type { AgentRole } from './types';
 import { startWorkingHeartbeat, workingLine } from './workingHeartbeat';
+import { WORKING_LINE_ID } from '../../lib/liveStatusLine';
 import type { ConversationStore, ConversationStatus } from './ConversationStore';
 import { compactMessagesForPersist, compactTranscriptForModel } from './SessionTimeline';
 import { billedAmountUsd } from './pricing';
@@ -29,9 +30,9 @@ import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRe
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
-import { abortCauseOf, abortSummary } from './buildAbortCause';
+import { abortCauseOf, abortSummary, timedOutSummary, stalledModelSummary, type SeedState } from './buildAbortCause';
 import { isBuildStoppedError } from './stopSignal';
-import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
+import { budgetSteer, buildBudgetNarration, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResumeNote } from './unfinishedResume';
@@ -43,6 +44,7 @@ import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
 import { answerAfterPlanning } from './answerAfterPlanning';
 import { resolveToolAlias, toolAliasNote } from './toolAlias';
+import { answerTimeOf } from './answeringModel';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -188,6 +190,13 @@ export interface AgentRunnerOptions {
    */
   hasExistingFiles?: () => boolean;
   /**
+   * Does the workspace hold files the PLATFORM set up for this build (a tested template, a game kit, the page
+   * the user pasted)? Checked live. Read only when `hasExistingFiles` says nothing of the build's own exists,
+   * so an ending can say "the app's starting files are in your workspace" instead of "nothing was written"
+   * (autopsy 303e8a6f). Never changes ok/false or what is persisted — only the sentence.
+   */
+  seedState?: () => SeedState | null;
+  /**
    * True when this turn is editing a project that ALREADY EXISTS (the route's `isEditMode`).
    *
    * Used for ONE thing: the build nudge's wording. The old single message told the model to "start
@@ -263,7 +272,16 @@ export interface AgentRunnerOptions {
     toolCalls: number;
     inputTokens: number;
     outputTokens: number;
+    /** The caller's wait — the whole provider chain, fallbacks included. */
     latencyMs: number;
+    /** The answering model's own time (TurnResult.attemptMs), on a success through a chain. */
+    answerMs?: number;
+    /** Time on rungs the chain tried and lost before the answer (TurnResult.fallbackMs). */
+    fallbackMs?: number;
+    /** How long it took to open its streamed answer (TurnResult.openedAfterMs). */
+    openMs?: number;
+    /** How long until its first produced byte (TurnResult.firstOutputAfterMs). */
+    firstOutputMs?: number;
     ok: boolean;
     error?: string;
   }) => void;
@@ -456,7 +474,7 @@ export interface AgentRunResult {
    * needs the answer — whether the loop should END itself here rather than merely say so — must not
    * be taken on a belief. Absent means "never judged finished", which is NOT an overrun of zero.
    */
-  readyAt?: ReadyMark;
+  readyAt?: { step: number; elapsedMs: number; score: number; at?: number };
   /** T1-budget-ux: the run stopped ONLY because it hit the per-build budget cap (work is saved and the
    *  build can be continued — a fresh run gets a fresh budget window). Lets the client show an honest
    *  "budget reached — continue" state instead of a hard failure. */
@@ -595,6 +613,11 @@ export class AgentRunner {
     // "never claim the user did something they did not do" rule this module's summary text states.
     const builtSomethingNow = (): boolean =>
       producingToolUses > 0 || this.opts.hasExistingFiles?.() === true;
+    // The third state every ending can be in (autopsy 303e8a6f): nothing of ours, but the platform's seed is there.
+    const endingContext = (): { builtSomething: boolean; seed: SeedState | null } => {
+      const builtSomething = builtSomethingNow();
+      return { builtSomething, seed: builtSomething ? null : this.opts.seedState?.() ?? null };
+    };
     // How many times we've nudged a build that only NARRATED (described its plan / said it would
     // "assign the frontend expert") without calling a single tool. The model often plans out loud
     // on its first turn; terminating there is the "model replied without building" bug. We instead
@@ -795,7 +818,7 @@ export class AgentRunner {
         const cause = abortCauseOf(this.opts.signal as AbortSignal);
         const summary = abortSummary(cause, {
           minutes: maxBuildMs ? Math.round(maxBuildMs / 60000) : undefined,
-          builtSomething: builtSomethingNow(),
+          ...endingContext(),
         });
         await persist('stopped');
         events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
@@ -824,10 +847,9 @@ export class AgentRunner {
         // reported ok:true (the work is real and resumable); one that produced nothing is ok:false.
         if (buildTimedOut(buildStartMs, maxBuildMs, Date.now())) {
           const minutes = Math.round((maxBuildMs as number) / 60000);
-          const builtSomething = builtSomethingNow();
-          const summary = builtSomething
-            ? `I stopped after about ${minutes} min to avoid an endless loop. Your files so far are saved — send another message and I'll continue from here.`
-            : `I stopped after about ${minutes} min — the build wasn't making progress (often a preview that won't come up). Nothing was lost; try again or rephrase.`;
+          const ending = endingContext();
+          const builtSomething = ending.builtSomething;
+          const summary = timedOutSummary(minutes, ending);
           await persist(builtSomething ? 'complete' : 'stopped');
           events.emit({ type: 'done', ok: builtSomething, summary, ts: Date.now() });
           return { ok: builtSomething, summary, steps, usage, billedUsd: billed(), timedOut: true };
@@ -929,9 +951,11 @@ export class AgentRunner {
           // An elapsed clock is a MEASUREMENT, not an estimate, so it may always be shown; the module
           // it comes from explains why that distinction is the whole justification. It carries a
           // stable `id`, so the surface replaces one line instead of appending a new one every 15 s.
+          // ⏱️ The number is the USER'S wait (the build's stream start), never this call's age — the call only
+          // decides WHEN to speak (autopsy 303e8a6f: 23 s into the build the line said "11s so far").
           const stopWorkingHeartbeat = startWorkingHeartbeat((elapsedMs) => {
-            events.emit({ type: 'narration', agent: agentRole, text: workingLine(elapsedMs), ts: Date.now(), id: 'working' });
-          });
+            events.emit({ type: 'narration', agent: agentRole, text: workingLine(elapsedMs), ts: Date.now(), id: WORKING_LINE_ID });
+          }, { originMs: events.startedAt });
           try {
             turn = turnTimeoutMs > 0
               ? await withTimeout(turnCall, turnTimeoutMs, `model turn ${steps}`)
@@ -970,10 +994,9 @@ export class AgentRunner {
           const isTurnTimeout = err instanceof Error && /timed out after/.test(err.message);
           if (isTurnTimeout) {
             const minutes = Math.max(1, Math.round(turnTimeoutMs / 60000));
-            const builtSomething = builtSomethingNow();
-            const summary = builtSomething
-              ? `A model response stalled and was stopped after about ${minutes} min. Your files so far are saved — send another message and I'll continue from here.`
-              : `The model didn't respond in time (stalled after about ${minutes} min). Nothing was lost — please try again.`;
+            const ending = endingContext();
+            const builtSomething = ending.builtSomething;
+            const summary = stalledModelSummary(minutes, ending);
             await persist(builtSomething ? 'complete' : 'error');
             events.emit({ type: 'done', ok: builtSomething, summary, ts: Date.now() });
             return { ok: builtSomething, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
@@ -991,7 +1014,9 @@ export class AgentRunner {
             responsePreview: turn.text, responseChars: turn.text.length,
             finishReason: turn.stopReason, toolCalls: turn.toolUses.length,
             inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens,
-            latencyMs: Date.now() - llmStartedAt, ok: true,
+            // The row names the rung that answered, so its own time rides with it (autopsy 303e8a6f); the
+            // caller's wait stays `latencyMs`, which is what preparation is measured against.
+            latencyMs: Date.now() - llmStartedAt, ...answerTimeOf(turn), ok: true,
           });
         } catch { /* diagnostics capture is best-effort */ }
 
@@ -1175,7 +1200,7 @@ export class AgentRunner {
                   typeErrors: typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null,
                   editingExistingApp: this.opts.editingExistingApp === true, wroteThisRun: dispatcher.wroteAnything(),
                   projectModule: this.opts.projectModule?.() ?? null,
-                  step: steps, at: Date.now(),
+                  step: steps, elapsedMs: Date.now() - buildStartMs, at: Date.now(),
                 });
               } catch { /* a measurement must never touch a build */ }
               if (readiness.ready && styleResumes === 0 && !this.opts.focusedRepair && !this.opts.signal?.aborted) {
@@ -1513,8 +1538,14 @@ export class AgentRunner {
           if (bs) {
             budgetStagesSent.add(bs.stage);
             budgetText = bs.text;
-            // Narrated, because a build that silently stops polishing looks like a build that gave up.
-            events.emit({ type: 'narration', agent: agentRole, text: bs.narration, ts: Date.now() });
+          }
+          // Narrated, because a build that silently stops polishing looks like a build that gave up — on the BUILD's
+          // clock and once per build (a retry runner's own "half" is ~75% of the build). The build's total is this
+          // runner's remaining budget plus what had passed before it started.
+          if (typeof maxBuildMs === 'number' && maxBuildMs > 0 && events.budgetStagesSaid) {
+            const origin = typeof events.startedAt === 'number' ? events.startedAt : buildStartMs;
+            const said = buildBudgetNarration(Date.now() - origin, (buildStartMs - origin) + maxBuildMs, events.budgetStagesSaid);
+            if (said) events.emit({ type: 'narration', agent: agentRole, text: said, ts: Date.now() });
           }
         } catch { /* the budget steer is advisory — it must never break a build */ }
         // DONE — the app may already be finished. Runs the SAME free deterministic scan the weak
@@ -1531,7 +1562,7 @@ export class AgentRunner {
             // Never "complete and healthy" over a compile that just failed (autopsy 33812996).
             const typeErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;
             if (appIsDone(readiness) && !(typeErrors !== null && typeErrors > 0)) {
-              if (!readyMark) readyMark = { step: steps, at: Date.now(), score: readiness.score };
+              if (!readyMark) readyMark = { step: steps, elapsedMs: Date.now() - buildStartMs, score: readiness.score, at: Date.now() };
               doneText = doneSteer(readiness);
               if (doneText) {
                 doneSignalled = true;

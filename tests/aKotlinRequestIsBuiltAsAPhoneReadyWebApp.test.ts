@@ -71,7 +71,7 @@ describe('a native mobile stack is named, like any stack we do not build', () =>
     // reaches the fast lane and the one-shot lane, which it used to miss. tests/everyRequestNoteReachesEveryLane.test.ts
     // holds the whole matrix; these two lines hold this note's place in it.
     expect(ROUTE).toContain("{ code: 'unsupported-stack', text: unsupportedStackAsked ? unsupportedStackBuilderNote(unsupportedStackAsked, framework) : '' },");
-    expect(ROUTE).toContain('const plannerGoal = requestNotesText ? `${requestNotesText}\\n\\n---\\n\\n${prompt}` : prompt;');
+    expect(ROUTE).toContain('const plannerGoal = withRequestNotes(prompt, requestNotesText);');
     expect(ROUTE).toMatch(/projectPlanUserPrompt\(plannerGoal, ppScaffold\)/);
     expect(ROUTE).toMatch(/createProjectPlan\(plannerGoal, framework, modules, Date\.now\(\)\)/);
     expect(ROUTE).not.toMatch(/projectPlanUserPrompt\(prompt, ppScaffold\)/);

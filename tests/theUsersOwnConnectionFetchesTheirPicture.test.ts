@@ -20,7 +20,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   DIRECT_FETCH_THROW_LIMIT, IMAGE_FETCH_HOSTS, IMAGE_TICKET_TTL_MS,
-  imageRetryBudgetMs, imageRetryDelaysMs, imageWaitMessage, isAllowedImageHost,
+  imageRetryBudgetMs, imageRetryDelaysMs, isAllowedImageHost,
   shouldRetryImageStatus,
 } from '../src/lib/imageDelivery';
 import { clientImageFetchEnabled, signImageTicket, verifyImageTicket } from '../src/server/lib/imageTicket';
@@ -148,13 +148,6 @@ describe('⏱️ waiting out the provider’s limit', () => {
     // retrying a refusal makes the user wait a full minute for something that never succeeds.
     expect(DIRECT_FETCH_THROW_LIMIT).toBe(2);
     expect(DIRECT_FETCH_THROW_LIMIT).toBeLessThan(imageRetryDelaysMs().length);
-  });
-
-  it('🔒 the countdown never names the provider', () => {
-    const msg = imageWaitMessage(30_000);
-    expect(msg).toContain('NavBharatAI');
-    expect(msg.toLowerCase()).not.toContain('pollination');
-    expect(msg).toContain('30');
   });
 
   it('a ticket outlives a tab the user left open, but is not a standing key', () => {

@@ -25,21 +25,59 @@ const ENTRY_CANDIDATES = [
   'main.tsx', 'main.jsx',
 ];
 
-/** Does the HTML already have a `<script>` that loads a main/index entry module? */
+/**
+ * Does the HTML already load the app's code as a module? Any LOCAL module script counts — `/src/main.tsx`, but also
+ * `/src/app.tsx` or an inline `<script type="module">import "/src/main.tsx"</script>` (heal census of autopsy
+ * 303e8a6f: reading only main|index made the guard ADD a second entry to a page that already booted — a false
+ * repair, and a double mount when both modules render).
+ */
 function hasEntryScript(html: string): boolean {
-  return /<script\b[^>]*\bsrc\s*=\s*["'][^"']*\b(?:main|index)\.[jt]sx?["']/i.test(html);
+  if (/<script\b[^>]*\bsrc\s*=\s*["'][^"']*\b(?:main|index)\.[jt]sx?["']/i.test(html)) return true;
+  for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+    const attrs = m[1] ?? '';
+    if (!/\btype\s*=\s*["']?module\b/i.test(attrs)) continue;
+    const src = /\bsrc\s*=\s*["']([^"']+)["']/i.exec(attrs)?.[1];
+    if (src && !/^(?:[a-z]+:)?\/\//i.test(src)) return true; // a local module file
+    if (!src && /\bimport\b[^;]*["'](?:\.{0,2}\/)[^"']+["']/.test(m[2] ?? '')) return true; // an inline module importing local code
+  }
+  return false;
+}
+
+/** The ids the entry module mounts the app into (`getElementById('x')`, `querySelector('#x')`, `.mount('#x')`). */
+function mountIdsOf(entrySource: string): string[] {
+  const ids = new Set<string>();
+  for (const m of entrySource.matchAll(/getElementById\(\s*["']([\w-]+)["']\s*\)|querySelector\(\s*["']#([\w-]+)["']\s*\)|\.mount\(\s*["']#([\w-]+)["']\s*\)/g)) {
+    const id = m[1] ?? m[2] ?? m[3];
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}
+
+/** Does the HTML carry an element with this id — quoted or not? */
+function hasId(html: string, id: string): boolean {
+  const e = id.replace(/[-]/g, '\\-');
+  return new RegExp(`\\bid\\s*=\\s*(?:["']${e}["']|${e}(?=[\\s>/]))`, 'i').test(html);
 }
 
 /**
- * Ensure the app's `index.html` actually BOOTS: it must load the entry module via a `<script type=
- * "module">` and provide a `<div id="root">` mount node. Deterministically injects whichever is missing,
- * pointing at the entry module that really exists in the file set. Pure; never throws. Returns the input
- * unchanged (new object) when nothing needs adding, when there is no index.html, or when no entry module
- * is present (we never guess an entry that doesn't exist).
+ * The page a Vite app is served from: the ROOT `index.html`, never `public/index.html` (a CRA page the bundler fills
+ * in) or a `dist/`, `docs/` or `client/` copy that sorts first in the durable store's key order (heal census of
+ * autopsy 303e8a6f). One answer for both lanes. PURE.
+ */
+export function appEntryHtmlKey(files: Readonly<Record<string, unknown>>): string | null {
+  return Object.prototype.hasOwnProperty.call(files ?? {}, 'index.html') ? 'index.html' : null;
+}
+
+/**
+ * Ensure the app's `index.html` actually BOOTS: it must load the app's code as a module and provide the mount node
+ * the entry module mounts into. Deterministically injects whichever is missing, pointing at the entry module that
+ * really exists in the file set and the id it really uses. Pure; never throws. Returns the input unchanged (new
+ * object) when nothing needs adding, when there is no root index.html, or when no entry module is present (we never
+ * guess an entry that doesn't exist).
  */
 export function ensureHtmlEntryScript(input: Record<string, string>): HtmlEntryResult {
   if (!input || typeof input !== 'object') return { files: {}, injected: false };
-  const htmlKey = Object.keys(input).find((k) => /(^|\/)index\.html$/i.test(k));
+  const htmlKey = appEntryHtmlKey(input);
   if (!htmlKey) return { files: { ...input }, injected: false };
   let html = input[htmlKey];
   if (typeof html !== 'string' || !html.trim()) return { files: { ...input }, injected: false };
@@ -49,15 +87,18 @@ export function ensureHtmlEntryScript(input: Record<string, string>): HtmlEntryR
 
   let injected = false;
 
-  // 1) Ensure a #root mount node exists (React needs a target). Insert right after <body> if absent.
-  if (!/\bid\s*=\s*["']root["']/i.test(html)) {
+  // 1) Ensure the mount node the entry module mounts into exists — its OWN id (Vue's `#app`, an unquoted id), and
+  //    `#root` only when the entry names none we can read. Insert right after <body> if absent.
+  const ids = mountIdsOf(input[entry] ?? '');
+  const mountPresent = ids.length > 0 ? ids.some((id) => hasId(html, id)) : hasId(html, 'root');
+  if (!mountPresent) {
     if (/<body[^>]*>/i.test(html)) {
-      html = html.replace(/(<body[^>]*>)/i, '$1\n    <div id="root"></div>');
+      html = html.replace(/(<body[^>]*>)/i, `$1\n    <div id="${ids[0] ?? 'root'}"></div>`);
       injected = true;
     }
   }
 
-  // 2) Ensure a module script loads the entry. Only add when NO entry script is present (a mismatched
+  // 2) Ensure a module script loads the app's code. Only add when NO local module script is present (a mismatched
   // path — e.g. main.tsx vs main.jsx — is left to the language-coherence reference rewrite).
   if (!hasEntryScript(html)) {
     const tag = `<script type="module" src="/${entry}"></script>`;

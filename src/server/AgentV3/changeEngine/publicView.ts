@@ -32,6 +32,7 @@ const KIND_WORDS: Record<ChangeKind, string> = {
   security: 'Security change',
   architectural: 'Structure change',
   large: 'Large change',
+  'new-app': 'New app',
 };
 
 const OUTCOME_WORDS = { completed: 'Done and checked', partial: 'Done, some checks open', failed: 'Did not finish', stopped: 'Stopped' } as const;

@@ -40,7 +40,8 @@ const ROUTE = RAW.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').
  * import into the route named `…BuilderNote` / `…BuildRule` is caught by the census below and must be added here.
  */
 const NOTE_PRODUCERS = [
-  'unsupportedStackBuilderNote', 'scriptRequestBuilderNote', 'unknownNameBuilderNote', 'requestScopeNote',
+  // `requestScopeVerdict` since #3692 (the note and its reason, read through `scope?.note`).
+  'unsupportedStackBuilderNote', 'scriptRequestBuilderNote', 'unknownNameBuilderNote', 'requestScopeVerdict',
   'nonSmartphoneBuildRule', 'thirdPartyLimitsBuilderNote',
 ] as const;
 
@@ -52,10 +53,19 @@ function aggregator(): string {
   return ROUTE.slice(start, end + 2);
 }
 
-/** The variable a producer's result is stored in (`const unknownNameNote = unknownNameBuilderNote(…)`), if any. */
+/**
+ * The variable a producer's result is stored in (`const unknownNameNote = unknownNameBuilderNote(…)`), if any — and
+ * one hop further when the producer returns a record and the route keeps one field of it (`const scope =
+ * requestScopeVerdict(…)` then `requestScopeText = scope?.note ?? ''`).
+ */
 function heldIn(producer: string): string[] {
   const out = new Set<string>();
   for (const m of ROUTE.matchAll(new RegExp(String.raw`\b(?:const|let)?\s*(\w+)\s*=\s*${producer}\(`, 'g'))) out.add(m[1]);
+  for (const v of [...out]) {
+    const kept = [...ROUTE.matchAll(new RegExp(String.raw`\b(\w+)\s*=\s*${v}\??\.note\b`, 'g'))].map((m) => m[1]);
+    // The record's own name (`scope`) is too common to search for; the field the route keeps is the note.
+    if (kept.length > 0) { out.delete(v); for (const k of kept) out.add(k); }
+  }
   return [...out];
 }
 
@@ -107,10 +117,22 @@ describe('🧭 the census: every request note reaches every lane through ONE lis
   });
 
   it('the project planner reads the list — and every module turn reads the plan goal', () => {
-    expect(ROUTE).toContain('const plannerGoal = requestNotesText ? `${requestNotesText}\\n\\n---\\n\\n${prompt}` : prompt;');
+    expect(ROUTE).toContain('const plannerGoal = withRequestNotes(prompt, requestNotesText);');
     const plannerCalls = [...ROUTE.matchAll(/projectPlanUserPrompt\((\w+)/g)].map((m) => m[1]);
     expect(plannerCalls.length).toBeGreaterThan(0);
     for (const arg of plannerCalls) expect(arg).toBe('plannerGoal');
+  });
+
+  it('the plan-first planner reads the list (its todos are appended to the build prompt)', () => {
+    expect(ROUTE).toContain('await planRunner.run(withRequestNotes(prompt, requestNotesText));');
+    expect(ROUTE).not.toMatch(/await planRunner\.run\((?!withRequestNotes\(prompt, requestNotesText\))/);
+  });
+
+  it('every writing sub-agent reads the list (Q-868 gave it only the phone rule)', () => {
+    expect(ROUTE).toContain('requestNotesRule: () => childRequestNotes,');
+    expect(ROUTE).toContain('childRequestNotes = requestNotesText;');
+    const subAgent = readFileSync(join(process.cwd(), 'src/server/AgentV3/SubAgent.ts'), 'utf8');
+    expect(subAgent).toContain("(deps.requestNotesRule?.() ?? '')");
   });
 });
 
@@ -142,7 +164,8 @@ describe('the fast lane reads the notes APART from the request (its file budget 
   it('the keypad-phone rule reaches the fast lane now, without taking the budget to the maximum', async () => {
     const prompt = 'a racing game for Nokia C2-01';
     const user = await manifestPromptFor(prompt, nonSmartphoneBuildRule('Nokia C2-01'));
-    expect(user).toContain('DEVICE TARGET');
+    // #3689 (Q-868) reworded the rule: it opens 'CLASSIC PHONE NAMED' now.
+    expect(user).toContain('CLASSIC PHONE NAMED');
     expect(user).toContain(`AT MOST ${fileBudgetForPrompt(prompt).maxFiles} source files`);
     expect(user).not.toContain('AT MOST 32 source files');
   });

@@ -14,7 +14,7 @@
 import { streamingBudget, streamNoClampEnabled } from '../reliability/streamBudget';
 import { modelAcceptsReasoningPassback, reasoningPassbackEnabled } from '../reliability/reasoningPassback';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
-import { turnDeadline, firstAnswerBoundMs, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE, isSlowStreamAbandon } from '../turnDeadline';
+import { turnDeadline, firstAnswerBoundMs, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE, SILENT_OPEN_MARK, isSlowStreamAbandon } from '../turnDeadline';
 import { glmThinkingParam, isThinkingParamRejection, modelAlwaysReasons, type GlmThinkingLevel } from './glmThinking';
 import { reconcileFloorBudget, turnStarvedItsBudget, starvedBudgetError } from '../floorBudget';
 import { markAbandonedTurn } from '../unbilledTurns';
@@ -527,20 +527,27 @@ export class OpenAiToolRunner implements TurnRunner {
     const providerWentSilent = streaming && firstAnswerMs < timeoutMs;
     // A stream that opens AFTER we gave up on it is closed on arrival, so it never generates (and bills)
     // for nobody — the stop path below already did this; the give-up path did not.
-    const opened = call();
+    // When the provider OPENED its response (streaming only) — the time-to-open a "has it started yet?" bound
+    // would be chosen from. Not recorded anywhere before autopsy 303e8a6f, so that choice had no data.
+    let openedAt: number | null = null;
+    const opened = Promise.resolve(call()).then((v) => { openedAt = Date.now(); return v; });
     const closeIfLate = (e: unknown) => {
       opened.then((late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } }, () => { /* already failed */ });
       throw e;
     };
+    // A request that did not even OPEN by its first-answer bound is silence too — counted as such, not only when we
+    // were allowed to walk away from it (adversarial review of 303e8a6f: those are the LONGEST silences, and the
+    // silent share left them out). Still "timed out", so the timeout bench, strike and cooldown are unchanged.
     const ordinaryBoundMessage = providerWentSilent
-      ? `OpenAI-compatible call (GLM/Kimi) timed out after ${firstAnswerMs}ms`
+      ? `OpenAI-compatible call (GLM/Kimi) timed out after ${firstAnswerMs}ms — ${SILENT_OPEN_MARK}`
       : clockMessage(firstAnswerMs);
     const raw = await raceStop(
       withTimeout(
         opened,
         initialBoundMs,
+        // The provider had not even opened its response: silence, not a slow answer (autopsy 303e8a6f).
         silentBoundMs !== null
-          ? `${SLOW_STREAM_MESSAGE} after ${silentBoundMs}ms`
+          ? `${SLOW_STREAM_MESSAGE} after ${silentBoundMs}ms — ${SILENT_OPEN_MARK}`
           : ordinaryBoundMessage,
       ).catch((e: unknown) => {
         // The silent bound fired. It was only PEEKED at the start, so the abandon is claimed now; if another
@@ -558,6 +565,8 @@ export class OpenAiToolRunner implements TurnRunner {
 
     let completion: OpenAiCompletionLike;
     let streamedText = false;
+    /** When the first produced byte arrived (streaming only) — the time to the provider's first word. */
+    let firstOutputAt: number | null = null;
     if (streaming && isChatStream(raw)) {
       streamedText = true;
       const acc = new OpenAiStreamAccumulator();
@@ -588,7 +597,9 @@ export class OpenAiToolRunner implements TurnRunner {
       // tell this apart from a hung provider and bench the FAMILY immediately, rather than sending
       // the next turn back to the same crawling rung.
       if (stop === 'slow') {
-        throw new Error(`${SLOW_STREAM_MESSAGE} after ${Math.max(0, Date.now() - startedAt)}ms`);
+        // An opened stream that sent no byte is silence too — the words must say which it was.
+        const silent = acc.producedBytes() === 0 ? ` — ${SILENT_OPEN_MARK}` : '';
+        throw new Error(`${SLOW_STREAM_MESSAGE} after ${Math.max(0, Date.now() - startedAt)}ms${silent}`);
       }
       // 🔴 Only reasoning, past the rung's own answer bound: the provider was slow, not our budget — so it is a
       // timeout, the chain falls to the next rung and two in a row bench the family (autopsy 15e69839).
@@ -599,8 +610,12 @@ export class OpenAiToolRunner implements TurnRunner {
       // 300 s cap unless the lane's deadline was nearer; reporting it as "build budget reached" ended the whole
       // chain with "no provider failed" and never tried the next rung. `clockMessage` already knows which.
       if (stop !== 'complete' && !acc.hasAnswer()) {
-        throw new Error(stop === 'deadline' ? clockMessage(timeoutMs) : clockMessage(idleMs));
+        // An opened stream that ended WITHOUT a single byte is silence, and says so (adversarial review of 303e8a6f) —
+        // still "timed out", so every routing reader is unchanged. Our own budget is never marked: it is our clock.
+        const ceiling = stop === 'deadline' ? clockMessage(timeoutMs) : clockMessage(idleMs);
+        throw new Error(`${ceiling}${acc.producedBytes() === 0 && ceiling !== BUDGET_REACHED_MESSAGE ? ` — ${SILENT_OPEN_MARK}` : ''}`);
       }
+      firstOutputAt = acc.firstOutputAt();
       completion = acc.toCompletion(stop);
     } else {
       completion = raw as OpenAiCompletionLike;
@@ -652,6 +667,8 @@ export class OpenAiToolRunner implements TurnRunner {
     // delta by delta, in which case repeating it here would print the answer twice.
     if (!streamedText && params.onText && result.text) params.onText(result.text);
 
-    return result;
+    return streamedText && openedAt !== null
+      ? { ...result, openedAfterMs: Math.max(0, openedAt - startedAt), ...(firstOutputAt !== null ? { firstOutputAfterMs: Math.max(0, firstOutputAt - startedAt) } : {}) }
+      : result;
   }
 }

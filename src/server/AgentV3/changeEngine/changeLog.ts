@@ -14,7 +14,7 @@
 //
 // PURE.
 
-import type { ChangeKind, ChangeRisk, ChangeDepth } from './changeClassifier';
+import { CHANGE_KINDS, type ChangeKind, type ChangeRisk, type ChangeDepth } from './changeClassifier';
 import { parseAppSpec, type AppSpec } from './appSpec';
 import { parseIssueQueue, type IssueQueue } from './issueQueue';
 
@@ -33,7 +33,11 @@ export interface ChangeRecord {
   requirements: string[];
   /** ISS ids opened, fixed or verified by this change. */
   issues: string[];
-  /** Paths written, ≤ 40. */
+  /**
+   * Paths this turn AUTHORED, ≤ 40 — the platform's untouched template and its own finishing writes are left out
+   * (autopsy 303e8a6f: a stopped build's record said "14 file(s)" for our template). Records before 2026-10-12
+   * hold every path written.
+   */
   files: string[];
   status: ChangeStatus;
   /** Release-gate state, when the build reached it. */
@@ -61,7 +65,8 @@ export function emptyMemory(): EngineeringMemory {
   return { version: 1, spec: { items: [], nextReq: 1 }, queue: { issues: [], nextIss: 1 }, changes: [], nextChg: 1, updatedAt: 0 };
 }
 
-const KINDS = new Set<ChangeKind>(['micro-ui', 'local', 'feature', 'bug', 'refactor', 'cross-cutting', 'data', 'integration', 'security', 'architectural', 'large']);
+// The classifier's own list (autopsy 303e8a6f): a hand-copied set here would drop a new kind from every user's history.
+const KINDS = new Set<ChangeKind>(CHANGE_KINDS);
 
 function strArr(v: unknown, cap: number): string[] {
   return Array.isArray(v) ? (v as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, cap) : [];
@@ -74,10 +79,12 @@ export function parseEngineeringMemory(raw: unknown): EngineeringMemory {
   for (const x of Array.isArray(r.changes) ? r.changes : []) {
     if (!x || typeof x !== 'object') continue;
     const c = x as Record<string, unknown>;
-    if (typeof c.id !== 'string' || !KINDS.has(c.kind as ChangeKind)) continue;
+    if (typeof c.id !== 'string') continue;
     changes.push({
       id: c.id, ts: Number(c.ts) || 0, summary: typeof c.summary === 'string' ? c.summary.slice(0, 160) : '',
-      kind: c.kind as ChangeKind,
+      // An unknown kind is KEPT as 'local', never dropped (adversarial review of 303e8a6f): a record written by a
+      // newer version — 'new-app' today — must survive a rollback, or the History card silently loses it.
+      kind: KINDS.has(c.kind as ChangeKind) ? c.kind as ChangeKind : 'local',
       risk: c.risk === 'low' || c.risk === 'high' ? c.risk : 'medium',
       depth: c.depth === 'light' || c.depth === 'deep' ? c.depth : 'standard',
       requirements: strArr(c.requirements, 40), issues: strArr(c.issues, 40), files: strArr(c.files, 40),

@@ -107,30 +107,25 @@ describe('it fires once, and never before there is an app', () => {
   });
 });
 
-// UPDATED DELIBERATELY (autopsy 9c612cdb, 2026-10-12): the mark is now an EPOCH (`at`) and the third
-// argument the END epoch. It was an elapsed time on the runner's clock read against the build's clock, so
-// every overrun was inflated by everything before the runner started ("105s" where the truth was 39 s).
-// The same cases, the same expected words — only the clock basis changed.
-const T0 = 1_791_819_048_064;
 describe('the measurement — the deliverable, and it never reads as zero when it is unknown', () => {
   it('"never judged finished" is said in words, not as an overrun of zero', () => {
-    expect(readyOverrunNote(null, 40, T0 + 600_000)).toBe('The app was never judged finished during the build.');
+    expect(readyOverrunNote(null, 40, 600_000)).toBe('The app was never judged finished during the build.');
   });
 
   it('a build that stopped when it was done says so', () => {
-    expect(readyOverrunNote({ step: 20, at: T0 + 300_000, score: 90 }, 20, T0 + 300_000))
+    expect(readyOverrunNote({ step: 20, elapsedMs: 300_000, score: 90 }, 20, 300_000))
       .toContain('the build ended there');
   });
 
   it('an overrun is reported in steps AND seconds', () => {
-    const note = readyOverrunNote({ step: 20, at: T0 + 300_000, score: 90 }, 46, T0 + 1_860_000);
+    const note = readyOverrunNote({ step: 20, elapsedMs: 300_000, score: 90 }, 46, 1_860_000);
     expect(note).toContain('26 more step(s)');
     expect(note).toContain('1560s');
     expect(note).toContain('90/100');
   });
 
   it('a clock that runs backwards cannot produce a negative overrun', () => {
-    expect(readyOverrunNote({ step: 30, at: T0 + 900_000, score: 90 }, 10, T0 + 100_000))
+    expect(readyOverrunNote({ step: 30, elapsedMs: 900_000, score: 90 }, 10, 100_000))
       .toContain('the build ended there');
   });
 });

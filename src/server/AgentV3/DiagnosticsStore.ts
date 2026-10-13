@@ -18,6 +18,7 @@ import { redactSecrets } from './SecretRedactor';
 import { summarizeModelPerformance, type ModelPerformanceSummary } from './modelPerformance';
 import { summarizeHealCodes, type HealCodeTally } from './healBreakdown';
 import { workaroundCountOf } from '../../lib/healIssue';
+import { GREEN_RESTORE_UNCHECKED_DETAIL } from './GreenGuard';
 
 const COLLECTION = 'workspace_diagnostics_v3';
 /** Firestore's hard per-document limit is 1 MB; stay well under it after trimming. */
@@ -565,13 +566,29 @@ export interface DiagnosticsHistoryEntry {
    * has a running app. `null` when the report carries no timeline to read.
    */
   restoredToGreen?: boolean | null;
+  /**
+   * GreenGuard put back the files as they were at the START of the turn — a base that differs from the
+   * last browser-checked snapshot, so it was never seen running (Q-973). Present only when true, so an
+   * older row keeps its shape. Never counted as "the last working version".
+   */
+  restoredUnchecked?: true;
 }
 
-/** True when this stored report's timeline records a GreenGuard restore; null when it has no timeline. */
+/**
+ * True when this stored report's timeline records a GreenGuard restore to a BROWSER-CHECKED base; null when it
+ * has no timeline. A restore to the unchecked turn start is not one (Q-973) — see `restoredUncheckedOf`.
+ */
 export function restoredToGreenOf(r: { issues?: unknown } | null | undefined): boolean | null {
-  const issues = Array.isArray(r?.issues) ? (r!.issues as Array<{ code?: unknown }>) : null;
+  const issues = Array.isArray(r?.issues) ? (r!.issues as Array<{ code?: unknown; detail?: unknown }>) : null;
   if (!issues) return null;
-  return issues.some((i) => i && i.code === 'GREEN_GUARD_RESTORED');
+  return issues.some((i) => i && i.code === 'GREEN_GUARD_RESTORED' && i.detail !== GREEN_RESTORE_UNCHECKED_DETAIL);
+}
+
+/** True when the build's only restore put back the unchecked turn-start files (Q-973); undefined otherwise. */
+export function restoredUncheckedOf(r: { issues?: unknown } | null | undefined): true | undefined {
+  const issues = Array.isArray(r?.issues) ? (r!.issues as Array<{ code?: unknown; detail?: unknown }>) : null;
+  if (!issues || restoredToGreenOf(r)) return undefined;
+  return issues.some((i) => i && i.code === 'GREEN_GUARD_RESTORED' && i.detail === GREEN_RESTORE_UNCHECKED_DETAIL) ? true : undefined;
 }
 
 /** Enough to tell two edits apart in a list; far short of shipping the whole prompt in a listing. */
@@ -791,6 +808,7 @@ async function listDiagnosticsHistoryInner(
         healCodes: (() => { try { return summarizeHealCodes(r); } catch { return null; } })(),
         workaroundCount: (() => { try { return workaroundCountOf(r); } catch { return null; } })(),
         restoredToGreen: restoredToGreenOf(r),
+        ...(restoredUncheckedOf(r) ? { restoredUnchecked: true as const } : {}),
         userStopped: Array.isArray(r.issues) ? stoppedByUser(r.issues) : null,
       }];
     });
@@ -846,6 +864,12 @@ export interface AllDiagnosticsEntry extends DiagnosticsHistoryEntry {
    * nothing, so "no models recorded" and "this field was never computed" stay distinguishable.
    */
   modelPerformance?: ModelPerformanceSummary | null;
+  /**
+   * The build's provider-time waste ledger as numbers (autopsy 303e8a6f) — the instrument for Q-009's reopen line
+   * ("silent or crawling rungs > 10% of builds' wall time over a day"). No extra I/O: the report is in memory.
+   * `null` on a report written before the field.
+   */
+  providerWaste?: BuildDiagnosticsReport['providerWaste'] | null;
   /**
    * THE BUILD'S OWN `OUTCOME_*` CODE — the machine fact it recorded about how it ended.
    *
@@ -974,9 +998,11 @@ function toAllDiagnosticsEntry(d: FirebaseFirestore.QueryDocumentSnapshot): AllD
     modelPerformance: (() => {
       try { return summarizeModelPerformance(r); } catch { return null; }
     })(),
+    providerWaste: r.providerWaste ?? null,
     healCodes: (() => { try { return summarizeHealCodes(r); } catch { return null; } })(),
     workaroundCount: (() => { try { return workaroundCountOf(r); } catch { return null; } })(),
     restoredToGreen: restoredToGreenOf(r),
+    ...(restoredUncheckedOf(r) ? { restoredUnchecked: true as const } : {}),
   };
 }
 

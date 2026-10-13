@@ -7,7 +7,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { designLintSummary } from '../src/server/AgentV3/buildQualityLint';
+import { designLintSummary, lintBuiltApp } from '../src/server/AgentV3/buildQualityLint';
+import { restateDesignAfterRepair } from '../src/server/AgentV3/designAfterRepair';
 import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
 
 describe('each design finding is printed once', () => {
@@ -31,6 +32,7 @@ describe('each design finding is printed once', () => {
 // the snap runs before the lint, and the lint records its verdict either way.
 describe('the design line describes the app after the snap', () => {
   const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
+  const restatement = readFileSync(join(__dirname, '../src/server/AgentV3/designAfterRepair.ts'), 'utf8');
 
   it('the snap runs before the lint that records DESIGN_CONSISTENCY', () => {
     const snap = route.indexOf("await snapSpacing({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'before-lint');");
@@ -53,8 +55,10 @@ describe('the design line describes the app after the snap', () => {
     const snapAfter = route.indexOf("await snapSpacing({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'after-repair');");
     expect(repair).toBeGreaterThan(-1);
     expect(snapAfter).toBeGreaterThan(repair);
-    // 2500, not 1500: the heal/withdraw guard below (and its comment) sits between the snap and this line.
-    expect(route.slice(snapAfter, snapAfter + 2500)).toContain('After the design repair: ${designLintSummary(afterRepair)}');
+    // MOVED 2026-10-13 into designAfterRepair.ts (the chat handler crossed TypeScript's control-flow limit, TS2563, once
+    // main's #3692/#3698 landed beside this block). The route calls it right after the snap; the line lives there.
+    expect(route.slice(snapAfter, snapAfter + 600)).toContain('designShipped = restateDesignAfterRepair({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, designShipped, buildDiag);');
+    expect(restatement).toContain('After the design repair: ${designLintSummary(afterRepair)}');
   });
 
   // Adversarial review of the same change (2026-10-12): the restatement first called
@@ -63,10 +67,10 @@ describe('the design line describes the app after the snap', () => {
   // method's own contract is "only when the same check re-ran and found no failure at all". A heal is
   // claimed only on a clean re-check; otherwise the stale sentence is withdrawn (`retract`), never healed.
   it('the restatement claims a heal only when the re-check is clean; otherwise it withdraws the stale line', () => {
-    const snapAfter = route.indexOf("await snapSpacing({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'after-repair');");
-    const block = route.slice(snapAfter, route.indexOf('After the design repair: ${designLintSummary(afterRepair)}', snapAfter));
-    expect(block).toContain("if (left === 0) buildDiag.resolveOnRecheck('DESIGN_CONSISTENCY');");
-    expect(block).toContain("else buildDiag.retract('DESIGN_CONSISTENCY', 'Design consistency',");
+    // MOVED with the block (see above): the guard is read where it now lives.
+    const block = restatement.slice(0, restatement.indexOf('After the design repair: ${designLintSummary(afterRepair)}'));
+    expect(block).toContain("if (left === 0) diag.resolveOnRecheck('DESIGN_CONSISTENCY');");
+    expect(block).toContain("else diag.retract('DESIGN_CONSISTENCY', 'Design consistency',");
     // No unguarded clear anywhere in the block.
     expect(block.match(/resolveOnRecheck\('DESIGN_CONSISTENCY'\)/g)?.length).toBe(1);
   });
@@ -84,5 +88,35 @@ describe('the design line describes the app after the snap', () => {
     clean.record({ phase: 'build', severity: 'warning', code: 'DESIGN_CONSISTENCY', message: before, autoResolved: false });
     clean.resolveOnRecheck('DESIGN_CONSISTENCY');
     expect(clean.report().counts.autoResolved).toBe(1);
+  });
+});
+
+describe('the restatement, executed (designAfterRepair.ts)', () => {
+  // A real app's own file — off-grid spacing the design lint counts, then the same file after a repair.
+  const offGrid = { 'src/App.tsx': 'export default function App() { return <div style={{ padding: 10, margin: 14, gap: 6 }}>Hi</div>; }', 'src/index.css': '.card { padding: 10px; margin: 14px; gap: 6px; }\n.row { padding: 18px; margin: 22px; gap: 26px; }\n' };
+  const onGrid = { 'src/App.tsx': 'export default function App() { return <div style={{ padding: 8, margin: 12, gap: 4 }}>Hi</div>; }', 'src/index.css': '.card { padding: 8px; margin: 12px; gap: 4px; }\n.row { padding: 16px; margin: 20px; gap: 24px; }\n' };
+
+  it('a clean re-check is the one heal, and the new verdict is returned', () => {
+    const shipped = lintBuiltApp(offGrid)!;
+    expect(shipped.design.violations.length).toBeGreaterThan(0);
+    const diag = new BuildDiagnostics();
+    diag.record({ phase: 'build', severity: 'warning', code: 'DESIGN_CONSISTENCY', message: designLintSummary(shipped), autoResolved: false });
+    const now = restateDesignAfterRepair(onGrid, shipped, diag);
+    expect(now?.design.violations.length).toBe(0);
+    expect(diag.report().counts.autoResolved).toBeGreaterThanOrEqual(1);
+    expect(diag.report().counts.unresolved).toBe(0);
+  });
+
+  it('an unchanged verdict says nothing and returns what shipped', () => {
+    const shipped = lintBuiltApp(offGrid)!;
+    const diag = new BuildDiagnostics();
+    expect(restateDesignAfterRepair(offGrid, shipped, diag)).toBe(shipped);
+    expect(diag.report().counts.total).toBe(0);
+  });
+
+  it('nothing shipped means nothing to restate', () => {
+    const diag = new BuildDiagnostics();
+    expect(restateDesignAfterRepair(onGrid, null, diag)).toBeNull();
+    expect(diag.report().counts.total).toBe(0);
   });
 });

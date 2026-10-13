@@ -26,6 +26,7 @@
 import { isCheapFlashRung, withoutCheapFlashLead, type LadderRung } from './tierLadder';
 import { signalsCouldNotRead, signalsMatchedNothing } from './RequestAnalyser';
 import { BIG_SOFTWARE_NOUN, countEnumeratedFeatures, MIN_RUN_ITEMS } from './enumeratedFeatures';
+import type { BuildIntent } from './IntentClassifier';
 import { withEnglishReading } from '../lib/devanagariTechTerms';
 
 /**
@@ -119,7 +120,7 @@ export function complexityFromScore(score: number): ComplexityVerdict {
  * 18 would spend a call to move a verdict from `simple` to `simple`. "Kharcha kam se kam" applies to
  * the classifier too — a question whose answer cannot change the outcome is not worth asking.
  */
-export function needsSecondOpinion(score: number, prompt?: string): boolean {
+export function needsSecondOpinion(score: number, prompt?: string, buildIntent?: BuildIntent): boolean {
   if (prompt !== undefined && signalsCouldNotRead(prompt)) return true;
   // 🔴 THE SIBLING OF THE LINE ABOVE, AND IT WAS NEVER HUNTED (autopsy c6e4c6ff, 2026-09-18).
   // "I could not read the script" and "I read it and recognised nothing" are the SAME fact about this
@@ -128,7 +129,7 @@ export function needsSecondOpinion(score: number, prompt?: string): boolean {
   // with total confidence and sends the biggest app on the cheapest rung. A confident wrong answer is
   // worse than an admitted unknown. `'E commerce website'` is exactly that request: one space away
   // from a pattern that would have scored it 58, and it opened a 26.7-minute build on the flash rung.
-  if (prompt !== undefined && signalsMatchedNothing(prompt)) return statesAScope(prompt);
+  if (prompt !== undefined && signalsMatchedNothing(prompt, buildIntent)) return statesAScope(prompt);
   return Number.isFinite(score) && Math.abs(score - COMPLEX_SCORE_LINE) <= BORDERLINE_MARGIN;
 }
 
@@ -289,7 +290,7 @@ export function scaffoldedComplexityDecision(score: number): ComplexityDecision 
  * worst case is the behaviour that existed before this module — never an error, never a hang.
  */
 export async function decideComplexity(
-  input: { prompt: string; score: number },
+  input: { prompt: string; score: number; buildIntent?: BuildIntent },
   llmCall?: (prompt: string) => Promise<string>,
   opts: { timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
 ): Promise<ComplexityDecision> {
@@ -301,7 +302,7 @@ export async function decideComplexity(
     return { ...base, verdict: 'simple', source: 'disabled', reason: 'complexity routing is switched off' };
   }
   const unread = signalsCouldNotRead(input?.prompt ?? '');
-  const unmatched = !unread && signalsMatchedNothing(input?.prompt ?? '');
+  const unmatched = !unread && signalsMatchedNothing(input?.prompt ?? '', input?.buildIntent);
   /** Why the call is being bought — three different facts, and the admin report should say which. */
   const why = unread
     ? 'the request is not in a script the scorer reads'
@@ -315,7 +316,7 @@ export async function decideComplexity(
     ? `${why}; ${how}. The ${score} score came from evidence the scorer could not read, so it does not `
       + `decide the routing: this build opens on the cheap rung and the ladder climbs if it has to.`
     : `${why}; ${how}, so the score stands`;
-  if (!needsSecondOpinion(score, input?.prompt) || !llmCall) {
+  if (!needsSecondOpinion(score, input?.prompt, input?.buildIntent) || !llmCall) {
     const nothingToSize = unmatched && !statesAScope(input?.prompt ?? '');
     return {
       ...base,

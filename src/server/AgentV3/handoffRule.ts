@@ -54,3 +54,13 @@ export function contractRenameHandoffLine(renames: ReadonlyArray<{ from: string;
     + 'In a type position always write the NEW name and import it from the shared types file — the old name is the component, '
     + 'and the compiler\'s "Did you mean typeof …" suggestion is only right when you mean the component itself.';
 }
+
+/**
+ * The same line as a clause of the hand-off prompt: '' when nothing was renamed, otherwise the line with its
+ * leading space. The empty case lives here so the route's template carries no condition — the chat handler sits at
+ * TypeScript's control-flow limit (TS2563).
+ */
+export function contractRenameHandoffClause(renames: ReadonlyArray<{ from: string; to: string; component?: string }> | undefined): string {
+  const line = contractRenameHandoffLine(renames);
+  return line ? ` ${line}` : '';
+}

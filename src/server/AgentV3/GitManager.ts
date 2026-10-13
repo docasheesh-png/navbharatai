@@ -36,18 +36,18 @@ export class GitManager implements Checkpointer {
       //    of dependency files on every single file write → ~45s per commit → the build blew
       //    past the wall-clock cap and "timed out". We append only the patterns that are
       //    missing, so a real project .gitignore is preserved, never clobbered.
-      await this.run(ENSURE_GITIGNORE_CMD);
       // 2) Initialise the repo + identity (idempotent).
-      await this.run(
-        'git rev-parse --git-dir >/dev/null 2>&1 || ' +
-          '( git init -q && git config user.email "agent@navbharatai.dev" ' +
-          '&& git config user.name "NavBharatAI Pro" )',
-      );
       // 3) Untrack heavy dirs an OLDER sandbox may have committed before this .gitignore
       //    existed, so future checkpoints stay fast. Best-effort — a no-op on a fresh repo.
-      await this.run(
+      // ⏱️ ONE sandbox round trip, the same three steps in the same order (autopsy 303e8a6f): they were three
+      // serial commands on the critical path to the first model call, and their exit codes were never read.
+      await this.run([
+        ENSURE_GITIGNORE_CMD,
+        'git rev-parse --git-dir >/dev/null 2>&1 || '
+          + '( git init -q && git config user.email "agent@navbharatai.dev" '
+          + '&& git config user.name "NavBharatAI Pro" )',
         'git rm -r --cached --quiet node_modules dist build .next out coverage .venv 2>/dev/null || true',
-      );
+      ].join('; '));
       this.ready = true;
       return true;
     } catch {

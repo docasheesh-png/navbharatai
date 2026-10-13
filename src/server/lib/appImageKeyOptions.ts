@@ -2,12 +2,15 @@
 // aur bhi api keys ke bare me bataye jaise grok, gemini, chatgpt — user jo bhi select kare uski
 // location/link bataye, user ko guide kare ki keys kaha dalni hai").
 //
-// Read by the builder's instruction (inAppImageGeneration.ts), the recipe (ImageAiGenerator.ts), the
-// checklist at the end of a build (AppRequirements.ts), the owner's error message and the vault lookup
-// (appImageKeys.ts) — so a secret's name, its link and where it goes cannot drift between them.
-// PURE — no imports, no I/O.
+// Read by the builder's instruction (inAppImageGeneration.ts), the recipe (ImageAiGenerator.ts), the owner's
+// error message and the vault lookup (appImageKeys.ts). The secret NAMES and console links come from
+// src/lib/imageKeyNames.ts, which the end-of-build checklist (AppRequirements.ts) and the "where do I get this
+// key" screens (credentialRecipes.ts) read too — so a secret's name and its link cannot drift between them.
+// PURE — no I/O.
 
-export type AppImageProvider = 'navbharatai' | 'openai' | 'gemini' | 'xai' | 'pollinations';
+import { IMAGE_KEY_NAMES, type AppImageProvider } from '../../lib/imageKeyNames';
+
+export type { AppImageProvider } from '../../lib/imageKeyNames';
 
 export interface AppImageKeyOption {
   provider: AppImageProvider;
@@ -25,38 +28,30 @@ export interface AppImageKeyOption {
 /** Where the owner pastes any of them. One sentence, used everywhere. */
 export const APP_KEYS_PLACE = 'NavBharatAI Pro → More → Keys & Secrets (or Settings → App Settings → Secrets & API Keys)';
 
-export const APP_IMAGE_KEY_OPTIONS: readonly AppImageKeyOption[] = [
-  {
-    provider: 'navbharatai', secret: 'NAVBHARATAI_API_KEY', aliases: [],
+/** What the owner reads for each key. The name and the link come from IMAGE_KEY_NAMES. */
+const OWNER_WORDS: Record<AppImageProvider, { label: string; getIt?: string; note: string }> = {
+  navbharatai: {
     label: 'NavBharatAI API key',
     getIt: 'Home → Other AI → Developer Tools → NavBharatAI API → create a key with the "Images" permission',
     note: 'No other account needed. 5 free pictures a day, then ₹1 each from your NavBharatAI wallet.',
   },
-  {
-    provider: 'openai', secret: 'OPENAI_API_KEY', aliases: [],
-    label: 'OpenAI (ChatGPT) key',
-    getIt: 'https://platform.openai.com/api-keys',
-    note: 'Billed by OpenAI to your OpenAI account.',
-  },
-  {
-    provider: 'gemini', secret: 'GEMINI_API_KEY', aliases: ['GOOGLE_API_KEY'],
-    label: 'Google Gemini key',
-    getIt: 'https://aistudio.google.com/apikey',
-    note: 'Billed by Google to your Google account.',
-  },
-  {
-    provider: 'xai', secret: 'XAI_API_KEY', aliases: ['GROK_API_KEY'],
-    label: 'xAI Grok key',
-    getIt: 'https://console.x.ai',
-    note: 'Billed by xAI to your xAI account.',
-  },
-  {
-    provider: 'pollinations', secret: 'POLLINATIONS_API_KEY', aliases: [],
+  openai: { label: 'OpenAI (ChatGPT) key', note: 'Billed by OpenAI to your OpenAI account.' },
+  gemini: { label: 'Google Gemini key', note: 'Billed by Google to your Google account.' },
+  xai: { label: 'xAI Grok key', note: 'Billed by xAI to your xAI account.' },
+  pollinations: {
     label: 'Pollinations secret key (sk_…)',
-    getIt: 'https://enter.pollinations.ai',
     note: 'Use the SECRET key (sk_…), never the publishable pk_ key. Billed in Pollinations "pollen".',
   },
-];
+};
+
+export const APP_IMAGE_KEY_OPTIONS: readonly AppImageKeyOption[] = IMAGE_KEY_NAMES.map((k) => ({
+  provider: k.provider,
+  secret: k.secret,
+  aliases: k.aliases,
+  label: OWNER_WORDS[k.provider].label,
+  getIt: OWNER_WORDS[k.provider].getIt ?? k.consoleLink,
+  note: OWNER_WORDS[k.provider].note,
+}));
 
 /** The plain-words list of options, for the owner. PURE. */
 export function appImageKeyOptionsText(): string {

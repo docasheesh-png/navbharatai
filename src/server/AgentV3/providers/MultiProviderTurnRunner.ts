@@ -22,7 +22,8 @@ import { modelAlwaysReasons } from './glmThinking';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
-import { isBudgetEndedError, isSlowStreamAbandon, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
+import { isBudgetEndedError, isSlowStreamAbandon, isSilentAbandon, providerNeverAnswered, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
+import type { WasteKind } from '../providerWaste';
 import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
 import { abandonedTurnUsage } from '../unbilledTurns';
 import { turnDiscardedTruncatedOutput } from '../TruncationRecovery';
@@ -88,7 +89,7 @@ export interface MultiProviderOptions {
    * Measurement only (autopsy 21b431e1): the bench's trigger is a COUNT of consecutive timeouts and
    * its cost is a CLOCK, and nothing had ever compared the two. Never read back, never acted on.
    */
-  onAttemptWasted?: (family: string, kind: 'timeout' | 'crawl' | 'rate-limit' | 'error', ms: number) => void;
+  onAttemptWasted?: (family: string, kind: WasteKind, ms: number) => void;
   /**
    * Billing Phase 3 — called when a turn succeeds, with the provider that answered, its measured
    * token usage, AND the exact model id that answered (TurnResult.model — used by REAL-cost billing
@@ -765,6 +766,12 @@ export function makeMultiProviderTurnRunner(
       const fellBackFrom: string[] = [];
       let lastError: unknown;
       let alive = 0;
+      /**
+       * Time spent on rungs that were tried and FAILED before the one that answers — MEASURED per attempt
+       * (the same number `onAttemptWasted` receives), never derived as "caller's wait minus the answer"
+       * (adversarial review of 303e8a6f: a subtraction charged the caller's own preparation to the engines).
+       */
+      let fallbackMs = 0;
       // P4 — a sticky runner opens where this build's escalations / successes left it (never below).
       const stickyStart = opts.sticky ? stickyStartIndex(bench.sticky ??= createStickyState(), chain) : 0;
       for (let i = stickyStart; i < chain.length; i++) {
@@ -885,6 +892,8 @@ export function makeMultiProviderTurnRunner(
             ...params, canAbandonSlowStream, hasNextRung: i + 1 < chain.length,
             maxTokens: reasoningAwareAsk(params.maxTokens, chain[i].modelId),
           }), params.signal);
+          /** This rung's own time — not the rungs tried, skipped or abandoned before it (see TurnResult.attemptMs). */
+          const answeredInMs = Math.max(0, now() - attemptStartedAt);
           timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
@@ -926,7 +935,7 @@ export function makeMultiProviderTurnRunner(
             const slowKey = slowKeyFor(chain[i]);
             const next = recordSlowSample(slowRungs.get(slowKey) ?? EMPTY_SLOW_RUNG_STATE, {
               outputTokens: result.usage?.outputTokens ?? 0,
-              observedMs: Math.max(0, now() - attemptStartedAt),
+              observedMs: answeredInMs,
               ...(result.usage?.measured === false ? { measured: false as const } : {}),
             });
             slowRungs.set(slowKey, next);
@@ -946,8 +955,13 @@ export function makeMultiProviderTurnRunner(
               }
             }
           } catch { /* throughput bookkeeping must never disturb the build */ }
-          return result;
+          // ⏱️ THE ANSWERER'S OWN CLOCK RIDES OUT WITH ITS ANSWER (autopsy 303e8a6f). Callers time the whole
+          // chain; the row they file is labelled with the rung that answered. Without this, KIMI's 3.4 s was
+          // recorded as 18.4 s — GLM's 15 s crawl charged to the engine that rescued it. `??` keeps the
+          // innermost value when one chain wraps another; the rungs left behind add up across both.
+          return { ...result, attemptMs: result.attemptMs ?? answeredInMs, fallbackMs: fallbackMs + (result.fallbackMs ?? 0) };
         } catch (err) {
+          fallbackMs += Math.max(0, now() - attemptStartedAt);
           // 🔴 A STOP IS NOT A PROVIDER FAILURE (autopsy 2720e553). Decided FIRST, before any
           // classification below can bench this vendor, count the wait as its waste, or fall to the
           // next rung and start a new call for a build nobody is waiting on.
@@ -1047,14 +1061,19 @@ export function makeMultiProviderTurnRunner(
                 if (Number.isFinite(until)) bench.slowBenchUntil.set(slowKey, until);
                 else bench.slowBenchUntil.delete(slowKey);
                 const elapsedMs = Math.max(0, now() - attemptStartedAt);
+                // Silence and a slow answer are different events about the provider (autopsy 303e8a6f): the
+                // report said "answering far below a usable rate … mid-answer" of an engine that never answered.
                 opts.onProviderBenched?.(
                   reportName,
-                  `${chain[i].modelId ? `${chain[i].modelId} ` : ''}was answering far below a usable rate after `
-                  + `${Math.round(elapsedMs / 1000)}s — abandoned mid-answer and `
+                  `${chain[i].modelId ? `${chain[i].modelId} ` : ''}`
+                  + (isSilentAbandon(err)
+                    ? `had not started answering after ${Math.round(elapsedMs / 1000)}s — given up before its first word and `
+                    : `was answering far below a usable rate after ${Math.round(elapsedMs / 1000)}s — abandoned mid-answer and `)
                   + (Number.isFinite(until)
                     ? `skipped for ${Math.round((until - now()) / 1000)}s, then tried once more, `
                     : abandons >= 2
-                      ? 'skipped for the rest of this build (it crawled again when tried once more), '
+                      // The tail says what the re-probe saw, too — silence is not a crawl (adversarial review).
+                      ? `skipped for the rest of this build (it ${isSilentAbandon(err) ? 'was silent' : 'crawled'} again when tried once more), `
                       : 'skipped for the rest of this build, ')
                   + 'so the ladder can reach the next engine instead of waiting it out',
                 );
@@ -1154,8 +1173,11 @@ export function makeMultiProviderTurnRunner(
  * waste at all because OUR OWN clock ended it (a lane cap, a build budget). Budget-ended is checked
  * FIRST: such an error can also read as a timeout, and the order is the whole rule. Pure.
  */
-export function wasteKindFor(err: unknown): 'timeout' | 'crawl' | 'rate-limit' | 'error' | null {
+export function wasteKindFor(err: unknown): WasteKind | null {
   if (isBudgetEndedError(err)) return null;
+  // Silence before the crawl and timeout tests: a never-answered call carries the mark whether we walked away or
+  // waited out its bound, and silence is a different fact from a slow answer (autopsy 303e8a6f + its review).
+  if (providerNeverAnswered(err)) return 'silent';
   if (isSlowStreamAbandon(err)) return 'crawl';
   if (isTimeoutProviderError(err)) return 'timeout';
   if (isRateLimitProviderError(err)) return 'rate-limit';

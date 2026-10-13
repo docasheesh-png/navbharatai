@@ -4,6 +4,7 @@
 // passes without it. The user's own packages are never touched.
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
+import { anchorOf, awaitedCallAt } from './helpers/sourceSlice';
 import { resolve } from 'path';
 import {
   depsAddedByBuild, pruneCandidates, isSafePackageName, parseNeeded, peerCheckScript, hasBuildScript,
@@ -147,7 +148,10 @@ describe('removing, proving, and putting it back', () => {
 
 describe('the route wiring (source guards)', () => {
   it('the baseline is read after the platform seeds and before the first model call', () => {
-    const at = route.indexOf("const packageJsonAtBuildStart: string | null = await actuator.readFile(workspaceId, 'package.json')");
+    // The declaration's own value is the awaited read — bare or inside its setup timing step (303e8a6f).
+    const decl = 'const packageJsonAtBuildStart: string | null = ';
+    const at = anchorOf(route, decl);
+    expect(awaitedCallAt(route.slice(at), "actuator.readFile(workspaceId, 'package.json')")).toBe(decl.length);
     expect(at).toBeGreaterThan(route.indexOf('const pastedSeed = new Map'));
     expect(at).toBeLessThan(route.indexOf('const fastLaneWouldRun = '));
   });

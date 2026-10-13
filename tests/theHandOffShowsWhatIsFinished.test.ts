@@ -3,6 +3,12 @@
 // pressed Stop at 96.5 s. The admin chose: keep waiting (that call salvaged App.tsx), but show the
 // finished files at once. So the files done when the decision is taken are saved and announced
 // immediately, each in-flight file as it lands, and the final salvage still writes last.
+//
+// UPDATED 2026-10-13 (build report 9c612cdb, Q-912): the salvage no longer writes everything again. The writer here
+// now answers per file, as the route's does (writeOutcomes.ts), so the lane knows the early saves landed and the
+// salvage writes only what is missing or changed — here nothing, so the early saves ARE the last word. The old
+// expectation ("the salvage writes everything last") pinned the double write itself; a writer that answers
+// nothing still gets exactly that behaviour, and the last test below keeps it pinned.
 import { describe, it, expect } from 'vitest';
 import { runSimpleBuild, handOffEarlySaveEnabled } from '../src/server/AgentV3/SimpleBuilder';
 import type { OneShotFile } from '../src/server/AgentV3/OneShotBuilder';
@@ -10,7 +16,8 @@ import type { OneShotFile } from '../src/server/AgentV3/OneShotBuilder';
 const manifest = ['src/components/Alpha.tsx :: alpha', 'src/components/Beta.tsx :: beta', 'src/components/Gamma.tsx :: gamma'].join('\n');
 const block = (p: string) => `<<<FILE ${p}>>>\nexport const x = 1;\n<<<ENDFILE>>>`;
 
-function run(env: Record<string, string | undefined> = {}) {
+function run(env: Record<string, string | undefined> = {}, opts: { answers?: boolean } = {}) {
+  const answers = opts.answers ?? true;
   const saved = Object.assign({}, process.env);
   Object.assign(process.env, env);
   let releaseBeta!: () => void;
@@ -37,6 +44,8 @@ function run(env: Record<string, string | undefined> = {}) {
       events.push(`${betaReleased ? 'after' : 'before'}:${files.map((f) => f.path.split('/').pop()).join(',')}`);
       // Beta is held until the early save has been seen, so the test proves the save did not wait for it.
       if (!betaReleased) setTimeout(releaseBeta, 0);
+      // The route's writer answers per file (Q-912); `answers: false` is a writer that answers nothing.
+      return answers ? files.map((f) => ({ path: f.path, ok: true })) : undefined;
     },
     onFilesReady: (files: OneShotFile[]) => { ready.push(files.map((f) => f.path.split('/').pop()!)); },
   } as never);
@@ -54,11 +63,21 @@ describe('Q-422: the finished files are saved when the hand-off is decided', () 
     expect(ready[0]).toEqual(['Alpha.tsx']);
   });
 
-  it('the in-flight file is saved as it lands, and the salvage still writes everything last', async () => {
+  it('the in-flight file is saved as it lands, and the salvage writes only what is not there yet — here nothing', async () => {
+    // Was: `expect(events[events.length - 1]).toBe('after:Alpha.tsx,Beta.tsx')` — the salvage rewriting both files
+    // the early saves had just written. Changed deliberately (Q-912): that second write was the double write.
     const { p, events, ready } = run();
     const r = await p;
     expect(events).toContain('after:Beta.tsx');
     expect(ready).toContainEqual(['Beta.tsx']);
+    expect(events).toEqual(['before:Alpha.tsx', 'after:Beta.tsx']);
+    expect([...(r.salvagedPaths ?? [])].sort()).toEqual(['src/components/Alpha.tsx', 'src/components/Beta.tsx']);
+  });
+
+  it('a writer that answers nothing keeps the old behaviour: the salvage writes everything last', async () => {
+    // Unknown is never confirmed, so the lane cannot skip a file it never heard landed (writeOutcomes.ts).
+    const { p, events } = run({}, { answers: false });
+    const r = await p;
     expect(events[events.length - 1]).toBe('after:Alpha.tsx,Beta.tsx');
     expect([...(r.salvagedPaths ?? [])].sort()).toEqual(['src/components/Alpha.tsx', 'src/components/Beta.tsx']);
   });

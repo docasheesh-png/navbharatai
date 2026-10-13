@@ -231,7 +231,8 @@ describe('§F a login nobody asked for is not built', () => {
     const src = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
     expect(src).toContain('requestScopeVerdict({ request: planning.text, newBuild: intent === \'new_build\' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain })');
     expect(src).toContain('buildPrompt = `${requestScopeText}\\n\\n---\\n\\n${buildPrompt}`;');
-    expect(src).toContain('unknownNameSuffix + requestScopeSuffix,');
-    expect(src).toContain('runOneShot({ prompt: prompt + unknownNameSuffix + requestScopeSuffix,');
+    // One request for both fast lanes since Q-975 (fastLaneRequest).
+    expect(src).toContain('unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix;');
+    expect(src).toContain('runOneShot({ prompt: fastLaneRequest,');
   });
 });

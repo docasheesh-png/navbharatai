@@ -252,6 +252,17 @@ export interface RunTurnParams {
 /** The slice of ClaudeClient the AgentRunner loop depends on (DI/testing). */
 export interface TurnRunner {
   runTurn(params: RunTurnParams): Promise<TurnResult>;
+  /**
+   * The model id this runner was BUILT to call first — a multi-provider chain's first rung
+   * (`glm-4.7-flashx` on Weak), or `NO_ENGINE_CONFIGURED` for a tier with no runnable rung.
+   *
+   * A LABEL FOR RECORDS ONLY (Q-970). It is never sent anywhere and never routes: every rung pins its
+   * own model. It exists so a record that must name a model before (or without) any rung answering —
+   * a failed or stopped call, the context meter — names the chain's own plan instead of the request's
+   * `params.model`, which since the three-ladder rewrite (2026-09-14) is the Claude default every rung
+   * overrides. Optional: a single-provider runner or a test stub has no chain to describe.
+   */
+  readonly plannedModel?: string;
 }
 
 /** Minimal structural type of the Anthropic client method we use (for DI/tests). */

@@ -129,10 +129,76 @@ export function unreachedProvidersNote(providers: readonly string[], delivered: 
  * `claude-sonnet-4-6` on a weak build that never called Claude (4efab9d7).
  */
 export function firstRungLabel(chain: readonly ChainRung[]): string | undefined {
+  const first = firstRung(chain);
+  if (!first) return undefined;
+  return first.rung.modelId ? `${first.family}(${first.rung.modelId})` : first.family;
+}
+
+/** The first rung that names a provider, with its family resolved — the one walk both readers share. */
+function firstRung(chain: readonly ChainRung[]): { rung: ChainRung; family: string } | undefined {
   for (const r of chain ?? []) {
     const family = (r?.reportAs || r?.name || '').trim();
-    if (!family) continue;
-    return r.modelId ? `${family}(${r.modelId})` : family;
+    if (family) return { rung: r, family };
   }
   return undefined;
+}
+
+/**
+ * The MODEL ID a record should name when it means "the engine this chain was built to call first" —
+ * `glm-4.7-flashx` on Weak, `glm-5.3` on Strong. The first rung's pinned model id, else its family
+ * (`reportAs || name`), else undefined for an empty chain.
+ *
+ * 🔴 WHY IT EXISTS (Q-970, autopsy 303e8a6f, 2026-10-13). A Weak build whose prompt scored in the old
+ * "sonnet" band recorded `claude-sonnet-4-6` — a model that build can never call — on every failed and
+ * stopped model call, in its prompt audit, in its decision trace and in its debug tag. They all read one
+ * variable, `selectBuildModel`'s answer, which was written before the three-ladder rewrite (2026-09-14)
+ * and still speaks the old Haiku/Sonnet vocabulary. Since that rewrite every rung pins its own model,
+ * so that value routes nothing (see `firstRungLabel` above: "a LABEL, not a routing decision").
+ * Earlier autopsies fixed ONE reader of it at a time — six times — and the source survived. This is
+ * the source: the chain itself says what it plans to call, and the chain is the only thing that knows.
+ *
+ * ⚠️ Still a LABEL. It names the PLAN, never a delivery: a record that knows what actually answered
+ * (`TurnResult.model`, the ledger) must prefer that. PURE.
+ */
+export function plannedModelOf(chain: readonly ChainRung[]): string | undefined {
+  const first = firstRung(chain);
+  if (!first) return undefined;
+  const id = typeof first.rung.modelId === 'string' ? first.rung.modelId.trim() : '';
+  return id || first.family;
+}
+
+/** What a chain with no runnable rung plans to call: nothing, and it says so rather than naming a model. */
+export const NO_ENGINE_CONFIGURED = 'none (no engine configured)';
+
+/** What a build record says when no model call completed. The words the signed manifest has used since 120eb52f. */
+export const NO_MODEL_CALL_MADE = 'none (no model call was made)';
+
+/**
+ * THE ONE MODEL NAME a build-level record carries (prompt audit, signed manifest, decision trace, debug
+ * tag) — so the four can never disagree, and none of them can fall back to a Claude id the tier never ran.
+ *
+ * Order, most specific truth first:
+ *   1. `delivered`        — the model id that delivered most of the build (the ledger's answer);
+ *   2. `deliveredFamily`  — the provider that delivered, when no entry carried a model id;
+ *   3. no call completed  — `NO_MODEL_CALL_MADE`. A build no model touched does not name one, not even
+ *                           the one it planned (autopsy 120eb52f: a 9-second stopped build read Haiku);
+ *   4. `planned`          — the chain's own first rung (`TurnRunner.plannedModel`);
+ *   5. `'unknown'`        — never an invented id.
+ *
+ * It takes no Claude helper and never will: `sonnetModel()` & co. answer "which Claude id would a Claude
+ * rung pin", which is not a question about this build. PURE.
+ */
+export function buildRecordModel(i: {
+  delivered?: string | null;
+  deliveredFamily?: string | null;
+  planned?: string | null;
+  anyCallMade: boolean;
+}): string {
+  const clean = (v: string | null | undefined): string | undefined => {
+    const s = typeof v === 'string' ? v.trim() : '';
+    return s || undefined;
+  };
+  return clean(i.delivered)
+    ?? clean(i.deliveredFamily)
+    ?? (i.anyCallMade ? (clean(i.planned) ?? 'unknown') : NO_MODEL_CALL_MADE);
 }

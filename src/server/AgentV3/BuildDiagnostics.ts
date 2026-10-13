@@ -1815,7 +1815,10 @@ export class BuildDiagnostics {
             ? `A model turn timed out with no provider answering (${rec.error})`.slice(0, 400)
             : `Model call failed (${rec.model ?? 'model'}): ${rec.error ?? 'unknown error'}`.slice(0, 400),
         autoResolved: false,
-        detail: rec.provider ? `provider=${rec.provider}` : turnTimedOutUnanswered ? `planned model=${rec.model ?? 'unknown'} — the label, not a provider that ran` : undefined,
+        // A FAILED row with no provider is one the whole chain threw on (AgentRunner never passes one): its
+        // `model` is the chain's PLANNED first rung, not a provider that ran. Said for every such failure, not
+        // only a timeout, so "Model call failed (glm-4.7-flashx)" cannot be read as "GLM alone failed" (Q-970).
+        detail: rec.provider ? `provider=${rec.provider}` : !rec.ok ? `planned model=${rec.model ?? 'unknown'} — the label, not a provider that ran` : undefined,
       });
     }
   }

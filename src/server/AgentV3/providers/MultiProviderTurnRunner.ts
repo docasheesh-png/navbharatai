@@ -18,6 +18,7 @@
 import { createStickyState, recordStickySuccess, stickyStartIndex, type StickyState } from '../reliability/stickyRung';
 import { crawlBenchWindowMs, mayAbandonCrawl, crawlBenchUntil } from '../crawlBench';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
+import { plannedModelOf } from '../runnerChainSummary';
 import { modelAlwaysReasons } from './glmThinking';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
@@ -762,6 +763,9 @@ export function makeMultiProviderTurnRunner(
   const distinctSlowRungs = new Set(chain.map(slowKeyFor)).size;
   const crawlWindowMs = crawlBenchWindowMs();
   return {
+    // What this chain plans to call first — for records only, never sent (see TurnRunner.plannedModel).
+    // `NamedRunner` carries the same identifying fields as `ChainRung`, so the one reader both use is shared.
+    plannedModel: plannedModelOf(chain),
     async runTurn(params: RunTurnParams): Promise<TurnResult> {
       const fellBackFrom: string[] = [];
       let lastError: unknown;

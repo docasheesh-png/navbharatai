@@ -555,6 +555,13 @@ export class AgentRunner {
       thinking,
       maxBudgetUsd,
     } = this.opts;
+    // 🔴 THE MODEL A RECORD NAMES IS NOT THE MODEL THE REQUEST CARRIES (Q-970, autopsy 303e8a6f). `model`
+    // is the request's `params.model`, and since the three-ladder rewrite (2026-09-14) it is the Claude
+    // default every rung overrides — so a Weak build that never ran Claude filed each failed and stopped
+    // call under `claude-sonnet-4-6`. Records name what the CHAIN plans to call first; `model` still goes
+    // to `client.runTurn` exactly as before, so no provider sees a different value. Runners that describe
+    // no chain (a single provider, a test stub) keep the requested id, as they always did.
+    const recordModel = (typeof client.plannedModel === 'string' ? client.plannedModel.trim() : '') || model;
     // Bill by explicit power level when set; else fall back to the legacy onlyOpus boolean.
     const billingPower = powerLevel ?? onlyOpus;
     const maxSteps = this.opts.maxSteps ?? 50;
@@ -988,7 +995,7 @@ export class AgentRunner {
           //   our clock → a budget end (LLM_CALL_BUDGET_ENDED), naming the clock and the engine it was on;
           //   our platform → a stopped call naming the platform event and the engine.
           if (this.opts.signal?.aborted && isBuildStoppedError(err)) {
-            const stop = stoppedCallFields(abortCauseOf(this.opts.signal as AbortSignal), err, model);
+            const stop = stoppedCallFields(abortCauseOf(this.opts.signal as AbortSignal), err, recordModel);
             try {
               this.opts.onLlmCall?.({
                 model: stop.model, promptPreview, promptChars,
@@ -1010,9 +1017,10 @@ export class AgentRunner {
             err = new Error(`model turn ${steps} timed out after ${turnTimeoutMs}ms`);
           }
           // #4 — capture the FAILED model turn before it propagates (provider error, timeout, …).
+          // No rung reported who it was, so the row names the chain's PLAN, never the request's Claude id.
           try {
             this.opts.onLlmCall?.({
-              model, promptPreview, promptChars,
+              model: recordModel, promptPreview, promptChars,
               responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0,
               inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - llmStartedAt,
               ok: false, error: err instanceof Error ? err.message : String(err),
@@ -1037,10 +1045,11 @@ export class AgentRunner {
         // Quiz-app autopsy 2026-07-17: record the model that ACTUALLY answered (TurnResult.model —
         // e.g. a GLM rung behind the multi-provider chain), not the requested id, so the report's
         // llmCalls agree with providerDelivery/builtBy instead of labelling a GLM turn "claude-haiku".
-        // The requested id stays the fallback for runners that don't report their model.
+        // A rung that answers without naming its model falls back to the chain's plan (Q-970), and only a
+        // runner that describes no chain falls back to the requested id.
         try {
           this.opts.onLlmCall?.({
-            model: turn.model ?? model, promptPreview, promptChars,
+            model: turn.model ?? recordModel, promptPreview, promptChars,
             responsePreview: turn.text, responseChars: turn.text.length,
             finishReason: turn.stopReason, toolCalls: turn.toolUses.length,
             inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens,
@@ -1055,7 +1064,7 @@ export class AgentRunner {
         // concludes the product got worse. Uses the PROVIDER-REPORTED count, never an estimate, and
         // only fires when the reading meaningfully changed.
         try {
-          const ctx = describeContextUsage(turn.usage.inputTokens, turn.model ?? model);
+          const ctx = describeContextUsage(turn.usage.inputTokens, turn.model ?? recordModel);
           if (shouldEmitContextUsage(this.lastContextUsage, ctx)) {
             this.lastContextUsage = ctx;
             events.emit({ type: 'context_usage', pct: ctx.pct, level: ctx.level, note: ctx.note, ts: Date.now() });

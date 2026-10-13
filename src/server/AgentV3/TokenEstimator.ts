@@ -91,3 +91,26 @@ export function contextUsage(tokens: number, model: string | null | undefined, w
     overLimit: ratio >= 1,
   };
 }
+
+/**
+ * The model with the SMALLEST context window in a list — the one a pre-call warning must be measured
+ * against when the prompt may land on any of them. First wins on a tie; undefined for an empty list.
+ *
+ * WHY THE SMALLEST (Q-970, autopsy 303e8a6f). The build's pre-call "Large context" warning measured the
+ * prompt against `selectBuildModel`'s answer — a Claude id (200k) on every tier, including Weak, which can
+ * never call Sonnet. The chain that really receives the prompt opens on GLM (128k) or, on a complex build,
+ * on Kimi (256k) with GLM behind it. Any one rung's window can over-state the room the build has, and the
+ * comment above names that as the harmful direction: it "warns after the failure". The tightest window
+ * among the rungs that may answer is the only number that never does. PURE.
+ */
+export function tightestContextModel(models: ReadonlyArray<string | null | undefined>): string | undefined {
+  let best: string | undefined;
+  let bestLimit = Infinity;
+  for (const m of models ?? []) {
+    const name = typeof m === 'string' ? m.trim() : '';
+    if (!name) continue;
+    const limit = modelContextLimit(name);
+    if (limit < bestLimit) { best = name; bestLimit = limit; }
+  }
+  return best;
+}

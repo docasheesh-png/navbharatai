@@ -17,10 +17,10 @@
  * 🔒 THE FOUR INTEGRITY RULES, each forced by something real in the data
  *
  * 1. **A FAILED CALL'S MODEL ID IS NOT THE MODEL THAT FAILED, so failures are never attributed to a
- *    model here.** `AgentRunner`'s failure path (AgentRunner.ts:586) reports the *requested* model —
- *    the outer `model` variable, a Claude id — because the chain threw before any rung reported which
- *    one it was. Only the SUCCESS path carries `turn.model ?? model`, i.e. the rung that actually
- *    answered. Counting failed calls per model would therefore file every GLM starvation under
+ *    model here.** `AgentRunner`'s failure path reports the chain's PLANNED first rung
+ *    (`TurnRunner.plannedModel`; it reported the request's Claude id until Q-970) — because the chain
+ *    threw before any rung reported which one it was, and every rung of the chain may have been tried.
+ *    Only the SUCCESS path carries `turn.model`, i.e. the rung that actually answered. Counting failed calls per model would therefore file every GLM starvation under
  *    `claude-haiku`, which is worse than not counting it: it would be a plausible, wrong number in
  *    exactly the comparison this module exists to inform.
  *    So per-MODEL stats come from successful calls, and failures are reported per PROVIDER from

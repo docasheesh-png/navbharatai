@@ -26,7 +26,8 @@ describe('🔴 the reported case', () => {
     const bill = decideCancelledBuildBill({ ...base, filesWritten: 12, preseededUnchanged: 12 });
     expect(bill.billedUsd).toBe(0);
     expect(bill.discountPct).toBe(100);
-    expect(bill.delivery).toBe('nothing');
+    // 'seed-only' since 303e8a6f — still free; the user is told the template is kept, not that nothing changed.
+    expect(bill.delivery).toBe('seed-only');
     expect(bill.userMessage).toBeNull();
   });
 

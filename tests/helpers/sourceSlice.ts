@@ -112,6 +112,29 @@ export function anchorOf(src: string, needle: string): number {
 }
 
 /**
+ * The index of an AWAITED call — written bare (`await f(x)`) or inside a timing step
+ * (`await steps.step('label', () => f(x)…)`) — or a FAILURE, never `-1`.
+ *
+ * 🔴 THE CLASS THIS REMOVES (autopsy 303e8a6f, 2026-10-12). Setup work was wrapped in timed steps so every
+ * second before the first model call is in a window, and four guards failed on correct code: each one pinned
+ * the literal text `await f(x)`, so a wrapper that changes nothing about WHEN or WHETHER the call is awaited
+ * read as the call having gone. What these guards protect is "this call is awaited here"; the timing wrapper
+ * awaits the call it is handed, so both spellings satisfy that and nothing else does.
+ */
+export function awaitedCallAt(src: string, call: string): number {
+  const text = String(src ?? '');
+  const escaped = call.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp(`await (?:[A-Za-z_$][\\w$]*\\.step\\('[^']*', \\(\\) => )?${escaped}`).exec(text);
+  if (!m) {
+    throw new Error(
+      `sourceSlice.awaitedCallAt: no awaited ${JSON.stringify(call)} in this source (bare or in a timing step). `
+      + 'The code this guard was written against has changed — re-anchor the test rather than widening it.',
+    );
+  }
+  return m.index;
+}
+
+/**
  * The source with COMMENTS REMOVED, so prose can neither satisfy nor defeat an assertion about code.
  *
  * 🔴 WHY IT IS SHARED (six files hand-rolled this on 2026-09-17, and one of them got it wrong). This

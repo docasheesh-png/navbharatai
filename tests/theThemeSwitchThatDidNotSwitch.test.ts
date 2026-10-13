@@ -19,6 +19,7 @@ import {
   writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckSummary, emptyWriteTypecheckStats,
 } from '../src/server/AgentV3/writeTimeTypecheck';
 import { themeTsx } from '../src/server/AgentV3/goldenScaffolds/base';
+import { GOLDEN_SCAFFOLDS, goldenBuildPrompt } from '../src/server/AgentV3/goldenScaffolds/registry';
 
 const read = (p: string) => readFileSync(p, 'utf8');
 
@@ -88,8 +89,12 @@ describe('2 · the explorer presses a light/dark switch until the colours change
   it('the template\'s own switch says what it is, so a builder has no reason to replace it', () => {
     expect(themeTsx).toContain("'🌓 Auto'");
     expect(THEME_CONTROL.test('Toggle light/dark theme')).toBe(true);
-    const route = read('src/server/routes/agentv3.ts');
-    expect(route).toContain("KEEP the template's own working controls — above all its light/dark switch (ThemeToggle in src/theme.tsx");
+    // The note moved into goldenBuildPrompt (autopsy 303e8a6f), so the builder's actual instruction is read —
+    // for every SIMPLE template — rather than a line of route source.
+    for (const g of GOLDEN_SCAFFOLDS.filter((x) => x.tier === 'simple')) {
+      expect(goldenBuildPrompt(g, 'x'), g.id).toContain("KEEP the template's own working controls — above all its light/dark switch (ThemeToggle in src/theme.tsx");
+    }
+    expect(read('src/server/routes/agentv3.ts')).toContain('buildPrompt = goldenBuildPrompt(golden, buildPrompt);');
   });
 });
 

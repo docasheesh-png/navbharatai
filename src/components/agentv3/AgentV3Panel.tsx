@@ -2,6 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
 import { stopVersionPreview } from '../../lib/versionPreviewStop';
+import { isLiveStatusLine, withoutStaleLiveStatus, latestLiveStatusText, lastActivityTs, ETA_LINE_ID } from '../../lib/liveStatusLine';
+import { buildElapsedMs } from './buildClock';
 import { CONTINUE_INTERRUPTED_BUILD_PROMPT, CONTINUE_PAST_BUDGET_PROMPT, CONTINUE_AND_FIX_BUILD_PROMPT } from '../../lib/continueBuildPrompts';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { publicTierLabel } from '../../lib/engineLabels';
@@ -1121,7 +1123,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const buildConvo: ChatMsg[] = [
     ...agentHistory,
     ...userMsgs,
-    ...state.narration.map((n) => ({
+    // ⏱️ A live-status line ("Still working — Ns so far", the ETA) is shown only while it is still TRUE: the
+    // build is running and nothing newer has been said since (autopsy 303e8a6f). Once a later line arrives, the
+    // call it was timing has ended — left in place, a frozen clock reads as a frozen build.
+    ...withoutStaleLiveStatus(state.narration, running, lastActivityTs(state.activity)).map((n) => ({
       role: 'agent' as const,
       agent: n.agent,
       text: n.text,
@@ -1137,7 +1142,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     // permanently stuck. Filtering by the text marker (not just the live id) also cleans OLD sessions
     // that persisted these lines before the fix, and keeps them out of the History save (which reads
     // `convo` after `running` has cleared on the terminal result).
-    .filter((m) => running || !/^⏱️\s*Still building…/.test(m.text || ''))
+    // The same predicate reads saved threads by the line's own words (they predate the id), so an old session's
+    // "⏳ Still working" bubble is cleaned up exactly like its "⏱️ Still building…" one.
+    .filter((m) => running || m.role === 'user' || !isLiveStatusLine({ text: m.text }))
     .sort((a, b) => a.ts - b.ts);
 
   // The thread the ACTIVE tab renders — Build's, or the Plan/Advise lane's own page. History-save and
@@ -1625,7 +1632,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     if (state.narration.length > 0) {
       setAgentHistory((h) => [
         ...h,
-        ...state.narration.map((n) => ({
+        ...withoutStaleLiveStatus(state.narration, false).map((n) => ({
           role: 'agent' as const,
           agent: n.agent,
           text: n.text,
@@ -2074,7 +2081,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     if (state.narration.length > 0) {
       setAgentHistory((h) => [
         ...h,
-        ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) })),
+        ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) })),
       ]);
     }
     if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
@@ -2109,7 +2116,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       activeQueuedItemRef.current = item.id;
       setUserMsgs((c) => [...c, { role: 'user', text: item.prompt, ts: Date.now() }]);
       if (state.narration.length > 0) {
-        setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) }))]);
+        setAgentHistory((h) => [...h, ...withoutStaleLiveStatus(state.narration, false).map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) }))]);
       }
       try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
       start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, appSignature: appSignaturePref() });
@@ -4695,6 +4702,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             {(running || state.activity.length > 0) && (
               <WorkingIndicator
                 activity={state.activity} running={running} progress={progress} costInr={state.costSoFarInr}
+                startedAt={state.startedAt} endedAt={state.endedAt}
+                etaLine={running ? latestLiveStatusText(state.narration, ETA_LINE_ID) : null}
                 onWatchLive={offerWatchLive({ running, entryWrittenAt: state.entryWrittenAt, previewOpen: showWorkspace && tab === 'preview' }) ? () => openSurfaceFromFooter('preview') : undefined}
               />
             )}
@@ -5752,7 +5761,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             <span className="font-medium text-muted capitalize shrink-0">{tab}</span>
             {(running || state.activity.length > 0) && (
               <div className="flex-1 min-w-0 flex justify-end">
-                <WorkingIndicator activity={state.activity} running={running} progress={progress} costInr={state.costSoFarInr} />
+                <WorkingIndicator activity={state.activity} running={running} progress={progress} costInr={state.costSoFarInr} startedAt={state.startedAt} endedAt={state.endedAt} />
               </div>
             )}
             <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" aria-label="Close workspace" className="ml-auto shrink-0 flex items-center text-muted hover:text-ink">
@@ -6721,23 +6730,25 @@ function fmtElapsed(ms: number): string {
  * REAL engine events (state.activity); no synthetic activity. Renders while running, and stays as a
  * collapsed "view activity" expander after the build finishes so the work is reviewable.
  */
-function WorkingIndicator({ activity, running, progress, costInr, onWatchLive }: { activity: ActivityEntry[]; running: boolean; progress?: BuildProgress; costInr?: number; onWatchLive?: () => void }) {
+function WorkingIndicator({ activity, running, progress, costInr, onWatchLive, startedAt, endedAt, etaLine }: { activity: ActivityEntry[]; running: boolean; progress?: BuildProgress; costInr?: number; onWatchLive?: () => void; startedAt?: number; endedAt?: number; etaLine?: string | null }) {
   const [nowTick, setNowTick] = useState(() => Date.now());
-  const mountTsRef = useRef(Date.now());
 
   // Tick the elapsed clock only while running. On stop (done OR error) the time FREEZES at the
-  // last real value — it is derived from the activity timestamps, so it can never reset to 0.
+  // last real value — `endedAt` is stamped once, when the build stopped, so it can never reset to 0.
   useEffect(() => {
     if (!running) return;
     const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
   }, [running]);
 
-  const startTs = activity.length ? activity[0].ts : mountTsRef.current;
-  const endTs = running ? nowTick : (activity.length ? activity[activity.length - 1].ts : startTs);
+  // From the user's Send, on this device's clock — never from the first activity (autopsy 303e8a6f). See buildClock.ts.
+  const elapsedMs = buildElapsedMs({
+    startedAt, endedAt, running, now: nowTick,
+    firstActivityTs: activity[0]?.ts, lastActivityTs: activity[activity.length - 1]?.ts,
+  });
   const cost = liveCostLabel(costInr);
   const [costInfoOpen, setCostInfoOpen] = useState(false);
-  const elapsed = fmtElapsed(endTs - startTs);
+  const elapsed = fmtElapsed(elapsedMs);
 
   // Current action: the newest still-in-flight tool, else the newest entry.
   const current = [...activity].reverse().find((a) => a.active) ?? activity[activity.length - 1];
@@ -6775,6 +6786,12 @@ function WorkingIndicator({ activity, running, progress, costInr, onWatchLive }:
         )}
         <span className="shrink-0 tabular-nums text-faint">{elapsed}</span>
       </div>
+      {/* THE ETA THE USER IS PROMISED (admin 2026-09-26: shown, and labelled a guess where unmeasured). The chat
+          drops every ⏱ line as progress noise, so before this the estimate reached nobody on the main chat while
+          the report said "Shown to the user" (autopsy 303e8a6f). Live status lives in the status line. */}
+      {running && etaLine && (
+        <div className="mt-1 text-[11px] leading-snug text-muted">{etaLine.replace(/^⏱️?\s*/, '')}</div>
+      )}
       {/* EARLY PREVIEW (earlyPreviewCue.ts): the app is on screen while it is still being built. */}
       {running && onWatchLive && (
         <button

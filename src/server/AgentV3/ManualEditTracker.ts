@@ -139,6 +139,35 @@ export async function consumeManualEdits(workspaceId: string): Promise<PendingMa
 }
 
 /**
+ * The build's ONE read of this workspace's manual-edit document: the pending set (consumed — cleared — exactly as
+ * `consumeManualEdits` does) AND every file the user owns (as `userOwnedFiles`). The build used to read the same
+ * Firestore document twice, serially, before its first model call (autopsy 303e8a6f). Same answers: a failed read
+ * yields no pending edits and the owned files this instance has seen. Never throws.
+ */
+export async function consumeManualEditsWithOwned(workspaceId: string): Promise<{ manual: PendingManualEdits; owned: string[] }> {
+  const none: PendingManualEdits = { paths: [], count: 0, at: 0 };
+  if (!workspaceId) return { manual: none, owned: [] };
+  const db = getDb();
+  if (!db) return { manual: await consumeManualEdits(workspaceId), owned: await userOwnedFiles(workspaceId) };
+  const local = _userFilesCache.get(workspaceId) ?? new Set<string>();
+  let data: Record<string, unknown> | null = null;
+  try {
+    const snap = await db.collection(COLLECTION).doc(workspaceId).get();
+    data = snap.exists ? (snap.data() || {}) : {};
+  } catch { data = null; }
+  const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((p: unknown): p is string => typeof p === 'string' && !!p) : []);
+  const paths = data ? strings(data.paths) : [];
+  const manual: PendingManualEdits = data ? { paths, count: paths.length, at: typeof data.at === 'number' ? data.at : 0 } : none;
+  const owned = [...new Set([...(data ? strings(data.userFiles) : []), ...local])];
+  _cache.delete(workspaceId);
+  _cacheAt.delete(workspaceId);
+  if (manual.count > 0) {
+    try { await db.collection(COLLECTION).doc(workspaceId).set({ paths: [], at: 0 }, { merge: true }); } catch { /* best-effort */ }
+  }
+  return { manual, owned };
+}
+
+/**
  * Pure: build the architect-prompt note that tells the agent the user manually edited these files in
  * the IDE since the last build. Returns '' when there is nothing to announce, so callers can prepend
  * it unconditionally. Names up to MAX_NAMED_IN_NOTE paths, then summarises the remainder.

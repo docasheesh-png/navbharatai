@@ -349,3 +349,4 @@ export function projectSizedComplexity(base: Complexity, projectPaths: readonly 
     featureCount: clamp(Math.max(base.featureCount, 6), 1, 30),
   };
 }
+

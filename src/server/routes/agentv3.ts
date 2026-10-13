@@ -38,7 +38,7 @@ import { requestForChecks } from '../AgentV3/requestForChecks';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
-import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
+import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild } from '../AgentV3/goldenScaffolds/registry';
 import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
@@ -52,7 +52,7 @@ import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV
 import { unrelatedToExistingApp, unrelatedRequestSteer, unrelatedRequestFallback } from '../AgentV3/unrelatedRequest';
 import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary, writeTypecheckCommand } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
-import { answeringModel } from '../AgentV3/answeringModel';
+import { answeringModel, answerTimeOf } from '../AgentV3/answeringModel';
 import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
 import { streamThinkingToChat } from '../AgentV3/thinkingStream';
@@ -205,7 +205,7 @@ import {
 import { withoutPlatformCheckTools } from '../AgentV3/repairScope';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
-import { releaseGate, releaseGateSummary, runtimeProven, runtimeRedFlipEnabled, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
+import { releaseGate, releaseGateRecord, releaseGateSummary, runtimeProven, runtimeRedFlipEnabled, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary, admittedInertControls } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
 import { visibleAppError, appShowsErrorNote, APP_SHOWS_ERROR_CODE } from '../AgentV3/visibleAppError';
@@ -256,7 +256,7 @@ import { missingViteEnvTypes, viteEnvTypesNote } from '../AgentV3/viteEnvTypes';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, mergeDevEnvContent, externalServiceNote, conjurableSecrets, detectDatabaseProvider, persistentDatabaseAdvisory, externalSecretVars, previewBootFailureAdvisory, previewServeNarration, previewDiagnoseReason, PREVIEW_UNVERIFIED_PROBLEM, halfBootCause, detectMigrationCommand, shellEnvAssignment, schemaMissingFromLog } from '../AgentV3/ImportPreview';
 import { previewWakeBudgetMs, shouldMigrateOnWake, envFileValue } from '../AgentV3/previewWake';
-import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, removablePaths, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage, chooseRestoreBase, greenRestoreTurnStartEnabled, attemptIsHonoured } from '../AgentV3/GreenGuard';
+import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessage, greenGuardRestoredRecord, greenGuardUnverifiedMessage, greenGuardShouldTellUnverified, greenWorkspaceKey, greenGuardEnabled, buildRemoveCommand, removablePaths, attemptWorkspaceKey, wantsAttemptBack, attemptRestoredMessage, chooseRestoreBase, greenRestoreTurnStartEnabled, attemptIsHonoured } from '../AgentV3/GreenGuard';
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
@@ -285,7 +285,7 @@ import { shouldAnswerPictureRequest, pictureAnswerEnabled, PICTURE_REQUEST_STEER
 import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
 import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
 import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
-import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
+import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, seedStateOf, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
 import { runAsUnreadWrites } from '../AgentV3/unreadWrites';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
@@ -349,7 +349,7 @@ import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { prepareSandboxForBuild } from '../AgentV3/sandboxSeed';
-import { summarizeRestore, type SandboxRestoreOutcome } from '../AgentV3/sandboxRestore';
+import { summarizeRestore, mayPersistSeededScaffold, type SandboxRestoreOutcome } from '../AgentV3/sandboxRestore';
 import { publishedAppCap, publishedAppCapForAccount, readHostingAllowance, readHostingTierForQuota } from '../lib/HostingQuota';
 import { hostingPlansEnabled, hostingPlanPriceInr, readHostingPlanStatus } from '../lib/hostingPlan';
 import { bundlerFallbackCommand, composeBuildFailureDetail, TYPECHECK_SKIPPED_WARNING } from '../AgentV3/publishBuild';
@@ -379,6 +379,8 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
+import { reasoningStayNote, laneOutcomeWords } from '../AgentV3/FastLaneBudget';
+import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
@@ -425,7 +427,7 @@ import { appKeepsUploadsInSmallStore } from '../AgentV3/browserFileStore';
 import { signInExploreEnabled, signInScript, signInCandidates, authLivesInTheBrowser, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { unknownNameNoteEnabled, unknownNamesInRequest, unknownNameBuilderNote, unknownNameReportNote } from '../AgentV3/unknownName';
-import { requestScopeNote } from '../AgentV3/requestScope';
+import { requestScopeVerdict, requestScopeReportLine, type RequestScopeReason } from '../AgentV3/requestScope';
 import { bootPythonBackendFirst, backendBootReport, isPythonServerCommand, PYTHON_BOOT_BUDGET_MS } from '../AgentV3/pythonBackendBoot';
 import { scriptRequestNoteEnabled, scriptDeliverableRequested, liveDataRequested, scriptRequestBuilderNote, scriptRequestStartLine, scriptRequestReportNote } from '../AgentV3/scriptRequest';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
@@ -521,7 +523,7 @@ import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
 import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, fileContentHashes, savedDivergesFromSandbox, type SnapshotTaken, describeDivergence } from '../AgentV3/snapshotIdentity';
 import { sandboxReasonMiddleware } from '../AgentV3/sandboxSessionZone';
-import { PEAK_MEMORY_PROBE, parsePeakMemory, describePeakMemory, describeSession, type SandboxSession } from '../AgentV3/sandboxSessions';
+import { PEAK_MEMORY_PROBE, describePeakMemory, peakProbeOutcome, describeSession, type SandboxSession, type PeakMemory } from '../AgentV3/sandboxSessions';
 import { sandboxRamGb } from '../AgentV3/sandboxRate';
 import { scoreBuildOutcome, shouldAutoReport, autoReportReason, complaintInText } from '../AgentV3/buildOutcomeSignals';
 import { buildOutcomeStore, buildOutcomeTrackingEnabled, watchedMsFrom, type BuildOutcomeRecord } from '../AgentV3/BuildOutcomeStore';
@@ -558,7 +560,7 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
-import { loadUserVaultSecrets, withheldVaultSecretNames, secretsWithheldNote } from '../lib/secrets';
+import { loadUserVaultSecrets, loadUserVaultForBuild, secretsWithheldNote } from '../lib/secrets';
 import { secretRequestPrompt, postBuildKeyAsks, postBuildKeyPrompt } from '../AgentV3/secretRequest';
 import { connectActions } from '../AgentV3/connectActions';
 import { buildNeedsNotice, type ServerPlanOffer } from '../AgentV3/buildNeeds';
@@ -638,14 +640,15 @@ import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } 
 import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../AgentV3/terminalMeter';
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
-import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict } from '../AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
 import { gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
-import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration, userOwnedFiles } from '../AgentV3/ManualEditTracker';
+import { recordManualEdits, consumeManualEditsWithOwned, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
+import { createPrepSteps } from '../AgentV3/prepClock';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
 import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
 import {
@@ -659,7 +662,7 @@ import {
   type VersionPreviewDeps,
 } from '../AgentV3/versionPreview';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, etaTaskKey, etaBuildKind, type EtaBuildKind } from '../AgentV3/etaHistory';
+import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, fleetEmptyBasisNote, etaTaskKey, etaBuildKind, type EtaBuildKind } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -686,7 +689,8 @@ import { isUserStoppedBuild } from '../lib/buildFailureCategory';
 import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportSweep';
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
 import { ensureViteConfig } from '../AgentV3/ViteConfigGuard';
-import { ensureHtmlEntryScript } from '../AgentV3/HtmlEntryGuard';
+import { ensureHtmlEntryScript, appEntryHtmlKey } from '../AgentV3/HtmlEntryGuard';
+import { isNotFoundError } from '../AgentV3/fsErrors';
 import { withoutPreviewBridge, hasPreviewBridge, injectPreviewBridge, withPreviewAiRelay } from '../AgentV3/previewBridge';
 import { applyVisualTextEdit, applyVisualStyleEdit, applyVisualStyleEdits } from '../AgentV3/VisualEditPatcher';
 import { runCheckpointDiff } from '../AgentV3/checkpointDiff';
@@ -1578,10 +1582,15 @@ export async function findWorkspaceConversation(
   workspaceId: string,
 ): Promise<ConversationRecord | null> {
   const owner = userId ?? 'anon';
-  for (const id of conversationIdCandidatesForWorkspace(workspaceId, userId)) {
-    const rec = await (store.getMeta ? store.getMeta(id) : store.get(id)).catch(() => null);
-    if (rec && rec.workspaceId === workspaceId && rec.userId === owner) return rec;
-  }
+  const read = (id: string) => (store.getMeta ? store.getMeta(id) : store.get(id)).catch(() => null);
+  const mine = (rec: ConversationRecord | null): rec is ConversationRecord => !!rec && rec.workspaceId === workspaceId && rec.userId === owner;
+  // ⏱️ The usual hit stays ONE read; on a miss the remaining candidates are read TOGETHER, first in candidate order
+  // wins (autopsy 303e8a6f): a first build missed all three, serially, on the path to the first model call.
+  const [first, ...rest] = conversationIdCandidatesForWorkspace(workspaceId, userId);
+  if (first === undefined) return null;
+  const head = await read(first);
+  if (mine(head)) return head;
+  for (const rec of await Promise.all(rest.map(read))) if (mine(rec)) return rec;
   return null;
 }
 
@@ -3697,7 +3706,7 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; plan?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: 'timeout' | 'crawl' | 'rate-limit' | 'error', ms: number) => void;
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; plan?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: WasteKind, ms: number) => void;
   /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
    *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
    *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
@@ -7181,6 +7190,10 @@ async function noteBuildOutcome(
       write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
       end: () => { if (!res.writableEnded) res.end(); },
     };
+    // ⏱️ How long the user has been waiting, FIRST — as a duration, so no clock domain crosses the wire. A page that
+    // reloads or re-attaches has no Send of its own; without this its build clock restarted at 0 or counted from
+    // the first replayed event (autopsy 303e8a6f, adversarial review). Older clients ignore an unknown event.
+    if (typeof rb.originTs === 'number') sub.write({ type: 'build_clock', startedAgoMs: Math.max(0, Date.now() - rb.originTs) });
     for (const e of rb.buffer) sub.write(e);                   // replay so the UI catches up to "now"
     rb.subscribers.add(sub);
     // Keepalive: like the /chat stream, ping every 15 s so a RESUMED stream is never seen as
@@ -10045,6 +10058,10 @@ async function noteBuildOutcome(
   });
 
   app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+    // ⏱️ THE USER'S WAIT STARTS HERE — the first statement, before every await of the preamble (autopsy 303e8a6f,
+    // adversarial review): the build's event stream used to take its own construction time as the origin, up to
+    // ~30 s of checks later, so "Still working — Ns so far" still undercounted. Every user-visible clock reads this.
+    const requestArrivedAt = Date.now();
     // SECURITY (C1): identity from the VERIFIED token only — never the client-claimed body.userId.
     // Runs before flushHeaders(), so a reject is a clean HTTP 401 (no stream started yet). Skipped
     // under VITEST (route handler isn't exercised by tests; the pure resolveBuildIdentity is tested
@@ -10109,7 +10126,11 @@ async function noteBuildOutcome(
     // "yes" to our offer to build (Q-200): then it becomes the request that was offered, and the typed
     // "yes" is what the chat history keeps.
     const typedPrompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
-    let prompt = typedPrompt;
+    // A starter chip's RETIRED wording (still sent by phone bundles built before the correction) becomes today's
+    // wording HERE, once, so every builder, reviewer and repair reads the same request — not only the first turn
+    // (adversarial review of 303e8a6f: the judge and the repair lanes still read "needs no API key"). The chat
+    // history keeps what was typed (`typedPrompt`).
+    let prompt = chipPromptForBuild(typedPrompt);
     if (!prompt) {
       res.status(400).json({ error: 'A non-empty "prompt" is required.' });
       return;
@@ -11528,7 +11549,7 @@ async function noteBuildOutcome(
         } catch { /* memory is best-effort — never blocks a reply */ }
         // Surface the reply EXACTLY like a normal build narration — no provider
         // name, no note — then close out the stream the same way a build does.
-        const chatEvents = new AgentEventStream();
+        const chatEvents = new AgentEventStream(500, requestArrivedAt);
         chatEvents.subscribe((e) => send(e), false);
         chatEvents.emit({ type: 'narration', agent: 'architect', text: reply, ts: Date.now(), ...(sheetFile ? { file: sheetFile } : {}) });
         chatEvents.emit({ type: 'done', ok: true, summary: reply, ts: Date.now() });
@@ -11591,7 +11612,7 @@ async function noteBuildOutcome(
     // `key` stays the ACCOUNT key (userId ?? 'anon') for the cross-device LiveChannel (readers already
     // filter by workspaceId), while the registry Map is keyed by `buildKey` (per-workspace when enabled).
     // `userId` lets the per-account cap count this account's live builds across workspaces.
-    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), key: userId ?? 'anon', userId, workspaceId: intentWorkspaceId, steerQueue: [], powerLevel: powerLevelReqEffective };
+    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), originTs: requestArrivedAt, key: userId ?? 'anon', userId, workspaceId: intentWorkspaceId, steerQueue: [], powerLevel: powerLevelReqEffective };
     const primary: BuildSubscriber = {
       write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
       end: () => { if (!res.writableEnded) res.end(); },
@@ -11630,7 +11651,7 @@ async function noteBuildOutcome(
     let disposeGreenFreezeObserver: (() => void) | null = null;
     let disposeWriteObserver: (() => void) | null = null;
 
-    const events = new AgentEventStream();
+    const events = new AgentEventStream(500, requestArrivedAt);
     events.subscribe((e) => emit(e), false);
     // Said once, at the start, so a user who expected the badge gone is not left to discover it on the
     // finished app and conclude the toggle is broken.
@@ -12592,7 +12613,7 @@ async function noteBuildOutcome(
         const waited = Math.max(0, Date.now() - startedWait);
         userWait.since = null;
         userWait.totalMs += waited;
-        try { buildDiagRef?.addUserWait(waited); } catch { /* diagnostics are best-effort */ }
+        try { buildDiagRef?.addUserWait(waited, startedWait); } catch { /* diagnostics are best-effort */ }
         try { onUserWaitEnded?.(startedWait, waited); } catch { /* clocks are best-effort */ }
       }
     };
@@ -13698,7 +13719,9 @@ async function noteBuildOutcome(
       // A starter chip whose tested template will be seeded is verify-and-polish, not a big build — see
       // scaffoldedComplexityDecision. The same four conditions the seeding below checks up front
       // (flag, a fresh build, not an import, a template for this exact prompt).
-      const scaffoldWillSeed = process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !isImportTurn && !!goldenScaffoldForPrompt(prompt);
+      // The scaffold itself is kept (not only the yes/no): the ETA sizes a seeded build by its template's tier.
+      const seededScaffold = process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !isImportTurn ? goldenScaffoldForPrompt(prompt) : null;
+      const scaffoldWillSeed = !!seededScaffold;
       // 🔴 THE DOMAIN QUESTION STARTS HERE, BESIDE SETUP (autopsy 31254f9a, 2026-10-01). It used to be asked
       // after setup, project restore and context loading, right before the first build call, so its whole
       // wait was added to the user's: that calculator build sat 6 seconds in silence (the call's own cap)
@@ -13712,7 +13735,8 @@ async function noteBuildOutcome(
           ? learnDomain(prompt)
           : null;
       const promptComplexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
-        { prompt: planning.sizing, score: analysis?.complexityScore ?? 0 },
+        // The intent rides along so the router reads the request exactly as the analysis did (review of 303e8a6f).
+        { prompt: planning.sizing, score: analysis?.complexityScore ?? 0, buildIntent: intent },
         (p) => AIRouterManager.getRouter('free')
           .route(p, 'You are a classifier. Reply with one word only.')
           .then((r) => r.response.content),
@@ -13736,9 +13760,10 @@ async function noteBuildOutcome(
         try { return etaBuildKind(analyzeRequirementGaps(prompt).domain, appGeneratesImages(prompt)); } catch { return null; }
       })() : null;
       // A port is estimated by the project it ports, as it is routed (autopsy 51ef24ad).
-      const etaKeyForBuild = (scaffolded: boolean): string => (complexityDecision.source === 'workspace'
+      // A seeded build's template TIER picks its slice too (a pro template is extended, a simple one polished).
+      const etaKeyForBuild = (scaffolded: boolean, scaffoldTier: 'simple' | 'pro' | null): string => (complexityDecision.source === 'workspace'
         ? 'complex_app'
-        : etaTaskKey(analysis?.taskType, scaffolded, buildIsComplex, etaKind));
+        : etaTaskKey(analysis?.taskType, scaffolded, buildIsComplex, etaKind, scaffoldTier));
       // LARGE-PROJECT ROUTING (admin 2026-07-05: "badi apps direct Sonnet"): list the existing
       // project ONCE up-front (edit/import mode only — a fresh build has nothing to list). The
       // listing is REUSED further down for the edit-mode prompt, so this adds no extra sandbox
@@ -13992,6 +14017,9 @@ async function noteBuildOutcome(
           }
         },
       });
+      // 🔒 Every narration the user sees from here on goes through `events`, so it also reaches this report
+      // (autopsy 303e8a6f: the "⚡ Starting from the tested template" line and the database lines went out on
+      // the route's bare `emit` and were missing from the forensic record). Census: aNarrationReachesTheReport.
       events.subscribe((e) => buildDiag.ingestEvent(e), false);
       // Fix 37a (admin: "app kitni baar fail hui yeh bhi likho"): stamp how many earlier builds in
       // THIS workspace's durable history ended not-ok, so a repeat failure is visible in every
@@ -14522,7 +14550,7 @@ async function noteBuildOutcome(
             }
             try {
               const lbl = fastLaneProviderLabel(rmProvider);
-              buildDiag.recordLlmCall({ model: answeringModel({ answered: rmT.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length + megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals).length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: rmT.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length + megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals).length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ...answerTimeOf(rmT), ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += rmT.usage.inputTokens;
             blueprintUsage.outputTokens += rmT.usage.outputTokens;
@@ -14632,6 +14660,9 @@ async function noteBuildOutcome(
           // behaviour, and can never delay or fail a build.
           // A port is estimated by the project it ports, as it is routed (autopsy 51ef24ad).
           const etaByProject = complexityDecision.source === 'workspace';
+          // ⚠️ A seeded template is NOT re-sized here (adversarial review of 303e8a6f): one constant calibrated on two
+          // builds LOWERED seven unmeasured chips (wedding-rsvp 10.5 → 4 min) — the optimistic direction, which breaks
+          // the promise instead of arriving early. It learns from its own slice (split by tier) as builds finish.
           const etaComplexity = etaByProject
             ? projectSizedComplexity(complexityFromPrompt(planning.sizing), projectFilePaths)
             : complexityFromPrompt(planning.sizing);
@@ -14643,14 +14674,15 @@ async function noteBuildOutcome(
           // With no history of its own, the estimate learns from how long the platform's recent builds
           // of THIS task type took — read from the cost telemetry every build already writes. The app's
           // own history always wins the moment it exists; a failed read is [] — today's behaviour.
-          let fleet: ReturnType<typeof fleetHistoryFromTelemetry> = { history: [], builds: 0, days: 0 };
+          let fleet: ReturnType<typeof fleetHistoryFromTelemetry> = { history: [], builds: 0, days: 0, seenOk: 0, daysRead: 0 };
           // A seeded template is its own kind of build (autopsy 4a1c0157): the same `scaffoldWillSeed` that
           // routed it to the cheap rung picks the slice, so the ETA never prices template polish as a
           // from-scratch `complex_app`.
           // The key comes from `etaKeyForBuild` — the same function the telemetry writer files this build under.
-          const etaFleetKey = etaByProject ? 'complex_app' : (analysis?.taskType || etaKind) ? etaKeyForBuild(scaffoldWillSeed) : null;
+          const etaFleetKey = etaByProject ? 'complex_app' : (analysis?.taskType || etaKind) ? etaKeyForBuild(scaffoldWillSeed, seededScaffold?.tier ?? null) : null;
+          let fleetReadFailed = false;
           if (past.length === 0 && etaFleetKey) {
-            try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), etaFleetKey, etaComplexity); } catch { /* best-effort */ }
+            try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), etaFleetKey, etaComplexity); } catch { fleetReadFailed = true; /* best-effort — and said so */ }
           }
           const est = estimateBuildTime(etaComplexity, past.length > 0 ? past : fleet.history);
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
@@ -14695,14 +14727,22 @@ async function noteBuildOutcome(
           // a sentence we wrote. Stored structured for exactly the reason `buildFailureCategory.ts`
           // documents: reading our own prose back to recover facts we had in hand is how a reader
           // ends up classifying on a wording change.
+          // Whose builds taught it — and, when nobody's did, the slice that was asked and why it was empty.
+          const etaSource: 'workspace' | 'platform' | 'heuristic' = past.length > 0 ? 'workspace' : fleet.history.length > 0 ? 'platform' : 'heuristic';
+          const etaBasis = etaSource === 'platform' && etaFleetKey
+            ? fleetEtaBasisNote(etaFleetKey, fleet.builds, fleet.days)
+            : etaSource === 'heuristic' && etaFleetKey
+              ? fleetEmptyBasisNote(etaFleetKey, fleet.seenOk, fleet.daysRead, { readFailed: fleetReadFailed })
+              : etaBasisNote(past);
           buildDiag.setEtaPromise({
             estimateMs: est.estimateMs, lowMs: est.lowMs, highMs: est.highMs,
             evidenced: etaEvidenced, shown: etaShown.replace(/^⏱️\s*/, ''),
+            ...(etaFleetKey ? { key: etaFleetKey } : {}), source: etaSource,
           });
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: `${past.length === 0 && fleet.history.length > 0 && etaFleetKey ? fleetEtaBasisNote(etaFleetKey, fleet.builds, fleet.days) : etaBasisNote(past)} ${etaEvidenceNote(est, past.length === 0 && fleet.history.length > 0 ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
+            detail: `${etaBasis} ${etaEvidenceNote(est, etaSource === 'platform' ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -14743,6 +14783,13 @@ async function noteBuildOutcome(
       // the build tools will report the real sandbox error only if the user asks
       // to build. This is what makes v5.0 conversational like Claude Code.
       let git: GitManager | undefined;
+      // ⏱️ What happens between "Project checked" and "Personal context" — timed by name (autopsy 303e8a6f: 3.6 s
+      // of untimed awaits sat there). Closed as one window, so anything not named still shows as `other`.
+      const wiringSteps = createPrepSteps();
+      // …and the two windows after the project context: the prompt's context, then the plan, the template and
+      // the last reads before the first model call.
+      const promptSteps = createPrepSteps();
+      const finalSteps = createPrepSteps();
       // Deep-test App #7 (2026-07-13): true when the build sandbox could not be set up (E2B down / quota /
       // template). No file can ever be written, so the build MUST end as a failure — not "✓ Done" over an
       // empty preview. Threaded into the empty-build honesty override below.
@@ -14781,6 +14828,9 @@ async function noteBuildOutcome(
         // Sandbox create, the npm install inside ensureWorkspace, and the GitHub hydrate that follows all
         // hid behind one sentence, so the largest slice of a short build was the one slice we could not
         // measure. These stamps cost nothing and turn "setup felt slow" into a number worth acting on.
+        // The stretch BEFORE setup (ETA reads, the roadmap save, routing) is a window too — it was the one untimed
+        // segment left (adversarial review of 303e8a6f), and it is closed exactly where setup's own clock starts.
+        try { buildDiag.closeSetupWindow('Routing and ETA'); } catch { /* timing is observation only */ }
         const setupT0 = Date.now();
         const resumeSandboxId = sandboxResumeEnabled()
           ? (await sandboxStore.get(workspaceId).catch(() => null)) ?? undefined
@@ -14790,8 +14840,8 @@ async function noteBuildOutcome(
         await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
         const ensureWorkspaceMs = Date.now() - ensureT0;
         try {
-          buildDiag.record({
-            phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+          buildDiag.recordSetupTiming({
+            startMs: setupT0,
             message: `Workspace ready in ${Math.round((Date.now() - setupT0) / 1000)}s`,
             // ⚠️ `resumed=yes` USED TO MEAN "an id existed", NOT "we resumed" — and it was printed as
             // though it were the second. Five real reports (2026-08-24) carried `resumed=yes` with
@@ -14826,7 +14876,10 @@ async function noteBuildOutcome(
         // Best-effort — never blocks a build; a resumed sandbox seeds nothing (returns undefined → no-op).
         try {
           const seededScaffold = actuator.takeSeededScaffold?.(workspaceId);
-          if (seededScaffold && Object.keys(seededScaffold).length > 0) {
+          // Never over a store that held this workspace's files when none of them came back — see
+          // mayPersistSeededScaffold (a merge overwrites each path: the template would replace the user's app).
+          const restoreOutcome = (actuator as { sandboxRestore?: (id: string) => SandboxRestoreOutcome | null }).sandboxRestore?.(workspaceId) ?? null;
+          if (seededScaffold && Object.keys(seededScaffold).length > 0 && mayPersistSeededScaffold(restoreOutcome)) {
             await mergeWorkspaceFiles(workspaceId, seededScaffold).catch(() => {});
           }
         } catch { /* scaffold durability is best-effort — the end-of-build scan remains the fallback */ }
@@ -15371,8 +15424,8 @@ async function noteBuildOutcome(
             // sandbox scan) — re-materialize them from the durable asset store alongside the files.
             await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
             try {
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+              buildDiag.recordSetupTiming({
+                startMs: restoreT0,
                 message: `Project restored in ${Math.round((Date.now() - restoreT0) / 1000)}s`,
                 detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s), ${durable.status}) · sandbox listing `
                   + `${scanMs}ms · config read ${configMs}ms · wrote ${plan.count} missing file(s) + assets ${Date.now() - writeT0}ms`,
@@ -15398,8 +15451,8 @@ async function noteBuildOutcome(
             // branch would leave the ordinary build exactly as silent as it is today, which is the
             // whole complaint. Recorded at info with no repair language, because nothing was wrong.
             try {
-              buildDiag.record({
-                phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+              buildDiag.recordSetupTiming({
+                startMs: restoreT0,
                 message: `Project checked in ${Math.round((Date.now() - restoreT0) / 1000)}s — nothing needed restoring`,
                 detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s), ${durable.status}) · sandbox listing ${scanMs}ms · config read ${configMs}ms`,
               });
@@ -15501,8 +15554,9 @@ async function noteBuildOutcome(
         } catch { /* best-effort — the guardian never blocks a build */ }
         // Real git repo → real checkpoints/History/restore (best-effort on
         // sandboxes without a shell).
-        git = new GitManager(actuator, workspaceId);
-        await git.ensureRepo();
+        const gm = new GitManager(actuator, workspaceId);
+        git = gm;
+        await wiringSteps.step('git init', () => gm.ensureRepo());
         // Pass the actuator as the session's command runner so the REAL Code Studio terminal can exec
         // bounded commands in this same warm sandbox.
         registerSession(workspaceId, git, userId ?? undefined, actuator);
@@ -15539,7 +15593,7 @@ async function noteBuildOutcome(
           eps?.slice().reverse().find((e) => e.kind === 'note' && typeof e.text === 'string' && e.text.startsWith('PLAN_STATE'));
         let planSeedNote = findPlanNote(getWorkspaceMemory(workspaceId).snapshot().episodes);
         if (!planSeedNote) {
-          const coldSnap = await loadWorkspaceMemory(workspaceId).catch(() => null);
+          const coldSnap = await wiringSteps.step('plan carry-over', () => loadWorkspaceMemory(workspaceId).catch(() => null));
           planSeedNote = findPlanNote(coldSnap?.episodes);
         }
         const savedPlan = planSeedNote ? parsePlanState(planSeedNote.text) : [];
@@ -15977,6 +16031,9 @@ async function noteBuildOutcome(
       // Every file this build removed, in order — the user is told about the ones their app had
       // (deletedFilesNotice.ts, queue Q-019). The admin line below stays as it was.
       const deletedThisBuild: string[] = [];
+      // Of those, the ones ALSO removed from the saved project — authoritative absence the issue queue may act
+      // on (Q-969). Set only by the durable forget step below, and only when that removal really ran.
+      let removedFromApp: string[] = [];
       // Files the fast lane salvaged into the workspace for the full builder (deadSalvage.ts).
       const salvagedThisBuild: string[] = [];
       // What a shell command removes is checked against these (queue Q-246, shellWriteTargets.ts).
@@ -16044,7 +16101,7 @@ async function noteBuildOutcome(
       // edits a protected folder during a big refactor, and the user finds out when their live payment
       // flow breaks. The dispatcher refuses the write; the prompt block below only saves wasted turns.
       try {
-        const ignoreRaw = await actuator.readFile(workspaceId, IGNORE_FILE).catch(() => '');
+        const ignoreRaw = await wiringSteps.step('ignore file', () => actuator.readFile(workspaceId, IGNORE_FILE).catch(() => ''));
         ignoreRulesForBuild = parseIgnoreFile(ignoreRaw);
         dispatcher.setIgnoreRules(ignoreRulesForBuild);
       } catch { /* no ignore file is the normal case — the guard stays off */ }
@@ -16059,6 +16116,8 @@ async function noteBuildOutcome(
       // the user's SHARED keys plus the ones tied to THIS app. Keys saved before scoping existed have no
       // workspace, so they count as shared and every existing build behaves exactly as it did.
       let vaultSecrets: Record<string, string> = {};
+      // The names this app did NOT receive — from the SAME vault read as the keys it did (autopsy 303e8a6f).
+      let vaultWithheld: string[] = [];
       // Set when the build-start database offer was put to the user (sharedDataNeed.ts), so the
       // mid-build fallback below never asks the same question twice in one build.
       let databaseOfferedAtStart = false;
@@ -16067,7 +16126,10 @@ async function noteBuildOutcome(
       let mcpTools: SafeMcpTool[] = [];
       try {
         if (userId) {
-          vaultSecrets = await loadUserVaultSecrets(userId, workspaceId);
+          // ONE read and decrypt of the vault for both the keys and the withheld names (it was two, serially).
+          const vault = await wiringSteps.step('vault', () => loadUserVaultForBuild(userId, workspaceId));
+          vaultSecrets = vault.secrets;
+          vaultWithheld = vault.withheld;
           // THE DATABASE, OFFERED BEFORE THE BUILDER DECIDES WHERE DATA LIVES (sharedDataNeed.ts). An app
           // whose request needs shared data (bookings, orders, admissions, accounts) used to be built with
           // that data in the visitor's own browser, and every file-based check then said "no database
@@ -16091,17 +16153,18 @@ async function noteBuildOutcome(
               emit({ type: 'permission_request', agent: 'architect', action: startOfferText(need), callId: requestId, ts: Date.now() });
               const approved = (await waitForUser(requestId, START_OFFER_WAIT_MS)) === 'approved';
               if (!approved) {
-                emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '👍 Building without a database for now — data will be kept on this device. You can connect one any time in Settings → App Settings → Database.' });
+                events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: 'Building without a database for now — data will be kept on this device. You can connect one any time in Settings → App Settings → Database.' });
                 buildDiag.record({ phase: 'plan', severity: 'info', code: 'DATABASE_OFFER_AT_START', message: `Offered a database at build start (${need.reasons.join(', ')}); the user declined or did not answer.`, autoResolved: true });
               } else {
-                emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
+                events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
                 const made = await provisionDatabaseForUser(userId, { appLabel: prompt.slice(0, 40), workspaceId }).catch(() => null);
                 if (made && made.ok) {
-                  vaultSecrets = await loadUserVaultSecrets(userId, workspaceId).catch(() => vaultSecrets);
-                  emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: databaseReadyNarration(made, 'start') });
+                  const fresh = await loadUserVaultForBuild(userId, workspaceId).catch(() => null);
+                  if (fresh) { vaultSecrets = fresh.secrets; vaultWithheld = fresh.withheld; }
+                  events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: databaseReadyNarration(made, 'start') });
                   buildDiag.record({ phase: 'plan', severity: 'info', code: 'DATABASE_OFFER_AT_START', message: `${made.reused ? 'Attached the user\'s existing database' : 'Created the user\'s database'} at build start (${need.reasons.join(', ')})${made.asleepNote ? ' — it is ASLEEP (Supabase paused it); the user was told how to wake it' : ''}.`, autoResolved: true });
                 } else {
-                  emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${made && !made.ok ? made.error : 'Your database could not be created just now.'} I will build with data kept on this device for now.` });
+                  events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), filed: true, text: `⚠️ ${made && !made.ok ? made.error : 'Your database could not be created just now.'} I will build with data kept on this device for now.` });
                   buildDiag.record({ phase: 'plan', severity: 'warning', code: 'DATABASE_OFFER_AT_START', message: 'The user approved a database at build start and it could not be created.', detail: made && !made.ok ? made.error : 'provisioning threw', autoResolved: false });
                 }
               }
@@ -16115,7 +16178,7 @@ async function noteBuildOutcome(
             if (!databaseOfferedAtStart && userDatabaseContext(vaultSecrets)) {
               const asleep = await connectedDatabaseAsleepNote(userId, vaultSecrets.VITE_SUPABASE_URL);
               if (asleep) {
-                emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${asleep}` });
+                events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), filed: true, text: `⚠️ ${asleep}` });
                 buildDiag.record({ phase: 'plan', severity: 'warning', code: 'DATABASE_ASLEEP', message: 'The app\'s connected Supabase database is not running (paused, failed or removed); the user was told how to wake it.', detail: asleep, autoResolved: false });
               }
             }
@@ -16127,7 +16190,7 @@ async function noteBuildOutcome(
           // WHICH SAVED KEYS THIS APP DID NOT GET (Q-155). Least privilege's own failure mode is "I saved that
           // key — why is it not in my app?"; the build report now answers it by name. Names only, never values.
           try {
-            const withheld = await withheldVaultSecretNames(userId, workspaceId);
+            const withheld = vaultWithheld;
             if (withheld.length > 0) buildDiag.record({ phase: 'plan', severity: 'info', code: 'SECRETS_WITHHELD', message: secretsWithheldNote(withheld), autoResolved: true });
           } catch { /* a report line — never a reason a build changes */ }
           // CONNECTED SERVICES (MCP). Fetched ONCE here, before the loop, so the tool list the model
@@ -16137,7 +16200,7 @@ async function noteBuildOutcome(
           // Wholly best-effort: a service that is slow, down or hostile yields no tools and the build
           // proceeds exactly as it does today. It must never be able to fail or delay a build.
           try {
-            const servers = await mcpServerStore.listFull(workspaceId);
+            const servers = await wiringSteps.step('connected services', () => mcpServerStore.listFull(workspaceId));
             const unreadableServers = mcpServerStore.unreadableIds(workspaceId); // Q-628, read in parallel
             // THE PAID-PLAN GATE (admin 2026-09-12). Checked BEFORE the services are contacted, so a
             // free account costs neither the network calls nor the tokens their descriptions would add
@@ -16146,11 +16209,15 @@ async function noteBuildOutcome(
             // 🔒 More forgiving than the connect gate on ONE case only: a plan we could not READ lets
             // an existing integration keep working, because a billing-lookup blip must not silently
             // change what a paying customer's app can do mid-build. See mcpPlanGate.ts.
-            const mcpFacts = await mcpPlanFacts(req).catch(
-              () => ({ signedIn: false, hasActivePlan: false, planKnown: true, isFreeListed: false }),
-            );
-            const mcpAllowed = canRunConnectedServices(mcpFacts);
-            if (servers.length > 0 && !mcpAllowed) {
+            // ⏱️ Only when there IS a service to gate (autopsy 303e8a6f): a token verify and a plan probe of up to 3 s
+            // ran on every build, for a result read only when `servers.length > 0`.
+            const mcpFacts = servers.length > 0
+              ? await wiringSteps.step('service plan check', () => mcpPlanFacts(req).catch(
+                () => ({ signedIn: false, hasActivePlan: false, planKnown: true, isFreeListed: false }),
+              ))
+              : null;
+            const mcpAllowed = mcpFacts !== null && canRunConnectedServices(mcpFacts);
+            if (servers.length > 0 && mcpFacts && !mcpAllowed) {
               // NEVER SILENT: a build that quietly stopped using a tool the user set up looks like the
               // AI forgetting, which is worse than one plain sentence.
               const notice = skippedServicesNotice(servers.length, mcpFacts);
@@ -16179,7 +16246,7 @@ async function noteBuildOutcome(
           // import turn, the Diagnose button, update_preview — booted the app with NONE of the keys the
           // user saved in Settings. Write them now, before anything can run, so the keys the user entered
           // are genuinely readable by the app v5.0 built. No-op when the vault is empty; best-effort.
-          await dispatcher.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS).catch(() => {});
+          await wiringSteps.step('secrets file', () => dispatcher.ensureUserSecretsEnvFile(ALWAYS_WRITE_SECRETS).catch(() => {}));
         }
       } catch { /* best-effort — a vault-load failure just means the app runs without injected keys */ }
 
@@ -16253,7 +16320,7 @@ async function noteBuildOutcome(
           if (!token || !token.ok) {
             return { ok: false, message: 'Your Supabase connection has expired. Please connect Supabase again from Settings → App Settings → Database.' };
           }
-          emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '💳 Setting up secure payment checking in your own Supabase project.' });
+          events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '💳 Setting up secure payment checking in your own Supabase project.' });
           const done = await setupSupabasePayments({ token: token.token, projectRef, tables: [table], keyId, keySecret });
           if (!done.ok) {
             buildDiag.record({
@@ -16275,14 +16342,14 @@ async function noteBuildOutcome(
       }
 
       if (userId && vaultSecrets[DB_PROVIDER_MARKER] !== 'supabase') {
-        const connected = await getConnection(userId).catch(() => null);
+        const connected = await wiringSteps.step('database link', () => getConnection(userId).catch(() => null));
         if (connected?.orgId) {
           let asked = false;
           dispatcher.setDatabaseFallback(async () => {
             if (asked || databaseOfferedAtStart) return null; // one offer per build — never a loop of prompts
             asked = true;
             const requestId = randomUUID();
-            emit({
+            events.emit({
               type: 'narration', agent: 'architect', ts: Date.now(),
               text: '🗄️ Your app needs a database to save data, and a temporary one could not be started here.',
             });
@@ -16296,18 +16363,18 @@ async function noteBuildOutcome(
               ts: Date.now(),
             });
             if ((await waitForUser(requestId)) !== 'approved') {
-              emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '👍 No database created. You can connect your own any time in Settings → App Settings → Database.' });
+              events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: 'No database created. You can connect your own any time in Settings → App Settings → Database.' });
               return null;
             }
-            emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
+            events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
             const result = await provisionDatabaseForUser(userId, { appLabel: prompt.slice(0, 40), workspaceId }).catch(() => null);
             if (!result || !result.ok) {
               // Supabase's own words — a full free plan in particular needs the user's action, not a
               // generic failure line that reads like our bug.
-              emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${result && !result.ok ? result.error : 'Your database could not be created just now.'}` });
+              events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${result && !result.ok ? result.error : 'Your database could not be created just now.'}` });
               return null;
             }
-            emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: databaseReadyNarration(result, 'mid-build') });
+            events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: databaseReadyNarration(result, 'mid-build') });
             return result.env;
           });
         }
@@ -16391,7 +16458,8 @@ async function noteBuildOutcome(
       // and builds ON TOP of those edits, never reverting them), and acknowledge it to the user in chat.
       // Consuming clears the set so the same edits aren't re-announced next turn. Additive + best-effort.
       try {
-        const manual = await consumeManualEdits(workspaceId);
+        // ONE read of the manual-edit document for the pending set AND the user's own files (it was two).
+        const { manual, owned } = await wiringSteps.step('manual edits', () => consumeManualEditsWithOwned(workspaceId));
         if (manual.count > 0) {
           const note = manualEditContext(manual.paths);
           if (note) architectSystem = `${note}\n\n---\n\n${architectSystem}`;
@@ -16401,7 +16469,6 @@ async function noteBuildOutcome(
         // userFileGuard.ts). The pending set above is cleared every build; `userOwnedFiles` is not,
         // so a page the user added three builds ago is protected exactly like one added a minute ago.
         try {
-          const owned = await userOwnedFiles(workspaceId);
           dispatcher.setUserOwnedFiles([...new Set([...manual.paths, ...owned])], prompt);
           dispatcher.setUserFileRefusalSink((paths) => {
             try {
@@ -16428,6 +16495,8 @@ async function noteBuildOutcome(
       //
       // Each keeps its OWN failure isolation. `allSettled`, not `all`: one unavailable store must leave
       // the other two contexts in the prompt, exactly as three independent try/catches did.
+      // Everything since the project check, as one window — named steps, and the rest as `other`.
+      try { buildDiag.closeSetupWindow('Build wiring ready', wiringSteps.list()); } catch { /* timing is observation only */ }
       const contextT0 = Date.now();
       const [prefSettled, adrSettled, brainSettled] = await Promise.allSettled([
         userPreferenceStore.contextFor(userId),
@@ -16448,8 +16517,8 @@ async function noteBuildOutcome(
       const brainContext = brainSettled.status === 'fulfilled' ? brainSettled.value : '';
       if (brainContext) architectSystem = `${brainContext}\n\n---\n\n${architectSystem}`;
       try {
-        buildDiag.record({
-          phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+        buildDiag.recordSetupTiming({
+          startMs: contextT0, endMs: contextT0 + contextMs,
           message: `Personal context loaded in ${contextMs}ms`,
           detail: `preferences, past decisions and cross-project lessons, fetched concurrently · `
             + `applied: ${[prefContext && 'preferences', adrContext && 'decisions', brainContext && 'lessons']
@@ -16539,7 +16608,7 @@ async function noteBuildOutcome(
             const t = await Promise.race([call, timeout]);
             try {
               const lbl = fastLaneProviderLabel(bpProvider);
-              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: bpProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: bpProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
@@ -16783,9 +16852,12 @@ async function noteBuildOutcome(
       const unknownNameNote = unknownNameBuilderNote(unknownNamesAsked);
       // A login nobody asked for is a wall in front of the app (autopsy 70e030bb, see requestScope.ts).
       let requestScopeText = '';
+      let requestScopeReason: RequestScopeReason | null = null;
       try {
-        requestScopeText = requestScopeNote({ request: planning.text, newBuild: intent === 'new_build' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain });
-      } catch { requestScopeText = ''; }
+        const scope = requestScopeVerdict({ request: planning.text, newBuild: intent === 'new_build' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain });
+        requestScopeText = scope?.note ?? '';
+        requestScopeReason = scope?.reason ?? null;
+      } catch { requestScopeText = ''; requestScopeReason = null; }
       // A script, a CLI, a Streamlit dashboard or a notebook is built as a web app, and the user hears that
       // BEFORE the build (Q-274, autopsy 241215d1 — a "self-contained Python script" became FastAPI + React
       // with a simulated feed, said nowhere). New builds only, like the two notes above — see scriptRequest.ts.
@@ -16862,6 +16934,10 @@ async function noteBuildOutcome(
         // work to resume from" and the user was told their files were saved. Only files the MODEL
         // authored count as work.
         hasExistingFiles: () => modelAuthoredPaths(writtenFiles).length > 0,
+        // …and the third state (autopsy 303e8a6f): nothing of the build's own, but our seed (template, game kit,
+        // pasted page) IS in the workspace — the ending then says so instead of "nothing was written".
+        // …and WHICH seed, read with the router's own test, so the way on it names is the one the next turn takes.
+        seedState: () => seedStateOf(writtenFiles),
         // Autopsy 95598899 — wording of the build nudge only, never whether it fires. An established
         // project must never be told to "start by writing the entry file". See nudgeToBuild.ts.
         editingExistingApp: isEditMode,
@@ -17002,6 +17078,8 @@ async function noteBuildOutcome(
         events.subscribe(checkpointListener, false);
       } catch { /* checkpoint listener is best-effort — never blocks a build */ }
 
+      // A corrected starter chip's OLD text (an old phone bundle still sends it) reaches the builder as the
+      // chip's current text — autopsy 303e8a6f: the old AI-image chip told the builder the pictures need no key.
       let buildPrompt = prompt;
       // Cache-prefix mode (see above): the volatile context blocks that were split out of the system
       // prompt ride the user turn instead, so the model still receives every one — just not in the
@@ -17024,7 +17102,8 @@ async function noteBuildOutcome(
       // in the ready message — see unsupportedStack.ts.
       if (requestScopeText) {
         buildPrompt = `${requestScopeText}\n\n---\n\n${buildPrompt}`;
-        buildDiag.record({ phase: 'plan', severity: 'info', code: 'REQUEST_SCOPE_NOTE', message: 'The request asks for no sign-in, so the builder was told to add no login or accounts and no control for a state the data does not have.', autoResolved: true });
+        // The decider's own reason, in its own words (autopsy 303e8a6f) — never a paraphrase written here.
+        buildDiag.record({ phase: 'plan', severity: 'info', code: 'REQUEST_SCOPE_NOTE', message: requestScopeReportLine(requestScopeReason ?? 'names-no-sign-in'), autoResolved: true });
       }
       if (unknownNameNote) {
         buildPrompt = `${unknownNameNote}\n\n---\n\n${buildPrompt}`;
@@ -17032,7 +17111,7 @@ async function noteBuildOutcome(
       }
       if (scriptFormAsked && scriptRequestNote) {
         buildPrompt = `${scriptRequestNote}\n\n---\n\n${buildPrompt}`;
-        emit({ type: 'narration', agent: 'architect', text: scriptRequestStartLine(scriptFormAsked, liveDataAsked), ts: Date.now() });
+        events.emit({ type: 'narration', agent: 'architect', text: scriptRequestStartLine(scriptFormAsked, liveDataAsked), ts: Date.now() });
         buildDiag.record({ phase: 'plan', severity: 'info', code: 'SCRIPT_REQUEST_AS_WEB_APP', message: scriptRequestReportNote(scriptFormAsked, liveDataAsked), autoResolved: true });
       }
       if (unsupportedStackAsked) {
@@ -17212,8 +17291,8 @@ async function noteBuildOutcome(
         const ctxIndexed = await warmIndexFiles(ctxMem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 200 });
         const ctxT3 = Date.now();
         try {
-          buildDiag.record({
-            phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+          buildDiag.recordSetupTiming({
+            startMs: ctxT0, endMs: ctxT3,
             message: `Project context prepared in ${Math.round((ctxT3 - ctxT0) / 100) / 10}s`,
             detail: `memory restore ${ctxT1 - ctxT0}ms · file listing ${ctxT2 - ctxT1}ms (${tree.length} path(s)) · indexed ${ctxIndexed.length} file(s) in ${ctxT3 - ctxT2}ms`,
           });
@@ -17259,7 +17338,7 @@ async function noteBuildOutcome(
         // port (SERVER's port for single-port, CLIENT's for two-port) from package.json + the server file,
         // and hand it to the builder before it touches the preview. Deterministic; null for a non-fullstack
         // app (a plain client/API is already covered by the framework hint). Reads only a handful of files.
-        const bootHint = await fullstackBootHint(tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''));
+        const bootHint = await promptSteps.step('boot hint', () => fullstackBootHint(tree, (p) => actuator.readFile(workspaceId, p).catch(() => '')));
         if (bootHint) buildPrompt = `${bootHint}\n\n${buildPrompt}`;
         /**
          * REAL OR JUST 3D (admin 2026-08-27: "wording par nahi jana, intension samjhna hai").
@@ -17376,9 +17455,9 @@ async function noteBuildOutcome(
       // turns "continue" from amnesia into a real resume. Best-effort — never blocks the build.
       try {
         const store = getConversationStore();
-        const prior = await findWorkspaceConversation(store, userId, workspaceId);
+        const prior = await promptSteps.step('conversation recap', () => findWorkspaceConversation(store, userId, workspaceId));
         if (prior) {
-          const full = await store.get(prior.id);
+          const full = await promptSteps.step('conversation read', () => store.get(prior.id));
           // MEMORY FIX 6 (long sessions): a ROLLING summary — recent turns verbatim PLUS a condensed
           // digest of everything before them — so the early context (the original ask, what the app
           // is) is not silently dropped once the session grows past the recap window.
@@ -17518,7 +17597,7 @@ async function noteBuildOutcome(
               message: 'The user pasted their own one-file HTML app, so it stays one file: their page is index.html and is improved in place, not rebuilt as a React project.',
               detail: `document ${doc.length} chars · storage names kept: ${keys.length ? keys.join(', ') : 'none found'}`,
             });
-            emit({ type: 'narration', agent: 'architect', text: '📄 Keeping your app as one HTML file, the way you pasted it — improving it in place.', ts: Date.now() });
+            events.emit({ type: 'narration', agent: 'architect', text: '📄 Keeping your app as one HTML file, the way you pasted it — improving it in place.', ts: Date.now() });
           }
         } catch { /* seeding is best-effort — a failure builds as a plain static page from the brief */ }
       }
@@ -17672,6 +17751,7 @@ async function noteBuildOutcome(
       // The gate is an exact-match allowlist against the SIGN-IN email and used to record nothing at
       // all, so a mistyped domain and a below-threshold prompt produced the identical symptom:
       // silence. Advisory string only — it can never enable, block or slow a build.
+      try { buildDiag.closeSetupWindow('Prompt context gathered', promptSteps.list()); } catch { /* timing is observation only */ }
       try {
         const pmDiag = projectModeDiagnosis({
           flagRaw: process.env.AGENTV3_PROJECT_MODE,
@@ -17690,7 +17770,7 @@ async function noteBuildOutcome(
         // point is withdrawn aloud instead of trailing off (autopsy e706e068).
         let ppDecompositionAnnounced = false;
         try {
-          let pPlan = await loadProjectPlan(workspaceId);
+          let pPlan = await finalSteps.step('project plan', () => loadProjectPlan(workspaceId));
           const planPreExisted = !!pPlan;
           // A single bounded plan-generation LLM call (used by BOTH the initial decomposition and the
           // GA-7 live-replan below). Cheap-floor-first like every other build text call. The outer
@@ -17725,7 +17805,7 @@ async function noteBuildOutcome(
             }
             try {
               const lbl = fastLaneProviderLabel(ppProvider);
-              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
@@ -17911,6 +17991,10 @@ async function noteBuildOutcome(
       // template). Best-effort: any failure just falls through to a normal from-scratch build. Kill switch
       // AGENTV3_GOLDEN_SCAFFOLD=off.
       let goldenPreseeded = false;
+      /** The memory probe at the end of setup (see "THE MACHINE'S MEMORY HIGH-WATER MARK" below). */
+      let peakMemoryAtStart: Promise<PeakMemory | null> = Promise.resolve(null);
+      /** The seeded template's tier — files the build under its tier's ETA slice (see SCAFFOLD_PRO_TASK_KEY). */
+      let goldenPreseededTier: 'simple' | 'pro' | null = null;
       /** Path → the exact content the platform's own template seeded. See the bill note below. */
       const preseededGolden = new Map<string, string>();
       for (const [pp, pc] of pastedSeed) preseededGolden.set(pp, pc); // the user's own pasted page — see pastedSeed
@@ -17918,7 +18002,7 @@ async function noteBuildOutcome(
         try {
           const golden = goldenScaffoldForPrompt(prompt);
           if (golden) {
-            const existingSrc = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
+            const existingSrc = (await finalSteps.step('template check', () => actuator.listFiles(workspaceId).catch(() => [] as string[])))
               .filter((p) => p.startsWith('src/'));
             // "Nothing of anybody's is here", not "src/ is empty" — setup writes our own starter into a fresh
             // workspace, so src/ is never empty any more (autopsy 31254f9a; see `holdsOnlyOurStarter`).
@@ -17938,12 +18022,12 @@ async function noteBuildOutcome(
               // TOGETHER, not one after another (autopsy 972acde5): twelve sequential sandbox round trips
               // were ~5 s of the wait before the first model call. A failed write still rejects the whole
               // seed, exactly as the loop did, and the files are recorded only once every write landed.
-              await Promise.all(Object.entries(goldenFiles).map(([gp, gc]) => actuator.writeFile(workspaceId, gp, gc)));
+              await finalSteps.step('template write', () => Promise.all(Object.entries(goldenFiles).map(([gp, gc]) => actuator.writeFile(workspaceId, gp, gc))));
               for (const [gp, gc] of Object.entries(goldenFiles)) {
                 writtenFiles.set(gp, gc);
                 try { getWorkspaceMemory(workspaceId).indexFile(gp, gc); } catch { /* index best-effort */ }
               }
-              await saveWorkspaceFiles(workspaceId, goldenFiles).catch(() => {});
+              await finalSteps.step('template save', () => saveWorkspaceFiles(workspaceId, goldenFiles).catch(() => {}));
               // 🔴 REMEMBERED FOR THE BILL (autopsy 2b0a3ed5). These 12 files go into `writtenFiles`
               // above so the rest of the build treats them as present — but they are OUR template, not
               // the user's app. `decideCancelledBuildBill`'s "nothing delivered, nothing charged" rule
@@ -17973,30 +18057,13 @@ async function noteBuildOutcome(
                 for (const e of firstPaintEvents(Object.keys(goldenFiles))) events.emit(e);
               }
               goldenPreseeded = true;
+              goldenPreseededTier = golden.tier;
               buildDiag.record({ phase: 'build', severity: 'info', code: 'GOLDEN_SCAFFOLD', message: `Pre-seeded the tested "${golden.label}" template (${Object.keys(goldenFiles).length} files) — the builder verifies & customizes instead of writing from scratch.`, autoResolved: true });
-              emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
+              events.emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
               // HANDOFF FRAMING (same discipline as the fast-lane salvage below): the builder must treat the
-              // scaffold as ITS OWN work to verify — never alien clutter to re-plan or rewrite.
-              //
-              // TIER-AWARE, and this distinction is load-bearing. A SIMPLE scaffold IS the finished app, so
-              // "polish and finish" is the truth. A PRO scaffold is a compile-proven ARCHITECTURE covering
-              // part of a much larger request ("…activity history, tasks, and a dashboard of pipeline
-              // value") — telling the builder it "fully implements the request" would make it ship a
-              // skeleton and declare success, which is exactly the fake-completion the real-features rule
-              // forbids. So pro gets an EXTEND instruction instead of a FINISH one.
-              buildPrompt = golden.tier === 'pro'
-                ? `[EXTEND THIS WORKING FOUNDATION — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested "${golden.label}" foundation. ` +
-                  `It already compiles and runs: src/lib/ui.tsx holds the shared components (Shell, Card, StatTile, Badge, Button, Field, Select, Modal, Empty), ` +
-                  `src/lib/store.ts holds persistent state (useCollection, inr, shortDate), and src/App.tsx has the working screens. ` +
-                  `READ all three FIRST. It is a STARTING POINT, not the finished app — BUILD OUT everything the request below asks for that is not there yet, ` +
-                  `reusing those existing components and the useCollection pattern rather than inventing a second set. Add new screens as their own files under src/. ` +
-                  `Do NOT rewrite what already works, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.\n\n---\n\n${buildPrompt}`
-                : `[VERIFY & FINISH — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested, working "${golden.label}" app template. ` +
-                  `It already compiles cleanly and fully implements the request below. READ src/App.tsx first. If the request matches the template (it should — the prompt is the template's own), ` +
-                  `make at most SMALL polish edits and finish quickly. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists. ` +
-                  // Autopsy 8257ca59: a polish step replaced the template's working light/dark switch with a
-                  // hand-rolled one that set a class no stylesheet styles, and a repair pass had to put it back.
-                  `KEEP the template's own working controls — above all its light/dark switch (ThemeToggle in src/theme.tsx, which cycles Auto → Light → Dark through the data-theme attribute the styles use); improve one in place if you must, never replace it with a hand-rolled copy.\n\n---\n\n${buildPrompt}`;
+              // scaffold as ITS OWN work to verify — never alien clutter to re-plan or rewrite. Tier-aware, and the
+              // template's recipe instructions ride along (goldenBuildPrompt, autopsy 303e8a6f).
+              buildPrompt = goldenBuildPrompt(golden, buildPrompt);
             }
           }
         } catch (seedErr) {
@@ -18069,7 +18136,7 @@ async function noteBuildOutcome(
               gameKitSkipReason = `the workspace already holds ${existingSrc.length} source file(s) that are not our untouched starter, and the kit is never written over somebody's work`;
             } else {
               const kitThreeD = kitPlan.includes('generate_game_3d');
-              emit({ type: 'narration', agent: 'architect', text: `🎮 Setting up NavBharatAI's game engine first — game loop, controls, sound effects and music${kitThreeD ? ', visual effects, the 3D world and a playable 3D shell' : ''} — so your game is built on it.`, ts: Date.now() });
+              events.emit({ type: 'narration', agent: 'architect', text: `🎮 Setting up NavBharatAI's game engine first — game loop, controls, sound effects and music${kitThreeD ? ', visual effects, the 3D world and a playable 3D shell' : ''} — so your game is built on it.`, ts: Date.now() });
               const writtenBeforeKit = new Map(writtenFiles);
               const kitStartedAt = Date.now();
               const kitResults: GameKitSeedResult[] = [];
@@ -18154,7 +18221,15 @@ async function noteBuildOutcome(
       // 🧹 THE PACKAGE LIST AS THE BUILDER FOUND IT (unusedDepPrune.ts). Read once, after every platform seed
       // (template, golden scaffold, pasted page) and before the first model call, so a package this build
       // adds can be told from one the user already had. Unreadable ⇒ null ⇒ nothing is ever removed.
-      const packageJsonAtBuildStart: string | null = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
+      const packageJsonAtBuildStart: string | null = await finalSteps.step('package.json read', () => actuator.readFile(workspaceId, 'package.json').catch(() => null));
+      // The last window before the first model call: project plan, template seed, the reads above (autopsy 303e8a6f).
+      try { buildDiag.closeSetupWindow('Final preparation', finalSteps.list()); } catch { /* timing is observation only */ }
+      // 🧠 THE MACHINE'S MEMORY HIGH-WATER MARK BEFORE THIS BUILD'S WORK (adversarial review of 303e8a6f): the counter
+      // cannot be reset and machines are reused, so the end reading alone is the machine's lifetime peak. Started
+      // here, NOT awaited — it never adds to the user's wait — and only on a machine that already exists.
+      peakMemoryAtStart = sandboxSessionOf(actuator, workspaceId)
+        ? withTimeout(actuator.runCommand(workspaceId, PEAK_MEMORY_PROBE), 5_000, 'peak-memory').then((r) => peakProbeOutcome(r).peak, () => null)
+        : Promise.resolve(null);
       const fastLaneWouldRun = !goldenPreseeded && pastedSeed.size === 0 && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
       const fastLaneRung = fastLaneWouldRun
         ? (() => {
@@ -18219,7 +18294,9 @@ async function noteBuildOutcome(
         // The model that served the lane's LAST call reasons before every answer — the lane stops at
         // the next boundary and hands off (SimpleBuildDeps.stopLane; autopsy Study-Racer, 2026-09-25).
         let fastLaneReasoningRung: string | null = null;
-        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
+        /** Q-926: the per-file calls a reasoning rung answered while the lane stayed on it — the measurement. */
+        const laneReasoningStays: Array<{ model: string; ms: number }> = [];
+        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number, mayReason = false): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
           // blind spot — a truncated (max_tokens) per-file generation is exactly what produces broken
@@ -18259,7 +18336,8 @@ async function noteBuildOutcome(
               deadlineAt,
               // The walk stops BEFORE a rung that reasons before every answer, rather than spending the
               // lane's clock inside one (autopsy 33812996: 497 s of one repair call on two such rungs).
-              stopAtReasoningRung: fastLaneReasoningGateEnabled(),
+              // …except a per-file call the lane decided may carry on there (Q-926, FastLaneBudget.mayStayOnReasoningRung).
+              stopAtReasoningRung: fastLaneReasoningGateEnabled() && !mayReason,
               // Stop cancels this call and every later one (stopSignal.ts). The lane never read the
               // build's signal before autopsy 2720e553, so a pressed Stop ran on for minutes.
               signal: abort.signal,
@@ -18289,8 +18367,11 @@ async function noteBuildOutcome(
             throw err;
           }
           const servedBy = fastLaneCallIdentity(providerReported, usedProvider, fbModel, t.model);
-          try { buildDiag.recordLlmCall({ model: servedBy.model, provider: servedBy.provider, promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true }); } catch { /* diagnostics best-effort */ }
-          if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {
+          try { buildDiag.recordLlmCall({ model: servedBy.model, provider: servedBy.provider, promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true }); } catch { /* diagnostics best-effort */ }
+          if (mayReason && modelAlwaysReasons(servedBy.model)) {
+            // The lane chose to stay (Q-926): measured, and the lane is NOT told to stop.
+            laneReasoningStays.push({ model: servedBy.model, ms: Date.now() - startedAt });
+          } else if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {
             fastLaneReasoningRung = servedBy.model;
             try {
               buildDiag.record({
@@ -18320,8 +18401,8 @@ async function noteBuildOutcome(
         // on text we discarded. Continuing is provider-cap-agnostic (raising max_tokens only moves the
         // ceiling and can 400 on a provider whose real cap is lower), bounded to MAX_CONTINUATIONS, and
         // a continuation that FAILS never loses the work already produced — we keep what we have.
-        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number }): Promise<string> => {
-          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt);
+        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number; mayReason?: boolean }): Promise<string> => {
+          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt, genOpts?.mayReason === true);
           let text = first.text;
           let stopReason = first.stopReason;
           // The call whose reply ends the text — the one a dropped half-written file came from (Q-166).
@@ -18337,7 +18418,7 @@ async function noteBuildOutcome(
               // A CONTINUATION FACES THE SAME DEADLINE AS THE CALL IT CONTINUES. It is a fresh provider
               // call, so without this the budget would bound only the first one and the continuation
               // ladder would walk straight past it — the same gap the Claude retry loop had.
-              next = await fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt);
+              next = await fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt, genOpts?.mayReason === true);
             } catch (err) {
               // A failed continuation must never discard the complete files we already have.
               buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_CONTINUATION_FAILED', message: `A continuation of a truncated generation failed after ${attempts - 1} successful continuation(s) — keeping the files produced so far.`, autoResolved: false, detail: err instanceof Error ? err.message : String(err) });
@@ -18708,6 +18789,8 @@ async function noteBuildOutcome(
         // plans its own files, so "9 of 10 files written · ~1 min to go" at minute 4 counted against a list
         // nobody was following any more. Forget it; the architect's own plan steps drive the ETA from here.
         if (!sb.ok) { etaPlannedFiles = 0; etaFirstFileAt = 0; }
+        // Q-926 — the measurement the admin approved the change on: every stay, its price, and how the lane ended.
+        if (laneReasoningStays.length > 0) buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_STAYED_ON_REASONING_RUNG', message: reasoningStayNote(laneReasoningStays, laneOutcomeWords(sb)), autoResolved: true });
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
         // needs explaining, and a check only ever visible when it complains cannot be told apart from
@@ -19212,7 +19295,9 @@ async function noteBuildOutcome(
       if (expectsArtifacts && builderWroteCount() === 0 && costAfterFirstAttempt > capUsd) {
         events.emit({
           type: 'narration', agent: 'architect',
-          text: `⚠️ Build stopped: session cost ($${costAfterFirstAttempt.toFixed(2)}) reached the $${capUsd.toFixed(0)} cap. No files were produced — you will not be charged. Try again with a simpler prompt or contact support.`,
+          // "No files were produced" was false for a seeded build (a game kit is not counted as the builder's own,
+          // autopsy 303e8a6f's adversarial review) — the seed state says what is there, as every other ending does.
+          text: `⚠️ Build stopped: session cost ($${costAfterFirstAttempt.toFixed(2)}) reached the $${capUsd.toFixed(0)} cap. ${(() => { const seed = seedStateOf(writtenFiles); return seed ? `Nothing of the build's own was produced — you will not be charged. ${seedKeptSentence(seed)}` : 'No files were produced — you will not be charged. Try again with a simpler prompt or contact support.'; })()}`,
           ts: Date.now(),
         });
       }
@@ -19370,10 +19455,16 @@ async function noteBuildOutcome(
       try {
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
-          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode, projectModule: projectModuleRef?.name ?? null }),
+          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode, projectModule: projectModuleRef?.name ?? null, endAt: Date.now() }),
           autoResolved: true,
         });
       } catch { /* an advisory line must never affect a build */ }
+      // 🧹 THE NET UNDER THE ORPHAN HAND-BACK (autopsy db07e0af): a component this build wrote, that the import graph
+      // proves nothing reaches and the request never named, is removed instead of shipped — the model was handed it
+      // and left it. One the request may name stays, and so does its warning. See leftoverComponents.ts.
+      // The guard lives in leftoverComponents.ts: this handler is at TypeScript's control-flow limit (TS2563), and one
+      // more `if (a && b && c && d)` here crossed it once #3692 landed (merge of #3698, 2026-10-13).
+      await applyLeftoverNetAfterBuild({ ok: result.ok === true, importTurn: isImportTurn, editMode: isEditMode, aborted: abort.signal.aborted }, dispatcher, buildDiag, checksRequest);
       // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
       // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
       // worked: a behavioural fix nobody measures is a hope.
@@ -20181,7 +20272,7 @@ async function noteBuildOutcome(
                   try { getWorkspaceMemory(workspaceId).indexFile(cp, cc); } catch { /* index best-effort */ }
                 }
                 await saveWorkspaceFiles(workspaceId, changed).catch(() => {});
-                emit({ type: 'narration', agent: 'architect', text: prunedNarration(outcome.removed), ts: Date.now() });
+                events.emit({ type: 'narration', agent: 'architect', text: prunedNarration(outcome.removed), ts: Date.now() });
               }
               buildDiag.record({
                 phase: 'build', severity: 'info', autoResolved: true,
@@ -21324,7 +21415,10 @@ async function noteBuildOutcome(
       const recordVerdictHeld = (flip: LateFlip, count: number) => {
         try {
           const proof = runProof();
-          buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'VERDICT_HELD_BY_RUN', message: verdictHeldMessage(flip, proof, count), autoResolved: true, detail: `flip=${flip} · prodBuild=${prodBuildOutcome} · browserRendered=${browserRenderProven}` });
+          // INFORMATION, not a closed warning (autopsy 303e8a6f's heal census): nothing was repaired — the run's proof
+          // outranked a late flip, and the findings it held back stay listed as their own rows. As a closed warning
+          // it was counted as a self-heal on every build that held a verdict.
+          buildDiag.record({ phase: 'readiness', severity: 'info', code: 'VERDICT_HELD_BY_RUN', message: verdictHeldMessage(flip, proof, count), autoResolved: true, detail: `flip=${flip} · prodBuild=${prodBuildOutcome} · browserRendered=${browserRenderProven}` });
         } catch { /* diagnostics best-effort */ }
       };
       // The POSITIVE counterpart. Without it the runtime verdict below could report "no live preview
@@ -21677,7 +21771,8 @@ async function noteBuildOutcome(
               let exists = false;
               try { await actuator.readFile(workspaceId, path); exists = true; } catch { exists = false; }
               if (exists) continue;
-              await actuator.writeFile(workspaceId, path, content);
+              // Named, so the post-green ledger says who wrote it (db07e0af: our suite was filed under "build loop").
+              await runInPass('e2e-scaffold', () => actuator.writeFile(workspaceId, path, content));
               writtenFiles.set(path, content);
               noteFinishingWrite(path);
               added.push(path);
@@ -21696,7 +21791,7 @@ async function noteBuildOutcome(
               try { await actuator.readFile(workspaceId, AUTH_SPEC_PATH); authExists = true; } catch { authExists = false; }
               if (!authExists) {
                 const spec = buildAuthFlowSpec(auth);
-                await actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec);
+                await runInPass('e2e-scaffold', () => actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec));
                 writtenFiles.set(AUTH_SPEC_PATH, spec);
                 noteFinishingWrite(AUTH_SPEC_PATH);
                 added.push(AUTH_SPEC_PATH);
@@ -21768,7 +21863,7 @@ async function noteBuildOutcome(
             for (const path of fixedPaths) {
               const stripped = stripCollidingAmbientShims(projectNow[path]);
               if (stripped.source === projectNow[path]) continue;
-              if (!(await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, stripped.source)))) continue;
+              if (!(await writeUnlessFrozen(() => runInPass('ambient-shim-cleanup', () => actuator.writeFile(workspaceId, path, stripped.source))))) continue;
               projectNow[path] = stripped.source;
               writtenFiles.set(path, stripped.source);
               noteFinishingWrite(path);
@@ -21788,7 +21883,7 @@ async function noteBuildOutcome(
             if (tsconfigRaw) {
               const excluded = withE2eExcluded(tsconfigRaw);
               if (excluded.changed) {
-                await actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text);
+                await runInPass('e2e-tsconfig-exclude', () => actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text));
                 writtenFiles.set('tsconfig.json', excluded.text);
                 noteFinishingWrite('tsconfig.json');
                 buildDiag.record({
@@ -21821,7 +21916,7 @@ async function noteBuildOutcome(
               // refusal and then calls onFileWrite would record a file the sandbox never received
               // (adversarial review 2026-08-12). Record-only-on-success keeps the two in step.
               let adrWritten = false;
-              try { await actuator.writeFile(workspaceId, path, content); adrWritten = true; } catch { /* refused or failed */ }
+              try { await runInPass('architecture-note', () => actuator.writeFile(workspaceId, path, content)); adrWritten = true; } catch { /* refused or failed */ }
               if (adrWritten) onFileWrite?.(path, content);
               if (adrWritten) finishingPaths.add(path);
             }
@@ -23564,11 +23659,18 @@ async function noteBuildOutcome(
             phase: 'readiness', severity: 'info', code: 'SANDBOX_SESSION', autoResolved: true,
             message: describeSession(session, Date.now()),
           });
-          const probe = await withTimeout(actuator.runCommand(workspaceId, PEAK_MEMORY_PROBE), 5_000, 'peak-memory').catch(() => null);
-          const peak = parsePeakMemory(probe?.stdout);
+          // A measurement never starts a machine: with no live session there is nothing to ask. A failed probe keeps
+          // its KIND (timed out vs failed) — a cause the report states must be one that happened.
+          const end = !session
+            ? { peak: null, failure: { kind: 'no-session' as const } }
+            : await withTimeout(actuator.runCommand(workspaceId, PEAK_MEMORY_PROBE), 5_000, 'peak-memory').then((r) => peakProbeOutcome(r), (e) => peakProbeOutcome(null, e));
+          const start = await withTimeout(peakMemoryAtStart, 1_000, 'peak-memory-start').catch(() => null);
           buildDiag.record({
             phase: 'readiness', severity: 'info', code: 'SANDBOX_PEAK_MEMORY', autoResolved: true,
-            message: describePeakMemory(peak, sandboxRamGb()),
+            message: describePeakMemory(end.peak, sandboxRamGb(), {
+              start, failure: end.failure,
+              sessionAgeMs: session ? Date.now() - session.startedAt : null, sessionOrigin: session?.origin ?? null,
+            }),
           });
         } catch { /* an observation must never affect the verdict it precedes */ }
         buildDiag.record({
@@ -23584,13 +23686,19 @@ async function noteBuildOutcome(
           // `stoppedByUser` fact for its headline; the severity now reads it too.
           // 🧩 …AND A MODULE TURN WHOSE APP IS PUT TOGETHER LATER IS NOT UNPROVEN, IT IS NOT DUE (autopsy 0311186f):
           // two module turns each carried three "nothing proven to run" warnings about an app that did not exist yet.
-          severity: gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error'
-            : gate.state === 'green' || (gate.state === 'unknown' && !!gateEvidence.awaitingShell) ? 'info' : 'warning',
-          code: 'RELEASE_GATE',
-          message: releaseGateSummary(gate),
           // A STOPPED build's RED is the user's own decision, not an item anyone must act on — leaving it open
           // made a clean Stop end with "2 unresolved" problems (autopsy 31254f9a). The verdict stays RED.
-          autoResolved: gate.state === 'green' || gateEvidence.stoppedByUser === true || (gate.state === 'unknown' && !!gateEvidence.awaitingShell),
+          // 🧮 …AND SEVERITY AND "CLOSED" ARE ONE DECISION (autopsy 303e8a6f). They were two expressions here,
+          // each fixed once: a Stop became WARNING + closed, which the heal predicate counts as a repair — every
+          // stopped build reported "1 self-heal" and a warning. `releaseGateRecord` now decides both.
+          ...releaseGateRecord(gate, {
+            buildOk: result.ok === true,
+            stoppedByUser: gateEvidence.stoppedByUser === true,
+            // The CORRECTED prediction (autopsy 50378049): a module turn with a live address is not "not yet due".
+            awaitsShell: !!gateEvidence.awaitingShell,
+          }),
+          code: 'RELEASE_GATE',
+          message: releaseGateSummary(gate),
         });
         changeGateState = gate.state;
 
@@ -25513,7 +25621,7 @@ async function noteBuildOutcome(
                 events.emit({ type: 'narration', agent: 'architect', text: greenGuardMessage(plan, chosen.kind), ts: Date.now() });
                 buildDiag.record({
                   phase: 'build', severity: 'warning', code: 'GREEN_GUARD_RESTORED',
-                  message: `Restored the last verified-working version: ${Object.keys(plan.write).length} file(s) put back, ${plan.remove.length} added by the failed attempt removed, ${plan.unchanged} already correct. The attempt itself is kept and was not discarded.`,
+                  ...greenGuardRestoredRecord(plan, chosen.kind), // a turn-start base is never called "verified" (Q-973)
                   autoResolved: true,
                 });
                 // …AND THE USER MUST BE TOLD, IN THE SUMMARY THEY ACTUALLY READ (admin 2026-08-25).
@@ -25525,6 +25633,7 @@ async function noteBuildOutcome(
                   restored: Object.keys(plan.write).length,
                   removed: plan.remove.length,
                   fromThisBuild: chosen.kind === 'green-snapshot' && fromThisBuild,
+                  unchecked: chosen.kind === 'turn-start',
                 };
                 }
               } else if (greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })) {
@@ -25553,6 +25662,9 @@ async function noteBuildOutcome(
                 15_000, 'durable-delete',
               );
               if (forgotten > 0) {
+                // A positive count means the store's path list was rewritten without every one of these paths
+                // (removeWorkspaceFiles returns 0 on any failure), so all of them are now absent from the app.
+                removedFromApp = forgetDurably;
                 buildDiag.record({
                   phase: 'build', severity: 'info', code: 'DELETED_FILES_FORGOTTEN', autoResolved: true,
                   message: `${forgotten} file(s) this build deleted were removed from the saved project too, so the next session does not bring them back: ${forgetDurably.slice(0, 8).join(', ')}${forgetDurably.length > 8 ? ` and ${forgetDurably.length - 8} more` : ''}.`,
@@ -26209,11 +26321,15 @@ async function noteBuildOutcome(
           const settled = await withTimeout(settleChange(changeSession, {
             ok: result.ok === true,
             stopped: abort.signal.aborted || buildWasStopped(settleIssues),
-            files: [...writtenFiles.keys()],
+            // What THIS build changed — never our untouched template or our own finishing writes (autopsy
+            // 303e8a6f: a stopped starter chip was recorded as "14 file(s)", every one of them the template).
+            // The bill (2b0a3ed5) and the review (8257ca59) already read the same helper.
+            files: reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden),
             gate: changeGateState,
             issues: settleIssues,
             security: (() => { try { return getWorkspaceMemory(workspaceId).appSecurityFindings(); } catch { return []; } })(),
             securityScanned: (() => { try { return getWorkspaceMemory(workspaceId).graph().files; } catch { return []; } })(),
+            removedFiles: removedFromApp,
           }), 4_000, 'change-engine-settle').catch(() => null);
           if (settled) {
             for (const line of settled.reportLines) buildDiag.record({ phase: 'build', severity: 'info', code: 'CHANGE_RECORDED', autoResolved: true, message: line });
@@ -26292,6 +26408,8 @@ async function noteBuildOutcome(
           detail: `calls=${totalWasteCalls(providerWaste)}`,
           autoResolved: true,
         });
+        // …and as numbers, so a day's share of wall time lost to silent / crawling rungs can be computed (Q-009).
+        buildDiag.setProviderWaste(providerWaste, Date.now() - buildStartedAt);
       } catch { /* an observation must never affect a finished build */ }
 
       /**
@@ -26323,16 +26441,21 @@ async function noteBuildOutcome(
       // tier, billed amount, tokens, success, and duration so the savings AND the
       // per-tier quality are MEASURABLE (the P8 cutover gate needs this data). Best-
       // effort — never blocks the run. Recorded for every build, signed-in or not.
+      // 🔴 THE TIER THAT DELIVERED, MEASURED (autopsy 303e8a6f). `deliveredTier` starts as the analyser's PLAN and
+      // was corrected only on the empty-build retry (f5351721), so an agentic weak GLM/KIMI build was filed under
+      // the band its prompt was SIZED as — 'sonnet' for the report's chip. The providers that actually answered
+      // decide; nobody reported ⇒ the old value stands (never an invented tier).
+      const measuredTier: StartTier = deliveredStartTier(dominantProvider(providerTurns)) ?? deliveredTier;
       agentV3CostTelemetry
         .record({
           // A seeded template build is counted as its own kind, so the ETA can learn from it and the
           // `complex_app` average is not pulled down by template polish (autopsy 4a1c0157). Filed through
           // the SAME function the opening ETA reads its slice with (build 46e2d74b): a game is filed as a
           // game, a routed-complex build as complex — never under a key the reader does not use.
-          taskType: etaKeyForBuild(goldenPreseeded),
+          taskType: etaKeyForBuild(goldenPreseeded, goldenPreseededTier),
           // Record the tier the build was actually DELIVERED on (after any P3 escalation),
           // so per-tier success rates reflect what really ran, not just the start tier.
-          startTier: deliveredTier,
+          startTier: measuredTier,
           // Billing accounting fix: record the ACTUAL charged amount + the WHOLE build's tokens
           // (from the sink), so the cost-ladder measurement reflects real spend, not one runner's turns.
           billedUsd: effectiveBilledUsd,
@@ -26515,7 +26638,7 @@ async function noteBuildOutcome(
           ok: result.ok,
           intent: String(intent),
           framework,
-          tier: deliveredTier,
+          tier: measuredTier,
           files: writtenFiles.size,
           durationMs: Math.max(0, traceEnd - buildStartedAt),
         });
@@ -26526,8 +26649,8 @@ async function noteBuildOutcome(
       // P-AI.9 — record the final model/tier and outcome decisions, then persist the trace. Best-effort.
       try {
         const nowIso = new Date().toISOString();
-        decisionTrace.record('model', `${deliveredTier} (${model})`, onlyOpus ? `pinned tier '${powerLevelReqEffective}' selected` : `analyzer chose ${analysis?.startTier ?? 'default'} start tier`, nowIso);
-        decisionTrace.record('outcome', result.ok ? 'success' : 'incomplete', `${writtenFiles.size} file(s) written in ${Math.max(0, Date.now() - buildStartedAt)}ms`, nowIso);
+        decisionTrace.record('model', `${measuredTier} (${dominantProvider(providerTurns) ?? model})`, onlyOpus ? `pinned tier '${powerLevelReqEffective}' selected` : `analyzer chose ${analysis?.startTier ?? 'default'} start tier`, nowIso);
+        decisionTrace.record('outcome', result.ok ? 'success' : 'incomplete', `${reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden).length} file(s) written in ${Math.max(0, Date.now() - buildStartedAt)}ms`, nowIso);
         await persistDecisionTrace(decisionTrace, nowIso);
         // Surface the trace in chat when provider-debug is on (same gate as the trace-id tag), so the
         // admin can SEE why each choice was made. Normal users see nothing — explainability without noise.
@@ -26580,7 +26703,8 @@ async function noteBuildOutcome(
       try {
         if (result.ok && expectsArtifacts && (process.env.AGENTV3_HTML_ENTRY_GUARD ?? '').trim().toLowerCase() !== 'off') {
           const full = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
-          const htmlKey = Object.keys(full).find((k) => /(^|\/)index\.html$/i.test(k));
+          // The ROOT page only — a `dist/` or `public/` copy can sort first in the store's key order (heal census).
+          const htmlKey = appEntryHtmlKey(full);
           if (htmlKey) {
             const guarded = ensureHtmlEntryScript(full);
             if (guarded.injected && guarded.files[htmlKey] !== full[htmlKey]) {
@@ -26613,8 +26737,10 @@ async function noteBuildOutcome(
           const dangling = danglingStylesheetImports(full);
           const confirmed: typeof dangling = [];
           for (const d of dangling) {
-            const exists = await actuator.readFile(workspaceId, d.sheet).then(() => true, () => false);
-            if (!exists) confirmed.push(d);
+            // Absent only when the sandbox SAYS absent — a read that failed for another reason (a dead machine, a
+            // timeout) is unknown, and a real import is never removed on it (heal census of autopsy 303e8a6f).
+            const absent = await actuator.readFile(workspaceId, d.sheet).then(() => false, (e: unknown) => isNotFoundError(e));
+            if (absent) confirmed.push(d);
           }
           const byFile = new Map<string, string[]>();
           for (const d of confirmed) byFile.set(d.file, [...(byFile.get(d.file) ?? []), d.specifier]);

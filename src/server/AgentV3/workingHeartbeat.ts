@@ -15,15 +15,21 @@
 // shown that whole minute. The distinction is the same one the whole report discipline rests on: we
 // may always say what we have measured, and never what we have guessed.
 //
-// Pure: no clock of its own, no I/O, no env. The caller supplies elapsed time.
+// ⏱️ …AND THE NUMBER IS THE USER'S WAIT, NOT THE CALL'S AGE (autopsy 303e8a6f, 2026-10-12). The clock started
+// when the MODEL CALL started, so a user who had waited 23 s was told "Still working — 11s so far", and on a
+// multi-turn build the clock restarted at "12s" on every slow turn, ten minutes in. A measurement is only
+// honest about what it says it measures, and "so far" names the build. WHEN to speak is still the call's
+// business (twelve seconds of this call's silence); WHAT number to show is measured from `originMs`, the
+// moment the user started waiting — required, so no caller can fall back to the call start.
+//
+// Pure: no I/O, no env. The caller supplies the origin; the clock is injectable.
 
 /**
  * The marker every transient status line carries.
  *
- * It exists so two different readers can recognise these lines without pattern-matching their wording:
- * the build report records only the FIRST one (a line that updates every 15 seconds would otherwise
- * bury the timeline it is meant to sit in), and the transcript builder already drops ⏱-prefixed ETA
- * lines from the assistant turn for the same reason.
+ * ⚠️ NOT A CLASSIFIER (autopsy 303e8a6f). Other progress lines start with the same emoji (the build-budget
+ * steer, the hand-back notice), so readers recognise the heartbeat by its id — `isLiveStatusLine` in
+ * src/lib/liveStatusLine.ts — never by this character.
  */
 export const WORKING_MARKER = '⏳';
 
@@ -46,11 +52,6 @@ export function workingLine(elapsedMs: number): string {
   return `${WORKING_MARKER} Still working — ${formatElapsed(elapsedMs)} so far`;
 }
 
-/** Is this narration one of our transient status lines rather than real build progress? PURE. */
-export function isTransientStatusLine(text: string | null | undefined): boolean {
-  return String(text ?? '').trimStart().startsWith(WORKING_MARKER);
-}
-
 /**
  * When the first heartbeat appears, and how often after that.
  *
@@ -68,21 +69,26 @@ export const WORKING_INTERVAL_MS = 15_000;
 /**
  * Start a heartbeat that calls `emit(elapsedMs)` on that schedule until it is stopped.
  *
+ * The schedule is relative to THIS call (first tick after `firstMs` of its silence); the number is measured
+ * from `originMs`, the moment the user started waiting (the build's event stream — see AgentEventStream).
+ *
  * Returns the stopper. The timers are `unref`ed where the runtime supports it, so a forgotten
  * heartbeat can never hold the process open — an observation must never outlive the thing it observes.
  */
 export function startWorkingHeartbeat(
   emit: (elapsedMs: number) => void,
-  opts: { firstMs?: number; intervalMs?: number; now?: () => number } = {},
+  opts: { originMs: number; firstMs?: number; intervalMs?: number; now?: () => number },
 ): () => void {
   const now = opts.now ?? (() => Date.now());
   const firstMs = typeof opts.firstMs === 'number' && opts.firstMs > 0 ? opts.firstMs : WORKING_FIRST_MS;
   const intervalMs = typeof opts.intervalMs === 'number' && opts.intervalMs > 0 ? opts.intervalMs : WORKING_INTERVAL_MS;
-  const startedAt = now();
+  // An origin we cannot read is the one case where the call start is all we have — and it is never later
+  // than the user's real wait began, so the number can only err short, never invent time.
+  const originMs = Number.isFinite(opts.originMs) ? opts.originMs : now();
   let interval: ReturnType<typeof setInterval> | undefined;
   const unref = (t: { unref?: () => void } | undefined) => { try { t?.unref?.(); } catch { /* not every runtime has it */ } };
 
-  const tick = () => { try { emit(Math.max(0, now() - startedAt)); } catch { /* a status line must never break a build */ } };
+  const tick = () => { try { emit(Math.max(0, now() - originMs)); } catch { /* a status line must never break a build */ } };
 
   const first = setTimeout(() => {
     tick();

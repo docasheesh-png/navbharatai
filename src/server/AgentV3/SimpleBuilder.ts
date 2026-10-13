@@ -44,7 +44,7 @@ import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport, dedupeStylesheetImports } from './ProjectIntegrityChecks';
 import { frameworkShipsDesignKit } from './designKitReach';
 import { kitClasses } from './kitRestore';
-import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
+import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason, mayStayOnReasoningRung, wavesFor } from './FastLaneBudget';
 
 
 /**
@@ -1413,7 +1413,37 @@ export function pathsNamedInErrors(errors: string): string[] {
     const p = m[2].replace(/^\.\//, '');
     if (!seen.has(p)) { seen.add(p); out.push(p); }
   }
+  // …and the file a "cannot find module" error is ABOUT (heal census of autopsy 303e8a6f): the error names the
+  // importer, so the repair that correctly CREATED the missing module was dropped as out of scope — a real fix
+  // blocked, and counted as a heal (REPAIR_OUT_OF_SCOPE). The target is resolved against the importing file.
+  for (const t of missingModuleTargets(errors)) if (!seen.has(t)) { seen.add(t); out.push(t); }
   return out;
+}
+
+/**
+ * The files a "cannot find module" error asks for, resolved against the importing file (tsc TS2307, Vite's
+ * "Failed to resolve import"). A spec without an extension yields the module and index candidates. Relative
+ * specs only — a package is not a file the repair may write. PURE.
+ */
+export function missingModuleTargets(errors: string): string[] {
+  if (!errors || typeof errors !== 'string') return [];
+  const out = new Set<string>();
+  const add = (importer: string, spec: string) => {
+    if (!/^\.{1,2}\//.test(spec)) return;
+    const dir = importer.replace(/^\.\//, '').split('/').slice(0, -1);
+    const parts = [...dir];
+    for (const seg of spec.split('/')) {
+      if (seg === '.' || seg === '') continue;
+      if (seg === '..') { if (!parts.length) return; parts.pop(); } else parts.push(seg);
+    }
+    const base = parts.join('/');
+    if (!base) return;
+    if (/\.[a-z0-9]{1,5}$/i.test(base)) { out.add(base); return; }
+    for (const ext of ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx']) out.add(`${base}${ext}`);
+  };
+  for (const m of errors.matchAll(/([\w./-]+\.[a-zA-Z]{1,5})(?:\(\d+,\d+\)|:\d+:\d+)[^\n]*?error TS2307: Cannot find module ['"]([^'"]+)['"]/g)) add(m[1]!, m[2]!);
+  for (const m of errors.matchAll(/Failed to resolve import ["']([^"']+)["'] from ["']([^"']+)["']/g)) add(m[2]!, m[1]!);
+  return [...out];
 }
 
 /**
@@ -1530,7 +1560,7 @@ export interface SimpleBuildDeps {
    * is optional on purpose: a caller (and every test) that omits it gets exactly today's behaviour.
    * See turnDeadline.ts for the report that produced it.
    */
-  generate: (system: string, user: string, opts?: { deadlineAt?: number }) => Promise<string>;
+  generate: (system: string, user: string, opts?: { deadlineAt?: number; mayReason?: boolean }) => Promise<string>;
   /**
    * Asked before every per-file call and after every tier: should the lane stop NOW and hand what it
    * has to the full builder? Returns the reason, or null to carry on.
@@ -1966,8 +1996,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         } catch (err) {
           contract = '';
           // 🔴 A HAND-OFF DURING THE CONTRACT ENDS THE LANE HERE (autopsy 1219c639), the sibling of the stop
-          // below (31254f9a). The engine crawled and the next one reasons before every answer, so the
-          // provider chain declined to call it — a deliberate hand-off. The lane read it as an empty
+          // below (31254f9a). The first engine failed (it crawled there; silence, a 429 or a timeout leads here
+          // too) and the next one reasons before every answer, so the provider chain declined to call it — a
+          // deliberate hand-off. The lane read it as an empty
           // contract: the report said it "came back with nothing usable, so the files were written without
           // a shared contract", and the user was told "Building 10 file(s)" — then not one file was
           // written, because every file call would have met the same rung. The plan goes to the full
@@ -2067,6 +2098,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // Generate ONE file (its own call, returns one FILE block). `produced` is the real source of
       // earlier-tier files, injected so this file uses their EXACT exported names.
       let laneStopReason: string | null = null; // set by deps.stopLane; thrown at the next tier boundary
+      /** Q-926: may THIS tier's file calls continue onto a reasoning rung? Decided per tier in the loop below. */
+      let tierMayReason = false;
       const genOne = async (spec: SimpleFileSpec, produced: OneShotFile[]): Promise<OneShotFile | null> => {
         if (lapsed) return null; // the lane already timed out — stop burning tokens on files nobody will use
         // The lane's chain may have fallen to an engine this lane cannot afford (see SimpleBuildDeps.stopLane).
@@ -2109,7 +2142,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             ? await deps.readExisting(spec.path).catch(() => null)
             : null;
           if (lapsed) return null;
-          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock, contractPath || undefined, existing), { deadlineAt: laneStartedAt + overallMs });
+          // Q-926: a per-file call may continue onto a reasoning rung when what is left is small (see the tier loop).
+          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock, contractPath || undefined, existing), { deadlineAt: laneStartedAt + overallMs, ...(tierMayReason ? { mayReason: true } : {}) });
           if (lapsed) return null; // timed out while this call was in flight — discard, don't log
           const blocks = parseFileBlocks(text);
           const match = blocks.find((b) => b.path === spec.path) ?? blocks[0];
@@ -2162,12 +2196,21 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         : null;
       // With v2 the stages ARE the waves (index i ⇒ v2Waves[i]); the projection above already ran.
       if (v2Waves) tiers.splice(0, tiers.length, ...v2Waves.map((_, i) => i));
+      const specsAt = (i: number) => (v2Waves
+        ? manifest.filter((s) => v2Waves[i].includes(s.path))
+        : depOrder ? manifest.filter((s) => generationTier(s.path) === tiers[i]) : manifest);
       for (let ti = 0; ti < tiers.length; ti++) {
-        const tier = tiers[ti];
-        const specs = v2Waves
-          ? manifest.filter((s) => v2Waves[ti].includes(s.path))
-          : depOrder ? manifest.filter((s) => generationTier(s.path) === tier) : manifest;
+        const specs = specsAt(ti);
         if (specs.length === 0) continue;
+        // Q-926 (autopsy db07e0af): what is LEFT — this tier and every later one — decides whether a fall onto a
+        // reasoning rung hands off or carries on. Recomputed per tier, so a slow tier shrinks the next decision.
+        const leftSizes = tiers.slice(ti).map((_, k) => specsAt(ti + k).length);
+        tierMayReason = mayStayOnReasoningRung({
+          remainingFiles: leftSizes.reduce((a, b) => a + b, 0),
+          remainingWaves: wavesFor(leftSizes, concurrency),
+          elapsedMs: Date.now() - laneStartedAt,
+          overallMs,
+        });
         const producedSoFar = [...written]; // real source of all earlier tiers (snapshot for this tier)
         const tierStartedAt = Date.now();
         const gen = await mapWithConcurrency(specs, concurrency, (spec) => genOne(spec, producedSoFar));

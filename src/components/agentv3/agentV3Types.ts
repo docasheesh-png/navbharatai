@@ -209,6 +209,15 @@ export interface AgentV3ClientState {
   narration: NarrationLine[];
   /** Live "working…" activity log (the expandable indicator) — ordered, capped, real events only. */
   activity: ActivityEntry[];
+  /**
+   * THIS device's clock when the user pressed Send for the build on screen — the origin of every user-visible
+   * build clock (autopsy 303e8a6f: the bar's clock started at the first activity, 11 s late, and on the server's
+   * clock while it ended on this one). Absent for a re-attached or restored build, which falls back to the
+   * server's own timestamps (see buildClock.ts).
+   */
+  startedAt?: number;
+  /** This device's clock when that build stopped running — the clock freezes here, never resets. */
+  endedAt?: number;
   /** PRIOR turns' activity (admin 2026-07-21 — "diff gayab na ho"): each new send used to wipe
    *  `activity`, so the finished build's action rows ("Created 33 files +812 -0" + its diffs)
    *  vanished from the chat. The hook archives the settled turn's entries here (deactivated,

@@ -33,6 +33,12 @@ export interface RunningBuild {
   subscribers: Set<BuildSubscriber>;
   ended: boolean;
   startedTs: number;
+  /**
+   * When the user's request ARRIVED (the handler's first statement) — the origin of every user-visible build
+   * clock. `startedTs` is when the build was registered, after the whole preamble (abuse check, caps, wallet,
+   * intent classifier…), so it is the lock's age, not the user's wait (adversarial review of 303e8a6f, #3692).
+   */
+  originTs?: number;
   /** Full Team steering (Fix 60): user messages sent MID-BUILD ('max' tier only). The AgentRunner
    *  drains this between turns and injects each as a REAL user turn, so the very next model call
    *  acts on it — the Claude-Code-style "talk to the team while it builds" experience. */

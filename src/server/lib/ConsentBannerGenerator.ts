@@ -277,7 +277,20 @@ ${CONSENT_CORE_SOURCE}
     '.nbc-fab{position:fixed;left:12px;bottom:12px;z-index:2147482999;font:12px system-ui,sans-serif;background:#fff;color:#111;border:1px solid #ccc;border-radius:999px;padding:6px 10px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.12)}' +
     '@media (prefers-color-scheme: dark){.nbc-card,.nbc-fab{background:#161616;color:#f2f2f2;border-color:#333}.nbc-body{color:#ddd}.nbc-row button{background:#161616;color:#f2f2f2;border-color:#f2f2f2}.nbc-row button.nbc-primary{background:#f2f2f2;color:#111}.nbc-links{color:#aaa}.nbc-links a{color:#93c5fd}}';
 
-  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  // The banner is built as DOM nodes with text, never as an HTML string: with no HTML string there is no place
+  // a value could turn into markup, and a security scan can see that at a glance.
+  function el(tag, attrs, kids) {
+    var n = document.createElement(tag);
+    if (attrs) for (var k in attrs) {
+      if (!Object.prototype.hasOwnProperty.call(attrs, k) || attrs[k] === false || attrs[k] == null) continue;
+      n.setAttribute(k, attrs[k] === true ? '' : String(attrs[k]));
+    }
+    if (kids) for (var j = 0; j < kids.length; j++) {
+      if (kids[j] == null) continue;
+      n.appendChild(typeof kids[j] === 'string' ? document.createTextNode(kids[j]) : kids[j]);
+    }
+    return n;
+  }
   function t(key) { return langs.map(function (l) { return COPY[l][key]; }).join(' / '); }
   function purposeName(p) { return langs.map(function (l) { return COPY[l].purposeNames[p] || p; }).join(' / '); }
 
@@ -286,25 +299,38 @@ ${CONSENT_CORE_SOURCE}
     if (wrap) wrap.parentNode.removeChild(wrap);
     wrap = document.createElement('div');
     wrap.className = 'nbc-wrap';
-    var prefs = '';
-    prefs += '<div class="nbc-pref"><input type="checkbox" checked disabled id="nbc-necessary"><label for="nbc-necessary">' + esc(purposeName('necessary')) + ' <span class="nbc-muted">(' + esc(t('alwaysOn')) + ')</span></label></div>';
+    var prefs = el('div', { 'class': 'nbc-prefs' + (open ? ' nbc-open' : '') }, [
+      el('div', { 'class': 'nbc-pref' }, [
+        el('input', { type: 'checkbox', checked: true, disabled: true, id: 'nbc-necessary' }),
+        el('label', { 'for': 'nbc-necessary' }, [purposeName('necessary') + ' ', el('span', { 'class': 'nbc-muted' }, ['(' + t('alwaysOn') + ')'])]),
+      ]),
+    ]);
     for (var i = 0; i < cfg.purposes.length; i++) {
       var p = cfg.purposes[i];
       var on = granted.indexOf(p) !== -1;
       // Never pre-ticked on a fresh visit; reflects the saved choice when reopened.
-      prefs += '<div class="nbc-pref"><input type="checkbox" data-purpose="' + esc(p) + '" id="nbc-' + esc(p) + '"' + (on ? ' checked' : '') + '><label for="nbc-' + esc(p) + '">' + esc(purposeName(p)) + '</label></div>';
+      prefs.appendChild(el('div', { 'class': 'nbc-pref' }, [
+        el('input', { type: 'checkbox', 'data-purpose': p, id: 'nbc-' + p, checked: on }),
+        el('label', { 'for': 'nbc-' + p }, [purposeName(p)]),
+      ]));
     }
-    var body = langs.map(function (l) { return '<p class="nbc-body">' + esc(COPY[l].body) + '</p>'; }).join('');
-    var links = '<a href="' + esc(cfg.policyUrl) + '">' + esc(t('policy')) + '</a>';
-    if (cfg.grievance) links += ' · ' + esc(t('grievance')) + ': <a href="mailto:' + esc(cfg.grievance) + '">' + esc(cfg.grievance) + '</a>';
-    wrap.innerHTML = '<div class="nbc-card" role="dialog" aria-modal="false" aria-labelledby="nbc-title">' +
-      '<h2 class="nbc-title" id="nbc-title">' + esc(t('title')) + '</h2>' + body +
-      '<div class="nbc-prefs' + (open ? ' nbc-open' : '') + '">' + prefs + '</div>' +
-      '<div class="nbc-row">' +
-        '<button type="button" data-act="reject-all">' + esc(t('rejectAll')) + '</button>' +
-        '<button type="button" data-act="manage">' + esc(open ? t('save') : t('manage')) + '</button>' +
-        '<button type="button" class="nbc-primary" data-act="accept-all">' + esc(t('acceptAll')) + '</button>' +
-      '</div><div class="nbc-links">' + links + '</div></div>';
+    var card = el('div', { 'class': 'nbc-card', role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'nbc-title' }, [
+      el('h2', { 'class': 'nbc-title', id: 'nbc-title' }, [t('title')]),
+    ]);
+    for (var b = 0; b < langs.length; b++) card.appendChild(el('p', { 'class': 'nbc-body' }, [COPY[langs[b]].body]));
+    card.appendChild(prefs);
+    card.appendChild(el('div', { 'class': 'nbc-row' }, [
+      el('button', { type: 'button', 'data-act': 'reject-all' }, [t('rejectAll')]),
+      el('button', { type: 'button', 'data-act': 'manage' }, [open ? t('save') : t('manage')]),
+      el('button', { type: 'button', 'class': 'nbc-primary', 'data-act': 'accept-all' }, [t('acceptAll')]),
+    ]));
+    var links = el('div', { 'class': 'nbc-links' }, [el('a', { href: cfg.policyUrl }, [t('policy')])]);
+    if (cfg.grievance) {
+      links.appendChild(document.createTextNode(' · ' + t('grievance') + ': '));
+      links.appendChild(el('a', { href: 'mailto:' + cfg.grievance }, [cfg.grievance]));
+    }
+    card.appendChild(links);
+    wrap.appendChild(card);
     document.body.appendChild(wrap);
     var prefsEl = wrap.querySelector('.nbc-prefs');
     wrap.addEventListener('click', function (e) {

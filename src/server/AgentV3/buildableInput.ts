@@ -33,6 +33,8 @@
 // (see `RequirementGapAnalyzer`, which deliberately does NOT ask questions). This answers one
 // question — *is there any instruction here at all?* — and only ever for the case where there is none.
 
+import { textWords } from './textWords';
+
 /** Matches http(s) links and bare `www.` / `domain.tld/...` forms a user might paste. */
 const URL_PATTERN = /\b(?:https?:\/\/|www\.)\S+|\b[a-z0-9-]+\.(?:com|org|net|io|dev|app|in|co|ai|me|gg|xyz)\b\S*/gi;
 
@@ -215,10 +217,7 @@ export type InputVerdict = BuildableVerdict | UnbuildableVerdict;
 
 /** Strip links and filler, and report what real instruction is left. PURE. */
 export function instructionWords(prompt: string): string[] {
-  return String(prompt ?? '')
-    .replace(URL_PATTERN, ' ')
-    .toLowerCase()
-    .split(/[^a-z0-9ऀ-ॿ]+/)
+  return textWords(String(prompt ?? '').replace(URL_PATTERN, ' ').toLowerCase())
     .filter((w) => w.length > 1 && !FILLER.has(w));
 }
 

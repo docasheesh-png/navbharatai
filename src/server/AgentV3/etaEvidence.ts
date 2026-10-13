@@ -197,7 +197,9 @@ export function etaEvidenceNote(
   // What the user saw: a labelled rough estimate (admin 2026-09-26), or the phase when no band existed.
   const shown = band ? `Shown as a ROUGH ESTIMATE (${band}), labelled a guess` : 'No number shown';
   if (!Number.isFinite(w) || w <= 0) {
-    return `${shown}: there are no past builds to measure against, and the prompt-word heuristic alone is not evidence (it scores short, ambitious prompts smallest).`;
+    // "No past builds of this KIND were measured" — the evidence weight only proves that none QUALIFIED, and the
+    // basis line beside this one says which slice was read and why it was empty (autopsy 303e8a6f).
+    return `${shown}: no past builds of this kind were measured, and the heuristic alone is not evidence (it scores short, ambitious prompts smallest).`;
   }
   return `${shown}: only ${Math.round(w * 100)}% of the estimate comes from real past builds, so the prompt-word heuristic still dominates it.`;
 }

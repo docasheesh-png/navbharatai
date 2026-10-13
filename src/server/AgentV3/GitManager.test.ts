@@ -37,15 +37,15 @@ describe('GitManager', () => {
     const shell = new FakeShell();
     const git = new GitManager(shell, 'ws-1');
     await git.ensureRepo();
-    // node_modules must be ignored BEFORE git init, so `git add -A` stays cheap.
-    const gitignoreCall = shell.calls.find((c) => c.includes('.gitignore'));
-    expect(gitignoreCall).toBeTruthy();
-    expect(gitignoreCall).toContain('node_modules/');
-    const ignoreIdx = shell.calls.findIndex((c) => c.includes('.gitignore'));
-    const initIdx = shell.calls.findIndex((c) => c.includes('git init'));
-    expect(ignoreIdx).toBeLessThan(initIdx); // gitignore first, then init
-    // It also untracks heavy dirs an older sandbox may have already committed.
-    expect(shell.calls.some((c) => c.includes('git rm -r --cached') && c.includes('node_modules'))).toBe(true);
+    // node_modules must be ignored BEFORE git init, so `git add -A` stays cheap. Since autopsy 303e8a6f the three
+    // steps are ONE sandbox round trip — the order is now the order within that one command.
+    expect(shell.calls.length).toBe(1);
+    const cmd = shell.calls[0]!;
+    expect(cmd).toContain('node_modules/');
+    expect(cmd.indexOf('.gitignore')).toBeLessThan(cmd.indexOf('git init')); // gitignore first, then init
+    // It also untracks heavy dirs an older sandbox may have already committed — after init.
+    expect(cmd.indexOf('git init')).toBeLessThan(cmd.indexOf('git rm -r --cached'));
+    expect(cmd).toMatch(/git rm -r --cached[^;]*node_modules/);
   });
 
   it('sanitises commit messages (no quotes/newlines/backticks)', async () => {

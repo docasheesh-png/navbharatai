@@ -288,6 +288,8 @@ export function EngineReportsPanel({ adminToken, onStatus, only, heading }: Engi
                         <span className="text-muted">{num(p.failedInARow)} failed in a row · {num(p.builds)} builds</span>
                         {p.restoredToGreen === true ? (
                           <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-success font-bold">last working version restored</span>
+                        ) : p.restoredUnchecked === true ? (
+                          <span className="px-1.5 py-0.5 rounded bg-well text-warn font-bold">pre-request version restored (not re-checked)</span>
                         ) : p.restoredToGreen === false ? (
                           <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-danger font-bold">failed attempt left standing</span>
                         ) : (

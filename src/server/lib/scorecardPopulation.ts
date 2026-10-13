@@ -76,6 +76,7 @@ export function toMetricInput(e: {
   rootCause?: string | null;
   prompt?: string | null;
   restoredToGreen?: boolean | null;
+  restoredUnchecked?: boolean | null;
   userStopped?: boolean | null;
 }): BuildMetricInput {
   const started = typeof e.startedAt === 'number' ? e.startedAt : null;
@@ -106,6 +107,8 @@ export function toMetricInput(e: {
     rootCause: typeof e.rootCause === 'string' && e.rootCause ? e.rootCause : undefined,
     prompt: typeof e.prompt === 'string' && e.prompt ? e.prompt : undefined,
     restoredToGreen: typeof e.restoredToGreen === 'boolean' ? e.restoredToGreen : undefined,
+    // Only when true (Q-973): a restore to the unchecked turn start is its own state, never "working".
+    ...(e.restoredUnchecked === true ? { restoredUnchecked: true as const } : {}),
     // The store's timeline read; `undefined` when absent so a legacy row keeps its old shape.
     userStopped: typeof e.userStopped === 'boolean' ? e.userStopped : undefined,
   };

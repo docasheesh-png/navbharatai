@@ -145,6 +145,15 @@ the code (it is actually read somewhere) on 2026-07-11.
   and no vCPU reduction at all without a measured speed ratio** — RAM is billed per WALL-CLOCK hour, so
   a slower build is a dearer one (break-even ≈ 1.44× slower for halving cores). `infra/e2b/e2b.toml`
   now carries the per-hour price of each size beside its numbers, and matches `build.mjs` (2 vCPU / 4 GB).
+  🔴 **CORRECTED 2026-10-12 (autopsy 303e8a6f + its adversarial review) — READ THE NUMBER BEFORE ANY RAM
+  DECISION.** Until then the probe read the cgroup ROOT, which has no `memory.peak` on a VM, so every E2B build
+  said "not available". It now reads its OWN cgroup (`/user` on E2B; its own v1 memory cgroup on a hybrid host).
+  What the line means: the counter runs from when the machine came up and cannot be reset on kernel 6.1, and
+  machines are reused, so the probe also runs at the end of setup — "Peak memory during this build" only when
+  the build raised the mark, otherwise "stayed under the machine's earlier high-water mark", and with no start
+  reading "since this machine came up". It is a cache-inclusive UPPER bound measured against the cgroup's OWN
+  limit (envd sets it ~128 MB under the template's RAM), with the reclaim-throttle (`high`) and out-of-memory
+  counts beside it — read all three before deciding RAM. Changing the RAM stays the admin's call.
   From the same forwarded plan, **rejected with reasons**: "route finished apps through
   `renderPreview.ts`" (PR B already frames the REAL `dist/`, strictly more faithful than a babel
   re-render, and the in-browser tab is that renderer for apps without a copy); "target 1,110 → ~300
@@ -186,6 +195,13 @@ the code (it is actually read somewhere) on 2026-07-11.
   ⚠️ Do not add a second "is the copy current?" rule anywhere — ask that helper. And do not move the
   `snapshot` stream event back to save time: it belongs after the confirmation, or a stale copy gets
   announced as the app.
+  🔴 **CORRECTED 2026-10-12 (autopsy 303e8a6f): the probe never produced a number until then.** It read
+  `/sys/fs/cgroup/memory.peak` at the mount ROOT, where the kernel never creates that file; an E2B sandbox is a VM
+  whose envd runs every build command in `/sys/fs/cgroup/user`. Every "not available (no cgroup accounting
+  exposed)" since 2026-09-11 was the probe looking one directory too high. It now reads the build's OWN cgroup
+  (from `/proc/self/cgroup`, `cgroupSelf.ts`), prints the out-of-memory kill count beside the peak, and calls the
+  number what it is — an UPPER bound (memory.peak includes reclaimable file cache). A probe that never answered
+  is "not measured", never a claim about the machine. Read the RAM decision off the peak AND the OOM-kill count.
 - **📊 WHAT E2B ACTUALLY COSTS — measured, not estimated (admin's own dashboard, 2026-08-11).** The
   knobs above are worth real money, so here is the money. Billing window Jul 14 – Aug 13 2026 (30 days),
   read off the E2B usage dashboard: **1,260 sandboxes started/resumed · 2,078.29 vCPU-hours ·
@@ -2992,6 +3008,17 @@ the flag entries above promise.
   (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers
   directly, so on `kimi-k2.7-code` it spent the whole cap thinking and handed over nothing.
   `fastLaneRungDecision` in `fastLaneRung.ts`; report code `FAST_LANE_SKIPPED_REASONING_RUNG`.
+- **`AGENTV3_FASTLANE_REASONING_STAY`** (default ON, `off` reverts — added 2026-10-13, Q-926, autopsy db07e0af;
+  the admin approved option (b): *"han, apka suggestion ke anusar banao"*).
+  - **The rule.** When the chain falls onto a rung that reasons before every answer during the lane's per-file
+    calls, the lane no longer hands off at once. It stays when the files left are at most 20 and the lane's
+    remaining budget can carry their waves at 45 s each.
+  - **What still stops.** Plan, contract and repair calls still stop in front of the rung, and the measured early
+    bail (`canFinishRemainingTiers`) still hands off on a slow tier.
+  - **Where.** `mayStayOnReasoningRung` in `FastLaneBudget.ts`.
+  - **The measurement.** Report code `FAST_LANE_STAYED_ON_REASONING_RUNG`, with call count, median and slowest
+    call, and how the lane ended. Read it on the next Weak builds; set `off` if staying is slower than the
+    hand-off.
 - **`AGENTV3_HANDOFF_EARLY_SAVE`** (NOT set; default ON; `off` restores the old wait-then-save — Q-422, autopsy
   1eaa5f5a, admin chose "wait, but show the finished files" 2026-10-04). When the fast lane decides mid-tier to hand
   off (`stopLane`), the tier still waits for the calls in flight (67 s there, nothing on screen, the user pressed
@@ -3012,10 +3039,15 @@ the flag entries above promise.
   user keys na de, to default pollination ai"*).** A recipe (`src/server/lib/ImageAiGenerator.ts`, reached
   through `run_recipe`) writes a modular engine into the USER's app: `ImageGenerationProvider` →
   `PollinationsProvider` / `ServerImageProvider` in `src/lib/imageAi.ts`, plus `useImageGenerator()` for React.
-  - **Default (`server` left out): the page calls Pollinations directly** (`image.pollinations.ai`, `safe=true`,
-    `private=true`). No key exists, so nothing can leak, and it works the same in the preview and after publish.
+  - 🔴 **CORRECTED 2026-10-04 (#3528, autopsy cc3ef776) — this default no longer exists.** The provider began
+    answering 401 to every keyless request, so EVERY image engine now needs an image API key; the page asks
+    NavBharatAI (`window.NavAI.image`) and the server draws with the owner's key. See the 2026-10-04 entry
+    below. The original text, kept as history: *"Default (`server` left out): the page calls Pollinations
+    directly (`image.pollinations.ai`, `safe=true`, `private=true`). No key exists, so nothing can leak, and it
+    works the same in the preview and after publish."*
   - **`server: true`: the page posts to the app's own `/api/generate-image`**, and `server/lib/imageAi.ts` picks
-    the engine on every request from the APP's env: no `IMAGE_API_KEY` ⇒ Pollinations; otherwise `IMAGE_PROVIDER`
+    the engine on every request from the APP's env: ~~no `IMAGE_API_KEY` ⇒ Pollinations~~ (🔴 CORRECTED 2026-10-04: no
+    key ⇒ an honest 503 "needs-key", never an anonymous call); otherwise `IMAGE_PROVIDER`
     = `pollinations` | `openai` (any OpenAI-compatible images API via `IMAGE_BASE_URL`) | `stability`, with
     `IMAGE_MODEL`, and `IMAGE_RATE_PER_MINUTE` (default 10 per visitor). The owner sets them in Settings → App
     Settings → Secrets & API Keys; the vault reaches the app's `.env` at boot (`devSecretsBoot.ts`), so a change
@@ -3030,7 +3062,8 @@ the flag entries above promise.
     policy). The generated code is compiled with the real TypeScript compiler under strict Vite settings and RUN
     against a fake network in `tests/anImageAppMakesRealPictures.test.ts`; the first real build is the first live
     evidence. ⚠️ A published STATIC app has no server, so the own-key path needs the app's server hosted
-    (NavBharat Cloud, which is admin-only today) — the Pollinations default needs nothing.
+    (NavBharat Cloud, which is admin-only today) — ~~the Pollinations default needs nothing~~ (🔴 CORRECTED
+    2026-10-04: there is no keyless default; see above).
 - **`AGENTV3_GREEN_REVIEW_LEAN`** (default ON, set `off` to disable — added 2026-09-18, autopsy b6f88a72) —
   **a suggestion costs a suggestion's price.** `reviewerShouldWrite` (Green Stop) already makes the
   post-build reviewer suggest-only on a proven-green app — no repair, nothing it says can fail the
@@ -3669,6 +3702,14 @@ the flag entries above promise.
   `vite.config.*`, root `index.html`) is handed its current content in both fast lanes (`existingConfig.ts`).
   ⚠️ Never let a lane write a project config file blind — that is what `ViteConfigGuard` and the HTML entry guard
   were cleaning up after. Test: `tests/aWebsiteToApkIsAnsweredNotBuilt.test.ts`.
+- **🏷️ `AGENTV3_ORDER_FEATURE_WORDS` — A FEATURE NAMED IN AN APP ORDER IS NOT THE TASK (autopsy 303e8a6f,
+  2026-10-12). ⚠️ NOT set; default ON; `off` reverts.** On a NEW build, a debugging word that sits in a feature clause
+  of an app order ("…and a crash report screen", "friendly error messages with a Try again button") no longer files
+  the request as debugging/50 on the Sonnet start tier (`aDebugWordNamesAFeature`, RequestAnalyser.ts). A problem
+  report on a fresh workspace ("Make the app work, it is broken") still reads as debugging, and the complexity
+  router reads the request with the same intent the analysis used, so the two cannot disagree. Some non-template
+  new builds move from complex to simple routing — the switch exists for exactly that. Test:
+  `tests/aFeatureNamedInAnAppOrderIsNotTheTask.test.ts`.
 - **🔐 `AGENTV3_REQUEST_SCOPE` — A LOGIN NOBODY ASKED FOR IS NOT BUILT (autopsy 70e030bb, 2026-10-04). ⚠️ NOT set;
   default ON; `off` reverts.** "An app which takes notes from online classes" opened on a username/password form with a
   hashed demo account, and "Clear Completed" (a to-do prop the contract invented) deleted every note. `requestScope.ts`:
@@ -3681,6 +3722,16 @@ the flag entries above promise.
   dependency and a React app is never "Stack: Vue", a password form is a sign-in journey run signed out
   (`isCredentialForm`), the sign-in explorer reads `passwordHash: hashPassword("demo123")`, and a pruned package takes
   its `@types/` with it. Test: `tests/theNotesAppAutopsy.test.ts`.
+  🔴 **CORRECTED 2026-10-12 (autopsy 303e8a6f).** Two parts of the paragraph above are no longer true. (1) It stands
+  down only for a domain whose implicit feature list ADDS access control (`domainAddsAccessControl`, read from the
+  list itself) — productivity, booking, trading and game add none, so "a todo app" or "a racing game" now gets the
+  note. (2) A sign-in word the request DECLINES ("no login needed", "without an account", "login ki zarurat nahi")
+  is no longer read as a request for sign-in; the note applies and the report says it was declined. The report line
+  is the decider's own (`requestScopeReportLine`), never a call-site paraphrase. Test:
+  `tests/aReportReasonIsTheDecidersReason.test.ts`. (3) A gate named by its MECHANISM — username, credentials,
+  2FA / MFA / two-factor, Face ID / Touch ID, fingerprint, biometric, "unlocked" — is read as asking for sign-in
+  (the adversarial review found "a vault that asks for credentials" told to add NO login). The report line credits
+  the word list it checked, never "the request names no access word".
 - **🙋 `AGENTV3_CONFIRM_BUILD` + 📎 `AGENTV3_ATTACHMENT_MEMORY` (admin 2026-10-03, Q-200 / Q-201). ⚠️ NEITHER is set;
   both default ON; `off` reverts each alone.** `buildConfirmation.ts`: see "READ THE MOOD FIRST" above — an unconfirmed
   build is answered and offered, and a "yes" builds the offered request. `lib/attachmentMemory.ts`: the latest

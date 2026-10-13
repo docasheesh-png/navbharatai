@@ -8,12 +8,15 @@ const issue = (over: Partial<BuildIssue> = {}): BuildIssue => ({
   ts: 1, phase: 'build', severity: 'error', code: 'X', message: 'a problem', autoResolved: false, ...over,
 });
 
-const report = (problems: BuildIssue[]): BuildDiagnosticsReport => ({
+// `problems` is built the way the real recorder builds it — every row EXCEPT info (BuildDiagnostics.report()).
+// This fixture used to set `problems = issues`, info rows included, and that is how a card that looked for
+// an info row inside `problems` passed here and never once worked in production (autopsy 303e8a6f).
+const report = (issues: BuildIssue[]): BuildDiagnosticsReport => ({
   schema: 'navbharatai.v3.build-diagnostics/1',
   startedAt: 0,
-  counts: { total: problems.length, errors: 0, warnings: 0, autoResolved: 0, unresolved: 0 },
-  issues: problems,
-  problems,
+  counts: { total: issues.length, errors: 0, warnings: 0, autoResolved: 0, unresolved: 0 },
+  issues,
+  problems: issues.filter((i) => i.severity !== 'info'),
 } as BuildDiagnosticsReport);
 
 /** The one record that means "we opened the app in a real browser and it rendered". */

@@ -173,6 +173,8 @@ export interface AdminBuildReportMeta {
   etaWithinBand?: boolean;
   /** False when no figure was shown to the user (unevidenced ⇒ they saw a phase, not a promise). */
   etaEvidenced?: boolean;
+  /** The slice the estimate learned from (EtaPromise.key) — accuracy per kind. Absent before 2026-10-12. */
+  etaKey?: string;
   /**
    * FIRST-PASS QUALITY (ROADMAP #1 Phase 0.2) — how many defects the engine had to repair in its OWN
    * output, and how many it left unresolved. Projected into the meta at write time so the admin list
@@ -411,6 +413,9 @@ export function buildAdminReportRecord(
       etaRatio: !trimmed.etaAccuracy?.untested && Number.isFinite(Number(trimmed.etaAccuracy?.ratio)) ? Number(trimmed.etaAccuracy?.ratio) : undefined,
       etaWithinBand: !trimmed.etaAccuracy?.untested && typeof trimmed.etaAccuracy?.withinBand === 'boolean' ? trimmed.etaAccuracy.withinBand : undefined,
       etaEvidenced: typeof trimmed.etaAccuracy?.evidenced === 'boolean' ? trimmed.etaAccuracy.evidenced : undefined,
+      // Which slice the estimate learned from ('scaffold', 'game', 'complex_app', …) — so "is the band wrong for
+      // template builds?" is a measured question (autopsy 303e8a6f). Absent on reports written before it.
+      etaKey: typeof trimmed.etaAccuracy?.key === 'string' && trimmed.etaAccuracy.key ? trimmed.etaAccuracy.key.slice(0, 40) : undefined,
       // Already sanitised at the route boundary; sanitised again here so a direct caller (a test, a
       // future path) cannot write raw control characters into the admin table.
       userNote: sanitizeUserNote(ctx.userNote),

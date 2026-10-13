@@ -196,8 +196,15 @@ export function doneSteer(readiness: ReadinessReport | null | undefined): string
 /** Where a build stood when it was FIRST judged finished. Recorded even when the model keeps going. */
 export interface ReadyMark {
   step: number;
+  /** Since the RUNNER started — not the build. Compared only with a clock from the same origin. */
   elapsedMs: number;
   score: number;
+  /**
+   * When it was judged, as epoch ms (autopsy db07e0af). The route measured the end from the BUILD's start and
+   * subtracted this mark's runner-relative `elapsedMs`, so the fast lane's 45 s before the runner began were
+   * reported as 56 s of work after the app was finished — about 11 s really ran. An absolute instant has no origin.
+   */
+  at?: number;
 }
 
 /**
@@ -206,7 +213,7 @@ export interface ReadyMark {
  * This is the number the stop-the-loop decision needs and nobody has. A build that was never judged
  * ready says so plainly — "we did not look" and "it never got there" must not read as zero overrun.
  */
-export function readyOverrunNote(mark: ReadyMark | null | undefined, endStep: number, endMs: number, opts: { editingExistingApp?: boolean; projectModule?: string | null } = {}): string {
+export function readyOverrunNote(mark: ReadyMark | null | undefined, endStep: number, endMs: number, opts: { editingExistingApp?: boolean; projectModule?: string | null; endAt?: number } = {}): string {
   // A project-mode turn builds ONE module of an app another module assembles (autopsy Sur Taal: "never
   // judged finished" about the "Shared Types" module, which is not an app and is never judged as one).
   if (!mark && opts.projectModule) return `Not measured: this turn built one project module ("${opts.projectModule}"), not the whole app, so the project score cannot say when it was done.`;
@@ -215,7 +222,7 @@ export function readyOverrunNote(mark: ReadyMark | null | undefined, endStep: nu
   if (!mark && opts.editingExistingApp) return 'Not measured: this turn ran as an edit of the files already in the project, so the project score cannot say when the request was done.';
   if (!mark) return 'The app was never judged finished during the build.';
   const steps = Math.max(0, endStep - mark.step);
-  const secs = Math.max(0, Math.round((endMs - mark.elapsedMs) / 1000));
+  const secs = Math.max(0, Math.round((typeof mark.at === 'number' && typeof opts.endAt === 'number' ? opts.endAt - mark.at : endMs - mark.elapsedMs) / 1000));
   if (steps === 0 && secs === 0) return `The app was judged finished at step ${mark.step} (${mark.score}/100) and the build ended there.`;
   return `The app was judged finished at step ${mark.step} (${mark.score}/100); the build then ran `
     + `${steps} more step(s) over ${secs}s before it ended.`;
@@ -245,11 +252,13 @@ export function endOfTurnReadyMark(p: {
    * module turn the end-of-turn gate judged. The guard and the explanation have to agree.
    */
   projectModule?: string | null;
+  /** Epoch ms of the judgement — see `ReadyMark.at`. */
+  at?: number;
 }): ReadyMark | null {
   if (p.existing) return p.existing;
   if (p.editingExistingApp || !p.wroteThisRun) return null;
   if (typeof p.projectModule === 'string' && p.projectModule.trim() !== '') return null;
   if (p.typeErrors !== null && p.typeErrors > 0) return null;
   if (!appIsDone(p.readiness) || !p.readiness) return null;
-  return { step: p.step, elapsedMs: p.elapsedMs, score: p.readiness.score };
+  return { step: p.step, elapsedMs: p.elapsedMs, score: p.readiness.score, ...(typeof p.at === 'number' ? { at: p.at } : {}) };
 }

@@ -29,6 +29,7 @@
 // which model built the app, not about hiding the user's own integrations.
 
 import { recipeFor, preferredOption, optionLink, requiredVarNames, type KeylessRoute } from '../../lib/credentialRecipes';
+import { imageKeySecretNames, RECOMMENDED_IMAGE_KEY } from '../../lib/imageKeyNames';
 
 /** Where a requirement is satisfied. */
 export type RequirementKind =
@@ -98,6 +99,13 @@ interface ServiceSpec extends Omit<AppRequirement, 'kind' | 'matchedEnvVars' | '
    * the service that owns the name (Supabase keys ⇒ `database_hosted`), never as this entry too.
    */
   impliedOnly?: true;
+  /**
+   * A shape in the app's own SOURCE that proves the service is used, for a service that needs a key the app
+   * never reads itself (autopsy 303e8a6f). An AI-image app built on NavBharatAI calls `window.NavAI.image`
+   * and NavBharatAI reads the owner's image key on its server, so the app declares no package and reads no
+   * env var — the two signals above — and the checklist could never say that its pictures need a key.
+   */
+  codeMarkers?: RegExp;
 }
 
 const SECRETS_PATH = 'Settings → App Settings → Secrets & API Keys';
@@ -156,6 +164,16 @@ const SERVICES: ServiceSpec[] = [
     packages: ['openai', '@google/generative-ai', '@google/genai', '@anthropic-ai/sdk'],
     envVars: ['AI_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'XAI_API_KEY'],
     envHints: ['AI_API_KEY', 'OPENAI_API_KEY', 'VITE_OPENAI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENAI_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'XAI_API_KEY', 'GROK_API_KEY', 'NAVBHARATAI_API_KEY'],
+  },
+  // ── AI-made PICTURES inside the user's app (admin 2026-10-04: "user ko saaf saaf bolo ki API keys chahiye")
+  // Every image engine needs a key (there is no keyless one since #3528). ANY one of the image keys counts as
+  // configured (envHints); the card and the checklist ask for the recommended one — NavBharatAI's own, which
+  // needs no other account — because asking for all five would read as "get all of these".
+  {
+    id: 'app_image_key', label: 'AI pictures (an image API key)', kind: 'user', settingsPath: SECRETS_PATH,
+    packages: [], envVars: [RECOMMENDED_IMAGE_KEY], envHints: [...imageKeySecretNames(), 'IMAGE_API_KEY'],
+    codeMarkers: /\bNavAIImageProvider\b|\bNavAI\.image\s*\(|['"`]\/api\/generate-image['"`]/,
+    why: 'Your app makes AI pictures, and every picture needs ONE image API key. A NavBharatAI API key with the "Images" permission (Home → Other AI → Developer Tools → NavBharatAI API) needs no other account; the app itself lists the other keys that work.',
   },
   // ── Storage (uploads) — has its own dedicated settings screen ────────────────────────────────────
   {
@@ -233,6 +251,9 @@ function declaredPackages(entries: Array<[string, string]>): Set<string> {
   return out;
 }
 
+/** A source file of the app (where a `codeMarkers` shape counts). */
+const SOURCE_FILE = /\.(?:m?[jt]sx?|c?[jt]s|vue|svelte|html?)$/i;
+
 /** Every env-var name the app's own source actually reads. */
 function referencedEnvNames(entries: Array<[string, string]>): Set<string> {
   const out = new Set<string>();
@@ -265,11 +286,13 @@ export function detectAppRequirements(input: RequirementInput): AppRequirement[]
     if (spec.impliedOnly) continue; // only a fake feature implies it — see impliedRequirement()
     const matchedEnvVars = spec.envHints.filter((n) => envs.has(n));
     const matchedPackages = spec.packages.filter((n) => pkgs.has(n));
-    if ((matchedPackages.length === 0 && matchedEnvVars.length === 0) || seen.has(spec.id)) continue;
+    const marked = !!spec.codeMarkers && entries.some(([p, c]) => SOURCE_FILE.test(p) && spec.codeMarkers!.test(c));
+    if ((matchedPackages.length === 0 && matchedEnvVars.length === 0 && !marked) || seen.has(spec.id)) continue;
     seen.add(spec.id);
     found.push({
       id: spec.id, label: spec.label, kind: spec.kind, envVars: [...spec.envVars],
       settingsPath: spec.settingsPath, matchedEnvVars, matchedPackages,
+      ...(spec.why ? { why: spec.why } : {}),
     });
   }
   return found;

@@ -15,7 +15,8 @@ import { isBuildStoppedError } from './stopSignal';
 import { toolCallDetail } from './toolCallTarget';
 import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
 import { isProjectSummaryNarration } from './ProjectSummary';
-import { isTransientStatusLine } from './workingHeartbeat';
+import { WORKING_LINE_ID } from '../../lib/liveStatusLine';
+import { prepWindowDetail } from './prepClock';
 import type { AgentEvent } from './types';
 import { parseNpmAuditSummary, npmAuditNote, auditSeverity, looksLikeDependencyInstall } from './npmAuditSummary';
 import { redactSecrets } from './SecretRedactor';
@@ -27,7 +28,7 @@ import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
-import { isBudgetEndedError, isReasoningRungHandoff } from './turnDeadline';
+import { isBudgetEndedError, isReasoningRungHandoff, providerNeverAnswered, isSlowStreamAbandon } from './turnDeadline';
 import { typecheckEvidenceFromCommands, commandOutcomeText } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
@@ -216,6 +217,8 @@ export const PROCESS_ONLY_CODES = new Set([
   'FAST_LANE_SKIPPED_IMAGE_APP',
   // …and the lane HANDING OFF because its chain fell to such a rung mid-lane (autopsy Study-Racer).
   'FAST_LANE_FELL_TO_REASONING_RUNG',
+  'FAST_LANE_STAYED_ON_REASONING_RUNG', // Q-926: the lane's stay on a reasoning rung, measured — a fact about OUR routing
+  'LEFTOVER_COMPONENTS', // our net removed (or kept) components nothing imports (leftoverComponents.ts, db07e0af)
   // …and each per-file call that handoff stopped (autopsy d382b398) — a planned handoff, not a failure.
   'LLM_CALL_HANDED_OFF',
   // An observation about OUR checkpoint heuristic (autopsy SignBridge, 2026-09-26) — never the app.
@@ -554,7 +557,27 @@ export interface LlmCallRecord {
   toolCalls?: number;
   inputTokens?: number;
   outputTokens?: number;
+  /**
+   * The time the CALLER waited, in ms — the whole provider chain, including every rung that was tried, timed
+   * out, rate-limited or abandoned before the one that answered. It is what preparation is subtracted from.
+   */
   latencyMs?: number;
+  /**
+   * The answering model's OWN time, in ms (TurnResult.attemptMs) — present on a successful call through a
+   * fallback chain. `model` names that rung, so a per-model speed reads THIS, never `latencyMs`: autopsy
+   * 303e8a6f's row said "kimi-k2.7-code 18 s" when KIMI answered in 3.4 s after GLM crawled for 15 s.
+   */
+  answerMs?: number;
+  /**
+   * Time on rungs the chain TRIED and lost before the answering one, in ms (TurnResult.fallbackMs) — measured
+   * per failed attempt. Whatever is left of `latencyMs` beyond `fallbackMs + answerMs` was spent by the caller
+   * before the provider call (transcript compaction, working-set reads), never by an engine.
+   */
+  fallbackMs?: number;
+  /** How long the answering provider took to OPEN its streamed response (TurnResult.openedAfterMs). */
+  openMs?: number;
+  /** How long until its FIRST produced byte (TurnResult.firstOutputAfterMs) — sizes "opened, then silent". */
+  firstOutputMs?: number;
   ok: boolean;
   error?: string;
 }
@@ -823,6 +846,13 @@ export interface BuildDiagnosticsReport {
    * events are PER TURN. See sessionSummary.
    */
   session?: { turns: number; elapsedMs: number; dataLossTotal: number; failedTurns: number; truncated: boolean; line: string };
+  /**
+   * The provider-time waste ledger as NUMBERS, beside the PROVIDER_TIME_WASTED sentence (autopsy 303e8a6f).
+   * The admin accepted the first rung's walk-aways as "provider weather" (Q-009) with a reopen line of "more
+   * than 10% of builds' wall time over a day" — and nothing could compute that: the ledger existed only as
+   * prose, per build. `buildMs` is the clock the shares are of. Absent on reports written before it.
+   */
+  providerWaste?: { msByKind: Record<string, number>; callsByKind: Record<string, number>; msByFamily: Record<string, number>; buildMs: number };
   /** Fix 37c — explicit data-loss/recovery events (sandbox recycled, files restored, generation
    *  reset), each with the observed CAUSE, so "data kyu udha" is answered inside the report itself. */
   dataLossEvents?: Array<{ ts: number; cause: string; detail: string }>;
@@ -966,6 +996,11 @@ export class BuildDiagnostics {
   private liveCacheReadInputTokens?: number;
   private sandboxCostRecord?: { seconds: number; usd: number; estimated: true };
   private cacheReadInputTokens?: number;
+  private providerWaste?: BuildDiagnosticsReport['providerWaste'];
+  /** When the build waited for the USER ([start, end] ms) — see addUserWait. */
+  private userWaitSpans: Array<{ a: number; b: number }> = [];
+  /** Timed setup spans before the first model call ([start, end] ms) — see recordSetupTiming. */
+  private readonly setupSpans: Array<{ startMs: number; endMs: number; message: string }> = [];
   private billing?: BuildBillingRecord;
   /** What the user was promised at t=0 — see `etaAccuracy`. Absent on turns that show no ETA. */
   private etaPromise?: EtaPromise;
@@ -1447,7 +1482,30 @@ export class BuildDiagnostics {
     return { seconds, lanes: marks.length };
   }
 
-  private recordTimeToFirstCall(latencyMs?: number): void {
+  /**
+   * How the first call's own time is told — split when a fallback chain walked past engines first.
+   *
+   * ⏱️ AUTOPSY 303e8a6f: "The first call itself then took 18s; that is model time" described a 15 s crawl on
+   * GLM, abandoned, then 3 s on KIMI. Every part is MEASURED: `fallbackMs` by the chain per failed attempt,
+   * `answerMs` by the chain for the answering attempt. ⚠️ Never derived as "wait minus answer" (adversarial
+   * review): that charged the caller's own pre-call work (compaction, working-set reads) to the engines. What
+   * the two measured parts do not cover is named as what it is.
+   */
+  private static firstCallTime(lat: number, answerMs: number | undefined, fallbackMs: number | undefined): { split: boolean; text: string } {
+    const s = (ms: number): number => Math.round(ms / 1000);
+    const ok = (v: number | undefined): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+    if (ok(answerMs) && ok(fallbackMs) && fallbackMs >= 1000) {
+      const rest = lat - fallbackMs - answerMs;
+      return {
+        split: true,
+        text: `${s(lat)}s: ${s(fallbackMs)}s on engine(s) that did not answer and were left behind (see PROVIDER_FALLBACK / PROVIDER_TIME_WASTED), then ${s(answerMs)}s for the engine that answered`
+          + (rest >= 1000 ? `, and ${s(rest)}s of the runner's own work before the provider call (transcript compaction, working-set reads)` : ''),
+      };
+    }
+    return { split: false, text: `${s(lat)}s` };
+  }
+
+  private recordTimeToFirstCall(latencyMs?: number, answerMs?: number, fallbackMs?: number): void {
     if (this.llmCalls.length > 0) return; // only the first
     const elapsedMs = Math.max(0, this.now() - this.startedAt);
     // Clamped to the elapsed time: a provider-reported latency longer than the whole build so far is
@@ -1455,7 +1513,11 @@ export class BuildDiagnostics {
     const lat = typeof latencyMs === 'number' && Number.isFinite(latencyMs) && latencyMs >= 0
       ? Math.min(latencyMs, elapsedMs)
       : undefined;
+    // ⚠️ PREPARATION IS SUBTRACTED FROM THE CALLER'S WAIT, NEVER FROM THE ANSWERER'S TIME. Using `answerMs`
+    // here would turn GLM's abandoned 15 s into "26s of preparation" — blaming setup for a provider crawl,
+    // the misattribution autopsies dukaan and a38c6fef already paid for once.
     const seconds = Math.round((lat === undefined ? elapsedMs : elapsedMs - lat) / 1000);
+    const callTime = lat === undefined ? null : BuildDiagnostics.firstCallTime(lat, answerMs, fallbackMs);
     const message = lat === undefined
       // NEVER INVENT THE SPLIT. Without a latency we cannot separate the two, so we say the number is
       // an upper bound rather than repeating the old confident, wrong attribution.
@@ -1466,7 +1528,7 @@ export class BuildDiagnostics {
       // build `npm install` runs in the background boot, CONCURRENT with the build — it does not gate
       // this first call — and a resumed sandbox already carries node_modules. Naming it here sent an
       // autopsy to optimise install when the real cost was the cold sandbox and its round-trips.
-      : `${seconds}s of preparation before the build's first model call began — sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) The first call itself then took ${Math.round(lat / 1000)}s; that is model time, not setup.`;
+      : `${seconds}s of preparation before the build's first model call began — sandbox setup, project restore and secrets loading all happen in it, and the user waits through every second. (Dependency install is NOT part of this wait: it runs in the background boot, concurrent with the build.) ${callTime!.split ? `The first call then took ${callTime!.text} — provider time, not setup.` : `The first call itself then took ${callTime!.text}; that is model time, not setup.`}`;
     // …UNLESS A FAST LANE ALREADY BURNED THAT WINDOW, IN WHICH CASE NONE OF THE ABOVE IS TRUE
     // (autopsy a38c6fef, 2026-09-13). A lane's model call is not RECORDED until it returns, so a lane
     // that is abandoned at its deadline leaves this window looking like pure setup. In the real report
@@ -1492,7 +1554,7 @@ export class BuildDiagnostics {
         + `${abandoned.seconds}s went to ${abandoned.lanes} fast build lane(s) that were started and then abandoned at their `
         + `deadline. Their model calls are only recorded when they return, so the window looks like preparation and is not. `
         + `Setup itself is measured separately — read the SETUP_TIMING lines for the real number.`
-        + (lat === undefined ? '' : ` The first recorded call then took ${Math.round(lat / 1000)}s.`)
+        + (callTime === null ? '' : ` The first recorded call then took ${callTime.text}.`)
       : message;
     // WHERE THE TIME WENT — see longestSilentGap. Appended rather than replacing the sentence above,
     // because the total and the biggest single stretch answer two different questions, and the second
@@ -1511,6 +1573,24 @@ export class BuildDiagnostics {
           ? `, and ending at: "${gap.until}" — that second line is usually the step that filled it, and is where to look first.`
           : ' — that is where to look first (it names when the silence started, not what caused it).')
       : attributed;
+    // 🧭 HOW MUCH OF THE WAIT WAS TIMED AT ALL (autopsy 303e8a6f). The sentence above names "sandbox setup, project
+    // restore and secrets loading", and the timed setup lines covered 4.4 s of an 11.4 s wait. Said whenever a
+    // second or a tenth of it sits in no timed step, with the largest such stretch named by what it followed.
+    let covered = withGap;
+    // Only where the window IS preparation: with no latency the wait includes the call itself, and when a fast lane
+    // was abandoned in it the window is lane time — a coverage figure there would describe the wrong thing.
+    if (lat !== undefined && !abandoned) {
+      try {
+        const callStart = this.now() - lat;
+        const cov = this.setupSpans.length ? this.setupCoverage(this.startedAt, callStart) : null;
+        const prepMs = Math.max(0, callStart - this.startedAt);
+        if (cov && prepMs > 0 && (cov.untimedMs >= 1000 || cov.untimedMs >= prepMs * 0.1)) {
+          const s = (ms: number) => `${Math.round(ms / 100) / 10}s`;
+          covered = `${withGap} Timed setup steps account for ${s(cov.timedMs)} of the ${s(prepMs)}; ${s(cov.untimedMs)} is outside every timed step`
+            + (cov.largest ? ` (largest: ${s(cov.largest.ms)} after "${cov.largest.after}").` : '.');
+        }
+      } catch { /* coverage is observation only */ }
+    }
     this.record({
       phase: 'plan',
       // Loud past the point where a user starts wondering whether anything is happening. Judged on
@@ -1518,7 +1598,7 @@ export class BuildDiagnostics {
       // flagging it here sent the reader hunting the wrong subsystem.
       severity: seconds >= 60 ? 'warning' : 'info',
       code: 'TIME_TO_FIRST_CALL',
-      message: withGap,
+      message: covered,
       autoResolved: seconds < 60,
     });
   }
@@ -1542,7 +1622,14 @@ export class BuildDiagnostics {
   }
 
   recordLlmCall(rec: Omit<LlmCallRecord, 'ts' | 'promptPreview' | 'responsePreview'> & { promptPreview?: string; responsePreview?: string }): void {
-    this.recordTimeToFirstCall(rec.latencyMs);
+    // The answering engine's own time is only ever PART of the caller's wait — never more than it.
+    const answerMs = typeof rec.answerMs === 'number' && Number.isFinite(rec.answerMs) && rec.answerMs >= 0
+      ? (typeof rec.latencyMs === 'number' && Number.isFinite(rec.latencyMs) ? Math.min(rec.answerMs, Math.max(0, rec.latencyMs)) : rec.answerMs)
+      : undefined;
+    const fallbackMs = typeof rec.fallbackMs === 'number' && Number.isFinite(rec.fallbackMs) && rec.fallbackMs >= 0
+      ? (typeof rec.latencyMs === 'number' && Number.isFinite(rec.latencyMs) ? Math.min(rec.fallbackMs, Math.max(0, rec.latencyMs)) : rec.fallbackMs)
+      : undefined;
+    this.recordTimeToFirstCall(rec.latencyMs, answerMs, fallbackMs);
     this.channelTotals.llmCalls += 1;
     // 🔴 BOTH ENDS, NEVER A PREFIX (2026-09-21). This read `if (this.llmCalls.length < MAX_LLM_CALLS)`,
     // so a build past the cap recorded NO further model calls — and `DiagnosticsStore` then kept the
@@ -1563,6 +1650,10 @@ export class BuildDiagnostics {
       inputTokens: rec.inputTokens,
       outputTokens: rec.outputTokens,
       latencyMs: rec.latencyMs,
+      ...(answerMs !== undefined ? { answerMs } : {}),
+      ...(fallbackMs !== undefined ? { fallbackMs } : {}),
+      ...(typeof rec.openMs === 'number' && Number.isFinite(rec.openMs) && rec.openMs >= 0 ? { openMs: rec.openMs } : {}),
+      ...(typeof rec.firstOutputMs === 'number' && Number.isFinite(rec.firstOutputMs) && rec.firstOutputMs >= 0 ? { firstOutputMs: rec.firstOutputMs } : {}),
       ok: rec.ok,
       error: rec.error ? rec.error.slice(0, 500) : undefined,
     }, MAX_LLM_CALLS);
@@ -1908,9 +1999,17 @@ export class BuildDiagnostics {
          * tick. `lastActivity` above is still refreshed on every tick, so the still-running detector —
          * which is the one reader that genuinely wants the newest heartbeat — is unaffected.
          */
-        if (isTransientStatusLine(t)) {
+        //
+        // 🔴 …RECOGNISED BY ITS ID, AND FILED AS THE HEARTBEAT IT IS (autopsy 303e8a6f). This read the first
+        // character ('⏳'), which the build-budget steer and the hand-back notice also start with — so after one
+        // tick, "Half the build time is used" and "Not finished yet" never reached the report. And the kept tick
+        // was an AGENT_STEP, which the silence detector counts as activity: a 56 s stall read as 44 s, "right
+        // after: ⏳ Still working". Filed as HEARTBEAT, every timer-chatter reader already sets it aside.
+        if (e.id === WORKING_LINE_ID) {
           if (this.transientStatusRecorded) break;
           this.transientStatusRecorded = true;
+          this.record({ phase: 'build', severity: 'info', code: 'HEARTBEAT', message: t.slice(0, 200), autoResolved: true });
+          break;
         }
         // A problem the agent is talking about (sandbox unavailable, port/preview not responding,
         // errors remaining, retries) is flagged warning/error; everything else is recorded as a
@@ -1953,7 +2052,9 @@ export class BuildDiagnostics {
         // 🧾 is our own money notice (autopsy 0311186f): "🧾 I could not confirm your app running here, so you
         // have been charged only…" landed in the problems list as an ERROR, though it states a bill, not a fault.
         const platformNotice = /^\s*(?:ℹ️|🧾)/.test(t);
-        if (statusLike && problemWord && !platformNotice
+        // A line whose fact the route already FILED as its own row is not a second finding (see the `filed` flag).
+        const alreadyFiled = (e as { filed?: boolean }).filed === true;
+        if (statusLike && problemWord && !platformNotice && !alreadyFiled
           && !(remediationIntent && !failureVerb)
           && !(echoesPrompt && !failureVerb)) {
           this.record({ phase: 'build', severity: failureVerb && !narrationIsProbeMiss(tForMatch) ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
@@ -2219,6 +2320,8 @@ export class BuildDiagnostics {
       highMs: Number.isFinite(Number(p?.highMs)) ? Number(p.highMs) : estimateMs,
       evidenced: p?.evidenced === true,
       ...(typeof p?.shown === 'string' && p.shown ? { shown: p.shown } : {}),
+      ...(typeof p?.key === 'string' && p.key ? { key: p.key } : {}),
+      ...(p?.source === 'workspace' || p?.source === 'platform' || p?.source === 'heuristic' ? { source: p.source } : {}),
     };
   }
 
@@ -2228,9 +2331,14 @@ export class BuildDiagnostics {
    * whose own work took 1.5 minutes. The estimate predicts the build's work, never how long a person takes
    * to find a key, so `etaAccuracy` takes this off the clock. Never throws.
    */
-  addUserWait(ms: number): void {
+  addUserWait(ms: number, startedAt?: number): void {
     const n = Number(ms);
-    if (Number.isFinite(n) && n > 0) this.userWaitMs += n;
+    if (Number.isFinite(n) && n > 0) {
+      this.userWaitMs += n;
+      // Kept as a span too, so a setup window that contains the wait does not report it as setup (adversarial
+      // review of 303e8a6f: a plan approval of several minutes would have read "Prompt context gathered in 3m").
+      if (Number.isFinite(startedAt)) this.userWaitSpans.push({ a: startedAt as number, b: (startedAt as number) + n });
+    }
   }
 
   setBilling(b: BuildBillingRecord): void {
@@ -2334,6 +2442,81 @@ export class BuildDiagnostics {
   /** Fix 37a — stamp how many earlier builds in this workspace ended not-ok (from durable history). */
   setPriorFailedBuilds(n: number): void {
     if (Number.isFinite(n) && n >= 0) this.priorFailedBuilds = Math.floor(n);
+  }
+
+  /**
+   * One timed setup step, recorded as SETUP_TIMING and kept as a SPAN so the first-call line can say how much of
+   * the wait was timed at all (autopsy 303e8a6f: 62% of an 11.4 s wait was in no line). Every SETUP_TIMING goes
+   * through here or `closeSetupWindow` — a census forbids a hand-written one in the route.
+   */
+  recordSetupTiming(t: { message: string; detail?: string; startMs: number; endMs?: number }): void {
+    const endMs = Number.isFinite(t.endMs) ? (t.endMs as number) : this.now();
+    const startMs = Number.isFinite(t.startMs) ? Math.min(t.startMs, endMs) : endMs;
+    this.setupSpans.push({ startMs, endMs, message: t.message });
+    this.record({ phase: 'build', severity: 'info', code: 'SETUP_TIMING', message: t.message, ...(t.detail ? { detail: t.detail } : {}), autoResolved: true });
+  }
+
+  /**
+   * Close a setup WINDOW: from where the last timed span ended (or the build start) to now, so consecutive windows
+   * tile the wait with no gap by construction. `steps` name what happened inside; the rest is said as `other`.
+   */
+  closeSetupWindow(title: string, steps: ReadonlyArray<{ name: string; ms: number }> = []): void {
+    const endMs = this.now();
+    const startMs = this.setupSpans.length ? Math.max(...this.setupSpans.map((s) => s.endMs)) : this.startedAt;
+    const wallMs = Math.max(0, endMs - startMs);
+    // ⚠️ MODEL CALLS AND THE USER'S OWN THINKING ARE NOT SETUP (adversarial review of 303e8a6f). A window is
+    // contiguous by construction, so a planner or blueprint call, a project decomposition, or a plan approval inside
+    // it would otherwise be reported as preparation — the class autopsy a38c6fef removed from TIME_TO_FIRST_CALL.
+    // Measured from the recorded calls and waits, never guessed; the window's own number is the rest.
+    const overlap = (spans: Array<{ a: number; b: number }>) => {
+      const clipped = spans.map((x) => ({ a: Math.max(startMs, x.a), b: Math.min(endMs, x.b) })).filter((x) => x.b > x.a).sort((x, y) => x.a - y.a);
+      let total = 0;
+      let cursor = startMs;
+      for (const x of clipped) { if (x.b > cursor) { total += x.b - Math.max(cursor, x.a); cursor = x.b; } }
+      return total;
+    };
+    const modelMs = overlap(this.llmCalls.filter((c) => Number.isFinite(c.latencyMs)).map((c) => ({ a: c.ts - (c.latencyMs as number), b: c.ts })));
+    const userMs = overlap(this.userWaitSpans);
+    const setupMs = Math.max(0, wallMs - modelMs - userMs);
+    const fmt = (ms: number) => (ms >= 1000 ? `${Math.round(ms / 100) / 10}s` : `${Math.round(ms)}ms`);
+    const besides = [modelMs >= 1000 ? `${fmt(modelMs)} of model calls` : '', userMs >= 1000 ? `${fmt(userMs)} waiting for you` : ''].filter(Boolean);
+    const message = `${title} in ${fmt(setupMs)}${besides.length ? ` (plus ${besides.join(' and ')} — not setup)` : ''}`;
+    const notSetup = [...(modelMs > 0 ? [{ name: 'model calls (not setup)', ms: modelMs }] : []), ...(userMs > 0 ? [{ name: 'waiting for you (not setup)', ms: userMs }] : [])];
+    this.recordSetupTiming({ message, detail: prepWindowDetail([...steps, ...notSetup], wallMs), startMs, endMs });
+  }
+
+  /**
+   * How much of [from, until] no timed setup span covers, and the largest such stretch — named by the span (or the
+   * build start) it followed. PURE over the recorded spans.
+   */
+  setupCoverage(fromMs: number, untilMs: number): { timedMs: number; untimedMs: number; largest: { ms: number; after: string } | null } {
+    const spans = this.setupSpans
+      .map((s) => ({ a: Math.max(fromMs, s.startMs), b: Math.min(untilMs, s.endMs), message: s.message }))
+      .filter((s) => s.b > s.a)
+      .sort((x, y) => x.a - y.a);
+    let timedMs = 0;
+    let cursor = fromMs;
+    let after = 'the start of the build';
+    let largest: { ms: number; after: string } | null = null;
+    for (const s of spans) {
+      if (s.a > cursor) {
+        const gap = s.a - cursor;
+        if (!largest || gap > largest.ms) largest = { ms: gap, after };
+      }
+      if (s.b > cursor) { timedMs += s.b - Math.max(cursor, s.a); cursor = s.b; after = s.message; }
+    }
+    if (untilMs > cursor) {
+      const gap = untilMs - cursor;
+      if (!largest || gap > largest.ms) largest = { ms: gap, after };
+    }
+    const total = Math.max(0, untilMs - fromMs);
+    return { timedMs, untimedMs: Math.max(0, total - timedMs), largest };
+  }
+
+  /** Stamp the provider-time waste ledger as numbers (see the report field). Best-effort; a bad value is ignored. */
+  setProviderWaste(ledger: { msByKind: Record<string, number>; callsByKind: Record<string, number>; msByFamily: Record<string, number> }, buildMs: number): void {
+    if (!ledger || !Number.isFinite(buildMs) || buildMs <= 0) return;
+    this.providerWaste = { msByKind: { ...ledger.msByKind }, callsByKind: { ...ledger.callsByKind }, msByFamily: { ...ledger.msByFamily }, buildMs: Math.round(buildMs) };
   }
 
   /** Stamp the whole-session view (see sessionSummary). Best-effort; a bad value is ignored. */
@@ -2729,6 +2912,7 @@ export class BuildDiagnostics {
       review: this.reviewText,
       priorFailedBuilds: this.priorFailedBuilds,
       session: this.session,
+      ...(this.providerWaste ? { providerWaste: this.providerWaste } : {}),
       dataLossEvents: this.dataLossEvents.length ? [...this.dataLossEvents] : undefined,
       // DERIVED AT SERIALIZATION, like etaAccuracy above, so no ending path can forget it. This is
       // the FIRST of the report's two truncation passes: what the recorder's own caps refused. The
@@ -3054,6 +3238,13 @@ export function classifyProviderFailure(reason: unknown): string {
   // Checked here, above the generic tests, so a future reword of the marker cannot fall through them.
   if (isStarvedBudgetError(text)) return 'output-budget';
   if (/\b429\b|rate.?limit|too many requests|quota/.test(t)) return 'rate-limit';
+  // OUR walk-away from a provider, before the generic "timed out" test the marker also matches — the same order
+  // `wasteKindFor` uses, so the two classifiers of one error agree (autopsy 303e8a6f: this one said 'timeout',
+  // the waste ledger said 'crawl', and the event was neither — the provider had not started answering).
+  // …and a silence we waited out (a timed-out request that never opened) is silence too — every never-answered
+  // call carries the mark, however we stopped waiting (adversarial review).
+  if (providerNeverAnswered(text)) return 'silent';
+  if (isSlowStreamAbandon(text)) return 'crawl';
   if (/timeout|timed out|etimedout|deadline/.test(t)) return 'timeout';
   if (/\b401\b|\b403\b|unauthor|forbidden|invalid api key|authentication/.test(t)) return 'auth';
   if (/\b400\b|bad request|invalid request|schema/.test(t)) return 'bad-request';
@@ -3071,7 +3262,7 @@ export function classifyProviderFailure(reason: unknown): string {
  * in here would tell a user to "try again in a few minutes" about a ladder that will still be broken
  * tomorrow. They get their own, louder treatment.
  */
-const DEGRADED_BUCKETS = new Set(['timeout', 'rate-limit', 'server-error', 'network']);
+const DEGRADED_BUCKETS = new Set(['timeout', 'silent', 'crawl', 'rate-limit', 'server-error', 'network']);
 
 /**
  * Buckets that mean OUR OWN REQUEST OR LADDER IS WRONG — they never come right on a retry.
@@ -3405,6 +3596,13 @@ export interface EtaPromise {
   evidenced: boolean;
   /** The exact sentence the user saw, so the report can never claim a promise that was not made. */
   shown?: string;
+  /**
+   * Which slice of builds the estimate was asked to learn from (`etaTaskKey`: 'scaffold', 'game', 'complex_app',
+   * …), and whose builds actually taught it. Carried so the ETA's accuracy can be measured PER KIND — "is the
+   * band wrong for template builds?" was unanswerable while the promise named no kind (autopsy 303e8a6f).
+   */
+  key?: string;
+  source?: 'workspace' | 'platform' | 'heuristic';
 }
 
 /** How the promise held up. `ratio` is actual ÷ midpoint; `overBandBy` is 0 when it landed inside. */
@@ -3422,6 +3620,9 @@ export interface EtaAccuracy {
    * then it never ran long enough to test the estimate, and its ratio must not be counted as a miss.
    */
   untested?: boolean;
+  /** The promise's slice and source (see EtaPromise) — absent on reports written before 2026-10-12. */
+  key?: string;
+  source?: 'workspace' | 'platform' | 'heuristic';
 }
 
 /**
@@ -3465,6 +3666,23 @@ export function etaAccuracy(
   endedAt: number | null | undefined,
   outcomeCode: string = '',
   userWaitMs: number = 0,
+): EtaAccuracy | null {
+  const judged = judgeEtaPromise(promise, startedAt, endedAt, outcomeCode, userWaitMs);
+  if (!judged) return null;
+  // The kind rides along, so accuracy can be read per slice (autopsy 303e8a6f).
+  return {
+    ...judged,
+    ...(typeof promise?.key === 'string' && promise.key ? { key: promise.key } : {}),
+    ...(promise?.source ? { source: promise.source } : {}),
+  };
+}
+
+function judgeEtaPromise(
+  promise: EtaPromise | null | undefined,
+  startedAt: number | null | undefined,
+  endedAt: number | null | undefined,
+  outcomeCode: string,
+  userWaitMs: number,
 ): EtaAccuracy | null {
   const promisedMs = Number(promise?.estimateMs);
   const a = Number(startedAt);
@@ -4136,7 +4354,12 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
     lines.push('');
     lines.push(`LLM calls (${r.llmCalls.length}):`);
     r.llmCalls.forEach((c, n) => {
-      const lat = c.latencyMs != null ? ` ${Math.round(c.latencyMs / 1000)}s` : '';
+      // The caller's wait is the headline (it is what the build waited); the measured split rides beside it
+      // only when engines were really left behind — never a "differs by a few ms" rule (adversarial review).
+      const lat = c.latencyMs == null ? ''
+        : c.answerMs != null && c.fallbackMs != null && c.fallbackMs >= 1000
+          ? ` ${Math.round(c.latencyMs / 1000)}s (answering engine ${Math.round(c.answerMs / 1000)}s; ${Math.round(c.fallbackMs / 1000)}s on engines left behind)`
+          : ` ${Math.round(c.latencyMs / 1000)}s`;
       const tok = (c.inputTokens != null || c.outputTokens != null) ? ` tokens=${c.inputTokens ?? '?'}/${c.outputTokens ?? '?'}` : '';
       lines.push(`${n + 1}. ${c.provider ?? '?'}/${c.model ?? '?'} finish=${c.finishReason ?? '?'}${tok}${lat} ${c.ok ? 'ok' : 'FAILED'}`);
       if (c.error) lines.push(`   error: ${c.error}`);

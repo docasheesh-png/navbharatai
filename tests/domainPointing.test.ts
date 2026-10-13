@@ -121,8 +121,13 @@ describe('🔒 the wiring — the destructive button is refused, and the screen 
   });
 
   it('🔒 ONE conversation store, not two — a fact written through one must be visible through the other', () => {
-    expect(route).toContain('export function getConversationStore()');
-    expect(domains).toContain("import { getConversationStore } from './agentv3';");
+    // The singleton moved out of the build route (Q-867) so this route can read it without loading the
+    // whole engine; the build route imports and re-exports that same accessor rather than declaring one.
+    const store = readFileSync(join(__dirname, '..', 'src/server/AgentV3/sharedConversationStore.ts'), 'utf8');
+    expect(store).toContain('export function getConversationStore()');
+    expect(route).toContain("import { getConversationStore } from '../AgentV3/sharedConversationStore';");
+    expect(route).not.toContain('function getConversationStore(');
+    expect(domains).toContain("import { getConversationStore } from '../AgentV3/sharedConversationStore';");
   });
 
   it('the status route reports from evidence and stops reading the static host as the verdict', () => {

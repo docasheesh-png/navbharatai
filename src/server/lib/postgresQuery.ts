@@ -19,6 +19,8 @@
 // verification gets it; a user who asked for `require` gets what they asked for and no less.
 
 import { Client } from 'pg';
+import { lookup as dnsLookup } from 'dns/promises';
+import { isBlockedHostname, isBlockedIp } from './ssrfGuard';
 
 export interface PostgresQueryError {
   ok: false;
@@ -86,9 +88,17 @@ export async function runPostgresQuery(
   connectionString: string,
   sql: string,
   clientFactory: (cfg: { connectionString: string; ssl: false | { rejectUnauthorized: boolean }; connectionTimeoutMillis: number; statement_timeout: number }) => Client = (cfg) => new Client(cfg as never),
+  resolveHost: HostResolver = defaultResolveHost,
 ): Promise<{ ok: true; rows: Array<Record<string, unknown>> } | PostgresQueryError> {
   if (!isPostgresUrl(connectionString)) {
     return { ok: false, failure: 'bad-request', message: 'Connect your database first — Settings → App Settings → Database.' };
+  }
+  // 🔒 TENANT / NETWORK ISOLATION (DB-13, go-live audit 2026-10-13). The URL is the USER's, so the host is
+  // theirs to choose — including our own private network or the metadata server. Refuse private,
+  // loopback, link-local and internal targets before any socket opens, with ONE generic message so the
+  // refusal is not a port-scan oracle. PG_ALLOW_PRIVATE_HOSTS=on exists for local development only.
+  if (!(await postgresHostAllowed(connectionString, resolveHost))) {
+    return { ok: false, failure: 'bad-request', message: 'That database address is not reachable from NavBharatAI. Use the public address your database provider gives you.' };
   }
   const client = clientFactory({
     connectionString,
@@ -99,6 +109,8 @@ export async function runPostgresQuery(
   try {
     await client.connect();
   } catch (e) {
+    // A failed or timed-out connect can still hold a socket; close it (best-effort) so abuse cannot leak them.
+    try { await client.end(); } catch { /* already closed */ }
     return { ok: false, failure: classifyPgFailure(e), message: connectMessageFor(e), detail: String(e).slice(0, 500) };
   }
   try {
@@ -145,4 +157,40 @@ export function connectMessageFor(e: unknown): string {
     return 'Your database did not answer. Check it is running and that it accepts connections from the internet — some providers block outside access until you allow it.';
   }
   return 'Could not connect to your database just now. Please try again in a moment.';
+}
+
+/** Resolve a hostname to every address it points at. Injected in tests. */
+export type HostResolver = (host: string) => Promise<string[]>;
+
+async function defaultResolveHost(host: string): Promise<string[]> {
+  const rows = await dnsLookup(host, { all: true, verbatim: true });
+  return rows.map((r) => r.address);
+}
+
+/** The host part of a postgres URL, or '' when it cannot be parsed. PURE. */
+export function postgresHostOf(connectionString: string): string {
+  try {
+    const u = new URL(String(connectionString).replace(/^postgres(ql)?:/i, 'http:'));
+    return decodeURIComponent(u.hostname).replace(/^\[|\]$/g, '');
+  } catch { return ''; }
+}
+
+/**
+ * May the server open a socket to this database URL? Refuses internal hostnames and any IP literal or
+ * resolved address that is private/loopback/link-local/metadata. A name that does not resolve is
+ * allowed through — the connect then fails on its own and reaches nothing. Every resolved address must
+ * be public, so a name that mixes a public and a private answer is refused.
+ */
+export async function postgresHostAllowed(
+  connectionString: string,
+  resolveHost: HostResolver = defaultResolveHost,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<boolean> {
+  if (String(env.PG_ALLOW_PRIVATE_HOSTS ?? '').toLowerCase() === 'on') return true;
+  const host = postgresHostOf(connectionString);
+  if (!host || isBlockedHostname(host)) return false;
+  if (/^[\d.]+$/.test(host) || host.includes(':')) return !isBlockedIp(host);
+  let addrs: string[];
+  try { addrs = await resolveHost(host); } catch { return true; }
+  return addrs.length === 0 || addrs.every((a) => !isBlockedIp(a));
 }

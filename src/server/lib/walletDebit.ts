@@ -2,6 +2,7 @@ import { doc, getDoc, runTransaction } from './serverDb'; // admin-SDK binding (
 import { inrToDebitTokens, TOKENS_PER_RUPEE } from './payments';
 import { giftAfterSpend, giftRemaining, paidSpendableTokens } from './giftSpend';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
+import { WALLET_OPS, walletOpId } from './walletOps';
 
 // BILLING PHASE 1 (admin plan 2026-07-10) — the missing HALF of the money path.
 //
@@ -537,15 +538,23 @@ export async function debitWalletForBuild(
     // merged/retired account correctly charges the unified balance (matches the wallet-read resolution).
     const ownerId = await walletOwnerId(db, userId);
     const walletRef = doc(db, 'user_token_wallets', ownerId);
+    // DB-17: a durable dedupe doc per buildRef, so a late retry is caught even after the 500-row ledger
+    // has rolled past the original charge. Read before any write; written only when the charge applies.
+    const opRef = tx.buildRef ? doc(db, WALLET_OPS, walletOpId(ownerId, 'build', tx.buildRef)) : null;
     const debited = await runTransaction(db, async (t: any) => {
       const snap = await t.get(walletRef);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
+      if (opRef) {
+        const op = await t.get(opRef);
+        if (op.exists()) return { applied: false, tokensDebited: 0, wallet: current } as ReturnType<typeof computeDebitedWallet>;
+      }
       // The env-tunable floor is resolved HERE, in the I/O layer, so the pure function above stays
       // pure and testable while production still gets the configured value.
       const result = computeDebitedWallet(current, { ...tx, floorInr: tx.floorInr ?? overdraftFloorInr() }, new Date().toISOString());
       // `applied`, not `tokensDebited > 0`: a charge under one whole token debits nothing now but
       // moves the carried remainder, and losing that write would quietly forgive the charge.
       if (result.applied) t.set(walletRef, result.wallet);
+      if (result.applied && opRef) t.set(opRef, { kind: 'build', ownerId, ref: tx.buildRef, at: new Date().toISOString() });
       return result;
     });
     if (debited.applied) recordFeatureSpend(tx, userId);

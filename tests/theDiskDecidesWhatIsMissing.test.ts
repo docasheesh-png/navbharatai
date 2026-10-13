@@ -61,7 +61,8 @@ describe('the route', () => {
     const check = route.indexOf('foundationFilesStillAbsent(planned,', plan);
     // UPDATED 2026-10-13 (build report 9c612cdb, Q-982): the foundation is written through the route's one
     // platform writer, which returns each file's outcome, instead of dispatching write_file itself.
-    const write = route.indexOf("await writePlatform(toAdd, 'fast-foundation-'", plan);
+    // The write carries its pass name since the post-green attribution (autopsy 9c612cdb, Q-1000).
+    const write = route.indexOf("() => writePlatform(toAdd, 'fast-foundation-'", plan);
     expect(plan).toBeGreaterThan(0);
     expect(check).toBeGreaterThan(plan);
     expect(write).toBeGreaterThan(check);

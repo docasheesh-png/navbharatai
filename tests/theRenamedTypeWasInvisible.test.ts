@@ -29,7 +29,7 @@ import {
   contractRenameHeaderLine, contractRenamesFromSource, contractRenamesInSources, suggestedTypeRenames, typeRenameAdvice,
   fixRecordedTypeRenames, errorsAfterTypeRenames, typeRenameHealNote, contractRenameHealEnabled, valueUsedAsTypeName,
 } from '../src/server/AgentV3/contractRenames';
-import { contractRenameHandoffLine, SALVAGE_HANDOFF_MARKER } from '../src/server/AgentV3/handoffRule';
+import { contractRenameHandoffLine, contractRenameHandoffClause, SALVAGE_HANDOFF_MARKER } from '../src/server/AgentV3/handoffRule';
 import { writeTypecheckNote } from '../src/server/AgentV3/writeTimeTypecheck';
 import { parseTscErrors } from '../src/server/AgentV3/EndgameRepair';
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
@@ -201,6 +201,10 @@ describe('2 · the lane hands the rename on — result, hand-off sentence, bluep
     expect(line).toMatch(/only right when you mean the component itself/);
     expect(contractRenameHandoffLine([])).toBe('');
     expect(contractRenameHandoffLine(undefined)).toBe('');
+    // The prompt's clause: nothing when nothing was renamed, otherwise the line with its leading space.
+    expect(contractRenameHandoffClause([])).toBe('');
+    expect(contractRenameHandoffClause(undefined)).toBe('');
+    expect(contractRenameHandoffClause(prepared.renamed)).toBe(` ${line}`);
   });
 
   it('SOURCE: the salvage hand-off appends it after the entry line, inside the same note', () => {
@@ -209,7 +213,9 @@ describe('2 · the lane hands the rename on — result, hand-off sentence, bluep
     expect(start).toBeGreaterThan(0);
     const note = route.slice(start, route.indexOf('`\\n\\n---\\n\\n${buildPrompt}`', start));
     expect(note).toContain("(salvageEntryLine ? ` ${salvageEntryLine}` : '') +");
-    expect(note).toContain("(sb.contractRenames?.length ? ` ${contractRenameHandoffLine(sb.contractRenames)}` : '') +");
+    // PIN UPDATED 2026-10-13: the empty case moved into `contractRenameHandoffClause` (the chat handler is at TypeScript's
+    // control-flow limit, TS2563, so the template carries no condition); its behaviour is asserted below.
+    expect(note).toContain('contractRenameHandoffClause(sb.contractRenames) +');
     expect(SALVAGE_HANDOFF_MARKER).toBe('[CONTINUE — DO NOT START OVER]');
   });
 

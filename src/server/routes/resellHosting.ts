@@ -28,6 +28,32 @@ import { quoteDatabaseResell, quoteServerResell, projectRefFromDatabaseProof, st
 import { dataClientSource } from '../lib/sharedData';
 import { createSharedDatabase, destroySharedDatabase, markSharedReady, type SharedDb } from '../lib/sharedDataStore';
 import type { ServerPublishInput, ServerPublishResult } from '../AgentV3/serverPublish';
+import { doc, getDoc } from '../lib/serverDb';
+import { resellDuplicateGuardEnabled } from '../lib/purchaseAuditFlags';
+import { isDeliveredRow } from '../lib/resellLifecycle';
+
+/**
+ * RESELL_DUPLICATE_GUARD: the ref of an EXPIRED private-database row for this app that was never
+ * removed, or null. Reads the raw rows because `readHostingAddons` drops expired ones. Fails open to
+ * null (= old behaviour) — the guard only ever prevents a create, it never blocks a refund.
+ */
+async function lapsedDedicatedRef(uid: string, workspaceId: string, nowMs: number): Promise<string | null> {
+  if (!resellDuplicateGuardEnabled()) return null;
+  try {
+    const db = getServerDb();
+    if (!db) return null;
+    const snap = await getDoc(doc(db as any, 'user_token_wallets', uid));
+    const rows = snap.exists() ? (snap.data() as any)?.hostingAddons : null;
+    if (!Array.isArray(rows)) return null;
+    const hit = rows.find((r: unknown) => isDeliveredRow(r)
+      && r.addonId === 'dedicated_db'
+      && String(r.proof || '').startsWith(`db:${workspaceId}:`)
+      && Date.parse(r.expiresAt) <= nowMs);
+    return hit ? hit.ref : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface ResellRouteDeps {
   /** Deploy with the server cap already lifted for this one paid extra. The quote decided it was allowed. */
@@ -117,6 +143,7 @@ export function registerResellHostingRoutes(app: Express, deps: ResellRouteDeps)
       workspaceId,
       active: dedicatedPay.active,
       canPay: dedicatedPay.canPay,
+      lapsedRef: await lapsedDedicatedRef(who.uid, workspaceId, now),
     });
     const serverSpec = addonById('server');
     const sharedSpec = addonById('shared_db');
@@ -328,6 +355,7 @@ function dataOrigin(req: Request): string {
         workspaceId,
         active: pay.active,
         canPay: pay.canPay,
+        lapsedRef: await lapsedDedicatedRef(who.uid, workspaceId, now),
       },
       create: async () => {
         if (!cfg) return { ok: false, message: 'A database from NavBharatAI is not switched on yet.', cleaned: true };
@@ -366,7 +394,16 @@ function dataOrigin(req: Request): string {
       return noCharge(res, 403, 'This app is not on your account. Nothing was refunded.');
     }
     const menu = await readHostingAddons(getServerDb(), who.uid);
-    const row = menu.active.find((a) => a.ref === ref && (a.addonId === 'shared_db' || a.addonId === 'dedicated_db'));
+    let row = menu.active.find((a) => a.ref === ref && (a.addonId === 'shared_db' || a.addonId === 'dedicated_db'));
+    // An EXPIRED private database is still a real project holding the user's data. Without this its
+    // row was invisible here, so it could never be removed (guard flag only; refund is ₹0 when expired).
+    if (!row && (await lapsedDedicatedRef(who.uid, workspaceId, Date.now())) === ref) {
+      row = { ref, addonId: 'dedicated_db', proof: undefined } as any;
+      const snap = await getDoc(doc(getServerDb() as any, 'user_token_wallets', who.uid)).catch(() => null);
+      const raw = (snap && snap.exists() ? (snap.data() as any)?.hostingAddons : []) || [];
+      const full = raw.find((r: any) => r && r.ref === ref);
+      if (full) row = full;
+    }
     if (!row || !String(row.proof || '').startsWith(`db:${workspaceId}:`)) {
       return noCharge(res, 404, 'That database was not found on this app. Nothing was refunded.');
     }

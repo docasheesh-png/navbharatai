@@ -184,6 +184,11 @@ export function quoteDatabaseResell(input: {
    * version of this quote was.
    */
   product?: 'shared' | 'dedicated';
+  /**
+   * Ref of a private database for THIS app whose period ended but which was never removed
+   * (RESELL_DUPLICATE_GUARD). Creating another would orphan it. Omitted ⇒ no guard (old behaviour).
+   */
+  lapsedRef?: string | null;
 }): ResellOption {
   const product = input.product === 'shared' ? 'shared' : 'dedicated';
   const spec = addonById(product === 'shared' ? 'shared_db' : 'dedicated_db');
@@ -214,6 +219,16 @@ export function quoteDatabaseResell(input: {
       reason: product === 'shared'
         ? 'This app already has a NavBharatAI database and API. Nothing extra is charged. Remove it here to delete the data first — unused days come back only after it is gone.' + own
         : 'This app already has a NavBharatAI database. Nothing extra is charged. Remove it here to delete the database first — unused days come back only after it is gone.' + own,
+    };
+  }
+  if (product === 'dedicated' && input.lapsedRef) {
+    return {
+      mode: 'unavailable',
+      priceInr: price,
+      canStart: false,
+      stopRef: input.lapsedRef,
+      status: 409,
+      reason: 'This app still has its earlier private database — its 30 days ended but it was not removed, and your data is still in it. Remove it first if you want a new one. Nothing was charged.' + own,
     };
   }
   if (input.active.length >= max || max <= 0) {

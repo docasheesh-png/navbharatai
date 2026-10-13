@@ -574,7 +574,7 @@ async function drawn(page) {
  *
  * The cap is what keeps this bounded on a page that has stopped drawing altogether; without it a dead
  * raf loop would hang the probe for the whole playtest budget. Returns what really happened, so the
- * caller can say "the page was starved" instead of reporting nothing.
+ * caller can report the starvation instead of reporting nothing at all.
  */
 async function waitFrames(page, n, capMs) {
   const t0 = Date.now();

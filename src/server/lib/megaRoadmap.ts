@@ -435,3 +435,78 @@ export function summarizeRoadmapForDiag(roadmap: MegaRoadmap): string {
   return `${roadmap.steps.length} checkpoint(s)${ceils ? `, ${ceils} with an honest infra ceiling` : ''}: `
     + roadmap.steps.map((s) => `${s.n}) ${s.title}${s.infraCeiling ? ' [infra]' : ''}`).join('  ');
 }
+
+/** Said once above the milestone's brief when notes were kept, so a note written for the whole request never
+ *  pulls a later milestone into this build. */
+export const MILESTONE_NOTES_SCOPE_LINE =
+  '[THE NOTES ABOVE WERE WRITTEN FOR THE WHOLE REQUEST] Apply each one to this milestone. Where a note names a part of the app that a later milestone builds, leave that part for that milestone.';
+
+export interface MilestoneBuildPrompt {
+  /** What the builder is handed. */
+  prompt: string;
+  /** True when notes were prepended above the request and every one of them was carried over. */
+  notesKept: boolean;
+  /** True when notes existed but could not be separated from the request, so only the brief went through.
+   *  Unreachable while every note is a PREPEND (tests/aMilestoneKeepsItsNotes.test.ts holds that); the route
+   *  reports it as a warning rather than letting it pass in silence. */
+  notesDropped: boolean;
+}
+
+/**
+ * THE PROMPT A MILESTONE IS BUILT FROM — the brief replaces the REQUEST, never the notes above it (Q-975,
+ * 2026-10-13).
+ *
+ * 🔴 WHAT HAPPENED. Milestone mode wrote `buildPrompt = step1.buildPrompt + …`, replacing the whole prompt, so every
+ * note the route had prepended above the user's words was thrown away on a milestone build: the classic-phone rule,
+ * the no-sign-in scope, the unknown-name and script notes, the unsupported-stack note, the native and pasted-app
+ * briefs, the framework-coherence warning, the requirement guidance and the cache-prefix context blocks. Only the
+ * hard-constraint lines were restated. Its sibling, the plan-approval rebuild, was fixed the same way in #3689: an
+ * approved plan is appended, never swapped in.
+ *
+ * 🔑 THE ONE INVARIANT IT RESTS ON. Every note is prepended, so the request is the suffix of `buildPrompt`. The
+ * brief replaces that suffix and nothing else. The milestone's own instruction stays last, where it binds hardest,
+ * and MILESTONE_NOTES_SCOPE_LINE stops a note written for the whole app from widening this build. PURE.
+ */
+export function milestoneBuildPrompt(input: {
+  buildPrompt: string;
+  request: string;
+  step: Pick<RoadmapStep, 'buildPrompt' | 'title'>;
+  total: number;
+  /** The build report: a dropped-notes swap is recorded there as a warning, never passed in silence. */
+  report?: { record(issue: { phase: 'plan'; severity: 'warning'; code: string; message: string; autoResolved: boolean }): void };
+}): MilestoneBuildPrompt {
+  const full = String(input.buildPrompt ?? '');
+  const request = String(input.request ?? '');
+  const brief = `${input.step.buildPrompt}\n\n(This is milestone 1 of ${input.total} for a larger app the user is building step by step: "${input.step.title}". Build THIS milestone as a complete, standalone, fully-working and polished app on its own — do NOT stub the later milestones, and do NOT try to build them now. Later milestones will be added in their own separate builds.)`;
+  const separable = full.endsWith(request);
+  const notes = separable ? full.slice(0, full.length - request.length) : '';
+  const notesKept = notes.trim().length > 0;
+  let prompt = notesKept ? `${notes}${MILESTONE_NOTES_SCOPE_LINE}\n\n${brief}` : brief;
+  // 🔴 THE USER'S OWN RULES SURVIVE THE SWAP (build 681bd91b): the brief is the planner's words, so "no React, one
+  // single file, no fake responses" reached the builder only if the planner repeated them — and it did not.
+  const constraints = hardConstraintLines(request);
+  if (constraints.length > 0) {
+    prompt += `\n\nNON-NEGOTIABLE CONSTRAINTS from the user's original request — they bind this milestone too:\n${constraints.map((c) => `- ${c}`).join('\n')}`;
+  }
+  const notesDropped = !separable && full.trim() !== request.trim();
+  if (notesDropped) {
+    try {
+      input.report?.record({ phase: 'plan', severity: 'warning', code: 'MILESTONE_NOTES_DROPPED', autoResolved: false, message: 'The milestone brief could not be separated from the notes above the request, so this milestone was built without them.' });
+    } catch { /* the report is best-effort; the prompt is still returned */ }
+  }
+  return { prompt, notesKept, notesDropped };
+}
+
+/**
+ * The request a lane that composes its OWN prompt (the two fast lanes, a writing specialist) is handed on a
+ * milestone build (Q-975): the milestone's brief in place of the user's words, and whatever the planning request
+ * carried after them (the attachment, the earlier requests) kept. Before this, those lanes were handed the WHOLE
+ * message while the builder was told to build milestone 1, so a fast lane planned the entire app. With no milestone
+ * (`null`) it returns the planning text unchanged, so the route reads one expression either way. PURE.
+ */
+export function milestoneLaneRequest(planningText: string, request: string, milestonePrompt: string | null): string {
+  const text = String(planningText ?? '');
+  if (!milestonePrompt) return text; // not a milestone build: the planning request as it is
+  const req = String(request ?? '');
+  return req && text.startsWith(req) ? `${milestonePrompt}${text.slice(req.length)}` : milestonePrompt;
+}

@@ -292,3 +292,16 @@ export function laneOutcomeWords(sb: { ok: boolean; stopped?: boolean; reason?: 
   if (sb.stopped) return 'The lane was stopped by the user.';
   return `The lane still handed off (${sb.reason || 'no reason recorded'}), with ${sb.salvagedPaths?.length ?? 0} finished file(s).`;
 }
+
+/**
+ * The route's one call after the lane: record the stays, if any, as an engine fact. Here rather than inline because
+ * the route handler sits at TypeScript's control-flow-analysis limit (TS2563) — every branch added there costs it.
+ */
+export function recordReasoningStays(
+  report: { record(issue: { phase: 'build'; severity: 'info'; code: string; message: string; autoResolved: boolean }): void },
+  calls: ReadonlyArray<{ model: string; ms: number }>,
+  sb: Parameters<typeof laneOutcomeWords>[0],
+): void {
+  if (calls.length === 0) return;
+  report.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_STAYED_ON_REASONING_RUNG', message: reasoningStayNote(calls, laneOutcomeWords(sb)), autoResolved: true });
+}

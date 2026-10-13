@@ -119,7 +119,10 @@ describe('🔒 the wiring — every lane that writes the app hears the same rule
   });
   it('the fast lane: its prompt carries the same rule', () => {
     expect(route).toContain('const keypadPhoneSuffix = keypadPhoneForBuild ? `\\n\\n${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}`');
-    expect(route).toMatch(/runSimpleBuild\(\{ prompt: planning\.text \+[^,]*\+ keypadPhoneSuffix,/);
+    // Both fast lanes read ONE request since Q-975 — the one-shot never had this rule before it.
+    expect(route).toContain('+ singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix;');
+    expect(route).toContain('runSimpleBuild({ prompt: fastLaneRequest,');
+    expect(route).toContain('runOneShot({ prompt: fastLaneRequest,');
   });
   it('the writing sub-agents: a deviceRule thunk, read only by roles that write files', () => {
     expect(route).toMatch(/deviceRule: \(\) => \{\s*const phone = !isImportTurn && intent === 'new_build' && !isEditMode \? namedNonSmartphone\(prompt\) : null;\s*return phone \? nonSmartphoneBuildRule\(phone\.device, phone\.kind\) : '';/);

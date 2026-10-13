@@ -1,4 +1,5 @@
 import { DESIGN_KIT_CSS } from './designKit';
+import { APP_VIEWPORT_META } from '../../../../nativeFeel';
 import { VITE_ENV_DTS_PATH, VITE_ENV_DTS_CONTENT } from '../../../../viteEnvTypes';
 import { ITemplateProvider } from './ViteReactProvider';
 
@@ -60,7 +61,7 @@ const INDEX_HTML = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    ${APP_VIEWPORT_META}
     <title>My Vue App</title>
   </head>
   <body>

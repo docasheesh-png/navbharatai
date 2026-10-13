@@ -581,7 +581,13 @@ redefined how NavBharatAI bills v3.0 builds. **This supersedes the old "Sonnet-e
 billing for Weak/Normal/Strong** (which billed a cheap-led build ~21× its real cost — and once billed a
 FAILED build ₹811). The Opus tiers are untouched.
 
-- **Non-Opus tiers (Weak, Normal, Strong):** `bill = tieredMarkup( REAL provider cost )`.
+- **Non-Opus tiers (Weak, Normal, Strong):** `bill = tieredMarkup( REAL provider cost + sandbox share )`,
+  then the admin's build discount if one is set (never below that real cost — `buildDiscount.ts`).
+  - The sandbox share is the VM's measured time × `E2B_USD_PER_HOUR`, added BEFORE the markup only when
+    BOTH `AGENTV3_BILL_SANDBOX=on` AND `E2B_USD_PER_HOUR` is explicitly set (`sandboxCost.ts` →
+    `sandboxBillableUsd`; see the sandbox-time entry in `docs/claude/ENV_REGISTRY.md`). The flag without
+    the rate bills ZERO — the code refuses to bill its placeholder rate. Otherwise the share is shown to
+    the admin and absorbed, never billed.
   - REAL provider cost = the EXACT per-provider/model token spend × each provider's own real rate card
     (`src/server/AgentV3/providerRates.ts`), summed. The exact model that ran is captured via
     `TurnResult.model` (Claude/GLM/Kimi/Gemini runners all report it) → a `glm-4.7-flash` turn is FREE,
@@ -596,9 +602,16 @@ FAILED build ₹811). The Opus tiers are untouched.
   flat/per-tier billing WITHOUT a deploy (default = ON, this IS the billing model now). Rate cards are
   env-tunable (`RATE_GLM_IN`/`RATE_KIMI_OUT`/… ) and the markup curve too (`AGENTV3_MARKUP_SMALL` = 4,
   `AGENTV3_MARKUP_LARGE` = 3, `AGENTV3_MARKUP_THRESHOLD_USD` = 1) — track live prices without a deploy.
-- HONESTY: cache-hit input tokens are not yet tracked separately, so cached input is priced at the full
-  cache-miss rate → real cost is a slight OVER-estimate (margin-safe). A later slice can capture
-  `cache_read` usage to bill even lower.
+- HONESTY: cache-hit input tokens ARE tracked and priced at each provider's own cache-read rate where its
+  rate card has one (Fix 66, #1434, 2026-07-16 — `tokenCostUsd` in `pricing.ts`; Q-343 added Anthropic's
+  cache-write line), and at the full input rate where the card has no cache line.
+  **Corrected 2026-10-12 (autopsy 9c612cdb):** this bullet used to say cache hits were not tracked and were
+  priced at the cache-miss rate — true before Fix 66, false since. The report proved it to the cent: Kimi's
+  896,000 cache-read tokens were priced at its $0.19 cache rate, giving a real cost of $0.274781 and a bill
+  of ₹103.24; at the miss rate it would have been about ₹341. **This corrects a DESCRIPTION; it does not
+  change the billing model**, so the confirm-with-admin rule above (which guards the model) is not engaged.
+  `tests/theBillOfReport9c612cdb.test.ts` pins that build's real numbers and fails if either this file or
+  the rate card's header claims cache hits are priced at the miss rate again.
 
 ### "Seen running" for a bill includes the in-build render (admin decision 2026-10-06, Q-727 = b) — ⚠️ CONFIRM WITH ADMIN BEFORE CHANGING
 

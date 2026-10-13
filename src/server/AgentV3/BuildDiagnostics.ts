@@ -235,6 +235,9 @@ export const PROCESS_ONLY_CODES = new Set([
   // …and the click explorer's two "did not look" outcomes (clickExplorer.ts): it never reached the app,
   // or found nothing safe to press. Facts about OUR instrument, never about the user's app.
   'EXPLORE_NOT_RUN', 'EXPLORE_NOTHING_TO_PRESS',
+  // …and OUR starter unit-test pass saying why it added none (starterTestsSkip.ts, autopsy 9c612cdb): what our
+  // pass could do in this project, never a defect in the app ("No tests at all" stays the readiness finding).
+  'STARTER_TESTS_SKIPPED',
   // …and the reviewer's own version of that: the judge threw, or answered with something unreadable.
   // It used to be recorded as `CHEAP_REVIEW: PASS`, which is the fake-success class exactly. A review
   // that did not happen says something about OUR instrument, never about the user's app.
@@ -618,9 +621,14 @@ export interface PreviewErrorRecord {
  * reached settle (e.g. a pre-stream refusal).
  */
 export interface BuildBillingRecord {
-  /** Who the build ran for: 'free-list (admin/tester)' | 'free (welcome bonus — cheap engines)' |
-   *  'paid' | 'billing-off (no charge)'. */
+  /** Who the build ran for, from `buildBillingLabel` (one rule at both settle paths): 'free-list (admin/tester)' |
+   *  'weak (free tier — cheap engines) · charged ₹N' or '… · not charged' | 'paid' | 'billing-off (no charge)'.
+   *  Reports stored before 2026-10-12 carry the older cheap-tier wording, which named a sign-up grant retired on
+   *  2026-09-17 (autopsy 9c612cdb); `classifyReportTier` still reads both. */
   userTier: string;
+  /** True when this build's bill was set against the user's wallet (billing applies and the bill is above
+   *  zero). The money answer, so nobody has to parse `userTier` for it. Absent before 2026-10-12. */
+  charged?: boolean;
   /** The ACTUAL amount charged (after every zeroing rule). 0 = a free build. */
   billedUsd?: number;
   billedInr?: number;

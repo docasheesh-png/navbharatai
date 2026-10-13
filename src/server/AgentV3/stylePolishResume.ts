@@ -25,6 +25,8 @@ import { turnAskedTheUser, turnDeclined } from './nudgeToBuild';
 import { DEFECT_TEXT, type DesignDefect } from './DesignCoverage';
 import { undefinedClassesInFile } from './CssConsistency';
 import { orphanInstruction } from './orphanHandBack';
+// The one append sentence every "add rules" instruction carries (autopsy 9c612cdb, Q-943 — appendByEdit.ts).
+import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
 
 export const MAX_STYLE_RESUMES = 1;
 
@@ -143,8 +145,8 @@ export function missingClassesInstruction(missing: readonly string[], sheet: str
   const more = missing.length > MAX_CLASSES_LISTED ? ` and ${missing.length - MAX_CLASSES_LISTED} more` : '';
   return `${missing.length} class name(s) the screens use have NO rule in any stylesheet, so those parts of the app `
     + `render as plain unstyled HTML: ${shown}${more}. Add a real rule for every one of them in ONE edit_file `
-    + `call on ${sheet} with an EMPTY old_string (an empty old_string appends to the end of the file — no anchor `
-    + 'needed). Use the palette variables already defined at the top of that file (var(--accent), var(--card), '
+    + `call on ${sheet}. ${APPEND_WITH_EMPTY_OLD_STRING} `
+    + 'Use the palette variables already defined at the top of that file (var(--accent), var(--card), '
     + 'var(--border), var(--muted), var(--radius), …) and the kit classes it already has. Do not rename classes in '
     + 'the screens and do not remove existing rules.';
 }

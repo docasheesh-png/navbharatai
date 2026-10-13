@@ -182,11 +182,6 @@ describe('5 · 🔒 CENSUS — a new "add rules to the stylesheet" instruction c
     { file: 'SimpleBuilder.ts', has: 'Add element and state rules as the design needs', why: 'the fast lane writes whole files with no tools — there is no edit_file to append with' },
     { file: 'SimpleBuilder.ts', has: 'add any class you use to it when you write that stylesheet', why: 'the fast lane writes whole files with no tools' },
     { file: 'buildFindingSuggestions.ts', has: 'Add the missing rules to the app', why: 'a suggestion the USER sends as their own message — tool mechanics do not belong in their words; the edit build it starts reads the edit_file contract' },
-    {
-      file: 'stylePolishResume.ts', has: 'Add a real rule for every one of them in ONE edit_file',
-      why: 'already names the empty-old_string append in its own words; moving it onto the shared constant waits for the open work on the lines around it (Q-943 deferred part)',
-      check: (t) => /EMPTY old_string/.test(t),
-    },
     { file: 'systemPrompt.ts', has: 'extend the kit in index.css', why: 'DESIGN_KIT_BRIEF — both of its readers put the sentence beside it (section 2 checks both, and that there is no third)' },
     { file: 'systemPrompt.ts', has: 'define the equivalents ONCE in the project', why: 'kit-less scaffolds: WHAT to define once; the same architect prompt states the append sentence at its stylesheet rule (section 2)' },
     { file: 'routes/agentv3.ts', has: 'Adding the styles your screens use', why: 'a narration line the USER reads, not an instruction' },

@@ -151,8 +151,10 @@ describe('B — the planner may not plan a fake, and the user’s rules survive 
   it('the milestone swap restates the constraints to the builder', () => {
     const src = read('src/server/routes/agentv3.ts');
     const swap = src.slice(src.indexOf('const step1 = megaRoadmapActive.steps[0];'), src.indexOf('// Universal Language (Layer 73)'));
-    expect(swap).toContain('const constraints = hardConstraintLines(prompt);');
-    expect(swap).toMatch(/NON-NEGOTIABLE CONSTRAINTS from the user's original request/);
+    // Since Q-975 the swap is one call (milestoneBuildPrompt) that restates them from the user's own words;
+    // tests/aMilestoneKeepsItsNotes.test.ts checks its output carries them.
+    expect(swap).toContain('milestoneBuildPrompt({ buildPrompt, request: prompt, step: step1, total, report: buildDiag })');
+    expect(read('src/server/lib/megaRoadmap.ts')).toMatch(/NON-NEGOTIABLE CONSTRAINTS from the user's original request/);
   });
 });
 

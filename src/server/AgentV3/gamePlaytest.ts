@@ -1008,6 +1008,50 @@ export function playtestNotRunVerdict(why: string): PlaytestVerdict {
   };
 }
 
+/**
+ * 🔴 THE THIRD WAY THIS CHECK IS REACHED, WHICH HAD NO SENTENCE (Q-913, autopsy `50378049`, 2026-10-12).
+ *
+ * `playtestNotRunVerdict` above promises *"one sentence for every way it is reached (the runner's own
+ * answer, and the route's timeout or crash), so the two can never drift apart."* There is a THIRD way:
+ * **the route never calls it at all.** Its gate is one long `if (…)` with no `else`, so when a condition
+ * is false the playtest is silently skipped and the report says nothing.
+ *
+ * That is the reported build. BlockWorld is a canvas game whose screen stayed DARK; the engine's own
+ * measurement for exactly that — `scorePlaytest`'s `runs`, read from the brightness spread of a 48×27
+ * sample, which scores 0 for *"blank or a single colour"* — never ran, because the preview address had
+ * been discarded (Q-900). **Nothing anywhere said the game had not been played**, so the only account of
+ * the dark screen left in the report was the MODEL's own prose — *"normal for a sandbox game, players
+ * can move and dig to daylight"* — an explanation standing where a measurement belonged.
+ *
+ * 🔒 "COULD NOT LOOK" AND "NOT APPLICABLE" ARE DIFFERENT, and conflating them would make this a nag.
+ * A project with no canvas game, an import turn, a stopped build, a failed build or the kill switch are
+ * NOT APPLICABLE — this returns null and the report stays silent, correctly. A canvas game the route
+ * could not play — no preview address, a module turn judged as awaiting its shell, no time left, no
+ * command channel — is COULD NOT LOOK, and gets the warning that already exists.
+ *
+ * PURE.
+ */
+export function playtestSkipReason(ctx: {
+  enabled: boolean;
+  buildOk: boolean;
+  isCanvasGame: boolean;
+  isImportTurn: boolean;
+  aborted: boolean;
+  hasRunCommand: boolean;
+  hasPreviewUrl: boolean;
+  awaitsShell: boolean;
+  timeLeft: boolean;
+}): string | null {
+  // Not applicable — silence is the honest answer, and a warning here would be a nag.
+  if (!ctx.enabled || !ctx.isCanvasGame || !ctx.buildOk || ctx.isImportTurn || ctx.aborted) return null;
+  // Could not look — each one names what was missing, never "something went wrong".
+  if (!ctx.hasPreviewUrl) return 'no live preview address was available to open the game at';
+  if (ctx.awaitsShell) return 'this turn built one project module and the app is assembled by a later one';
+  if (!ctx.hasRunCommand) return 'this sandbox has no way to run a browser';
+  if (!ctx.timeLeft) return 'the build had no time left to play it in';
+  return null;
+}
+
 /** The report line, with the scorecard. PURE. */
 export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): PlaytestVerdict {
   if (!run.ok) return playtestNotRunVerdict(run.error || run.diagnostic || '');

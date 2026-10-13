@@ -192,7 +192,7 @@ describe('§4 a config file the starter already has is edited, never rewritten b
     const src = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
     expect(src).toContain('readExisting: readExistingProjectFile,');
     expect(src).toContain('framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile,');
-    expect(src).toContain('runOneShot({ prompt: prompt + unknownNameSuffix + requestScopeSuffix,');
+    expect(src).toContain('runOneShot({ prompt: fastLaneRequest, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile,'); // one request for both lanes (Q-975)
     expect(src).toMatch(/withoutPreviewBridge\(p, raw\)/);
   });
 });

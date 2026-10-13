@@ -24,7 +24,7 @@ import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
 import { lostTruncatedOutput, truncationRecoverySteer, truncationRecoveryNarration, truncationSteeredPaths } from './TruncationRecovery';
-import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
+import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRepeatProbeSteer, noteMutations, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
@@ -461,7 +461,7 @@ export interface AgentRunResult {
    * needs the answer — whether the loop should END itself here rather than merely say so — must not
    * be taken on a belief. Absent means "never judged finished", which is NOT an overrun of zero.
    */
-  readyAt?: { step: number; elapsedMs: number; score: number };
+  readyAt?: { step: number; elapsedMs: number; score: number; at?: number };
   /** T1-budget-ux: the run stopped ONLY because it hit the per-build budget cap (work is saved and the
    *  build can be continued — a fresh run gets a fresh budget window). Lets the client show an honest
    *  "budget reached — continue" state instead of a hard failure. */
@@ -1184,14 +1184,14 @@ export class AgentRunner {
                   typeErrors: typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null,
                   editingExistingApp: this.opts.editingExistingApp === true, wroteThisRun: dispatcher.wroteAnything(),
                   projectModule: this.opts.projectModule?.() ?? null,
-                  step: steps, elapsedMs: Date.now() - buildStartMs,
+                  step: steps, elapsedMs: Date.now() - buildStartMs, at: Date.now(),
                 });
               } catch { /* a measurement must never touch a build */ }
               if (readiness.ready && styleResumes === 0 && !this.opts.focusedRepair && !this.opts.signal?.aborted) {
                 // SCREENS THAT USE CLASSES NO STYLESHEET DEFINES ARE HANDED BACK ONCE, while the model still
                 // holds them (autopsy 1be16985 — 63 undefined classes, then a 174 s fresh-context repair).
                 const style = await dispatcher.undefinedClassesNow();
-                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, orphans: style.orphans, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
+                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, orphans: style.orphans, noTokens: style.noTokens, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
                 if (decision.resume) {
                   styleResumes++;
                   summaryBeforeStyleResume = turn.text.trim() || null;
@@ -1199,7 +1199,7 @@ export class AgentRunner {
                   // (autopsy 536c8189 — it is snapped deterministically in `spacingSnap.ts`).
                   const styleNotice = handBackNotice('style', turn.text);
                   if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
-                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0, style.a11y?.length ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0, style.a11y?.length ?? 0, style.noTokens?.colours ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`), ...(style.noTokens ? [`${style.noTokens.colours}-colours:no-tokens`] : [])].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
                   markHandBack('style');
                   continue;
@@ -1471,6 +1471,13 @@ export class AgentRunner {
           } catch { /* the guard is best-effort — it must never break a build */ }
         }
         // LOOP BREAKER — steer the model off a repeated non-progressing call (best-effort; never blocks).
+        // 🔑 MUTATIONS ARE NOTED FIRST (Q-912, autopsy 50378049). A probe repeated after the build changed
+        // something is a NEW question with the same spelling — `console_errors` after a fix is the model
+        // checking whether its own fix worked, which is the "check, fix, check again" shape this module
+        // already excludes `tsc` for. Noting this turn's writes BEFORE counting its probes is what lets
+        // the same call in a LATER turn start over, while the original six-identical-greps loop — which
+        // mutated nothing — is still caught.
+        if (loopGuardOn) { try { noteMutations(repeatProbe, turn.toolUses); } catch { /* never break a build */ } }
         const loopSteer = loopGuardOn ? collectRepeatProbeSteer(repeatProbe, turn.toolUses, loopThreshold) : null;
         if (loopSteer) {
           // Honest narration per severity: the FINAL steer means the model ignored an earlier nudge and
@@ -1530,7 +1537,7 @@ export class AgentRunner {
             // Never "complete and healthy" over a compile that just failed (autopsy 33812996).
             const typeErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;
             if (appIsDone(readiness) && !(typeErrors !== null && typeErrors > 0)) {
-              if (!readyMark) readyMark = { step: steps, elapsedMs: Date.now() - buildStartMs, score: readiness.score };
+              if (!readyMark) readyMark = { step: steps, elapsedMs: Date.now() - buildStartMs, score: readiness.score, at: Date.now() };
               doneText = doneSteer(readiness);
               if (doneText) {
                 doneSignalled = true;

@@ -31,7 +31,7 @@ import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
 import { scopeVerdict } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
-import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, hardConstraintLines, type MegaRoadmap } from '../lib/megaRoadmap';
+import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, milestoneBuildPrompt, milestoneLaneRequest, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
 import { requestForChecks } from '../AgentV3/requestForChecks';
@@ -379,6 +379,8 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
+import { recordReasoningStays } from '../AgentV3/FastLaneBudget';
+import { applyLeftoverNetAfterBuild } from '../AgentV3/leftoverComponents';
 import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSupported, gameKitHandoffBlock, gameKitSeededMessage, builderWrittenCount, type GameKitRecipe, type GameKitSeedResult, wantsSceneDetail } from '../AgentV3/gameKitSeed';
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
@@ -644,7 +646,7 @@ import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
-import { gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
+import { gamePlaytestEnabled, gamePlaytestScript, parsePlaytest, playtestVerdict, playtestNotRunVerdict, playtestSkipReason, playtestOutcome, isCanvasGameProject, replayFromCode, startLabelsFromExplore, PLAYTEST_BUDGET_MS } from '../AgentV3/gamePlaytest';
 import { recordManualEdits, consumeManualEditsWithOwned, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { createPrepSteps } from '../AgentV3/prepClock';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
@@ -14476,6 +14478,9 @@ async function noteBuildOutcome(
       let megaRoadmapActive: MegaRoadmap | null = null;
       /** The milestone's brief when a roadmap step is being built — what the feature checks grade. */
       let milestoneRequest: string | null = null;
+      /** The same brief as the builder's, without the builder's notes — what a lane that composes its own prompt is
+       *  handed in place of the user's words (Q-975, `milestoneLaneRequest`). */
+      let milestoneLanePrompt: string | null = null;
       // A pasted one-file app is improved in place, never split into milestones (pastedAppFormat.ts).
       if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode && !pastedFormat.keep) {
         try {
@@ -15694,7 +15699,8 @@ async function noteBuildOutcome(
         // The specialist is handed the request WITH what came with it (autopsy 3f959fde: `planning.text` = the
         // words + the attachment + the earlier requests), and on a "Continue…" turn the request it continues
         // (requestForChecks.ts, autopsy 241215d1).
-        userRequest: () => (checksRequest === prompt ? planning.text : checksRequest),
+        // On a milestone build, the milestone it is building — never the whole message (Q-975).
+        userRequest: () => (milestoneLanePrompt ? milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt) : checksRequest === prompt ? planning.text : checksRequest),
         portDigest: () => portDigestText,
       };
       const spawnSubAgent = makeSubAgentSpawn(subAgentDeps);
@@ -17544,15 +17550,10 @@ async function noteBuildOutcome(
         // not the whole message whose later parts this build is told not to build.
         milestoneRequest = step1.buildPrompt;
         dispatcher.setCoverageRequest(step1.buildPrompt);
-        buildPrompt = `${step1.buildPrompt}\n\n(This is milestone 1 of ${total} for a larger app the user is building step by step: "${step1.title}". Build THIS milestone as a complete, standalone, fully-working and polished app on its own — do NOT stub the later milestones, and do NOT try to build them now. Later milestones will be added in their own separate builds.)`;
-        // 🔴 THE USER'S OWN RULES SURVIVE THE SWAP (build 681bd91b). This line REPLACES the user's words
-        // with the planner's, so "no React, one single file, no fake responses, no placeholder buttons"
-        // reached the builder only if the planner happened to repeat them — and it did not. They are
-        // restated here verbatim, deterministically, so no step can be built in breach of them.
-        const constraints = hardConstraintLines(prompt);
-        if (constraints.length > 0) {
-          buildPrompt += `\n\nNON-NEGOTIABLE CONSTRAINTS from the user's original request — they bind this milestone too:\n${constraints.map((c) => `- ${c}`).join('\n')}`;
-        }
+        // The brief replaces the user's words and ONLY them (Q-975): every note prepended above stays, and the
+        // user's hard constraints are restated after it (681bd91b). See milestoneBuildPrompt.
+        buildPrompt = milestoneBuildPrompt({ buildPrompt, request: prompt, step: step1, total, report: buildDiag }).prompt;
+        milestoneLanePrompt = milestoneBuildPrompt({ buildPrompt: prompt, request: prompt, step: step1, total }).prompt;
       }
 
       // 📄 THE USER'S OWN PAGE IS THE STARTING FILE (pastedAppFormat.ts). The pasted document is written as
@@ -17613,6 +17614,12 @@ async function noteBuildOutcome(
         + (scriptRequestNote ? `\n\n${scriptRequestNote}` : ''); // and the script-request note (Q-274)
       const requestScopeSuffix = requestScopeText ? `\n\n${requestScopeText}` : ''; // and the request-scope rule (autopsy 70e030bb)
       const keypadPhoneSuffix = keypadPhoneForBuild ? `\n\n${nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind)}` : ''; // and the classic-phone rule (Q-868)
+      // ONE REQUEST FOR BOTH FAST LANES (Q-975). Each lane used to add its own pick of the notes above: the one-shot
+      // got two of the five (no classic-phone rule, no one-file rule, no pasted checklist) and the user's bare words
+      // without the attachment. On a milestone build both were handed the WHOLE message while the builder built
+      // milestone 1. tests/aMilestoneKeepsItsNotes.test.ts fails on a lane that composes its own.
+      const fastLaneRequest = milestoneLaneRequest(planning.text, prompt, milestoneLanePrompt)
+        + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix;
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -18292,7 +18299,9 @@ async function noteBuildOutcome(
         // The model that served the lane's LAST call reasons before every answer — the lane stops at
         // the next boundary and hands off (SimpleBuildDeps.stopLane; autopsy Study-Racer, 2026-09-25).
         let fastLaneReasoningRung: string | null = null;
-        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
+        /** Q-926: the per-file calls a reasoning rung answered while the lane stayed on it — the measurement. */
+        const laneReasoningStays: Array<{ model: string; ms: number }> = [];
+        const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number, mayReason = false): Promise<{ text: string; stopReason: string | null; billedAs: { provider: string; model?: string; outputTokens: number } }> => {
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
           // blind spot — a truncated (max_tokens) per-file generation is exactly what produces broken
@@ -18332,7 +18341,8 @@ async function noteBuildOutcome(
               deadlineAt,
               // The walk stops BEFORE a rung that reasons before every answer, rather than spending the
               // lane's clock inside one (autopsy 33812996: 497 s of one repair call on two such rungs).
-              stopAtReasoningRung: fastLaneReasoningGateEnabled(),
+              // …except a per-file call the lane decided may carry on there (Q-926, FastLaneBudget.mayStayOnReasoningRung).
+              stopAtReasoningRung: fastLaneReasoningGateEnabled() && !mayReason,
               // Stop cancels this call and every later one (stopSignal.ts). The lane never read the
               // build's signal before autopsy 2720e553, so a pressed Stop ran on for minutes.
               signal: abort.signal,
@@ -18363,7 +18373,10 @@ async function noteBuildOutcome(
           }
           const servedBy = fastLaneCallIdentity(providerReported, usedProvider, fbModel, t.model);
           try { buildDiag.recordLlmCall({ model: servedBy.model, provider: servedBy.provider, promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true }); } catch { /* diagnostics best-effort */ }
-          if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {
+          if (mayReason && modelAlwaysReasons(servedBy.model)) {
+            // The lane chose to stay (Q-926): measured, and the lane is NOT told to stop.
+            laneReasoningStays.push({ model: servedBy.model, ms: Date.now() - startedAt });
+          } else if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {
             fastLaneReasoningRung = servedBy.model;
             try {
               buildDiag.record({
@@ -18393,8 +18406,8 @@ async function noteBuildOutcome(
         // on text we discarded. Continuing is provider-cap-agnostic (raising max_tokens only moves the
         // ceiling and can 400 on a provider whose real cap is lower), bounded to MAX_CONTINUATIONS, and
         // a continuation that FAILS never loses the work already produced — we keep what we have.
-        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number }): Promise<string> => {
-          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt);
+        const fastGenerate = async (system: string, user: string, genOpts?: { deadlineAt?: number; mayReason?: boolean }): Promise<string> => {
+          const first = await fastGenerateOnce(system, user, genOpts?.deadlineAt, genOpts?.mayReason === true);
           let text = first.text;
           let stopReason = first.stopReason;
           // The call whose reply ends the text — the one a dropped half-written file came from (Q-166).
@@ -18410,7 +18423,7 @@ async function noteBuildOutcome(
               // A CONTINUATION FACES THE SAME DEADLINE AS THE CALL IT CONTINUES. It is a fresh provider
               // call, so without this the budget would bound only the first one and the continuation
               // ladder would walk straight past it — the same gap the Claude retry loop had.
-              next = await fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt);
+              next = await fastGenerateOnce(system, continuationPrompt(text), genOpts?.deadlineAt, genOpts?.mayReason === true);
             } catch (err) {
               // A failed continuation must never discard the complete files we already have.
               buildDiag.record({ phase: 'build', severity: 'warning', code: 'FASTLANE_CONTINUATION_FAILED', message: `A continuation of a truncated generation failed after ${attempts - 1} successful continuation(s) — keeping the files produced so far.`, autoResolved: false, detail: err instanceof Error ? err.message : String(err) });
@@ -18767,7 +18780,7 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix + keypadPhoneSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        const sb = await runSimpleBuild({ prompt: fastLaneRequest, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           // A planned config file the starter already has is edited, never rewritten blind (isProjectConfigPath).
           readExisting: readExistingProjectFile,
           stopLane: () => (fastLaneReasoningRung
@@ -18781,6 +18794,8 @@ async function noteBuildOutcome(
         // plans its own files, so "9 of 10 files written · ~1 min to go" at minute 4 counted against a list
         // nobody was following any more. Forget it; the architect's own plan steps drive the ETA from here.
         if (!sb.ok) { etaPlannedFiles = 0; etaFirstFileAt = 0; }
+        // Q-926 — the measurement the admin approved the change on: every stay, its price, and how the lane ended.
+        recordReasoningStays(buildDiag, laneReasoningStays, sb);
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
         // needs explaining, and a check only ever visible when it complains cannot be told apart from
@@ -18923,7 +18938,7 @@ async function noteBuildOutcome(
           //    …and gated on what the lane above just MEASURED. See oneShotStillViable: in the dukaan
           //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
           //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
-          const os = await runOneShot({ prompt: prompt + unknownNameSuffix + requestScopeSuffix, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
+          const os = await runOneShot({ prompt: fastLaneRequest, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) {
             // VERIFY GATE for the one-shot lane too (autopsy 2026-07-07: a NowPlaying.tsx TRUNCATED
@@ -19445,10 +19460,16 @@ async function noteBuildOutcome(
       try {
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
-          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode, projectModule: projectModuleRef?.name ?? null }),
+          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode, projectModule: projectModuleRef?.name ?? null, endAt: Date.now() }),
           autoResolved: true,
         });
       } catch { /* an advisory line must never affect a build */ }
+      // 🧹 THE NET UNDER THE ORPHAN HAND-BACK (autopsy db07e0af): a component this build wrote, that the import graph
+      // proves nothing reaches and the request never named, is removed instead of shipped — the model was handed it
+      // and left it. One the request may name stays, and so does its warning. See leftoverComponents.ts.
+      // The guard lives in leftoverComponents.ts: this handler is at TypeScript's control-flow limit (TS2563), and one
+      // more `if (a && b && c && d)` here crossed it once #3692 landed (merge of #3698, 2026-10-13).
+      await applyLeftoverNetAfterBuild({ ok: result.ok === true, importTurn: isImportTurn, editMode: isEditMode, aborted: abort.signal.aborted }, dispatcher, buildDiag, checksRequest);
       // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
       // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
       // worked: a behavioural fix nobody measures is a hope.
@@ -21755,7 +21776,8 @@ async function noteBuildOutcome(
               let exists = false;
               try { await actuator.readFile(workspaceId, path); exists = true; } catch { exists = false; }
               if (exists) continue;
-              await actuator.writeFile(workspaceId, path, content);
+              // Named, so the post-green ledger says who wrote it (db07e0af: our suite was filed under "build loop").
+              await runInPass('e2e-scaffold', () => actuator.writeFile(workspaceId, path, content));
               writtenFiles.set(path, content);
               noteFinishingWrite(path);
               added.push(path);
@@ -21774,7 +21796,7 @@ async function noteBuildOutcome(
               try { await actuator.readFile(workspaceId, AUTH_SPEC_PATH); authExists = true; } catch { authExists = false; }
               if (!authExists) {
                 const spec = buildAuthFlowSpec(auth);
-                await actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec);
+                await runInPass('e2e-scaffold', () => actuator.writeFile(workspaceId, AUTH_SPEC_PATH, spec));
                 writtenFiles.set(AUTH_SPEC_PATH, spec);
                 noteFinishingWrite(AUTH_SPEC_PATH);
                 added.push(AUTH_SPEC_PATH);
@@ -21846,7 +21868,7 @@ async function noteBuildOutcome(
             for (const path of fixedPaths) {
               const stripped = stripCollidingAmbientShims(projectNow[path]);
               if (stripped.source === projectNow[path]) continue;
-              if (!(await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, stripped.source)))) continue;
+              if (!(await writeUnlessFrozen(() => runInPass('ambient-shim-cleanup', () => actuator.writeFile(workspaceId, path, stripped.source))))) continue;
               projectNow[path] = stripped.source;
               writtenFiles.set(path, stripped.source);
               noteFinishingWrite(path);
@@ -21866,7 +21888,7 @@ async function noteBuildOutcome(
             if (tsconfigRaw) {
               const excluded = withE2eExcluded(tsconfigRaw);
               if (excluded.changed) {
-                await actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text);
+                await runInPass('e2e-tsconfig-exclude', () => actuator.writeFile(workspaceId, 'tsconfig.json', excluded.text));
                 writtenFiles.set('tsconfig.json', excluded.text);
                 noteFinishingWrite('tsconfig.json');
                 buildDiag.record({
@@ -21899,7 +21921,7 @@ async function noteBuildOutcome(
               // refusal and then calls onFileWrite would record a file the sandbox never received
               // (adversarial review 2026-08-12). Record-only-on-success keeps the two in step.
               let adrWritten = false;
-              try { await actuator.writeFile(workspaceId, path, content); adrWritten = true; } catch { /* refused or failed */ }
+              try { await runInPass('architecture-note', () => actuator.writeFile(workspaceId, path, content)); adrWritten = true; } catch { /* refused or failed */ }
               if (adrWritten) onFileWrite?.(path, content);
               if (adrWritten) finishingPaths.add(path);
             }
@@ -22915,6 +22937,32 @@ async function noteBuildOutcome(
               buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
             } catch { /* best-effort */ }
           }
+        } else {
+          // 🔴 THE THIRD WAY THIS CHECK IS REACHED, AND IT HAD NO SENTENCE (Q-913, autopsy 50378049).
+          // The gate above is one long `if` with no `else`, so a canvas game the route could not play was
+          // SILENTLY skipped — and on the reported build that left the model's own prose ("normal for a
+          // sandbox game") as the only account of a screen that stayed dark, while the engine's own
+          // measurement for exactly that (scorePlaytest's `runs`, 0 for "blank or a single colour") never
+          // ran. `playtestSkipReason` tells "could not look" from "not applicable": a project with no
+          // canvas game, an import turn, a stopped or failed build and the kill switch stay silent.
+          try {
+            const why = playtestSkipReason({
+              enabled: gamePlaytestEnabled(),
+              buildOk: result?.ok === true,
+              isCanvasGame: isCanvasGameProject(playtestFiles),
+              isImportTurn,
+              aborted: abort.signal.aborted,
+              hasRunCommand: !!actuator.runCommand,
+              hasPreviewUrl: !!lastPreviewUrl,
+              awaitsShell: !!awaitsShellNow(),
+              timeLeft: effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000,
+            });
+            if (why) {
+              const notRun = playtestNotRunVerdict(why);
+              buildDiag.record({ phase: 'preview', severity: notRun.severity, code: notRun.code, message: notRun.message, autoResolved: notRun.autoResolved });
+              gameProof = { outcome: playtestOutcome(notRun.code), score: null };
+            }
+          } catch { /* an honest line is best-effort and must never touch a build */ }
         }
       };
       // The journey above drives ONE form. Nothing pressed the rest of the app, so the commonest

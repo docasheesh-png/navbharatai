@@ -31,8 +31,21 @@ describe('a screen a screen reader cannot use is handed back before the turn end
     expect(decideStyleResume({ text: 'x', missing: [], a11y: [], resumesUsed: 0, producedFiles: true }).resume).toBe(false);
   });
 
+  /**
+   * ⚠️ RE-ANCHORED 2026-10-13 (Q-914), and the case's own title is now MORE true than when it was
+   * written. It pinned the one-liner `a11y = a11yHandBack(lintBuiltApp(project));`. That lint result
+   * also carries `design.stats.hasTokens` and a counted `hardcoded-colors`, and every bit of it but the
+   * a11y half was being thrown away — so the engine measured 45 colour literals, scored the app for
+   * them, and never asked the model to fix them. The lint is now taken ONCE and read twice, which is
+   * exactly "from the same read"; the assertion says so instead of pinning the old spelling.
+   */
   it('the runner passes it, and the dispatcher computes it from the same read', () => {
     expect(readFileSync('src/server/AgentV3/AgentRunner.ts', 'utf8')).toContain('a11y: style.a11y,');
-    expect(readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8')).toContain('a11y = a11yHandBack(lintBuiltApp(project));');
+    const disp = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
+    const once = disp.indexOf('const lint = lintBuiltApp(project);');
+    expect(once).toBeGreaterThan(0);
+    expect(disp).toContain('a11y = a11yHandBack(lint);');
+    // One read, not two: a second `lintBuiltApp(project)` would re-lint every file for the same answer.
+    expect([...disp.matchAll(/lintBuiltApp\(project\)/g)].length).toBe(1);
   });
 });

@@ -517,3 +517,24 @@ Q-925
 Q-927
 Q-928
 Q-929
+# 2026-10-13 — build report 50378049 (BlockWorld, a voxel game): ALL 15 items resolved.
+# PRs #3684 #3686 #3688 #3690 #3693 #3694 #3695 #3699, all merged. Ledger in PROGRESS.md.
+Q-900
+Q-901
+Q-902
+Q-903
+Q-904
+Q-905
+Q-906
+Q-907
+Q-908
+Q-909
+Q-910
+Q-911
+Q-912
+Q-913
+Q-914
+Q-926
+Q-976
+Q-977
+Q-978

@@ -97,6 +97,8 @@ const KNOWN_UNREACHABLE = new Set([
   'src/server/lib/billOfSupply.ts',
   // Go-live PR 16: BYO test/rotate/disconnect, routed behind BYO_LIFECYCLE_V1 in a follow-up. Remove then.
   'src/server/providers/byoLifecycle.ts',
+  // Go-live PR 17: report-only orphan sweep, run by an admin route/script once managed adapters exist. Remove then.
+  'src/server/lib/orphanReport.ts',
   // Go-live marketplace building block, merged ahead of its caller behind a default-off flag. Remove when wired.
   'src/lib/catalogue/index.ts',
   'src/server/providers/index.ts',

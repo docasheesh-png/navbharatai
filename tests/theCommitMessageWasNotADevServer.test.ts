@@ -216,9 +216,19 @@ describe('5 · an edit is not judged "complete" by the project score', () => {
     expect(readyOverrunNote(null, 118, 900_000)).toMatch(/never judged finished/);
   });
 
+  /**
+   * ⚠️ RE-ANCHORED 2026-10-12 (autopsy `50378049`). This counted the literal
+   * `editingExistingApp: … === true })` — the flag followed immediately by the closing brace — so it was
+   * really asserting that the flag is the LAST property in the call. Adding the `projectModule` carve-out
+   * after it broke the guard without weakening anything it was written to protect. The intent is "both
+   * done checks receive the edit flag"; it now asserts that directly, which a reordering cannot break and
+   * a REMOVAL still can.
+   */
   it('the runner passes the edit flag to both checks (source guard)', () => {
     const src = readFileSync('src/server/AgentV3/AgentRunner.ts', 'utf8');
-    expect((src.match(/editingExistingApp: this\.opts\.editingExistingApp === true \}\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    const calls = [...src.matchAll(/shouldCheckDone\(\{[^}]*\}\)/g)].map((m) => m[0]);
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    for (const c of calls) expect(c).toContain('editingExistingApp: this.opts.editingExistingApp === true');
   });
 });
 

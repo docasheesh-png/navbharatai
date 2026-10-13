@@ -20,6 +20,7 @@ import { BUILD_STOPPED_MESSAGE } from '../src/server/AgentV3/stopSignal';
 import { runSimpleBuild, stoppedLaneSummary } from '../src/server/AgentV3/SimpleBuilder';
 import { fastLanePhaseSummary } from '../src/server/AgentV3/fastLanePhases';
 import { describeLadderDepth } from '../src/server/AgentV3/ladderDepth';
+import { releaseGateRecord } from '../src/server/AgentV3/releaseGate';
 
 const VITE = new TemplateRegistry().getProvider('vite-react').getFiles([]);
 const CALC_PROMPT = 'Build a calculator app with the standard operations (+ − × ÷ %), a clear and a delete key, decimal support, keyboard input, and a running history of recent calculations. Big, tappable buttons; light/dark mode.';
@@ -180,10 +181,13 @@ describe('§4 a Stop is reported as a Stop', () => {
   it('SOURCE: no "handed off to the full builder" after a Stop; the stopped gate is not left open', () => {
     expect(route).toMatch(/sb\.ok \? 'SIMPLE_BUILD_SUCCESS' : sb\.stopped \? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK'/);
     expect(route).toMatch(/if \(sb\.outcome && !sb\.stopped\) \{/);
-    // A module turn's not-yet-due gate is closed too (autopsy 0311186f); the Stop clause is unchanged.
-    // Since autopsy 50378049 it reads `gateEvidence.awaitingShell`, which the route sets from the
-    // CORRECTED prediction — so a module turn with a live address is not excused as "not yet due".
-    expect(route).toMatch(/autoResolved: gate\.state === 'green' \|\| gateEvidence\.stoppedByUser === true(?: \|\| \(gate\.state === 'unknown' && !!gateEvidence\.awaitingShell\))?,/);
+    // A module turn's not-yet-due gate is closed too (autopsy 0311186f); since 303e8a6f one helper decides
+    // severity and closed together, and the route hands it the Stop and the module-turn facts. Since autopsy
+    // 50378049 the module-turn fact is `gateEvidence.awaitingShell`, which the route sets from the CORRECTED
+    // prediction — so a module turn with a live address is not excused as "not yet due".
+    expect(route).toMatch(/\.\.\.releaseGateRecord\(gate, \{\s*buildOk: result\.ok === true,\s*stoppedByUser: gateEvidence\.stoppedByUser === true,\s*(?:\/\/[^\n]*\n\s*)?awaitsShell: !!gateEvidence\.awaitingShell,\s*\}\)/);
+    expect(releaseGateRecord({ state: 'red' }, { buildOk: false, stoppedByUser: true, awaitsShell: false }).autoResolved).toBe(true);
+    expect(releaseGateRecord({ state: 'unknown' }, { buildOk: true, stoppedByUser: false, awaitsShell: true })).toEqual({ severity: 'info', autoResolved: true });
   });
 
   it('the ladder line describes routing, never how much was built', () => {

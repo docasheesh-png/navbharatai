@@ -352,10 +352,28 @@ export function greenGuardMessage(plan: RestorePlan, kind: 'green-snapshot' | 't
   if (changed > 0) bits.push(`${changed} file${changed === 1 ? '' : 's'} put back`);
   if (removed > 0) bits.push(`${removed} file${removed === 1 ? '' : 's'} added by that attempt removed`);
   const detail = bits.length > 0 ? ` (${bits.join(', ')})` : '';
-  const back = kind === 'turn-start'
-    ? 'Your working app is back exactly as it was before this request'
-    : 'Your working app is back exactly as it was';
-  return `↩️ That change stopped your app from working, so I restored the last version that ran correctly${detail}. ${back} — nothing of it was lost, and the attempt is saved too. Tell me what you wanted and I'll try a different way — or reply "${KEEP_CHANGES_PHRASE}" if you meant to keep that version and carry on from there.`;
+  const after = ` — nothing of it was lost, and the attempt is saved too. Tell me what you wanted and I'll try a different way — or reply "${KEEP_CHANGES_PHRASE}" if you meant to keep that version and carry on from there.`;
+  // 🔒 A TURN-START BASE WAS NEVER SEEN RUNNING (autopsy 303e8a6f, Q-973). `chooseRestoreBase` picks it exactly
+  // when it DIFFERS from the last browser-checked snapshot — a turn that was kept unverified, a manual edit — so
+  // "the last version that ran correctly" would claim a check that never happened. It is named for what it is.
+  if (kind === 'turn-start') {
+    return `↩️ That change stopped your app from working, so I put your app back exactly as it was before this request${detail}. That version was not re-checked in the browser after the restore — if anything looks wrong, tell me what you see${after}`;
+  }
+  return `↩️ That change stopped your app from working, so I restored the last version that ran correctly${detail}. Your working app is back exactly as it was${after}`;
+}
+
+/**
+ * The `detail` a GREEN_GUARD_RESTORED record carries when its base was the turn start (Q-973). The admin
+ * scorecard reads it, so a restore to an unchecked version is never counted as "the last working version".
+ */
+export const GREEN_RESTORE_UNCHECKED_DETAIL = 'base=turn-start (not re-checked after the restore)';
+
+/** The admin-report sentence for a restore — what was put back, and whether that base was ever seen running. PURE. */
+export function greenGuardRestoredRecord(plan: RestorePlan, kind: 'green-snapshot' | 'turn-start'): { message: string; detail?: string } {
+  const counts = `${Object.keys(plan.write).length} file(s) put back, ${plan.remove.length} added by the failed attempt removed, ${plan.unchanged} already correct. The attempt itself is kept and was not discarded.`;
+  return kind === 'turn-start'
+    ? { message: `Restored the files as they were at the start of this turn (this base differs from the last browser-checked snapshot and was not re-checked after the restore): ${counts}`, detail: GREEN_RESTORE_UNCHECKED_DETAIL }
+    : { message: `Restored the last verified-working version: ${counts}` };
 }
 
 /**

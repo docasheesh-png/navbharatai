@@ -288,6 +288,16 @@ export async function withheldVaultSecretNames(userId: string, workspaceId: stri
 }
 
 /**
+ * The build's ONE vault read: the keys this app receives AND the names it does not, from the same rows (autopsy
+ * 303e8a6f). The build used to call `loadUserVaultSecrets` and then `withheldVaultSecretNames`, which read and
+ * decrypted the whole vault twice, serially, before the first model call. Same pure rules, same answers.
+ */
+export async function loadUserVaultForBuild(userId: string, workspaceId: string): Promise<{ secrets: Record<string, string>; withheld: string[] }> {
+  const rows = await loadUserVaultRows(userId);
+  return { secrets: resolveScopedSecrets(rows, workspaceId), withheld: workspaceId ? withheldSecretNames(rows, workspaceId) : [] };
+}
+
+/**
  * The build report's sentence for the keys this app did not receive (Q-155). Names only, never values;
  * it is admin-facing, and it answers the question least privilege raises: "I saved that key — why is it
  * not in my app?" PURE.

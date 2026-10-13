@@ -125,6 +125,34 @@ export interface TurnResult {
    * it undefined, which is unchanged behaviour.
    */
   reasoningOnly?: boolean;
+  /**
+   * Wall time of the ONE provider attempt that produced this result, in ms — excluding every earlier rung a
+   * fallback chain tried, skipped or abandoned. Set by the multi-provider chain; absent from a single-provider
+   * runner, where the caller's own stopwatch already is the answer's time.
+   *
+   * ⚠️ A caller's `Date.now() - startedAt` around `runTurn` is the time the CALLER waited (the whole walk).
+   * Filed on a row that names `model` (the answering rung), it charged the rescuer with the crawl it rescued
+   * the build from (autopsy 303e8a6f: GLM crawled 15 s, KIMI answered in 3.4 s, the row said KIMI 18 s).
+   */
+  attemptMs?: number;
+  /**
+   * Wall time of the rungs a fallback chain TRIED and lost before the one that answered, in ms — measured per
+   * failed attempt (the number the waste ledger receives), 0 when the first rung answered. Absent from a
+   * single-provider runner. Together with `attemptMs` it splits the caller's wait without guessing.
+   */
+  fallbackMs?: number;
+  /**
+   * How long the provider took to OPEN its streamed response, in ms (from the request to the stream object) —
+   * set by the streaming OpenAI-compatible runner on a call that answered. The data a "has it started yet?"
+   * bound is chosen from (autopsy 303e8a6f, admin option (b) for Q-842). Absent where not measured.
+   */
+  openedAfterMs?: number;
+  /**
+   * How long until the provider's FIRST produced byte, in ms (streaming only) — distinct from opening: a stream
+   * that opens and then sends nothing is silence too, and time-to-open cannot size it (adversarial review of
+   * autopsy 303e8a6f, Q-842 option (b)).
+   */
+  firstOutputAfterMs?: number;
 }
 
 export interface RunTurnParams {

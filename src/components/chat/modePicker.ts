@@ -120,7 +120,8 @@ export const FREE_MODE_ID = 'free';
  */
 export const IMAGE_MODE_ID = 'imagegen';
 
-/** Named like "NavBharatAI FREE", because it is free (admin 2026-09-23: "image generator ai 'free'"). */
+/** Named like "NavBharatAI FREE" (admin 2026-09-23: "image generator ai 'free'"). Since 2026-10-05 the first 5
+ *  pictures a day are free and the rest cost ₹1 each (#3547) — the name stays, the "always free" reason does not. */
 export const IMAGE_MODE_NAME = 'Image Generator AI';
 
 /** What a recent row's id is built from. See ModeEntry.id for why it cannot be the bare view id. */

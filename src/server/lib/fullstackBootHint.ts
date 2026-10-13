@@ -209,10 +209,11 @@ export async function fullstackBootHint(
   try {
     const probe = fullstackBootProbeFiles(paths);
     if (probe.length === 0) return null;
+    // Read together, not one after another (adversarial review of autopsy 303e8a6f): on every vite build this read
+    // package.json and vite.config.* in series, on the critical path to the first model call.
+    const read = await Promise.all(probe.map((p) => readFile(p).catch(() => '')));
     const contents: Record<string, string> = {};
-    for (const p of probe) {
-      contents[p] = await readFile(p).catch(() => '');
-    }
+    probe.forEach((p, i) => { contents[p] = read[i] ?? ''; });
     const finding = analyzeFullstackBoot(contents);
     if (!finding) return null;
     return renderBootHint(finding);

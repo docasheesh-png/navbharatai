@@ -59,10 +59,14 @@ export const BUDGET_REACHED_MESSAGE = 'build budget reached while this call was 
  * A provider we ABANDONED for crawling — answering, but far below the rate at which waiting is worth
  * it (autopsy 2b0a3ed5, 2026-09-17).
  *
- * ⚠️ IT READS AS A TIMEOUT AND MUST BE TOLD FROM ONE. `isTimeout` matches "timed out" (the shared
- * cooldown still sees it). But since 2026-10-01 (autopsy d382b398) it no longer counts toward the
- * family's "2 consecutive timeouts" bench: the crawl bench (crawlBench.ts) owns it — one rung, a window,
- * one re-probe — and two crawls used to bench every rung of the family for the whole build.
+ * ⚠️ IT READS AS A TIMEOUT AND MUST BE TOLD FROM ONE. `isTimeout` matches "timed out", but since 2026-10-01
+ * (autopsy d382b398) neither the family's "2 consecutive timeouts" bench nor the shared cooldown counts it
+ * (the strike branch excludes `isSlowStreamAbandon`): the crawl bench (crawlBench.ts) owns it — one rung, a
+ * window, one re-probe — and two crawls used to bench every rung of the family for the whole build.
+ *
+ * ⚠️ TWO EVENTS SHARE THIS MARKER (autopsy 303e8a6f): a stream answering too slowly, and — since 1389f0d5 — a
+ * provider that had not started answering at all within the grace. Routing treats them the same on purpose;
+ * the words and the numbers must not. The silent kind carries `SILENT_OPEN_MARK` as well (`isSilentAbandon`).
  *
  * 🔒 NEVER a user-facing string: it names the engines, so it stays in the admin report (White-Label).
  */
@@ -79,6 +83,27 @@ export const REASONING_RUNG_HANDOFF_MARKER = 'the fast lane stops here and hands
 export function isReasoningRungHandoff(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err ?? '');
   return message.includes(REASONING_RUNG_HANDOFF_MARKER);
+}
+
+/**
+ * Appended to the crawl marker when the provider had produced NOTHING — it never opened its response, or opened
+ * it and sent no byte — before we walked away. The routing reader (`isSlowStreamAbandon`) still matches.
+ */
+export const SILENT_OPEN_MARK = 'the provider had not started answering';
+
+/**
+ * Did the provider never answer at all — whether we walked away (a crawl abandon) or waited out its bound (a
+ * timeout)? The silence is the fact about the provider; how we stopped waiting is ours. PURE.
+ */
+export function providerNeverAnswered(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  return message.includes(SILENT_OPEN_MARK);
+}
+
+/** Did we walk away from a provider that had not started answering at all? PURE. */
+export function isSilentAbandon(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  return message.includes('abandoned for crawling') && message.includes(SILENT_OPEN_MARK);
 }
 
 /** Was this error our own decision to walk away from a crawling provider? PURE. */

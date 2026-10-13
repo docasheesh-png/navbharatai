@@ -15,7 +15,7 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import {
   summarizeSession, describeSession, tallyMinutes, tallyStarts, dayKey,
-  PEAK_MEMORY_PROBE, parsePeakMemory, describePeakMemory, type SandboxSession,
+  PEAK_MEMORY_PROBE, parsePeakMemory, describePeakMemory, peakProbeOutcome, type SandboxSession,
 } from '../src/server/AgentV3/sandboxSessions';
 import { reasonForPath, currentSandboxReason, inSandboxReasonZone } from '../src/server/AgentV3/sandboxSessionZone';
 
@@ -121,26 +121,61 @@ describe('why machines start', () => {
 });
 
 describe('peak memory — asked of the machine, never invented', () => {
-  it('the probe is read-only and tries v2 then v1 then says so', () => {
-    expect(PEAK_MEMORY_PROBE).toContain('/sys/fs/cgroup/memory.peak');
-    expect(PEAK_MEMORY_PROBE).toContain('/sys/fs/cgroup/memory/memory.max_usage_in_bytes');
-    expect(PEAK_MEMORY_PROBE).toContain('echo unavailable');
+  it('the probe is read-only, reads the build\'s OWN cgroup, tries v2 then v1, then says so', () => {
+    // Autopsy 303e8a6f: this asserted the mount-root path — the bug's own shape — and passed while the instrument
+    // never produced a number. The real layouts are executed in tests/cgroupOwnPath.test.ts.
+    expect(PEAK_MEMORY_PROBE).toContain('/proc/self/cgroup');
+    expect(PEAK_MEMORY_PROBE).toContain('$d/memory.peak');
+    expect(PEAK_MEMORY_PROBE).not.toContain('/sys/fs/cgroup/memory.peak');
+    expect(PEAK_MEMORY_PROBE).toContain('$v/memory.max_usage_in_bytes');
+    expect(PEAK_MEMORY_PROBE).toContain('echo "unavailable');
+    // The write-ban, exactly as strict as before the fix: the probe has no redirection at all (adversarial review).
     expect(PEAK_MEMORY_PROBE).not.toMatch(/\brm\b|>\s*\//);
+    expect(PEAK_MEMORY_PROBE).not.toContain('>');
   });
 
   it('parses both accountings and rejects everything else', () => {
-    expect(parsePeakMemory('v2 1610612736\n')).toEqual({ bytes: 1_610_612_736, source: 'cgroup-v2' });
-    expect(parsePeakMemory('v1 734003200')).toEqual({ bytes: 734_003_200, source: 'cgroup-v1' });
-    for (const bad of ['unavailable', '', null, 'v2 0', 'v3 12', 'v2 abc']) {
+    expect(parsePeakMemory('v2 1610612736\n')).toEqual({ kind: 'value', bytes: 1_610_612_736, source: 'cgroup-v2' });
+    expect(parsePeakMemory('v2 1610612736 max=4160749568 high=12 oom_kill=0 cgroup=/user'))
+      .toEqual({ kind: 'value', bytes: 1_610_612_736, source: 'cgroup-v2', cgroup: '/user', oomKills: 0, highEvents: 12, limitBytes: 4_160_749_568 });
+    expect(parsePeakMemory('v2 1610612736 max=max high= oom_kill= cgroup=/user')).toEqual({ kind: 'value', bytes: 1_610_612_736, source: 'cgroup-v2', cgroup: '/user' });
+    expect(parsePeakMemory('v1 734003200 cgroup=/a/b')).toEqual({ kind: 'value', bytes: 734_003_200, source: 'cgroup-v1', cgroup: '/a/b' });
+    expect(parsePeakMemory('unavailable cgroup=/user')).toEqual({ kind: 'unavailable', cgroup: '/user' });
+    expect(parsePeakMemory('unavailable')).toEqual({ kind: 'unavailable' });
+    for (const bad of ['', null, 'v2 0', 'v3 12', 'v2 abc']) {
       expect(parsePeakMemory(bad as never), String(bad)).toBeNull();
     }
   });
 
-  it('the report line shows headroom against the template, and admits when it cannot', () => {
-    expect(describePeakMemory({ bytes: 1.5 * 1024 ** 3, source: 'cgroup-v2' }, 4)).toBe('Peak memory: 1.50 GB of 4 GB (38%, cgroup-v2)');
-    expect(describePeakMemory(null, 4)).toMatch(/not available/);
+  it('the report line says what the number is the peak OF, against the cgroup\'s own limit, and admits when it cannot', () => {
+    const end = { kind: 'value' as const, bytes: 1.5 * 1024 ** 3, source: 'cgroup-v2' as const, cgroup: '/user', oomKills: 0, highEvents: 2, limitBytes: 3.875 * 1024 ** 3 };
+    // No start reading: the machine's lifetime, said so.
+    expect(describePeakMemory(end, 4, { sessionAgeMs: 12 * 60_000, sessionOrigin: 'resumed' })).toBe(
+      'Peak memory since this machine came up (this session started 12 min ago, resumed): 1.50 GB of 3.88 GB (the cgroup\'s own limit; template 4 GB) '
+      + '(39%, cgroup-v2 /user — an upper bound: it includes reclaimable file cache; includes anything that ran on this machine before this build; '
+      + '0 out-of-memory kills, 2 reclaim-throttle events since it came up)');
+    // The build raised the mark: its own peak, and only its own events.
+    expect(describePeakMemory(end, 4, { start: { ...end, bytes: 1.0 * 1024 ** 3, highEvents: 1 } })).toMatch(/^Peak memory during this build: 1\.50 GB .*this is its own peak.*0 out-of-memory kills, 1 reclaim-throttle event during this build\)$/);
+    // It did not: the earlier mark, never claimed as this build's.
+    expect(describePeakMemory(end, 4, { start: end })).toMatch(/^Peak memory: this build stayed under the machine's earlier high-water mark of 1\.50 GB/);
+    expect(describePeakMemory({ kind: 'value', bytes: 1.5 * 1024 ** 3, source: 'cgroup-v1' }, 4)).toMatch(/^Peak memory since this machine came up: 1\.50 GB of 4 GB \(38%, cgroup-v1;/);
+    expect(describePeakMemory({ kind: 'unavailable', cgroup: '/user' }, 4)).toMatch(/not available — the build's cgroup \(\/user\) keeps no peak-memory counter/);
+    // A failed probe says which failure — never a cause nobody established.
+    expect(describePeakMemory(null, 4, { failure: { kind: 'timeout', reason: 'peak-memory timed out after 5000ms' } })).toMatch(/did not answer in time/);
+    expect(describePeakMemory(null, 4, { failure: { kind: 'error', reason: 'sandbox not found' } })).toMatch(/the probe failed \(sandbox not found\)/);
+    expect(describePeakMemory(null, 4, { failure: { kind: 'no-session' } })).toMatch(/no live sandbox session/);
+    expect(describePeakMemory(null, 4)).toMatch(/printed nothing readable/);
+    // "No accounting exposed" is a claim about the machine nobody checked — never said again.
+    for (const f of [undefined, { kind: 'timeout' as const }, { kind: 'error' as const }]) expect(describePeakMemory(null, 4, { failure: f })).not.toMatch(/no cgroup accounting exposed/);
+  });
+
+  it('a timeout and a failure are told apart', () => {
+    expect(peakProbeOutcome(null, new Error('peak-memory timed out after 5000ms')).failure?.kind).toBe('timeout');
+    expect(peakProbeOutcome(null, new Error('sandbox not found')).failure?.kind).toBe('error');
+    expect(peakProbeOutcome({ stdout: 'v2 5 cgroup=/user' }).peak).toMatchObject({ bytes: 5 });
   });
 });
+
 
 describe('wiring — measurement is recorded where the facts are, and changes nothing', () => {
   const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');

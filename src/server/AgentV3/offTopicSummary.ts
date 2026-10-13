@@ -16,6 +16,7 @@
 // A summary that never once utters the name the user themselves gave the app has, at minimum, earned
 // a warning — and the warning states facts only: what was asked, what the summary says. PURE.
 import { readablePrompt } from '../lib/pastedSource';
+import { textWords } from './textWords';
 
 /** The quoted app name in a prompt, or null. The FIRST quoted run of 2+ words wins. */
 export function quotedAppName(prompt: string): string | null {
@@ -46,10 +47,7 @@ const NAME_AFTER = /^\s*(?:app|application|website|site|game|tool|platform|porta
 
 /** Words worth matching on: 4+ characters, lowercased, articles and glue dropped by the length bar. */
 export function significantWords(name: string): string[] {
-  return String(name ?? '')
-    .toLowerCase()
-    .split(/[^a-z0-9ऀ-ॿ]+/i)
-    .filter((w) => w.length >= 4);
+  return textWords(String(name ?? '').toLowerCase()).filter((w) => w.length >= 4);
 }
 
 /**

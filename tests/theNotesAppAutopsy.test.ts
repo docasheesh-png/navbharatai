@@ -229,7 +229,7 @@ describe('§F a login nobody asked for is not built', () => {
 
   it('REVERSION GUARD: the architect, the fast lane and the one-shot lane all read it', () => {
     const src = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
-    expect(src).toContain('requestScopeNote({ request: planning.text, newBuild: intent === \'new_build\' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain })');
+    expect(src).toContain('requestScopeVerdict({ request: planning.text, newBuild: intent === \'new_build\' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain })');
     expect(src).toContain('buildPrompt = `${requestScopeText}\\n\\n---\\n\\n${buildPrompt}`;');
     expect(src).toContain('unknownNameSuffix + requestScopeSuffix,');
     expect(src).toContain('runOneShot({ prompt: prompt + unknownNameSuffix + requestScopeSuffix,');

@@ -613,6 +613,30 @@ function matchesSignal(lower: string, signals: readonly string[]): boolean {
   return firstSignalWord(lower, signals) !== undefined;
 }
 
+/**
+ * The text with every continuation phrase that NAMES A CONTROL removed (autopsy 303e8a6f, 2026-10-12).
+ *
+ * The first starter chip asks for *"friendly error messages with a Try again button"*. "try again" is a
+ * continuation signal — the retry button sends it — so a request for a NEW app was read as "work already
+ * started", and the analyser refused the floor every unsized app order gets. A continuation phrase followed
+ * by a control noun ("a Try again button", "a Retry link", "a Continue option") is the name of something the
+ * new app should have, not the user asking us to resume. A bare "try again" / "retry please" is untouched.
+ * PURE.
+ */
+// ⚠️ BUTTONS ONLY, AND READ ONLY BY `describesWorkAlreadyStarted` (adversarial review of 303e8a6f): with link /
+// option / tab / action in the list, and applied at the intent gate too, short continuation turns — "continue
+// option 2", "retry link", "resume tab", "redo action" — lost their continuation reading and fell to chat, the
+// amnesia path CONTINUATION_SIGNALS exists to prevent. The one shape measured in a real order is a button.
+const CONTROL_LABEL = /["'“”‘’]?\b(?:try again|try it again|retry|redo|continue|resume|once more|start again|start over)\b["'“”‘’]?\s+(?:buttons?|btns?)\b/gi;
+/**
+ * …and "resume" is also a CV. "Build a resume builder app" read as work already started (the review's sibling of
+ * this class): the CV noun before a product word, or after an article, is not the user asking us to resume.
+ */
+const CV_RESUME = /\b(?:resume|cv)s?\s+(?:builder|maker|creator|generator|writer|template|app|website|site|page|parser|checker|scanner|review|analy[sz]er|portfolio)s?\b|\b(?:a|an)\s+resume\b/gi;
+export function withoutControlLabels(lower: string): string {
+  return String(lower ?? '').replace(CONTROL_LABEL, ' ').replace(CV_RESUME, ' ');
+}
+
 /** Strip a trailing fenced code block check / file path / URL detection helper. */
 function hasCodeOrPathOrUrl(message: string): boolean {
   if (message.includes('```')) return true; // fenced code block
@@ -1406,7 +1430,7 @@ export function describesWorkAlreadyStarted(message: string): boolean {
   // "continue", "finish it", "retry", "dobara karo" — and "preview nahi chala", "it isn't working".
   // Both families describe work ALREADY STARTED. Neither is a request for a new app, whatever nouns
   // they happen to contain.
-  if (matchesSignal(lower, CONTINUATION_SIGNALS)) return true;
+  if (matchesSignal(withoutControlLabels(lower), CONTINUATION_SIGNALS)) return true;
   if (matchesSignal(lower, PROBLEM_SIGNALS)) return true;
   // 🔴 NavBharatAI composed this message ITSELF — the preview "Fix error" button. A request we wrote
   // is never a request for a new app, and it must not be guessed at: the template and this test share

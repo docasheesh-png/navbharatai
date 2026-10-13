@@ -596,11 +596,11 @@ describe('4 · L-12: the ETA key is decided before the estimate, and one helper 
   });
 
   it('the reader and the telemetry writer use ONE helper; etaTaskKey is called nowhere else in the route', () => {
-    expect(ROUTE).toContain('etaKeyForBuild(scaffoldWillSeed)');
-    expect(ROUTE).toMatch(/\.record\(\{[\s\S]{0,600}?taskType: etaKeyForBuild\(goldenPreseeded\),/);
+    expect(ROUTE).toContain('etaKeyForBuild(scaffoldWillSeed, seededScaffold?.tier ?? null)');
+    expect(ROUTE).toMatch(/\.record\(\{[\s\S]{0,600}?taskType: etaKeyForBuild\(goldenPreseeded, goldenPreseededTier\),/);
     const calls = [...ROUTE.matchAll(/\betaTaskKey\(/g)];
     expect(calls).toHaveLength(1); // inside `etaKeyForBuild`
-    expect(ROUTE).toContain('etaTaskKey(analysis?.taskType, scaffolded, buildIsComplex, etaKind)');
+    expect(ROUTE).toContain('etaTaskKey(analysis?.taskType, scaffolded, buildIsComplex, etaKind, scaffoldTier)');
   });
 });
 

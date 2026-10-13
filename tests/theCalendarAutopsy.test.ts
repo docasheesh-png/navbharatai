@@ -90,7 +90,8 @@ describe('2 · a screen that imports a stylesheet nobody wrote', () => {
     const route = read('src/server/routes/agentv3.ts');
     const block = route.slice(route.indexOf('A STYLESHEET IMPORT OF A FILE THAT DOES NOT EXIST'), route.indexOf('ENTRY-FILE DUPLICATE-IMPORT SWEEP'));
     expect(block).toContain('danglingStylesheetImports(full)');
-    expect(block).toMatch(/actuator\.readFile\(workspaceId, d\.sheet\)\.then\(\(\) => true, \(\) => false\)/);
+    // Since 303e8a6f's heal census: absent only when the sandbox SAYS absent — a failed read is unknown, never absent.
+    expect(block).toMatch(/actuator\.readFile\(workspaceId, d\.sheet\)\.then\(\(\) => false, \(e: unknown\) => isNotFoundError\(e\)\)/);
     expect(block).toContain("code: 'DANGLING_STYLESHEET_IMPORT_REMOVED'");
     expect(read('src/server/AgentV3/BuildDiagnostics.ts')).toContain("'DANGLING_STYLESHEET_IMPORT_REMOVED'");
   });

@@ -39,6 +39,7 @@
 import { TSC_BIN, PRIME_NODE_MODULES, NPM_INSTALL_LOCK_FRESH, MANIFEST_CURRENT } from './tscCommand';
 import { suggestedPropertyRenames, type TscError } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote, remedyFileFor } from './tscErrorCause';
+import { isNotFoundError } from './fsErrors';
 
 /** Per-caller incremental cache. Never the one shared path two builds used to clobber (TD-18). */
 export function tsBuildInfoFile(id: string): string {
@@ -441,15 +442,8 @@ export function shouldProbeTsconfig(verdict: TsProjectVerdict, attempts: number)
  * sandbox, a network error, an empty message) stays unknown and is retried. Pure.
  */
 export function isMissingFileError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
-  if (!msg) return false;
-  const m = msg.toLowerCase();
-  // A DEAD SANDBOX CAN SAY "no such file or directory" ABOUT THE WHOLE WORKSPACE — this repo records
-  // exactly that string (`[not_found] lstat /home/user/workspace: no such file or directory`). That is
-  // not a missing tsconfig, it is a missing machine, and treating it as an answer would be the same
-  // mistake one level up. A message naming the workspace root is never a verdict about one file.
-  if (m.includes('/home/user/workspace:') || m.includes('workspace: no such file')) return false;
-  return m.includes('enoent') || m.includes('no such file') || m.includes('not_found') || m.includes('not found');
+  // The one shared predicate (fsErrors.ts) — this copy had drifted from it (heal census of autopsy 303e8a6f).
+  return isNotFoundError(err);
 }
 
 /** The project question is no longer open — either it was answered, or its probe budget is spent. Pure. */

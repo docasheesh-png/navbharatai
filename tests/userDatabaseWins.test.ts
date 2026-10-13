@@ -1,6 +1,6 @@
 import { narrationText } from '../src/server/AgentV3/narrationCatalogue';
 import { describe, it, expect } from 'vitest';
-import { braceBlock } from './helpers/sourceSlice';
+import { awaitedCallAt, braceBlock } from './helpers/sourceSlice';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { APP_KNOWLEDGE_BASE } from '../src/server/AppContext/AppKnowledgeBase';
@@ -149,7 +149,11 @@ describe('The provision sequence is callable from outside a request handler', ()
 
 describe('The build asks — but only when it can honour a yes', () => {
   it('the offer is wired only for a user whose Supabase account is already connected', () => {
-    expect(agentv3Src).toContain('const connected = await getConnection(userId).catch(() => null);');
+    // The value of `connected` is the awaited lookup — bare or inside its setup timing step (303e8a6f).
+    const decl = 'const connected = ';
+    const at = agentv3Src.indexOf(`${decl}await `);
+    expect(at).toBeGreaterThan(-1);
+    expect(awaitedCallAt(agentv3Src.slice(at), 'getConnection(userId).catch(() => null)')).toBe(decl.length);
     expect(agentv3Src).toContain('if (connected?.orgId) {');
     expect(agentv3Src).toContain('dispatcher.setDatabaseFallback(');
   });

@@ -120,7 +120,7 @@ function App() {
       a.click();
       URL.revokeObjectURL(a.href);
     } catch {
-      window.open(qrUrl, '_blank');
+      window.open(qrUrl, '_blank', 'noopener,noreferrer');
     } finally {
       setBusy(false);
     }

@@ -95576,3 +95576,55 @@ ask; the wait bypassing `waitForUser` (the one door, autopsy 1219c639); the butt
 again; and the tray ignoring a gate's own labels. The 130 tests across every module this touched
 (`whatTheUserMustDo`, `theTrayKnowsWhatIsNotConnected`, `everyPopupClearsTheChrome`, `buildNeeds`) pass
 unchanged.
+## 2026-10-13 — Q-1026 + Q-1033: two copies of one truth, where only one of them is the truth
+
+Two rows from build report 9c612cdb, closed together because they are ONE class — the fourth absolute
+rule's centralisation class, the same shape as the four drifted `safeRelPath` copies that became
+`workspacePath.ts` and the five hardcoded model ids that became `visionModels.ts`.
+
+**Q-1026 — the contract's home.** Two facts about the contract module were each written twice. The
+relative import specifier existed as `importSpecifierFor` in `contractRenames.ts` and
+`contractImportSpecifier` in `SimpleBuilder.ts`, byte-identical bodies. That pair is the lesser half.
+The real defect was the other pair: the WRITER decided where the contract goes (`contractFilePath`)
+while the HEALERS searched a hand-kept list (`CONTRACT_PATH_CANDIDATES`). Nothing made them agree.
+Move the contract to a third location in the writer — `app/types.ts` for a Next project — and the
+healers find no contract, report no renames, and hand every TS2749 they exist to fix back to the
+model. **And no test fails**, because the list is still internally consistent; it is simply no longer
+about reality. That is the quiet kind of drift: not a wrong value, a true value about the wrong world.
+
+The fix is `src/server/AgentV3/contractLocation.ts`, and it is STRUCTURAL rather than a merge of the
+two copies: the candidate list is derived from the very two constants `contractFilePath` returns, so a
+new location cannot enter the writer without appearing in the search. `ToolDispatcher` takes the
+candidates from that one home rather than through `contractRenames` — a re-export chain would have put
+two definition-looking lines back under `grep`, which is how the next session re-derives the wrong
+source of truth.
+
+**Q-1033 — a bill has one rule.** The money predicate `(paid-public OR credit-gate) AND not
+free-listed` was written SIX times in `routes/agentv3.ts`: the affordability gate, the cheap-floor
+chain, the watchdog's billing label, the watchdog's wallet debit, the live ₹ figure and the settle. It
+has already been widened once — the credit gate was OR-ed in on 2026-07-10 — so this is not a
+hypothetical: the next widening that reaches five of the six leaves the sixth charging, or not
+charging, by a rule nobody chose. A money predicate is the last place a copy may drift. Now one
+`billingAppliesTo()` in `featureFlag.ts`.
+
+🔴 **What was deliberately NOT done, and why it matters more than what was.** The live figure's call
+site reads `!!userId && <predicate>`. Folding that `!!userId` into the shared helper would have given
+a tidier signature and silently stopped charging the five sites that never had it — fixing problem A
+while creating problem X, which the 2026-09-13 rule forbids outright. The helper answers "is billing
+on for them", never "is there someone to bill", and a test asserts the helper's body contains no
+`!!userId` so the tidier version cannot arrive later as a cleanup.
+
+**The guard that was itself the bug's shelter.** `theBuildShowsWhatItCostsSoFar` had a source guard
+asserting the live figure used "the settle's own predicate, word for word". Its intent was right and
+its mechanism was exactly why six copies could sit in one file and still read as one rule: it pinned
+the TEXT. It now asserts both readings call the function, and that no copy of the text survives.
+
+**Proof.** `tests/aContractHasOneHomeAndABillHasOneRule.test.ts`, 9 tests. The census WALKS the engine
+tree rather than reading a list of files to check — a hand-kept list of files is the same drift class
+the test exists to end — with vacuity guards (the walk must reach `SimpleBuilder.ts` and
+`contractRenames.ts`, and find more than fifty sources) so a narrowed walk cannot pass green. Nine
+reversions, each failing the right test and nothing else: a second specifier implementation under
+another name, a dead candidate the writer can never produce, the writer moving away from the search
+(the exact Q-1026 failure), a hand-kept candidate list, a dead copy left behind unused, a seventh
+predicate copy, the uid folded into the shared rule, a narrowed walk, and two widenings of the money
+rule itself.

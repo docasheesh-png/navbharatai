@@ -95415,3 +95415,17 @@ FINAL: ❌ NOT COMPLETE — until this PR merges and the OPEN follow-ups are fix
   follow-up) uses Q-976, Q-977, Q-978 and Q-979 for its own new findings; its branch predates them on `main`. On `main`,
   Q-976 to Q-978 are this session's closed db07e0af rows, and Q-979 is the open TS2563 row. `aClosedQueueRowStaysClosed`
   catches a closed ID being re-added, and `theQueueIdsAreUnique` catches a duplicate. #3700 needs to renumber from Q-981.
+
+### 2026-10-13 — #3703 merged (every AI chat reads like one product); the open root cause found while gating it is Q-1038
+
+- **#3703 merged by the admin at 05:24 UTC** (`3d5bd91c5`), CI green on the merge commit. The admin's own "merge main" commit
+  `4c208819a` was tree-identical to the locally gated merge, so it became the branch tip and no duplicate merge was pushed.
+  Web users get the new chat on the Cloud Run deploy; phone users only through a fresh store bundle (the apps are bundled).
+- **Found while gating the merged state.** The full suite failed once in
+  `tests/aThreeGameIsReadFromItsScene.test.ts` (`mirrored: null` for the correct chase camera); it passed alone and in the
+  pre-merge run. Root cause: the playtest's steering read samples a frame-driven simulation by wall-clock (a 500 ms hold,
+  a 5° threshold), so a page starved of frames under load yields no verdict — the frame-count dependence Q-869 removed
+  from the pixel verdicts, still present in the scene read. The fix is to judge by rendered frames (the module already
+  counts them). Not fixed in the chat PR: the playtest module was mid-flight in #3701 / #3704.
+- **Renumbered on rebase.** This note was filed as Q-1039. #3705 had already taken Q-1039 for the live-ETA row and opened
+  the same flake as Q-1038 ("find the probe's time window"). The root cause is now on Q-1038. No second row.

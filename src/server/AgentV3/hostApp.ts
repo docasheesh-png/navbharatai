@@ -258,7 +258,7 @@ export async function hostAppOnNavBharatCloud(
  * once, not on how often they are deployed; counting a redeploy would make the last app on a plan
  * un-updatable, which is the shape of bug that turns a limit into a trap.
  *
- * ⚠️ IT FAILS OPEN ON AN UNREADABLE COUNT, and that direction is deliberate and NOT the direction
+ * ⚠️ HISTORY: IT USED TO FAIL OPEN ON AN UNREADABLE COUNT (changed 2026-10-13, see the body). The old reasoning was
  * `hasPlan` fails. An unknown PLAN must read as "no plan", because guessing yes gives away a paid
  * product. An unknown COUNT is different: guessing "at the cap" refuses a publish a paying customer
  * is entitled to, on the strength of a Firestore hiccup, while guessing "under it" costs at most one
@@ -275,16 +275,28 @@ export function serverAppLimit(input: {
   workspaceId: string;
   /** The tier's `backendApps`. `null`/0 = no tier, which the plan gate above has already refused. */
   cap: number | null | undefined;
+  /** Injected for tests; defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
 }): Availability {
   // The admin is exempt for the same reason the flags above exempt them: the path has to be testable
   // before anyone can buy into it.
   if (input.isAdmin) return { available: true, message: '' };
 
+  // 🔒 FAIL-CLOSED (go-live audit 2026-10-13). An entitlement that cannot be read is not granted: an
+  // unreadable tier or count now refuses with a retry message instead of letting the server start.
+  // Nothing is charged on this path, so a refusal costs the user one retry. The old fail-open
+  // behaviour can be restored without a deploy by AGENTV3_SERVER_CAP_FAIL_OPEN=on (rollback switch).
+  const failOpen = parseEnvFlag((input.env ?? process.env).AGENTV3_SERVER_CAP_FAIL_OPEN) ?? false;
+  const unsure: Availability = {
+    available: false,
+    message: 'We could not confirm your plan\'s server allowance just now, so nothing was started and nothing was charged. Please try again in a minute.',
+  };
+
   const cap = Number(input.cap);
-  if (!Number.isFinite(cap) || cap <= 0) return { available: true, message: '' };
+  if (!Number.isFinite(cap) || cap <= 0) return failOpen ? { available: true, message: '' } : unsure;
 
   const live = input.liveServerWorkspaceIds;
-  if (!Array.isArray(live)) return { available: true, message: '' }; // unreadable ⇒ open; see above
+  if (!Array.isArray(live)) return failOpen ? { available: true, message: '' } : unsure;
 
   // Already a server app ⇒ this is an update, and updates never spend the allowance.
   const already = live.some((id) => String(id) === String(input.workspaceId));

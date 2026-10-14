@@ -80,11 +80,17 @@ export function UserActionTray({
           )}
           {action.kind === 'approve' ? (
             <>
+              {/*
+                A GATE THAT DOES NOT BUILD MUST NOT OFFER TO BUILD (admin 2026-10-13). These two labels
+                were fixed strings, so every gate said "Approve & build" — including the ones that build
+                nothing, like the optional bug hunt ("Find and fix bugs" / "Not now"). A gate that names
+                its own labels gets them; one that does not keeps these, unchanged.
+              */}
               <button type="button" disabled={busy} onClick={() => onAnswerGate(action, true)} className={`${BTN} bg-indigo-600 hover:bg-indigo-500 text-on-accent`}>
-                <Check className="w-3.5 h-3.5" /> Approve &amp; build
+                <Check className="w-3.5 h-3.5" /> {action.approveLabel ?? <>Approve &amp; build</>}
               </button>
               <button type="button" disabled={busy} onClick={() => onAnswerGate(action, false)} className={`${BTN} bg-raised hover:bg-raised-hover text-body`}>
-                <Ban className="w-3.5 h-3.5" /> Reject
+                <Ban className="w-3.5 h-3.5" /> {action.denyLabel ?? 'Reject'}
               </button>
             </>
           ) : isLiveOnly(action) ? null : (

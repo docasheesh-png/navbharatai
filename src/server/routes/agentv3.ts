@@ -35,6 +35,7 @@ import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadm
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
 import { requestForChecks } from '../AgentV3/requestForChecks';
+import { offerBugHunt, BUG_HUNT_WAIT_MS } from '../AgentV3/optionalBugHunt';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -24648,7 +24649,30 @@ async function noteBuildOutcome(
             message: `Post-build review deferred: this turn built one project module, and the app is reviewed once "${reviewDeferredToShell}" assembles it.` });
         } catch { /* diagnostics best-effort */ }
       }
-      if (result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell) {
+      /**
+       * ❓ THE DEEP BUG HUNT IS OFFERED, NOT ASSUMED (admin 2026-10-13, `optionalBugHunt.ts`).
+       *
+       * The reviewer below is a multi-call model pass the user ALREADY PAYS FOR on every build without
+       * being asked — autopsy b6f88a72, quoted beside the call itself: 34.4% of that build's tokens, zero
+       * characters back, billed at ×4. This question does not introduce a charge; it shows an existing one
+       * to the person paying it, which is what the admin asked for.
+       *
+       * Offered HERE because every other condition for the review has already said yes, so the user is
+       * never asked to pay for a pass that was not going to run. The whole flow lives in the module (the
+       * ask, the wait, the words) and takes its effects as arguments: this handler is at TypeScript's
+       * control-flow-analysis ceiling (Q-979), so a feature that adds branches here is a feature that
+       * stops the file type-checking. One call, one await.
+       */
+      const bugHunt = await offerBugHunt({
+        eligible: result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell,
+        hasUser: !!userId,
+        newCallId: () => randomUUID(),
+        ask: (gate) => emit({ type: 'permission_request', agent: 'reviewer', ts: Date.now(), ...gate }),
+        wait: (callId) => waitForUser(callId, BUG_HUNT_WAIT_MS),
+        say: (text) => { try { events.emit({ type: 'narration', agent: 'reviewer', ts: Date.now(), text }); } catch { /* best-effort */ } },
+        record: (message) => { try { buildDiag.record({ phase: 'build', severity: 'info', code: 'BUG_HUNT_NOT_RUN', message, autoResolved: true }); } catch { /* best-effort */ } },
+      });
+      if (result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell && bugHunt.runReview) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
           // The REAL project size, captured before the fallback below can shrink rFiles to just this
@@ -26722,6 +26746,13 @@ async function noteBuildOutcome(
               billingActive,
               billedUsd: effectiveBilledUsd,
               billedInr: settledBilledInr,
+              // THE WALLET FACT, WHICH ONLY THIS PATH KNOWS (Q-1036). The debit above ran, or failed
+              // and was written to console.error only — and the record then said "charged" about a
+              // bill the balance never paid. `walletDebit` is null for a debit that was refused as
+              // well as for one nobody attempted; `charged` already excludes the latter, so a false
+              // here means money owed and not taken. The watchdog label is built BEFORE its debit
+              // and therefore passes nothing, which is the truthful answer there.
+              walletDebited: !!walletDebit && walletDebit.tokensDebited > 0,
             }),
             billedUsd: Math.round(effectiveBilledUsd * 1_000_000) / 1_000_000,
             billedInr: settledBilledInr,

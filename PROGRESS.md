@@ -95508,6 +95508,74 @@ passes is the test telling you it is not watching.
 
 ---
 
+## 2026-10-13 — Q-1040/Q-1041/Q-1042: the deep bug hunt is offered, not assumed
+
+Admin instruction, verbatim: *"helper, verifier jo app banne ke bad last me check karta hai, ko optional
+kar do"* — a ❓ question in the chat, Yes runs the helper that already exists, No means the build is
+complete as it stands.
+
+**The investigation came first, and its result changed the framing.** Nine searches (60 commits, the
+user-facing strings, the flags, filenames, the queue, `PROGRESS.md`, `CLAUDE.md`, `docs/claude/`,
+Hindi/Hinglish phrasings, 12 open and recent PRs, all 1,435 remote branches) found no trace of this
+feature and **no record of the instruction anywhere** — reported to the admin as *"I could not find it"*,
+never as "it does not exist", because only one of those two is a verified claim.
+
+What the search DID find is the thing that mattered: **the helper is not a free check being made paid.
+It is a PAID check being made optional.** The route's own comment beside the reviewer call records the
+size, autopsy b6f88a72: *"40 calls, 523,374 input tokens = 34.4% of the build, `responseChars: 0` on
+every one, and then no verdict at all — all of it billed at ×4"*. The user already paid for that, on
+every build, silently. The admin's own words — the real build costs x, the helper takes 4x — are
+corroborated by the code. So this change does not introduce a charge; it shows an existing one to the
+person paying it.
+
+**What stays free, and why that is the point.** The deterministic end-of-build checks — the tsc gate,
+lint, readiness, the playtest, the fake-feature scan, the journeys, the app's own tests — spend no model
+tokens and sit in no billing phase. They are the EVIDENCE that the app was built at all, which the
+second absolute rule requires, so putting them behind a payment would make a free build mean "it
+probably works". They are untouched.
+
+**Three admin decisions, implemented as given.** (1) No amount on the button — and that is the only
+honest option anyway: a token-metered cost has no true number before it runs, so a figure there would be
+a fabricated quote. (2) A "no" is scoped to ONE build, implemented by storing *nothing* — the offer is
+turn-local, so there is nothing to forget and nothing to reset. (3) Free and gift credits pay for it.
+
+🔴 **One admin instruction was NOT followed, and raised instead (third absolute rule).** The admin asked
+for the question in the user's language. `narrationCatalogue.ts` carries the admin's own 2026-08-11 rule
+— a status line is the PLATFORM speaking, not the AI, and an earlier Hindi table there was removed as
+wrong and unmaintainable ("22 hand-written translations per line") — and on 2026-09-14 the admin saw a
+voice-chat **price** in Devanagari and asked *"south india wale kaise padhenge isko??"*, superseding
+three modules' "user's language" behaviour. This offer IS a price. Building it translated would
+re-create exactly what they stopped, so it is professional English and the admin was told, with the
+reasoning, rather than quietly obeyed.
+
+🔴 **Q-979's ceiling was hit live, by this feature.** The first version put its `let`, its nested `if`s
+and its two `try`s inline in the `/build` handler, and `tsc` answered **TS2563: the containing function
+or module body is too large for control flow analysis** — the exact row draft #3700 owns. Rather than
+touch that row (it is taken), the whole flow moved into `optionalBugHunt.ts` with its effects injected
+(`ask` / `wait` / `say` / `record`), leaving the handler at ONE call and one `await`. A source guard
+asserts no branch, no `let` and no second `await` inside it, and says why: in that handler, the cost of
+a branch is the whole file. This is the better design regardless — every branch is now unit-testable
+without a server, a user or a clock.
+
+**Q-1041, found while building.** `permission_request` carried the whole question as one string, which
+the tray printed as a bold title with an empty detail line and two *fixed* buttons. That is why
+`startOfferText` has to spell "Approve = … Deny = …" inside its own sentence — the buttons could not be
+labelled — and why a gate that builds nothing still offered to "Approve & build". The event gained four
+optional fields, threaded through to the tray; **a gate that names none of them renders byte-for-byte as
+before**, which a test asserts on the fallbacks themselves.
+
+**Q-1042, the honest leftover.** The admin's instinct — run the helper on the cheap tier — is the actual
+cure; hiding the price treats the symptom. Recorded as an open row with what it needs: the cheap rung
+must be measured against the Sonnet judge before it becomes the default, because a cheaper hunt that
+misses real bugs is worse than an honest "not run".
+
+**Proof.** `tests/aBugHuntIsOfferedNotAssumed.test.ts`, 24 tests. Eight reversions, each failing the
+right test: silence counted as consent; a declined hunt reported as passed; a made-up rupee figure on
+the button; the fail-open flipped to fail-closed; the kill switch turning the review off instead of the
+ask; the wait bypassing `waitForUser` (the one door, autopsy 1219c639); the button offering to "build"
+again; and the tray ignoring a gate's own labels. The 130 tests across every module this touched
+(`whatTheUserMustDo`, `theTrayKnowsWhatIsNotConnected`, `everyPopupClearsTheChrome`, `buildNeeds`) pass
+unchanged.
 ## 2026-10-13 — Q-1026 + Q-1033: two copies of one truth, where only one of them is the truth
 
 Two rows from build report 9c612cdb, closed together because they are ONE class — the fourth absolute
@@ -95560,3 +95628,143 @@ another name, a dead candidate the writer can never produce, the writer moving a
 (the exact Q-1026 failure), a hand-kept candidate list, a dead copy left behind unused, a seventh
 predicate copy, the uid folded into the shared rule, a narrowed walk, and two widenings of the money
 rule itself.
+
+---
+
+## 2026-10-14 — Q-1035 + Q-1036: two money facts the system stated wrongly
+
+One class, taken from build report 9c612cdb: **a statement about money that the code never checked.**
+One was a test asserting a property of arithmetic; the other a field asserting a fact about the wallet.
+
+### Q-1035 — a test that could not fail
+
+It read:
+
+```ts
+const twice = realProviderCostUsd([...ENTRIES, ENTRIES[1]]);
+expect(Math.abs(twice - REPORT.realCostUsd)).toBeGreaterThan(1e-6);
+```
+
+`realProviderCostUsd` is a SUM over its argument. Handing a sum an extra entry changes the total —
+that is a property of addition, not of this system, and it holds however the ledger behaves. The test
+was NAMED for a claim about the ledger ("the fast lane's GLM is counted ONCE") while asserting
+something arithmetic could not disprove. **A test that cannot fail is worse than no test: it produces
+exactly the confidence a real double count would need in order to pass unnoticed.**
+
+**And the simulation was wrong in principle too**, which is why it could never have caught the bug
+even by accident: the ledger keys its slices by provider + model + phase, so recording the same GLM
+turn twice yields **one slice with doubled tokens** — never the two separate entries the array
+modelled. The shape it watched for cannot occur.
+
+The claim is now checked where it lives. The report's cost is reproduced through
+`createProviderUsageLedger` itself, and a ledger fed one extra GLM turn is asserted to merge into one
+slice with doubled tokens, to **say so** in `callsByProvider()`, and to cost more — so a double count
+cannot hide behind a plausible total.
+
+⚠️ **Deliberately not asserted: how many GLM calls the real build logged.** Q-1003 records GLM
+crawling TWICE on this very report, so "GLM answered once" is not a verified fact, and the test no
+longer implies it. `ENTRIES` are the report's merged slices; the call count is a property of the
+test's own construction, used only to prove a double record is detectable.
+
+### Q-1036 — `charged` claimed the wallet moved, and never looked
+
+The doc said *"this build's bill was set against the user's wallet"* — a claim about the WALLET —
+while the value is `billing applies && bill > 0`, a claim about the BILL. The gap is real money:
+
+- At the settle the debit runs under `if (userId && effectiveBilledUsd > 0 && billingActive)`. When
+  `debitRes.ok` is false the failure goes to **`console.error` only** and `walletDebit` stays null —
+  and the record still said `charged`, about a bill the balance never paid.
+- The watchdog path skips its debit whenever it cannot reproduce the settle's exact `buildRef`,
+  deliberately, because a mismatch there could double-charge. Recorded identically.
+
+🔑 **`charged`'s computation is unchanged, on purpose.** Making it require a known debit would have
+made every caller that cannot see one report "not charged" about a build that really was billed — one
+lie traded for another, which the 2026-09-13 rule forbids outright. The wallet fact is reported
+beside it: `walletDebited`, `billedButNotDebited`, and `· billed but NOT debited` on the label, on
+every branch that can be charged.
+
+**An unknown stays silent.** "We did not check" and "it did not happen" are different facts and only
+the second is a finding, so the settle (which knows the debit result) passes it and the watchdog
+(which builds its label before its own debit) passes nothing. A test asserts the field is *absent*
+there, not false.
+
+### Proof, and one honest correction to my own method
+
+`tests/aBillTheWalletNeverTookIsSaid.test.ts` (11 tests), plus the existing branch table now pinning
+the new flag on EVERY branch — a flag only one test looks at is a flag that quietly becomes true
+somewhere nobody checked.
+
+Four reversions: an unknown reported as a missed debit (5 tests fail); the note computed but never
+written on the record (2); a bill of zero counted as money owed (1); the settle no longer passing the
+fact (1).
+
+🔴 **The second of those first PASSED, and the cause was my own reversion, not a blind test.** The
+`replace` carried no assertion, so when it failed to match it silently changed nothing and the green
+meant only that I had edited no code. Re-applied with an assertion, it fails two tests. **A reversion
+that passes is a claim to verify, never a result to accept** — and that applies to the reversion as
+much as to the test.
+
+---
+
+## 2026-10-14 — Q-1011: a model call made outside the loop was not on the record (and its deadline could not cancel it)
+
+Two defects in one function, `AgentRunner`'s `endgameBatchRepair`.
+
+**It was invisible.** It calls `client.runTurn` directly, outside the step loop where the three
+`onLlmCall` emitters live, so the endgame's batched repair — a call that can spend a minute and a
+large prompt — left **no row at all**, on success or on failure. Every autopsy reads `llmCalls`, so
+the one place a reader would look to ask "what did the endgame actually do?" was empty.
+
+It now goes through one `recordOffLoopCall`, used on **both** outcomes, because a failed call is a
+call that was paid for. The recorder deliberately **invents nothing**: no `answerMs`, `fallbackMs`,
+`openMs` or `stopCause`, since those are the loop's own measurements, and putting unmeasured numbers
+into a report is this row's defect one level down.
+
+**Its deadline could not cancel it, and that is the expensive half.** `withDeadline` hands a signal to
+`runEndgameRepair`, which checks it *between* steps — but the repair passed `this.opts.signal` (the
+BUILD's) down to the model. So once the 150 s deadline fired, the call carried on burning tokens for
+an answer nothing would read. **A deadline that cannot cancel is a comment.**
+
+🔑 **The fix does not trade Stop for the deadline.** Handing the deadline's signal down *alone* would
+have stopped a user's Stop from reaching the call — problem A fixed by creating problem X.
+`withDeadline` already accepts a `parent`, so the build's signal is passed as that parent and the one
+signal fires on **either**. Both call sites are asserted, not just the function.
+
+**A sibling, found by rule 3.** `tscErrorCause`'s guard pinned `io.llmRepair(out2 + causes, subset)`
+*including the closing paren*, so adding a third argument failed a guard whose property was perfectly
+intact — the same class as `aModuleIsNotTheWholeApp`'s review-gate guard (fixed yesterday). Repaired
+the same way, and proven still to catch its own bug: dropping the annotation fails three tests.
+
+**Proof.** `tests/aCallOutsideTheLoopIsStillOnTheRecord.test.ts`, 7 tests, including a census over
+`client.runTurn(` **bodies** so a third site that records nothing fails it. Five reversions, each
+failing the right test: the success row removed, the failure row removed, the model call ignoring the
+deadline, the deadline losing its parent, and the contract dropping the signal. Two of my own
+assertions were wrong on the first run (my recorder is itself a fourth `onLlmCall` site; `codeOnly`
+strips the very inline comment I was asserting) — fixed in the test, not in the code.
+
+**Still open, stated rather than implied:** the ROUTE's own direct `runTurn` aux calls (plan,
+blueprint, judge) are also absent from `llmCalls`. Their *tokens* are reconciled as `other` by design,
+so money is safe; the *rows* are not. A separate change.
+
+## 2026-10-14 — Q-1012 is BLOCKED, because the row's prescribed fix collides with a standing lesson
+
+The row asks for a provider stall ended by our per-turn timeout to be counted in
+`PROVIDER_TIME_WASTED`. Investigating it found the opposite rule already written down, in
+`providerWaste.ts`'s own header, from autopsy bb688add:
+
+> *"OUR OWN CLOCK ENDING IS NOT A PROVIDER'S WASTE … a lane that ran out of ITS budget mid-call is our
+> accounting, not the vendor's failure."*
+
+The per-turn timeout **is** our clock. Counting it as vendor waste would re-introduce exactly what
+that autopsy removed — and this number is what the 429 bench's trigger will be re-chosen from, so
+inflating it would move a routing decision on a false reading.
+
+The honest distinction is whether the provider was *producing* when our clock fired: `crawl` and
+`silent` are real vendor waste, a healthy call our budget cut short is not. **That fact is not
+available at the timeout site** — there is no `TurnResult`, so no `firstOutputAfterMs` or
+`openedAfterMs`, and the chain does not report which rung was serving when a stop cancels it.
+
+So it is recorded as BLOCKED with all four fields, with the recommendation to count it only as
+`silent` (provider produced nothing) and never as `timeout`, and with the note that the required
+change is inside the provider chain — which CLAUDE.md says to confirm with the admin before touching.
+Guessing it would put a number nobody measured into the figure a routing decision is made from.

@@ -12,7 +12,8 @@
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity, verifyFirebaseToken, rateLimiter } from '../lib/authMiddleware';
 import { routeParam } from '../lib/expressCompat';
-import { isStoreAdmin } from './navStore';
+import { isStoreAdmin, listedWebAppMeta } from './navStore';
+import { recordLike } from '../lib/appMartSignals';
 import { identityGrantEmail } from '../AgentV3/featureFlag';
 import { listMyWebApps, listWebAppsByOwners, getWebAppsByIds, toPublicWebApp, type WebStoreApp } from '../lib/navStoreWeb';
 import { listAppsByUid, listAppsByOwners, getAppsByIds, toPublic, type StoreApp } from '../lib/navStoreStore';
@@ -88,6 +89,7 @@ export function registerAppMartSocialRoutes(app: Express): void {
     if (!target || !target.live) return res.status(404).json({ error: 'This app is no longer on App Mart.' });
     try {
       const { mine, newLike } = await pressReaction(k.key, me.uid, reaction);
+      if (newLike && k.kind === 'web') void listedWebAppMeta(k.id).then((m) => recordLike(me.uid, m)).catch(() => {});
       if (newLike) void notifySocial({ recipientUid: target.ownerUid, kind: 'like', appKey: k.key, appName: target.name, actorUid: me.uid });
       const counts = (await countsFor([k.key]))[k.key] ?? null;
       res.json({ mine, counts });

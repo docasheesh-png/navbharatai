@@ -151,6 +151,8 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    */
   { collection: 'app_mart_follows', key: { field: 'followerUid' } },
   { collection: 'app_mart_follows', key: { field: 'creatorUid' } },
+  /** App Mart For You taste profile (appMartSignals.ts, 2026-10-14) — doc id IS the uid. `app_mart_signals` is anonymous counters, nothing to erase. */
+  { collection: 'app_mart_affinity', key: 'docId' },
   /** An uploaded profile photo (profileAvatar.ts, 2026-10-01): one doc under the public creator code, holding `uid`. */
   { collection: 'profile_avatars', key: { field: 'uid' } },
   /**

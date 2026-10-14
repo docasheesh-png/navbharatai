@@ -42,5 +42,7 @@
   "src/server/routes/supabaseIntegration.ts::pendingConnections": "lifecycle: expires within minutes, swept on each new connection",
   "src/server/routes/supabaseIntegration.ts::pendingVerifiers": "lifecycle: expires within minutes, swept on each new sign-in start",
   "src/server/routes/zipUpload.ts::pending": "lifecycle: an upload in progress, expired ones swept",
-  "src/server/runtime/PreviewDepWarmup.ts::inFlight": "lifecycle: a warmup in flight, removed when it settles"
+  "src/server/runtime/PreviewDepWarmup.ts::inFlight": "lifecycle: a warmup in flight, removed when it settles",
+  "src/server/lib/appMartSignals.ts::pendingApps": "For You signal buffer: capped at MAX_PENDING_APPS (5,000) and cleared on every 30 s flush",
+  "src/server/lib/appMartSignals.ts::pendingAff": "For You per-viewer affinity buffer: capped at MAX_PENDING_USERS (1,000) and cleared on every 30 s flush"
 }

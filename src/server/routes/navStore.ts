@@ -78,6 +78,8 @@ import { hostingPlansEnabled, hostingPlanPriceInr, probeHostingPlan } from '../l
 import { isAgentV3FreeUser, identityGrantEmail } from '../AgentV3/featureFlag';
 import { remixGate, remixRefusal } from '../lib/remixPlanGate';
 import { routeParam, routeParams } from '../lib/expressCompat';
+import { forYouEnabled, parseSortMode, cleanSeed, cleanEvents, rankForYou, pageOf } from '../../lib/appMartForYou';
+import { recordEvents, readSignals, readAffinity, type AppMeta } from '../lib/appMartSignals';
 import {
   downloadSignInRequired, signDownloadTicket, verifyDownloadTicket, downloadTicketQuery,
   ticketRefusalMessage, ticketSecret, DOWNLOAD_TICKET_TTL_MS,
@@ -120,6 +122,19 @@ export const STORE_CATEGORIES = [
  * them so the reviewer sees the change at once; other instances catch up within the TTL.
  */
 const publicListings = new SharedReadCache<Array<ReturnType<typeof toPublicWebApp>>>({ maxEntries: 4, ttlMs: 60_000 });
+/** The shared, viewer-independent LISTED web apps (cached 1 min per instance). Browse, For You and events all read this. */
+function listedWebAppsShared() {
+  return publicListings.get('web-apps', async () => {
+    const rows = await listListedWebApps();
+    const creators = await resolveCreators(rows.map((a) => a.uid), realCreatorLookupDeps).catch(() => new Map());
+    return rows.map((a) => toPublicWebApp(a, creators.get(a.uid)));
+  });
+}
+/** For You: the public metadata of a LISTED web app (undefined if not listed / lookup fails). */
+export async function listedWebAppMeta(id: string): Promise<AppMeta | undefined> {
+  const all = await listedWebAppsShared().catch(() => []);
+  return all.find((a) => a.id === id);
+}
 const publicApprovedApps = new SharedReadCache<StoreApp[]>({ maxEntries: 4, ttlMs: 60_000 });
 
 export function isStoreAdmin(email: GrantEmail | null): boolean { // a verified email only (Q-624)
@@ -1033,18 +1048,53 @@ export function registerNavStoreRoutes(app: Express): void {
         const creators = await resolveCreators(rows.map((a) => a.uid), realCreatorLookupDeps).catch(() => new Map());
         return rows.map((a) => toPublicWebApp(a, creators.get(a.uid)));
       });
+      const visible = listed.filter((a) => !hiddenFromBrowse({ contentClass: a.contentClass }, {
+        optedIn: viewer.optedIn,
+        // The native shell never shows 18+ content at all — see adultContent.ts for why that is a
+        // Play-policy decision rather than a preference.
+        isNative: isNativeRequest(req),
+      }));
+      // FOR YOU (admin 2026-10-14). `?sort=newest` or no `sort` = the list exactly as before (newest
+      // first). `?sort=foryou&seed=…` = personalised + trending, seed-stable so paging never reshuffles.
+      // Any failure in the ranking falls back to the chronological list — the store never breaks for it.
+      if (req.query.sort === 'foryou' && forYouEnabled(process.env.APPMART_FOR_YOU)) {
+        try {
+          const uid = await verifyFirebaseToken(req).catch(() => null);
+          const [signals, affinity] = await Promise.all([readSignals(), readAffinity(uid ?? null)]);
+          const ranked = rankForYou(visible, { signals, affinity, seed: cleanSeed(req.query.seed), now: Date.now() });
+          const page = pageOf(ranked, req.query.offset, req.query.limit);
+          res.setHeader('Cache-Control', 'private, no-store');
+          return res.json({ apps: page.items, nextOffset: page.nextOffset, sort: 'foryou', personalized: !!affinity });
+        } catch (e) {
+          logStoreError('web/apps foryou', e);
+        }
+      }
       res.setHeader('Cache-Control', 'private, max-age=30');
-      res.json({
-        apps: listed.filter((a) => !hiddenFromBrowse({ contentClass: a.contentClass }, {
-          optedIn: viewer.optedIn,
-          // The native shell never shows 18+ content at all — see adultContent.ts for why that is a
-          // Play-policy decision rather than a preference.
-          isNative: isNativeRequest(req),
-        })),
-      });
+      res.json({ apps: visible, sort: parseSortMode(req.query.sort) === 'foryou' ? 'newest-fallback' : 'newest' });
     } catch (e) {
       logStoreError('web/apps list', e);
       res.status(502).json({ error: 'Could not load the store.' });
+    }
+  });
+
+  /**
+   * App Mart engagement events for For You — batched by the client (≤50 per call, sendBeacon on hide).
+   * Signed-out viewers count toward global trending only. Unknown/unlisted app ids are dropped.
+   */
+  const eventsLimiter = rateLimiter({ name: 'appmart-events', authed: 120, anon: 60, noun: 'events', durable: false, anonGlobalPerHour: 50_000 });
+  app.post('/api/app-mart/events', eventsLimiter, async (req: Request, res: Response) => {
+    if (!forYouEnabled(process.env.APPMART_FOR_YOU)) return res.status(204).end();
+    try {
+      const events = cleanEvents((req.body as { events?: unknown } | undefined)?.events);
+      if (events.length === 0) return res.status(204).end();
+      const uid = await verifyFirebaseToken(req).catch(() => null);
+      const listed = await listedWebAppsShared();
+      const byId = new Map<string, AppMeta>(listed.map((a) => [a.id, a]));
+      recordEvents(uid ?? null, events, (id) => byId.get(id));
+      res.status(204).end();
+    } catch (e) {
+      logStoreError('appmart events', e);
+      res.status(204).end();
     }
   });
 

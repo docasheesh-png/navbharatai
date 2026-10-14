@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../lib/authHeaders';
+import { SORT_LABELS, type SortMode } from '../../lib/appMartForYou';
+import { readSortPref, writeSortPref, sessionSeed, markOpened, logAppMartEvent } from './appMart/forYouClient';
 import { authedFetch } from '../../lib/authedFetch';
 import { LONG_REQUEST_TIMEOUT_MS, isFetchTimeout } from '../../lib/longRequest';
 import { resolveApiHref } from '../../lib/apiBase';
@@ -257,6 +259,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
 
   const openWebDetail = async (a: WebApp) => {
     setDetailApp(a);
+    logAppMartEvent({ kind: 'detail', appId: a.id });
     setDetailShots([]);
     if ((a.screenshotCount ?? 0) <= 0) return;
     setDetailLoading(true);
@@ -357,6 +360,20 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       return m ? m[1] : null;
     } catch { return null; }
   });
+  // For You signals: an open (repeat if this device opened it before), the time spent, and an app that
+  // arrived through a share link counts as a share. Batched in forYouClient.
+  const sharedOpenRef = useRef<string | null>(playingId);
+  useEffect(() => {
+    if (!playingId) return;
+    const id = playingId;
+    const started = Date.now();
+    logAppMartEvent({ kind: 'open', appId: id, repeat: markOpened(id) });
+    if (sharedOpenRef.current === id) { logAppMartEvent({ kind: 'share', appId: id }); sharedOpenRef.current = null; }
+    return () => {
+      const sec = Math.round((Date.now() - started) / 1000);
+      if (sec >= 3) logAppMartEvent({ kind: 'dwell', appId: id, sec });
+    };
+  }, [playingId]);
   const [webBusy, setWebBusy] = useState('');
 
   const [reviewing, setReviewing] = useState('');
@@ -440,13 +457,22 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     } catch { /* shown as an empty queue */ }
   }, []);
 
+  // FOR YOU ⇄ NEWEST (admin 2026-10-14). Newest = the exact old request (chronological). For You asks the
+  // server for the personalised order with this session's seed. The choice is remembered on the device.
+  const [sortMode, setSortModeState] = useState<SortMode>(() => readSortPref());
+  const [forYouAvailable, setForYouAvailable] = useState(true);
+  const setSortMode = useCallback((m: SortMode) => { writeSortPref(m); setSortModeState(m); }, []);
   const loadWebApps = useCallback(async () => {
     try {
-      const res = await fetch('/api/nav-store/web/apps');
+      const res = sortMode === 'foryou'
+        ? await fetch(`/api/nav-store/web/apps?sort=foryou&seed=${encodeURIComponent(sessionSeed())}`, { headers: await authedHeaders().catch(() => ({})) })
+        : await fetch('/api/nav-store/web/apps');
       const data = await res.json().catch(() => null);
-      if (liveRef.current) setWebApps(Array.isArray(data?.apps) ? data.apps : []);
+      if (!liveRef.current) return;
+      setWebApps(Array.isArray(data?.apps) ? data.apps : []);
+      if (sortMode === 'foryou') setForYouAvailable(data?.sort === 'foryou');
     } catch { /* the APK list still renders */ }
-  }, []);
+  }, [sortMode]);
 
   const loadWebMine = useCallback(async () => {
     try {
@@ -888,6 +914,24 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                 </button>
               ))}
             </div>
+            {browseView === 'general' && forYouAvailable && (
+              <div role="radiogroup" aria-label="Sort apps" className="inline-flex gap-1 p-0.5 rounded-full bg-raised border border-line">
+                {(['foryou', 'newest'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="radio"
+                    aria-checked={sortMode === m}
+                    onClick={() => setSortMode(m)}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+                      sortMode === m ? 'bg-card text-ink shadow-sm' : 'text-muted hover:text-body'
+                    }`}
+                  >
+                    {m === 'foryou' ? '✨ ' : '🕒 '}{SORT_LABELS[m]}
+                  </button>
+                ))}
+              </div>
+            )}
             {kindFilterOptions(HIDE_ANDROID_INSTALLS).length > 0 && (
               <div className="flex gap-1.5 overflow-x-auto pb-0.5" aria-label="Filter by kind of app">
                 {kindFilterOptions(HIDE_ANDROID_INSTALLS).map((f) => (

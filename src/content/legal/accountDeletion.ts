@@ -79,7 +79,7 @@ When your deletion request is completed, we remove:
 - your **gift-code purchase tally** — the running count of how many gift codes you bought on a given
   day. (The codes themselves are **not** deleted: once you have given a code to somebody, it is theirs
   to redeem, and a payment record is one of the things we are required to keep — see below.);
-- your **App Mart likes, dislikes and comments** — every 👍 and 👎 you gave, every comment and reply you wrote, your App Mart notifications, the list of people you blocked, the creators you follow and the people who follow you, the profile photo you uploaded, and the link between your public creator code and your account (so your App Mart profile stops opening). Other people's replies to your comments are not theirs to lose, but they can no longer be reached once your comment is gone;
+- your **App Mart likes, dislikes and comments** — every 👍 and 👎 you gave, every comment and reply you wrote, your App Mart notifications, the list of people you blocked, the creators you follow and the people who follow you, the record of what you like on App Mart that shapes your For You feed, the profile photo you uploaded, and the link between your public creator code and your account (so your App Mart profile stops opening). Other people's replies to your comments are not theirs to lose, but they can no longer be reached once your comment is gone;
 - your **rating of NavBharatAI** — the stars and the note you gave after one of your apps went live, and any "Not now" pause on that question;
 - your **cross-device workspace** — the copy of your chat sessions and your last built app that we
   keep so they follow you from one device to another;

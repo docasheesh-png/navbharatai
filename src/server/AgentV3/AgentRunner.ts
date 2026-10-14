@@ -28,6 +28,7 @@ import { findSyntaxErrors } from './SyntaxCheck';
 import { lostTruncatedOutput, truncationRecoverySteer, truncationRecoveryNarration, truncationSteeredPaths } from './TruncationRecovery';
 import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRepeatProbeSteer, noteMutations, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
+import { serviceRecommendationEvent } from '../analyzer/serviceRecommendation';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
 import { abortCauseOf, abortSummary, timedOutSummary, stalledModelSummary, stoppedCallFields, type SeedState, type AbortCause } from './buildAbortCause';
@@ -1378,6 +1379,15 @@ export class AgentRunner {
           // asked for is absent is misleading by omission. Empty for a complete build. See
           // missingFeatureNotice.ts.
           if (ok) summary = `${summary}${missingFeatureNotice(buildHealth?.warnings)}`;
+          // Go-live PR 13: what this app needs to run, as Buy/Connect choices. AGENTV3_SERVICE_RECO
+          // (default OFF) is checked FIRST so the off path does no I/O. Best-effort, never blocks.
+          if (ok && expectsArtifacts && envFlag('AGENTV3_SERVICE_RECO')) {
+            try {
+              const snap = await dispatcher.projectSnapshot();
+              const reco = snap ? serviceRecommendationEvent(snap) : null;
+              if (reco) events.emit(reco);
+            } catch { /* a recommendation must never fail a build */ }
+          }
           await persist(ok ? 'complete' : 'error');
           events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
           return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}), ...(!ok && modelAnswer ? { modelAnswer } : {}) };
@@ -1823,6 +1833,15 @@ export class AgentRunner {
         // emit. A long build is exactly the kind most likely to drop a feature, so leaving this one
         // silent would have hidden the worst cases.
         if (ok) summary = `${summary}${missingFeatureNotice(buildHealth?.warnings)}`;
+        // Go-live PR 13: what this app needs to run, as Buy/Connect choices. AGENTV3_SERVICE_RECO
+        // (default OFF) is checked FIRST so the off path does no I/O. Best-effort, never blocks.
+        if (ok && expectsArtifacts && envFlag('AGENTV3_SERVICE_RECO')) {
+          try {
+            const snap = await dispatcher.projectSnapshot();
+            const reco = snap ? serviceRecommendationEvent(snap) : null;
+            if (reco) events.emit(reco);
+          } catch { /* a recommendation must never fail a build */ }
+        }
         await persist(ok ? 'complete' : 'stopped');
         events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
         return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };

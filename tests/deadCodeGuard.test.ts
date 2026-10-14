@@ -85,11 +85,6 @@ const isTest = (p: string) => p.includes('.test.') || p.includes('.spec.');
  * becomes a place to hide the next dead engine.
  */
 const KNOWN_UNREACHABLE = new Set([
-  // Go-live PR 13: emitted/rendered once AGENTV3_SERVICE_RECO is wired into the build loop. Remove then.
-  'src/server/analyzer/serviceRecommendation.ts',
-  'src/components/agentv3/ServiceRecommendationCard.tsx',
-  // Go-live PR 12: analyzer, called by the chat card behind AGENTV3_SERVICE_RECO. Remove when wired.
-  'src/server/analyzer/requirements.ts',
   // Go-live PR 14: wallet doors, mounted in BillingPanel behind WALLET_V2_UI in a follow-up. Remove then.
   'src/lib/walletIntent.ts',
   'src/components/panels/WalletDoors.tsx',
@@ -101,8 +96,6 @@ const KNOWN_UNREACHABLE = new Set([
   'src/server/lib/orphanReport.ts',
   // Go-live PR 18: Pro plan model, read by the plans card/purchase route behind PLAN_MODEL_PRO in a follow-up. Remove then.
   'src/lib/planModel.ts',
-  // Go-live marketplace building block, merged ahead of its caller behind a default-off flag. Remove when wired.
-  'src/lib/catalogue/index.ts',
   'src/server/providers/index.ts',
   // Go-live marketplace building block, merged ahead of its caller behind a default-off flag. Remove when wired.
   'src/server/providers/types.ts',

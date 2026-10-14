@@ -13626,7 +13626,7 @@ async function noteBuildOutcome(
     /**
      * A COMPLETED command, from ANY lane — the one door both the architect and its sub-agents use.
      *
-     * 🔴 AND A COMMAND THAT CANNOT CHANGE ANYTHING IS NOT PROGRESS (build `413d29a1`, Q-1062). The futility
+     * 🔴 AND A COMMAND THAT CANNOT CHANGE ANYTHING IS NOT PROGRESS (build `413d29a1`, Q-1081). The futility
      * breaker's three progress signals are a file written, a command completed, or a plan step done — and
      * this counted EVERY completed command. `: > /tmp/x && node -e 'console.log("noop")'` exits 0, so it
      * completes, so the breaker saw continuous progress through 13.4 minutes and ~170 turns that produced

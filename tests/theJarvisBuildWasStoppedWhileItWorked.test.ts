@@ -60,7 +60,7 @@ describe('the futility window opens when the BUILD starts, not when the request 
 
 describe('every lane\'s completed command counts — the architect\'s too', () => {
   it('the architect dispatcher and the sub-agents both go through noteCommandCompleted', () => {
-    // UPDATED 2026-10-14 (build 413d29a1, Q-1062): the counter now takes the command TEXT, because a
+    // UPDATED 2026-10-14 (build 413d29a1, Q-1081): the counter now takes the command TEXT, because a
     // command that cannot change anything is not progress — `noteCommandCompleted(c?.command)` instead of
     // `noteCommandCompleted()`. The property THIS test exists for is unchanged and is what is pinned: BOTH
     // lanes count, and there is exactly one counter. A fix that threaded the text through only one of the

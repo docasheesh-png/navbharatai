@@ -96,7 +96,7 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
  * exactly that call (the dispatcher refuses it before the shell), and
  * `tests/aRunThatOnlyDoesNothingEnds` caught it immediately.
  *
- * 🔴 AND IT RE-BROKE AGAIN, WITH THE NO-OP SPELLED OUT (build `413d29a1`, 2026-10-14, Q-1062). Q-738 fixed
+ * 🔴 AND IT RE-BROKE AGAIN, WITH THE NO-OP SPELLED OUT (build `413d29a1`, 2026-10-14, Q-1081). Q-738 fixed
  * the INSTANCE — a command string that is literally empty. The CLASS is "a command that cannot change
  * anything", and `: > /tmp/x && node -e 'console.log("noop")'` is the same thing written out: non-empty, so
  * it counted as a mutation, so it reset its own repeat count on every call. The loop guard could never reach
@@ -270,7 +270,7 @@ export function isEmptyCommandCall(tu: { name?: unknown; input?: unknown }): boo
 }
 
 /**
- * 🔑 THE QUESTION EVERY GUARD SHOULD ASK (Q-1062): can this call change anything at all? A `bash` whose
+ * 🔑 THE QUESTION EVERY GUARD SHOULD ASK (Q-1081): can this call change anything at all? A `bash` whose
  * command is empty OR provably inert (`isInertCommand`) cannot. PURE.
  */
 export function isInertCommandCall(tu: { name?: unknown; input?: unknown }): boolean {

@@ -1,5 +1,5 @@
 /**
- * Build `413d29a1` (2026-10-14, the MP4→MP3 converter) — Q-1062.
+ * Build `413d29a1` (2026-10-14, the MP4→MP3 converter) — Q-1081.
  *
  * 171 model calls in 13.4 minutes, averaging 52,163 input tokens in and 33 output tokens out; 166 made
  * exactly one tool call and 170 of 171 finished with `tool_use` — the model never once tried to stop.
@@ -167,7 +167,7 @@ describe('site 1 + 2 — the loop guard can now reach its threshold', () => {
 
   it('the narrow literal question still exists and still answers only about an EMPTY command', () => {
     expect(isEmptyCommandCall(call(''))).toBe(true);
-    expect(isEmptyCommandCall(call(REPORTED))).toBe(false); // ← the Q-738 instance vs the Q-1062 class
+    expect(isEmptyCommandCall(call(REPORTED))).toBe(false); // ← the Q-738 instance vs the Q-1081 class
     expect(isInertCommandCall(call(REPORTED))).toBe(true);
     expect(isInertCommandCall({ name: 'write_file', input: { command: REPORTED } })).toBe(false);
   });

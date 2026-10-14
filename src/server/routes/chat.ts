@@ -28,6 +28,10 @@ import { isProfessionalFreeUser } from '../professionals/professionalPaid';
 import { guestDailyQuota } from '../lib/guestDailyQuota';
 import { POLLINATIONS_BLOCK_MESSAGE } from '../lib/pollinationsGuard';
 import { checkChatInput } from '../lib/chatInputLimits';
+import {
+  freeChatAnswerAllEnabled, FREE_ANSWER_ALL_RULES, isAppBuildRequest, detectReplyLanguage,
+  appRequestDirective, missingProLine, isAboutNavBharatAI,
+} from '../lib/freeChatReplies';
 
 /**
  * Chat routes (the general/FREE chat) extracted from the server.ts monolith
@@ -319,6 +323,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     }
 
     const isFree = tier === 'navbharat';
+    const answerAll = isFree && freeChatAnswerAllEnabled();
+    const appAsk = answerAll && isAppBuildRequest(message);
     // Free tier: always conversational — ignore canvas and build intent completely
     const hasCanvas = !isFree && !!(currentApp && typeof currentApp === 'string' && currentApp.length > 200);
     const buildIntents = ['create', 'build', 'generate', 'edit', 'fix', 'add', 'modify', 'update', 'change'];
@@ -333,6 +339,14 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       // The Mode map is a STANDING instruction, not a keyword lottery (admin 2026-09-30: "navbharatai
       // free ko mode aur uske andar jo hai, sabke bare me batao").
       systemPrompt = `${systemPrompt}\n\n${freeChatModeGuide()}`;
+      // FREE_CHAT_ANSWER_ALL (freeChatReplies.ts): the unconditional "lead with NavBharatAI Pro" block
+      // made the model pitch an app for ordinary questions ("Best job ke bare me batao"). Replaced by
+      // answer-first rules; an actual app request gets its own directive below.
+      if (answerAll) {
+        systemPrompt = systemPrompt.replace(/APP BUILDING — LEAD WITH NavBharatAI Pro[\s\S]*?(?=\nHARD LIMITS:)/, `${FREE_ANSWER_ALL_RULES}\n`)
+          .replace('(guide them to NavBharatAI Pro instead, per the rule above)', '(for an app request, explain the idea instead, per the rule above)');
+        if (appAsk) systemPrompt = `${systemPrompt}\n\n${appRequestDirective(detectReplyLanguage(message))}`;
+      }
     } else if (hasCanvas) {
       systemPrompt = SYSTEM_PROMPT_EDIT;
     } else if (isBuildIntent) {
@@ -392,7 +406,7 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
 
     // App awareness injection — inject only for conversation mode (not canvas/build).
     // Teaches every chat tier to answer "where is X?" and "how do I Y?" correctly.
-    if (!hasCanvas && !isBuildIntent) {
+    if (!hasCanvas && !isBuildIntent && (!answerAll || isAboutNavBharatAI(message))) {
       const chatSurface = isFree ? 'nbi_chat' : 'pro_chat';
       // The iPhone app never teaches a way to pay (Q-123): the client names its platform in X-NBAI-Platform.
       const appCtx = AppContextInjector.getRelevantContext(message, chatSurface, clientPlatform(req.headers['x-nbai-platform']));
@@ -671,10 +685,12 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         // day (the model pin, Vertex's hardcoded stream model, this) — the streaming path in this repo
         // has a habit of being forgotten, which is why it is now written down here.
         let outcome: Awaited<ReturnType<typeof aiRouter.routeStream>> | null = null;
+        let streamedText = '';
         try {
           outcome = await aiRouter.routeStream(
             contextualMessage, history, tier, systemPrompt,
             (chunk: string) => {
+              streamedText += chunk;
               if (!res.writableEnded) {
                 if (firstTokenAt === null) {
                   firstTokenAt = Date.now();
@@ -705,6 +721,9 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
               c: '\n\n_(NavBharatAI\u2019s engine went quiet before finishing this answer, so it stops here. Ask again and it will pick the thread back up.)_',
             })}\n\n`);
           }
+          // FREE_CHAT_ANSWER_ALL: exactly one Pro line on an app request, even if the model left it out.
+          const proTail = appAsk && outcome?.reason !== 'stalled' && streamedText.trim() ? missingProLine(streamedText, message) : '';
+          if (proTail) res.write(`data: ${JSON.stringify({ c: proTail })}\n\n`);
           res.write('data: [DONE]\n\n');
           res.end();
         }
@@ -766,7 +785,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           ok: routed.ok,
           createdAt: new Date().toISOString(),
         }).catch(() => {});
-        res.json({ reply: routed.content });
+        const proTail = appAsk && routed.ok && routed.content ? missingProLine(routed.content, message) : '';
+        res.json({ reply: `${routed.content}${proTail}` });
       }
     } catch(e: any) {
       console.error(`Error for tier ${tier}:`, e.message);

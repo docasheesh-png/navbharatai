@@ -11,7 +11,7 @@
 // complex or multi-major ranges (`>=16 <19`, `a || b`) are treated as "unknown" and never flagged. Pure
 // and deterministic — no registry, no guessing.
 
-import { shipsOwnTypes } from '../../lib/selfTypedPackages';
+import { shipsOwnTypes, typingsMajorMayLag } from '../../lib/selfTypedPackages';
 
 export type ConflictKind = 'react-dom-mismatch' | 'duplicate-version-conflict' | 'types-mismatch';
 export type ConflictSeverity = 'high' | 'medium' | 'low';
@@ -114,6 +114,7 @@ export function analyzeDependencyConstraints(files: Record<string, string>): Con
         });
         continue;
       }
+      if (typingsMajorMayLag(target)) continue; // the registry's typings lag this runtime by design (Q-1066)
       if (tMajor !== null && rMajor !== null && tMajor !== rMajor) {
         conflicts.push({
           kind: 'types-mismatch', severity: 'low', package: name, file: path,

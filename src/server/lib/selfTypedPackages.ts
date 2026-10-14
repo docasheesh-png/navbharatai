@@ -21,3 +21,19 @@ export function shipsOwnTypes(runtime: string, major: number | null): boolean {
   const from = SHIPS_OWN_TYPES[runtime];
   return from !== undefined && major !== null && major >= from;
 }
+
+/**
+ * Packages whose `@types/*` major is NOT kept in step with the runtime's (autopsy 398db9f3, Q-1066).
+ *
+ * The finding "@types/better-sqlite3 is v9 but better-sqlite3 is v13" advised matching a major that
+ * DefinitelyTyped does not publish — the same false advice a106df77 ended for packages that ship their
+ * own types. For these, a lower typings major is the normal state of the registry, so a mismatch says
+ * nothing about the app and must not be raised. Conservative: only packages known to lag belong here;
+ * the pure analyzers have no registry access, so this list is the evidence. PURE.
+ */
+export const TYPINGS_LAG_RUNTIME: ReadonlySet<string> = new Set(['better-sqlite3']);
+
+/** True when a typings-vs-runtime major difference for `runtime` is expected and not a finding. */
+export function typingsMajorMayLag(runtime: string): boolean {
+  return TYPINGS_LAG_RUNTIME.has(runtime);
+}

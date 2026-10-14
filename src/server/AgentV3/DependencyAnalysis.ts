@@ -16,7 +16,7 @@
 // `semver` (installed, 7.x) ships no bundled types and @types/semver isn't a dependency; the tiny
 // surface we use is declared ambiently in ./semver.d.ts so the version-conflict analyzer stays typed.
 import { validRange, intersects, minVersion, gt } from 'semver';
-import { shipsOwnTypes } from '../lib/selfTypedPackages';
+import { shipsOwnTypes, typingsMajorMayLag } from '../lib/selfTypedPackages';
 
 export type DependencySeverity = 'high' | 'medium' | 'low';
 
@@ -461,6 +461,7 @@ export function detectTypesMajorMismatch(packageJsonContent: string | null): Dep
       });
       continue;
     }
+    if (typingsMajorMayLag(runtimeName)) { seen.add(typesName); continue; } // typings lag this runtime by design (Q-1066)
     // Non-intersecting ranges ⇒ the types major cannot line up with the runtime major.
     if (!rangesIncompatible(runtimeRange, typesRange)) continue;
     seen.add(typesName);

@@ -443,6 +443,7 @@ import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLev
 import { tieredMarkupUsd, realProviderCostUsd } from '../AgentV3/providerRates';
 import { splitUnbilledCost, absorbedWorkDetail } from '../AgentV3/unbilledTurns';
 import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_POST_FIX_REVIEW, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
+import { bugHuntCostReading, bugHuntCostLine } from '../AgentV3/bugHuntCost';
 import { postFixRecheckBudgetMs, postFixRecheckOutcome } from '../AgentV3/postFixReview';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
@@ -26098,6 +26099,23 @@ async function noteBuildOutcome(
         // OUR VM cost, measured whether or not the user was charged for it.
         sandboxSeconds: livePreviewCharge.measuredSeconds,
       });
+      /**
+       * 💰 WHAT THE DEEP BUG HUNT COST (Q-1042).
+       *
+       * The admin's instinct — run the hunt on the cheap rung — rests on ONE archaeological figure from
+       * ONE report ("523,374 input tokens = 34.4% of the build"), found by reading that report by hand.
+       * This puts the same number on EVERY build, so the routing decision can be made from a trend
+       * instead of an anecdote. Routing itself is deliberately untouched: `cheapBuildFloorRunners`
+       * carries six separate verbatim admin decisions with env overrides that always win, and CLAUDE.md
+       * says to confirm before changing any of it.
+       *
+       * It is also Q-1040's other half: now that the user is ASKED to pay for this pass, the record says
+       * what that yes cost. Recorded HERE because only now is the provider ledger final.
+       */
+      try {
+        const huntLine = bugHuntCostLine(bugHuntCostReading(providerLedger.entries()));
+        if (huntLine) buildDiag.record({ phase: 'build', severity: 'info', code: 'BUG_HUNT_COST', message: huntLine, autoResolved: true });
+      } catch { /* a cost line never affects a build */ }
       /**
        * WHY DO BUILDS FAIL? — the platform-level ledger (failureLedger.ts).
        *

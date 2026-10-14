@@ -95970,3 +95970,11 @@ tarballs Capacitor ships (`ios-spm-template` — what `cap add ios` generates �
 Node 22 and no network; the generated `AppDelegate.swift`/`SceneDelegate.swift` were compared byte for byte with the SPM tarball's first. Verified under Node 20 and by reversion (breaking the
 Scene branch fails it; restored). **New open row Q-1060:** CI tests Node 20 while production and every release workflow run Node 22 — a gate exercising a runtime nobody ships. Not fixed here: moving 38,000 tests
 to Node 22 is its own change (run the suite on 22 first, then flip `ci.yml`).
+
+## 2026-10-14 — Autopsy 398db9f3 (PAWTRACE lost-and-found platform; Weak tier, KIMI; RED gate; 25-min cap; not charged)
+
+**Ledger (545 timeline entries, 500 kept — the middle 45 are gone):** ✅ self-healed 5 (3× tsc TS2345 from `@types/express` v5, the GLM silent rung, 2 rejected writes) · 🔀 workaround 1 (planner fell to the Haiku rung) · ⏭️ skipped 0 reported · ❌ shipped imperfect: RED gate, 1 unnamed blocker, 2 design-standard pages, the types-mismatch warning · 🥵 struggle: planner 113 s thrown away, first preview at 1,220 s of 1,500 s, 5 todo-only turns, 2 hand-backs the model answered without changing anything, ETA 1.9× over.
+**Fixed in this change (each proven by reversion):** Q-1061 planner prompt now fits its allowance (`PLANNER_BUDGET`) · Q-1062 the gate names its blockers · Q-1063 typings follow a pinned runtime (`TYPINGS_TRACK_RUNTIME`).
+**Missing subsystem named:** a serial single-file-per-turn writer for COMPLEX apps (Q-1064) — the admin's decision, options in the queue.
+**Not fixed, with state:** Q-1064/1065/1066/1067/1070 🟡 BLOCKED; Q-1068/1069 OPEN. See `BUILD_REPORT_QUEUE.md`.
+**Earlier fix that was incomplete:** 6461025c raised the planner allowance 8,000 → 16,000 and repaired one hand-edit path for the `@types/express` drift; the CLASS (prompt larger than allowance; pinned runtime with unpinned typings) was left, and came back.

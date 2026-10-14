@@ -23732,6 +23732,7 @@ async function noteBuildOutcome(
         const gateFindings = () => ({
           // Counted from what this build actually recorded, so the gate and the report cannot disagree.
           blockers: buildDiag.shippingIssueCount('error'),
+          blockerLabels: buildDiag.shippingIssueLabels('error'),
           // Security findings already arrive as error-severity issues above; counting them again here
           // would report one problem twice in the same sentence.
           highSeverity: 0,

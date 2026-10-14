@@ -2537,6 +2537,23 @@ export class ToolDispatcher {
     return undefined;
   }
 
+  /**
+   * Go-live PR 13 wiring: file paths + package.json for the requirements analyzer. Bounded (10 s each),
+   * never throws; null when the sandbox cannot answer. Read-only.
+   */
+  async projectSnapshot(): Promise<{ paths: string[]; packageJson: string | null } | null> {
+    try {
+      const files = await withTimeout(this.actuator.listFiles(this.workspaceId), 10_000, 'listFiles');
+      const paths = files.filter((p) => !/(^|[\\/])(node_modules|dist|build|\.next|\.git)([\\/]|$)/i.test(p)).slice(0, 2000);
+      const pkg = paths.some((p) => p.replace(/^\.?\//, '') === 'package.json')
+        ? await withTimeout(this.actuator.readFile(this.workspaceId, 'package.json'), 10_000, 'readFile').catch(() => null)
+        : null;
+      return { paths, packageJson: pkg };
+    } catch {
+      return null;
+    }
+  }
+
   private async readEvalSnapshot(): Promise<{ files: string[]; sources: EvalSourceFile[] }> {
     const SOURCE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|astro|html?|py|rb|java|php|go)$/i;
     const SKIP_DIR = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)/i;

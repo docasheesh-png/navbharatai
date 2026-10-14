@@ -169,7 +169,12 @@ describe('the wiring', () => {
     // `reviewDeferredToShell` is `awaitsShellNow()` — so a module turn that DID deliver a running app
     // gets reviewed, instead of being deferred to a shell its own build already made redundant.
     expect(route).toContain('const reviewDeferredToShell = awaitsShellNow();');
-    expect(route).toContain('if (result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell) {');
+    // The four conditions and their order, NOT the punctuation that used to close the line. This
+    // assertion was `if (… && !reviewDeferredToShell) {` until Q-1040 legitimately appended a fifth
+    // condition (the user's own answer to the bug-hunt offer) and the guard failed for a change that
+    // kept its property perfectly. What it exists to lock is that `!reviewDeferredToShell` gates the
+    // review — so that is what it asks, and a later condition may be added without silently dropping it.
+    expect(route).toContain('if (result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell');
     expect(route).toMatch(/if \(pausedPlanRef && !projectModuleRef && result\.ok && runProof\(\)\.proven && retireUnbuiltPlan\(pausedPlanRef\)\)/);
   });
 

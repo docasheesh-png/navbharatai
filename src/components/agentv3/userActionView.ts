@@ -27,6 +27,14 @@ export interface UserActionView {
   cta?: { view: 'billing' | 'settings'; settingsScreen?: 'database'; label: string };
   envName?: string;
   callId?: string;
+  /**
+   * What this gate's buttons say. Absent ⇒ "Approve & build" / "Reject", today's fixed pair.
+   *
+   * A gate that does not build must not offer to build (admin 2026-10-13): the optional bug hunt is an
+   * extra look at a finished app, so its buttons read "Find and fix bugs" / "Not now".
+   */
+  approveLabel?: string;
+  denyLabel?: string;
   blocking: boolean;
   status: UserActionStatus;
   createdAt: number;
@@ -120,7 +128,7 @@ export function traySummary(openCount: number): string {
 /** What the running build is asking for RIGHT NOW, as the panel already holds it in memory. */
 export interface LiveAsks {
   pendingSecrets?: { callId: string; secrets: Array<{ name: string; why: string }> };
-  pendingPermission?: { callId: string; action: string };
+  pendingPermission?: { callId: string; action: string; title?: string; why?: string; approveLabel?: string; denyLabel?: string };
   pendingClarify?: { questions: string[] };
 }
 
@@ -156,8 +164,21 @@ export function mergeLiveActions(stored: readonly UserActionView[], live: LiveAs
     if (!s?.name) continue;
     add({ ...base, id: `live:secret:${s.name}`, kind: 'secret', title: s.name, why: s.why ?? '', envName: s.name, callId: live.pendingSecrets?.callId });
   }
-  if (live.pendingPermission?.action) {
-    add({ ...base, id: `live:approve:${live.pendingPermission.callId}`, kind: 'approve', title: live.pendingPermission.action, why: '', callId: live.pendingPermission.callId, blocking: true });
+  if (live.pendingPermission?.action || live.pendingPermission?.title) {
+    const g = live.pendingPermission;
+    add({
+      ...base,
+      id: `live:approve:${g.callId}`,
+      kind: 'approve',
+      // The gate's own short line when it gave one, else the whole question — which is what every
+      // gate did before the structured shape existed.
+      title: g.title?.trim() || g.action,
+      why: g.why?.trim() ?? '',
+      callId: g.callId,
+      blocking: true,
+      ...(g.approveLabel?.trim() ? { approveLabel: g.approveLabel.trim() } : {}),
+      ...(g.denyLabel?.trim() ? { denyLabel: g.denyLabel.trim() } : {}),
+    });
   }
   for (const q of live.pendingClarify?.questions ?? []) {
     if (!q) continue;

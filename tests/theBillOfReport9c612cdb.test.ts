@@ -15,6 +15,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { realProviderCostUsd, realRateFor, tieredMarkupUsd, type ProviderCostEntry } from '../src/server/AgentV3/providerRates';
+import { createProviderUsageLedger } from '../src/server/AgentV3/ProviderUsageLedger';
 import { applyBuildDiscount } from '../src/server/lib/buildDiscount';
 import { sandboxBillableUsd } from '../src/server/AgentV3/sandboxCost';
 
@@ -51,9 +52,52 @@ describe('report 9c612cdb, recomputed with the code\'s own functions', () => {
     expect(Math.abs(paid.payUsd - REPORT.billedUsd)).toBeLessThan(1e-5);
   });
 
-  it('the fast lane\'s GLM is counted ONCE (twice would not reproduce the report)', () => {
-    const twice = realProviderCostUsd([...ENTRIES, ENTRIES[1]]);
-    expect(Math.abs(twice - REPORT.realCostUsd)).toBeGreaterThan(1e-6);
+  /**
+   * 🔴 THIS TEST COULD NOT FAIL, AND IT IS THE WORST KIND OF DEFECT (Q-1035).
+   *
+   * It used to read:
+   *
+   *     const twice = realProviderCostUsd([...ENTRIES, ENTRIES[1]]);
+   *     expect(Math.abs(twice - REPORT.realCostUsd)).toBeGreaterThan(1e-6);
+   *
+   * `realProviderCostUsd` is a SUM over its argument. Handing a sum an extra entry changes the total —
+   * that is a property of addition, not of this system, and it holds no matter how the ledger behaves.
+   * The test was named for a claim about the LEDGER ("GLM is counted ONCE") while asserting something
+   * arithmetic could never disprove. A test that cannot fail is worse than no test: it produces the
+   * exact confidence a real double count would need in order to pass unnoticed.
+   *
+   * 🧬 AND THE SIMULATION WAS WRONG TOO, which is why it could never have caught the bug even in
+   * principle. The ledger keys its slices by provider + model + phase, so recording the same GLM turn
+   * twice yields ONE slice with DOUBLED tokens — never the two separate entries the old array
+   * modelled. The shape it was testing for cannot occur.
+   *
+   * So the claim is now checked where it lives: the cost is reproduced THROUGH the ledger, and a
+   * ledger that recorded one extra GLM turn is asserted to be both more expensive AND visibly so.
+   *
+   * ⚠️ WHAT IS DELIBERATELY NOT ASSERTED: how many GLM calls the real build logged. Q-1003 records GLM
+   * crawling TWICE on this very report, so "GLM answered once" is not a verified fact and this test
+   * will not pretend otherwise. `ENTRIES` are the report's merged SLICES; the call count below is a
+   * property of this test's own construction, used only to prove a double record is detectable.
+   */
+  it('🔒 the cost is reproducible THROUGH the ledger, and a double record is visible and more expensive', () => {
+    const once = createProviderUsageLedger();
+    for (const e of ENTRIES) once.add(e.provider, e.usage, e.model);
+    // The report's figure comes back out of the ledger's own entries, not a hand-written array.
+    expect(realProviderCostUsd(once.entries())).toBeCloseTo(REPORT.realCostUsd, 6);
+
+    // What a REAL double count looks like: the same GLM turn recorded a second time.
+    const twice = createProviderUsageLedger();
+    for (const e of ENTRIES) twice.add(e.provider, e.usage, e.model);
+    twice.add(ENTRIES[1].provider, ENTRIES[1].usage, ENTRIES[1].model);
+
+    const glm = twice.entries().filter((e) => e.provider === 'GLM');
+    expect(glm).toHaveLength(1); // merged into one slice — NOT the two entries the old test simulated
+    expect(glm[0].usage.inputTokens).toBe(ENTRIES[1].usage.inputTokens * 2);
+    expect(glm[0].usage.outputTokens).toBe(ENTRIES[1].usage.outputTokens * 2);
+    // The ledger SAYS it happened, so a double count cannot hide behind a plausible total.
+    expect(twice.callsByProvider?.().GLM).toBe((once.callsByProvider?.().GLM ?? 0) + 1);
+    // And it costs more, which is the consequence the user would have paid for.
+    expect(realProviderCostUsd(twice.entries())).toBeGreaterThan(REPORT.realCostUsd);
   });
 
   it('pricing the cache hits at the miss rate would have tripled our own cost — the claim the docs made', () => {

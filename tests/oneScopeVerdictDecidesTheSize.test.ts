@@ -92,7 +92,14 @@ describe('🔒 the route sizes once', () => {
     expect(route).toContain('const scope = appScope.scope;');
     expect(route).toContain('const { scope, dispute } = appScope;');
     expect(route).toContain('megaProject: appScope.projectMode,');
-    expect(route).toContain('&& !pastedFormat.keep && appScope.projectMode) {');
+    // UPDATED 2026-10-14 (autopsy e3135b7b, Q-1061): the gate gained `&& !templateIsTheFinishedApp(seededScaffold)`
+    // — a seeded simple-tier template IS the finished app, so there is nothing to decompose. Pinned as a
+    // PROPERTY of the condition rather than its exact text, because the literal form is what broke here: a
+    // guard that pins punctuation fails on every correct change and teaches nothing (the class named in
+    // `nobodyPlansAnAppAlreadyWritten.test.ts`).
+    const planGate = route.slice(route.indexOf('if (!pPlan &&'), route.indexOf(') {', route.indexOf('if (!pPlan &&')) + 3);
+    expect(planGate).toContain('appScope.projectMode'); // ← project mode reads THE one verdict, not a second derivation
+    expect(planGate).not.toMatch(/megaProjectSignals\(|analyzeAppScope\(/);
     expect(route).toContain('scope: { large: appScope.large, signals: appScope.scope.signals },');
   });
 

@@ -40,7 +40,7 @@ import { offerBugHunt, BUG_HUNT_WAIT_MS } from '../AgentV3/optionalBugHunt';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
-import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild } from '../AgentV3/goldenScaffolds/registry';
+import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp } from '../AgentV3/goldenScaffolds/registry';
 import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
@@ -418,7 +418,7 @@ import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/ca
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { shellModuleFor, shellStillAwaited, recordModuleDelivery, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { shellModuleFor, shellStillAwaited, recordModuleDelivery, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDown, roadmapStandDownMessage, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout } from '../AgentV3/asyncUtils';
@@ -14577,19 +14577,25 @@ async function noteBuildOutcome(
           // minutes before the first line of code. Project mode is the stronger strategy for a prompt it
           // reads as a mega-project (it builds the WHOLE thing across turns; a roadmap narrows it to step
           // 1), so it owns the build and the roadmap stands down, said aloud in the report.
-          const projectModeOwns = roadmapStandsDownForProjectMode({
+          // AND NOBODY PLANS AN APP THAT IS ALREADY FINISHED (autopsy e3135b7b — the Quran reader). The gate read
+          // only the project-mode half; a seeded simple-tier template is the other thing that already owns a build,
+          // and it is the FINISHED app. One predicate answers both, so a third owner cannot be forgotten at this
+          // call site — roadmapStandsDown. Its sibling gate is the project planner's, which reports the same fact
+          // through projectModeDiagnosis ('template-is-the-app').
+          const standDown = roadmapStandsDown({
             projectModeOn: projectModeEnabled(process.env, { userId, email }),
             planFirst,
             megaProject: appScope.projectMode,
+            templateIsTheApp: templateIsTheFinishedApp(seededScaffold),
           });
-          if (projectModeOwns && scope.decision === 'analyze' && !dispute) {
+          if (standDown && scope.decision === 'analyze' && !dispute) {
             buildDiag.record({
               phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_STOOD_DOWN', autoResolved: true,
-              message: 'Mega-app roadmap stood down: Software Project Mode will decompose this build, so one planner runs instead of two.',
+              message: roadmapStandDownMessage(standDown),
               detail: `scope signals: ${scope.signals.join('; ')}`,
             });
           }
-          if (scope.decision === 'analyze' && !dispute && !projectModeOwns) {
+          if (scope.decision === 'analyze' && !dispute && !standDown) {
             const rmStartedAt = Date.now();
             let rmProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
             const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({
@@ -17905,6 +17911,7 @@ async function noteBuildOutcome(
           // The text the gate sized and the verdict it read — never a second derivation (Q-138).
           prompt: planning.sizing,
           scope: { large: appScope.large, signals: appScope.scope.signals },
+          templateIsTheApp: templateIsTheFinishedApp(seededScaffold),
         });
         buildDiag.record({ phase: 'plan', severity: 'info', code: pmDiag.code, message: pmDiag.message, detail: pmDiag.detail, autoResolved: true });
       } catch { /* diagnostics are best-effort and must never touch a build */ }
@@ -17964,7 +17971,10 @@ async function noteBuildOutcome(
             ppLast.outputTokens = t.usage.outputTokens;
             return t.text;
           };
-          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && appScope.projectMode) {
+          // `!templateIsTheApp`: a seeded simple-tier template IS the finished app, so there is nothing to split
+          // into modules (autopsy e3135b7b — `panchang` is such a chip and reached exactly this line). The report
+          // says so through projectModeDiagnosis's 'template-is-the-app'.
+          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && appScope.projectMode && !templateIsTheFinishedApp(seededScaffold)) {
             ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);

@@ -127,7 +127,16 @@ describe('the route wiring (source guards)', () => {
   it('a seeded page is improved in place: no fast-lane regeneration, no milestones, no module plan', () => {
     expect(route).toContain('const fastLaneWouldRun = !goldenPreseeded && pastedSeed.size === 0 && oneShotEnabled()');
     expect(route).toContain("if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode && !pastedFormat.keep) {");
-    expect(route).toContain("if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && appScope.projectMode) {");
+    // UPDATED 2026-10-14 (autopsy e3135b7b, Q-1061): the gate gained `&& !templateIsTheFinishedApp(seededScaffold)`
+    // — a seeded simple-tier template IS the finished app, so there is nothing to decompose. Pinned as a
+    // PROPERTY of the condition rather than its exact text, because the literal form is what broke here: a
+    // guard that pins punctuation fails on every correct change and teaches nothing (the class named in
+    // `nobodyPlansAnAppAlreadyWritten.test.ts`).
+    const planGate = route.slice(route.indexOf('if (!pPlan &&'), route.indexOf(') {', route.indexOf('if (!pPlan &&')) + 3);
+    expect(planGate).toContain("intent === 'new_build'");
+    expect(planGate).toContain('!isEditMode');
+    expect(planGate).toContain('!pastedFormat.keep'); // ← the property THIS test exists for
+    expect(planGate).toContain('appScope.projectMode');
   });
 
   it('the user\'s own page is never billed as our delivered work unless the build changed it', () => {

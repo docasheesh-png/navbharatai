@@ -310,7 +310,11 @@ describe('WIRING — all FIVE places the compiler speaks to the model, not just 
 
   it('the endgame batch repair is annotated', () => {
     expect(endgame).toContain('const causes = tscCauseNote(tscErrorCauses(errors2, files));');
-    expect(endgame).toContain('io.llmRepair(out2 + causes, subset)');
+    // The two arguments this test is about, NOT the paren that used to close them. Q-1011 added the
+    // deadline's signal as a third argument and this guard failed for a change that kept its property
+    // exactly — the same shape as `aModuleIsNotTheWholeApp`'s review-gate guard (fixed 2026-10-13).
+    // A source guard should pin what it is about and nothing else.
+    expect(endgame).toContain('io.llmRepair(out2 + causes, subset');
   });
 
   // ⚠️ FOUND BY RULE 3 AFTER THE FIRST FOUR WERE WIRED, and it is the one that repeats: the fast lane's

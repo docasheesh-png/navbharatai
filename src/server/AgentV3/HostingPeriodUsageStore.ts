@@ -45,6 +45,9 @@ export interface PeriodUsageRecord extends PeriodUsage {
    * warnings can describe a period rather than a single day.
    */
   frontendGb?: number;
+  /** FRONTEND_TRAFFIC_METER billing: GB above the frontend allowance already charged this period. */
+  frontendGbBilled?: number;
+  frontendInrBilled?: number;
   updatedAt: number;
 }
 
@@ -142,6 +145,23 @@ class HostingPeriodUsageStore {
     } catch (e) {
       // Quiet: the cost of losing this is one repeated warning, not a wrong bill.
       console.warn(`[hosting-bill] could not record usage warning for ${userId}:`, (e as Error)?.message ?? e);
+    }
+  }
+
+  /** Advance the FRONTEND total together with what was charged for it, in one write. */
+  async recordFrontendBilled(userId: string, periodStart: string, patch: { frontendGb: number; frontendGbBilled: number; addInr: number }): Promise<void> {
+    const db = this.getDb();
+    if (!db || !userId || !periodStart) return;
+    try {
+      await db.collection(COLLECTION).doc(docId(userId, periodStart)).set({
+        userId, periodStart,
+        frontendGb: Math.max(0, Number(patch.frontendGb) || 0),
+        frontendGbBilled: Math.max(0, Number(patch.frontendGbBilled) || 0),
+        frontendInrBilled: admin.firestore.FieldValue.increment(Math.max(0, Number(patch.addInr) || 0)),
+        updatedAt: Date.now(),
+      }, { merge: true });
+    } catch (e) {
+      console.warn(`[hosting-bill] could not record frontend billing for ${userId}:`, (e as Error)?.message ?? e);
     }
   }
 

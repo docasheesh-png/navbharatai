@@ -72,7 +72,7 @@ export const HOSTING_ADDONS: readonly HostingAddon[] = [
     days: 30,
     max: 5,
     sellable: false,
-    unavailableReason: 'Not sold from this list. On Publish, choose “NavBharatAI runs the server” — ₹149 is taken only after the server is live. Or host it yourself, which stays free from us.',
+    unavailableReason: 'Not sold from this list. On Publish, choose “NavBharatAI runs the server” — ₹149 is taken only after the server is live, then every 30 days while its auto-renew is on (turn it off on Publish any time). Or host it yourself, which stays free from us.',
     summary: 'A real server for login, payments or an API.',
   },
   {
@@ -82,7 +82,7 @@ export const HOSTING_ADDONS: readonly HostingAddon[] = [
     days: 30,
     max: 5,
     sellable: false,
-    unavailableReason: 'Not sold from this list. On Publish, start the NavBharatAI database and API — ₹49 is taken only after both exist. Or connect your own Supabase, which stays free from us.',
+    unavailableReason: 'Not sold from this list. On Publish, start the NavBharatAI database and API — ₹49 is taken only after both exist, then every 30 days while its auto-renew is on (turn it off on Publish any time). Or connect your own Supabase, which stays free from us.',
     summary: 'A small database and the API your app calls, on the servers NavBharatAI already runs. 20,000 operations included. Not a separate machine.',
   },
   {
@@ -92,7 +92,7 @@ export const HOSTING_ADDONS: readonly HostingAddon[] = [
     days: 30,
     max: 3,
     sellable: false,
-    unavailableReason: 'Not sold from this list. On Publish, choose NavBharatAI’s database — ₹1,499 is taken only after the database is ready. Or connect your own Supabase, which stays free from us.',
+    unavailableReason: 'Not sold from this list. On Publish, choose NavBharatAI’s database — ₹1,499 is taken only after the database is ready, then every 30 days while its auto-renew is on (turn it off on Publish any time). Or connect your own Supabase, which stays free from us.',
     summary: 'A private database for one app.',
   },
   {
@@ -111,13 +111,22 @@ export function addonById(id: string | null | undefined): HostingAddon | null {
   return HOSTING_ADDONS.find((a) => a.id === String(id ?? '')) ?? null;
 }
 
+/** PRIVATE_DB_COST_PLUS disclosure (shown only while that server flag is on). Multiplier is passed in. */
+export function privateDbCostPlusTerm(multiplier: number): string {
+  return `Private database usage is billed at our actual Supabase cost × ${multiplier} (compute, disk above 8 GB, traffic). ₹1,499 a period is the minimum and is paid up front; if a period's cost-plus total is higher, only the difference is charged at renewal as a separate line with a breakdown. Usage cost × ${multiplier}; ₹1,499 minimum, zyada hua to renewal par fark katega.`;
+}
+
 /** The sentences the user ticks before a sellable add-on is bought. Generated from the row. */
 export function addonAgreementTerms(addon: HostingAddon): readonly string[] {
+  const privateDbLine = addon.id === 'dedicated_db'
+    ? ['If it is not renewed when its period ends, it is paused with your data kept — or, where it cannot be paused, it is deleted 7 days after its period ends, with a warning 3 days and 1 day before. Renew nahi kiya to 7 din baad delete ho sakta hai; pehle warning milegi.']
+    : [];
   return [
     `₹${addon.priceInr} is taken from the money you added to your wallet, for ${addon.days} days. Your welcome gift is not used.`,
     addon.summary,
     'If this purchase does not go through, nothing is charged.',
     'You can remove it whenever you want. Unused days come back to your wallet. If you are still using it — the extra website is still published, or the extra domain is still connected — remove that first. We do not keep charging for something you have removed, and we do not stop charging while you are still using it.',
+    ...privateDbLine,
   ];
 }
 
@@ -130,6 +139,18 @@ export interface HostingAddonRecord {
   agreedAt: string;
   /** Set only when this row was written after a real server URL or database id came back. */
   proof?: string;
+  /**
+   * RESELL_AUTO_RENEW: renew from the wallet at the end of each period. Only ever true when the user
+   * ticked terms that SAID so (`autoRenewAgreedAt`). Rows bought before that carry no consent and
+   * never renew by themselves.
+   */
+  autoRenew?: boolean;
+  autoRenewAgreedAt?: string;
+}
+
+/** The sentence shown (and ticked) before a server or database that auto-renews. */
+export function resellAutoRenewTerm(addon: HostingAddon): string {
+  return `It renews by itself every ${addon.days} days: ₹${addon.priceInr} is taken from the money you added, and you get a reminder 5, 3 and 1 day before. Turn auto-renew off any time on Publish — it then simply ends on its date. If your balance is short, it waits 3 days for a top-up before it is stopped. Auto-renew hota hai; Publish par kabhi bhi band kar sakte hain.`;
 }
 
 const REF_RE = /^[A-Za-z0-9_-]{8,64}$/;

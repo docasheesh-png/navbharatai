@@ -55,6 +55,7 @@ import { readHostingPlanStatus, planDays } from '../lib/hostingPlan';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
 import { sumFrontendBytes, judgeFrontendUsage } from './frontendUsage';
+import { edgeMeterEnabled, readEdgeBytesForDay, subForUrl } from './edgeTrafficMeter';
 import { decideUsageWarning, type UsageMeterKind } from '../lib/hostingUsageWarning';
 import { HOSTING_OVERAGE_INR_PER_GB } from '../../lib/hostingTiers';
 import { readWalletBalanceInr, firestoreWalletReader } from './WalletBalance';
@@ -128,22 +129,31 @@ export async function runHostingBillingSweep(opts?: {
   };
 
   const project = appsProject(env);
-  if (!project.projectId) {
-    out.notes.push(`Hosting billing skipped: ${project.message}`);
-    return out;
-  }
-
   const listing = await deploymentStore.listWithCompleteness({ limit: opts?.maxApps ?? 500 })
     .catch(() => ({ records: [] as DeploymentRecord[], complete: false }));
   out.registryComplete = listing.complete;
+  // FRONTEND_TRAFFIC_METER: the static-app pass must not depend on the server pass. It used to run only
+  // after it, so an owner with no server app — or a day Google could not be reached — was never counted.
+  const frontendOnly = async (): Promise<SweepResult> => {
+    if (edgeMeterEnabled(env)) {
+      await reportFrontendTraffic(getServerDb() as unknown, listing.records, win.day, out, env, opts?.fetchImpl)
+        .catch((e) => { out.notes.push(`frontend traffic pass failed (${e instanceof Error ? e.message : String(e)}).`); });
+    }
+    return out;
+  };
+  if (!project.projectId) {
+    out.notes.push(`Hosting billing skipped: ${project.message}`);
+    return frontendOnly();
+  }
+
   const apps = listing.records.filter(isHostedLiveApp);
-  if (apps.length === 0) return out;
+  if (apps.length === 0) return frontendOnly();
 
   const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
   const token = await auth.getAccessToken().catch(() => null);
   if (!token) {
     out.notes.push('Hosting billing skipped: could not authenticate with Google Cloud. Nothing was charged.');
-    return out;
+    return frontendOnly();
   }
 
   const billingEnabled = hostingBillingEnabled(env);
@@ -329,7 +339,7 @@ export async function runHostingBillingSweep(opts?: {
     }
   }
 
-  await reportFrontendTraffic(db, listing.records, win.day, out).catch((e) => {
+  await reportFrontendTraffic(db, listing.records, win.day, out, env, opts?.fetchImpl).catch((e) => {
     // Reporting must never affect billing. It runs after every charge is settled, and a failure here
     // costs a line in the admin log, not a rupee.
     out.notes.push(`frontend traffic report failed (${e instanceof Error ? e.message : String(e)}).`);
@@ -353,12 +363,44 @@ export async function runHostingBillingSweep(opts?: {
  * admin until a meter in the SERVING path exists. Same shape as slice 2 before slice 2.1: measure,
  * report, and let the switch be its own decision.
  */
+/**
+ * PURE. The frontend twin of the server overage rule, on its OWN running total and its own
+ * "already billed" GB, so the two allowances are "counted separately, not added together".
+ * Charges only with an agreed plan AND NAVBHARAT_BILL_HOSTING=on; otherwise the GB are absorbed.
+ */
+export function decideFrontendCharge(o: {
+  gbToday: number;
+  record: { frontendGb?: number; frontendGbBilled?: number };
+  includedGb: number;
+  agreed: boolean;
+  billingEnabled: boolean;
+}): { charge: boolean; inr: number; billableGb: number; periodGb: number; reason: string } {
+  const d = decideOverage({
+    gbToday: o.gbToday,
+    usage: { gbBefore: Math.max(0, Number(o.record.frontendGb) || 0), gbBilled: Math.max(0, Number(o.record.frontendGbBilled) || 0) } as never,
+    includedGb: o.includedGb,
+    ratePerGb: HOSTING_OVERAGE_INR_PER_GB,
+    hasPlan: true,
+    agreed: o.agreed,
+  });
+  if (d.charge && !o.billingEnabled) return { charge: false, inr: 0, billableGb: 0, periodGb: d.periodGb, reason: `₹${d.inr} absorbed (NAVBHARAT_BILL_HOSTING off)` };
+  return { charge: d.charge, inr: d.charge ? d.inr : 0, billableGb: d.charge ? d.billableGb : 0, periodGb: d.periodGb, reason: d.reason.replace(/-/g, ' ') };
+}
+
 async function reportFrontendTraffic(
   db: unknown,
   records: readonly DeploymentRecord[],
   day: string,
   out: SweepResult,
+  env: NodeJS.ProcessEnv = process.env,
+  fetchImpl?: typeof fetch,
 ): Promise<void> {
+  // FRONTEND_TRAFFIC_METER: bytes the EDGE served (all callers), instead of the browser beacon (a floor).
+  const edge = edgeMeterEnabled(env) ? await readEdgeBytesForDay(day, env, fetchImpl ?? fetch) : null;
+  if (edgeMeterEnabled(env) && !edge) {
+    out.notes.push(`frontend edge meter could not be read for ${day} — nothing counted or charged for it.`);
+    return;
+  }
   const byOwner = new Map<string, DeploymentRecord[]>();
   for (const r of records) {
     // Live, published, and NOT a container app — the container apps are billed by the loop above and
@@ -374,8 +416,10 @@ async function reportFrontendTraffic(
   if (byOwner.size === 0) return;
 
   for (const [ownerId, owned] of byOwner) {
-    const perApp = await Promise.all(owned.map((r) =>
-      siteAnalyticsStore.bytesForDay(siteIdForWorkspace(String(r.workspaceId ?? '')), day).catch(() => null)));
+    const perApp = edge
+      ? owned.map((r) => { const sub = subForUrl(r.url); return sub ? (edge.get(sub) ?? 0) : null; })
+      : await Promise.all(owned.map((r) =>
+        siteAnalyticsStore.bytesForDay(siteIdForWorkspace(String(r.workspaceId ?? '')), day).catch(() => null)));
     const usage = sumFrontendBytes(perApp);
     // Nothing measured and nothing to say — an account whose apps had no visitors does not need a line.
     if (usage.bytes === 0 && usage.appsUnmeasured === 0) continue;
@@ -396,6 +440,52 @@ async function reportFrontendTraffic(
     if (!periodStart || !verdict.includedGb) continue;
     const record = await hostingPeriodUsageStore.read(ownerId, periodStart).catch(() => null);
     if (!record) continue;  // unreadable ⇒ do not advance a total or warn off a number we do not have
+    if (edge) {
+      // ONE claim per owner per day for the frontend meter, taken before the total moves, so a re-run
+      // can neither add the same day twice nor charge it twice.
+      const claimed = await hostingBillingStore.claim({ subject: `fe:${ownerId}`, day, userId: ownerId, billedInr: 0, costUsd: 0 });
+      if (!claimed) { out.notes.push(`${ownerId}: frontend already processed for ${day} — nothing charged.`); continue; }
+      const fe = decideFrontendCharge({
+        gbToday: verdict.gb,
+        record,
+        includedGb: verdict.includedGb,
+        agreed: !!plan?.agreedAt,
+        billingEnabled: hostingBillingEnabled(env),
+      });
+      let addInr = 0;
+      let gbBilled = Math.max(0, Number(record.frontendGbBilled) || 0);
+      if (fe.charge) {
+        const res = await debitWalletRolledUp(db as never, ownerId, {
+          feature: 'hosting',
+          billedInr: fe.inr,
+          rollupRef: `${hostingLedgerRef(day)}_frontend`,
+          description: `Visitor traffic above your plan — ${fe.billableGb.toFixed(3)} GB at ₹${HOSTING_OVERAGE_INR_PER_GB}/GB`,
+        }).catch(() => ({ ok: false as const, error: 'debit threw' }));
+        if (res.ok) {
+          addInr = fe.inr;
+          await hostingBillingStore.markDebited(`fe:${ownerId}`, day, res.tokensDebited);
+          out.charged++;
+          out.totalInr = Math.round((out.totalInr + fe.inr) * 100) / 100;
+        } else {
+          // Owed like server traffic: recorded as debt, reminded, 3-day grace (settleDebt).
+          await hostingPeriodUsageStore.record(ownerId, periodStart, {
+            periodGb: record.gbBefore, gbBilled: record.gbBilled, addInrBilled: 0,
+            owedInr: Math.round((record.owedInr + fe.inr) * 100) / 100,
+            owedSince: record.owedSince ?? new Date().toISOString(),
+          });
+          await settleDebt(db, ownerId, owned, Math.round((record.owedInr + fe.inr) * 100) / 100,
+            record.owedSince ?? new Date().toISOString(), Date.now(), out);
+        }
+        gbBilled = Math.round((gbBilled + fe.billableGb) * 1e6) / 1e6;
+      }
+      out.notes.push(`${ownerId}: frontend ${fe.periodGb} GB of ${verdict.includedGb} GB — ${fe.reason}${fe.charge ? ` ₹${fe.inr}` : ''}.`);
+      await hostingPeriodUsageStore.recordFrontendBilled(ownerId, periodStart, { frontendGb: fe.periodGb, frontendGbBilled: gbBilled, addInr });
+      await warnOnUsage({
+        ownerId, meter: 'frontend', usedGb: fe.periodGb, includedGb: verdict.includedGb,
+        periodStart, warnedFor: record.warnedFor, out,
+      });
+      continue;
+    }
     const periodGb = Math.round((Math.max(0, Number(record.frontendGb) || 0) + verdict.gb) * 1e6) / 1e6;
     await hostingPeriodUsageStore.recordFrontend(ownerId, periodStart, periodGb);
     await warnOnUsage({

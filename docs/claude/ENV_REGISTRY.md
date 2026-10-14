@@ -4254,6 +4254,35 @@ behind `AGENTV3_TOKEN_COMPACT`).
 real money) once with all flags off (baseline) and once with the flag(s) on, then `npm run bench:compare`.
 Turn flags on one or two at a time so a regression has one owner.
 
+## Purchase audit flags (2026-10-13, branch fix/purchase-audit)
+
+All three are **OFF unless set to `on`**. None of them charges anyone or changes a price.
+
+| Key | Default | What it does when `on` |
+|---|---|---|
+| `RESELL_EXPIRY_SWEEP` | off | Every 6 h (exclusive scheduler job `resell-expiry-sweep`): reminds the owner 3 and 1 days before a paid extra server / small database / private database ends; 3 days after expiry takes an **extra server** down (code kept) and marks the row `lapsedAt`. A small database already stops at expiry (data API 402); the owner is now told. A **private database is never deleted** by the sweep — it is listed in the log for the admin. Never debits a wallet. |
+| `RESELL_DUPLICATE_GUARD` | off | Publish → "NavBharatAI database (private)" refuses to create a SECOND Supabase project while an expired, never-removed one exists for the same app, and offers Remove for it instead (the stop route can now find that expired row). |
+| `LAPSE_PAUSE_SERVER_APPS` | off | When a hosting plan lapses, apps that run a server (Cloud Run) are taken offline too, even inside the free 3 — free accounts get 0 servers and the plan terms already say server apps wait offline. Apps with their own paid extra-server add-on still in period are kept. |
+
+**Verify:** `npx vitest run tests/purchaseAudit.test.ts`. On staging, set the flag, create a test add-on row with
+`expiresAt` in the past, and run the job with `scheduler.runNow('resell-expiry-sweep')`.
+
+### Auto-renew, private database policy, frontend meter, cost-plus (2026-10-13, same branch)
+
+All **OFF unless set**. No price changes.
+
+| Key | Default | What it does |
+|---|---|---|
+| `RESELL_AUTO_RENEW` | off | Extra server (₹149), small DB (₹49) and private DB (₹1,499) renew every 30 days from the wallet (paid money only, never the gift). Reminders 5/3/1 days ahead; renews from 12 h before expiry in ONE transaction (ledger key `hostingaddon_renew_<ref>_<oldExpiresAt>`, so no double charge); short balance → one notice, 3-day grace, then the normal `RESELL_EXPIRY_SWEEP` lapse. Only rows bought with the renewal term ticked renew; a per-resource switch on Publish (`POST /api/agentv3/resell/auto-renew`) turns it off. |
+| `PRIVATE_DB_EXPIRY_POLICY` | off | Needs `RESELL_EXPIRY_SWEEP=on`. For a lapsed private DB: pause it (if `PRIVATE_DB_ORG_PAUSABLE=on`) or warn 3 and 1 days ahead and **delete** the Supabase project at period end + `PRIVATE_DB_DELETE_AFTER_DAYS`. Every step in the admin audit log (`resell.private_db.*`). |
+| `PRIVATE_DB_ORG_PAUSABLE` | off | Set `on` ONLY if our Supabase org is on the Free plan — Supabase docs: paid-plan projects cannot be paused, and a paused project costs no compute. |
+| `PRIVATE_DB_DELETE_AFTER_DAYS` | 7 | Days after period end before deletion (min 4 so both warnings fit). |
+| `FRONTEND_TRAFFIC_METER` | off | Visitor bytes from the Cloudflare Worker (Analytics Engine) instead of the browser beacon; per owner per day claim `fe:<owner>`; warnings 80%/100%; with `NAVBHARAT_BILL_HOSTING=on` and an agreed plan, ₹20/GB above `includedFrontendGb`, idempotent per day/period (rollup `<hostingLedgerRef>_frontend`). |
+| `CF_ACCOUNT_ID`, `CF_ANALYTICS_TOKEN` | — | Needed by the meter (token: Account Analytics Read). Secret — never log. |
+| `NBAI_TRAFFIC_DATASET` | `nbai_traffic` | Analytics Engine dataset; bind it in the Worker as `NBAI_TRAFFIC`, then paste+deploy the Worker. |
+| `PRIVATE_DB_COST_PLUS` | off | Private DB = Supabase cost × multiplier. ₹1,499 stays the up-front minimum; at renewal only the part above it is charged as a separate ledger line (`privatedb_costplus_<ref>_<periodEnd>`). Usage: compute size + disk from the Management API (no per-project bill endpoint exists); unit prices in `privateDbCostPlus.ts` **need verification**; egress counted 0. |
+| `PRIVATE_DB_COST_MULTIPLIER` | 1.5 | Clamped to [1, 5]. |
+
 ---
 
 ## `AGENTV3_BUG_HUNT_ASK` — the deep bug hunt is OFFERED, not assumed (admin 2026-10-13)

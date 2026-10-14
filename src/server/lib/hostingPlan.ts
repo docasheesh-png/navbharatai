@@ -553,6 +553,30 @@ export interface PausableApp {
   workspaceId: string;
   status?: string;
   updatedAt?: number;
+  /** Registry fields that say whether the app runs a server (see recordHasHostedServer). */
+  providerId?: string;
+  service?: string;
+}
+
+/**
+ * PURE (LAPSE_PAUSE_SERVER_APPS). Apps that run a SERVER must also go offline when a plan lapses,
+ * even inside the free allowance: free accounts get 0 servers, and the agreement says "Apps that need
+ * a server run only on a plan. If the plan ends, they wait offline". `appsToPauseOnLapse` only counts
+ * apps, so a server app among the first free three kept its container running on our bill.
+ * `keep` = workspaces with their own paid extra-server add-on still inside its period.
+ */
+export function serverAppsToPauseOnLapse(
+  apps: ReadonlyArray<PausableApp>,
+  alreadyPausing: ReadonlyArray<string>,
+  keep: ReadonlyArray<string> = [],
+  hasServer: (a: PausableApp) => boolean = (a) => a.providerId === 'navbharat-cloud' || !!String(a.service ?? '').trim(),
+): string[] {
+  const skip = new Set([...alreadyPausing, ...keep]);
+  return (apps || [])
+    .filter((a) => a && typeof a.workspaceId === 'string' && a.workspaceId.length > 0)
+    .filter((a) => (a.status ?? 'active') === 'active')
+    .filter((a) => !skip.has(a.workspaceId) && hasServer(a))
+    .map((a) => a.workspaceId);
 }
 
 /**

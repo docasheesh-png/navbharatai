@@ -50,7 +50,7 @@ import {
   getProjectState, restoreProject, projectStateMessage, canWake, stateNeedsOwner,
 } from '../lib/supabaseProjectState';
 import { projectRefsInVault } from '../lib/supabasePauseWatch';
-import { provisionDatabaseForUser, freshAccessToken, saveUserSecrets } from '../lib/supabaseProvisionFlow';
+import { provisionDatabaseForUser, saveUserSecrets, freshAccessToken } from '../lib/supabaseProvisionFlow';
 import { reusedDatabaseNote } from '../lib/databaseReuse';
 import { getConversationStore } from '../AgentV3/sharedConversationStore';
 import { runPostgresQuery, isPostgresUrl } from '../lib/postgresQuery';

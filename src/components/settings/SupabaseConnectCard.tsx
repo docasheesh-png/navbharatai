@@ -336,7 +336,9 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
   const lifecycle = async (kind: 'test' | 'rotate'): Promise<void> => {
     setBusy(kind); setError(''); setDone('');
     try {
-      const res = await authedFetch(`/api/integrations/supabase/${kind}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      // Literal paths (not `${kind}`) so the route census sees both callers.
+      const url = kind === 'test' ? '/api/integrations/supabase/test' : '/api/integrations/supabase/rotate';
+      const res = await authedFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const data = await res.json().catch(() => null) as { ok?: boolean; detail?: string; error?: string } | null;
       if (data?.ok) setDone(data.detail || 'Done.'); else setError(data?.detail || data?.error || 'That did not work. Please try again.');
     } catch {

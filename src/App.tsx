@@ -1,4 +1,6 @@
 import UpdateBanner from './components/UpdateBanner';
+import { usePublicFlags } from './lib/publicFlags';
+import { parseWalletIntent, type WalletIntent } from './lib/walletIntent';
 import { platformFixRequestPrompt } from './lib/platformFixRequest';
 import { EMPTY_PREVIEW_HTML } from './lib/workspaceSource';
 import { appFileCount, IMPORT_NOT_MERGED_MESSAGE } from './lib/projectImportTarget';
@@ -188,6 +190,9 @@ import { deliverFile, deliveryMessage } from './lib/downloadFile';
 
 export default function App() {
   // ── Phase 1 hooks ──────────────────────────────────────────────────────
+  // Go-live PR 14: default-OFF UI flags from the server, and the wallet door a Buy/Connect tap asked for.
+  const publicFlags = usePublicFlags();
+  const [walletIntent, setWalletIntent] = useState<WalletIntent | null>(null);
   const { logs, addLog } = useDevLogs();
   const { theme, setTheme, preferredLanguage, setPreferredLanguage, mode, setMode, enabledModules, setEnabledModules, isThemePickerOpen, setIsThemePickerOpen } = useSettings();
   // ───────────────────────────────────────────────────────────────────────
@@ -1493,12 +1498,18 @@ export default function App() {
   // `navbharat:navigate` with { detail: { view } } instead of threading a prop through every layer.
   useEffect(() => {
     const onNavigate = (e: Event) => {
-      const detail = (e as CustomEvent<{ view?: ViewType; settingsScreen?: string; fixPrompt?: string; autoSend?: boolean; signIn?: 'phone'; storeTab?: 'browse' | 'publish' | 'mine' | 'review'; storeWorkspaceId?: string; storeSocialKey?: string }>).detail;
+      const detail = (e as CustomEvent<{ view?: ViewType; walletIntent?: unknown; settingsScreen?: string; fixPrompt?: string; autoSend?: boolean; signIn?: 'phone'; storeTab?: 'browse' | 'publish' | 'mine' | 'review'; storeWorkspaceId?: string; storeSocialKey?: string }>).detail;
       // OPEN THE SIGN-IN SCREEN (admin 2026-08-22). The verify sheet refuses a number that belongs to
       // another account and offers the one thing that helps — signing in with it, which opens that
       // account. It rides this existing event rather than a new prop chain: the sheet lives four
       // components deep and App is the only place that owns `showAuth`.
       if (detail?.signIn === 'phone') { setShowAuth(true); return; }
+      // Go-live PR 14: a Buy/Connect tap carries which wallet door and service to open. Re-parsed
+      // through the same allowlist as a URL, so an event can never name an unknown SKU.
+      if (detail?.walletIntent && typeof detail.walletIntent === 'object') {
+        const wi = detail.walletIntent as { door?: string; skuId?: string };
+        setWalletIntent(parseWalletIntent(`?intent=${encodeURIComponent(wi.door ?? '')}&sku=${encodeURIComponent(wi.skuId ?? '')}`));
+      }
       if (detail?.view) toggleTab(detail.view);
       // A surface that hit a wall can hand v5 the whole problem (the APK build's "Fix" button). The
       // nonce lets the SAME text re-trigger, so pressing Fix twice is not silently ignored.
@@ -3865,6 +3876,8 @@ export default function App() {
               storeRail={storeRail}
               storeConfig={storeConfig}
               platformFeePct={platformFeePct}
+              walletV2Ui={publicFlags.walletV2Ui}
+              walletIntent={walletIntent}
               buyingProductId={buyingProductId}
               storePurchaseNotice={storePurchaseNotice}
               onBuyStorePack={(id) => { void buyStorePack(id); }}

@@ -85,9 +85,6 @@ const isTest = (p: string) => p.includes('.test.') || p.includes('.spec.');
  * becomes a place to hide the next dead engine.
  */
 const KNOWN_UNREACHABLE = new Set([
-  // Go-live PR 14: wallet doors, mounted in BillingPanel behind WALLET_V2_UI in a follow-up. Remove then.
-  'src/lib/walletIntent.ts',
-  'src/components/panels/WalletDoors.tsx',
   // Go-live PR 15: metering + Bill of Supply, called from purchase/usage paths behind METERING_V1. Remove when wired.
   'src/server/lib/billOfSupply.ts',
   // Go-live PR 16: BYO test/rotate/disconnect, routed behind BYO_LIFECYCLE_V1 in a follow-up. Remove then.

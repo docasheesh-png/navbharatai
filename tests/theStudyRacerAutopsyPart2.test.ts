@@ -122,7 +122,7 @@ describe('2 · when the scope analyzer and the complexity router disagree, the d
     expect(route).toContain("code: 'APP_SCOPE_DISPUTED'");
     // The dispute still gates the planner; since autopsy a2b9c802 Project Mode owning the build does too
     // (theJarvisBuildWasStoppedWhileItWorked.test.ts).
-    // UPDATED 2026-10-14 (autopsy e3135b7b, Q-1061): `projectModeOwns` became `standDown`, the one predicate that
+    // UPDATED 2026-10-14 (autopsy e3135b7b, Q-1080): `projectModeOwns` became `standDown`, the one predicate that
     // answers for EVERY thing that already owns a build (project mode OR a seeded finished template). The property
     // THIS test exists for is `!dispute` — the planner is not asked when the two classifiers disagree — so that is
     // what is pinned, not the name of the variable beside it.

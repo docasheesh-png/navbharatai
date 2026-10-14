@@ -244,7 +244,7 @@ export function roadmapStandsDownForProjectMode(input: {
 export type RoadmapStandDown = 'project-mode' | 'finished-template';
 
 /**
- * 🔴 NOBODY PLANS AN APP THAT IS ALREADY FINISHED (autopsy e3135b7b, 2026-10-14 — the Quran reader). Q-1061.
+ * 🔴 NOBODY PLANS AN APP THAT IS ALREADY FINISHED (autopsy e3135b7b, 2026-10-14 — the Quran reader). Q-1080.
  *
  * The roadmap gate read exactly one of the two things that can already own a build. `roadmapStandsDownForProjectMode`
  * above closed the project-mode half in September; the other half was never asked, and the class is the one Q-1024
@@ -300,7 +300,7 @@ export type ProjectModeSkipReason =
   | 'below-threshold'
   /**
    * The seeded golden scaffold IS the finished app (the `simple` tier), so there is nothing left to decompose
-   * (autopsy e3135b7b, Q-1061). A `pro` scaffold is only an architecture and does NOT reach this reason.
+   * (autopsy e3135b7b, Q-1080). A `pro` scaffold is only an architecture and does NOT reach this reason.
    */
   | 'template-is-the-app'
   /** Shaped like a project spec, but the one scope verdict (APP_SCOPE) reads it as one app (Q-138). */

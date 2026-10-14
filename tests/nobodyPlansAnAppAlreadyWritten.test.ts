@@ -1,5 +1,5 @@
 /**
- * Autopsy e3135b7b (2026-10-14) — the Quran reader. Q-1061.
+ * Autopsy e3135b7b (2026-10-14) — the Quran reader. Q-1080.
  *
  * The build seeded the `quran` golden scaffold — a `simple`-tier template, which IS the finished app, written and
  * tested, on disk before the first model call — and then ran the mega-app roadmap planner over the same prompt and

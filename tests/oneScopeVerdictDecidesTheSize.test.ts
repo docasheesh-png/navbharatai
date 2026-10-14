@@ -92,7 +92,7 @@ describe('🔒 the route sizes once', () => {
     expect(route).toContain('const scope = appScope.scope;');
     expect(route).toContain('const { scope, dispute } = appScope;');
     expect(route).toContain('megaProject: appScope.projectMode,');
-    // UPDATED 2026-10-14 (autopsy e3135b7b, Q-1061): the gate gained `&& !templateIsTheFinishedApp(seededScaffold)`
+    // UPDATED 2026-10-14 (autopsy e3135b7b, Q-1080): the gate gained `&& !templateIsTheFinishedApp(seededScaffold)`
     // — a seeded simple-tier template IS the finished app, so there is nothing to decompose. Pinned as a
     // PROPERTY of the condition rather than its exact text, because the literal form is what broke here: a
     // guard that pins punctuation fails on every correct change and teaches nothing (the class named in

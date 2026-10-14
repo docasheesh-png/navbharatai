@@ -145,6 +145,8 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
   agentv3_build_leases: { kind: 'platform', why: 'one doc per BUILDING workspace, deleted when the build ends and stale after 90 s — holds a uid only while that build runs (workspaceBuildLease.ts)' },
   metrics_timeline:    { kind: 'platform', why: 'one doc per time bucket — see the SCALE-PLAN entry' },
   monitor_alert_state: { kind: 'platform', why: 'a single document holding alert episodes' },
+  app_mart_signals:    { kind: 'platform', why: 'one doc per UTC day: anonymous per-app engagement counters for App Mart For You (appMartSignals.ts); no uid; only the last 28 days are read' },
+  app_mart_affinity:   { kind: 'user', why: 'doc id IS the uid: topic/creator weights for that person’s own For You feed (appMartSignals.ts), erased with the account' },
   web_risk_budget:     { kind: 'platform', why: 'one doc per calendar month, replaced in place' },
   agentv3_engine_use:  { kind: 'platform', why: 'one doc per day of engine use' },
   platform_settings:   { kind: 'platform', why: 'admin-set platform knobs (the build discount, buildDiscount.ts); one doc per setting, no person in it' },

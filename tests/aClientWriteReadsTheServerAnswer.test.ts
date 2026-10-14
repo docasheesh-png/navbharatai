@@ -33,6 +33,7 @@ const BEST_EFFORT: Record<string, Record<string, string>> = {
   'src/components/agentv3/PreviewSurface.tsx': { '/api/agentv3/preview-error': 'error telemetry for the platform; nothing is shown or promised to the user' },
   'src/hooks/useAgentV3Build.ts': { '/api/agentv3/queue/complete': "queue bookkeeping; a stale 'running' item self-heals to 'failed' on next load" },
   'src/lib/zipProjectUpload.ts': { '/api/zip-upload/abort': 'cleanup of an abandoned upload; the server sweeps stale uploads' },
+  'src/components/ide/appMart/forYouClient.ts': { 'URL, {': 'App Mart For You engagement signals (204); a lost batch only makes ranking slightly staler, nothing is shown or promised' },
   'src/lib/referralClaim.ts': { '/claim-failed': 'a failure count for the server; nothing is shown or promised to the user' },
   // Not calls at all: code samples the user copies into their own app, held in template strings.
   'src/components/ide/PWANotifications.tsx': { '/api/notifications/subscribe': 'code sample text, not a call NavBharatAI makes' },

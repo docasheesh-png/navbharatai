@@ -74,6 +74,7 @@ const REVIEWED_SMALL: Record<string, string> = {
   '/api/app-ai/settings': 'its own route-level `express.json` at 4 KB',
   '/api/app-mart/social/batch': 'comment keys and short text',
   '/api/app-mart/social/react': 'a reaction',
+  '/api/app-mart/events': 'at most 50 tiny engagement events (cleanEvents caps the batch)',
   '/api/app-mart/social/comments': 'a short comment',
   '/api/app-mart/social/comments/:id/report': 'a report reason',
   '/api/app-mart/social/comments/:id/keep': 'no payload',

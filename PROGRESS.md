@@ -95963,3 +95963,10 @@ anchored to the template's shape, and a dependency bump moves the shape with no 
 **Honest limit (rule 6).** No Xcode here, so the Swift cannot be compiled in this session; the injected code is guarded by `#if canImport(GoogleSignIn)` and
 read against the generated template. The real proof is the iOS run itself, and — because the failure this wiring prevents ("Google login succeeds → redirect back →
 infinite loading") only shows on a device — **the TestFlight build needs one real Google sign-in on an iPhone before it is promoted.**
+
+**Addendum (same day, #3740's own first CI run).** The new template test first ran `npx cap add ios` and PASSED locally but FAILED in CI: `ci.yml` is on **Node 20** and
+`@capacitor/cli` 8 requires **Node >= 22** (`[fatal] The Capacitor CLI requires NodeJS >=22.0.0`, reproduced with `/opt/node20`). The test now unpacks the two iOS template
+tarballs Capacitor ships (`ios-spm-template` — what `cap add ios` generates — and `ios-pods-template`, which still carries the classic AppDelegate redirect), so it needs no CLI, no
+Node 22 and no network; the generated `AppDelegate.swift`/`SceneDelegate.swift` were compared byte for byte with the SPM tarball's first. Verified under Node 20 and by reversion (breaking the
+Scene branch fails it; restored). **New open row Q-1060:** CI tests Node 20 while production and every release workflow run Node 22 — a gate exercising a runtime nobody ships. Not fixed here: moving 38,000 tests
+to Node 22 is its own change (run the suite on 22 first, then flip `ci.yml`).

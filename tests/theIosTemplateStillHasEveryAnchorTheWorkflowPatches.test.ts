@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync, spawnSync } from 'child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -15,76 +15,93 @@ import { join } from 'path';
  * `application(_:open:options:)`, and the Google Sign-In step stopped. The instance was one anchor; the class is
  * "a patch whose anchor is checked only when it ships".
  *
- * THE LOCK. This test runs the REAL `npx cap add ios` (it needs no network and no macOS — verified) into a
- * temporary copy and holds every anchor the workflow depends on against what comes out. The next bump that moves
- * one fails the PR that bumps it. The Google Sign-In wiring is the one patch with logic, so it is also run for
- * real here, on the generated template AND on a fixture of the classic one, and its "neither template" refusal is
- * exercised: a third shape is an error, never a silent skip (a silent skip ships a login that hangs forever).
+ * THE LOCK. This test unpacks the two iOS templates Capacitor ships (`@capacitor/cli/assets/ios-spm-template.tar.gz`,
+ * the one `cap add ios` generates by default, and `ios-pods-template.tar.gz`) — the very files `cap add ios` extracts
+ * before it post-processes a few of them — and holds every anchor the workflow depends on against them. The next bump
+ * that moves one fails the PR that bumps it. The Google Sign-In wiring is the one patch with logic, so it is also run for
+ * real here, on BOTH templates and on a fixture of the classic one, and its "neither template" refusal is exercised: a
+ * third shape is an error, never a silent skip (a silent skip ships a login that hangs forever).
+ *
+ * 🔴 WHY IT DOES NOT RUN `npx cap add ios` (found on this test's own first CI run). It did, and passed locally, then
+ * failed in CI: `ci.yml` runs Node 20 while `@capacitor/cli` 8 requires Node >= 22 (the release workflows and the
+ * Dockerfile are on 22), so the CLI refuses to start there. Reading the template tarball needs no CLI, no Node 22 and no
+ * network. (The CI-vs-production Node gap is its own open row in BUILD_REPORT_QUEUE.md.) The generated `AppDelegate.swift`
+ * and `SceneDelegate.swift` were compared byte for byte with the tarball's before this was written.
  */
 const root = join(__dirname, '..');
 const SCRIPT = join(root, 'scripts', 'ios-wire-google-signin.sh');
 const read = (p: string) => readFileSync(p, 'utf8');
 
+const ASSETS = join(root, 'node_modules', '@capacitor', 'cli', 'assets');
+const TEMPLATES = { spm: 'ios-spm-template.tar.gz', pods: 'ios-pods-template.tar.gz' } as const;
+
 let work = '';
-let generated = '';
+/** The App group folder of each unpacked template: `<work>/<kind>/App/App`. */
+const appDir = (kind: keyof typeof TEMPLATES) => join(work, kind, 'App', 'App');
 
 beforeAll(() => {
   work = mkdtempSync(join(tmpdir(), 'nbai-ios-template-'));
-  for (const f of ['package.json', 'capacitor.config.ts']) cpSync(join(root, f), join(work, f));
-  symlinkSync(join(root, 'node_modules'), join(work, 'node_modules'));
-  mkdirSync(join(work, 'dist'));
-  writeFileSync(join(work, 'dist', 'index.html'), '<html></html>');
-  execFileSync('npx', ['cap', 'add', 'ios'], { cwd: work, stdio: 'pipe', timeout: 120_000 });
-  generated = join(work, 'ios', 'App', 'App');
-}, 150_000);
+  for (const [kind, file] of Object.entries(TEMPLATES)) {
+    expect(existsSync(join(ASSETS, file)), `${file} — Capacitor moved its iOS template`).toBe(true);
+    mkdirSync(join(work, kind));
+    execFileSync('tar', ['-xzf', join(ASSETS, file), '-C', join(work, kind)], { stdio: 'pipe' });
+  }
+});
 
 afterAll(() => { if (work) rmSync(work, { recursive: true, force: true }); });
 
 const runScript = (dir: string) => spawnSync('bash', [SCRIPT, dir], { encoding: 'utf8' });
+const KINDS = Object.keys(TEMPLATES) as Array<keyof typeof TEMPLATES>;
 
-describe('the template Capacitor really generates today', () => {
-  it('has every file and directory the workflow edits', () => {
-    for (const rel of [
-      'ios/App/App/AppDelegate.swift',
-      'ios/App/App/Info.plist',
-      'ios/App/App/Assets.xcassets/AppIcon.appiconset',
-      'ios/App/App.xcodeproj/project.pbxproj',
-    ]) expect(existsSync(join(work, rel)), rel).toBe(true);
-  });
+describe('the iOS templates Capacitor ships today (both flavours)', () => {
+  for (const kind of KINDS) {
+    describe(kind, () => {
+      it('has every file and directory the workflow edits', () => {
+        for (const rel of [
+          'App/App/AppDelegate.swift',
+          'App/App/Info.plist',
+          'App/App/Assets.xcassets/AppIcon.appiconset',
+          'App/App.xcodeproj/project.pbxproj',
+        ]) expect(existsSync(join(work, kind, rel)), rel).toBe(true);
+      });
 
-  it('the APNs step can still insert before the class\'s final closing brace', () => {
-    // The push step does `s/\n\}\s*\z/…/` on AppDelegate.swift: the file must still END with the class.
-    expect(read(join(generated, 'AppDelegate.swift'))).toMatch(/\n\}\s*$/);
-  });
+      it('the APNs step can still insert before the class\'s final closing brace', () => {
+        // The push step does `s/\n\}\s*\z/…/` on AppDelegate.swift: the file must still END with the class.
+        expect(read(join(appDir(kind), 'AppDelegate.swift'))).toMatch(/\n\}\s*$/);
+      });
 
-  it('exactly one of the two known redirect anchors exists — never neither', () => {
-    const ad = read(join(generated, 'AppDelegate.swift'));
-    const sd = existsSync(join(generated, 'SceneDelegate.swift')) ? read(join(generated, 'SceneDelegate.swift')) : '';
-    const classic = /return ApplicationDelegateProxy\.shared\.application\(app, open: url, options: options\)/.test(ad);
-    const scene = /SceneDelegateProxy\.shared\.scene\(scene, openURLContexts: URLContexts\)/.test(sd);
-    expect(classic || scene, 'a third template shape: ios-wire-google-signin.sh must learn it').toBe(true);
-  });
+      it('at least one of the two known redirect anchors exists — never neither', () => {
+        const ad = read(join(appDir(kind), 'AppDelegate.swift'));
+        const sdPath = join(appDir(kind), 'SceneDelegate.swift');
+        const sd = existsSync(sdPath) ? read(sdPath) : '';
+        const classic = /return ApplicationDelegateProxy\.shared\.application\(app, open: url, options: options\)/.test(ad);
+        const scene = /SceneDelegateProxy\.shared\.scene\(scene, openURLContexts: URLContexts\)/.test(sd);
+        expect(classic || scene, 'a third template shape: ios-wire-google-signin.sh must learn it').toBe(true);
+      });
 
-  it('🔒 the Google Sign-In script wires it, ahead of the Capacitor proxy, and is idempotent', () => {
-    const dir = join(work, 'wire-real');
-    cpSync(generated, dir, { recursive: true });
-    const r = runScript(dir);
-    expect(r.status, r.stderr + r.stdout).toBe(0);
-    const files = ['AppDelegate.swift', 'SceneDelegate.swift'].filter((f) => existsSync(join(dir, f)));
-    const patched = files.map((f) => read(join(dir, f))).find((t) => t.includes('GIDSignIn.sharedInstance.handle'));
-    expect(patched, 'no file carries the GIDSignIn call').toBeTruthy();
-    // The call comes BEFORE the generic proxy line it must pre-empt, and is compile-guarded.
-    const at = patched!.indexOf('GIDSignIn.sharedInstance.handle');
-    const proxyAt = Math.min(...['ApplicationDelegateProxy.shared.application(app, open', 'SceneDelegateProxy.shared.scene(scene, openURLContexts']
-      .map((m) => patched!.indexOf(m)).filter((i) => i >= 0));
-    expect(at).toBeGreaterThan(-1);
-    expect(at).toBeLessThan(proxyAt);
-    expect(patched).toContain('#if canImport(GoogleSignIn)');
-    expect(patched!.indexOf('import GoogleSignIn')).toBeLessThan(at);
-    const again = runScript(dir);
-    expect(again.status).toBe(0);
-    expect(read(join(dir, files.find((f) => read(join(dir, f)).includes('GIDSignIn'))!)).split('GIDSignIn.sharedInstance.handle').length - 1).toBe(1);
-  });
+      it('🔒 the Google Sign-In script wires it, ahead of the Capacitor proxy, and is idempotent', () => {
+        const dir = join(work, `wire-${kind}`);
+        cpSync(appDir(kind), dir, { recursive: true });
+        const r = runScript(dir);
+        expect(r.status, r.stderr + r.stdout).toBe(0);
+        const files = ['AppDelegate.swift', 'SceneDelegate.swift'].filter((f) => existsSync(join(dir, f)));
+        const patchedFile = files.find((f) => read(join(dir, f)).includes('GIDSignIn.sharedInstance.handle'));
+        expect(patchedFile, 'no file carries the GIDSignIn call').toBeTruthy();
+        const patched = read(join(dir, patchedFile!));
+        // The call comes BEFORE the generic proxy line it must pre-empt, and is compile-guarded.
+        const at = patched.indexOf('GIDSignIn.sharedInstance.handle');
+        const proxyAt = Math.min(...['ApplicationDelegateProxy.shared.application(app, open', 'SceneDelegateProxy.shared.scene(scene, openURLContexts']
+          .map((m) => patched.indexOf(m)).filter((i) => i >= 0));
+        expect(at).toBeGreaterThan(-1);
+        expect(at).toBeLessThan(proxyAt);
+        expect(patched).toContain('#if canImport(GoogleSignIn)');
+        expect(patched.indexOf('import GoogleSignIn')).toBeLessThan(at);
+        const again = runScript(dir);
+        expect(again.status).toBe(0);
+        expect(read(join(dir, patchedFile!)).split('GIDSignIn.sharedInstance.handle').length - 1).toBe(1);
+      });
+    });
+  }
 });
 
 describe('the Google Sign-In script knows both templates and refuses a third', () => {
@@ -114,7 +131,7 @@ describe('the Google Sign-In script knows both templates and refuses a third', (
 
 describe('the workflow calls the script — no second, inline copy to drift', () => {
   const wf = read(join(root, '.github', 'workflows', 'ios-ipa.yml'));
-  it('the step runs scripts/ios-wire-google-signin.sh on the generated project', () => {
+  it('the step runs scripts/ios-wire-google-signin.sh on the project `cap add ios` generates', () => {
     expect(wf).toContain('run: bash scripts/ios-wire-google-signin.sh ios/App/App');
   });
   it('the old inline AppDelegate-only patch is gone (the comments still tell its history)', () => {

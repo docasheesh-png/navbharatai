@@ -296,7 +296,7 @@ export interface AgentRunnerOptions {
    * (`isTodoOnlyTurn`, autopsy 9c612cdb). `latencyMs` is that turn's model time. The route sums these into
    * the build's `TODO_ONLY_TURNS` line. Best-effort; a throw here never breaks the build.
    */
-  onTodoOnlyTurn?: (turn: { latencyMs: number }) => void;
+  onTodoOnlyTurn?: (turn: { latencyMs: number; firstInRun: boolean }) => void;
   /**
    * Build-level token accumulator (billing accounting fix). When provided, EVERY turn's tokens are
    * added here as well as to this runner's own `usage`. The SAME sink is shared across the main
@@ -1484,7 +1484,7 @@ export class AgentRunner {
         // Measured here, while `llmStartedAt` still times only the model call; handed back below, once.
         const todoOnlyTurn = isTodoOnlyTurn(turn.toolUses.map((tu) => tu.name), tools.map((t) => t.name));
         if (todoOnlyTurn) {
-          try { this.opts.onTodoOnlyTurn?.({ latencyMs: Date.now() - llmStartedAt }); } catch { /* a measurement must never fail a build */ }
+          try { this.opts.onTodoOnlyTurn?.({ latencyMs: Date.now() - llmStartedAt, firstInRun: !todoOnlySteered }); } catch { /* a measurement must never fail a build */ }
         }
 
         // Execute the requested tools and gather results (in the original order, so tool_use

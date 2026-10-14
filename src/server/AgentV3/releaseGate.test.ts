@@ -424,3 +424,20 @@ describe('a preview that came up but was never verified is not "no preview at al
     expect(withUrl.proven).toEqual(without.proven);
   });
 });
+
+describe('autopsy 398db9f3 — a RED gate names its blocker, as it names its warnings', () => {
+  const ev = { buildOk: true } as Parameters<typeof releaseGate>[0];
+  it('names the blocker in the failure line and the headline', () => {
+    const v = releaseGate(ev, { blockers: 1, highSeverity: 0, warnings: 0, blockerLabels: ['2 fake/incomplete code issue(s)'] });
+    expect(v.state).toBe('red');
+    expect(v.failures[0]).toBe('1 build-breaking blocker(s) (2 fake/incomplete code issue(s))');
+    expect(v.headline).toContain('2 fake/incomplete code issue(s)');
+  });
+  it('says how many more there are when the labels are fewer than the count', () => {
+    const v = releaseGate(ev, { blockers: 3, highSeverity: 0, warnings: 0, blockerLabels: ['a', 'b'] });
+    expect(v.failures[0]).toBe('3 build-breaking blocker(s) (a; b, +1 more)');
+  });
+  it('without labels the line is exactly what it was', () => {
+    expect(releaseGate(ev, { blockers: 1, highSeverity: 0, warnings: 0 }).failures[0]).toBe('1 build-breaking blocker(s)');
+  });
+});

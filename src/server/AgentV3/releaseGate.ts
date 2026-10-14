@@ -179,6 +179,12 @@ export interface StaticFindings {
   warnings: number;
   /** What those warnings ARE, in a few words each (`shippingIssueLabels`) — named in the headline. */
   warningLabels?: string[];
+  /**
+   * What the blockers ARE, the same way. Warnings were named from autopsy d798ddd3; the blockers were not,
+   * so a RED gate said "1 build-breaking blocker(s)" and the reader had to search the timeline for it
+   * (autopsy 398db9f3 — and the timeline had been cut in the middle).
+   */
+  blockerLabels?: string[];
 }
 
 /**
@@ -404,7 +410,7 @@ export function releaseGate(
   const pressedOk = ev.explore === 'passed' && (ev.explorePresses ?? 0) > 0;
   if (pressedOk) proven.push(`pressing ${ev.explorePresses} of its controls in a real browser broke nothing`);
 
-  if (f.blockers > 0) failures.push(`${f.blockers} build-breaking blocker(s)`);
+  if (f.blockers > 0) failures.push(`${f.blockers} build-breaking blocker(s)${namedFindings(f.blockers, f.blockerLabels)}`);
   if (f.highSeverity > 0) failures.push(`${f.highSeverity} high-severity security/privacy finding(s)`);
 
   // RED — something we looked at is actually broken.
@@ -490,9 +496,14 @@ export function releaseGate(
 
 /** " (design consistency 96/100)" — the warnings the count above stands for, when they were given. PURE. */
 function namedWarnings(f: StaticFindings): string {
-  const labels = (f.warningLabels ?? []).filter((l) => typeof l === 'string' && l.trim());
+  return namedFindings(f.warnings, f.warningLabels);
+}
+
+/** " (label; label, +N more)" — what a count stands for, when the labels were given. One shape for blockers and warnings. PURE. */
+function namedFindings(count: number, given: readonly string[] | undefined): string {
+  const labels = (given ?? []).filter((l) => typeof l === 'string' && l.trim());
   if (labels.length === 0) return '';
-  const more = f.warnings > labels.length ? `, +${f.warnings - labels.length} more` : '';
+  const more = count > labels.length ? `, +${count - labels.length} more` : '';
   return ` (${labels.join('; ')}${more})`;
 }
 

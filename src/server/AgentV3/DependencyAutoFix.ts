@@ -148,6 +148,34 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
 };
 
 /**
+ * RUNTIME PACKAGES WHOSE `@types/*` MAJOR FOLLOWS THEIR OWN (autopsy 398db9f3 — PAWTRACE, 2026-10-14).
+ *
+ * `express` is pinned to `^4` above, and its typings were not. The builder ran
+ * `npm install -D @types/express …`; npm took the LATEST (5), and express 4 sat under v5 typings:
+ * `req.params.x` became `string | string[]`, three typechecks failed (TS2345), and the readiness check
+ * still warned "@types/express is v5 but express is v4" at the end of a build that ran out of time
+ * before the model fixed it. The pin protected the runtime and left its typings to chance — a pinned
+ * package whose typings are unpinned is half a pin.
+ *
+ * So a bare `@types/<name>` for any package below follows the major the runtime is pinned to, read from
+ * ONE place (`WELL_KNOWN_DEPS`) so the two can never drift. Only packages whose DefinitelyTyped major is
+ * known to track the runtime's major are listed: a pin to a `@types` major that does not exist would turn
+ * a working install into a 404, which is worse than the drift it prevents. PURE.
+ */
+export const TYPINGS_TRACK_RUNTIME: readonly string[] = Object.freeze([
+  'express', 'cors', 'cookie-parser', 'bcrypt', 'bcryptjs', 'jsonwebtoken', 'morgan', 'multer', 'ws', 'uuid', 'leaflet',
+]);
+
+function typingsRangeFor(name: string): string {
+  if (!name.startsWith('@types/')) return '';
+  const runtime = typesToRuntime(name);
+  if (!runtime || !TYPINGS_TRACK_RUNTIME.includes(runtime)) return '';
+  if (!Object.prototype.hasOwnProperty.call(WELL_KNOWN_DEPS, runtime)) return '';
+  const major = rangeMajor(WELL_KNOWN_DEPS[runtime]);
+  return major !== null && major > 0 ? `^${major}` : '';
+}
+
+/**
  * The pinned version for a package, from EITHER allowlist, or '' when it is not one of ours.
  *
  * One lookup, so a package can never be pinned in one place and unpinned in another purely because of
@@ -156,6 +184,8 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
  */
 export function knownDepVersion(name: string, ctx?: PinContext): string {
   const n = String(name ?? '');
+  const typings = typingsRangeFor(n);
+  if (typings) return typings;
   if (VITEST_FAMILY.has(n)) return vitestRangeForVite(ctx?.viteRange);
   if (Object.prototype.hasOwnProperty.call(R3F_FAMILY, n)) return r3fRangeForReact(n, ctx?.reactRange);
   if (isCapacitorPlugin(n)) return capacitorPluginRange(n, ctx?.capacitorRange);

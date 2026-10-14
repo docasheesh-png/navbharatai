@@ -54,26 +54,34 @@ describe('🔒 updating an app you already host is always free', () => {
   });
 });
 
-describe('⚠️ it fails OPEN on an unreadable count — the opposite of how `hasPlan` fails', () => {
-  /**
-   * An unknown PLAN must read as "no plan": guessing yes gives away a paid product. An unknown COUNT
-   * is the other way round — guessing "at the cap" refuses a publish a paying customer is entitled
-   * to, on the strength of a Firestore hiccup, while guessing "under it" costs at most one extra idle
-   * service and self-corrects on the next deploy. The expensive mistake is the visible one.
-   */
-  it('null (registry unreadable) allows the publish', () => {
-    expect(serverAppLimit({ isAdmin: false, liveServerWorkspaceIds: null, workspaceId: 'new', cap: 1 }).available).toBe(true);
+describe('🔒 it fails CLOSED on an unreadable entitlement (go-live audit 2026-10-13)', () => {
+  const OPEN = { AGENTV3_SERVER_CAP_FAIL_OPEN: 'on' } as unknown as NodeJS.ProcessEnv;
+  const CLOSED = {} as NodeJS.ProcessEnv;
+
+  it('null (registry unreadable) refuses with a retry message, nothing started or charged', () => {
+    const r = serverAppLimit({ isAdmin: false, liveServerWorkspaceIds: null, workspaceId: 'new', cap: 1, env: CLOSED });
+    expect(r.available).toBe(false);
+    expect(r.message).toMatch(/nothing was charged/);
   });
 
   it('an empty ARRAY is not the same thing — it genuinely means nobody is hosting', () => {
-    expect(serverAppLimit({ isAdmin: false, liveServerWorkspaceIds: [], workspaceId: 'new', cap: 1 }).available).toBe(true);
-    expect(serverAppLimit({ isAdmin: false, liveServerWorkspaceIds: ['a'], workspaceId: 'new', cap: 1 }).available).toBe(false);
+    expect(serverAppLimit({ isAdmin: false, liveServerWorkspaceIds: [], workspaceId: 'new', cap: 1, env: CLOSED }).available).toBe(true);
+    expect(serverAppLimit({ isAdmin: false, liveServerWorkspaceIds: ['a'], workspaceId: 'new', cap: 1, env: CLOSED }).available).toBe(false);
   });
 
-  it('an absent or nonsense cap does not block — the PLAN gate above already refused a non-holder', () => {
+  it('an absent or nonsense cap refuses', () => {
     for (const cap of [null, undefined, 0, -1, NaN, 'ten' as unknown as number]) {
-      expect(serverAppLimit({ isAdmin: false, liveServerWorkspaceIds: at(99), workspaceId: 'new', cap: cap as number }).available, String(cap)).toBe(true);
+      expect(serverAppLimit({ isAdmin: false, liveServerWorkspaceIds: [], workspaceId: 'new', cap: cap as number, env: CLOSED }).available, String(cap)).toBe(false);
     }
+  });
+
+  it('the admin is still exempt', () => {
+    expect(serverAppLimit({ isAdmin: true, liveServerWorkspaceIds: null, workspaceId: 'new', cap: null, env: CLOSED }).available).toBe(true);
+  });
+
+  it('AGENTV3_SERVER_CAP_FAIL_OPEN=on restores the old behaviour (rollback switch)', () => {
+    expect(serverAppLimit({ isAdmin: false, liveServerWorkspaceIds: null, workspaceId: 'new', cap: 1, env: OPEN }).available).toBe(true);
+    expect(serverAppLimit({ isAdmin: false, liveServerWorkspaceIds: at(99), workspaceId: 'new', cap: null, env: OPEN }).available).toBe(true);
   });
 });
 

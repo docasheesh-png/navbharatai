@@ -146,7 +146,11 @@ export function registerWalletRoutes(app: Express): void {
       const autoRenew = typeof req.body?.autoRenew === 'boolean' ? req.body.autoRenew : undefined;
       const result = await purchaseHostingPlan(
         getDb() as any, routeParam(req.params.userId), undefined, tierId ?? HOSTING_TIERS[0].id,
-        { agreedToTerms, ...(autoRenew === undefined ? {} : { autoRenew }) },
+        {
+          agreedToTerms, ...(autoRenew === undefined ? {} : { autoRenew }),
+          // DB-14: optional client request id — the same id twice is one purchase.
+          ...(typeof req.body?.requestId === 'string' ? { requestId: req.body.requestId } : {}),
+        },
       );
       if (!result.ok) {
         // insufficient → 402 (recharge first); a missing tick or an unbuyable tier is the caller's

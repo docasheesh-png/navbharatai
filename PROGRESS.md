@@ -95429,3 +95429,342 @@ FINAL: ❌ NOT COMPLETE — until this PR merges and the OPEN follow-ups are fix
   counts them). Not fixed in the chat PR: the playtest module was mid-flight in #3701 / #3704.
 - **Renumbered on rebase.** This note was filed as Q-1039. #3705 had already taken Q-1039 for the live-ETA row and opened
   the same flake as Q-1038 ("find the probe's time window"). The root cause is now on Q-1038. No second row.
+
+## 2026-10-13 — Q-1038: a frame-driven simulation sampled by a stopwatch
+
+The flake that gated report 9c612cdb's PR and then #3703. The row's diagnosis was right about the class
+and wrong about the place, and the difference only showed up because the fix was **measured under load
+instead of reasoned about**.
+
+**What the row said to fix:** the steering leg — `hold(page, ['ArrowLeft','KeyA'], 500)` and the
+`waitForTimeout(400)` interval the turn is read across. True, and insufficient: with that leg frame-gated
+the test **still failed** under three CPU hogs.
+
+**Where it actually lives:** the ACCELERATOR probe's `waitForTimeout(550)`. `out.scene` — `moved`,
+`follows`, `ahead`, `looks` — is read across that one interval, and *both* `sceneVerdict` fields sit
+behind its `moved >= 0.2` guard. So a page starved there nulls the camera reading and, through the guard,
+the steering reading as well. Frame-gating the steering leg could never have been enough, and the row
+could not have known: it reasoned from the symptom's name ("mirrored: null") to the probe that computes
+`turn`.
+
+🧬 **It is Q-869's class, in the place that fix did not reach.** Q-869 removed exactly this dependence
+from the PIXEL verdicts — a page a loaded machine stops drawing shows the same picture whatever the car
+does, so those looks record `gasLateFrames` and are believed only when the page was drawing. The scene
+probes, in the same file, kept their stopwatch. The instance was fixed; the class was not.
+
+**The fix, both halves:** both windows wait for DRAWN frames (`waitFrames`, with a wall-clock cap so a
+dead raf loop cannot hang the probe); the WEAKEST leg sets `probeFrames`, because one starved interval is
+enough to null a reading; and a starved probe is NAMED — *"page starved: 3 frames in 2500 ms"* — instead
+of returning a null that reads identically to the real finding "this game does not steer". That is
+`playtestNotRunVerdict`'s own stated principle one level down: **a check that could not look is not a
+check that passed.** It changes no score: the probe failing to look is our instrument's problem, not the
+app's, exactly as the not-run warning says.
+
+**Evidence, because "it should be fine now" is not evidence:** 6/6 unloaded; 3/3 on the previously-failing
+case under three CPU hogs (load 3.5 on 4 cores) — the same conditions under which the partial fix failed.
+
+🔴 **Bugs this change caught in itself, all worth recording as classes:**
+
+1. **A bare TypeScript constant inside the browser script.** The accelerator fix was first written
+   `waitFrames(page, PROBE_MIN_FRAMES, PROBE_CAP_MS)` — no `${…}`. Inside the template literal that is
+   not the constant, it is an identifier the BROWSER must resolve, and it would have thrown a
+   ReferenceError in the accelerator step, left `out.scene` unset, and nulled every scene verdict —
+   turning an intermittent flake into a permanent one. **It survived a full typecheck**, because a
+   template literal's contents are text, and no browser test had run since that edit. Only a source
+   assertion noticed. Guarded now.
+2. **An unescaped backtick in a script comment ends the template literal** — three times in this one
+   change. The compiler does catch it, but TS1005 points at the next line that fails to parse, twenty
+   lines past the cause. The guard names the line; it is a diagnostics fix, not a new safety net, and
+   that is what its comment says rather than overclaiming it.
+
+🔴 **AND THEN THE MEASUREMENT SAID THE ROW'S PRESCRIBED FIX WAS HARMFUL.** The row said to *"hold LEFT
+until N rendered frames … with a wall-clock cap"*. That was built — and it made things worse, twice over:
+
+1. Waiting for frames ALONE is SHORTER than the interval it replaced on a fast machine: twelve frames is
+   about 200 ms against 550 ms, so `out.gas` saw less change, fell under the still threshold, and the gas
+   optical-flow sample was never taken. Adding the original duration back as a floor fixed that.
+2. But the floor exposed the real objection. On a loaded machine the hold stretched to as much as
+   2500 ms — and **the car does not politely wait.** It drives four times further: into a wall, off the
+   road, or past the turn the next sample meant to read. Under three CPU hogs,
+   `aRacingGameIsStartedAndDriven` passed **7/7 twice on main** and failed **1 then 3** on that branch.
+   Gathering more frames CHANGED WHAT THERE WAS TO MEASURE.
+
+🧬 **So the fix became what Q-869 ACTUALLY did, rather than what it looked like it did.** Q-869 did not
+make the pixel looks longer. It RECORDED how many frames the page drew during them and refused to believe
+a verdict taken while the page was not drawing. The intervals here keep their exact original lengths —
+550 ms and 400 ms, untouched — the frames drawn in them are counted, and a reading taken across too few
+is reported as starved instead of returned as a null that reads exactly like the real finding "this game
+does not steer". After the rework: **7/7 twice under the same load**, matching main.
+
+⚠️ **The lesson is not "the row was wrong", it is that a prescribed fix on a SIMULATION needs measuring
+before it is believed.** The row's author reasoned correctly from the symptom and could not have known
+that lengthening a hold moves the car; only running it under load showed that. The row's second half —
+*print "page starved" instead of a silent null* — was right all along, and is the whole fix now.
+
+**Proof.** 14 tests (`tests/aStarvedPageIsSaidNotGuessed.test.ts`), the two real-browser suites green together (32/32), and the regression case 7/7 twice under three CPU hogs. The rejected design is asserted GONE, not merely unused, so it cannot creep back as an optimisation. Two of those
+reversions found holes in the lock itself: removing the accelerator frame-gate left all thirteen other
+tests green, and the bare-constant bug was invisible until a source assertion existed. A reversion that
+passes is the test telling you it is not watching.
+
+---
+
+## 2026-10-13 — Q-1040/Q-1041/Q-1042: the deep bug hunt is offered, not assumed
+
+Admin instruction, verbatim: *"helper, verifier jo app banne ke bad last me check karta hai, ko optional
+kar do"* — a ❓ question in the chat, Yes runs the helper that already exists, No means the build is
+complete as it stands.
+
+**The investigation came first, and its result changed the framing.** Nine searches (60 commits, the
+user-facing strings, the flags, filenames, the queue, `PROGRESS.md`, `CLAUDE.md`, `docs/claude/`,
+Hindi/Hinglish phrasings, 12 open and recent PRs, all 1,435 remote branches) found no trace of this
+feature and **no record of the instruction anywhere** — reported to the admin as *"I could not find it"*,
+never as "it does not exist", because only one of those two is a verified claim.
+
+What the search DID find is the thing that mattered: **the helper is not a free check being made paid.
+It is a PAID check being made optional.** The route's own comment beside the reviewer call records the
+size, autopsy b6f88a72: *"40 calls, 523,374 input tokens = 34.4% of the build, `responseChars: 0` on
+every one, and then no verdict at all — all of it billed at ×4"*. The user already paid for that, on
+every build, silently. The admin's own words — the real build costs x, the helper takes 4x — are
+corroborated by the code. So this change does not introduce a charge; it shows an existing one to the
+person paying it.
+
+**What stays free, and why that is the point.** The deterministic end-of-build checks — the tsc gate,
+lint, readiness, the playtest, the fake-feature scan, the journeys, the app's own tests — spend no model
+tokens and sit in no billing phase. They are the EVIDENCE that the app was built at all, which the
+second absolute rule requires, so putting them behind a payment would make a free build mean "it
+probably works". They are untouched.
+
+**Three admin decisions, implemented as given.** (1) No amount on the button — and that is the only
+honest option anyway: a token-metered cost has no true number before it runs, so a figure there would be
+a fabricated quote. (2) A "no" is scoped to ONE build, implemented by storing *nothing* — the offer is
+turn-local, so there is nothing to forget and nothing to reset. (3) Free and gift credits pay for it.
+
+🔴 **One admin instruction was NOT followed, and raised instead (third absolute rule).** The admin asked
+for the question in the user's language. `narrationCatalogue.ts` carries the admin's own 2026-08-11 rule
+— a status line is the PLATFORM speaking, not the AI, and an earlier Hindi table there was removed as
+wrong and unmaintainable ("22 hand-written translations per line") — and on 2026-09-14 the admin saw a
+voice-chat **price** in Devanagari and asked *"south india wale kaise padhenge isko??"*, superseding
+three modules' "user's language" behaviour. This offer IS a price. Building it translated would
+re-create exactly what they stopped, so it is professional English and the admin was told, with the
+reasoning, rather than quietly obeyed.
+
+🔴 **Q-979's ceiling was hit live, by this feature.** The first version put its `let`, its nested `if`s
+and its two `try`s inline in the `/build` handler, and `tsc` answered **TS2563: the containing function
+or module body is too large for control flow analysis** — the exact row draft #3700 owns. Rather than
+touch that row (it is taken), the whole flow moved into `optionalBugHunt.ts` with its effects injected
+(`ask` / `wait` / `say` / `record`), leaving the handler at ONE call and one `await`. A source guard
+asserts no branch, no `let` and no second `await` inside it, and says why: in that handler, the cost of
+a branch is the whole file. This is the better design regardless — every branch is now unit-testable
+without a server, a user or a clock.
+
+**Q-1041, found while building.** `permission_request` carried the whole question as one string, which
+the tray printed as a bold title with an empty detail line and two *fixed* buttons. That is why
+`startOfferText` has to spell "Approve = … Deny = …" inside its own sentence — the buttons could not be
+labelled — and why a gate that builds nothing still offered to "Approve & build". The event gained four
+optional fields, threaded through to the tray; **a gate that names none of them renders byte-for-byte as
+before**, which a test asserts on the fallbacks themselves.
+
+**Q-1042, the honest leftover.** The admin's instinct — run the helper on the cheap tier — is the actual
+cure; hiding the price treats the symptom. Recorded as an open row with what it needs: the cheap rung
+must be measured against the Sonnet judge before it becomes the default, because a cheaper hunt that
+misses real bugs is worse than an honest "not run".
+
+**Proof.** `tests/aBugHuntIsOfferedNotAssumed.test.ts`, 24 tests. Eight reversions, each failing the
+right test: silence counted as consent; a declined hunt reported as passed; a made-up rupee figure on
+the button; the fail-open flipped to fail-closed; the kill switch turning the review off instead of the
+ask; the wait bypassing `waitForUser` (the one door, autopsy 1219c639); the button offering to "build"
+again; and the tray ignoring a gate's own labels. The 130 tests across every module this touched
+(`whatTheUserMustDo`, `theTrayKnowsWhatIsNotConnected`, `everyPopupClearsTheChrome`, `buildNeeds`) pass
+unchanged.
+## 2026-10-13 — Q-1026 + Q-1033: two copies of one truth, where only one of them is the truth
+
+Two rows from build report 9c612cdb, closed together because they are ONE class — the fourth absolute
+rule's centralisation class, the same shape as the four drifted `safeRelPath` copies that became
+`workspacePath.ts` and the five hardcoded model ids that became `visionModels.ts`.
+
+**Q-1026 — the contract's home.** Two facts about the contract module were each written twice. The
+relative import specifier existed as `importSpecifierFor` in `contractRenames.ts` and
+`contractImportSpecifier` in `SimpleBuilder.ts`, byte-identical bodies. That pair is the lesser half.
+The real defect was the other pair: the WRITER decided where the contract goes (`contractFilePath`)
+while the HEALERS searched a hand-kept list (`CONTRACT_PATH_CANDIDATES`). Nothing made them agree.
+Move the contract to a third location in the writer — `app/types.ts` for a Next project — and the
+healers find no contract, report no renames, and hand every TS2749 they exist to fix back to the
+model. **And no test fails**, because the list is still internally consistent; it is simply no longer
+about reality. That is the quiet kind of drift: not a wrong value, a true value about the wrong world.
+
+The fix is `src/server/AgentV3/contractLocation.ts`, and it is STRUCTURAL rather than a merge of the
+two copies: the candidate list is derived from the very two constants `contractFilePath` returns, so a
+new location cannot enter the writer without appearing in the search. `ToolDispatcher` takes the
+candidates from that one home rather than through `contractRenames` — a re-export chain would have put
+two definition-looking lines back under `grep`, which is how the next session re-derives the wrong
+source of truth.
+
+**Q-1033 — a bill has one rule.** The money predicate `(paid-public OR credit-gate) AND not
+free-listed` was written SIX times in `routes/agentv3.ts`: the affordability gate, the cheap-floor
+chain, the watchdog's billing label, the watchdog's wallet debit, the live ₹ figure and the settle. It
+has already been widened once — the credit gate was OR-ed in on 2026-07-10 — so this is not a
+hypothetical: the next widening that reaches five of the six leaves the sixth charging, or not
+charging, by a rule nobody chose. A money predicate is the last place a copy may drift. Now one
+`billingAppliesTo()` in `featureFlag.ts`.
+
+🔴 **What was deliberately NOT done, and why it matters more than what was.** The live figure's call
+site reads `!!userId && <predicate>`. Folding that `!!userId` into the shared helper would have given
+a tidier signature and silently stopped charging the five sites that never had it — fixing problem A
+while creating problem X, which the 2026-09-13 rule forbids outright. The helper answers "is billing
+on for them", never "is there someone to bill", and a test asserts the helper's body contains no
+`!!userId` so the tidier version cannot arrive later as a cleanup.
+
+**The guard that was itself the bug's shelter.** `theBuildShowsWhatItCostsSoFar` had a source guard
+asserting the live figure used "the settle's own predicate, word for word". Its intent was right and
+its mechanism was exactly why six copies could sit in one file and still read as one rule: it pinned
+the TEXT. It now asserts both readings call the function, and that no copy of the text survives.
+
+**Proof.** `tests/aContractHasOneHomeAndABillHasOneRule.test.ts`, 9 tests. The census WALKS the engine
+tree rather than reading a list of files to check — a hand-kept list of files is the same drift class
+the test exists to end — with vacuity guards (the walk must reach `SimpleBuilder.ts` and
+`contractRenames.ts`, and find more than fifty sources) so a narrowed walk cannot pass green. Nine
+reversions, each failing the right test and nothing else: a second specifier implementation under
+another name, a dead candidate the writer can never produce, the writer moving away from the search
+(the exact Q-1026 failure), a hand-kept candidate list, a dead copy left behind unused, a seventh
+predicate copy, the uid folded into the shared rule, a narrowed walk, and two widenings of the money
+rule itself.
+
+---
+
+## 2026-10-14 — Q-1035 + Q-1036: two money facts the system stated wrongly
+
+One class, taken from build report 9c612cdb: **a statement about money that the code never checked.**
+One was a test asserting a property of arithmetic; the other a field asserting a fact about the wallet.
+
+### Q-1035 — a test that could not fail
+
+It read:
+
+```ts
+const twice = realProviderCostUsd([...ENTRIES, ENTRIES[1]]);
+expect(Math.abs(twice - REPORT.realCostUsd)).toBeGreaterThan(1e-6);
+```
+
+`realProviderCostUsd` is a SUM over its argument. Handing a sum an extra entry changes the total —
+that is a property of addition, not of this system, and it holds however the ledger behaves. The test
+was NAMED for a claim about the ledger ("the fast lane's GLM is counted ONCE") while asserting
+something arithmetic could not disprove. **A test that cannot fail is worse than no test: it produces
+exactly the confidence a real double count would need in order to pass unnoticed.**
+
+**And the simulation was wrong in principle too**, which is why it could never have caught the bug
+even by accident: the ledger keys its slices by provider + model + phase, so recording the same GLM
+turn twice yields **one slice with doubled tokens** — never the two separate entries the array
+modelled. The shape it watched for cannot occur.
+
+The claim is now checked where it lives. The report's cost is reproduced through
+`createProviderUsageLedger` itself, and a ledger fed one extra GLM turn is asserted to merge into one
+slice with doubled tokens, to **say so** in `callsByProvider()`, and to cost more — so a double count
+cannot hide behind a plausible total.
+
+⚠️ **Deliberately not asserted: how many GLM calls the real build logged.** Q-1003 records GLM
+crawling TWICE on this very report, so "GLM answered once" is not a verified fact, and the test no
+longer implies it. `ENTRIES` are the report's merged slices; the call count is a property of the
+test's own construction, used only to prove a double record is detectable.
+
+### Q-1036 — `charged` claimed the wallet moved, and never looked
+
+The doc said *"this build's bill was set against the user's wallet"* — a claim about the WALLET —
+while the value is `billing applies && bill > 0`, a claim about the BILL. The gap is real money:
+
+- At the settle the debit runs under `if (userId && effectiveBilledUsd > 0 && billingActive)`. When
+  `debitRes.ok` is false the failure goes to **`console.error` only** and `walletDebit` stays null —
+  and the record still said `charged`, about a bill the balance never paid.
+- The watchdog path skips its debit whenever it cannot reproduce the settle's exact `buildRef`,
+  deliberately, because a mismatch there could double-charge. Recorded identically.
+
+🔑 **`charged`'s computation is unchanged, on purpose.** Making it require a known debit would have
+made every caller that cannot see one report "not charged" about a build that really was billed — one
+lie traded for another, which the 2026-09-13 rule forbids outright. The wallet fact is reported
+beside it: `walletDebited`, `billedButNotDebited`, and `· billed but NOT debited` on the label, on
+every branch that can be charged.
+
+**An unknown stays silent.** "We did not check" and "it did not happen" are different facts and only
+the second is a finding, so the settle (which knows the debit result) passes it and the watchdog
+(which builds its label before its own debit) passes nothing. A test asserts the field is *absent*
+there, not false.
+
+### Proof, and one honest correction to my own method
+
+`tests/aBillTheWalletNeverTookIsSaid.test.ts` (11 tests), plus the existing branch table now pinning
+the new flag on EVERY branch — a flag only one test looks at is a flag that quietly becomes true
+somewhere nobody checked.
+
+Four reversions: an unknown reported as a missed debit (5 tests fail); the note computed but never
+written on the record (2); a bill of zero counted as money owed (1); the settle no longer passing the
+fact (1).
+
+🔴 **The second of those first PASSED, and the cause was my own reversion, not a blind test.** The
+`replace` carried no assertion, so when it failed to match it silently changed nothing and the green
+meant only that I had edited no code. Re-applied with an assertion, it fails two tests. **A reversion
+that passes is a claim to verify, never a result to accept** — and that applies to the reversion as
+much as to the test.
+
+---
+
+## 2026-10-14 — Q-1011: a model call made outside the loop was not on the record (and its deadline could not cancel it)
+
+Two defects in one function, `AgentRunner`'s `endgameBatchRepair`.
+
+**It was invisible.** It calls `client.runTurn` directly, outside the step loop where the three
+`onLlmCall` emitters live, so the endgame's batched repair — a call that can spend a minute and a
+large prompt — left **no row at all**, on success or on failure. Every autopsy reads `llmCalls`, so
+the one place a reader would look to ask "what did the endgame actually do?" was empty.
+
+It now goes through one `recordOffLoopCall`, used on **both** outcomes, because a failed call is a
+call that was paid for. The recorder deliberately **invents nothing**: no `answerMs`, `fallbackMs`,
+`openMs` or `stopCause`, since those are the loop's own measurements, and putting unmeasured numbers
+into a report is this row's defect one level down.
+
+**Its deadline could not cancel it, and that is the expensive half.** `withDeadline` hands a signal to
+`runEndgameRepair`, which checks it *between* steps — but the repair passed `this.opts.signal` (the
+BUILD's) down to the model. So once the 150 s deadline fired, the call carried on burning tokens for
+an answer nothing would read. **A deadline that cannot cancel is a comment.**
+
+🔑 **The fix does not trade Stop for the deadline.** Handing the deadline's signal down *alone* would
+have stopped a user's Stop from reaching the call — problem A fixed by creating problem X.
+`withDeadline` already accepts a `parent`, so the build's signal is passed as that parent and the one
+signal fires on **either**. Both call sites are asserted, not just the function.
+
+**A sibling, found by rule 3.** `tscErrorCause`'s guard pinned `io.llmRepair(out2 + causes, subset)`
+*including the closing paren*, so adding a third argument failed a guard whose property was perfectly
+intact — the same class as `aModuleIsNotTheWholeApp`'s review-gate guard (fixed yesterday). Repaired
+the same way, and proven still to catch its own bug: dropping the annotation fails three tests.
+
+**Proof.** `tests/aCallOutsideTheLoopIsStillOnTheRecord.test.ts`, 7 tests, including a census over
+`client.runTurn(` **bodies** so a third site that records nothing fails it. Five reversions, each
+failing the right test: the success row removed, the failure row removed, the model call ignoring the
+deadline, the deadline losing its parent, and the contract dropping the signal. Two of my own
+assertions were wrong on the first run (my recorder is itself a fourth `onLlmCall` site; `codeOnly`
+strips the very inline comment I was asserting) — fixed in the test, not in the code.
+
+**Still open, stated rather than implied:** the ROUTE's own direct `runTurn` aux calls (plan,
+blueprint, judge) are also absent from `llmCalls`. Their *tokens* are reconciled as `other` by design,
+so money is safe; the *rows* are not. A separate change.
+
+## 2026-10-14 — Q-1012 is BLOCKED, because the row's prescribed fix collides with a standing lesson
+
+The row asks for a provider stall ended by our per-turn timeout to be counted in
+`PROVIDER_TIME_WASTED`. Investigating it found the opposite rule already written down, in
+`providerWaste.ts`'s own header, from autopsy bb688add:
+
+> *"OUR OWN CLOCK ENDING IS NOT A PROVIDER'S WASTE … a lane that ran out of ITS budget mid-call is our
+> accounting, not the vendor's failure."*
+
+The per-turn timeout **is** our clock. Counting it as vendor waste would re-introduce exactly what
+that autopsy removed — and this number is what the 429 bench's trigger will be re-chosen from, so
+inflating it would move a routing decision on a false reading.
+
+The honest distinction is whether the provider was *producing* when our clock fired: `crawl` and
+`silent` are real vendor waste, a healthy call our budget cut short is not. **That fact is not
+available at the timeout site** — there is no `TurnResult`, so no `firstOutputAfterMs` or
+`openedAfterMs`, and the chain does not report which rung was serving when a stop cancels it.
+
+So it is recorded as BLOCKED with all four fields, with the recommendation to count it only as
+`silent` (provider produced nothing) and never as `timeout`, and with the note that the required
+change is inside the provider chain — which CLAUDE.md says to confirm with the admin before touching.
+Guessing it would put a number nobody measured into the figure a routing decision is made from.

@@ -5,6 +5,8 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. The server writes payment_transactions
 // / user_token_wallets which navbharat-prod's rules mark `allow write: if false` (server-only); the old
 // unauthenticated CLIENT SDK was rejected with PERMISSION_DENIED. Same modular API, admin-backed.
+import { creditWalletId } from '../lib/walletCreditTarget';
+import { listEqNewestFirst, epochMillis, INDEX_SAFE_FETCH_CAP } from '../lib/firestoreIndexSafe';
 import { doc, getDoc, setDoc, updateDoc, runTransaction, collection, query, where, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
 import { mirroredCreditPatch, rupeesToTokens } from '../lib/walletMirror';
 import { ordersToReconcile, reconcileMessage, type PendingOrderRecord } from '../lib/pendingOrders';
@@ -60,6 +62,20 @@ export function isValidCashfreeSignature(opts: {
   // CONSTANT-TIME (forensic audit 2026-10-04): `===` returns as soon as a character differs, so the time a
   // rejection takes leaks how much of a guessed signature was right. Each candidate is compared in full.
   return [v2, v1Base64, v1Hex].some((expected) => timingSafeStringEqual(signature, expected));
+}
+
+/**
+ * The signature and timestamp a Cashfree webhook arrived with. Cashfree's documented headers are
+ * `x-webhook-signature` / `x-webhook-timestamp`; the older `x-cf-signature` / `x-cf-signature-timestamp`
+ * (and `cf-signature`) are still read so nothing that works today stops working. The documented name
+ * wins when both are present. This only LOCATES the values — `isValidCashfreeSignature` still decides,
+ * against the server's secret, and an absent signature is still a rejection. PURE.
+ */
+export function cashfreeWebhookSignatureHeaders(headers: Record<string, unknown>): { signature: string; timestamp: string } {
+  const one = (v: unknown): string => (Array.isArray(v) ? String(v[0] ?? '') : typeof v === 'string' ? v : '');
+  const signature = one(headers['x-webhook-signature']) || one(headers['x-cf-signature']) || one(headers['cf-signature']);
+  const timestamp = one(headers['x-webhook-timestamp']) || one(headers['x-cf-signature-timestamp']);
+  return { signature, timestamp };
 }
 
 /** Equal-length strings compared in constant time; different lengths are simply unequal. */
@@ -404,10 +420,12 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     if (!userId) return res.status(401).json({ error: 'Please sign in first.' });
 
     try {
-      const txRef = collection(db, 'payment_transactions');
-      const q = query(txRef, where('userId', '==', userId), where('paymentStatus', '==', 'PENDING'), limit(50));
-      const snap = await getDocs(q);
-      const records = snap.docs.map((d: any) => d.data() as PendingOrderRecord);
+      // DB-5: newest PENDING orders first. The old unordered limit(50) returned the 50 OLDEST ids, so a
+      // user with 50 abandoned checkouts never had a new paid order swept. Index-free helper, bounded scan.
+      const records = await listEqNewestFirst<PendingOrderRecord & { _at: number }>(
+        db.collection('payment_transactions'), [['userId', userId], ['paymentStatus', 'PENDING']], '_at', 50, INDEX_SAFE_FETCH_CAP,
+        (_id, data) => ({ ...(data as PendingOrderRecord), _at: epochMillis(data.createdAt) }),
+      );
       const orderIds = ordersToReconcile(records, Date.now());
 
       let creditedInr = 0;
@@ -482,8 +500,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         return res.status(400).json({ error: 'Webhook secret not configured.' });
       }
 
-      const signature = (req.headers['x-cf-signature'] || req.headers['cf-signature'] || '') as string;
-      const ts = (req.headers['x-cf-signature-timestamp'] || '') as string;
+      const { signature, timestamp: ts } = cashfreeWebhookSignatureHeaders(req.headers);
 
       // Accepts Cashfree's v2 (timestamp+rawBody) and legacy v1 (rawBody) formats — all over raw bytes.
       const isSignatureValid = isValidCashfreeSignature({ rawBody, timestamp: ts, signature, secret });
@@ -643,7 +660,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       // failure between them burned the one redemption this person gets with nothing credited. Claim and
       // credit are now ONE transaction — both happen or neither does.
       const txRef = doc(db, 'payment_transactions', redemptionId);
-      const walletRef = doc(db, 'user_token_wallets', userId);
+      const walletRef = doc(db, 'user_token_wallets', await creditWalletId(db, userId));
       const newBalance = await runTransaction(db, async (tx: any): Promise<number | null> => {
         // Every read before any write — a Firestore transaction requires it.
         const snap = await tx.get(txRef);
@@ -821,6 +838,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         createdAt: nowIso,
       };
 
+      const creditOwner = await creditWalletId(db, userId);
       const wallet = await runTransaction(db, async (tx: any) => {
         // 🔴 MONEY AUDIT 2026-09-12 — THE IDEMPOTENCY CHECK MUST BE INSIDE THE TRANSACTION.
         // The `existing` read above is a cheap fast path, but it is OUTSIDE, and the transaction used
@@ -832,7 +850,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         // receipt part of the conflict set, so the second one sees SUCCESS and credits nothing.
         const already = await tx.get(txRef);
         if (already.exists() && already.data()?.paymentStatus === 'SUCCESS') return null;
-        const walletRef = doc(db, 'user_token_wallets', userId);
+        const walletRef = doc(db, 'user_token_wallets', creditOwner);
         const walletSnap = await tx.get(walletRef);
         const walletData = walletSnap.exists() ? walletSnap.data() : { userId, tokenBalance: 0, totalTokensPurchased: 0, totalTokensUsed: 0, totalMoneySpent: 0, walletLedger: [], remaining_balance: 0, total_balance: 0 };
         const { wallet: credited } = computeCreditedWallet(walletData, txData as any, nowIso);

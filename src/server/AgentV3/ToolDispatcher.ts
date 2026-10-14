@@ -9,7 +9,8 @@ import { repeatedEditNotice } from './repeatedEdits';
 import { missingMembers, declaredMembers, relativeImports, resolveCandidates, memberListNote, RECIPE_LIBRARY_PATH, type MissingMember } from './typeMembers';
 import { fixNodeModulesTypo } from './nodeModulesTypo';
 import { healWouldOscillate } from './HealLedger';
-import { contractRenamesFromSource, contractRenameHealEnabled, fixRecordedTypeRenames, errorsAfterTypeRenames, typeRenameHealNote, valueUsedAsTypeName, CONTRACT_PATH_CANDIDATES, type ContractRename } from './contractRenames';
+import { contractRenamesFromSource, contractRenameHealEnabled, fixRecordedTypeRenames, errorsAfterTypeRenames, typeRenameHealNote, valueUsedAsTypeName, type ContractRename } from './contractRenames';
+import { CONTRACT_PATH_CANDIDATES } from './contractLocation';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
 import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAuditFix';
@@ -2534,6 +2535,23 @@ export class ToolDispatcher {
       try { await this.actuator.readFile(this.workspaceId, file); return pm; } catch { /* absent */ }
     }
     return undefined;
+  }
+
+  /**
+   * Go-live PR 13 wiring: file paths + package.json for the requirements analyzer. Bounded (10 s each),
+   * never throws; null when the sandbox cannot answer. Read-only.
+   */
+  async projectSnapshot(): Promise<{ paths: string[]; packageJson: string | null } | null> {
+    try {
+      const files = await withTimeout(this.actuator.listFiles(this.workspaceId), 10_000, 'listFiles');
+      const paths = files.filter((p) => !/(^|[\\/])(node_modules|dist|build|\.next|\.git)([\\/]|$)/i.test(p)).slice(0, 2000);
+      const pkg = paths.some((p) => p.replace(/^\.?\//, '') === 'package.json')
+        ? await withTimeout(this.actuator.readFile(this.workspaceId, 'package.json'), 10_000, 'readFile').catch(() => null)
+        : null;
+      return { paths, packageJson: pkg };
+    } catch {
+      return null;
+    }
   }
 
   private async readEvalSnapshot(): Promise<{ files: string[]; sources: EvalSourceFile[] }> {

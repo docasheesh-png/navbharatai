@@ -14,10 +14,13 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  contractModule, topLevelStatements, contractFilePath, contractImportSpecifier,
+  contractModule, topLevelStatements,
   frameworkSupportsContractFile, contractFileEnabled, contractBlock, fileUserPrompt, repairUserPrompt,
   runSimpleBuild, type SimpleFileSpec,
 } from '../src/server/AgentV3/SimpleBuilder';
+// The contract's home and import form moved to their ONE module in Q-1026; the behaviour these two pin
+// is unchanged, so the assertions below are untouched — only where they are imported from.
+import { contractFilePath, contractImportSpecifier } from '../src/server/AgentV3/contractLocation';
 import type { OneShotFile } from '../src/server/AgentV3/OneShotBuilder';
 
 /** The contract the real build designed (trimmed), exactly as the model returned it — fenced. */

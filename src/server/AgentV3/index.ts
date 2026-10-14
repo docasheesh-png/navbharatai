@@ -17,6 +17,7 @@ export {
   isAgentV3FreeUser,
   isAgentV3PaidPublicEnabled,
   isAgentV3CreditGateEnabled,
+  billingAppliesTo,
   costRoutingEnabled,
   costRoutingActiveFor,
   buildRequiresSignIn,

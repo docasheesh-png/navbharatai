@@ -123,6 +123,27 @@ export function isAgentV3CreditGateEnabled(): boolean {
 }
 
 /**
+ * DOES THIS BUILD'S BILL REACH THIS USER'S WALLET AT ALL? (build report 9c612cdb, 2026-10-13, Q-1033.)
+ *
+ * 🔴 WHY IT IS A FUNCTION. This exact expression was written SIX times in `routes/agentv3.ts` — the
+ * affordability gate, the cheap-floor chain, the watchdog's billing label, the watchdog's wallet debit,
+ * the live ₹ figure and the settle. Six copies of one money rule, in one file, with nothing making them
+ * agree. The rule has already been widened once (the credit gate was OR-ed in on 2026-07-10); the next
+ * widening that reaches five of the six leaves the sixth charging — or not charging — by a rule nobody
+ * chose. A money predicate is the last place a copy may drift.
+ *
+ * The rule itself is unchanged: billing applies when EITHER the paid-public master switch or the
+ * decoupled credit gate is on, AND this VERIFIED identity is not on the free list (admin/testers).
+ * Callers that additionally require a billable uid keep their own `userId &&` — this answers only
+ * "is billing on for them", never "is there someone to bill".
+ *
+ * MUST be called with the server-VERIFIED identity (see `isAgentV3FreeUser`). Pure over the env flags.
+ */
+export function billingAppliesTo(userId?: string | null, email?: GrantEmail | null): boolean {
+  return (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email);
+}
+
+/**
  * SECURITY Phase 1.3 (admin-approved 2026-07-07) — must a v5.0 build be REFUSED for lack of a
  * billable identity? A build spends NavBharatAI's paid model budget, so it may run ONLY for:
  *   • a VERIFIED user (`verifiedUserId` present — billable / free-list-checkable), or

@@ -43,6 +43,7 @@
 import * as ts from 'typescript';
 import { posix } from 'node:path';
 import type { TscError } from './EndgameRepair';
+import { CONTRACT_PATH_CANDIDATES, contractImportSpecifier } from './contractLocation';
 
 /** One platform rename: `from` is the component's name, `to` the shared data type's new name. */
 export interface ContractRename {
@@ -52,8 +53,6 @@ export interface ContractRename {
   component?: string;
 }
 
-/** Where the fast lane writes the contract module — `contractFilePath` in SimpleBuilder.ts. */
-export const CONTRACT_PATH_CANDIDATES: readonly string[] = ['src/types.ts', 'types.ts'];
 
 /** Kill switch for the write-door heal. Default ON; `off` leaves the error to the model with the ✏️ advice. */
 export function contractRenameHealEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -175,12 +174,6 @@ function declaresType(contractSource: string, name: string): boolean {
   return new RegExp(`(?:^|\\n)\\s*export\\s+(?:declare\\s+)?(?:interface|type|enum|class)\\s+${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(contractSource);
 }
 
-function importSpecifierFor(fromFile: string, contractPath: string): string {
-  let rel = posix.relative(posix.dirname(fromFile), contractPath).replace(/\.tsx?$/, '');
-  if (!rel.startsWith('.')) rel = `./${rel}`;
-  return rel;
-}
-
 function resolvesTo(fromFile: string, spec: string, contractPath: string): boolean {
   if (!spec.startsWith('.')) return false;
   const base = contractPath.replace(/\.tsx?$/, '');
@@ -267,7 +260,7 @@ export function fixRecordedTypeRenames(
             edits.push({ start: at, end: at, text: ` ${specs} ` });
           }
         } else {
-          const line = `import type { ${missing.join(', ')} } from '${importSpecifierFor(file, contract.path)}';`;
+          const line = `import type { ${missing.join(', ')} } from '${contractImportSpecifier(file, contract.path)}';`;
           const last = imports[imports.length - 1];
           if (last) {
             edits.push({ start: last.end, end: last.end, text: `\n${line}` });

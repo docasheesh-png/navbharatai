@@ -34,6 +34,8 @@ import { ledgerPatch } from './walletStatement';
 import { checkPlanPayable, giftRemaining, paidSpendableTokens } from './giftSpend';
 import { inrToDebitTokens, inrToWalletTokens, TOKENS_PER_RUPEE } from './payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
+import { WALLET_OPS, validRequestId, walletOpId } from './walletOps';
+import { withLedgerV2 } from './ledgerV2';
 import { envFlag } from './envFlag';
 import {
   HOSTING_TIERS, LEGACY_HOSTING_PLAN_ID, hostingAgreementTerms, isKnownPlanId, purchasableTier,
@@ -697,7 +699,7 @@ export async function purchaseHostingPlan(
   userId: string,
   nowIso?: string,
   tierId: HostingTierId | string = HOSTING_TIERS[0].id,
-  opts: { agreedToTerms?: boolean; autoRenew?: boolean } = {},
+  opts: { agreedToTerms?: boolean; autoRenew?: boolean; requestId?: string } = {},
 ): Promise<PlanPurchaseResult> {
   if (!hostingPlansEnabled()) {
     return { ok: false, error: 'Hosting plans are not available right now.', reason: 'disabled' };
@@ -708,11 +710,22 @@ export async function purchaseHostingPlan(
   try {
     const ownerId = await canonicalId(db, userId);
     const ref = doc(db, 'user_token_wallets', ownerId);
+    // DB-14: a client request id makes a double tap a replay, not a second charge. Absent (older
+    // clients) ⇒ exactly the old behaviour.
+    const opRef = validRequestId(opts.requestId) ? doc(db, WALLET_OPS, walletOpId(ownerId, 'plan', opts.requestId)) : null;
     const outcome = await runTransaction(db, async (t: any) => {
       const snap = await t.get(ref);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
+      if (opRef) {
+        const op = await t.get(opRef);
+        const plan = current.hostingPlan as HostingPlanRecord | undefined;
+        if (op.exists() && plan) {
+          return { ok: true, replay: true, wallet: current, plan, charged: false, creditedInr: 0, bundledCreditInr: 0 } as any;
+        }
+      }
       const result = computePlanPurchase(current, nowIso ?? new Date().toISOString(), tierId, opts);
-      if (result.ok) t.set(ref, result.wallet);
+      if (result.ok) t.set(ref, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? current : null, result.wallet, `plan:${String(tierId)}`));
+      if (result.ok && opRef) t.set(opRef, { kind: 'plan', ownerId, tierId: String(tierId), at: new Date().toISOString() });
       return result;
     });
     if (!outcome.ok) {

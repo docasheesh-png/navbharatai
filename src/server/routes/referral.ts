@@ -20,6 +20,7 @@
 // or reveals somebody's money.
 
 import type { Express, Request, Response } from 'express';
+import { creditWalletId } from '../lib/walletCreditTarget';
 import { randomBytes } from 'crypto';
 import {
   doc, getDoc, setDoc, runTransaction, getServerDb as getDb,
@@ -187,7 +188,7 @@ export async function settleWebReferralSteps(db: any, userId: string, opts: {
     hasReferrer: false, // the referral code is Android-only; it is never earned on the web
   };
   const nowIso = new Date().toISOString();
-  const walletRef = doc(db, 'user_token_wallets', userId);
+  const walletRef = doc(db, 'user_token_wallets', await creditWalletId(db, userId));
 
   const result = await runTransaction(db, async (tx: any) => {
     const [refSnap, walletSnap] = await Promise.all([tx.get(selfRef), tx.get(walletRef)]);
@@ -570,7 +571,7 @@ export function registerReferralRoutes(app: Express): void {
 
       const nowIso = new Date().toISOString();
       const selfRef = doc(db, REFERRALS, userId);
-      const walletRef = doc(db, 'user_token_wallets', userId);
+      const walletRef = doc(db, 'user_token_wallets', await creditWalletId(db, userId));
 
       const paid = await runTransaction(db, async (tx: any) => {
         const [refSnap, walletSnap] = await Promise.all([tx.get(selfRef), tx.get(walletRef)]);
@@ -680,7 +681,7 @@ export function registerReferralRoutes(app: Express): void {
 async function payReferrer(db: any, referrerId: string, friendId: string, nowIso: string): Promise<void> {
   const referrerRef = doc(db, REFERRALS, referrerId);
   const friendRef = doc(db, REFERRALS, friendId);
-  const walletRef = doc(db, 'user_token_wallets', referrerId);
+  const walletRef = doc(db, 'user_token_wallets', await creditWalletId(db, referrerId));
 
   await runTransaction(db, async (tx: any) => {
     const [refSnap, friendSnap, walletSnap] = await Promise.all([

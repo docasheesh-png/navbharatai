@@ -255,9 +255,22 @@ describe('8 · evaluate leaves our starter e2e suite out of the app’s counts',
 // ── 9 · the ETA says where the build is ───────────────────────────────────────────────────────────────
 describe('9 · the ETA line in the final checks, and after a hand-off', () => {
   it('🔴 the report: at minute 12, inside the final checks, the line promises no minutes', () => {
-    const line = finalChecksEtaLine(12 * 60_000);
+    // `appExists` is TRUE here because this report's build really did produce an app — a green React
+    // app on the default starter. The argument is new (Q-1024: a stopped or empty build was being told
+    // "your app is built" by the heartbeat tick), and passing it reproduces THIS report rather than
+    // accommodating the change.
+    const line = finalChecksEtaLine(12 * 60_000, true);
     expect(line).toMatch(/your app is built — running the final checks/);
     expect(line).not.toMatch(/to go|more to go/);
+  });
+
+  it('…and a build that produced NOTHING gets the same silence about minutes, without the claim (Q-1024)', () => {
+    const line = finalChecksEtaLine(12 * 60_000);
+    // The property this section is about is unchanged: no countdown, whatever happened.
+    expect(line).not.toMatch(/to go|more to go/);
+    // But the claim is gone, because there is no app to claim.
+    expect(line).not.toMatch(/your app is built/);
+    expect(line).toMatch(/running the final checks/);
   });
   // REWRITTEN DELIBERATELY (autopsy 9c612cdb, 2026-10-12). This pinned the FIRST `etaFinalChecks = true`
   // to sit beside `integrityStartedAt`. That anchor was too late: the runner returned at 361.9 s, the

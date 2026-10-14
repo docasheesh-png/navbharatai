@@ -99,17 +99,23 @@ describe('🔒 the trail — all four steps, one predicate', () => {
     expect(tile.slice(0, 900)).toContain('{TOP_UP_DOT_LABEL}');
   });
 
-  it('STEPS 3 and 4 — the Buy tokens tile and the Purchase button, from the same predicate', () => {
+  it('STEPS 3 and 4 — the Buy Tokens tab and the Pay button, from the same predicate', () => {
     const bill = src('src/components/panels/BillingPanel.tsx');
+    const header = src('src/components/wallet/WalletHeader.tsx');
+    const buy = src('src/components/wallet/TokenPurchaseTab.tsx');
     expect(bill).toContain("from '../../lib/walletNeedsTopUp'");
     // Read from the wallet this panel already holds — no second fetch, no second source of truth.
     expect(bill).toContain('const needsTopUp = walletNeedsTopUp({ wallet, loading: loadingWallet });');
-    // 🔴 THE DOT IS DRAWN TWICE, AND NEITHER MAY SIT INSIDE SOMETHING A PHONE HIDES. The capsule
-    // row (2026-09-22) stands its icon chip down below `sm` — it is the widest thing in the row
-    // that carries no information — and the first draft put the dot inside that chip, which
-    // removed it from every phone, i.e. from exactly the screens where a ₹0 balance matters most.
-    // Caught by measurement before it shipped; held here so it cannot come back.
-    const dots = bill.match(/needsTopUp && <span aria-hidden className="[^"]*rounded-full bg-danger" \/>/g) ?? [];
+    // The panel computes it ONCE and hands the same boolean to both places that draw the dot.
+    expect(bill).toContain('needsTopUp={needsTopUp}');
+    expect((bill.match(/needsTopUp=\{needsTopUp\}/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    // 🔴 THE DOT IS DRAWN TWICE, AND NEITHER MAY SIT INSIDE SOMETHING A PHONE HIDES (2026-09-22: the first
+    // draft put it inside an icon chip a phone stands down, which removed it from exactly the screens
+    // where a ₹0 balance matters most). The redesign keeps the rule: held here so it cannot come back.
+    const dots = [
+      ...(header.match(/needsTopUp[^\n]*\n?\s*<span aria-hidden className="[^"]*rounded-full bg-danger" \/>/g) ?? []),
+      ...(buy.match(/needsTopUp && <span aria-hidden className="[^"]*rounded-full bg-danger" \/>/g) ?? []),
+    ];
     expect(dots).toHaveLength(2);
     for (const dot of dots) {
       // The CLASS LIST only — `aria-hidden` is the attribute that makes the dot decorative beside
@@ -118,10 +124,12 @@ describe('🔒 the trail — all four steps, one predicate', () => {
       const hides = classes.filter((c) => c === 'hidden' || c.endsWith(':hidden'));
       expect(hides, `a dot that a phone hides is not a warning: ${dot}`).toEqual([]);
     }
-    // The capsule's dot is positioned off the CAPSULE, which is why the capsule is `relative`.
-    expect(bill).toContain('absolute top-1.5 right-2 w-2 h-2 rounded-full bg-danger');
-    expect(bill).toMatch(/"relative flex-1 min-w-fit/);
-    expect(bill).toContain('Purchase Wallet Tokens');
+    // Each dot has its words as a SIBLING, never inside something that could clip them.
+    expect(header).toContain('{TOP_UP_DOT_LABEL}');
+    expect(buy).toContain('{TOP_UP_DOT_LABEL}');
+    // The tab the dot hangs off is `relative`, which is what positions it.
+    expect(header).toMatch(/'relative flex min-h-\[56px\]/);
+    expect(buy).toContain('Pay ${inr(amount)} for');
   });
 
   it('the dot carries words everywhere it is drawn', () => {

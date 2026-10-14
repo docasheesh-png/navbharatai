@@ -27,6 +27,8 @@ const codeOnly = (src: string) => src
 const app = read('src/App.tsx');
 const settings = read('src/components/panels/SettingsPanel.tsx');
 const billing = read('src/components/panels/BillingPanel.tsx');
+// The recharge gate moved with the Buy Tokens page (wallet redesign, 2026-10-14).
+const purchaseTab = read('src/components/wallet/TokenPurchaseTab.tsx');
 const viewPanels = read('src/components/panels/ViewPanels.tsx');
 const secrets = read('src/components/SecretManager.tsx');
 const lockSection = read('src/components/settings/AppLockSettings.tsx');
@@ -36,7 +38,7 @@ const WIRED_IN: Record<AppLockArea, { file: string; src: string }> = {
   api_keys: { file: 'src/components/SecretManager.tsx', src: secrets },
   billing: { file: 'src/App.tsx', src: app },
   subscription: { file: 'src/components/panels/BillingPanel.tsx', src: billing },
-  wallet_recharge: { file: 'src/components/panels/BillingPanel.tsx', src: billing },
+  wallet_recharge: { file: 'src/components/wallet/TokenPurchaseTab.tsx', src: purchaseTab },
   pro_builder: { file: 'src/App.tsx', src: app },
   code_studio: { file: 'src/components/panels/ViewPanels.tsx', src: viewPanels },
   settings: { file: 'src/components/panels/SettingsPanel.tsx', src: settings },
@@ -130,16 +132,25 @@ describe('the money screens are gated where it is safe to gate them', () => {
   it('the whole Wallet & Billing view, the plans card and the recharge tab each have their own gate', () => {
     expect(app).toContain('area="billing"');
     expect(billing).toContain('area="subscription"');
-    expect(billing).toContain('area="wallet_recharge"');
+    expect(purchaseTab).toContain('area="wallet_recharge"');
   });
 
   it('🔴 the recharge gate sits on the TAB BODY, not around the panel', () => {
-    // The four balance cards above are this screen's tab bar. Gating them too would leave the user unable
-    // to read their own balance or switch tabs.
-    const rechargeAt = billing.indexOf('area="wallet_recharge"');
-    const tabTestAt = billing.indexOf("activeBillingDetailTab === 'purchase'");
-    expect(tabTestAt).toBeGreaterThan(-1);
-    expect(rechargeAt).toBeGreaterThan(tabTestAt);
+    // The balance and the three-tab bar are this screen's navigation. Gating them too would leave the user
+    // unable to read their own balance or switch pages. The gate lives INSIDE the Buy Tokens page, which the
+    // panel renders only under `tab === 'buy'`, below the header and the tab bar.
+    expect(billing).not.toContain('area="wallet_recharge"');
+    const headerAt = billing.indexOf('<WalletHeader');
+    const tabTestAt = billing.indexOf("tab === 'buy'");
+    const pageAt = billing.indexOf('<TokenPurchaseTab');
+    expect(headerAt).toBeGreaterThan(-1);
+    expect(tabTestAt).toBeGreaterThan(headerAt);
+    expect(pageAt).toBeGreaterThan(tabTestAt);
+    // And the gate wraps the whole page body, not one button inside it.
+    const gateAt = purchaseTab.indexOf('area="wallet_recharge"');
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(purchaseTab.indexOf('render={() => (', gateAt)).toBeGreaterThan(gateAt);
+    expect(purchaseTab.indexOf('<RecentPayments')).toBeGreaterThan(gateAt);
   });
 
   it('🔒 does NOT gate the checkout modal — a lock must not interrupt a payment already made', () => {

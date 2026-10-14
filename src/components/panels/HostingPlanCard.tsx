@@ -25,7 +25,7 @@
  * STATUS RESPONSE, not from an import, so a price change on the server reaches the screen without
  * a new frontend build.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Globe, Database, Cpu, BadgeCheck, RefreshCw, Check , ChevronDown} from 'lucide-react';
 import { authHeaders } from '../../lib/authedFetch';
 import { HOSTING_TIERS, hostingAgreementTerms, type HostingTier, HOSTING_OVERAGE_INR_PER_GB, FREE_PUBLISHED_APPS } from '../../lib/hostingTiers';
@@ -78,8 +78,16 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
 
   useEffect(() => { void load(); }, [load]);
 
+  // DB-14: one request id per purchase intent. A repeat tap (or a retry after a lost response) re-sends the
+  // SAME id, which the server treats as a replay. It is released 30 s after a success, so a deliberate
+  // early renewal later is still a new purchase.
+  const purchaseIntent = useRef<{ tierId: string; id: string } | null>(null);
   const purchase = async (tier: HostingTier) => {
     if (busy || !status || !agreed) return;
+    if (!purchaseIntent.current || purchaseIntent.current.tierId !== tier.id) {
+      purchaseIntent.current = { tierId: tier.id, id: `hp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}` };
+    }
+    const intent = purchaseIntent.current;
     setBusy(true);
     try {
       // 🔒 Carries the app-lock ticket when one is held. The server checks it (appLockEnforce.ts); this
@@ -87,13 +95,15 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
       const res = await fetch(`/api/wallet/${userId}/hosting-plan/purchase`, {
         method: 'POST',
         headers: { ...(await authHeaders()), ...(await unlockHeaders()), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tierId: tier.id, agreedToTerms: true, autoRenew }),
+        body: JSON.stringify({ tierId: tier.id, agreedToTerms: true, autoRenew, requestId: intent.id }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         onToast(data?.error || 'Could not complete the purchase.', res.status === 402 ? 'warning' : 'error');
+        if (res.status < 500) purchaseIntent.current = null; // a refusal charged nothing; the next try is new
         return;
       }
+      setTimeout(() => { if (purchaseIntent.current === intent) purchaseIntent.current = null; }, 30_000);
       // Every real part of the outcome is named — the credit returned for unused days and the
       // bundled credit are money that moved, and money that moved is money the user is told about.
       const extras = [
@@ -181,6 +191,16 @@ export function HostingPlanCard({ userId, onWalletChanged, onToast }: {
               )}
             </div>
           </div>
+          {active && (status as any).trafficUsage && (status as any).trafficUsage.includedFrontendGb != null && (() => {
+            const u = (status as any).trafficUsage as { frontendGb: number; includedFrontendGb: number; frontendGbBilled: number; frontendInrBilled: number };
+            const pct = u.includedFrontendGb > 0 ? Math.min(100, Math.round((u.frontendGb / u.includedFrontendGb) * 100)) : 0;
+            return (
+              <p className="text-[11px] text-muted mt-0.5 w-full" data-testid="frontend-traffic-usage">
+                Visitor traffic this period: {u.frontendGb} GB of {u.includedFrontendGb} GB ({pct}%).
+                {u.frontendGbBilled > 0 ? ` Extra ${u.frontendGbBilled} GB charged at ₹20/GB (₹${u.frontendInrBilled}).` : ' Beyond the allowance: ₹20/GB.'}
+              </p>
+            );
+          })()}
           {active && (
             <button
               onClick={toggleAutoRenew}

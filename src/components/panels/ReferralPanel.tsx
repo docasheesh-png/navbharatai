@@ -148,7 +148,7 @@ export const ReferralPanel: React.FC<{
   const ordered = [...rows].sort((a, b) => STEP_ORDER.indexOf(a.step) - STEP_ORDER.indexOf(b.step));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Portals to document.body, so its position in this tree doesn't matter. Reuses the SAME sheet
           ProfilePage does, rather than a second copy — see accountVerificationActions.ts's own note
           on why phone stays out of that file. */}
@@ -160,57 +160,65 @@ export const ReferralPanel: React.FC<{
         onVerified={() => { setPhoneSheetOpen(false); props.onRefresh(); }}
         onSignInInstead={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { signIn: 'phone' } }))}
       />
-      {/* Your code — shareable EVERYWHERE, including the website. Only claiming is Android-only. */}
-      <div className="rounded-2xl border border-amber-500/20 bg-well p-6">
-        <h4 className="text-[10px] font-black uppercase tracking-widest text-muted">Your Referral Code</h4>
-        <div className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-line bg-surface px-5 py-3.5">
-          <span className="font-mono text-base font-black tracking-widest text-warn">{code ?? '—'}</span>
+
+      {/* YOUR CODE — shareable EVERYWHERE, including the website. Only claiming is Android-only.
+          Copy and Share sit side by side as two equal 48px targets; the code itself is the largest thing on the card. */}
+      <section aria-labelledby="referral-code-heading" className="rounded-2xl border border-line bg-card p-5">
+        <h3 id="referral-code-heading" className="text-sm font-bold text-ink">Your referral code</h3>
+        <p className="mt-0.5 text-xs font-semibold text-muted">Invite friends and earn tokens when they verify.</p>
+        <div className="mt-3 rounded-xl border border-dashed border-line bg-surface px-4 py-3 text-center">
+          <span className="break-all font-mono text-2xl font-extrabold tracking-widest text-ink">{code ?? '—'}</span>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2.5">
           <button
+            type="button"
             disabled={!code}
             onClick={() => {
               navigator.clipboard?.writeText(shareMessage || code || '');
               props.onToast('Referral link copied ✓', 'success');
             }}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-black transition-all hover:bg-amber-600 disabled:opacity-40"
+            className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl border border-line bg-raised px-3 text-sm font-bold text-ink transition-colors hover:bg-raised-hover disabled:opacity-40"
           >
-            <Copy className="h-3 w-3" /> Copy
+            <Copy className="h-4 w-4" aria-hidden /> Copy
+          </button>
+          {/* A REAL share button, not an icon on a sentence (admin 2026-09-17). Same shared helper the
+              profile card uses, so the two surfaces can never behave differently. */}
+          <button
+            type="button"
+            disabled={!code}
+            onClick={async () => {
+              const outcome = await shareReferral(shareMessage || code || '', undefined, navigator);
+              if (outcome === 'shared') props.onToast('Shared ✓', 'success');
+              if (outcome === 'copied') props.onToast('Referral link copied ✓', 'success');
+              if (outcome === 'failed') props.onToast('Could not open sharing — use Copy instead.', 'error');
+              // 'dismissed' is silent: the user closed the sheet on purpose.
+            }}
+            className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-accent px-3 text-sm font-bold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
+          >
+            <Share2 className="h-4 w-4" aria-hidden /> Share
           </button>
         </div>
-        {/* A REAL share button, not an icon on a sentence (admin 2026-09-17). Same shared helper the
-            profile card uses, so the two surfaces can never behave differently. */}
-        <button
-          disabled={!code}
-          onClick={async () => {
-            const outcome = await shareReferral(shareMessage || code || '', undefined, navigator);
-            if (outcome === 'shared') props.onToast('Shared ✓', 'success');
-            if (outcome === 'copied') props.onToast('Referral link copied ✓', 'success');
-            if (outcome === 'failed') props.onToast('Could not open sharing — use Copy instead.', 'error');
-            // 'dismissed' is silent: the user closed the sheet on purpose.
-          }}
-          className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-3 text-[11px] font-black uppercase tracking-widest text-black transition-all hover:bg-amber-600 disabled:opacity-40"
-        >
-          <Share2 className="h-3.5 w-3.5" /> Share
-        </button>
-        <p className="mt-4 text-xs font-semibold leading-relaxed text-warn">
-          You earn ₹25 for each of your friend&rsquo;s verifications — up to ₹75 per friend and
+        <p className="mt-4 text-sm font-semibold leading-relaxed text-body">
+          You earn ₹25 each time a friend you invited completes a verification — up to ₹75 per friend and
           ₹{capRupees} in total. Your friend applies your code in the NavBharatAI Android app.
         </p>
-        <p className="mt-2 text-[11px] font-bold text-muted">
-          Earned so far: <span className="text-success">₹{earnedRupees}</span> of ₹{capRupees}
-          {capReached && <span className="ml-1 text-warn">— you have reached the maximum.</span>}
+        <p className="mt-2 text-sm font-bold text-ink">
+          Earned so far: <span className="text-success">₹{earnedRupees}</span> <span className="font-semibold text-muted">of ₹{capRupees}</span>
+          {capReached && <span className="ml-1 font-semibold text-warn">— you have reached the maximum.</span>}
         </p>
-      </div>
+      </section>
 
       {/* The free-credit steps. */}
-      <div className="rounded-2xl border border-line bg-well p-6">
-        <h4 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-ink">
-          <Gift className="h-4 w-4 text-success" /> Your free credit
-        </h4>
+      <section aria-labelledby="free-credit-heading" className="rounded-2xl border border-line bg-card p-5">
+        <h3 id="free-credit-heading" className="flex items-center gap-2 text-sm font-bold text-ink">
+          <Gift className="h-4 w-4 text-success" aria-hidden /> Your own free credit
+        </h3>
+        <p className="mt-0.5 text-xs font-semibold text-muted">Finish each step once to claim its reward.</p>
 
         {!isAndroid && (
           // Honest about exactly what the website can do: two steps, a ceiling, and the mobile first.
           // The other two rewards are real too, just not here — say where, rather than hide them.
-          <p className="mt-3 rounded-xl border border-line bg-well p-3 text-[11px] font-semibold text-muted">
+          <p className="mt-3 rounded-xl border border-line bg-well p-3 text-xs font-semibold text-muted">
             On the website you earn ₹50 for signing up, ₹50 for logging in with a verified email and
             ₹100 for verifying your mobile{props.webCapRupees ? <> — up to ₹{props.webCapRupees}</> : null}. The
             referral-code and GitHub rewards are in the NavBharatAI Android app.
@@ -228,31 +236,34 @@ export const ReferralPanel: React.FC<{
               : row.step === 'github' ? { label: 'Connect', onClick: () => void connectGithub() }
               : null;
             return (
-              <li key={row.step} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3">
-                <span className="flex min-w-0 items-center gap-2">
+              // Stacked on a phone (the words get the full width, the button its own 44px row), side by
+              // side from `sm` up — a label and a button squeezed onto one 320px line is how a step
+              // name ends up cut to "Logged in with a ver…".
+              <li key={row.step} className="flex flex-col gap-2.5 rounded-xl border border-line bg-surface px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="flex min-w-0 items-start gap-2.5">
                   {row.claimed
-                    ? <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+                    ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" aria-label="Done" />
                     : row.missed
-                      ? <CircleX className="h-4 w-4 shrink-0 text-danger" aria-label="Missed" />
-                      : <Circle className="h-4 w-4 shrink-0 opacity-40" />}
-                  <span className={`truncate text-[11px] font-semibold ${row.claimed || row.missed ? 'text-muted line-through' : 'text-ink'}`}>
+                      ? <CircleX className="mt-0.5 h-5 w-5 shrink-0 text-danger" aria-label="Missed" />
+                      : <Circle className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-label="Not done yet" />}
+                  <span className={`break-words text-sm font-semibold ${row.claimed || row.missed ? 'text-muted line-through' : 'text-ink'}`}>
                     {row.label}
                   </span>
                 </span>
                 {row.missed && !row.claimed && (
                   // The chance has passed (admin 2026-09-30): say so, and offer nothing — there is nothing to do.
-                  <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-danger">Missed</span>
+                  <span className="shrink-0 text-xs font-bold text-danger">Missed</span>
                 )}
                 {!row.claimed && !row.missed && (
                   blocked
                     ? (
-                      <span className="flex shrink-0 items-center gap-2">
-                        <span className="text-[10px] font-bold text-warn">{blocked}</span>
+                      <span className="flex shrink-0 flex-wrap items-center gap-2">
+                        <span className="text-xs font-semibold text-warn">{blocked}</span>
                         {action && (
                           <button
                             onClick={action.onClick}
                             disabled={busy !== null}
-                            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-on-accent transition-all hover:bg-indigo-500 disabled:opacity-40"
+                            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-accent px-4 text-xs font-bold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
                           >
                             {busy === row.step && <Loader2 className="h-3 w-3 animate-spin" />}
                             {action.label}
@@ -264,7 +275,7 @@ export const ReferralPanel: React.FC<{
                       <button
                         onClick={() => claim(row.step)}
                         disabled={busy !== null}
-                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-on-accent transition-all hover:bg-emerald-500 disabled:opacity-40"
+                        className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-accent px-4 text-xs font-bold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
                       >
                         {busy === row.step && <Loader2 className="h-3 w-3 animate-spin" />}
                         Claim ₹{row.rupees}
@@ -280,7 +291,7 @@ export const ReferralPanel: React.FC<{
             still redeem (the server's `canRedeem`: new, and no code applied yet). */}
         {isAndroid && canRedeem && !referred && (
           <div className="mt-5 border-t border-line pt-5">
-            <h5 className="text-[10px] font-black uppercase tracking-widest text-muted">Have a friend&rsquo;s code?</h5>
+            <h4 className="text-sm font-bold text-ink">Have a friend&rsquo;s code?</h4>
             {/* Stacked, like the promo code box: side by side the input's minimum width pushed the button
                 off a narrow phone, and this panel only ever shows on a phone. */}
             <div className="mt-2.5 flex flex-col gap-3">
@@ -289,17 +300,17 @@ export const ReferralPanel: React.FC<{
                 value={codeInput}
                 onChange={(e) => setCodeInput(e.target.value)}
                 placeholder="Enter referral code"
-                className="w-full min-w-0 rounded-xl border border-line bg-surface px-4 py-3 font-mono text-xs font-bold uppercase tracking-widest text-ink transition-colors focus:border-amber-500 focus:outline-none"
+                className="w-full min-w-0 rounded-xl border border-line bg-surface px-4 py-3 font-mono text-sm font-bold uppercase tracking-widest text-ink transition-colors focus:border-accent focus:outline-none"
               />
               <button
                 onClick={redeem}
                 disabled={busy !== null || !codeInput.trim()}
-                className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-500 px-6 py-3 text-[10px] font-black uppercase tracking-widest text-black transition-all hover:bg-amber-600 disabled:bg-amber-500/20 disabled:text-on-accent"
+                className="inline-flex min-h-[48px] w-full items-center justify-center gap-1.5 rounded-xl bg-accent px-6 text-sm font-bold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
               >
                 {busy === 'redeem' && <Loader2 className="h-3 w-3 animate-spin" />} Apply
               </button>
             </div>
-            <p className="mt-2 text-[10px] font-semibold text-muted">
+            <p className="mt-2 text-xs font-semibold text-muted">
               A code can be applied once, to a new account{typeof props.codeOpensLeft === 'number'
                 ? <> — only in your first 3 app opens or 7 days. {props.codeOpensLeft === 0
                   ? 'This is your last chance.'
@@ -310,15 +321,15 @@ export const ReferralPanel: React.FC<{
         )}
 
         {notice && (
-          <div className={`mt-4 flex items-center gap-2 rounded-xl p-3 text-xs font-semibold ${
+          <div role="status" className={`mt-4 flex items-start gap-2 rounded-xl p-3 text-sm font-semibold ${
             notice.kind === 'ok'
-              ? 'border border-emerald-500/20 bg-emerald-500/10 text-success'
-              : 'border border-red-500/20 bg-red-500/10 text-danger'}`}>
-            {notice.kind === 'ok' ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
-            <span>{notice.text}</span>
+              ? 'border border-success/30 bg-success/10 text-success'
+              : 'border border-danger/30 bg-danger/10 text-danger'}`}>
+            {notice.kind === 'ok' ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />}
+            <span className="break-words">{notice.text}</span>
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 };

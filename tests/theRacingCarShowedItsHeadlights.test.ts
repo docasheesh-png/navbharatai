@@ -521,9 +521,13 @@ describe('3d · P-4: AppKnowledgeBase says what a game build really guarantees',
     expect(kb).not.toContain('Ask for a game and it first lays down a real game runtime');
   });
   it('names when the engine is laid down, when it is not, and the camera note', () => {
-    expect(kb).toContain('WHEN THE ENGINE IS LAID DOWN (corrected 2026-10-11, build 46e2d74b)');
+    // Q-1034: the internal build id is gone from this sentence — `AppKnowledgeBase` is read by every AI
+    // to answer users, and an id like "build 46e2d74b" means nothing to them and may be repeated aloud.
+    // What this test is about is that the engine-laydown rule IS stated, so that is what it asks for.
+    // `thePlatformSaysOnlyWhatItChecked` now censuses the whole file for such ids.
+    expect(kb).toContain('WHEN THE ENGINE IS LAID DOWN (corrected 2026-10-11)');
     expect(kb).toContain('It is NOT laid down automatically when you change an existing game');
-    expect(kb).toContain('HONEST NOTE (2026-10-11, build 46e2d74b)');
+    expect(kb).toContain('HONEST NOTE (2026-10-11)');
   });
 });
 

@@ -654,6 +654,10 @@ const NEVER_SUGGEST = new Set([
   'FAST_LANE_SKIPPED_IMAGE_APP',
   // What our own failed provider calls cost — our routing's problem, never the user's next move.
   'PROVIDER_TIME_WASTED',
+  // The user's own answer to the paid bug-hunt offer, and what our pass cost when they said yes. A
+  // choice is not a defect and a cost is not a next move (Q-1042; #3728 left both off every registry).
+  'BUG_HUNT_NOT_RUN',
+  'BUG_HUNT_COST',
   'PREVIEW_SERVER_RESTARTED',
   // "₹X of engine work produced nothing and was not billed" is our own accounting, not something
   // the user could ever act on.

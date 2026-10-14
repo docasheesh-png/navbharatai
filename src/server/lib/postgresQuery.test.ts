@@ -9,6 +9,8 @@ import { sslConfigFor, isPostgresUrl, classifyPgFailure, connectMessageFor, runP
  * A shipped screen that tells 10 of 11 users something false is worse than one that is honestly absent.
  * This is the second transport; the SQL itself needed no changes.
  */
+const PUBLIC_DNS = async () => ['93.184.216.34']; // DB-13 guard: these tests are about the driver, not DNS
+
 describe('sslConfigFor — libpq semantics, not whatever is convenient', () => {
   it('VERIFIES when the user asked for verification', () => {
     expect(sslConfigFor('postgresql://u:p@h.example.com/db?sslmode=verify-full')).toEqual({ rejectUnauthorized: true });
@@ -80,7 +82,7 @@ describe('runPostgresQuery', () => {
 
   it('returns rows and always closes the connection', async () => {
     const end = vi.fn(async () => {});
-    const r = await runPostgresQuery('postgresql://u:p@h/db', 'select 1', (() => fakeClient({ end })) as never);
+    const r = await runPostgresQuery('postgresql://u:p@h/db', 'select 1', (() => fakeClient({ end })) as never, PUBLIC_DNS);
     expect(r.ok).toBe(true);
     expect(r.ok && r.rows).toEqual([{ a: 1 }]);
     expect(end).toHaveBeenCalled();
@@ -89,13 +91,13 @@ describe('runPostgresQuery', () => {
   it('closes the connection even when the QUERY throws', async () => {
     // A connection left open on a free-tier provider is one of their app's own slots.
     const end = vi.fn(async () => {});
-    const r = await runPostgresQuery('postgresql://u:p@h/db', 'select 1', (() => fakeClient({ query: async () => { throw new Error('syntax error at or near "slect"'); }, end })) as never);
+    const r = await runPostgresQuery('postgresql://u:p@h/db', 'select 1', (() => fakeClient({ query: async () => { throw new Error('syntax error at or near "slect"'); }, end })) as never, PUBLIC_DNS);
     expect(r.ok).toBe(false);
     expect(end).toHaveBeenCalled();
   });
 
   it('never returns the driver\'s own text — it quotes the SQL, and a write quotes VALUES', async () => {
-    const r = await runPostgresQuery('postgresql://u:p@h/db', 'x', (() => fakeClient({ query: async () => { throw new Error('column "secret_token" does not exist'); } })) as never);
+    const r = await runPostgresQuery('postgresql://u:p@h/db', 'x', (() => fakeClient({ query: async () => { throw new Error('column "secret_token" does not exist'); } })) as never, PUBLIC_DNS);
     expect(r.ok).toBe(false);
     expect(r.ok === false && r.message).not.toContain('secret_token');
     expect(r.ok === false && r.detail).toContain('secret_token'); // the real text goes to the log
@@ -110,7 +112,7 @@ describe('runPostgresQuery', () => {
 
   it('bounds both the connect and the statement, so a hung database cannot hang the screen', async () => {
     let cfg: Record<string, unknown> = {};
-    await runPostgresQuery('postgresql://u:p@h/db', 'select 1', ((c: Record<string, unknown>) => { cfg = c; return fakeClient(); }) as never);
+    await runPostgresQuery('postgresql://u:p@h/db', 'select 1', ((c: Record<string, unknown>) => { cfg = c; return fakeClient(); }) as never, PUBLIC_DNS);
     expect(cfg.statement_timeout).toBe(PG_STATEMENT_TIMEOUT_MS);
     expect(cfg.connectionTimeoutMillis).toBeGreaterThan(0);
     expect(cfg.ssl).toEqual({ rejectUnauthorized: false });

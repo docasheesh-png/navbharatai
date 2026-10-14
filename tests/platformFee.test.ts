@@ -172,19 +172,20 @@ describe('where the fee is and is NOT applied', () => {
   });
 });
 
-const billingPanel = readFileSync(join(__dirname, '..', 'src/components/panels/BillingPanel.tsx'), 'utf8');
+// The purchase screen is the Buy Tokens page (wallet redesign, 2026-10-14).
+const billingPanel = readFileSync(join(__dirname, '..', 'src/components/wallet/TokenPurchaseTab.tsx'), 'utf8');
 
 describe('the purchase screen tells the user BEFORE they pay', () => {
   it('the calculator prints the credit AFTER the fee, from the shared split', () => {
-    expect(billingPanel).toContain('splitPaymentAtPct(parseFloat(buyAmountInput) || 0, platformFeePct)');
-    expect(billingPanel).toContain('rechargeSplit.creditInr');
-    expect(billingPanel).toContain('platform fee');
+    expect(billingPanel).toContain('splitPaymentAtPct(amount, platformFeePct)');
+    expect(billingPanel).toContain('split.creditInr');
+    expect(billingPanel).toContain('Platform fee');
     // The old promise: `amount × 100` under "at ₹1 = 100 tokens". It must not survive anywhere.
     expect(billingPanel).not.toContain('{(parseFloat(buyAmountInput) || 0) * 100}');
   });
 
   it('the Play pack block still promises the FULL credit, because it is still true there', () => {
-    expect(billingPanel).toContain('credited the full credit amount shown, never less');
+    expect(billingPanel).toContain('receives the full token amount shown, never less');
   });
 });
 

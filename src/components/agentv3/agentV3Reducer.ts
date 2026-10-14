@@ -269,6 +269,10 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'plan_updated':
       return { ...state, plan: event.plan };
 
+    // Go-live PR 13: latest reading replaces the old one (the needs of the app, not a log).
+    case 'service_recommendation':
+      return { ...state, serviceRecommendations: event.recommendations };
+
     case 'checkpoint':
       return { ...state, checkpoints: [...state.checkpoints, event.checkpoint] };
 
@@ -325,10 +329,19 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       return { ...state, pendingSecrets: { callId: event.callId, prompt: event.prompt, secrets: event.secrets } };
 
     case 'permission_request':
+      // The gate's own words are carried through verbatim when it gave them (admin 2026-10-13); a gate
+      // that gave none keeps today's shape exactly, so nothing downstream has to know which it was.
       return {
         ...state,
-        pendingPermission: { callId: event.callId, action: event.action },
-        agents: touchAgent(state.agents, event.agent, `awaiting permission: ${event.action}`, true, event.ts),
+        pendingPermission: {
+          callId: event.callId,
+          action: event.action,
+          ...(event.title ? { title: event.title } : {}),
+          ...(event.why ? { why: event.why } : {}),
+          ...(event.approveLabel ? { approveLabel: event.approveLabel } : {}),
+          ...(event.denyLabel ? { denyLabel: event.denyLabel } : {}),
+        },
+        agents: touchAgent(state.agents, event.agent, `awaiting permission: ${event.title || event.action}`, true, event.ts),
       };
 
     case 'done':

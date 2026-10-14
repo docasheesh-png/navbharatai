@@ -64,31 +64,33 @@ describe('the label for report 9c612cdb\'s build', () => {
   });
 });
 
+// Q-1036: `billedButNotDebited` is pinned on EVERY branch, not only where it can be true. A flag that
+// only one test looks at is a flag that quietly becomes true somewhere nobody checked.
 describe('every branch of the one rule', () => {
   it('a ₹0 Weak build says "not charged"', () => {
     const l = buildBillingLabel({ freeListed: false, cheapEnginesOnly: true, billingActive: true, billedUsd: 0, billedInr: 0 });
-    expect(l).toEqual({ userTier: `${CHEAP_TIER_LABEL} · not charged`, charged: false });
+    expect(l).toEqual({ userTier: `${CHEAP_TIER_LABEL} · not charged`, charged: false, billedButNotDebited: false });
     expect(classifyReportTier(l.userTier)).toBe('free');
   });
 
   it('a Weak build with billing OFF is not charged, whatever the bill was priced at (nothing was debited)', () => {
     const l = buildBillingLabel({ freeListed: false, cheapEnginesOnly: true, billingActive: false, billedUsd: 0.5, billedInr: 48.5 });
-    expect(l).toEqual({ userTier: `${CHEAP_TIER_LABEL} · not charged`, charged: false });
+    expect(l).toEqual({ userTier: `${CHEAP_TIER_LABEL} · not charged`, charged: false, billedButNotDebited: false });
   });
 
   it('free-list, paid and billing-off keep their stored wording, so the inbox classification does not move', () => {
     const freeListed = buildBillingLabel({ freeListed: true, cheapEnginesOnly: true, billingActive: false, billedUsd: 1, billedInr: 97 });
-    expect(freeListed).toEqual({ userTier: 'free-list (admin/tester)', charged: false });
+    expect(freeListed).toEqual({ userTier: 'free-list (admin/tester)', charged: false, billedButNotDebited: false });
     expect(classifyReportTier(freeListed.userTier)).toBe('admin');
 
     const paid = buildBillingLabel({ freeListed: false, cheapEnginesOnly: false, billingActive: true, billedUsd: 2.5, billedInr: 242.43 });
-    expect(paid).toEqual({ userTier: 'paid', charged: true });
+    expect(paid).toEqual({ userTier: 'paid', charged: true, billedButNotDebited: false });
     expect(classifyReportTier(paid.userTier)).toBe('paid');
     expect(buildBillingLabel({ freeListed: false, cheapEnginesOnly: false, billingActive: true, billedUsd: 0, billedInr: 0 }))
-      .toEqual({ userTier: 'paid', charged: false });
+      .toEqual({ userTier: 'paid', charged: false, billedButNotDebited: false });
 
     const off = buildBillingLabel({ freeListed: false, cheapEnginesOnly: false, billingActive: false, billedUsd: 3, billedInr: 291 });
-    expect(off).toEqual({ userTier: 'billing-off (no charge)', charged: false });
+    expect(off).toEqual({ userTier: 'billing-off (no charge)', charged: false, billedButNotDebited: false });
     expect(classifyReportTier(off.userTier)).toBe('free');
   });
 

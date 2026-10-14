@@ -108,3 +108,12 @@ export function reconcileMessage(creditedInr: number, orders: number): string | 
     ? `We found a payment of ${money} that had not reached your wallet yet, and added it.`
     : `We found ${orders} payments totalling ${money} that had not reached your wallet yet, and added them.`;
 }
+
+/**
+ * Cashfree order states that can never become PAID (DB-5). Anything else — ACTIVE, PAID, an unknown
+ * new value — is NOT closed, so an unrecognised status can never expire a payable order. Pure.
+ */
+export function cashfreeOrderClosedUnpaid(status: unknown): boolean {
+  const s = String(status ?? '').toUpperCase();
+  return s === 'EXPIRED' || s === 'TERMINATED';
+}

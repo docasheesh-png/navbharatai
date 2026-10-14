@@ -4253,3 +4253,74 @@ behind `AGENTV3_TOKEN_COMPACT`).
 (`scripts/agentv3-reliability-bench.ts`, 15-prompt smoke set first, `BENCH_CONFIRM=yes` required — it spends
 real money) once with all flags off (baseline) and once with the flag(s) on, then `npm run bench:compare`.
 Turn flags on one or two at a time so a regression has one owner.
+
+## Purchase audit flags (2026-10-13, branch fix/purchase-audit)
+
+All three are **OFF unless set to `on`**. None of them charges anyone or changes a price.
+
+| Key | Default | What it does when `on` |
+|---|---|---|
+| `RESELL_EXPIRY_SWEEP` | off | Every 6 h (exclusive scheduler job `resell-expiry-sweep`): reminds the owner 3 and 1 days before a paid extra server / small database / private database ends; 3 days after expiry takes an **extra server** down (code kept) and marks the row `lapsedAt`. A small database already stops at expiry (data API 402); the owner is now told. A **private database is never deleted** by the sweep — it is listed in the log for the admin. Never debits a wallet. |
+| `RESELL_DUPLICATE_GUARD` | off | Publish → "NavBharatAI database (private)" refuses to create a SECOND Supabase project while an expired, never-removed one exists for the same app, and offers Remove for it instead (the stop route can now find that expired row). |
+| `LAPSE_PAUSE_SERVER_APPS` | off | When a hosting plan lapses, apps that run a server (Cloud Run) are taken offline too, even inside the free 3 — free accounts get 0 servers and the plan terms already say server apps wait offline. Apps with their own paid extra-server add-on still in period are kept. |
+
+**Verify:** `npx vitest run tests/purchaseAudit.test.ts`. On staging, set the flag, create a test add-on row with
+`expiresAt` in the past, and run the job with `scheduler.runNow('resell-expiry-sweep')`.
+
+### Auto-renew, private database policy, frontend meter, cost-plus (2026-10-13, same branch)
+
+All **OFF unless set**. No price changes.
+
+| Key | Default | What it does |
+|---|---|---|
+| `RESELL_AUTO_RENEW` | off | Extra server (₹149), small DB (₹49) and private DB (₹1,499) renew every 30 days from the wallet (paid money only, never the gift). Reminders 5/3/1 days ahead; renews from 12 h before expiry in ONE transaction (ledger key `hostingaddon_renew_<ref>_<oldExpiresAt>`, so no double charge); short balance → one notice, 3-day grace, then the normal `RESELL_EXPIRY_SWEEP` lapse. Only rows bought with the renewal term ticked renew; a per-resource switch on Publish (`POST /api/agentv3/resell/auto-renew`) turns it off. |
+| `PRIVATE_DB_EXPIRY_POLICY` | off | Needs `RESELL_EXPIRY_SWEEP=on`. For a lapsed private DB: pause it (if `PRIVATE_DB_ORG_PAUSABLE=on`) or warn 3 and 1 days ahead and **delete** the Supabase project at period end + `PRIVATE_DB_DELETE_AFTER_DAYS`. Every step in the admin audit log (`resell.private_db.*`). |
+| `PRIVATE_DB_ORG_PAUSABLE` | off | Set `on` ONLY if our Supabase org is on the Free plan — Supabase docs: paid-plan projects cannot be paused, and a paused project costs no compute. |
+| `PRIVATE_DB_DELETE_AFTER_DAYS` | 7 | Days after period end before deletion (min 4 so both warnings fit). |
+| `FRONTEND_TRAFFIC_METER` | off | Visitor bytes from the Cloudflare Worker (Analytics Engine) instead of the browser beacon; per owner per day claim `fe:<owner>`; warnings 80%/100%; with `NAVBHARAT_BILL_HOSTING=on` and an agreed plan, ₹20/GB above `includedFrontendGb`, idempotent per day/period (rollup `<hostingLedgerRef>_frontend`). |
+| `CF_ACCOUNT_ID`, `CF_ANALYTICS_TOKEN` | — | Needed by the meter (token: Account Analytics Read). Secret — never log. |
+| `NBAI_TRAFFIC_DATASET` | `nbai_traffic` | Analytics Engine dataset; bind it in the Worker as `NBAI_TRAFFIC`, then paste+deploy the Worker. |
+| `PRIVATE_DB_COST_PLUS` | off | Private DB = Supabase cost × multiplier. ₹1,499 stays the up-front minimum; at renewal only the part above it is charged as a separate ledger line (`privatedb_costplus_<ref>_<periodEnd>`). Usage: compute size + disk from the Management API (no per-project bill endpoint exists); unit prices in `privateDbCostPlus.ts` **need verification**; egress counted 0. |
+| `PRIVATE_DB_COST_MULTIPLIER` | 1.5 | Clamped to [1, 5]. |
+
+---
+
+## `AGENTV3_BUG_HUNT_ASK` — the deep bug hunt is OFFERED, not assumed (admin 2026-10-13)
+
+**Default ON (absent or anything but `off`).** `off` restores the behaviour this flag replaced: the
+post-build reviewer runs on every build without asking, exactly as it did before.
+
+**What the flag turns off is the QUESTION, never the review.** `bugHuntAskEnabled() === false` means the
+hunt runs unasked — it does NOT mean the hunt is skipped. A kill switch that silently removed the app's
+deepest check would be worse than the thing it was switching off, so the module is written so the only
+way to reach "the review does not run" is a user saying so. A test (`aBugHuntIsOfferedNotAssumed`) holds
+that distinction, and a reversion that made `off` skip the review failed it.
+
+**Admin decisions this implements, verbatim-sourced (2026-10-13):**
+
+1. **No amount is shown on the button.** The admin: *"paise kitna lagega yeh show mat karo… real build me
+   x₹ lagte hai, helper 4x₹ leta hai"*. It is also the only honest option — the cost is metered per token,
+   so any figure printed before the hunt runs would be a fabricated quote, which `NO_FAKE_FEATURE_RULE`
+   forbids. What IS said up front: it spends credits, from the wallet, and free/gift credits count. The
+   real figure reaches the user in the bill, priced by the settle's own function, as today.
+2. **A "no" is scoped to ONE build.** The admin: *"sirf isi build ke liye no, next edit ne wapas same
+   question!"*. Implemented by storing nothing at all — the offer is turn-local, so there is nothing to
+   forget and nothing to reset. A test asserts the module touches no store.
+3. **Today's free checks stay free.** The admin: *"user ke wallet se charge free/gift token se bhi chal
+   jaye"*. The deterministic end-of-build checks (tsc gate, lint, readiness, playtest, fake-feature scan,
+   journeys, the app's own tests) spend no model tokens, sit in no billing phase, and are the EVIDENCE the
+   app was built — the second absolute rule requires them, so they are never put behind a payment. Only
+   the model-driven hunt is offered.
+
+**Why it was needed, from the code's own record.** The route's comment beside the reviewer call, autopsy
+b6f88a722: *"40 calls, 523,374 input tokens = 34.4% of the build, `responseChars: 0` on every one, and
+then no verdict at all — all of it billed at ×4"*. The user already paid for that, on every build,
+silently. This flag's feature does not add a charge; it shows an existing one to the person paying it.
+
+**Still open, and it is the real defect (admin's own instinct).** The admin asked whether the helper could
+run on the cheap tier — *"aap help ko glm se chalo to sayad sasta chale?"*. That is the cure; hiding the
+price is not. Recorded as a queue row, not done here.
+
+| Key | Values | Default | Owner |
+|---|---|---|---|
+| `AGENTV3_BUG_HUNT_ASK` | `off` disables the QUESTION (the hunt then runs unasked, as before). Anything else / absent = ask. | ask | `src/server/AgentV3/optionalBugHunt.ts` |

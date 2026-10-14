@@ -28,6 +28,7 @@ import { findSyntaxErrors } from './SyntaxCheck';
 import { lostTruncatedOutput, truncationRecoverySteer, truncationRecoveryNarration, truncationSteeredPaths } from './TruncationRecovery';
 import { isNoOpTurn, MAX_NO_OP_TURNS_AFTER_FINAL, newRepeatProbeState, collectRepeatProbeSteer, noteMutations, loopGuardEnabled, loopGuardThreshold, isProbeBanned, bannedProbeMessage } from './RepeatProbeGuard';
 import { envFlag, envKillSwitch } from '../lib/envFlag';
+import { serviceRecommendationEvent } from '../analyzer/serviceRecommendation';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
 import { abortCauseOf, abortSummary, timedOutSummary, stalledModelSummary, stoppedCallFields, type SeedState, type AbortCause } from './buildAbortCause';
@@ -792,16 +793,90 @@ export class AgentRunner {
     // dying. The wall-clock watchdog still rules over everything, so this can never run away.
     let stepCap = maxSteps;
     let stepResumesLeft = stepResumeBudget();
-    // ONE bounded batch repair call, shared by the trend checkpoint and the step-cap endgame.
-    const endgameBatchRepair = async (errorText: string, files: Array<{ path: string; content: string }>) => {
-      const turn = await client.runTurn({
-        model,
-        system: repairSystemPrompt(dispatcher.frameworkId),
-        messages: [{ role: 'user', content: repairUserPrompt(userPrompt, errorText, files) }],
-        maxTokens: maxTokensPerTurn,
-        signal: this.opts.signal,
-      });
-      return parseFileBlocks(turn.text ?? '');
+    /**
+     * Record ONE model call made OUTSIDE the step loop (Q-1011).
+     *
+     * The loop's three `onLlmCall` emitters each carry fields only the loop knows (tool counts, the
+     * chain's own split times, a stop's cause). An off-loop call has none of those, and inventing
+     * them would put numbers in the report that nothing measured — so this records exactly what such
+     * a call really knows, and nothing more. Best-effort, like every other emitter here: a throw in
+     * diagnostics never breaks a build.
+     */
+    const recordOffLoopCall = (c: {
+      model: string;
+      prompt: string;
+      text: string;
+      stopReason: string | null;
+      usage?: { inputTokens: number; outputTokens: number };
+      startedAt: number;
+      ok: boolean;
+      error?: string;
+    }): void => {
+      try {
+        this.opts.onLlmCall?.({
+          model: c.model,
+          promptPreview: c.prompt.slice(0, PROMPT_PREVIEW_HEAD),
+          promptChars: c.prompt.length,
+          responsePreview: c.text.slice(0, PROMPT_PREVIEW_HEAD),
+          responseChars: c.text.length,
+          finishReason: c.stopReason,
+          toolCalls: 0, // an off-loop repair call is given no tools
+          inputTokens: c.usage?.inputTokens ?? 0,
+          outputTokens: c.usage?.outputTokens ?? 0,
+          latencyMs: Date.now() - c.startedAt,
+          ok: c.ok,
+          ...(c.error ? { error: c.error } : {}),
+        });
+      } catch { /* diagnostics capture is best-effort */ }
+    };
+
+    /**
+     * ONE bounded batch repair call, shared by the trend checkpoint and the step-cap endgame.
+     *
+     * 🔴 TWO DEFECTS LIVED HERE, AND BOTH ARE FIXED (build report 9c612cdb, Q-1011).
+     *
+     * 1. **The call was invisible.** It goes straight to `client.runTurn`, outside the step loop, so
+     *    `onLlmCall` never fired for it — success or failure. Every autopsy reads `llmCalls`, so a
+     *    repair pass that spent a minute and a batch of tokens left no row at all: the one place a
+     *    reader would look to ask "what did the endgame actually do?" showed nothing.
+     * 2. **The 150 s deadline could not stop it.** `withDeadline` hands a signal down to
+     *    `runEndgameRepair`, which checks it BETWEEN steps — but this function passed
+     *    `this.opts.signal` (the BUILD's), so once the deadline fired the model call carried on
+     *    burning tokens for an answer nothing would read. A deadline that cannot cancel is a comment.
+     *
+     * 🔑 The signal is now the CALLER's, and the call sites pass the build's signal as `withDeadline`'s
+     * `parent` — so the one signal fires on the deadline OR a user's Stop. Switching to the deadline's
+     * signal alone would have fixed the deadline by breaking Stop, which is not a fix.
+     */
+    const endgameBatchRepair = async (
+      errorText: string,
+      files: Array<{ path: string; content: string }>,
+      signal?: AbortSignal,
+    ) => {
+      const startedAt = Date.now();
+      const prompt = repairUserPrompt(userPrompt, errorText, files);
+      try {
+        const turn = await client.runTurn({
+          model,
+          system: repairSystemPrompt(dispatcher.frameworkId),
+          messages: [{ role: 'user', content: prompt }],
+          maxTokens: maxTokensPerTurn,
+          // The deadline's signal when the caller handed one down; the build's otherwise, which is
+          // exactly what every caller got before this parameter existed.
+          signal: signal ?? this.opts.signal,
+        });
+        recordOffLoopCall({
+          model: turn.model ?? model, prompt, text: turn.text ?? '',
+          stopReason: turn.stopReason, usage: turn.usage, startedAt, ok: true,
+        });
+        return parseFileBlocks(turn.text ?? '');
+      } catch (err) {
+        recordOffLoopCall({
+          model, prompt, text: '', stopReason: null, usage: undefined, startedAt, ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
     };
 
     let steps = 0;
@@ -1387,6 +1462,15 @@ export class AgentRunner {
           // asked for is absent is misleading by omission. Empty for a complete build. See
           // missingFeatureNotice.ts.
           if (ok) summary = `${summary}${missingFeatureNotice(buildHealth?.warnings)}`;
+          // Go-live PR 13: what this app needs to run, as Buy/Connect choices. AGENTV3_SERVICE_RECO
+          // (default OFF) is checked FIRST so the off path does no I/O. Best-effort, never blocks.
+          if (ok && expectsArtifacts && envFlag('AGENTV3_SERVICE_RECO')) {
+            try {
+              const snap = await dispatcher.projectSnapshot();
+              const reco = snap ? serviceRecommendationEvent(snap) : null;
+              if (reco) events.emit(reco);
+            } catch { /* a recommendation must never fail a build */ }
+          }
           await persist(ok ? 'complete' : 'error');
           events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
           return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}), ...(!ok && modelAnswer ? { modelAnswer } : {}) };
@@ -1710,8 +1794,10 @@ export class AgentRunner {
               trendFired = true; // once per run — the step-cap endgame remains the final net
               events.emit({ type: 'narration', agent: agentRole, text: '🔎 Checkpoint: compile errors are not going down — fixing them all in one pass…', ts: Date.now() });
               const verdict = await withDeadline(
+                // The build's signal is the deadline's PARENT, so the one signal below fires on the
+                // 150 s deadline OR a user's Stop — and `llmRepair` cancels on either (Q-1011).
                 (signal) => runEndgameRepair({ ...io, signal, llmRepair: endgameBatchRepair, log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }) }),
-                150_000, 'errtrend-repair',
+                150_000, 'errtrend-repair', this.opts.signal,
               );
               if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore && !verdict.tscUnverified) {
                 // Tell the model the grind is over so it spends the remaining steps on FEATURES.
@@ -1765,7 +1851,9 @@ export class AgentRunner {
                     signal,
                     llmRepair: endgameBatchRepair,
                     log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }),
-                  }), 150_000, 'endgame-repair');
+                    // Q-1011: the build's signal is the deadline's parent, so one signal ends the
+                    // repair on the deadline OR a Stop, and the model call sees it.
+                  }), 150_000, 'endgame-repair', this.opts.signal);
                   if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore && !verdict.tscUnverified) {
                     const after = await dispatcher.assessBuildReadiness();
                     buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings, tier: after.tier, ...(after.unassessed ? { unassessed: true } : {}) };
@@ -1832,6 +1920,15 @@ export class AgentRunner {
         // emit. A long build is exactly the kind most likely to drop a feature, so leaving this one
         // silent would have hidden the worst cases.
         if (ok) summary = `${summary}${missingFeatureNotice(buildHealth?.warnings)}`;
+        // Go-live PR 13: what this app needs to run, as Buy/Connect choices. AGENTV3_SERVICE_RECO
+        // (default OFF) is checked FIRST so the off path does no I/O. Best-effort, never blocks.
+        if (ok && expectsArtifacts && envFlag('AGENTV3_SERVICE_RECO')) {
+          try {
+            const snap = await dispatcher.projectSnapshot();
+            const reco = snap ? serviceRecommendationEvent(snap) : null;
+            if (reco) events.emit(reco);
+          } catch { /* a recommendation must never fail a build */ }
+        }
         await persist(ok ? 'complete' : 'stopped');
         events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
         return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };

@@ -20,6 +20,33 @@ import { testSkeletonsCanRun } from './TestGenerationAgent';
 /** The reason recorded when the project declares no test runner — the default starter's case. */
 export const STARTER_TESTS_NEED_VITEST = 'vitest is not declared in package.json';
 
+/**
+ * 🔴 A REASON MUST NAME SOMETHING THAT EXISTS (Q-1034's sibling, Q-1032).
+ *
+ * `testSkeletonsCanRun` answers false for TWO different worlds: a package.json that declares no
+ * vitest, and NO PACKAGE.JSON AT ALL (`JSON.parse(String(null))` throws into its `catch`). Both were
+ * reported as *"vitest is not declared in package.json"* — a sentence about a file that does not
+ * exist, which sends a reader to add a dependency to nothing. A false reason is worse than a vague
+ * one: it is actionable in the wrong direction.
+ *
+ * The two are not merged into one vague line either, because the fixes differ: one project needs a
+ * dependency, the other needs a package.json before that question can be asked.
+ */
+export const STARTER_TESTS_NO_PACKAGE_JSON = 'no package.json was read for this project, so no test runner could be declared';
+
+/** Present, but not valid JSON — a third world, and the one where the file itself is the problem. */
+export const STARTER_TESTS_PACKAGE_JSON_UNREADABLE = "this project's package.json could not be read as JSON";
+
+/** Is there any package.json text in hand at all? PURE. */
+function hasPackageJsonText(text: string | null | undefined): boolean {
+  return typeof text === 'string' && text.trim() !== '';
+}
+
+/** Does the text in hand parse as JSON? PURE. */
+function packageJsonParses(text: string): boolean {
+  try { JSON.parse(text); return true; } catch { return false; }
+}
+
 export interface StarterTestsOutcome {
   /** The package.json text the pass read (null when there was none, or it could not be read). */
   packageJson: string | null | undefined;
@@ -37,6 +64,10 @@ export interface StarterTestsOutcome {
  */
 export function starterTestsSkipReason(o: StarterTestsOutcome): string | null {
   if (o.written > 0) return null;
+  // Q-1032: the three worlds `testSkeletonsCanRun` collapses into one `false`, told apart — so the
+  // reason names something that exists and points at the fix this project actually needs.
+  if (!hasPackageJsonText(o.packageJson)) return STARTER_TESTS_NO_PACKAGE_JSON;
+  if (!packageJsonParses(o.packageJson as string)) return STARTER_TESTS_PACKAGE_JSON_UNREADABLE;
   if (!testSkeletonsCanRun(o.packageJson)) return STARTER_TESTS_NEED_VITEST;
   // `testSkeletonsCannotBreakTheBuild` says yes whenever vitest resolves, so this is reached only if that
   // rule changes — named rather than left to fall through to a reason that would then be false.

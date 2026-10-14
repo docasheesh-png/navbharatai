@@ -8,9 +8,14 @@ import { requireUserMatch } from '../lib/authMiddleware';
 import { appLockBlocks } from '../lib/appLockEnforce';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
-import { readHostingPlanStatus, purchaseHostingPlan, setHostingPlanAutoRenew } from '../lib/hostingPlan';
+import { readHostingPlanStatus, purchaseHostingPlan, setHostingPlanAutoRenew, planDays } from '../lib/hostingPlan';
+import { hostingPeriodUsageStore } from '../AgentV3/HostingPeriodUsageStore';
+import { periodStartFrom } from '../lib/hostingOverage';
+import { edgeMeterEnabled } from '../AgentV3/edgeTrafficMeter';
 import { readHostingAddons, purchaseHostingAddon, removeHostingAddon } from '../lib/hostingAddonLedger';
 import { HOSTING_TIERS } from '../../lib/hostingTiers';
+import { listReceipts } from '../lib/receiptStore';
+import { meteringEnabled } from '../lib/billOfSupply';
 import { publishedAppCapForTier, liveAppCount } from '../lib/HostingQuota';
 import { deploymentStore } from '../AgentV3/DeploymentStore';
 import { firebaseDomainLinksForUser } from '../lib/firebaseDomainLink';
@@ -103,9 +108,28 @@ export function registerWalletRoutes(app: Express): void {
   // Lazy auto-renewal happens inside the status read (readHostingPlanStatus), so no cron exists.
   // The catalogue (prices, limits, agreement text) is src/lib/hostingTiers.ts — shared with the UI.
 
+  // Go-live PR 15: the user's Bills of Supply (METERING_V1, default OFF ⇒ 404, as if absent).
+  app.get('/api/wallet/:userId/receipts', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    if (!meteringEnabled()) return res.status(404).json({ error: 'Not found' });
+    const receipts = await listReceipts(getDb() as any, routeParam(req.params.userId));
+    return res.json({ receipts });
+  });
+
   app.get('/api/wallet/:userId/hosting-plan', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {
-      const status = await readHostingPlanStatus(getDb() as any, routeParam(req.params.userId));
+      const status: any = await readHostingPlanStatus(getDb() as any, routeParam(req.params.userId));
+      // FRONTEND_TRAFFIC_METER: this period's visitor traffic, for the Billing card. Absent when off.
+      if (edgeMeterEnabled() && status?.active && status?.plan?.expiresAt) {
+        const ps = periodStartFrom(status.plan.expiresAt, planDays(status.plan.id));
+        const rec = await hostingPeriodUsageStore.read(routeParam(req.params.userId), ps).catch(() => null);
+        status.trafficUsage = {
+          periodStart: ps,
+          frontendGb: Math.round((Number(rec?.frontendGb) || 0) * 1000) / 1000,
+          frontendGbBilled: Math.round((Number(rec?.frontendGbBilled) || 0) * 1000) / 1000,
+          frontendInrBilled: Math.round((Number(rec?.frontendInrBilled) || 0) * 100) / 100,
+          includedFrontendGb: status.tier?.includedFrontendGb ?? null,
+        };
+      }
       return res.json(status);
     } catch (err: any) {
       return sendSafeError(res, 500, 'Unable to load your plan right now. Please try again.', err, 'hosting plan status');
@@ -131,7 +155,11 @@ export function registerWalletRoutes(app: Express): void {
       const autoRenew = typeof req.body?.autoRenew === 'boolean' ? req.body.autoRenew : undefined;
       const result = await purchaseHostingPlan(
         getDb() as any, routeParam(req.params.userId), undefined, tierId ?? HOSTING_TIERS[0].id,
-        { agreedToTerms, ...(autoRenew === undefined ? {} : { autoRenew }) },
+        {
+          agreedToTerms, ...(autoRenew === undefined ? {} : { autoRenew }),
+          // DB-14: optional client request id — the same id twice is one purchase.
+          ...(typeof req.body?.requestId === 'string' ? { requestId: req.body.requestId } : {}),
+        },
       );
       if (!result.ok) {
         // insufficient → 402 (recharge first); a missing tick or an unbuyable tier is the caller's

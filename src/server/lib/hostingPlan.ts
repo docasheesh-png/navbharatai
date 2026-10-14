@@ -34,12 +34,21 @@ import { ledgerPatch } from './walletStatement';
 import { checkPlanPayable, giftRemaining, paidSpendableTokens } from './giftSpend';
 import { inrToDebitTokens, inrToWalletTokens, TOKENS_PER_RUPEE } from './payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
+import { WALLET_OPS, validRequestId, walletOpId } from './walletOps';
+import { withLedgerV2 } from './ledgerV2';
 import { envFlag } from './envFlag';
+import { issueBillOfSupply } from './receiptStore';
 import {
   HOSTING_TIERS, LEGACY_HOSTING_PLAN_ID, hostingAgreementTerms, isKnownPlanId, purchasableTier,
   tierForPlanId, tierRank, HOSTING_OVERAGE_INR_PER_GB, type HostingTier, type HostingTierId,
 } from '../../lib/hostingTiers';
 import { activeAddonCount } from '../../lib/hostingAddons';
+import { proPlan, proPriceInr } from '../../lib/planModel';
+
+/** Go-live PR 18: is Pro offered to buyers right now? Default OFF. */
+function proOffered(): boolean {
+  return envFlag('PLAN_MODEL_PRO');
+}
 
 /**
  * TWO TIERS SINCE 2026-09-10 (admin: "do tier banao, credit bundle karo, 20 GB theek hai").
@@ -84,6 +93,7 @@ export function legacyPlanPriceInr(): number {
 /** The price THIS plan id costs per period — the legacy one at its own price, tiers at theirs. */
 export function planPriceInr(planId: string | null | undefined): number {
   if (String(planId ?? '') === LEGACY_HOSTING_PLAN_ID) return legacyPlanPriceInr();
+  if (String(planId ?? '') === 'pro') return proPriceInr(process.env);
   return tierForPlanId(planId)?.priceInr ?? hostingPlanPriceInr();
 }
 
@@ -229,7 +239,10 @@ export function computePlanPurchase(
   opts: { agreedToTerms?: boolean; autoRenew?: boolean } = {},
 ): PlanPurchaseOutcome {
   if (!hostingPlansEnabled()) return { ok: false, reason: 'disabled' };
-  const tier = purchasableTier(tierId);
+  // Pro only while PLAN_MODEL_PRO is on, at its configured price. Starter/Growth stay purchasable
+  // either way, so an existing subscriber's renewal and upgrade paths never change under the flag.
+  const listed = purchasableTier(tierId, { proEnabled: proOffered() });
+  const tier = listed?.id === 'pro' ? proPlan(process.env) : listed;
   if (!tier) return { ok: false, reason: 'unknown_tier' };
   if (!opts.agreedToTerms) return { ok: false, reason: 'agreement_required' };
 
@@ -541,6 +554,30 @@ export interface PausableApp {
   workspaceId: string;
   status?: string;
   updatedAt?: number;
+  /** Registry fields that say whether the app runs a server (see recordHasHostedServer). */
+  providerId?: string;
+  service?: string;
+}
+
+/**
+ * PURE (LAPSE_PAUSE_SERVER_APPS). Apps that run a SERVER must also go offline when a plan lapses,
+ * even inside the free allowance: free accounts get 0 servers, and the agreement says "Apps that need
+ * a server run only on a plan. If the plan ends, they wait offline". `appsToPauseOnLapse` only counts
+ * apps, so a server app among the first free three kept its container running on our bill.
+ * `keep` = workspaces with their own paid extra-server add-on still inside its period.
+ */
+export function serverAppsToPauseOnLapse(
+  apps: ReadonlyArray<PausableApp>,
+  alreadyPausing: ReadonlyArray<string>,
+  keep: ReadonlyArray<string> = [],
+  hasServer: (a: PausableApp) => boolean = (a) => a.providerId === 'navbharat-cloud' || !!String(a.service ?? '').trim(),
+): string[] {
+  const skip = new Set([...alreadyPausing, ...keep]);
+  return (apps || [])
+    .filter((a) => a && typeof a.workspaceId === 'string' && a.workspaceId.length > 0)
+    .filter((a) => (a.status ?? 'active') === 'active')
+    .filter((a) => !skip.has(a.workspaceId) && hasServer(a))
+    .map((a) => a.workspaceId);
 }
 
 /**
@@ -605,7 +642,8 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
   const base: HostingPlanStatus = {
     enabled: hostingPlansEnabled(), active: false, plan: null,
     priceInr: hostingPlanPriceInr(), days: HOSTING_PLAN_DAYS,
-    tiers: HOSTING_TIERS, tier: null, renewalPriceInr: hostingPlanPriceInr(),
+    // PLAN_MODEL_PRO on ⇒ new buyers are shown Pro; off ⇒ exactly today's list.
+    tiers: proOffered() ? [proPlan(process.env)] : HOSTING_TIERS, tier: null, renewalPriceInr: hostingPlanPriceInr(),
     overageInrPerGb: HOSTING_OVERAGE_INR_PER_GB,
     extraSites: 0,
     extraDomains: 0,
@@ -635,6 +673,8 @@ export async function readHostingPlanStatus(db: any, userId: string, nowIso?: st
       active: hostingPlanActive(wallet, Number.isFinite(nowMs as number) ? (nowMs as number) : undefined),
       plan: plan && isKnownPlanId(plan.id) ? plan : null,
       tier: heldTier,
+      // A Starter/Growth subscriber keeps seeing their own plan (to renew) next to Pro.
+      ...(proOffered() && heldTier && heldTier.id !== 'pro' ? { tiers: [heldTier, proPlan(process.env)] } : {}),
       renewalPriceInr: plan && isKnownPlanId(plan.id) ? planPriceInr(plan.id) : hostingPlanPriceInr(),
       extraSites: activeAddonCount(wallet, 'extra_site', clock),
       extraDomains: activeAddonCount(wallet, 'extra_domain', clock),
@@ -673,7 +713,7 @@ export async function purchaseHostingPlan(
   userId: string,
   nowIso?: string,
   tierId: HostingTierId | string = HOSTING_TIERS[0].id,
-  opts: { agreedToTerms?: boolean; autoRenew?: boolean } = {},
+  opts: { agreedToTerms?: boolean; autoRenew?: boolean; requestId?: string } = {},
 ): Promise<PlanPurchaseResult> {
   if (!hostingPlansEnabled()) {
     return { ok: false, error: 'Hosting plans are not available right now.', reason: 'disabled' };
@@ -684,11 +724,22 @@ export async function purchaseHostingPlan(
   try {
     const ownerId = await canonicalId(db, userId);
     const ref = doc(db, 'user_token_wallets', ownerId);
+    // DB-14: a client request id makes a double tap a replay, not a second charge. Absent (older
+    // clients) ⇒ exactly the old behaviour.
+    const opRef = validRequestId(opts.requestId) ? doc(db, WALLET_OPS, walletOpId(ownerId, 'plan', opts.requestId)) : null;
     const outcome = await runTransaction(db, async (t: any) => {
       const snap = await t.get(ref);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };
+      if (opRef) {
+        const op = await t.get(opRef);
+        const plan = current.hostingPlan as HostingPlanRecord | undefined;
+        if (op.exists() && plan) {
+          return { ok: true, replay: true, wallet: current, plan, charged: false, creditedInr: 0, bundledCreditInr: 0 } as any;
+        }
+      }
       const result = computePlanPurchase(current, nowIso ?? new Date().toISOString(), tierId, opts);
-      if (result.ok) t.set(ref, result.wallet);
+      if (result.ok) t.set(ref, withLedgerV2(t, (c, i) => doc(db, c, i), ownerId, snap.exists() ? current : null, result.wallet, `plan:${String(tierId)}`));
+      if (result.ok && opRef) t.set(opRef, { kind: 'plan', ownerId, tierId: String(tierId), at: new Date().toISOString() });
       return result;
     });
     if (!outcome.ok) {
@@ -732,6 +783,19 @@ export async function purchaseHostingPlan(
       return { ok: false, error: 'Hosting plans are not available right now.', reason: 'disabled' };
     }
     invalidatePlanCache(userId);
+    // Go-live PR 15 (METERING_V1, default OFF ⇒ issueBillOfSupply returns at once): a Bill of Supply
+    // for a CHARGED, non-replayed purchase. Idempotent per period; never fails the purchase.
+    if (outcome.charged && !(outcome as any).replay) {
+      const billed = Math.round(Number((outcome.plan as any)?.billedInr ?? 0) * 100);
+      if (billed > 0) {
+        const name = tierForPlanId(outcome.plan?.id)?.name ?? 'Hosting plan';
+        await issueBillOfSupply(db, {
+          ownerId, sourceRef: `plan_${outcome.plan.id}_${outcome.plan.expiresAt}`,
+          customer: { id: ownerId, name: null, email: null },
+          lines: [{ description: `${name} plan`, quantity: 1, unit: '30 days', unitPaise: billed, amountPaise: billed }],
+        });
+      }
+    }
     return {
       ok: true, plan: outcome.plan, charged: outcome.charged,
       creditedInr: outcome.creditedInr, bundledCreditInr: outcome.bundledCreditInr,

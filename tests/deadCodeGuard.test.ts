@@ -85,6 +85,22 @@ const isTest = (p: string) => p.includes('.test.') || p.includes('.spec.');
  * becomes a place to hide the next dead engine.
  */
 const KNOWN_UNREACHABLE = new Set([
+  // Go-live PR 15's `src/server/lib/billOfSupply.ts` and PR 16's `byoLifecycle.ts` were both here, each
+  // with the note "remove when wired". Both exemptions are now spent: THIS PR wires billOfSupply
+  // (`receiptStore.ts` imports it), and #3732 — which wires byoLifecycle — has merged, so main reaches
+  // it already. PR 17's `orphanReport.ts` below stays: its caller has not landed, and dropping an
+  // exemption before its wiring does land fails this same guard from the other side.
+  // Go-live PR 17: report-only orphan sweep, run by an admin route/script once managed adapters exist. Remove then.
+  'src/server/lib/orphanReport.ts',
+  // Go-live PR 18's `src/lib/planModel.ts` WAS here, with the note "read by the plans card/purchase
+  // route behind PLAN_MODEL_PRO in a follow-up. Remove then." This PR is that follow-up: the plans
+  // card and the purchase route import it now, so the exemption is spent and the guard covers the
+  // file again — which is the entry doing exactly what its own note asked for.
+  'src/server/providers/index.ts',
+  // Go-live marketplace building block, merged ahead of its caller behind a default-off flag. Remove when wired.
+  'src/server/providers/types.ts',
+  'src/server/lib/provisioningJobs.ts',
+  'src/server/lib/secretSink.ts',
   // Its only caller was the legacy Engineer AI actuator, removed 2026-09-25. Kept on purpose: it is an
   // npm-install safety scan the LIVE actuator does not run yet, so the right move is to wire it in, not
   // to delete a working check. Remove this entry in the change that wires it.

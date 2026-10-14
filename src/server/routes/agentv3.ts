@@ -35,6 +35,7 @@ import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadm
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
 import { requestForChecks } from '../AgentV3/requestForChecks';
+import { offerBugHunt, BUG_HUNT_WAIT_MS } from '../AgentV3/optionalBugHunt';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -165,6 +166,7 @@ import {
   isAgentV3FreeUser,
   isAgentV3PaidPublicEnabled,
   isAgentV3CreditGateEnabled,
+  billingAppliesTo,
   costRoutingActiveFor,
   buildRequiresSignIn,
   estimateBuildCost,
@@ -335,6 +337,7 @@ import { firestoreDeployStore } from '../AgentV3/hostedDeployments';
 import { runServerPublish, type ServerPublishDeps } from '../AgentV3/serverPublish';
 import { registerResellHostingRoutes } from './resellHosting';
 import { registerAppDataRoutes } from './appData';
+import { registerResellExpirySweep } from '../lib/resellLifecycleJob';
 import { registerBrandApplyRoutes } from './brandApply';
 import { removeHostedServers } from '../AgentV3/hostedAppLifecycle';
 import { analyzeApiWiring, buildEnvForSplit, buildEnvForWhole, mergeEnvFile } from '../AgentV3/apiWiring';
@@ -441,6 +444,7 @@ import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLev
 import { tieredMarkupUsd, realProviderCostUsd } from '../AgentV3/providerRates';
 import { splitUnbilledCost, absorbedWorkDetail } from '../AgentV3/unbilledTurns';
 import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, PHASE_POST_FIX_REVIEW, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
+import { bugHuntCostReading, bugHuntCostLine } from '../AgentV3/bugHuntCost';
 import { postFixRecheckBudgetMs, postFixRecheckOutcome } from '../AgentV3/postFixReview';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
@@ -4195,6 +4199,13 @@ export function registerAgentV3Routes(app: Express): void {
       if (removed.ok) await deploymentStore.setStatus(workspaceId, 'unpublished').catch(() => false);
       return { ok: removed.ok };
     },
+  });
+  // RESELL_EXPIRY_SWEEP (default OFF): remind before a paid server/database ends, take an expired
+  // extra server down after 3 days' grace. Never charges. See resellLifecycle.ts.
+  registerResellExpirySweep(async (workspaceId) => {
+    const removed = await removeHostedServers(workspaceId, { providerId: NAVBHARAT_CLOUD_PROVIDER, service: '' });
+    if (removed.ok) await deploymentStore.setStatus(workspaceId, 'unpublished').catch(() => false);
+    return { ok: removed.ok };
   });
   // WHY WAS THIS SANDBOX STARTED? One zone per request, opened before every route below, so a create
   // or resume deep inside any handler can name its cause (sandboxSessionZone.ts). Decides nothing.
@@ -10519,7 +10530,7 @@ async function noteBuildOutcome(
     // (AGENTV3_CREDIT_GATE) is on. The credit gate lets ₹0-balance accounts be blocked from spending
     // NavBharatAI's model budget without turning on the rest of paid-public (which stays OFF during the
     // security migration). Free-list users (admin/testers) always bypass it.
-    if ((isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email)) {
+    if (billingAppliesTo(userId, email)) {
       // ONE wallet read serves the whole paid-surface gate: the power-mode paid-only check (doc's
       // totalMoneySpent) AND the balance math below (doc's remaining_balance via the same pure reader).
       // An anonymous caller (userId null) has no wallet to read → balance-unknown → fail-open proceed.
@@ -10603,8 +10614,7 @@ async function noteBuildOutcome(
       // on; the older per-feature flag stays honored as a surgical override. Either activates it.
       (freeTierCheapEnabled() || costRoutingActiveFor(userId, email)) &&
       userId &&
-      (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) &&
-      !isAgentV3FreeUser(userId, email) &&
+      billingAppliesTo(userId, email) &&
       cheapBuildFloorRunners().length > 0
     ) {
       const walletDoc = await firestoreWalletReader(getDb())(userId).catch(() => null);
@@ -13107,7 +13117,7 @@ async function noteBuildOutcome(
             ...buildBillingLabel({
               freeListed: isAgentV3FreeUser(userId, email),
               cheapEnginesOnly: freeTierBuildActive,
-              billingActive: (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email),
+              billingActive: billingAppliesTo(userId, email),
               billedUsd: watchdogBilledUsd,
               billedInr: watchdogBilledInr,
             }),
@@ -13217,7 +13227,7 @@ async function noteBuildOutcome(
           userCostStore.record(userId, watchdogBilledUsd).catch(() => {});
           // Only debit with the EXACT buildRef the normal settle uses; without it a ref mismatch could
           // let a race double-charge, so skip the debit rather than risk it (the build stays free — safe).
-          const billingActiveNow = (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email);
+          const billingActiveNow = billingAppliesTo(userId, email);
           if (billingActiveNow && billingCtx.buildStartedAt !== undefined) {
             try {
               const debitRes = await debitWalletForBuild(getDb() as any, userId, {
@@ -13566,7 +13576,11 @@ async function noteBuildOutcome(
         if (only && (only.unlessStopped.aborted || only.wrote() <= 0)) return;
         if (!(etaTotalMs > 0 && etaStartMs > 0) || userWait.since !== null) return;
         const now = Date.now();
-        const line = etaPhaseLine({ elapsedMs: now - etaStartMs, finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt });
+        // Q-1024: the claim "your app is built" needs a built app. `only.wrote` is the builder's own
+        // file count when the caller has it (it is passed in, not closed over, because this helper runs
+        // before `builderWroteCount` exists); without it the rendered fact still answers, and when
+        // neither can the line reports the phase and claims nothing.
+        const line = etaPhaseLine({ elapsedMs: now - etaStartMs, finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt, appExists: (only?.wrote?.() ?? 0) > 0 });
         if (line && line !== lastEtaShown) events.emit({ type: 'narration', agent: 'architect', text: line, ts: now, id: 'eta-live' });
       } catch { /* the live line is best-effort — it must never affect a build */ }
     };
@@ -13690,6 +13704,9 @@ async function noteBuildOutcome(
           const decision = etaTickLine({
             elapsedMs, now,
             finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt,
+            // Q-1024: the heartbeat tick had no "is there an app?" guard, so it told a stopped or empty
+            // build "your app is built". `etaFilesDone` is the builder's OWN files (our seed subtracted).
+            appExists: etaFilesDone > 0,
             plannedFiles: etaPlannedFiles, filesDone: etaFilesDone, firstFileAt: etaFirstFileAt,
             plannedSteps: etaPlannedSteps, stepsDone: etaStepPaths.size, firstStepAt: etaFirstStepAt,
             evidenced: etaEvidenced, budgetMs: effectiveBuildSeconds * 1000,
@@ -14139,7 +14156,7 @@ async function noteBuildOutcome(
       // reach the wallet at all (the settle's own `billingActive`), and could the first-build-free credit
       // zero it? Either "no" ⇒ no figure is ever sent. The discount is read ONCE, up front, so the live
       // number is priced exactly like the final bill; until it has been read nothing is sent.
-      const liveCostCharged = !!userId && (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email);
+      const liveCostCharged = !!userId && billingAppliesTo(userId, email);
       const liveCostOnboarding = freeOnboardingLimit() > 0;
       let liveCostDiscountPct: number | null = null;
       let liveCostLast: { inr: number; at: number } | null = null;
@@ -24698,7 +24715,30 @@ async function noteBuildOutcome(
             message: `Post-build review deferred: this turn built one project module, and the app is reviewed once "${reviewDeferredToShell}" assembles it.` });
         } catch { /* diagnostics best-effort */ }
       }
-      if (result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell) {
+      /**
+       * ❓ THE DEEP BUG HUNT IS OFFERED, NOT ASSUMED (admin 2026-10-13, `optionalBugHunt.ts`).
+       *
+       * The reviewer below is a multi-call model pass the user ALREADY PAYS FOR on every build without
+       * being asked — autopsy b6f88a72, quoted beside the call itself: 34.4% of that build's tokens, zero
+       * characters back, billed at ×4. This question does not introduce a charge; it shows an existing one
+       * to the person paying it, which is what the admin asked for.
+       *
+       * Offered HERE because every other condition for the review has already said yes, so the user is
+       * never asked to pay for a pass that was not going to run. The whole flow lives in the module (the
+       * ask, the wait, the words) and takes its effects as arguments: this handler is at TypeScript's
+       * control-flow-analysis ceiling (Q-979), so a feature that adds branches here is a feature that
+       * stops the file type-checking. One call, one await.
+       */
+      const bugHunt = await offerBugHunt({
+        eligible: result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell,
+        hasUser: !!userId,
+        newCallId: () => randomUUID(),
+        ask: (gate) => emit({ type: 'permission_request', agent: 'reviewer', ts: Date.now(), ...gate }),
+        wait: (callId) => waitForUser(callId, BUG_HUNT_WAIT_MS),
+        say: (text) => { try { events.emit({ type: 'narration', agent: 'reviewer', ts: Date.now(), text }); } catch { /* best-effort */ } },
+        record: (message) => { try { buildDiag.record({ phase: 'build', severity: 'info', code: 'BUG_HUNT_NOT_RUN', message, autoResolved: true }); } catch { /* best-effort */ } },
+      });
+      if (result.ok && reviewHeadroomOk && reviewerAllowed && !reviewDeferredToShell && bugHunt.runReview) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
           // The REAL project size, captured before the fallback below can shrink rFiles to just this
@@ -26110,6 +26150,23 @@ async function noteBuildOutcome(
         sandboxSeconds: livePreviewCharge.measuredSeconds,
       });
       /**
+       * 💰 WHAT THE DEEP BUG HUNT COST (Q-1042).
+       *
+       * The admin's instinct — run the hunt on the cheap rung — rests on ONE archaeological figure from
+       * ONE report ("523,374 input tokens = 34.4% of the build"), found by reading that report by hand.
+       * This puts the same number on EVERY build, so the routing decision can be made from a trend
+       * instead of an anecdote. Routing itself is deliberately untouched: `cheapBuildFloorRunners`
+       * carries six separate verbatim admin decisions with env overrides that always win, and CLAUDE.md
+       * says to confirm before changing any of it.
+       *
+       * It is also Q-1040's other half: now that the user is ASKED to pay for this pass, the record says
+       * what that yes cost. Recorded HERE because only now is the provider ledger final.
+       */
+      try {
+        const huntLine = bugHuntCostLine(bugHuntCostReading(providerLedger.entries()));
+        if (huntLine) buildDiag.record({ phase: 'build', severity: 'info', code: 'BUG_HUNT_COST', message: huntLine, autoResolved: true });
+      } catch { /* a cost line never affects a build */ }
+      /**
        * WHY DO BUILDS FAIL? — the platform-level ledger (failureLedger.ts).
        *
        * 🔴 RECORDED HERE AND NOT AT THE RETROSPECTIVE BELOW, because only here do both halves exist.
@@ -26512,7 +26569,7 @@ async function noteBuildOutcome(
       // untouched (today's behavior); flag on → chip + estimate gate + debit + block all activate.
       // The display-only monthly cost (userCostStore) still records always — it is an internal
       // estimate surface, not a money movement.
-      const billingActive = (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email);
+      const billingActive = billingAppliesTo(userId, email);
       let walletDebit: { tokensDebited: number; tokenBalance: number } | null = null;
       if (userId && effectiveBilledUsd > 0) {
         userCostStore.record(userId, effectiveBilledUsd).catch(() => {});
@@ -26786,6 +26843,13 @@ async function noteBuildOutcome(
               billingActive,
               billedUsd: effectiveBilledUsd,
               billedInr: settledBilledInr,
+              // THE WALLET FACT, WHICH ONLY THIS PATH KNOWS (Q-1036). The debit above ran, or failed
+              // and was written to console.error only — and the record then said "charged" about a
+              // bill the balance never paid. `walletDebit` is null for a debit that was refused as
+              // well as for one nobody attempted; `charged` already excludes the latter, so a false
+              // here means money owed and not taken. The watchdog label is built BEFORE its debit
+              // and therefore passes nothing, which is the truthful answer there.
+              walletDebited: !!walletDebit && walletDebit.tokensDebited > 0,
             }),
             billedUsd: Math.round(effectiveBilledUsd * 1_000_000) / 1_000_000,
             billedInr: settledBilledInr,

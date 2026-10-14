@@ -28,6 +28,36 @@ import { quoteDatabaseResell, quoteServerResell, projectRefFromDatabaseProof, st
 import { dataClientSource } from '../lib/sharedData';
 import { createSharedDatabase, destroySharedDatabase, markSharedReady, type SharedDb } from '../lib/sharedDataStore';
 import type { ServerPublishInput, ServerPublishResult } from '../AgentV3/serverPublish';
+import { doc, getDoc } from '../lib/serverDb';
+import { resellDuplicateGuardEnabled, resellAutoRenewEnabled } from '../lib/purchaseAuditFlags';
+import { setResellAutoRenew } from '../lib/hostingAddonLedger';
+import { resellAutoRenewTerm, privateDbCostPlusTerm } from '../../lib/hostingAddons';
+import { privateDbCostPlusEnabled, privateDbCostMultiplier } from '../lib/privateDbCostPlus';
+import { isDeliveredRow } from '../lib/resellLifecycle';
+
+/**
+ * RESELL_DUPLICATE_GUARD: the ref of an EXPIRED private-database row for this app that was never
+ * removed, or null. Reads the raw rows because `readHostingAddons` drops expired ones. Fails open to
+ * null (= old behaviour) — the guard only ever prevents a create, it never blocks a refund.
+ */
+async function lapsedDedicatedRef(uid: string, workspaceId: string, nowMs: number): Promise<string | null> {
+  if (!resellDuplicateGuardEnabled()) return null;
+  try {
+    const db = getServerDb();
+    if (!db) return null;
+    const snap = await getDoc(doc(db as any, 'user_token_wallets', uid));
+    const rows = snap.exists() ? (snap.data() as any)?.hostingAddons : null;
+    if (!Array.isArray(rows)) return null;
+    const hit = rows.find((r: unknown) => isDeliveredRow(r)
+      && r.addonId === 'dedicated_db'
+      && String(r.proof || '').startsWith(`db:${workspaceId}:`)
+      && Date.parse(r.expiresAt) <= nowMs
+      && !(r as any).deletedAt);
+    return hit ? hit.ref : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface ResellRouteDeps {
   /** Deploy with the server cap already lifted for this one paid extra. The quote decided it was allowed. */
@@ -51,11 +81,14 @@ async function asCharge(
   addonId: 'server' | 'dedicated_db' | 'shared_db',
   clientRef: string,
   proof: string,
+  autoRenew = false,
 ): Promise<ChargeResult> {
   const result = await chargeDeliveredHostingAddon(getServerDb(), uid, addonId, {
     agreedToTerms: true,
     clientRef,
     proof,
+    // RESELL_AUTO_RENEW: recorded only when the flag is on, so the ticked terms included the renewal line.
+    autoRenew: autoRenew && resellAutoRenewEnabled(),
   });
   if (!result.ok) return { ok: false, error: result.error, active: false };
   const exp = Date.parse(result.addon.expiresAt);
@@ -117,16 +150,31 @@ export function registerResellHostingRoutes(app: Express, deps: ResellRouteDeps)
       workspaceId,
       active: dedicatedPay.active,
       canPay: dedicatedPay.canPay,
+      lapsedRef: await lapsedDedicatedRef(who.uid, workspaceId, now),
     });
     const serverSpec = addonById('server');
     const sharedSpec = addonById('shared_db');
     const dbSpec = addonById('dedicated_db');
+    // RESELL_AUTO_RENEW: the renewal sentence is part of what is ticked, and each paid row says
+    // whether it renews, so Publish can show the switch to turn it off.
+    const renewOn = resellAutoRenewEnabled();
+    const termsFor = (spec: ReturnType<typeof addonById>) => (spec
+      ? [...addonAgreementTerms(spec), ...(renewOn ? [resellAutoRenewTerm(spec)] : []),
+        ...(spec.id === 'dedicated_db' && privateDbCostPlusEnabled() ? [privateDbCostPlusTerm(privateDbCostMultiplier())] : [])]
+      : []);
+    const menuRows = renewOn ? (await readHostingAddons(getServerDb(), who.uid).catch(() => ({ active: [] as any[] }))).active : [];
+    const renewInfo = (stopRef: string | null) => {
+      if (!renewOn || !stopRef) return undefined;
+      const row = menuRows.find((r: any) => r.ref === stopRef);
+      return row ? { on: row.autoRenew === true && !!row.autoRenewAgreedAt, ref: stopRef, expiresAt: row.expiresAt } : undefined;
+    };
     return res.json({
       ok: true,
       charged: false,
-      server: { ...server, terms: serverSpec ? addonAgreementTerms(serverSpec) : [] },
-      database: { ...database, terms: sharedSpec ? addonAgreementTerms(sharedSpec) : [] },
-      dedicated: { ...dedicated, terms: dbSpec ? addonAgreementTerms(dbSpec) : [] },
+      autoRenewAvailable: renewOn,
+      server: { ...server, terms: termsFor(serverSpec), autoRenew: renewInfo(server.stopRef) },
+      database: { ...database, terms: termsFor(sharedSpec), autoRenew: renewInfo(database.stopRef) },
+      dedicated: { ...dedicated, terms: termsFor(dbSpec), autoRenew: renewInfo(dedicated.stopRef) },
       own: {
         hosting: 'Hosting it yourself stays free from us.',
         database: 'Connecting your own Supabase stays free from us.',
@@ -189,10 +237,42 @@ export function registerResellHostingRoutes(app: Express, deps: ResellRouteDeps)
           files,
         });
       },
-      charge: (clientRef, proof) => asCharge(who.uid, 'server', clientRef, proof),
+      charge: (clientRef, proof) => asCharge(who.uid, 'server', clientRef, proof, req.body?.autoRenew !== false),
       teardown: (service) => deps.teardownServer(workspaceId, service),
     });
     return res.status(outcome.status).json(outcome.body);
+  });
+
+  /** RESELL_AUTO_RENEW: switch auto-renew for ONE paid server/database on this app. Charges nothing. */
+  app.post('/api/agentv3/resell/auto-renew', async (req: Request, res: Response) => {
+    if (!resellAutoRenewEnabled()) return noCharge(res, 404, 'Auto-renew is not switched on yet. Nothing was changed.');
+    const who = await caller(req);
+    if (!who) return noCharge(res, 401, 'Please sign in. Nothing was changed.');
+    const blocked = await appLockBlocks(req, who.uid, 'hosting-plan-auto-renew');
+    if (blocked) return res.status(blocked.status).json({ ...blocked.body, charged: false });
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const ref = typeof req.body?.ref === 'string' ? req.body.ref : '';
+    const on = req.body?.autoRenew;
+    if (typeof on !== 'boolean') return noCharge(res, 400, 'autoRenew must be true or false. Nothing was changed.');
+    if (!ownedByVerifiedUid(who.uid, workspaceId)) return noCharge(res, 403, 'This app is not on your account. Nothing was changed.');
+    const menu = await readHostingAddons(getServerDb(), who.uid);
+    const row = menu.active.find((a) => a.ref === ref && (a.addonId === 'server' || a.addonId === 'shared_db' || a.addonId === 'dedicated_db'));
+    const proofWs = row ? (/^(?:ws|db):([^:]{8,}):/.exec(String(row.proof || '')) || [])[1] : null;
+    if (!row || proofWs !== workspaceId) return noCharge(res, 404, 'That server or database was not found on this app. Nothing was changed.');
+    const r = await setResellAutoRenew(getServerDb(), who.uid, ref, on, req.body?.agreedToTerms === true);
+    if (!r.ok) {
+      const status = r.reason === 'agreement_required' ? 400 : r.reason === 'not_found' ? 404 : 503;
+      const error = r.reason === 'agreement_required'
+        ? 'Tick the auto-renew terms to switch it on. Nothing was changed.'
+        : 'Could not change auto-renew right now. Nothing was changed.';
+      return res.status(status).json({ ok: false, charged: false, error });
+    }
+    return res.json({
+      ok: true, charged: false, autoRenew: on,
+      message: on
+        ? 'Auto-renew is on. It renews from your wallet every 30 days; you get reminders first.'
+        : `Auto-renew is off. It stays until ${row.expiresAt.slice(0, 10)} and then simply ends. Nothing more will be charged.`,
+    });
   });
 
   app.post('/api/agentv3/resell/server/stop', async (req: Request, res: Response) => {
@@ -288,7 +368,7 @@ function dataOrigin(req: Request): string {
         if (!secretsOk) return false;
         return markSharedReady(db as unknown as SharedDb, workspaceId, now);
       },
-      charge: (clientRef, proof) => asCharge(who.uid, 'shared_db', clientRef, proof),
+      charge: (clientRef, proof) => asCharge(who.uid, 'shared_db', clientRef, proof, req.body?.autoRenew !== false),
       destroy: async () => {
         const db = getServerDb();
         if (!db) return { ok: false };
@@ -328,6 +408,7 @@ function dataOrigin(req: Request): string {
         workspaceId,
         active: pay.active,
         canPay: pay.canPay,
+        lapsedRef: await lapsedDedicatedRef(who.uid, workspaceId, now),
       },
       create: async () => {
         if (!cfg) return { ok: false, message: 'A database from NavBharatAI is not switched on yet.', cleaned: true };
@@ -339,7 +420,7 @@ function dataOrigin(req: Request): string {
         });
       },
       save: (env) => saveUserSecrets(who.uid, env, workspaceId),
-      charge: (clientRef, proof) => asCharge(who.uid, 'dedicated_db', clientRef, proof),
+      charge: (clientRef, proof) => asCharge(who.uid, 'dedicated_db', clientRef, proof, req.body?.autoRenew !== false),
       destroy: async (projectRef) => {
         if (!cfg) return { ok: false };
         const gone = await deleteProject(cfg.token, projectRef);
@@ -366,7 +447,16 @@ function dataOrigin(req: Request): string {
       return noCharge(res, 403, 'This app is not on your account. Nothing was refunded.');
     }
     const menu = await readHostingAddons(getServerDb(), who.uid);
-    const row = menu.active.find((a) => a.ref === ref && (a.addonId === 'shared_db' || a.addonId === 'dedicated_db'));
+    let row = menu.active.find((a) => a.ref === ref && (a.addonId === 'shared_db' || a.addonId === 'dedicated_db'));
+    // An EXPIRED private database is still a real project holding the user's data. Without this its
+    // row was invisible here, so it could never be removed (guard flag only; refund is ₹0 when expired).
+    if (!row && (await lapsedDedicatedRef(who.uid, workspaceId, Date.now())) === ref) {
+      row = { ref, addonId: 'dedicated_db', proof: undefined } as any;
+      const snap = await getDoc(doc(getServerDb() as any, 'user_token_wallets', who.uid)).catch(() => null);
+      const raw = (snap && snap.exists() ? (snap.data() as any)?.hostingAddons : []) || [];
+      const full = raw.find((r: any) => r && r.ref === ref);
+      if (full) row = full;
+    }
     if (!row || !String(row.proof || '').startsWith(`db:${workspaceId}:`)) {
       return noCharge(res, 404, 'That database was not found on this app. Nothing was refunded.');
     }

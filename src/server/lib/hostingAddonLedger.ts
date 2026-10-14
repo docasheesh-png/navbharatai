@@ -22,6 +22,7 @@ import { checkPlanPayable } from './giftSpend';
 import { inrToDebitTokens, inrToWalletTokens, TOKENS_PER_RUPEE } from './payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
 import { hostingPlansEnabled } from './hostingPlan';
+import { RESELL_GRACE_DAYS, RESELL_RENEW_LEAD_MS } from './resellLifecycle';
 import {
   HOSTING_ADDONS, addonAgreementTerms, addonById, activeAddonCount, activeAddonRows, validAddonRef,
   type HostingAddon, type HostingAddonId, type HostingAddonRecord,
@@ -123,7 +124,7 @@ export function computeDeliveredAddonPurchase(
   current: Record<string, any> | null | undefined,
   nowIso: string,
   addonId: string,
-  opts: { agreedToTerms?: boolean; clientRef?: unknown; proof?: unknown },
+  opts: { agreedToTerms?: boolean; clientRef?: unknown; proof?: unknown; autoRenew?: boolean },
 ): AddonPurchaseOutcome {
   const addon = addonById(addonId);
   if (!addon || !DELIVERED_ADDONS.has(addon.id)) return { ok: false, reason: 'not_available' };
@@ -158,6 +159,8 @@ export function computeDeliveredAddonPurchase(
     expiresAt: new Date(periodStartMs + addon.days * 24 * 60 * 60 * 1000).toISOString(),
     agreedAt: nowIso,
     proof,
+    // Consent to renew is recorded only when the ticked terms included the auto-renew sentence.
+    ...(opts.autoRenew === true && opts.agreedToTerms ? { autoRenew: true, autoRenewAgreedAt: nowIso } : {}),
   };
   const debited = computeDebitedWallet(w, {
     billedInr: addon.priceInr,
@@ -375,7 +378,7 @@ export async function chargeDeliveredHostingAddon(
   db: any,
   userId: string,
   addonId: 'server' | 'dedicated_db' | 'shared_db',
-  opts: { agreedToTerms?: boolean; clientRef?: unknown; proof?: unknown },
+  opts: { agreedToTerms?: boolean; clientRef?: unknown; proof?: unknown; autoRenew?: boolean },
   nowIso?: string,
 ): Promise<AddonPurchaseResult> {
   const addon = addonById(addonId);
@@ -471,6 +474,117 @@ export async function removeHostingAddon(
     };
   } catch {
     return { ok: false, reason: 'unavailable', error: 'Could not remove that. It is still active and nothing was refunded.' };
+  }
+}
+
+// Same windows as the sweep that calls this (resellLifecycle.ts is their one home).
+const RESELL_RENEW_GRACE_DAYS = RESELL_GRACE_DAYS;
+
+export type ResellRenewalOutcome =
+  | { ok: true; wallet: Record<string, any>; row: HostingAddonRecord; chargedInr: number }
+  | { ok: false; reason: 'not_found' | 'off' | 'not_due' | 'too_late' | 'insufficient' | 'gift_only' | 'already' };
+
+/**
+ * PURE. Renew ONE paid server/database row for one more period, debiting the wallet in the same
+ * object the caller writes in one transaction.
+ *
+ * 🔒 NO DOUBLE CHARGE, two ways: the caller names the `expiresAt` it saw, so a second run after the
+ * period moved finds a different date and does nothing; and the ledger key is
+ * `hostingaddon_renew_<ref>_<oldExpiresAt>`, which `computeDebitedWallet` refuses to charge twice.
+ * The new period starts at the OLD expiry, never at "now", so renewing early or late never loses or
+ * gains a day.
+ */
+export function computeResellRenewal(
+  current: Record<string, any> | null | undefined,
+  ref: string,
+  expectedExpiresAt: string,
+  nowIso: string,
+  /** PRIVATE_DB_COST_PLUS: the cost-plus amount above ₹1,499 for the period that just ended. */
+  costPlus?: { extraInr: number; note: string },
+): ResellRenewalOutcome {
+  const w = current || {};
+  const rows = rowsOf(w);
+  const row = rows.find((r) => r.ref === ref);
+  if (!row || !DELIVERED_ADDONS.has(row.addonId)) return { ok: false, reason: 'not_found' };
+  if (row.expiresAt !== expectedExpiresAt) return { ok: false, reason: 'already' };
+  if (row.autoRenew !== true || !row.autoRenewAgreedAt || (row as any).lapsedAt) return { ok: false, reason: 'off' };
+  const addon = addonById(row.addonId) as HostingAddon;
+  const exp = Date.parse(row.expiresAt);
+  const nowMs = Date.parse(nowIso);
+  if (!Number.isFinite(exp) || !Number.isFinite(nowMs)) return { ok: false, reason: 'not_found' };
+  if (nowMs < exp - RESELL_RENEW_LEAD_MS) return { ok: false, reason: 'not_due' };
+  if (nowMs >= exp + RESELL_RENEW_GRACE_DAYS * 24 * 60 * 60 * 1000) return { ok: false, reason: 'too_late' };
+  const extraInr = row.addonId === 'dedicated_db' && costPlus && costPlus.extraInr > 0 ? Math.round(costPlus.extraInr * 100) / 100 : 0;
+  const totalInr = addon.priceInr + extraInr;
+  const needed = inrToDebitTokens(totalInr);
+  const balance = typeof w.tokenBalance === 'number' && Number.isFinite(w.tokenBalance) ? w.tokenBalance : 0;
+  if (balance < needed) return { ok: false, reason: 'insufficient' };
+  if (checkPlanPayable(w, needed)) return { ok: false, reason: 'gift_only' };
+  let base: Record<string, any> = w;
+  if (extraInr > 0) {
+    // Its OWN ledger line, keyed to the period that ended, so a receipt shows it apart from the renewal.
+    const cp = computeDebitedWallet(w, {
+      billedInr: extraInr,
+      buildRef: `privatedb_costplus_${ref}_${row.expiresAt}`,
+      feature: 'hosting-addon',
+      description: `Private database usage above ₹1,499 (period to ${row.expiresAt.slice(0, 10)}) — ${costPlus!.note}`.slice(0, 300),
+      spends: 'paid-only',
+    }, nowIso);
+    if (cp.applied) base = cp.wallet;
+  }
+  const debited = computeDebitedWallet(base, {
+    billedInr: addon.priceInr,
+    buildRef: `hostingaddon_renew_${ref}_${row.expiresAt}`,
+    feature: 'hosting-addon',
+    description: `Auto-renewal — ${addon.name} (${addon.days} days, from ${row.expiresAt.slice(0, 10)})`,
+    spends: 'paid-only',
+  }, nowIso);
+  if (!debited.applied) return { ok: false, reason: (debited as any).refused ? 'gift_only' : 'already' };
+  const renewed: HostingAddonRecord = {
+    ...row,
+    expiresAt: new Date(exp + addon.days * 24 * 60 * 60 * 1000).toISOString(),
+  };
+  delete (renewed as any).remindedFor;
+  const nextRows = rowsOf(debited.wallet).map((r) => (r.ref === ref ? renewed : r));
+  return { ok: true, wallet: { ...debited.wallet, hostingAddons: nextRows }, row: renewed, chargedInr: totalInr };
+}
+
+/** PURE. Switch auto-renew for one paid server/database row. Turning it ON needs the terms ticked. */
+export function computeResellAutoRenewToggle(
+  current: Record<string, any> | null | undefined,
+  ref: string,
+  on: boolean,
+  agreedToTerms: boolean,
+  nowIso: string,
+): { ok: true; wallet: Record<string, any> } | { ok: false; reason: 'not_found' | 'agreement_required' } {
+  const w = current || {};
+  const rows = rowsOf(w);
+  const row = rows.find((r) => r.ref === ref);
+  if (!row || !DELIVERED_ADDONS.has(row.addonId)) return { ok: false, reason: 'not_found' };
+  if (on && !agreedToTerms) return { ok: false, reason: 'agreement_required' };
+  const next: HostingAddonRecord = on
+    ? { ...row, autoRenew: true, autoRenewAgreedAt: row.autoRenewAgreedAt || nowIso }
+    : { ...row, autoRenew: false };
+  return { ok: true, wallet: { ...w, hostingAddons: rows.map((r) => (r.ref === ref ? next : r)) } };
+}
+
+export async function setResellAutoRenew(
+  db: any, userId: string, ref: string, on: boolean, agreedToTerms: boolean,
+): Promise<{ ok: true } | { ok: false; reason: 'not_found' | 'agreement_required' | 'unavailable' }> {
+  if (!db || !userId || !validAddonRef(ref)) return { ok: false, reason: 'not_found' };
+  try {
+    const ownerId = await canonicalId(db, userId);
+    const docRef = doc(db, 'user_token_wallets', ownerId);
+    return await runTransaction(db, async (t: any) => {
+      const snap = await t.get(docRef);
+      if (!snap.exists()) return { ok: false as const, reason: 'not_found' as const };
+      const r = computeResellAutoRenewToggle(snap.data(), ref, on, agreedToTerms, new Date().toISOString());
+      if (!r.ok) return r;
+      t.set(docRef, r.wallet);
+      return { ok: true as const };
+    });
+  } catch {
+    return { ok: false, reason: 'unavailable' };
   }
 }
 

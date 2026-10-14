@@ -16,7 +16,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { TemplateRegistry } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { testSkeletonsCanRun } from '../src/server/AgentV3/TestGenerationAgent';
-import { STARTER_TESTS_NEED_VITEST, starterTestsSkipReason, starterTestsSkippedNote } from '../src/server/AgentV3/starterTestsSkip';
+import { STARTER_TESTS_NEED_VITEST, starterTestsSkipReason, starterTestsSkippedNote, STARTER_TESTS_NO_PACKAGE_JSON, STARTER_TESTS_PACKAGE_JSON_UNREADABLE } from '../src/server/AgentV3/starterTestsSkip';
 import { PROCESS_ONLY_CODES, isAppFinding } from '../src/server/AgentV3/BuildDiagnostics';
 import { codeOnly, enclosingBlock, sectionUntil } from './helpers/sourceSlice';
 
@@ -47,8 +47,25 @@ describe('the skip reason — derived from the facts the pass decided on', () =>
   });
 
   it('names the FIRST thing that stopped it, in the pass\'s own order', () => {
-    expect(starterTestsSkipReason({ packageJson: null, skeletonsSafe: false, planned: 0, written: 0 })).toBe(STARTER_TESTS_NEED_VITEST);
-    expect(starterTestsSkipReason({ packageJson: '{ not json', skeletonsSafe: false, planned: 0, written: 0 })).toBe(STARTER_TESTS_NEED_VITEST);
+    // 🔴 THESE TWO LINES USED TO PIN THE DEFECT Q-1032 NAMES, and that is why they changed.
+    //
+    // They asserted that a project with NO package.json, and one whose package.json is not JSON, are
+    // both reported as "vitest is not declared in package.json" — a sentence about a file that does
+    // not exist, or about a declaration nobody could read. A false reason is worse than a vague one:
+    // it is actionable in the WRONG direction, sending a reader to add a dependency to nothing.
+    // `testSkeletonsCanRun` collapses all three worlds into one `false`; the reason now tells them
+    // apart, because the fixes differ.
+    expect(starterTestsSkipReason({ packageJson: null, skeletonsSafe: false, planned: 0, written: 0 })).toBe(STARTER_TESTS_NO_PACKAGE_JSON);
+    expect(starterTestsSkipReason({ packageJson: undefined, skeletonsSafe: false, planned: 0, written: 0 })).toBe(STARTER_TESTS_NO_PACKAGE_JSON);
+    expect(starterTestsSkipReason({ packageJson: '   ', skeletonsSafe: false, planned: 0, written: 0 })).toBe(STARTER_TESTS_NO_PACKAGE_JSON);
+    expect(starterTestsSkipReason({ packageJson: '{ not json', skeletonsSafe: false, planned: 0, written: 0 })).toBe(STARTER_TESTS_PACKAGE_JSON_UNREADABLE);
+    // A readable package.json that simply declares no runner keeps the original sentence, which was
+    // always true of exactly this case.
+    expect(starterTestsSkipReason({ packageJson: '{"name":"app"}', skeletonsSafe: false, planned: 0, written: 0 })).toBe(STARTER_TESTS_NEED_VITEST);
+    // No two of the three say the same thing, or telling them apart would be decoration.
+    expect(new Set([STARTER_TESTS_NO_PACKAGE_JSON, STARTER_TESTS_PACKAGE_JSON_UNREADABLE, STARTER_TESTS_NEED_VITEST]).size).toBe(3);
+    // And none of them names a file the project does not have.
+    expect(STARTER_TESTS_NO_PACKAGE_JSON).not.toMatch(/not declared in package\.json/);
     expect(starterTestsSkipReason({ packageJson: withVitest, skeletonsSafe: false, planned: 0, written: 0 })).toMatch(/production build/);
     expect(starterTestsSkipReason({ packageJson: withVitest, skeletonsSafe: true, planned: 0, written: 0 })).toMatch(/exports a function/);
     expect(starterTestsSkipReason({ packageJson: withVitest, skeletonsSafe: true, planned: 2, written: 0 })).toBe('none of the 2 planned test file(s) could be written');

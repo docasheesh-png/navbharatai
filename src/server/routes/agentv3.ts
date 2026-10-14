@@ -13522,7 +13522,11 @@ async function noteBuildOutcome(
         if (only && (only.unlessStopped.aborted || only.wrote() <= 0)) return;
         if (!(etaTotalMs > 0 && etaStartMs > 0) || userWait.since !== null) return;
         const now = Date.now();
-        const line = etaPhaseLine({ elapsedMs: now - etaStartMs, finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt });
+        // Q-1024: the claim "your app is built" needs a built app. `only.wrote` is the builder's own
+        // file count when the caller has it (it is passed in, not closed over, because this helper runs
+        // before `builderWroteCount` exists); without it the rendered fact still answers, and when
+        // neither can the line reports the phase and claims nothing.
+        const line = etaPhaseLine({ elapsedMs: now - etaStartMs, finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt, appExists: (only?.wrote?.() ?? 0) > 0 });
         if (line && line !== lastEtaShown) events.emit({ type: 'narration', agent: 'architect', text: line, ts: now, id: 'eta-live' });
       } catch { /* the live line is best-effort — it must never affect a build */ }
     };
@@ -13646,6 +13650,9 @@ async function noteBuildOutcome(
           const decision = etaTickLine({
             elapsedMs, now,
             finalChecks: etaFinalChecks, appRenderedAt: etaAppRenderedAt,
+            // Q-1024: the heartbeat tick had no "is there an app?" guard, so it told a stopped or empty
+            // build "your app is built". `etaFilesDone` is the builder's OWN files (our seed subtracted).
+            appExists: etaFilesDone > 0,
             plannedFiles: etaPlannedFiles, filesDone: etaFilesDone, firstFileAt: etaFirstFileAt,
             plannedSteps: etaPlannedSteps, stepsDone: etaStepPaths.size, firstStepAt: etaFirstStepAt,
             evidenced: etaEvidenced, budgetMs: effectiveBuildSeconds * 1000,

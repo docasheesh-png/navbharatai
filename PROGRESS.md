@@ -95832,3 +95832,63 @@ So it is recorded as BLOCKED with all four fields, with the recommendation to co
 `silent` (provider produced nothing) and never as `timeout`, and with the note that the required
 change is inside the provider chain — which CLAUDE.md says to confirm with the admin before touching.
 Guessing it would put a number nobody measured into the figure a routing decision is made from.
+
+---
+
+## 2026-10-14 — Q-1042: the evidence half, built; and Q-1043, the defect it uncovered
+
+### Q-1042 — the hunt's cost, on every build instead of one archaeological read
+
+The admin's instinct about the post-build review is right — *"aap help ko glm se chalo to sayad sasta
+chale?"* — and the figure behind it is real: *"523,374 input tokens = 34.4% of the build … billed at
+×4"*. But that figure came from reading **one** report **by hand**. A routing decision taken from one
+anecdote is a guess with a citation.
+
+🔴 **Routing was deliberately not touched.** `cheapBuildFloorRunners` carries **six** separate verbatim
+admin routing decisions, with env overrides that always win, and CLAUDE.md says to confirm before
+changing any of it. The admin asked *"sayad sasta chale?"* — a question, not a decision. So the row is
+BLOCKED on their yes, and what shipped is the half that makes the yes informed: `bugHuntCost.ts` puts
+the hunt's share of each build's engine cost into every report.
+
+**Three things the line deliberately does not do**, each for a reason this repo has already paid for:
+
+- **It names no engine.** The build report reaches the USER (⋮ More → Report), and the White-Label Law
+  is absolute. The share answers the question anyway — 34.4% is what made the point.
+- **It states no per-slice ₹.** The markup (then the discount) applies to the build's **total**, not to
+  each slice, so a rupee figure for the hunt would be a number nobody computed — Q-1035's class exactly.
+- **It says nothing when the hunt did not run.** A "0%" line would read as a hunt that found nothing for
+  free; Q-1040's not-run principle one level on.
+
+Priced by `realProviderCostUsd` — the one cost function — with the share's numerator **and** denominator
+from the same call, so the ratio can never compare two differently-priced numbers.
+
+### Q-1043 — found by rule 3 while adding the sibling, and it was mine
+
+`BUG_HUNT_NOT_RUN`, which **I shipped in #3728**, was in no registry at all. `isAppFinding` reads only
+the phase and `PROCESS_ONLY_CODES` — `severity: 'info'` and `autoResolved: true` do not help — so it
+said **yes**. And `BuildDiagnostics.ts` already records what that costs, from the 2026-10-04 census:
+
+> *"Eight codes recorded at WARNING severity that were in no registry at all, so `isAppFinding` said yes
+> to every one: each appeared in the USER's build-health card as a problem with THEIR app and took 6
+> points off their app's health score."*
+
+**So a person who pressed "Not now" on a paid extra was losing app-health points for declining to pay.**
+Both codes are now process-only and carry no "next move", because a choice is not a defect and a cost is
+not a next move.
+
+🔒 **The class is locked, not the instance.** The test scans the route and `optionalBugHunt.ts` for every
+`code: 'BUG_HUNT_*'` actually recorded and asserts each one is process-only — so a third code added the
+way #3728 added the first fails CI instead of quietly costing a user six points.
+
+### Proof, and the reversion that taught me something
+
+`tests/whatTheHuntCostIsSaidAndIsNotTheAppsFault.test.ts`, 14 tests. Six reversions: the #3728 defect put
+back; a vendor name in the user-visible line; a per-slice rupee figure; no zero-cost guard; a cost line
+for a hunt that never ran; and a third `BUG_HUNT_*` code left unregistered.
+
+🔴 **One reversion PASSED, and chasing it found a real hole in my own guard.** The source guard listed
+the honest FUNCTIONS (`usdInrRate`, `tieredMarkupUsd`), so a hardcoded `realUsd * 88 * 4` walked straight
+past it — **it knew every honest way to get a rupee and not one dishonest way.** Widened to the rupee
+sign. The first attempt, `[₹$]`, failed the *correct* code because every template literal contains
+`${…}`; scoped to `₹` and re-proven. Two lessons, both already paid for today: a reversion that passes is
+a claim to verify, and a guard written from the honest implementations is blind to the dishonest ones.

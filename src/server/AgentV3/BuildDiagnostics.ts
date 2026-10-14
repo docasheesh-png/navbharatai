@@ -68,6 +68,14 @@ export const PROCESS_ONLY_CODES = new Set([
   // read that failed). It is evidence about our write, recorded so the refusal is never silent again; whatever
   // the refused file means for the app is measured by the checks that read the workspace afterwards.
   'PLATFORM_WRITE_REFUSED',
+  // ── THE DEEP BUG HUNT IS OUR PROCESS, AND THE USER'S CHOICE IS NEVER THEIR APP'S FLAW ─────────────
+  // 🔴 A DEFECT SHIPPED BY #3728 AND FOUND BY RULE 3 WHILE ADDING ITS SIBLING (Q-1042). `BUG_HUNT_NOT_RUN`
+  // records that the user was OFFERED the paid hunt and said no (or said nothing). It was in no registry,
+  // so `isAppFinding` said yes to it — which is the exact shape of the 2026-10-04 census below: a code in
+  // no registry appears in the USER's build-health card as a problem with THEIR app and costs them 6
+  // points. A person pressing "Not now" on a paid extra was losing app-health points for declining to pay.
+  // `BUG_HUNT_COST` is a measurement of what our own pass spent. Neither is about the app.
+  'BUG_HUNT_NOT_RUN', 'BUG_HUNT_COST',
   'BUILD_OFFER_ACCEPTED', 'ATTACHMENT_RECALLED',
   // A project import refused because the chat already held an app (Q-733). Nothing about the app is wrong —
   // it was deliberately left untouched — so it is never a problem WITH the user's app.

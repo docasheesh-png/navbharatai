@@ -60,10 +60,18 @@ describe('the futility window opens when the BUILD starts, not when the request 
 
 describe('every lane\'s completed command counts — the architect\'s too', () => {
   it('the architect dispatcher and the sub-agents both go through noteCommandCompleted', () => {
-    const uses = route.match(/noteCommandCompleted\(\);/g) ?? [];
+    // UPDATED 2026-10-14 (build 413d29a1, Q-1062): the counter now takes the command TEXT, because a
+    // command that cannot change anything is not progress — `noteCommandCompleted(c?.command)` instead of
+    // `noteCommandCompleted()`. The property THIS test exists for is unchanged and is what is pinned: BOTH
+    // lanes count, and there is exactly one counter. A fix that threaded the text through only one of the
+    // two lanes would re-open the very gap a2b9c802 was written for, so the count stays at 2.
+    // Two CALL sites. The definition reads `noteCommandCompleted = (command?: string)`, so it is not a
+    // call and does not match — counted, not assumed.
+    const uses = route.match(/noteCommandCompleted\(/g) ?? [];
     expect(uses.length).toBe(2);
+    expect((route.match(/noteCommandCompleted\(c\?\.command\)/g) ?? []).length).toBe(2);
     // The architect's hook is the one passed to the ToolDispatcher — it must count, not only record.
-    expect(route).toMatch(/\(c\) => \{ noteCommandCompleted\(\); try \{ buildDiag\.recordCommand\(c\); \}/);
+    expect(route).toMatch(/\(c\) => \{ noteCommandCompleted\(c\?\.command\); try \{ buildDiag\.recordCommand\(c\); \}/);
     // No second, private counter can drift from the shared one.
     expect((route.match(/commandsRun \+= 1/g) ?? []).length).toBe(1);
   });

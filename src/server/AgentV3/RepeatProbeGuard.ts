@@ -17,6 +17,8 @@
 // announces and does not have is the state the second absolute rule forbids; either the claim goes or the
 // ban becomes real. The ban became real — see `PROBE_TOOLS` for the narrow set it applies to.
 
+import { isInertCommand } from './inertCommand';
+
 /**
  * 🔒 THE ONLY TOOLS A BAN MAY EVER APPLY TO — and the narrowness is the whole safety argument.
  *
@@ -93,6 +95,13 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
  * applied, and a run that does nothing forever would never end. `isEmptyCommandCall` already recognises
  * exactly that call (the dispatcher refuses it before the shell), and
  * `tests/aRunThatOnlyDoesNothingEnds` caught it immediately.
+ *
+ * 🔴 AND IT RE-BROKE AGAIN, WITH THE NO-OP SPELLED OUT (build `413d29a1`, 2026-10-14, Q-1062). Q-738 fixed
+ * the INSTANCE — a command string that is literally empty. The CLASS is "a command that cannot change
+ * anything", and `: > /tmp/x && node -e 'console.log("noop")'` is the same thing written out: non-empty, so
+ * it counted as a mutation, so it reset its own repeat count on every call. The loop guard could never reach
+ * its threshold at ANY repeat count, `isNoOpTurn` was never true, and ~170 turns of 33 output tokens each
+ * ran for 13.4 minutes. `isInertCommandCall` now answers for the class — see inertCommand.ts.
  */
 export function noteMutations(
   state: RepeatProbeState,
@@ -100,7 +109,7 @@ export function noteMutations(
 ): void {
   for (const tu of toolUses) {
     if (typeof tu?.name !== 'string' || !MUTATING_TOOLS.has(tu.name)) continue;
-    if (isEmptyCommandCall(tu)) continue; // it changed nothing, so nothing is a new question
+    if (isInertCommandCall(tu)) continue; // it changed nothing, so nothing is a new question
     state.mutations += 1;
   }
 }
@@ -252,12 +261,22 @@ export function collectRepeatProbeSteer(
 
 /**
  * A call that cannot do anything: a `bash` whose command is empty (the dispatcher refuses it before the shell).
- * PURE. Used with `isProbeBanned` to recognise a model that has stopped making progress.
+ * PURE. Kept as the narrow, literal question — `isInertCommandCall` is the one every guard should ask.
  */
 export function isEmptyCommandCall(tu: { name?: unknown; input?: unknown }): boolean {
   if (tu?.name !== 'bash') return false;
   const cmd = (tu.input as Record<string, unknown> | null | undefined)?.command;
   return typeof cmd !== 'string' || cmd.trim() === '';
+}
+
+/**
+ * 🔑 THE QUESTION EVERY GUARD SHOULD ASK (Q-1062): can this call change anything at all? A `bash` whose
+ * command is empty OR provably inert (`isInertCommand`) cannot. PURE.
+ */
+export function isInertCommandCall(tu: { name?: unknown; input?: unknown }): boolean {
+  if (tu?.name !== 'bash') return false;
+  const cmd = (tu.input as Record<string, unknown> | null | undefined)?.command;
+  return typeof cmd !== 'string' || isInertCommand(cmd);
 }
 
 /**
@@ -276,6 +295,6 @@ export function isNoOpTurn(
   toolUses: ReadonlyArray<{ name?: unknown; input?: unknown }>,
   banned: (name: string, input: unknown) => boolean,
 ): boolean {
-  return toolUses.length > 0 && toolUses.every((tu) => isEmptyCommandCall(tu) || (typeof tu?.name === 'string' && banned(tu.name, tu.input)));
+  return toolUses.length > 0 && toolUses.every((tu) => isInertCommandCall(tu) || (typeof tu?.name === 'string' && banned(tu.name, tu.input)));
 }
 

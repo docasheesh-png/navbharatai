@@ -10,7 +10,11 @@ import {
 afterEach(() => { delete process.env.FREE_CHAT_ANSWER_ALL; delete process.env.STUDENT_TEACHER_PROMO; });
 
 describe('flags', () => {
-  it('both default OFF', () => {
+  it('both default ON; "off" is the kill switch', () => {
+    expect(freeChatAnswerAllEnabled()).toBe(true);
+    expect(studentTeacherPromoEnabled()).toBe(true);
+    process.env.FREE_CHAT_ANSWER_ALL = 'off';
+    process.env.STUDENT_TEACHER_PROMO = 'OFF';
     expect(freeChatAnswerAllEnabled()).toBe(false);
     expect(studentTeacherPromoEnabled()).toBe(false);
     expect(teacherPromoFor('Build a quiz app for my exam')).toBeNull();

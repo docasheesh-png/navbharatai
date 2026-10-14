@@ -1,4 +1,4 @@
-// FREE CHAT ANSWERS EVERY MESSAGE + STUDENT → TEACHER AI PROMO (2026-10-14). Both default OFF.
+// FREE CHAT ANSWERS EVERY MESSAGE + STUDENT → TEACHER AI PROMO (2026-10-14). Both default ON; set to `off` to disable.
 //
 // 🔴 THE BUG (admin): "Best job ke bare me batao" got "best job app NavBharatAI me banti hai" instead
 // of an answer. Nothing hard-codes that line — the free chat's model wrote it, because the free system
@@ -17,11 +17,12 @@
 //
 // PURE — no I/O.
 
+// Default ON (admin 2026-10-14, made live). `off` is the kill switch.
 export function freeChatAnswerAllEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return String(env.FREE_CHAT_ANSWER_ALL ?? '').trim().toLowerCase() === 'on';
+  return String(env.FREE_CHAT_ANSWER_ALL ?? '').trim().toLowerCase() !== 'off';
 }
 export function studentTeacherPromoEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return String(env.STUDENT_TEACHER_PROMO ?? '').trim().toLowerCase() === 'on';
+  return String(env.STUDENT_TEACHER_PROMO ?? '').trim().toLowerCase() !== 'off';
 }
 
 export type ReplyLang = 'hi' | 'hinglish' | 'en' | 'other';

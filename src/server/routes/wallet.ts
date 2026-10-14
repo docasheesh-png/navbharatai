@@ -14,6 +14,8 @@ import { periodStartFrom } from '../lib/hostingOverage';
 import { edgeMeterEnabled } from '../AgentV3/edgeTrafficMeter';
 import { readHostingAddons, purchaseHostingAddon, removeHostingAddon } from '../lib/hostingAddonLedger';
 import { HOSTING_TIERS } from '../../lib/hostingTiers';
+import { listReceipts } from '../lib/receiptStore';
+import { meteringEnabled } from '../lib/billOfSupply';
 import { publishedAppCapForTier, liveAppCount } from '../lib/HostingQuota';
 import { deploymentStore } from '../AgentV3/DeploymentStore';
 import { firebaseDomainLinksForUser } from '../lib/firebaseDomainLink';
@@ -105,6 +107,13 @@ export function registerWalletRoutes(app: Express): void {
   // The plan lives ON the wallet doc; purchase debits the SAME wallet in the SAME transaction.
   // Lazy auto-renewal happens inside the status read (readHostingPlanStatus), so no cron exists.
   // The catalogue (prices, limits, agreement text) is src/lib/hostingTiers.ts — shared with the UI.
+
+  // Go-live PR 15: the user's Bills of Supply (METERING_V1, default OFF ⇒ 404, as if absent).
+  app.get('/api/wallet/:userId/receipts', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    if (!meteringEnabled()) return res.status(404).json({ error: 'Not found' });
+    const receipts = await listReceipts(getDb() as any, routeParam(req.params.userId));
+    return res.json({ receipts });
+  });
 
   app.get('/api/wallet/:userId/hosting-plan', requireUserMatch('userId'), async (req: Request, res: Response) => {
     try {

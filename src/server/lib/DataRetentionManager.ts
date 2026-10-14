@@ -778,6 +778,24 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
    * whose retention is a legal duty rather than a choice. Saying so out loud is the point.
    */
   { collection: 'payment_transactions', reason: 'a record of money received; tax and accounting law requires it, and Privacy §9 names it as an exception to erasure' },
+  /**
+   * THE BILL OF SUPPLY IS A STATUTORY DOCUMENT, NOT A CONVENIENCE COPY (#3734, classified by the
+   * Q-701 census, which refused the PR until this was decided).
+   *
+   * One doc per charged purchase, id `{ownerId}__{sourceRef}`. It is `payment_transactions`' own class:
+   * tax and accounting law requires the issuer to keep it, and Privacy §9 names exactly this as an
+   * exception to erasure. A receipt a timer deletes is a receipt the issuer cannot produce when asked.
+   */
+  { collection: 'bill_of_supply', reason: 'a statutory tax document issued for a charged purchase; the issuer must be able to produce it, and Privacy §9 names it as an exception to erasure' },
+  /**
+   * ONE `global` doc holding the gap-free receipt sequence — and deleting it is WORSE than keeping it.
+   *
+   * `issueBillOfSupply` reads this counter and writes `seq + 1` in the same transaction, so the numbers
+   * are gap-free and unique. Delete the doc and the sequence restarts at 1, issuing receipt numbers that
+   * ALREADY EXIST — a legal defect, in exchange for one document of storage. It is a single doc that
+   * never grows, so there is nothing for a timer to save.
+   */
+  { collection: 'bill_of_supply_counters', reason: 'ONE `global` doc holding the gap-free receipt sequence; deleting it restarts numbering and re-issues numbers that already exist. A single doc that never grows' },
   { collection: 'hosting_usage', reason: 'per-user metering that the bill is derived from' },
   /**
    * Q-767. Both hosting stores were filed as "a money input, so the question is which window the law

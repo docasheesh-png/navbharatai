@@ -85,8 +85,11 @@ const isTest = (p: string) => p.includes('.test.') || p.includes('.spec.');
  * becomes a place to hide the next dead engine.
  */
 const KNOWN_UNREACHABLE = new Set([
-  // Go-live PR 15: metering + Bill of Supply, called from purchase/usage paths behind METERING_V1. Remove when wired.
-  'src/server/lib/billOfSupply.ts',
+  // Go-live PR 15's `src/server/lib/billOfSupply.ts` and PR 16's `byoLifecycle.ts` were both here, each
+  // with the note "remove when wired". Both exemptions are now spent: THIS PR wires billOfSupply
+  // (`receiptStore.ts` imports it), and #3732 — which wires byoLifecycle — has merged, so main reaches
+  // it already. PR 17's `orphanReport.ts` below stays: its caller has not landed, and dropping an
+  // exemption before its wiring does land fails this same guard from the other side.
   // Go-live PR 17: report-only orphan sweep, run by an admin route/script once managed adapters exist. Remove then.
   'src/server/lib/orphanReport.ts',
   // Go-live PR 18's `src/lib/planModel.ts` WAS here, with the note "read by the plans card/purchase

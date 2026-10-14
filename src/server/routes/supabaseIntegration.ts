@@ -28,7 +28,10 @@ import {
   tokenExchangeBody, basicAuthHeader, parseCallbackParams, supabaseOAuthConfigured,
   connectFailureMessage, SUPABASE_TOKEN_URL, OAUTH_STATE_TTL_MS, supabaseReturnUrl,
 } from '../lib/supabaseOAuth';
-import { listOrganizations } from '../lib/supabaseProvision';
+import { listOrganizations, fetchProjectCredentials, envForProject } from '../lib/supabaseProvision';
+import { envFlag } from '../lib/envFlag';
+import { rotateKey } from '../providers/byoLifecycle';
+import { databasesInVault } from '../lib/databaseReuse';
 import {
   saveConnection, getConnection, getConnectionStatus, deleteConnection,
 } from '../lib/supabaseConnectionStore';
@@ -47,7 +50,7 @@ import {
   getProjectState, restoreProject, projectStateMessage, canWake, stateNeedsOwner,
 } from '../lib/supabaseProjectState';
 import { projectRefsInVault } from '../lib/supabasePauseWatch';
-import { provisionDatabaseForUser, freshAccessToken } from '../lib/supabaseProvisionFlow';
+import { provisionDatabaseForUser, saveUserSecrets, freshAccessToken } from '../lib/supabaseProvisionFlow';
 import { reusedDatabaseNote } from '../lib/databaseReuse';
 import { getConversationStore } from '../AgentV3/sharedConversationStore';
 import { runPostgresQuery, isPostgresUrl } from '../lib/postgresQuery';
@@ -387,6 +390,66 @@ export function registerSupabaseIntegrationRoutes(
     if (!fresh.ok) return { ok: false, status: fresh.status, error: fresh.message, connected: true };
     return { ok: true, token: fresh.token, refs };
   }
+
+  // ── Go-live PR 16: test / refresh keys (BYO_LIFECYCLE_V1, default OFF ⇒ 404, as if absent). ──
+  // Disconnect already exists below; the UI adds a confirmation in front of it when the flag is on.
+  app.post('/api/integrations/supabase/test', async (req: Request, res: Response) => {
+    if (!envFlag('BYO_LIFECYCLE_V1')) { res.status(404).json({ error: 'Not found' }); return; }
+    const uid = await verifyFirebaseToken(req);
+    if (!uid) { res.status(401).json({ error: 'Please sign in first.' }); return; }
+    const access = await userProjects(uid);
+    if (!access.ok) {
+      res.json({ ok: false, detail: access.connected ? access.error : 'Your Supabase account is not connected.' });
+      return;
+    }
+    const orgs = await listOrganizations(access.token).catch(() => null);
+    const ok = !!orgs && orgs.ok;
+    try { audit('SUPABASE_BYO_TEST', { userId: uid, ok }); } catch { /* audit never blocks */ }
+    res.json(ok
+      ? { ok: true, detail: `Connected. ${access.refs.length} database${access.refs.length === 1 ? '' : 's'} linked to your apps.` }
+      : { ok: false, detail: orgs && !orgs.ok ? orgs.message : 'Supabase did not answer. Please try again.' });
+  });
+
+  // Re-read each linked database's public key (after the user rotated it in Supabase), PROVE the new
+  // key works, then save it back to the SAME app scope it came from. A key that does not answer is
+  // never stored: rotateKey keeps the old one. Only projects already in this user's vault are touched.
+  app.post('/api/integrations/supabase/rotate', async (req: Request, res: Response) => {
+    if (!envFlag('BYO_LIFECYCLE_V1')) { res.status(404).json({ error: 'Not found' }); return; }
+    const uid = await verifyFirebaseToken(req);
+    if (!uid) { res.status(401).json({ error: 'Please sign in first.' }); return; }
+    const conn = await getConnection(uid).catch(() => null);
+    if (!conn) { res.status(400).json({ error: 'Your Supabase account is not connected.' }); return; }
+    const fresh = await freshAccessToken(uid, conn);
+    if (!fresh.ok) { res.status(fresh.status).json({ error: fresh.message }); return; }
+    const dbs = databasesInVault(await loadUserVaultRows(uid).catch(() => []))
+      .map((d) => ({ scope: d.workspaceId, ref: projectRefFromUrl(d.env.VITE_SUPABASE_URL) }))
+      .filter((d): d is { scope: string | null; ref: string } => !!d.ref)
+      .slice(0, 8);
+    if (dbs.length === 0) { res.json({ ok: true, detail: 'No databases are linked yet — nothing to refresh.', results: [] }); return; }
+    const results = [];
+    for (const d of dbs) {
+      const creds = await fetchProjectCredentials(fresh.token, d.ref);
+      if (!creds.ok) { results.push({ projectRef: d.ref, ok: false, detail: creds.message }); continue; }
+      const r = await rotateKey({
+        probe: async (ref, key) => {
+          const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 10_000);
+          try {
+            const resp = await fetch(`https://${ref}.supabase.co/rest/v1/`, { headers: { apikey: key, Authorization: `Bearer ${key}` }, signal: ctl.signal });
+            return resp.status !== 401 && resp.status !== 403 && resp.status < 500;
+          } catch { return false; } finally { clearTimeout(t); }
+        },
+        currentKeyVersion: async () => null,
+        storeKey: async () => { if (!(await saveUserSecrets(uid, envForProject(creds.credentials), d.scope))) throw new Error('save failed'); },
+        activate: async () => { /* saveUserSecrets replaces in place: storing IS activating */ },
+        retireKey: async () => { /* saveUserSecrets soft-retires the old row itself */ },
+        forgetConnection: async () => false,
+        audit: async (u, action, ok, detail) => { try { audit('SUPABASE_BYO_ROTATE', { userId: u, action, ok, detail, projectRef: d.ref }); } catch { /* never blocks */ } },
+      }, uid, d.ref, creds.credentials.anonKey);
+      results.push({ projectRef: d.ref, ...r });
+    }
+    const ok = results.every((r) => r.ok);
+    res.json({ ok, detail: ok ? 'Keys refreshed for your databases.' : 'Some databases kept their old key — see each one.', results });
+  });
 
   app.get('/api/integrations/supabase/project-health', async (req: Request, res: Response) => {
     const uid = await verifyFirebaseToken(req);

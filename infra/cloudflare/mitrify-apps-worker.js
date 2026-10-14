@@ -57,7 +57,20 @@ const APEX = 'mitrify.in';
 // ⚠️ BUMP `WORKER_VERSION` WHENEVER THIS FILE CHANGES. That is the entire contract: the value is
 // compared against this file BY A TEST, so a change that forgets to bump it fails CI rather than
 // producing a version string that lies — which would be worse than having no version at all.
-const WORKER_VERSION = '2026-09-17.1';
+const WORKER_VERSION = '2026-10-13.1';
+
+// ── TRAFFIC METER (FRONTEND_TRAFFIC_METER on the server) ─────────────────────────────────────────
+// Every response this Worker sends, cache hits too, is one Workers Analytics Engine data point:
+// blob1 = app subdomain, double1 = bytes (Content-Length; 0 when unknown, so any error favours the
+// user). Bind a dataset `nbai_traffic` as `NBAI_TRAFFIC` to switch it on; with no binding it is a no-op.
+function meter(env, sub, resp) {
+  try {
+    if (!env || !env.NBAI_TRAFFIC || !resp) return resp;
+    const len = Number(resp.headers.get('content-length'));
+    env.NBAI_TRAFFIC.writeDataPoint({ blobs: [sub], doubles: [Number.isFinite(len) && len > 0 ? len : 0], indexes: [sub] });
+  } catch (_) { /* metering must never break serving */ }
+  return resp;
+}
 
 // ── BUCKET ORIGIN (ROADMAP §10.3) ─────────────────────────────────────────────────────────────────
 // Firebase Hosting serves a published app from a preview CHANNEL, and channels are a finite per-site
@@ -168,7 +181,7 @@ export default {
       if (hit) {
         const h = new Headers(hit.headers);
         h.set('x-nbai-cache', 'HIT');
-        return new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers: h });
+        return meter(env, sub, new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers: h }));
       }
     }
 
@@ -183,7 +196,7 @@ export default {
         headers.set('x-nbai-cache', 'MISS');
         const out = new Response(fromBucket.body, { status: 200, headers });
         ctx.waitUntil(cache.put(cacheKey, out.clone()));
-        return out;
+        return meter(env, sub, out);
       }
       // Nothing in the bucket for this app — fall through to Firebase, which is what keeps every
       // app published before the mirror existed working with nothing to migrate.
@@ -203,7 +216,7 @@ export default {
 
     if (!cacheable || resp.status !== 200) {
       // Never cache an error: a 404 held at the edge would outlive the publish that fixes it.
-      return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: resp.headers });
+      return meter(env, sub, new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: resp.headers }));
     }
 
     // ── HOW LONG, AND WHY IT DIFFERS BY FILE ────────────────────────────────────────────────────
@@ -222,7 +235,7 @@ export default {
     const out = new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
     // Store a COPY: the response body can only be read once, and the visitor gets the original.
     ctx.waitUntil(cache.put(cacheKey, out.clone()));
-    return out;
+    return meter(env, sub, out);
   },
 };
 

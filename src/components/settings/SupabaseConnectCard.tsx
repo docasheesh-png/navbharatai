@@ -14,6 +14,7 @@
 //    genuinely usable — the server earns that verdict by polling, so the UI does not have to guess.
 //  • Disconnect says plainly that Supabase must be told separately; we do not imply we revoked it.
 
+import { usePublicFlags } from '../../lib/publicFlags';
 import { useCallback, useEffect, useState } from 'react';
 import { Database, Check, Loader2, ExternalLink, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
@@ -166,7 +167,7 @@ interface Props {
 
 export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Props) {
   const [status, setStatus] = useState<Status | null>(null);
-  const [busy, setBusy] = useState<'connect' | 'create' | 'disconnect' | null>(null);
+  const [busy, setBusy] = useState<'connect' | 'create' | 'disconnect' | 'test' | 'rotate' | null>(null);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
   /** True when the last "Create database" attached an existing one instead of making a new project —
@@ -329,7 +330,26 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
     }
   };
 
+  // Go-live PR 16 (BYO_LIFECYCLE_V1, default OFF): Test + Refresh keys, and a confirmation before
+  // Disconnect. Off ⇒ none of this renders and Disconnect behaves exactly as before.
+  const { byoLifecycle } = usePublicFlags();
+  const lifecycle = async (kind: 'test' | 'rotate'): Promise<void> => {
+    setBusy(kind); setError(''); setDone('');
+    try {
+      // Literal paths (not `${kind}`) so the route census sees both callers.
+      const url = kind === 'test' ? '/api/integrations/supabase/test' : '/api/integrations/supabase/rotate';
+      const res = await authedFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const data = await res.json().catch(() => null) as { ok?: boolean; detail?: string; error?: string } | null;
+      if (data?.ok) setDone(data.detail || 'Done.'); else setError(data?.detail || data?.error || 'That did not work. Please try again.');
+    } catch {
+      setError('Could not reach NavBharatAI. Check your connection and try again.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const disconnect = async (): Promise<void> => {
+    if (byoLifecycle && !window.confirm('Disconnect your Supabase account? Your projects and data stay in your Supabase account; apps that use them keep their saved keys.')) return;
     setBusy('disconnect'); setError(''); setDone('');
     try {
       const res = await authedFetch('/api/integrations/supabase/disconnect', { method: 'POST' });
@@ -376,6 +396,19 @@ export function SupabaseConnectCard({ appLabel, workspaceId, onProvisioned }: Pr
               {busy === 'create' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
               {busy === 'create' ? 'Creating your database…' : 'Create database'}
             </button>
+            {byoLifecycle && (
+              <>
+                <button onClick={() => void lifecycle('test')} disabled={busy !== null}
+                  className="text-xs font-semibold px-3 py-2 rounded-xl border border-line text-ink hover:bg-raised disabled:opacity-50">
+                  {busy === 'test' ? 'Testing…' : 'Test connection'}
+                </button>
+                <button onClick={() => void lifecycle('rotate')} disabled={busy !== null}
+                  title="After you rotate keys in Supabase, tap this so your apps use the new key."
+                  className="text-xs font-semibold px-3 py-2 rounded-xl border border-line text-ink hover:bg-raised disabled:opacity-50">
+                  {busy === 'rotate' ? 'Refreshing…' : 'Refresh keys'}
+                </button>
+              </>
+            )}
             <button
               onClick={disconnect}
               disabled={busy !== null}

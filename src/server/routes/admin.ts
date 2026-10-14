@@ -193,6 +193,11 @@ const GROWING_COLLECTIONS: readonly string[] = [
   // Q-784: two App Mart money stores that were in no registry at all, hidden from the collection
   // census because their constants are named `PURCHASES` and `PENDING_CREDITS`.
   'nav_store_purchases', 'nav_store_pending_credits',
+  // #3734: the Bill of Supply and its sequence counter. Both are RETAINED_INDEFINITELY (a statutory tax
+  // document, and the one `global` doc whose deletion would re-issue numbers that already exist), and a
+  // store kept for ever is the one this board most needs to show — nothing will ever shrink it.
+  // `aGrowingStoreCannotHideFromTheBoard` requires it: the classification forced this entry.
+  'bill_of_supply', 'bill_of_supply_counters',
 ];
 import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
 import { routeParam, routeParams } from '../lib/expressCompat';

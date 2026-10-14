@@ -162,6 +162,8 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
    * stated exceptions to erasure.
    */
   gift_codes:          { kind: 'platform', why: 'one doc per minted code; the doc id IS the code, and an unredeemed one is value in a third party\'s hands that must outlive the buyer\'s account' },
+  bill_of_supply:      { kind: 'forever', why: "a STATUTORY tax document, one doc per charged purchase (`{ownerId}__{sourceRef}`, receiptStore.ts). `payment_transactions`' own class: tax law requires the issuer to keep it and Privacy §9 names it as an exception to erasure — so it is NOT erased with the account and is NOT on a timer. A receipt a clock deletes is one the issuer cannot produce when asked (#3734)" },
+  bill_of_supply_counters: { kind: 'forever', why: "ONE `global` doc holding the gap-free receipt sequence (receiptStore.ts). Deleting it restarts numbering and re-issues numbers that ALREADY EXIST — a legal defect bought with one document of storage — and it never grows, so a timer saves nothing (#3734)" },
   promo_codes:         { kind: 'platform', why: "one doc per admin-made promo code (adminPromoStore.ts); the doc id IS the code and it belongs to the campaign, not to any one redeemer — each person's redemption is its own payment_transactions record" },
   gift_code_daily:     { kind: 'user', why: "one doc per buyer per UTC day bounding chargeback exposure; it is that person's own purchase tally and nothing needs it once the account is gone" },
 

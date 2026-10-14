@@ -29,7 +29,7 @@ function row(src: string, placeholder: string): { wrapper: string; input: string
 
 describe('a code box and its Apply button can never push each other off a phone screen', () => {
   for (const [file, placeholder] of [
-    ['src/components/panels/BillingPanel.tsx', 'Enter your promo code'],
+    ['src/components/wallet/PromoRewardsTab.tsx', 'Enter your promo code'],
     ['src/components/panels/ReferralPanel.tsx', 'Enter referral code'],
   ] as const) {
     it(`${placeholder}: the button is under the box, full width`, () => {

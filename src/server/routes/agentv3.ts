@@ -1,4 +1,5 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { teacherPromoFor } from '../lib/freeChatReplies';
 import { BoundedCache } from '../lib/boundedCache';
 import { FILE_SIZE_RULE, READ_GUIDE_TOOL, fileSizeRuleEnabled, moduleText, modularizePrompt, modularPromptEnabled } from '../AgentV3/reliability/modularPrompt';
 import { APPEND_FILE_TOOL, resumeTruncatedEnabled } from '../AgentV3/reliability/resumeWrite';
@@ -11720,6 +11721,12 @@ async function noteBuildOutcome(
     // Said once, at the start, so a user who expected the badge gone is not left to discover it on the
     // finished app and conclude the toggle is broken.
     if (appSignatureNoticeText) emit({ type: 'narration', agent: 'architect', text: `ℹ️ ${appSignatureNoticeText}`, ts: Date.now() });
+    // STUDENT_TEACHER_PROMO (freeChatReplies.ts): a study/exam app is built exactly as asked; the student
+    // is also told, once, in their language, that Mode → Teacher AI in NavBharatAI FREE teaches and sets exams.
+    // A note only — it never changes, delays or blocks the build.
+    if (intent === 'new_build' && !hasImportIntent) {
+      try { const promo = teacherPromoFor(String(prompt ?? '')); if (promo) emit({ type: 'narration', agent: 'architect', text: promo, ts: Date.now() }); } catch { /* never block a build on a note */ }
+    }
     const state = new WorkspaceState(events);
 
     // AP-4 (flag-gated): when parallel building is ON, wrap the actuator so concurrent frontend/backend

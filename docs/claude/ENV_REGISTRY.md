@@ -4324,3 +4324,10 @@ price is not. Recorded as a queue row, not done here.
 | Key | Values | Default | Owner |
 |---|---|---|---|
 | `AGENTV3_BUG_HUNT_ASK` | `off` disables the QUESTION (the hunt then runs unasked, as before). Anything else / absent = ask. | ask | `src/server/AgentV3/optionalBugHunt.ts` |
+
+## Free chat replies (2026-10-14, branch fix/free-chat-replies)
+
+| Key | Default | What it does (set `off` to disable) |
+|---|---|---|
+| `FREE_CHAT_ANSWER_ALL` | **on** | Free chat answers every question itself. The unconditional "lead with NavBharatAI Pro" prompt block is replaced by answer-first rules, and app-navigation context is injected only for messages about NavBharatAI. On a real app-build request the chat explains the idea (no code) and ends with ONE line in the user's language that it can be built in NavBharatAI Pro (the server appends it if the model omits it). |
+| `STUDENT_TEACHER_PROMO` | **on** | A new build whose prompt is a study/exam app gets one narration note, in the user's language: Mode → Teacher AI in NavBharatAI FREE to study and take exams. The build is not changed or blocked. |

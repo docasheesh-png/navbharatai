@@ -866,13 +866,16 @@ export class AgentRunner {
           signal: signal ?? this.opts.signal,
         });
         recordOffLoopCall({
-          model: turn.model ?? model, prompt, text: turn.text ?? '',
+          // The RECORD names the chain's plan (`recordModel`), exactly like the loop's own rows — never the
+          // bare request id, which on a Weak build is a Claude id that never ran (303e8a6f Q-970). The
+          // value handed to `client.runTurn` above is unchanged.
+          model: turn.model ?? recordModel, prompt, text: turn.text ?? '',
           stopReason: turn.stopReason, usage: turn.usage, startedAt, ok: true,
         });
         return parseFileBlocks(turn.text ?? '');
       } catch (err) {
         recordOffLoopCall({
-          model, prompt, text: '', stopReason: null, usage: undefined, startedAt, ok: false,
+          model: recordModel, prompt, text: '', stopReason: null, usage: undefined, startedAt, ok: false,
           error: err instanceof Error ? err.message : String(err),
         });
         throw err;

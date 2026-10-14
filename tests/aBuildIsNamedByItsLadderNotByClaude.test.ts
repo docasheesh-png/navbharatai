@@ -404,14 +404,17 @@ describe('§6 · class census over the route and AgentRunner', () => {
     walk(ar, (n) => {
       if (!ts.isCallExpression(n)) return;
       const callee = calleeText(ar, n);
-      if (!callee.endsWith('.onLlmCall') && callee !== 'describeContextUsage') return;
+      // `recordOffLoopCall` (#3736) is a record site too: it forwards its `model` straight into onLlmCall, so
+      // the thing that must be the chain's plan is what its CALLERS pass. Counting only the forwarder let two
+      // callers keep naming the bare request id (found merging #3700 with #3736, 2026-10-14).
+      if (!callee.endsWith('.onLlmCall') && callee !== 'describeContextUsage' && callee !== 'recordOffLoopCall') return;
       sites += 1;
       for (const a of n.arguments) for (const name of referencedNames(a)) {
         if (name === 'model' || LEGACY_HELPERS.has(name)) offenders.push(`${callee} @${lineOf(ar, n)} reads ${name}`);
       }
     });
     expect(offenders).toEqual([]);
-    expect(sites).toBe(4); // stop row, failure row, success row, context meter
+    expect(sites).toBe(7); // stop row, failure row, success row, context meter, the off-loop recorder + its 2 callers (success, failure)
   });
 
   it('🔒 (b) every remaining Claude-helper call in the route has a known, non-record role', () => {

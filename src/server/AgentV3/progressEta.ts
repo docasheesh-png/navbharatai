@@ -200,9 +200,24 @@ export function stepEtaText(elapsedMs: number, remainingMs: number, stepsDone: n
  * a few minutes at most, and a countdown there has promised "about 7 min more" 34 seconds before the end
  * (autopsy de3bb2bb). PURE.
  */
-export function finalChecksEtaLine(elapsedMs: number): string {
+export function finalChecksEtaLine(elapsedMs: number, appExists = false): string {
   const inTxt = formatEta(Math.max(0, elapsedMs)).replace('~', '');
-  return `⏱️ Almost done… ${inTxt} in · your app is built — running the final checks.`;
+  // 🔴 "YOUR APP IS BUILT" IS A CLAIM, AND IT IS MADE ONLY WHEN SOMETHING WAS BUILT (Q-1024).
+  //
+  // `finalChecks` is a PHASE flag — the builder's loop is over — which is true of a stopped build and
+  // of one that wrote nothing at all. The route's immediate announcement already knew this and guarded
+  // it (`emitEtaPhaseNow({ unlessStopped, wrote: builderWroteCount })`), and the comment beside that
+  // guard states the rule outright: *"a stopped or empty build is never told 'your app is built'"*.
+  // The two-minute HEARTBEAT tick had no such guard, so it said it anyway. A rule enforced at one of
+  // two call sites is not enforced — so the rule now lives here, where the sentence is written, and
+  // every caller answers for it.
+  //
+  // Without the fact, the line still reports the phase and claims nothing: `appRunningEtaLine` demands
+  // a real `appRenderedAt` for the WEAKER claim "running in the preview", so this stronger one must not
+  // need less.
+  return appExists
+    ? `⏱️ Almost done… ${inTxt} in · your app is built — running the final checks.`
+    : `⏱️ Almost done… ${inTxt} in · running the final checks.`;
 }
 
 /**
@@ -221,8 +236,14 @@ export function appRunningEtaLine(elapsedMs: number): string {
  * route also calls this at the moment a phase begins, so the line changes at the transition rather than
  * at the next even minute. PURE.
  */
-export function etaPhaseLine(p: { elapsedMs: number; finalChecks: boolean; appRenderedAt: number }): string | null {
-  if (p.finalChecks) return finalChecksEtaLine(p.elapsedMs);
+export function etaPhaseLine(p: {
+  elapsedMs: number;
+  finalChecks: boolean;
+  appRenderedAt: number;
+  /** Did this build produce an app? Omitted ⇒ unknown, and the final-checks line claims nothing (Q-1024). */
+  appExists?: boolean;
+}): string | null {
+  if (p.finalChecks) return finalChecksEtaLine(p.elapsedMs, p.appExists === true || Number(p.appRenderedAt) > 0);
   if (Number(p.appRenderedAt) > 0) return appRunningEtaLine(p.elapsedMs);
   return null;
 }
@@ -261,6 +282,12 @@ export interface EtaTickState {
   finalChecks: boolean;
   /** Epoch ms the app was first PROVEN rendered in a real browser this build; 0 = not yet. */
   appRenderedAt: number;
+  /**
+   * Did this build produce an app? The final-checks line claims "your app is built" ONLY on this
+   * (Q-1024) — `finalChecks` alone is also true of a stopped build and of one that wrote nothing.
+   * Omitted ⇒ unknown, and the line reports the phase without the claim.
+   */
+  appExists?: boolean;
   plannedFiles: number;
   filesDone: number;
   firstFileAt: number;
@@ -294,7 +321,7 @@ export interface EtaTickDecision {
 export function etaTickLine(s: EtaTickState): EtaTickDecision {
   const elapsedMs = Math.max(0, Number(s.elapsedMs) || 0);
   const keep = { totalMs: s.totalMs, revisions: s.revisions, evidenced: s.evidenced };
-  const phase = etaPhaseLine({ elapsedMs, finalChecks: s.finalChecks, appRenderedAt: s.appRenderedAt });
+  const phase = etaPhaseLine({ elapsedMs, finalChecks: s.finalChecks, appRenderedAt: s.appRenderedAt, ...(s.appExists === undefined ? {} : { appExists: s.appExists }) });
   if (phase !== null) return { text: phase, kind: s.finalChecks ? 'final-checks' : 'app-running', ...keep };
 
   const measured = measuredRemainingMs({ plannedFiles: s.plannedFiles, filesDone: s.filesDone, firstFileAt: s.firstFileAt, now: s.now });

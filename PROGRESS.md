@@ -95706,6 +95706,70 @@ much as to the test.
 
 ---
 
+## 2026-10-14 — Q-1024 + Q-1032 + Q-1034: the platform says only what it checked
+
+Three rows from report 9c612cdb, one class: **a sentence shown to a user that states something the
+code never established.**
+
+### Q-1024 — "your app is built", on a build that built nothing
+
+The defect is narrower and worse than the row describes: **the rule already existed, and was enforced
+at one of two call sites.** The comment beside `etaFinalChecks = true` states it outright —
+
+> *"The line is announced at once only over an app that exists: a stopped or empty build is never told
+> 'your app is built'."*
+
+— and the immediate announcement really does enforce it, via
+`emitEtaPhaseNow({ unlessStopped: abort.signal, wrote: builderWroteCount })`, with its own test pinning
+that guard. **The two-minute heartbeat tick had no guard at all**, so it said the sentence anyway.
+A rule enforced at one of two call sites is not enforced.
+
+So the fact moved into the **sentence**: `finalChecksEtaLine(elapsedMs, appExists)`, defaulting to
+claiming nothing. A future caller cannot leak the claim by forgetting a guard, because there is no
+guard to forget.
+
+🔑 **The evidence bar was already sitting next to it.** `appRunningEtaLine` demands a real
+`appRenderedAt` to say the weaker *"running in the preview"*. The stronger *"your app is built"* must
+not be reachable on **less** — and a phase flag is less. Either real fact now earns it (the builder's
+own files, or a proven render); neither leaves the line asserting it.
+
+### Q-1032 — a reason that names a file the project does not have
+
+`testSkeletonsCanRun` answers `false` for a package.json that declares no vitest **and** for no
+package.json at all (`JSON.parse(String(null))` throws into its `catch`). Both were reported as
+*"vitest is not declared in package.json"*. **A false reason is worse than a vague one: it is
+actionable in the wrong direction**, sending a reader to add a dependency to a file that is not there.
+
+Three distinct reasons now, deliberately not merged into one vague line, because the fixes differ: one
+project needs a dependency, another needs a package.json before that question can be asked, and a
+third has a package.json that cannot be parsed.
+
+🔴 **An existing test pinned the defect.** It asserted
+`starterTestsSkipReason({ packageJson: null, … }) === STARTER_TESTS_NEED_VITEST`. That expectation was
+changed — with the reasoning written beside it in the test — because this row *is* the decision that
+the pinned behaviour is wrong. Changing a test to match broken behaviour is forbidden; changing one
+that encodes a defect, once the defect is named, is the fix. The difference is whether it is argued or
+done quietly.
+
+### Q-1034 — and rule 3 found three siblings the row never named
+
+The row named one internal id ("build 9c612cdb") in `AppKnowledgeBase`, the file **every** AI reads to
+answer users. A sweep found `build 46e2d74b` three more times — twice in description text an AI can
+repeat aloud. Those are gone. The third is a **code comment**, and it stays on purpose: CLAUDE.md keeps
+comments as the audit trail and deliberately does not sweep them.
+
+The tests sentence also now tells a user where *their own* reason is (`⋮ More → Report`) instead of
+gesturing at "the build report".
+
+### Proof
+
+`tests/thePlatformSaysOnlyWhatItChecked.test.ts`, 12 tests. The Q-1034 census strips comments and then
+asserts **no** internal id survives — with a vacuity guard asserting the comments' own ids are still
+present, so the sweep is proven *scoped* rather than blind.
+
+Four reversions, each failing the right test: the sentence defaulting to the claim again; the heartbeat
+losing its fact; the three starter-test reasons collapsing back into one; and an internal id returning
+to the knowledge text.
 ## 2026-10-14 — Q-1011: a model call made outside the loop was not on the record (and its deadline could not cancel it)
 
 Two defects in one function, `AgentRunner`'s `endgameBatchRepair`.

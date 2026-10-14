@@ -23,6 +23,7 @@ import {
   projectPlanSystemPrompt,
   projectPlanUserPrompt,
   MAX_MODULES,
+  PLANNER_BUDGET,
   MAX_CONTRACT_CHARS,
   type ProjectModule,
   type ProjectPlan,
@@ -323,7 +324,9 @@ describe('planner prompts', () => {
     expect(s).toContain('JSON array');
     expect(s).toContain('dependsOn');
     expect(s).toContain('contracts');
-    expect(s).toContain(String(MAX_MODULES));
+    // The prompt asks for the PLANNER_BUDGET (fits the call's allowance, autopsy 398db9f3); the parser's
+    // MAX_MODULES ceiling bounds what is READ and is no longer what is asked for.
+    expect(s).toContain(`at most ${PLANNER_BUDGET.modules} modules`);
   });
   it('user prompt carries the goal and the scaffold', () => {
     const u = projectPlanUserPrompt('a hospital management system', ['package.json', 'src/App.tsx']);

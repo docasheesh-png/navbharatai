@@ -9,6 +9,7 @@ import { danglingStylesheetImports, withoutStylesheetImports, missingImportedShe
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
 import { freeCancellationMessage } from '../src/server/AgentV3/cancelledBuildBilling';
 import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
+import { buildRecordModel } from '../src/server/AgentV3/runnerChainSummary';
 import { makeTempDir } from './helpers/tempDir';
 
 const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
@@ -117,6 +118,12 @@ describe('4 · a build no model touched does not name a model', () => {
     expect(d.report().model).toBe('GLM(glm-4.7-flashx)');
   });
   it('🔴 the signed manifest says no call was made', () => {
-    expect(read('src/server/routes/agentv3.ts')).toContain("providerLedger.entries().length === 0 ? 'none (no model call was made)'");
+    // Q-970 moved this expression into `buildRecordModel`, the one name every build-level record carries.
+    // The rule is the same and is asserted on the function: with no call made, not even the PLANNED rung
+    // is named — and the manifest reads that value, with the ledger as its "any call made" input.
+    expect(buildRecordModel({ planned: 'glm-4.7-flashx', anyCallMade: false })).toBe('none (no model call was made)');
+    const route = read('src/server/routes/agentv3.ts');
+    expect(route).toContain('anyCallMade: providerLedger.entries().length > 0,');
+    expect(route).toContain('model: buildModelForRecord,');
   });
 });

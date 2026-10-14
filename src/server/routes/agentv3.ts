@@ -59,7 +59,8 @@ import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
 import { streamThinkingToChat } from '../AgentV3/thinkingStream';
 import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemotronSuperModel, nemotronTierAllowed, nemotronConfigNote } from '../AgentV3/nemotron';
 import { composeJudgeChain, describeJudgeAttempts, type JudgeCandidate, type JudgeChain, type JudgeKind } from '../AgentV3/judgeChain';
-import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
+import { describeRunnerChain, chainProviders, firstRungLabel, buildRecordModel, NO_ENGINE_CONFIGURED, type ChainRung } from '../AgentV3/runnerChainSummary';
+import { claudeRungModelId } from '../AgentV3/models';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePowers';
 import { namedNonSmartphone, nonSmartphoneBuildRule, nonSmartphoneUserLine } from '../AgentV3/deviceTarget';
@@ -488,7 +489,7 @@ import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
-import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
+import { DecisionTrace, persistDecisionTrace, getDecisionTrace, decisionTraceForViewer } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration, failuresAreOurStarterTests, ourStarterTestFailedNote } from '../AgentV3/TestGenerationAgent';
 import { starterTestsSkipReason, starterTestsSkippedNote } from '../AgentV3/starterTestsSkip';
 import { buildBillingLabel } from '../AgentV3/buildBillingLabel';
@@ -498,7 +499,7 @@ import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
 import { selectZombieBuilds } from '../AgentV3/buildWatchdog';
 import { recordDebt } from '../AppMakerLab/intelligence/TechnicalDebtTracker';
-import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
+import { estimateTokens, contextUsage, tightestContextModel } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
@@ -3414,7 +3415,9 @@ export function plannerCallLabel(
   const p = String(provider ?? '').trim();
   if (!p) return { provider: 'none', model: 'no provider answered' };
   const lbl = label(p);
-  return { provider: lbl, model: answeringModel({ planned: lbl === 'anthropic' ? plannedClaudeModel : null, family: p }) };
+  // The Claude RUNG that was reached names its own pinned id (claudeRungModelId) — a Weak build's last rung is
+  // Haiku, and it used to be filed under the Sonnet default because both fold into 'anthropic' (Q-970).
+  return { provider: lbl, model: answeringModel({ planned: claudeRungModelId(p) ?? (lbl === 'anthropic' ? plannedClaudeModel : null), family: p }) };
 }
 
 /**
@@ -3520,7 +3523,8 @@ export function fastLaneCallIdentity(
   // (and the report's top-level `model`, derived from it) named a vendor where a model belongs. It is
   // the expression `answeringModel.ts` replaced at five aux call sites (autopsy f152c1ab); this lane
   // records through its own helper, so that fix never reached it. `answered` is `TurnResult.model`.
-  return { provider, model: answeringModel({ answered, planned: provider === 'anthropic' ? claudeTierModel : null, family: String(usedProvider || '').toLowerCase() }) };
+  // A Claude rung names the id it pins (claudeRungModelId) — CLAUDE_HAIKU is Haiku, not the Sonnet default (Q-970).
+  return { provider, model: answeringModel({ answered, planned: claudeRungModelId(usedProvider) ?? (provider === 'anthropic' ? claudeTierModel : null), family: String(usedProvider || '').toLowerCase() }) };
 }
 
 /**
@@ -3667,13 +3671,15 @@ export function ladderRunners(rungs: readonly LadderRung[]): NamedRunner[] {
         }
         break;
       case 'CLAUDE':
-        if (anthropicKey) out.push({ name: 'CLAUDE', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), sonnetModel()), modelId: sonnetModel() });
+        // The pin and the record come from ONE function (claudeRungModelId), so a report can never name a
+        // different Claude id than the one this rung sends (Q-970).
+        if (anthropicKey) out.push({ name: 'CLAUDE', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), claudeRungModelId('CLAUDE')), modelId: claudeRungModelId('CLAUDE') });
         break;
       case 'CLAUDE_HAIKU':
-        if (anthropicKey && !envFlag('AGENTV3_DISABLE_HAIKU_BACKSTOP')) out.push({ name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), haikuModel()), modelId: haikuModel() });
+        if (anthropicKey && !envFlag('AGENTV3_DISABLE_HAIKU_BACKSTOP')) out.push({ name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), claudeRungModelId('CLAUDE_HAIKU')), modelId: claudeRungModelId('CLAUDE_HAIKU') });
         break;
       case 'CLAUDE_OPUS':
-        if (anthropicKey) out.push({ name: 'CLAUDE_OPUS', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), opusModel()), modelId: opusModel() });
+        if (anthropicKey) out.push({ name: 'CLAUDE_OPUS', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), claudeRungModelId('CLAUDE_OPUS')), modelId: claudeRungModelId('CLAUDE_OPUS') });
         break;
       default:
         break;
@@ -3690,6 +3696,8 @@ export function ladderRunners(rungs: readonly LadderRung[]): NamedRunner[] {
 function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKeys: string[]): TurnRunner {
   console.warn(`[AGENTV3] ${tierDisplayName(level)} engine unavailable — ladder ${ladderText}; missing keys: ${missingKeys.join(', ') || 'none named'}`);
   return {
+    // No rung can run, so a record names no model at all — never the Claude default the request carries (Q-970).
+    plannedModel: NO_ENGINE_CONFIGURED,
     runTurn: async () => {
       throw new Error(`The ${tierDisplayName(level)} engine is not available right now — none of its engines is configured on this server. Please try again shortly, or pick another power level.`);
     },
@@ -3783,6 +3791,39 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
     ...(opts.bench ? { bench: opts.bench } : {}),
     ...(opts.sticky ? { sticky: opts.sticky } : {}),
   });
+}
+
+/**
+ * Does the BUILD chain open past its tier's cheap flash opener? True exactly when the main build client —
+ * the build runner made from the tier and the complexity verdict alone, with no heal / plan / retry /
+ * escalation option — drops rung 1.
+ *
+ * 🔒 THE SAME PREDICATE, NOT A SECOND OPINION. `buildTurnRunner` computes its rungs as
+ * `opts.complex ? withoutCheapFlashLead(tierLadder(level).rungs) : …`; `openingRung` asks the identical
+ * question — `complex` guard, then `withoutCheapFlashLead` on the same ladder (tierLadder.ts). So this can
+ * only say "past the opener" when the chain really is. `aBuildIsNamedByItsLadderNotByClaude.test.ts`
+ * checks it against the constructed chain on every tier. PURE (reads the same env the chain does).
+ */
+export function buildChainOpensPastOpener(tier: PowerLevel | string | boolean | null | undefined, complex: boolean): boolean {
+  return openingRung(tierLadder(toPowerLevel(tier as PowerLevel | boolean | string | undefined | null)).rungs, { complex }) > 1;
+}
+
+/**
+ * The line a user sees when a large or imported project starts on a stronger engine — or null when it
+ * does not, which is the only time the line used to be false.
+ *
+ * 🔴 IT USED TO ANNOUNCE AN ENGINE CHANGE THAT NO LONGER HAPPENED (Q-970, autopsy 303e8a6f). "🏗️ Large
+ * project — running directly on the strong model" was printed whenever the project was large or an
+ * import, because `selectBuildModel` then chose Sonnet. Since the three-ladder rewrite (2026-09-14) that
+ * choice routes nothing — the report's own TIER_LADDER line says "the ladder is unchanged; the tier decides
+ * the engine" — so an import with a simple verdict opened on the cheapest rung while the user was told
+ * otherwise. The line now speaks only when `buildChainOpensPastOpener` is true, and names no vendor. PURE.
+ */
+export function strongStartNotice(i: { largeProject: boolean; files: number; isImport: boolean; opensPastOpener: boolean }): string | null {
+  if (!i.opensPastOpener) return null;
+  if (i.largeProject) return `🏗️ Large project (${Math.max(0, Math.floor(Number(i.files) || 0))} files) — this build starts on a stronger engine for reliability.`;
+  if (i.isImport) return '📦 Imported project — this build starts on a stronger engine for reliability.';
+  return null;
 }
 
 /**
@@ -5193,13 +5234,17 @@ async function noteBuildOutcome(
     // SECURITY Phase 3.2 (IDOR) — the decision trace reveals a build's intent/model/outcome and is
     // owner-private. This route had NO ownership check; add the STRICT verified-owner read gate
     // (anon-capability preserved — an agentv3-anon-* workspace is reachable by its unguessable id).
-    if (!verifiedWorkspaceReadOk(await verifyFirebaseToken(req), workspaceId)) {
+    const verifiedTraceUid = await verifyFirebaseToken(req);
+    if (!verifiedWorkspaceReadOk(verifiedTraceUid, workspaceId)) {
       res.status(403).json({ error: 'This decision trace belongs to another account.' });
       return;
     }
     const decisions = await getDecisionTrace(workspaceId);
     if (!decisions || decisions.length === 0) { res.status(404).json({ error: 'No decision trace yet — run a build first.' }); return; }
-    res.json({ decisions });
+    // White-Label Law (Q-978): only the ADMIN sees provider/model names. The same verified-email check the
+    // diagnostics route uses (`showProviderDetail`), failing CLOSED — no email or a failed lookup ⇒ redacted.
+    const showTraceProviders = isReportAdmin(await resolveGrantEmail(verifiedTraceUid ?? '').catch(() => null));
+    res.json({ decisions: decisionTraceForViewer(decisions, showTraceProviders) });
   });
 
   // Capture a PREVIEW failure (in-browser srcdoc / live runtime) reported by the client into the
@@ -13814,19 +13859,20 @@ async function noteBuildOutcome(
       // timed out 6× on the huge grounding prompt). Any import operates on a real existing app with a
       // large prompt, so treat it like a large edit: strong model, no cheap floor.
       const routeStrong = shouldRouteStrongModel(largeProject, hasImportIntent);
-      // Admin routing policy: small app → Haiku, complex app → Sonnet, large project / import → Sonnet.
-      // PAID PINNED tiers (admin 2026-07-13): Strong → Sonnet 100%, Powerful/Full Team → Opus — the
-      // LEVEL is passed (not a boolean) so the pinned model is exact. Gemini/Vertex remain the
-      // error-only fallback in buildTurnRunner.
-      const model = selectBuildModel(analysis?.startTier, powerLevelReqEffective, routeStrong);
-      if (routeStrong && !onlyOpus) {
-        // Honest + visible: the user sees WHY this build routes to the strong model.
-        events.emit({
-          type: 'narration', agent: 'architect', ts: Date.now(),
-          text: largeProject
-            ? `🏗️ Large project (${editFileTree?.length ?? 0} files) — running directly on the strong model for reliability.`
-            : `📦 Imported project — running directly on the strong model for reliability.`,
-        });
+      // 🔴 THE REQUEST'S MODEL, NEVER A RECORD (Q-970, autopsy 303e8a6f). This is the `params.model` handed to
+      // `client.runTurn`, and every ladder rung overrides it: Claude rungs through `forceModelRunner`, the
+      // GLM/Kimi/OpenAI/Nemotron rungs with their own pinned model. `selectBuildModel` predates the three
+      // ladders (2026-09-14) and still answers in Haiku/Sonnet terms — Sonnet on a Weak build in the old
+      // "sonnet" band — so a record that read this value named a model the tier cannot run. Records read the
+      // chain (`client.plannedModel`) or what delivered (`buildRecordModel`); this name exists so they can't
+      // pick this up by accident (aBuildIsNamedByItsLadderNotByClaude.test.ts counts its readers).
+      const requestModel = selectBuildModel(analysis?.startTier, powerLevelReqEffective, routeStrong);
+      // Said only when it is TRUE: the build chain opens past its cheap opener (see strongStartNotice).
+      const strongStartLine = routeStrong && !onlyOpus
+        ? strongStartNotice({ largeProject, files: editFileTree?.length ?? 0, isImport: hasImportIntent, opensPastOpener: buildChainOpensPastOpener(powerLevelReqEffective, buildIsComplex) })
+        : null;
+      if (strongStartLine) {
+        events.emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: strongStartLine });
       }
       // BUILD DIAGNOSTICS — capture every struggle (provider fallback, tool error, "replied
       // without building" nudge, readiness blocker, sandbox issue) into a downloadable report,
@@ -13852,7 +13898,9 @@ async function noteBuildOutcome(
       const buildDiag = new BuildDiagnostics({
         buildId, promptHash,
         sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
-        workspaceId, prompt, model, framework,
+        // No `model`: the report's plannedModel comes from the chain itself (setProviderChain → firstRungLabel)
+        // and is honestly absent until the chain exists — never the request's Claude default (Q-970).
+        workspaceId, prompt, framework,
         // REAL-TIME: persist the report after every recorded issue, so "Build report" is never empty
         // mid-build and genuinely survives a crash/hang/rotation (the user can download it any time).
         onUpdate: (r) => {
@@ -14574,7 +14622,7 @@ async function noteBuildOutcome(
             }
             try {
               const lbl = fastLaneProviderLabel(rmProvider);
-              buildDiag.recordLlmCall({ model: answeringModel({ answered: rmT.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length + megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals).length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ...answerTimeOf(rmT), ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: rmT.model, planned: claudeRungModelId(rmProvider) ?? null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length + megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals).length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ...answerTimeOf(rmT), ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += rmT.usage.inputTokens;
             blueprintUsage.outputTokens += rmT.usage.outputTokens;
@@ -15669,7 +15717,7 @@ async function noteBuildOutcome(
         shadowTwins: () => dispatcherForSubAgents?.sharedShadowTwins(),
         // And its shell deletions, which must leave the saved project like the parent's (queue Q-246).
         deletionWiring: () => dispatcherForSubAgents?.deletionWiring(),
-        client, actuator, workspaceId, state, events, model, onlyOpus,
+        client, actuator, workspaceId, state, events, model: requestModel, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
         // at the tier's effort, same as the top-level runner.
@@ -16661,7 +16709,7 @@ async function noteBuildOutcome(
             const t = await Promise.race([call, timeout]);
             try {
               const lbl = fastLaneProviderLabel(bpProvider);
-              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: bpProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: claudeRungModelId(bpProvider) ?? null, family: bpProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
@@ -17067,7 +17115,7 @@ async function noteBuildOutcome(
       const runner = new AgentRunner({
         ...baseRunnerOpts,
         client,
-        model,
+        model: requestModel,
         // P4b (fix/build-reliability, AGENTV3_QUALITY_ESCALATE, default OFF) — quality signals move the
         // build UP one model on the sticky chain. `noClaude` forbids a Claude target outright, so a weak
         // build can never be escalated onto Claude (user rule 2026-10-09).
@@ -17724,7 +17772,9 @@ async function noteBuildOutcome(
       // truncating mid-build. Dependency-free heuristic; best-effort — never blocks the build.
       try {
         const estTokens = estimateTokens(architectSystem) + estimateTokens(buildPrompt);
-        const usage = contextUsage(estTokens, model);
+        // Measured against the TIGHTEST window among this tier's rungs — the prompt may land on any of them —
+        // never the request's Claude id, which a Weak build cannot call (Q-970). See tightestContextModel.
+        const usage = contextUsage(estTokens, tightestContextModel(tierLadder(powerLevelReqEffective).rungs.map((r) => r.model)) ?? '');
         if (usage.nearLimit) {
           events.emit({ type: 'narration', agent: 'architect', text: `⚠️ Large context: ~${estTokens.toLocaleString()} tokens (~${Math.round(usage.ratio * 100)}% of the model window). I'll keep responses focused; consider splitting very large requests.`, ts: Date.now() });
         }
@@ -17753,7 +17803,7 @@ async function noteBuildOutcome(
           state,
           events,
           usageSink: buildUsage, // billing accounting fix — the plan step's tokens are billed too
-          model: planGrok ? sonnetModel() : model, // every rung pins its own model; this is the Claude default only
+          model: planGrok ? sonnetModel() : requestModel, // every rung pins its own model; this is the Claude default only
           system: planSystemPrompt(),
           tools: catalogForTools(['update_todo']),
           onlyOpus,
@@ -17891,7 +17941,7 @@ async function noteBuildOutcome(
             }
             try {
               const lbl = fastLaneProviderLabel(ppProvider);
-              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: claudeRungModelId(ppProvider) ?? null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
@@ -26722,19 +26772,33 @@ async function noteBuildOutcome(
       // P-PE.6 — Prompt audit trail: one durable record per build capturing the EXACT prompt context
       // (version, intent, model, task type, outcome + the system-prompt head) for prompt-engineering
       // traceability. Best-effort — never blocks the build.
+      // ONE model name for every build-level record — prompt audit, debug tag, signed manifest, decision trace —
+      // so they cannot disagree, and none can fall back to the request's Claude id (Q-970). What delivered,
+      // else the provider that delivered, else "no call was made", else the chain's own first rung.
+      // HONEST manifest identity (ShopSphere autopsy 2026-07-19): the model that ACTUALLY delivered (the
+      // ledger's dominant-provider model), not the nominal Claude fallback id — a weak GLM build must never
+      // read as `claude-sonnet-4-6`. deliveredVia carries the provider.
+      const deliveredViaProvider = dominantProvider(providerTurns);
+      const deliveredModel = deliveredModelId(providerLedger.entries(), deliveredViaProvider);
+      const buildModelForRecord = buildRecordModel({
+        delivered: deliveredModel,
+        deliveredFamily: deliveredViaProvider,
+        planned: client.plannedModel,
+        anyCallMade: providerLedger.entries().length > 0,
+      });
       savePromptAudit(userId, buildPromptAudit({
         ts: Date.now(),
         promptVersion: architectPromptVersion,
         intentLabel: String(intent),
-        model,
+        model: buildModelForRecord,
         taskType: analysis?.taskType ?? 'unknown',
         ok: result.ok,
         systemPrompt: architectSystem,
       })).catch(() => {});
 
-      // TEMP DEBUG: tag the build reply with the provider/model (Claude primary; the
-      // resilient runner already self-labels in the text if it fell back to a free provider).
-      const buildTag = providerDebugTag(`Claude (${model})`);
+      // TEMP DEBUG: tag the build reply with the model that delivered it. It used to say `Claude (<id>)` on every
+      // build — a Weak GLM build "replied via Claude (claude-sonnet-4-6)" (Q-970).
+      const buildTag = providerDebugTag(buildModelForRecord);
       if (buildTag) events.emit({ type: 'narration', agent: 'architect', text: buildTag.trim(), ts: Date.now() });
       // Finalize the build diagnostics and ship the report with the result so the client
       // can download it (JSON/text) and hand it to Claude. Also cached per session for the
@@ -26820,19 +26884,16 @@ async function noteBuildOutcome(
         // U-1 — record the signed determinism-audit manifest (routing inputs + sha256 of every written
         // file, HMAC-signed by SECRET_ENCRYPTION_KEY when present). Best-effort; never blocks the report.
         try {
-          // HONEST manifest identity (ShopSphere autopsy 2026-07-19): record the model that ACTUALLY
-          // delivered (the ledger's dominant-provider model), not the nominal Claude fallback id — a
-          // weak GLM build must never read as `claude-sonnet-4-6`. deliveredVia carries the provider.
-          const deliveredViaProvider = dominantProvider(providerTurns);
-          const deliveredModel = deliveredModelId(providerLedger.entries(), deliveredViaProvider);
+          // The model named here is `buildModelForRecord` (above): what delivered, never the nominal Claude id.
           const manifest = signManifest(
             buildBuildManifest({
               buildId,
               promptHash,
               // No call delivered at all (a build stopped in its first seconds — autopsy 120eb52f) ⇒ say
               // so. The fallback used to be `selectBuildModel`'s legacy answer, which on Weak is the
-              // Claude BACKSTOP: the manifest named Haiku for a build no model ever touched.
-              model: deliveredModel || (providerLedger.entries().length === 0 ? 'none (no model call was made)' : String(model)),
+              // Claude BACKSTOP: the manifest named Haiku for a build no model ever touched. Its last
+              // fallback (`String(model)`) was the same value one branch over; `buildRecordModel` has none.
+              model: buildModelForRecord,
               deliveredVia: deliveredViaProvider,
               effort: powerSpecResolved?.effort,
               powerLevel: powerLevelReqEffective,
@@ -26880,7 +26941,7 @@ async function noteBuildOutcome(
       // P-AI.9 — record the final model/tier and outcome decisions, then persist the trace. Best-effort.
       try {
         const nowIso = new Date().toISOString();
-        decisionTrace.record('model', `${measuredTier} (${dominantProvider(providerTurns) ?? model})`, onlyOpus ? `pinned tier '${powerLevelReqEffective}' selected` : `analyzer chose ${analysis?.startTier ?? 'default'} start tier`, nowIso);
+        decisionTrace.record('model', `${measuredTier} (${deliveredViaProvider ?? buildModelForRecord})`, onlyOpus ? `pinned tier '${powerLevelReqEffective}' selected` : `analyzer chose ${analysis?.startTier ?? 'default'} start tier`, nowIso);
         decisionTrace.record('outcome', result.ok ? 'success' : 'incomplete', `${reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden).length} file(s) written in ${Math.max(0, Date.now() - buildStartedAt)}ms`, nowIso);
         await persistDecisionTrace(decisionTrace, nowIso);
         // Surface the trace in chat when provider-debug is on (same gate as the trace-id tag), so the

@@ -53,6 +53,11 @@ export interface BuildEstimate {
   basis: 'heuristic' | 'historical' | 'blended';
   etaText: string;
   complexityScore: number;
+  /**
+   * The mean of the measured builds OF THIS SIZE the estimate learned from; absent when there were none.
+   * Feeds the band (see `measuredEvidenceSpan`) and the admin line, never the midpoint.
+   */
+  evidenceMeanMs?: number;
 }
 
 // Heuristic constants (milliseconds). RE-CALIBRATED to REAL measured NavBharatAI Pro durations
@@ -276,6 +281,30 @@ function historicalEstimateMs(history: HistoricalBuild[], targetScore: number): 
 }
 
 /**
+ * Where the measured builds OF THIS SIZE really landed: their mean, and an interval of one standard deviation
+ * either side clipped to the builds themselves. PURE.
+ *
+ * Only same-size entries count (both live callers stamp every entry with the current complexity, so all live
+ * evidence qualifies), so one distant 40-minute build never stretches a small app's band. The interval always
+ * contains the mean and at least one of the builds: not every build can sit more than one standard deviation
+ * from their mean.
+ */
+export function measuredEvidenceSpan(history: HistoricalBuild[], targetScore: number): { meanMs: number; lowMs: number; highMs: number; n: number } | null {
+  const same = history.filter((h) => Number.isFinite(h.durationMs) && h.durationMs > 0 && complexityScore(h.complexity) === targetScore);
+  if (same.length === 0) return null;
+  const mean = same.reduce((a, h) => a + h.durationMs, 0) / same.length;
+  // Between the entries, plus inside each entry that is itself an average (the law of total variance).
+  const variance = same.reduce((a, h) => {
+    const inner = Number.isFinite(h.sdMs) && (h.sdMs as number) > 0 ? (h.sdMs as number) : 0;
+    return a + (h.durationMs - mean) ** 2 + inner ** 2;
+  }, 0) / same.length;
+  const sd = Math.sqrt(variance);
+  const min = Math.min(...same.map((h) => h.durationMs));
+  const max = Math.max(...same.map((h) => h.durationMs));
+  return { meanMs: mean, lowMs: Math.max(mean - sd, min), highMs: Math.min(mean + sd, max), n: same.length };
+}
+
+/**
  * 🔴 THE BAND CANNOT BE NARROWER THAN THE BUILDS IT CAME FROM (autopsy 68f0a486, 2026-10-04). The band was
  * set by confidence alone — "how much history" — so 28 builds of every size averaged to 8 min and promised
  * 7.8–8.3 min (±3%); the build took 8.4 and was recorded as missing its band. How much history there is
@@ -321,6 +350,17 @@ export function estimateBuildTime(complexity: Complexity, history: HistoricalBui
     lowMs = Math.min(lowMs, Math.max(Math.round(estimateMs * 0.5), Math.round(estimateMs - hist.sdMs)));
     highMs = Math.max(highMs, Math.round(estimateMs + hist.sdMs));
   }
+  // 🔴 A BAND NEVER EXCLUDES THE BUILDS IT LEARNED FROM (autopsy 303e8a6f, Q-967). The band above is placed
+  // around the BLENDED midpoint and nothing else, and with 1–4 entries the midpoint still leans on the prompt
+  // heuristic: six template builds of ~3 min were shown as "4.6–6.1 min, how long 6 recent builds took", and
+  // three of a workspace's own 10-minute builds as "6.4–8.6 min, based on your last 3 builds". Q-536 bounded
+  // the band's WIDTH, from 5 entries only, and never its POSITION. This may only WIDEN the band: the midpoint,
+  // confidence and history weight are untouched, so an unmeasured chip keeps its estimate exactly.
+  const span = hist ? measuredEvidenceSpan(history, score) : null;
+  if (span) {
+    lowMs = Math.min(lowMs, Math.round(span.lowMs));
+    highMs = Math.max(highMs, Math.round(span.highMs));
+  }
   return {
     estimateMs,
     lowMs,
@@ -330,6 +370,7 @@ export function estimateBuildTime(complexity: Complexity, history: HistoricalBui
     basis,
     etaText: formatEta(estimateMs),
     complexityScore: Math.round(score * 100) / 100,
+    ...(span ? { evidenceMeanMs: Math.round(span.meanMs) } : {}),
   };
 }
 

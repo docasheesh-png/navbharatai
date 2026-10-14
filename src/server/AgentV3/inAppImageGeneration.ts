@@ -29,7 +29,9 @@ export const IMAGE_IN_APP_RULE =
   'API key the owner saves, in the preview and after publishing. Pass { "server": true } only when the app ' +
   'already has its own server (a key must never be in browser code). Build the screen the recipe describes ' +
   '(prompt box, Generate, a visible progress state, the picture, Download, generate again, errors with ' +
-  'Retry). EVERY image engine now needs an API key — there is no free, keyless engine any more. In your ' +
+  'Retry) and show the recipe\'s readiness (useImageGenerator().readiness, or imageReadiness()) BEFORE the ' +
+  'first Generate: while no image key is saved, its message in a clearly visible red line above Generate — ' +
+  'never only after a press has failed. EVERY image engine now needs an API key — there is no free, keyless engine any more. In your ' +
   'final message say so plainly and list the key options the recipe gives you, with where to get each and ' +
   'where to paste it. Never call the pictures free or say no key is needed.';
 

@@ -67,15 +67,20 @@ describe('1 · 🔒 a seeded build learns from builds of its own TIER — and is
 });
 
 // The real shape of a week where template builds finished, one a day — below the per-day floor every day.
+// ⚠️ Q-967 CHANGED THIS ON PURPOSE (autopsy 303e8a6f): those days were DROPPED, so a quiet slice taught nothing for a
+// whole week and its ETA was priced from the chip's wording. They are now POOLED two at a time. The old assertions
+// below encoded that defect; the new ones encode the fix (anEstimateBandReachesItsOwnEvidence.test.ts locks the class).
 const ONE_A_DAY = Array.from({ length: 7 }, (_, i) => ({
   date: `2026-10-0${i + 1}`,
   byTaskType: { [SCAFFOLD_TASK_KEY]: { builds: 3, okBuilds: 1, okDurationMs: 4 * MIN, durationMs: 5 * MIN } },
 }));
 
 describe('2 · an empty slice is reported as what it is', () => {
-  it('a week of one finished template build a day: no history, but the window is counted', () => {
+  it('a week of one finished template build a day: sparse days are pooled two at a time, and the window is counted', () => {
     const f = fleetHistoryFromTelemetry(ONE_A_DAY, SCAFFOLD_TASK_KEY, { moduleCount: 1, featureCount: 9 });
-    expect(f.history).toEqual([]);
+    expect(f.history.map((h) => h.durationMs)).toEqual([4 * MIN, 4 * MIN, 4 * MIN]); // the 7th build alone is not an average
+    expect(f.builds).toBe(6);
+    expect(f.days).toBe(6);
     expect(f.seenOk).toBe(7);
     expect(f.daysRead).toBe(7);
   });
@@ -84,7 +89,12 @@ describe('2 · an empty slice is reported as what it is', () => {
     const line = fleetEmptyBasisNote(SCAFFOLD_TASK_KEY, 7, 7);
     expect(line).toContain('tested template');
     expect(line).toContain('finished 7');
-    expect(line).toContain(`never ${FLEET_MIN_BUILDS_PER_DAY} on one day`);
+    // Pooling made "never 2 on one day" false as a reason (Q-967); the reason now is that no average was usable.
+    expect(line).not.toContain('on one day');
+    expect(line).toContain('none gave a usable average');
+    expect(fleetEmptyBasisNote(SCAFFOLD_TASK_KEY, 1, 7)).toContain('finished only 1');
+    expect(fleetEmptyBasisNote(SCAFFOLD_TASK_KEY, 1, 7)).toContain('one build is not an average');
+    expect(FLEET_MIN_BUILDS_PER_DAY).toBe(2);
     expect(line).not.toMatch(/no past builds to learn from/i);
     expect(fleetEmptyBasisNote(SCAFFOLD_TASK_KEY, 0, 7)).toContain('none of NavBharatAI\'s builds that start from a tested template (verify and polish) finished');
     expect(fleetEmptyBasisNote('complex_app', 0, 0)).toContain('returned no days');

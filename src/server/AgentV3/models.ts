@@ -47,6 +47,28 @@ export function opusModel(): string {
 }
 
 /**
+ * The model id a CLAUDE-family ladder rung pins — `CLAUDE` → Sonnet, `CLAUDE_HAIKU` → Haiku,
+ * `CLAUDE_OPUS` → Opus — and `undefined` for any other provider name.
+ *
+ * ONE PIN, ONE RECORD (Q-970, autopsy 303e8a6f). `ladderRunners` pins each Claude rung's model through
+ * this function, and every record that must name "the Claude model this rung would have called" reads it
+ * too, so the id a report writes down can never drift from the id the rung sends. Before it, the
+ * planner and fast-lane records answered "which Claude rung?" with the build's Sonnet default, so a
+ * call served by (or failed on) the HAIKU rung of a Weak build was filed under Sonnet — a model that
+ * tier can never run. PURE.
+ */
+export function claudeRungModelId(provider: 'CLAUDE' | 'CLAUDE_HAIKU' | 'CLAUDE_OPUS'): string;
+export function claudeRungModelId(provider: string | null | undefined): string | undefined;
+export function claudeRungModelId(provider: string | null | undefined): string | undefined {
+  switch (String(provider ?? '').trim().toUpperCase()) {
+    case 'CLAUDE': return sonnetModel();
+    case 'CLAUDE_HAIKU': return haikuModel();
+    case 'CLAUDE_OPUS': return opusModel();
+    default: return undefined;
+  }
+}
+
+/**
  * Resolve the Claude model a power level PINS its Claude calls to (admin tier→model
  * redefinition 2026-07-13 — the user's selected tier is what the backend calls):
  *   'mini' (Strong)              → SONNET 100% (was Opus). Never Opus on this tier.

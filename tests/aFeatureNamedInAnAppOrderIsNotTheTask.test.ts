@@ -101,7 +101,10 @@ describe('4 · the telemetry files the tier that DELIVERED, not the band the pro
     const telemetry = route.slice(route.indexOf('agentV3CostTelemetry\n        .record({'), route.indexOf('agentV3CostTelemetry\n        .record({') + 1200);
     expect(telemetry).toContain('startTier: measuredTier,');
     expect(route).toContain('tier: measuredTier,');
-    expect(route).toContain("decisionTrace.record('model', `${measuredTier} (${dominantProvider(providerTurns) ?? model})`");
+    // The provider is read once (`deliveredViaProvider = dominantProvider(providerTurns)`) and the fallback is the
+    // build's one record name, never the request's Claude id (Q-970).
+    expect(route).toContain('const deliveredViaProvider = dominantProvider(providerTurns);');
+    expect(route).toContain("decisionTrace.record('model', `${measuredTier} (${deliveredViaProvider ?? buildModelForRecord})`");
   });
 
   it('a weak build delivered by GLM or KIMI is the cheap bucket, never a Claude one', async () => {

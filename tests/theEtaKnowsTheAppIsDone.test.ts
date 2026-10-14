@@ -165,7 +165,13 @@ describe('Q-1039 · B — a guess keeps its label, and nothing inside the promis
     const c = complexityFromPrompt(PROMPT);
     expect(c).toEqual({ moduleCount: 1, featureCount: 3 });
     const e = estimateBuildTime(c, [{ complexity: c, durationMs: 695_155 }]);
-    expect([e.estimateMs, e.lowMs, e.highMs, e.historyWeight, e.confidence]).toEqual([EST.estimateMs, EST.lowMs, EST.highMs, 0.2, 0.59]);
+    // ⚠️ THE TOP OF THE BAND MOVED, ON PURPOSE (303e8a6f Q-967, merged 2026-10-14). The report's band ended at
+    // EST.highMs (385,427 ms) — which EXCLUDED the one 695,155 ms build it said it had learned from: exactly the
+    // defect Q-967 fixes ("a band never excludes the builds it learned from"). The estimate and the low end are
+    // unchanged; the top now reaches that build. EST stays the REPORT's own numbers for every other case here, which
+    // test the ticker's wording, not the estimator.
+    expect([e.estimateMs, e.lowMs, e.highMs, e.historyWeight, e.confidence]).toEqual([EST.estimateMs, EST.lowMs, 695_155, 0.2, 0.59]);
+    expect(e.lowMs <= 695_155 && 695_155 <= e.highMs).toBe(true);
   });
 });
 

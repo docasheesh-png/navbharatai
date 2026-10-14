@@ -23,11 +23,13 @@ import { dayKey } from '../lib/siteAnalytics';
 import { loadWorkspaceFilesByPath } from '../AgentV3/WorkspaceFileStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { BASE_SYSTEM } from './appAi';
-import { imageForApp, readAppImagePrompt, imageCounterId, PREVIEW_IMAGES_PER_DAY } from '../lib/appAiImage';
+import { imageForApp, appImageReadiness, readAppImagePrompt, imageCounterId, PREVIEW_IMAGES_PER_DAY } from '../lib/appAiImage';
 import { clampImagePixels } from '../lib/navbharatImageEngine';
 
 export const PREVIEW_ASK_PATH = '/api/app-ai/preview-ask';
 export const PREVIEW_IMAGE_PATH = '/api/app-ai/preview-image';
+/** "Can this app make pictures yet?" for the owner's preview — asked before anyone presses Generate (Q-966). */
+export const PREVIEW_IMAGE_READY_PATH = '/api/app-ai/preview-image-ready';
 export const SETTINGS_PATH = '/api/app-ai/settings';
 
 /** The preview's daily ceiling per app, in ₹. Unreadable ⇒ the default, never "no limit". */
@@ -107,6 +109,23 @@ export function registerAppAiOwnerRoutes(app: Express): void {
     });
     if (!answer.ok) { res.json({ ok: false, code: answer.code, message: answer.owner }); return; }
     res.json({ ok: true, image: `data:${answer.image.mimeType};base64,${answer.image.base64}` });
+  });
+
+  /**
+   * CAN THIS APP MAKE PICTURES YET? — the owner's preview asks before anyone presses Generate (Q-966), so the
+   * app can show the owner the key list in red on its own screen instead of after a failed press. The same
+   * vault lookup the picture route uses (appImageReadiness); no counter, no wallet, no provider call. Not
+   * cached: a key the owner has just saved counts on the very next check.
+   */
+  const imageReadyLimiter = rateLimiter({ name: 'app-ai-owner-image-ready', authed: 120, anon: 0, noun: 'checks', durable: false });
+  app.post(PREVIEW_IMAGE_READY_PATH, imageReadyLimiter, async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const ownerId = await ownerOf(req, workspaceId);
+    if (!ownerId) { res.status(403).json({ ok: false, message: 'Sign in as this app’s owner to check its pictures in the preview.' }); return; }
+    res.setHeader('Cache-Control', 'no-store');
+    const ready = await appImageReadiness(ownerId, workspaceId);
+    if (ready.ready) { res.json({ ok: true, ready: true }); return; }
+    res.json({ ok: true, ready: false, code: ready.code, message: ready.owner });
   });
 
   app.get('/api/app-ai/settings', limiter, async (req: Request, res: Response) => {

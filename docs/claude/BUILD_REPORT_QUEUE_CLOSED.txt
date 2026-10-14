@@ -3,13 +3,11 @@
 # Every ID that has LEFT the open table of BUILD_REPORT_QUEUE.md (its PR merged, or it was resolved as
 # not-a-defect) is listed here, and tests/aClosedQueueRowStaysClosed.test.ts fails if one of them is ever
 # back in the open table.
-#
 # WHY A SEPARATE FILE (2026-10-06): #3543 rebuilt the queue from a stale copy and silently put back rows
 # that #3534 had closed or moved to BLOCKED (Q-129 and Q-151 reopened although fixed; Q-111/Q-114/Q-126
 # lost their four-field BLOCKED records). Nothing noticed for a day. A register INSIDE the queue file
 # would have been reverted by the same stale copy; this file is not touched by a queue rewrite, and one
 # ID per line merges without conflicts.
-#
 # When you remove a row from the open table, append its ID here in the same commit.
 # Seeded from the full first-parent history of BUILD_REPORT_QUEUE.md on main.
 Q-001
@@ -540,4 +538,31 @@ Q-977
 Q-978
 Q-981
 Q-975
+
+# 2026-10-13 — autopsy 303e8a6f: the 24 rows #3692 resolved.
+# Ledger in PROGRESS.md. Q-966 Q-967 Q-970 stay open: this PR fixes them.
+Q-940
+Q-941
+Q-942
+Q-943
+Q-944
+Q-945
+Q-946
+Q-947
+Q-948
+Q-949
+Q-950
+Q-951
+Q-952
+Q-953
+Q-954
+Q-955
+Q-956
+Q-957
+Q-958
+Q-959
+Q-960
+Q-961
+Q-969
+Q-973
 Q-1038

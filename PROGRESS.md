@@ -95703,3 +95703,68 @@ fact (1).
 meant only that I had edited no code. Re-applied with an assertion, it fails two tests. **A reversion
 that passes is a claim to verify, never a result to accept** — and that applies to the reversion as
 much as to the test.
+
+---
+
+## 2026-10-14 — Q-1011: a model call made outside the loop was not on the record (and its deadline could not cancel it)
+
+Two defects in one function, `AgentRunner`'s `endgameBatchRepair`.
+
+**It was invisible.** It calls `client.runTurn` directly, outside the step loop where the three
+`onLlmCall` emitters live, so the endgame's batched repair — a call that can spend a minute and a
+large prompt — left **no row at all**, on success or on failure. Every autopsy reads `llmCalls`, so
+the one place a reader would look to ask "what did the endgame actually do?" was empty.
+
+It now goes through one `recordOffLoopCall`, used on **both** outcomes, because a failed call is a
+call that was paid for. The recorder deliberately **invents nothing**: no `answerMs`, `fallbackMs`,
+`openMs` or `stopCause`, since those are the loop's own measurements, and putting unmeasured numbers
+into a report is this row's defect one level down.
+
+**Its deadline could not cancel it, and that is the expensive half.** `withDeadline` hands a signal to
+`runEndgameRepair`, which checks it *between* steps — but the repair passed `this.opts.signal` (the
+BUILD's) down to the model. So once the 150 s deadline fired, the call carried on burning tokens for
+an answer nothing would read. **A deadline that cannot cancel is a comment.**
+
+🔑 **The fix does not trade Stop for the deadline.** Handing the deadline's signal down *alone* would
+have stopped a user's Stop from reaching the call — problem A fixed by creating problem X.
+`withDeadline` already accepts a `parent`, so the build's signal is passed as that parent and the one
+signal fires on **either**. Both call sites are asserted, not just the function.
+
+**A sibling, found by rule 3.** `tscErrorCause`'s guard pinned `io.llmRepair(out2 + causes, subset)`
+*including the closing paren*, so adding a third argument failed a guard whose property was perfectly
+intact — the same class as `aModuleIsNotTheWholeApp`'s review-gate guard (fixed yesterday). Repaired
+the same way, and proven still to catch its own bug: dropping the annotation fails three tests.
+
+**Proof.** `tests/aCallOutsideTheLoopIsStillOnTheRecord.test.ts`, 7 tests, including a census over
+`client.runTurn(` **bodies** so a third site that records nothing fails it. Five reversions, each
+failing the right test: the success row removed, the failure row removed, the model call ignoring the
+deadline, the deadline losing its parent, and the contract dropping the signal. Two of my own
+assertions were wrong on the first run (my recorder is itself a fourth `onLlmCall` site; `codeOnly`
+strips the very inline comment I was asserting) — fixed in the test, not in the code.
+
+**Still open, stated rather than implied:** the ROUTE's own direct `runTurn` aux calls (plan,
+blueprint, judge) are also absent from `llmCalls`. Their *tokens* are reconciled as `other` by design,
+so money is safe; the *rows* are not. A separate change.
+
+## 2026-10-14 — Q-1012 is BLOCKED, because the row's prescribed fix collides with a standing lesson
+
+The row asks for a provider stall ended by our per-turn timeout to be counted in
+`PROVIDER_TIME_WASTED`. Investigating it found the opposite rule already written down, in
+`providerWaste.ts`'s own header, from autopsy bb688add:
+
+> *"OUR OWN CLOCK ENDING IS NOT A PROVIDER'S WASTE … a lane that ran out of ITS budget mid-call is our
+> accounting, not the vendor's failure."*
+
+The per-turn timeout **is** our clock. Counting it as vendor waste would re-introduce exactly what
+that autopsy removed — and this number is what the 429 bench's trigger will be re-chosen from, so
+inflating it would move a routing decision on a false reading.
+
+The honest distinction is whether the provider was *producing* when our clock fired: `crawl` and
+`silent` are real vendor waste, a healthy call our budget cut short is not. **That fact is not
+available at the timeout site** — there is no `TurnResult`, so no `firstOutputAfterMs` or
+`openedAfterMs`, and the chain does not report which rung was serving when a stop cancels it.
+
+So it is recorded as BLOCKED with all four fields, with the recommendation to count it only as
+`silent` (provider produced nothing) and never as `timeout`, and with the note that the required
+change is inside the provider chain — which CLAUDE.md says to confirm with the admin before touching.
+Guessing it would put a number nobody measured into the figure a routing decision is made from.

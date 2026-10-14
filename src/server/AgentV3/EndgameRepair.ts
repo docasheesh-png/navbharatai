@@ -383,7 +383,13 @@ export interface EndgameIo {
    * ONE bounded batch repair call: all remaining error text + the offending files, returns corrected
    * files (fast-lane repair shape). Absent → deterministic-only endgame.
    */
-  llmRepair?(errorText: string, files: Array<{ path: string; content: string }>): Promise<Array<{ path: string; content: string }>>;
+  /**
+   * One batched model repair. `signal` is the DEADLINE's own signal (Q-1011): the caller's 150 s
+   * deadline used to reach only the between-step checks below, so a repair call that outlived it kept
+   * burning tokens for an answer nothing would read. Optional, so an implementation that ignores it
+   * behaves exactly as before.
+   */
+  llmRepair?(errorText: string, files: Array<{ path: string; content: string }>, signal?: AbortSignal): Promise<Array<{ path: string; content: string }>>;
   /**
    * Ask the INSTALLED packages which of these names they export (bare specifier → names). Absent, or a
    * failure, means no package import is added on a package's word — exactly the behaviour before Q-115.
@@ -620,7 +626,8 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
       const subset = offendingFileSubset(files, errors2);
       const out2 = checked2.out;
       const causes = tscCauseNote(tscErrorCauses(errors2, files));
-      const fixed = (await io.llmRepair(out2 + causes, subset).catch(() => [])) || [];
+      // The deadline's signal goes WITH the call, not just around it (Q-1011).
+      const fixed = (await io.llmRepair(out2 + causes, subset, io.signal).catch(() => [])) || [];
       const preRepair = new Map<string, string | undefined>();
       const referenced = referencedMissingModules(errors2);
       const rejected: string[] = [];

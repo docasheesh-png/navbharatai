@@ -58,13 +58,25 @@ export const TODO_ONLY_TURN_STEER =
   + TODO_RIDES_WITH_WORK;
 
 /** The admin-report sentence for `TODO_ONLY_TURNS`. Never user-facing. PURE. */
-export function todoOnlyTurnsNote(turns: number, latencyMs: number): string {
+export function todoOnlyTurnsNote(turns: number, latencyMs: number, firstInRun?: number): string {
   const n = Number.isFinite(turns) && turns > 0 ? Math.floor(turns) : 0;
   if (n === 0) return 'No model turn while the app was generated was spent only on updating the plan (update_todo with no other tool call).';
   const secs = Math.max(0, Math.round((Number.isFinite(latencyMs) ? latencyMs : 0) / 100) / 10);
   return `${n} model turn(s) while the app was generated did nothing but update the plan (update_todo with no other tool call) — ${secs}s of model time `
     + 'that built nothing. The first one in each run was handed back with the rule to send update_todo together with '
-    + 'the next step\'s tool calls (autopsy 9c612cdb).';
+    + 'the next step\'s tool calls (autopsy 9c612cdb).'
+    + splitOfRepeats(n, firstInRun);
+}
+
+/**
+ * How many of the turns were the first of a run (handed back) and how many came AFTER a hand-back. Autopsy
+ * 398db9f3 (Q-1068): five turns were reported and the report could not say whether the once-per-run rule was
+ * working (one per run) or too weak (several in one run) — so the split is now part of the line. PURE.
+ */
+function splitOfRepeats(n: number, firstInRun: number | undefined): string {
+  if (typeof firstInRun !== 'number' || !Number.isFinite(firstInRun) || firstInRun < 0) return '';
+  const first = Math.min(n, Math.floor(firstInRun));
+  return ` ${first} of them were the first in a run (handed back); ${n - first} came after a hand-back in the same run.`;
 }
 
 /**
@@ -74,9 +86,9 @@ export function todoOnlyTurnsNote(turns: number, latencyMs: number): string {
  */
 export function recordTodoOnlyTurns(
   diag: { record(r: { phase: 'build'; severity: 'info'; code: string; message: string; autoResolved: boolean }): unknown },
-  tally: { turns: number; latencyMs: number },
+  tally: { turns: number; latencyMs: number; firstInRun?: number },
 ): void {
   try {
-    diag.record({ phase: 'build', severity: 'info', code: 'TODO_ONLY_TURNS', message: todoOnlyTurnsNote(tally.turns, tally.latencyMs), autoResolved: true });
+    diag.record({ phase: 'build', severity: 'info', code: 'TODO_ONLY_TURNS', message: todoOnlyTurnsNote(tally.turns, tally.latencyMs, tally.firstInRun), autoResolved: true });
   } catch { /* an advisory line must never affect a build */ }
 }

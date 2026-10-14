@@ -370,6 +370,7 @@ import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormanc
 import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
 import { repeatedReadSummary, READ_LOOP_LIMIT } from '../AgentV3/repeatedReads';
 import { recordTodoOnlyTurns } from '../AgentV3/todoOnlyTurn';
+import { finishingPassMayRun, recordFinishingPassesHeld } from '../AgentV3/finishingPassesAtCap';
 import { APPEND_WITH_EMPTY_OLD_STRING } from '../AgentV3/appendByEdit';
 import { greenGuardUndidWork, withGreenGuardCorrection, type GreenGuardRestoreFacts } from '../AgentV3/greenGuardHonesty';
 import { findAuthFlow, buildAuthFlowSpec, AUTH_SPEC_PATH } from '../AgentV3/authFlowSpec';
@@ -17016,7 +17017,7 @@ async function noteBuildOutcome(
             : {}),
         });
       } catch { /* hooks are optional — a dispatcher without them just refuses the meta tools */ }
-      const todoOnlyTally = { turns: 0, latencyMs: 0 };
+      const todoOnlyTally = { turns: 0, latencyMs: 0, firstInRun: 0 };
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -17109,8 +17110,9 @@ async function noteBuildOutcome(
         },
         // Turns spent only on update_todo (autopsy 9c612cdb, Q-987), summed across the runners that share these
         // opts and reported once as TODO_ONLY_TURNS after generation (main run, escalation, empty-build retry).
-        onTodoOnlyTurn: (t: { latencyMs: number }) => {
+        onTodoOnlyTurn: (t: { latencyMs: number; firstInRun?: boolean }) => {
           todoOnlyTally.turns += 1;
+          if (t?.firstInRun) todoOnlyTally.firstInRun += 1;
           todoOnlyTally.latencyMs += Math.max(0, Number(t?.latencyMs) || 0);
         },
       };
@@ -19417,6 +19419,7 @@ async function noteBuildOutcome(
         }
       } catch { /* an advisory finding must never affect a build */ }
       if (result.timedOut === true) {
+        recordFinishingPassesHeld(buildDiag);
         try {
           buildDiag.record({
             phase: 'build', severity: result.ok ? 'warning' : 'error', code: 'OUTCOME_BUILD_TIMEOUT',
@@ -21871,7 +21874,7 @@ async function noteBuildOutcome(
       // construction (keep-on-any-doubt; never touches side-effect / namespace / default imports — see
       // UnusedImportSweep). Additive + best-effort; kill switch AGENTV3_IMPORT_SWEEP=off.
       try {
-        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && importSweepEnabled()) {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && importSweepEnabled() && finishingPassMayRun(result)) {
           const src: Record<string, string> = {};
           for (const [p, c] of writtenFiles) {
             if (typeof c === 'string' && /\.(mjs|cjs|jsx?|tsx?)$/i.test(p) && !/\.d\.ts$/i.test(p)) src[p] = c;
@@ -22190,7 +22193,7 @@ async function noteBuildOutcome(
       // means the freeze is usually not armed yet; the name is what makes the guarantee hold on any
       // path that still reaches here latched.
       try {
-        if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && finishingPassMayRun(result)) {
           await runInPass('production-defaults', async () => {
           const idxPath = writtenFiles.has('index.html') ? 'index.html' : (writtenFiles.has('public/index.html') ? 'public/index.html' : 'index.html');
           let indexHtml: string | null = writtenFiles.get(idxPath) ?? null;

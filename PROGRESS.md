@@ -95978,3 +95978,8 @@ to Node 22 is its own change (run the suite on 22 first, then flip `ci.yml`).
 **Missing subsystem named:** a serial single-file-per-turn writer for COMPLEX apps (Q-1064) — the admin's decision, options in the queue.
 **Not fixed, with state:** Q-1064/1065/1066/1067/1070 🟡 BLOCKED; Q-1068/1069 OPEN. See `BUILD_REPORT_QUEUE.md`.
 **Earlier fix that was incomplete:** 6461025c raised the planner allowance 8,000 → 16,000 and repaired one hand-edit path for the `@types/express` drift; the CLASS (prompt larger than allowance; pinned runtime with unpinned typings) was left, and came back.
+
+**2026-10-14, later — admin said "han" to every open decision of autopsy 398db9f3:**
+- Q-1070 closed as NOT-A-DEFECT: the Weak planner ladder puts Haiku second on purpose (admin, 2026-09-30, "planing ke liye haiku accha hai", `weakPlanHaikuEnabled`). The report's "rung 5 of 5" is that ladder, not a skip.
+- Q-1064 premise corrected (honesty): batching already exists (`write_files_batch`, 24 uses). The cost is token throughput on the KIMI rung; the options changed, so the "han" cannot be applied to it — three options are in the queue.
+- Q-1066 fixed (lag list read by both detectors) · Q-1068 diagnostics shipped, verdict waits for a report · Q-1069 fixed per the approved rule.

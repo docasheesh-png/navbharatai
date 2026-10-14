@@ -143,8 +143,9 @@ describe('2 · the runner hands the first one back, and counts every one', () =>
     // is at TypeScript's control-flow limit (TS2563). The route makes the one call; the module writes the line.
     expect(route).toContain('recordTodoOnlyTurns(buildDiag, todoOnlyTally);');
     const module = readFileSync('src/server/AgentV3/todoOnlyTurn.ts', 'utf8');
-    expect(module).toContain("code: 'TODO_ONLY_TURNS', message: todoOnlyTurnsNote(tally.turns, tally.latencyMs)");
-    expect(route).toMatch(/onTodoOnlyTurn: \(t: \{ latencyMs: number \}\) => \{\s*todoOnlyTally\.turns \+= 1;/);
+    expect(module).toContain("code: 'TODO_ONLY_TURNS', message: todoOnlyTurnsNote(tally.turns, tally.latencyMs, tally.firstInRun)");
+    // PIN UPDATED (Q-1068): the callback also carries `firstInRun`, so the line can say whether the once-per-run rule held.
+    expect(route).toMatch(/onTodoOnlyTurn: \(t: \{ latencyMs: number; firstInRun\?: boolean \}\) => \{\s*todoOnlyTally\.turns \+= 1;/);
   });
 });
 

@@ -34,28 +34,68 @@ export interface BuildBillingLabelInput {
   billedUsd: number;
   /** The same bill in rupees, rounded exactly as the record's `billedInr` is. */
   billedInr: number;
+  /**
+   * DID THE WALLET ACTUALLY MOVE? (Q-1036.)
+   *
+   * `true` the debit succeeded · `false` a debit was attempted for this bill and did NOT happen ·
+   * `undefined` this caller cannot know yet. The watchdog label is built BEFORE its debit runs, so
+   * `undefined` is the truthful answer there, and omitting it is byte-for-byte today's behaviour.
+   */
+  walletDebited?: boolean;
 }
 
 export interface BuildBillingLabel {
   /** The record's `userTier` string. */
   userTier: string;
-  /** True when this build's bill was set against the user's wallet: billing applies and the bill is above zero. */
+  /**
+   * THE BILL APPLIES AND IS ABOVE ZERO. It is NOT a statement that the wallet moved (Q-1036).
+   *
+   * 🔴 This doc used to read "set against the user's wallet", which claimed a debit the value never
+   * checked — and the gap is not theoretical. At the settle, a debit that FAILS is written to
+   * `console.error` and leaves `walletDebit` null, while this flag stayed true: the record said the
+   * user was charged for a bill their balance never paid. A debit is also skipped outright with no
+   * uid, and skipped by the watchdog path when it cannot reproduce the settle's exact `buildRef`
+   * (deliberately — a mismatch there could double-charge).
+   *
+   * The computation is UNCHANGED, on purpose: flipping it would have made every caller that cannot
+   * see the debit report "not charged" on a build that really was billed — one lie traded for
+   * another. The wallet fact is reported beside it instead.
+   */
   charged: boolean;
+  /** Echoed when the caller knew whether the wallet moved; absent when it could not know. */
+  walletDebited?: boolean;
+  /**
+   * A bill above zero that the caller KNOWS never reached the wallet — money owed and not taken.
+   * False when the debit succeeded AND when nobody could say, because "we did not check" and "it did
+   * not happen" are different facts and only one of them is a finding.
+   */
+  billedButNotDebited: boolean;
 }
 
 /** The routing name the Weak / cost-routed label carries. Exported so a test can pin it without a copy. */
 export const CHEAP_TIER_LABEL = 'weak (free tier — cheap engines)';
 
-/** The label and the charge flag for one build. PURE. */
+/** The record's own words for a bill the wallet never took. Exported so a test pins it without a copy. */
+export const BILLED_NOT_DEBITED_NOTE = 'billed but NOT debited';
+
+/** The label and the charge flags for one build. PURE. */
 export function buildBillingLabel(input: BuildBillingLabelInput): BuildBillingLabel {
   const usd = Number(input.billedUsd);
   const inr = Number(input.billedInr);
   const charged = !input.freeListed && input.billingActive && Number.isFinite(usd) && usd > 0;
-  if (input.freeListed) return { userTier: 'free-list (admin/tester)', charged: false };
+  const known = typeof input.walletDebited === 'boolean';
+  // Only a KNOWN "the wallet did not move" is a finding. An unknown stays silent rather than
+  // accusing the settle of something nobody looked at.
+  const billedButNotDebited = charged && known && input.walletDebited === false;
+  const debited = known ? { walletDebited: input.walletDebited as boolean } : {};
+  /** Every branch that can be charged carries the note, so it cannot be lost by taking one path. */
+  const withNote = (tier: string): string => (billedButNotDebited ? `${tier} · ${BILLED_NOT_DEBITED_NOTE}` : tier);
+
+  if (input.freeListed) return { userTier: 'free-list (admin/tester)', charged: false, billedButNotDebited: false, ...debited };
   if (input.cheapEnginesOnly) {
     const money = charged ? `charged ₹${(Number.isFinite(inr) ? inr : 0).toFixed(2)}` : 'not charged';
-    return { userTier: `${CHEAP_TIER_LABEL} · ${money}`, charged };
+    return { userTier: withNote(`${CHEAP_TIER_LABEL} · ${money}`), charged, billedButNotDebited, ...debited };
   }
-  if (input.billingActive) return { userTier: 'paid', charged };
-  return { userTier: 'billing-off (no charge)', charged: false };
+  if (input.billingActive) return { userTier: withNote('paid'), charged, billedButNotDebited, ...debited };
+  return { userTier: 'billing-off (no charge)', charged: false, billedButNotDebited: false, ...debited };
 }

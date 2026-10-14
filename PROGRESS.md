@@ -95628,3 +95628,78 @@ another name, a dead candidate the writer can never produce, the writer moving a
 (the exact Q-1026 failure), a hand-kept candidate list, a dead copy left behind unused, a seventh
 predicate copy, the uid folded into the shared rule, a narrowed walk, and two widenings of the money
 rule itself.
+
+---
+
+## 2026-10-14 — Q-1035 + Q-1036: two money facts the system stated wrongly
+
+One class, taken from build report 9c612cdb: **a statement about money that the code never checked.**
+One was a test asserting a property of arithmetic; the other a field asserting a fact about the wallet.
+
+### Q-1035 — a test that could not fail
+
+It read:
+
+```ts
+const twice = realProviderCostUsd([...ENTRIES, ENTRIES[1]]);
+expect(Math.abs(twice - REPORT.realCostUsd)).toBeGreaterThan(1e-6);
+```
+
+`realProviderCostUsd` is a SUM over its argument. Handing a sum an extra entry changes the total —
+that is a property of addition, not of this system, and it holds however the ledger behaves. The test
+was NAMED for a claim about the ledger ("the fast lane's GLM is counted ONCE") while asserting
+something arithmetic could not disprove. **A test that cannot fail is worse than no test: it produces
+exactly the confidence a real double count would need in order to pass unnoticed.**
+
+**And the simulation was wrong in principle too**, which is why it could never have caught the bug
+even by accident: the ledger keys its slices by provider + model + phase, so recording the same GLM
+turn twice yields **one slice with doubled tokens** — never the two separate entries the array
+modelled. The shape it watched for cannot occur.
+
+The claim is now checked where it lives. The report's cost is reproduced through
+`createProviderUsageLedger` itself, and a ledger fed one extra GLM turn is asserted to merge into one
+slice with doubled tokens, to **say so** in `callsByProvider()`, and to cost more — so a double count
+cannot hide behind a plausible total.
+
+⚠️ **Deliberately not asserted: how many GLM calls the real build logged.** Q-1003 records GLM
+crawling TWICE on this very report, so "GLM answered once" is not a verified fact, and the test no
+longer implies it. `ENTRIES` are the report's merged slices; the call count is a property of the
+test's own construction, used only to prove a double record is detectable.
+
+### Q-1036 — `charged` claimed the wallet moved, and never looked
+
+The doc said *"this build's bill was set against the user's wallet"* — a claim about the WALLET —
+while the value is `billing applies && bill > 0`, a claim about the BILL. The gap is real money:
+
+- At the settle the debit runs under `if (userId && effectiveBilledUsd > 0 && billingActive)`. When
+  `debitRes.ok` is false the failure goes to **`console.error` only** and `walletDebit` stays null —
+  and the record still said `charged`, about a bill the balance never paid.
+- The watchdog path skips its debit whenever it cannot reproduce the settle's exact `buildRef`,
+  deliberately, because a mismatch there could double-charge. Recorded identically.
+
+🔑 **`charged`'s computation is unchanged, on purpose.** Making it require a known debit would have
+made every caller that cannot see one report "not charged" about a build that really was billed — one
+lie traded for another, which the 2026-09-13 rule forbids outright. The wallet fact is reported
+beside it: `walletDebited`, `billedButNotDebited`, and `· billed but NOT debited` on the label, on
+every branch that can be charged.
+
+**An unknown stays silent.** "We did not check" and "it did not happen" are different facts and only
+the second is a finding, so the settle (which knows the debit result) passes it and the watchdog
+(which builds its label before its own debit) passes nothing. A test asserts the field is *absent*
+there, not false.
+
+### Proof, and one honest correction to my own method
+
+`tests/aBillTheWalletNeverTookIsSaid.test.ts` (11 tests), plus the existing branch table now pinning
+the new flag on EVERY branch — a flag only one test looks at is a flag that quietly becomes true
+somewhere nobody checked.
+
+Four reversions: an unknown reported as a missed debit (5 tests fail); the note computed but never
+written on the record (2); a bill of zero counted as money owed (1); the settle no longer passing the
+fact (1).
+
+🔴 **The second of those first PASSED, and the cause was my own reversion, not a blind test.** The
+`replace` carried no assertion, so when it failed to match it silently changed nothing and the green
+meant only that I had edited no code. Re-applied with an assertion, it fails two tests. **A reversion
+that passes is a claim to verify, never a result to accept** — and that applies to the reversion as
+much as to the test.

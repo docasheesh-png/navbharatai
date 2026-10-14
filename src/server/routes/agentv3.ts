@@ -26746,6 +26746,13 @@ async function noteBuildOutcome(
               billingActive,
               billedUsd: effectiveBilledUsd,
               billedInr: settledBilledInr,
+              // THE WALLET FACT, WHICH ONLY THIS PATH KNOWS (Q-1036). The debit above ran, or failed
+              // and was written to console.error only — and the record then said "charged" about a
+              // bill the balance never paid. `walletDebit` is null for a debit that was refused as
+              // well as for one nobody attempted; `charged` already excludes the latter, so a false
+              // here means money owed and not taken. The watchdog label is built BEFORE its debit
+              // and therefore passes nothing, which is the truthful answer there.
+              walletDebited: !!walletDebit && walletDebit.tokensDebited > 0,
             }),
             billedUsd: Math.round(effectiveBilledUsd * 1_000_000) / 1_000_000,
             billedInr: settledBilledInr,

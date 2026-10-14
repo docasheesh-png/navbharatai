@@ -91,8 +91,10 @@ const KNOWN_UNREACHABLE = new Set([
   'src/server/providers/byoLifecycle.ts',
   // Go-live PR 17: report-only orphan sweep, run by an admin route/script once managed adapters exist. Remove then.
   'src/server/lib/orphanReport.ts',
-  // Go-live PR 18: Pro plan model, read by the plans card/purchase route behind PLAN_MODEL_PRO in a follow-up. Remove then.
-  'src/lib/planModel.ts',
+  // Go-live PR 18's `src/lib/planModel.ts` WAS here, with the note "read by the plans card/purchase
+  // route behind PLAN_MODEL_PRO in a follow-up. Remove then." This PR is that follow-up: the plans
+  // card and the purchase route import it now, so the exemption is spent and the guard covers the
+  // file again — which is the entry doing exactly what its own note asked for.
   'src/server/providers/index.ts',
   // Go-live marketplace building block, merged ahead of its caller behind a default-off flag. Remove when wired.
   'src/server/providers/types.ts',

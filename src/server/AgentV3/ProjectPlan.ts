@@ -1135,6 +1135,22 @@ export function parseStoredProjectPlan(text: string | null | undefined): Project
 
 // ── Planner prompts (module decomposition — ONE call per project, before any build turn) ──────
 
+/**
+ * HOW BIG THE PLANNER'S ANSWER MAY BE (autopsy 398db9f3 — PAWTRACE, 2026-10-14).
+ *
+ * The planner call has an output allowance (`PROJECT_PLANNER_MAX_TOKENS`, 16,000). Its prompt allowed an
+ * answer far larger than that: up to 60 modules, each with up to 60 files and a contract of up to 12,000
+ * characters. A mega-prompt (an 18-feature lost-and-found platform) came back as 51,077 characters, cut off
+ * at the limit after 113 seconds, and the whole plan was thrown away — the same failure as autopsy
+ * 6461025c, which raised the allowance from 8,000 to 16,000. Raising it again would only move the cliff:
+ * an allowance the prompt can exceed is a failure waiting for a long enough request.
+ *
+ * So the prompt now carries limits that FIT the allowance by construction, and a test holds the worst case
+ * under the allowance (`tests/theProjectPlannerAnswerFitsItsAllowance.test.ts`). The parser's own ceilings
+ * (`MAX_MODULES` and friends) stay as they are — they bound what is READ, not what is asked for.
+ */
+export const PLANNER_BUDGET = Object.freeze({ modules: 14, filesPerModule: 24, descriptionChars: 200, contractChars: 800 });
+
 export function projectPlanSystemPrompt(framework: string): string {
   return [
     `You are an elite ${framework} software architect decomposing a LARGE software project into`,
@@ -1154,7 +1170,7 @@ export function projectPlanSystemPrompt(framework: string): string {
     '',
     'RULES:',
     '- Order modules foundation-first: shared types/config → data/services → features → app shell.',
-    '- Every module must be completable in ONE focused session (roughly 10–60 files each).',
+    '- Every module must be completable in ONE focused session.',
     '- dependsOn must reference EARLIER modules only — no cycles, no forward references.',
     '- contracts: exact exported names, types, and signatures — frozen; later modules import these',
     '  verbatim. A module with nothing importable uses "" (e.g. a pure pages module).',
@@ -1164,7 +1180,10 @@ export function projectPlanSystemPrompt(framework: string): string {
     '- files: relative paths from the project root; each file belongs to exactly ONE module.',
     '- Exactly ONE module — the app shell, last — lists the app entry (src/App.tsx) in its files. Earlier modules never list it: until the shell is built the app is not assembled, and that is expected.',
     '- Do NOT list node_modules, lockfiles, or build output.',
-    `- At most ${MAX_MODULES} modules. Prefer fewer, larger, coherent modules over many fragments.`,
+    `- SIZE BUDGET — HARD LIMITS, because the whole answer must fit in one reply: at most ${PLANNER_BUDGET.modules} modules`,
+    `  (merge related features into one module rather than adding a 15th), at most ${PLANNER_BUDGET.filesPerModule} files per module,`,
+    `  description under ${PLANNER_BUDGET.descriptionChars} characters, contracts under ${PLANNER_BUDGET.contractChars} characters. Prefer fewer, larger, coherent`,
+    '  modules over many fragments.',
   ].join('\n');
 }
 

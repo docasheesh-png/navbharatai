@@ -129,7 +129,7 @@ describe('the gate cannot be got round by finding another button', () => {
 
 describe('the user is told the truth, and never steered outside', () => {
   it('a screen that cannot sell says so — it is not a hidden section or a dead button', () => {
-    const panel = src('src/components/panels/BillingPanel.tsx');
+    const panel = src('src/components/wallet/TokenPurchaseTab.tsx');
     expect(panel).toContain("storeRail === 'none'");
     expect(panel).toMatch(/not available in this app/i);
   });
@@ -137,7 +137,7 @@ describe('the user is told the truth, and never steered outside', () => {
   it('🔴 ANTI-STEERING: the notice never sends the user to an outside purchase', () => {
     // Apple's rule (and CLAUDE.md's own Play note: "do NOT add 'cheaper on the web' copy to the app").
     // Stating a feature is unavailable is allowed; routing around the store is not.
-    const panel = code('src/components/panels/BillingPanel.tsx');
+    const panel = code('src/components/wallet/TokenPurchaseTab.tsx');
     const notice = panel.slice(panel.indexOf("storeRail === 'none'"), panel.indexOf("storeRail === 'play-billing'"));
     expect(notice.length, 'the notice block must be found').toBeGreaterThan(20);
     expect(notice).not.toMatch(/navbharatai\.com|on the web|website|browser|cheaper/i);

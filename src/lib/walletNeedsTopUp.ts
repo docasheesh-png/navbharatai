@@ -2,9 +2,10 @@
 //
 // Admin, verbatim: *"agar balat kahatam hai, to navigator dot, ko 3lins menu-> wallet and billing ->
 // buy token -> purchage wallet token par ek red dot show hona chahiye!"* — a trail, not one badge:
-// the ☰ button, the **Wallet & Billing** row, the **Buy tokens** tile and the **Purchase Wallet
-// Tokens** button each carry the same dot, so a user who cannot use the app is walked to the one
-// screen that fixes it instead of being left to find it.
+// the ☰ button, the **Wallet & Billing** row, the **Buy Tokens** tab and the **Pay** button on that page
+// each carry the same dot, so a user who cannot use the app is walked to the one screen that fixes it
+// instead of being left to find it. (Redesigned 2026-10-14: the tab and the Pay button replaced the old
+// "Buy tokens" capsule and "Purchase Wallet Tokens" button.)
 //
 // 🔒 ONE QUESTION, ONE ANSWER, FOUR READERS. Four places asking "is the balance finished?" in four
 // slightly different ways is the drifted-copy class this repo has paid for five times (`safeRelPath`

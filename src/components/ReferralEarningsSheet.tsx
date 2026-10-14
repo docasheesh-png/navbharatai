@@ -20,7 +20,8 @@ import { Github } from './ui/BrandIcons';
 import { authedHeaders } from '../lib/authHeaders';
 
 interface ReferredFriend {
-  email: string | null;
+  /** A masked label from the server — the friend's address is never sent. */
+  label: string | null;
   emailVerified: boolean;
   phoneVerified: boolean;
   githubLinked: boolean;
@@ -35,11 +36,10 @@ export interface ReferralEarningsSheetProps {
 
 type LoadState = 'loading' | 'ready' | 'error';
 
-function formatEmail(email: string | null): string {
-  // Missing only when the account behind that step lookup could not be read — a real account with
-  // no visible mailbox does not happen on this platform, but the row must still say something honest
-  // rather than render blank.
-  return email && email.trim() ? email : 'Account details unavailable';
+function formatLabel(label: string | null): string {
+  // Missing only when the account behind that step lookup could not be read — the row must still say
+  // something honest rather than render blank.
+  return label && label.trim() ? label : 'Account details unavailable';
 }
 
 /** One of the three verification badges. `Icon` covers both lucide icons and the vendored Github mark. */
@@ -148,7 +148,7 @@ export const ReferralEarningsSheet: React.FC<ReferralEarningsSheetProps> = ({ us
               {friends.map((f, i) => (
                 <li key={i} className="rounded-xl border border-line bg-card p-3.5">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="truncate text-xs font-semibold text-ink">{formatEmail(f.email)}</span>
+                    <span className="truncate text-xs font-semibold text-ink">{formatLabel(f.label)}</span>
                     <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-warn">
                       {f.completedCount} of 3
                     </span>

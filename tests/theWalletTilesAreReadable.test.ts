@@ -3,7 +3,13 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 /**
- * THE WALLET TILES: FIRST, AND READABLE — and the dead budget console is gone (admin 2026-09-20).
+ * THE DEAD BUDGET CONSOLE IS GONE, AND THE REAL OVERDRAFT FLOOR REMAINS (admin 2026-09-20).
+ *
+ * ⚠️ 2026-10-14: the "tiles come first / readable by construction" cases that used to live here pinned the
+ * three-capsule row, which the wallet redesign REPLACED with the tab bar in `WalletHeader`. Their intent
+ * (a control is either a solid brand fill wearing `text-on-accent`, or a themed surface wearing themed ink;
+ * the balance is never truncated; every control is keyboard-reachable) is held for the new layout by
+ * `tests/theWalletTabsFitAPhone.test.ts`. The two groups below are unrelated to the layout and are kept.
  *
  * Three instructions in one message, with one screenshot each:
  *   • *"sabse upar yeh tile … sabse upar aani chahiye"*
@@ -32,115 +38,6 @@ const stripComments = (s: string) =>
 const PANEL = stripComments(read('src/components/panels/BillingPanel.tsx'));
 const HOOK = stripComments(read('src/hooks/usePaymentEngine.ts'));
 const APP = stripComments(read('src/App.tsx'));
-
-/**
- * The three tiles, as they really appear in the source, in order.
- *
- * ⚠️ Every marker here is CODE, never a `{/* … *\/}` comment: the sources are read with comments
- * stripped (the removal notes quote the very sentence other cases assert is gone), so a comment
- * marker would resolve to -1 and the slice would silently become the whole file.
- */
-const DETAIL_PANEL = 'bg-card border border-line rounded-[2.5rem] p-6 sm:p-8 shadow-3xl';
-/**
- * The row selector. It was `grid grid-cols-1 sm:grid-cols-3 gap-4` until 2026-09-22, when the
- * admin asked for three horizontal capsules (*"all 3 options ko horizontal 3 capsule ke jaise
- * banao … jisse ui clear hoga"*). A FLEX row, not a grid, because `flex-1 min-w-fit` is what
- * lets a long balance make the row SCROLL instead of the number being cut — see the measured
- * case below.
- */
-const CAPSULE_ROW = '<div className="flex items-stretch gap-2 sm:gap-3 overflow-x-auto no-scrollbar';
-const tileBlock = (): string => {
-  const from = PANEL.indexOf(CAPSULE_ROW);
-  const to = PANEL.indexOf(DETAIL_PANEL, from);
-  expect(from, 'the capsule row').toBeGreaterThan(-1);
-  expect(to, 'the detail panel after it').toBeGreaterThan(from);
-  return PANEL.slice(from, to);
-};
-
-describe('the tiles come FIRST — that was the whole instruction', () => {
-  it('the tile grid sits above the daily-usage, plan and monthly-cost blocks', () => {
-    const tiles = PANEL.indexOf(CAPSULE_ROW);
-    const usage = PANEL.indexOf("Today's Messages");
-    const plans = PANEL.indexOf('<HostingPlanCard');
-    const cost = PANEL.indexOf("This Month's AI Cost");
-    for (const [name, at] of [['daily usage', usage], ['plans', plans], ['monthly cost', cost]] as const) {
-      expect(at, name).toBeGreaterThan(-1);
-      expect(tiles, `tiles must precede ${name}`).toBeLessThan(at);
-    }
-  });
-
-  it('the detail panel the tiles switch stays directly under them, not pages away', () => {
-    const tiles = PANEL.indexOf(CAPSULE_ROW);
-    const detail = PANEL.indexOf(DETAIL_PANEL);
-    const usage = PANEL.indexOf("Today's Messages");
-    expect(detail).toBeGreaterThan(tiles);
-    expect(detail, 'tapping a tile must not appear to do nothing').toBeLessThan(usage);
-  });
-
-  it('Buy tokens leads — it is literally the first capsule in the row', () => {
-    // It used to lead by `order-first` on a grid. In the capsule row it leads by being first in
-    // source order, which is what a screen reader and a keyboard both follow as well.
-    // ⚠️ CODE markers, never the `{/* CAPSULE n */}` comments — this file is read with comments
-    // stripped, exactly as the note above says, so a comment marker resolves to -1.
-    const block = tileBlock();
-    const buy = block.indexOf("onSetActiveBillingDetailTab('purchase')");
-    const balance = block.indexOf('data-tour="billing"');
-    const promo = block.indexOf("onSetActiveBillingDetailTab('gift')");
-    expect(buy).toBeGreaterThan(-1);
-    expect(buy).toBeLessThan(balance);
-    expect(balance).toBeLessThan(promo);
-  });
-});
-
-describe('🔴 readable by construction — no tile wears the other kind of label', () => {
-  const tiles = () => tileBlock();
-
-  it('the one SOLID tile carries the solid-fill label colour', () => {
-    const block = tiles();
-    const buy = block.slice(0, block.indexOf('data-tour="billing"'));
-    expect(buy).toContain('bg-emerald-700');
-    expect(buy).toContain('text-on-accent');
-  });
-
-  it('🔒 a tile on the THEMED card surface never uses `text-on-accent` — that is the invisible-text bug', () => {
-    const block = tiles();
-    // Every element that declares the card surface must not also declare the solid-fill ink.
-    for (const line of block.split('\n')) {
-      if (line.includes('bg-card')) {
-        expect(line, `white ink on the themed card: ${line.trim()}`).not.toContain('text-on-accent');
-      }
-    }
-  });
-
-  it('🔒 no dark 900/950 tint survives — the theme cannot lighten one, so it is a Light defect', () => {
-    expect(tiles()).not.toMatch(/(from|to|via|bg)-[a-z]+-9[0-5]0\//);
-  });
-
-  it('the balance is never truncated again — a full-width tile has room for the number', () => {
-    const block = tiles();
-    const balanceLine = block.split('\n').find((l) => l.includes('tokenBalance'));
-    expect(balanceLine).toBeTruthy();
-    expect(balanceLine!, 'the number this screen exists to show').not.toContain('truncate');
-  });
-
-  it('🔒 three across at every width, and a long value SCROLLS the row rather than being cut', () => {
-    // Measured in a real browser before this shipped: at 360 / 390 / 414 / 768 px the three
-    // capsules fit with nothing clipped, with a seven-digit balance as well as a five-digit one.
-    // `min-w-fit` is the property that guarantees it — a grid track can shrink a cell below its
-    // content and truncate, which is exactly the "89,894 tok…" defect this file already records.
-    const block = tileBlock();
-    expect(block.match(/flex-1 min-w-fit/g) ?? []).toHaveLength(3);
-    expect(PANEL).toContain('overflow-x-auto');
-    expect(PANEL).not.toContain('grid grid-cols-2 md:grid-cols-4');
-  });
-
-  it('every tile is reachable by keyboard, not a bare clickable div', () => {
-    const block = tiles();
-    expect(block.match(/role="button"/g)?.length).toBe(3);
-    expect(block.match(/onKeyDown=/g)?.length).toBe(3);
-    expect(block.match(/focus-visible:ring-2/g)?.length).toBe(3);
-  });
-});
 
 describe('🔴 the budget/reminder system is gone at the root, not hidden', () => {
   it('no screen still reads or writes the two localStorage keys', () => {

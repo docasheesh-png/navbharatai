@@ -28,8 +28,8 @@ describe('a forgotten wire-up is shown', () => {
   it('🔒 the top-up button says it is opening checkout while the order is being made', () => {
     // The hook kept "Requesting Cashfree checkout protocol..." in state no screen read; the button only
     // dimmed. The real state (`isRecharging`) now drives words a user understands.
-    const bill = read('src/components/panels/BillingPanel.tsx');
-    expect(bill).toMatch(/\{isRecharging\s*\?\s*'Opening secure checkout…'/);
+    const bill = read('src/components/wallet/TokenPurchaseTab.tsx');
+    expect(bill).toMatch(/\{isRecharging\s*\?[\s\S]{0,160}Opening secure checkout…/);
     const hook = code(read('src/hooks/usePaymentEngine.ts'));
     expect(hook).not.toMatch(/rechargeStatus|customPurchaseCredits/);
   });

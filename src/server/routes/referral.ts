@@ -29,6 +29,7 @@ import {
 import { requireUserMatch, resolveAccountContact } from '../lib/authMiddleware';
 import { sendSafeError } from '../lib/httpError';
 import { routeParam } from '../lib/expressCompat';
+import { referralFriendLabel } from '../lib/referralFriendLabel';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mirroredCreditPatch } from '../lib/walletMirror';
 import { MAX_WEB_GIFT_TOKENS } from '../lib/giftPolicy';
@@ -410,7 +411,8 @@ export function registerReferralRoutes(app: Express): void {
         const contact = await resolveAccountContact(row.userId);
         const status = friendVerificationStatus(row.paidSteps);
         return {
-          email: contact.email,
+          // A MASKED label, never the address — see referralFriendLabel.ts.
+          label: referralFriendLabel(contact.email),
           // Named to match the SAME fields the /api/referral/:userId status route already uses
           // (emailVerified / phoneVerified / githubLinked) — one vocabulary for the same three facts,
           // never `email: true/false` beside `email: "a@b.com"` on the same object.

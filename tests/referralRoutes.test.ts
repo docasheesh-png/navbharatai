@@ -632,7 +632,7 @@ describe('the Earning list — who used my code, and how far each has got', () =
     });
   });
 
-  it('reports each friend’s EMAIL and exactly how many of the three steps are done', async () => {
+  it('reports each friend by a MASKED label (never the address) and exactly how many of the three steps are done', async () => {
     const code = (await status('A')).code;
     accountsByUid['B'] = { email: 'friend.b@example.com', emailVerified: true, phone: '+911111111111', providers: ['google.com'] };
     await redeem('B', code, 'bbbbbbbbbbbbbbbb');
@@ -642,9 +642,12 @@ describe('the Earning list — who used my code, and how far each has got', () =
     const r = await referred('A');
     expect(r.count).toBe(1);
     expect(r.friends[0]).toMatchObject({
-      email: 'friend.b@example.com',
+      label: 'fr••••••@example.com',
       emailVerified: true, phoneVerified: true, githubLinked: false, completedCount: 2,
     });
+    // 🔒 The address itself is nowhere in the answer — a referrer may see progress, not collect addresses.
+    expect(JSON.stringify(r)).not.toContain('friend.b@example.com');
+    expect(r.friends[0]).not.toHaveProperty('email');
   });
 
   it('never lists somebody else’s friends — the query is scoped to MY code alone', async () => {
@@ -660,10 +663,10 @@ describe('the Earning list — who used my code, and how far each has got', () =
     expect(x.count).toBe(1);
   });
 
-  it('lists MULTIPLE friends, each with their own email and their own progress', async () => {
+  it('lists MULTIPLE friends, each with their own masked label and their own progress', async () => {
     const code = (await status('A')).code;
-    accountsByUid['B'] = { email: 'b@example.com', emailVerified: true, phone: '', providers: [] };
-    accountsByUid['C'] = { email: 'c@example.com', emailVerified: true, phone: '+912222222222', providers: ['github.com'] };
+    accountsByUid['B'] = { email: 'bravo.b@example.com', emailVerified: true, phone: '', providers: [] };
+    accountsByUid['C'] = { email: 'charlie.c@example.com', emailVerified: true, phone: '+912222222222', providers: ['github.com'] };
     await redeem('B', code, 'bbbbbbbbbbbbbbbb');
     await redeem('C', code, 'cccccccccccccccc');
     await claim('B', 'email', 'bbbbbbbbbbbbbbbb');
@@ -673,9 +676,10 @@ describe('the Earning list — who used my code, and how far each has got', () =
 
     const r = await referred('A');
     expect(r.count).toBe(2);
-    const byEmail = Object.fromEntries(r.friends.map((f: any) => [f.email, f]));
-    expect(byEmail['b@example.com'].completedCount).toBe(1);
-    expect(byEmail['c@example.com'].completedCount).toBe(3);
+    const byLabel = Object.fromEntries(r.friends.map((f: any) => [f.label, f.completedCount]));
+    expect(byLabel).toEqual({ 'br•••••@example.com': 1, 'ch•••••••@example.com': 3 });
+    expect(JSON.stringify(r)).not.toContain('bravo.b@example.com');
+    expect(JSON.stringify(r)).not.toContain('charlie.c@example.com');
   });
 
   it('agrees exactly with the money — completedCount never disagrees with what the referrer was paid', async () => {

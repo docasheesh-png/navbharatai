@@ -95892,3 +95892,47 @@ past it — **it knew every honest way to get a rupee and not one dishonest way.
 sign. The first attempt, `[₹$]`, failed the *correct* code because every template literal contains
 `${…}`; scoped to `₹` and re-proven. Two lessons, both already paid for today: a reversion that passes is
 a claim to verify, and a guard written from the honest implementations is blind to the dishonest ones.
+
+## 2026-10-14 — Wallet & Billing redesign: three pages, one balance (branch `claude/wallet-billing-redesign`)
+
+**What the admin asked for** (an external brief + three mock-ups, handled under the external-suggestion rule: adapted to the
+real code, not transcribed). Wallet & Billing becomes exactly three pages — **Buy Tokens · Promo Code · History** — mobile
+first, simple English, every number from the real backend.
+
+**What shipped.** `BillingPanel.tsx` is now a header (`WalletHeader`: balance + the three tabs) over one page at a time:
+`TokenPurchaseTab` (quick amounts + the amount box + one Pay button + recent payments with an honest status),
+`PromoRewardsTab` (referral code/steps via the existing `ReferralPanel`, the friends list, the promo box, gift codes behind
+one tap) and `WalletStatementPanel` (the reconciled history with filters, a time range and "Show more"). Hosting plans,
+add-ons, today's usage and the month's AI cost moved under ONE collapsed "Plans, add-ons and usage" section. Pure logic is in
+`walletTabs.ts`, `walletQuickAmounts.ts`, `walletHistoryView.ts`, `walletPaymentRows.ts`, `referredFriendsView.ts`.
+**Nothing about money changed**: the order is still created by `onCreateBillingOrder`, store packs by `onBuyStorePack`, the
+coupon by `onRedeemPromoCoupon`, tokens are credited only by the server after the gateway confirms; App.tsx is untouched
+(the page is chosen through the `activeBillingDetailTab` it already owns — `walletTabs.ts` maps its four values to three pages).
+
+**Where the brief was CORRECTED against the code (rule 3 — honesty, not obedience):**
+| Brief / mock-up said | The code does | What was built |
+|---|---|---|
+| ₹100 = 10,000 tokens | the 2% platform fee comes off first: ₹100 → **9,800** tokens | chips print tokens from the server's own `splitPaymentAtPct`; a test pins 9,800 ≠ 10,000 |
+| a Cashfree / Google Play radio | the rail is decided by the platform (web gateway; Play packs REPLACE it by Play policy; iPhone cannot buy) | no radio; "UPI, cards or net banking" with no vendor name (White-Label Law); the iPhone notice still never points outside |
+| referrer earns 100 tokens after 4/4 steps | the referrer earns ₹25 per friend verification (email, mobile, GitHub; ₹75/friend, ₹1,500 total); the user's own 5 steps pay ₹100 each | the real rules, from the server; no ₹ is derived per friend (the server gates, caps and pays exactly-once) |
+| Devanagari / Hinglish labels | CLAUDE.md language standard + `uiLanguageEnglishOnly` | simple English |
+| friend names and emails in the list | a referrer may see PROGRESS, not collect addresses | the server now sends a **masked label** only (`fr••••••@mail.com`; 1–2 letter names reveal nothing); the raw `email` field is gone from `/referred` and from the profile "Earning" sheet |
+
+**Root causes found on the way (class → fix → lock):**
+- *A balance that could not be read printed as 0* (`wallet?.tokenBalance ?? 0`). → `readableBalance` + "Could not load / Try again". Lock: `theWalletHeaderNeverShowsAFalseZero` (+ a source ban on `tokenBalance ?? 0` in every wallet file).
+- *A pending or failed payment looked like a purchase.* → `walletPaymentRows`: only an explicit `SUCCESS` is "paid", anything unreadable is "waiting". Lock: `walletPaymentRows.test.ts`.
+- *A filter can hide money.* → every history row belongs to exactly one filter; counts add up to All; an unreadable date is KEPT by every range. Lock: `walletHistoryView.test.ts`.
+- *The `maskEmail` self-view mask prints a whole 1–2 letter address* if reused for a third party. → `referralFriendLabel` (a third, at most two characters). Lock: `aReferredFriendIsNeverNamedByAddress`.
+- *A source-pinned test cannot see a layout.* The structural measurement passed while two real defects were visible only in screenshots (a selected chip and a verdict banner rendering as solid fills). Both turned out to be the HARNESS serving Vite's dev CSS (the repo's postcss `cascade-layers` fallback rule beats the later `@supports color-mix` rule only in dev); re-measured against the production CSS: clean. Recorded so nobody re-chases it.
+- Three source-pin tests were re-pointed to the new files with their intent kept (`appLockWiring`, `platformFee`, `theIphoneCannotOpenACheckout`, `theApplyButtonStaysOnScreen`, `everyValueTheAppKeepsIsRead`, `theRedDotLeadsToTheTopUp`); the capsule-row cases were superseded by `theWalletTabsFitAPhone` (tab bar, 44px targets, tokens-only colour, wrapping).
+
+**Measured, not assumed:** a real Chromium against the PRODUCTION css, 5 widths (320/360/375/390/430) × 7 states (buy, Play packs, iPhone, unread balance, promo, history, history error): no horizontal scroll, no clipped text, every control ≥ 44px — 35/35 clean; light, dark and 320px screenshots read by eye.
+**Reversion-proven (5):** label leaks the address · unknown status shown as paid · unread balance shown as 0 · a filter drops a kind · the route sends the raw email — each made its test fail; restored.
+
+**Left open, honestly (none is a silent gap):**
+1. 🟡 *Decision for the admin:* the profile "Earning" sheet used to show friends' FULL emails because the admin asked for it (2026-09). It is now masked, per this brief's privacy rule. Say if the full address is wanted back.
+2. The date range and "Show more" are client-side over the ≤500 rows the statement already returns — there is no server pagination to call.
+3. History shows tokens only; the old "₹" running balance columns became "Balance after: N" (tokens).
+4. `/transactions` returns the latest 50 payments, so "Your recent payments" is bounded to those (it shows the latest 5).
+5. A "Payment did not go through" row does not say "you were not charged" — the record cannot prove that, so it does not claim it.
+6. Not run: a real Cashfree/Google Play purchase (no keys here); the payment path is unchanged and still covered by its existing tests.

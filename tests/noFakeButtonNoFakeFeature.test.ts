@@ -28,6 +28,7 @@ import { VirtualFileSystem } from '../src/server/project/ProjectModel';
 import { auditSummaryClaims, claimCorrection } from '../src/server/AgentV3/claimAudit';
 import { featurePresenceRepairPrompt } from '../src/server/AgentV3/FeaturePresence';
 import { authenticityRepairInstruction } from '../src/server/AgentV3/AuthenticityAnalysis';
+import { SECRETS_SCREEN } from '../src/server/AppContext/navPaths';
 
 const DEMO_LOGIN = `import { useState } from 'react';
 const DEMO_USER = { email: 'demo@shop.in', password: 'demo123' };
@@ -299,7 +300,12 @@ describe('✍️ the builder hears it with the file open, and every lane carries
 
   it('the rule is in the shared module and in all THREE lanes (architect, fast lane, one-shot)', () => {
     expect(NO_FAKE_FEATURE_RULE).toContain('NO FAKE BUTTON');
-    expect(NO_FAKE_FEATURE_RULE).toContain('Keys & Secrets');
+    // UPDATED 2026-10-14 (the admin's self-awareness report): the rule used to be pinned to the literal
+    // 'Keys & Secrets' — the BUILDER's sheet name — and that is exactly what was wrong with it: the line is
+    // printed into the user's own app, where the address they need is the Settings tab, labelled
+    // "Secrets & API Keys". Pinned now to the one source of truth, so the assertion follows the screen
+    // instead of freezing a name that does not match it. See tests/everyPathLeadsSomewhereReal.test.ts.
+    expect(NO_FAKE_FEATURE_RULE).toContain(SECRETS_SCREEN.canonical);
     expect(NO_FAKE_FEATURE_RULE).toContain('RED line');
     expect(SEED_PASSWORD_RULE).toContain('never the app\'s LOGIN');
     for (const f of ['src/server/AgentV3/systemPrompt.ts', 'src/server/AgentV3/SimpleBuilder.ts', 'src/server/AgentV3/OneShotBuilder.ts']) {

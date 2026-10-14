@@ -95983,3 +95983,8 @@ to Node 22 is its own change (run the suite on 22 first, then flip `ci.yml`).
 - Q-1070 closed as NOT-A-DEFECT: the Weak planner ladder puts Haiku second on purpose (admin, 2026-09-30, "planing ke liye haiku accha hai", `weakPlanHaikuEnabled`). The report's "rung 5 of 5" is that ladder, not a skip.
 - Q-1064 premise corrected (honesty): batching already exists (`write_files_batch`, 24 uses). The cost is token throughput on the KIMI rung; the options changed, so the "han" cannot be applied to it — three options are in the queue.
 - Q-1066 fixed (lag list read by both detectors) · Q-1068 diagnostics shipped, verdict waits for a report · Q-1069 fixed per the approved rule.
+
+## 2026-10-14 — "mode change is slow" (admin, website/desktop, Free → Doctor AI → Teacher AI)
+**Evidence, not guesses:** production build in headless Chromium (4× CPU, 150 ms RTT, 1.5 Mbps). Switching is synchronous state only in code; measured steady-state 60–110 ms. The first switch to each AI is 6–8× slower (490 / 590 ms): the screen's lazy chunk is fetched on the pick.
+**Fix:** `src/lib/warmModeChunks.ts` — idle, one-at-a-time warm-up of the four screens (490→357 ms, 590→409 ms). **A bug the measurement caught:** my first version asked `window.Capacitor`, which exists in every browser, and fetched nothing; the same mistake was live in `main.tsx` (every website launch labelled `app` in cold-start telemetry) and is fixed with a census.
+**Honest limit:** not reproduced signed-in; what is left is evaluation + first render (~350 ms at 4× CPU). Q-1071 stays 🟡 until the admin says whether the SECOND switch is also slow.

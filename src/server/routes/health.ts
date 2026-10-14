@@ -8,6 +8,7 @@
 //                        instance out of rotation — see DR_RUNBOOK.md).
 //   • POST /api/admin/backup/firestore — admin-triggered Firestore export (DR backup).
 
+import { publicFlags } from '../lib/publicFlags';
 import type { Express, Request, Response } from 'express';
 import { firestoreBackup } from '../lib/FirestoreBackup';
 import { audit } from '../lib/audit';
@@ -262,6 +263,12 @@ export function registerHealthRoutes(app: Express): void {
   // UNSET (today's state) ⇒ metaPixelId is null ⇒ the client never loads the pixel. A malformed value
   // is treated exactly like an unset one, so a typo disables advertising measurement honestly instead
   // of injecting junk into every page.
+  // Go-live wiring: default-OFF UI flags (booleans only). See publicFlags.ts.
+  app.get('/api/public-flags', (_req: Request, res: Response) => {
+    res.set('Cache-Control', 'public, max-age=60');
+    res.json(publicFlags());
+  });
+
   app.get('/api/public-config', (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=300');
     res.json(buildPublicConfig(

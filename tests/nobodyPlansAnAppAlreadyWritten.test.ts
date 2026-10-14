@@ -158,10 +158,18 @@ describe('the census: no scaffolded starter chip whose template IS the app reach
 });
 
 describe('the route reads the one predicate at both gates', () => {
+    // UPDATED on the merge with #3743 (2026-10-14): the gate is now ONE call, `roadmapDecision({…})`, which
+    // also carries what the report should say. That was forced, not cosmetic — expressed as a local plus two
+    // branches in the route, this decision raised TS2563 (the `/build` body is ON TypeScript's control-flow
+    // limit, Q-979) the moment it met #3743's changes; `main` alone typechecked clean, so the merge tipped it.
+    // The PROPERTIES are unchanged and are what these assertions pin.
   it('there is no second, private copy of the stand-down rule', () => {
-    expect(route).toContain('roadmapStandsDown({');
+    expect(route).toContain('roadmapDecision({');
     expect(route).not.toContain('roadmapStandsDownForProjectMode');
-    expect((route.match(/roadmapStandsDown\(\{/g) ?? []).length).toBe(1);
+    expect((route.match(/roadmapDecision\(\{/g) ?? []).length).toBe(1);
+    // The route no longer decides anything itself: no stand-down branch, no message string of its own.
+    expect(route).not.toMatch(/roadmapStandsDown\(/);
+    expect(route).not.toMatch(/roadmapStandDownMessage\(/);
     // The tier comparison lives in the registry, never inline in the route (one rule, one home).
     expect(route).not.toMatch(/tier === 'simple'/);
     expect((route.match(/templateIsTheFinishedApp\(seededScaffold\)/g) ?? []).length).toBe(3);
@@ -173,12 +181,15 @@ describe('the route reads the one predicate at both gates', () => {
     // `false` — the ETA call supplies that same substring hundreds of lines away. A guard must pin its
     // property, not a punctuation mark something else in the file happens to contain (the same class as
     // `aModuleIsNotTheWholeApp`'s review gate and `tscErrorCause`'s repair call).
-    const open = route.indexOf('roadmapStandsDown({');
+    const open = route.indexOf('roadmapDecision({');
     expect(open).toBeGreaterThan(0);
     const call = route.slice(open, route.indexOf('});', open) + 3);
     expect(call).toMatch(/templateIsTheApp: templateIsTheFinishedApp\(seededScaffold\),/);
     expect(call).toMatch(/\bplanFirst,/);
     expect(call).toMatch(/megaProject: appScope\.projectMode,/);
+    // The size verdict and the dispute go IN, so the module decides and the route cannot forget half of it.
+    expect(call).toMatch(/decisionIsAnalyze: scope\.decision === 'analyze',/);
+    expect(call).toMatch(/disputed: !!dispute,/);
     // The project planner's own gate reads it too, and reads it negated.
     expect(route).toMatch(/appScope\.projectMode && !templateIsTheFinishedApp\(seededScaffold\)\) \{/);
   });

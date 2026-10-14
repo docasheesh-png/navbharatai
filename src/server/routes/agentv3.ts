@@ -419,7 +419,7 @@ import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/ca
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { shellModuleFor, shellStillAwaited, recordModuleDelivery, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDown, roadmapStandDownMessage, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { shellModuleFor, shellStillAwaited, recordModuleDelivery, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapDecision, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout } from '../AgentV3/asyncUtils';
@@ -14583,20 +14583,19 @@ async function noteBuildOutcome(
           // and it is the FINISHED app. One predicate answers both, so a third owner cannot be forgotten at this
           // call site — roadmapStandsDown. Its sibling gate is the project planner's, which reports the same fact
           // through projectModeDiagnosis ('template-is-the-app').
-          const standDown = roadmapStandsDown({
+          const roadmap = roadmapDecision({
             projectModeOn: projectModeEnabled(process.env, { userId, email }),
             planFirst,
             megaProject: appScope.projectMode,
             templateIsTheApp: templateIsTheFinishedApp(seededScaffold),
+            decisionIsAnalyze: scope.decision === 'analyze',
+            disputed: !!dispute,
+            signals: scope.signals,
           });
-          if (standDown && scope.decision === 'analyze' && !dispute) {
-            buildDiag.record({
-              phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_STOOD_DOWN', autoResolved: true,
-              message: roadmapStandDownMessage(standDown),
-              detail: `scope signals: ${scope.signals.join('; ')}`,
-            });
+          if (roadmap.record) {
+            buildDiag.record({ phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_STOOD_DOWN', autoResolved: true, ...roadmap.record });
           }
-          if (scope.decision === 'analyze' && !dispute && !standDown) {
+          if (roadmap.runPlanner) {
             const rmStartedAt = Date.now();
             let rmProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
             const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({

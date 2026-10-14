@@ -284,6 +284,40 @@ export function roadmapStandsDown(input: {
   return null;
 }
 
+/**
+ * THE WHOLE ROADMAP GATE, IN ONE CALL — and it is a function for a MEASURED reason, not for tidiness.
+ *
+ * The `/build` handler sits ON TypeScript's control-flow-analysis limit (Q-979). Expressed in the route as a
+ * local plus two branches, this decision raised TS2563 on the whole file the moment it met #3743's changes on
+ * `main` — `main` alone typechecked clean, so the merge is what tipped it. The same cliff shaped the optional
+ * bug-hunt flow (`offerBugHunt`): the fix there, and here, is that the route makes ONE call and the branching
+ * lives in the module.
+ *
+ * It answers both halves at once: whether the planner runs, and what the report should say if it does not.
+ * `record` is null exactly when there is nothing to say. PURE.
+ */
+export function roadmapDecision(input: {
+  projectModeOn: boolean;
+  planFirst: boolean;
+  megaProject: boolean;
+  templateIsTheApp: boolean;
+  /** The one scope verdict said `analyze` — the size question, already answered (Q-138). */
+  decisionIsAnalyze: boolean;
+  /** The two classifiers disagreed, so the planner is never asked (`scopeDispute`). */
+  disputed: boolean;
+  signals: readonly string[];
+}): { runPlanner: boolean; standDown: RoadmapStandDown | null; record: { message: string; detail: string } | null } {
+  const standDown = roadmapStandsDown(input);
+  const sized = input.decisionIsAnalyze && !input.disputed;
+  return {
+    standDown,
+    runPlanner: sized && !standDown,
+    record: sized && standDown
+      ? { message: roadmapStandDownMessage(standDown), detail: `scope signals: ${input.signals.join('; ')}` }
+      : null,
+  };
+}
+
 /** The one sentence the build report carries for each stand-down reason. PURE. */
 export function roadmapStandDownMessage(reason: RoadmapStandDown): string {
   return reason === 'project-mode'

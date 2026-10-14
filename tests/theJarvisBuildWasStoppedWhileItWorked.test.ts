@@ -87,16 +87,20 @@ describe('one planner per build', () => {
   });
 
   it('the route gates the roadmap on it and says so in the report', () => {
-    // UPDATED 2026-10-14 (autopsy e3135b7b): the call is now `roadmapStandsDown`, the one predicate that
+    // UPDATED on the merge with #3743 (2026-10-14): the gate is ONE call now, `roadmapDecision({…})`, which
+    // also carries what the report should say. That was FORCED, not cosmetic — as a local plus two branches in
+    // the route it raised TS2563 (the `/build` body is ON TypeScript's control-flow limit, Q-979) the moment it
+    // met #3743's changes; `main` alone typechecked clean, so the merge is what tipped it. The properties this
+    // test locks are unchanged: project mode still stands the roadmap down, and its sentence is byte-identical.
     // answers for EVERY thing that can already own a build — project mode OR a seeded golden scaffold. The
     // behaviour this test locks is unchanged (the project-mode branch is checked first and its sentence is
     // byte-identical, asserted below); only the name at the call site moved. Pinning the old name here would
     // pin a gate that reads one of two owners, which is the defect that autopsy found.
-    expect(route).toContain('roadmapStandsDown({');
-    expect(route).toMatch(/if \(scope\.decision === 'analyze' && !dispute && !standDown\)/);
+    expect(route).toContain('roadmapDecision({');
+    expect(route).toContain('if (roadmap.runPlanner) {');
     // Project mode is still a stand-down reason, and still the one the predicate derives from this function.
     expect(route).toContain("code: 'MEGA_ROADMAP_STOOD_DOWN'");
-    expect(route).toContain('message: roadmapStandDownMessage(standDown)');
+    expect(route).toContain('...roadmap.record');
     const diag = readFileSync(join(__dirname, '../src/server/AgentV3/BuildDiagnostics.ts'), 'utf8');
     expect(diag).toContain("'MEGA_ROADMAP_STOOD_DOWN'");
   });

@@ -95936,3 +95936,30 @@ coupon by `onRedeemPromoCoupon`, tokens are credited only by the server after th
 4. `/transactions` returns the latest 50 payments, so "Your recent payments" is bounded to those (it shows the latest 5).
 5. A "Payment did not go through" row does not say "you were not charged" — the record cannot prove that, so it does not claim it.
 6. Not run: a real Cashfree/Google Play purchase (no keys here); the payment path is unchanged and still covered by its existing tests.
+
+## 2026-10-14 — iOS release build #111 failed at the Google Sign-In wiring; fixed at the class (branch `fix/ios-scene-delegate-google-signin`)
+
+**Report.** The `.ipa` build the admin asked for (`ios-ipa.yml`, run #111, `main` @ 8b4d727) stopped in 1.5 minutes at the step "Wire the
+Google Sign-In redirect into AppDelegate" with its own message — *"AppDelegate patch failed — the template changed"*. The same-day Android run (#152)
+built, signed and uploaded to the Play internal track (every step green, including "Upload to Google Play (internal track)").
+
+**Root cause.** The step patched `AppDelegate.application(_:open:options:)`. Capacitor 8.5.x (bumped in #3666, after the last good iOS build on 2026-10-08)
+generates a UIScene-lifecycle project: `AppDelegate` has no `open url` method any more and the redirect arrives in `SceneDelegate.scene(_:openURLContexts:)`.
+Verified by running `npx cap add ios` and reading the output. The guard did its job (it stopped, it did not ship an app whose Google login hangs forever).
+
+**Class.** *A patch applied to a generated template whose anchor is checked only when it ships.* Every edit `ios-ipa.yml` makes to what Capacitor generates is
+anchored to the template's shape, and a dependency bump moves the shape with no line of ours changing.
+
+**Fix, and why it is a class fix.**
+- `scripts/ios-wire-google-signin.sh` (new): knows BOTH templates (classic → AppDelegate, UIScene → SceneDelegate, the URL offered to `GIDSignIn` before the
+  Capacitor proxy and consumed when handled), is idempotent, uses portable perl (no BSD `sed -i ''`), and exits 1 with an `::error::` on a THIRD shape — never a silent skip.
+  The workflow step now calls it; there is no second inline copy to drift.
+- `tests/theIosTemplateStillHasEveryAnchorTheWorkflowPatches.test.ts` runs the REAL `npx cap add ios` in CI (no network, no macOS needed — verified) and holds every
+  anchor the workflow depends on (files, the AppIcon set, the Xcode project, the AppDelegate closing brace the APNs step inserts before, and exactly-one-of-two redirect
+  anchors), runs the script for real on the generated template AND on a classic fixture, and proves the "neither template" refusal. The next Capacitor bump that moves an
+  anchor fails the PR that bumps it, not a release on a macOS runner. Reverted-and-failed: breaking the Scene branch fails the test; restored.
+- Siblings hunted: the push-notification step also edits `AppDelegate.swift` — its anchor (insert before the class's final brace) still holds on the new template and is now tested.
+
+**Honest limit (rule 6).** No Xcode here, so the Swift cannot be compiled in this session; the injected code is guarded by `#if canImport(GoogleSignIn)` and
+read against the generated template. The real proof is the iOS run itself, and — because the failure this wiring prevents ("Google login succeeds → redirect back →
+infinite loading") only shows on a device — **the TestFlight build needs one real Google sign-in on an iPhone before it is promoted.**

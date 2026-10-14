@@ -290,21 +290,13 @@ jobs:
       # handler of its own — verified in its source), so the SDK never learned the login finished and the
       # JS promise hung forever. Because ios/ is regenerated fresh on every build, we inject the wiring
       # here, exactly like the plist/permissions steps. canImport keeps it compile-safe.
-      - name: Wire the Google Sign-In redirect into AppDelegate (fixes infinite login)
-        run: |
-          set -e
-          AD="ios/App/App/AppDelegate.swift"
-          if grep -q "GIDSignIn.sharedInstance.handle" "$AD"; then
-            echo "AppDelegate already wired — skipping."
-            exit 0
-          fi
-          # 1) Import GoogleSignIn (guarded so the file still compiles if the module ever moves).
-          sed -i '' '1s/^/#if canImport(GoogleSignIn)\nimport GoogleSignIn\n#endif\n/' "$AD"
-          # 2) Hand the redirect URL to GIDSignIn BEFORE the generic Capacitor proxy. Only the real code
-          #    line is matched (leading whitespace + return), never the template's commented example.
-          perl -0pi -e 's/(\n\s*)(return ApplicationDelegateProxy\.shared\.application\(app, open: url, options: options\))/$1#if canImport(GoogleSignIn)$1if GIDSignIn.sharedInstance.handle(url) \{$1    return true$1\}$1#endif$1$2/' "$AD"
-          grep -q "GIDSignIn.sharedInstance.handle" "$AD" || { echo "::error::AppDelegate patch failed — the template changed. Fix the injection."; exit 1; }
-          echo "AppDelegate wired:"; grep -n -A3 "GIDSignIn" "$AD" | head -12
+      # (2026-10-14: Capacitor 8.5's UIScene template delivers the URL to SceneDelegate, not AppDelegate — the step now
+      # calls scripts/ios-wire-google-signin.sh, which handles both.)
+      - name: Wire the Google Sign-In redirect (AppDelegate or SceneDelegate — whichever this template uses)
+        # The wiring lives in scripts/ios-wire-google-signin.sh so CI can run it against the REAL generated
+        # template. Capacitor 8.5 moved the redirect from AppDelegate to SceneDelegate (iOS run #111, 2026-10-14);
+        # the script knows both and fails LOUDLY on a third shape — never a silent skip.
+        run: bash scripts/ios-wire-google-signin.sh ios/App/App
 
       # Native "Sign in with Apple" (OPT-IN — off by default so the proven Google-only build is never at
       # risk). When enabled, this declares the com.apple.developer.applesignin entitlement + points the

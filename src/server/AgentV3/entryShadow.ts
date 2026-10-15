@@ -34,7 +34,18 @@ export function entryIsRootIndexHtml(framework: string | undefined): boolean {
 /** Would this path shadow the real entry of a root-index framework? */
 export function isShadowingEntryPath(path: string, framework: string | undefined): boolean {
   if (!entryIsRootIndexHtml(framework)) return false;
-  return /^\.?\/?public\/index\.html?$/i.test(String(path ?? '').trim());
+  return /^\.?\/?public\/index\.html?$/i.test(String(path ?? '').trim()) || isStrayEntryCopy(path, framework);
+}
+
+/**
+ * `src/index.html` in a root-index framework: the fast lane's planner listed it beside the real root `index.html` and
+ * spent a generation call on a file nothing serves (autopsy 993d3127) — dead weight that also links a favicon that
+ * does not exist. Unlike `public/index.html` it does not shadow the entry; it is dropped for the same reason: the
+ * ONLY page entry is the root index.html. Angular keeps its entry at src/index.html and is not a root-index framework. PURE.
+ */
+export function isStrayEntryCopy(path: string, framework: string | undefined): boolean {
+  if (!entryIsRootIndexHtml(framework)) return false;
+  return /^\.?\/?src\/index\.html?$/i.test(String(path ?? '').trim());
 }
 
 /** Drop shadowing entries from a file plan. Returns what was kept and what was dropped. */
@@ -48,6 +59,7 @@ export function dropShadowingEntries<T extends { path: string }>(planned: readon
 /** The note the full builder is handed when it writes such a file. '' when the path is fine. */
 export function entryShadowNote(path: string, framework: string | undefined): string {
   if (!entryShadowGuardEnabled() || !isShadowingEntryPath(path, framework)) return '';
+  if (isStrayEntryCopy(path, framework)) return `\n\n⚠️ ${path}: in this project the page entry is the ROOT index.html and nothing serves this copy. Delete ${path} and put any change in the root index.html instead.`;
   return `\n\n⚠️ ${path}: in this project the page entry is the ROOT index.html. Vite serves public/ as-is at the site root, so this copy shadows the real entry and the app's scripts come back as text/html ("unsupported MIME type"). Delete ${path} and put any change in the root index.html instead.`;
 }
 

@@ -2148,7 +2148,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // A second index.html in public/ shadows a Vite app's real entry (autopsy 876afca9) — see entryShadow.ts.
       const { kept, dropped: droppedShadow } = dropShadowingEntries(keptBoilerplate, deps.framework);
       if (droppedShadow.length) {
-        deps.log?.(`Leaving out ${droppedShadow.join(', ')} — in this project the page entry is the root index.html, and a copy in public/ would shadow it.`);
+        deps.log?.(`Leaving out ${droppedShadow.join(', ')} — in this project the page entry is the root index.html, and a second copy would either shadow it (public/) or sit unused (src/).`);
       }
       // A second copy of a component we provide, in another folder (autopsy db07e0af) — see dropProvidedTwins.
       const { kept: keptTwins, dropped: droppedTwins } = dropProvidedTwins(kept, provided);

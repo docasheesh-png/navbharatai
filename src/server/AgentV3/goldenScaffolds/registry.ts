@@ -200,6 +200,22 @@ export function bareTemplateRequestFor(prompt: string): GoldenScaffold | null {
  * asked for something else, so they get a normal from-scratch build (no surprise template).
  * Pure.
  */
+/**
+ * Is the seeded template the FINISHED app, or only a starting architecture? (autopsy e3135b7b, Q-1080.)
+ *
+ * The distinction is `GoldenScaffold.tier` and it is the only thing that decides whether a planner has work to do:
+ * a `simple` scaffold IS the finished app (the builder verifies and polishes it), while a `pro` scaffold is a
+ * compile-proven ARCHITECTURE the builder extends (proShell.ts). Both planners — the mega-app roadmap and Software
+ * Project Mode — stand down for the first and run normally for the second.
+ *
+ * ⚠️ IT IS A FUNCTION, NOT A LOCAL IN THE ROUTE, FOR A MEASURED REASON (Q-979). The `/build` handler sits ON
+ * TypeScript's control-flow-analysis limit: adding one `const` for this in that body raised TS2563 on the whole
+ * file. Three call sites read it, so it also must not be three inline copies of the same comparison. PURE.
+ */
+export function templateIsTheFinishedApp(scaffold: Pick<GoldenScaffold, 'tier'> | null | undefined): boolean {
+  return scaffold?.tier === 'simple';
+}
+
 export function goldenScaffoldForPrompt(prompt: string): GoldenScaffold | null {
   const p = norm(prompt);
   if (!p) return null;

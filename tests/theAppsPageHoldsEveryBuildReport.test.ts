@@ -49,20 +49,28 @@ describe('All builds moved from the Build tab to the Apps page', () => {
 
 describe('every app card has the "v"', () => {
   it('BuiltAppsPanel renders it from the one card renderer (live, held, banned and orphaned alike)', () => {
-    expect(panel).toContain('onViewReport({ workspaceId: d.workspaceId');
+    expect(panel).toContain('setReportApp({ workspaceId: d.workspaceId');
     expect(panel).toContain('title="View build report"');
     // ONE renderer serves the orphaned list too — the button is not special-cased away from it.
-    expect((panel.match(/onViewReport\(\{/g) || []).length).toBe(1);
+    expect((panel.match(/setReportApp\(\{ workspaceId/g) || []).length).toBe(1);
     expect(panel).toMatch(/orphan/);
   });
-  it('the dashboard opens a dialog for the chosen app, closable by button, backdrop and Escape', () => {
-    expect(dash).toContain('onViewReport={setReportApp}');
-    expect(dash).toContain('aria-label={`Build reports of ${reportApp.appName}`}');
-    expect(dash).toContain("e.key === 'Escape') setReportApp(null)");
+  it('the panel opens a dialog for the chosen app, closable by button, backdrop and Escape', () => {
+    expect(panel).toContain('aria-label={`Build reports of ${reportApp.appName}`}');
+    expect(panel).toContain("e.key === 'Escape') setReportApp(null)");
+    expect(panel).toContain('aria-label="Close build reports"');
   });
-  it('Copy / Download in the panel are the dashboard\'s own (they write the "taken" mark)', () => {
-    expect(dash).toContain('onCopy={(ws, buildId) => void copyWorkspaceReport(ws, buildId)}');
-    expect(dash).toContain('onDownload={(ws, buildId) => void downloadWorkspaceReport(ws, buildId)}');
+  it('🔒 the dialog keeps the sheet contract: overlay + card classes, no bare vh, portalled to the body', () => {
+    const at = panel.indexOf('Build reports of ${reportApp.appName}');
+    const seg = panel.slice(at - 200, at + 1800);
+    expect(seg).toContain('nb-sheet-overlay nb-sheet-over-nav');
+    expect(seg).toContain('className="nb-sheet ');
+    expect(seg).not.toMatch(/max-h-\[\d+vh\]/);
+    expect(seg).toContain('createPortal(sheet, document.body)');
+  });
+  it('the dashboard hands over its OWN copy / download (they write the "taken" mark)', () => {
+    expect(dash).toContain('onCopyBuildReport={(ws, buildId) => void copyWorkspaceReport(ws, buildId)}');
+    expect(dash).toContain('onDownloadBuildReport={(ws, buildId) => void downloadWorkspaceReport(ws, buildId)}');
     expect(body).not.toMatch(/\/download/); // no second download path that could skip the mark
   });
 });

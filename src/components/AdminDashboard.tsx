@@ -10,7 +10,6 @@ import { publishedAppRows, liveAppCount } from '../lib/publishedAppsView';
 import { platformMarginView } from '../lib/platformMarginView';
 import { adultOptInSummary } from '../lib/adultContent';
 import { confirmCopy, ownerConfirmCopy, MODERATION_ROUTE, type ModerationAction } from '../lib/adminAppModeration';
-import { WorkspaceBuildReports } from './admin/WorkspaceBuildReports';
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
@@ -372,14 +371,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }
   const [allBuilds, setAllBuilds] = useState<AllBuildRow[]>([]);
   const [allBuildsLoading, setAllBuildsLoading] = useState(false);
-  /** The app whose build reports the "v" button on an Apps card opened (admin 2026-10-15). */
-  const [reportApp, setReportApp] = useState<{ workspaceId: string; appName: string } | null>(null);
-  useEffect(() => {
-    if (!reportApp) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setReportApp(null); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [reportApp]);
   const [allBuildsSearch, setAllBuildsSearch] = useState('');
   // Four filters, deliberately (see server/lib/buildListFilter.ts for why not more).
   const [allBuildsStatus, setAllBuildsStatus] = useState<'all' | 'failed' | 'succeeded' | 'unknown'>('all');
@@ -4719,29 +4710,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 onModerateOwner={(ownerUid, action, count, more) => { setModerating({ workspaceId: ownerUid, action, ownerUid, count, more }); setModerateReason(''); }}
                 ownerModerated={ownerModerated}
                 focusOwner={focusOwner}
-                onViewReport={setReportApp}
+                onCopyBuildReport={(ws, buildId) => void copyWorkspaceReport(ws, buildId)}
+                onDownloadBuildReport={(ws, buildId) => void downloadWorkspaceReport(ws, buildId)}
               />
-              {reportApp && (
-                <div role="dialog" aria-modal="true" aria-label={`Build reports of ${reportApp.appName}`} className="fixed inset-0 z-[300] flex items-center justify-center p-4">
-                  <button type="button" aria-label="Close build reports" onClick={() => setReportApp(null)} className="absolute inset-0 bg-scrim backdrop-blur-sm cursor-default" />
-                  <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-card border border-line rounded-[1.25rem] p-5 space-y-3 shadow-2xl">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h4 className="text-sm font-black text-ink tracking-tight">Build reports</h4>
-                        <p className="text-[11px] font-bold text-body truncate">{reportApp.appName}</p>
-                        <p className="text-[9px] font-mono text-faint truncate">{reportApp.workspaceId}</p>
-                      </div>
-                      <button onClick={() => setReportApp(null)} className="shrink-0 min-h-[32px] px-3 rounded-lg border border-line text-[10px] font-black uppercase tracking-wider text-body hover:text-ink">Close</button>
-                    </div>
-                    <WorkspaceBuildReports
-                      workspaceId={reportApp.workspaceId}
-                      headers={headers}
-                      onCopy={(ws, buildId) => void copyWorkspaceReport(ws, buildId)}
-                      onDownload={(ws, buildId) => void downloadWorkspaceReport(ws, buildId)}
-                    />
-                  </div>
-                </div>
-              )}
 
               {/* ALL BUILDS moved here from the Build tab (admin 2026-10-15: "apps ke andar hi all build report" and "build se
                   All builds wala column hata dena"). Same card, same state, same filters and marks — only its address changed, so no

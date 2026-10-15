@@ -67,7 +67,7 @@ describe('all-builds admin routes', () => {
 });
 
 describe('admin dashboard surface', () => {
-  it('the All Builds section is mounted in the reports tab with search, expand and both downloads', () => {
+  it('the All Builds section is mounted in the Apps tab (moved from the Build tab 2026-10-15) with search, expand and both downloads', () => {
     expect(dashboard).toContain('All builds — every user, no submit needed');
     expect(dashboard).toContain('fetchAllBuilds');
     expect(dashboard).toContain('expandWorkspaceBuilds');

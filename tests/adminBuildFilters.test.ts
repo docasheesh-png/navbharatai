@@ -16,7 +16,9 @@ describe('the All-builds filters actually re-fetch (admin screenshot 2026-09-13)
   // from the Load button and the search box's Enter key, so the chip highlighted and the list never
   // changed — four dead controls from one missing effect.
   it('an effect re-fetches when a discrete filter changes', () => {
-    expect(DASH).toMatch(/useEffect\(\(\) => \{\s*if \(activeTab !== 'reports'\) return;[\s\S]{0,120}fetchAllBuildsRef\.current\(\)/);
+    // PIN UPDATED 2026-10-15: the All builds card moved from the Build tab ('reports') to the Apps page ('apps'), so
+    // the effect that loads it follows it. The property is unchanged: a discrete filter re-fetches.
+    expect(DASH).toMatch(/useEffect\(\(\) => \{\s*if \(activeTab !== 'apps'\) return;[^\n]*\n[\s\S]{0,120}fetchAllBuildsRef\.current\(\)/);
     // `allBuildsTier` joined them when the paid/free filter was added (admin 2026-09-14) — it is a
     // discrete control too, so it must re-fetch exactly like the other three.
     expect(DASH).toMatch(/\}, \[activeTab, allBuildsStatus, allBuildsDate, allBuildsUid, allBuildsTier\]\)/);

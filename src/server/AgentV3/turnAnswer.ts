@@ -36,6 +36,7 @@
 
 import { looksLikeRefusal } from '../lib/promptSafety';
 import { turnAskedTheUser, turnPointedToPlatformFeature } from './nudgeToBuild';
+import { adRemovalAnsweredNotBuilt, type OwnAdNetwork } from './thirdPartyLimits';
 
 export interface TurnAnswer {
   /** The model said it cannot or will not do what was asked. */
@@ -44,21 +45,53 @@ export interface TurnAnswer {
   asked: boolean;
   /** The user asked for a phone package and the model pointed to NavBharatAI's own APK flow (autopsy 0c2a987a). */
   pointed: boolean;
-}
-
-/** Read the model's own answer. Call it on the MODEL's text, before any platform rewrite. */
-export function readTurnAnswer(answer: string | null | undefined, request?: string | null): TurnAnswer {
-  return { declined: looksLikeRefusal(answer), asked: turnAskedTheUser(answer), pointed: turnPointedToPlatformFeature(answer, request) };
+  /**
+   * The turn's whole ask was to remove ads that live inside another service's player, the model said so, and
+   * it changed nothing — the one correct outcome, filed until Q-1019 as a failed build. Decided from MEASURED
+   * project facts (see `adRemovalAnsweredNotBuilt`), never from reading the model's prose for a refusal.
+   */
+  notOurs: boolean;
 }
 
 /**
- * Did the model answer the user instead of building? A refusal, a question and a pointer to the
- * platform's own feature (autopsy 0c2a987a) are all FINAL answers for this turn — the rule
- * `shouldRetryEmptyBuild` already states for the first two — so a platform sentence must never be
- * written over any of them.
+ * The project facts a turn's answer is judged against. Omitted (or partly omitted) ⇒ `notOurs` is false and
+ * every other field is unchanged, so a caller that does not have them behaves exactly as before.
+ */
+export interface TurnAnswerFacts {
+  /** An edit of an app that exists. */
+  editTurn?: boolean;
+  /** An import / survey turn — the user's own code. */
+  importTurn?: boolean;
+  /** The WHOLE project's ad-serving players (`projectAdServingPlayers`). */
+  players?: readonly string[] | null;
+  /** The WHOLE project's OWN ad networks (`projectOwnAdSdks`). */
+  ownAds?: readonly OwnAdNetwork[] | null;
+}
+
+/** Read the model's own answer. Call it on the MODEL's text, before any platform rewrite. */
+export function readTurnAnswer(answer: string | null | undefined, request?: string | null, facts?: TurnAnswerFacts): TurnAnswer {
+  return {
+    declined: looksLikeRefusal(answer),
+    asked: turnAskedTheUser(answer),
+    pointed: turnPointedToPlatformFeature(answer, request),
+    notOurs: adRemovalAnsweredNotBuilt({
+      prompt: request, modelText: answer,
+      editTurn: facts?.editTurn === true, importTurn: facts?.importTurn === true,
+      players: facts?.players ?? [], ownAds: facts?.ownAds ?? [],
+    }),
+  };
+}
+
+/**
+ * Did the model answer the user instead of building? A refusal, a question, a pointer to the
+ * platform's own feature (autopsy 0c2a987a) and "those ads are not the app's to switch off" (Q-1019) are
+ * all FINAL answers for this turn — the rule `shouldRetryEmptyBuild` already states for the first two — so
+ * a platform sentence must never be written over any of them.
  */
 export function answeredWithoutBuilding(answer: TurnAnswer): boolean {
-  return answer.declined || answer.asked || answer.pointed;
+  // `notOurs` joined this list for the reason the first three are on it (Q-1019): the one correct outcome of
+  // the turn was a sentence, so a platform sentence must never be written over it.
+  return answer.declined || answer.asked || answer.pointed || answer.notOurs;
 }
 
 /**

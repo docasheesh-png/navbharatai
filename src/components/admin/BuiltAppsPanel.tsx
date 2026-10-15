@@ -52,13 +52,15 @@ export interface BuiltAppsPanelProps {
   ownerModerated?: { tick: number } | null;
   /** After a ban that left the person other live apps: their apps are opened here. */
   focusOwner?: { uid: string; tick: number } | null;
+  /** The "v" button on every card (admin 2026-10-15): open THIS app's build reports. Absent = no button. */
+  onViewReport?: (app: { workspaceId: string; appName: string }) => void;
 }
 
 function fmtDate(ms: number): string {
   return ms > 0 ? new Date(ms).toLocaleDateString('en-IN', { dateStyle: 'medium' }) : '';
 }
 
-export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAccount, toast, onModerate, moderated, onModerateOwner, ownerModerated, focusOwner }) => {
+export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAccount, toast, onModerate, moderated, onModerateOwner, ownerModerated, focusOwner, onViewReport }) => {
   const [rows, setRows] = useState<BuiltAppRow[] | null>(null);
   const [orphaned, setOrphaned] = useState<BuiltAppRow[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -233,6 +235,18 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* "v" — this app's build reports (admin 2026-10-15). On EVERY card, the orphaned ones too: the report
+                outlives the workspace, and an app the owner deleted is exactly when the admin wants to read it. */}
+            {onViewReport && (
+              <button
+                onClick={() => onViewReport({ workspaceId: d.workspaceId, appName: name || d.workspaceId })}
+                title="View build report"
+                aria-label={`View build report of ${name || d.workspaceId}`}
+                className="inline-flex items-center justify-center min-w-[30px] min-h-[30px] px-2 py-1.5 rounded-lg bg-raised border border-line text-[11px] font-black lowercase text-accent-text hover:border-accent"
+              >
+                v
+              </button>
+            )}
             <button
               onClick={() => void openPreview(d)}
               disabled={plan.source === 'none'}

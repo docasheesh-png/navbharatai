@@ -10,6 +10,7 @@ import { publishedAppRows, liveAppCount } from '../lib/publishedAppsView';
 import { platformMarginView } from '../lib/platformMarginView';
 import { adultOptInSummary } from '../lib/adultContent';
 import { confirmCopy, ownerConfirmCopy, MODERATION_ROUTE, type ModerationAction } from '../lib/adminAppModeration';
+import { WorkspaceBuildReports } from './admin/WorkspaceBuildReports';
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 import { BotsLedgerPanel } from './admin/BotsLedgerPanel';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
@@ -371,6 +372,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }
   const [allBuilds, setAllBuilds] = useState<AllBuildRow[]>([]);
   const [allBuildsLoading, setAllBuildsLoading] = useState(false);
+  /** The app whose build reports the "v" button on an Apps card opened (admin 2026-10-15). */
+  const [reportApp, setReportApp] = useState<{ workspaceId: string; appName: string } | null>(null);
+  useEffect(() => {
+    if (!reportApp) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setReportApp(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [reportApp]);
   const [allBuildsSearch, setAllBuildsSearch] = useState('');
   // Four filters, deliberately (see server/lib/buildListFilter.ts for why not more).
   const [allBuildsStatus, setAllBuildsStatus] = useState<'all' | 'failed' | 'succeeded' | 'unknown'>('all');
@@ -1542,7 +1551,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // would hit the endpoint on every letter. It keeps its Enter/Load trigger, and the ref below is
   // what lets this effect still send whatever the box currently holds.
   useEffect(() => {
-    if (activeTab !== 'reports') return;
+    if (activeTab !== 'apps') return; // the All builds card lives on the Apps page since 2026-10-15
     void fetchAllBuildsRef.current();
   }, [activeTab, allBuildsStatus, allBuildsDate, allBuildsUid, allBuildsTier]);
   useEffect(() => { if (activeTab === 'userreports') fetchUserReports(); }, [activeTab, fetchUserReports]);
@@ -4016,172 +4025,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               {/* FAILURE CATEGORY (admin 2026-09-16): which app TYPE fails most, and WHY — grouped from
                   the same durable per-workspace records the All Builds list below reads. */}
               <FailureCategoryCard adminToken={adminToken} />
-              {/* ALL BUILDS (admin 2026-08-06): every user's every build — 0→100% report downloadable
-                  WITHOUT the user pressing Report. The engine already records every build durably;
-                  this is the admin's global window over that record. */}
-              <div className="bg-card border border-indigo-500/20 rounded-[1.25rem] p-4 space-y-3">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <FileText className="w-4 h-4 text-accent-text" />
-                  <h4 className="text-sm font-black text-ink tracking-tight">All builds — every user, no submit needed</h4>
-                  <span className="text-[10px] text-muted font-bold">full 0→100% report per build, straight from the engine's own record</span>
-                </div>
-                {/* THE SAME COMPONENT THE USER-SUBMITTED INBOX RENDERS (admin 2026-09-14). It used
-                    to be ~100 lines of bespoke JSX here and a different bar over there; now one
-                    component draws both and one pure module (reportListFilter.ts) decides what each
-                    control MEANS. That split is the point: a shared component keeps them LOOKING the
-                    same, a shared module keeps them AGREEING — and only the second can be tested.
-
-                    ⚠️ This list's filters go to the SERVER (see fetchAllBuilds): a date bound applied
-                    in the browser would make "last 30 days" secretly mean "the newest 500 rows, some
-                    of which are recent". The inbox filters in the browser because it already holds
-                    every row. Same meanings, applied where each list can afford them. */}
-                <ReportFilterBar
-                  value={{ query: allBuildsSearch, status: allBuildsStatus, date: allBuildsDate, uid: allBuildsUid, tier: allBuildsTier }}
-                  onChange={(next) => {
-                    setAllBuildsSearch(next.query);
-                    setAllBuildsStatus(next.status);
-                    setAllBuildsDate(next.date);
-                    setAllBuildsUid(next.uid);
-                    setAllBuildsTier(next.tier);
-                    // ⚠️ EXPLICIT OVERRIDES, and that is not a convenience. React state is set
-                    // asynchronously, so fetching straight after the setters above would send the
-                    // PREVIOUS values — the list would lag one click behind every control.
-                    // Typing is deliberately NOT auto-fetched: that would be one request per
-                    // keystroke. Enter (onSubmitSearch) and Load are what submit the search box.
-                    if (next.query === allBuildsSearch) {
-                      void fetchAllBuilds({ q: next.query, status: next.status, date: next.date, uid: next.uid, tier: next.tier });
-                    }
-                  }}
-                  onSubmitSearch={() => void fetchAllBuilds()}
-                  counts={allBuildsCounts}
-                  users={allBuildsUsers}
-                  trailing={(
-                    <button
-                      onClick={() => void fetchAllBuilds()}
-                      className="shrink-0 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-on-accent"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${allBuildsLoading ? 'animate-spin' : ''}`} /> Load
-                    </button>
-                  )}
-                />
-                <p className="text-[10px] text-muted">
-                  Showing {allBuilds.length}
-                  {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
-                    /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
-                       list has not looked at, so "0 failed" must not read as "none exist". */
-                    ? ` of the ${allBuildsFetched.fetched} most recent — narrow the date to see further back`
-                    : allBuildsFetched ? ` of ${allBuildsFetched.fetched} loaded` : ''}
-                </p>
-
-                {allBuilds.length === 0 && !allBuildsLoading && (
-                  <p className="text-[11px] text-muted">Press Load to list the most recently active builds across all users.</p>
-                )}
-                <div className="space-y-1.5 max-h-[28rem] overflow-y-auto">
-                  {pagedAllBuilds.visible.map((b) => (
-                    <div key={b.workspaceId} className="border border-line rounded-xl overflow-hidden">
-                      <button
-                        onClick={() => void expandWorkspaceBuilds(b.workspaceId)}
-                        className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-raised"
-                      >
-                        <span className={`shrink-0 w-2 h-2 rounded-full ${b.ok === true ? 'bg-emerald-400' : b.ok === false ? 'bg-rose-400' : 'bg-faint'}`} />
-                        <span className="flex-1 min-w-0">
-                          <span className="block text-[12px] font-bold text-ink truncate">{b.prompt || b.summary || b.workspaceId}</span>
-                          {/* The person first, in words. This line used to read `user RyN1xjbfr…`,
-                              which is the Firebase UID -- correct, unreadable, and impossible to act
-                              on. The uid stays available (title + workspace id) for matching against
-                              logs, but it is no longer the only thing shown. */}
-                          <span className="block text-[10px] truncate">
-                            <span
-                              className={b.owner?.anonymous ? 'text-warn' : 'text-info'}
-                              title={b.ownerUid || 'no user id'}
-                            >
-                              {b.owner?.label || (b.ownerUid ? `id ${b.ownerUid.slice(0, 8)}…` : 'Signed-out user')}
-                            </span>
-                            <span className="text-muted">
-                              {' · '}{b.savedAt ? new Date(b.savedAt).toLocaleString() : ''}
-                            </span>
-                          </span>
-                          <span className="block text-[9px] text-faint font-mono truncate">{b.workspaceId}</span>
-                        </span>
-                        {/* ALREADY TAKEN? (admin 2026-09-14). The badge says only what we KNOW — that
-                            the report left the admin's hands — never "someone is fixing it", which we
-                            cannot know. Clicking it un-marks: a mis-tap that could not be undone would
-                            HIDE a report that still needs work, the very failure this prevents. */}
-                        {(() => {
-                          const st = reportStatus(b.triage);
-                          if (st === 'new') return null; // an untouched row needs no badge — the list is already dense
-                          return (
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              title={`${reportStatusHint(b.triage, (ms) => new Date(ms).toLocaleString())} — press to un-mark`}
-                              onClick={(e) => { e.stopPropagation(); void markBuildTaken(b.workspaceId, { downloaded: false }); }}
-                              onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void markBuildTaken(b.workspaceId, { downloaded: false }); } }}
-                              className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-1 rounded-full border ${st === 'fixed' ? 'border-emerald-500/40 text-success' : 'border-sky-500/40 text-info'}`}
-                            >{st === 'fixed' ? reportStatusLabel(st) : '📤 Taken'}</span>
-                          );
-                        })()}
-                        {/* Sender · email · time · user type · charge · status — off the row, behind
-                            one button, from the SAME pure function the other list uses. */}
-                        <ReportInfoButton facts={allBuildRowFacts(b, Date.now())} />
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => { e.stopPropagation(); void copyWorkspaceReport(b.workspaceId); }}
-                          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void copyWorkspaceReport(b.workspaceId); } }}
-                          className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border border-emerald-500/40 text-success hover:bg-emerald-500/10"
-                        >
-                          ⧉ Copy session
-                        </span>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => { e.stopPropagation(); void downloadWorkspaceReport(b.workspaceId); }}
-                          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void downloadWorkspaceReport(b.workspaceId); } }}
-                          className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border border-indigo-500/40 text-accent-text hover:bg-indigo-500/10"
-                        >
-                          ⬇ Full session
-                        </span>
-                      </button>
-                      {expandedWorkspace === b.workspaceId && (
-                        <div className="border-t border-line bg-well px-3 py-2 space-y-1">
-                          {expandedLoading && <p className="text-[11px] text-muted">Loading builds…</p>}
-                          {!expandedLoading && expandedHistory.length === 0 && (
-                            <p className="text-[11px] text-muted">Only the latest report exists for this workspace — use “Full session” above.</p>
-                          )}
-                          {/* NUMBERED 1st, 2nd, 3rd … in BUILD order (admin 2026-08-09). The list itself
-                              arrives newest-first, so the position is counted from the far end — that way
-                              "1st part" here means the same build as "1st part" in the session download,
-                              which is ordered oldest → newest. */}
-                          {!expandedLoading && expandedHistory.map((h, i) => (
-                            <div key={h.id} className="flex items-center gap-3 py-1">
-                              <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${h.ok === true ? 'bg-emerald-400' : h.ok === false ? 'bg-rose-400' : 'bg-faint'}`} />
-                              <span className="shrink-0 text-[10px] font-black text-muted tabular-nums w-9">{ordinal(expandedHistory.length - i)}</span>
-                              <span className="flex-1 min-w-0 text-[11px] text-body truncate">
-                                {h.startedAt ? new Date(h.startedAt).toLocaleString() : h.id} — {h.prompt || h.summary || 'build'}
-                              </span>
-                              <button
-                                onClick={() => void copyWorkspaceReport(b.workspaceId, h.id)}
-                                className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border border-emerald-500/30 text-success hover:text-ink hover:bg-emerald-500/10"
-                              >
-                                ⧉ Copy
-                              </button>
-                              <button
-                                onClick={() => void downloadWorkspaceReport(b.workspaceId, h.id)}
-                                className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border border-line text-muted hover:text-ink hover:bg-raised"
-                              >
-                                ⬇ This build
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  <LoadMore list={pagedAllBuilds} label="apps" />
-                </div>
-              </div>
-
               {/* FIRST-PASS QUALITY (ROADMAP #1 Phase 0.2) — the headline engine number. A build that
                   healed itself is NOT counted as a success (50/50 law: a heal is a red flag), so this
                   deliberately reads lower than the delivered rate shown beside it. Honest by
@@ -4876,7 +4719,198 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 onModerateOwner={(ownerUid, action, count, more) => { setModerating({ workspaceId: ownerUid, action, ownerUid, count, more }); setModerateReason(''); }}
                 ownerModerated={ownerModerated}
                 focusOwner={focusOwner}
+                onViewReport={setReportApp}
               />
+              {reportApp && (
+                <div role="dialog" aria-modal="true" aria-label={`Build reports of ${reportApp.appName}`} className="fixed inset-0 z-[300] flex items-center justify-center p-4">
+                  <button type="button" aria-label="Close build reports" onClick={() => setReportApp(null)} className="absolute inset-0 bg-scrim backdrop-blur-sm cursor-default" />
+                  <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-card border border-line rounded-[1.25rem] p-5 space-y-3 shadow-2xl">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h4 className="text-sm font-black text-ink tracking-tight">Build reports</h4>
+                        <p className="text-[11px] font-bold text-body truncate">{reportApp.appName}</p>
+                        <p className="text-[9px] font-mono text-faint truncate">{reportApp.workspaceId}</p>
+                      </div>
+                      <button onClick={() => setReportApp(null)} className="shrink-0 min-h-[32px] px-3 rounded-lg border border-line text-[10px] font-black uppercase tracking-wider text-body hover:text-ink">Close</button>
+                    </div>
+                    <WorkspaceBuildReports
+                      workspaceId={reportApp.workspaceId}
+                      headers={headers}
+                      onCopy={(ws, buildId) => void copyWorkspaceReport(ws, buildId)}
+                      onDownload={(ws, buildId) => void downloadWorkspaceReport(ws, buildId)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* ALL BUILDS moved here from the Build tab (admin 2026-10-15: "apps ke andar hi all build report" and "build se
+                  All builds wala column hata dena"). Same card, same state, same filters and marks — only its address changed, so no
+                  report and no "taken" mark was lost. Each app above also has a "v" button that opens ITS builds. */}
+              {/* ALL BUILDS (admin 2026-08-06): every user's every build — 0→100% report downloadable
+                  WITHOUT the user pressing Report. The engine already records every build durably;
+                  this is the admin's global window over that record. */}
+              <div className="bg-card border border-indigo-500/20 rounded-[1.25rem] p-4 space-y-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <FileText className="w-4 h-4 text-accent-text" />
+                  <h4 className="text-sm font-black text-ink tracking-tight">All builds — every user, no submit needed</h4>
+                  <span className="text-[10px] text-muted font-bold">full 0→100% report per build, straight from the engine's own record</span>
+                </div>
+                {/* THE SAME COMPONENT THE USER-SUBMITTED INBOX RENDERS (admin 2026-09-14). It used
+                    to be ~100 lines of bespoke JSX here and a different bar over there; now one
+                    component draws both and one pure module (reportListFilter.ts) decides what each
+                    control MEANS. That split is the point: a shared component keeps them LOOKING the
+                    same, a shared module keeps them AGREEING — and only the second can be tested.
+
+                    ⚠️ This list's filters go to the SERVER (see fetchAllBuilds): a date bound applied
+                    in the browser would make "last 30 days" secretly mean "the newest 500 rows, some
+                    of which are recent". The inbox filters in the browser because it already holds
+                    every row. Same meanings, applied where each list can afford them. */}
+                <ReportFilterBar
+                  value={{ query: allBuildsSearch, status: allBuildsStatus, date: allBuildsDate, uid: allBuildsUid, tier: allBuildsTier }}
+                  onChange={(next) => {
+                    setAllBuildsSearch(next.query);
+                    setAllBuildsStatus(next.status);
+                    setAllBuildsDate(next.date);
+                    setAllBuildsUid(next.uid);
+                    setAllBuildsTier(next.tier);
+                    // ⚠️ EXPLICIT OVERRIDES, and that is not a convenience. React state is set
+                    // asynchronously, so fetching straight after the setters above would send the
+                    // PREVIOUS values — the list would lag one click behind every control.
+                    // Typing is deliberately NOT auto-fetched: that would be one request per
+                    // keystroke. Enter (onSubmitSearch) and Load are what submit the search box.
+                    if (next.query === allBuildsSearch) {
+                      void fetchAllBuilds({ q: next.query, status: next.status, date: next.date, uid: next.uid, tier: next.tier });
+                    }
+                  }}
+                  onSubmitSearch={() => void fetchAllBuilds()}
+                  counts={allBuildsCounts}
+                  users={allBuildsUsers}
+                  trailing={(
+                    <button
+                      onClick={() => void fetchAllBuilds()}
+                      className="shrink-0 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-on-accent"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${allBuildsLoading ? 'animate-spin' : ''}`} /> Load
+                    </button>
+                  )}
+                />
+                <p className="text-[10px] text-muted">
+                  Showing {allBuilds.length}
+                  {allBuildsFetched && allBuildsFetched.fetched >= allBuildsFetched.limit
+                    /* Honest about the fetch ceiling: at the limit there may be OLDER builds this
+                       list has not looked at, so "0 failed" must not read as "none exist". */
+                    ? ` of the ${allBuildsFetched.fetched} most recent — narrow the date to see further back`
+                    : allBuildsFetched ? ` of ${allBuildsFetched.fetched} loaded` : ''}
+                </p>
+
+                {allBuilds.length === 0 && !allBuildsLoading && (
+                  <p className="text-[11px] text-muted">Press Load to list the most recently active builds across all users.</p>
+                )}
+                <div className="space-y-1.5 max-h-[28rem] overflow-y-auto">
+                  {pagedAllBuilds.visible.map((b) => (
+                    <div key={b.workspaceId} className="border border-line rounded-xl overflow-hidden">
+                      <button
+                        onClick={() => void expandWorkspaceBuilds(b.workspaceId)}
+                        className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-raised"
+                      >
+                        <span className={`shrink-0 w-2 h-2 rounded-full ${b.ok === true ? 'bg-emerald-400' : b.ok === false ? 'bg-rose-400' : 'bg-faint'}`} />
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-[12px] font-bold text-ink truncate">{b.prompt || b.summary || b.workspaceId}</span>
+                          {/* The person first, in words. This line used to read `user RyN1xjbfr…`,
+                              which is the Firebase UID -- correct, unreadable, and impossible to act
+                              on. The uid stays available (title + workspace id) for matching against
+                              logs, but it is no longer the only thing shown. */}
+                          <span className="block text-[10px] truncate">
+                            <span
+                              className={b.owner?.anonymous ? 'text-warn' : 'text-info'}
+                              title={b.ownerUid || 'no user id'}
+                            >
+                              {b.owner?.label || (b.ownerUid ? `id ${b.ownerUid.slice(0, 8)}…` : 'Signed-out user')}
+                            </span>
+                            <span className="text-muted">
+                              {' · '}{b.savedAt ? new Date(b.savedAt).toLocaleString() : ''}
+                            </span>
+                          </span>
+                          <span className="block text-[9px] text-faint font-mono truncate">{b.workspaceId}</span>
+                        </span>
+                        {/* ALREADY TAKEN? (admin 2026-09-14). The badge says only what we KNOW — that
+                            the report left the admin's hands — never "someone is fixing it", which we
+                            cannot know. Clicking it un-marks: a mis-tap that could not be undone would
+                            HIDE a report that still needs work, the very failure this prevents. */}
+                        {(() => {
+                          const st = reportStatus(b.triage);
+                          if (st === 'new') return null; // an untouched row needs no badge — the list is already dense
+                          return (
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              title={`${reportStatusHint(b.triage, (ms) => new Date(ms).toLocaleString())} — press to un-mark`}
+                              onClick={(e) => { e.stopPropagation(); void markBuildTaken(b.workspaceId, { downloaded: false }); }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void markBuildTaken(b.workspaceId, { downloaded: false }); } }}
+                              className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-1.5 py-1 rounded-full border ${st === 'fixed' ? 'border-emerald-500/40 text-success' : 'border-sky-500/40 text-info'}`}
+                            >{st === 'fixed' ? reportStatusLabel(st) : '📤 Taken'}</span>
+                          );
+                        })()}
+                        {/* Sender · email · time · user type · charge · status — off the row, behind
+                            one button, from the SAME pure function the other list uses. */}
+                        <ReportInfoButton facts={allBuildRowFacts(b, Date.now())} />
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); void copyWorkspaceReport(b.workspaceId); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void copyWorkspaceReport(b.workspaceId); } }}
+                          className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border border-emerald-500/40 text-success hover:bg-emerald-500/10"
+                        >
+                          ⧉ Copy session
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); void downloadWorkspaceReport(b.workspaceId); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void downloadWorkspaceReport(b.workspaceId); } }}
+                          className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2.5 py-1.5 rounded-lg border border-indigo-500/40 text-accent-text hover:bg-indigo-500/10"
+                        >
+                          ⬇ Full session
+                        </span>
+                      </button>
+                      {expandedWorkspace === b.workspaceId && (
+                        <div className="border-t border-line bg-well px-3 py-2 space-y-1">
+                          {expandedLoading && <p className="text-[11px] text-muted">Loading builds…</p>}
+                          {!expandedLoading && expandedHistory.length === 0 && (
+                            <p className="text-[11px] text-muted">Only the latest report exists for this workspace — use “Full session” above.</p>
+                          )}
+                          {/* NUMBERED 1st, 2nd, 3rd … in BUILD order (admin 2026-08-09). The list itself
+                              arrives newest-first, so the position is counted from the far end — that way
+                              "1st part" here means the same build as "1st part" in the session download,
+                              which is ordered oldest → newest. */}
+                          {!expandedLoading && expandedHistory.map((h, i) => (
+                            <div key={h.id} className="flex items-center gap-3 py-1">
+                              <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${h.ok === true ? 'bg-emerald-400' : h.ok === false ? 'bg-rose-400' : 'bg-faint'}`} />
+                              <span className="shrink-0 text-[10px] font-black text-muted tabular-nums w-9">{ordinal(expandedHistory.length - i)}</span>
+                              <span className="flex-1 min-w-0 text-[11px] text-body truncate">
+                                {h.startedAt ? new Date(h.startedAt).toLocaleString() : h.id} — {h.prompt || h.summary || 'build'}
+                              </span>
+                              <button
+                                onClick={() => void copyWorkspaceReport(b.workspaceId, h.id)}
+                                className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border border-emerald-500/30 text-success hover:text-ink hover:bg-emerald-500/10"
+                              >
+                                ⧉ Copy
+                              </button>
+                              <button
+                                onClick={() => void downloadWorkspaceReport(b.workspaceId, h.id)}
+                                className="shrink-0 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg border border-line text-muted hover:text-ink hover:bg-raised"
+                              >
+                                ⬇ This build
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <LoadMore list={pagedAllBuilds} label="apps" />
+                </div>
+              </div>
 
               {/* Restoring a removed app is built in PR 3 (the server route exists; this screen does not offer it yet). */}
             </div>

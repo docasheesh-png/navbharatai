@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { WorkspaceBuildReports } from './WorkspaceBuildReports';
 import { Globe, Search, ExternalLink, Eye, X, Ban as BanIcon, RotateCcw } from 'lucide-react';
 import {
   canBan, canUnpublish, isRestorableStatus, matchesBuiltApp, ownerModerationTargets, previewPlan, publishStateView, replaceRow, type BuiltAppRow, type ModerationAction, type OwnerAction,
@@ -52,13 +53,19 @@ export interface BuiltAppsPanelProps {
   ownerModerated?: { tick: number } | null;
   /** After a ban that left the person other live apps: their apps are opened here. */
   focusOwner?: { uid: string; tick: number } | null;
+  /**
+   * The "v" button on every card (admin 2026-10-15) opens THIS app's build reports. Both handlers must be given
+   * for the button to exist: they are the dashboard's own copy / download, which also write the "taken" mark.
+   */
+  onCopyBuildReport?: (workspaceId: string, buildId?: string) => void;
+  onDownloadBuildReport?: (workspaceId: string, buildId?: string) => void;
 }
 
 function fmtDate(ms: number): string {
   return ms > 0 ? new Date(ms).toLocaleDateString('en-IN', { dateStyle: 'medium' }) : '';
 }
 
-export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAccount, toast, onModerate, moderated, onModerateOwner, ownerModerated, focusOwner }) => {
+export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAccount, toast, onModerate, moderated, onModerateOwner, ownerModerated, focusOwner, onCopyBuildReport, onDownloadBuildReport }) => {
   const [rows, setRows] = useState<BuiltAppRow[] | null>(null);
   const [orphaned, setOrphaned] = useState<BuiltAppRow[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -71,6 +78,14 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [preview, setPreview] = useState<{ row: BuiltAppRow; html: string | null; loading: boolean; error: string; kind: string } | null>(null);
+  /** The app whose build reports the "v" button opened (admin 2026-10-15). */
+  const [reportApp, setReportApp] = useState<{ workspaceId: string; appName: string } | null>(null);
+  useEffect(() => {
+    if (!reportApp) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setReportApp(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [reportApp]);
 
   const load = useCallback(async (opts: { cursor?: string | null; q: string; status: string; append: boolean }) => {
     setLoading(true);
@@ -233,6 +248,18 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* "v" — this app's build reports (admin 2026-10-15). On EVERY card, the orphaned ones too: the report
+                outlives the workspace, and an app the owner deleted is exactly when the admin wants to read it. */}
+            {onCopyBuildReport && onDownloadBuildReport && (
+              <button
+                onClick={() => setReportApp({ workspaceId: d.workspaceId, appName: name || d.workspaceId })}
+                title="View build report"
+                aria-label={`View build report of ${name || d.workspaceId}`}
+                className="inline-flex items-center justify-center min-w-[30px] min-h-[30px] px-2 py-1.5 rounded-lg bg-raised border border-line text-[11px] font-black lowercase text-accent-text hover:border-accent"
+              >
+                v
+              </button>
+            )}
             <button
               onClick={() => void openPreview(d)}
               disabled={plan.source === 'none'}
@@ -481,6 +508,28 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
           </div>
         );
         // No document ⇒ nothing to portal into (a server render), so render in place.
+        return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body);
+      })()}
+      {reportApp && onCopyBuildReport && onDownloadBuildReport && (() => {
+        // THE SHEET CONTRACT again (tests/everyPopupClearsTheChrome, mobileScrollGeometry): the overlay clears the notch
+        // and the tab bar, the card is capped by the room the overlay really has (never a bare `vh`), and it portals to
+        // the body like the preview above, so no ancestor's transform or blur becomes its containing block.
+        const sheet = (
+          <div role="dialog" aria-modal="true" aria-label={`Build reports of ${reportApp.appName}`} className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 z-[9998] flex items-center justify-center sm:p-6 bg-scrim backdrop-blur-sm">
+            <button type="button" aria-label="Close build reports" onClick={() => setReportApp(null)} className="absolute inset-0 cursor-default" />
+            <div className="nb-sheet relative w-full max-w-2xl overflow-y-auto bg-card border border-line rounded-[1.25rem] p-5 space-y-3 shadow-2xl">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h4 className="text-sm font-black text-ink tracking-tight">Build reports</h4>
+                  <p className="text-[11px] font-bold text-body truncate">{reportApp.appName}</p>
+                  <p className="text-[9px] font-mono text-faint truncate">{reportApp.workspaceId}</p>
+                </div>
+                <button onClick={() => setReportApp(null)} className="shrink-0 min-h-[32px] px-3 rounded-lg border border-line text-[10px] font-black uppercase tracking-wider text-body hover:text-ink">Close</button>
+              </div>
+              <WorkspaceBuildReports workspaceId={reportApp.workspaceId} headers={headers} onCopy={onCopyBuildReport} onDownload={onDownloadBuildReport} />
+            </div>
+          </div>
+        );
         return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body);
       })()}
     </div>

@@ -40,7 +40,8 @@ import { offerBugHunt, BUG_HUNT_WAIT_MS } from '../AgentV3/optionalBugHunt';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
-import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild } from '../AgentV3/goldenScaffolds/registry';
+import { isInertCommand } from '../AgentV3/inertCommand';
+import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp } from '../AgentV3/goldenScaffolds/registry';
 import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
@@ -419,7 +420,7 @@ import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/ca
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { shellModuleFor, shellStillAwaited, recordModuleDelivery, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { shellModuleFor, shellStillAwaited, recordModuleDelivery, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapDecision, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout } from '../AgentV3/asyncUtils';
@@ -13623,8 +13624,21 @@ async function noteBuildOutcome(
      * governs the whole request.
      */
     let futilityArmed = false;
-    /** A COMPLETED command, from ANY lane — the one door both the architect and its sub-agents use. */
-    const noteCommandCompleted = (): void => { commandsRun += 1; };
+    /**
+     * A COMPLETED command, from ANY lane — the one door both the architect and its sub-agents use.
+     *
+     * 🔴 AND A COMMAND THAT CANNOT CHANGE ANYTHING IS NOT PROGRESS (build `413d29a1`, Q-1081). The futility
+     * breaker's three progress signals are a file written, a command completed, or a plan step done — and
+     * this counted EVERY completed command. `: > /tmp/x && node -e 'console.log("noop")'` exits 0, so it
+     * completes, so the breaker saw continuous progress through 13.4 minutes and ~170 turns that produced
+     * nothing. The breaker's own header says a provider call is not progress "because progress is what the
+     * build PRODUCED, not what it attempted"; an inert command is the same argument one step further in.
+     * `isInertCommand` is the shared predicate — the loop guard asks it too (inertCommand.ts).
+     */
+    const noteCommandCompleted = (command?: string): void => {
+      if (isInertCommand(command)) return;
+      commandsRun += 1;
+    };
     // ⏸️ The user's thinking time is not the build's (autopsy 1219c639) — see `waitForUser`. When a wait
     // ends, every live clock moves forward by it, so the countdown, the pace measurements and the futility
     // window carry on from where the BUILD was, not from where the wall clock is.
@@ -14578,19 +14592,24 @@ async function noteBuildOutcome(
           // minutes before the first line of code. Project mode is the stronger strategy for a prompt it
           // reads as a mega-project (it builds the WHOLE thing across turns; a roadmap narrows it to step
           // 1), so it owns the build and the roadmap stands down, said aloud in the report.
-          const projectModeOwns = roadmapStandsDownForProjectMode({
+          // AND NOBODY PLANS AN APP THAT IS ALREADY FINISHED (autopsy e3135b7b — the Quran reader). The gate read
+          // only the project-mode half; a seeded simple-tier template is the other thing that already owns a build,
+          // and it is the FINISHED app. One predicate answers both, so a third owner cannot be forgotten at this
+          // call site — roadmapStandsDown. Its sibling gate is the project planner's, which reports the same fact
+          // through projectModeDiagnosis ('template-is-the-app').
+          const roadmap = roadmapDecision({
             projectModeOn: projectModeEnabled(process.env, { userId, email }),
             planFirst,
             megaProject: appScope.projectMode,
+            templateIsTheApp: templateIsTheFinishedApp(seededScaffold),
+            decisionIsAnalyze: scope.decision === 'analyze',
+            disputed: !!dispute,
+            signals: scope.signals,
           });
-          if (projectModeOwns && scope.decision === 'analyze' && !dispute) {
-            buildDiag.record({
-              phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_STOOD_DOWN', autoResolved: true,
-              message: 'Mega-app roadmap stood down: Software Project Mode will decompose this build, so one planner runs instead of two.',
-              detail: `scope signals: ${scope.signals.join('; ')}`,
-            });
+          if (roadmap.record) {
+            buildDiag.record({ phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_STOOD_DOWN', autoResolved: true, ...roadmap.record });
           }
-          if (scope.decision === 'analyze' && !dispute && !projectModeOwns) {
+          if (roadmap.runPlanner) {
             const rmStartedAt = Date.now();
             let rmProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
             const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({
@@ -15744,7 +15763,7 @@ async function noteBuildOutcome(
         onCommand: (c) => {
           // A COMPLETED command is one of the futility breaker's three progress signals — counted here,
           // at the one hook that fires on completion, so an attempt can never be mistaken for progress.
-          noteCommandCompleted();
+          noteCommandCompleted(c?.command);
           try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ }
         },
         onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
@@ -16078,7 +16097,7 @@ async function noteBuildOutcome(
         // ⚠️ AND COUNT IT (autopsy a2b9c802): this hook only recorded, so the futility breaker never saw
         // one command the ARCHITECT ran — only sub-agents' — and read a build that had just run `ls`
         // and was mid-`npm install` as "0 commands".
-        (c) => { noteCommandCompleted(); try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
+        (c) => { noteCommandCompleted(c?.command); try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
@@ -17907,6 +17926,7 @@ async function noteBuildOutcome(
           // The text the gate sized and the verdict it read — never a second derivation (Q-138).
           prompt: planning.sizing,
           scope: { large: appScope.large, signals: appScope.scope.signals },
+          templateIsTheApp: templateIsTheFinishedApp(seededScaffold),
         });
         buildDiag.record({ phase: 'plan', severity: 'info', code: pmDiag.code, message: pmDiag.message, detail: pmDiag.detail, autoResolved: true });
       } catch { /* diagnostics are best-effort and must never touch a build */ }
@@ -17966,7 +17986,10 @@ async function noteBuildOutcome(
             ppLast.outputTokens = t.usage.outputTokens;
             return t.text;
           };
-          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && appScope.projectMode) {
+          // `!templateIsTheApp`: a seeded simple-tier template IS the finished app, so there is nothing to split
+          // into modules (autopsy e3135b7b — `panchang` is such a chip and reached exactly this line). The report
+          // says so through projectModeDiagnosis's 'template-is-the-app'.
+          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && appScope.projectMode && !templateIsTheFinishedApp(seededScaffold)) {
             ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);

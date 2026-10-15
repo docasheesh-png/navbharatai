@@ -6,6 +6,10 @@
 // the `evaluate` tool can report concrete placeholder/stub/TODO defects for the
 // team to fix — never a synthetic "looks complete".
 
+
+// The keys screen's address comes from the one source of truth, never from prose here.
+import { SECRETS_SCREEN } from '../AppContext/navPaths';
+
 export type AuthenticitySeverity = 'high' | 'medium' | 'low';
 
 export interface AuthenticityIssue {
@@ -378,7 +382,7 @@ export function authenticityRepairInstruction(issues: AuthenticityIssue[]): stri
     '  • If the real implementation needs a key, an account or a provider the app does not have (a login,',
     '    a payment, an OTP, an email), do NOT invent one: keep the feature, render a clearly visible RED line',
     '    on that screen in the user\'s language saying it is a demo and which key makes it real',
-    '    (NavBharatAI → ⋮ More → Keys & Secrets), and say so in your final message.',
+    `    (NavBharatAI → ${SECRETS_SCREEN.canonical}, or ${SECRETS_SCREEN.inBuilderPath} without leaving the build), and say so in your final message.`,
     '  • Keep everything else that already works untouched; change only what is needed to complete these.',
     '',
     'Locations the scan flagged:',

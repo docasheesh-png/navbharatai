@@ -369,7 +369,7 @@ import { shouldAutoScaffoldE2e, e2eAutoScaffoldNote } from '../AgentV3/e2eAutoSc
 import { dormancyReason, reportableFileCount } from '../AgentV3/workspaceDormancy';
 import { uiWithoutBuildVerdict } from '../AgentV3/uiWithoutBuild';
 import { repeatedReadSummary, READ_LOOP_LIMIT } from '../AgentV3/repeatedReads';
-import { recordTodoOnlyTurns } from '../AgentV3/todoOnlyTurn';
+import { noteTodoOnlyTurn } from '../AgentV3/todoOnlyTurn';
 import { finishingPassMayRun, recordFinishingPassesHeld } from '../AgentV3/finishingPassesAtCap';
 import { APPEND_WITH_EMPTY_OLD_STRING } from '../AgentV3/appendByEdit';
 import { greenGuardUndidWork, withGreenGuardCorrection, type GreenGuardRestoreFacts } from '../AgentV3/greenGuardHonesty';
@@ -15704,6 +15704,11 @@ async function noteBuildOutcome(
       // smaller step cap on a proven-green app — see greenReviewPlan. One wiring, two spawns.
       // The request notes a writing sub-agent reads (see `requestNotesRule` below) — set once the ONE list exists.
       let childRequestNotes = '';
+      // 📋 ONE PLAN-ONLY-TURN TALLY FOR THE WHOLE BUILD (Q-1030). Declared HERE, above the sub-agent deps,
+      // because the lane that writes most of a build's files is the one that was missing from it. The report
+      // is handed the OBJECT and builds its line when it serializes — never from a number read mid-build.
+      const todoOnlyTally = { turns: 0, latencyMs: 0, firstInRun: 0 };
+      buildDiag.setTodoOnlyTally(todoOnlyTally);
       const subAgentDeps: SubAgentDeps = {
         ignoreRules: () => ignoreRulesForBuild,
         onFileWrite: (path, content) => onFileWriteForSubAgents?.(path, content),
@@ -15750,6 +15755,9 @@ async function noteBuildOutcome(
         onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
           try { buildDiag.recordLlmCall(c); } catch { /* diagnostics are best-effort */ }
         },
+        // The same omission, one measurement over (Q-1030): a specialist writes most of a build's files, so
+        // ITS plan-only turns are the ones TODO_ONLY_TURNS was most likely to be missing. A pure count.
+        onTodoOnlyTurn: (t) => noteTodoOnlyTurn(todoOnlyTally, t),
         // A specialist's end-of-turn notes (Q-066: its style hand-back) reach the same report as the architect's.
         onNote: (note: { code: string; message: string; detail?: string }) => {
           try { buildDiag.record({ phase: 'build', severity: 'info', code: note.code, message: note.message, detail: note.detail, autoResolved: true }); } catch { /* a note must never fail a build */ }
@@ -17017,7 +17025,6 @@ async function noteBuildOutcome(
             : {}),
         });
       } catch { /* hooks are optional — a dispatcher without them just refuses the meta tools */ }
-      const todoOnlyTally = { turns: 0, latencyMs: 0, firstInRun: 0 };
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -17110,11 +17117,7 @@ async function noteBuildOutcome(
         },
         // Turns spent only on update_todo (autopsy 9c612cdb, Q-987), summed across the runners that share these
         // opts and reported once as TODO_ONLY_TURNS after generation (main run, escalation, empty-build retry).
-        onTodoOnlyTurn: (t: { latencyMs: number; firstInRun?: boolean }) => {
-          todoOnlyTally.turns += 1;
-          if (t?.firstInRun) todoOnlyTally.firstInRun += 1;
-          todoOnlyTally.latencyMs += Math.max(0, Number(t?.latencyMs) || 0);
-        },
+        onTodoOnlyTurn: (t: { latencyMs: number; firstInRun?: boolean }) => noteTodoOnlyTurn(todoOnlyTally, t),
       };
       // Hoisted so the fast-lane fallback persistence below (SETTLED section) can reuse the SAME id —
       // if the agentic runner ends up actually persisting under it, the fallback is a no-op.
@@ -19648,11 +19651,11 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* an advisory finding must never affect a build */ }
-      // 📋 MODEL TURNS SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-987: 5 of 22 turns, 20.2 s). Recorded on
-      // every build, zero included, for the reason the block above states: a missing line reads as "none".
-      // It covers the generation runs above; a heal pass that starts after this line is not in its count.
-      // Info and never a cause — it describes our engine's pace, not the app.
-      recordTodoOnlyTurns(buildDiag, todoOnlyTally);
+      // 📋 MODEL TURNS SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-987: 5 of 22 turns, 20.2 s) used to be
+      // RECORDED HERE, and that was the bug: the integrity, design, compile, hooks, completion, guard,
+      // feature, vax, runtime, fix, repair and crit-fix runners all begin BELOW this line and all count into
+      // the same tally, so the line the admin read was written before most of the counting happened
+      // (Q-1030). The report now builds it when it serializes — see BuildDiagnostics.setTodoOnlyTally.
       // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
       // write time and how many errors were caught while the model still held the file. Reported
       // so the next autopsy can say whether the 7-minute endgame grind actually went away.

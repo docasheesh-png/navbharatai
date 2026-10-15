@@ -95983,3 +95983,29 @@ to Node 22 is its own change (run the suite on 22 first, then flip `ci.yml`).
 - Q-1070 closed as NOT-A-DEFECT: the Weak planner ladder puts Haiku second on purpose (admin, 2026-09-30, "planing ke liye haiku accha hai", `weakPlanHaikuEnabled`). The report's "rung 5 of 5" is that ladder, not a skip.
 - Q-1064 premise corrected (honesty): batching already exists (`write_files_batch`, 24 uses). The cost is token throughput on the KIMI rung; the options changed, so the "han" cannot be applied to it — three options are in the queue.
 - Q-1066 fixed (lag list read by both detectors) · Q-1068 diagnostics shipped, verdict waits for a report · Q-1069 fixed per the approved rule.
+
+### 2026-10-15 — Q-1030: a measurement whose error is unknown (TODO_ONLY_TURNS)
+
+**Root cause, two halves of one class** — *a count kept at one of N call sites is not kept*:
+1. `SubAgent.ts` threaded `onLlmCall` to its child runner but not `onTodoOnlyTurn`, so the lane that runs
+   most of a delegating build's turns was never in the tally. The exact sibling of the `onLlmCall` omission
+   fixed on 2026-09-19, in the same object, for the same reason.
+2. The route **recorded** the line the moment generation ended — above the integrity, design, compile, hooks,
+   completion, guard, feature, vax, runtime, fix, repair and crit-fix runners, every one of which spreads
+   `baseRunnerOpts` and counts into that same tally. The arithmetic was right; the number the admin read was
+   written before most of the counting happened.
+
+**Fix.** The arithmetic is one call (`noteTodoOnlyTurn`), so a lane joins the tally in one line; the sub-agent
+lane now does. The line is a property of SERIALIZATION, not of a moment in the route:
+`BuildDiagnostics.setTodoOnlyTally` holds the tally **by reference** and `report()` builds the line — the same
+lesson `resolveRecoveredOnSuccess` already learned in that file. Info, outside every tally and `problems`.
+
+**Locked by `tests/everyLaneCountsItsIdleTurns.test.ts`, which polices the CLASS, not the instance:** it finds
+every `new AgentRunner` in the server and requires each to feed the tally or prove from its own `tools:` line
+that it cannot write (the plan-approval lane, offered only `update_todo`). A thirteenth heal lane fails it until
+it is wired. Proven by five reversions (child hook removed · route hook removed · tally COPIED instead of held ·
+report never handed the tally · one heal lane drops `baseRunnerOpts`) — each failed, each restored.
+
+**Honest consequence for an earlier autopsy.** The "6 turns / 20.8 s" quoted for report 12ef62b2 was an
+under-count of unknown size. **Watch on the next real report: the figure should RISE on any delegating build**,
+and a rise is the fix working, not a regression.

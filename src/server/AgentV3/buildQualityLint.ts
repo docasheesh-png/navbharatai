@@ -219,15 +219,37 @@ export function offenderNote(r: BuildQualityLint, type: string): string {
   return ` Worst: ${files.map((o) => `${o.path} (${o.count})`).join(', ')}${more > 0 ? `, and ${more} more file(s)` : ''}.`;
 }
 
-/** One line for the build report — the score plus the count, never a bare grade with no evidence. */
-export function designLintSummary(r: BuildQualityLint): string {
+/**
+ * One line for the build report — the score plus the count, never a bare grade with no evidence.
+ *
+ * `handledElsewhere` is how many violations the CALLER removed before handing this result over, and it
+ * exists because of Q-1022 (see `CLEAN_AFTER_OUR_FIX`). A caller that lists a filtered set must say so,
+ * or the clean sentence is read off a list that is only clean because somebody shortened it.
+ */
+export function designLintSummary(r: BuildQualityLint, handledElsewhere = 0): string {
   const v = r.design.violations.length;
   // Each finding once (autopsy e3b0ce25: the line read "grade A (98/100), 1 issue(s): ⚠ 4 spacing values
   // are off … 4 spacing values are off …" — `designSummary` already carries the score and every message).
   const head = `Design consistency ${r.design.score}/100 (${r.design.grade}) across ${r.fileCount} file(s)${r.truncated ? ', partially scanned' : ''}.`;
-  if (!v) return `${head} ${designSummary(r.design)}`.trim();
+  if (!v) return handledElsewhere > 0 ? `${head} ${CLEAN_AFTER_OUR_FIX}` : `${head} ${designSummary(r.design)}`.trim();
   return `${head} ${r.design.violations.map((x) => `${x.message}${offenderNote(r, x.type)}`).join(' ')}`.trim();
 }
+
+/**
+ * 🔴 THE CLEAN SENTENCE IS EARNED, NOT INFERRED FROM A SHORTENED LIST (Q-1022, 2026-10-15).
+ *
+ * `designSummary`'s clean form — *"✓ A (92/100) — cohesive palette, typography and spacing"* — is correct
+ * when a result has no violations. But `modelDesignLine` hands this function a COPY with the
+ * platform-fixed types filtered out, and when the only finding was one of those, the copy has none left:
+ * the model read "cohesive … spacing" and, on the very next line, "4 off-grid spacing value(s)". One
+ * sentence denying what the next one states, from the same lint, in the same breath.
+ *
+ * The class: A PREDICATE AND ITS EVIDENCE COMPUTED FROM TWO DIFFERENT INPUTS. The filtered copy is the
+ * right input for LISTING what is left and the wrong one for DECIDING whether anything was wrong, so the
+ * caller now says how many it removed and the honest sentence is said instead of the cohesive one.
+ */
+export const CLEAN_AFTER_OUR_FIX =
+  'Nothing is left for you to change: the only issue(s) found are ones the platform fixes itself, listed below.';
 
 /** One line for the build report, listing the real WCAG criteria rather than a score alone. */
 export function a11yLintSummary(r: BuildQualityLint): string {

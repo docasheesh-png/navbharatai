@@ -95989,3 +95989,9 @@ to Node 22 is its own change (run the suite on 22 first, then flip `ci.yml`).
 - **Decision, said plainly:** the admin said "remove All builds from the Build tab" — it was RELOCATED, not deleted. It holds builds that never produced an app, the failed/tier filters and the "taken" marks the autopsy workflow depends on; deleting it would have lost them.
 - **No new server route.** Copy / Download in the panel are the dashboard's own functions, because they also write the "taken" mark (one report, one session).
 - Locked by `tests/theAppsPageHoldsEveryBuildReport.test.ts` and `WorkspaceBuildReports.render.test.tsx`; three reversions each failed the right test. Two existing pins moved with the card (`theAdminMenuHasNineTabs`, `adminAllBuilds`, `adminBuildFilters`), each with the reason beside it.
+
+## 2026-10-15 — Autopsy 67a2b0a2 (data-analyst portfolio, Weak/KIMI; 10.1 min, 0 files, RED, not charged)
+**Ledger:** ✅ self-healed 3 (GLM silent 15 s, KIMI and GLM-5.3 150 s reasoning-only timeouts — each a fallback that cost clock) · 🔀 workaround 3 (fast lane → full builder; KIMI → GLM-5.3; one-shot lane skipped) · ⏭️ skipped: typecheck, page checks, journey (no app existed) · ❌ shipped: nothing produced, RED · 🥵 struggle: 4 read-only turns (17–69 s each), 3 provider calls that answered nothing (315 s, 52%), futility breaker at minute 10.
+**Fixed here:** Q-1123 the summary no longer blames the request when the engine took the clock · Q-1124 a history countdown is withdrawn when this build has written nothing. Each has a reverted-and-failed test.
+**Missing subsystem named:** the fast lane has no path for "my first rung is silent" other than the reasoning engines (Q-1120 — the admin's routing decision, with a recommendation).
+**Not fixed, with state:** Q-1120 / Q-1121 / Q-1122 🟡 BLOCKED. The silent first rung has now hit two reports in two days; Q-962's "keep" answer predates that.

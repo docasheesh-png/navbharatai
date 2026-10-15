@@ -1,6 +1,9 @@
 // Shared by the architect prompt (systemPrompt.ts) and the fast lane's per-file prompt (SimpleBuilder.ts).
 // Its own module so neither prompt file has to import the other.
 
+// The keys screen's address comes from the one source of truth, never from prose in this file.
+import { demoUntilKeySaved } from '../AppContext/navPaths';
+
 /**
  * NO eval FOR USER INPUT (autopsy 53a621e3, 2026-09-30). A calculator's first App.tsx evaluated the typed
  * expression with `new Function()`. The write-time security scan flagged it, and the rewrite (a parser, a
@@ -85,7 +88,11 @@ export const NO_FAKE_FEATURE_RULE =
   '(generate_payment) or a UPI link, with a server-verified result — never a timer or a state change that marks an order paid. ' +
   'A real OTP or email is sent by a provider — never generated or shown by the page. When the key is missing: ask for it with ' +
   'request_secrets if you have that tool, and until it is saved render a clearly visible RED line in the user\'s own language on ' +
-  'that screen — "<Feature> is a demo, not real. Add <KEY NAMES> in NavBharatAI → ⋮ More → Keys & Secrets to make it real." — ' +
+  // 🔴 THE PATH COMES FROM navPaths.ts, NEVER FROM THIS STRING (admin 2026-10-14). This line is printed in
+  // RED inside the user's own app, and it used to say "⋮ More → Keys & Secrets" — a menu that exists only
+  // inside the NavBharatAI Pro panel, under a name the Settings tab does not use. A user who opened
+  // Settings looking for "Keys & Secrets" found nothing. `demoUntilKeySaved` names the canonical screen.
+  `that screen — "${demoUntilKeySaved('<Feature>', '<KEY NAMES>')}" — ` +
   'and say the same in your final message. Never present a demo as working. AI TEXT inside a browser app is the one ' +
   'exception to "its keys": it goes through NavBharatAI\'s keyless route (src/lib/ai.ts) — never an API key ' +
   'read, stored or typed in browser code, and never a direct call to an AI provider from the page. AI-made PICTURES ' +

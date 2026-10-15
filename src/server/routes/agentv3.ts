@@ -234,7 +234,7 @@ import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
 import { inlineLinkedStylesheet } from '../AgentV3/singleFileKit';
 import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
 import { appFileCount, IMPORT_NOT_MERGED_MESSAGE, IMPORT_NOT_CHECKED_MESSAGE } from '../../lib/projectImportTarget';
-import { gitPushTarget, wipPushNote } from '../AgentV3/gitPushTarget';
+import { gitPushTarget, wipPushNote, keepsNothingOfItsOwn, recordGitConnectTiming } from '../AgentV3/gitPushTarget';
 import { StaticProvider } from '../AgentV3/sandbox/AppMakerLab/generator/templates/StaticProvider';
 import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration, depsAddedByBuild, unusedDependencyLine, hasBuildScript } from '../AgentV3/unusedDepPrune';
 import { pruneDeadSalvageEnabled, deadSalvagedFiles, removeDeadSalvage } from '../AgentV3/deadSalvage';
@@ -15019,6 +15019,7 @@ async function noteBuildOutcome(
               .then((rec) => rec && getConversationStore().update(workspaceId, { repoName, updatedAt: rec.updatedAt }))
               .catch(() => { /* the derivation is deterministic — an unwritten name costs nothing */ });
           }
+          const gitConnectT0 = Date.now(); // autopsy b001fd78 (Q2): this step ran 7s with no timing line — see the SETUP_TIMING below
           const userToken = typeof req.body?.githubToken === 'string' && req.body.githubToken ? req.body.githubToken : '';
           // PREFER THE USER'S OWN GITHUB: when the user signed in with GitHub, store the project in a
           // repo under THEIR account (their code, no lock-in) and run PR/CI/merge there. Best-effort —
@@ -15134,6 +15135,9 @@ async function noteBuildOutcome(
               }
             } catch { /* git-native is best-effort — fall back to Firestore durability below */ }
           }
+          // The longest untimed stretch of a seeded-template build was THIS: creating/finding the user's repo and
+          // hydrating from it (7.0s, autopsy b001fd78). Timed now, so TIME_TO_FIRST_CALL's coverage line names it.
+          recordGitConnectTiming(buildDiag, gitConnectT0, !!userToken, !!repoSync);
         }
         // GITHUB IMPORT: if the user specified an existing repo URL, clone it now (before
         // durable-restore and git-native hydrate, so the import takes priority). Best-effort —
@@ -26028,7 +26032,10 @@ async function noteBuildOutcome(
       // having been written, never on the build having worked, so a failed turn's half-done edits went onto
       // the user's own branch. A build that did not work is now pushed to its own `wip/` branch — nothing is
       // lost — and the user's branch, the pull request and the merge are left alone (gitPushTarget.ts).
-      if (repoSync && repoAuthedUrl && writtenFiles.size > 0) {
+      // ⚠️ Autopsy b001fd78 (Q5): a build that did NOT work and wrote only the platform's own template has nothing of
+      // its own to keep — the old gate (`writtenFiles.size > 0`) still pushed that template to a `wip/` branch and said
+      // "this build did not finish working". A build that worked still pushes (the template IS its project then).
+      if (repoSync && repoAuthedUrl && writtenFiles.size > 0 && !keepsNothingOfItsOwn({ buildOk: result.ok === true, seed: seedStateOf(writtenFiles) })) {
         try {
           const msg = `NavBharatAI build: ${deriveTitle(prompt)}`;
           const userBranch = ownRepoTarget ? ownRepoTarget.workBranch : repoBranch;

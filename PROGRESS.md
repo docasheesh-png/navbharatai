@@ -95989,3 +95989,32 @@ to Node 22 is its own change (run the suite on 22 first, then flip `ci.yml`).
 - **Decision, said plainly:** the admin said "remove All builds from the Build tab" — it was RELOCATED, not deleted. It holds builds that never produced an app, the failed/tier filters and the "taken" marks the autopsy workflow depends on; deleting it would have lost them.
 - **No new server route.** Copy / Download in the panel are the dashboard's own functions, because they also write the "taken" mark (one report, one session).
 - Locked by `tests/theAppsPageHoldsEveryBuildReport.test.ts` and `WorkspaceBuildReports.render.test.tsx`; three reversions each failed the right test. Two existing pins moved with the card (`theAdminMenuHasNineTabs`, `adminAllBuilds`, `adminBuildFilters`), each with the reason beside it.
+
+### 2026-10-15 — Q-1021: our instrumentation is never the user's app
+
+`journeyDerivation.appOwnFiles` is the one place every *"does this app do X?"* question in that module is
+asked of — and it stripped **one of the three things NavBharatAI injects** into a built app.
+`withoutAppSignature` removes the "made by NavBharatAI" badge. It does not touch the red **honesty
+banner** (the NO-FAKE-FEATURE rule's demo warning) or the **preview bridge** — roughly 300 lines of our
+own script, which registers `addEventListener('input', …)`, a `click` handler and a `mouseover` handler.
+So on an app whose author wrote no script at all, those questions were partly being answered about our
+own instrumentation.
+
+**The class, and why the fix is one call rather than three patterns copied in.** Autopsy 9c612cdb had
+already met this exact bug in the design lint (our badge's `gap:6px` counted as the user's eighth
+off-grid value) and fixed it with `ourMarkupRanges`: ONE list of what we inject, owned by the three
+modules that write it. This reader was left on its private, partial strip. Pointing it at the shared one
+closes today's gap **and** makes a fourth injection safe by construction instead of by somebody
+remembering to add it in two places. It blanks rather than deletes, which this reader needs too —
+`dataEntryEvidence` reports *where* it found a sign, and blanking keeps every other offset valid.
+
+Locked by `tests/ourMarkupIsNeverTheUsersApp.test.ts` (12 tests), whose fixtures are built from the real
+badge, banner and bridge rather than a paraphrase, with a **census** that fails on any reader of the
+app's own files rolling its own strip. A real `<form>` and a real React form component are proven still
+found — the strip must never hide the app's own input. Three reversions: the import reverted (the module
+throws on load), the stripper handed a non-HTML path (3 fail), the shared list reduced to the badge
+alone (2 fail).
+
+⚠️ **My own history comment tripped my own census.** The first version of the source guard failed on the
+Q-1021 note that explains the fix, because that note names the helper it removed. Comments are stripped
+now — the same trap Q-1081's census fell into, closed the same way.

@@ -40,6 +40,7 @@ import { offerBugHunt, BUG_HUNT_WAIT_MS } from '../AgentV3/optionalBugHunt';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
+import { isInertCommand } from '../AgentV3/inertCommand';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp } from '../AgentV3/goldenScaffolds/registry';
 import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
@@ -13623,8 +13624,21 @@ async function noteBuildOutcome(
      * governs the whole request.
      */
     let futilityArmed = false;
-    /** A COMPLETED command, from ANY lane — the one door both the architect and its sub-agents use. */
-    const noteCommandCompleted = (): void => { commandsRun += 1; };
+    /**
+     * A COMPLETED command, from ANY lane — the one door both the architect and its sub-agents use.
+     *
+     * 🔴 AND A COMMAND THAT CANNOT CHANGE ANYTHING IS NOT PROGRESS (build `413d29a1`, Q-1081). The futility
+     * breaker's three progress signals are a file written, a command completed, or a plan step done — and
+     * this counted EVERY completed command. `: > /tmp/x && node -e 'console.log("noop")'` exits 0, so it
+     * completes, so the breaker saw continuous progress through 13.4 minutes and ~170 turns that produced
+     * nothing. The breaker's own header says a provider call is not progress "because progress is what the
+     * build PRODUCED, not what it attempted"; an inert command is the same argument one step further in.
+     * `isInertCommand` is the shared predicate — the loop guard asks it too (inertCommand.ts).
+     */
+    const noteCommandCompleted = (command?: string): void => {
+      if (isInertCommand(command)) return;
+      commandsRun += 1;
+    };
     // ⏸️ The user's thinking time is not the build's (autopsy 1219c639) — see `waitForUser`. When a wait
     // ends, every live clock moves forward by it, so the countdown, the pace measurements and the futility
     // window carry on from where the BUILD was, not from where the wall clock is.
@@ -15749,7 +15763,7 @@ async function noteBuildOutcome(
         onCommand: (c) => {
           // A COMPLETED command is one of the futility breaker's three progress signals — counted here,
           // at the one hook that fires on completion, so an attempt can never be mistaken for progress.
-          noteCommandCompleted();
+          noteCommandCompleted(c?.command);
           try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ }
         },
         onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
@@ -16083,7 +16097,7 @@ async function noteBuildOutcome(
         // ⚠️ AND COUNT IT (autopsy a2b9c802): this hook only recorded, so the futility breaker never saw
         // one command the ARCHITECT ran — only sub-agents' — and read a build that had just run `ls`
         // and was mid-`npm install` as "0 commands".
-        (c) => { noteCommandCompleted(); try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
+        (c) => { noteCommandCompleted(c?.command); try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;

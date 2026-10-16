@@ -68,6 +68,7 @@ import { footerTapPlan, type ModeFooterKey } from './lib/footerSheets';
 import { startFreshCase, CASE_ID_KEY, CASE_DOC_KEY } from './lib/sdaCaseStore';
 import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
+import { warmModeChunksWhenIdle } from './lib/warmModeChunks';
 import { ActionDot } from './components/ActionDot';
 import type { ActionTone } from './lib/actionNavigator';
 import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, recentTargetFromId, startsFreshOnPick, recentModeEntries, recentRowClosable, nextRecentAfterClose, lastChatClosed, activeModeId } from './components/chat/modePicker';
@@ -196,6 +197,10 @@ export default function App() {
   const { logs, addLog } = useDevLogs();
   const { theme, setTheme, preferredLanguage, setPreferredLanguage, mode, setMode, enabledModules, setEnabledModules, isThemePickerOpen, setIsThemePickerOpen } = useSettings();
   // ───────────────────────────────────────────────────────────────────────
+
+  // The screens a Mode pick opens are fetched while the browser is idle, so the pick finds them cached
+  // (lib/warmModeChunks.ts — measured: the first switch to each AI was 6-8x slower than the next).
+  useEffect(() => { warmModeChunksWhenIdle(); }, []);
 
   // Startup: evict large cached data if localStorage is > 3 MB to keep space for Firebase auth
   useEffect(() => {

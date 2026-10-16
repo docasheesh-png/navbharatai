@@ -96331,3 +96331,36 @@ with 722 sibling tests across 39 files green.
 doubly defended — an in-loop early return *and* the final `hits.length === 1` — so removing either half alone
 still rejects, and the test looked like it had no teeth. It bites when both go. A reversion that silently
 changes nothing produces a meaningless green, which is the same trap as an un-asserted `replace`.
+## 2026-10-16 — Q-1028: the advice fits the position it is about (#3764)
+
+**The row's own plan was wrong, and measuring it is what showed that.** Q-1028 said to add `FC`,
+`FunctionComponent` and `ComponentType` to `COMPONENT_TAKING_TYPES` — the set that switches the rename heal
+OFF. Measured against the installed `@types/react` and a real `tsc` run of all five shapes a model writes:
+
+| position | the renamed data type | `typeof Component` |
+|---|---|---|
+| `FC<…>`, `FunctionComponent<…>`, `ComponentType<…>` | ✅ compiles | ✅ compiles — and means "props are a function" |
+| `ComponentProps<…>` | ❌ TS2344 | ✅ the right fix |
+| a plain annotation | ✅ compiles | only if you mean the component |
+
+`FunctionComponent<P>` is `(props: P) => ReactNode`, so **P is the props**. Excluding those three would have
+switched off a heal that produces correct code, and `ComponentProps` — the one already excluded — is the only
+React position where `typeof` is right. The row had it backwards, so it is NOT implemented as written.
+
+**The real defect is worse than the row's.** At a props position `typeof X` *also compiles*, silently
+declaring the component's props to be the component's own function type. A wrong fix the compiler accepts
+costs more than one it rejects — and the advice offered it. Measured, one sentence named lines 2, 3, 4, 5, 6
+together and gave both options for all of them, although at line 5 the data name is a compile error and at
+lines 2–4 `typeof` is the nonsense. Advice right for one of those is wrong for the other.
+
+**The class:** the heal knew the position from the AST; the advice knew nothing and guessed. One classifier
+(`typeUsePosition` → `plain` / `props-arg` / `component-arg` / `not-a-type-use`) is now read by both, so they
+cannot disagree — Q-1022's shape (a predicate and its evidence from two different inputs) and Q-1026/Q-1033's
+(one computation, one copy). Without sources the advice stays conditional, which is the honest answer rather
+than a guess. The hand-off note names the three props positions too, and its ticket id came out of the
+model-facing prompt — a model has no use for our queue numbers.
+
+Heal behaviour is unchanged, because measurement said it was already right. Locked by
+`tests/theAdviceFitsThePosition.test.ts` (18 tests, the real tsc message as the fixture, a census that each
+set has exactly one reader), with 101 sibling tests green. Three reversions bite — including **the row's own
+plan**, which fails 5 tests, one of them named for exactly why.

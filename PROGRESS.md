@@ -96447,3 +96447,37 @@ Also corrected one of my own assertions: the guard first banned ✅ anywhere in 
 disproved — its state is an honest compound ("🟡 BLOCKED — REQUIRES A DECISION … · the meter half is ✅ RESOLVED
 as NOT-A-DEFECT"), and the strict rule would have forced someone to delete that information. It checks the
 leading token instead. Four reversions bite.
+
+## 2026-10-16 — Q-1027: the enum normaliser is not silent (#3771)
+
+The row said the normalisation was "silent in the report". Measured, it was worse: `prepareSharedContract`
+computed `enumsAsConst` — the enums it had just rewritten as `as const` objects — returned it, and **nothing
+in the repo read it.** Declared, assigned, returned, and that was all.
+
+**The class: a measurement computed and returned with no reader is indistinguishable from one never
+computed.** The same shape as Q-1011, where `endgameBatchRepair` left no `llmCalls` row and the one place a
+reader would look was empty. The rewrite worked correctly and no autopsy could see it fire.
+
+**An "info line" alone would not have been enough**, which is why the fix is wider than the row asked.
+`contractEnums.ts` names a residual it cannot reach: a consumer that writes a member as a TYPE —
+`interface AddAction { type: ActionType.Add }` — gets **TS2702** against an `as const` object, because the
+name no longer refers to a type. Nothing told the model that. So the fact now travels the same four roads a
+rename travels (Q-985's pattern): the contract file's header (one `// as-const:` line per enum, naming the
+`typeof X.Member` form), the user-facing log beside the `🏷️ Renamed` one, the hand-off clause to the full
+builder that never saw the contract call, and the blueprint block.
+
+**The sibling the row never mentioned:** `blueprintAdvisoryBlock` already named a rename and said nothing
+about a normalised enum — while showing the architect a contract that had already been rewritten.
+
+⚠️ **Three of my own mistakes, kept in the test file because each is a trap worth seeing again:**
+
+1. My first draft inlined `contractEnumsSentence(...)` **twice** in the route's concatenation — once to test
+   it, once to use it. That is the duplication Q-1026/Q-1033 exist to stop, so it became one clause helper,
+   and a census now pins the call count at one.
+2. A **reversion caught two blueprint assertions passing for the wrong reason:** I checked for `'as const'`
+   and `'VideoSource'`, and both appear in the contract source the block embeds — so they held even with the
+   sentence deleted. A test that cannot fail proves nothing; the whole sentence is asserted now.
+3. `stripCodeComments` **ate the sentence** in one assertion, because `contractEnumHeaderLine` returns a
+   string that *begins with* `//` — the stripper read a string literal as a comment and the assertion failed
+   on its own subject. That one reads the file raw, which is the right question anyway: a copy of the wording
+   is a copy whether it sits in code or in a comment.

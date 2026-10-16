@@ -96175,6 +96175,52 @@ note beside a fix names the function the fix stopped calling, so a guard reading
 its own documentation. It is a pattern — a source census must read stripped code, and the assertion that
 needs stripping is always the negative one.
 
+## 2026-10-16 — Q-1097: a null scene reading is never silent, and the vehicle is identified once (#3763)
+
+`tests/aThreeGameIsReadFromItsScene.test.ts` failed twice in one day under a loaded machine, on two different
+fixtures, with the same shape: `{ faces: false, mirrored: null }` where a concrete steering verdict was demanded.
+Both runs had **180 frames** — so `probeStarved`, the predicate the test branched on, was false, Q-1038's starved
+branch never ran, and the test fell through to an assertion no machine can promise.
+
+Three causes underneath, and the row only named the first:
+
+1. **The reason was not computed from the evidence.** `probeStarved` counts frames; the verdict's floors are
+   geometric (the vehicle seen to move, the camera following it, the turn big enough to call). New `sceneUnread`
+   answers from the same read `sceneVerdict` decides on, and the reason is computed ONLY where the verdict is
+   null — so *exactly one of the two is non-null, per axis* holds by construction. Q-1022's class one level down.
+   My own first draft got this wrong (it returned the starvation note for both axes on a low frame count, which
+   claimed the camera "could not be read" on a read that had just answered it); the invariant test caught it.
+2. **The vehicle was identified twice.** The steering probe re-picked it from its own 400 ms sample. The racer
+   fixture's traffic car moves 0.5 per frame whatever the player presses and never turns, so a second pick under
+   load can land on it — the camera question answered about the car, the steering question about something else.
+3. **A long look can LIE, not merely fail.** `turn` is a chord angle — half the swept angle — and three seconds
+   of holding LEFT is a 310° sweep at 60 fps on that fixture. One frame-rate step up passes 360°, where the chord
+   points backwards and `turn < 0` **accuses a correctly-steering game of mirrored steering**. A wrong verdict is
+   worse than no verdict. The reading is now taken over a 400 ms window, the long one used only as a fallback and
+   only below `TURN_WRAP_SAFE_DEG`; the arithmetic moved OUT of the probe script — which no unit test can reach —
+   into pure `chordTurn` / `pickTurn` / `readTurn`, with the script recording only the raw vectors (`SceneRead.aim`).
+
+And a contradiction inside Q-1038's own fix fell out: a starved page whose turn DID read used to print
+"Steering was not read" in the same report that scored `steeringMirrored` from that very reading.
+
+**Report honesty (rule 5):** four of the five reasons a reading can be missing used to print nothing, so a game
+whose steering the scene never read appeared as a game that steers correctly. All five print now — only where the
+scene was actually consulted (a driving game, not stalled, with a three.js scene), because without a scene the
+pixel flow is the designed path, not a failure.
+
+Locked by `tests/aNullSceneReadingIsNeverSilent.test.ts` (44 tests) plus the four live tests rewritten to the
+honest contract — never a wrong claim, the exact verdict when read, a stated reason when not — which only the
+first of them had. Four reversions all bite. Proven under 6 CPU hogs on 4 cores; `aRacingGameIsStartedAndDriven`
+re-run because the turn hold grew by 400 ms (140 sibling tests green).
+
+⚠️ **This entry first said #3761, which is another session's PR.** A PR number cannot be known until the PR
+exists, so a row written before that is a guess — and while this container was asleep another session opened,
+and merged, its own #3761 (Q-1017). Mine is **#3763**. The sixth rule's point exactly: a row whose owner is
+wrong is a row nobody can check.
+
+⚠️ **One thing to know before editing that file again:** lines ~238–835 are a template literal — the Playwright
+script, run as a subprocess. A backtick in a comment there ends the string, and the parse error points at the
+comment, not at the cause. The existing in-script comments escape theirs; the Q-1097 note says so in place.
 ### 2026-10-16 — Q-1017: the goal's cap was spent on our own notes, and raising it in October was not the fix
 
 **The defect.** `createProjectPlan` stored `goal` as `(joined).slice(0, MAX_GOAL_CHARS)`, and the route handed it

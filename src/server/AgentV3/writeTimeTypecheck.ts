@@ -280,7 +280,10 @@ export function writeTypecheckNote(
   // A NAME THE PLATFORM CHANGED (build 9c612cdb, Q-985 — contractRenames.ts). TS2749 on a recorded rename
   // carries tsc's own `typeof X` suggestion, which is wrong for the data; said for the written file's errors
   // AND the ones elsewhere, because in that build the error sat in the 'elsewhere' bucket for two writes.
-  parts.push(...typeRenameAdvice(suggestedTypeRenames([...own, ...others], renames)));
+  // `sources` goes with them (Q-1028) so the advice can see WHERE each one landed: inside `ComponentProps<…>`
+  // the compiler's suggestion is right, inside `FC<…>` it compiles into nonsense, and one sentence cannot be
+  // right for both. Without the sources the wording stays conditional rather than guessing.
+  parts.push(...typeRenameAdvice(suggestedTypeRenames([...own, ...others], renames), sources));
   // WHAT THE ERROR MEANS, not just what it says (autopsy baa0b3c7). A missing-declaration error points
   // at the file where the symbol is USED, so its remedy appears nowhere in the message and the code under
   // the cursor looks broken — which is how a correct file gets rewritten six times. Diagnosed here, at the

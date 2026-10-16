@@ -52,7 +52,8 @@ export function contractRenameHandoffLine(renames: ReadonlyArray<{ from: string;
   const named = list.map((r) => `${r.from} → ${r.to} (${r.from} is the component${r.component ? ` in ${r.component}` : ''})`).join('; ');
   return `NavBharatAI renamed these shared types so no data type shares a component's name: ${named}. `
     + 'In a type position always write the NEW name and import it from the shared types file — the old name is the component, '
-    + 'and the compiler\'s "Did you mean typeof …" suggestion is only right when you mean the component itself.';
+    + 'and the compiler\'s "Did you mean typeof …" suggestion is only right when you mean the component itself '
+    + '— never inside `FC<…>`, `FunctionComponent<…>` or `ComponentType<…>`, whose type argument is the PROPS type.';
 }
 
 /**

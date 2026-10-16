@@ -16,7 +16,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { armedFutilityState, initialFutilityState, tickFutility } from '../src/server/AgentV3/futilityBreaker';
-import { roadmapStandsDownForProjectMode, detectMegaProject } from '../src/server/AgentV3/ProjectPlan';
+import { roadmapStandsDownForProjectMode, roadmapStandDownMessage, detectMegaProject } from '../src/server/AgentV3/ProjectPlan';
 import { OpenAiStreamAccumulator, streamIsCrawling, utf8Bytes } from '../src/server/AgentV3/providers/openAiStream';
 
 const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8')
@@ -60,10 +60,18 @@ describe('the futility window opens when the BUILD starts, not when the request 
 
 describe('every lane\'s completed command counts — the architect\'s too', () => {
   it('the architect dispatcher and the sub-agents both go through noteCommandCompleted', () => {
-    const uses = route.match(/noteCommandCompleted\(\);/g) ?? [];
+    // UPDATED 2026-10-14 (build 413d29a1, Q-1081): the counter now takes the command TEXT, because a
+    // command that cannot change anything is not progress — `noteCommandCompleted(c?.command)` instead of
+    // `noteCommandCompleted()`. The property THIS test exists for is unchanged and is what is pinned: BOTH
+    // lanes count, and there is exactly one counter. A fix that threaded the text through only one of the
+    // two lanes would re-open the very gap a2b9c802 was written for, so the count stays at 2.
+    // Two CALL sites. The definition reads `noteCommandCompleted = (command?: string)`, so it is not a
+    // call and does not match — counted, not assumed.
+    const uses = route.match(/noteCommandCompleted\(/g) ?? [];
     expect(uses.length).toBe(2);
+    expect((route.match(/noteCommandCompleted\(c\?\.command\)/g) ?? []).length).toBe(2);
     // The architect's hook is the one passed to the ToolDispatcher — it must count, not only record.
-    expect(route).toMatch(/\(c\) => \{ noteCommandCompleted\(\); try \{ buildDiag\.recordCommand\(c\); \}/);
+    expect(route).toMatch(/\(c\) => \{ noteCommandCompleted\(c\?\.command\); try \{ buildDiag\.recordCommand\(c\); \}/);
     // No second, private counter can drift from the shared one.
     expect((route.match(/commandsRun \+= 1/g) ?? []).length).toBe(1);
   });
@@ -87,11 +95,28 @@ describe('one planner per build', () => {
   });
 
   it('the route gates the roadmap on it and says so in the report', () => {
-    expect(route).toContain('roadmapStandsDownForProjectMode({');
-    expect(route).toMatch(/if \(scope\.decision === 'analyze' && !dispute && !projectModeOwns\)/);
+    // UPDATED on the merge with #3743 (2026-10-14): the gate is ONE call now, `roadmapDecision({…})`, which
+    // also carries what the report should say. That was FORCED, not cosmetic — as a local plus two branches in
+    // the route it raised TS2563 (the `/build` body is ON TypeScript's control-flow limit, Q-979) the moment it
+    // met #3743's changes; `main` alone typechecked clean, so the merge is what tipped it. The properties this
+    // test locks are unchanged: project mode still stands the roadmap down, and its sentence is byte-identical.
+    // answers for EVERY thing that can already own a build — project mode OR a seeded golden scaffold. The
+    // behaviour this test locks is unchanged (the project-mode branch is checked first and its sentence is
+    // byte-identical, asserted below); only the name at the call site moved. Pinning the old name here would
+    // pin a gate that reads one of two owners, which is the defect that autopsy found.
+    expect(route).toContain('roadmapDecision({');
+    expect(route).toContain('if (roadmap.runPlanner) {');
+    // Project mode is still a stand-down reason, and still the one the predicate derives from this function.
     expect(route).toContain("code: 'MEGA_ROADMAP_STOOD_DOWN'");
+    expect(route).toContain('...roadmap.record');
     const diag = readFileSync(join(__dirname, '../src/server/AgentV3/BuildDiagnostics.ts'), 'utf8');
     expect(diag).toContain("'MEGA_ROADMAP_STOOD_DOWN'");
+  });
+
+  it('the project-mode stand-down still reports the exact sentence the September fix shipped', () => {
+    expect(roadmapStandDownMessage('project-mode')).toBe(
+      'Mega-app roadmap stood down: Software Project Mode will decompose this build, so one planner runs instead of two.',
+    );
   });
 });
 

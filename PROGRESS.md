@@ -96024,3 +96024,72 @@ the removal verb, so every negative Q-990 pinned still does not match.
 Locked by `tests/theAdsWeCanRemoveAndTheOnesWeCannot.test.ts` (24 tests) — including a census that every
 reader of `pointed` in the route also reads `notOurs`, because the defect was one grouping lacking a term.
 Nine reversions, each with an anchor assertion, each failed and was restored.
+## 2026-10-15 — Admin → Apps: a "v" on every app opens its build reports; "All builds" moved out of the Build tab (admin request)
+- **What changed:** `BuiltAppsPanel` cards (live, held, banned and the orphaned list alike) get a "v" button → a dialog (`WorkspaceBuildReports`) reading the existing `GET /api/admin/all-builds/:workspaceId`: the latest build's headline in the engine's words, Copy / Download for the whole session and for each build. The "All builds — every user, no submit needed" card moved from the Build tab to the Apps page (same state, filters, "taken" mark); its auto-load follows it.
+- **Decision, said plainly:** the admin said "remove All builds from the Build tab" — it was RELOCATED, not deleted. It holds builds that never produced an app, the failed/tier filters and the "taken" marks the autopsy workflow depends on; deleting it would have lost them.
+- **No new server route.** Copy / Download in the panel are the dashboard's own functions, because they also write the "taken" mark (one report, one session).
+- Locked by `tests/theAppsPageHoldsEveryBuildReport.test.ts` and `WorkspaceBuildReports.render.test.tsx`; three reversions each failed the right test. Two existing pins moved with the card (`theAdminMenuHasNineTabs`, `adminAllBuilds`, `adminBuildFilters`), each with the reason beside it.
+
+### 2026-10-15 — Q-1022: the clean design sentence is earned, not read off a shortened list
+
+`modelDesignLine` hands `designLintSummary` a **copy** of the lint with the platform-fixed violation types
+filtered out. That is right: the model must not be told to fix what the spacing snap is about to fix
+itself (autopsy 536c8189 — it spent three model calls writing regex scripts over the stylesheet and moved
+on-grid values *off* the grid). But when the **only** finding was a platform-fixed one, the copy had no
+violations left, so the summary took its clean branch and the model read:
+
+> Design consistency 92/100 (A) across 7 file(s). Design consistency: ✓ A (92/100) — **cohesive palette,
+> typography and spacing.**
+>   ✓ **4 off-grid spacing value(s)**: the platform snaps these to the grid when the build ends.
+
+One sentence denying what the next one states, from the same lint, in the same breath.
+
+**The class: a predicate and its evidence computed from two different inputs.** The filtered copy is the
+right input for *listing what is left* and the wrong one for *deciding whether anything was wrong*. The
+caller now states how many it removed — `designLintSummary(shown, handled.length)` — and the honest
+`CLEAN_AFTER_OUR_FIX` sentence is said in place of the cohesive one.
+
+A genuinely cohesive app still gets its compliment, and that is tested: replacing the clean sentence
+unconditionally is the opposite defect, and the third reversion proves the test catches it.
+
+Locked by `tests/theCleanDesignSentenceIsEarned.test.ts` (10 tests), including a census that only the
+filtering caller may pass a count. Three reversions: the caller stops saying what it filtered (2 fail),
+the summary ignores the count (2 fail), the honest sentence replaces the cohesive one always (2 fail).
+
+### 2026-10-16 — Q-1016: the request notes exist before the first lane plans
+
+Q-991 gathered every request note into ONE list and had every lane read it — the right shape. But the list
+was **built ~500 lines below the first lane that plans**, so the blueprint lane (`AGENTV3_BLUEPRINT`)
+proposed the whole file manifest *and* the shared contract from the **bare** request: route ~16750 for the
+plan, ~16978 for the first note input. A Kotlin request, a keypad phone named in the prompt or a no-login
+scope was planned blind — and on a deep build the architect then follows that plan. It was never a wiring
+oversight; there was nothing to hand the lane yet, which is why Q-1020's name-based census could not see it.
+
+**The fix is one computation, read twice** — the Q-1026/Q-1033 shape. `requestNotesFor` is pure, lives in
+`requestNotes.ts` beside the `withRequestNotes` join, and is called once above the blueprint lane; the
+aggregator now reads that result instead of deriving the same facts again. Both blueprint prompts take
+`withRequestNotes(prompt, requestNotesText)`. The file budget beside them still reads the **bare** prompt,
+because Q-991 measured that notes riding the request take a 13-file budget to 25 — the user's app sized by
+our own instructions.
+
+**Three things the work found, each worth keeping:**
+1. **The obvious placement would have been wrong.** Computing at ~12882 (right after `planning`) looked
+   right and is not: `framework` is reassigned at ~15593 by the drift detector, and the stack note *names*
+   the framework it was built in — so the note could have carried a label that later changed. Measured
+   before shipping, not after.
+2. **My own test found a duplicate derivation.** Route ~24454 called `namedNonSmartphone(prompt)` a second
+   time with its own copy of the new-build gate — two answers to one question, this row's exact class. It
+   now reads the one result and adds only what is genuinely its own (`result.ok && expectsArtifacts`).
+3. **A reversion found my test weak.** Dropping the `!editing` narrowing (Q-868) *passed*, because the test
+   only ever set `newBuild: false`. The guard exists for `newBuild && editing` together; that case is in
+   now, and the reversion bites.
+
+Ratchet 6 → 4: `megaRoadmapUserPrompt` ×2 needs the framework label late-bound (it runs before ~15593), and
+`repairUserPrompt` ×2 is a repair pass whose need for the whole note list is a judgement, recorded not
+assumed. Locked by `tests/theNotesExistBeforeAnyLanePlans.test.ts` (13 tests) plus the census, which now
+reads the MODULE for the list and the ROUTE for the lanes. Five reversions.
+
+⚠️ **Third time today a census of mine matched its own explanatory comment** (Q-1081, Q-1021, Q-1016): the
+note beside a fix names the function the fix stopped calling, so a guard reading the file as text fails on
+its own documentation. It is a pattern — a source census must read stripped code, and the assertion that
+needs stripping is always the negative one.

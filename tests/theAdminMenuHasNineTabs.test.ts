@@ -122,7 +122,8 @@ const FEATURE_HOME: Record<string, string | string[]> = {
   // Builds
   'onClick={clearAllReports}': 'reports',
   '<FailureCategoryCard': 'reports',
-  'All builds — every user, no submit needed': 'reports',
+  // MOVED 2026-10-15 (admin: "build se All builds wala column hata dena", merged into Apps): the card is on the Apps page now.
+  'All builds — every user, no submit needed': 'apps',
   '{openApkReport && (': 'apkreports',
   '<MobileBuildOutcomeCard': 'apkreports',
   'onClick={fetchNecessity}': 'health',

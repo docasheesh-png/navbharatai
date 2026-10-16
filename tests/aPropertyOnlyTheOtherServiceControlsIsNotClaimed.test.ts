@@ -349,8 +349,15 @@ describe('🔒 the wiring (agentv3.ts)', () => {
     // The start line rides the build's own bus, so the build report shows the line the user read (adversarial review:
     // a bare `emit` after the report subscribes reaches the user and never the report).
     expect(route).toContain("(text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),");
-    // …and the note hears the app's OWN ad slots, which are the ones it is told to remove (Q-1018).
-    expect(route).toContain("{ code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, thirdPartyAdFactsAtStart.players, thirdPartyAdFactsAtStart.ownAds) },");
+    // PIN MOVED WITH THE FIX (Q-1016) AND KEPT WHOLE (Q-1018). The list left the route for
+    // `requestNotes.ts` — it was built ~500 lines BELOW the blueprint lane, which therefore planned the
+    // whole file manifest from the bare request. And the note still hears the app's OWN ad slots, which
+    // are the ones it is told to remove: that third argument is #3753's, threaded through the module on
+    // merge exactly as `RequestNoteInputs.thirdPartyOwnAds` said it would be.
+    expect(readFileSync(join(process.cwd(), 'src/server/AgentV3/requestNotes.ts'), 'utf8'))
+      .toContain("{ code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, players, input.thirdPartyOwnAds ?? []) },");
+    expect(route, 'and the route hands the one computation both ad facts').toContain('thirdPartyOwnAds: thirdPartyAdFactsAtStart.ownAds,');
+    expect(route, 'and reads the one answer').toContain('const thirdPartyLimitAsk = requestNoteSet.thirdPartyLimitAsk;');
   });
 
   it('CLASS CENSUS: every fact the claim audit can read is handed to it — an unwired optional fact silently disables its rule', () => {

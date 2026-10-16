@@ -40,7 +40,8 @@ import { offerBugHunt, BUG_HUNT_WAIT_MS } from '../AgentV3/optionalBugHunt';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
-import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild } from '../AgentV3/goldenScaffolds/registry';
+import { isInertCommand } from '../AgentV3/inertCommand';
+import { goldenScaffoldForPrompt, goldenScaffoldFiles, goldenBuildPrompt, chipPromptForBuild, templateIsTheFinishedApp } from '../AgentV3/goldenScaffolds/registry';
 import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
@@ -419,7 +420,7 @@ import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/ca
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { shellModuleFor, shellStillAwaited, recordModuleDelivery, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { shellModuleFor, shellStillAwaited, recordModuleDelivery, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapDecision, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout } from '../AgentV3/asyncUtils';
@@ -654,7 +655,7 @@ import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../A
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
 import { restateDesignAfterRepair } from '../AgentV3/designAfterRepair';
-import { withRequestNotes } from '../AgentV3/requestNotes';
+import { withRequestNotes, requestNotesFor } from '../AgentV3/requestNotes';
 import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict, seedKeptSentence, passAbort } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
@@ -13623,8 +13624,21 @@ async function noteBuildOutcome(
      * governs the whole request.
      */
     let futilityArmed = false;
-    /** A COMPLETED command, from ANY lane — the one door both the architect and its sub-agents use. */
-    const noteCommandCompleted = (): void => { commandsRun += 1; };
+    /**
+     * A COMPLETED command, from ANY lane — the one door both the architect and its sub-agents use.
+     *
+     * 🔴 AND A COMMAND THAT CANNOT CHANGE ANYTHING IS NOT PROGRESS (build `413d29a1`, Q-1081). The futility
+     * breaker's three progress signals are a file written, a command completed, or a plan step done — and
+     * this counted EVERY completed command. `: > /tmp/x && node -e 'console.log("noop")'` exits 0, so it
+     * completes, so the breaker saw continuous progress through 13.4 minutes and ~170 turns that produced
+     * nothing. The breaker's own header says a provider call is not progress "because progress is what the
+     * build PRODUCED, not what it attempted"; an inert command is the same argument one step further in.
+     * `isInertCommand` is the shared predicate — the loop guard asks it too (inertCommand.ts).
+     */
+    const noteCommandCompleted = (command?: string): void => {
+      if (isInertCommand(command)) return;
+      commandsRun += 1;
+    };
     // ⏸️ The user's thinking time is not the build's (autopsy 1219c639) — see `waitForUser`. When a wait
     // ends, every live clock moves forward by it, so the countdown, the pace measurements and the futility
     // window carry on from where the BUILD was, not from where the wall clock is.
@@ -14578,19 +14592,24 @@ async function noteBuildOutcome(
           // minutes before the first line of code. Project mode is the stronger strategy for a prompt it
           // reads as a mega-project (it builds the WHOLE thing across turns; a roadmap narrows it to step
           // 1), so it owns the build and the roadmap stands down, said aloud in the report.
-          const projectModeOwns = roadmapStandsDownForProjectMode({
+          // AND NOBODY PLANS AN APP THAT IS ALREADY FINISHED (autopsy e3135b7b — the Quran reader). The gate read
+          // only the project-mode half; a seeded simple-tier template is the other thing that already owns a build,
+          // and it is the FINISHED app. One predicate answers both, so a third owner cannot be forgotten at this
+          // call site — roadmapStandsDown. Its sibling gate is the project planner's, which reports the same fact
+          // through projectModeDiagnosis ('template-is-the-app').
+          const roadmap = roadmapDecision({
             projectModeOn: projectModeEnabled(process.env, { userId, email }),
             planFirst,
             megaProject: appScope.projectMode,
+            templateIsTheApp: templateIsTheFinishedApp(seededScaffold),
+            decisionIsAnalyze: scope.decision === 'analyze',
+            disputed: !!dispute,
+            signals: scope.signals,
           });
-          if (projectModeOwns && scope.decision === 'analyze' && !dispute) {
-            buildDiag.record({
-              phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_STOOD_DOWN', autoResolved: true,
-              message: 'Mega-app roadmap stood down: Software Project Mode will decompose this build, so one planner runs instead of two.',
-              detail: `scope signals: ${scope.signals.join('; ')}`,
-            });
+          if (roadmap.record) {
+            buildDiag.record({ phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_STOOD_DOWN', autoResolved: true, ...roadmap.record });
           }
-          if (scope.decision === 'analyze' && !dispute && !projectModeOwns) {
+          if (roadmap.runPlanner) {
             const rmStartedAt = Date.now();
             let rmProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
             const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({
@@ -15744,7 +15763,7 @@ async function noteBuildOutcome(
         onCommand: (c) => {
           // A COMPLETED command is one of the futility breaker's three progress signals — counted here,
           // at the one hook that fires on completion, so an attempt can never be mistaken for progress.
-          noteCommandCompleted();
+          noteCommandCompleted(c?.command);
           try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ }
         },
         onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
@@ -16078,7 +16097,7 @@ async function noteBuildOutcome(
         // ⚠️ AND COUNT IT (autopsy a2b9c802): this hook only recorded, so the futility breaker never saw
         // one command the ARCHITECT ran — only sub-agents' — and read a build that had just run `ls`
         // and was mid-`npm install` as "0 commands".
-        (c) => { noteCommandCompleted(); try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
+        (c) => { noteCommandCompleted(c?.command); try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
@@ -16691,6 +16710,51 @@ async function noteBuildOutcome(
       const importSurveyNote = importSurveyPromptNote(importSurvey);
       if (importSurveyNote) architectSystem = `${importSurveyNote}\n\n---\n\n${architectSystem}`;
 
+      // 🧭 EVERY REQUEST NOTE EXISTS BEFORE ANY LANE PLANS (Q-1016, 2026-10-16).
+      //
+      // 🔴 Q-991 gathered every note into ONE list and had every lane read it — but that list was built
+      // ~500 lines BELOW here, and Q-1020's rebuilt census measured the consequence: the BLUEPRINT lane
+      // just below plans the whole file manifest and the shared contract from the BARE request. It was
+      // never a wiring oversight; there was simply nothing to hand it yet. A Kotlin request, a keypad
+      // phone or a no-login scope was planned blind, and the plan is what the rest of the build follows.
+      //
+      // So the computation moved HERE, above the first lane that plans, and `requestNotesFor` is called
+      // ONCE: the aggregator below now READS this result instead of deriving the same facts a second
+      // time (the Q-1026/Q-1033 "two readers, one computation" shape). Every input is final by this
+      // point — `planning` ~12881, `intent`/`isEditMode` ~12831, `framework` for a new build (the only
+      // kind the blueprint lane runs on) above.
+      // BOTH ad facts from ONE load (Q-1018): the other service's players, and the app's OWN ad slots — the
+      // ones that ARE ours to remove, and that the builder note is told to take out.
+      const thirdPartyAdFactsAtStart = await editTurnAdFacts(prompt, { editTurn: intent === 'edit_existing', importTurn: isImportTurn }, () => loadWorkspaceFiles(workspaceId));
+      // 🔴 Q-1019 — the facts a zero-file turn's answer is judged against, read from the project as it was
+      // when the turn BEGAN, which is what the model was answering about. "Remove the ads" on an app that
+      // plays videos in YouTube's own player has one correct outcome — say so and change nothing — and the
+      // platform used to file exactly that as a failed build. See `adRemovalAnsweredNotBuilt`.
+      const adAnswerFacts = { editTurn: intent === 'edit_existing', importTurn: isImportTurn, players: thirdPartyAdFactsAtStart.players, ownAds: thirdPartyAdFactsAtStart.ownAds };
+      const requestNoteSet = requestNotesFor({
+        prompt, planningText: planning.text, framework,
+        newBuild: intent === 'new_build', editing: isEditMode, importTurn: isImportTurn,
+        // 🔴 #3753's OWN-ADS FACT, THREADED AS THAT MODULE'S HEADER PROMISED (Q-1018 + Q-1016 reconciled
+        // on merge, 2026-10-16). Q-1016 shipped with `thirdPartyOwnAds` deliberately un-threaded, because
+        // #3753 was green but unmerged and this branch was cut from a `main` without the third argument.
+        // Both have landed, so the note the blueprint lane reads now names the app's own ad slots too.
+        thirdPartyPlayers: thirdPartyAdFactsAtStart.players,
+        thirdPartyOwnAds: thirdPartyAdFactsAtStart.ownAds,
+      });
+      const requestNotesText = requestNoteSet.text;
+      // The facts each note was derived from, kept under their old names so every report line and
+      // user-facing sentence further down reads the SAME answer rather than deriving it again.
+      const unsupportedStackAsked = requestNoteSet.unsupportedStackAsked;
+      const unknownNamesAsked = requestNoteSet.unknownNamesAsked;
+      const unknownNameNote = requestNoteSet.unknownNameNote;
+      const requestScopeText = requestNoteSet.requestScopeText;
+      const requestScopeReason = requestNoteSet.requestScopeReason;
+      const liveDataAsked = requestNoteSet.liveDataAsked;
+      const scriptFormAsked = requestNoteSet.scriptFormAsked;
+      const scriptRequestNote = requestNoteSet.scriptRequestNote;
+      const keypadPhoneForBuild = requestNoteSet.keypadPhone;
+      const thirdPartyLimitAsk = requestNoteSet.thirdPartyLimitAsk;
+
       // P-ARCH+.3 — up-front BLUEPRINT (advisory) for DEEP, agentic, NEW builds. The fast lane already
       // freezes a file-manifest + shared contract; the agentic loop plans free-form (update_todo only),
       // so a large app drifts (mismatched imports, missing files). This does ONE bounded, best-effort
@@ -16728,7 +16792,10 @@ async function noteBuildOutcome(
             return t.text;
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
-          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework, scaffold), manifestUserPrompt(prompt, scaffold)));
+          // 🔴 Q-1016: the notes open the request the manifest is planned from. `fileBudgetForPrompt(prompt)`
+          // below still reads the BARE prompt on purpose — Q-991 measured that notes riding the request
+          // take a 13-file budget to 25, which is the user's app being sized by our own instructions.
+          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework, scaffold), manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold)));
           // FILE BUDGET honesty (admin 2026-08-02): the plan is NEVER trimmed — shipping an incomplete app
           // would be far worse than shipping a large one — but an overrun is recorded so "this app planned
           // more files than it should need" is measurable instead of invisible.
@@ -16743,7 +16810,7 @@ async function noteBuildOutcome(
           if (manifest.length >= 2) {
             // The same door as the fast lane (build 9c612cdb): the name split and the enum normaliser run on
             // every generated contract before anything reads it, and a rename is named in the block.
-            const prepared = prepareSharedContract(((await bpGenerate(contractSystemPrompt(framework), contractUserPrompt(prompt, manifest))) || '').trim(), manifest);
+            const prepared = prepareSharedContract(((await bpGenerate(contractSystemPrompt(framework), contractUserPrompt(withRequestNotes(prompt, requestNotesText), manifest))) || '').trim(), manifest);
             const block = blueprintAdvisoryBlock(manifest, prepared.contract, prepared.renamed);
             if (block) {
               architectSystem = `${block}\n\n---\n\n${architectSystem}`;
@@ -16955,26 +17022,9 @@ async function noteBuildOutcome(
       // outcome — NOT a failed build to retry/escalate. (Real evidence: importing Mitrify escalated
       // 3-4× over 5 min and ran the readiness gate on the user's OWN imported code → "NOT READY 0/100".)
       const expectsArtifacts = (intent === 'new_build' || intent === 'edit_existing') && !isImportTurn;
-      // Only a NEW build is told about the named stack: an edit of an existing app already has one.
-      const unsupportedStackAsked = intent === 'new_build' && !isImportTurn ? unsupportedStackRequested(prompt) : null;
-      // A word we do not know is not a service to connect to (Q-067, autopsy de3bb2bb: "COACT" became a
-      // chat to "the COACT backend"). New builds only, like the stack note above — see unknownName.ts.
-      const unknownNamesAsked = intent === 'new_build' && !isImportTurn && unknownNameNoteEnabled() ? unknownNamesInRequest(prompt) : [];
-      const unknownNameNote = unknownNameBuilderNote(unknownNamesAsked);
-      // A login nobody asked for is a wall in front of the app (autopsy 70e030bb, see requestScope.ts).
-      let requestScopeText = '';
-      let requestScopeReason: RequestScopeReason | null = null;
-      try {
-        const scope = requestScopeVerdict({ request: planning.text, newBuild: intent === 'new_build' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain });
-        requestScopeText = scope?.note ?? '';
-        requestScopeReason = scope?.reason ?? null;
-      } catch { requestScopeText = ''; requestScopeReason = null; }
-      // A script, a CLI, a Streamlit dashboard or a notebook is built as a web app, and the user hears that
-      // BEFORE the build (Q-274, autopsy 241215d1 — a "self-contained Python script" became FastAPI + React
-      // with a simulated feed, said nowhere). New builds only, like the two notes above — see scriptRequest.ts.
-      const liveDataAsked = liveDataRequested(prompt);
-      const scriptFormAsked = intent === 'new_build' && !isImportTurn && scriptRequestNoteEnabled() ? scriptDeliverableRequested(prompt) : null;
-      const scriptRequestNote = scriptRequestBuilderNote(scriptFormAsked, liveDataAsked);
+      // The stack, unknown-name, no-login and script notes — and the keypad phone and third-party player
+      // below — are all computed ONCE, above the blueprint lane, so the lane that plans first can read
+      // them (Q-1016). This block used to derive them here, which is why nothing above had them.
       // The deadline finalizer prices the same build and must use the same fact — see billingCtx.
       billingCtx.expectsArtifacts = expectsArtifacts;
       // The mandatory readiness gate audits code v5.0 BUILT — it must NOT judge a freshly-imported
@@ -17209,26 +17259,6 @@ async function noteBuildOutcome(
       // reconciles to ONE framework before writing features. Applies to any turn on an incoherent workspace;
       // '' (coherent, or flag off) leaves buildPrompt unchanged.
       if (frameworkCoherenceMsg) buildPrompt = `${frameworkCoherenceMsg}\n\n---\n\n${buildPrompt}`;
-      // A KEYPAD PHONE THE USER NAMED (Q-846): the builder is told before it writes, so what it builds fits the keys.
-      // Pure (deviceTarget.ts never throws), so no best-effort wrapper — like the notes below.
-      // A NEW BUILD only (Q-868): on an edit of an existing app — "add a Nokia 3310 as a pickup in my 3D city game" — the
-      // phone is a detail of the request, and telling the builder "never three.js" would break a working 3D game. Every
-      // value read here is final: intent and isEditMode are last assigned well above this line.
-      const keypadPhoneForBuild = !isImportTurn && intent === 'new_build' && !isEditMode ? namedNonSmartphone(prompt) : null;
-      // NO ADS FROM A PLAYER THAT SHOWS ITS OWN (Q-990, autopsy 9c612cdb — "Your ad-free video player app is
-      // ready." over YouTube's own embedded player). A new build is told when the request names the source; an
-      // edit ("remove the ads") when the WHOLE project already embeds such a player — see thirdPartyLimits.ts.
-      // ⚠️ The conditions live in thirdPartyLimits.ts on purpose: this handler sits at TypeScript's control-flow
-      // limit (TS2563), and every `&&` / `if` written here is one more branch the checker must walk.
-      // BOTH ad facts from ONE load (Q-1018): the other service's players, and the app's OWN ad slots — the
-      // ones that ARE ours to remove, and that the builder note below is now told to take out.
-      const thirdPartyAdFactsAtStart = await editTurnAdFacts(prompt, { editTurn: intent === 'edit_existing', importTurn: isImportTurn }, () => loadWorkspaceFiles(workspaceId));
-      const thirdPartyLimitAsk = thirdPartyLimitAsked({ prompt, newBuild: intent === 'new_build', importTurn: isImportTurn, projectPlayers: thirdPartyAdFactsAtStart.players });
-      // 🔴 Q-1019 — the facts a zero-file turn's answer is judged against, read from the project as it was
-      // when the turn BEGAN, which is what the model was answering about. "Remove the ads" on an app that
-      // plays videos in YouTube's own player has one correct outcome — say so and change nothing — and the
-      // platform used to file exactly that as a failed build. See `adRemovalAnsweredNotBuilt`.
-      const adAnswerFacts = { editTurn: intent === 'edit_existing', importTurn: isImportTurn, players: thirdPartyAdFactsAtStart.players, ownAds: thirdPartyAdFactsAtStart.ownAds };
       // 🧭 EVERY REQUEST NOTE REACHES EVERY LANE — ONE LIST, READ BY ALL FOUR (Q-991, autopsy 9c612cdb). Each note
       // used to be threaded into each lane by hand, and each fix reached the lanes its author remembered: the
       // keypad-phone rule (Q-846) reached the architect only, the stack note missed the fast lane and the one-shot
@@ -17236,17 +17266,9 @@ async function noteBuildOutcome(
       // note joins THIS list, and the architect (just below), the fast lane, the one-shot lane and the project
       // planner all read it. `tests/everyRequestNoteReachesEveryLane.test.ts` fails on a note threaded any other way.
       // Order is the architect's reading order, top first (the unchanged order of the old prepends).
-      const requestNotes: ReadonlyArray<{ code: string; text: string }> = [
-        // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built in React
-        // with a types file claiming a "PHP MVC backend"). The user hears it in the ready message — unsupportedStack.ts.
-        { code: 'unsupported-stack', text: unsupportedStackAsked ? unsupportedStackBuilderNote(unsupportedStackAsked, framework) : '' },
-        { code: 'script-request', text: scriptRequestNote },
-        { code: 'unknown-name', text: unknownNameNote },
-        { code: 'request-scope', text: requestScopeText },
-        { code: 'device', text: keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind) : '' },
-        { code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, thirdPartyAdFactsAtStart.players, thirdPartyAdFactsAtStart.ownAds) },
-      ];
-      const requestNotesText = requestNotes.map((n) => n.text.trim()).filter(Boolean).join('\n\n---\n\n');
+      // The ONE list, built above the blueprint lane (Q-1016) — read here, never derived twice. Order is
+      // the architect's reading order, top first, and it lives in `requestNotesFor` with each note's reason.
+      const requestNotes = requestNoteSet.notes;
       const requestNotesSuffix = requestNotesText ? `\n\n${requestNotesText}` : ''; // the one-shot lane's copy
       childRequestNotes = requestNotesText; // and every writing sub-agent's
       buildPrompt = [requestNotesText, buildPrompt].filter(Boolean).join('\n\n---\n\n'); // no notes → unchanged
@@ -17914,6 +17936,7 @@ async function noteBuildOutcome(
           // The text the gate sized and the verdict it read — never a second derivation (Q-138).
           prompt: planning.sizing,
           scope: { large: appScope.large, signals: appScope.scope.signals },
+          templateIsTheApp: templateIsTheFinishedApp(seededScaffold),
         });
         buildDiag.record({ phase: 'plan', severity: 'info', code: pmDiag.code, message: pmDiag.message, detail: pmDiag.detail, autoResolved: true });
       } catch { /* diagnostics are best-effort and must never touch a build */ }
@@ -17973,7 +17996,10 @@ async function noteBuildOutcome(
             ppLast.outputTokens = t.usage.outputTokens;
             return t.text;
           };
-          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && appScope.projectMode) {
+          // `!templateIsTheApp`: a seeded simple-tier template IS the finished app, so there is nothing to split
+          // into modules (autopsy e3135b7b — `panchang` is such a chip and reached exactly this line). The report
+          // says so through projectModeDiagnosis's 'template-is-the-app'.
+          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && appScope.projectMode && !templateIsTheFinishedApp(seededScaffold)) {
             ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
@@ -24447,7 +24473,11 @@ async function noteBuildOutcome(
       // light 2D, any modern browser, touch or keys — and nothing about what the user meant (the admin corrected Q-846's
       // "no web app runs there" reading on 2026-10-12). Same new-build gate as the rule. Recorded for the admin as info.
       try {
-        const keypadPhone = result.ok && expectsArtifacts && !isImportTurn && intent === 'new_build' && !isEditMode ? namedNonSmartphone(prompt) : null;
+        // 🔴 THE SAME FACT, READ NOT RE-DERIVED (found by Q-1016's own test, 2026-10-16). This line used to
+        // call `namedNonSmartphone(prompt)` a second time with its own copy of the new-build gate — two
+        // derivations of one question, the exact class Q-1016 is about. It now reads the one computation and
+        // adds only what is genuinely its own: the build has to have SUCCEEDED and expected artifacts.
+        const keypadPhone = result.ok && expectsArtifacts ? requestNoteSet.keypadPhone : null;
         if (keypadPhone) {
           result = { ...result, summary: `${result.summary}${nonSmartphoneUserLine(keypadPhone.device)}` };
           buildDiag.record({ phase: 'readiness', severity: 'info', code: 'NON_SMARTPHONE_TOLD', autoResolved: true, message: `The request named ${keypadPhone.device}, a classic keypad phone — the build was steered to a light 2D version (touch and keys; for a game, the classic game from that phone unless the request asked otherwise), and the user was given a line saying what was built (light 2D, any modern browser, touch or keys).` });

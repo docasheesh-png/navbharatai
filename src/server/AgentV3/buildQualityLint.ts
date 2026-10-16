@@ -28,8 +28,37 @@ import { lintA11y, type A11yLintResult } from '../AppMakerLab/intelligence/A11yL
 import { stripCommentsForMarkup } from './stripCodeComments';
 import { blankOurMarkup } from './ourInjectedMarkup';
 
-/** Source files worth linting. Everything else is noise the linters would only mis-read. */
-const LINTABLE = /\.(tsx?|jsx?|css|scss|html)$/i;
+/**
+ * Source files worth linting. Everything else is noise the linters would only mis-read.
+ *
+ * 🔴 .vue / .svelte / .astro / .less / .sass / .styl ADDED (Q-1015, 2026-10-15). The `evaluate` tool used
+ * to design-lint them with a selection of its own. When that private copy was replaced by THIS one
+ * (autopsy 9c612cdb — one selection, so the lint and the spacing snap could never disagree about scope),
+ * the shared set was the narrower of the two, so **a Vue or Svelte app silently stopped getting any design
+ * feedback at all**: its components and its styles are in no `.tsx`/`.css` file. Centralising was right;
+ * centralising on the smaller set was the regression.
+ */
+const LINTABLE = /\.(tsx?|jsx?|vue|svelte|astro|css|scss|less|sass|styl|html)$/i;
+
+/**
+ * The INDENTED stylesheet syntaxes — Sass's original `.sass` and Stylus — where a declaration ends at the
+ * END OF THE LINE instead of at a `;`.
+ *
+ * 🔴 THIS IS NOT A TIDINESS DETAIL; WITHOUT IT THE LINES ABOVE WOULD CORRUPT A USER'S APP. Measured
+ * 2026-10-15 on a real indented file. `SPACING_DECL_RE_SOURCE` captures a declaration's value as
+ * `[^;"'}]+`, which does not stop at a newline, so in
+ *
+ *     .card
+ *       padding: 6px
+ *       font-size: 15px
+ *       border-radius: 13px
+ *
+ * the `padding` declaration swallows the next two lines and `extractSpacingPx` returns `[6, 15, 13]`. The
+ * app would then be told its FONT SIZE is off-grid spacing — and `spacingSnap`, which rewrites exactly
+ * what that extractor counts, would have changed `font-size: 15px` to `16px` and `width: 333px` to `332px`
+ * in the user's stylesheet. A design advisory must never be able to do that.
+ */
+const INDENTED_STYLE = /\.(sass|styl)$/i;
 
 /**
  * Paths that are not the user's design.
@@ -46,7 +75,7 @@ const GENERATED = /(\.min\.(css|js)|\.bundle\.js|-lock\.json)$/i;
  * the values the `DESIGN_CONSISTENCY` finding counts, and a private copy of the
  * file selection there is the drifted-copy class this repo has already paid for four times.
  */
-export { LINTABLE as LINTABLE_DESIGN_FILE, NOT_APP_DESIGN as NOT_APP_DESIGN_FILE, GENERATED as GENERATED_FILE };
+export { LINTABLE as LINTABLE_DESIGN_FILE, NOT_APP_DESIGN as NOT_APP_DESIGN_FILE, GENERATED as GENERATED_FILE, INDENTED_STYLE as INDENTED_STYLE_FILE };
 
 /**
  * The text every design/accessibility reader judges, for ONE file: comments blanked (a comment is never
@@ -58,7 +87,15 @@ export { LINTABLE as LINTABLE_DESIGN_FILE, NOT_APP_DESIGN as NOT_APP_DESIGN_FILE
  * (`<!-- nbai-honesty -->`) and blanking those first would hide the block from its own pattern. PURE.
  */
 export function shippedDesignText(path: string, content: string): string {
-  return stripCommentsForMarkup(blankOurMarkup(path, content));
+  const shipped = stripCommentsForMarkup(blankOurMarkup(path, content));
+  // An indented syntax's line break IS its declaration terminator, so it becomes one the shared spacing
+  // regex can see (Q-1015). `\n` → `;` is ONE character for ONE character, which is what keeps this
+  // function length-preserving — the property the snap's offsets depend on — and it is done LAST, after
+  // comment stripping, because a `//` comment in a `.sass` file ends at a newline too. No design rule
+  // here is line-based (no `m` flag, no `split('\n')` in either linter), so nothing else changes.
+  // The alternative was a second, newline-terminated copy of the regex; one definition with one reader is
+  // the same choice this module's export block already makes, for the same drifted-copy reason.
+  return INDENTED_STYLE.test(path) ? shipped.replace(/\n/g, ';') : shipped;
 }
 
 /**

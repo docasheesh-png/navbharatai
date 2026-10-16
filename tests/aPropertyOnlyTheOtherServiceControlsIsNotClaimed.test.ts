@@ -269,14 +269,18 @@ describe('what the user and the builder are told — never "ad-free", never "ill
   it('the route\'s one assignment: a successful build gets the line and the report hears it; anything else is the same object', () => {
     const told: string[][] = [];
     const ok = { ok: true, summary: REAL_SUMMARY.replace('Your ad-free video player app is ready.', 'Your video player app is ready.') };
-    const next = withThirdPartyLimitsEndLine(ok, REAL_PROMPT, ['YouTube'], (p) => told.push([...p]), {});
+    // PIN UPDATED (Q-1018): the wrapper takes BOTH ad facts — the other service's players and the app's own
+    // ad slots — because the route must be able to pass `await adFactsNow()` inline (the chat handler is at
+    // TypeScript's control-flow limit, so a new local there costs more than this parameter shape does).
+    const next = withThirdPartyLimitsEndLine(ok, REAL_PROMPT, { players: ['YouTube'] }, (p) => told.push([...p]), {});
     expect(next.summary).toContain('ℹ️ **About ads:**');
     expect(told).toEqual([['YouTube']]);
     const failed = { ok: false, summary: 'The build failed.' };
-    expect(withThirdPartyLimitsEndLine(failed, REAL_PROMPT, ['YouTube'], (p) => told.push([...p]), {})).toBe(failed);
+    expect(withThirdPartyLimitsEndLine(failed, REAL_PROMPT, { players: ['YouTube'] }, (p) => told.push([...p]), {})).toBe(failed);
     const noSummary = { ok: true };
-    expect(withThirdPartyLimitsEndLine(noSummary, REAL_PROMPT, ['YouTube'], undefined, {})).toBe(noSummary);
-    expect(withThirdPartyLimitsEndLine(ok, 'a todo app', ['YouTube'], undefined, {})).toBe(ok);
+    expect(withThirdPartyLimitsEndLine(noSummary, REAL_PROMPT, { players: ['YouTube'] }, undefined, {})).toBe(noSummary);
+    expect(withThirdPartyLimitsEndLine(ok, 'a todo app', { players: ['YouTube'] }, undefined, {})).toBe(ok);
+    expect(withThirdPartyLimitsEndLine(ok, REAL_PROMPT, null, undefined, {}), 'no facts known ⇒ nothing is claimed').toBe(ok);
     expect(told).toHaveLength(1);
   });
 
@@ -318,10 +322,13 @@ describe('🔒 the wiring (agentv3.ts)', () => {
 
   it('the claim correction runs right after the audit, on the WHOLE project\'s players', () => {
     const audit = route.indexOf('const contradictions = auditSummaryClaims(');
-    const fix = route.indexOf('const adFreeFix = adFreeClaimCorrection(auditedSummary, adPlayers);');
+    // PIN UPDATED (Q-1018): one thunk reads BOTH facts from the same project map, so a reply can never
+    // describe two different versions of the project, and the correction's sentence is measured too.
+    const fix = route.indexOf('const adFreeFix = adFreeClaimCorrection(auditedSummary, adPlayers, undefined, adFacts.ownAds);');
     expect(audit).toBeGreaterThan(0);
     expect(fix).toBeGreaterThan(audit);
-    expect(route).toContain('const adPlayers = await adServingPlayersNow();');
+    expect(route).toContain('const adFacts = await adFactsNow();');
+    expect(route).toContain('const adPlayers = adFacts.players;');
     // The players come from the integrity pass's whole-project map, never `writtenFiles` alone.
     expect(route).toContain('wholeProjectFiles = integrityFiles;');
     expect(route).toMatch(/const base = wholeProjectFiles \?\? await loadWorkspaceFiles\(workspaceId\)/);
@@ -329,18 +336,28 @@ describe('🔒 the wiring (agentv3.ts)', () => {
 
   it('the end line comes after the correction, so it can see it and stay silent', () => {
     const fix = route.indexOf('const adFreeFix = adFreeClaimCorrection(');
-    const end = route.indexOf('result = withThirdPartyLimitsEndLine(result, prompt, await adServingPlayersNow(),');
+    const end = route.indexOf('result = withThirdPartyLimitsEndLine(result, prompt, await adFactsNow(),');
     expect(end).toBeGreaterThan(fix);
     expect(route).toContain("code: 'THIRD_PARTY_LIMIT_TOLD'");
   });
 
   it('the edit turn reads the project before the builder starts; the start line is said', () => {
-    expect(route).toContain("await editTurnAdServingPlayers(prompt, { editTurn: intent === 'edit_existing', importTurn: isImportTurn }, () => loadWorkspaceFiles(workspaceId))");
-    expect(route).toContain('announceThirdPartyLimit(thirdPartyLimitAsk, thirdPartyPlayersAtStart,');
+    // PIN UPDATED (Q-1018): one load, both facts (`editTurnAdFacts`) — the player question and the own-ads
+    // question are asked of the same files, and the durable store is still read once per turn.
+    expect(route).toContain("await editTurnAdFacts(prompt, { editTurn: intent === 'edit_existing', importTurn: isImportTurn }, () => loadWorkspaceFiles(workspaceId))");
+    expect(route).toContain('announceThirdPartyLimit(thirdPartyLimitAsk, thirdPartyAdFactsAtStart.players,');
     // The start line rides the build's own bus, so the build report shows the line the user read (adversarial review:
     // a bare `emit` after the report subscribes reaches the user and never the report).
     expect(route).toContain("(text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),");
-    expect(route).toContain("{ code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, thirdPartyPlayersAtStart) },");
+    // PIN MOVED WITH THE FIX (Q-1016) AND KEPT WHOLE (Q-1018). The list left the route for
+    // `requestNotes.ts` — it was built ~500 lines BELOW the blueprint lane, which therefore planned the
+    // whole file manifest from the bare request. And the note still hears the app's OWN ad slots, which
+    // are the ones it is told to remove: that third argument is #3753's, threaded through the module on
+    // merge exactly as `RequestNoteInputs.thirdPartyOwnAds` said it would be.
+    expect(readFileSync(join(process.cwd(), 'src/server/AgentV3/requestNotes.ts'), 'utf8'))
+      .toContain("{ code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, players, input.thirdPartyOwnAds ?? []) },");
+    expect(route, 'and the route hands the one computation both ad facts').toContain('thirdPartyOwnAds: thirdPartyAdFactsAtStart.ownAds,');
+    expect(route, 'and reads the one answer').toContain('const thirdPartyLimitAsk = requestNoteSet.thirdPartyLimitAsk;');
   });
 
   it('CLASS CENSUS: every fact the claim audit can read is handed to it — an unwired optional fact silently disables its rule', () => {

@@ -28,6 +28,7 @@ const root = resolve(__dirname, '..');
 const KOTLIN = readFileSync(resolve(root, 'tests/fixtures/autopsy042e472f.prompt.txt'), 'utf8');
 const WEB = `Build a JARVIS-style voice assistant web app. Features: a mic button using the Web Speech API (SpeechRecognition) to take voice commands in Hindi and English; spoken replies using speechSynthesis; a dark, glowing arc-reactor style UI with a live chat log; commands like "open YouTube", "what's the time", "set a timer", "remember my name is …" (saved in localStorage); and a fallback text input. Keep it mobile-first and a single page. apk`;
 const ROUTE = readFileSync(resolve(root, 'src/server/routes/agentv3.ts'), 'utf8');
+const NOTES = readFileSync(resolve(root, 'src/server/AgentV3/requestNotes.ts'), 'utf8'); // the list moved here (Q-1016)
 const DISPATCHER = readFileSync(resolve(root, 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
 
 describe('a native mobile stack is named, like any stack we do not build', () => {
@@ -70,10 +71,19 @@ describe('a native mobile stack is named, like any stack we do not build', () =>
     // through the ONE request-notes list every lane reads, instead of a planner-only ternary — so the same note also
     // reaches the fast lane and the one-shot lane, which it used to miss. tests/everyRequestNoteReachesEveryLane.test.ts
     // holds the whole matrix; these two lines hold this note's place in it.
-    expect(ROUTE).toContain("{ code: 'unsupported-stack', text: unsupportedStackAsked ? unsupportedStackBuilderNote(unsupportedStackAsked, framework) : '' },");
+    // PIN MOVED WITH THE FIX (Q-1016, 2026-10-16): the request-notes list and every producer that feeds it
+    // left the route for `requestNotes.ts`, because the list was built ~500 lines BELOW the blueprint lane
+    // and that lane therefore planned the whole file manifest from the bare request. The claim this test
+    // makes is unchanged — the note is produced and reaches the builder — only the file it lives in moved.
+    expect(NOTES).toContain("{ code: 'unsupported-stack', text: unsupportedStackAsked ? unsupportedStackBuilderNote(unsupportedStackAsked, input.framework) : '' },");
+    expect(ROUTE, 'and the route still reads the one list').toContain('const requestNotes = requestNoteSet.notes;');
     expect(ROUTE).toContain('const plannerGoal = withRequestNotes(prompt, requestNotesText);');
     expect(ROUTE).toMatch(/projectPlanUserPrompt\(plannerGoal, ppScaffold\)/);
-    expect(ROUTE).toMatch(/createProjectPlan\(plannerGoal, framework, modules, Date\.now\(\)\)/);
+    // PIN MOVED WITH THE FIX (Q-1017, 2026-10-16), claim unchanged: the note still reaches the plan's goal, so
+    // every module turn still reads it — but the REQUEST and the notes are now handed over APART, because the
+    // goal's cap used to be applied to the join and the cut therefore always landed on the user's own spec
+    // (autopsy 042e472f raised that cap and left the class). The notes are kept whole inside.
+    expect(ROUTE).toMatch(/createProjectPlan\(prompt, framework, modules, Date\.now\(\), requestNotesText\)/);
     expect(ROUTE).not.toMatch(/projectPlanUserPrompt\(prompt, ppScaffold\)/);
   });
 });

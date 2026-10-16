@@ -184,7 +184,11 @@ export function modelDesignLine(lint: BuildQualityLint | null, env: NodeJS.Proce
   if (handled.length === 0) return designLintSummary(lint);
   const shown = { ...lint, design: { ...lint.design, violations: lint.design.violations.filter((v) => !platformFixesNow(v.type, env)) } };
   const told = handled.map((v) => `  ✓ ${PLATFORM_FIXED_VIOLATIONS.get(v.type)?.told(v.count) ?? ''}`);
-  return [designLintSummary(shown), ...told].join('\n');
+  // 🔴 `handled.length` IS PASSED, AND THAT IS THE WHOLE OF Q-1022. `shown` is the filtered copy: when the
+  // ONLY finding was a platform-fixed one it has no violations left, and the summary then read its clean
+  // "cohesive palette, typography and spacing" sentence off a list that is empty only because this line
+  // emptied it — immediately above a `✓ 4 off-grid spacing value(s)` line saying the opposite.
+  return [designLintSummary(shown, handled.length), ...told].join('\n');
 }
 
 /**

@@ -95988,3 +95988,417 @@ to Node 22 is its own change (run the suite on 22 first, then flip `ci.yml`).
 **Evidence, not guesses:** production build in headless Chromium (4× CPU, 150 ms RTT, 1.5 Mbps). Switching is synchronous state only in code; measured steady-state 60–110 ms. The first switch to each AI is 6–8× slower (490 / 590 ms): the screen's lazy chunk is fetched on the pick.
 **Fix:** `src/lib/warmModeChunks.ts` — idle, one-at-a-time warm-up of the four screens (490→357 ms, 590→409 ms). **A bug the measurement caught:** my first version asked `window.Capacitor`, which exists in every browser, and fetched nothing; the same mistake was live in `main.tsx` (every website launch labelled `app` in cold-start telemetry) and is fixed with a census.
 **Honest limit:** not reproduced signed-in; what is left is evaluation + first render (~350 ms at 4× CPU). Q-1071 stays 🟡 until the admin says whether the SECOND switch is also slow.
+### 2026-10-15 — Q-1018 + Q-1019 (+ Q-1096 found while fixing them): the ads we can remove, and the ones we cannot
+
+Q-990 built `thirdPartyLimits.ts` so the platform would stop claiming a property only another service
+controls. Its honest sentence has two halves, and **only the first was ever measured**:
+
+- *"ads inside YouTube's own player may still play …"* — measured (`projectAdServingPlayers`)
+- *"The app adds no ads of its own"* — **asserted, on every build, unchecked**
+
+**Q-1018.** That second half is not a safe assumption, and the proof is inside NavBharatAI: our OWN
+Monetization wizard generates an AdSense block (`generateAdsense`, `src/lib/paymentSetup.ts`). A user who
+added ads through our own feature and then asked about ads was told, by us, that their app adds none.
+`projectOwnAdSdks` now measures nine networks — each by its loader, publisher id or SDK package, never by a
+product name, so prose, a `.adsbygoogle{display:none}` style and our own test files can never match. The end
+line, the "ad-free" correction and the **builder note** all read it, and when the app really does carry its
+own ads the note tells the builder to REMOVE them: those ARE ours to remove and the user just asked
+(the 50/50 law's prevent half). One project load serves both ad questions (`editTurnAdFacts`).
+
+**Q-1019, the same fact read again.** An edit turn whose whole ask is "remove the ads" on an app that plays
+videos in YouTube's own player has one correct outcome: say those ads are not the app's to switch off, and
+change nothing. The platform filed that as a **failed build** — "the build produced no files, please try
+again" over the honest answer, an empty-build retry to produce the same answer on a stronger rung, and on
+the free tier an upsell. Fixed on the `pointed` precedent (autopsy 0c2a987a): `TurnAnswer.notOurs`, decided
+from measured facts, never from reading the model's prose. Six conditions, all required — and two of them
+are what keep it honest: the app must have **no ads of its own** (if it does, the removal IS ours to make,
+so the zero-file turn really failed), and the ad removal must be the turn's **only** ask (conservative — in
+doubt it answers false and today's behaviour stands, so "remove the ads and add dark mode" is still a real
+empty build whose retry may deliver the dark mode). `TURN_ANSWERED_NOT_OURS` is registered PROCESS-ONLY,
+because an unregistered code costs the user 6 app-health points (the Q-1043 class).
+
+**Q-1096 — found while writing Q-1019's test, and it was bigger than either row.** `adRemovalRequested`
+matched only verb-then-noun removals ("remove the ads"). Hindi is subject-object-VERB, so the form an Indian
+user types FIRST — *"ads hata do"*, *"ads nikal do"*, *"ads band karo"*, *"विज्ञापन हटाओ"* — matched nothing,
+and with that predicate false **all three of Q-990's layers stood down**: the builder was never told, the user
+got no start line, and the honest end line never appeared. Q-990 was written from one English report; this is
+the same module's blind spot in the language its own user base writes in. The ad word must sit directly beside
+the removal verb, so every negative Q-990 pinned still does not match.
+
+Locked by `tests/theAdsWeCanRemoveAndTheOnesWeCannot.test.ts` (24 tests) — including a census that every
+reader of `pointed` in the route also reads `notOurs`, because the defect was one grouping lacking a term.
+Nine reversions, each with an anchor assertion, each failed and was restored.
+### 2026-10-15 — Q-1030: a measurement whose error is unknown (TODO_ONLY_TURNS)
+
+**Root cause, two halves of one class** — *a count kept at one of N call sites is not kept*:
+1. `SubAgent.ts` threaded `onLlmCall` to its child runner but not `onTodoOnlyTurn`, so the lane that runs
+   most of a delegating build's turns was never in the tally. The exact sibling of the `onLlmCall` omission
+   fixed on 2026-09-19, in the same object, for the same reason.
+2. The route **recorded** the line the moment generation ended — above the integrity, design, compile, hooks,
+   completion, guard, feature, vax, runtime, fix, repair and crit-fix runners, every one of which spreads
+   `baseRunnerOpts` and counts into that same tally. The arithmetic was right; the number the admin read was
+   written before most of the counting happened.
+
+**Fix.** The arithmetic is one call (`noteTodoOnlyTurn`), so a lane joins the tally in one line; the sub-agent
+lane now does. The line is a property of SERIALIZATION, not of a moment in the route:
+`BuildDiagnostics.setTodoOnlyTally` holds the tally **by reference** and `report()` builds the line — the same
+lesson `resolveRecoveredOnSuccess` already learned in that file. Info, outside every tally and `problems`.
+
+**Locked by `tests/everyLaneCountsItsIdleTurns.test.ts`, which polices the CLASS, not the instance:** it finds
+every `new AgentRunner` in the server and requires each to feed the tally or prove from its own `tools:` line
+that it cannot write (the plan-approval lane, offered only `update_todo`). A thirteenth heal lane fails it until
+it is wired. Proven by five reversions (child hook removed · route hook removed · tally COPIED instead of held ·
+report never handed the tally · one heal lane drops `baseRunnerOpts`) — each failed, each restored.
+
+**Honest consequence for an earlier autopsy.** The "6 turns / 20.8 s" quoted for report 12ef62b2 was an
+under-count of unknown size. **Watch on the next real report: the figure should RISE on any delegating build**,
+and a rise is the fix working, not a regression.
+## 2026-10-15 — Admin → Apps: a "v" on every app opens its build reports; "All builds" moved out of the Build tab (admin request)
+- **What changed:** `BuiltAppsPanel` cards (live, held, banned and the orphaned list alike) get a "v" button → a dialog (`WorkspaceBuildReports`) reading the existing `GET /api/admin/all-builds/:workspaceId`: the latest build's headline in the engine's words, Copy / Download for the whole session and for each build. The "All builds — every user, no submit needed" card moved from the Build tab to the Apps page (same state, filters, "taken" mark); its auto-load follows it.
+- **Decision, said plainly:** the admin said "remove All builds from the Build tab" — it was RELOCATED, not deleted. It holds builds that never produced an app, the failed/tier filters and the "taken" marks the autopsy workflow depends on; deleting it would have lost them.
+- **No new server route.** Copy / Download in the panel are the dashboard's own functions, because they also write the "taken" mark (one report, one session).
+- Locked by `tests/theAppsPageHoldsEveryBuildReport.test.ts` and `WorkspaceBuildReports.render.test.tsx`; three reversions each failed the right test. Two existing pins moved with the card (`theAdminMenuHasNineTabs`, `adminAllBuilds`, `adminBuildFilters`), each with the reason beside it.
+
+### 2026-10-15 — Q-1020: the request-notes census reads the sinks, not the names (and it corrected Q-1016)
+
+The census that keeps every request note reaching every builder lane was kept honest by a guard matching
+route imports named `…BuilderNote` / `…BuildRule`. It could not see a producer called anything else, and
+`requestScopeVerdict` — already on the list — was itself the proof: it had to be added by hand because no
+name rule caught it.
+
+**Widening the name rule was measured and rejected.** `/(?:Note|Rule|Verdict)$/` matches **73** of the
+route's imports for these **6** real producers, so the net would have needed a 67-name allowlist nobody
+would read, which dilutes a guard into decoration. The census now works from the **sinks**: each of the
+six lane prompts is pinned to the exact expression that must supply the notes, plus a **ratchet** over
+every `…UserPrompt(prompt, …)` call, so a seventh builder prompt reading the bare request fails the test.
+No name rule, no allowlist.
+
+**🔴 And on its first run it corrected Q-1016.** That row says the blueprint lane plans the manifest and
+contract blind. Measured, **six** builder prompts read the bare request:
+
+| sink | what it plans |
+|---|---|
+| `manifestUserPrompt(prompt, scaffold)` | the blueprint lane's whole file list — as the row said |
+| `contractUserPrompt(prompt, manifest)` | and its shared contract — as the row said |
+| `megaRoadmapUserPrompt(prompt, …)` ×2 | **the mega-app roadmap planner, which the row never mentioned** |
+| `repairUserPrompt(prompt, …)` ×2 | a repair pass — it rewrites real files, so "no sign-in" still constrains it; a judgement, recorded rather than assumed |
+
+None of the six is a wiring oversight: every one runs *above* the line where the first note input is
+computed (blueprint ~16750, first input ~16978), so there is nothing to pass yet. Closing them means
+lifting the note computation into one pure function called before the blueprint lane and read in both
+places — the Q-1026/Q-1033 "one computation, one copy" shape — not one more threaded argument. Q-1016's
+row now carries that scope and that plan, and the ratchet may only shrink.
+
+Three reversions: a seventh bare-prompt lane added (1 fail), the architect stops reading the list
+(2 fail), the sub-agents stop reading it (2 fail).
+### 2026-10-15 — Q-1021: our instrumentation is never the user's app
+
+`journeyDerivation.appOwnFiles` is the one place every *"does this app do X?"* question in that module is
+asked of — and it stripped **one of the three things NavBharatAI injects** into a built app.
+`withoutAppSignature` removes the "made by NavBharatAI" badge. It does not touch the red **honesty
+banner** (the NO-FAKE-FEATURE rule's demo warning) or the **preview bridge** — roughly 300 lines of our
+own script, which registers `addEventListener('input', …)`, a `click` handler and a `mouseover` handler.
+So on an app whose author wrote no script at all, those questions were partly being answered about our
+own instrumentation.
+
+**The class, and why the fix is one call rather than three patterns copied in.** Autopsy 9c612cdb had
+already met this exact bug in the design lint (our badge's `gap:6px` counted as the user's eighth
+off-grid value) and fixed it with `ourMarkupRanges`: ONE list of what we inject, owned by the three
+modules that write it. This reader was left on its private, partial strip. Pointing it at the shared one
+closes today's gap **and** makes a fourth injection safe by construction instead of by somebody
+remembering to add it in two places. It blanks rather than deletes, which this reader needs too —
+`dataEntryEvidence` reports *where* it found a sign, and blanking keeps every other offset valid.
+
+Locked by `tests/ourMarkupIsNeverTheUsersApp.test.ts` (12 tests), whose fixtures are built from the real
+badge, banner and bridge rather than a paraphrase, with a **census** that fails on any reader of the
+app's own files rolling its own strip. A real `<form>` and a real React form component are proven still
+found — the strip must never hide the app's own input. Three reversions: the import reverted (the module
+throws on load), the stripper handed a non-HTML path (3 fail), the shared list reduced to the badge
+alone (2 fail).
+
+⚠️ **My own history comment tripped my own census.** The first version of the source guard failed on the
+Q-1021 note that explains the fix, because that note names the helper it removed. Comments are stripped
+now — the same trap Q-1081's census fell into, closed the same way.
+### 2026-10-15 — Q-1015: design feedback reaches every framework, and an indented stylesheet survives it
+
+**The regression.** The `evaluate` tool used to design-lint `.vue`, `.svelte`, `.less` and `.sass` with a
+file selection of its own. Autopsy 9c612cdb replaced that private copy with the shared one in
+`buildQualityLint` — the right call (one selection, so the lint and the spacing snap can never disagree
+about scope). But the shared set was the **narrower** of the two, so a Vue or Svelte app silently stopped
+getting any design feedback at all: `lintBuiltApp` selected nothing and returned null, which the report
+reads as "not checked". Centralising was right; centralising on the smaller set was the regression.
+
+**And the obvious widening would have corrupted a user's stylesheet — measured, not reasoned.**
+`SPACING_DECL_RE_SOURCE` captures a declaration's value as `[^;"'}]+`, which does not stop at a newline.
+Sass's original indented syntax has no `;`, so a `padding: 6px` line swallows the next two and the
+extractor returns `[6, 15, 13]`: the app is told its **font size** is off-grid spacing, and `spacingSnap` —
+which rewrites exactly what that extractor counts — would have written `font-size: 16px` and
+`width: 332px` into the user's file. An advisory check that quietly edits values it misread is worse than
+no check at all. The queue row had flagged indented `.sass`; the measurement showed the cost was larger
+than the row said.
+
+**The fix.** For an indented syntax only, `shippedDesignText` turns the line break into the terminator it
+already is — `\n` → `;`, **one character for one**, which is what keeps that function length-preserving
+(the property the snap's offsets depend on) and keeps the spacing regex a single definition with one
+reader rather than a second, newline-terminated copy that would drift. Braced CSS is untouched, including
+a multi-line value — which is precisely why it is applied by syntax and not everywhere.
+
+Locked by `tests/designFeedbackReachesEveryFramework.test.ts` (12 tests: a Vue app, a Svelte app, the real
+indented fixture, and the snap proven not to touch a font size, a width or a radius). Three reversions,
+each with an anchor assertion: the narrow selection back (5 fail), the terminator removed (3 fail), the
+terminator applied to braced files too (2 fail).
+### 2026-10-15 — Q-1022: the clean design sentence is earned, not read off a shortened list
+
+`modelDesignLine` hands `designLintSummary` a **copy** of the lint with the platform-fixed violation types
+filtered out. That is right: the model must not be told to fix what the spacing snap is about to fix
+itself (autopsy 536c8189 — it spent three model calls writing regex scripts over the stylesheet and moved
+on-grid values *off* the grid). But when the **only** finding was a platform-fixed one, the copy had no
+violations left, so the summary took its clean branch and the model read:
+
+> Design consistency 92/100 (A) across 7 file(s). Design consistency: ✓ A (92/100) — **cohesive palette,
+> typography and spacing.**
+>   ✓ **4 off-grid spacing value(s)**: the platform snaps these to the grid when the build ends.
+
+One sentence denying what the next one states, from the same lint, in the same breath.
+
+**The class: a predicate and its evidence computed from two different inputs.** The filtered copy is the
+right input for *listing what is left* and the wrong one for *deciding whether anything was wrong*. The
+caller now states how many it removed — `designLintSummary(shown, handled.length)` — and the honest
+`CLEAN_AFTER_OUR_FIX` sentence is said in place of the cohesive one.
+
+A genuinely cohesive app still gets its compliment, and that is tested: replacing the clean sentence
+unconditionally is the opposite defect, and the third reversion proves the test catches it.
+
+Locked by `tests/theCleanDesignSentenceIsEarned.test.ts` (10 tests), including a census that only the
+filtering caller may pass a count. Three reversions: the caller stops saying what it filtered (2 fail),
+the summary ignores the count (2 fail), the honest sentence replaces the cohesive one always (2 fail).
+
+### 2026-10-16 — Q-1016: the request notes exist before the first lane plans
+
+Q-991 gathered every request note into ONE list and had every lane read it — the right shape. But the list
+was **built ~500 lines below the first lane that plans**, so the blueprint lane (`AGENTV3_BLUEPRINT`)
+proposed the whole file manifest *and* the shared contract from the **bare** request: route ~16750 for the
+plan, ~16978 for the first note input. A Kotlin request, a keypad phone named in the prompt or a no-login
+scope was planned blind — and on a deep build the architect then follows that plan. It was never a wiring
+oversight; there was nothing to hand the lane yet, which is why Q-1020's name-based census could not see it.
+
+**The fix is one computation, read twice** — the Q-1026/Q-1033 shape. `requestNotesFor` is pure, lives in
+`requestNotes.ts` beside the `withRequestNotes` join, and is called once above the blueprint lane; the
+aggregator now reads that result instead of deriving the same facts again. Both blueprint prompts take
+`withRequestNotes(prompt, requestNotesText)`. The file budget beside them still reads the **bare** prompt,
+because Q-991 measured that notes riding the request take a 13-file budget to 25 — the user's app sized by
+our own instructions.
+
+**Three things the work found, each worth keeping:**
+1. **The obvious placement would have been wrong.** Computing at ~12882 (right after `planning`) looked
+   right and is not: `framework` is reassigned at ~15593 by the drift detector, and the stack note *names*
+   the framework it was built in — so the note could have carried a label that later changed. Measured
+   before shipping, not after.
+2. **My own test found a duplicate derivation.** Route ~24454 called `namedNonSmartphone(prompt)` a second
+   time with its own copy of the new-build gate — two answers to one question, this row's exact class. It
+   now reads the one result and adds only what is genuinely its own (`result.ok && expectsArtifacts`).
+3. **A reversion found my test weak.** Dropping the `!editing` narrowing (Q-868) *passed*, because the test
+   only ever set `newBuild: false`. The guard exists for `newBuild && editing` together; that case is in
+   now, and the reversion bites.
+
+Ratchet 6 → 4: `megaRoadmapUserPrompt` ×2 needs the framework label late-bound (it runs before ~15593), and
+`repairUserPrompt` ×2 is a repair pass whose need for the whole note list is a judgement, recorded not
+assumed. Locked by `tests/theNotesExistBeforeAnyLanePlans.test.ts` (13 tests) plus the census, which now
+reads the MODULE for the list and the ROUTE for the lanes. Five reversions.
+
+⚠️ **Third time today a census of mine matched its own explanatory comment** (Q-1081, Q-1021, Q-1016): the
+note beside a fix names the function the fix stopped calling, so a guard reading the file as text fails on
+its own documentation. It is a pattern — a source census must read stripped code, and the assertion that
+needs stripping is always the negative one.
+
+## 2026-10-16 — Q-1097: a null scene reading is never silent, and the vehicle is identified once (#3763)
+
+`tests/aThreeGameIsReadFromItsScene.test.ts` failed twice in one day under a loaded machine, on two different
+fixtures, with the same shape: `{ faces: false, mirrored: null }` where a concrete steering verdict was demanded.
+Both runs had **180 frames** — so `probeStarved`, the predicate the test branched on, was false, Q-1038's starved
+branch never ran, and the test fell through to an assertion no machine can promise.
+
+Three causes underneath, and the row only named the first:
+
+1. **The reason was not computed from the evidence.** `probeStarved` counts frames; the verdict's floors are
+   geometric (the vehicle seen to move, the camera following it, the turn big enough to call). New `sceneUnread`
+   answers from the same read `sceneVerdict` decides on, and the reason is computed ONLY where the verdict is
+   null — so *exactly one of the two is non-null, per axis* holds by construction. Q-1022's class one level down.
+   My own first draft got this wrong (it returned the starvation note for both axes on a low frame count, which
+   claimed the camera "could not be read" on a read that had just answered it); the invariant test caught it.
+2. **The vehicle was identified twice.** The steering probe re-picked it from its own 400 ms sample. The racer
+   fixture's traffic car moves 0.5 per frame whatever the player presses and never turns, so a second pick under
+   load can land on it — the camera question answered about the car, the steering question about something else.
+3. **A long look can LIE, not merely fail.** `turn` is a chord angle — half the swept angle — and three seconds
+   of holding LEFT is a 310° sweep at 60 fps on that fixture. One frame-rate step up passes 360°, where the chord
+   points backwards and `turn < 0` **accuses a correctly-steering game of mirrored steering**. A wrong verdict is
+   worse than no verdict. The reading is now taken over a 400 ms window, the long one used only as a fallback and
+   only below `TURN_WRAP_SAFE_DEG`; the arithmetic moved OUT of the probe script — which no unit test can reach —
+   into pure `chordTurn` / `pickTurn` / `readTurn`, with the script recording only the raw vectors (`SceneRead.aim`).
+
+And a contradiction inside Q-1038's own fix fell out: a starved page whose turn DID read used to print
+"Steering was not read" in the same report that scored `steeringMirrored` from that very reading.
+
+**Report honesty (rule 5):** four of the five reasons a reading can be missing used to print nothing, so a game
+whose steering the scene never read appeared as a game that steers correctly. All five print now — only where the
+scene was actually consulted (a driving game, not stalled, with a three.js scene), because without a scene the
+pixel flow is the designed path, not a failure.
+
+Locked by `tests/aNullSceneReadingIsNeverSilent.test.ts` (44 tests) plus the four live tests rewritten to the
+honest contract — never a wrong claim, the exact verdict when read, a stated reason when not — which only the
+first of them had. Four reversions all bite. Proven under 6 CPU hogs on 4 cores; `aRacingGameIsStartedAndDriven`
+re-run because the turn hold grew by 400 ms (140 sibling tests green).
+
+⚠️ **This entry first said #3761, which is another session's PR.** A PR number cannot be known until the PR
+exists, so a row written before that is a guess — and while this container was asleep another session opened,
+and merged, its own #3761 (Q-1017). Mine is **#3763**. The sixth rule's point exactly: a row whose owner is
+wrong is a row nobody can check.
+
+⚠️ **One thing to know before editing that file again:** lines ~238–835 are a template literal — the Playwright
+script, run as a subprocess. A backtick in a comment there ends the string, and the parse error points at the
+comment, not at the cause. The existing in-script comments escape theirs; the Q-1097 note says so in place.
+### 2026-10-16 — Q-1017: the goal's cap was spent on our own notes, and raising it in October was not the fix
+
+**The defect.** `createProjectPlan` stored `goal` as `(joined).slice(0, MAX_GOAL_CHARS)`, and the route handed it
+`withRequestNotes(prompt, requestNotesText)` — our request notes FIRST, the user's words after. `plan.goal` is read
+back as `PROJECT GOAL:` by EVERY module turn of a project build (`moduleBuildContext`), so on a long spec the
+closing requirements were missing from every turn of the build, silently. Worse than a fixed ceiling: the notes'
+length decided how much of the spec survived, so the same request kept different characters depending on which
+notes fired.
+
+**Why this is the fourth rule's forbidden shape, twice over.** Autopsy 042e472f (2026-10-01) met this exact
+failure — "a 2,900-char spec plus that note was cutting the user's own closing requirements off the end" — and the
+fix was to raise the cap from 4,000 to 6,000. That moved the cliff and left the CLASS: **one scalar bound applied
+AFTER a join of two different things, so one part's size silently spends the other's budget.** A longer spec walks
+off the new edge the same way. Recording it here plainly, as the fifth rule's 2026-09-30 section requires: that
+earlier fix was incomplete, and this is what it missed.
+
+**The sibling, found by hunting the class (rule 3).** `manifestUserPrompt(prompt, scaffoldPaths, sizeFrom = prompt)`
+grew its third argument for exactly this reason under autopsy 9c612cdb ("a note's commas and 'and's are not features
+of the app"). The route's blueprint lane called it with TWO arguments, so `sizeFrom` defaulted to the joined text and
+the file budget the MODEL is told to build within was derived from notes+request — while the overrun recorded five
+lines below correctly read the bare prompt. One question, two answers, and the model was given the wrong one.
+`SimpleBuilder.ts:2120`, the other call site, had always passed it.
+
+**The fix — the bound goes BEFORE the join, where the join already lives.** `withRequestNotesBounded(prompt,
+notesText, maxRequestChars)` in `requestNotes.ts` caps the REQUEST alone and keeps the notes whole (they are ours,
+few and short), so the surviving prefix of a given request is identical whatever notes ride with it.
+`createProjectPlan(request, framework, modules, now, notesText)` now takes the two apart and joins them itself —
+passing the joined text is no longer possible to do by accident. `MAX_GOAL_CHARS` is exported so the test asserts
+against the real bound rather than a copy of the number.
+
+**Honesty (rule 5).** A request that genuinely exceeds the cap now ends with `REQUEST_TRUNCATION_MARKER` instead of
+stopping mid-sentence, so a model — and the next autopsy — can see the spec was cut rather than believing it ended
+there. And `withRequestNotes` no longer writes a bare `---` when either side is empty; that dangling separator was
+found by this change's own test, not by a reader.
+
+**The lock.** `tests/aRequestCapIsNeverSpentOnOurOwnNotes.test.ts`, both halves:
+- BEHAVIOUR — the surviving request prefix is byte-identical with and without a 1,100-char stack note; the 042e472f
+  spec keeps its closing requirement; an over-cap request says so; a short request is stored byte-for-byte.
+- SOURCE CENSUS — no production caller may hand a notes+request join to `createProjectPlan`, and every
+  `manifestUserPrompt` call whose prompt carries notes must pass its own `sizeFrom`. A NEW sibling at either site
+  fails this test instead of shipping.
+- Proven by reversion: with either bug put back, 5 of the 7 fail (both behavioural and census halves).
+`tests/theNotesExistBeforeAnyLanePlans.test.ts`'s file-budget pin was widened from the telemetry budget to BOTH
+budgets, so the property it already claimed is now actually checked where the model reads it.
+
+## 2026-10-16 — Q-1029: a mistyped import is not a designed wait (#3765)
+
+The row was about a sentence; the sentence was the smaller half. `remedyFileFor` returned the resolved target
+for **any** `Cannot find module './x'`, so a typo and a designed entry-first wait were indistinguishable — and
+the note that follows tells the model *"Do NOT rewrite `<file>` for them; write or update `./x` next"*. For a
+typo that instruction is actively wrong: it sends the model to **create a file at the misspelled path** instead
+of changing one import line, and tells it not to touch the file that is actually broken.
+
+**The class: "the remedy is elsewhere" claimed without evidence that the elsewhere is real.** The same
+function already demands that evidence for *has no exported member* — `exportedElsewhere`, from candy report
+7da1cdca, where the identical wrong claim had a model edit a recipe library four times — and demanded none at
+all one branch along, for the missing-module case.
+
+Fixed in two tiers, because a false *"your import is mistyped"* is the opposite defect:
+
+- **Certain** → `mistypedImport` claims a typo only on evidence that cannot be anything else: a held file
+  differing **only in capitalisation** (two such files cannot coexist in one build, and the import resolves on
+  a case-insensitive disk and then fails in the Docker image), or a **spelled-out extension** the resolver
+  never takes. The remedy moves to the importer and the note names the exact correction.
+- **Possible** → `nearlyHeldImport` offers a one-character match as a *possibility* without deciding.
+  `Card.tsx` planned while `Cart.tsx` exists is a real wait, and two equally close names are no evidence at
+  all — so nothing is claimed, but the reader is no longer told there is nothing to check.
+
+The summary now says the next writes **may** add (never "expected") and counts a proven-wrong path on its own
+line. Q-989's pin on the word "expected" was **repointed with the reason written in**, not deleted.
+
+Locked by `tests/aMistypedImportIsNotADesignedWait.test.ts` (15 tests, tsc's real TS2307 text as the fixture),
+with 722 sibling tests across 39 files green.
+
+⚠️ **A fourth reversion turned out to be a no-op, and that is worth writing down.** The ambiguity guard is
+doubly defended — an in-loop early return *and* the final `hits.length === 1` — so removing either half alone
+still rejects, and the test looked like it had no teeth. It bites when both go. A reversion that silently
+changes nothing produces a meaningless green, which is the same trap as an un-asserted `replace`.
+**Q-1017 closed 2026-10-16:** #3761 merged to `main` as `15d2997`. The row is deleted from
+`BUILD_REPORT_QUEUE.md`'s open table and its ID appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the
+same commit, with the queue edited on a fresh `main` (#3543's lesson, 2026-10-06). Its ledger is the entry above.
+## 2026-10-16 — Q-1028: the advice fits the position it is about (#3764)
+
+**The row's own plan was wrong, and measuring it is what showed that.** Q-1028 said to add `FC`,
+`FunctionComponent` and `ComponentType` to `COMPONENT_TAKING_TYPES` — the set that switches the rename heal
+OFF. Measured against the installed `@types/react` and a real `tsc` run of all five shapes a model writes:
+
+| position | the renamed data type | `typeof Component` |
+|---|---|---|
+| `FC<…>`, `FunctionComponent<…>`, `ComponentType<…>` | ✅ compiles | ✅ compiles — and means "props are a function" |
+| `ComponentProps<…>` | ❌ TS2344 | ✅ the right fix |
+| a plain annotation | ✅ compiles | only if you mean the component |
+
+`FunctionComponent<P>` is `(props: P) => ReactNode`, so **P is the props**. Excluding those three would have
+switched off a heal that produces correct code, and `ComponentProps` — the one already excluded — is the only
+React position where `typeof` is right. The row had it backwards, so it is NOT implemented as written.
+
+**The real defect is worse than the row's.** At a props position `typeof X` *also compiles*, silently
+declaring the component's props to be the component's own function type. A wrong fix the compiler accepts
+costs more than one it rejects — and the advice offered it. Measured, one sentence named lines 2, 3, 4, 5, 6
+together and gave both options for all of them, although at line 5 the data name is a compile error and at
+lines 2–4 `typeof` is the nonsense. Advice right for one of those is wrong for the other.
+
+**The class:** the heal knew the position from the AST; the advice knew nothing and guessed. One classifier
+(`typeUsePosition` → `plain` / `props-arg` / `component-arg` / `not-a-type-use`) is now read by both, so they
+cannot disagree — Q-1022's shape (a predicate and its evidence from two different inputs) and Q-1026/Q-1033's
+(one computation, one copy). Without sources the advice stays conditional, which is the honest answer rather
+than a guess. The hand-off note names the three props positions too, and its ticket id came out of the
+model-facing prompt — a model has no use for our queue numbers.
+
+Heal behaviour is unchanged, because measurement said it was already right. Locked by
+`tests/theAdviceFitsThePosition.test.ts` (18 tests, the real tsc message as the fixture, a census that each
+set has exactly one reader), with 101 sibling tests green. Three reversions bite — including **the row's own
+plan**, which fails 5 tests, one of them named for exactly why.
+
+## 2026-10-16 — Q-1060: one declared runtime, and every place that names one agrees (#3766)
+
+`ci.yml` ran the whole 38,000-test suite on **Node 20** while the Dockerfile (`node:22`, `node:22-slim`), the
+`.aab` and `.ipa` workflows and `@capacitor/cli` 8 (`engines: >=22`) all run **Node 22**. A gate that
+exercises a different runtime from the one it guards proves less than it appears to — and any test needing
+the Capacitor CLI could not run there at all (*"The Capacitor CLI requires NodeJS >=22.0.0"*).
+
+**The row's prerequisite was already met, with evidence.** It asked to run the full suite on Node 22 first,
+fix what moves, then flip. Measured: this repo's container runs **Node 22.22.0**, and the full suite was run
+on it repeatedly today — **2705 files, 38,974 passed, 0 failed**. Nothing had to move.
+
+**Two things the row missed:**
+
+1. **`dast.yml` was on 20 as well.** It named `ci.yml` alone; a per-instance fix would have left the sibling.
+2. **`package.json` had no `engines` field at all** — the real cause. Nothing declared the project's runtime,
+   so six workflows and a Dockerfile each carried their own literal, two of them drifted, and a seventh could
+   drift tomorrow with nothing to catch it. `ci.yml`'s `'20'` was not a deliberate pin either: it came in with
+   the file's creation (#3538).
+
+So the class is fixed rather than the instance. The requirement is declared **once** — `engines.node: ">=22"`
+— and `tests/oneDeclaredRuntime.test.ts` checks every declaration against it: each workflow's `node-version`,
+both `FROM node:` lines, and `@capacitor/cli`'s own `engines` read from the installed package. The census pins
+its own size, so renaming the key cannot make the guard go blind. The reason is written beside the version in
+both workflows so nobody lowers it back.
+
+Three reversions bite: the gate back to 20 (3 fail), the declaration removed (8), the declaration disagreeing
+with the image (10).
+
+⚠️ **What to watch:** this PR's own CI run is the **first on Node 22**. That run is the real test of the flip,
+and it is the whole point of the change.

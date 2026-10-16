@@ -99,6 +99,29 @@ export interface ChannelTruncation {
    * informed. `head === kept` would mean a plain head.
    */
   head?: number;
+  /**
+   * WHAT REPEATED INSIDE THE GAP — the most-repeated dropped entries, with their counts (Q-1087).
+   *
+   * 🔴 THE THIRD BUG, found 2026-10-14, and it is NOT a fault in the head+tail split. That split is
+   * argued above and the argument holds: neither end is privileged, and it costs not one byte. But a
+   * window — any window — loses the one pathology an autopsy most often hunts, because a LOOP is not
+   * an entry, it is a COUNT of entries, and a count cannot be sampled. Build `413d29a1` ran the same
+   * no-op command about sixty times across minutes 10–13 of a 13.4-minute build that ended RED; the
+   * stored report kept "40 of 140 sandbox commands (the first 20 and the last 20)", so the loop lived
+   * entirely in the hundred that went, and the report could not show the defect it was reporting.
+   * Report 398db9f3 lost its RED gate's own blocker the same way (#3743's Q-1067) — two unrelated
+   * reports, one day, the same shape.
+   *
+   * So the gap is CENSUSED before it is cut. Only repeats are kept (a thing seen once is not a
+   * pattern), only the top few, and only when something actually repeated — so an ordinary build pays
+   * nothing, and a looping one pays a few hundred bytes to make its loop visible in one line. That is
+   * the same byte-consciousness the caps themselves exist for: this never grows with the loop.
+   *
+   * Absent means nothing repeated in the gap, or the caller passed no summariser — never "no loop
+   * happened", which is the distinction the whole module exists to keep (an absent measurement is not
+   * a measurement of zero).
+   */
+  gapTop?: Array<{ what: string; n: number }>;
 }
 
 /**
@@ -188,10 +211,36 @@ export function pushBounded<T>(arr: T[], item: T, cap: number): boolean {
  * carries the SHAPE of that earlier pass's window, so trimming a list that already has a gap cannot
  * claim head entries it no longer holds.
  */
+/** At most this many distinct repeats are named from a gap, and each label is capped to this length. */
+export const GAP_TOP_MAX = 3;
+export const GAP_LABEL_MAX = 120;
+
+/**
+ * The most-repeated entries in a dropped slice, commonest first. Only things seen MORE THAN ONCE —
+ * a single entry is not a pattern, and listing it would make this grow with the gap instead of with
+ * the repetition. Ties break on the label so the output is deterministic. PURE.
+ */
+export function gapCensus<T>(dropped: readonly T[], summarise: (item: T) => string): Array<{ what: string; n: number }> {
+  const counts = new Map<string, number>();
+  for (const item of dropped) {
+    let key: string;
+    try { key = String(summarise(item) ?? '').trim().replace(/\s+/g, ' '); } catch { continue; }
+    if (!key) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, n]) => n > 1)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, GAP_TOP_MAX)
+    .map(([what, n]) => ({ what: what.slice(0, GAP_LABEL_MAX), n }));
+}
+
 export function trimChannel<T>(
   list: readonly T[] | undefined,
   cap: number,
   known?: ChannelTruncation,
+  /** Turns one entry into a comparable label, so the GAP can be censused before it is cut (Q-1087). */
+  summarise?: (item: T) => string,
 ): { list: T[] | undefined; fact?: ChannelTruncation } {
   if (list === undefined) {
     // Nothing to trim. A channel already dropped upstream keeps its fact so the loss is not forgotten.
@@ -210,12 +259,49 @@ export function trimChannel<T>(
   const head = priorHead > 0 ? Math.min(want.head, priorHead) : want.head;
   const tail = cap - head;
   const kept = [...list.slice(0, head), ...(tail > 0 ? list.slice(list.length - tail) : [])];
-  return { list: kept, fact: withHead({ kept: kept.length, total }, head) };
+  const fact = withHead({ kept: kept.length, total }, head);
+  // Census the slice that is about to be lost — see `gapTop`. Nothing is added when nothing repeats.
+  if (summarise) {
+    const dropped = list.slice(head, tail > 0 ? list.length - tail : list.length);
+    const top = gapCensus(dropped, summarise);
+    if (top.length > 0) return { list: kept, fact: { ...fact, gapTop: top } };
+  }
+  return { list: kept, fact };
 }
 
 /** Attach a head count only when it really describes a gap — never a decorative zero. */
 function withHead(fact: ChannelTruncation, head: number): ChannelTruncation {
   return head > 0 && head < fact.kept ? { ...fact, head } : fact;
+}
+
+/** Attach a gap census only when there is one — never an empty array, which reads as "nothing repeated". */
+function withGap(fact: ChannelTruncation, gapTop: Array<{ what: string; n: number }>): ChannelTruncation {
+  return gapTop.length > 0 ? { ...fact, gapTop } : fact;
+}
+
+/**
+ * Fold two passes' gap censuses into one, SUMMING each label's count (Q-1087).
+ *
+ * 🔑 Summing is the honest rule, and the reason is the same one the `total` merge rule rests on: the
+ * two passes censused DIFFERENT slices. The recorder's cap drops entries the store never sees; the
+ * store then drops more from what survived. A label dropped 30 times upstream and 25 times here was
+ * dropped 55 times, and both figures describe real entries. Taking the later census alone would
+ * under-count by exactly the entries nobody ever saw — which is the bug this whole module exists to
+ * prevent, one field over. PURE.
+ */
+export function mergeGapTop(
+  before: ChannelTruncation['gapTop'],
+  after: ChannelTruncation['gapTop'],
+): Array<{ what: string; n: number }> {
+  const counts = new Map<string, number>();
+  for (const row of [...(before ?? []), ...(after ?? [])]) {
+    if (!row?.what) continue;
+    counts.set(row.what, (counts.get(row.what) ?? 0) + (Number.isFinite(row.n) ? row.n : 0));
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, GAP_TOP_MAX)
+    .map(([what, n]) => ({ what, n }));
 }
 
 /** Drop a channel entirely, recording the count it had rather than letting it read as zero. */
@@ -247,7 +333,10 @@ export function mergeTruncation(
       // The earliest total is the true one; the latest kept — and the latest WINDOW — is what
       // survived. The shape must come from the newest pass: an older `head` describes a list this
       // one has already cut down, so carrying it forward would over-claim the surviving head.
-      ? withHead({ kept: fact.kept, total: Math.max(before.total, fact.total) }, fact.head ?? 0)
+      ? withGap(
+          withHead({ kept: fact.kept, total: Math.max(before.total, fact.total) }, fact.head ?? 0),
+          mergeGapTop(before.gapTop, fact.gapTop),
+        )
       : fact;
   }
   // A channel whose kept still equals its total lost nothing and must not be listed as a loss — that
@@ -300,9 +389,24 @@ export function truncationNote(channels: Record<string, ChannelTruncation>): str
  * tail, which is what a small cap still produces.
  */
 export function windowShape(f: ChannelTruncation): string {
-  if (!f.head || f.head >= f.kept) return '';
+  const gap = gapShape(f);
+  if (!f.head || f.head >= f.kept) return gap;
   const missing = f.total - f.kept;
-  return ` (the first ${f.head} and the last ${f.kept - f.head} — ${missing} from the middle are gone)`;
+  return ` (the first ${f.head} and the last ${f.kept - f.head} — ${missing} from the middle are gone)${gap}`;
+}
+
+/**
+ * What repeated in the gap, for the one sentence an admin reads (Q-1087).
+ *
+ * This is where the census earns its bytes: *"40 of 140 sandbox commands (the first 20 and the last
+ * 20 — 100 from the middle are gone; what repeated there: `: > /tmp/x && node -e …` ×58)"* says in one
+ * line what the dropped hundred entries were for. Said even when the window shape is a plain tail,
+ * because a gap exists either way. PURE.
+ */
+export function gapShape(f: ChannelTruncation): string {
+  const top = f.gapTop ?? [];
+  if (top.length === 0) return '';
+  return `; what repeated there: ${top.map((t) => `\`${t.what}\` ×${t.n}`).join(', ')}`;
 }
 
 /**

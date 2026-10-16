@@ -18,6 +18,25 @@
 // A LEAF — no imports — so the tool catalog, the prompts, the write-time notes and the dispatcher can all
 // read it without an import cycle.
 
+// 🔴 AND IT USED TO END "no anchor and no read are needed" (Q-1031, found reviewing Q-986). Three lines above
+// it in the system prompt stands rule 2: "READ BEFORE WRITING: use read_file on every file you intend to change
+// before touching it. Never assume you know a file's current content from memory." A model reading both had a
+// flat contradiction to resolve by guessing — and the half that is wrong is the dangerous one: no read is needed
+// to CONSTRUCT an anchor-free append, but plenty is needed to know whether what you are appending is ALREADY
+// THERE. On a fresh build the file is one we just wrote; on an EDIT build it is the user's, and a blind append
+// duplicates a rule, a function or a whole section of their app.
+//
+// So the sentence now separates the mechanics from the judgement: it saves the ANCHOR, not the LOOK.
+//
+// 🔒 AND IT SAYS "know what is in it", NOT "read it" — because a blanket "read it" would have cost a 500-line
+// read of the design kit on every CSS append, which the prompt deliberately avoids by LISTING the kit's classes
+// instead (CssConsistency's "already defined … Do not read the stylesheet to find them"). Supplied knowledge
+// and a read answer the same question; demanding the read would have fixed a contradiction by creating a cost.
+//
+// ⚠️ The row asked for "an edit-mode form of the append sentence" — a SECOND string. That is declined, with
+// reason: two strings for one rule is the drift this module exists to end (the class came back five times, each
+// fix teaching one more branch). One sentence that is correct in both modes cannot disagree with itself.
+
 /**
  * The one sentence that teaches the anchor-free append. It says `old_string: ""` literally, because the
  * argument repair (toolArgRepair.ts) reads an alias key such as `search` or `find` when old_string is
@@ -25,4 +44,7 @@
  */
 export const APPEND_WITH_EMPTY_OLD_STRING =
   'To ADD content at the end of a file, call edit_file with an EMPTY old_string — it appends new_string to the '
-  + 'end of the file. Send old_string: "" exactly; no anchor and no read are needed.';
+  + 'end of the file. Send old_string: "" exactly; no anchor is needed, so there is nothing to guess and nothing '
+  + 'to miss. It saves you the ANCHOR, not the LOOK: on a file that already holds content you did not write this '
+  + 'turn, know what is in it before you add — read it, or use the listing this prompt already gives you — so you '
+  + 'do not add something that is in there already.';

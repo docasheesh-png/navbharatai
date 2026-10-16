@@ -88,14 +88,18 @@ describe('2 · the first attempt is told — the contract and the prompts', () =
     const p = architectSystemPrompt('vite-react');
     const at = p.indexOf('Add your app\'s styles by APPENDING');
     expect(at).toBeGreaterThan(0);
-    expect(p.slice(at, at + 400)).toContain(APPEND_WITH_EMPTY_OLD_STRING);
+    // The window is 600, not 400 (Q-1031): the sentence grew when it stopped saying "no read is needed" and
+    // started separating the anchor from the look. What this test checks — that HOW to append is said right
+    // where the append is asked for — is unchanged; only the sentence it looks for is longer.
+    expect(p.slice(at, at + 600)).toContain(APPEND_WITH_EMPTY_OLD_STRING);
   });
 
   it('every reader of DESIGN_KIT_BRIEF ("extend the kit in index.css") puts the sentence beside it', () => {
     const p = architectSystemPrompt('vite-react');
     const at = p.indexOf('never drop back to unstyled markup');
     expect(at).toBeGreaterThan(0);
-    expect(p.slice(at, at + 600)).toContain(APPEND_WITH_EMPTY_OLD_STRING);
+    // 800, for the same reason as the window above (Q-1031): the sentence is longer now.
+    expect(p.slice(at, at + 800)).toContain(APPEND_WITH_EMPTY_OLD_STRING);
     const subAgent = readFileSync('src/server/AgentV3/SubAgent.ts', 'utf8');
     const brief = subAgent.indexOf("DESIGN_KIT_BRIEF.join('\\n')");
     expect(brief).toBeGreaterThan(0);

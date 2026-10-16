@@ -96015,3 +96015,41 @@ unconditionally is the opposite defect, and the third reversion proves the test 
 Locked by `tests/theCleanDesignSentenceIsEarned.test.ts` (10 tests), including a census that only the
 filtering caller may pass a count. Three reversions: the caller stops saying what it filtered (2 fail),
 the summary ignores the count (2 fail), the honest sentence replaces the cohesive one always (2 fail).
+
+### 2026-10-16 — Q-1016: the request notes exist before the first lane plans
+
+Q-991 gathered every request note into ONE list and had every lane read it — the right shape. But the list
+was **built ~500 lines below the first lane that plans**, so the blueprint lane (`AGENTV3_BLUEPRINT`)
+proposed the whole file manifest *and* the shared contract from the **bare** request: route ~16750 for the
+plan, ~16978 for the first note input. A Kotlin request, a keypad phone named in the prompt or a no-login
+scope was planned blind — and on a deep build the architect then follows that plan. It was never a wiring
+oversight; there was nothing to hand the lane yet, which is why Q-1020's name-based census could not see it.
+
+**The fix is one computation, read twice** — the Q-1026/Q-1033 shape. `requestNotesFor` is pure, lives in
+`requestNotes.ts` beside the `withRequestNotes` join, and is called once above the blueprint lane; the
+aggregator now reads that result instead of deriving the same facts again. Both blueprint prompts take
+`withRequestNotes(prompt, requestNotesText)`. The file budget beside them still reads the **bare** prompt,
+because Q-991 measured that notes riding the request take a 13-file budget to 25 — the user's app sized by
+our own instructions.
+
+**Three things the work found, each worth keeping:**
+1. **The obvious placement would have been wrong.** Computing at ~12882 (right after `planning`) looked
+   right and is not: `framework` is reassigned at ~15593 by the drift detector, and the stack note *names*
+   the framework it was built in — so the note could have carried a label that later changed. Measured
+   before shipping, not after.
+2. **My own test found a duplicate derivation.** Route ~24454 called `namedNonSmartphone(prompt)` a second
+   time with its own copy of the new-build gate — two answers to one question, this row's exact class. It
+   now reads the one result and adds only what is genuinely its own (`result.ok && expectsArtifacts`).
+3. **A reversion found my test weak.** Dropping the `!editing` narrowing (Q-868) *passed*, because the test
+   only ever set `newBuild: false`. The guard exists for `newBuild && editing` together; that case is in
+   now, and the reversion bites.
+
+Ratchet 6 → 4: `megaRoadmapUserPrompt` ×2 needs the framework label late-bound (it runs before ~15593), and
+`repairUserPrompt` ×2 is a repair pass whose need for the whole note list is a judgement, recorded not
+assumed. Locked by `tests/theNotesExistBeforeAnyLanePlans.test.ts` (13 tests) plus the census, which now
+reads the MODULE for the list and the ROUTE for the lanes. Five reversions.
+
+⚠️ **Third time today a census of mine matched its own explanatory comment** (Q-1081, Q-1021, Q-1016): the
+note beside a fix names the function the fix stopped calling, so a guard reading the file as text fails on
+its own documentation. It is a pattern — a source census must read stripped code, and the assertion that
+needs stripping is always the negative one.

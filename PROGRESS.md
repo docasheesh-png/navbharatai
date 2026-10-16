@@ -96015,6 +96015,34 @@ and a rise is the fix working, not a regression.
 - **No new server route.** Copy / Download in the panel are the dashboard's own functions, because they also write the "taken" mark (one report, one session).
 - Locked by `tests/theAppsPageHoldsEveryBuildReport.test.ts` and `WorkspaceBuildReports.render.test.tsx`; three reversions each failed the right test. Two existing pins moved with the card (`theAdminMenuHasNineTabs`, `adminAllBuilds`, `adminBuildFilters`), each with the reason beside it.
 
+### 2026-10-15 — Q-1015: design feedback reaches every framework, and an indented stylesheet survives it
+
+**The regression.** The `evaluate` tool used to design-lint `.vue`, `.svelte`, `.less` and `.sass` with a
+file selection of its own. Autopsy 9c612cdb replaced that private copy with the shared one in
+`buildQualityLint` — the right call (one selection, so the lint and the spacing snap can never disagree
+about scope). But the shared set was the **narrower** of the two, so a Vue or Svelte app silently stopped
+getting any design feedback at all: `lintBuiltApp` selected nothing and returned null, which the report
+reads as "not checked". Centralising was right; centralising on the smaller set was the regression.
+
+**And the obvious widening would have corrupted a user's stylesheet — measured, not reasoned.**
+`SPACING_DECL_RE_SOURCE` captures a declaration's value as `[^;"'}]+`, which does not stop at a newline.
+Sass's original indented syntax has no `;`, so a `padding: 6px` line swallows the next two and the
+extractor returns `[6, 15, 13]`: the app is told its **font size** is off-grid spacing, and `spacingSnap` —
+which rewrites exactly what that extractor counts — would have written `font-size: 16px` and
+`width: 332px` into the user's file. An advisory check that quietly edits values it misread is worse than
+no check at all. The queue row had flagged indented `.sass`; the measurement showed the cost was larger
+than the row said.
+
+**The fix.** For an indented syntax only, `shippedDesignText` turns the line break into the terminator it
+already is — `\n` → `;`, **one character for one**, which is what keeps that function length-preserving
+(the property the snap's offsets depend on) and keeps the spacing regex a single definition with one
+reader rather than a second, newline-terminated copy that would drift. Braced CSS is untouched, including
+a multi-line value — which is precisely why it is applied by syntax and not everywhere.
+
+Locked by `tests/designFeedbackReachesEveryFramework.test.ts` (12 tests: a Vue app, a Svelte app, the real
+indented fixture, and the snap proven not to touch a font size, a width or a radius). Three reversions,
+each with an anchor assertion: the narrow selection back (5 fail), the terminator removed (3 fail), the
+terminator applied to braced files too (2 fail).
 ### 2026-10-15 — Q-1022: the clean design sentence is earned, not read off a shortened list
 
 `modelDesignLine` hands `designLintSummary` a **copy** of the lint with the platform-fixed violation types

@@ -42,6 +42,7 @@ import { alignNativePlugins } from '../AgentV3/nativeCapabilities';
 // See assetImports.ts for why the two callers treat the same fact differently (a note vs a refusal).
 import { unshippableAssetImports } from './assetImports';
 import { isLiveEnvFile, publicEnvOnly, hasNoAssignments } from './publicEnvOnly';
+import { brandingNote, brandingTextFiles, type LogoDecision } from './appBranding';
 
 /** Ignore anything that cannot be part of a web build — these bloat the repo and break nothing by leaving. */
 const SKIP_PATH = /(^|\/)(node_modules|\.git|dist|build|\.next|\.cache|coverage)(\/|$)/;
@@ -51,8 +52,14 @@ export interface AssembleOptions {
   appId: string;
   /** The app's background colour (any `#rrggbb`); ignored unless it is a valid hex colour. */
   backgroundColor?: string;
-  /** Data URL of the icon the user chose or uploaded. Optional — omitted means the default icon. */
+  /** Data URL of the icon the user chose or uploaded. Optional — when omitted the app gets a generated logo or, if that
+   *  fails, an explicitly reported app-specific mark. NEVER Capacitor's default icon (appBranding.ts). */
   iconDataUrl?: string;
+  /**
+   * Which logo the app has, decided by the caller (`decideLogo`: the user's, else a generated one, else 'none'). When
+   * omitted it is derived from `iconDataUrl` alone, so a caller that never generates still gets the branding step.
+   */
+  branding?: LogoDecision;
   /** Include the iOS workflow + fastlane lane. */
   ios?: boolean;
   /**
@@ -741,17 +748,18 @@ export function assembleMobileProject(
     notes.push(`${skippedAssets.length} file(s) could not be read and were not included: ${skippedAssets.slice(0, 3).join(', ')}${skippedAssets.length > 3 ? '…' : ''}. Any image or font among them will be missing from the app.`);
   }
 
-  if (opts.iconDataUrl) {
-    const parsed = parseImageDataUrl(opts.iconDataUrl);
-    if (parsed) {
-      // Capacitor's asset generator reads resources/icon.png; keeping the name it expects means the
-      // icon is picked up without the user configuring anything.
-      binaryFiles[`resources/icon.${parsed.ext}`] = parsed.base64;
-      notes.push('Your icon was added as resources/icon.png — run "npx capacitor-assets generate" locally to produce every Android size, or Android will use the default icon.');
-    } else {
-      notes.push('The icon could not be read, so the default icon will be used.');
-    }
-  }
+  // THE APP'S OWN BRANDING (appBranding.ts). Always written — the branding script runs on every ship and decides,
+  // from `declared`, whether resources/icon.* is this app's logo. A file left in the repo by an earlier ship is
+  // therefore never mistaken for this app's logo, and "no logo" never means "Capacitor's default icon".
+  const decision: LogoDecision = opts.branding
+    ?? (opts.iconDataUrl ? { declared: 'user', dataUrl: opts.iconDataUrl } : { declared: 'none', aiFailure: 'no logo was supplied' });
+  const logo = decision.declared !== 'none' && decision.dataUrl ? parseImageDataUrl(decision.dataUrl) : null;
+  const logoUnreadable = decision.declared !== 'none' && !logo;
+  const effective: LogoDecision = logoUnreadable ? { declared: 'none', aiFailure: 'the logo could not be read as a PNG, JPEG or WebP image' } : decision;
+  const iconFile = logo ? `resources/icon.${logo.ext}` : '';
+  Object.assign(files, brandingTextFiles({ appName: opts.appName, appId: opts.appId, decision: effective, iconFile }));
+  if (logo) binaryFiles[iconFile] = logo.base64;
+  notes.push(brandingNote(effective));
 
   // HONEST ABOUT WHAT STILL WILL NOT SHIP. With `files` and `binaryFiles` both final, this is a fact
   // rather than a guess — see unshippableAssetImports. A note, never a refusal.

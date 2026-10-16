@@ -25,7 +25,8 @@
 import type { Express, Request, Response } from 'express';
 import axios from 'axios';
 import { loadWorkspaceFiles, mergeWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
-import { loadWorkspaceAssetsWithCompleteness } from '../AgentV3/WorkspaceAssetStore';
+import { loadWorkspaceAssetsWithCompleteness, saveWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
+import { decideLogo, serverAiLogoGenerator } from '../lib/appBranding';
 import { findMissingImportedAssets, missingAssetUserMessage } from '../AgentV3/missingAssetCheck';
 import { sessionWorkspaceId } from '../lib/workspaceEdit';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
@@ -257,11 +258,28 @@ export function registerMobileSetupRoutes(app: Express): void {
     // the user as "your app is missing these files" — see the note in mobileProjectAssembler.
     const assetLoad = await loadWorkspaceAssetsWithCompleteness(workspaceId)
       .catch(() => ({ assets: {} as Record<string, string>, complete: false }));
-    const appAssets = assetLoad.assets;
+    // The app's saved generated logo lives in the same store under a reserved key. It is taken OUT of the app's own
+    // assets here so it is never pushed as one (the branding step places it as resources/icon.*).
+    const SAVED_LOGO_KEY = 'nbai-brand/ai-logo';
+    const { [SAVED_LOGO_KEY]: savedAiLogo, ...appAssets } = assetLoad.assets;
+    // WHICH LOGO THE APP HAS (appBranding.ts): the user's own, else the one generated on an earlier ship, else a new
+    // generated one, else an explicit app-specific mark. Never Capacitor's default icon.
+    const logo = await decideLogo({
+      appName: name,
+      iconDataUrl: typeof iconDataUrl === 'string' ? iconDataUrl : undefined,
+      savedAiLogo,
+      generateAiLogo: serverAiLogoGenerator(),
+    });
+    if (logo.declared === 'ai' && logo.dataUrl && !savedAiLogo) {
+      // Kept so a second ship never gives the app a different logo. Best-effort: a store that drops it only means a
+      // fresh logo next time, and the notes say which logo this ship used.
+      void saveWorkspaceAssets(workspaceId, { [SAVED_LOGO_KEY]: logo.dataUrl }).catch(() => { /* best-effort */ });
+    }
     const project = assembleMobileProject(appFiles, kit.files, {
       appName: name,
       appId: typeof appId === 'string' ? appId : kit.appId,
       iconDataUrl: typeof iconDataUrl === 'string' ? iconDataUrl : undefined,
+      branding: logo,
       backgroundColor: typeof backgroundColor === 'string' ? backgroundColor : undefined,
       ios: includeIos,
       appAssets,

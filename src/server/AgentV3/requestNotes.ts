@@ -93,7 +93,7 @@ import { unknownNameNoteEnabled, unknownNamesInRequest, unknownNameBuilderNote }
 import { requestScopeVerdict, type RequestScopeReason } from './requestScope';
 import { scriptRequestNoteEnabled, scriptDeliverableRequested, liveDataRequested, scriptRequestBuilderNote } from './scriptRequest';
 import { namedNonSmartphone, nonSmartphoneBuildRule } from './deviceTarget';
-import { thirdPartyLimitAsked, thirdPartyLimitsBuilderNote } from './thirdPartyLimits';
+import { thirdPartyLimitAsked, thirdPartyLimitsBuilderNote, type OwnAdNetwork } from './thirdPartyLimits';
 import { analyzeRequirementGaps } from '../lib/RequirementGapAnalyzer';
 
 export interface RequestNoteInputs {
@@ -109,12 +109,16 @@ export interface RequestNoteInputs {
   /** The WHOLE project's ad-serving players — the route's own async read (`editTurnAdFacts`). */
   thirdPartyPlayers?: readonly string[];
   /**
-   * ⚠️ NOT THREADED YET, DELIBERATELY. #3753 (Q-1018) adds the app's OWN ad networks as a third argument
-   * to `thirdPartyLimitsBuilderNote`, and that PR is green but unmerged; this branch is cut from `main`,
-   * where the argument does not exist. Stacking branches to borrow it would be worse than one recorded
-   * follow-up: when #3753 lands, pass its `ownAds` through here so the blueprint lane hears that note too.
+   * …and its OWN ad networks (`projectOwnAdSdks`, Q-1018) — the ads that ARE ours to remove, as opposed to
+   * the ones inside another service's player.
+   *
+   * ✅ THREADED ON MERGE, AS THIS FIELD'S FIRST VERSION PROMISED. Q-1016 shipped with it typed `never`,
+   * because #3753 (which adds this third argument to `thirdPartyLimitsBuilderNote`) was green but unmerged
+   * and this module was written against a `main` that did not have it. Stacking branches to borrow it would
+   * have been worse than one recorded follow-up; both have now landed, so the note the blueprint lane reads
+   * names the app's own ad slots too.
    */
-  thirdPartyOwnAds?: never;
+  thirdPartyOwnAds?: readonly OwnAdNetwork[];
 }
 
 /** The list, the joined text, and every fact the notes were derived from. */
@@ -187,7 +191,7 @@ export function requestNotesFor(input: RequestNoteInputs): RequestNotesResult {
     { code: 'unknown-name', text: unknownNameNote },
     { code: 'request-scope', text: requestScopeText },
     { code: 'device', text: keypadPhone ? nonSmartphoneBuildRule(keypadPhone.device, keypadPhone.kind) : '' },
-    { code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, players) },
+    { code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, players, input.thirdPartyOwnAds ?? []) },
   ];
 
   return {

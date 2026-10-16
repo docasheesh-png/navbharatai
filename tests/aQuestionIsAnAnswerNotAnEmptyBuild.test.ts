@@ -149,13 +149,15 @@ describe('🔒 REVERSION GUARDS — tsc and vitest cannot see an argument that s
   // really given the fact — is asserted below against the new spelling.
   it('the retry decision is really given the fact', () => {
     // Read through `modelsOwnWords` since autopsy 0473628e: the runner appends its own sentence to the summary.
-    expect(route).toContain('const firstAttempt = readTurnAnswer(modelsOwnWords(result), prompt);');
+    expect(route).toContain('const firstAttempt = readTurnAnswer(modelsOwnWords(result), prompt, adAnswerFacts);');
     expect(route).toContain('const firstAttemptAskedTheUser = firstAttempt.asked;');
     expect(route).toContain('modelAskedTheUser: firstAttemptAskedTheUser');
   });
 
   it('the settle flip is really given the fact — both halves of it', () => {
-    expect(route).toMatch(/emptyBuildFailureSummary\([\s\S]{0,1100}?modelAnswer\.asked \|\| modelAnswer\.pointed,\s*modelAnswer\.declined,\s*\)/);
+    // PIN UPDATED (Q-1019): a third kind of final answer joined the first argument. Both halves of the
+    // fact this test is about — the question and the refusal — are still passed, which is its whole claim.
+    expect(route).toMatch(/emptyBuildFailureSummary\([\s\S]{0,1400}?modelAnswer\.asked \|\| modelAnswer\.pointed \|\| modelAnswer\.notOurs,\s*modelAnswer\.declined,\s*\)/);
   });
 
   it('🔑 the predicate is IMPORTED, never re-implemented beside its sibling', () => {

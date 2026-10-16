@@ -95984,6 +95984,46 @@ to Node 22 is its own change (run the suite on 22 first, then flip `ci.yml`).
 - Q-1064 premise corrected (honesty): batching already exists (`write_files_batch`, 24 uses). The cost is token throughput on the KIMI rung; the options changed, so the "han" cannot be applied to it — three options are in the queue.
 - Q-1066 fixed (lag list read by both detectors) · Q-1068 diagnostics shipped, verdict waits for a report · Q-1069 fixed per the approved rule.
 
+### 2026-10-15 — Q-1018 + Q-1019 (+ Q-1096 found while fixing them): the ads we can remove, and the ones we cannot
+
+Q-990 built `thirdPartyLimits.ts` so the platform would stop claiming a property only another service
+controls. Its honest sentence has two halves, and **only the first was ever measured**:
+
+- *"ads inside YouTube's own player may still play …"* — measured (`projectAdServingPlayers`)
+- *"The app adds no ads of its own"* — **asserted, on every build, unchecked**
+
+**Q-1018.** That second half is not a safe assumption, and the proof is inside NavBharatAI: our OWN
+Monetization wizard generates an AdSense block (`generateAdsense`, `src/lib/paymentSetup.ts`). A user who
+added ads through our own feature and then asked about ads was told, by us, that their app adds none.
+`projectOwnAdSdks` now measures nine networks — each by its loader, publisher id or SDK package, never by a
+product name, so prose, a `.adsbygoogle{display:none}` style and our own test files can never match. The end
+line, the "ad-free" correction and the **builder note** all read it, and when the app really does carry its
+own ads the note tells the builder to REMOVE them: those ARE ours to remove and the user just asked
+(the 50/50 law's prevent half). One project load serves both ad questions (`editTurnAdFacts`).
+
+**Q-1019, the same fact read again.** An edit turn whose whole ask is "remove the ads" on an app that plays
+videos in YouTube's own player has one correct outcome: say those ads are not the app's to switch off, and
+change nothing. The platform filed that as a **failed build** — "the build produced no files, please try
+again" over the honest answer, an empty-build retry to produce the same answer on a stronger rung, and on
+the free tier an upsell. Fixed on the `pointed` precedent (autopsy 0c2a987a): `TurnAnswer.notOurs`, decided
+from measured facts, never from reading the model's prose. Six conditions, all required — and two of them
+are what keep it honest: the app must have **no ads of its own** (if it does, the removal IS ours to make,
+so the zero-file turn really failed), and the ad removal must be the turn's **only** ask (conservative — in
+doubt it answers false and today's behaviour stands, so "remove the ads and add dark mode" is still a real
+empty build whose retry may deliver the dark mode). `TURN_ANSWERED_NOT_OURS` is registered PROCESS-ONLY,
+because an unregistered code costs the user 6 app-health points (the Q-1043 class).
+
+**Q-1096 — found while writing Q-1019's test, and it was bigger than either row.** `adRemovalRequested`
+matched only verb-then-noun removals ("remove the ads"). Hindi is subject-object-VERB, so the form an Indian
+user types FIRST — *"ads hata do"*, *"ads nikal do"*, *"ads band karo"*, *"विज्ञापन हटाओ"* — matched nothing,
+and with that predicate false **all three of Q-990's layers stood down**: the builder was never told, the user
+got no start line, and the honest end line never appeared. Q-990 was written from one English report; this is
+the same module's blind spot in the language its own user base writes in. The ad word must sit directly beside
+the removal verb, so every negative Q-990 pinned still does not match.
+
+Locked by `tests/theAdsWeCanRemoveAndTheOnesWeCannot.test.ts` (24 tests) — including a census that every
+reader of `pointed` in the route also reads `notOurs`, because the defect was one grouping lacking a term.
+Nine reversions, each with an anchor assertion, each failed and was restored.
 ### 2026-10-15 — Q-1030: a measurement whose error is unknown (TODO_ONLY_TURNS)
 
 **Root cause, two halves of one class** — *a count kept at one of N call sites is not kept*:
@@ -96015,6 +96055,34 @@ and a rise is the fix working, not a regression.
 - **No new server route.** Copy / Download in the panel are the dashboard's own functions, because they also write the "taken" mark (one report, one session).
 - Locked by `tests/theAppsPageHoldsEveryBuildReport.test.ts` and `WorkspaceBuildReports.render.test.tsx`; three reversions each failed the right test. Two existing pins moved with the card (`theAdminMenuHasNineTabs`, `adminAllBuilds`, `adminBuildFilters`), each with the reason beside it.
 
+### 2026-10-15 — Q-1015: design feedback reaches every framework, and an indented stylesheet survives it
+
+**The regression.** The `evaluate` tool used to design-lint `.vue`, `.svelte`, `.less` and `.sass` with a
+file selection of its own. Autopsy 9c612cdb replaced that private copy with the shared one in
+`buildQualityLint` — the right call (one selection, so the lint and the spacing snap can never disagree
+about scope). But the shared set was the **narrower** of the two, so a Vue or Svelte app silently stopped
+getting any design feedback at all: `lintBuiltApp` selected nothing and returned null, which the report
+reads as "not checked". Centralising was right; centralising on the smaller set was the regression.
+
+**And the obvious widening would have corrupted a user's stylesheet — measured, not reasoned.**
+`SPACING_DECL_RE_SOURCE` captures a declaration's value as `[^;"'}]+`, which does not stop at a newline.
+Sass's original indented syntax has no `;`, so a `padding: 6px` line swallows the next two and the
+extractor returns `[6, 15, 13]`: the app is told its **font size** is off-grid spacing, and `spacingSnap` —
+which rewrites exactly what that extractor counts — would have written `font-size: 16px` and
+`width: 332px` into the user's file. An advisory check that quietly edits values it misread is worse than
+no check at all. The queue row had flagged indented `.sass`; the measurement showed the cost was larger
+than the row said.
+
+**The fix.** For an indented syntax only, `shippedDesignText` turns the line break into the terminator it
+already is — `\n` → `;`, **one character for one**, which is what keeps that function length-preserving
+(the property the snap's offsets depend on) and keeps the spacing regex a single definition with one
+reader rather than a second, newline-terminated copy that would drift. Braced CSS is untouched, including
+a multi-line value — which is precisely why it is applied by syntax and not everywhere.
+
+Locked by `tests/designFeedbackReachesEveryFramework.test.ts` (12 tests: a Vue app, a Svelte app, the real
+indented fixture, and the snap proven not to touch a font size, a width or a radius). Three reversions,
+each with an anchor assertion: the narrow selection back (5 fail), the terminator removed (3 fail), the
+terminator applied to braced files too (2 fail).
 ### 2026-10-15 — Q-1022: the clean design sentence is earned, not read off a shortened list
 
 `modelDesignLine` hands `designLintSummary` a **copy** of the lint with the platform-fixed violation types

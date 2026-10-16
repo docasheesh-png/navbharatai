@@ -202,6 +202,11 @@ export const PROCESS_ONLY_CODES = new Set([
   'TURN_ANSWERED_A_QUESTION',
   // …and its sibling (2026-09-26): the model DECLINED, and its refusal was left standing as the answer.
   'TURN_DECLINED',
+  // …and its third sibling (Q-1019, 2026-10-15): the turn's whole ask was to remove ads that live inside
+  // another service's player, which the app cannot reach into. The model said so and changed nothing — our
+  // retry policy correctly left that answer standing. An unregistered code costs the USER 6 app-health
+  // points (`isAppFinding`), and this is a fact about our engine, not a flaw in their app.
+  'TURN_ANSWERED_NOT_OURS',
   // The REQUEST asked for a device power a web app does not have (autopsy 6bae5835) — a fact about what
   // the platform can deliver, told to the user in the summary, never a defect in the app that was built.
   'DEVICE_CAPABILITIES_TOLD',

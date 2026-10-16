@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { planAppDefaults } from '../src/server/AgentV3/appDefaults';
 import { dropShadowingEntries, isStrayEntryCopy, entryShadowNote } from '../src/server/AgentV3/entryShadow';
 
 // Autopsy 993d3127: the fast lane planned `src/index.html` beside the real root index.html and spent a generation
@@ -21,5 +22,18 @@ describe('a second copy of the page entry is never planned', () => {
     const n = entryShadowNote('src/index.html', 'vite-react');
     expect(n).toContain('nothing serves this copy');
     expect(n).not.toContain('shadows');
+  });
+});
+
+// Admin 2026-10-16: every app's icon must be its own. The PWA tile used one fixed colour, so two apps starting with the
+// same letter shipped byte-identical install icons.
+describe('the install icon is specific to the app', () => {
+  const bare = '<!doctype html><html><head><title>x</title></head><body><div id="root"></div></body></html>';
+  const icon = (name: string) => planAppDefaults(bare, name).files['icon.svg'];
+  it('two apps with the same first letter get different icons', () => {
+    expect(icon('Pixelyt')).not.toBe(icon('Pocket Budget'));
+  });
+  it('the same app always gets the same icon', () => {
+    expect(icon('Pixelyt')).toBe(icon('Pixelyt'));
   });
 });

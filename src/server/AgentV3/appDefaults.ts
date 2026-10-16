@@ -8,6 +8,7 @@
 // Next.js metadata API) the tool says so honestly rather than writing something wrong.
 
 import { PLACEHOLDER_TITLE } from './appDisplayName';
+import { createHash } from 'node:crypto';
 import {
   nativeFeelEnabled, nativeFeelHeadTags, nativeFeelLinkTag, nativeFeelStylesheet, NATIVE_FEEL_HREF,
   withViewportFitCover, hasNativeFeel,
@@ -46,8 +47,11 @@ function manifestJson(appName: string, shortName?: string): string {
 /** A minimal, self-contained maskable app icon: a monogram of the app's first letter. Pure. */
 function iconSvg(appName: string): string {
   const letter = (appName.trim()[0] || 'A').toUpperCase().replace(/[<>&"']/g, 'A');
+  // The tile colour comes from the app's NAME (admin 2026-10-16: every app's icon must be its own). It used to be one
+  // fixed colour, so two apps whose names start with the same letter shipped byte-identical install icons.
+  const hue = parseInt(createHash('sha256').update(appName.trim().toLowerCase()).digest('hex').slice(0, 4), 16) % 360;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="${escapeHtml(appName)} icon">
-  <rect width="512" height="512" rx="96" fill="#0f172a"/>
+  <rect width="512" height="512" rx="96" fill="hsl(${hue} 55% 26%)"/>
   <text x="50%" y="50%" dy=".35em" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="280" font-weight="700" fill="#ffffff">${letter}</text>
 </svg>
 `;

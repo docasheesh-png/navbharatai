@@ -96078,3 +96078,20 @@ reads the MODULE for the list and the ROUTE for the lanes. Five reversions.
 note beside a fix names the function the fix stopped calling, so a guard reading the file as text fails on
 its own documentation. It is a pattern — a source census must read stripped code, and the assertion that
 needs stripping is always the negative one.
+
+## 2026-10-16 — App logo and native icon must both be custom (admin-mandated)
+Before: a mobile ship with no uploaded logo, or with a failed icon generator (only a `::warning::`), finished with
+Capacitor's default icon; the iOS lane never touched icons at all; nothing inspected the native project.
+Now: `scripts/nbai-branding.mjs` (embedded in `appBrandingScript.ts`, written into every mobile project) runs in the
+Android (APK + AAB) and iOS workflows: snapshot the fresh project → choose the branding source (user logo → saved or newly
+generated AI logo → explicit app-specific fallback mark) → generate launcher/adaptive/round/splash (and the iOS AppIcon set
+with the 1024 icon) → VERIFY the native project (manifest references resolve, density sizes, adaptive layers, nothing
+byte-identical to the default or another app's icon, rebuild-of-same-logo accepted via a stamp) → on failure apply the
+fallback in place (only the broken part) and say so. The step fails only if even the fallback cannot be verified. The web
+build also checks the PWA manifest's icons (`verify pwa`). `decideLogo` runs in `routes/mobileSetup.ts`; the PWA tile colour
+now comes from the app name, so two apps no longer share an install icon. Tests: `tests/appBrandingScript.test.ts` runs the
+real script on fixture Capacitor trees (25 cases); `tests/appBranding.test.ts` covers the decision, assembler and workflows.
+**NOT done, honestly:** the packaged .apk/.aab/.ipa is not unpacked and inspected (see BUILD_REPORT_QUEUE Q-1107); the
+fallback mark is a geometric mark, not a designed logo; the splash for a user logo needs `sharp` on the runner (else a
+generated mark is used and reported).
+

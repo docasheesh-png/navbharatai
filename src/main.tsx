@@ -40,7 +40,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { installOfflineQueueFlush } from './lib/offlineQueue';
 import { initializeObservability, recordError, setAppContext, crashTestTools } from './lib/observability';
 import { productionObservabilityDeps } from './lib/observability/native';
-import { nativePlatformName } from './lib/mobileNative';
+import { nativePlatformName, isNativeApp } from './lib/mobileNative';
 import { nativeAppBuild } from './lib/appBuildId';
 import { SW_UPDATE_MIN_INTERVAL_MS, shouldCheckForUpdate } from './swUpdateCheck';
 import { ConsentBanner } from './components/ConsentBanner';
@@ -289,7 +289,9 @@ function measureColdStart(appReady: number): void {
       // `hidden` right now is the cheap, reliable half of "was this launch watched": a pre-warm or a
       // user who switched away mid-launch is hidden by the time this frame runs.
       wasHiddenDuringLaunch: typeof document !== 'undefined' && document.visibilityState === 'hidden',
-      nativeShell: typeof (window as { Capacitor?: unknown }).Capacitor !== 'undefined',
+      // isNativeApp(), never the mere presence of window.Capacitor: the Capacitor core defines that global in
+      // every browser, so this labelled every WEBSITE launch as the app (found with lib/warmModeChunks.ts).
+      nativeShell: isNativeApp(),
     });
     if (!verdict.usable) return; // a reload, a background pre-warm or a partial timing — never averaged in
     void fetch('/api/analytics/event', {

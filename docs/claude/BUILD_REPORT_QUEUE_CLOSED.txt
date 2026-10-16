@@ -573,3 +573,74 @@ Q-1063
 Q-1066
 Q-1069
 Q-1017
+
+# Closed 2026-10-16 — the in-flight sweep: 61 rows claimed an open PR while ZERO PRs were open.
+# Every owner was resolved to a MERGED pull request before its row was removed (26 numbered PRs, the merged
+# claude/new-session-gx9294 branch, #3681 for Q-866, #3683 for Q-880, #3755 for Q-1124). Q-1011's row named a
+# still-open part with no row of its own; it was carried out as Q-1125 rather than deleted with the row.
+Q-808
+Q-866
+Q-867
+Q-868
+Q-880
+Q-982
+Q-983
+Q-984
+Q-985
+Q-986
+Q-987
+Q-988
+Q-989
+Q-990
+Q-991
+Q-992
+Q-993
+Q-994
+Q-995
+Q-996
+Q-997
+Q-998
+Q-999
+Q-1000
+Q-1011
+Q-1013
+Q-1015
+Q-1016
+Q-1018
+Q-1019
+Q-1020
+Q-1021
+Q-1022
+Q-1024
+Q-1026
+Q-1028
+Q-1029
+Q-1030
+Q-1032
+Q-1033
+Q-1034
+Q-1035
+Q-1036
+Q-1039
+Q-1040
+Q-1041
+Q-1043
+Q-1060
+Q-1080
+Q-1081
+Q-1084
+Q-1090
+Q-1091
+Q-1092
+Q-1093
+Q-1094
+Q-1095
+Q-1096
+Q-1097
+Q-1123
+Q-1124
+# …and three the first pass missed: Q-1089's problem text contains escaped pipes (\|), so a naive
+# cell split mis-read its columns; Q-1088 and Q-1082 already carried ✅ in their state column.
+Q-1089
+Q-1088
+Q-1082

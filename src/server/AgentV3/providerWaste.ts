@@ -84,3 +84,22 @@ export function wasteSummary(ledger: WasteLedger, buildMs?: number): string {
   return `Provider time wasted: ${sec(total)} across ${calls} call(s) that returned nothing${share}. `
     + `By kind: ${kinds.join(', ')}. By engine: ${families.join(', ')}.`;
 }
+
+/**
+ * Did OUR ENGINE, not the request, take the build's time? (autopsy 67a2b0a2, 2026-10-15)
+ *
+ * A third of the build's clock spent inside calls that returned nothing is not a prompt problem. That build ran
+ * 10.1 minutes and wrote no file; 315 s of it (52%) went to three calls that answered nothing, and the user was
+ * told to "add a bit more detail about what the app should do" — for a clear five-part request. The ledger that
+ * could tell the two apart already existed and was reported once for the admin; nothing user-facing read it.
+ *
+ * The threshold is a third, not a share of one failure: a single 15 s silent first rung (which every build now
+ * pays) is ~1-2% of a normal build and must never read as an outage — PAWTRACE's 398db9f3 lost 15 s of 1,510 s.
+ * `buildMs` unknown or zero is NOT evidence of an outage (false = today's wording). PURE.
+ */
+export const ENGINE_TIME_DOMINATES_SHARE = 1 / 3;
+export function engineTimeDominated(ledger: WasteLedger, buildMs: number): boolean {
+  const ms = Number(buildMs);
+  if (!Number.isFinite(ms) || ms <= 0) return false;
+  return totalWasteMs(ledger) / ms >= ENGINE_TIME_DOMINATES_SHARE;
+}

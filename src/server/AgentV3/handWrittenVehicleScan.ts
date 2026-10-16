@@ -100,12 +100,39 @@ const MOVE_Z_ASSIGN = new RegExp(`${OBJ}\\.position\\.z\\s*=\\s*${OBJ}\\.positio
 const MOVE_TRANSLATE = new RegExp(`${OBJ}\\.translateZ\\(\\s*(-?)\\s*([^)]+)\\)`, 'g');
 const SPEED_NAME = /\b(\w*(?:speed|Speed)|velocity|vel)\b/;
 
+/**
+ * 🔴 EVERY PATTERN ABOVE STARTS WITH AN UNBOUNDED IDENTIFIER, AND THAT COSTS O(n²) ON ONE LONG WORD RUN
+ * (Q-1126, 2026-10-16 — found by this repo's own CI, not by a report).
+ *
+ * `OBJ`, `\w*cam\w*` and `\w*(?:speed|Speed)` are greedy word-character prefixes with no anchor. On a
+ * run of word characters the engine matches the whole run at every start position and backtracks out of
+ * it, so the scan costs O(run²) — and the `matchAll` loops below run six such patterns over the raw file.
+ * MEASURED on this machine: a file that is one 10,000-character word run took 577 ms, 40,000 took 7,293 ms,
+ * and the 50,000-character write in `AgentRunner.test.ts` took 11.9 SECONDS — inside `writeSteeringNotes`,
+ * on the agent's critical path, at EVERY write. It is what made that test time out in CI (run 38967985876).
+ *
+ * 🔑 The condition, not the instance: a scan of HAND-WRITTEN code was handed whatever the model wrote, with
+ * nothing saying what hand-written code looks like. Length was never the trigger — measured on the same
+ * machine, 40,000 characters of ordinary code is 3 ms and a 40,000-character MINIFIED line is 5 ms, because
+ * both break into short tokens. Only an unbroken word run is quadratic. So the bound is on the run, and a
+ * file carrying one (an embedded base64 asset, a generated token table, a long data literal) is not a
+ * hand-written vehicle in the first place — it joins `node_modules` and the kit's own library as a file this
+ * scan does not read, the same `empty` and the same precision-first reason. The playtest still PLAYS the
+ * game and reads both facts from its pixels, so nothing is left unchecked, only unguessed.
+ *
+ * `LONG_WORD_RUN` itself is one quantified character class — a single forward pass, no backtracking — so
+ * the guard cannot carry the cost it removes.
+ */
+export const MAX_WORD_RUN = 512;
+const LONG_WORD_RUN = new RegExp(`[\\w$]{${MAX_WORD_RUN + 1},}`);
+
 /** The halves one file contributes. PURE. */
 export function vehicleShapeHalves(path: string, content: string): VehicleShapeHalves {
   const empty: VehicleShapeHalves = { cameras: [], motions: [], zeroSpeeds: [], movingSpeeds: [], raisedSpeeds: [], accelerator: false, vehicle: false, axisThrottle: null, flipsHeading: false };
   const p = String(path ?? '').replace(/^\.?\/+/, '');
   const src = typeof content === 'string' ? content : '';
   if (!src || !CODE_FILE.test(p) || /(^|\/)node_modules\//.test(p) || RECIPE_LIBRARY_PATH.test(p)) return empty;
+  if (LONG_WORD_RUN.test(src)) return empty; // not hand-written code — see MAX_WORD_RUN above
   const out = { ...empty, cameras: [] as CameraHalf[], motions: [] as MotionHalf[], zeroSpeeds: [] as Array<{ name: string; line: string }>, movingSpeeds: [] as string[], raisedSpeeds: [] as string[] };
   out.vehicle = VEHICLE_WORD.test(src);
   out.accelerator = ACCELERATOR.test(src);

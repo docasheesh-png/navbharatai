@@ -335,5 +335,5 @@ export function scanProfanity(text: string | null | undefined): { ok: true } | {
 /** The net under every caller: throws for a banned prompt. Called by `pollinationsImageUrl`. */
 export function assertPollinationsPromptSafe(text: string | null | undefined): void {
   const scan = scanPollinationsPrompt(text);
-  if (!scan.ok) throw new PollinationsPromptBlockedError(scan.category);
+  if (scan.ok === false) throw new PollinationsPromptBlockedError(scan.category); // `=== false`, not `!scan.ok`: the frontend program (no strictNullChecks) pulls this file in through tests and cannot narrow the union otherwise
 }

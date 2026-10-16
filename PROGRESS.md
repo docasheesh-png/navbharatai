@@ -96087,6 +96087,34 @@ row now carries that scope and that plan, and the ratchet may only shrink.
 
 Three reversions: a seventh bare-prompt lane added (1 fail), the architect stops reading the list
 (2 fail), the sub-agents stop reading it (2 fail).
+### 2026-10-15 — Q-1021: our instrumentation is never the user's app
+
+`journeyDerivation.appOwnFiles` is the one place every *"does this app do X?"* question in that module is
+asked of — and it stripped **one of the three things NavBharatAI injects** into a built app.
+`withoutAppSignature` removes the "made by NavBharatAI" badge. It does not touch the red **honesty
+banner** (the NO-FAKE-FEATURE rule's demo warning) or the **preview bridge** — roughly 300 lines of our
+own script, which registers `addEventListener('input', …)`, a `click` handler and a `mouseover` handler.
+So on an app whose author wrote no script at all, those questions were partly being answered about our
+own instrumentation.
+
+**The class, and why the fix is one call rather than three patterns copied in.** Autopsy 9c612cdb had
+already met this exact bug in the design lint (our badge's `gap:6px` counted as the user's eighth
+off-grid value) and fixed it with `ourMarkupRanges`: ONE list of what we inject, owned by the three
+modules that write it. This reader was left on its private, partial strip. Pointing it at the shared one
+closes today's gap **and** makes a fourth injection safe by construction instead of by somebody
+remembering to add it in two places. It blanks rather than deletes, which this reader needs too —
+`dataEntryEvidence` reports *where* it found a sign, and blanking keeps every other offset valid.
+
+Locked by `tests/ourMarkupIsNeverTheUsersApp.test.ts` (12 tests), whose fixtures are built from the real
+badge, banner and bridge rather than a paraphrase, with a **census** that fails on any reader of the
+app's own files rolling its own strip. A real `<form>` and a real React form component are proven still
+found — the strip must never hide the app's own input. Three reversions: the import reverted (the module
+throws on load), the stripper handed a non-HTML path (3 fail), the shared list reduced to the badge
+alone (2 fail).
+
+⚠️ **My own history comment tripped my own census.** The first version of the source guard failed on the
+Q-1021 note that explains the fix, because that note names the helper it removed. Comments are stripped
+now — the same trap Q-1081's census fell into, closed the same way.
 ### 2026-10-15 — Q-1015: design feedback reaches every framework, and an indented stylesheet survives it
 
 **The regression.** The `evaluate` tool used to design-lint `.vue`, `.svelte`, `.less` and `.sass` with a
@@ -96178,3 +96206,48 @@ reads the MODULE for the list and the ROUTE for the lanes. Five reversions.
 note beside a fix names the function the fix stopped calling, so a guard reading the file as text fails on
 its own documentation. It is a pattern — a source census must read stripped code, and the assertion that
 needs stripping is always the negative one.
+
+### 2026-10-16 — Q-1017: the goal's cap was spent on our own notes, and raising it in October was not the fix
+
+**The defect.** `createProjectPlan` stored `goal` as `(joined).slice(0, MAX_GOAL_CHARS)`, and the route handed it
+`withRequestNotes(prompt, requestNotesText)` — our request notes FIRST, the user's words after. `plan.goal` is read
+back as `PROJECT GOAL:` by EVERY module turn of a project build (`moduleBuildContext`), so on a long spec the
+closing requirements were missing from every turn of the build, silently. Worse than a fixed ceiling: the notes'
+length decided how much of the spec survived, so the same request kept different characters depending on which
+notes fired.
+
+**Why this is the fourth rule's forbidden shape, twice over.** Autopsy 042e472f (2026-10-01) met this exact
+failure — "a 2,900-char spec plus that note was cutting the user's own closing requirements off the end" — and the
+fix was to raise the cap from 4,000 to 6,000. That moved the cliff and left the CLASS: **one scalar bound applied
+AFTER a join of two different things, so one part's size silently spends the other's budget.** A longer spec walks
+off the new edge the same way. Recording it here plainly, as the fifth rule's 2026-09-30 section requires: that
+earlier fix was incomplete, and this is what it missed.
+
+**The sibling, found by hunting the class (rule 3).** `manifestUserPrompt(prompt, scaffoldPaths, sizeFrom = prompt)`
+grew its third argument for exactly this reason under autopsy 9c612cdb ("a note's commas and 'and's are not features
+of the app"). The route's blueprint lane called it with TWO arguments, so `sizeFrom` defaulted to the joined text and
+the file budget the MODEL is told to build within was derived from notes+request — while the overrun recorded five
+lines below correctly read the bare prompt. One question, two answers, and the model was given the wrong one.
+`SimpleBuilder.ts:2120`, the other call site, had always passed it.
+
+**The fix — the bound goes BEFORE the join, where the join already lives.** `withRequestNotesBounded(prompt,
+notesText, maxRequestChars)` in `requestNotes.ts` caps the REQUEST alone and keeps the notes whole (they are ours,
+few and short), so the surviving prefix of a given request is identical whatever notes ride with it.
+`createProjectPlan(request, framework, modules, now, notesText)` now takes the two apart and joins them itself —
+passing the joined text is no longer possible to do by accident. `MAX_GOAL_CHARS` is exported so the test asserts
+against the real bound rather than a copy of the number.
+
+**Honesty (rule 5).** A request that genuinely exceeds the cap now ends with `REQUEST_TRUNCATION_MARKER` instead of
+stopping mid-sentence, so a model — and the next autopsy — can see the spec was cut rather than believing it ended
+there. And `withRequestNotes` no longer writes a bare `---` when either side is empty; that dangling separator was
+found by this change's own test, not by a reader.
+
+**The lock.** `tests/aRequestCapIsNeverSpentOnOurOwnNotes.test.ts`, both halves:
+- BEHAVIOUR — the surviving request prefix is byte-identical with and without a 1,100-char stack note; the 042e472f
+  spec keeps its closing requirement; an over-cap request says so; a short request is stored byte-for-byte.
+- SOURCE CENSUS — no production caller may hand a notes+request join to `createProjectPlan`, and every
+  `manifestUserPrompt` call whose prompt carries notes must pass its own `sizeFrom`. A NEW sibling at either site
+  fails this test instead of shipping.
+- Proven by reversion: with either bug put back, 5 of the 7 fail (both behavioural and census halves).
+`tests/theNotesExistBeforeAnyLanePlans.test.ts`'s file-budget pin was widened from the telemetry budget to BOTH
+budgets, so the property it already claimed is now actually checked where the model reads it.

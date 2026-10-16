@@ -23,10 +23,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 22, like everything that ships (Q-1060) — see engines.node in package.json. This workflow was the
+      # SIBLING the queue row missed: it named ci.yml alone, and both were on 20.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies

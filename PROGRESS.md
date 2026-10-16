@@ -96334,3 +96334,34 @@ Heal behaviour is unchanged, because measurement said it was already right. Lock
 `tests/theAdviceFitsThePosition.test.ts` (18 tests, the real tsc message as the fixture, a census that each
 set has exactly one reader), with 101 sibling tests green. Three reversions bite — including **the row's own
 plan**, which fails 5 tests, one of them named for exactly why.
+
+## 2026-10-16 — Q-1060: one declared runtime, and every place that names one agrees (#3766)
+
+`ci.yml` ran the whole 38,000-test suite on **Node 20** while the Dockerfile (`node:22`, `node:22-slim`), the
+`.aab` and `.ipa` workflows and `@capacitor/cli` 8 (`engines: >=22`) all run **Node 22**. A gate that
+exercises a different runtime from the one it guards proves less than it appears to — and any test needing
+the Capacitor CLI could not run there at all (*"The Capacitor CLI requires NodeJS >=22.0.0"*).
+
+**The row's prerequisite was already met, with evidence.** It asked to run the full suite on Node 22 first,
+fix what moves, then flip. Measured: this repo's container runs **Node 22.22.0**, and the full suite was run
+on it repeatedly today — **2705 files, 38,974 passed, 0 failed**. Nothing had to move.
+
+**Two things the row missed:**
+
+1. **`dast.yml` was on 20 as well.** It named `ci.yml` alone; a per-instance fix would have left the sibling.
+2. **`package.json` had no `engines` field at all** — the real cause. Nothing declared the project's runtime,
+   so six workflows and a Dockerfile each carried their own literal, two of them drifted, and a seventh could
+   drift tomorrow with nothing to catch it. `ci.yml`'s `'20'` was not a deliberate pin either: it came in with
+   the file's creation (#3538).
+
+So the class is fixed rather than the instance. The requirement is declared **once** — `engines.node: ">=22"`
+— and `tests/oneDeclaredRuntime.test.ts` checks every declaration against it: each workflow's `node-version`,
+both `FROM node:` lines, and `@capacitor/cli`'s own `engines` read from the installed package. The census pins
+its own size, so renaming the key cannot make the guard go blind. The reason is written beside the version in
+both workflows so nobody lowers it back.
+
+Three reversions bite: the gate back to 20 (3 fail), the declaration removed (8), the declaration disagreeing
+with the image (10).
+
+⚠️ **What to watch:** this PR's own CI run is the **first on Node 22**. That run is the real test of the flip,
+and it is the whole point of the change.

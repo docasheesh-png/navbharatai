@@ -96334,3 +96334,35 @@ Heal behaviour is unchanged, because measurement said it was already right. Lock
 `tests/theAdviceFitsThePosition.test.ts` (18 tests, the real tsc message as the fixture, a census that each
 set has exactly one reader), with 101 sibling tests green. Three reversions bite — including **the row's own
 plan**, which fails 5 tests, one of them named for exactly why.
+
+## 2026-10-16 — Q-1031: the append saves the anchor, not the look (#3767)
+
+The contradiction is inside **one function**, which is why the row said "on an edit build". `editModePrefix`
+carries rule 2 — *"use read_file on every file you intend to change before touching it. Never assume you know
+a file's current content from memory"* — and, a few hundred characters later, the append sentence ending
+*"no anchor and no read are needed"*.
+
+A model reading both resolves it by guessing, **and the half that is wrong is the dangerous one.** No read is
+needed to *construct* an anchor-free append; plenty is needed to know whether what you are appending is
+already there. On a fresh build the file is one we just wrote. On an edit build it is the user's app, and a
+blind append duplicates a rule, a function, or a whole section of it.
+
+**The class: a true statement about an operation's mechanics, read as permission to skip the judgement the
+operation still needs.** The sentence now separates them — *it saves you the ANCHOR, not the LOOK*.
+
+**The row's "edit-mode form of the append sentence" is declined, with reason.** A second string for one rule
+is the exact drift this module exists to end: the class came back five times, each fix teaching one more
+branch of one more failure message. One sentence correct in both modes cannot disagree with itself, and there
+is one place to change when it must change.
+
+⚠️ **My own first wording was wrong in a way worth recording.** It said *"read it first anyway"* — which would
+have cost a **500-line read of the design kit on every CSS append**, the very thing the prompt avoids by
+*listing* the kit's classes instead. It now says *"know what is in it — read it, or use the listing this
+prompt already gives you"*: supplied knowledge and a read answer the same question, and demanding the read
+would have fixed a contradiction by creating a cost. The test holds that distinction shut.
+
+Locked by `tests/theAppendSavesTheAnchorNotTheLook.test.ts` (9 tests), including that both sentences really
+are in one function and near each other, and a census that the module exports exactly **one** such string and
+that no reader spells its words out. Two existing proximity pins were **widened with the reason written in**,
+not deleted — the sentence grew. Three reversions bite: the contradiction restored (6 fail), an unconditional
+read (1), and **the row's own second string** (1).

@@ -96447,3 +96447,31 @@ Also corrected one of my own assertions: the guard first banned ✅ anywhere in 
 disproved — its state is an honest compound ("🟡 BLOCKED — REQUIRES A DECISION … · the meter half is ✅ RESOLVED
 as NOT-A-DEFECT"), and the strict rule would have forced someone to delete that information. It checks the
 leading token instead. Four reversions bite.
+
+## 2026-10-16 — Q-1023: the sentence matches the counter (#3772)
+
+`NO_READABLE_SCOPE` is what a user is told when the sizer finds no readable scope, and its own doc comment
+claimed it was *"generated from the two constants the counter really uses, so the sentence cannot drift from
+the code."* The constants were interpolated. **The rules were hand-written prose, and they had drifted.**
+
+Measured against `countEnumeratedFeatures`, "each bullet or numbered line counts one" is false four ways:
+
+| input | real count |
+|---|---|
+| `- name` / `- email` / `- phone number` | **0** — field names are not features |
+| `- modern` / `- clean` / `- fast` | **0** — style adjectives |
+| `- login` / `- login` / `- login` | **1** — repeats collapse |
+| three bullets of 10+ words each | **0** — `MAX_ITEM_WORDS` |
+
+The row named the first three. **The fourth is the one a careful user hits:** write detailed bullets and the
+sizer reads no scope at all, while the sentence tells them each bullet counted one.
+
+**The class: prose that describes a rule, living apart from the rule.** Editing the prose once would only let
+it drift again, so the sentence is built from the module's constants and
+`tests/theSentenceMatchesTheCounter.test.ts` holds each **measured** case against it — if a count changes,
+the test pinning it fails and the sentence must be re-checked.
+
+⚠️ **The counter is deliberately unchanged.** Whether a careful 10-word bullet should count zero moves
+routing for real builds and what they are charged — a behaviour change with a blast radius, not a wording
+fix. It is recorded as **Q-1128** with the measurement, the rule's real rationale, and three options. Q-1023
+only promised the sentence would stop over-stating, and now it does; the user is at least told.

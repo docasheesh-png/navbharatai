@@ -6,6 +6,7 @@
 // meaning with "unless the request asks otherwise"; the user line says only what is true under every reading.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { stripCodeComments } from '../src/server/AgentV3/stripCodeComments';
 import { namedNonSmartphone, nonSmartphoneBuildRule, nonSmartphoneUserLine } from '../src/server/AgentV3/deviceTarget';
 import { gameKitPlan, gameKitWants3D } from '../src/server/AgentV3/gameKitSeed';
 
@@ -111,11 +112,15 @@ describe('what it changes', () => {
 
 describe('🔒 the wiring — every lane that writes the app hears the same rule', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+  const notes = readFileSync('src/server/AgentV3/requestNotes.ts', 'utf8'); // the list moved here (Q-1016)
   const subAgent = readFileSync('src/server/AgentV3/SubAgent.ts', 'utf8');
   it('the architect: the build prompt opens with the rule, the summary gets the line, from the same reading', () => {
     // PIN UPDATED 2026-10-13 (autopsy 9c612cdb, Q-991 — this rule's first fix reached ONE lane): the rule rides the ONE
     // request-notes list, so the architect, the fast lane, the one-shot lane and the planner all read the same text.
-    expect(route).toContain("{ code: 'device', text: keypadPhoneForBuild ? nonSmartphoneBuildRule(keypadPhoneForBuild.device, keypadPhoneForBuild.kind) : '' },");
+    // PIN MOVED WITH THE FIX (Q-1016, 2026-10-16): the request-notes list and its producers left the route
+    // for `requestNotes.ts` — the list was built ~500 lines BELOW the blueprint lane, which therefore
+    // planned the whole file manifest from the bare request. The claim here is unchanged.
+    expect(notes).toContain("{ code: 'device', text: keypadPhone ? nonSmartphoneBuildRule(keypadPhone.device, keypadPhone.kind) : '' },");
     expect(route).toContain("buildPrompt = [requestNotesText, buildPrompt].filter(Boolean).join('\\n\\n---\\n\\n');");
     expect(route).toContain('summary: `${result.summary}${nonSmartphoneUserLine(keypadPhone.device)}`');
     expect(route).toContain("code: 'NON_SMARTPHONE_TOLD'");
@@ -144,13 +149,21 @@ describe('🔒 the wiring — every lane that writes the app hears the same rule
     expect(route).not.toContain('await planRunner.run(prompt);');
   });
   it('🔒 a NEW build only — the rule and the line never touch an edit of an existing (possibly 3D) app', () => {
-    const gate = "!isImportTurn && intent === 'new_build' && !isEditMode";
-    expect(route).toContain(`const keypadPhoneForBuild = ${gate} ? namedNonSmartphone(prompt) : null;`);
-    expect(route).toContain(`const keypadPhone = result.ok && expectsArtifacts && ${gate} ? namedNonSmartphone(prompt) : null;`);
-    // Every call to the detector in the route sits behind that gate (or the import/new-build guard above it).
-    const calls = route.match(/namedNonSmartphone\(prompt\)/g) ?? [];
-    // 2, not 3, since the sub-agents read the request-notes list (Q-991) instead of re-detecting the phone themselves.
-    expect(calls.length).toBe(2);
+    // PIN STRENGTHENED BY Q-1016 (2026-10-16). This test used to pin TWO derivations of the phone, each
+    // carrying its own copy of the gate — and that duplication was the defect Q-1016's own test found: the
+    // ready-message line at route ~24454 called the detector a second time on the same prompt. There is ONE
+    // call now, in requestNotes.ts, behind the module's gate; the route reads its answer in both places. So
+    // the claim is the same and the count is lower, which is the direction this number may move.
+    expect(notes).toContain("const keypadPhone = !input.importTurn && input.newBuild && !input.editing ? namedNonSmartphone(input.prompt) : null;");
+    expect(route).toContain('const keypadPhoneForBuild = requestNoteSet.keypadPhone;');
+    expect(route).toContain('const keypadPhone = result.ok && expectsArtifacts ? requestNoteSet.keypadPhone : null;');
+    // The detector is called exactly once in the whole stack, and not from the route at all.
+    // CODE, not the comment describing it. The note beside the Q-1016 fix NAMES the call it removed, so a
+    // text match finds it — the FOURTH time in one day a source guard tripped on its own documentation
+    // (Q-1081, Q-1021, Q-1016, here). A census over source reads stripped code; the negative assertion is
+    // always the one that needs it.
+    expect(stripCodeComments(route).match(/namedNonSmartphone\(/g) ?? [], 'the route must read the one answer').toHaveLength(0);
+    expect(notes.match(/namedNonSmartphone\(/g) ?? []).toHaveLength(1);
   });
   it('an approved plan is ADDED to the build prompt — never rebuilt from the bare request, which dropped every note', () => {
     expect(route).toContain('buildPrompt = `${buildPrompt}\\n\\nApproved plan:\\n');

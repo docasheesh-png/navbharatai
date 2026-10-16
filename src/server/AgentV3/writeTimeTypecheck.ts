@@ -38,7 +38,7 @@
  */
 import { TSC_BIN, PRIME_NODE_MODULES, NPM_INSTALL_LOCK_FRESH, MANIFEST_CURRENT } from './tscCommand';
 import { suggestedPropertyRenames, type TscError } from './EndgameRepair';
-import { tscErrorCauses, tscCauseNote, remedyFileFor } from './tscErrorCause';
+import { tscErrorCauses, tscCauseNote, remedyFileFor, mistypedImport, nearlyHeldImport } from './tscErrorCause';
 import { suggestedTypeRenames, typeRenameAdvice, contractRenamesInSources, type ContractRename } from './contractRenames';
 import { isNotFoundError } from './fsErrors';
 
@@ -258,14 +258,35 @@ export function writeTypecheckNote(
       parts.push(`✏️ The type spells it \`${to}\`: in ${file}, rename EVERY \`${from}\` to \`${to}\` (line${lines.length > 1 ? 's' : ''} ${[...new Set(lines)].join(', ')}) in ONE edit.`);
     }
   }
+  // 🔴 A MISTYPED PATH IS NOT A FILE SOMEBODY IS ABOUT TO WRITE (Q-1029). `mistypedImport` is certain —
+  // a held file differing only in capitalisation, or a spelled-out extension the resolver never takes — so
+  // these are `fixHere` errors by then, and this says exactly which import line to change. Before, they
+  // landed in `waiting` and the note below sent the model to CREATE a file at the misspelled path.
+  for (const e of fixHere) {
+    const typo = mistypedImport(e, sources);
+    if (!typo) continue;
+    parts.push(
+      `✏️ The import path is wrong, not missing: \`${typo.spec}\` in ${normalizePath(e.file)} (line ${e.line}) `
+      + `${typo.why === 'case' ? 'differs only in capitalisation from' : 'spells out an extension the resolver does not take for'} `
+      + `\`${typo.held}\`, which this build already has. Fix the import line in ${normalizePath(e.file)} — do NOT create `
+      + `a file at \`${typo.spec}\`.`,
+    );
+  }
   if (waiting.length > 0) {
     const targets = [...new Set(waiting.map((e) => remedyFileFor(e, sources) as string))];
+    // And where a held file is ONE character away, the wait is still the likely reading — but it is no
+    // longer the only one stated (Q-1029). The note cannot decide; it can stop pretending there is nothing
+    // to check. `Card.tsx` planned while `Cart.tsx` exists is a real wait, so this never overrides it.
+    const near = waiting.map((e) => nearlyHeldImport(e, sources)).filter((n): n is NonNullable<typeof n> => n !== null);
+    const nearNote = near.length > 0
+      ? ` If \`${near[0].spec}\` is a typo for \`${near[0].held}\` — which this build already has — fix the import line here instead.`
+      : '';
     const quoted = waiting.slice(0, MAX_OWN_ERRORS_QUOTED).map(fmt);
     const more = waiting.length > MAX_OWN_ERRORS_QUOTED ? `\n…and ${waiting.length - MAX_OWN_ERRORS_QUOTED} more.` : '';
     parts.push(
       `⏳ TYPECHECK after this write: ${waiting.length} error(s) in ${files} are fixed in ANOTHER file — ${targets.join(', ')} — `
       + `not in ${files}. Do NOT rewrite ${files} for them; write or update ${targets.join(', ')} next `
-      + `(the production build fails until you do):\n${quoted.join('\n')}${more}`,
+      + `(the production build fails until you do):\n${quoted.join('\n')}${more}${nearNote}`,
     );
   }
   if (others.length > 0) {
@@ -280,7 +301,10 @@ export function writeTypecheckNote(
   // A NAME THE PLATFORM CHANGED (build 9c612cdb, Q-985 — contractRenames.ts). TS2749 on a recorded rename
   // carries tsc's own `typeof X` suggestion, which is wrong for the data; said for the written file's errors
   // AND the ones elsewhere, because in that build the error sat in the 'elsewhere' bucket for two writes.
-  parts.push(...typeRenameAdvice(suggestedTypeRenames([...own, ...others], renames)));
+  // `sources` goes with them (Q-1028) so the advice can see WHERE each one landed: inside `ComponentProps<…>`
+  // the compiler's suggestion is right, inside `FC<…>` it compiles into nonsense, and one sentence cannot be
+  // right for both. Without the sources the wording stays conditional rather than guessing.
+  parts.push(...typeRenameAdvice(suggestedTypeRenames([...own, ...others], renames), sources));
   // WHAT THE ERROR MEANS, not just what it says (autopsy baa0b3c7). A missing-declaration error points
   // at the file where the symbol is USED, so its remedy appears nowhere in the message and the code under
   // the cursor looks broken — which is how a correct file gets rewritten six times. Diagnosed here, at the
@@ -385,6 +409,8 @@ export interface WriteTypecheckStats {
    * report does not show a planned step as a struggle (autopsy 9c612cdb, Q-989). See `splitByRemedy`.
    */
   waitingErrorsSurfaced: number;
+  /** Errors whose import path was proven WRONG rather than early (Q-1029) — counted apart from the waits. */
+  mistypedImportsSurfaced: number;
   /** Sandbox time spent, in total. */
   elapsedMs: number;
   timeouts: number;
@@ -478,7 +504,7 @@ export interface WriteTypecheckStats {
 
 export function emptyWriteTypecheckStats(): WriteTypecheckStats {
   return {
-    runs: 0, cleanRuns: 0, notRunRuns: 0, ownErrorsSurfaced: 0, waitingErrorsSurfaced: 0, elapsedMs: 0, timeouts: 0,
+    runs: 0, cleanRuns: 0, notRunRuns: 0, ownErrorsSurfaced: 0, waitingErrorsSurfaced: 0, mistypedImportsSurfaced: 0, elapsedMs: 0, timeouts: 0,
     skipped: 0, skippedNotTs: 0, skippedNoTsconfig: 0, probeFailures: 0,
     compiledUnprobed: 0, projectVerdict: null, disabledReason: null, qualityNotedFiles: [],
     warmupStarted: false, warmupMs: null, warmupSkipped: false,
@@ -662,8 +688,15 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
   // A designed wait is not a builder error (autopsy 9c612cdb, Q-989): the entry written before its parts
   // is the admin's early-preview order, and its "cannot find module" errors are named apart.
   const waitingErrors = s.waitingErrorsSurfaced ?? 0;
+  // 🔴 "EXPECTED" WAS A CLAIM THE COUNT COULD NOT SUPPORT (Q-1029). A designed wait and a mistyped import
+  // produce the same `Cannot find module`, and this sentence called every one of them expected — so a
+  // report could reassure the reader about an error that was never going to resolve itself. The wait is
+  // what the next writes MAY add, and a path proven wrong is counted on its own line.
   const waiting = waitingErrors > 0
-    ? `, ${waitingErrors} waiting on files not written yet (a module or an export the next writes add — entry-first, expected)`
+    ? `, ${waitingErrors} waiting on files not written yet (a module or an export the next writes may add — entry-first)`
+    : '';
+  const mistyped = (s.mistypedImportsSurfaced ?? 0) > 0
+    ? `, ${s.mistypedImportsSurfaced} with a mistyped import path (the file was already there under another spelling — fixed in the importer, not by writing the named file)`
     : '';
   // 🔴 WHAT THE SKIPS ACTUALLY COST (Q-910). `tsc --noEmit` compiles the whole project, so one clean run
   // AFTER the last skip has already covered every skipped file. Said plainly, because "9 writes skipped"
@@ -673,7 +706,7 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
     : notReady > 0 && s.cleanRunCoveredSkips === false
       ? ' — and no check succeeded after them, so the end-of-build typecheck was their first compile'
       : '';
-  return `Write-time typecheck: ${s.runs} run(s), ${s.cleanRuns} clean${notRun}, ${s.ownErrorsSurfaced} error(s) quoted back in the file just written${waiting}, `
+  return `Write-time typecheck: ${s.runs} run(s), ${s.cleanRuns} clean${notRun}, ${s.ownErrorsSurfaced} error(s) quoted back in the file just written${waiting}${mistyped}, `
     + `${Math.round(s.elapsedMs / 1000)}s total (~${avg}s each)`
     + (s.timeouts ? `, ${s.timeouts} timeout(s)` : '')
     + (s.warmupMs !== null ? `; the cache was warmed at build start in ${Math.round(s.warmupMs / 1000)}s, before the first write`

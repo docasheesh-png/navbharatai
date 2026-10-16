@@ -27,6 +27,7 @@ import { withEnglishReading } from '../lib/devanagariTechTerms';
 import { withoutMachineText } from '../lib/machineText';
 import { STARTER_ENTRY_PATHS } from './stillTheStarterApp';
 import { CONTRACT_FIXED_VALUES_RULE } from './contractEnums';
+import { withRequestNotesBounded } from './requestNotes';
 
 export type ModuleStatus = 'pending' | 'in_progress' | 'done' | 'failed';
 
@@ -78,9 +79,13 @@ export const MAX_MODULES = 60;
 export const MAX_FILES_PER_MODULE = 150;
 export const MAX_CONTRACT_CHARS = 12_000;
 export const MAX_DESCRIPTION_CHARS = 1_200;
-// 6,000, not 4,000: a stack note (unsupportedStack.ts, ~1,100 chars) now leads the goal, and a 2,900-char
-// spec plus that note was cutting the user's own closing requirements off the end (autopsy 042e472f).
-const MAX_GOAL_CHARS = 6_000;
+// 🔴 THIS CAP IS THE REQUEST'S ALONE (Q-1017, 2026-10-16). It was raised from 4,000 to 6,000 after autopsy
+// 042e472f, where a ~1,100-char stack note led the goal and cut a 2,900-char spec's closing requirements off
+// the end. Raising it only moved the cliff: the cap was applied to the JOINED text (our notes, then the
+// user's words), so every note still spent the user's budget and a longer spec walked off the new edge the
+// same way. `createProjectPlan` now takes the notes apart from the request and bounds the REQUEST only
+// (`withRequestNotesBounded`) — the notes are kept whole and can never shorten the spec.
+export const MAX_GOAL_CHARS = 6_000;
 
 /** Same unsafe-path rules as the file manifest: no absolute, no traversal, no heavy dirs. */
 const UNSAFE_PATH_RE = /^(node_modules|\.git|dist|build)\//;
@@ -240,6 +245,91 @@ export function roadmapStandsDownForProjectMode(input: {
   return !!input.projectModeOn && !input.planFirst && !!input.megaProject;
 }
 
+/** Why no planner ran over this build — `null` means one did. Each value is a thing that ALREADY owns the build. */
+export type RoadmapStandDown = 'project-mode' | 'finished-template';
+
+/**
+ * 🔴 NOBODY PLANS AN APP THAT IS ALREADY FINISHED (autopsy e3135b7b, 2026-10-14 — the Quran reader). Q-1080.
+ *
+ * The roadmap gate read exactly one of the two things that can already own a build. `roadmapStandsDownForProjectMode`
+ * above closed the project-mode half in September; the other half was never asked, and the class is the one Q-1024
+ * named — a rule enforced at one of two call sites is not enforced.
+ *
+ * A golden scaffold seeds only when the prompt is a starter chip's prompt VERBATIM, and for the `simple` tier the
+ * scaffold IS the finished app (`GoldenScaffold.tier`, and `scaffoldedComplexityDecision` says so for the complexity
+ * router in the admin's own 2026-09-27 words: "the template already delivers the whole request and the build's job is
+ * to verify and polish it"). Planning it is worse than wasted work: a roadmap NARROWS the request to step 1 and is
+ * narrated to the user as what their app will be. That is what the Quran build told its user about an app that was
+ * already complete on disk before the first model call.
+ *
+ * ⚠️ `pro` IS DELIBERATELY EXCLUDED, AND THAT IS THE WHOLE PRECISION OF THIS FIX. A `pro` scaffold is a compile-proven
+ * ARCHITECTURE the builder then extends (proShell.ts), so a planner over it is doing real work. Measured over the
+ * registry the day this was written: 14 scaffolded chips reach a planner, 11 of them `pro`. Standing all 14 down would
+ * have shipped a bare architecture as the user's finished app — a far worse defect than the one being fixed here.
+ *
+ * ⚠️ AND IT IS BOTH PLANNERS, WHICH IS WHY THE SIBLING HUNT MATTERED. The three `simple` chips split across the two
+ * call sites: quran and wedding-rsvp reach the roadmap, panchang reaches the PROJECT planner. Fixing only the
+ * reported one would have left the same defect live under a different gate. `projectModeDiagnosis` carries the
+ * matching skip reason so the report names the real cause at that site too.
+ *
+ * The finished template is asked FIRST: when it is true, nothing plans this build at all, so it is the honest reason
+ * to report. A plan-first turn is left alone by both halves — the user asked for a plan and has their own planner.
+ * The census is locked by `tests/nobodyPlansAnAppAlreadyWritten.test.ts`, which recomputes both gates over the whole
+ * starter registry and fails when a NEW chip, scaffold or loosened scope rule would reach a planner. PURE.
+ */
+export function roadmapStandsDown(input: {
+  projectModeOn: boolean;
+  planFirst: boolean;
+  megaProject: boolean;
+  /** The seeded template IS the finished app — the `simple` tier, never `pro`. */
+  templateIsTheApp: boolean;
+}): RoadmapStandDown | null {
+  if (!input.planFirst && !!input.templateIsTheApp) return 'finished-template';
+  if (roadmapStandsDownForProjectMode(input)) return 'project-mode';
+  return null;
+}
+
+/**
+ * THE WHOLE ROADMAP GATE, IN ONE CALL — and it is a function for a MEASURED reason, not for tidiness.
+ *
+ * The `/build` handler sits ON TypeScript's control-flow-analysis limit (Q-979). Expressed in the route as a
+ * local plus two branches, this decision raised TS2563 on the whole file the moment it met #3743's changes on
+ * `main` — `main` alone typechecked clean, so the merge is what tipped it. The same cliff shaped the optional
+ * bug-hunt flow (`offerBugHunt`): the fix there, and here, is that the route makes ONE call and the branching
+ * lives in the module.
+ *
+ * It answers both halves at once: whether the planner runs, and what the report should say if it does not.
+ * `record` is null exactly when there is nothing to say. PURE.
+ */
+export function roadmapDecision(input: {
+  projectModeOn: boolean;
+  planFirst: boolean;
+  megaProject: boolean;
+  templateIsTheApp: boolean;
+  /** The one scope verdict said `analyze` — the size question, already answered (Q-138). */
+  decisionIsAnalyze: boolean;
+  /** The two classifiers disagreed, so the planner is never asked (`scopeDispute`). */
+  disputed: boolean;
+  signals: readonly string[];
+}): { runPlanner: boolean; standDown: RoadmapStandDown | null; record: { message: string; detail: string } | null } {
+  const standDown = roadmapStandsDown(input);
+  const sized = input.decisionIsAnalyze && !input.disputed;
+  return {
+    standDown,
+    runPlanner: sized && !standDown,
+    record: sized && standDown
+      ? { message: roadmapStandDownMessage(standDown), detail: `scope signals: ${input.signals.join('; ')}` }
+      : null,
+  };
+}
+
+/** The one sentence the build report carries for each stand-down reason. PURE. */
+export function roadmapStandDownMessage(reason: RoadmapStandDown): string {
+  return reason === 'project-mode'
+    ? 'Mega-app roadmap stood down: Software Project Mode will decompose this build, so one planner runs instead of two.'
+    : 'Mega-app roadmap stood down: a tested template for this exact request is already seeded and is the finished app, so the whole app exists before the first model call — the job is to verify and polish it, not to plan it.';
+}
+
 /** Why Software Project Mode did not steer this build — `null` means it did. */
 export type ProjectModeSkipReason =
   | 'not-configured'
@@ -247,6 +337,11 @@ export type ProjectModeSkipReason =
   | 'pre-empted'
   | 'not-a-new-build'
   | 'below-threshold'
+  /**
+   * The seeded golden scaffold IS the finished app (the `simple` tier), so there is nothing left to decompose
+   * (autopsy e3135b7b, Q-1080). A `pro` scaffold is only an architecture and does NOT reach this reason.
+   */
+  | 'template-is-the-app'
   /** Shaped like a project spec, but the one scope verdict (APP_SCOPE) reads it as one app (Q-138). */
   | 'scope-says-one-app';
 
@@ -311,6 +406,8 @@ export function projectModeDiagnosis(args: {
    * answer and never sizes on its own; when it is absent the spec shape alone is reported (unit callers).
    */
   scope?: { large: boolean; signals: string[] } | null;
+  /** The seeded template IS the finished app (`simple` tier) — autopsy e3135b7b. A `pro` scaffold is not. */
+  templateIsTheApp?: boolean;
 }): ProjectModeDiagnosis {
   const flagRaw = String(args.flagRaw ?? '').trim();
   const identity = args.identity ?? {};
@@ -354,6 +451,21 @@ export function projectModeDiagnosis(args: {
       'Both are "big app" strategies and they are mutually exclusive by design — two planners must '
         + 'never steer one build. The mega-app roadmap is default-ON and needs no key, so it is '
         + 'reached first; project mode stands down rather than competing with it.',
+    );
+  }
+
+  // NOBODY DECOMPOSES AN APP THAT IS ALREADY FINISHED (autopsy e3135b7b — the OTHER call site of the same
+  // class; `panchang` is a `simple` chip that reaches THIS planner, not the roadmap). Asked after pre-emption
+  // so a plan-first turn still reports the reason the user caused, and before the shape questions because the
+  // app's existence settles them: there is nothing to size.
+  if (args.templateIsTheApp) {
+    return say(
+      'template-is-the-app',
+      'Software Project Mode is ON for this account, but a tested template for this exact request is already seeded and is the finished app — no decomposition was needed.',
+      'A starter template is seeded only when the request is a starter chip\'s text exactly, and a simple-tier '
+        + 'template IS the finished app rather than a starting architecture. The build verifies and polishes it, '
+        + 'which is what the admin decided for the complexity router on 2026-09-27; splitting a finished app into '
+        + 'modules would rewrite it across rounds and make the user wait for something that already existed.',
     );
   }
 
@@ -533,11 +645,24 @@ export function parsePlannedModules(text: string): ProjectModule[] {
   return out;
 }
 
-/** Assemble a fresh plan. `now` is injected so tests are deterministic. PURE. */
-export function createProjectPlan(goal: string, framework: string, modules: ProjectModule[], now: number): ProjectPlan {
+/**
+ * Assemble a fresh plan. `now` is injected so tests are deterministic.
+ *
+ * 🔴 `request` is the USER'S WORDS and `notesText` is OURS, and they arrive apart on purpose (Q-1017): the
+ * cap belongs to the request, so the same spec keeps the same characters whatever notes ride with it. Pass
+ * the joined text here and the old defect is back — the join happens inside, once, where the bound is.
+ * PURE.
+ */
+export function createProjectPlan(
+  request: string,
+  framework: string,
+  modules: ProjectModule[],
+  now: number,
+  notesText: string = '',
+): ProjectPlan {
   return {
     version: 1,
-    goal: (goal || '').slice(0, MAX_GOAL_CHARS),
+    goal: withRequestNotesBounded(request, notesText, MAX_GOAL_CHARS).text,
     framework: framework || 'vite-react',
     createdAt: now,
     modules,

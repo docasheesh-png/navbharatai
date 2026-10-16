@@ -31,7 +31,7 @@ import { declaredRoutes } from './routerPaths';
 import { rendersDataList } from './DesignCoverage';
 import { scanMarkup, enclosingTag, isHtmlElement, tagName, type ScannedTag } from './jsxTags';
 import { NEVER_PRESS, WRITE_VERBS } from './clickExplorer';
-import { withoutAppSignature } from './appSignature';
+import { blankOurMarkup } from './ourInjectedMarkup';
 import { isCanvasGameProject } from './gamePlaytest';
 
 /** How a single element is addressed, in the order Playwright should be asked for it. */
@@ -214,11 +214,29 @@ export const NO_DATA_ENTRY_REASON =
 /**
  * The files with OUR markup removed — what every "does the app do X?" question here reads (autopsy
  * 2b1f845e: the badge's checkbox was read as the app taking input). PURE.
+ *
+ * 🔴 IT STRIPPED ONE OF THE THREE THINGS WE INJECT (Q-1021, 2026-10-15). `withoutAppSignature` removes
+ * the "made by NavBharatAI" badge and nothing else, so the red honesty banner (`honestyBanner.ts`, the
+ * NO-FAKE-FEATURE rule's demo warning) and the preview bridge (`previewBridge.ts`, ~300 lines of our own
+ * script) were both still in the text every question here is asked of. The bridge alone adds
+ * `addEventListener('input', …)`, a `click` handler and a `mouseover` handler to a document the app's
+ * author may have written no script in at all — so "does this app take data?" and "what does this app
+ * do?" were partly being answered about OUR instrumentation.
+ *
+ * 🔑 THE CLASS, and it is why this is one call and not three: autopsy 9c612cdb had already met exactly
+ * this bug in the design lint, and the fix there was `ourMarkupRanges` — ONE list of what we inject,
+ * owned by the three modules that write it (`appSignatureRanges`, `honestyBannerRanges`,
+ * `previewBridgeRanges`), so a FOURTH thing we ever inject is stripped everywhere at once. This reader
+ * was left on its private, partial strip. Using the shared one closes the gap and makes the next
+ * injection safe by construction rather than by somebody remembering.
+ *
+ * `blankOurMarkup` blanks rather than deletes, which is also what this reader wants: `dataEntryEvidence`
+ * reports WHERE it found a sign, and blanking keeps every other offset pointing at the same character.
  */
 export function appOwnFiles(files: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [path, src] of Object.entries(files ?? {})) {
-    out[path] = /\.html?$/i.test(path) && typeof src === 'string' ? withoutAppSignature(src) : src;
+    out[path] = typeof src === 'string' ? blankOurMarkup(path, src) : src;
   }
   return out;
 }

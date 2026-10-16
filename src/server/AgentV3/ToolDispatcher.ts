@@ -115,7 +115,7 @@ import { currentPass, runInPass, inPlatformPass, isGreenLatched, assertWriteAllo
 import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemovedOperands, removedRecordedPaths } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
-import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames } from './tscErrorCause';
+import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
 import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
@@ -3856,6 +3856,11 @@ export class ToolDispatcher {
       const { fixHere, waiting } = splitByRemedy(errors, tsPaths, sources);
       s.ownErrorsSurfaced += fixHere.length;
       s.waitingErrorsSurfaced = (s.waitingErrorsSurfaced ?? 0) + waiting.length;
+      // And the ones whose path is proven WRONG rather than early (Q-1029) — counted from the same split,
+      // so the number in the summary is the number of notes the model was actually shown. They are part of
+      // `fixHere` (that is what `remedyFileFor` returning null means), so this never double-counts a wait.
+      s.mistypedImportsSurfaced = (s.mistypedImportsSurfaced ?? 0)
+        + fixHere.filter((e) => mistypedImport(e, sources) !== null).length;
       if (fixHere.length > 0) {
         try { getWorkspaceMemory(this.workspaceId).recordError(`write-typecheck: ${fixHere.length} error(s) in ${tsPaths.join(', ')}`); } catch { /* audit best-effort */ }
       }
@@ -6779,7 +6784,8 @@ export class ToolDispatcher {
       }
 
       case 'update_todo': {
-        const todos = parseTodos(input);
+        // The list already on the plan, so an item sent as "id + status" keeps its title (Q-1083).
+        const todos = parseTodos(input, this.state?.snapshot().todos ?? []);
         this.state?.setTodos(todos);
         return `Updated ${todos.length} todo(s).`;
       }
@@ -11867,15 +11873,42 @@ function optStr(input: Record<string, unknown>, key: string): string | undefined
   return typeof v === 'string' ? v : undefined;
 }
 
-function parseTodos(input: Record<string, unknown>): TodoItem[] {
+/**
+ * Read one todo item the model sent. Q-1083.
+ *
+ * 🔴 A WHOLE TURN WAS LOST TO A FIELD WE ALREADY KNEW (build 7805e6d7, 2026-10-14):
+ * `TOOL_ERROR — Tool call failed: update_todo: item 1 is missing a title` (architect, 0 s). Item ONE,
+ * not item zero, which is the tell: the model sent a complete first item and then, for the next one,
+ * sent what it was actually changing — an id and a status. For a tool literally called `update_todo`
+ * that is a reasonable thing to send, and the schema does say `required: ['id','title','status']`, so
+ * the call was malformed. But OUR response threw the entire call away, and with it the turn, when the
+ * stored list ALREADY HELD that id's title. Rejecting a call whose missing field we can look up is
+ * self-inflicted waste — and this build lost six more turns to `update_todo` besides (Q-987's class,
+ * fixed separately by #3743's `todoOnlyTurn`).
+ *
+ * So: an item with a known id keeps its stored title, a bare string is read as a title, and the honest
+ * throw stays for the one case that genuinely cannot be answered — a NEW id with no title anywhere.
+ * Every branch here can only rescue a call that used to throw; none changes a call that already worked.
+ */
+function titleOf(obj: Record<string, unknown>, item: unknown, id: string, known: ReadonlyMap<string, string>): string {
+  if (typeof item === 'string' && item.trim()) return item.trim(); // `todos: ["do x", "do y"]`
+  if (typeof obj.title === 'string' && obj.title.trim()) return obj.title.trim();
+  return known.get(id) ?? ''; // the id we already have a title for — the reported case
+}
+
+function parseTodos(input: Record<string, unknown>, existing: readonly TodoItem[] = []): TodoItem[] {
   const raw = input.todos;
   if (!Array.isArray(raw)) throw new Error('update_todo: todos must be an array.');
   const valid: TodoStatus[] = ['pending', 'in_progress', 'done', 'blocked'];
+  const known = new Map(existing.map((t) => [t.id, t.title] as const));
   return raw.map((item, i) => {
     const obj = (item ?? {}) as Record<string, unknown>;
     const id = typeof obj.id === 'string' ? obj.id : String(i + 1);
-    const title = typeof obj.title === 'string' ? obj.title : '';
-    if (!title) throw new Error(`update_todo: item ${i} is missing a title.`);
+    const title = titleOf(obj, item, id, known);
+    if (!title) {
+      // Still honest, and now actionable: it says what it looked for and could not find.
+      throw new Error(`update_todo: item ${i} has no title, and its id (${id}) is not one of the ${known.size} todo(s) already on the list, so there is no stored title to keep. Send the title with it.`);
+    }
     const status = valid.includes(obj.status as TodoStatus) ? (obj.status as TodoStatus) : 'pending';
     const owner = typeof obj.owner === 'string' ? (obj.owner as AgentRole) : undefined;
     return owner ? { id, title, status, owner } : { id, title, status };

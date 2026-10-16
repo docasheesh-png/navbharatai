@@ -96055,6 +96055,38 @@ and a rise is the fix working, not a regression.
 - **No new server route.** Copy / Download in the panel are the dashboard's own functions, because they also write the "taken" mark (one report, one session).
 - Locked by `tests/theAppsPageHoldsEveryBuildReport.test.ts` and `WorkspaceBuildReports.render.test.tsx`; three reversions each failed the right test. Two existing pins moved with the card (`theAdminMenuHasNineTabs`, `adminAllBuilds`, `adminBuildFilters`), each with the reason beside it.
 
+### 2026-10-15 — Q-1020: the request-notes census reads the sinks, not the names (and it corrected Q-1016)
+
+The census that keeps every request note reaching every builder lane was kept honest by a guard matching
+route imports named `…BuilderNote` / `…BuildRule`. It could not see a producer called anything else, and
+`requestScopeVerdict` — already on the list — was itself the proof: it had to be added by hand because no
+name rule caught it.
+
+**Widening the name rule was measured and rejected.** `/(?:Note|Rule|Verdict)$/` matches **73** of the
+route's imports for these **6** real producers, so the net would have needed a 67-name allowlist nobody
+would read, which dilutes a guard into decoration. The census now works from the **sinks**: each of the
+six lane prompts is pinned to the exact expression that must supply the notes, plus a **ratchet** over
+every `…UserPrompt(prompt, …)` call, so a seventh builder prompt reading the bare request fails the test.
+No name rule, no allowlist.
+
+**🔴 And on its first run it corrected Q-1016.** That row says the blueprint lane plans the manifest and
+contract blind. Measured, **six** builder prompts read the bare request:
+
+| sink | what it plans |
+|---|---|
+| `manifestUserPrompt(prompt, scaffold)` | the blueprint lane's whole file list — as the row said |
+| `contractUserPrompt(prompt, manifest)` | and its shared contract — as the row said |
+| `megaRoadmapUserPrompt(prompt, …)` ×2 | **the mega-app roadmap planner, which the row never mentioned** |
+| `repairUserPrompt(prompt, …)` ×2 | a repair pass — it rewrites real files, so "no sign-in" still constrains it; a judgement, recorded rather than assumed |
+
+None of the six is a wiring oversight: every one runs *above* the line where the first note input is
+computed (blueprint ~16750, first input ~16978), so there is nothing to pass yet. Closing them means
+lifting the note computation into one pure function called before the blueprint lane and read in both
+places — the Q-1026/Q-1033 "one computation, one copy" shape — not one more threaded argument. Q-1016's
+row now carries that scope and that plan, and the ratchet may only shrink.
+
+Three reversions: a seventh bare-prompt lane added (1 fail), the architect stops reading the list
+(2 fail), the sub-agents stop reading it (2 fail).
 ### 2026-10-15 — Q-1021: our instrumentation is never the user's app
 
 `journeyDerivation.appOwnFiles` is the one place every *"does this app do X?"* question in that module is
@@ -96175,6 +96207,52 @@ note beside a fix names the function the fix stopped calling, so a guard reading
 its own documentation. It is a pattern — a source census must read stripped code, and the assertion that
 needs stripping is always the negative one.
 
+## 2026-10-16 — Q-1097: a null scene reading is never silent, and the vehicle is identified once (#3763)
+
+`tests/aThreeGameIsReadFromItsScene.test.ts` failed twice in one day under a loaded machine, on two different
+fixtures, with the same shape: `{ faces: false, mirrored: null }` where a concrete steering verdict was demanded.
+Both runs had **180 frames** — so `probeStarved`, the predicate the test branched on, was false, Q-1038's starved
+branch never ran, and the test fell through to an assertion no machine can promise.
+
+Three causes underneath, and the row only named the first:
+
+1. **The reason was not computed from the evidence.** `probeStarved` counts frames; the verdict's floors are
+   geometric (the vehicle seen to move, the camera following it, the turn big enough to call). New `sceneUnread`
+   answers from the same read `sceneVerdict` decides on, and the reason is computed ONLY where the verdict is
+   null — so *exactly one of the two is non-null, per axis* holds by construction. Q-1022's class one level down.
+   My own first draft got this wrong (it returned the starvation note for both axes on a low frame count, which
+   claimed the camera "could not be read" on a read that had just answered it); the invariant test caught it.
+2. **The vehicle was identified twice.** The steering probe re-picked it from its own 400 ms sample. The racer
+   fixture's traffic car moves 0.5 per frame whatever the player presses and never turns, so a second pick under
+   load can land on it — the camera question answered about the car, the steering question about something else.
+3. **A long look can LIE, not merely fail.** `turn` is a chord angle — half the swept angle — and three seconds
+   of holding LEFT is a 310° sweep at 60 fps on that fixture. One frame-rate step up passes 360°, where the chord
+   points backwards and `turn < 0` **accuses a correctly-steering game of mirrored steering**. A wrong verdict is
+   worse than no verdict. The reading is now taken over a 400 ms window, the long one used only as a fallback and
+   only below `TURN_WRAP_SAFE_DEG`; the arithmetic moved OUT of the probe script — which no unit test can reach —
+   into pure `chordTurn` / `pickTurn` / `readTurn`, with the script recording only the raw vectors (`SceneRead.aim`).
+
+And a contradiction inside Q-1038's own fix fell out: a starved page whose turn DID read used to print
+"Steering was not read" in the same report that scored `steeringMirrored` from that very reading.
+
+**Report honesty (rule 5):** four of the five reasons a reading can be missing used to print nothing, so a game
+whose steering the scene never read appeared as a game that steers correctly. All five print now — only where the
+scene was actually consulted (a driving game, not stalled, with a three.js scene), because without a scene the
+pixel flow is the designed path, not a failure.
+
+Locked by `tests/aNullSceneReadingIsNeverSilent.test.ts` (44 tests) plus the four live tests rewritten to the
+honest contract — never a wrong claim, the exact verdict when read, a stated reason when not — which only the
+first of them had. Four reversions all bite. Proven under 6 CPU hogs on 4 cores; `aRacingGameIsStartedAndDriven`
+re-run because the turn hold grew by 400 ms (140 sibling tests green).
+
+⚠️ **This entry first said #3761, which is another session's PR.** A PR number cannot be known until the PR
+exists, so a row written before that is a guess — and while this container was asleep another session opened,
+and merged, its own #3761 (Q-1017). Mine is **#3763**. The sixth rule's point exactly: a row whose owner is
+wrong is a row nobody can check.
+
+⚠️ **One thing to know before editing that file again:** lines ~238–835 are a template literal — the Playwright
+script, run as a subprocess. A backtick in a comment there ends the string, and the parse error points at the
+comment, not at the cause. The existing in-script comments escape theirs; the Q-1097 note says so in place.
 ### 2026-10-16 — Q-1017: the goal's cap was spent on our own notes, and raising it in October was not the fix
 
 **The defect.** `createProjectPlan` stored `goal` as `(joined).slice(0, MAX_GOAL_CHARS)`, and the route handed it
@@ -96223,3 +96301,36 @@ budgets, so the property it already claimed is now actually checked where the mo
 **Q-1017 closed 2026-10-16:** #3761 merged to `main` as `15d2997`. The row is deleted from
 `BUILD_REPORT_QUEUE.md`'s open table and its ID appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the
 same commit, with the queue edited on a fresh `main` (#3543's lesson, 2026-10-06). Its ledger is the entry above.
+## 2026-10-16 — Q-1028: the advice fits the position it is about (#3764)
+
+**The row's own plan was wrong, and measuring it is what showed that.** Q-1028 said to add `FC`,
+`FunctionComponent` and `ComponentType` to `COMPONENT_TAKING_TYPES` — the set that switches the rename heal
+OFF. Measured against the installed `@types/react` and a real `tsc` run of all five shapes a model writes:
+
+| position | the renamed data type | `typeof Component` |
+|---|---|---|
+| `FC<…>`, `FunctionComponent<…>`, `ComponentType<…>` | ✅ compiles | ✅ compiles — and means "props are a function" |
+| `ComponentProps<…>` | ❌ TS2344 | ✅ the right fix |
+| a plain annotation | ✅ compiles | only if you mean the component |
+
+`FunctionComponent<P>` is `(props: P) => ReactNode`, so **P is the props**. Excluding those three would have
+switched off a heal that produces correct code, and `ComponentProps` — the one already excluded — is the only
+React position where `typeof` is right. The row had it backwards, so it is NOT implemented as written.
+
+**The real defect is worse than the row's.** At a props position `typeof X` *also compiles*, silently
+declaring the component's props to be the component's own function type. A wrong fix the compiler accepts
+costs more than one it rejects — and the advice offered it. Measured, one sentence named lines 2, 3, 4, 5, 6
+together and gave both options for all of them, although at line 5 the data name is a compile error and at
+lines 2–4 `typeof` is the nonsense. Advice right for one of those is wrong for the other.
+
+**The class:** the heal knew the position from the AST; the advice knew nothing and guessed. One classifier
+(`typeUsePosition` → `plain` / `props-arg` / `component-arg` / `not-a-type-use`) is now read by both, so they
+cannot disagree — Q-1022's shape (a predicate and its evidence from two different inputs) and Q-1026/Q-1033's
+(one computation, one copy). Without sources the advice stays conditional, which is the honest answer rather
+than a guess. The hand-off note names the three props positions too, and its ticket id came out of the
+model-facing prompt — a model has no use for our queue numbers.
+
+Heal behaviour is unchanged, because measurement said it was already right. Locked by
+`tests/theAdviceFitsThePosition.test.ts` (18 tests, the real tsc message as the fixture, a census that each
+set has exactly one reader), with 101 sibling tests green. Three reversions bite — including **the row's own
+plan**, which fails 5 tests, one of them named for exactly why.

@@ -39,6 +39,7 @@ import { signInCandidates, authLivesInTheBrowser } from './signInExplore';
 import { impliedRequirement, type AppRequirement } from './AppRequirements';
 import { recipeFor, preferredOption, requiredVarNames } from '../../lib/credentialRecipes';
 import { HONESTY_BANNER_OPEN, HONESTY_BANNER_CLOSE, stripHonestyBanner, hasHonestyBanner } from '../../lib/honestyBanner';
+import { SECRETS_SCREEN } from '../AppContext/navPaths';
 
 export { hasHonestyBanner };
 
@@ -196,9 +197,14 @@ export function findFakeFeatures(files: Readonly<Record<string, string>>, prompt
 }
 
 // ── Where the user pastes the key ─────────────────────────────────────────────────────────────────────
-/** The phone app's path (the admin's "3 dot menu") and the website's — both are said, the phone one first. */
-export const KEYS_PATH_PHONE = 'NavBharatAI → ⋮ More → Keys & Secrets';
-export const KEYS_PATH_WEB = 'Settings → App Settings → Secrets & API Keys';
+/**
+ * The phone app's path (the admin's "3 dot menu") and the website's — both are said, the phone one first.
+ *
+ * 🔒 DERIVED FROM navPaths.ts (admin 2026-10-14), never typed here: the keys screen was named in 155 places
+ * across the server under two different names, and a path nobody compares to the screen goes stale silently.
+ */
+export const KEYS_PATH_PHONE = `NavBharatAI → ${SECRETS_SCREEN.inBuilderPath}`;
+export const KEYS_PATH_WEB = SECRETS_SCREEN.canonical;
 
 /** The exact env names the real version reads — the recipe's recommended provider, first option. */
 export function keysForFinding(finding: Pick<FakeFeatureFinding, 'requirementId'>): string[] {
@@ -218,7 +224,7 @@ export function impliedRequirementsFor(findings: readonly FakeFeatureFinding[]):
     seen.add(f.requirementId);
     const req = impliedRequirement(f.requirementId, keysForFinding(f));
     if (!req) continue;
-    out.push({ ...req, why: `${ENGLISH.feature[f.kind]} in your app is a demo until this key is added — then it becomes real. Paste it here, or in ${KEYS_PATH_PHONE}.` });
+    out.push({ ...req, why: `${ENGLISH.feature[f.kind]} in your app is a demo until this key is added — then it becomes real. Paste it here, or any time in ${KEYS_PATH_WEB} (${KEYS_PATH_PHONE} without leaving a build).` });
   }
   return out;
 }
@@ -415,6 +421,7 @@ export function fakeFeatureWriteNote(file: string, content: string): string {
   const lines = hits.map((h) => `  ${file}:${h.line} ${h.snippet}\n  → ${WRITE_NOTE_FIX[h.kind]}.`).join('\n');
   return `\n\n⛔ NO FAKE BUTTON, NO FAKE FEATURE — ${file} has a feature that only pretends to work:\n${lines}\n`
     + 'Until the real provider is wired, that screen MUST carry a clearly visible RED line in the user\'s language saying it is a '
-    + `demo and not real, and which key makes it real (${KEYS_PATH_PHONE}); say the same in your final message. `
+    + `demo and not real, and which key makes it real (${KEYS_PATH_WEB}, or ${KEYS_PATH_PHONE} without leaving the build); `
+    + 'say the same in your final message. '
     + 'Never present it as working.';
 }

@@ -96009,3 +96009,34 @@ report never handed the tally · one heal lane drops `baseRunnerOpts`) — each 
 **Honest consequence for an earlier autopsy.** The "6 turns / 20.8 s" quoted for report 12ef62b2 was an
 under-count of unknown size. **Watch on the next real report: the figure should RISE on any delegating build**,
 and a rise is the fix working, not a regression.
+## 2026-10-15 — Admin → Apps: a "v" on every app opens its build reports; "All builds" moved out of the Build tab (admin request)
+- **What changed:** `BuiltAppsPanel` cards (live, held, banned and the orphaned list alike) get a "v" button → a dialog (`WorkspaceBuildReports`) reading the existing `GET /api/admin/all-builds/:workspaceId`: the latest build's headline in the engine's words, Copy / Download for the whole session and for each build. The "All builds — every user, no submit needed" card moved from the Build tab to the Apps page (same state, filters, "taken" mark); its auto-load follows it.
+- **Decision, said plainly:** the admin said "remove All builds from the Build tab" — it was RELOCATED, not deleted. It holds builds that never produced an app, the failed/tier filters and the "taken" marks the autopsy workflow depends on; deleting it would have lost them.
+- **No new server route.** Copy / Download in the panel are the dashboard's own functions, because they also write the "taken" mark (one report, one session).
+- Locked by `tests/theAppsPageHoldsEveryBuildReport.test.ts` and `WorkspaceBuildReports.render.test.tsx`; three reversions each failed the right test. Two existing pins moved with the card (`theAdminMenuHasNineTabs`, `adminAllBuilds`, `adminBuildFilters`), each with the reason beside it.
+
+### 2026-10-15 — Q-1022: the clean design sentence is earned, not read off a shortened list
+
+`modelDesignLine` hands `designLintSummary` a **copy** of the lint with the platform-fixed violation types
+filtered out. That is right: the model must not be told to fix what the spacing snap is about to fix
+itself (autopsy 536c8189 — it spent three model calls writing regex scripts over the stylesheet and moved
+on-grid values *off* the grid). But when the **only** finding was a platform-fixed one, the copy had no
+violations left, so the summary took its clean branch and the model read:
+
+> Design consistency 92/100 (A) across 7 file(s). Design consistency: ✓ A (92/100) — **cohesive palette,
+> typography and spacing.**
+>   ✓ **4 off-grid spacing value(s)**: the platform snaps these to the grid when the build ends.
+
+One sentence denying what the next one states, from the same lint, in the same breath.
+
+**The class: a predicate and its evidence computed from two different inputs.** The filtered copy is the
+right input for *listing what is left* and the wrong one for *deciding whether anything was wrong*. The
+caller now states how many it removed — `designLintSummary(shown, handled.length)` — and the honest
+`CLEAN_AFTER_OUR_FIX` sentence is said in place of the cohesive one.
+
+A genuinely cohesive app still gets its compliment, and that is tested: replacing the clean sentence
+unconditionally is the opposite defect, and the third reversion proves the test catches it.
+
+Locked by `tests/theCleanDesignSentenceIsEarned.test.ts` (10 tests), including a census that only the
+filtering caller may pass a count. Three reversions: the caller stops saying what it filtered (2 fail),
+the summary ignores the count (2 fail), the honest sentence replaces the cohesive one always (2 fail).

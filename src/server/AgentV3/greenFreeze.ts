@@ -87,6 +87,24 @@ export const ALLOWED_PASSES: ReadonlySet<string> = new Set([
   // designHealGuard.ts — and unlike the reviewer it repairs the app's OWN stated design contract, not an
   // opinion about it.
   'design-consistency-heal',
+  // 🔴 THE HEAL'S OWN UNDO (Q-1013). `design-consistency-heal` above may write to a latched app; its
+  // revert could not, so if the heal broke a page's syntax the break STAYED and the freeze ended up
+  // protecting the breakage instead of the app. The route's comment beside the revert already said this
+  // was a freeze decision rather than an attribution one ("NOT 'design-consistency-heal' (allowlisted):
+  // that would widen what a latched app lets through") — this is that decision, made.
+  //
+  // ⚠️ IT WAS WORSE THAN "THE REVERT DID NOT RUN", because the refusal is swallowed per file while the
+  // bookkeeping is not: `writtenFiles.set(path, original)` and `mergeWorkspaceFiles` run regardless, so
+  // the record and the durable store said "reverted" while the live sandbox kept the broken file. A
+  // state the report describes wrongly is the fifth rule's own target.
+  //
+  // 🔒 WHY IT IS SAFE BY CONSTRUCTION, not by judgement: the revert writes `beforeHeal[path]` — the
+  // PRE-HEAL bytes, which are exactly the content the latch exists to protect — and only for the paths
+  // `designHealDecision` chose, i.e. files the heal itself had just written. So allowing it is strictly
+  // MORE faithful to the freeze's purpose than refusing it. That is the same argument this list already
+  // makes for `green-guard-restore` and `sandbox-file-restore`: "Refusing it does not protect the app;
+  // it strands it."
+  'design-heal-revert',
   // A REAL BUG THE REVIEWER FOUND IN A WORKING APP (admin 2026-09-23, autopsy ac41a924: "han to fix
   // karo"). A news site rendered, and the reviewer found every article showing as ONE paragraph and
   // footer links to pages that do not exist — both shipped, because on a green app the reviewer could

@@ -96055,6 +96055,38 @@ and a rise is the fix working, not a regression.
 - **No new server route.** Copy / Download in the panel are the dashboard's own functions, because they also write the "taken" mark (one report, one session).
 - Locked by `tests/theAppsPageHoldsEveryBuildReport.test.ts` and `WorkspaceBuildReports.render.test.tsx`; three reversions each failed the right test. Two existing pins moved with the card (`theAdminMenuHasNineTabs`, `adminAllBuilds`, `adminBuildFilters`), each with the reason beside it.
 
+### 2026-10-15 — Q-1020: the request-notes census reads the sinks, not the names (and it corrected Q-1016)
+
+The census that keeps every request note reaching every builder lane was kept honest by a guard matching
+route imports named `…BuilderNote` / `…BuildRule`. It could not see a producer called anything else, and
+`requestScopeVerdict` — already on the list — was itself the proof: it had to be added by hand because no
+name rule caught it.
+
+**Widening the name rule was measured and rejected.** `/(?:Note|Rule|Verdict)$/` matches **73** of the
+route's imports for these **6** real producers, so the net would have needed a 67-name allowlist nobody
+would read, which dilutes a guard into decoration. The census now works from the **sinks**: each of the
+six lane prompts is pinned to the exact expression that must supply the notes, plus a **ratchet** over
+every `…UserPrompt(prompt, …)` call, so a seventh builder prompt reading the bare request fails the test.
+No name rule, no allowlist.
+
+**🔴 And on its first run it corrected Q-1016.** That row says the blueprint lane plans the manifest and
+contract blind. Measured, **six** builder prompts read the bare request:
+
+| sink | what it plans |
+|---|---|
+| `manifestUserPrompt(prompt, scaffold)` | the blueprint lane's whole file list — as the row said |
+| `contractUserPrompt(prompt, manifest)` | and its shared contract — as the row said |
+| `megaRoadmapUserPrompt(prompt, …)` ×2 | **the mega-app roadmap planner, which the row never mentioned** |
+| `repairUserPrompt(prompt, …)` ×2 | a repair pass — it rewrites real files, so "no sign-in" still constrains it; a judgement, recorded rather than assumed |
+
+None of the six is a wiring oversight: every one runs *above* the line where the first note input is
+computed (blueprint ~16750, first input ~16978), so there is nothing to pass yet. Closing them means
+lifting the note computation into one pure function called before the blueprint lane and read in both
+places — the Q-1026/Q-1033 "one computation, one copy" shape — not one more threaded argument. Q-1016's
+row now carries that scope and that plan, and the ratchet may only shrink.
+
+Three reversions: a seventh bare-prompt lane added (1 fail), the architect stops reading the list
+(2 fail), the sub-agents stop reading it (2 fail).
 ### 2026-10-15 — Q-1021: our instrumentation is never the user's app
 
 `journeyDerivation.appOwnFiles` is the one place every *"does this app do X?"* question in that module is

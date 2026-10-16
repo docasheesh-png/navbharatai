@@ -96444,3 +96444,23 @@ with the image (10).
 
 ⚠️ **What to watch:** this PR's own CI run is the **first on Node 22**. That run is the real test of the flip,
 and it is the whole point of the change.
+
+### 2026-10-16 — #3768's CI failure, diagnosed rather than re-run (Q-1127)
+
+`AgentRunner.test.ts > recovers from an oversized turn via aggressive compaction` failed CI with
+*"Test timed out in 20000ms"* on a PR whose diff was a prompt string and two test pins — nothing that test
+can reach. It would have been easy to call it a flake and press re-run. Measured instead:
+
+- **12.0 s** on an idle container, against the global `testTimeout: 20_000` — a **1.65× margin**, which a
+  runner with 2,709 other test files in flight eats. In that whole 52-test file it is the **only** test over
+  2 s, so this is one outlier, not a sweep.
+- **The product path was ruled out first:** `compactMessagesForPersist` on that exact oversized turn runs
+  **50 calls in 1 ms**. There is no slow compaction behind it, so nothing a real build pays for that reason.
+
+So the bound — which was never chosen for this test, only inherited — is now an explicit 60 s with the
+measurement written beside it. The assertions are untouched.
+
+⚠️ **And the half that is NOT explained is recorded, not waved past:** why the test's agent-loop scaffolding
+costs 12 s when the compaction is instant. That is **Q-1127**, with the first suspect named (the fake store's
+per-append `JSON.stringify` of a 50 KB payload — test code, so it must be confirmed before the product is
+blamed). Raising a bound explains the timeout; it does not explain the 12 s.

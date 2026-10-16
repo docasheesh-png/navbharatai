@@ -96331,6 +96331,9 @@ with 722 sibling tests across 39 files green.
 doubly defended — an in-loop early return *and* the final `hits.length === 1` — so removing either half alone
 still rejects, and the test looked like it had no teeth. It bites when both go. A reversion that silently
 changes nothing produces a meaningless green, which is the same trap as an un-asserted `replace`.
+**Q-1017 closed 2026-10-16:** #3761 merged to `main` as `15d2997`. The row is deleted from
+`BUILD_REPORT_QUEUE.md`'s open table and its ID appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the
+same commit, with the queue edited on a fresh `main` (#3543's lesson, 2026-10-06). Its ledger is the entry above.
 ## 2026-10-16 — Q-1028: the advice fits the position it is about (#3764)
 
 **The row's own plan was wrong, and measuring it is what showed that.** Q-1028 said to add `FC`,

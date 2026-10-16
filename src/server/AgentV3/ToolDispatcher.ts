@@ -115,7 +115,7 @@ import { currentPass, runInPass, inPlatformPass, isGreenLatched, assertWriteAllo
 import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemovedOperands, removedRecordedPaths } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
-import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames } from './tscErrorCause';
+import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames, mistypedImport } from './tscErrorCause';
 import { WRITE_TYPECHECK_NOT_READY_MARKER, writeTypecheckNotReadyReason,
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
@@ -3856,6 +3856,11 @@ export class ToolDispatcher {
       const { fixHere, waiting } = splitByRemedy(errors, tsPaths, sources);
       s.ownErrorsSurfaced += fixHere.length;
       s.waitingErrorsSurfaced = (s.waitingErrorsSurfaced ?? 0) + waiting.length;
+      // And the ones whose path is proven WRONG rather than early (Q-1029) — counted from the same split,
+      // so the number in the summary is the number of notes the model was actually shown. They are part of
+      // `fixHere` (that is what `remedyFileFor` returning null means), so this never double-counts a wait.
+      s.mistypedImportsSurfaced = (s.mistypedImportsSurfaced ?? 0)
+        + fixHere.filter((e) => mistypedImport(e, sources) !== null).length;
       if (fixHere.length > 0) {
         try { getWorkspaceMemory(this.workspaceId).recordError(`write-typecheck: ${fixHere.length} error(s) in ${tsPaths.join(', ')}`); } catch { /* audit best-effort */ }
       }

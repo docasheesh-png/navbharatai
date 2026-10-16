@@ -601,7 +601,7 @@ import type { FrameworkCoherence } from '../AgentV3/ProjectImport';
 import { attachmentMemoryEnabled, rememberableUid, saveAttachmentMemory, loadAttachmentMemory, deleteAttachmentMemory, shouldRecallAttachment, refersToEarlierAttachment } from '../lib/attachmentMemory';
 import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt, readerlessIntent, describeReaderOutcome, type ReaderOutcome } from '../AgentV3/IntentClassifier';
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
-import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, type WasteKind } from '../AgentV3/providerWaste';
+import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, engineTimeDominated, type WasteKind } from '../AgentV3/providerWaste';
 import { readTurnAnswer, answeredWithoutBuilding, modelsOwnWords } from '../AgentV3/turnAnswer';
 import { assessBuildInput, shouldAskWhatToBuild } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
@@ -17112,6 +17112,7 @@ async function noteBuildOutcome(
         // pasted page) IS in the workspace — the ending then says so instead of "nothing was written".
         // …and WHICH seed, read with the router's own test, so the way on it names is the one the next turn takes.
         seedState: () => seedStateOf(writtenFiles),
+        providerFaultNow: () => engineTimeDominated(providerWaste, Date.now() - buildStartedAt),
         // Autopsy 95598899 — wording of the build nudge only, never whether it fires. An established
         // project must never be told to "start by writing the entry file". See nudgeToBuild.ts.
         editingExistingApp: isEditMode,

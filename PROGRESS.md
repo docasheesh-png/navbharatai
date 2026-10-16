@@ -95984,6 +95984,10 @@ to Node 22 is its own change (run the suite on 22 first, then flip `ci.yml`).
 - Q-1064 premise corrected (honesty): batching already exists (`write_files_batch`, 24 uses). The cost is token throughput on the KIMI rung; the options changed, so the "han" cannot be applied to it — three options are in the queue.
 - Q-1066 fixed (lag list read by both detectors) · Q-1068 diagnostics shipped, verdict waits for a report · Q-1069 fixed per the approved rule.
 
+## 2026-10-14 — "mode change is slow" (admin, website/desktop, Free → Doctor AI → Teacher AI)
+**Evidence, not guesses:** production build in headless Chromium (4× CPU, 150 ms RTT, 1.5 Mbps). Switching is synchronous state only in code; measured steady-state 60–110 ms. The first switch to each AI is 6–8× slower (490 / 590 ms): the screen's lazy chunk is fetched on the pick.
+**Fix:** `src/lib/warmModeChunks.ts` — idle, one-at-a-time warm-up of the four screens (490→357 ms, 590→409 ms). **A bug the measurement caught:** my first version asked `window.Capacitor`, which exists in every browser, and fetched nothing; the same mistake was live in `main.tsx` (every website launch labelled `app` in cold-start telemetry) and is fixed with a census.
+**Honest limit:** not reproduced signed-in; what is left is evaluation + first render (~350 ms at 4× CPU). Q-1071 stays 🟡 until the admin says whether the SECOND switch is also slow.
 ### 2026-10-15 — Q-1018 + Q-1019 (+ Q-1096 found while fixing them): the ads we can remove, and the ones we cannot
 
 Q-990 built `thirdPartyLimits.ts` so the platform would stop claiming a property only another service
@@ -96055,6 +96059,11 @@ and a rise is the fix working, not a regression.
 - **No new server route.** Copy / Download in the panel are the dashboard's own functions, because they also write the "taken" mark (one report, one session).
 - Locked by `tests/theAppsPageHoldsEveryBuildReport.test.ts` and `WorkspaceBuildReports.render.test.tsx`; three reversions each failed the right test. Two existing pins moved with the card (`theAdminMenuHasNineTabs`, `adminAllBuilds`, `adminBuildFilters`), each with the reason beside it.
 
+## 2026-10-15 — Autopsy 67a2b0a2 (data-analyst portfolio, Weak/KIMI; 10.1 min, 0 files, RED, not charged)
+**Ledger:** ✅ self-healed 3 (GLM silent 15 s, KIMI and GLM-5.3 150 s reasoning-only timeouts — each a fallback that cost clock) · 🔀 workaround 3 (fast lane → full builder; KIMI → GLM-5.3; one-shot lane skipped) · ⏭️ skipped: typecheck, page checks, journey (no app existed) · ❌ shipped: nothing produced, RED · 🥵 struggle: 4 read-only turns (17–69 s each), 3 provider calls that answered nothing (315 s, 52%), futility breaker at minute 10.
+**Fixed here:** Q-1123 the summary no longer blames the request when the engine took the clock · Q-1124 a history countdown is withdrawn when this build has written nothing. Each has a reverted-and-failed test.
+**Missing subsystem named:** the fast lane has no path for "my first rung is silent" other than the reasoning engines (Q-1120 — the admin's routing decision, with a recommendation).
+**Not fixed, with state:** Q-1120 / Q-1121 / Q-1122 🟡 BLOCKED. The silent first rung has now hit two reports in two days; Q-962's "keep" answer predates that.
 ### 2026-10-15 — Q-1020: the request-notes census reads the sinks, not the names (and it corrected Q-1016)
 
 The census that keeps every request note reaching every builder lane was kept honest by a guard matching
@@ -96298,6 +96307,39 @@ found by this change's own test, not by a reader.
 `tests/theNotesExistBeforeAnyLanePlans.test.ts`'s file-budget pin was widened from the telemetry budget to BOTH
 budgets, so the property it already claimed is now actually checked where the model reads it.
 
+## 2026-10-16 — Q-1029: a mistyped import is not a designed wait (#3765)
+
+The row was about a sentence; the sentence was the smaller half. `remedyFileFor` returned the resolved target
+for **any** `Cannot find module './x'`, so a typo and a designed entry-first wait were indistinguishable — and
+the note that follows tells the model *"Do NOT rewrite `<file>` for them; write or update `./x` next"*. For a
+typo that instruction is actively wrong: it sends the model to **create a file at the misspelled path** instead
+of changing one import line, and tells it not to touch the file that is actually broken.
+
+**The class: "the remedy is elsewhere" claimed without evidence that the elsewhere is real.** The same
+function already demands that evidence for *has no exported member* — `exportedElsewhere`, from candy report
+7da1cdca, where the identical wrong claim had a model edit a recipe library four times — and demanded none at
+all one branch along, for the missing-module case.
+
+Fixed in two tiers, because a false *"your import is mistyped"* is the opposite defect:
+
+- **Certain** → `mistypedImport` claims a typo only on evidence that cannot be anything else: a held file
+  differing **only in capitalisation** (two such files cannot coexist in one build, and the import resolves on
+  a case-insensitive disk and then fails in the Docker image), or a **spelled-out extension** the resolver
+  never takes. The remedy moves to the importer and the note names the exact correction.
+- **Possible** → `nearlyHeldImport` offers a one-character match as a *possibility* without deciding.
+  `Card.tsx` planned while `Cart.tsx` exists is a real wait, and two equally close names are no evidence at
+  all — so nothing is claimed, but the reader is no longer told there is nothing to check.
+
+The summary now says the next writes **may** add (never "expected") and counts a proven-wrong path on its own
+line. Q-989's pin on the word "expected" was **repointed with the reason written in**, not deleted.
+
+Locked by `tests/aMistypedImportIsNotADesignedWait.test.ts` (15 tests, tsc's real TS2307 text as the fixture),
+with 722 sibling tests across 39 files green.
+
+⚠️ **A fourth reversion turned out to be a no-op, and that is worth writing down.** The ambiguity guard is
+doubly defended — an in-loop early return *and* the final `hits.length === 1` — so removing either half alone
+still rejects, and the test looked like it had no teeth. It bites when both go. A reversion that silently
+changes nothing produces a meaningless green, which is the same trap as an un-asserted `replace`.
 **Q-1017 closed 2026-10-16:** #3761 merged to `main` as `15d2997`. The row is deleted from
 `BUILD_REPORT_QUEUE.md`'s open table and its ID appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the
 same commit, with the queue edited on a fresh `main` (#3543's lesson, 2026-10-06). Its ledger is the entry above.
@@ -96366,3 +96408,33 @@ are in one function and near each other, and a census that the module exports ex
 that no reader spells its words out. Two existing proximity pins were **widened with the reason written in**,
 not deleted — the sentence grew. Three reversions bite: the contradiction restored (6 fail), an unconditional
 read (1), and **the row's own second string** (1).
+## 2026-10-16 — Q-1060: one declared runtime, and every place that names one agrees (#3766)
+
+`ci.yml` ran the whole 38,000-test suite on **Node 20** while the Dockerfile (`node:22`, `node:22-slim`), the
+`.aab` and `.ipa` workflows and `@capacitor/cli` 8 (`engines: >=22`) all run **Node 22**. A gate that
+exercises a different runtime from the one it guards proves less than it appears to — and any test needing
+the Capacitor CLI could not run there at all (*"The Capacitor CLI requires NodeJS >=22.0.0"*).
+
+**The row's prerequisite was already met, with evidence.** It asked to run the full suite on Node 22 first,
+fix what moves, then flip. Measured: this repo's container runs **Node 22.22.0**, and the full suite was run
+on it repeatedly today — **2705 files, 38,974 passed, 0 failed**. Nothing had to move.
+
+**Two things the row missed:**
+
+1. **`dast.yml` was on 20 as well.** It named `ci.yml` alone; a per-instance fix would have left the sibling.
+2. **`package.json` had no `engines` field at all** — the real cause. Nothing declared the project's runtime,
+   so six workflows and a Dockerfile each carried their own literal, two of them drifted, and a seventh could
+   drift tomorrow with nothing to catch it. `ci.yml`'s `'20'` was not a deliberate pin either: it came in with
+   the file's creation (#3538).
+
+So the class is fixed rather than the instance. The requirement is declared **once** — `engines.node: ">=22"`
+— and `tests/oneDeclaredRuntime.test.ts` checks every declaration against it: each workflow's `node-version`,
+both `FROM node:` lines, and `@capacitor/cli`'s own `engines` read from the installed package. The census pins
+its own size, so renaming the key cannot make the guard go blind. The reason is written beside the version in
+both workflows so nobody lowers it back.
+
+Three reversions bite: the gate back to 20 (3 fail), the declaration removed (8), the declaration disagreeing
+with the image (10).
+
+⚠️ **What to watch:** this PR's own CI run is the **first on Node 22**. That run is the real test of the flip,
+and it is the whole point of the change.

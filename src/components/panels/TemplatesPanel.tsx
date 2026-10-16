@@ -288,7 +288,8 @@ waves of enemies for as long as you can.
 
 ### MUST BE PLAYABLE, NOT A DEMO
 1. **Movement that feels good** — run, sprint and jump with a camera that follows and does not clip
-   through walls. Steep slopes slide; small ledges are stepped over.
+   through walls. The camera sits behind and above the player, so forward is INTO the screen,
+   away from the camera, never toward it. Steep slopes slide; small ledges are stepped over.
 2. **Enemies** that notice you at a sensible distance, chase you, spread out instead of merging into
    one clump, and attack on a cooldown.
 3. **Combat** — a ranged attack, health for you and for them, and a brief protection window after
@@ -314,6 +315,8 @@ Keep it smooth on a mid-range Android phone — that matters more than any visua
 ### THE GAME
 An endless side-scrolling runner. Jump and duck through obstacles, collect coins, and survive as long
 as you can while it steadily speeds up.
+The runner faces and runs RIGHT; the ground, obstacles and parallax scroll LEFT, and new obstacles
+appear at the right edge.
 
 ### MUST BE FULLY PLAYABLE
 1. **Controls that forgive** — the jump still works for a split second after you run off a ledge, and

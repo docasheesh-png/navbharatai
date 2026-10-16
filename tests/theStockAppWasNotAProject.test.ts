@@ -241,7 +241,11 @@ describe('7 · a stack we do not build is said out loud', () => {
     expect(unsupportedStackBuilderNote('PHP', 'vite-react')).toMatch(/never claim the app is PHP/);
     expect(unsupportedStackUserNote('PHP', 'vite-react')).toMatch(/You asked for \*\*PHP\*\*.*React \+ TypeScript/s);
     expect(unsupportedStackUserNote(null, 'vite-react')).toBe('');
-    expect(ROUTE).toMatch(/unsupportedStackRequested\(prompt\)/);
+    // PIN MOVED WITH THE FIX (Q-1016, 2026-10-16): the list and its producers left the route for
+    // `requestNotes.ts`, because the list was built ~500 lines BELOW the blueprint lane and that lane
+    // therefore planned the whole file manifest from the bare request. The claim here is unchanged.
+    expect(readFileSync(join(process.cwd(), 'src/server/AgentV3/requestNotes.ts'), 'utf8')).toMatch(/unsupportedStackRequested\(input\.prompt\)/);
+    expect(ROUTE, 'and the route reads the one answer').toContain('const unsupportedStackAsked = requestNoteSet.unsupportedStackAsked;');
     expect(ROUTE).toMatch(/unsupportedStackUserNote\(unsupportedStackAsked, framework, result\.summary\)/);
   });
 });

@@ -13,8 +13,9 @@
 //      blueprint block, the task tool) — the first attempt is the right one;
 //   2. a mechanical hand-back: the FIRST todo-only turn of a run gets `TODO_ONLY_TURN_STEER` appended to
 //      its tool result (AgentRunner) — a rule that exists only as prose is a preference;
-//   3. a measurement: every such turn is counted, and the route reports `TODO_ONLY_TURNS` on every build,
-//      so the next report says whether 1 and 2 worked.
+//   3. a measurement: every lane that can write counts its turns into ONE tally (`noteTodoOnlyTurn`), and the
+//      REPORT carries `TODO_ONLY_TURNS` on every build (`todoOnlyTurnsLine`, emitted when the report is
+//      serialized — Q-1030), so the next report says whether 1 and 2 worked.
 //
 // 🔒 NEVER TOLD, NEVER STEERED: a run that cannot write. The plan-approval lane offers ONLY update_todo and
 // is told to end its turn after it; the planner roles have no writer tool. Telling either to pair the plan
@@ -79,16 +80,41 @@ function splitOfRepeats(n: number, firstInRun: number | undefined): string {
   return ` ${first} of them were the first in a run (handed back); ${n - first} came after a hand-back in the same run.`;
 }
 
+/** The ONE running count of a build's plan-only turns, shared by every lane that can run a writer turn. */
+export type TodoOnlyTally = { turns: number; latencyMs: number; firstInRun: number };
+
 /**
- * Record `TODO_ONLY_TURNS` on the build report — every build, zero included, because a missing line reads as
- * "none". Its own try lives here, not in the route: the chat handler sits at TypeScript's control-flow limit
- * (TS2563), and a try block there is more branches the checker must walk. Info, never a cause.
+ * Count one plan-only turn into the build's single tally.
+ *
+ * 🔴 ONE COUNTER, BECAUSE A COUNT KEPT AT ONE OF N CALL SITES IS NOT KEPT (Q-1030, 2026-10-15). The route
+ * had this arithmetic inline in `baseRunnerOpts`, so every OTHER lane that wanted to count had to copy it —
+ * and the sub-agent lane, which writes most of a build's files, simply never did (see SubAgentDeps). Lifting
+ * the three lines here is what makes "every lane feeds the same tally" a one-line property of a lane rather
+ * than three lines a lane can forget. PURE apart from the mutation of the tally it is handed.
  */
-export function recordTodoOnlyTurns(
-  diag: { record(r: { phase: 'build'; severity: 'info'; code: string; message: string; autoResolved: boolean }): unknown },
-  tally: { turns: number; latencyMs: number; firstInRun?: number },
-): void {
-  try {
-    diag.record({ phase: 'build', severity: 'info', code: 'TODO_ONLY_TURNS', message: todoOnlyTurnsNote(tally.turns, tally.latencyMs, tally.firstInRun), autoResolved: true });
-  } catch { /* an advisory line must never affect a build */ }
+export function noteTodoOnlyTurn(tally: TodoOnlyTally, turn: { latencyMs: number; firstInRun?: boolean }): void {
+  if (!tally) return;
+  tally.turns += 1;
+  if (turn?.firstInRun) tally.firstInRun += 1;
+  tally.latencyMs += Math.max(0, Number(turn?.latencyMs) || 0);
+}
+
+/**
+ * The `TODO_ONLY_TURNS` report line — every build, zero included, because a missing line reads as "none".
+ *
+ * 🔴 IT IS BUILT AT SERIALIZATION TIME, AND THAT POSITION IS THE FIX (Q-1030, 2026-10-15). It used to be
+ * RECORDED by the route the moment generation ended — which is before the integrity, design, compile, hooks,
+ * completion, guard, feature, vax, runtime, fix, repair and crit-fix runners have run even one turn. Every
+ * one of those lanes shares `baseRunnerOpts`, so each was faithfully counted into a tally whose line had
+ * already been written: the arithmetic was right and the number the admin read was wrong. Making the line a
+ * property of the report rather than of a moment in the route is the same lesson `resolveRecoveredOnSuccess`
+ * learned in BuildDiagnostics — a truth that arrives later cannot be stamped early. Info, never a cause.
+ */
+export function todoOnlyTurnsLine(tally: { turns: number; latencyMs: number; firstInRun?: number }): {
+  phase: 'build'; severity: 'info'; code: 'TODO_ONLY_TURNS'; message: string; autoResolved: true;
+} {
+  return {
+    phase: 'build', severity: 'info', code: 'TODO_ONLY_TURNS', autoResolved: true,
+    message: todoOnlyTurnsNote(tally?.turns ?? 0, tally?.latencyMs ?? 0, tally?.firstInRun),
+  };
 }

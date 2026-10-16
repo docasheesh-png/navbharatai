@@ -340,7 +340,12 @@ describe('🔒 the wiring (agentv3.ts)', () => {
     // The start line rides the build's own bus, so the build report shows the line the user read (adversarial review:
     // a bare `emit` after the report subscribes reaches the user and never the report).
     expect(route).toContain("(text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),");
-    expect(route).toContain("{ code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, thirdPartyPlayersAtStart) },");
+    // PIN MOVED WITH THE FIX (Q-1016, 2026-10-16): the list and its producers left the route for
+    // `requestNotes.ts`, because the list was built ~500 lines BELOW the blueprint lane and that lane
+    // therefore planned the whole file manifest from the bare request. The claim here is unchanged.
+    expect(readFileSync(join(process.cwd(), 'src/server/AgentV3/requestNotes.ts'), 'utf8'))
+      .toContain("{ code: 'third-party-limits', text: thirdPartyLimitsBuilderNote(thirdPartyLimitAsk, players) },");
+    expect(route, 'and the route reads the one answer').toContain('const thirdPartyLimitAsk = requestNoteSet.thirdPartyLimitAsk;');
   });
 
   it('CLASS CENSUS: every fact the claim audit can read is handed to it — an unwired optional fact silently disables its rule', () => {

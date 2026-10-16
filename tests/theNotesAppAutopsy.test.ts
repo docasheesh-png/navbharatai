@@ -229,10 +229,18 @@ describe('§F a login nobody asked for is not built', () => {
 
   it('REVERSION GUARD: the architect, the fast lane, the one-shot lane and the planner all read it', () => {
     const src = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
-    expect(src).toContain('requestScopeVerdict({ request: planning.text, newBuild: intent === \'new_build\' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain })');
+    // PIN MOVED WITH THE FIX (Q-1016, 2026-10-16): the list and its producers left the route for
+    // `requestNotes.ts`, because the list was built ~500 lines BELOW the blueprint lane and that lane
+    // therefore planned the whole file manifest from the bare request. The claim here is unchanged.
+    const notes = readFileSync(join(process.cwd(), 'src/server/AgentV3/requestNotes.ts'), 'utf8');
+    expect(notes).toContain('request: input.planningText,');
+    expect(notes).toContain('domain: analyzeRequirementGaps(input.planningText).domain,');
+    expect(notes, 'new builds only, as before').toContain('newBuild: newBuildOnly,');
+    expect(src, 'and the route reads the one answer').toContain('const requestScopeText = requestNoteSet.requestScopeText;');
     // PIN UPDATED 2026-10-13 (autopsy 9c612cdb, Q-991; with #3701's one fast-lane request, Q-975): the note joins the
     // ONE request-notes list, and every lane reads that list — the planner too, which this note used to miss.
-    expect(src).toContain("{ code: 'request-scope', text: requestScopeText },");
+    // PIN MOVED (Q-1016): the entry is in the module's list now; the route reads the joined text.
+    expect(readFileSync(join(process.cwd(), 'src/server/AgentV3/requestNotes.ts'), 'utf8')).toContain("{ code: 'request-scope', text: requestScopeText },");
     expect(src).toContain("buildPrompt = [requestNotesText, buildPrompt].filter(Boolean).join('\\n\\n---\\n\\n');");
     expect(src).toContain('runSimpleBuild({ prompt: fastLaneRequest, requestNotes: requestNotesText,');
     expect(src).toContain('runOneShot({ prompt: fastLaneRequest + requestNotesSuffix,');

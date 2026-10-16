@@ -45,12 +45,22 @@ const NOTE_PRODUCERS = [
   'nonSmartphoneBuildRule', 'thirdPartyLimitsBuilderNote',
 ] as const;
 
-/** The aggregator block: `const requestNotes … = [ … ];`. */
+/**
+ * The aggregator block — `const notes … = [ … ];`.
+ *
+ * ⚠️ IT MOVED OUT OF THE ROUTE (Q-1016, 2026-10-16). It used to live in the chat handler, ~500 lines BELOW
+ * the first lane that plans, which is exactly why the blueprint lane planned the whole file manifest from
+ * the BARE request: there was nothing to hand it yet. It is now `requestNotesFor` in requestNotes.ts,
+ * called once above that lane, and the route READS the result. So this census reads the MODULE for the
+ * list and the ROUTE for the lanes — each where the thing it checks actually lives.
+ */
+const NOTES_MODULE = readFileSync(join(process.cwd(), 'src/server/AgentV3/requestNotes.ts'), 'utf8');
+
 function aggregator(): string {
-  const start = ROUTE.indexOf('const requestNotes: ReadonlyArray<{ code: string; text: string }> = [');
+  const start = NOTES_MODULE.indexOf('const notes: ReadonlyArray<{ code: string; text: string }> = [');
   if (start < 0) return '';
-  const end = ROUTE.indexOf('];', start);
-  return ROUTE.slice(start, end + 2);
+  const end = NOTES_MODULE.indexOf('];', start);
+  return NOTES_MODULE.slice(start, end + 2);
 }
 
 /**
@@ -60,9 +70,10 @@ function aggregator(): string {
  */
 function heldIn(producer: string): string[] {
   const out = new Set<string>();
-  for (const m of ROUTE.matchAll(new RegExp(String.raw`\b(?:const|let)?\s*(\w+)\s*=\s*${producer}\(`, 'g'))) out.add(m[1]);
+  // The module, not the route (Q-1016): that is where every producer is called now.
+  for (const m of NOTES_MODULE.matchAll(new RegExp(String.raw`\b(?:const|let)?\s*(\w+)\s*=\s*${producer}\(`, 'g'))) out.add(m[1]);
   for (const v of [...out]) {
-    const kept = [...ROUTE.matchAll(new RegExp(String.raw`\b(\w+)\s*=\s*${v}\??\.note\b`, 'g'))].map((m) => m[1]);
+    const kept = [...NOTES_MODULE.matchAll(new RegExp(String.raw`\b(\w+)\s*=\s*${v}\??\.note\b`, 'g'))].map((m) => m[1]);
     // The record's own name (`scope`) is too common to search for; the field the route keeps is the note.
     if (kept.length > 0) { out.delete(v); for (const k of kept) out.add(k); }
   }
@@ -76,8 +87,9 @@ describe('🧭 the census: every request note reaches every lane through ONE lis
     expect(agg, 'no `const requestNotes = [...]` aggregator in agentv3.ts').not.toBe('');
   });
 
-  it('CLASS GUARD: a note producer imported into the route is a listed producer', () => {
-    const imported = [...RAW.matchAll(/^import\s*\{([^}]*)\}\s*from\s*'\.\.\/AgentV3\/[^']+';/gm)]
+  it('CLASS GUARD: a note producer imported into the module is a listed producer', () => {
+    // Reads the MODULE's imports now (Q-1016): the producers moved there with the list.
+    const imported = [...NOTES_MODULE.matchAll(/^import\s*\{([^}]*)\}\s*from\s*'\.\/[^']+';/gm)]
       .flatMap((m) => m[1].split(',').map((s) => s.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]))
       .filter((n) => /(?:BuilderNote|BuildRule)$/.test(n));
     const unlisted = imported.filter((n) => !(NOTE_PRODUCERS as readonly string[]).includes(n));
@@ -92,7 +104,8 @@ describe('🧭 the census: every request note reaches every lane through ONE lis
 
   it.each(NOTE_PRODUCERS)('no lane reads %s on its own — the hand-threading this census replaces', (producer) => {
     // Outside the list, a producer's value may be computed and logged, never written into a prompt.
-    const outside = ROUTE.replace(agg, '');
+    // Both files, minus the list itself: hand-threading is hand-threading wherever it is written.
+    const outside = `${ROUTE}\n${NOTES_MODULE.replace(agg, '')}`;
     const names = [producer, ...heldIn(producer)];
     for (const n of names) {
       expect(outside, `\${${n}...} is spliced into a prompt outside requestNotes`).not.toMatch(new RegExp(String.raw`\$\{${n}\b`));

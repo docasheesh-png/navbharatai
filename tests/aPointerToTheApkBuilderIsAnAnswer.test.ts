@@ -63,9 +63,12 @@ describe('wired where the answer is read', () => {
     expect(runner).toContain('request: userPrompt,');
   });
   it('the route reads both answers with the request, and the retry and the empty flip honour it', () => {
-    expect(route).toContain('const firstAttempt = readTurnAnswer(modelsOwnWords(result), prompt);');
-    expect(route).toContain('const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt);');
-    expect(route).toContain('modelAskedTheUser: firstAttemptAskedTheUser || firstAttempt.pointed,');
-    expect(route).toContain('modelAnswer.asked || modelAnswer.pointed,');
+    expect(route).toContain('const firstAttempt = readTurnAnswer(modelsOwnWords(result), prompt, adAnswerFacts);');
+    expect(route).toContain('const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt, adAnswerFacts);');
+    // PIN UPDATED (Q-1019): a third kind of final answer joined the grouping — "those ads are not the
+    // app's to switch off". The claim here is unchanged: a POINTER is still honoured by the retry.
+    expect(route).toContain('modelAskedTheUser: firstAttemptAskedTheUser || firstAttempt.pointed || firstAttempt.notOurs,');
+    // PIN UPDATED (Q-1019): same grouping, one more kind of final answer in it. The POINTER claim stands.
+    expect(route).toContain('modelAnswer.asked || modelAnswer.pointed || modelAnswer.notOurs,');
   });
 });

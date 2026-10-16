@@ -66,7 +66,7 @@ import { claudeRungModelId } from '../AgentV3/models';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePowers';
 import { namedNonSmartphone, nonSmartphoneBuildRule, nonSmartphoneUserLine } from '../AgentV3/deviceTarget';
-import { thirdPartyLimitsEnabled, editTurnAdServingPlayers, projectAdServingPlayers, thirdPartyLimitAsked, thirdPartyLimitsBuilderNote, announceThirdPartyLimit, withThirdPartyLimitsEndLine, thirdPartyLimitReportNote, adFreeClaimCorrection, claimReportWithAdFree } from '../AgentV3/thirdPartyLimits';
+import { thirdPartyLimitsEnabled, editTurnAdFacts, projectAdServingPlayers, projectOwnAdSdks, thirdPartyLimitAsked, thirdPartyLimitsBuilderNote, announceThirdPartyLimit, withThirdPartyLimitsEndLine, thirdPartyLimitReportNote, adFreeClaimCorrection, claimReportWithAdFree, adRemovalAnsweredNote, recordAnsweredNotBuilt } from '../AgentV3/thirdPartyLimits';
 import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
 import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eAutoScaffold';
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
@@ -16731,11 +16731,23 @@ async function noteBuildOutcome(
       // time (the Q-1026/Q-1033 "two readers, one computation" shape). Every input is final by this
       // point — `planning` ~12881, `intent`/`isEditMode` ~12831, `framework` for a new build (the only
       // kind the blueprint lane runs on) above.
-      const thirdPartyPlayersAtStart = await editTurnAdServingPlayers(prompt, { editTurn: intent === 'edit_existing', importTurn: isImportTurn }, () => loadWorkspaceFiles(workspaceId));
+      // BOTH ad facts from ONE load (Q-1018): the other service's players, and the app's OWN ad slots — the
+      // ones that ARE ours to remove, and that the builder note is told to take out.
+      const thirdPartyAdFactsAtStart = await editTurnAdFacts(prompt, { editTurn: intent === 'edit_existing', importTurn: isImportTurn }, () => loadWorkspaceFiles(workspaceId));
+      // 🔴 Q-1019 — the facts a zero-file turn's answer is judged against, read from the project as it was
+      // when the turn BEGAN, which is what the model was answering about. "Remove the ads" on an app that
+      // plays videos in YouTube's own player has one correct outcome — say so and change nothing — and the
+      // platform used to file exactly that as a failed build. See `adRemovalAnsweredNotBuilt`.
+      const adAnswerFacts = { editTurn: intent === 'edit_existing', importTurn: isImportTurn, players: thirdPartyAdFactsAtStart.players, ownAds: thirdPartyAdFactsAtStart.ownAds };
       const requestNoteSet = requestNotesFor({
         prompt, planningText: planning.text, framework,
         newBuild: intent === 'new_build', editing: isEditMode, importTurn: isImportTurn,
-        thirdPartyPlayers: thirdPartyPlayersAtStart,
+        // 🔴 #3753's OWN-ADS FACT, THREADED AS THAT MODULE'S HEADER PROMISED (Q-1018 + Q-1016 reconciled
+        // on merge, 2026-10-16). Q-1016 shipped with `thirdPartyOwnAds` deliberately un-threaded, because
+        // #3753 was green but unmerged and this branch was cut from a `main` without the third argument.
+        // Both have landed, so the note the blueprint lane reads now names the app's own ad slots too.
+        thirdPartyPlayers: thirdPartyAdFactsAtStart.players,
+        thirdPartyOwnAds: thirdPartyAdFactsAtStart.ownAds,
       });
       const requestNotesText = requestNoteSet.text;
       // The facts each note was derived from, kept under their old names so every report line and
@@ -17283,7 +17295,7 @@ async function noteBuildOutcome(
       }
       // On the build's own bus (`events.emit`, which also reaches the user through `emit`), so the report shows the line
       // the user read — a bare `emit` after `events.subscribe(… buildDiag.ingestEvent …)` never reaches it.
-      announceThirdPartyLimit(thirdPartyLimitAsk, thirdPartyPlayersAtStart,
+      announceThirdPartyLimit(thirdPartyLimitAsk, thirdPartyAdFactsAtStart.players,
         (text) => events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() }),
         (message) => buildDiag.record({ phase: 'plan', severity: 'info', code: 'THIRD_PARTY_LIMIT_TOLD', message, autoResolved: true }));
       // WHICH PREVIEW BROKE (autopsy "Lekhan Sahyak", 2026-09-27): a fix request from the in-browser
@@ -19483,7 +19495,7 @@ async function noteBuildOutcome(
       }
       // A policy refusal is not a capability failure — see `modelRefused`. Read from the answer the
       // model actually gave, so it holds for any refusal rather than only the pornography one.
-      const firstAttempt = readTurnAnswer(modelsOwnWords(result), prompt);
+      const firstAttempt = readTurnAnswer(modelsOwnWords(result), prompt, adAnswerFacts);
       const firstAttemptRefused = firstAttempt.declined;
       // …and its SIBLING, read from the same answer by the same module that already decided this
       // exact question for the nudge, 156ms earlier in this turn (autopsy e628efd4). Never a second
@@ -19514,7 +19526,9 @@ async function noteBuildOutcome(
         userAskedToBuildAnApp,
         modelRefused: firstAttemptRefused,
         // A pointer to the platform's own APK flow is a final answer too (autopsy 0c2a987a) — `modelAnswered`.
-        modelAskedTheUser: firstAttemptAskedTheUser || firstAttempt.pointed,
+        // …and so is "those ads are not the app's to switch off" (Q-1019): retrying it on a stronger rung
+        // produces the same sentence, more slowly, and on the free tier it used to end in an upsell.
+        modelAskedTheUser: firstAttemptAskedTheUser || firstAttempt.pointed || firstAttempt.notOurs,
       })) {
         // 🔴 THE CLAIM IS DERIVED, NEVER TEMPLATED (autopsy f5351721 — see `retryLeadsHigher`). Both
         // sentences below used to assert "a stronger model" unconditionally, and on STRONG that was
@@ -19589,7 +19603,11 @@ async function noteBuildOutcome(
       // sentence, the empty-build flip and the free-tier upsell. They used to read `result.summary`
       // at their own moment, and the platform had by then overwritten it: the upsell found no refusal
       // in our own "please try again" and asked a user whose request the engine had declined for money.
-      const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt);
+      const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt, adAnswerFacts);
+      // 🔴 Q-1019 — and the same line for the turn whose honest answer was the whole job. Recorded on its
+      // own condition rather than folded into the one below, so the report says WHICH kind of answer ended
+      // the turn; `recordAnsweredNotBuilt` carries its own try, so the handler gains no branch (TS2563).
+      recordAnsweredNotBuilt(buildDiag, modelAnswer.notOurs && builderWroteCount() === 0, adRemovalAnsweredNote(thirdPartyAdFactsAtStart.players));
       if (expectsArtifacts && builderWroteCount() === 0 && modelAnswer.declined && !abort.signal.aborted) {
         try {
           buildDiag.record({
@@ -20169,13 +20187,16 @@ async function noteBuildOutcome(
       // the integrity pass below (durable store + this turn's writes); `integrityFiles` itself is block-scoped.
       // An edit turn's writes are a slice — the player the first build wrote is in a file this turn never touched.
       let wholeProjectFiles: Record<string, string> | null = null;
-      // Never throws (a fault is "no player known"), so a caller needs no try of its own.
-      const adServingPlayersNow = async (): Promise<string[]> => {
+      // Never throws (a fault is "nothing known"), so a caller needs no try of its own. BOTH facts from one
+      // read (Q-1018): the players, and the app's own ad slots — asked of the same files at the same moment,
+      // so a reply can never describe two different versions of the project.
+      const adFactsNow = async (): Promise<{ players: ReturnType<typeof projectAdServingPlayers>; ownAds: ReturnType<typeof projectOwnAdSdks> }> => {
         try {
-          if (isImportTurn || !thirdPartyLimitsEnabled()) return [];
+          if (isImportTurn || !thirdPartyLimitsEnabled()) return { players: [], ownAds: [] };
           const base = wholeProjectFiles ?? await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
-          return projectAdServingPlayers({ ...base, ...Object.fromEntries(writtenFiles) });
-        } catch { return []; }
+          const files = { ...base, ...Object.fromEntries(writtenFiles) };
+          return { players: projectAdServingPlayers(files), ownAds: projectOwnAdSdks(files) };
+        } catch { return { players: [], ownAds: [] }; }
       };
       try {
         // FULL-WORKSPACE view for integrity (FitPulse autopsy 2026-07-17, hardened after the edit-build
@@ -20202,7 +20223,7 @@ async function noteBuildOutcome(
         const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
         const storeLoadMs = Date.now() - integrityStartedAt;
         const integrityFiles: Record<string, string> = { ...storeFiles, ...Object.fromEntries(writtenFiles) };
-        wholeProjectFiles = integrityFiles; // the same map, read later by `adServingPlayersNow`
+        wholeProjectFiles = integrityFiles; // the same map, read later by `adFactsNow`
         // The sandbox is read for the files a check reasons from by their ABSENCE (autopsy de3bb2bb): the
         // durable map did not hold the starter's `src/vite-env.d.ts`, so `missingViteEnvTypes` wrote one into
         // a project that already had it and told the user TypeScript had complained — tsc was clean.
@@ -22247,7 +22268,7 @@ async function noteBuildOutcome(
           for (const p of appSource == null ? APP_ENTRY_CANDIDATES : []) {
             try { appSource = await actuator.readFile(workspaceId, p); break; } catch { /* try next */ }
           }
-          const adServingPlayer = (await adServingPlayersNow()).length > 0;
+          const adServingPlayer = (await adFactsNow()).players.length > 0;
           const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource, adServingPlayer });
           const appName = display.name;
           const defaults = planAppDefaults(indexHtml, appName, { description: display.description, shortName: display.shortName });
@@ -24395,8 +24416,9 @@ async function noteBuildOutcome(
         // "Your ad-free video player app is ready." over YouTube's own embedded player (Q-990, autopsy 9c612cdb).
         // Judged on the WHOLE project's players, never an edit turn's slice; one correction list either way.
         const auditedSummary = `${result.summary}${claimCorrection(contradictions)}`;
-        const adPlayers = await adServingPlayersNow();
-        const adFreeFix = adFreeClaimCorrection(auditedSummary, adPlayers);
+        const adFacts = await adFactsNow();
+        const adPlayers = adFacts.players;
+        const adFreeFix = adFreeClaimCorrection(auditedSummary, adPlayers, undefined, adFacts.ownAds);
         if (`${claimCorrection(contradictions)}${adFreeFix}`) {
           result = { ...result, summary: `${auditedSummary}${adFreeFix}` };
           buildDiag.record({
@@ -24473,7 +24495,7 @@ async function noteBuildOutcome(
       // players, already said): this handler sits at TypeScript's control-flow limit (TS2563), and every `&&` / `if`
       // written here is one more branch the checker must walk. One unconditional assignment costs none, and neither
       // call can throw (both catch inside), so no try is needed around them.
-      result = withThirdPartyLimitsEndLine(result, prompt, await adServingPlayersNow(), (players) => buildDiag.record({ phase: 'readiness', severity: 'info', code: 'THIRD_PARTY_LIMIT_TOLD', autoResolved: true, message: thirdPartyLimitReportNote(players, 'end') }));
+      result = withThirdPartyLimitsEndLine(result, prompt, await adFactsNow(), (players) => buildDiag.record({ phase: 'readiness', severity: 'info', code: 'THIRD_PARTY_LIMIT_TOLD', autoResolved: true, message: thirdPartyLimitReportNote(players, 'end') }));
 
       // 🎭 MADE-UP RESULTS ARE DISCLOSED TOO (autopsy 33812996). The sibling of the block above for a
       // feature whose OUTPUT is invented — a random "recognised" song, "[Translated to hi]: …", search
@@ -25512,7 +25534,9 @@ async function noteBuildOutcome(
             // and a question asked of our own sentence is not a question about the model's answer.
             // So it is read once, after the last model run — `modelAnswer` — and both halves go in.
             // A pointer to the platform's own APK flow is an answer, never "the build produced no files".
-            modelAnswer.asked || modelAnswer.pointed,
+            // A pointer to the platform's own APK flow is an answer, and so is "those ads are not the app's
+            // to switch off" (Q-1019) — never "the build produced no files".
+            modelAnswer.asked || modelAnswer.pointed || modelAnswer.notOurs,
             modelAnswer.declined,
           );
           if (emptyFail) {

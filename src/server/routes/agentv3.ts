@@ -16788,10 +16788,15 @@ async function noteBuildOutcome(
             return t.text;
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
-          // 🔴 Q-1016: the notes open the request the manifest is planned from. `fileBudgetForPrompt(prompt)`
-          // below still reads the BARE prompt on purpose — Q-991 measured that notes riding the request
-          // take a 13-file budget to 25, which is the user's app being sized by our own instructions.
-          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework, scaffold), manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold)));
+          // 🔴 Q-1016: the notes open the request the manifest is planned from. BOTH budgets read the BARE
+          // prompt — Q-991 measured that notes riding the request take a 13-file budget to 25, which is the
+          // user's app being sized by our own instructions.
+          //
+          // 🔴 Q-1017 (2026-10-16): the third argument is that rule, and it was missing here. `sizeFrom`
+          // exists for exactly this call — it defaults to the first argument, so omitting it sized the app
+          // the MODEL is told to build from notes+request while the overrun recorded five lines below read
+          // the bare prompt. Two answers to one question; the model's was the wrong one.
+          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework, scaffold), manifestUserPrompt(withRequestNotes(prompt, requestNotesText), scaffold, prompt)));
           // FILE BUDGET honesty (admin 2026-08-02): the plan is NEVER trimmed — shipping an incomplete app
           // would be far worse than shipping a large one — but an overrun is recorded so "this app planned
           // more files than it should need" is measurable instead of invisible.
@@ -18001,7 +18006,8 @@ async function noteBuildOutcome(
             const plannerGoal = withRequestNotes(prompt, requestNotesText);
             const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
             if (modules.length >= MIN_PROJECT_MODULES) {
-              pPlan = createProjectPlan(plannerGoal, framework, modules, Date.now());
+              // Q-1017: the REQUEST and the notes go in apart, so the goal's cap is the request's alone.
+              pPlan = createProjectPlan(prompt, framework, modules, Date.now(), requestNotesText);
               await saveProjectPlan(workspaceId, pPlan);
               events.emit({ type: 'narration', agent: 'architect', text: `📦 Project plan ready: ${modules.length} modules — ${modules.map((m) => m.name).join(' → ')}. I will build them one per round, in dependency order, and the plan survives reloads.`, ts: Date.now() });
             } else {

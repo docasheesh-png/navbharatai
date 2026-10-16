@@ -217,6 +217,9 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     stillBelow: STILL_BELOW,
     // How many one-second looks the second accelerator hold may take (Q-869: a 9 s countdown is a working game).
     lateLooks: LATE_LOOKS,
+    // How long LEFT is held before the steering snapshot (Q-1097) — the script MEASURES over this window
+    // and records the vectors; the reading itself is arithmetic the verdict does, in testable code.
+    turnReadMs: TURN_READ_MS,
     noise: CONSOLE_NOISE.source,
     noiseFlags: CONSOLE_NOISE.flags,
     // The start-control shape (see `startLabelRank`) — the same regexes, handed to the browser as sources.
@@ -647,6 +650,13 @@ try {
   // accelerates the car"). Up/W is held for 0.9 s, and the picture is compared between 0.35 s and 0.9 s
   // INTO the hold: a vehicle that is moving keeps changing the picture; one whose speed never rises does
   // not. Read by the score only for a driving game (see stalledVehicle).
+  // 🔴 THE VEHICLE IS IDENTIFIED ONCE (Q-1097). The steering probe below used to re-pick it from its own
+  // sample. Measured on this repo's own racer fixture, that is not a harmless duplicate: its traffic car
+  // moves 0.5 per frame whatever the player presses and NEVER turns, so a second pick taken on a loaded
+  // machine can land on IT — and an object that never turns reads as "no turn at all". That is how a
+  // correctly-steering game came back {faces:false, mirrored:null} twice in one day: the camera question
+  // was answered about the car and the steering question about something else. One pick, one subject.
+  let vehicleId = null;
   await step('up / W', async () => {
     for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(350);
@@ -664,6 +674,7 @@ try {
     const legGas = framesBetween(fGas0, await drawn(page), 550);
     const gasMoves = sceneMoves(sg0, sg1);
     const car = pickVehicle(idleMoves, gasMoves);
+    vehicleId = car;
     if (car && sg0 && sg1) {
       // Q-869: where the camera is, relative to where the vehicle is going — read from the scene, not from pixels.
       const m = gasMoves.get(car);
@@ -740,6 +751,17 @@ try {
     for (const k of ['ArrowLeft', 'KeyA']) await page.keyboard.down(k).catch(() => {});
     await page.waitForTimeout(300);
     const s0 = await snapScene(page);
+    // 🔴 A SHORT LOOK AS WELL AS THE LONG ONE (Q-1097). The steering reading is a CHORD angle, which for an
+    // arc is HALF its swept angle — so it stops meaning "which way did it turn" as the sweep approaches a
+    // full circle — at 360 degrees the chord has no length at all, and past it the sign FLIPS. Measured on
+    // this repo's racer fixture (0.03 rad per drawn frame), three seconds of holding LEFT is a 310 degree
+    // sweep at 60 fps; one frame-rate step up and a correctly-steering game would be accused of mirrored
+    // steering. So a second, short window is snapped here, and its frames counted like every other leg —
+    // it is the window the reading now depends on, and Q-1038's rule is that such a window is counted.
+    const fEarly0 = await drawn(page);
+    await page.waitForTimeout(cfg.turnReadMs);
+    const sEarly = await snapScene(page);
+    const legEarly = framesBetween(fEarly0, await drawn(page), cfg.turnReadMs);
     // The turning leg's length is sampleFlow's own 3 s, which is generous in frames even when loaded —
     // but it is counted too, so the probe reports the frames it really saw rather than assuming them.
     const turnFrom = await drawn(page);
@@ -747,8 +769,8 @@ try {
     const legTurn = { frames: (await drawn(page)) - turnFrom };
     const s1 = await snapScene(page);
     for (const k of ['ArrowUp', 'KeyW', 'ArrowLeft', 'KeyA']) await page.keyboard.up(k).catch(() => {});
-    const before = sceneMoves(e0, e1), after = sceneMoves(s0, s1);
-    const car = pickVehicle(idleMoves, before);
+    const before = sceneMoves(e0, e1), after = sceneMoves(s0, s1), early = sceneMoves(s0, sEarly);
+    const car = vehicleId;
     if (out.scene) {
       // Recorded WHETHER OR NOT a turn is computed below — that is the whole point: a null turn beside
       // "3 frames in 2500 ms" is a starved page, and a null turn beside 180 frames is a game that does
@@ -756,16 +778,19 @@ try {
       //
       // The WEAKEST leg decides, because any one starved interval is enough to null a reading: the
       // accelerator window above set this, and the two steering legs can only lower it.
-      out.scene.probeFrames = Math.min(out.scene.probeFrames ?? Infinity, legStraight.frames, legTurn.frames);
+      out.scene.probeFrames = Math.min(out.scene.probeFrames ?? Infinity, legStraight.frames, legEarly.frames, legTurn.frames);
       out.scene.probeMs = Math.max(out.scene.probeMs ?? 0, legStraight.ms);
     }
-    if (out.scene && car && after && after.get(car)) {
-      const v0 = before.get(car), v1 = after.get(car);
-      if (Math.hypot(v0.dx, v0.dz) >= 0.2 && Math.hypot(v1.dx, v1.dz) >= 0.2) {
-        // + is toward the driver's left: facing +Z, the driver's left is +X (three.js is right-handed, Y up).
-        const left = v1.dx * v0.dz - v1.dz * v0.dx, along = v1.dx * v0.dx + v1.dz * v0.dz;
-        out.scene.turn = Math.round(Math.atan2(left, along) * 180 / Math.PI * 10) / 10;
-      }
+    // 🔴 MEASURE HERE, DECIDE IN THE VERDICT (Q-1097). This block used to compute the steering angle itself
+    // — arithmetic that can tell a user their game's steering is backwards, living inside a script string no
+    // unit test can reach, over the one window where it can wrap. It now records only what it MEASURED: the
+    // direction the vehicle was going, and where it went a short way into the turn and over the whole of it.
+    // chordTurn and pickTurn turn that into a reading, once, in code a test can exercise. The old turn field
+    // is left for runs recorded before this change (see readTurn). NOTE: no backticks in here — every line
+    // of this comment lives inside the probe script's template literal, and one would end the string.
+    if (out.scene && car && before && before.get(car)) {
+      const vec = (m) => { const v = m && m.get(car); return v ? [v.dx, v.dz] : null; };
+      out.scene.aim = { straight: vec(before), early: vec(early), late: vec(after) };
     }
   }
   await ctx.close();
@@ -845,12 +870,85 @@ export interface FlowRead { total: number; pos: number; neg: number; pairs: numb
  */
 export const PROBE_MIN_FRAMES = 12;
 
+/**
+ * How many degrees the vehicle's direction must have turned before the reading is a finding. Q-1097 gave it
+ * a name; the value is `sceneVerdict`'s own literal, unchanged. Below it the turn is real but says nothing
+ * about which way the game steers — which is a REASON, not a silence (see `sceneUnread`).
+ */
+export const TURN_MIN_DEG = 5;
+
+/**
+ * How long LEFT is held before the steering snapshot, and how far a chord angle may be trusted (Q-1097).
+ *
+ * 400 ms keeps the racer fixture's sweep near 40 degrees at 60 fps — a 20 degree chord, four times the floor
+ * above — while a page drawing a third as many frames still clears it. 150 degrees is the most a chord may
+ * read before a longer window is refused as possibly wrapped: past half a turn its sign stops being evidence.
+ */
+export const TURN_READ_MS = 400;
+export const TURN_WRAP_SAFE_DEG = 150;
+
+/**
+ * The angle between where the vehicle was going and where it went next, + toward the driver's left; null when
+ * either displacement is too short to have a direction at all. PURE.
+ *
+ * Lifted out of the probe script by Q-1097. The 0.2 floor is here rather than at the call site because the
+ * floor is part of the arithmetic: a displacement that short has no direction to compare.
+ */
+export function chordTurn(
+  a: readonly [number, number] | null | undefined,
+  b: readonly [number, number] | null | undefined,
+): number | null {
+  if (!a || !b) return null;
+  if (!(Math.hypot(a[0], a[1]) >= 0.2) || !(Math.hypot(b[0], b[1]) >= 0.2)) return null;
+  // + is toward the driver's left: facing +Z, the driver's left is +X (three.js is right-handed, Y up).
+  const left = b[0] * a[1] - b[1] * a[0], along = b[0] * a[0] + b[1] * a[1];
+  return Math.round(Math.atan2(left, along) * 180 / Math.PI * 10) / 10;
+}
+
+/**
+ * Which of the two readings to believe: the short window first, the long one only as a fallback for a page too
+ * slow to have turned measurably in `TURN_READ_MS` — and only while it cannot have wrapped. PURE.
+ *
+ * When neither can be trusted the answer is the short one (null, or below the floor), so the verdict comes back
+ * null and `sceneUnread` says which reason it was. Never the wrapped reading: that is the one that would call a
+ * correct game broken, and a WRONG verdict is worse than no verdict.
+ */
+export function pickTurn(soon: number | null, late: number | null): number | null {
+  if (soon !== null && Math.abs(soon) >= TURN_MIN_DEG) return soon;
+  if (late !== null && Math.abs(late) <= TURN_WRAP_SAFE_DEG) return late;
+  return soon;
+}
+
+/**
+ * The steering reading this scene supports, in degrees, or null when it supports none. PURE.
+ *
+ * `aim` is what the probe measures now; `turn` is what a run recorded before Q-1097 carries, and reading it
+ * keeps an older diagnostics record scoreable instead of silently unreadable.
+ */
+export function readTurn(r: SceneRead | null | undefined): number | null {
+  if (!r) return null;
+  if (r.aim) return pickTurn(chordTurn(r.aim.straight, r.aim.early), chordTurn(r.aim.straight, r.aim.late));
+  return typeof r.turn === 'number' && Number.isFinite(r.turn) ? r.turn : null;
+}
+
 export interface SceneRead {
   moved: number;
   follows: boolean;
   ahead: number;
   looks: number;
   turn?: number;
+  /**
+   * The displacements the steering reading is computed FROM (Q-1097): the way the vehicle was going before
+   * LEFT, where it went `TURN_READ_MS` into the turn, and where it went over the whole turning leg. Recorded
+   * raw so the arithmetic that can accuse a user's game of backwards steering lives in ONE tested place
+   * instead of inside the probe script — and so a diagnostics record can be re-read later. Absent on an
+   * older run, which still carries `turn`.
+   */
+  aim?: {
+    straight: readonly [number, number] | null;
+    early?: readonly [number, number] | null;
+    late?: readonly [number, number] | null;
+  };
   /** Frames the page DREW during the steering probe's shortest leg (Q-1038). Absent on an older run. */
   probeFrames?: number;
   /** Wall-clock the probe spent collecting them, so "starved" can be stated with both numbers. */
@@ -1022,8 +1120,58 @@ export function sceneVerdict(r: SceneRead | null | undefined): { faces: boolean 
   const none = { faces: null, mirrored: null };
   if (!r || !r.follows || !(r.moved >= 0.2)) return none;
   const faces = r.ahead > 0.3 && r.looks > 0.5 ? true : r.ahead < -0.3 ? false : null;
-  const mirrored = typeof r.turn === 'number' && Number.isFinite(r.turn) && Math.abs(r.turn) >= 5 ? r.turn < 0 : null;
+  const turn = readTurn(r);
+  const mirrored = turn !== null && Math.abs(turn) >= TURN_MIN_DEG ? turn < 0 : null;
   return { faces, mirrored };
+}
+
+/**
+ * WHY an axis of the scene read could not be answered — computed from the SAME read `sceneVerdict` decides on,
+ * so the two can never disagree. null for an axis that WAS read. PURE.
+ *
+ * 🔴 Q-1097, and it is the second half of Q-1038. That one made ONE reason sayable — the page drew too few
+ * frames — and left the rest silent. The silent ones are the ones that fired: measured twice in one day on a
+ * real browser under load, `{faces:false, mirrored:null}` with 180 frames to spare, so the starved branch
+ * never ran and the report printed a passing game whose steering was never read. A frame count is a PROXY;
+ * the verdict's own floors (the vehicle seen to move, the camera following it, the turn big enough to call)
+ * are the evidence. A predicate and the evidence it guards computed from two different inputs is Q-1022's
+ * class, met here one level down.
+ *
+ * 🔒 The invariant, locked by a test over a grid of reads: for each axis, EXACTLY ONE of `sceneVerdict` and
+ * this is non-null. A null reading therefore cannot be silent — not in the report, and not in a test.
+ */
+export function sceneUnread(
+  r: SceneRead | null | undefined,
+  min = PROBE_MIN_FRAMES,
+): { faces: string | null; mirrored: string | null } {
+  // The reason is computed ONLY where the verdict is null, from the verdict itself. That is what makes the
+  // invariant hold by construction rather than by two lists being kept in step — and it is the correction my
+  // own first draft needed: it returned the starvation note for BOTH axes whenever the frame count was low,
+  // which claimed the camera "could not be read" on a read that had just answered it.
+  const v = sceneVerdict(r);
+  if (!r) {
+    const why = 'the scene was never read — no three.js scene, or nothing the accelerator clearly moved';
+    return { faces: why, mirrored: why };
+  }
+  // 🔴 AND STARVATION OUTRANKS THE FLOOR IT CAUSED, but only for an axis that HAS no answer. A page that was
+  // not drawing moved the vehicle less, so "the vehicle moved too little" would blame the app for our own
+  // instrument (Q-1038). What it must NOT do is contradict a reading that exists: positions are state, and a
+  // short look at them is shorter, never wrong — so a starved page whose turn still cleared the floor is a
+  // page whose steering WAS read, and the report says nothing about it.
+  const starved = probeStarvedNote(r, min);
+  const why = (reason: string) => starved ?? reason;
+  const floor = !r.follows
+    ? 'the camera did not follow the vehicle — a fixed camera, or a game that moves the world instead of the car'
+    : !(r.moved >= 0.2) ? `the vehicle moved too little to read (${r.moved} units under the accelerator)` : null;
+  const turn = readTurn(r);
+  return {
+    faces: v.faces !== null ? null : why(floor ?? (r.ahead > 0.3
+      ? `the camera was ahead of the vehicle but not looking at it (looks ${r.looks})`
+      : `the camera sat square to the vehicle's motion (ahead ${r.ahead})`)),
+    mirrored: v.mirrored !== null ? null : why(floor ?? (turn === null
+      ? 'no turn was measured — the vehicle was not seen to move in both legs of the steering probe'
+      : `the turn was too small to call (${turn}°)`)),
+  };
 }
 
 /** Is this flow read firm enough to judge, and which way did it go? 0 when it is not. PURE. */
@@ -1197,8 +1345,23 @@ export function playtestVerdict(run: PlaytestRun, replay: GameCodeFacts): Playte
    * app's, exactly as the not-run warning says — it costs the app no points and no money, and it can no
    * longer read as fine.
    */
-  const starved = probeStarvedNote(run.scene);
-  const starvedNote = starved ? ` Steering was not read — ${starved}.` : '';
+  /**
+   * 🔴 AND EVERY OTHER REASON IS SAID TOO (Q-1097). This read `probeStarvedNote` alone — one reason out of
+   * five. The other four printed NOTHING, so a game whose steering the scene never read appeared in the
+   * report as a game that steers correctly. Only where the scene was actually consulted: a driving game, not
+   * stalled, that HAS a three.js scene. Without a scene the pixel flow is the designed path, not a failure,
+   * and saying otherwise would be the opposite defect.
+   *
+   * The starved wording is unchanged on purpose — it is Q-1038's sentence — and the camera half is appended
+   * only when its reason DIFFERS, so a starved page still reads exactly as it did.
+   */
+  const unread = replay.driving === true && !score.stalledVehicle && run.scene
+    ? sceneUnread(run.scene)
+    : { faces: null, mirrored: null };
+  const starvedNote = [
+    unread.mirrored ? ` Steering was not read — ${unread.mirrored}.` : '',
+    unread.faces && unread.faces !== unread.mirrored ? ` The camera could not be read from the scene — ${unread.faces}.` : '',
+  ].join('');
   const head = `Game Quality Score ${score.overall}/100 (${card}) — played in a real browser: ${played}${fpsNote}${pictureNote}${errNote}.${starvedNote}`;
   if (ok) return { code: 'GAME_PLAYTEST_OK', severity: 'info', autoResolved: true, score, message: head };
   const fix = score.stalledVehicle ? STALLED_VEHICLE_FIX

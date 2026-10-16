@@ -96377,7 +96377,7 @@ Heal behaviour is unchanged, because measurement said it was already right. Lock
 set has exactly one reader), with 101 sibling tests green. Three reversions bite — including **the row's own
 plan**, which fails 5 tests, one of them named for exactly why.
 
-## 2026-10-16 — Q-1031: the append saves the anchor, not the look (#3767)
+## 2026-10-16 — Q-1031: the append saves the anchor, not the look (#3768)
 
 The contradiction is inside **one function**, which is why the row said "on an edit build". `editModePrefix`
 carries rule 2 — *"use read_file on every file you intend to change before touching it. Never assume you know
@@ -96402,6 +96402,12 @@ have cost a **500-line read of the design kit on every CSS append**, the very th
 *listing* the kit's classes instead. It now says *"know what is in it — read it, or use the listing this
 prompt already gives you"*: supplied knowledge and a read answer the same question, and demanding the read
 would have fixed a contradiction by creating a cost. The test holds that distinction shut.
+
+⚠️ **This entry first said #3767 — and #3767 is another session's games PR, already merged.** That is the
+SECOND number collision today: Q-1097's row first said #3761, which was also another session's. A PR number
+cannot be known until the PR exists, so writing one before that is a guess, and a row whose owner is wrong is
+a row nobody can check (the sixth rule's whole point). The habit that avoids it: create the PR FIRST, then
+write its number into the row. Mine is **#3768**.
 
 Locked by `tests/theAppendSavesTheAnchorNotTheLook.test.ts` (9 tests), including that both sentences really
 are in one function and near each other, and a census that the module exports exactly **one** such string and

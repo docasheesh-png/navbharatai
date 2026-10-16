@@ -102,7 +102,7 @@ const SPEED_NAME = /\b(\w*(?:speed|Speed)|velocity|vel)\b/;
 
 /**
  * 🔴 EVERY PATTERN ABOVE STARTS WITH AN UNBOUNDED IDENTIFIER, AND THAT COSTS O(n²) ON ONE LONG WORD RUN
- * (Q-1126, 2026-10-16 — found by this repo's own CI, not by a report).
+ * (Q-1128, 2026-10-16 — found by this repo's own CI, not by a report).
  *
  * `OBJ`, `\w*cam\w*` and `\w*(?:speed|Speed)` are greedy word-character prefixes with no anchor. On a
  * run of word characters the engine matches the whole run at every start position and backtracks out of

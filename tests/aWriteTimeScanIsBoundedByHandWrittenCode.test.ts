@@ -1,5 +1,5 @@
 /**
- * A WRITE-TIME SCAN COSTS WHAT HAND-WRITTEN CODE COSTS, WHATEVER THE MODEL ACTUALLY WROTE (Q-1126).
+ * A WRITE-TIME SCAN COSTS WHAT HAND-WRITTEN CODE COSTS, WHATEVER THE MODEL ACTUALLY WROTE (Q-1128).
  *
  * Found by this repository's own CI, not by a build report: `AgentRunner.test.ts`'s
  * "recovers from an oversized turn via aggressive compaction" timed out at 20 s on run 38967985876.

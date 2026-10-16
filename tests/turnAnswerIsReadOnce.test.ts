@@ -31,10 +31,14 @@ const code = (p: string) => read(p).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\
 
 describe('reading the answer', () => {
   it('a refusal is declined, a question is asked, a delivery is neither', () => {
-    expect(readTurnAnswer(REFUSAL)).toEqual({ declined: true, asked: false, pointed: false });
-    expect(readTurnAnswer(QUESTION)).toEqual({ declined: false, asked: true, pointed: false });
-    expect(readTurnAnswer(BUILT)).toEqual({ declined: false, asked: false, pointed: false });
-    expect(readTurnAnswer(undefined)).toEqual({ declined: false, asked: false, pointed: false });
+    // SHAPE UPDATED (Q-1019): a fourth kind of final answer joined the three — the turn's whole ask was to
+    // remove ads that live inside another service's player, which the app cannot reach into. `notOurs` is
+    // false here because none of these readings is given the project facts it is decided from, which is
+    // itself the guarantee that a caller without those facts behaves exactly as it did before.
+    expect(readTurnAnswer(REFUSAL)).toEqual({ declined: true, asked: false, pointed: false, notOurs: false });
+    expect(readTurnAnswer(QUESTION)).toEqual({ declined: false, asked: true, pointed: false, notOurs: false });
+    expect(readTurnAnswer(BUILT)).toEqual({ declined: false, asked: false, pointed: false, notOurs: false });
+    expect(readTurnAnswer(undefined)).toEqual({ declined: false, asked: false, pointed: false, notOurs: false });
   });
 
   it('either one is an answer given instead of a build', () => {
@@ -96,12 +100,14 @@ describe('🔒 WIRING — one reading, taken before the platform writes a word',
   const route = code('src/server/routes/agentv3.ts');
 
   it('the reading is taken exactly once', () => {
-    expect(route.match(/const modelAnswer = readTurnAnswer\(modelsOwnWords\(result\), prompt\);/g) ?? []).toHaveLength(1);
+    // PIN UPDATED (Q-1019): the reading is now handed the project facts it judges an ad answer against.
+    // The claim — ONE reading per build — is exactly the same, and is the whole point of this file.
+    expect(route.match(/const modelAnswer = readTurnAnswer\(modelsOwnWords\(result\), prompt, adAnswerFacts\);/g) ?? []).toHaveLength(1);
   });
 
   it('it is taken AFTER the last model run and BEFORE the platform rewrites the summary', () => {
     const retry = route.indexOf('result = retry;');
-    const capture = route.indexOf('const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt);');
+    const capture = route.indexOf('const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt, adAnswerFacts);');
     const verified = route.indexOf('result = { ...result, summary: verifiedNoChange };');
     const flip = route.indexOf('result = { ...result, ok: false, summary: emptyFail };');
     const proof = route.indexOf('const runProof = () => runProvenApp({');
@@ -123,7 +129,8 @@ describe('🔒 WIRING — one reading, taken before the platform writes a word',
   it('every reader is given the captured reading', () => {
     expect(route).toContain('deliveryRefused: modelAnswer.declined,');
     expect(route).toContain('modelAnsweredTheUser: answeredWithoutBuilding(modelAnswer),');
-    expect(route).toMatch(/modelAnswer\.asked \|\| modelAnswer\.pointed,\s*modelAnswer\.declined,\s*\)/);
+    // PIN UPDATED (Q-1019): the settle flip honours the fourth kind of answer too.
+    expect(route).toMatch(/modelAnswer\.asked \|\| modelAnswer\.pointed \|\| modelAnswer\.notOurs,\s*modelAnswer\.declined,\s*\)/);
     expect(route).toContain('const refused = !stopped && modelAnswer.declined;');
   });
 

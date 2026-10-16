@@ -11,6 +11,7 @@
 // events (a provider fallback, a sandbox-create timeout).
 
 import { startBandLabel } from './RequestAnalyser';
+import { todoOnlyTurnsLine } from './todoOnlyTurn';
 import { isBuildStoppedError } from './stopSignal';
 import { stoppedCallCauseWords, type AbortCause } from './buildAbortCause';
 import { toolCallDetail } from './toolCallTarget';
@@ -201,6 +202,11 @@ export const PROCESS_ONLY_CODES = new Set([
   'TURN_ANSWERED_A_QUESTION',
   // …and its sibling (2026-09-26): the model DECLINED, and its refusal was left standing as the answer.
   'TURN_DECLINED',
+  // …and its third sibling (Q-1019, 2026-10-15): the turn's whole ask was to remove ads that live inside
+  // another service's player, which the app cannot reach into. The model said so and changed nothing — our
+  // retry policy correctly left that answer standing. An unregistered code costs the USER 6 app-health
+  // points (`isAppFinding`), and this is a fact about our engine, not a flaw in their app.
+  'TURN_ANSWERED_NOT_OURS',
   // The REQUEST asked for a device power a web app does not have (autopsy 6bae5835) — a fact about what
   // the platform can deliver, told to the user in the summary, never a defect in the app that was built.
   'DEVICE_CAPABILITIES_TOLD',
@@ -981,6 +987,11 @@ export function capProblems(problems: readonly BuildIssue[]): BuildIssue[] {
 
 export class BuildDiagnostics {
   private readonly issues: BuildIssue[] = [];
+  /**
+   * The build's running plan-only-turn count, held BY REFERENCE so the line is built from the final value
+   * (Q-1030). See setTodoOnlyTally and todoOnlyTurnsLine for why the position matters.
+   */
+  private todoOnlyTally?: { turns: number; latencyMs: number; firstInRun?: number };
   /** provider → failure bucket → count. See recordProviderFailure. */
   private readonly providerFailureReasons = new Map<string, Map<string, number>>();
   private requestAnalysis?: { taskType: string; complexityScore: number; startTier: string; startBand?: string; signalsCouldNotRead?: boolean };
@@ -2562,6 +2573,18 @@ export class BuildDiagnostics {
     this.providerWaste = { msByKind: { ...ledger.msByKind }, callsByKind: { ...ledger.callsByKind }, msByFamily: { ...ledger.msByFamily }, buildMs: Math.round(buildMs) };
   }
 
+  /**
+   * Keep the build's plan-only-turn tally — THE OBJECT, not a copy of today's numbers (Q-1030).
+   *
+   * Every lane that can run a writer turn counts into this one object through `noteTodoOnlyTurn`, and the
+   * heal lanes keep counting long after generation ends; reading it at serialization time is therefore the
+   * only reading that describes the build the user was given. A copy here would re-create the very bug this
+   * closes — see todoOnlyTurnsLine.
+   */
+  setTodoOnlyTally(tally: { turns: number; latencyMs: number; firstInRun?: number }): void {
+    if (tally && typeof tally === 'object') this.todoOnlyTally = tally;
+  }
+
   /** Stamp the whole-session view (see sessionSummary). Best-effort; a bad value is ignored. */
   setSession(session: BuildDiagnosticsReport['session']): void {
     if (session && Number.isFinite(session.turns)) this.session = session;
@@ -2918,7 +2941,12 @@ export class BuildDiagnostics {
         unresolved: counted.filter((i) => !i.autoResolved && i.observation !== true).length,
         ...(observations > 0 ? { observations } : {}),
       },
-      issues: [...this.issues],
+      // 📋 PLAN-ONLY TURNS, BUILT HERE AND NOT WHEN GENERATION ENDED (Q-1030) — the heal lanes that run
+      // after it keep counting, so the line is a property of the report, exactly as the back-fill above is.
+      // Info, so it is outside every tally (see the INFO note above) and outside `problems` below.
+      issues: this.todoOnlyTally
+        ? [...this.issues, { ts: this.endedAt ?? this.now(), ...todoOnlyTurnsLine(this.todoOnlyTally) }]
+        : [...this.issues],
       problems: capProblems(this.issues.filter((i) => i.severity !== 'info')),
       rootCause: deriveRootCause({
         issues: this.issues, errors: this.errors, review: this.reviewText, ok: this.ok, commands: this.commands,

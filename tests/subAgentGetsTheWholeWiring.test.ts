@@ -114,7 +114,7 @@ describe('🔴 the child dispatcher gets EVERY positional argument the construct
   });
 });
 
-describe('🔴 the child runner gets the five options it never had', () => {
+describe('🔴 the child runner gets the six options it never had', () => {
   const runnerBlock = (() => {
     const at = SUB_AGENT.indexOf('const runner = new AgentRunner({');
     expect(at).toBeGreaterThan(-1);
@@ -137,6 +137,13 @@ describe('🔴 the child runner gets the five options it never had', () => {
   it('and the artifact expectation, gated on the role', () => {
     expect(runnerBlock).toContain('deps.expectsArtifacts');
     expect(runnerBlock).toContain('roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools)');
+  });
+
+  // The sixth, found by Q-1030 (2026-10-15): the same omission as `onLlmCall` above, one measurement over —
+  // the child's plan-only turns never reached TODO_ONLY_TURNS. Its own class guard is
+  // everyLaneCountsItsIdleTurns.test.ts; this pin keeps it in the list of what a child is handed.
+  it('and the plan-only-turn counter, so the build-wide figure includes the lane that writes the app', () => {
+    expect(runnerBlock).toContain('onTodoOnlyTurn: deps.onTodoOnlyTurn');
   });
 });
 

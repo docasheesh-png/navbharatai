@@ -139,13 +139,22 @@ describe('2 · the runner hands the first one back, and counts every one', () =>
 
   it('wiring: the route sums the turns into one TODO_ONLY_TURNS line', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    // PIN UPDATED 2026-10-13: the record and its try moved into todoOnlyTurn.ts (`recordTodoOnlyTurns`) — the chat handler
-    // is at TypeScript's control-flow limit (TS2563). The route makes the one call; the module writes the line.
-    expect(route).toContain('recordTodoOnlyTurns(buildDiag, todoOnlyTally);');
+    // PIN UPDATED 2026-10-13: the record and its try moved into todoOnlyTurn.ts — the chat handler is at
+    // TypeScript's control-flow limit (TS2563). The route makes the one call; the module writes the line.
+    // PIN UPDATED 2026-10-15 (Q-1030): the route no longer RECORDS the line at all. It hands the report the
+    // tally OBJECT and the line is built when the report serializes, because twelve heal runners begin below
+    // where the record used to sit and every one of them counts into that same tally. The claim this test
+    // makes is unchanged — one line, summed over the build — and `everyLaneCountsItsIdleTurns.test.ts`
+    // polices the lanes that feed it.
+    expect(route).toContain('buildDiag.setTodoOnlyTally(todoOnlyTally);');
+    expect(route, 'the mid-build stamp is what Q-1030 removed').not.toContain('recordTodoOnlyTurns');
     const module = readFileSync('src/server/AgentV3/todoOnlyTurn.ts', 'utf8');
-    expect(module).toContain("code: 'TODO_ONLY_TURNS', message: todoOnlyTurnsNote(tally.turns, tally.latencyMs, tally.firstInRun)");
+    expect(module).toContain("code: 'TODO_ONLY_TURNS', autoResolved: true,");
+    expect(module).toContain('message: todoOnlyTurnsNote(tally?.turns ?? 0, tally?.latencyMs ?? 0, tally?.firstInRun)');
     // PIN UPDATED (Q-1068): the callback also carries `firstInRun`, so the line can say whether the once-per-run rule held.
-    expect(route).toMatch(/onTodoOnlyTurn: \(t: \{ latencyMs: number; firstInRun\?: boolean \}\) => \{\s*todoOnlyTally\.turns \+= 1;/);
+    // PIN UPDATED (Q-1030): the arithmetic moved into `noteTodoOnlyTurn` so a lane joins the tally in one line.
+    expect(route).toContain('onTodoOnlyTurn: (t: { latencyMs: number; firstInRun?: boolean }) => noteTodoOnlyTurn(todoOnlyTally, t),');
+    expect(module).toMatch(/export function noteTodoOnlyTurn[\s\S]*tally\.turns \+= 1;/);
   });
 });
 

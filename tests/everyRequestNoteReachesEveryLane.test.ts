@@ -52,12 +52,22 @@ const NOTE_PRODUCERS = [
   'nonSmartphoneBuildRule', 'thirdPartyLimitsBuilderNote',
 ] as const;
 
-/** The aggregator block: `const requestNotes … = [ … ];`. */
+/**
+ * The aggregator block — `const notes … = [ … ];`.
+ *
+ * ⚠️ IT MOVED OUT OF THE ROUTE (Q-1016, 2026-10-16). It used to live in the chat handler, ~500 lines BELOW
+ * the first lane that plans, which is exactly why the blueprint lane planned the whole file manifest from
+ * the BARE request: there was nothing to hand it yet. It is now `requestNotesFor` in requestNotes.ts,
+ * called once above that lane, and the route READS the result. So this census reads the MODULE for the
+ * list and the ROUTE for the lanes — each where the thing it checks actually lives.
+ */
+const NOTES_MODULE = readFileSync(join(process.cwd(), 'src/server/AgentV3/requestNotes.ts'), 'utf8');
+
 function aggregator(): string {
-  const start = ROUTE.indexOf('const requestNotes: ReadonlyArray<{ code: string; text: string }> = [');
+  const start = NOTES_MODULE.indexOf('const notes: ReadonlyArray<{ code: string; text: string }> = [');
   if (start < 0) return '';
-  const end = ROUTE.indexOf('];', start);
-  return ROUTE.slice(start, end + 2);
+  const end = NOTES_MODULE.indexOf('];', start);
+  return NOTES_MODULE.slice(start, end + 2);
 }
 
 /**
@@ -67,9 +77,10 @@ function aggregator(): string {
  */
 function heldIn(producer: string): string[] {
   const out = new Set<string>();
-  for (const m of ROUTE.matchAll(new RegExp(String.raw`\b(?:const|let)?\s*(\w+)\s*=\s*${producer}\(`, 'g'))) out.add(m[1]);
+  // The module, not the route (Q-1016): that is where every producer is called now.
+  for (const m of NOTES_MODULE.matchAll(new RegExp(String.raw`\b(?:const|let)?\s*(\w+)\s*=\s*${producer}\(`, 'g'))) out.add(m[1]);
   for (const v of [...out]) {
-    const kept = [...ROUTE.matchAll(new RegExp(String.raw`\b(\w+)\s*=\s*${v}\??\.note\b`, 'g'))].map((m) => m[1]);
+    const kept = [...NOTES_MODULE.matchAll(new RegExp(String.raw`\b(\w+)\s*=\s*${v}\??\.note\b`, 'g'))].map((m) => m[1]);
     // The record's own name (`scope`) is too common to search for; the field the route keeps is the note.
     if (kept.length > 0) { out.delete(v); for (const k of kept) out.add(k); }
   }
@@ -108,28 +119,28 @@ describe('🧭 the census: every request note reaches every lane through ONE lis
   });
 
   /**
-   * 🔴 WHAT THE REBUILT CENSUS FOUND ON ITS FIRST RUN, AND THE OLD ONE NEVER COULD — and it is WIDER than
-   * the queue row that predicted it. Q-1016 names the blueprint lane's manifest and contract. Measured,
+   * 🔴 WHAT THE REBUILT CENSUS FOUND ON ITS FIRST RUN, AND THE OLD ONE NEVER COULD — and it was WIDER than
+   * the queue row that predicted it. Q-1016 named the blueprint lane's manifest and contract. Measured,
    * SIX builder prompts read the bare request:
    *
-   *   • `manifestUserPrompt(prompt, scaffold)`  — the blueprint lane plans the whole file list blind (Q-1016);
-   *   • `contractUserPrompt(prompt, manifest)`  — and its shared contract, the same lane (Q-1016);
+   *   • `manifestUserPrompt(prompt, scaffold)`  — the blueprint lane planned the whole file list blind;
+   *   • `contractUserPrompt(prompt, manifest)`  — and its shared contract, the same lane;
    *   • `megaRoadmapUserPrompt(prompt, …)` ×2   — the MEGA-APP roadmap planner, which Q-1016 never mentioned:
    *     a Kotlin, keypad-phone or no-login request shapes a roadmap at least as much as a file list;
    *   • `repairUserPrompt(prompt, …)` ×2        — a repair pass. It fixes code that already exists rather
    *     than planning an app, so whether it needs the notes is a judgement, not an obvious yes — but it
    *     rewrites real files, so "no sign-in" still constrains it. Recorded, not assumed.
    *
-   * None of the six is an oversight in the wiring: every one of them runs ABOVE the line where the first
-   * note input is computed, so there is nothing to pass yet. Closing them means making the notes available
-   * EARLIER — one computation read in both places — not threading one more argument.
+   * 🔒 AND THE RATCHET DID ITS JOB: the first two are GONE (#3760, Q-1016). The notes are now computed
+   * above every lane — `requestNotesFor(…)` once, `withRequestNotes(prompt, requestNotesText)` at the
+   * manifest and the contract — so the blueprint lane no longer plans blind, and this list is down from
+   * six to four. That is the only direction it may move. A FIFTH builder prompt reading the bare request
+   * fails this test; closing the four that remain is what shrinks it further, never an edit to the list.
    *
-   * 🔒 A RATCHET, NOT AN EXCUSE. The set is pinned exactly. A SEVENTH builder prompt reading the bare
-   * request fails this test, and Q-1016's fix must SHRINK this list — it cannot grow.
+   * Measured on the merged route when Q-1016 landed, not assumed: the two blueprint entries no longer
+   * match, and leaving them here would have left the ratchet two notches loose while still passing.
    */
   const UNWIRED_SINKS = [
-    'manifestUserPrompt(prompt, scaffold)',
-    'contractUserPrompt(prompt, manifest)',
     'megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals)',
     'megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals)',
     'repairUserPrompt(prompt, errors, currentFiles, contract, strategy, contractPath)',
@@ -143,6 +154,15 @@ describe('🧭 the census: every request note reaches every lane through ONE lis
     expect(bare.length, 'the list may only SHRINK — Q-1016 is what shrinks it').toBeLessThanOrEqual(UNWIRED_SINKS.length);
   });
 
+  it('CLASS GUARD: a note producer imported into the module is a listed producer', () => {
+    // Reads the MODULE's imports now (Q-1016): the producers moved there with the list.
+    const imported = [...NOTES_MODULE.matchAll(/^import\s*\{([^}]*)\}\s*from\s*'\.\/[^']+';/gm)]
+      .flatMap((m) => m[1].split(',').map((s) => s.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]))
+      .filter((n) => /(?:BuilderNote|BuildRule)$/.test(n));
+    const unlisted = imported.filter((n) => !(NOTE_PRODUCERS as readonly string[]).includes(n));
+    expect(unlisted, 'a new request note must join `requestNotes` (and this list) so every lane reads it').toEqual([]);
+  });
+
   it.each(NOTE_PRODUCERS)('%s feeds the list — called in it, or held in a variable the list reads', (producer) => {
     const direct = agg.includes(`${producer}(`);
     const viaVariable = heldIn(producer).some((v) => new RegExp(String.raw`text:\s*${v}\b`).test(agg));
@@ -151,7 +171,8 @@ describe('🧭 the census: every request note reaches every lane through ONE lis
 
   it.each(NOTE_PRODUCERS)('no lane reads %s on its own — the hand-threading this census replaces', (producer) => {
     // Outside the list, a producer's value may be computed and logged, never written into a prompt.
-    const outside = ROUTE.replace(agg, '');
+    // Both files, minus the list itself: hand-threading is hand-threading wherever it is written.
+    const outside = `${ROUTE}\n${NOTES_MODULE.replace(agg, '')}`;
     const names = [producer, ...heldIn(producer)];
     for (const n of names) {
       expect(outside, `\${${n}...} is spliced into a prompt outside requestNotes`).not.toMatch(new RegExp(String.raw`\$\{${n}\b`));

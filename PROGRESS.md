@@ -95984,6 +95984,71 @@ to Node 22 is its own change (run the suite on 22 first, then flip `ci.yml`).
 - Q-1064 premise corrected (honesty): batching already exists (`write_files_batch`, 24 uses). The cost is token throughput on the KIMI rung; the options changed, so the "han" cannot be applied to it — three options are in the queue.
 - Q-1066 fixed (lag list read by both detectors) · Q-1068 diagnostics shipped, verdict waits for a report · Q-1069 fixed per the approved rule.
 
+### 2026-10-15 — Q-1018 + Q-1019 (+ Q-1096 found while fixing them): the ads we can remove, and the ones we cannot
+
+Q-990 built `thirdPartyLimits.ts` so the platform would stop claiming a property only another service
+controls. Its honest sentence has two halves, and **only the first was ever measured**:
+
+- *"ads inside YouTube's own player may still play …"* — measured (`projectAdServingPlayers`)
+- *"The app adds no ads of its own"* — **asserted, on every build, unchecked**
+
+**Q-1018.** That second half is not a safe assumption, and the proof is inside NavBharatAI: our OWN
+Monetization wizard generates an AdSense block (`generateAdsense`, `src/lib/paymentSetup.ts`). A user who
+added ads through our own feature and then asked about ads was told, by us, that their app adds none.
+`projectOwnAdSdks` now measures nine networks — each by its loader, publisher id or SDK package, never by a
+product name, so prose, a `.adsbygoogle{display:none}` style and our own test files can never match. The end
+line, the "ad-free" correction and the **builder note** all read it, and when the app really does carry its
+own ads the note tells the builder to REMOVE them: those ARE ours to remove and the user just asked
+(the 50/50 law's prevent half). One project load serves both ad questions (`editTurnAdFacts`).
+
+**Q-1019, the same fact read again.** An edit turn whose whole ask is "remove the ads" on an app that plays
+videos in YouTube's own player has one correct outcome: say those ads are not the app's to switch off, and
+change nothing. The platform filed that as a **failed build** — "the build produced no files, please try
+again" over the honest answer, an empty-build retry to produce the same answer on a stronger rung, and on
+the free tier an upsell. Fixed on the `pointed` precedent (autopsy 0c2a987a): `TurnAnswer.notOurs`, decided
+from measured facts, never from reading the model's prose. Six conditions, all required — and two of them
+are what keep it honest: the app must have **no ads of its own** (if it does, the removal IS ours to make,
+so the zero-file turn really failed), and the ad removal must be the turn's **only** ask (conservative — in
+doubt it answers false and today's behaviour stands, so "remove the ads and add dark mode" is still a real
+empty build whose retry may deliver the dark mode). `TURN_ANSWERED_NOT_OURS` is registered PROCESS-ONLY,
+because an unregistered code costs the user 6 app-health points (the Q-1043 class).
+
+**Q-1096 — found while writing Q-1019's test, and it was bigger than either row.** `adRemovalRequested`
+matched only verb-then-noun removals ("remove the ads"). Hindi is subject-object-VERB, so the form an Indian
+user types FIRST — *"ads hata do"*, *"ads nikal do"*, *"ads band karo"*, *"विज्ञापन हटाओ"* — matched nothing,
+and with that predicate false **all three of Q-990's layers stood down**: the builder was never told, the user
+got no start line, and the honest end line never appeared. Q-990 was written from one English report; this is
+the same module's blind spot in the language its own user base writes in. The ad word must sit directly beside
+the removal verb, so every negative Q-990 pinned still does not match.
+
+Locked by `tests/theAdsWeCanRemoveAndTheOnesWeCannot.test.ts` (24 tests) — including a census that every
+reader of `pointed` in the route also reads `notOurs`, because the defect was one grouping lacking a term.
+Nine reversions, each with an anchor assertion, each failed and was restored.
+### 2026-10-15 — Q-1030: a measurement whose error is unknown (TODO_ONLY_TURNS)
+
+**Root cause, two halves of one class** — *a count kept at one of N call sites is not kept*:
+1. `SubAgent.ts` threaded `onLlmCall` to its child runner but not `onTodoOnlyTurn`, so the lane that runs
+   most of a delegating build's turns was never in the tally. The exact sibling of the `onLlmCall` omission
+   fixed on 2026-09-19, in the same object, for the same reason.
+2. The route **recorded** the line the moment generation ended — above the integrity, design, compile, hooks,
+   completion, guard, feature, vax, runtime, fix, repair and crit-fix runners, every one of which spreads
+   `baseRunnerOpts` and counts into that same tally. The arithmetic was right; the number the admin read was
+   written before most of the counting happened.
+
+**Fix.** The arithmetic is one call (`noteTodoOnlyTurn`), so a lane joins the tally in one line; the sub-agent
+lane now does. The line is a property of SERIALIZATION, not of a moment in the route:
+`BuildDiagnostics.setTodoOnlyTally` holds the tally **by reference** and `report()` builds the line — the same
+lesson `resolveRecoveredOnSuccess` already learned in that file. Info, outside every tally and `problems`.
+
+**Locked by `tests/everyLaneCountsItsIdleTurns.test.ts`, which polices the CLASS, not the instance:** it finds
+every `new AgentRunner` in the server and requires each to feed the tally or prove from its own `tools:` line
+that it cannot write (the plan-approval lane, offered only `update_todo`). A thirteenth heal lane fails it until
+it is wired. Proven by five reversions (child hook removed · route hook removed · tally COPIED instead of held ·
+report never handed the tally · one heal lane drops `baseRunnerOpts`) — each failed, each restored.
+
+**Honest consequence for an earlier autopsy.** The "6 turns / 20.8 s" quoted for report 12ef62b2 was an
+under-count of unknown size. **Watch on the next real report: the figure should RISE on any delegating build**,
+and a rise is the fix working, not a regression.
 ## 2026-10-15 — Admin → Apps: a "v" on every app opens its build reports; "All builds" moved out of the Build tab (admin request)
 - **What changed:** `BuiltAppsPanel` cards (live, held, banned and the orphaned list alike) get a "v" button → a dialog (`WorkspaceBuildReports`) reading the existing `GET /api/admin/all-builds/:workspaceId`: the latest build's headline in the engine's words, Copy / Download for the whole session and for each build. The "All builds — every user, no submit needed" card moved from the Build tab to the Apps page (same state, filters, "taken" mark); its auto-load follows it.
 - **Decision, said plainly:** the admin said "remove All builds from the Build tab" — it was RELOCATED, not deleted. It holds builds that never produced an app, the failed/tier filters and the "taken" marks the autopsy workflow depends on; deleting it would have lost them.
@@ -96022,3 +96087,94 @@ row now carries that scope and that plan, and the ratchet may only shrink.
 
 Three reversions: a seventh bare-prompt lane added (1 fail), the architect stops reading the list
 (2 fail), the sub-agents stop reading it (2 fail).
+### 2026-10-15 — Q-1015: design feedback reaches every framework, and an indented stylesheet survives it
+
+**The regression.** The `evaluate` tool used to design-lint `.vue`, `.svelte`, `.less` and `.sass` with a
+file selection of its own. Autopsy 9c612cdb replaced that private copy with the shared one in
+`buildQualityLint` — the right call (one selection, so the lint and the spacing snap can never disagree
+about scope). But the shared set was the **narrower** of the two, so a Vue or Svelte app silently stopped
+getting any design feedback at all: `lintBuiltApp` selected nothing and returned null, which the report
+reads as "not checked". Centralising was right; centralising on the smaller set was the regression.
+
+**And the obvious widening would have corrupted a user's stylesheet — measured, not reasoned.**
+`SPACING_DECL_RE_SOURCE` captures a declaration's value as `[^;"'}]+`, which does not stop at a newline.
+Sass's original indented syntax has no `;`, so a `padding: 6px` line swallows the next two and the
+extractor returns `[6, 15, 13]`: the app is told its **font size** is off-grid spacing, and `spacingSnap` —
+which rewrites exactly what that extractor counts — would have written `font-size: 16px` and
+`width: 332px` into the user's file. An advisory check that quietly edits values it misread is worse than
+no check at all. The queue row had flagged indented `.sass`; the measurement showed the cost was larger
+than the row said.
+
+**The fix.** For an indented syntax only, `shippedDesignText` turns the line break into the terminator it
+already is — `\n` → `;`, **one character for one**, which is what keeps that function length-preserving
+(the property the snap's offsets depend on) and keeps the spacing regex a single definition with one
+reader rather than a second, newline-terminated copy that would drift. Braced CSS is untouched, including
+a multi-line value — which is precisely why it is applied by syntax and not everywhere.
+
+Locked by `tests/designFeedbackReachesEveryFramework.test.ts` (12 tests: a Vue app, a Svelte app, the real
+indented fixture, and the snap proven not to touch a font size, a width or a radius). Three reversions,
+each with an anchor assertion: the narrow selection back (5 fail), the terminator removed (3 fail), the
+terminator applied to braced files too (2 fail).
+### 2026-10-15 — Q-1022: the clean design sentence is earned, not read off a shortened list
+
+`modelDesignLine` hands `designLintSummary` a **copy** of the lint with the platform-fixed violation types
+filtered out. That is right: the model must not be told to fix what the spacing snap is about to fix
+itself (autopsy 536c8189 — it spent three model calls writing regex scripts over the stylesheet and moved
+on-grid values *off* the grid). But when the **only** finding was a platform-fixed one, the copy had no
+violations left, so the summary took its clean branch and the model read:
+
+> Design consistency 92/100 (A) across 7 file(s). Design consistency: ✓ A (92/100) — **cohesive palette,
+> typography and spacing.**
+>   ✓ **4 off-grid spacing value(s)**: the platform snaps these to the grid when the build ends.
+
+One sentence denying what the next one states, from the same lint, in the same breath.
+
+**The class: a predicate and its evidence computed from two different inputs.** The filtered copy is the
+right input for *listing what is left* and the wrong one for *deciding whether anything was wrong*. The
+caller now states how many it removed — `designLintSummary(shown, handled.length)` — and the honest
+`CLEAN_AFTER_OUR_FIX` sentence is said in place of the cohesive one.
+
+A genuinely cohesive app still gets its compliment, and that is tested: replacing the clean sentence
+unconditionally is the opposite defect, and the third reversion proves the test catches it.
+
+Locked by `tests/theCleanDesignSentenceIsEarned.test.ts` (10 tests), including a census that only the
+filtering caller may pass a count. Three reversions: the caller stops saying what it filtered (2 fail),
+the summary ignores the count (2 fail), the honest sentence replaces the cohesive one always (2 fail).
+
+### 2026-10-16 — Q-1016: the request notes exist before the first lane plans
+
+Q-991 gathered every request note into ONE list and had every lane read it — the right shape. But the list
+was **built ~500 lines below the first lane that plans**, so the blueprint lane (`AGENTV3_BLUEPRINT`)
+proposed the whole file manifest *and* the shared contract from the **bare** request: route ~16750 for the
+plan, ~16978 for the first note input. A Kotlin request, a keypad phone named in the prompt or a no-login
+scope was planned blind — and on a deep build the architect then follows that plan. It was never a wiring
+oversight; there was nothing to hand the lane yet, which is why Q-1020's name-based census could not see it.
+
+**The fix is one computation, read twice** — the Q-1026/Q-1033 shape. `requestNotesFor` is pure, lives in
+`requestNotes.ts` beside the `withRequestNotes` join, and is called once above the blueprint lane; the
+aggregator now reads that result instead of deriving the same facts again. Both blueprint prompts take
+`withRequestNotes(prompt, requestNotesText)`. The file budget beside them still reads the **bare** prompt,
+because Q-991 measured that notes riding the request take a 13-file budget to 25 — the user's app sized by
+our own instructions.
+
+**Three things the work found, each worth keeping:**
+1. **The obvious placement would have been wrong.** Computing at ~12882 (right after `planning`) looked
+   right and is not: `framework` is reassigned at ~15593 by the drift detector, and the stack note *names*
+   the framework it was built in — so the note could have carried a label that later changed. Measured
+   before shipping, not after.
+2. **My own test found a duplicate derivation.** Route ~24454 called `namedNonSmartphone(prompt)` a second
+   time with its own copy of the new-build gate — two answers to one question, this row's exact class. It
+   now reads the one result and adds only what is genuinely its own (`result.ok && expectsArtifacts`).
+3. **A reversion found my test weak.** Dropping the `!editing` narrowing (Q-868) *passed*, because the test
+   only ever set `newBuild: false`. The guard exists for `newBuild && editing` together; that case is in
+   now, and the reversion bites.
+
+Ratchet 6 → 4: `megaRoadmapUserPrompt` ×2 needs the framework label late-bound (it runs before ~15593), and
+`repairUserPrompt` ×2 is a repair pass whose need for the whole note list is a judgement, recorded not
+assumed. Locked by `tests/theNotesExistBeforeAnyLanePlans.test.ts` (13 tests) plus the census, which now
+reads the MODULE for the list and the ROUTE for the lanes. Five reversions.
+
+⚠️ **Third time today a census of mine matched its own explanatory comment** (Q-1081, Q-1021, Q-1016): the
+note beside a fix names the function the fix stopped calling, so a guard reading the file as text fails on
+its own documentation. It is a pattern — a source census must read stripped code, and the assertion that
+needs stripping is always the negative one.

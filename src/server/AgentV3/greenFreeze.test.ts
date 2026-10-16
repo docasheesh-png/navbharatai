@@ -131,9 +131,15 @@ describe('the allowlist — the user\'s own requests still write to a green app'
     // OWN test suite failing on a working app. Unnamed, every edit was refused and the model went round
     // the freeze with the shell. Kept only if the suite then passes with the same command AND the app still
     // renders (strictReverify), and it may touch neither a .env file nor a test file (asserted below).
+    // 'design-heal-revert' was added 2026-10-15 (Q-1013) — the UNDO of the heal one line above, which could
+    // write to a latched app while its revert could not, so a page the heal BROKE stayed broken and the
+    // freeze protected the breakage. Safe by construction rather than by judgement: it writes the pre-heal
+    // bytes, which are the very content the latch protects, and only for the files the heal just wrote —
+    // the same argument this list already makes for 'green-guard-restore' and 'sandbox-file-restore'.
     expect([...ALLOWED_PASSES].sort()).toEqual([
-      'design-consistency-heal', 'explorer-repair', 'feature-presence-heal', 'green-guard-restore',
-      'reviewer-functional-repair', 'runtime-error-autofix', 'sandbox-file-restore', 'vaccine-repair',
+      'design-consistency-heal', 'design-heal-revert', 'explorer-repair', 'feature-presence-heal',
+      'green-guard-restore', 'reviewer-functional-repair', 'runtime-error-autofix', 'sandbox-file-restore',
+      'vaccine-repair',
     ]);
   });
 

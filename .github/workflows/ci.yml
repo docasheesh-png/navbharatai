@@ -26,10 +26,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 🔴 THE GATE RUNS THE RUNTIME IT GUARDS (Q-1060). This said '20' from the day the file was created
+      # (#3538) while the Dockerfile, the store workflows and @capacitor/cli 8 all run 22 — so the suite
+      # tested a runtime nobody ships, and any test needing the Capacitor CLI could not run here at all
+      # ("The Capacitor CLI requires NodeJS >=22.0.0"). The version is `engines.node` in package.json now,
+      # and tests/oneDeclaredRuntime.test.ts fails when any workflow drifts from it.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       # npm's legacy `/v1/security/audits/quick` endpoint (used by `npm audit`) is being retired and now

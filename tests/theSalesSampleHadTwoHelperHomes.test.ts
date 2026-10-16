@@ -114,7 +114,9 @@ describe('2 · a data type never shares a component\'s name', () => {
     const src = read('src/server/AgentV3/SimpleBuilder.ts');
     const at = src.indexOf('prepareSharedContract(contract, manifest)');
     expect(at).toBeGreaterThan(0);
-    expect(at).toBeLessThan(src.indexOf('const mod = contractModule(contract, contractRenames);'));
+    // 🔁 REPOINTED (Q-1027): the call gained `contractEnumsAsConst`. This test is about ORDER — the renames
+    // happen before the contract file is written — and that is unchanged.
+    expect(at).toBeLessThan(src.indexOf('const mod = contractModule(contract, contractRenames, contractEnumsAsConst);'));
     expect(at).toBeGreaterThan(src.indexOf("clock.contractOutcome = contract ? 'written'"));
     const door = src.slice(src.indexOf('export function prepareSharedContract('));
     expect(door).toContain('separateTypeFromComponentNames(text, manifest)');

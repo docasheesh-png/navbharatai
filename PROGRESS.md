@@ -96219,3 +96219,7 @@ found by this change's own test, not by a reader.
 - Proven by reversion: with either bug put back, 5 of the 7 fail (both behavioural and census halves).
 `tests/theNotesExistBeforeAnyLanePlans.test.ts`'s file-budget pin was widened from the telemetry budget to BOTH
 budgets, so the property it already claimed is now actually checked where the model reads it.
+
+**Q-1017 closed 2026-10-16:** #3761 merged to `main` as `15d2997`. The row is deleted from
+`BUILD_REPORT_QUEUE.md`'s open table and its ID appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the
+same commit, with the queue edited on a fresh `main` (#3543's lesson, 2026-10-06). Its ledger is the entry above.

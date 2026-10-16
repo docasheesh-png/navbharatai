@@ -96365,3 +96365,30 @@ with the image (10).
 
 ⚠️ **What to watch:** this PR's own CI run is the **first on Node 22**. That run is the real test of the flip,
 and it is the whole point of the change.
+
+### 2026-10-16 — Q-1125: the workaround outlived the defect (the half #3766 left behind)
+
+**Context, said plainly: this session built Q-1060 and LOST THE RACE.** Another session shipped it as #3766
+while this one was measuring, and the two had reached the same conclusions independently — `ci.yml` and
+`dast.yml` to Node 22 (the same un-named sibling), `engines.node` as the single source of truth, and a census
+test. That work is theirs and is on `main`; this session's duplicate of it was discarded rather than pushed as
+a competing PR, including its own census (`tests/oneDeclaredRuntime.test.ts` already does that job, and a
+second census would be two answers to one question — the class Q-1017 closed).
+
+**What #3766 left, and this is the 50/50 law's own half.** The Node divergence had already been paid for once,
+as a workaround: `aSeedScriptIsNotABrowser` asserted the sandbox's Node-22 globals, was "green on every
+developer machine, red on every CI run", and was gated behind `it.runIf(nodeMajor >= 22)` — so it SKIPPED in
+the one place it mattered. #3766 removed the gate's REASON (CI now runs 22) but not the gate. Two things were
+therefore still true on `main`: a vestigial condition, and — worse — a comment telling the next reader that
+"CI (`.github/workflows/ci.yml`) runs node 20". A false comment is not cosmetic; it is how a future session
+re-derives a constraint that no longer exists and writes the workaround again.
+
+**The fix.** The condition is gone, so the assertion runs unconditionally and is COUNTED rather than skipped.
+Its comment now records why the gate existed, that #3766 removed its reason, and the measurement behind the
+flip (node 20: 38,958 passed / 2 skipped; node 22: 38,959 passed / 1 skipped; zero failures either side —
+this was the one test that differed). `MOBILE_PUBLISHING.md`'s "Node 20+" was corrected to the one declared
+version. The trailing `nodeMajor >= 20` floor in the last test is kept on purpose: it records what was
+measured, not today's pin, which `oneDeclaredRuntime.test.ts` is the single place that asserts.
+
+**Proof is the test itself.** Before: skipped on a Node-20 runner and counted as a skip. After: it runs and
+passes, and the suite's skip count drops accordingly. No new test was added, deliberately — see above.

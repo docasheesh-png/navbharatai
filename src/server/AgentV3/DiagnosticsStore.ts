@@ -228,7 +228,18 @@ export function trimReportForStorage(reportIn: BuildDiagnosticsReport, opts: Sto
   // shorter list, so a report stored with 40 of 312 model calls said "40" and nothing else. Trimming
   // and declaring are now ONE operation and cannot be done separately. See reportTruncation.ts.
   const issues = trimChannel(report.issues, 500, prior?.channels?.issues);
-  const commands = trimChannel(report.commands, 40, prior?.channels?.commands);
+  // 🔑 THE GAP IS CENSUSED BEFORE IT IS CUT, for the two channels a LOOP lives in (Q-1087). A loop is
+  // not an entry, it is a COUNT of entries, so no window — head, tail or both — can sample it: build
+  // 413d29a1 ran the same no-op ~60 times inside the hundred commands this very cap dropped, and the
+  // report could not show the defect it was reporting. Only repeats are kept, only the top few, so an
+  // ordinary build pays nothing. See `gapTop` in reportTruncation.ts.
+  const commands = trimChannel(report.commands, 40, prior?.channels?.commands, (c) => c.command);
+  // ⚠️ `llmCalls` DELIBERATELY GETS NO CENSUS, and the reason is measured rather than assumed. A model
+  // call's prompt preview is deduped by the recorder to the literal placeholder "[system prompt head
+  // identical to the previous call]" — in build 413d29a1 that was 169 of 171 calls — so a census keyed on
+  // it would report "the model made many calls" on essentially every long build, which `total` already
+  // says. A census that fires on every build is noise, and noise costs the same bytes as signal. Commands
+  // carry their own distinctive text, which is where a repeat is both visible and meaningful (Q-1087).
   const llmCalls = trimChannel(report.llmCalls, opts.llmCallsCap ?? storedLlmCallsCap(report.llmCalls), prior?.channels?.llmCalls);
   const errors = trimChannel(report.errors, 50, prior?.channels?.errors);
   const trimmedIssues = issues.list ?? [];

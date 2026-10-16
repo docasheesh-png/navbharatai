@@ -15,6 +15,7 @@
  *    refused post-green write by the engine's own pass no longer invites the user to "reply".
  */
 import { describe, it, expect } from 'vitest';
+import { roadmapDecision } from '../src/server/AgentV3/ProjectPlan';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { runSimpleBuild } from '../src/server/AgentV3/SimpleBuilder';
@@ -122,7 +123,18 @@ describe('2 · when the scope analyzer and the complexity router disagree, the d
     expect(route).toContain("code: 'APP_SCOPE_DISPUTED'");
     // The dispute still gates the planner; since autopsy a2b9c802 Project Mode owning the build does too
     // (theJarvisBuildWasStoppedWhileItWorked.test.ts).
-    expect(route).toContain("if (scope.decision === 'analyze' && !dispute && !projectModeOwns) {");
+    // UPDATED 2026-10-14 (autopsy e3135b7b, Q-1080): `projectModeOwns` became `standDown`, the one predicate that
+    // answers for EVERY thing that already owns a build (project mode OR a seeded finished template). The property
+    // The dispute now reaches the decision as an INPUT (`disputed`) and the module refuses the planner on it, so
+    // the property is pinned in BOTH places: the route hands the fact over, and roadmapDecision acts on it.
+    const call = route.slice(route.indexOf('roadmapDecision({'), route.indexOf('});', route.indexOf('roadmapDecision({')) + 3);
+    expect(call).toContain('disputed: !!dispute,');
+    const ask = (disputed: boolean) => roadmapDecision({
+      projectModeOn: false, planFirst: false, megaProject: false, templateIsTheApp: false,
+      decisionIsAnalyze: true, disputed, signals: [],
+    }).runPlanner;
+    expect(ask(true)).toBe(false); // ← on a dispute the planner is never asked
+    expect(ask(false)).toBe(true); // and it still runs when nothing disputes the size
   });
 });
 

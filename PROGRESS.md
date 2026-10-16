@@ -96175,7 +96175,7 @@ note beside a fix names the function the fix stopped calling, so a guard reading
 its own documentation. It is a pattern — a source census must read stripped code, and the assertion that
 needs stripping is always the negative one.
 
-## 2026-10-16 — Q-1097: a null scene reading is never silent, and the vehicle is identified once (#3761)
+## 2026-10-16 — Q-1097: a null scene reading is never silent, and the vehicle is identified once (#3763)
 
 `tests/aThreeGameIsReadFromItsScene.test.ts` failed twice in one day under a loaded machine, on two different
 fixtures, with the same shape: `{ faces: false, mirrored: null }` where a concrete steering verdict was demanded.
@@ -96212,6 +96212,11 @@ Locked by `tests/aNullSceneReadingIsNeverSilent.test.ts` (44 tests) plus the fou
 honest contract — never a wrong claim, the exact verdict when read, a stated reason when not — which only the
 first of them had. Four reversions all bite. Proven under 6 CPU hogs on 4 cores; `aRacingGameIsStartedAndDriven`
 re-run because the turn hold grew by 400 ms (140 sibling tests green).
+
+⚠️ **This entry first said #3761, which is another session's PR.** A PR number cannot be known until the PR
+exists, so a row written before that is a guess — and while this container was asleep another session opened,
+and merged, its own #3761 (Q-1017). Mine is **#3763**. The sixth rule's point exactly: a row whose owner is
+wrong is a row nobody can check.
 
 ⚠️ **One thing to know before editing that file again:** lines ~238–835 are a template literal — the Playwright
 script, run as a subprocess. A backtick in a comment there ends the string, and the parse error points at the

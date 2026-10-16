@@ -223,7 +223,15 @@ describe('Q-989 · an error that waits on a file not written yet is reported apa
     expect(s.waitingErrorsSurfaced).toBe(3);
     const line = writeTypecheckSummary(s, true);
     expect(line).toContain('0 error(s) quoted back in the file just written, 3 waiting on files not written yet');
-    expect(line).toContain('entry-first, expected');
+    // 🔁 REPOINTED, NOT DELETED (Q-1029). This pinned the word "expected", and that word was a claim the
+    // count could not support: a designed wait and a MISTYPED import produce the same `Cannot find module`,
+    // so calling every one of them expected reassured the reader about errors that would never resolve
+    // themselves. The wait is what the next writes MAY add; a path proven wrong is counted on its own line
+    // (tests/aMistypedImportIsNotADesignedWait.test.ts). What this test is really about — that a wait is
+    // reported apart and never remembered as a compile error — is unchanged and still asserted here.
+    expect(line).toContain('entry-first');
+    expect(line).toContain('may add');
+    expect(line, 'and no mistyped path in this fixture, so nothing is counted apart').not.toContain('mistyped import');
     // Workspace memory feeds the reviewer; a designed wait is not a compile error to remember.
     expect(getWorkspaceMemory(ws).openErrors().filter((e) => /^write-typecheck:/.test(String(e.text ?? '')))).toHaveLength(0);
   });

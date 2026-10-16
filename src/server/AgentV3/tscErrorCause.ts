@@ -155,6 +155,103 @@ export function exportTargetCandidates(errors: readonly TscError[] | null | unde
   return bases.flatMap((b) => [...TS_EXTENSIONS.map((x) => `${b}${x}`), ...TS_EXTENSIONS.map((x) => `${b}/index${x}`)]);
 }
 
+/** The extensions a relative specifier may resolve through, in the order a bundler tries them. */
+const RESOLVE_AS = [...TS_EXTENSIONS, ...TS_EXTENSIONS.map((x) => `/index${x}`)];
+
+const normPath = (k: string): string => String(k ?? '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
+
+/** Does the build already HOLD a file at this extension-less target? */
+function heldAt(target: string, sources: Readonly<Record<string, string>>): string | null {
+  const have = new Set(Object.keys(sources || {}).map(normPath));
+  for (const ext of RESOLVE_AS) if (have.has(`${target}${ext}`)) return `${target}${ext}`;
+  return null;
+}
+
+/**
+ * A mistyped relative import: the module is missing, and a file the build ALREADY HOLDS is the same path
+ * but for its capitalisation, or the specifier carries an extension the resolver will not take. PURE.
+ *
+ * 🔴 WHY THIS IS NEEDED, AND WHY IT IS DELIBERATELY NARROW (Q-1029, found reviewing Q-989). Every
+ * `Cannot find module './x'` used to be read as the entry-first order working as designed — "waiting on
+ * files not written yet … expected" — and the note that follows tells the model *"Do NOT rewrite this
+ * file; write or update ./x next"*. For a TYPO that instruction is actively wrong: it sends the model to
+ * CREATE a file at the misspelled path instead of fixing one import line. That is the same shape as
+ * `exportedElsewhere` (candy report 7da1cdca), where a remedy was claimed in another file while the real
+ * fix was the import — fixed there for "has no exported member" and never for "cannot find module".
+ *
+ * 🔒 THE CLASS: "the remedy is elsewhere" claimed without evidence that the elsewhere is REAL. So this
+ * claims a typo only on evidence that cannot be anything else:
+ *
+ *   · a held file whose path differs ONLY in capitalisation — `./Components/Nav` against `components/Nav`.
+ *     No planned file can differ from an existing one only in case: two such files cannot coexist in the
+ *     build, and the import would resolve on a case-insensitive disk and fail in the Docker image;
+ *   · a specifier that spells out `.ts`/`.tsx` (or `.js`/`.jsx` for a file that is TypeScript) — the
+ *     resolver never takes those, and the file it names is right there.
+ *
+ * A near-miss by one character is NOT claimed: `Card.tsx` planned while `Cart.tsx` exists is an ordinary
+ * wait, and a false "your import is mistyped" would be the opposite defect. Those keep today's reading,
+ * and `nearlyHeldImport` offers the close match as a POSSIBILITY without deciding (see its note).
+ */
+export function mistypedImport(
+  e: TscError,
+  sources: Readonly<Record<string, string>> = {},
+): { spec: string; held: string; why: 'case' | 'extension' } | null {
+  const spec = (CANNOT_FIND_MODULE_RE.exec(String(e?.message ?? '')) ?? [])[1] ?? '';
+  if (!spec.startsWith('.')) return null;
+  const target = resolveRelativeSpecifier(e?.file ?? '', spec);
+  if (!target || heldAt(target, sources)) return null;
+  // An extension the resolver will not take, naming a file that is there.
+  const stripped = target.replace(/\.(?:tsx?|jsx?)$/, '');
+  if (stripped !== target) {
+    const held = heldAt(stripped, sources);
+    if (held) return { spec, held, why: 'extension' };
+  }
+  // The same path but for its capitalisation.
+  const lower = target.toLowerCase();
+  for (const key of Object.keys(sources || {})) {
+    const k = normPath(key);
+    const base = k.replace(/\.(?:tsx?|jsx?)$/, '').replace(/\/index$/, '');
+    if (base !== target && base.toLowerCase() === lower) return { spec, held: k, why: 'case' };
+  }
+  return null;
+}
+
+/** How many characters two strings of the same length differ in, or Infinity when the lengths differ. */
+function differingChars(a: string, b: string): number {
+  if (a.length !== b.length) return Infinity;
+  let n = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++;
+  return n;
+}
+
+/**
+ * A held file one character away from a missing import's target — offered as a POSSIBILITY, never as a
+ * verdict (Q-1029). PURE.
+ *
+ * `Card.tsx` planned while `Cart.tsx` exists is a real and ordinary wait, so this cannot decide; what it
+ * can do is stop the build from stating only one of the two readings. The note says the wait MAY resolve
+ * itself and names the close match, so a typo costs one glance instead of a created file and three
+ * rewrites. Only ONE candidate ever qualifies: two equally close names are no evidence at all.
+ */
+export function nearlyHeldImport(
+  e: TscError,
+  sources: Readonly<Record<string, string>> = {},
+): { spec: string; held: string } | null {
+  if (mistypedImport(e, sources)) return null; // certain already — not a possibility
+  const spec = (CANNOT_FIND_MODULE_RE.exec(String(e?.message ?? '')) ?? [])[1] ?? '';
+  if (!spec.startsWith('.')) return null;
+  const target = resolveRelativeSpecifier(e?.file ?? '', spec);
+  if (!target || heldAt(target, sources)) return null;
+  const hits: string[] = [];
+  for (const key of Object.keys(sources || {})) {
+    const k = normPath(key);
+    const base = k.replace(/\.(?:tsx?|jsx?)$/, '').replace(/\/index$/, '');
+    if (base !== target && differingChars(base, target) === 1) hits.push(k);
+    if (hits.length > 1) return null; // ambiguous — say nothing
+  }
+  return hits.length === 1 ? { spec, held: hits[0] } : null;
+}
+
 /**
  * The OTHER file an error's remedy lives in — or null when the fix belongs in the file that errored.
  *
@@ -171,6 +268,8 @@ export function remedyFileFor(e: TscError, sources: Readonly<Record<string, stri
   const message = String(e?.message ?? '');
   const missing = CANNOT_FIND_MODULE_RE.exec(message);
   if (missing) {
+    // A MISTYPED PATH IS NOT A FILE SOMEBODY IS ABOUT TO WRITE (Q-1029). The remedy is in the importer.
+    if (mistypedImport(e, sources)) return null;
     const target = resolveRelativeSpecifier(e?.file ?? '', missing[1] ?? '');
     return target || null;
   }

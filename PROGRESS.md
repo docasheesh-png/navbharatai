@@ -96298,6 +96298,39 @@ found by this change's own test, not by a reader.
 `tests/theNotesExistBeforeAnyLanePlans.test.ts`'s file-budget pin was widened from the telemetry budget to BOTH
 budgets, so the property it already claimed is now actually checked where the model reads it.
 
+## 2026-10-16 — Q-1029: a mistyped import is not a designed wait (#3765)
+
+The row was about a sentence; the sentence was the smaller half. `remedyFileFor` returned the resolved target
+for **any** `Cannot find module './x'`, so a typo and a designed entry-first wait were indistinguishable — and
+the note that follows tells the model *"Do NOT rewrite `<file>` for them; write or update `./x` next"*. For a
+typo that instruction is actively wrong: it sends the model to **create a file at the misspelled path** instead
+of changing one import line, and tells it not to touch the file that is actually broken.
+
+**The class: "the remedy is elsewhere" claimed without evidence that the elsewhere is real.** The same
+function already demands that evidence for *has no exported member* — `exportedElsewhere`, from candy report
+7da1cdca, where the identical wrong claim had a model edit a recipe library four times — and demanded none at
+all one branch along, for the missing-module case.
+
+Fixed in two tiers, because a false *"your import is mistyped"* is the opposite defect:
+
+- **Certain** → `mistypedImport` claims a typo only on evidence that cannot be anything else: a held file
+  differing **only in capitalisation** (two such files cannot coexist in one build, and the import resolves on
+  a case-insensitive disk and then fails in the Docker image), or a **spelled-out extension** the resolver
+  never takes. The remedy moves to the importer and the note names the exact correction.
+- **Possible** → `nearlyHeldImport` offers a one-character match as a *possibility* without deciding.
+  `Card.tsx` planned while `Cart.tsx` exists is a real wait, and two equally close names are no evidence at
+  all — so nothing is claimed, but the reader is no longer told there is nothing to check.
+
+The summary now says the next writes **may** add (never "expected") and counts a proven-wrong path on its own
+line. Q-989's pin on the word "expected" was **repointed with the reason written in**, not deleted.
+
+Locked by `tests/aMistypedImportIsNotADesignedWait.test.ts` (15 tests, tsc's real TS2307 text as the fixture),
+with 722 sibling tests across 39 files green.
+
+⚠️ **A fourth reversion turned out to be a no-op, and that is worth writing down.** The ambiguity guard is
+doubly defended — an in-loop early return *and* the final `hits.length === 1` — so removing either half alone
+still rejects, and the test looked like it had no teeth. It bites when both go. A reversion that silently
+changes nothing produces a meaningless green, which is the same trap as an un-asserted `replace`.
 **Q-1017 closed 2026-10-16:** #3761 merged to `main` as `15d2997`. The row is deleted from
 `BUILD_REPORT_QUEUE.md`'s open table and its ID appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the
 same commit, with the queue edited on a fresh `main` (#3543's lesson, 2026-10-06). Its ledger is the entry above.

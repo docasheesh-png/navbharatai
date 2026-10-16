@@ -96298,6 +96298,9 @@ found by this change's own test, not by a reader.
 `tests/theNotesExistBeforeAnyLanePlans.test.ts`'s file-budget pin was widened from the telemetry budget to BOTH
 budgets, so the property it already claimed is now actually checked where the model reads it.
 
+**Q-1017 closed 2026-10-16:** #3761 merged to `main` as `15d2997`. The row is deleted from
+`BUILD_REPORT_QUEUE.md`'s open table and its ID appended to `docs/claude/BUILD_REPORT_QUEUE_CLOSED.txt` in the
+same commit, with the queue edited on a fresh `main` (#3543's lesson, 2026-10-06). Its ledger is the entry above.
 ## 2026-10-16 — Q-1028: the advice fits the position it is about (#3764)
 
 **The row's own plan was wrong, and measuring it is what showed that.** Q-1028 said to add `FC`,

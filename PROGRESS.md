@@ -96407,3 +96407,43 @@ with the image (10).
 
 ⚠️ **What to watch:** this PR's own CI run is the **first on Node 22**. That run is the real test of the flip,
 and it is the whole point of the change.
+
+## 2026-10-16 — the in-flight sweep: the queue says what is true again
+
+`BUILD_REPORT_QUEUE.md` had **166 rows, of which 61 claimed an open pull request — while ZERO pull requests
+were open.** Under the sixth absolute rule the queue IS the contract, so a row that says work is in flight
+when nothing is makes the whole file unreadable and "is everything fixed?" unanswerable.
+
+**Every owner was resolved to a MERGED pull request before its row was touched** — 26 numbered PRs, the merged
+`claude/new-session-gx9294` branch, #3681 for Q-866 (its title names the row), #3683 for Q-880, #3755 for
+Q-1124. 64 rows closed in all; 166 → 103.
+
+**What a bulk delete would have destroyed, and why I scanned first.** Four of the 61 bodies mentioned something
+unfinished. Three were fine — Q-866's was a historical note, Q-991's remainder is Q-1016 (since fixed), and
+Q-1041's is Q-1042 (a blocked decision). **Q-1011's was not:** it named *"the ROUTE's own direct `runTurn` aux
+calls (plan / blueprint / judge) are also absent from `llmCalls` … a separate change"* with no row of its own.
+It is carried out as **Q-1125** rather than deleted with the row.
+
+**Four rows had stopped in states that do not exist** — `🔵 IN PROGRESS (fixed in this PR; ✅ after the first
+observed pipeline check)` (Q-141), `OPEN (decided — to build after Q-706 verifies)` (Q-820), a state column
+holding `—` while the state text sat in the problem column (Q-1012), and two parked at `✅ RESOLVED …` inside
+the table (Q-1088, Q-1082). Q-141 and Q-820 became 🟡 BLOCKED with all four fields; Q-1012's columns were put
+back; the two ✅ rows were closed. Every row now rests at OPEN or 🟡 BLOCKED — 97 blocked, 6 open.
+
+⚠️ **My own census had a blind spot, and it skipped a resolved row.** Q-1089's problem text contains **escaped
+pipes** (`\|`, from `npm install … 2>&1 \| tail -20`), so a naive `split('|')` read shell text as its state
+column and the first pass missed it — a resolved row that would have said "IN PROGRESS" for ever. Markdown's
+rule is that a cell boundary is a `|` not preceded by a backslash; the guard now encodes that, with the
+incident beside it.
+
+🔴 **And the honest part I did NOT fix: 52 of the 97 blocked rows are missing at least one of the four fields
+the rule requires** (14 lack only *Needs*, 12 lack all four, 7 lack *What* and *Why*, …). Filling them means
+understanding 52 separate blockers, and writing a plausible-sounding *Needs:* for a blocker nobody
+investigated would **invent a fact** — the defect this queue exists to prevent. It is recorded as **Q-1126**
+with its real numbers and pinned as a **ratchet**: `tests/theQueueSaysWhatIsTrue.test.ts` holds it at 52, it
+may only go down, and a new incomplete blocked row cannot push it up.
+
+Also corrected one of my own assertions: the guard first banned ✅ anywhere in a state, which **Q-1086**
+disproved — its state is an honest compound ("🟡 BLOCKED — REQUIRES A DECISION … · the meter half is ✅ RESOLVED
+as NOT-A-DEFECT"), and the strict rule would have forced someone to delete that information. It checks the
+leading token instead. Four reversions bite.

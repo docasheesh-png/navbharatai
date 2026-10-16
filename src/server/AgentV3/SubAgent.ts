@@ -183,6 +183,19 @@ export interface SubAgentDeps {
   onLlmCall?: import('./AgentRunner').AgentRunnerOptions['onLlmCall'];
 
   /**
+   * Turns the child spent only on `update_todo` (todoOnlyTurn.ts, Q-987) — reported into the BUILD's one
+   * tally so `TODO_ONLY_TURNS` counts the whole build and not just the architect's own turns.
+   *
+   * 🔴 WHY IT IS HERE (Q-1030). The counter was wired to the three generation-shaped runners and to every
+   * heal that spreads `baseRunnerOpts`, but never to the child — which is the lane that runs MOST of a
+   * delegating build's turns, exactly as `onLlmCall` above was missing for the same reason. So the figure
+   * the admin reads was an under-count of unknown size, and a measurement whose error is unknown is worse
+   * than a missing one: report 12ef62b2 was autopsied against "6 turns / 20.8 s" with no way to tell
+   * whether the sub-agents added more.
+   */
+  onTodoOnlyTurn?: import('./AgentRunner').AgentRunnerOptions['onTodoOnlyTurn'];
+
+  /**
    * The build's abort signal. Its absence is the one that costs money: a user pressing Stop, or the
    * mid-build cost ceiling firing, ends the ARCHITECT between turns — and the sub-agent it delegated to
    * keeps running and keeps spending, because nothing told it. The `task` tool is additionally exempt
@@ -367,9 +380,12 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       agentRole: role,
       // Billing accounting fix: feed the SAME build-level sink so this sub-agent's tokens are billed.
       usageSink: deps.usageSink,
-      // ── and the five the child never got ───────────────────────────────────────────────────────
+      // ── and the six the child never got (the sixth: Q-1030, 2026-10-15) ───────────────────────
       // Telemetry: without this the majority of a build's model calls appear in no `llmCalls` log.
       onLlmCall: deps.onLlmCall,
+      // The same omission, one measurement over (Q-1030): the child's plan-only turns reach the build's
+      // single tally, so TODO_ONLY_TURNS counts the whole build. A pure count — it changes no behaviour.
+      onTodoOnlyTurn: deps.onTodoOnlyTurn,
       // Stop / the mid-build cost ceiling can finally end a delegated run. `AgentRunner` ends BETWEEN
       // turns, so this cancels nothing in flight and loses no written file — it stops the next call.
       signal: deps.signal,

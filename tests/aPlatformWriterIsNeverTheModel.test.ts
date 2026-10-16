@@ -318,9 +318,19 @@ describe('🔒 every attribution-only pass name is refused EXACTLY as no name is
 
   it('the census found the names this fix added (so the list below is not vacuous)', () => {
     // 'architecture-note', not 'adr-note': #3698 (Q-977) named the ADR writer first, and its name is the one kept.
-    for (const n of ['unused-import-sweep', 'e2e-scaffold', 'architecture-note', 'reviewer-autofix', 'integrity-repair', 'heal-credential-logs', 'vaccine-repair-unlatched', 'design-heal-revert']) {
+    //
+    // 'design-heal-revert' WAS on this list and is deliberately off it now (Q-1013, 2026-10-15). It was
+    // attribution-only, and that was the defect: `design-consistency-heal` may write to a latched app while
+    // its own undo could not, so a page the heal BROKE stayed broken and the freeze protected the breakage.
+    // It is now in ALLOWED_PASSES, so `FREEZE_MEANINGFUL` excludes it from `names` automatically and the
+    // "decides as no name does" assertions below correctly no longer cover it. Seven names remain here, so
+    // this vacuity check still bites.
+    for (const n of ['unused-import-sweep', 'e2e-scaffold', 'architecture-note', 'reviewer-autofix', 'integrity-repair', 'heal-credential-logs', 'vaccine-repair-unlatched']) {
       expect(names).toContain(n);
     }
+    // And the move is asserted, not assumed: the name must now be freeze-meaningful rather than ignored.
+    expect(FREEZE_MEANINGFUL.has('design-heal-revert')).toBe(true);
+    expect(names).not.toContain('design-heal-revert');
   });
   it('none of them collides with a freeze-meaningful name', () => {
     for (const n of names) expect(FREEZE_MEANINGFUL.has(n)).toBe(false);

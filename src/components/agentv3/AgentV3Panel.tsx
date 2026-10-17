@@ -758,6 +758,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // A repository import waiting for the new chat it opened to render (Q-733 — see importRepo).
   const [pendingRepoImport, setPendingRepoImport] = useState<string | null>(null);
   const [showFrameworkPicker, setShowFrameworkPicker] = useState(false);
+  /** The clarity-gate chip set already answered (so it hides once used). */
+  const [quickRepliesUsedTs, setQuickRepliesUsedTs] = useState<number | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   // ── GitHub repo picker (1-click import, admin plan 2026-07-04) ────────────────────────────
   // ghRepos: null = not loaded yet; [] = loaded but the account has no repos.
@@ -1619,6 +1621,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     if ((!text && sendFiles.length === 0) || running) return;
     // Stop live voice dictation the moment the message is sent (never leave the mic recording).
     if (listening) stopVoice();
+    setQuickRepliesUsedTs(state.quickReplies?.ts ?? null); // any new message answers the clarity question
     setInterruptedResume(false); // AP-3 — a new build/turn resolves any "unfinished build" offer
     // A fresh user message resets the Layer-3 auto-continue budgets for the new turn — the pause
     // budget, the plan-continue count, AND the plan-progress watermark (SPM-3), so a typed
@@ -5052,6 +5055,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 COMPACT dropdown down in the input row (near the settings/attach icons) so it doesn't eat
                 a whole row, and stays active during a build for multitasking. Only the command-queue chip
                 remains here, and only when there's something queued (no empty row otherwise). */}
+            {/* CLARITY GATE chips (clarityGate.ts): the one question asked before a vague new build, answered by a tap. */}
+            {!running && state.quickReplies && state.quickReplies.chips.length > 0 && quickRepliesUsedTs !== state.quickReplies.ts && (
+              <div className="px-3 pt-1.5 flex flex-wrap items-center gap-1.5" data-testid="quick-replies">
+                {state.quickReplies.chips.map((c) => (
+                  <button
+                    key={c.label}
+                    type="button"
+                    onClick={() => { setQuickRepliesUsedTs(state.quickReplies?.ts ?? null); void send({ text: c.send, importUrl: '' }); }}
+                    className="px-3 h-7 rounded-full text-xs font-semibold border bg-indigo-500/10 border-indigo-800 text-accent-text hover:text-ink"
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {(() => {
               const pending = queueItems.filter((i) => i.status === 'pending').length;
               const runningQ = queueItems.some((i) => i.status === 'running');

@@ -125,7 +125,7 @@ describe('the planner reads only earlier BUILD requests', () => {
     expect(route).toMatch(/recordRequest\([^)]*'build'\)/);
     expect(route).toMatch(/planningRequest\(\{[^}]*recentTurns/);
     // An unlabelled recordRequest call is a new lane that forgot to say which it is.
-    const unlabelled = route.match(/\.recordRequest\((?:(?!\)).)*\)/g)?.filter((c) => !/'chat'|'build'/.test(c)) ?? [];
+    const unlabelled = route.match(/\.recordRequest\((?:(?!\)).)*\)/g)?.filter((c) => !/'chat'|'build'|'clarify'/.test(c)) ?? [];
     expect(unlabelled).toEqual([]);
   });
 });

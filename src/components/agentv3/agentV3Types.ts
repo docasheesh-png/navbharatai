@@ -154,6 +154,8 @@ export type AgentV3WireEvent =
   // ASK-USER (opt-in): non-blocking clarifications the engine assumed defaults for — shown as a
   // dismissible card the user MAY answer via a follow-up; the build never waits for it.
   | { type: 'clarify'; domain: string; questions: string[]; ts: number }
+  /** Clarity gate: tappable answers to the one question asked before a vague new build. */
+  | { type: 'quick_replies'; chips: Array<{ label: string; send: string }>; ts: number }
   | { type: 'verified'; ok: boolean; headline: string; steps: string[]; ts: number }
   /**
    * What this build has cost SO FAR, in rupees — priced by the same function as the final bill
@@ -285,6 +287,8 @@ export interface AgentV3ClientState {
   /** ASK-USER (opt-in): non-blocking clarifications the engine assumed defaults for on a fresh domain
    *  build — the panel shows a dismissible card; the build never waits for an answer. */
   pendingClarify?: { domain: string; questions: string[] };
+  /** The clarity gate's chips for the question just asked; tapping one sends its text. `ts` identifies the set. */
+  quickReplies?: { chips: Array<{ label: string; send: string }>; ts: number };
   /** What NavBharatAI actually tested in the finished app, shown to the user as proof rather than a claim. */
   verification?: { ok: boolean; headline: string; steps: string[] };
   /** The running build's cost so far in rupees (`cost_so_far`). Cleared when a new build begins. */

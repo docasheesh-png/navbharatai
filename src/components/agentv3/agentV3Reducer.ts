@@ -94,7 +94,7 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
         // The saved copy belongs to the build that produced it. A new build means the copy is of
         // the PREVIOUS app, and framing it during this one would show edits that are not there yet.
         // …and so does the running cost: a new build's figure starts from nothing, never from the last one's.
-        ...(isNewBuild ? { todos: [], agents: {}, snapshotUrl: undefined, snapshotNote: undefined, costSoFarInr: undefined, entryWrittenAt: undefined } : {}),
+        ...(isNewBuild ? { todos: [], agents: {}, snapshotUrl: undefined, snapshotNote: undefined, costSoFarInr: undefined, entryWrittenAt: undefined, quickReplies: undefined } : {}),
       };
     }
 
@@ -306,6 +306,9 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
 
     case 'proposed_steps':
       return { ...state, proposedSteps: { role: event.role, steps: event.steps } };
+
+    case 'quick_replies':
+      return { ...state, quickReplies: { chips: Array.isArray(event.chips) ? event.chips.filter((c) => c && typeof c.label === 'string' && typeof c.send === 'string').slice(0, 4) : [], ts: event.ts } };
 
     case 'clarify':
       // Non-blocking: just record the questions for the panel to surface. The build keeps streaming.

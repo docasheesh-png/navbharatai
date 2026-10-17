@@ -1,4 +1,6 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { clarityGateEnabled, shouldJudgeClarity, judgeClarity, clarifyReply, categoryFromWords, bestGuessPrompt, type ClarityCategory, type QuickReply } from '../AgentV3/clarityGate';
+import { clarityJudgeAsk } from '../AgentV3/clarityJudgeAsk';
 import { platformVoiceEnabled, voiceOf, voiceRequestedIn, eventInUserVoice } from '../AgentV3/platformVoice';
 import { silenceMemoryEnabled, sharedProviderSilenceMemory } from '../AgentV3/providerSilenceMemory';
 import { templateInstantPreviewEnabled, shouldUseSlimPrompt, isTemplateVerifyJob, capTemplateVerifyEstimate } from '../AgentV3/templateVerify';
@@ -11209,11 +11211,18 @@ async function noteBuildOutcome(
      * is asymmetric in the same direction it always is here, and a second opinion that can only ever
      * make the gate NARROWER cannot introduce a new way to refuse a real prompt.
      */
+    // CLARITY GATE (clarityGate.ts) — we asked ONCE already and this is the reply: never ask again; build
+    // the best guess from both messages and say what was assumed.
+    const askedClarifyLastTurn = clarityGateEnabled()
+      && lastRequestTurn !== null && lastRequestTurn.lane === 'clarify'
+      && Date.now() - lastRequestTurn.ts <= OFFER_LIFETIME_MS
+      && intent !== 'edit_existing' && rawAttachments.length === 0
+      && zipImports.length === 0 && !(typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '');
     const namesNothingToBuild =
       (!inputCheck.buildable && inputCheck.reason === 'no-object') || readerSaysUnclear;
     // db07e0af: the workspace is judged by CONTENT (our starter is not a project) and the conversation by
     // what it names (a "hi" is not a request) — see `shouldAskWhatToBuild`.
-    const askWhatToBuild = namesNothingToBuild && shouldAskWhatToBuild({
+    const askWhatToBuild = !askedClarifyLastTurn && namesNothingToBuild && shouldAskWhatToBuild({
       namesNothing: true,
       editIntent: intent === 'edit_existing',
       workspaceHoldsOnlyOurStarter: await workspaceHoldsOnlyOurStarter(),
@@ -11224,6 +11233,28 @@ async function noteBuildOutcome(
     if (askWhatToBuild) {
       console.log('[AGENTV3] the prompt orders something built but names nothing — asking the user instead of inventing an app');
       intent = 'chat';
+    }
+    /** Set when this turn answers with the clarity question + chips instead of building. */
+    let clarity: { category: ClarityCategory } | null = askWhatToBuild ? { category: categoryFromWords(prompt) } : null;
+    if (askedClarifyLastTurn && lastRequestTurn) {
+      console.log('[AGENTV3] clarity gate: this is the reply to our one question — building the best guess, no second question');
+      prompt = bestGuessPrompt(lastRequestTurn.text, typedPrompt);
+      intent = 'new_build';
+    } else if (!askWhatToBuild && intent === 'new_build' && shouldJudgeClarity({
+      enabled: clarityGateEnabled(),
+      newBuild: true,
+      workspaceHoldsOnlyOurStarter: await workspaceHoldsOnlyOurStarter(),
+      earlierBuildableRequest: recentRequests.some((t) => typeof t === 'string' && assessBuildInput(t).buildable && t.trim() !== String(prompt ?? '').trim()),
+      importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
+      attachments: rawAttachments.length,
+      askedLastTurn: false,
+      alreadyAsking: false,
+      prompt: String(prompt ?? ''),
+      isStarterPrompt: goldenScaffoldForPrompt(String(prompt ?? '')) !== null,
+    })) {
+      const v = await judgeClarity(prompt, clarityJudgeAsk);
+      console.log(`[AGENTV3] clarity judge: ${v.verdict} (${v.category}, ${v.ms}ms)`);
+      if (v.verdict === 'vague') { clarity = { category: v.category }; intent = 'chat'; }
     }
     /**
      * 🔴 THE APP THEY ASKED ABOUT IS NOT HERE (autopsy 0d297b25). "The WORKNEX app is already developed
@@ -11462,7 +11493,7 @@ async function noteBuildOutcome(
         // say plainly that we did not understand what, and ask. Steering the model (rather than
         // returning the canned `inputCheck.message`) is what keeps the question in the USER'S OWN
         // LANGUAGE, which LANGUAGE_RULE already governs on this path.
-        const clarifyWhatToBuild = askWhatToBuild;
+        const clarifyWhatToBuild = askWhatToBuild || clarity !== null;
         // Q-200: the turn was diverted because a build was not confirmed, and no more specific answer took it.
         // The reply answers, then offers; the turn is remembered as an offer so a "yes" builds this request.
         const answerThenOffer = offerToBuild && !askFramework && !clarifyWhatToBuild && !askUnrelated && !answerProjectElsewhere
@@ -11526,7 +11557,14 @@ async function noteBuildOutcome(
         // persisted turn, so the Download button is there live AND after the chat is reopened.
         let sheetFile: SheetFileRef | null = null;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
-        if (echoesPlatformNotice) {
+        /** The clarity question's chips, when this turn asks it (clarityGate.ts). */
+        let clarifyChips: QuickReply[] | null = null;
+        if (clarity && !echoesPlatformNotice) {
+          // Written by the PLATFORM, not a model: one short question in the user's language + 3–4 chips. Billed 0.
+          const r = clarifyReply(clarity.category, voiceOf(String(prompt ?? '')));
+          reply = r.text;
+          clarifyChips = r.chips;
+        } else if (echoesPlatformNotice) {
           reply = platformNoticeEchoReply(recentRequests.find((r) => !isPlatformNoticeEcho(r)) ?? null);
         } else if (answerSpreadsheet) {
           // A turn whose whole point is a FILE must never fall through to a build: every outcome of
@@ -11621,7 +11659,8 @@ async function noteBuildOutcome(
           const chatWsId = deriveWorkspaceId(userId, req.body?.sessionId);
           const chatMem = getWorkspaceMemory(chatWsId);
           // Our own notice is not one of the user's requests, and must never become "earlier context".
-          if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, askFramework ? 'framework' : answerThenOffer ? 'offer' : 'chat');
+          if (clarifyChips) { if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'clarify'); }
+          else if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, askFramework ? 'framework' : answerThenOffer ? 'offer' : 'chat');
           // Hydration at intent-time is a 3-second RACE, so it can be marked done while the read never
           // landed — `saveWorkspaceMemoryFor` checks the read itself, not the re-entrancy flag.
           void saveWorkspaceMemoryFor(chatWsId, chatMem).catch(() => {});
@@ -11631,6 +11670,7 @@ async function noteBuildOutcome(
         const chatEvents = new AgentEventStream(500, requestArrivedAt);
         chatEvents.subscribe((e) => send(e), false);
         chatEvents.emit({ type: 'narration', agent: 'architect', text: reply, ts: Date.now(), ...(sheetFile ? { file: sheetFile } : {}) });
+        if (clarifyChips && clarifyChips.length > 0) chatEvents.emit({ type: 'quick_replies', chips: clarifyChips, ts: Date.now() });
         chatEvents.emit({ type: 'done', ok: true, summary: reply, ts: Date.now() });
         // billedUsd: 0 — the cheap free router is not billed to the user as a build.
         send({ type: 'result', ok: true, summary: reply, steps: 0, billedUsd: 0, billedInr: 0 });

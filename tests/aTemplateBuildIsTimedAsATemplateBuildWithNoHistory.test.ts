@@ -52,7 +52,9 @@ describe('1 · 🔒 a seeded build learns from builds of its own TIER — and is
   it('🔒 the reader and the writer key a seeded build the same way, tier included', () => {
     const route = read('src/server/routes/agentv3.ts');
     expect(route).toContain('etaKeyForBuild(scaffoldWillSeed, seededScaffold?.tier ?? null)');
-    expect(route).toContain('taskType: etaKeyForBuild(goldenPreseeded, goldenPreseededTier),');
+    // PIN WIDENED (autopsy ca99778e): a chip the user ADDED words to seeds its template but is a real build, so the
+    // writer keys it as one — exactly as the reader does (`seededScaffold` is the exact-chip match). One helper still.
+    expect(route).toContain('taskType: etaKeyForBuild(templateOnlyBuild(goldenPreseeded, prompt), goldenPreseededTier),');
     expect(route).toContain('goldenPreseededTier = golden.tier;');
     expect(route.match(/etaKeyForBuild\(/g)!.length).toBe(2); // the reader and the writer — one helper
   });

@@ -195,6 +195,10 @@ describe('4 · the reopen line can be measured', () => {
 
 describe('5 · 🔒 the corrections of the adversarial review', () => {
   it('a rung silent again on its re-probe is said to be silent again — never "crawled again"', async () => {
+    // The re-probe only exists on the kill-switch path since autopsy ca99778e (a silent rung is sticky for the
+    // build by default — tests/brCa99778eAutopsy.test.ts); the wording it pins must still hold there.
+    const prevSticky = process.env.AGENTV3_SILENCE_STICKY;
+    process.env.AGENTV3_SILENCE_STICKY = 'off';
     const clock = { t: 0 };
     const reasons: string[] = [];
     const answer = { text: 'ok', toolUses: [], stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 }, rawContent: [], model: 'kimi-k2.7-code' };
@@ -208,6 +212,7 @@ describe('5 · 🔒 the corrections of the adversarial review', () => {
     expect(reasons.length).toBeGreaterThanOrEqual(2);
     for (const r of reasons) expect(r, r).not.toMatch(/crawl|far below|mid-answer/);
     expect(reasons.at(-1)).toMatch(/it was silent again when tried once more/);
+    if (prevSticky === undefined) delete process.env.AGENTV3_SILENCE_STICKY; else process.env.AGENTV3_SILENCE_STICKY = prevSticky;
   });
 
   it('🔴 a silence we WAITED OUT is silence too — still a timeout to every routing reader', async () => {

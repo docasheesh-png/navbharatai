@@ -299,8 +299,32 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         customerNameClean = customerNameClean.substring(0, 40);
       }
 
-      // Secure return_url generation with SSL enforcement for cloud preview environment
-      const host = req.get('host') || 'localhost:3000';
+      /**
+       * Q-889 (b) — THE HOST HEADER IS CHECKED FOR SHAPE, NOT TRUSTED.
+       *
+       * `return_url` is where the payment provider sends the person after they pay, and it was built
+       * straight from `req.get('host')` — a value the CLIENT sends. A request carrying a crafted Host
+       * would have the provider return the payer to that host instead of to this app.
+       *
+       * ⚠️ WHY A SHAPE CHECK AND NOT A CONFIGURED ORIGIN, which is the stronger fix. There is no
+       * canonical-origin constant in this repo today (searched: `PUBLIC_ORIGIN`, `APP_ORIGIN`,
+       * `APP_URL`, `SITE_URL` — the only hits belong to GENERATED apps' database provisioning, not to
+       * the platform). Introducing one means a new Cloud Run key, and a key that is unset or wrong
+       * does not degrade this flow — it BREAKS it, because the payer is never returned. With CI down
+       * (Q-1131) that is the trade the first absolute rule forbids, so the configured-origin version
+       * is Q-1134 and waits for the admin.
+       *
+       * This check costs nothing and cannot refuse a real deployment: a legitimate Host is a bare
+       * `host[:port]` of letters, digits, dots and hyphens. The vectors a crafted Host uses — `@` to
+       * smuggle a different authority, a second value after a comma, whitespace, a slash, a scheme —
+       * are exactly what the shape rejects. A request whose Host is not a host is a malformed
+       * request, so it is refused rather than answered with a guess.
+       */
+      const rawHost = req.get('host') || 'localhost:3000';
+      if (!/^[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(rawHost)) {
+        return sendSafeError(res, 400, 'That request could not be verified. Please reload the page and try again.', `rejected Host: ${rawHost.slice(0, 80)}`, 'payment create-order host');
+      }
+      const host = rawHost;
       const protocol = (host.includes('localhost') || host.includes('127.0.0.1')) ? 'http' : 'https';
       const secureReturnUrl = `${protocol}://${host}/api/payment/verify-redirect?order_id={order_id}`;
 
@@ -570,8 +594,23 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
   });
 
   app.get('/api/payment/verify-redirect', (req: Request, res: Response) => {
-    const order_id = req.query.order_id as string;
-    res.redirect(`/?payment=check&order_id=${order_id}`);
+    /**
+     * Q-889 (a) — the value is ENCODED, and it is ONE value.
+     *
+     * It was interpolated raw: `/?payment=check&order_id=${order_id}`. The row's own assessment is
+     * right that this is not an open redirect — the target is a fixed same-origin path and the value
+     * only ever lands in a query string — but an unencoded value can still carry `&`, `#` or `=` and
+     * so add or overwrite other parameters on the page it lands on.
+     *
+     * ⚠️ AND IT WAS NOT ALWAYS A STRING. `req.query.order_id` is typed `as string` here, which is a
+     * claim and not a check: `?order_id=a&order_id=b` makes Express hand back an ARRAY, and
+     * `encodeURIComponent(['a','b'])` would quietly encode "a,b". The first value is taken, so the
+     * cast is now true rather than asserted.
+     */
+    const raw = req.query.order_id;
+    const orderId = Array.isArray(raw) ? raw[0] : raw;
+    const safe = typeof orderId === 'string' ? encodeURIComponent(orderId) : '';
+    res.redirect(`/?payment=check&order_id=${safe}`);
   });
 
   app.post('/api/payment/redeem-coupon', paymentLimiter, async (req: Request, res: Response) => {

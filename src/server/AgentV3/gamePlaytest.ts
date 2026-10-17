@@ -220,6 +220,10 @@ export function gamePlaytestConfig(previewUrl: string, storageState: string | nu
     // How long LEFT is held before the steering snapshot (Q-1097) — the script MEASURES over this window
     // and records the vectors; the reading itself is arithmetic the verdict does, in testable code.
     turnReadMs: TURN_READ_MS,
+    // The frames a FLOW read needs before it means anything (Q-1132). Handed to the script so the sampler
+    // extends its window for a loaded page instead of returning a read the verdict has to call "could not
+    // tell" — the sibling Q-1038 fixed for the turn sample and this one kept.
+    flowMinFrames: FLOW_MIN_FRAMES,
     noise: CONSOLE_NOISE.source,
     noiseFlags: CONSOLE_NOISE.flags,
     // The start-control shape (see `startLabelRank`) — the same regexes, handed to the browser as sources.
@@ -379,8 +383,20 @@ async function compare(page, a, b) {
 // pair that is faster than the search (an edge of it) or barely changed says nothing; the total, and how many
 // pairs agreed on the sign, go to the score, which judges only when they are firm. It stops at 14 DRAWN frames, not at
 // a fixed time: a page a loaded machine draws slowly is given up to \`ms\` to draw them (Q-869).
-async function sampleFlow(page, axis, ms) {
-  return page.evaluate(async ([axis, ms]) => {
+//
+// 🔴 AND \`ms\` ALONE WAS STILL A WALL CLOCK — Q-1132, and it is Q-1038's class in the sibling that hunt
+// missed. Q-1038 fixed the TURN sample to wait for DRAWN FRAMES because a starved page read null; this
+// sampler kept its 3 s window, so a machine running the whole 2717-file suite beside it drew too few
+// frames, fewer than 3 voting pairs were collected, and firmFlow answered 0 — "could not tell". The
+// verdict stayed honest (never the wrong direction), which is why it took a red CI run to notice: the
+// test asks for a definite reading the probe could not promise. Measured on this container, the
+// chase-front case read 0 inside the full suite and -1 on its own.
+//
+// So the window EXTENDS while the minimum is unmet, up to a hard ceiling a dead canvas still ends on,
+// and the read now reports how many frames it actually saw so a caller can tell starvation from
+// disagreement (flowStarved below — the same shape as probeStarved for the scene read).
+async function sampleFlow(page, axis, ms, minFrames) {
+  return page.evaluate(async ([axis, ms, minFrames]) => {
     let c = null, area = 0;
     for (const el of document.querySelectorAll('canvas')) {
       const b = el.getBoundingClientRect();
@@ -394,8 +410,12 @@ async function sampleFlow(page, axis, ms) {
     const g = off.getContext('2d', { willReadFrequently: true });
     const frames = [];
     const end = performance.now() + ms;
+    // The hard ceiling. A canvas that never draws again must still end the probe, so the extension is
+    // bounded rather than open: three times the window, and not one frame past what the verdict needs.
+    const hardEnd = performance.now() + ms * 3;
     let last = -1;
-    while (performance.now() < end && frames.length < 14) {
+    while (frames.length < 14 && performance.now() < hardEnd
+      && (performance.now() < end || frames.length < minFrames)) {
       await new Promise((r) => requestAnimationFrame(r));
       try { g.clearRect(0, 0, W, H); g.drawImage(c, 0, 0, W, H); } catch (e) { return null; }
       const d = g.getImageData(0, 0, W, H).data;
@@ -452,8 +472,8 @@ async function sampleFlow(page, axis, ms) {
       total += sum;
       if (sum > 0.25) pos++; else if (sum < -0.25) neg++;
     }
-    return { total: Math.round(total * 10) / 10, pos, neg, pairs, edge, read };
-  }, [axis, ms]);
+    return { total: Math.round(total * 10) / 10, pos, neg, pairs, edge, read, frames: frames.length };
+  }, [axis, ms, minFrames]);
 }
 
 // The controls that look like they start the game, best first — the in-browser half of startLabelRank
@@ -695,7 +715,7 @@ try {
     out.gas = Math.round((await compare(page, g0, g1)).change * 100) / 100;
     // Q-861: which way the road moves while the vehicle drives — down the screen under a camera that looks the way
     // it drives, UP under one that sits in front of it looking back (the headlights view).
-    if (out.gas >= cfg.stillBelow) out.gasFlow = await sampleFlow(page, 'y', 3000).catch(() => null);
+    if (out.gas >= cfg.stillBelow) out.gasFlow = await sampleFlow(page, 'y', 3000, cfg.flowMinFrames).catch(() => null);
     for (const k of ['ArrowUp', 'KeyW']) await page.keyboard.up(k).catch(() => {});
     // A SECOND, LONGER LOOK BEFORE "THE CAR NEVER MOVES" (Q-865, Q-869). Working games read as stalled on the first
     // hold: one still showing "Get ready…" (a countdown freezes the car on purpose — measured: a 9 s one), a slow car
@@ -765,7 +785,7 @@ try {
     // The turning leg's length is sampleFlow's own 3 s, which is generous in frames even when loaded —
     // but it is counted too, so the probe reports the frames it really saw rather than assuming them.
     const turnFrom = await drawn(page);
-    out.steerFlow = await sampleFlow(page, 'x', 3000).catch(() => null);
+    out.steerFlow = await sampleFlow(page, 'x', 3000, cfg.flowMinFrames).catch(() => null);
     const legTurn = { frames: (await drawn(page)) - turnFrom };
     const s1 = await snapScene(page);
     for (const k of ['ArrowUp', 'KeyW', 'ArrowLeft', 'KeyA']) await page.keyboard.up(k).catch(() => {});
@@ -852,7 +872,7 @@ try {
 
 /** One flow read (Q-861): the summed sub-pixel shift over consecutive frames at 160×90, how the frame pairs voted,
  *  and how many strip reads moved too fast to read (`edge`) against how many could be read (`read`). */
-export interface FlowRead { total: number; pos: number; neg: number; pairs: number; edge?: number; read?: number }
+export interface FlowRead { total: number; pos: number; neg: number; pairs: number; edge?: number; read?: number; frames?: number }
 
 /**
  * A three.js game read from its scene (Q-869). `moved`: how far the vehicle went under the accelerator (world units);
@@ -1107,6 +1127,35 @@ export const STALLED_VEHICLE_FIX = 'Holding the accelerator (Up / W) moved nothi
  * judged only once the camera was proven to look forward. PURE.
  */
 export const FLOW_MIN_PX = 3;
+/**
+ * The agreeing frame PAIRS a flow read needs before `firmFlow` will call a direction, and the frames that
+ * takes. One definition: the number lived only as a literal `3` inside `firmFlow`, so nothing upstream
+ * could know what the sampler had to collect (Q-1132).
+ */
+export const FLOW_MIN_PAIRS = 3;
+export const FLOW_MIN_FRAMES = FLOW_MIN_PAIRS + 1;
+
+/**
+ * Did the read see too few frames to call anything — as opposed to seeing enough and finding no firm
+ * direction? The same distinction `probeStarved` makes for the scene read, and for the same reason: a
+ * starved read and a disagreeing one both come back `0` from `firmFlow`, and only one of them is a fact
+ * about the game. PURE.
+ */
+export function flowStarved(f: FlowRead | null | undefined): boolean {
+  if (!f) return true;
+  const frames = f.frames;
+  if (typeof frames === 'number' && Number.isFinite(frames)) return frames < FLOW_MIN_FRAMES;
+  // An older read carries no frame count. Its votes are the next best evidence of how much it saw.
+  return ((f.pos ?? 0) + (f.neg ?? 0)) < FLOW_MIN_PAIRS;
+}
+
+/** Why a flow read says nothing, in the words a report can print. null when it is not starved. PURE. */
+export function flowStarvedNote(f: FlowRead | null | undefined): string | null {
+  if (!flowStarved(f)) return null;
+  if (!f) return 'the canvas was never read — no canvas large enough to measure was found on the page';
+  const frames = typeof f.frames === 'number' ? f.frames : (f.pos ?? 0) + (f.neg ?? 0);
+  return `the page drew only ${frames} frame(s) to measure, fewer than the ${FLOW_MIN_FRAMES} this reading needs`;
+}
 export const CAMERA_FACES_VEHICLE_FIX = 'Driving forward moves the road UP the screen — the camera sits in front of the vehicle looking back at it, so the player sees its headlights and LEFT looks like RIGHT. Put the camera BEHIND the vehicle (offset along its backward direction, looking along its heading); in the kit, ctx.follow(car) does this.';
 export const STEERING_MIRRORED_FIX = 'Holding LEFT turned the view to the RIGHT — the steering is mirrored. LEFT must turn the vehicle to the driver\'s left and RIGHT to the right; in the kit, driveVehicle already does this.';
 
@@ -1179,7 +1228,7 @@ export function firmFlow(f: FlowRead | null | undefined): -1 | 0 | 1 {
   if (!f || typeof f.total !== 'number' || !Number.isFinite(f.total) || Math.abs(f.total) < FLOW_MIN_PX) return 0;
   const agree = f.total > 0 ? f.pos : f.neg;
   const voted = (f.pos ?? 0) + (f.neg ?? 0);
-  if (agree < 3 || agree < Math.ceil(voted * 0.75)) return 0;
+  if (agree < FLOW_MIN_PAIRS || agree < Math.ceil(voted * 0.75)) return 0;
   // Most strip reads faster than the search: what was read may be aliased. No verdict. (A near strip alone being too
   // fast is normal on a slow frame rate — the farther strips of the same pairs still read true.)
   const edge = f.edge ?? 0;

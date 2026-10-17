@@ -96761,3 +96761,58 @@ shared door must be MORE visible to a census than the copies it replaces, never 
 
 That is what safeguard #5 is for, and why the gate runs LAST on the final state — the change was
 plausible, typechecked clean, and was wrong in a way only the repo's own accumulated rules could see.
+
+---
+
+## 2026-10-17 — Q-1126 batch 2: 48 → 40, and the first thing it audited was batch 1's own measuring stick
+
+**Written after #3781 (batch 1) merged, and deliberately NOT a redo of it.** Two sessions took Q-1126
+within the same hour: #3781 was opened while this one was running its gate, and it merged first, so its
+six completed rows stand and nothing of theirs is reinstated or rewritten here (Q-107, Q-108 and Q-109
+were filled on both branches; theirs is what remains). What this batch adds is the part #3781 did not
+touch — **the detector those six rows were measured with.**
+
+**It was lying in both directions.** `gapsOf` had been written from the four field names as the TEST
+spells them, not as CLAUDE.md spells them. The sixth rule's own wording is *"what is **required** to
+unblock it"*. So:
+
+- It **FLAGGED six rows that were complete all along**, whose only sin was writing `**Required:**` — the
+  rule's own word — instead of `**Needs:**`: Q-111, Q-126, Q-133, Q-706, Q-819, Q-1012. Each was opened
+  and verified by eye to carry all four. Q-111 is the clearest: *What · Why blocked · Required · Already
+  tried*, every one present, counted as a gap.
+- It **PASSED one row with a real gap**: a bare `/because/` anywhere in the prose counted as a `Why`
+  FIELD, so **Q-1086** — which never wrote its reason down — read as complete.
+- And `/\*\*What/` also matched `**What is required:**`, so **one field could satisfy two**.
+
+So it was manufacturing work in one place while hiding it in another. That is the fifth rule's own
+lying-analyzer category, and it is the reason batch 1's "48" was never the real number.
+
+**Corrected to labelled fields only**, with the synonyms the rows actually use (`Required` / `To unblock`
+for needs; `Blocked` / `Blocker` / `Waiting on` for what; `Cause` / `Reason` for why; `Measured` /
+`Investigated` / `Checked` / `Evidence` for tried), and `What is required` excluded from `what` by a
+negative lookahead. Re-measured on batch 1's own unchanged file the honest count was **42 — lower than
+48** — so the more truthful detector moved the ratchet in the only direction it is allowed to move. Had
+it come out higher the number would have gone up with that reason stated, not been hidden; it did not
+have to.
+
+**Two further fills then took it to 40**, each from the row's own evidence rather than plausible prose:
+
+| Row | What the evidence said |
+|---|---|
+| **Q-008** | The admin already gave the decision RULE (2026-10-11) and the trial window has passed. It is not waiting on a decision and not on more time — it waits on somebody READING `byStrictCohort`, which lives in production telemetry no session can reach. |
+| **Q-1086** | Its reason written down as a field: a routing decision reserved to the admin, because it changes behaviour on real builds. The row already had What, Needs and Tried; only the reason was missing, and it was missing precisely where the old detector could not see it. |
+
+**Locked as a CLASS, not a count.** The count assertion alone would go green again under the old regexes
+once enough rows were filled, so three fixtures pin the detector's behaviour directly: a row written with
+`**Required:**` is complete; a reason buried in prose is NOT a `Why` field; and `**What is required:**`
+satisfies `needs` but never `what`.
+
+**Reversion proof.** Old detector restored → 4 tests fail (the count plus all three fixtures). Q-1086's
+reason removed again → the count fails at 41 > 40. Restored → 14 pass.
+
+**Q-1126 stays OPEN with 40 to go.** And one process note worth keeping, because it cost a full gate run:
+the open-PR check that safeguard #6 requires was done at the start of this work and returned only #3779.
+#3781 was opened after that and merged before this branch pushed. Checking once per session is not enough
+on this repo — it has to be immediately before the work, and even then a PR opened mid-gate is invisible.
+The cheap defence that actually worked was comparing the two branches afterwards and keeping only the
+non-overlapping half.

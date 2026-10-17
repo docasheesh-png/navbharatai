@@ -96642,3 +96642,32 @@ merged while #3769 was in CI and took both IDs for its own rows (the `llmCalls` 
 blocked rows missing a required field). Their rows are on `main`, so the IDs are theirs; mine moved. The ID
 rule — above every ID in the file AND in open PRs' diffs of it — cannot see a row that is in neither yet,
 which is what a concurrent merge is. Nothing else about either change moved.
+
+### 2026-10-17 — Q-1127 is ANSWERED, and its workaround goes with it (close-out of #3769)
+
+**Two sessions hit the same wall on the same day and only one of them went through it.** On 2026-10-16
+`AgentRunner.test.ts > recovers from an oversized turn via aggressive compaction` timed out at the global
+20 s twice — first on #3768, then on #3769 — on two diffs that could not reach it. #3768 did the honest
+thing with what it had: it gave the test an explicit 60 s, ruled out `compactMessagesForPersist` (50 calls
+in 1 ms on that exact turn), and recorded the remainder as **Q-1127 — OPEN**, in its own words *"why that
+scaffolding costs 12 s when the compaction is instant… if the cost is in the runner rather than the
+fixture, a user's oversized turn pays it too."* Its named next step was to profile `buildRunner`, with the
+fake store's per-append `JSON.stringify` as first suspect.
+
+**The suspect was wrong, and the instinct behind the row was right.** The cost was not in the fixture. It
+was in the product, on the agent's critical path: timed through the real write door, `guardedWrite` 22 ms,
+`writeSteeringNotes` **12,044 ms**, of which `vehicleShapeHalves` alone was **11,884 ms** — the
+hand-written-vehicle scan, whose patterns all begin with an unbounded greedy word-character prefix and go
+O(run²) on a long word run. Every real build paid it, at every write. That is Q-1128 (#3769, merged), and
+with the run bounded this test went from **12,174 ms to 22 ms**.
+
+**So Q-1127 closes as RESOLVED, not as a duplicate** — the question it asked was answered with a
+measurement and a merged fix, and the answer contradicts its own first suspect, which is worth keeping.
+
+**And the 60 s bound goes, because its defect is fixed.** A margin of 1.65× was the reason for it; the
+margin is now about 900×, so the explicit clock is a workaround outliving what it worked around — the
+exact class Q-1129 closed one row earlier, met again within a day. Its comment is rewritten to record the
+whole arc rather than deleted, so the next reader finds the answer where the question was.
+
+**Three rows close here** — Q-1127, Q-1128 and Q-1129 — with their ids appended to the closed file in the
+same commit, on a fresh `main`.

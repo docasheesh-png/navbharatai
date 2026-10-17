@@ -115,7 +115,12 @@ export interface NbaiDomainConnectProps {
    * For an app with a server half this screen's verdict says *"deploy the whole app to a host that can
    * run a server, then point this domain there"* — an instruction with no control beside it, on a
    * screen two levels deep. The controls that do it ("Put this app in my GitHub", "Deploy backend")
-   * live on the Publish sheet's server-half card. Absent ⇒ the sentence stands alone, as before.
+   * live on the Publish sheet's server-half card.
+   *
+   * 🔁 ABSENT NO LONGER MEANS SILENCE (admin report 2026-10-17). This used to read "Absent ⇒ the
+   * sentence stands alone, as before" — and a host that cannot navigate is exactly the host whose
+   * users need the path most. Absent now renders `deployBackendWayForward`: the same action, named
+   * in words, with the exact route to the controls.
    */
   onDeployBackend?: () => void;
 }
@@ -447,6 +452,45 @@ export function connectStage(
  *   • 'done'    — a tick.
  * PURE, so the rule is pinned by tests rather than by whoever next edits the JSX.
  */
+/**
+ * WHERE THE DEPLOY-BACKEND CONTROLS ACTUALLY ARE, in the words every AI in the app already uses.
+ *
+ * 🔴 WHY THIS EXISTS (admin report 2026-10-17, mitrify.com, found hunting the sibling of Q-1136).
+ * This screen's blocked verdict named a real action — `'deploy-backend'` — and rendered its button
+ * only `&& onDeployBackend`, an OPTIONAL prop. One of the screen's two hosts passes it
+ * (`HostingChooser`, where the controls live one view away); the other, `ConnectMyWebsitePanel`,
+ * cannot and does not. That panel is the ONE real "Connect my website" entry point, reached from
+ * Settings → App Settings → Domain and from Home → Other AI → Publish & Deploy → "Custom Domain".
+ * So on the surface most users arrive through, the screen said *"Deploy the server part first"* and
+ * offered nothing at all — an outcome described, with no path to it.
+ *
+ * 🔑 THE CLASS: a named action whose only way forward is an optional prop. The screen states the
+ * action unconditionally and leaves whether it is reachable up to whoever mounted it — so the
+ * verdict is honest on one host and a dead end on the next. The props doc even said so out loud
+ * ("Absent ⇒ the sentence stands alone, as before"), which is the defect written down as a design.
+ *
+ * The fix is that the SCREEN owns its completeness: a host that can navigate still gets the button,
+ * and a host that cannot gets the exact path in words. This is the same correction
+ * `ConnectMyWebsitePanel` already records for `publishResult` — *"it is an input of the screen now,
+ * so the button and the answer to pressing it can never again live on different surfaces"* — applied
+ * in the other direction.
+ */
+export const DEPLOY_BACKEND_PATH =
+  'NavBharatAI Pro → "Publish" (at the top of the chat, or the More sheet → Publish) → "Deploy backend"';
+
+/**
+ * The way forward when this host has no navigation of its own. '' when it has.
+ *
+ * The last sentence is not padding: someone two screens deep in a domain flow, told to go and do
+ * something else, has no way of knowing their DNS work survives it. Without that line the safe-looking
+ * move is to start the domain over, which is the loop this whole screen exists to end.
+ */
+export function deployBackendWayForward(canNavigate: boolean): string {
+  if (canNavigate) return '';
+  return `The controls for that are on the Publish sheet: ${DEPLOY_BACKEND_PATH}. `
+    + 'Your domain stays connected while you do it — nothing here needs redoing.';
+}
+
 export type StatusIcon = 'busy' | 'waiting' | 'done';
 
 export function statusIcon(input: { tone?: 'ok' | 'warn'; checking: boolean }): StatusIcon {
@@ -1186,14 +1230,23 @@ export function NbaiDomainConnect({ workspaceId, onBack, onPublish, publishBusy,
                 {/* THE SAME PRINCIPLE FOR A SERVER APP (admin screenshot 2026-09-07). The verdict said
                     "deploy the whole app to a host that can run a server" and offered nothing to press;
                     the controls that do it live on the Publish sheet's server-half card. */}
-                {stage.action === 'deploy-backend' && onDeployBackend && (
+                {/* ⚠️ AND IT MUST BE A WAY FORWARD ON EVERY HOST, NOT ONLY THE ONE THAT CAN NAVIGATE
+                    (admin report 2026-10-17). The button used to be the whole branch, gated on an
+                    optional prop — so `ConnectMyWebsitePanel`, the entry point reached from Settings
+                    → App Settings → Domain, rendered the refusal and nothing to act on. See
+                    deployBackendWayForward. */}
+                {stage.action === 'deploy-backend' && (onDeployBackend ? (
                   <button
                     onClick={onDeployBackend}
                     className="self-start flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-on-accent text-[12px] font-bold"
                   >
                     Go to Deploy backend
                   </button>
-                )}
+                ) : (
+                  <p className="text-[11px] leading-relaxed text-warn">
+                    {deployBackendWayForward(false)}
+                  </p>
+                ))}
                 {/* WHAT WE CAN SEE OF THEIR DNS (admin 2026-08-21, mitrify.com). The status line
                     below said `ownership: missing` while all three records were live and byte-perfect
                     in public DNS — a state indistinguishable from "you typed it wrong", so the user

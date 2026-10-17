@@ -96817,6 +96817,85 @@ on this repo — it has to be immediately before the work, and even then a PR op
 The cheap defence that actually worked was comparing the two branches afterwards and keeping only the
 non-overlapping half.
 
+## 2026-10-17 — Q-1138 + Q-1139: "backend connect ko simple banao" — and the live bug the measurement found
+
+Admin: *"website connect, databse connect, backend connect ko simple banao."* The three flows were
+counted in the user's own steps before anything was designed, because "simple" is a measurement and
+not an opinion:
+
+| | steps today | the real friction |
+|---|---|---|
+| database connect | **1 tap** (Connect Supabase → Create database) | none — already the simplest of the three, and it was left alone |
+| website connect | domain → 3 DNS records → Check → wait | its dead end was Q-1137, fixed in #3789 |
+| backend connect | **press Publish → be REFUSED → card appears → connect GitHub → push repo → save key → Deploy** | **it began with a failure** |
+
+### Q-1139 — the condition, not the symptom
+
+`backendDeployOffer`'s only input was `publishRefusalCode`, and that code exists only after a 422. The
+app's own files had always said it had a server half; we simply did not say so until the user had
+pressed the wrong button. `/api/agentv3/publish-state` now carries the fact, and the card is there
+when the Publish sheet opens. The fifth rule's 50/50 half: not kinder words on the refusal — the
+refusal is no longer how anyone finds out.
+
+🔴 **The obvious implementation would have spent the user's money, and the code said so in advance.**
+Seeding the client's `publishRefusalCode` from a status read fires `shouldAutoDeployBackend`, whose
+docblock exists for exactly this: *"Reacting to the code merely BEING set would deploy on reopening a
+panel — an action nobody asked for, in someone's own hosting account."* So the fact travels as its own
+field. The FACT shows the card; a FRESH REFUSAL drives the auto-deploy; three pins keep them apart
+(the effect's dependency list, the panel not merging them, and the fact not being an input of that
+function at all). This is the "a fix must never trade one problem for another" rule doing real work —
+the blast radius was traced through all three readers of `backendOffer` before a line was changed.
+
+### Q-1138 — and the measurement found Q-707 ALIVE AGAIN, in main
+
+Measuring the staged read turned up a live defect nobody reported:
+
+```
+planDeployment({'package.json': '{"scripts":{"start":"node server.js"}}'})
+   → shape 'unknown', staticHostingSufficient TRUE     ⇒ the real files were never read
+planDeployment({...the real files})
+   → shape 'node-server', staticHostingSufficient FALSE ⇒ the truth, never reached
+```
+
+Both staged readers — the publish route and the domain status route — ran stage 2 only
+`if (!plan.staticHostingSufficient)`, i.e. only when the four manifests ALREADY suspected a server. So
+an app whose server only its SOURCE reveals (plain `node:http`; a Python server whose manifests do not
+name the framework) was **published as a static site with its API dead and the user told it worked** —
+Q-707's exact words, reopened by Q-707-era code's own cost optimisation. **Q-707's test proves the
+detector on full files; nothing proved the publish path ever supplies any.** A green regression test
+over a fix that could not fire.
+
+**The class: a cost gate that decides whether to LOOK, written as if "no evidence yet" meant "no
+server".** `stageTwoNeeded` now ends the read only on a POSITIVE classification (`spa`, `static`);
+`unknown` is not a conclusion. The planner's safe default is untouched — an unclassifiable app is
+still published as files — what changed is that we look before defaulting.
+
+**Siblings, all in this change:** three definitions of "needs a server" became one
+(`serverHalfFromPlan`), both staged readers became one (`readServerHalf`), and a census fails when a
+fourth appears. **Two pins repointed that had encoded the bug as a requirement** —
+`publishSeedWiring`'s *"the load is inside the refusal branch"* and `domainPublishBlock`'s *"the
+whole-workspace read happens ONLY for an app already judged non-static"*. That is the third time this
+week a test asserted the defect; the cost guarantee both protected is real and is now asserted on real
+inputs, where a well-placed guard cannot satisfy it.
+
+**Watch on the next real build:** an `unknown`-shape app now pays one full-source read at publish and
+on the domain status poll. An `spa` or `static` app pays exactly what it paid before.
+
+### 🔴 A correction inside this same change: my "three became one" was false when I wrote it
+
+The commit claimed three definitions of "needs a server" had become one. They had not — the third,
+`!!planDeployment(appFiles).backend` at the build-completion row, was untouched, **and the census I had
+just written could not see it, because it allowlisted `routes/agentv3.ts` as a whole file.** An exempt
+file is exempt everywhere inside it, which is exactly the shape of hole this repo keeps paying for.
+
+Caught by re-reading my own claim against the code rather than by a test — which is the uncomfortable
+part, and the reason the census is now a **per-file ratchet**: counts with comments stripped, a new
+occurrence fails even inside a file allowed to have some, and the number may only go down. Reversion 5
+restores precisely that miss inside the allowed file; the ratchet and an explicit pin both catch it.
+
+`planDeployment(...).backend?.runtime` at `agentv3.ts:5460` stays, counted and allowed: "which runtime"
+is a different question from "is there a server", and collapsing the two would be a fourth definition
+wearing the shared one's name.
 ## 2026-10-17 — Q-1137: a named action is reachable on EVERY host of the domain screen (admin report, mitrify.com)
 
 The admin sent two screenshots and four words: *"dns connect hone ke bad bhi live nahi huyi website. dekho"*.

@@ -14,11 +14,35 @@ import { useState, useEffect } from 'react';
 import { authJsonHeaders } from '../lib/authHeaders';
 import type { PublishFreshness } from '../lib/publishFreshness';
 
+/**
+ * THE SERVER-HALF FACT — known the moment this reads, so nobody has to fail a publish to learn it.
+ *
+ * ⚠️ IT IS DELIBERATELY NOT A REFUSAL CODE. The obvious shortcut is to seed the panel's
+ * `publishRefusalCode` from this; `shouldAutoDeployBackend` watches the TRANSITION into that code
+ * exactly so that "reacting to the code merely BEING set" cannot start a deploy in someone's own
+ * Render account just because they reopened a panel. This fact shows the CARD; a fresh refusal still
+ * drives the auto-deploy. See src/server/AgentV3/appServerHalf.ts.
+ *
+ * `null` means "no server half, or we could not tell" — both of which render exactly what the panel
+ * rendered before. A card is a claim, and an unreadable workspace is not evidence for one.
+ */
+export interface ServerHalfView {
+  /** The app's own files contain something a website host cannot run. */
+  hasServerHalf: true;
+  shape: string;
+  /** A deploy could run right now — a key resolved, the user's own or the server's. */
+  canDeploy: boolean;
+  /** WHOSE key it would be. Never the key itself. */
+  keySource: 'user' | 'server' | null;
+}
+
 export interface PublishStateView {
   live: boolean;
   url: string | null;
   publishedAt: number | null;
   freshness: PublishFreshness;
+  /** Absent until known; see ServerHalfView. */
+  serverHalf?: ServerHalfView | null;
 }
 
 /**
@@ -60,6 +84,17 @@ export function usePublishState(workspaceId: string | undefined | null, refreshK
           url: typeof data.url === 'string' ? data.url : null,
           publishedAt: typeof data.publishedAt === 'number' ? data.publishedAt : null,
           freshness: data.freshness as PublishFreshness,
+          // Read defensively: the field is new, and a body that predates it (or a proxy that drops
+          // it) must leave the panel exactly as it is rather than render a card from `undefined`.
+          serverHalf: data.serverHalf && data.serverHalf.hasServerHalf === true
+            ? {
+              hasServerHalf: true,
+              shape: typeof data.serverHalf.shape === 'string' ? data.serverHalf.shape : '',
+              canDeploy: data.serverHalf.canDeploy === true,
+              keySource: data.serverHalf.keySource === 'user' || data.serverHalf.keySource === 'server'
+                ? data.serverHalf.keySource : null,
+            }
+            : null,
         });
       } catch { /* offline — the buttons all still work, they just carry no dot */ }
     })();

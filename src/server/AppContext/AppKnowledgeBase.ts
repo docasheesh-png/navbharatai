@@ -855,6 +855,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • You get the EXACT DNS records to add at your registrar (Hostinger, GoDaddy, Cloudflare, Namecheap, BigRock, etc.).
 • Press "Check" to see the real live status (ownership / DNS / SSL) — HTTPS is issued automatically once the records resolve.
 • Connected AFTER your last publish? You do not need to press Publish again (2026-10-05): once the domain is live and still empty, NavBharatAI puts the version of your app that is already published on it by itself (within about 15 minutes, once — nothing is rebuilt) and tells you in your notifications. If that could not be done, the notification says so and one press of Publish fixes it.
+• DNS ALL GREEN BUT THE SITE IS NOT LIVE? (admin report 2026-10-17, mitrify.com.) Two different things are being measured, and only one of them is DNS. If the screen's headline says your app "needs its server part deployed first", the records are finished and the APP is what is missing — an app with a running server half cannot be served by website hosting, so pressing Publish puts nothing on the domain. The controls are at NavBharatAI Pro → "Publish" (top of the chat, or the More sheet → Publish) → "Deploy backend". Your domain stays connected while you do it — nothing in the domain flow needs redoing. The green DNS box only ever speaks about the records, never about the whole task.
 Honest throughout: it never claims a domain is connected until it verifiably is, and it never offers this for an account with no built app yet — it tells you to build one first. Root-cause fix 2026-07-27: this used to be two different half-working screens; both entries now share one real, working flow. (2026-09-19: a THIRD entry in the sidebar menu was removed — same flow, but it sat in a general navigation menu where nobody is thinking about their app. The two entries above are unchanged.)
 NOTE (2026-08-06): connecting a domain is part of a hosting plan (Starter ₹299 or Growth ₹599 per 30 days, Billing → Plans, paid from the wallet — it also removes the "Made with NavBharatAI" badge). Starter covers 1 domain, Growth up to 3. A user without the plan gets an honest upgrade note at the Connect step; already-connected domains keep working.`,
     howToUse: 'Open Settings → App Settings → Domain (or Home → Other AI → Publish & Deploy → Custom Domain) → pick the app → enter your domain → Connect → add the DNS records shown → press Check until it shows Live. NOTE (2026-09-19): the sidebar menu used to carry a third "Connect my website" button; it was removed as a duplicate, so do NOT send anyone to the sidebar for this.',
@@ -864,6 +865,10 @@ NOTE (2026-08-06): connecting a domain is part of a hosting plan (Starter ₹299
       'hostinger', 'godaddy', 'dns', 'point domain', 'live website', 'own domain',
       'connect my website', 'domain jodo', 'website live karo',
       'app settings domain', 'settings domain', 'domain setting',
+      // What the admin actually typed when the records were green and the site was not live.
+      'domain connect ho gaya site live nahi', 'dns connect hone ke bad bhi live nahi',
+      'site not found', 'domain live nahi hui', 'website live nahi ho rahi',
+      'deploy backend', 'server part deploy',
     ],
   },
   {

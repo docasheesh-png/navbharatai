@@ -23,11 +23,11 @@ import {
   ADD_TO_THIS_APP_REPLY,
   MAKE_IT_REAL_REPLY,
 } from '../src/server/AgentV3/platformSuggestedReplies';
-import { fakeFeatureTails } from '../src/server/AgentV3/fakeFeatureScan';
 import { classifyIntentWithConfidence } from '../src/server/AgentV3/IntentClassifier';
 import { buildConfirmation } from '../src/server/AgentV3/buildConfirmation';
 import { missingFeatureNotice, CONFIRMED_MISSING_PREFIX } from '../src/server/AgentV3/missingFeatureNotice';
 import { unrelatedRequestFallback, unrelatedRequestSteer } from '../src/server/AgentV3/unrelatedRequest';
+import { fakeFeatureTails } from '../src/server/AgentV3/fakeFeatureScan';
 import { KEEP_CHANGES_PHRASE } from '../src/server/AgentV3/GreenGuard';
 import { stripCodeComments } from '../src/server/AgentV3/stripCodeComments';
 
@@ -93,21 +93,6 @@ describe('every reply the platform asks for is read with certainty, never guesse
     expect(suggestedReplyKey('please!!')).toBe('');
   });
 
-  it('the notices COMPOSE their phrase from the registry — one home, so the two cannot drift', () => {
-    const notice = missingFeatureNotice([`${CONFIRMED_MISSING_PREFIX} search`]);
-    expect(notice).toContain(`Reply "${ADD_MISSING_FEATURE_REPLY_ONE}"`);
-    expect(missingFeatureNotice([`${CONFIRMED_MISSING_PREFIX} search`, `${CONFIRMED_MISSING_PREFIX} cart`]))
-      .toContain(`Reply "${ADD_MISSING_FEATURE_REPLY_MANY}"`);
-    expect(unrelatedRequestFallback('calculator.tsx')).toContain(`reply "${ADD_TO_THIS_APP_REPLY}"`);
-
-    // None of the three may spell the phrase out again as a literal.
-    for (const file of ['missingFeatureNotice.ts', 'unrelatedRequest.ts']) {
-      const src = readFileSync(join(ENGINE_DIR, file), 'utf8');
-      expect(src, `${file} retypes a registered phrase instead of importing it`)
-        .not.toMatch(/reply "(add it|add them|add it to this app)"/i);
-    }
-  });
-
   it('the twelve-language phrase is EXTRACTED from fakeFeatureScan, not retyped', () => {
     const tails = fakeFeatureTails();
     expect(tails.length).toBeGreaterThanOrEqual(11);
@@ -146,45 +131,32 @@ describe('every reply the platform asks for is read with certainty, never guesse
     expect(steer).toMatch(/EXACTLY as it is, in English/);
   });
 
-  it('CENSUS — every user-facing `reply "…"` in the engine is registered or listed as already certain', () => {
-    // 🔑 This is what locks the CLASS rather than the four instances. A new notice that tells the user to
-    // type something lands here, and its phrase must either be registered or be named below WITH the
-    // reason it is already read with certainty.
-    //
-    // ⚠️ ITS SHAPE IS `reply "…"`, WHICH IS HOW THIS CODEBASE WRITES THEM — every one of the nine found
-    // by hand uses it. A future notice that asks for a phrase WITHOUT quoting it ("tell me to add it")
-    // would pass this census unseen. Stated rather than left implied: the census is a net under the
-    // known shape, not a proof that no other shape can exist.
-    const ALREADY_CERTAIN = new Map<string, string>([
-      ['fix it', '`fix` is an EDIT_SIGNAL → edit_existing/high'],
-      ['fix them', 'as above'],
-      ['fix these', 'as above'],
-      ['fix the styling', 'as above'],
-      ['continue', 'a CONTINUATION_SIGNAL → edit_existing/high'],
-      ['make it real', 'registered; also matched here because the English tail states it literally'],
-      ['yes', 'YES_WORDS / `isOfferAcceptance` — the offer path reads a bare yes before the ladder runs'],
-    ]);
-    // ⚠️ Keyed on the RAW phrase, not on `suggestedReplyKey`. "yes" is politeness, so the key function
-    // strips it to the empty string — correct for matching a registered phrase ("yes add it" is "add it"),
-    // and useless as a census key. Registered phrases are matched by key; already-certain ones by the word.
+  it('the notices keep the phrase as a LITERAL, pinned equal to the constant', () => {
+    // ⚠️ MY FIRST ATTEMPT INTERPOLATED THE CONSTANT INTO THESE SENTENCES, AND IT BROKE THE STRONGER
+    // GUARD. `tests/aPromiseToTheUserHasAHandler.test.ts` reads every SHIPPED STRING and demands that
+    // each `reply "X"` it finds has a proven handler. An imported constant is opaque to it: the census
+    // saw `Reply "${…}"` and three of its tests went red because the promise had vanished from the one
+    // place that checks promises are kept. Fixing A by creating X is forbidden, so the literal stays and
+    // this pin stops the drift instead.
+    const notice = missingFeatureNotice([`${CONFIRMED_MISSING_PREFIX} search`]);
+    expect(notice).toContain(`Reply "${ADD_MISSING_FEATURE_REPLY_ONE}"`);
+    expect(missingFeatureNotice([`${CONFIRMED_MISSING_PREFIX} search`, `${CONFIRMED_MISSING_PREFIX} cart`]))
+      .toContain(`Reply "${ADD_MISSING_FEATURE_REPLY_MANY}"`);
+    expect(unrelatedRequestFallback('calculator.tsx')).toContain(`reply "${ADD_TO_THIS_APP_REPLY}"`);
+    expect(fakeFeatureTails()[0]).toContain(`reply "${MAKE_IT_REAL_REPLY}"`);
+  });
 
-    const registered = new Set(PLATFORM_SUGGESTED_REPLIES.map((r) => suggestedReplyKey(r.phrase)));
-    const unregistered: string[] = [];
-    for (const name of readdirSync(ENGINE_DIR)) {
-      if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue;
-      if (name === 'platformSuggestedReplies.ts') continue;
-      // ⚠️ COMMENTS STRIPPED FIRST. Without this the census fails on its own documentation: the write-ups
-      // in this module and in IntentClassifier.ts quote `Reply "add it"` as evidence, and a census that
-      // reads a comment as a shipped string is a census that can never go green.
-      const src = stripCodeComments(readFileSync(join(ENGINE_DIR, name), 'utf8'));
-      for (const m of src.matchAll(/\breply "([^"]{2,40})"/gi)) {
-        const phrase = m[1].trim();
-        if (phrase.includes('${')) continue; // composed from a constant — that IS the fix
-        const key = suggestedReplyKey(phrase);
-        if (registered.has(key) || ALREADY_CERTAIN.has(phrase.toLowerCase())) continue;
-        unregistered.push(`${name}: reply "${phrase}"`);
-      }
-    }
-    expect(unregistered, 'a notice tells the user to type this, and nothing recognises it — register it in platformSuggestedReplies.ts or add it to ALREADY_CERTAIN with the reason').toEqual([]);
+  it('the CENSUS lives in aPromiseToTheUserHasAHandler.test.ts — not duplicated here', () => {
+    // 🔴 I BUILT ONE ANYWAY, AND THIS IS SAFEGUARD #6'S VOCABULARY FAILURE, VERBATIM. I searched
+    // "*suggest*reply*", "quickReplies", "PLATFORM_SUGGESTED" — found nothing — and wrote my own census
+    // over `reply "…"`. The existing one is called `aPromiseToTheUserHasAHandler`, it was written for
+    // Q-997 (the row Q-1037 was itself found while fixing), and it is strictly better: it walks the AST
+    // of all of `src/` plus `server.ts`, expands template literals, and demands an EXECUTABLE proof per
+    // phrase. Mine was a regex over one directory. It is deleted; what my work added there instead is
+    // the ten non-English promise verbs it was silently blind to, and the strict `buildConfirmation`
+    // proof for "add it" / "add them".
+    const census = readFileSync(join(process.cwd(), 'tests/aPromiseToTheUserHasAHandler.test.ts'), 'utf8');
+    expect(census, 'the census must still run the registry this module exports').toContain('PLATFORM_SUGGESTED_REPLIES');
+    expect(census, 'and it must see a non-English promise, whose verb follows the quote').toContain('PROMISE_SUFFIX_VERB');
   });
 });

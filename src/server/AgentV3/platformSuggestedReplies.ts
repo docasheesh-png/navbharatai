@@ -15,10 +15,18 @@
 // `add` lives only in `BUILD_SIGNALS`, the catch-all of ambiguous verbs, so the ladder calls it a NEW
 // BUILD at LOW confidence; `buildConfirmation` then finds no product noun and no build order in two
 // words and answers `names-nothing-to-build`; and the route turns the turn into `intent = 'chat'`
-// (`routes/agentv3.ts`, the `offerToBuild` branch). **So the feature is not added. The user is answered,
-// and offered a build they already asked for.** The row called this "handled, but not certain on the
-// first message" — measured, it is not handled at all. A sentence that promises an action and does not
-// perform it is the second absolute rule's territory, not a routing nicety.
+// (`routes/agentv3.ts`, the `offerToBuild` branch). So the feature is not added on that turn: the user
+// is answered and offered a build they had just asked for.
+//
+// ⚠️ AND THIS WAS ALREADY KNOWN — written down here because finding it out AFTER building the fix is
+// what not searching with the right word costs. `tests/aPromiseToTheUserHasAHandler.test.ts` (Q-997 —
+// the row Q-1037 was itself found while fixing) lists "add it" as HANDLED, and its proof is deliberately
+// the weaker `reachesReaderAsWork` rather than `reachesConfirmedWork`, with the case argued in its own
+// comment: an "add …" order is never certain to the keyword pass, the intention reader decides it with
+// the project in front of it, and with no reader an unconfirmed order is answered with an offer that a
+// "yes" then builds. Every word of that is true. So this is not a promise dropped on the floor — it is
+// a promise that costs a second round trip and leans on a model call, under a sentence that says "I'll
+// put it in". These phrases are OURS: nothing has to be inferred about them, so nothing should be.
 //
 // 🔑 THE CLASS, and this repo has now written it down four times: PLATFORM-WRITTEN TEXT MUST NEVER BE
 // GUESSED AT.

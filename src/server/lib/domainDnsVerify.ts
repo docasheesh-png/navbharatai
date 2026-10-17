@@ -182,7 +182,31 @@ export function summarize(checks: readonly RecordCheck[]): string {
   if (unreadable.length > 0 && unreadable.length === checks.length) {
     return 'We could not read your DNS just now. This is our side, not yours — try again in a moment.';
   }
-  return 'All your DNS records are correct and live on the internet. Nothing is left for you to do — '
-    + 'we are now waiting for the hosting service to re-check them, which it does on its own schedule. '
-    + 'You can safely close this page; your progress is saved.';
+  /**
+   * 🔴 THIS SENTENCE USED TO CLAIM THE WHOLE TASK WAS DONE, AND IT CANNOT KNOW THAT (admin report,
+   * mitrify.com, 2026-10-17).
+   *
+   * It said *"Nothing is left for you to do — we are now waiting for the hosting service"*, and it is
+   * rendered in a GREEN box. The admin's screenshot shows it printed directly beneath the amber
+   * headline *"Connected — but this app needs its server part deployed first"*, with a "Go to Deploy
+   * backend" button beside it. Two sentences, opposite meanings, and the reassuring one was green. The
+   * admin read the green one, opened mitrify.com, and got Firebase's "Site Not Found" — because the
+   * domain was wired correctly and nothing had ever been deployed to it.
+   *
+   * 🔑 THE CLASS: a check that can see ONE PART of a task stating a conclusion about the WHOLE task.
+   * This function answers exactly one question — *are the DNS records correct?* — and has no way to
+   * know whether an app was ever published, or whether a server half still needs deploying. The
+   * whole-task verdict already exists and is right: it is the headline, which `NbaiDomainConnect`
+   * computes from `publishBlocked` / `serving.state`. This sentence only had to stop contradicting it.
+   *
+   * ⚠️ WHAT IT MUST KEEP, because it was written for a real loop (admin, 2026-08-21): a user whose
+   * records are correct must be told so plainly, and must be told the remaining DNS wait is OURS — the
+   * earlier version of this screen had people re-editing byte-perfect records for days. That is why
+   * the wording below still says "that part is done" and "ours, not yours". It is scoped to the
+   * RECORDS now, which is all this function measured.
+   */
+  return 'Your DNS records are correct and live on the internet — that part is done, and nothing about '
+    + 'the records needs changing. The hosting service re-checks them on its own schedule, so any '
+    + 'remaining DNS wait is ours, not yours. This is about the records only: if a step is shown above, '
+    + 'it is a separate one and still needs doing. You can safely close this page; your progress is saved.';
 }

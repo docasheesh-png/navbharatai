@@ -329,6 +329,7 @@ import {
 } from '../AgentV3/ShellSessions';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, userFacingReport, importTurnObservation, findingAboutUntouchedCode, type UntouchedCodeReason, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { deployBackendToRender, resolveRenderKey, renderRequirement, findBackendUrl } from '../AgentV3/renderDeploy';
+import { readServerHalf, SHAPE_MANIFESTS } from '../AgentV3/appServerHalf';
 import { attachRenderCustomDomain } from '../AgentV3/renderCustomDomain';
 import { createRenderService, fetchServiceEnvKeys } from '../AgentV3/renderCreateService';
 import { readDeployVerdict } from '../AgentV3/renderDeployStatus';
@@ -8412,7 +8413,52 @@ async function noteBuildOutcome(
       res.status(403).json({ error: 'You can only check your own app.' });
       return;
     }
-    res.json(await resolvePublishState(workspaceId));
+    const state = await resolvePublishState(workspaceId);
+    /**
+     * 🔴 THE SERVER-HALF FACT, SO THE USER NEVER HAS TO FAIL A PUBLISH TO LEARN IT (admin 2026-10-17:
+     * "backend connect ko simple banao").
+     *
+     * Counted in the user's own steps, "backend connect" was: press Publish -> be REFUSED -> the card
+     * appears -> connect GitHub -> push a repo -> save a key -> Deploy. It began with a failure,
+     * because `backendDeployOffer` is gated on a refusal code and that code only exists after a 422.
+     * The app's own files always said it had a server half; we just did not say so until the user had
+     * pressed the wrong button. See appServerHalf.ts for the condition this removes.
+     *
+     * ⚠️ IT TRAVELS AS ITS OWN FIELD, NEVER AS A REFUSAL CODE. Seeding the client's
+     * `publishRefusalCode` from here would fire `shouldAutoDeployBackend`, which watches the
+     * TRANSITION into that code precisely so that "reacting to the code merely BEING set" cannot
+     * deploy on reopening a panel — in someone's own Render account, on their own bill. The fact shows
+     * the CARD; a fresh refusal still drives the auto-deploy. Two inputs, on purpose.
+     *
+     * 🔒 NO CREDENTIAL CROSSES THIS LINE. `keySource` says WHOSE key would be used — the same value
+     * the refusal already returns to this same client, and the thing the card must say so a user is
+     * not sent to do a one-time step that could never close the loop. The key itself never leaves the
+     * server.
+     *
+     * COST: one small manifest read for an ordinary static app, and this endpoint does not poll — the
+     * client reads it once per build/publish moment (see usePublishState). Best-effort by
+     * construction: a failure answers exactly what this endpoint answered before.
+     */
+    let serverHalf: { hasServerHalf: boolean; shape: string; canDeploy: boolean; keySource: 'user' | 'server' | null } | null = null;
+    try {
+      const read = await readServerHalf({
+        manifests: () => loadWorkspaceFilesByPath(workspaceId, [...SHAPE_MANIFESTS]),
+        full: () => loadWorkspaceFiles(workspaceId).catch(() => null),
+      });
+      if (read.hasServerHalf) {
+        const vault = identity?.uid
+          ? await loadUserVaultSecrets(identity.uid, workspaceId).catch(() => null)
+          : null;
+        const key = resolveRenderKey(vault);
+        serverHalf = {
+          hasServerHalf: true,
+          shape: read.plan.shape,
+          canDeploy: key !== null,
+          keySource: key?.source ?? null,
+        };
+      }
+    } catch { /* a status read must never fail over an extra fact */ }
+    res.json({ ...state, ...(serverHalf ? { serverHalf } : {}) });
   });
 
   /**
@@ -9123,31 +9169,38 @@ async function noteBuildOutcome(
        * outage for real users.
        */
       try {
-        const planFiles: Record<string, string> = {};
-        for (const p of ['package.json', 'requirements.txt', 'pyproject.toml', 'Pipfile']) {
-          try { planFiles[p] = await actuator.readFile(workspaceId, p); } catch { /* absent is normal */ }
-        }
         /**
-         * 🔒 A REFUSAL IS MADE ON THE REAL FILES, NEVER ON THE MANIFESTS ALONE (admin 2026-08-25).
+         * 🔒 A REFUSAL IS MADE ON THE REAL FILES, NEVER ON THE MANIFESTS ALONE (admin 2026-08-25) —
+         * and since 2026-10-17 through ONE shared staged read, `readServerHalf`.
          *
-         * Only these four manifests were ever handed to the planner, so its file-based detection — the
-         * half that asks whether the app's own source actually IMPORTS a server framework — could never
-         * fire here. The verdict came down to package.json, and a frontend-only app carrying `express`
-         * as a DEV dependency was told its website could not go on website hosting.
+         * 🔴 WHAT THE MOVE FIXED, AND IT WAS LIVE HERE. The staged read used to run its second stage
+         * only `if (!plan.staticHostingSufficient)` — i.e. only when the four manifests ALREADY
+         * suspected a server. Measured: a plain `node:http` app's manifest classifies as `unknown`
+         * with `staticHostingSufficient: true`, so the real files were never read and the app was
+         * PUBLISHED AS A STATIC SITE with its API dead — Q-707's exact bug, alive again not because
+         * the detector was wrong but because nothing ever handed it the source. `readServerHalf`'s
+         * gate is "stage 1 did not CONCLUDE" (`spa` / `static` end the read; `unknown` does not), and
+         * `appServerHalf.test.ts` pins both the gate and the measurement.
          *
-         * Two stages on purpose. The cheap manifest pass runs first and, for the ordinary static app,
-         * is the whole story — that path costs exactly what it did before. Only an app about to be
-         * REFUSED pays for the real files, and it is the one case where being right is worth a read.
-         * `src` is kept so the wiring analysis below reuses it instead of loading twice.
+         * The cost profile is unchanged for the ordinary app: a Vite manifest classifies as `spa` at
+         * stage 1 and pays one small read, exactly as before. The manifests come from the SANDBOX here
+         * — the freshest truth mid-build — which is why the loader is injected rather than assumed,
+         * and they still win over the full read. `files` is kept so the wiring analysis below reuses
+         * it instead of loading twice.
          */
-        let plan = planDeployment(planFiles);
-        let src: Record<string, string> | null = null;
-        if (!plan.staticHostingSufficient) {
-          src = await loadWorkspaceFiles(workspaceId).catch(() => null);
-          // The sandbox manifests win over the durable copies — they are the freshest truth.
-          if (src) plan = planDeployment({ ...src, ...planFiles });
-        }
-        if (!plan.staticHostingSufficient) {
+        const shapeRead = await readServerHalf({
+          manifests: async () => {
+            const m: Record<string, string> = {};
+            for (const p of SHAPE_MANIFESTS) {
+              try { m[p] = await actuator.readFile(workspaceId, p); } catch { /* absent is normal */ }
+            }
+            return m;
+          },
+          full: () => loadWorkspaceFiles(workspaceId).catch(() => null),
+        });
+        const plan = shapeRead.plan;
+        const src = shapeRead.files;
+        if (shapeRead.hasServerHalf) {
           /**
            * ONE BUTTON (ROADMAP §11 slice 5 / §13 item 2.4).
            *

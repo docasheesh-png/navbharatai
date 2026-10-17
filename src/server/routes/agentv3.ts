@@ -61,6 +61,7 @@ import { unrelatedToExistingApp, unrelatedRequestSteer, unrelatedRequestFallback
 import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary, writeTypecheckCommand } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel, answerTimeOf } from '../AgentV3/answeringModel';
+import { recordedTextCall } from '../AgentV3/recordedTextCall';
 import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
 import { ladderDepthUsed, describeLadderDepth } from '../AgentV3/ladderDepth';
 import { streamThinkingToChat } from '../AgentV3/thinkingStream';
@@ -14530,6 +14531,34 @@ async function noteBuildOutcome(
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
       }), abort.signal));
+      /**
+       * 🧬 Q-1125 (2026-10-17) — THE ONE DOOR for this lane's text-only repair calls.
+       *
+       * The agentic lane's four post-build gates (typecheck, missing-files, syntax, missing-export) each
+       * called `makeFastTextRunner().runTurn(...)` RAW, so NONE of them left a row in `llmCalls` — success
+       * or failure. A repair pass spends an 8000-token answer on a build that is already in trouble, which
+       * is exactly the call an autopsy opens the report to find, and the report had nothing to show.
+       *
+       * It is one door rather than four copied `recordLlmCall` blocks on purpose (fourth absolute rule,
+       * step 2 — fix the CLASS): a copied block is what let the fifth site be written without one, and it
+       * is why `answeringModel.ts` and `fastLaneCallIdentity` had to exist at all. A new repair gate that
+       * calls the raw runner is now the thing `aCallOutsideTheLoopIsStillOnTheRecord` fails on.
+       */
+      const recordedRepairCall = (system: string, user: string) => {
+        // The same binding name the fast lane uses, and for the same reason: it is handed to the request
+        // and to `fastLaneCallIdentity`'s Claude-default parameter, which `claudeRungModelId` answers
+        // first. `aBuildIsNamedByItsLadderNotByClaude` §6(b) classifies the helper by this name.
+        const fbModel = fastBuildModel();
+        return recordedTextCall(
+          {
+            makeRunner: (onUsed) => makeFastTextRunner(onUsed),
+            identify: (reported, used, answered) => fastLaneCallIdentity(reported, used, fbModel, answered),
+            recordLlmCall: (row) => buildDiag.recordLlmCall(row),
+          },
+          { model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000 },
+          { promptPreview: `${system}\n---\n${user}` },
+        );
+      };
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
@@ -16834,19 +16863,39 @@ async function noteBuildOutcome(
       ) {
         try {
           const bpGenerate = async (system: string, user: string): Promise<string> => {
-            const startedAt = Date.now();
             // Cheap-floor-first like every other build text call (admin 2026-07-11 — no direct-Sonnet path).
             let bpProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
-            const call = makePlanTextRunner((used) => { bpProvider = used; }).runTurn({
-              model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 6000,
-            });
-            // Hard timeout so an up-front step can NEVER hang the build (the losing call is ignored).
-            const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('blueprint step timed out')), 30_000));
-            const t = await Promise.race([call, timeout]);
-            try {
-              const lbl = fastLaneProviderLabel(bpProvider);
-              buildDiag.recordLlmCall({ model: answeringModel({ answered: t.model, planned: claudeRungModelId(bpProvider) ?? null, family: bpProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ...answerTimeOf(t), ok: true });
-            } catch { /* diagnostics best-effort */ }
+            const fbModel = fastBuildModel();
+            // 🔴 Q-1125 (2026-10-17): this step recorded its call on SUCCESS ONLY, and it hand-rolled its
+            // own `Promise.race` bound — so the 30 s timeout, and every error, left the report with NO row
+            // at all. `recordedTextCall` is the one door now: it owns the bound AND records both outcomes,
+            // so an abandoned blueprint step is a line an autopsy can read instead of a silence.
+            const t = await recordedTextCall(
+              {
+                // This site keeps its OWN capture — `bpProvider` feeds `captureTurnUsage` below, and the
+                // sign-bridge census pins this exact form for all three planners. The door's `onUsed` is
+                // not needed here because `identify` reads the same variable.
+                makeRunner: () => makePlanTextRunner((used) => { bpProvider = used; }),
+                // 🔴 A PLANNER IS NAMED BY THE PLAN LADDER, NOT THE BUILD ONE. An earlier draft of this
+                // change routed the row through `fastLaneCallIdentity`, whose Claude default is
+                // `fastBuildModel()` — the BUILD ladder's rung — and `aBuildIsNamedByItsLadderNotByClaude`
+                // §4 caught it. The three aux planners pin their Claude rung through `claudeRungModelId`,
+                // and this one keeps doing exactly that; only the FAILURE row is new.
+                identify: (_reported, _used, answered) => ({
+                  // Nothing reported means nobody served it — the row names no vendor rather than the
+                  // label's default (autopsy dcce5d26: a default pinned an unmade call on a third party).
+                  provider: bpProvider ? fastLaneProviderLabel(bpProvider) : 'unknown',
+                  model: answeringModel({ answered, planned: claudeRungModelId(bpProvider) ?? null, family: bpProvider }),
+                }),
+                recordLlmCall: (row) => buildDiag.recordLlmCall(row),
+              },
+              // The REQUEST's model parameter, under the repo's name for it (§6(b) classifies the helper
+              // by this binding). Every rung the plan ladder walks overrides it; the row above never
+              // reads it, which is the whole point of §4.
+              { model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 6000 },
+              // Hard bound so an up-front step can NEVER hang the build — now a bound whose expiry is on the record.
+              { promptPreview: `${system}\n---\n${user}`, timeoutMs: 30_000, timeoutMessage: 'blueprint step timed out' },
+            );
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
             buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, cacheReadInputTokens: t.usage.cacheReadInputTokens, cacheCreationInputTokens: t.usage.cacheCreationInputTokens });
@@ -19937,11 +19986,8 @@ async function noteBuildOutcome(
             const currentFiles = Array.from(writtenFiles.entries()).map(([path, content]) => ({ path, content }));
             // Cheap-floor-first like every other build text call (admin 2026-07-11 — no direct-Sonnet path);
             // Claude still backstops the chain so the repair never fails for lack of a provider.
-            const t = await makeFastTextRunner().runTurn({
-              model: fastBuildModel(), system: repairSystemPrompt(framework),
-              messages: [{ role: 'user', content: repairUserPrompt(prompt, check.errors, currentFiles) }],
-              tools: [], maxTokens: 8000,
-            });
+            // Q-1125: through the one recording door — this pass used to leave no row at all.
+            const t = await recordedRepairCall(repairSystemPrompt(framework), repairUserPrompt(prompt, check.errors, currentFiles));
             // Same guard the fast lane now carries: a REPAIR aimed at a file we own and that has one
             // correct form is replaced with that form. The restore above already put it back once — this
             // is what stops this very pass from immediately undoing that and starting the loop again.
@@ -20076,9 +20122,8 @@ async function noteBuildOutcome(
                 .filter((f) => f.content);
               const createList = trulyMissing.map((m) => `- ${m.missing} (imported by ${m.importedBy})`).join('\n');
               const mispathList = mispaths.map((m) => `- in ${m.importedBy}: the import of "${m.missing}" is a WRONG PATH — that module already exists at ${m.existsAt}; correct the import path to point at it`).join('\n');
-              const t = await makeFastTextRunner().runTurn({
-                model: fastBuildModel(), system: repairSystemPrompt(framework),
-                messages: [{ role: 'user', content:
+              // Q-1125: through the one recording door — this pass used to leave no row at all.
+              const t = await recordedRepairCall(repairSystemPrompt(framework),
                   `The app was built for this request:\n${prompt}\n\n` +
                   `Some LOCAL imports don't resolve, so the app crashes at runtime. Fix EXACTLY these, changing NOTHING else:\n` +
                   (mispathList ? `\nWRONG IMPORT PATHS — the target file ALREADY EXISTS; do NOT create a new file, just correct the import path in the importing file:\n${mispathList}\n` : '') +
@@ -20086,10 +20131,7 @@ async function noteBuildOutcome(
                   `importing file uses it (correct named/default exports, correct hook return shapes, real logic — no TODOs, no empty stubs; ` +
                   `for a *.module.css import, create the stylesheet with the class names the component references):\n${createList}\n` : '') +
                   `\nThe files that import them (match their usage precisely):\n` +
-                  importerFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 4000)}`).join('\n') },
-                ],
-                tools: [], maxTokens: 8000,
-              });
+                  importerFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 4000)}`).join('\n'));
               const created = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
               // `findMissing()` below reads `writtenFiles`, which only a write that LANDED fills (the dispatcher's
               // onFileWrite), so its verdict follows what landed whatever this pass sent.
@@ -20142,19 +20184,15 @@ async function noteBuildOutcome(
               const brokenFiles = brokenPaths
                 .map((p) => ({ path: p, content: writtenFiles.get(p) || '' }))
                 .filter((f) => f.content);
-              const t = await makeFastTextRunner().runTurn({
-                model: fastBuildModel(), system: repairSystemPrompt(framework),
-                messages: [{ role: 'user', content:
+              // Q-1125: through the one recording door — this pass used to leave no row at all.
+              const t = await recordedRepairCall(repairSystemPrompt(framework),
                   `The app was built for this request:\n${prompt}\n\n` +
                   `These files have a SYNTAX ERROR and the app will NOT compile. Rewrite EACH broken file in ` +
                   `full so it parses cleanly — fix ONLY the syntax (a truncated/corrupted region, a stray CSS ` +
                   `declaration inside JSX, an unclosed brace/tag), keep all the real logic and UI. Change ` +
                   `nothing else.\n\nSYNTAX ERRORS:\n${syntaxRepairInstruction(syntaxErrors)}\n\n` +
                   `The broken files (rewrite each one completely and correctly):\n` +
-                  brokenFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 6000)}`).join('\n') },
-                ],
-                tools: [], maxTokens: 8000,
-              });
+                  brokenFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 6000)}`).join('\n'));
               const scopedSyntax = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), brokenPaths);
               recordRepairOutOfScope('syntax', scopedSyntax.dropped);
               const fixed = scopedSyntax.kept;
@@ -20213,9 +20251,8 @@ async function noteBuildOutcome(
               const targetFiles = targets
                 .map((t) => ({ path: t.target, content: writtenFiles.get(t.target) || '' }))
                 .filter((f) => f.content);
-              const t = await makeFastTextRunner().runTurn({
-                model: fastBuildModel(), system: repairSystemPrompt(framework),
-                messages: [{ role: 'user', content:
+              // Q-1125: through the one recording door — this pass used to leave no row at all.
+              const t = await recordedRepairCall(repairSystemPrompt(framework),
                   `The app was built for this request:\n${prompt}\n\n` +
                   `These files are imported by other modules for specific bindings, but they DO NOT export those ` +
                   `bindings (usually a generation that was cut off before the export). Rewrite EACH file in full ` +
@@ -20223,10 +20260,7 @@ async function noteBuildOutcome(
                   `missing export(s) with real implementations (no stubs). Change nothing else.\n\n` +
                   `REQUIRED EXPORTS:\n${exportRegenInstruction(targets)}\n\n` +
                   `The files to rewrite (complete each one, exports included):\n` +
-                  targetFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 6000)}`).join('\n') },
-                ],
-                tools: [], maxTokens: 8000,
-              });
+                  targetFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 6000)}`).join('\n'));
               const scopedExport = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), targetFiles.map((f) => f.path));
               recordRepairOutOfScope('missing-export', scopedExport.dropped);
               const fixed = scopedExport.kept;

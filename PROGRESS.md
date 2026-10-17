@@ -96856,3 +96856,56 @@ week. A host census fails when a third host appears and proves both branches are
 correctly and nothing was ever deployed to the Firebase site it points at; Publish will not help an app with a
 server half. Both PRs fix what the SCREEN told them — the next user is sent somewhere real instead of being
 told, in green, that they are done.
+---
+
+## 2026-10-17 — Q-1130 MEASURED: long bullets are not features, and the measurement argues against the change
+
+Q-1130 asked a product question and, to its credit, refused to answer it from intuition: *"measure how
+often real prompts lose features this way (the build reports carry the prompts), then either raise the
+limit, or count a long bullet as one feature when the LINE is a bullet, or leave it and keep the honest
+sentence."* That measurement is now done, against **all 13 real prompt fixtures** in
+`tests/fixtures/*prompt*.txt`, using `countEnumeratedFeatures` itself.
+
+**The headline number first, because it is the one that decides the question.** The corpus holds about
+**104 marker lines over the 5-word limit**, and the overwhelming majority are **not features at all**.
+They are build instructions (*"Do NOT create src/main.tsx, package.json, or multiple files"*, *"Everything
+must be inside one index.html"*), styling notes (*"Keep the background elegant and non-distracting"*,
+*"Use subtle blueberry shapes/blobs and glowing particles"*), writing instructions, and pasted assistant
+advice. The 5-word limit is not accidentally dropping features; it is mostly doing its job.
+
+**Two candidate rules were measured, not supposed.**
+
+*(A) Blanket — any long bullet counts one.* Three fixtures cross `SPEC_FEATURE_COUNT` (14), and two of
+them are `autopsy8e124182` (7 → **33**) and `report0311186f` (9 → **20**) — the exact autopsies that exist
+BECAUSE of over-counting. 8e124182 is the one where sixteen counted parts split a six-screen stock app
+into fourteen modules; 0311186f is the one where a pasted assistant reply counted eighteen features and a
+one-screen trading app was split into eight. The blanket rule reverses both shipped fixes. Rejected.
+
+*(B) Head-before-a-gloss — the name before a `:` / em-dash / parenthetical counts one.* Much cleaner, and
+it ignores the instruction and styling lines for a principled reason rather than by luck: those lines are
+sentences and carry no gloss separator. It recovers genuine module names — `autopsy241215d1` 1 → **8**
+(*"Core Simulation Engine (the ledger, transaction math, and accounting rules)"*), `autopsyA2b9c802`
+6 → 8, `autopsy8e124182` 7 → 9, all under the spec line. But it still pushes `report0311186f` 9 → **18**,
+back over the line, and the parenthetical branch produced a false positive (`"getDownloadURL()"`).
+Restricting it to colon/em-dash only is safe on every fixture and then barely helps at all
+(`autopsy241215d1` recovers only 1 → 3), which is the whole case it was meant to fix.
+
+**So the honest finding is that the harm Q-1130 names is real but narrow — 1 of 13 fixtures — and every
+rule measured so far buys that one case by re-creating an over-count somewhere else.** `autopsy241215d1`
+is a genuinely detailed finance-simulator spec that currently reads as one feature, i.e. no scope at all,
+and that is a real user served badly. It is not enough on its own to reverse two autopsies for.
+
+**Why this does not become a session's own decision.** `countEnumeratedFeatures` feeds `statesAScope` →
+complexity routing → which lane a build takes and what the user is charged. The sixth rule reserves a
+money-and-behaviour change to the admin, so Q-1130 moves from OPEN to **🟡 BLOCKED on an admin decision**,
+with all four fields, the three options and a recommendation (**C — leave the counter alone**; Q-1023's
+sentence already tells the user that a long bullet does not count). A blocked row with its reason written
+down is the sixth rule's requirement; "measured and left silent" is the failure mode it was written against.
+
+**The measuring script was deliberately not committed.** It is scratch, not a gate: it asserts nothing and
+would rot the moment the fixtures change. The repo keeps the fixtures and the counter, which is everything
+needed to reproduce the numbers above.
+
+**Not a fix, and not claimed as one.** Nothing in the counter changed. `tests/theQueueSaysWhatIsTrue.test.ts`
+still passes 14/14 with the baseline unchanged at 40 — the new BLOCKED row carries all four fields, so it
+adds nothing to the gap count.

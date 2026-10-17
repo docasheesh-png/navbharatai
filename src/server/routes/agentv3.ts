@@ -1,4 +1,6 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { platformVoiceEnabled, voiceOf, voiceRequestedIn, eventInUserVoice } from '../AgentV3/platformVoice';
+import { silenceMemoryEnabled, sharedProviderSilenceMemory } from '../AgentV3/providerSilenceMemory';
 import { templateInstantPreviewEnabled, shouldUseSlimPrompt, isTemplateVerifyJob, capTemplateVerifyEstimate } from '../AgentV3/templateVerify';
 import { teacherPromoFor } from '../lib/freeChatReplies';
 import { BoundedCache } from '../lib/boundedCache';
@@ -3794,6 +3796,8 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
     ...(opts.deadRungs ? { deadRungs: opts.deadRungs } : {}),
     ...(opts.bench ? { bench: opts.bench } : {}),
     ...(opts.sticky ? { sticky: opts.sticky } : {}),
+    // Autopsy eb58abaf — a rung silent for another build moments ago is opened past (providerSilenceMemory.ts).
+    ...(silenceMemoryEnabled() ? { silenceMemory: sharedProviderSilenceMemory } : {}),
   });
 }
 
@@ -3957,12 +3961,17 @@ export function workspaceLeaseEnabled(env: NodeJS.ProcessEnv = process.env): boo
  * enforceNoClaude. Null when nothing in it has a key; the caller then plans on the build client, which
  * is the same tier's ladder anyway. Replaces grokPlanRunner (2026-09-14): Grok is the judge now.
  */
-function tierPlanRunner(level: PowerLevel | string | boolean | null | undefined, noClaude: boolean): TurnRunner | null {
+function tierPlanRunner(level: PowerLevel | string | boolean | null | undefined, noClaude: boolean, bench?: BuildBenchRegistry, onProviderBenched?: (family: string, reason: string) => void): TurnRunner | null {
   try {
     const chain = enforceNoClaude(ladderRunners(planLadder(level)), noClaude);
     if (chain.length === 0) return null;
     return makeMultiProviderTurnRunner(chain, {
       onProviderError: (name, err) => console.log(`[AGENTV3] plan ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
+      // Sibling of autopsy eb58abaf: the plan-first planner was the one build runner with a PRIVATE bench, so a
+      // rung it found silent was opened again by the architect, and vice versa. It shares the build's now.
+      ...(bench ? { bench } : {}),
+      ...(onProviderBenched ? { onProviderBenched } : {}),
+      ...(silenceMemoryEnabled() ? { silenceMemory: sharedProviderSilenceMemory } : {}),
     });
   } catch {
     return null; // misconfigured — caller falls back to the normal build client
@@ -6910,9 +6919,11 @@ async function noteBuildOutcome(
         return;
       }
       (rb.steerQueue ??= []).push(message);
+      // "Hindi me bolo" mid-build (autopsy eb58abaf): every platform line from here on follows it.
+      if (platformVoiceEnabled()) { const asked = voiceRequestedIn(message); if (asked) rb.voice = asked; }
       // Instant, honest feedback to EVERY attached device: the message is queued (the runner emits
       // its own "picked up" narration when it actually injects it at the next step boundary).
-      broadcastBuild(rb, { type: 'narration', agent: 'system', text: `📨 Message to the team queued — it will be picked up at the next step: “${message.slice(0, 140)}${message.length > 140 ? '…' : ''}”`, ts: Date.now() });
+      broadcastBuild(rb, eventInUserVoice({ type: 'narration', agent: 'system', text: `📨 Message to the team queued — it will be picked up at the next step: “${message.slice(0, 140)}${message.length > 140 ? '…' : ''}”`, ts: Date.now() }, rb.voice));
       audit('AGENTV3_STEER_QUEUED', { userId, workspaceId: rb.workspaceId }, 'info');
       res.json({ ok: true, queued: rb.steerQueue.length });
       return;
@@ -11680,7 +11691,7 @@ async function noteBuildOutcome(
     // `key` stays the ACCOUNT key (userId ?? 'anon') for the cross-device LiveChannel (readers already
     // filter by workspaceId), while the registry Map is keyed by `buildKey` (per-workspace when enabled).
     // `userId` lets the per-account cap count this account's live builds across workspaces.
-    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), originTs: requestArrivedAt, key: userId ?? 'anon', userId, workspaceId: intentWorkspaceId, steerQueue: [], powerLevel: powerLevelReqEffective };
+    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), originTs: requestArrivedAt, key: userId ?? 'anon', userId, workspaceId: intentWorkspaceId, steerQueue: [], powerLevel: powerLevelReqEffective, voice: platformVoiceEnabled() ? voiceOf(String(prompt ?? '')) : 'en' };
     const primary: BuildSubscriber = {
       write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
       end: () => { if (!res.writableEnded) res.end(); },
@@ -11712,7 +11723,8 @@ async function noteBuildOutcome(
      * field can be mangled, and `redactSecrets` returns its input unchanged when there is nothing to
      * mask — which is almost every event.
      */
-    const emit = (e: unknown): void => { const ev = redactEventForUser(honestResultEvent(e)); sessionTimeline.record(ev); broadcastBuild(rb, ev); };
+    // Platform lines in the user's language (autopsy eb58abaf, platformVoice.ts) — at the one door every event leaves by.
+    const emit = (e: unknown): void => { const ev = eventInUserVoice(redactEventForUser(honestResultEvent(e)), rb.voice); sessionTimeline.record(ev); broadcastBuild(rb, ev); };
     // Exposed to the finally so the LAST background checkpoint is flushed on every exit path
     // (success, error, abort). Held outside the try because `dispatcher` is block-scoped to it.
     let dispatcherForFlush: { flushCheckpoints: () => Promise<void>; markBuildActive: (active: boolean) => void; flushUnrecordedWrites: () => void } | undefined;
@@ -17845,7 +17857,7 @@ async function noteBuildOutcome(
         // Opus for a Sonnet-pinned tier would be exactly the cross-tier call the admin forbade.
         // Plan on the tier's plan ladder (admin-approved table 2026-09-14). `planGrok` keeps its name
         // for the lines below; it is no longer Grok — Grok judges.
-        const planGrok = tierPlanRunner(powerLevelReqEffective, noClaudeBuild);
+        const planGrok = tierPlanRunner(powerLevelReqEffective, noClaudeBuild, buildBench, recordProviderBenched);
         const planRunner = new AgentRunner({
           client: planGrok ?? client,
           // C2 — the plan runner has tool access too, so it gets the same guard. A planner that

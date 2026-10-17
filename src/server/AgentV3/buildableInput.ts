@@ -101,7 +101,12 @@ const BARE_ACTION_WORDS = new Set([
  * requires b·(a)·n·a(a)·<ending>, so "ban", "banner" and "banana" do not match it (the last is in the
  * set above on purpose — as a one-word prompt, a fruit is no more buildable than a verb).
  */
-const BANAO_FAMILY = /^b[a]?n[a]{1,2}(?:o|do|de|deo|dena|dijiye|ye)?$/;
+// 🔴 AND ITS CONJUNCTIVE / POLITE / FUTURE FORMS (autopsy eb58abaf, 2026-10-17). "Mujhe ek app bnakar do"
+// built for 49 s because "bnakar" (= "having made") was not in the family — every new spelling was a new
+// false negative, so the family is now the verb's MORPHOLOGY, not a list: stem b(a)n(a)a + any of the
+// endings Hindi puts on it (kar/ke/iye/ye/ega/enge/unga/oge/wa…). Still tight: it must start b·n·a and end
+// in one of these endings, so "banner", "bank", "banaras" do not match.
+const BANAO_FAMILY = /^b[a]?n[a]{1,2}(?:o|do|de|deo|dena|dijiye|ye|iye|ie|yie|ke|kar|kr|karke|krke|kar?ke|na|ni|ne|ya|yi|yega|yegi|enge|ega|egi|unga|ungi|oge|ogi|wa|wao|wado|wana|wani|iyega|vo|vao)?$/;
 
 /**
  * 🔴 "APP BANAO" NAMES NO MORE THAN "BANAO" DOES (admin, 2026-09-17, on reading the fix for report
@@ -156,6 +161,9 @@ const WANTING_GRAMMAR = new Set([
   // the auxiliary and the tense
   'hai', 'he', 'hain', 'hei', 'hoon', 'hun', 'hu', 'ho', 'tha', 'thi', 'hoga', 'hogi', 'is', 'am',
   'are', 'to', 'for', 'new', 'naya', 'nayi', 'one', 'now', 'abhi', 'jaldi', 'mai', 'main',
+  // the light verbs and particles an order is wrapped in ("bana KE DO", "bnakar DIJIYE") — eb58abaf
+  'ke', 'kr', 'karke', 'krke', 'dena', 'dijiye', 'dijie', 'dedo', 'dede', 'de', 'den', 'dein', 'do', 'please', 'plz', 'pls',
+  'sakte', 'sakti', 'sakta', 'skte', 'kya', 'kyaa', 'aap', 'tum', 'tu',
   // the same, in Devanagari
   'मुझे', 'मेरे', 'मेरा', 'मेरी', 'लिए', 'हमें', 'है', 'हैं', 'हूँ', 'हूं', 'चाहिए', 'चाहता', 'चाहती',
   'करना', 'नया', 'नई', 'मैं',

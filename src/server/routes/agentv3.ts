@@ -217,6 +217,7 @@ import {
 import { withoutPlatformCheckTools } from '../AgentV3/repairScope';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
+import { applyGateRedNotice } from '../AgentV3/gateRedNotice';
 import { releaseGate, releaseGateRecord, releaseGateSummary, runtimeProven, runtimeRedFlipEnabled, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary, admittedInertControls } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
@@ -24158,6 +24159,10 @@ async function noteBuildOutcome(
           });
           }
         }
+        // RED ON RUNTIME EVIDENCE, VERDICT STILL ok (audit P0-1, 2026-10-16): the flip above needs an unresolved ERROR, and a
+        // failed page or journey is a WARNING — so with AGENTV3_RUNTIME_RED_FLIP off the user got the ordinary success summary
+        // from a RED gate. Says so in their summary; `ok` and the bill are not touched (gateRedNotice.ts).
+        result = applyGateRedNotice(result, gate, gateEvidence, buildDiag);
         // ── UNKNOWN MUST REACH THE PERSON WHO IS ABOUT TO TRUST THE APP ──────────────────────────
         //
         // 🔴 THE GAP, and it is structural rather than a bug (audit 2026-09-16). `releaseGate` exists to

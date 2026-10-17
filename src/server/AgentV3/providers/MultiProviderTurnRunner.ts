@@ -16,7 +16,7 @@
 // injected, so this is fully unit-testable without any provider key.
 
 import { createStickyState, recordStickySuccess, stickyStartIndex, type StickyState } from '../reliability/stickyRung';
-import { crawlBenchWindowMs, mayAbandonCrawl, crawlBenchUntil } from '../crawlBench';
+import { crawlBenchWindowMs, mayAbandonCrawl, benchUntilAfterAbandon, silenceBenchIsSticky } from '../crawlBench';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { plannedModelOf } from '../runnerChainSummary';
 import { modelAlwaysReasons } from './glmThinking';
@@ -771,6 +771,10 @@ export function makeMultiProviderTurnRunner(
   const slowKeptAnyway = bench.slowKeptAnyway;
   const distinctSlowRungs = new Set(chain.map(slowKeyFor)).size;
   const crawlWindowMs = crawlBenchWindowMs();
+  // Silence is not re-probed inside a build (autopsy ca99778e — see `silenceBenchIsSticky`).
+  const silenceSticky = silenceBenchIsSticky();
+  // Other instances' silences are pulled in now, in the background, so the first call can already use them.
+  try { void opts.silenceMemory?.refresh?.(now()); } catch { /* best-effort */ }
   return {
     // What this chain plans to call first — for records only, never sent (see TurnRunner.plannedModel).
     // `NamedRunner` carries the same identifying fields as `ChainRung`, so the one reader both use is shared.
@@ -921,7 +925,7 @@ export function makeMultiProviderTurnRunner(
           }), params.signal);
           /** This rung's own time — not the rungs tried, skipped or abandoned before it (see TurnResult.attemptMs). */
           const answeredInMs = Math.max(0, now() - attemptStartedAt);
-          try { opts.silenceMemory?.clear(benchKey); } catch { /* best-effort */ }
+          try { opts.silenceMemory?.clear(benchKey, now()); } catch { /* best-effort */ }
           timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
@@ -1088,8 +1092,10 @@ export function makeMultiProviderTurnRunner(
               const silentKey = slowKeyFor(chain[i]);
               if (!slowBenched.has(silentKey) && canBenchAnother(slowBenched.size, distinctSlowRungs)) {
                 slowBenched.add(silentKey);
-                if (crawlWindowMs !== null) bench.slowBenchUntil.set(silentKey, now() + crawlWindowMs);
-                opts.onProviderBenched?.(reportName, `${chain[i].modelId ? `${chain[i].modelId} ` : ''}had not started answering after ${Math.round(Math.max(0, now() - attemptStartedAt) / 1000)}s — skipped on every key${crawlWindowMs !== null ? ` for ${Math.round(crawlWindowMs / 1000)}s, then tried once more` : ' for the rest of this build'}, so the ladder can reach the next engine instead of waiting it out`);
+                const windowed = crawlWindowMs !== null && !silenceSticky;
+                if (windowed) bench.slowBenchUntil.set(silentKey, now() + (crawlWindowMs as number));
+                else bench.slowBenchUntil.delete(silentKey);
+                opts.onProviderBenched?.(reportName, `${chain[i].modelId ? `${chain[i].modelId} ` : ''}had not started answering after ${Math.round(Math.max(0, now() - attemptStartedAt) / 1000)}s — skipped on every key${windowed ? ` for ${Math.round((crawlWindowMs as number) / 1000)}s, then tried once more` : ' for the rest of this build'}, so the ladder can reach the next engine instead of waiting it out`);
               }
             } catch { /* the bench is bookkeeping — it must never replace the error below */ }
           }
@@ -1106,7 +1112,7 @@ export function makeMultiProviderTurnRunner(
               bench.crawlReprobed.delete(slowKey);
               if (!slowBenched.has(slowKey) && canBenchAnother(slowBenched.size, distinctSlowRungs)) {
                 slowBenched.add(slowKey);
-                const until = crawlBenchUntil(abandons, now(), crawlWindowMs);
+                const until = benchUntilAfterAbandon({ abandonsOfThisRung: abandons, nowMs: now(), windowMs: crawlWindowMs, silent: isSilentAbandon(err), sticky: silenceSticky });
                 if (Number.isFinite(until)) bench.slowBenchUntil.set(slowKey, until);
                 else bench.slowBenchUntil.delete(slowKey);
                 const elapsedMs = Math.max(0, now() - attemptStartedAt);

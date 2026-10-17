@@ -79,6 +79,6 @@ describe('the route asks one question in both places', () => {
   });
 
   it('the telemetry counts the build under the template kind when the template was seeded', () => {
-    expect(route).toMatch(/\.record\(\{[\s\S]{0,600}?taskType: etaKeyForBuild\(goldenPreseeded, goldenPreseededTier\),/);
+    expect(route).toMatch(/\.record\(\{[\s\S]{0,700}?taskType: etaKeyForBuild\(templateOnlyBuild\(goldenPreseeded, prompt\), goldenPreseededTier\),/); // widened: ca99778e (a customised chip is a build, as the reader keys it)
   });
 });

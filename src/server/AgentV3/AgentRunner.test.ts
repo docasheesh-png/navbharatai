@@ -407,21 +407,25 @@ describe('AgentRunner persistence (D7)', () => {
     // All 4 transcript messages landed — the oversized turn was persisted in compacted form.
     expect(rec?.messages).toHaveLength(4);
     expect(JSON.stringify(rec?.messages)).toContain('truncated for storage');
-    // 🔴 THIS TEST'S BOUND WAS NEVER CHOSEN FOR IT, AND CI PAID FOR THAT (2026-10-16, run 11555 on #3768).
+    // 🔴 THIS TEST ONCE TOOK 12 SECONDS, AND IT WAS RIGHT TO (Q-1127 → Q-1128, 2026-10-16).
     //
-    // It failed with "Test timed out in 20000ms" on a pull request whose diff was a prompt string and two
-    // test pins — nothing this test can reach. Measured on an idle container it takes **12.0 s**, against the
-    // global `testTimeout: 20_000` in vitest.config.ts: a 1.65x margin, which a CI runner with 2709 other
-    // test files in flight eats. In this whole 52-test file it is the ONLY test over 2 s.
+    // It timed out at the global 20 s twice in one day, on #3768 and then on #3769 — both diffs unable to
+    // reach it. #3768 gave it an explicit 60 s and recorded the honest remainder as Q-1127: *why* does the
+    // scaffolding cost 12 s when `compactMessagesForPersist` on this exact turn runs 50 calls in 1 ms?
     //
-    // The product path was ruled out first, not assumed: `compactMessagesForPersist` on this exact oversized
-    // turn runs **50 calls in 1 ms**, so there is no slow compaction behind it — the seconds are this test's
-    // own agent-loop scaffolding driving a 50,000-character write. The assertions above are untouched; only
-    // the clock it was never deliberately given. 60 s is five times the measured cost.
+    // ✅ ANSWERED, and the answer was in the PRODUCT, not in this fixture. Q-1127's own first suspect — the
+    // fake store's per-append `JSON.stringify` of a 50 KB payload, i.e. test code — was wrong. Timed through
+    // the real write door: `guardedWrite` 22 ms, `writeSteeringNotes` 12,044 ms, of which `vehicleShapeHalves`
+    // alone was 11,884 ms. Its patterns all begin with an unbounded greedy word-character prefix, which
+    // backtracks out of a long word run once per start position: O(run²) on the 50,000 'x' characters below.
+    // That cost was paid by every real build too, at every write. `handWrittenVehicleScan.ts` now bounds the
+    // run (Q-1128, #3769), and this test went from 12,174 ms to 22 ms — so the 60 s bound is a workaround
+    // whose defect is fixed, and it goes with it. The global 20 s now has a ~900x margin, not 1.65x.
     //
-    // ⚠️ WHAT IS *NOT* EXPLAINED, and is recorded rather than waved past: why the scaffolding costs 12 s at
-    // all when the compaction is instant. That is Q-1127 — a measurement, not a guess.
-  }, 60_000);
+    // The assertions above were never the problem and are untouched. This test EARNED its keep: it is the
+    // only place in the suite that writes a file big enough to make that cost visible, and a re-run would
+    // have hidden it.
+  });
 
   it('self-heals from a TRANSIENT store outage — no turns are skipped as poison', async () => {
     // The store rejects the first few writes entirely (outage), then recovers. The poison-skip

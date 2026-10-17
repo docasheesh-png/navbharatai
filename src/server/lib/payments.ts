@@ -323,10 +323,40 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
         // Reconcile what Cashfree actually charged against the amount we recorded at create
         // time. Without this, a tampered/mismatched local record could credit more than was
         // paid. If they diverge beyond a 1-paisa rounding tolerance, refuse to credit.
+        /**
+         * 🔴 Q-890 — THE CHECK USED TO BE SKIPPED BY THE VERY INPUTS IT GUARDS AGAINST.
+         *
+         * The condition was `isFinite(paid) && isFinite(expected) && |paid − expected| > 0.01`. If
+         * EITHER amount was not a finite number the whole condition was false, so nothing was refused
+         * and the credit went through un-reconciled. A guard that stands down when its input is
+         * unreadable is a guard with an off switch.
+         *
+         * ⚠️ AND THE ROW'S PRESCRIBED FIX — "fail closed" — IS RIGHT FOR ONE SIDE AND WRONG FOR THE
+         * OTHER. That is measured, not assumed: this file's own comment at `lastRechargeAt` records
+         * that `txData.amountPaid` can legitimately be *"absent, a string or NaN (a legacy row, a
+         * hand-fixed one, a provider payload that changed shape)"*. Refusing those would turn a
+         * silent un-reconciled credit into a REFUSED credit for a customer who really paid — fixing
+         * one problem by creating a worse one, on money.
+         *
+         * So the two sides are treated as what they are:
+         *   · the PROVIDER's amount unreadable ⇒ REFUSE. A paid order always carries `order_amount`;
+         *     without it there is nothing to reconcile against and no legitimate case is lost.
+         *   · OUR record unreadable ⇒ credit (the amount credited is our own recorded figure either
+         *     way, which is what makes this safe) and SAY SO LOUDLY, so the gap is visible instead of
+         *     silent. Persisting that fact on the order itself is the other half — it needs threading
+         *     through the credit transaction below, which is money-path surgery and waits for CI
+         *     (Q-1135).
+         */
         const paidAmount = Number(orderDetails.order_amount);
         const expectedAmount = Number(txData.amountPaid);
-        if (Number.isFinite(paidAmount) && Number.isFinite(expectedAmount) && Math.abs(paidAmount - expectedAmount) > 0.01) {
-          console.error(`[CASHFREE] Amount mismatch for order ${orderId}: Cashfree charged ${paidAmount}, expected ${expectedAmount}. Refusing to credit.`);
+        if (!Number.isFinite(paidAmount)) {
+          console.error(`[CASHFREE] Order ${orderId} is PAID but carries no readable order_amount (${JSON.stringify(orderDetails.order_amount)}). Nothing to reconcile against — refusing to credit.`);
+          return { success: false, error: 'This payment could not be verified — please contact support.' };
+        }
+        if (!Number.isFinite(expectedAmount)) {
+          console.error(`[CASHFREE] UNRECONCILED CREDIT for order ${orderId}: the provider charged ${paidAmount} but our record's amountPaid is ${JSON.stringify(txData.amountPaid)}, which is not a number. Crediting the server-recorded amount; the paid-vs-recorded check could NOT run.`);
+        } else if (Math.abs(paidAmount - expectedAmount) > 0.01) {
+          console.error(`[CASHFREE] Amount mismatch for order ${orderId}: the provider charged ${paidAmount}, expected ${expectedAmount}. Refusing to credit.`);
           return { success: false, error: 'Payment amount mismatch detected — please contact support.' };
         }
         isPaid = true;

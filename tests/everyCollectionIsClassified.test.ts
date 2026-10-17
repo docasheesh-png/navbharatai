@@ -138,6 +138,7 @@ const CLASSIFICATION: Record<string, { kind: Kind; why: string }> = {
 
   hosted_deploy_leases: { kind: 'platform', why: 'one doc per workspace while a server deploy runs (hostedDeployments.ts), deleted when it ends and stale after the longest possible deploy — a lock, not a record' },
   hosted_deploy_attempts: { kind: 'retained', why: "one doc per server deploy attempt: its states, a failure category and the owner's uid (hostedDeployments.ts); purged at 180 days" },
+  agentv3ProviderHealth: { kind: 'platform', why: 'one doc (`silence`): per model rung, the timestamps (last 24 h, at most 8) it sent nothing before we stopped waiting (providerSilenceMemory.ts, autopsy ca99778e); no uid, no workspace, no person in it' },
   job_leases:          { kind: 'platform', why: 'one doc per job id; a lease that expires by its own clock' },
   job_runs:            { kind: 'platform', why: 'one doc per scheduled job id: when it last ran (schedulerTick.ts, Q-159); replaced in place, no person in it' },
   payment_reversal_cursors: { kind: 'platform', why: "one doc per store rail: the newest voided purchase already applied (playVoidedPurchases.ts, Q-690); a timestamp replaced in place, no person in it" },

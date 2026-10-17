@@ -230,6 +230,57 @@ export function goldenScaffoldForPrompt(prompt: string): GoldenScaffold | null {
 }
 
 /**
+ * 🔴 A CHIP PLUS THE USER'S OWN WORDS GOT NO TEMPLATE — AND LOST THE USER'S WORDS (autopsy ca99778e, 2026-10-17).
+ *
+ * The user tapped "Mock test" and typed, after the chip's text, "मुझे यूपी पुलिस कांस्टेबल की तैयारी करनी है तो तुम हर
+ * कोश्चन से मोक टेस्ट बनाकर दो". The exact-chip match above failed by design ("a user who wrote anything more has
+ * asked for something else"), so the build started from scratch: no instant preview (the starter page for 5.6
+ * minutes), a full plan, a sub-agent — and a builder reading a 70-word English spec (GK, Reasoning, Quant, English)
+ * with one Hindi sentence at the end, which is the one sentence that said what the user actually wanted.
+ *
+ * 🔑 THE CLASS: "the prompt is not exactly the chip" was treated as "the chip is irrelevant". It is the opposite:
+ * the chip is the base and the added words are the CUSTOMISATION. So the template is seeded (the preview shows a
+ * working app at once) and the builder is told, first, that the user's added words override the template wherever
+ * they differ (`goldenBuildPrompt`'s customise head). Only when the WHOLE chip text is present — a chip the user
+ * edited inside builds from scratch, exactly as before. PURE.
+ */
+export function chipExtensionFor(prompt: string): { scaffold: GoldenScaffold; extension: string } | null {
+  const raw = String(prompt ?? '').replace(/\s+/g, ' ').trim();
+  const lower = raw.toLowerCase();
+  if (!raw) return null;
+  for (const t of STARTER_TEMPLATES) {
+    const scaffold = GOLDEN_SCAFFOLDS.find((g) => g.id === t.id);
+    if (!scaffold) continue;
+    for (const chip of [t.prompt, ...(RETIRED_CHIP_PROMPTS[t.id] ?? [])]) {
+      const c = String(chip).replace(/\s+/g, ' ').trim().replace(/[\s.!?]+$/g, '');
+      if (!c) continue;
+      const at = lower.indexOf(c.toLowerCase());
+      if (at < 0) continue;
+      const rest = `${raw.slice(0, at)} ${raw.slice(at + c.length)}`.replace(/^[\s.!?,;:—-]+|[\s,;:—-]+$/g, '').trim();
+      // Punctuation alone is not an addition — that is the exact chip, which `goldenScaffoldForPrompt` answers.
+      if (!/[\p{L}\p{N}]/u.test(rest)) return null;
+      return { scaffold, extension: rest };
+    }
+  }
+  return null;
+}
+
+/** The user's added words over a chip, or '' (chipExtensionFor). PURE. */
+export function chipExtensionTextOf(prompt: string): string {
+  return chipExtensionFor(prompt)?.extension ?? '';
+}
+
+/** Was this build ONLY the template (seeded and not customised)? — what the verify-slice ETA may learn from. PURE. */
+export function templateOnlyBuild(preseeded: boolean, prompt: string): boolean {
+  return preseeded && !chipExtensionFor(prompt);
+}
+
+/** The template to seed for a prompt: the exact chip / bare name first, then a chip the user added words to. PURE. */
+export function seedableScaffoldFor(prompt: string): GoldenScaffold | null {
+  return goldenScaffoldForPrompt(prompt) ?? chipExtensionFor(prompt)?.scaffold ?? null;
+}
+
+/**
  * Chip texts that were CORRECTED, kept so a phone app still sending the old text keeps its template.
  *
  * The phone apps are BUNDLED (capacitor.config.ts serves `dist/`), so a chip's text in an installed app only
@@ -271,8 +322,24 @@ export function chipPromptForBuild(prompt: string): string {
  *
  * A scaffold's `finishNote` (the instructions of the recipe it seeds) is appended to both. PURE.
  */
-export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string): string {
-  const head = golden.tier === 'pro'
+/** Autopsy 8257ca59 — said to every builder of a simple template, verify or customise. */
+const KEEP_THE_SWITCH = `KEEP the template's own working controls — above all its light/dark switch (ThemeToggle in src/theme.tsx, which cycles Auto → Light → Dark through the data-theme attribute the styles use); improve one in place if you must, never replace it with a hand-rolled copy.`;
+
+export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string, extension?: string | null): string {
+  const added = String(extension ?? '').trim();
+  // The user's own words on top of a chip (chipExtensionFor, autopsy ca99778e) — said FIRST and as the priority.
+  const customise = added
+    ? `[CUSTOMISE THIS WORKING TEMPLATE — THE USER'S OWN WORDS COME FIRST] This workspace was just pre-seeded with NavBharatAI's tested "${golden.label}" ${golden.tier === 'pro' ? 'foundation' : 'app'}; it compiles, runs, and is already on the user's preview. `
+      + `The user tapped that suggestion AND added, in their own words: «${added.slice(0, 600)}». That addition is the real request: change the template's content, sections, data, labels and language to match it exactly `
+      + `(the exam, subjects, level and the language of the questions they named) — wherever it differs from the suggestion text below, the user's addition wins. `
+      + `READ src/App.tsx first and edit it in place (read the exact region before each edit_file; write_file a file you replace whole), and never start over. `
+      + `${KEEP_THE_SWITCH}\n\n`
+    : '';
+  if (customise && golden.tier !== 'pro') {
+    const note = golden.finishNote ? `\n\n${golden.finishNote}` : '';
+    return `${customise.trimEnd()}${note}\n\n---\n\n${buildPrompt}`;
+  }
+  const head = customise + (golden.tier === 'pro'
     ? `[EXTEND THIS WORKING FOUNDATION — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested "${golden.label}" foundation. ` +
       `It already compiles and runs: src/lib/ui.tsx holds the shared components (Shell, Card, StatTile, Badge, Button, Field, Select, Modal, Empty), ` +
       `src/lib/store.ts holds persistent state (useCollection, inr, shortDate), and src/App.tsx has the working screens. ` +
@@ -284,7 +351,7 @@ export function goldenBuildPrompt(golden: GoldenScaffold, buildPrompt: string): 
       `make NO edits unless tsc fails or the request asks for something the template does not do — a finished template needs no polish, and every edit is a chance to break it. The live preview has ALREADY been started by the platform. Before any edit_file, read_file the exact region you will change (one read of src/App.tsx, not fragments) — never edit text you have not read. Otherwise run the type check and finish. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists. ` +
       // Autopsy 8257ca59: a polish step replaced the template's working light/dark switch with a
       // hand-rolled one that set a class no stylesheet styles, and a repair pass had to put it back.
-      `KEEP the template's own working controls — above all its light/dark switch (ThemeToggle in src/theme.tsx, which cycles Auto → Light → Dark through the data-theme attribute the styles use); improve one in place if you must, never replace it with a hand-rolled copy.`;
+      KEEP_THE_SWITCH);
   const note = golden.finishNote ? `\n\n${golden.finishNote}` : '';
   return `${head}${note}\n\n---\n\n${buildPrompt}`;
 }

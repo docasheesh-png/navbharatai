@@ -21,7 +21,8 @@ import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTrigger
 import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { writerTaskSiblings, SIBLING_TASKS_INPUT_KEY } from './parallelSiblings';
 import { toolNameCouldProduceWork } from './toolWork';
-import { isTodoOnlyTurn, TODO_ONLY_TURN_STEER } from './todoOnlyTurn';
+import { TASK_NOT_OFFERED } from './soloBuild';
+import { isTodoOnlyTurn, TODO_ONLY_TURN_STEER, nextTodoWithdrawal, toolsThisTurn, type TodoWithdrawal } from './todoOnlyTurn';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
@@ -85,6 +86,11 @@ export interface AgentRunnerOptions {
    * (autopsy db07e0af: 45 s + 11 s spent waiting on a reasoning engine, for nothing). Absent ⇒ walk the chain.
    */
   stopAtReasoningRung?: boolean;
+  /**
+   * A small new app built by ONE agent (soloBuild.ts, autopsy ca99778e): the run is not offered `task`, and a `task`
+   * call it invents anyway is refused here instead of spawning a sub-agent.
+   */
+  soloBuild?: boolean;
   maxTokensPerTurn?: number;
   /** AP-4 (flag-gated, default off): allow frontend/backend WRITER sub-agents to run in parallel. Safe
    *  only when the actuator is wrapped with the per-path write lock (lockedActuator) — the caller pairs
@@ -620,6 +626,9 @@ export class AgentRunner {
     // Turns whose only tool calls were update_todo (todoOnlyTurn.ts, autopsy 9c612cdb): every one is reported
     // through `onTodoOnlyTurn`, and the first is handed back with the rule (once per run).
     let todoOnlySteered = false;
+    // …and after one, the plan tool is withdrawn until real work is done (autopsy ca99778e — see `toolsThisTurn`).
+    let todoWithdrawal: TodoWithdrawal = 'offered';
+    let plannedOnlyBefore = false;
     // ONE place answering "is there something to resume from", so the four abort/timeout/step-cap
     // exits below can never drift into disagreeing with each other (or with the route's own
     // `writtenFiles`-based billing decision — see `hasExistingFiles`'s doc comment for the report
@@ -1023,7 +1032,7 @@ export class AgentRunner {
             model,
             system,
             messages: modelMessages,
-            tools,
+            tools: toolsThisTurn(tools, todoWithdrawal),
             maxTokens: maxTokensPerTurn,
             thinking,
             effort,
@@ -1490,6 +1499,8 @@ export class AgentRunner {
         // 📋 A TURN SPENT ONLY ON THE PLAN (autopsy 9c612cdb, Q-987: five of 22 turns, 20 s of model time).
         // Measured here, while `llmStartedAt` still times only the model call; handed back below, once.
         const todoOnlyTurn = isTodoOnlyTurn(turn.toolUses.map((tu) => tu.name), tools.map((t) => t.name));
+        todoWithdrawal = nextTodoWithdrawal(todoWithdrawal, { todoOnly: todoOnlyTurn, didOtherWork: turn.toolUses.some((tu) => tu.name !== 'update_todo'), plannedOnlyBefore });
+        if (todoOnlyTurn) plannedOnlyBefore = true;
         if (todoOnlyTurn) {
           try { this.opts.onTodoOnlyTurn?.({ latencyMs: Date.now() - llmStartedAt, firstInRun: !todoOnlySteered }); } catch { /* a measurement must never fail a build */ }
         }
@@ -1554,6 +1565,9 @@ export class AgentRunner {
           // it makes is then the model's by evidence, so a platform step that named no pass can no longer be
           // reported as "the build loop". A repair the platform started is marked as that, not as the build.
           const asModel = <T>(fn: () => Promise<T>): Promise<T> => runAsModelToolCall(fn, { platformRequest: this.opts.platformRequest === true });
+          // A sub-agent is spawned only by a run that was OFFERED the task tool (soloBuild.ts, autopsy ca99778e): a small
+          // app's solo architect that invents a `task` call is told to write the files itself — nothing is spawned.
+          if (tu.name === 'task' && this.opts.soloBuild === true && !offeredToolNames.has('task')) return { tool_use_id: tu.id, content: TASK_NOT_OFFERED, is_error: true };
           if (toolTimeoutMs <= 0 || tu.name === 'task') return asModel(() => dispatcher.dispatch(tu, agentRole));
           try {
             return await withDeadline((signal) => asModel(() => dispatcher.dispatch(tu, agentRole, { signal })), toolTimeoutMs, `tool ${tu.name}`);

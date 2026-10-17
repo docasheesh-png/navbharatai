@@ -17,9 +17,10 @@
 //   • requires the project to actually HAVE a .css file with selectors, and a threshold of misses,
 //     before reporting — so a matched stylesheet (or a CSS-in-JS app) is never flagged.
 //
-// Pure + dependency-free → fully unit-testable. (Its one import is a constant from a leaf module.)
+// Pure + dependency-free → fully unit-testable. (Its imports are leaf modules.)
 
 import { APPEND_WITH_EMPTY_OLD_STRING } from './appendByEdit';
+import { isAutoStyleSheet } from './autoStyleFloor';
 
 const SRC_RE = /\.(t|j)sx?$/;
 /** A file whose markup names classes: a component, a script that builds HTML, or an HTML page. */
@@ -118,6 +119,9 @@ export function collectDefinedClasses(files: Record<string, string>): { defined:
   const re = /\.(-?[A-Za-z_][\w-]*)/g;
   for (const [path, content] of Object.entries(files)) {
     if (typeof content !== 'string') continue;
+    // The platform's style FLOOR defines nothing for this question (autoStyleFloor.ts, autopsy ca99778e): its rules
+    // are what the user sees meanwhile, and every net that asks for real rules must still ask.
+    if (isAutoStyleSheet(path)) continue;
     // A page's own <style> blocks define classes too — a one-file app keeps its whole stylesheet there.
     let text: string;
     if (CSS_RE.test(path)) text = content;

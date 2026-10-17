@@ -644,3 +644,15 @@ Q-1124
 Q-1089
 Q-1088
 Q-1082
+# Closed 2026-10-16/17 — merged PRs, registered on the fresh main that carries them.
+# #3768 (Q-1031: the append saves the anchor, not the look).
+Q-1031
+# #3771 (Q-1027: the enum normaliser is not silent).
+Q-1027
+# #3769 answered Q-1127's open half and fixed its cause in product code: the 12 s were
+# `vehicleShapeHalves`, O(run²) regex backtracking inside `writeSteeringNotes` on the agent's
+# critical path at EVERY write — not, as my row guessed first, the test's own fake store. Bounded
+# by `MAX_WORD_RUN = 512` in `handWrittenVehicleScan.ts`. Q-1128 and Q-1129 are that PR's own rows.
+Q-1127
+Q-1128
+Q-1129

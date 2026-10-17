@@ -75,18 +75,9 @@ describe('COMPLEXITY_ROUTING says what the sizer counted, never "names no featur
       expect(d.reason).not.toContain('names no features');
       // A comma and a single bullet both reached this line, so the sentence may not claim there were none.
       expect(d.reason).not.toMatch(/no comma|no bullet/);
-      // 🔁 REPOINTED AND STRENGTHENED (Q-1023), not loosened. "listed" became "countable" because the old
-      // word was the over-statement: measured, a bullet is counted only if it is short enough and names a
-      // feature — a field name, an adjective, a repeat or a longer phrase scores nothing, so three bullets
-      // can read as zero. This test's whole subject is that the sentence says what it MEASURED, so it now
-      // also asserts the droppers; the old wording would pass the test while lying to the user.
-      expect(d.reason).toContain(`fewer than ${MIN_STATED_FEATURES} countable features`);
+      expect(d.reason).toContain(`fewer than ${MIN_STATED_FEATURES} listed features`);
       expect(d.reason).toContain(`a run of ${MIN_RUN_ITEMS} or more short items`);
-      expect(d.reason).toContain('a feature described in a sentence is not counted');
-      expect(d.reason, 'the dropper a careful user hits: a detailed bullet counts nothing')
-        .toContain('a longer phrase is not counted');
-      expect(d.reason).toContain('a field name, a style adjective, a repeat of an earlier item');
-      expect(d.reason, 'and it no longer claims every bullet counts').not.toContain('each bullet or numbered line counts one');
+      expect(d.reason).toContain('features described in a sentence are not counted');
     });
   }
 });

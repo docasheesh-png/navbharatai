@@ -96377,6 +96377,43 @@ Heal behaviour is unchanged, because measurement said it was already right. Lock
 set has exactly one reader), with 101 sibling tests green. Three reversions bite — including **the row's own
 plan**, which fails 5 tests, one of them named for exactly why.
 
+## 2026-10-16 — Q-1031: the append saves the anchor, not the look (#3768)
+
+The contradiction is inside **one function**, which is why the row said "on an edit build". `editModePrefix`
+carries rule 2 — *"use read_file on every file you intend to change before touching it. Never assume you know
+a file's current content from memory"* — and, a few hundred characters later, the append sentence ending
+*"no anchor and no read are needed"*.
+
+A model reading both resolves it by guessing, **and the half that is wrong is the dangerous one.** No read is
+needed to *construct* an anchor-free append; plenty is needed to know whether what you are appending is
+already there. On a fresh build the file is one we just wrote. On an edit build it is the user's app, and a
+blind append duplicates a rule, a function, or a whole section of it.
+
+**The class: a true statement about an operation's mechanics, read as permission to skip the judgement the
+operation still needs.** The sentence now separates them — *it saves you the ANCHOR, not the LOOK*.
+
+**The row's "edit-mode form of the append sentence" is declined, with reason.** A second string for one rule
+is the exact drift this module exists to end: the class came back five times, each fix teaching one more
+branch of one more failure message. One sentence correct in both modes cannot disagree with itself, and there
+is one place to change when it must change.
+
+⚠️ **My own first wording was wrong in a way worth recording.** It said *"read it first anyway"* — which would
+have cost a **500-line read of the design kit on every CSS append**, the very thing the prompt avoids by
+*listing* the kit's classes instead. It now says *"know what is in it — read it, or use the listing this
+prompt already gives you"*: supplied knowledge and a read answer the same question, and demanding the read
+would have fixed a contradiction by creating a cost. The test holds that distinction shut.
+
+⚠️ **This entry first said #3767 — and #3767 is another session's games PR, already merged.** That is the
+SECOND number collision today: Q-1097's row first said #3761, which was also another session's. A PR number
+cannot be known until the PR exists, so writing one before that is a guess, and a row whose owner is wrong is
+a row nobody can check (the sixth rule's whole point). The habit that avoids it: create the PR FIRST, then
+write its number into the row. Mine is **#3768**.
+
+Locked by `tests/theAppendSavesTheAnchorNotTheLook.test.ts` (9 tests), including that both sentences really
+are in one function and near each other, and a census that the module exports exactly **one** such string and
+that no reader spells its words out. Two existing proximity pins were **widened with the reason written in**,
+not deleted — the sentence grew. Three reversions bite: the contradiction restored (6 fail), an unconditional
+read (1), and **the row's own second string** (1).
 ## 2026-10-16 — Q-1060: one declared runtime, and every place that names one agrees (#3766)
 
 `ci.yml` ran the whole 38,000-test suite on **Node 20** while the Dockerfile (`node:22`, `node:22-slim`), the
@@ -96481,6 +96518,25 @@ and nothing else. The test was not wrong and its 50,000-character write was not 
 place in the suite that writes a file big enough to make the cost visible, and it had been sitting at 12 s
 against a 20 s limit since #3708, passing on an idle runner and failing on a loaded one. A re-run would have
 turned it green and buried a 12-second-per-write defect in the real builder.
+### 2026-10-16 — #3768's CI failure, diagnosed rather than re-run (Q-1127)
+
+`AgentRunner.test.ts > recovers from an oversized turn via aggressive compaction` failed CI with
+*"Test timed out in 20000ms"* on a PR whose diff was a prompt string and two test pins — nothing that test
+can reach. It would have been easy to call it a flake and press re-run. Measured instead:
+
+- **12.0 s** on an idle container, against the global `testTimeout: 20_000` — a **1.65× margin**, which a
+  runner with 2,709 other test files in flight eats. In that whole 52-test file it is the **only** test over
+  2 s, so this is one outlier, not a sweep.
+- **The product path was ruled out first:** `compactMessagesForPersist` on that exact oversized turn runs
+  **50 calls in 1 ms**. There is no slow compaction behind it, so nothing a real build pays for that reason.
+
+So the bound — which was never chosen for this test, only inherited — is now an explicit 60 s with the
+measurement written beside it. The assertions are untouched.
+
+⚠️ **And the half that is NOT explained is recorded, not waved past:** why the test's agent-loop scaffolding
+costs 12 s when the compaction is instant. That is **Q-1127**, with the first suspect named (the fake store's
+per-append `JSON.stringify` of a 50 KB payload — test code, so it must be confirmed before the product is
+blamed). Raising a bound explains the timeout; it does not explain the 12 s.
 ## 2026-10-16 — the in-flight sweep: the queue says what is true again
 
 `BUILD_REPORT_QUEUE.md` had **166 rows, of which 61 claimed an open pull request — while ZERO pull requests

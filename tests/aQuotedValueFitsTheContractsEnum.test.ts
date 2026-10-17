@@ -297,7 +297,11 @@ describe('4 · CENSUS — every contract a lane asks for passes through the one 
 
   it('🔒 the blueprint lane hands the architect the prepared text, renames included', () => {
     const route = readFileSync(join(ROOT, 'src/server/routes/agentv3.ts'), 'utf8');
-    expect(route).toContain('const block = blueprintAdvisoryBlock(manifest, prepared.contract, prepared.renamed);');
+    // 🔁 REPOINTED, NOT DELETED (Q-1027). The call gained a FOURTH argument — `prepared.enumsAsConst` — because
+    // the enums this door rewrites used to reach nobody at all, the blueprint block included. What this test is
+    // about (the architect gets the PREPARED text, not the raw one) is unchanged, and it now also pins the
+    // enum forwarding, so this lane cannot go back to showing a rewritten contract with nothing to say why.
+    expect(route).toContain('const block = blueprintAdvisoryBlock(manifest, prepared.contract, prepared.renamed, prepared.enumsAsConst);');
   });
 
   it('Project Mode module contracts (no normaliser runs over them) carry the rule line', () => {

@@ -395,7 +395,7 @@ import { gameKitPlan, gameKitRecipeInput, gameKitSeedEnabled, gameKitFrameworkSu
 import { fastLaneSkipsImageApp, appGeneratesImages } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, prepareSharedContract, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
-import { contractRenameHandoffClause, salvageWhyClause } from '../AgentV3/handoffRule';
+import { contractRenameHandoffClause, contractEnumHandoffClause, salvageWhyClause } from '../AgentV3/handoffRule';
 import { entryFirstHandoffLine, renderWhileBuilding } from '../AgentV3/earlyPreview';
 import { planHandoffText } from '../AgentV3/planHandoff';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, dedupeStylesheetImports, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -16824,7 +16824,7 @@ async function noteBuildOutcome(
             // The same door as the fast lane (build 9c612cdb): the name split and the enum normaliser run on
             // every generated contract before anything reads it, and a rename is named in the block.
             const prepared = prepareSharedContract(((await bpGenerate(contractSystemPrompt(framework), contractUserPrompt(withRequestNotes(prompt, requestNotesText), manifest))) || '').trim(), manifest);
-            const block = blueprintAdvisoryBlock(manifest, prepared.contract, prepared.renamed);
+            const block = blueprintAdvisoryBlock(manifest, prepared.contract, prepared.renamed, prepared.enumsAsConst);
             if (block) {
               architectSystem = `${block}\n\n---\n\n${architectSystem}`;
               events.emit({ type: 'narration', agent: 'architect', text: 'Sketching a file blueprint & shared contract to keep this larger app consistent…', ts: Date.now() });
@@ -19066,6 +19066,10 @@ async function noteBuildOutcome(
             (salvageEntryLine ? ` ${salvageEntryLine}` : '') +
             // 🏷️ Build 9c612cdb (Q-985): a name the lane changed is named to the builder that never saw it.
             contractRenameHandoffClause(sb.contractRenames) +
+            // 🔁 And an enum the same door rewrote (Q-1027). Same reason, same blind spot: the full builder
+            // never saw the contract call, so a member written as a TYPE is a TS2702 it cannot read off the
+            // error. The fact used to reach nobody at all — `enumsAsConst` was returned and never read.
+            contractEnumHandoffClause(sb.contractEnumsAsConst) +
             `\n\n---\n\n${buildPrompt}`;
         }
         // 🔴 A PLAN IS WORK TOO — do not make the full builder buy it twice (autopsy f97eb0ec,

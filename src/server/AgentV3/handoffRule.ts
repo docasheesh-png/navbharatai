@@ -20,6 +20,8 @@
 //     feature, component or page is still delegated, exactly as before.
 
 /** Opens the build prompt when the fast lane handed finished files to the full builder. */
+import { contractEnumsSentence } from './contractEnums';
+
 export const SALVAGE_HANDOFF_MARKER = '[CONTINUE — DO NOT START OVER]';
 
 /** The system-prompt lines that grant the exception (indented to sit under the delegation rule). */
@@ -54,6 +56,18 @@ export function contractRenameHandoffLine(renames: ReadonlyArray<{ from: string;
     + 'In a type position always write the NEW name and import it from the shared types file — the old name is the component, '
     + 'and the compiler\'s "Did you mean typeof …" suggestion is only right when you mean the component itself '
     + '— never inside `FC<…>`, `FunctionComponent<…>` or `ComponentType<…>`, whose type argument is the PROPS type.';
+}
+
+/**
+ * The enum-normalisation sentence as a hand-off clause (Q-1027): '' when none, otherwise the sentence with
+ * its leading space — the same shape as the rename clause below, and for the same reason.
+ *
+ * ONE call, not two: the first draft of this inlined `contractEnumsSentence(...)` twice in the route's
+ * concatenation (once to test it, once to use it), which is the duplication Q-1026/Q-1033 exist to stop.
+ */
+export function contractEnumHandoffClause(names: readonly string[] | undefined): string {
+  const line = contractEnumsSentence(names ?? []);
+  return line ? ` ${line}` : '';
 }
 
 /**

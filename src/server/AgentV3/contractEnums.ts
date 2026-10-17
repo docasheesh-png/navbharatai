@@ -48,6 +48,38 @@ export const CONTRACT_FIXED_VALUES_RULE =
   "A fixed set of values in a contract is an `as const` object with its value-union type, or a string-literal union — "
   + "never an `enum`: a module written later, in isolation, writes the plain value ('active'), and an enum rejects it.";
 
+/**
+ * The contract file's header line for one converted enum (Q-1027). PURE.
+ *
+ * 🔴 WHY THE CONVERSION HAD TO BE SAID AT ALL. `prepareSharedContract` returned `enumsAsConst` — and
+ * measured, **nothing read it.** Not the report, not the hand-off, not the prompt, not the contract's own
+ * header. The rewrite happened and the FACT of it reached nobody, so the next autopsy could not see it fire
+ * and the model could not know it had. A value computed and returned with no reader is indistinguishable
+ * from one never computed (the same shape as Q-1011, where the one place a reader would look was empty).
+ *
+ * 🔑 AND IT IS NOT ONLY BOOKKEEPING. This module's own note names a residual it cannot reach: a CONSUMER
+ * that writes a member as a TYPE — `interface AddAction { type: ActionType.Add }` — gets TS2702 against an
+ * `as const` object, because the name no longer refers to a type. Telling the model which names were
+ * converted, in the file the hand-off says to read first, is what stops that residual being written.
+ *
+ * Unlike `contractRenameHeaderLine` this is NOT a parse protocol: nothing reads it back, so it is worded for
+ * a reader rather than a regex. If a heal ever needs to read it, give it a strict format then.
+ */
+export function contractEnumHeaderLine(name: string): string {
+  return `// as-const: ${name} is an \`as const\` object with a value-union type, not an enum — write the plain value `
+    + `('${name}' members are strings), and \`typeof ${name}.Member\` if you need one member as a type.`;
+}
+
+/** One sentence naming every converted enum, for a hand-off or a narration. '' when none. PURE. */
+export function contractEnumsSentence(names: readonly string[]): string {
+  const list = names.filter((n) => typeof n === 'string' && n.trim()).map((n) => n.trim());
+  if (list.length === 0) return '';
+  return `NavBharatAI rewrote ${list.length === 1 ? 'the enum' : 'the enums'} ${list.join(', ')} in the shared contract as `
+    + '`as const` object(s) with a value-union type, so a file written in isolation can use the plain value. Write the '
+    + 'value, not a member reference, and never re-declare them as `enum`; a member used as a TYPE must be written '
+    + '`typeof Name.Member`.';
+}
+
 /** Default ON. `off` leaves every contract enum as the model wrote it (the behaviour before 9c612cdb). */
 export function contractEnumAsConstEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_CONTRACT_ENUM_AS_CONST ?? '').trim().toLowerCase() !== 'off';

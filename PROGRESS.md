@@ -96377,6 +96377,43 @@ Heal behaviour is unchanged, because measurement said it was already right. Lock
 set has exactly one reader), with 101 sibling tests green. Three reversions bite — including **the row's own
 plan**, which fails 5 tests, one of them named for exactly why.
 
+## 2026-10-16 — Q-1031: the append saves the anchor, not the look (#3768)
+
+The contradiction is inside **one function**, which is why the row said "on an edit build". `editModePrefix`
+carries rule 2 — *"use read_file on every file you intend to change before touching it. Never assume you know
+a file's current content from memory"* — and, a few hundred characters later, the append sentence ending
+*"no anchor and no read are needed"*.
+
+A model reading both resolves it by guessing, **and the half that is wrong is the dangerous one.** No read is
+needed to *construct* an anchor-free append; plenty is needed to know whether what you are appending is
+already there. On a fresh build the file is one we just wrote. On an edit build it is the user's app, and a
+blind append duplicates a rule, a function, or a whole section of it.
+
+**The class: a true statement about an operation's mechanics, read as permission to skip the judgement the
+operation still needs.** The sentence now separates them — *it saves you the ANCHOR, not the LOOK*.
+
+**The row's "edit-mode form of the append sentence" is declined, with reason.** A second string for one rule
+is the exact drift this module exists to end: the class came back five times, each fix teaching one more
+branch of one more failure message. One sentence correct in both modes cannot disagree with itself, and there
+is one place to change when it must change.
+
+⚠️ **My own first wording was wrong in a way worth recording.** It said *"read it first anyway"* — which would
+have cost a **500-line read of the design kit on every CSS append**, the very thing the prompt avoids by
+*listing* the kit's classes instead. It now says *"know what is in it — read it, or use the listing this
+prompt already gives you"*: supplied knowledge and a read answer the same question, and demanding the read
+would have fixed a contradiction by creating a cost. The test holds that distinction shut.
+
+⚠️ **This entry first said #3767 — and #3767 is another session's games PR, already merged.** That is the
+SECOND number collision today: Q-1097's row first said #3761, which was also another session's. A PR number
+cannot be known until the PR exists, so writing one before that is a guess, and a row whose owner is wrong is
+a row nobody can check (the sixth rule's whole point). The habit that avoids it: create the PR FIRST, then
+write its number into the row. Mine is **#3768**.
+
+Locked by `tests/theAppendSavesTheAnchorNotTheLook.test.ts` (9 tests), including that both sentences really
+are in one function and near each other, and a census that the module exports exactly **one** such string and
+that no reader spells its words out. Two existing proximity pins were **widened with the reason written in**,
+not deleted — the sentence grew. Three reversions bite: the contradiction restored (6 fail), an unconditional
+read (1), and **the row's own second string** (1).
 ## 2026-10-16 — Q-1060: one declared runtime, and every place that names one agrees (#3766)
 
 `ci.yml` ran the whole 38,000-test suite on **Node 20** while the Dockerfile (`node:22`, `node:22-slim`), the
@@ -96408,6 +96445,98 @@ with the image (10).
 ⚠️ **What to watch:** this PR's own CI run is the **first on Node 22**. That run is the real test of the flip,
 and it is the whole point of the change.
 
+### 2026-10-16 — Q-1129: the workaround outlived the defect (the half #3766 left behind)
+
+**Context, said plainly: this session built Q-1060 and LOST THE RACE.** Another session shipped it as #3766
+while this one was measuring, and the two had reached the same conclusions independently — `ci.yml` and
+`dast.yml` to Node 22 (the same un-named sibling), `engines.node` as the single source of truth, and a census
+test. That work is theirs and is on `main`; this session's duplicate of it was discarded rather than pushed as
+a competing PR, including its own census (`tests/oneDeclaredRuntime.test.ts` already does that job, and a
+second census would be two answers to one question — the class Q-1017 closed).
+
+**What #3766 left, and this is the 50/50 law's own half.** The Node divergence had already been paid for once,
+as a workaround: `aSeedScriptIsNotABrowser` asserted the sandbox's Node-22 globals, was "green on every
+developer machine, red on every CI run", and was gated behind `it.runIf(nodeMajor >= 22)` — so it SKIPPED in
+the one place it mattered. #3766 removed the gate's REASON (CI now runs 22) but not the gate. Two things were
+therefore still true on `main`: a vestigial condition, and — worse — a comment telling the next reader that
+"CI (`.github/workflows/ci.yml`) runs node 20". A false comment is not cosmetic; it is how a future session
+re-derives a constraint that no longer exists and writes the workaround again.
+
+**The fix.** The condition is gone, so the assertion runs unconditionally and is COUNTED rather than skipped.
+Its comment now records why the gate existed, that #3766 removed its reason, and the measurement behind the
+flip (node 20: 38,958 passed / 2 skipped; node 22: 38,959 passed / 1 skipped; zero failures either side —
+this was the one test that differed). `MOBILE_PUBLISHING.md`'s "Node 20+" was corrected to the one declared
+version. The trailing `nodeMajor >= 20` floor in the last test is kept on purpose: it records what was
+measured, not today's pin, which `oneDeclaredRuntime.test.ts` is the single place that asserts.
+
+**Proof is the test itself.** Before: skipped on a Node-20 runner and counted as a skip. After: it runs and
+passes, and the suite's skip count drops accordingly. No new test was added, deliberately — see above.
+
+### 2026-10-16 — Q-1128: the write-time scan that cost 12 seconds a write, found by our own CI
+
+**This one came from nowhere but the gate.** #3769 (Q-1129 above) touches one test file and two docs. Its CI
+went red anyway: `AgentRunner.test.ts > recovers from an oversized turn via aggressive compaction` timed out
+at 20 s (run 38967985876). `main` was green on every run that day, so the easy reading was "a flake on a busy
+runner" — and the test would have passed on a re-run. It was not a flake.
+
+**Everything in that test is in-memory and fake** — a scripted client, a `Map`-backed actuator — so the
+12 seconds were real work on a 50,000-character `write_file`. Timed stage by stage through the write door:
+`guardedWrite` 22 ms, `removeShadowTwins` 0 ms, and `writeSteeringNotes` **12,044 ms**, of which
+`vehicleShapeHalves` was **11,884 ms**. Every other note stage on the same input was ≤ 5 ms.
+
+**Root cause.** `handWrittenVehicleScan.ts` reads a hand-written vehicle by code shape, and all six of its
+patterns begin with an unbounded greedy word-character prefix (`OBJ`, `\w*cam\w*`, `\w*(?:speed|Speed)`). On
+a run of word characters the engine matches the whole run at every start position and backtracks out of it:
+O(run²), six times, over the raw file. It runs from `writeSteeringNotes`, i.e. on the agent's critical path,
+at EVERY write — and `_vehicleShapeNoted` is only set when a finding EXISTS, so on an app with no vehicle it
+never stops running.
+
+**Length was never the trigger, and that is the whole point.** Measured on one machine: 40,000 characters of
+ordinary code → 3 ms; a 40,000-character MINIFIED line → 5 ms (both break into short tokens); an unbroken
+word run → 577 ms at 10,000, 7,293 ms at 40,000, 11,884 ms at 50,000. A bound on file size or line length
+would have missed the defect entirely while looking like a fix.
+
+**The fix is the condition, not the instance.** A scan of HAND-WRITTEN code was handed whatever the model
+wrote, with nothing saying what hand-written code looks like. The bound is on the RUN (`MAX_WORD_RUN = 512`):
+a file carrying a longer one — an inlined base64 asset, a generated token table, a long data literal — is not
+a hand-written vehicle, and joins `node_modules` and the kit's own library as a file this scan does not read,
+with the same `empty` and the same precision-first reason the module was written on. Nothing is left
+unchecked, only unguessed: the playtest still plays the game and reads both facts from its pixels. The guard
+is one quantified character class — a single forward pass, no backtracking — so it cannot carry the cost it
+removes. The pattern dates to the module's birth (#3708); #3767 widened it.
+
+**Locked by `tests/aWriteTimeScanIsBoundedByHandWrittenCode.test.ts` (5 tests), and the last one is a census.**
+It budgets one real `write_file` through `ToolDispatcher` rather than this scan alone, so a NEW write-time
+scanner with the same defect fails it without ever being named — that is the class, not the instance. The
+others pin what the bound must NOT cost: a real camera-ahead game just under the bound still yields its
+finding, and 60,000 characters of ordinary code — longer than the input that timed out — is still read in
+full. Proven by reversion: with the guard line deleted, 3 of 5 fail (11,832 ms and 12,846 ms against their
+ceilings).
+
+**On the honesty of the original failure (fifth rule, step 5).** The timeout said "test timed out in 20000ms"
+and nothing else. The test was not wrong and its 50,000-character write was not artificial — it is the only
+place in the suite that writes a file big enough to make the cost visible, and it had been sitting at 12 s
+against a 20 s limit since #3708, passing on an idle runner and failing on a loaded one. A re-run would have
+turned it green and buried a 12-second-per-write defect in the real builder.
+### 2026-10-16 — #3768's CI failure, diagnosed rather than re-run (Q-1127)
+
+`AgentRunner.test.ts > recovers from an oversized turn via aggressive compaction` failed CI with
+*"Test timed out in 20000ms"* on a PR whose diff was a prompt string and two test pins — nothing that test
+can reach. It would have been easy to call it a flake and press re-run. Measured instead:
+
+- **12.0 s** on an idle container, against the global `testTimeout: 20_000` — a **1.65× margin**, which a
+  runner with 2,709 other test files in flight eats. In that whole 52-test file it is the **only** test over
+  2 s, so this is one outlier, not a sweep.
+- **The product path was ruled out first:** `compactMessagesForPersist` on that exact oversized turn runs
+  **50 calls in 1 ms**. There is no slow compaction behind it, so nothing a real build pays for that reason.
+
+So the bound — which was never chosen for this test, only inherited — is now an explicit 60 s with the
+measurement written beside it. The assertions are untouched.
+
+⚠️ **And the half that is NOT explained is recorded, not waved past:** why the test's agent-loop scaffolding
+costs 12 s when the compaction is instant. That is **Q-1127**, with the first suspect named (the fake store's
+per-append `JSON.stringify` of a 50 KB payload — test code, so it must be confirmed before the product is
+blamed). Raising a bound explains the timeout; it does not explain the 12 s.
 ## 2026-10-16 — the in-flight sweep: the queue says what is true again
 
 `BUILD_REPORT_QUEUE.md` had **166 rows, of which 61 claimed an open pull request — while ZERO pull requests
@@ -96475,3 +96604,41 @@ the test pinning it fails and the sentence must be re-checked.
 routing for real builds and what they are charged — a behaviour change with a blast radius, not a wording
 fix. It is recorded as **Q-1128** with the measurement, the rule's real rationale, and three options. Q-1023
 only promised the sentence would stop over-stating, and now it does; the user is at least told.
+## 2026-10-16 — Q-1027: the enum normaliser is not silent (#3771)
+
+The row said the normalisation was "silent in the report". Measured, it was worse: `prepareSharedContract`
+computed `enumsAsConst` — the enums it had just rewritten as `as const` objects — returned it, and **nothing
+in the repo read it.** Declared, assigned, returned, and that was all.
+
+**The class: a measurement computed and returned with no reader is indistinguishable from one never
+computed.** The same shape as Q-1011, where `endgameBatchRepair` left no `llmCalls` row and the one place a
+reader would look was empty. The rewrite worked correctly and no autopsy could see it fire.
+
+**An "info line" alone would not have been enough**, which is why the fix is wider than the row asked.
+`contractEnums.ts` names a residual it cannot reach: a consumer that writes a member as a TYPE —
+`interface AddAction { type: ActionType.Add }` — gets **TS2702** against an `as const` object, because the
+name no longer refers to a type. Nothing told the model that. So the fact now travels the same four roads a
+rename travels (Q-985's pattern): the contract file's header (one `// as-const:` line per enum, naming the
+`typeof X.Member` form), the user-facing log beside the `🏷️ Renamed` one, the hand-off clause to the full
+builder that never saw the contract call, and the blueprint block.
+
+**The sibling the row never mentioned:** `blueprintAdvisoryBlock` already named a rename and said nothing
+about a normalised enum — while showing the architect a contract that had already been rewritten.
+
+⚠️ **Three of my own mistakes, kept in the test file because each is a trap worth seeing again:**
+
+1. My first draft inlined `contractEnumsSentence(...)` **twice** in the route's concatenation — once to test
+   it, once to use it. That is the duplication Q-1026/Q-1033 exist to stop, so it became one clause helper,
+   and a census now pins the call count at one.
+2. A **reversion caught two blueprint assertions passing for the wrong reason:** I checked for `'as const'`
+   and `'VideoSource'`, and both appear in the contract source the block embeds — so they held even with the
+   sentence deleted. A test that cannot fail proves nothing; the whole sentence is asserted now.
+3. `stripCodeComments` **ate the sentence** in one assertion, because `contractEnumHeaderLine` returns a
+   string that *begins with* `//` — the stripper read a string literal as a comment and the assertion failed
+   on its own subject. That one reads the file raw, which is the right question anyway: a copy of the wording
+   is a copy whether it sits in code or in a comment.
+⚠️ **Renumbered after the fact: these two were written as Q-1125 / Q-1126 and are Q-1127 / Q-1128 — and Q-1127 moved again to Q-1129 when main took it (merge resolution).** #3770
+merged while #3769 was in CI and took both IDs for its own rows (the `llmCalls` aux-call gap, and the 52
+blocked rows missing a required field). Their rows are on `main`, so the IDs are theirs; mine moved. The ID
+rule — above every ID in the file AND in open PRs' diffs of it — cannot see a row that is in neither yet,
+which is what a concurrent merge is. Nothing else about either change moved.

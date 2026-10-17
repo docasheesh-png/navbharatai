@@ -105,6 +105,7 @@ export const PROCESS_ONLY_CODES = new Set([
   'IN_BUILD_GREEN_SKIPPED_PARTIAL_SCAN', 'IN_BUILD_GREEN_NOT_SAVED', 'GREEN_SNAPSHOT_NOT_SAVED',
   'HEAL_NOT_DURABLE',         // our repair wrote twice to one file; the user never sees repair passes
   'IMPORT_NOT_DURABLE',       // our store did not confirm saving an import (autopsy d0b2fcd6, Q-735) — their app is unchanged
+  'IMPORT_DURABLE_PENDING',   // our background save of an import was still running when the turn ended (build d62bf22d) — their app is unchanged
   // ── Q-381 batch two (2026-10-11): each of these says, at its own recording site, that it is about OUR run.
   // All WARNING/INFO, so the error count a RED gate reads cannot change and no bill moves.
   'FASTLANE_CONTINUATION_FAILED',    // our generation's continuation call failed; the complete files were kept

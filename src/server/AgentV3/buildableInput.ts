@@ -34,6 +34,8 @@
 // question — *is there any instruction here at all?* — and only ever for the case where there is none.
 
 import { textWords } from './textWords';
+import { clarifyReply, categoryFromWords } from './clarityGate';
+import { voiceOf } from './platformVoice';
 
 /** Matches http(s) links and bare `www.` / `domain.tld/...` forms a user might paste. */
 const URL_PATTERN = /\b(?:https?:\/\/|www\.)\S+|\b[a-z0-9-]+\.(?:com|org|net|io|dev|app|in|co|ai|me|gg|xyz)\b\S*/gi;
@@ -284,7 +286,10 @@ export function assessBuildInput(prompt: string): InputVerdict {
       buildable: false,
       reason: 'no-object',
       links,
-      message: 'I did not understand what to make. Tell me in a line or two what the app should do — for example "a shop billing app with GST" — and I will build it right away.',
+      // In the user's own language (admin 2026-10-17) — the same words the clarity gate asks with.
+      message: voiceOf(raw) === 'en'
+        ? 'I did not understand what to make. Tell me in a line or two what the app should do — for example "a shop billing app with GST" — and I will build it right away.'
+        : clarifyReply(categoryFromWords(raw), voiceOf(raw)).text,
     };
   }
 

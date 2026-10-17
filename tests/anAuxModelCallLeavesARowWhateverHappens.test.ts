@@ -52,7 +52,7 @@ function harness(outcome: Parameters<typeof stubRunner>[0], reportAs: string | n
       // Stands in for `fastLaneCallIdentity`: it must refuse to name anyone when nothing reported.
       identify: (reported: boolean, used: string | undefined, answered?: string | null) =>
         (reported ? { provider: (used ?? '').toLowerCase(), model: answered ?? 'planned-model-1' } : { provider: 'unknown', model: 'unknown' }),
-      record: (row: Omit<LlmCallRecord, 'ts'>) => { rows.push(row); },
+      recordLlmCall: (row: Omit<LlmCallRecord, 'ts'>) => { rows.push(row); },
     },
   };
 }
@@ -119,7 +119,7 @@ describe('an aux model call leaves a row whatever happens to it', () => {
 
   it('a sink that throws can never break the build', async () => {
     const h = harness({ resolve: turn() });
-    const deps = { ...h.deps, record: () => { throw new Error('diagnostics store is full'); } };
+    const deps = { ...h.deps, recordLlmCall: () => { throw new Error('diagnostics store is full'); } };
     await expect(recordedTextCall(deps, PARAMS, { promptPreview: 'p' })).resolves.toMatchObject({ text: 'hello' });
   });
 

@@ -96707,3 +96707,26 @@ edit cannot quietly drop it again.
   success-only → 5 tests fail across both files. Restored → 21 pass.
 
 **Q-1125 closes here**, with its id appended to the closed file in the same commit.
+
+**🔴 AND THE GATE CAUGHT ME MAKING THE EXACT MISTAKE THIS REPO HAS CENSUSES FOR.** The first version of
+this change routed the BLUEPRINT's row through `fastLaneCallIdentity` — "the repo's one blessed identity
+helper" — and that reasoning was wrong, because that helper's Claude default is `fastBuildModel()`, the
+**BUILD** ladder's rung. The blueprint is a **PLANNER**; it runs on the plan ladder and pins its Claude
+rung through `claudeRungModelId`. Four existing censuses failed at once and said so:
+`aBuildIsNamedByItsLadderNotByClaude` §4 (all three aux planners pin through `claudeRungModelId`, never
+`fastBuildModel()`) and §6(a)/(b) (a record writer may not read a pre-ladder Claude helper, and every
+remaining helper call must have a classified role), and `theSignBridgeAutopsy` (the exact capture form
+the three planners share).
+
+The fix was at the root, not at the test: the blueprint keeps its OWN naming expression and its own
+`bpProvider` capture, and only its FAILURE row is new. The repair door binds `fbModel` — the name
+§6(b)'s `roleOf` classifies as the request parameter — instead of calling the helper inline.
+
+**A fifth census taught the door something too.** `aChainsClockIsNotItsAnswerersClock` scans for
+`recordLlmCall({…})` with an object LITERAL, so a door that renamed its sink or handed it a prepared
+variable would have made every call routed through it INVISIBLE to the one test proving a success row
+carries the answerer's own time. The sink is therefore named `recordLlmCall` and takes the literal: a
+shared door must be MORE visible to a census than the copies it replaces, never less.
+
+That is what safeguard #5 is for, and why the gate runs LAST on the final state — the change was
+plausible, typechecked clean, and was wrong in a way only the repo's own accumulated rules could see.

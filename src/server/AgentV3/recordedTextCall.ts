@@ -53,8 +53,15 @@ export interface RecordedTextCallDeps {
     usedProvider: string | undefined,
     answered?: string | null,
   ) => { provider: string; model: string };
-  /** The one sink — `buildDiag.recordLlmCall`. */
-  readonly record: (row: Omit<LlmCallRecord, 'ts'>) => void;
+  /**
+   * The one sink — `buildDiag.recordLlmCall`. It keeps that NAME on purpose: the repo's census of
+   * success rows (`aChainsClockIsNotItsAnswerersClock`) looks for a `recordLlmCall({…})` carrying an
+   * object literal, and a door that renamed the sink or passed a prepared variable would have made
+   * every call that goes through it invisible to the one test that proves a row carries the
+   * answerer's own time. A shared door must be MORE visible to a census than the copies it replaced,
+   * never less.
+   */
+  readonly recordLlmCall: (row: Omit<LlmCallRecord, 'ts'>) => void;
 }
 
 export interface RecordedTextCallOptions {
@@ -82,10 +89,6 @@ export async function recordedTextCall(
   let reported = false;
   const runner = deps.makeRunner((used) => { usedProvider = used; reported = true; });
 
-  const write = (row: Omit<LlmCallRecord, 'ts'>): void => {
-    try { deps.record(row); } catch { /* diagnostics capture is best-effort */ }
-  };
-
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const call = runner.runTurn(params);
@@ -101,39 +104,43 @@ export async function recordedTextCall(
         }),
       ]);
     const servedBy = deps.identify(reported, usedProvider, t.model);
-    write({
-      model: servedBy.model,
-      provider: servedBy.provider,
-      promptPreview: opts.promptPreview,
-      promptChars: opts.promptPreview.length,
-      responsePreview: t.text,
-      responseChars: t.text.length,
-      finishReason: t.stopReason,
-      toolCalls: t.toolUses.length,
-      inputTokens: t.usage.inputTokens,
-      outputTokens: t.usage.outputTokens,
-      latencyMs: Date.now() - startedAt,
-      ...answerTimeOf(t),
-      ok: true,
-    });
+    try {
+      deps.recordLlmCall({
+        model: servedBy.model,
+        provider: servedBy.provider,
+        promptPreview: opts.promptPreview,
+        promptChars: opts.promptPreview.length,
+        responsePreview: t.text,
+        responseChars: t.text.length,
+        finishReason: t.stopReason,
+        toolCalls: t.toolUses.length,
+        inputTokens: t.usage.inputTokens,
+        outputTokens: t.usage.outputTokens,
+        latencyMs: Date.now() - startedAt,
+        ...answerTimeOf(t),
+        ok: true,
+      });
+    } catch { /* diagnostics capture is best-effort */ }
     return t;
   } catch (err) {
     const failedAs = deps.identify(reported, usedProvider);
-    write({
-      model: failedAs.model,
-      provider: failedAs.provider,
-      promptPreview: opts.promptPreview,
-      promptChars: opts.promptPreview.length,
-      responsePreview: '',
-      responseChars: 0,
-      finishReason: null,
-      toolCalls: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      latencyMs: Date.now() - startedAt,
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    try {
+      deps.recordLlmCall({
+        model: failedAs.model,
+        provider: failedAs.provider,
+        promptPreview: opts.promptPreview,
+        promptChars: opts.promptPreview.length,
+        responsePreview: '',
+        responseChars: 0,
+        finishReason: null,
+        toolCalls: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        latencyMs: Date.now() - startedAt,
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } catch { /* diagnostics capture is best-effort */ }
     throw err;
   } finally {
     // A timer the race already lost would otherwise hold the process awake for its full bound.

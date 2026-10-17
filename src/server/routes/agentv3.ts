@@ -14491,15 +14491,21 @@ async function noteBuildOutcome(
        * is why `answeringModel.ts` and `fastLaneCallIdentity` had to exist at all. A new repair gate that
        * calls the raw runner is now the thing `aCallOutsideTheLoopIsStillOnTheRecord` fails on.
        */
-      const recordedRepairCall = (system: string, user: string) => recordedTextCall(
-        {
-          makeRunner: (onUsed) => makeFastTextRunner(onUsed),
-          identify: (reported, used, answered) => fastLaneCallIdentity(reported, used, fastBuildModel(), answered),
-          record: (row) => buildDiag.recordLlmCall(row),
-        },
-        { model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000 },
-        { promptPreview: `${system}\n---\n${user}` },
-      );
+      const recordedRepairCall = (system: string, user: string) => {
+        // The same binding name the fast lane uses, and for the same reason: it is handed to the request
+        // and to `fastLaneCallIdentity`'s Claude-default parameter, which `claudeRungModelId` answers
+        // first. `aBuildIsNamedByItsLadderNotByClaude` §6(b) classifies the helper by this name.
+        const fbModel = fastBuildModel();
+        return recordedTextCall(
+          {
+            makeRunner: (onUsed) => makeFastTextRunner(onUsed),
+            identify: (reported, used, answered) => fastLaneCallIdentity(reported, used, fbModel, answered),
+            recordLlmCall: (row) => buildDiag.recordLlmCall(row),
+          },
+          { model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000 },
+          { promptPreview: `${system}\n---\n${user}` },
+        );
+      };
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
@@ -16803,22 +16809,34 @@ async function noteBuildOutcome(
           const bpGenerate = async (system: string, user: string): Promise<string> => {
             // Cheap-floor-first like every other build text call (admin 2026-07-11 — no direct-Sonnet path).
             let bpProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
+            const fbModel = fastBuildModel();
             // 🔴 Q-1125 (2026-10-17): this step recorded its call on SUCCESS ONLY, and it hand-rolled its
             // own `Promise.race` bound — so the 30 s timeout, and every error, left the report with NO row
             // at all. `recordedTextCall` is the one door now: it owns the bound AND records both outcomes,
             // so an abandoned blueprint step is a line an autopsy can read instead of a silence.
             const t = await recordedTextCall(
               {
-                // `bpProvider` still has to reach the usage attribution below, so the chain's report is
-                // forwarded to BOTH — the recorder's own and this site's existing capture.
-                makeRunner: (onUsed) => makePlanTextRunner((used) => { bpProvider = used; onUsed(used); }),
-                // The repo's one identity helper, already used by the fast lane — it refuses to name a
-                // vendor when no rung reported in, which is what this site's private expression did
-                // (autopsy dcce5d26: a default label pinned an unmade call on a named third party).
-                identify: (reported, used, answered) => fastLaneCallIdentity(reported, used, fastBuildModel(), answered),
-                record: (row) => buildDiag.recordLlmCall(row),
+                // This site keeps its OWN capture — `bpProvider` feeds `captureTurnUsage` below, and the
+                // sign-bridge census pins this exact form for all three planners. The door's `onUsed` is
+                // not needed here because `identify` reads the same variable.
+                makeRunner: () => makePlanTextRunner((used) => { bpProvider = used; }),
+                // 🔴 A PLANNER IS NAMED BY THE PLAN LADDER, NOT THE BUILD ONE. An earlier draft of this
+                // change routed the row through `fastLaneCallIdentity`, whose Claude default is
+                // `fastBuildModel()` — the BUILD ladder's rung — and `aBuildIsNamedByItsLadderNotByClaude`
+                // §4 caught it. The three aux planners pin their Claude rung through `claudeRungModelId`,
+                // and this one keeps doing exactly that; only the FAILURE row is new.
+                identify: (_reported, _used, answered) => ({
+                  // Nothing reported means nobody served it — the row names no vendor rather than the
+                  // label's default (autopsy dcce5d26: a default pinned an unmade call on a third party).
+                  provider: bpProvider ? fastLaneProviderLabel(bpProvider) : 'unknown',
+                  model: answeringModel({ answered, planned: claudeRungModelId(bpProvider) ?? null, family: bpProvider }),
+                }),
+                recordLlmCall: (row) => buildDiag.recordLlmCall(row),
               },
-              { model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 6000 },
+              // The REQUEST's model parameter, under the repo's name for it (§6(b) classifies the helper
+              // by this binding). Every rung the plan ladder walks overrides it; the row above never
+              // reads it, which is the whole point of §4.
+              { model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 6000 },
               // Hard bound so an up-front step can NEVER hang the build — now a bound whose expiry is on the record.
               { promptPreview: `${system}\n---\n${user}`, timeoutMs: 30_000, timeoutMessage: 'blueprint step timed out' },
             );

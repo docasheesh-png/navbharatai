@@ -153,12 +153,12 @@ describe('a text-only call the build route makes is on the record too', () => {
 
   it('the four repair gates go through the one door', () => {
     expect((code.match(/recordedRepairCall\(/g) ?? []).length).toBe(4); // the four gates
-    expect(code).toContain('const recordedRepairCall = (system: string, user: string) => recordedTextCall(');
+    expect(code).toContain('const recordedRepairCall = (system: string, user: string) => {');
     for (const gate of ['tscgate-w', 'missfiles-w', 'syntax-w', 'missexport-w']) {
       expect(code).toContain(gate); // the gate is still there…
     }
     // …and the door it is built on hands both its outcomes to the real sink.
-    expect(code).toContain('record: (row) => buildDiag.recordLlmCall(row),');
+    expect(code).toContain('recordLlmCall: (row) => buildDiag.recordLlmCall(row),');
   });
 
   it('the blueprint step no longer hand-rolls its bound, so its expiry is on the record', () => {
@@ -167,8 +167,12 @@ describe('a text-only call the build route makes is on the record too', () => {
     expect(code).not.toContain('const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error(\'blueprint step timed out\')), 30_000));');
     // And the usage attribution below it still receives the provider the chain reported (a fix must not
     // trade one problem for another — `bpProvider` feeds `captureTurnUsage`).
-    expect(code).toContain('makeRunner: (onUsed) => makePlanTextRunner((used) => { bpProvider = used; onUsed(used); }),');
+    expect(code).toContain('makeRunner: () => makePlanTextRunner((used) => { bpProvider = used; }),');
     expect(code).toContain('captureTurnUsage(bpProvider,');
+    // 🔴 AND THE PLAN LADDER NAMES IT, NOT THE BUILD ONE. An earlier draft routed this row through
+    // `fastLaneCallIdentity`, whose Claude default is the BUILD ladder's rung — caught by
+    // `aBuildIsNamedByItsLadderNotByClaude` §4, which pins this exact form for all three planners.
+    expect(code).toContain('model: answeringModel({ answered, planned: claudeRungModelId(bpProvider) ?? null, family: bpProvider }),');
   });
 
   it('both planners record BOTH outcomes — unchanged, and asserted so a later edit cannot quietly drop one', () => {
@@ -197,6 +201,10 @@ describe('the one door records what happened and invents nothing else', () => {
     // for a call no rung ever served (autopsy dcce5d26).
     expect(code).toContain('deps.identify(reported, usedProvider, t.model)');
     expect(code).toContain('deps.identify(reported, usedProvider)');
+    // The sink keeps the NAME `recordLlmCall` and takes an object LITERAL, so every call that goes
+    // through this door stays visible to `aChainsClockIsNotItsAnswerersClock`'s success-row census. A
+    // door that hid its rows from a census would be worse than the copies it replaced.
+    expect(code).toContain('deps.recordLlmCall({');
     // The chain's own split times come from the turn, and are simply ABSENT on a failure — because on a
     // failure nothing measured them. Hand-written numbers are the defect this module is about.
     expect((code.match(/answerTimeOf\(/g) ?? []).length).toBe(1);
@@ -207,7 +215,7 @@ describe('the one door records what happened and invents nothing else', () => {
   });
 
   it('recording can never break a build, and a lost race does not hold a timer open', () => {
-    expect(recorder).toContain('try { deps.record(row); } catch { /* diagnostics capture is best-effort */ }');
+    expect((recorder.match(/catch \{ \/\* diagnostics capture is best-effort \*\/ \}/g) ?? []).length).toBe(2);
     expect(code).toContain('if (timer !== undefined) clearTimeout(timer);');
   });
 });

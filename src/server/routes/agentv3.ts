@@ -1,4 +1,5 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { templateInstantPreviewEnabled, shouldUseSlimPrompt, isTemplateVerifyJob, capTemplateVerifyEstimate } from '../AgentV3/templateVerify';
 import { teacherPromoFor } from '../lib/freeChatReplies';
 import { BoundedCache } from '../lib/boundedCache';
 import { FILE_SIZE_RULE, READ_GUIDE_TOOL, fileSizeRuleEnabled, moduleText, modularizePrompt, modularPromptEnabled } from '../AgentV3/reliability/modularPrompt';
@@ -14783,7 +14784,9 @@ async function noteBuildOutcome(
           if (past.length === 0 && etaFleetKey) {
             try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), etaFleetKey, etaComplexity); } catch { fleetReadFailed = true; /* best-effort — and said so */ }
           }
+          // Autopsy 778d7c58: a seeded finished template is a ~1 min verify, not a from-scratch build.
           const est = estimateBuildTime(etaComplexity, past.length > 0 ? past : fleet.history);
+          Object.assign(est, capTemplateVerifyEstimate(est, scaffoldWillSeed && isTemplateVerifyJob(seededScaffold?.tier ?? null), past.length > 0));
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
           etaBaseMs = est.estimateMs;  // the ORIGINAL estimate — sizes each overrun re-baseline step
           // RECORD WHAT THE USER WAS ACTUALLY TOLD, not the point estimate behind it (autopsy f04421ef).
@@ -16531,7 +16534,8 @@ async function noteBuildOutcome(
       // need move out and stay reachable through read_guide. P2c (AGENTV3_FILE_SIZE_RULE) — the ~200-line rule.
       const fullArchitectPromptForGuides = architectSystem;
       let modularDeferred: string[] = [];
-      if (modularPromptEnabled()) {
+      // Autopsy 778d7c58: a verify-only template job got the full 112k-char prompt — slim it regardless of the flag.
+      if (shouldUseSlimPrompt(modularPromptEnabled(), seededScaffold?.tier ?? null)) {
         try {
           const mp = modularizePrompt(architectSystem, prompt, isEditMode ? ['fullstack'] : []);
           architectSystem = mp.prompt;
@@ -18244,6 +18248,17 @@ async function noteBuildOutcome(
               }
               goldenPreseeded = true;
               goldenPreseededTier = golden.tier;
+              // 🔴 SHOW IT NOW, FOR REAL (autopsy 778d7c58): the events above only refresh the in-browser
+              // preview (and only behind AGENTV3_STREAMING_PREVIEW). The user still saw nothing for 76 s and
+              // stopped, because the sandbox preview waited for the MODEL to call update_preview. A finished,
+              // CI-proven template needs no model to be shown: boot its dev server through the same managed
+              // update_preview path now, in the background, while the first model call runs. The managed
+              // launcher is idempotent ("dev server already healthy"), so the builder's own later
+              // `npm run dev` does not start a second server. Kill switch AGENTV3_TEMPLATE_INSTANT_PREVIEW=off.
+              if (templateInstantPreviewEnabled()) {
+                void dispatcher.dispatch({ id: 'template-instant-preview', name: 'update_preview', input: { port: 5173 } }, 'architect', { signal: abort.signal })
+                  .catch(() => { /* the builder's own preview path still runs */ });
+              }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'GOLDEN_SCAFFOLD', message: `Pre-seeded the tested "${golden.label}" template (${Object.keys(goldenFiles).length} files) — the builder verifies & customizes instead of writing from scratch.`, autoResolved: true });
               events.emit({ type: 'narration', agent: 'architect', text: `⚡ Starting from NavBharatAI's tested "${golden.label}" app template — verifying and customizing it for you.`, ts: Date.now() });
               // HANDOFF FRAMING (same discipline as the fast-lane salvage below): the builder must treat the

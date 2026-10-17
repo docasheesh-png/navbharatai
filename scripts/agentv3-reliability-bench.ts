@@ -24,7 +24,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { parseNdjson, metricsFromEvents, type BuildMetrics } from '../src/server/AgentV3/BakeoffMetrics';
-import { breakdown, buildSucceeded, selectBenchPrompts, successRate, validateBenchFixture, type BenchResultFile, type BenchRun } from '../src/server/AgentV3/reliability/benchHarness';
+import { breakdown, buildSucceeded, formatEvidenceSummary, selectBenchPrompts, successRate, summarizeEvidence, validateBenchFixture, verifiedOutcome, type BenchResultFile, type BenchRun } from '../src/server/AgentV3/reliability/benchHarness';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const env = process.env;
@@ -85,13 +85,15 @@ async function main(): Promise<void> {
       }
       const run: BenchRun = { id: p.id, lang: p.lang, complexity: p.complexity, attempt, seconds: Math.round((Date.now() - t0) / 1000), metrics, success: buildSucceeded(metrics) };
       runs.push(run);
-      console.log(`  ${run.success ? '✓' : '✗'} ${p.id}#${attempt} files=${metrics.filesCreated} ok=${metrics.ok} readiness=${metrics.readinessScore ?? 'n/a'} (${run.seconds}s)`);
+      const ev = metrics.evidence;
+      console.log(`  ${run.success ? '✓' : '✗'} ${p.id}#${attempt} files=${metrics.filesCreated} ok=${metrics.ok} readiness=${metrics.readinessScore ?? 'n/a'} (${run.seconds}s) gate=${ev?.gateState ?? 'n/a'} preview=${ev?.previewEvidence ?? 'n/a'} calls=${ev?.llmCalls ?? 'n/a'} in=${ev?.inputTokens ?? 'n/a'} cached=${ev?.cachedInputTokens ?? 'n/a'} out=${ev?.outputTokens ?? 'n/a'} cost=$${ev?.realCostUsd ?? 'n/a'} → ${verifiedOutcome(metrics)}`);
     }
   }
   const total = successRate(runs);
   console.log(`\nSuccess: ${total.successes}/${total.n} = ${(total.rate * 100).toFixed(1)}% (95% CI ${(total.low * 100).toFixed(1)}–${(total.high * 100).toFixed(1)}%)`);
   console.log('By complexity:', JSON.stringify(breakdown(runs, 'complexity')));
   console.log('By language:', JSON.stringify(breakdown(runs, 'lang')));
+  console.log(formatEvidenceSummary(summarizeEvidence(runs), LABEL));
   const out: BenchResultFile = { label: LABEL, set: SET, baseUrl: BASE_URL, startedAt, flags: FLAGS, runs };
   const dir = join(HERE, 'bench-results');
   mkdirSync(dir, { recursive: true });

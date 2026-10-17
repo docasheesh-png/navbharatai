@@ -656,3 +656,9 @@ Q-1027
 Q-1127
 Q-1128
 Q-1129
+Q-1125
+# #3775 merged (Q-1037: the platform recognises the words it put in the user's mouth) — the row's own
+# corrections are in its PR body and in platformSuggestedReplies.ts, including the two mistakes it
+# records: the census I duplicated already existed as aPromiseToTheUserHasAHandler, and my first
+# "one home" refactor blinded it.
+Q-1037

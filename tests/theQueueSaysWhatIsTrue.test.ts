@@ -82,7 +82,14 @@ describe('🔒 RATCHET: the four fields a 🟡 BLOCKED row owes, and they may on
   // for a blocker nobody investigated would invent a fact, which is the defect this file exists to prevent.
   // It is recorded as Q-1126, pinned here, and may only go DOWN — the same shape as the theme-token and
   // uncalled-route ratchets.
-  const MISSING_FIELDS_BASELINE = 52;
+  // 🔽 52 → 48 (Q-1126 batch 1, 2026-10-17). Six rows were completed from MEASURED evidence, not from
+  // plausible prose: Q-107 (the image installs `playwright` but NOT `@playwright/test`, so the row holds
+  // narrowly — closing it on the near-match would have been a false verdict), Q-108 (no wrangler job and
+  // no token anywhere in CI), Q-109 (the Monitor check was already run on 2026-09-27 and FAILED),
+  // Q-120 (a physical device), Q-140 (`cloudbuild.yaml:87` already threads the value; one trigger field
+  // remains), Q-699 (a real phone). Only four come off this count, because Q-699's row did not TERMINATE
+  // — its closing pipe was missing, so no reader that splits on the pipe ever saw it as a row at all.
+  const MISSING_FIELDS_BASELINE = 48;
 
   const blocked = rows.filter((r) => r.state.startsWith('🟡 BLOCKED'));
   const gapsOf = (body: string): string[] => {
@@ -96,6 +103,18 @@ describe('🔒 RATCHET: the four fields a 🟡 BLOCKED row owes, and they may on
 
   it('there are blocked rows to check — the measurement is live, not a stale number', () => {
     expect(blocked.length).toBeGreaterThan(50);
+  });
+
+  it('every row TERMINATES — an unclosed row is invisible to every reader that splits on the pipe', () => {
+    // 🔴 FOUND IN Q-1126 BATCH 1: Q-699's row had no closing `|`. Markdown still renders it, so it looked
+    // fine, but its last cell runs to end-of-line and a census that splits on the pipe counts one cell too
+    // few — which is exactly why this file's own four-field check had never seen that row. A malformed row
+    // is worse than an incomplete one: an incomplete row is at least counted.
+    const bad = queue.split('\n')
+      .filter((l) => /^\| Q-\d+ \|/.test(l))
+      .filter((l) => !l.trimEnd().endsWith('|'))
+      .map((l) => l.slice(0, 40));
+    expect(bad, 'these rows do not end with a pipe, so their last cell is unbounded').toEqual([]);
   });
 
   it(`at most ${MISSING_FIELDS_BASELINE} blocked rows are missing a field, and the count may only shrink`, () => {

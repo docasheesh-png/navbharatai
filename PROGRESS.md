@@ -96216,6 +96216,10 @@ note beside a fix names the function the fix stopped calling, so a guard reading
 its own documentation. It is a pattern — a source census must read stripped code, and the assertion that
 needs stripping is always the negative one.
 
+## 2026-10-16 — Admin-approved stage 1 of the forensic-audit plan: P0-1 (a RED gate is told to the user) + P1-1 (benchmark evidence)
+**P0-1 — `gateRedNotice.ts`.** Reproduced with the real gate: preview/page/journey `failed` + no ERROR finding → gate RED, `result.ok` true, ordinary success summary (a failed page render or journey is recorded at WARNING, the verdict flip needs an ERROR, and `AGENTV3_RUNTIME_RED_FLIP` is off by default — "D-1 unanswered"). UNKNOWN already had its own line; RED had none. Now the user's summary names what a real browser saw fail and says it was NOT confirmed to work. **Billing semantics are untouched by construction:** only `summary` changes (`ok`, the bill, the wallet debit are returned exactly), it is a no-op when the flip already set `ok:false`, and a RED built only from static findings is never told it failed to run. Admin report gains `RELEASE_GATE_RED_TOLD` (info). 16 tests; three reversions failed the right tests (call removed · notice flips `ok` · …); the fourth reversion (drop the runtime-proven guard) is correctly NOT caught because the evidence-parts check is a second guard on the same property.
+**P1-1 — `reliability/benchEvidence.ts`.** The benchmark now reads from each build's own report: model calls (failed ones counted), input / **cached-input** / output tokens as each provider reported them, build and model seconds, real provider cost, preview evidence (`rendered` / `failed` / `not-proven`, from the platform's observation) and the release-gate state. A missing figure is `null`, never 0. `buildSucceeded` is deliberately unchanged; `verifiedOutcome` (proven / contradicted / unproven) and `falsePositive` sit beside it, so `ok:true` + RED gate is counted as a false positive. Runner prints it per build and in a summary; `bench:compare` prints a per-metric delta table. Fixtures are slices of the REAL reports 398db9f3 and 67a2b0a2. Dry run verified (no build, no spend). 22 tests, four reversions each failed.
+**Not done, by instruction:** no flag enabled, no push, no merge. Stage 2 (the paid A/B, hard cap US$5) and stage 3 (Q-963 template, option A) wait for the admin's go after this report.
 ## 2026-10-16 — Q-1097: a null scene reading is never silent, and the vehicle is identified once (#3763)
 
 `tests/aThreeGameIsReadFromItsScene.test.ts` failed twice in one day under a loaded machine, on two different
@@ -96671,3 +96675,89 @@ whole arc rather than deleted, so the next reader finds the answer where the que
 
 **Three rows close here** — Q-1127, Q-1128 and Q-1129 — with their ids appended to the closed file in the
 same commit, on a fresh `main`.
+
+---
+
+## 2026-10-17 — Q-1125 RESOLVED: a text-only call the build route makes is now on the record, and there is one door it has to go through
+
+**The row's own census contradicted the row.** Q-1125 was carried out of Q-1011 and said the route's
+*"plan / blueprint / judge"* aux calls record no `llmCalls` row. Two of the three — the roadmap planner
+and the project planner — **already record both outcomes**, and have for a while. The row was written
+from the SHAPE of Q-1011 rather than from a count, which is exactly how an item gets fixed where it
+isn't broken and left alone where it is. Saying so is the fifth rule's step 5 (fix the system's honesty)
+applied to our own queue.
+
+**What the census actually found — five live gaps, four of them worse than the row claimed:**
+
+| Site | What it recorded |
+|---|---|
+| roadmap planner · project planner · fast lane's `fastGenerateOnce` | success AND failure ✅ (three hand-written copies) |
+| BLUEPRINT step | **success only** — its 30 s bound and every error left no row at all |
+| typecheck · missing-files · syntax · missing-export repair gates | **nothing**, success or failure — raw `makeFastTextRunner().runTurn(...)` |
+
+The four repair gates are the expensive silence: a repair pass spends an 8000-token answer on a build
+that is already in trouble, which is the first call an autopsy opens the report to find, and `llmCalls`
+had no row for it. The blueprint's asymmetry is Q-1011's own defect one level down — the same "recorded
+nothing at all, success or failure" with the happy path carved out.
+
+**THE CLASS, and why the fix is a door and not four more copies (fourth rule, step 2).** The defect is
+not "four gates forgot". It is that **a recording block lives beside each call site instead of at the
+call**, so every new aux site is free to be written without one — and a fix made at one site never
+reaches the others. This repo already paid for that twice: `answeringModel.ts` exists because five
+copied sites each named a VENDOR where a model belongs (autopsy f152c1ab), and `fastLaneCallIdentity`
+exists because a copied default pinned an unmade call on a named third party (autopsy dcce5d26).
+Copying the block a fifth time would have fixed today's four and guaranteed the sixth.
+
+So `src/server/AgentV3/recordedTextCall.ts` is now the one door: it runs the turn, records on **both**
+outcomes, rethrows, and invents nothing — `answerMs` / `fallbackMs` / `openMs` / `firstOutputMs` come
+from the turn the chain measured and are simply ABSENT on a failure, because on a failure nothing
+measured them. All five sites go through it.
+
+**THE 50/50 HALF — the bound moved inside the door.** The blueprint hand-rolled `Promise.race([call,
+timeout])` and the losing call was abandoned with nothing written down. `timeoutMs` now belongs to the
+door, so a bounded call ALWAYS leaves a row saying it was abandoned and how long it was given. A bound
+whose expiry is invisible is a bound nobody can size — and the hand-rolled race is no longer a branch
+a new caller can write.
+
+**A fix must not trade one problem for another.** `bpProvider` feeds `captureTurnUsage` below the
+blueprint call, and routing the runner through the door would have left it empty and silently broken
+the vendor attribution. The chain's report is forwarded to both; the census test asserts it, so a later
+edit cannot quietly drop it again.
+
+**Locked, and proven by reversion:**
+- `tests/aCallOutsideTheLoopIsStillOnTheRecord.test.ts` grows the CENSUS: no raw `.runTurn(` on either
+  text-runner factory survives anywhere in the route, and the five remaining `runTurn` sites are each
+  named and accounted for — including the two deliberate allowances (the judge chain's runner
+  *definition*, and the admin-only `/api/agentv3/diag?test=1` probe, which is not a build and has no
+  `buildDiag` to record to). A SIXTH site fails the count without being named.
+- `tests/anAuxModelCallLeavesARowWhateverHappens.test.ts` exercises the door itself: a row on success
+  with the model that ANSWERED, a row on failure with the error (and the throw still propagating), a
+  row when the bound expires, `unknown` rather than a guessed default when no rung reported, no
+  invented measurement on a failure, and a sink that throws never breaking a build.
+- **Reversion proof.** One gate put back on the raw runner → 3 census tests fail. The door put back to
+  success-only → 5 tests fail across both files. Restored → 21 pass.
+
+**Q-1125 closes here**, with its id appended to the closed file in the same commit.
+
+**🔴 AND THE GATE CAUGHT ME MAKING THE EXACT MISTAKE THIS REPO HAS CENSUSES FOR.** The first version of
+this change routed the BLUEPRINT's row through `fastLaneCallIdentity` — "the repo's one blessed identity
+helper" — and that reasoning was wrong, because that helper's Claude default is `fastBuildModel()`, the
+**BUILD** ladder's rung. The blueprint is a **PLANNER**; it runs on the plan ladder and pins its Claude
+rung through `claudeRungModelId`. Four existing censuses failed at once and said so:
+`aBuildIsNamedByItsLadderNotByClaude` §4 (all three aux planners pin through `claudeRungModelId`, never
+`fastBuildModel()`) and §6(a)/(b) (a record writer may not read a pre-ladder Claude helper, and every
+remaining helper call must have a classified role), and `theSignBridgeAutopsy` (the exact capture form
+the three planners share).
+
+The fix was at the root, not at the test: the blueprint keeps its OWN naming expression and its own
+`bpProvider` capture, and only its FAILURE row is new. The repair door binds `fbModel` — the name
+§6(b)'s `roleOf` classifies as the request parameter — instead of calling the helper inline.
+
+**A fifth census taught the door something too.** `aChainsClockIsNotItsAnswerersClock` scans for
+`recordLlmCall({…})` with an object LITERAL, so a door that renamed its sink or handed it a prepared
+variable would have made every call routed through it INVISIBLE to the one test proving a success row
+carries the answerer's own time. The sink is therefore named `recordLlmCall` and takes the literal: a
+shared door must be MORE visible to a census than the copies it replaces, never less.
+
+That is what safeguard #5 is for, and why the gate runs LAST on the final state — the change was
+plausible, typechecked clean, and was wrong in a way only the repo's own accumulated rules could see.

@@ -96123,3 +96123,18 @@ real script on fixture Capacitor trees (25 cases); `tests/appBranding.test.ts` c
 fallback mark is a geometric mark, not a designed logo; the splash for a user logo needs `sharp` on the runner (else a
 generated mark is used and reported).
 
+## 2026-10-17 — Admin login throttle: shared, account-level, and its second factor said out loud (admin: "jo kami mili root cause se fix karo")
+Found (read-only, same day): the admin login's rate limit and lockout lived in each Cloud Run instance's MEMORY (up to 100 instances →
+a fresh budget per instance, forgotten on restart) and were keyed only by the attacker's address (many addresses → never met);
+the second factor is opt-in and its "off" state showed only inside the Security tab, fetched only when opened.
+Root cause: the most sensitive credential gate was never moved onto the durable limiter the platform built for exactly this
+(`DurableRateLimit.ts`), and nothing counted failures against the ONE account being attacked.
+Fixed: `adminLoginShared.ts` — per-address failure record + a GLOBAL failed-login ceiling (30/15 min, `ADMIN_LOGIN_GLOBAL_CEILING`) in
+Firestore, fail-open, addresses stored only as an HMAC; addresses the admin has logged in from are EXEMPT from the ceiling so an attacker
+cannot lock the real admin out; the per-minute count is also durable (`consumeDurableRate('admin-login')`). `adminMfaWarning` +
+AdminDashboard: the MFA status loads on mount and a banner says so when it is off. SIBLING found and fixed the same day: a private
+published app's password (`/api/nav-store/web/app/:id/open` and `/remix`) had no throttle at all → `privateAppPasswordBudget.ts`
+(20 password-bearing attempts / 10 min per app+address, durable). Tests: `tests/adminLoginSharedGuard.test.ts`,
+`tests/privateAppPasswordIsThrottled.test.ts` (each proven by reversion). NOT changed: the in-memory limiter stays as the fast first gate;
+chat/preview/payment limiters are cost limits keyed by account identity, not credential gates (left as they are).
+

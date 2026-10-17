@@ -60,6 +60,8 @@ import { loadWorkspaceFiles, saveWorkspaceFiles } from '../AgentV3/WorkspaceFile
 import { validateRemixPrice, hasPurchased, canAffordRemix, settleRemixPurchase, resalePriceCheck, resalePriceFloor, MAX_REMIX_PRICE_INR, PAID_REMIX_ENABLED, listPurchases } from '../lib/navStoreRemixPurchase';
 import { addDataRow, listDataRows, isValidDataCollection } from '../lib/navStoreWebData';
 import { rateLimiter } from '../lib/authMiddleware';
+import { privateAppPasswordBudget } from '../lib/privateAppPasswordBudget';
+import { addressRateKey } from '../lib/clientAddress';
 import { verifiedWorkspaceReadOk } from '../lib/workspaceIdentity';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { renderPreview } from '../runtime/renderPreview';
@@ -971,6 +973,12 @@ export function registerNavStoreRoutes(app: Express): void {
       }
       if (found.visibility === 'private') {
         const pw = typeof req.body?.password === 'string' ? req.body.password : '';
+        // The password is a credential: guesses are counted per (app, address), across instances (privateAppPasswordBudget.ts).
+        const budget = await privateAppPasswordBudget(found.id, addressRateKey(req), pw);
+        if (!budget.allowed) {
+          res.setHeader('Retry-After', String(budget.retryAfterSec));
+          return res.status(429).json({ error: 'Too many password attempts. Please wait a few minutes and try again.', requiresPassword: true });
+        }
         if (!verifyAppPassword(pw, found.passwordHash, found.passwordSalt)) {
           return res.status(401).json({ error: 'This app is private — the password is wrong or missing.', requiresPassword: true });
         }
@@ -1192,6 +1200,12 @@ export function registerNavStoreRoutes(app: Express): void {
       if (!found || found.status === 'removed') return res.status(404).json({ error: 'This app is not on the store.' });
       if (found.visibility === 'private') {
         const pw = typeof req.body?.password === 'string' ? req.body.password : '';
+        // The password is a credential: guesses are counted per (app, address), across instances (privateAppPasswordBudget.ts).
+        const budget = await privateAppPasswordBudget(found.id, addressRateKey(req), pw);
+        if (!budget.allowed) {
+          res.setHeader('Retry-After', String(budget.retryAfterSec));
+          return res.status(429).json({ error: 'Too many password attempts. Please wait a few minutes and try again.', requiresPassword: true });
+        }
         if (!verifyAppPassword(pw, found.passwordHash, found.passwordSalt)) {
           return res.status(401).json({ error: 'This app is private — the password is wrong or missing.', requiresPassword: true });
         }

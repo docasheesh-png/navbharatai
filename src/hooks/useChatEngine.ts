@@ -92,7 +92,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
     intent: string = 'general', 
     target?: string,
     agent: string = 'navbharatai',
-    mode: string = 'chat'
+    mode: string = 'chat',
+    memorySummary?: string
   ): Promise<string> => {
     let endpoint = '/api/chat/navbharatai';
 
@@ -108,7 +109,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
         intent: intent,
         target: target,
         files: files,
-        agent: agent
+        agent: agent,
+        ...(memorySummary ? { memorySummary } : {})
       }, {
         signal: controller.signal,
         headers: {
@@ -178,72 +180,18 @@ export function useChatEngine(deps: ChatEngineDeps) {
         addLog(enableSearch ? 'Accessing live knowledge banks...' : 'Generating your solution...', 'info');
     }
     
-    const isFollowUp = history.length > 0;
-    let promptWithContext = message;
-
-    // 7.5 — Error-aware AI: detect console errors / stack traces in user message
-    const ERROR_PATTERNS = [
-      /uncaught (typeerror|referenceerror|syntaxerror|rangeerror)/i,
-      /cannot read propert/i,
-      /is not a function/i,
-      /is not defined/i,
-      /\bat line \d+/i,
-      /error:/i,
-      /failed to|could not load/i,
-    ];
-    const isErrorMessage = ERROR_PATTERNS.some(p => p.test(message));
-
-    // 7.3 — Intent Detection: classify user request type
-    const detectIntent = (msg: string): 'fix' | 'add' | 'edit' | 'create' | 'general' => {
-      const m = msg.toLowerCase();
-      if (isErrorMessage || /fix|bug|broken|nahi chal|error|crash|issue/.test(m)) return 'fix';
-      if (/add|jod|include|insert|naya feature|new feature/.test(m)) return 'add';
-      if (/change|update|modify|badlo|hatao|remove|replace/.test(m)) return 'edit';
-      if (/build|create|banao|make|generate|design|write/.test(m)) return 'create';
-      return 'general';
-    };
-    const detectedIntent = intent === 'general' ? detectIntent(message) : intent as any;
-
-    // 7.6 — Component-level editing: detect component names (PascalCase words)
-    const componentMatches = message.match(/\b([A-Z][a-zA-Z0-9]+(?:Component|Panel|Card|Modal|Button|Nav|Header|Footer|Sidebar|Form)?)\b/g);
-    const mentionedComponents = componentMatches ? [...new Set(componentMatches)].slice(0, 3) : [];
-
-    // Build intent-aware prefix
-    const intentPrefix: Record<string, string> = {
-      fix: '[FIX MODE] User is reporting a bug or error. Focus ONLY on the specific issue. Show the exact lines to change. Do not rewrite unrelated code.',
-      add: '[ADD MODE] User wants to ADD a new feature to existing code. Integrate it cleanly without touching unrelated parts.',
-      edit: '[EDIT MODE] User wants to MODIFY existing code. Make targeted changes only. Preserve all other functionality.',
-      create: '[CREATE MODE] Build the requested app/component from scratch with clean, complete, production-ready code.',
-      general: isFollowUp ? '[FOLLOW-UP] Respond directly without greeting.' : '',
-    };
-
-    if (intent === 'security') {
-      promptWithContext = `[AUDITOR_ACTIVATION] Target: ${target || 'Current System'}\n\n${message}`;
-    } else if (intent === 'github') {
-      promptWithContext = `[GITHub_ACTIVATION] 🔗 navBharatAI GitHub Integration Activated\n\n${message}`;
-    } else {
-      const prefix = intentPrefix[detectedIntent] || '';
-      const componentHint = mentionedComponents.length > 0
-        ? `\n[COMPONENT FOCUS] User mentions: ${mentionedComponents.join(', ')} — target these specifically.`
-        : '';
-      const errorHint = isErrorMessage
-        ? '\n[ERROR DETECTED] User has pasted a runtime error. Diagnose the root cause and provide the exact fix.'
-        : '';
-      if (prefix || componentHint || errorHint) {
-        promptWithContext = `${prefix}${componentHint}${errorHint}\n\n${message}`;
-      } else if (isFollowUp) {
-        promptWithContext = `[Follow-up. No greeting needed. Respond in same language as user.]\n\n${message}`;
-      }
-    }
-
-    // 7.1 — Project Memory: inject active session memory summary
+    // The user's message goes to the server EXACTLY as typed. This block used to wrap it in bracketed
+    // instruction tags ("[Follow-up. No greeting needed. Respond in same language as user.]", "[FIX MODE]",
+    // "[COMPONENT FOCUS]" …). A model treats text inside the user turn as part of the conversation, so those
+    // tags were quoted back into free-chat replies (admin 2026-10-17: the Follow-up line appeared in the answer).
+    // The server already receives `intent` and `history` as fields and owns the system prompt, so nothing was
+    // gained by the tags — and no instruction text may ride inside a user message, ever.
+    // 7.1 — Project Memory: the session summary travels as its own field (the server reads `memorySummary`),
+    // not as a "[SESSION MEMORY]" block pasted in front of the message — same leak class as the tags above.
     const activeSession = sessions.find(s => s.id === currentSessionId);
-    if (activeSession?.memorySummary) {
-      promptWithContext = `[SESSION MEMORY]\n${activeSession.memorySummary}\n\n---\n\n${promptWithContext}`;
-    }
 
     // Switch to a single high-speed call for near-instant response
-    const response = await callGeminiFrontend(promptWithContext, enableSearch || (intent === 'security'), history, intent, target, agent, mode);
+    const response = await callGeminiFrontend(message, enableSearch || (intent === 'security'), history, intent, target, agent, mode, activeSession?.memorySummary);
     
     return { 
       reply: response, 

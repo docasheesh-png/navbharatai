@@ -23,6 +23,8 @@ import { join } from 'path';
 const read = (rel: string): string => readFileSync(join(__dirname, '..', rel), 'utf8');
 const runner = read('src/server/AgentV3/AgentRunner.ts');
 const endgame = read('src/server/AgentV3/EndgameRepair.ts');
+const route = read('src/server/routes/agentv3.ts');
+const recorder = read('src/server/AgentV3/recordedTextCall.ts');
 
 /** Comment text is evidence, not code — a class named in a header must not fail its own census. */
 function codeOnly(src: string): string {
@@ -98,5 +100,114 @@ describe('the 150 s deadline can actually cancel the call it bounds', () => {
     const utils = read('src/server/AgentV3/asyncUtils.ts');
     expect(utils).toContain("parent?.addEventListener('abort', onParent, { once: true });");
     expect(utils).toMatch(/export async function withDeadline<T>\(fn: \(signal: AbortSignal\) => Promise<T>, ms: number, label: string, parent\?: AbortSignal\)/);
+  });
+});
+
+
+/**
+ * 🧬 Q-1125 (2026-10-17) — AND THE SAME CLASS LIVED IN THE ROUTE, FIVE TIMES OVER.
+ *
+ * `AgentRunner` is not the only place a model call is made. The BUILD ROUTE makes text-only aux calls of
+ * its own, and the census above could never see them. What it found:
+ *
+ *   · the blueprint step recorded SUCCESS ONLY — its 30 s bound and every error left no row at all,
+ *     which is Q-1011's own asymmetry one level down;
+ *   · the agentic lane's FOUR post-build repair gates (typecheck, missing-files, syntax, missing-export)
+ *     called `makeFastTextRunner().runTurn(...)` raw and recorded NOTHING, success or failure.
+ *
+ * Two of the three sites the queue row named — the roadmap planner and the project planner — already
+ * recorded both outcomes. The row was written from the shape of Q-1011, not from a census; this test is
+ * the census, and it is what a future row should be written from.
+ *
+ * 🔒 WHAT THIS LOCKS IS THE CLASS, NOT THE FIVE. A new aux call written the old way — the raw runner,
+ * or a `recordLlmCall` only on the happy path — fails here WITHOUT being named, because the thing
+ * asserted is that no raw `runTurn` on either text-runner factory exists at all.
+ */
+describe('a text-only call the build route makes is on the record too', () => {
+  const code = codeOnly(route);
+
+  it('the census: NO raw text-runner call survives in the route', () => {
+    // The two factories every aux text call is built from. A `.runTurn(` straight off either one is a
+    // call nothing records — the exact shape the four repair gates had.
+    expect(code).not.toMatch(/makeFastTextRunner\([^)]*\)\.runTurn\(/);
+    expect(code).not.toMatch(/makePlanTextRunner\([^)]*\)\.runTurn\(/);
+  });
+
+  it('…and every remaining `runTurn` in the route is one of the known, recorded callers', () => {
+    const lines = code.split('\n').filter((l) => l.includes('.runTurn('));
+    // Exactly five, and each is accounted for below. A SIXTH — a new aux call site — fails this count.
+    expect(lines.length).toBe(5);
+    const joined = lines.join('\n');
+    // Two planners that have always recorded both outcomes (asserted individually further down).
+    expect(joined).toContain('const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({');
+    expect(joined).toContain('const call = makePlanTextRunner((used) => { ppProvider = used; }).runTurn({');
+    // The fast lane's own recording wrapper — `fastGenerateOnce` records success AND failure.
+    expect(joined).toContain('t = await runner.runTurn({');
+    // The judge chain's Claude backstop: a runner DEFINITION, not a build call — the judge's own
+    // recording is a separate path and not what this row is about.
+    expect(joined).toContain("runTurn: (a) => new ClaudeClient(undefined, { maxRetries: 1 }).runTurn(a)");
+    // The admin-only `/api/agentv3/diag?test=1` probe. It is not a build: there is no `buildDiag` in
+    // its scope and nothing to attach a row to. Named here so it is an allowance, not an oversight.
+    expect(joined).toContain('const turn = await client.runTurn({');
+  });
+
+  it('the four repair gates go through the one door', () => {
+    expect((code.match(/recordedRepairCall\(/g) ?? []).length).toBe(4); // the four gates
+    expect(code).toContain('const recordedRepairCall = (system: string, user: string) => recordedTextCall(');
+    for (const gate of ['tscgate-w', 'missfiles-w', 'syntax-w', 'missexport-w']) {
+      expect(code).toContain(gate); // the gate is still there…
+    }
+    // …and the door it is built on hands both its outcomes to the real sink.
+    expect(code).toContain('record: (row) => buildDiag.recordLlmCall(row),');
+  });
+
+  it('the blueprint step no longer hand-rolls its bound, so its expiry is on the record', () => {
+    expect(code).toContain("timeoutMs: 30_000, timeoutMessage: 'blueprint step timed out'");
+    // The old shape: a private race whose losing call was simply abandoned, with nothing written down.
+    expect(code).not.toContain('const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error(\'blueprint step timed out\')), 30_000));');
+    // And the usage attribution below it still receives the provider the chain reported (a fix must not
+    // trade one problem for another — `bpProvider` feeds `captureTurnUsage`).
+    expect(code).toContain('makeRunner: (onUsed) => makePlanTextRunner((used) => { bpProvider = used; onUsed(used); }),');
+    expect(code).toContain('captureTurnUsage(bpProvider,');
+  });
+
+  it('both planners record BOTH outcomes — unchanged, and asserted so a later edit cannot quietly drop one', () => {
+    for (const marker of ['rmProvider', 'ppProvider']) {
+      const i = code.indexOf(`let ${marker} = ''`);
+      expect(i).toBeGreaterThan(-1);
+      const fn = code.slice(i, i + 6000);
+      expect(fn).toMatch(/ok: true/);
+      expect(fn).toMatch(/ok: false/);
+    }
+  });
+});
+
+describe('the one door records what happened and invents nothing else', () => {
+  const code = codeOnly(recorder);
+
+  it('both outcomes leave a row, and a failure still propagates', () => {
+    expect(code).toContain('ok: true,');
+    expect(code).toContain('ok: false,');
+    expect(code).toContain('error: err instanceof Error ? err.message : String(err),');
+    expect(code).toContain('throw err;');
+  });
+
+  it('it never guesses who answered, and never invents a measurement', () => {
+    // `reported` is passed through to the caller's resolver, which is what refuses to name a vendor
+    // for a call no rung ever served (autopsy dcce5d26).
+    expect(code).toContain('deps.identify(reported, usedProvider, t.model)');
+    expect(code).toContain('deps.identify(reported, usedProvider)');
+    // The chain's own split times come from the turn, and are simply ABSENT on a failure — because on a
+    // failure nothing measured them. Hand-written numbers are the defect this module is about.
+    expect((code.match(/answerTimeOf\(/g) ?? []).length).toBe(1);
+    const failure = code.slice(code.indexOf('} catch (err) {'));
+    for (const invented of ['answerMs', 'fallbackMs', 'openMs', 'firstOutputMs', 'answerTimeOf']) {
+      expect(failure).not.toContain(invented);
+    }
+  });
+
+  it('recording can never break a build, and a lost race does not hold a timer open', () => {
+    expect(recorder).toContain('try { deps.record(row); } catch { /* diagnostics capture is best-effort */ }');
+    expect(code).toContain('if (timer !== undefined) clearTimeout(timer);');
   });
 });
